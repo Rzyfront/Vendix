@@ -86,6 +86,18 @@ export class InvoicingController {
 
   // --- Static Routes (MUST be before :id) ---
 
+  /**
+   * ¿La ficha de este cliente alcanza para una factura nominativa? Misma regla
+   * que la emisión de una orden (`evaluateOrderHolder`); el POS la consulta al
+   * elegir cliente para avisar ANTES de cobrar.
+   */
+  @Get('holder-check')
+  @Permissions('invoicing:read')
+  async holderCheck(@Query('customer_id', ParseIntPipe) customer_id: number) {
+    const result = await this.invoicing_service.getHolderCheck(customer_id);
+    return this.response_service.success(result);
+  }
+
   @Get('stats')
   @Permissions('invoicing:read')
   async getStats(@Query() query: QueryInvoiceStatsDto) {
@@ -235,6 +247,7 @@ export class InvoicingController {
     const result = await this.one_shot_emission.emitOrder(
       order_id,
       body?.credit,
+      body?.allow_final_consumer ? { force_final_consumer: true } : undefined,
     );
     return this.response_service.success(result, result.message ?? undefined);
   }

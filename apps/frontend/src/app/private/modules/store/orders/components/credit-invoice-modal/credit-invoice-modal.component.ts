@@ -50,7 +50,7 @@ export const CREDIT_PAYMENT_MEANS_OPTIONS: SelectorOption[] = [
 ];
 
 /** Suma `days` a una fecha local y la devuelve como YYYY-MM-DD local. */
-function localDatePlusDays(days: number): string {
+export function localDatePlusDays(days: number): string {
   const d = new Date();
   d.setHours(12, 0, 0, 0);
   d.setDate(d.getDate() + days);
@@ -58,7 +58,7 @@ function localDatePlusDays(days: number): string {
 }
 
 /** La fecha de vencimiento no puede ser anterior a hoy (fecha local). */
-function notBeforeToday(control: AbstractControl): ValidationErrors | null {
+export function notBeforeToday(control: AbstractControl): ValidationErrors | null {
   const value = control.value as string | null;
   if (!value) return null;
   // Comparación lexicográfica de YYYY-MM-DD: sin parseo, sin desfase UTC.

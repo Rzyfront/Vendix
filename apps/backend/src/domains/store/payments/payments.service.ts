@@ -6938,7 +6938,7 @@ export class PaymentsService {
     return (await findLinesAwaitingKitchenDelivery(tx, orderId)).length > 0;
   }
 
-  private async updateOrderPaymentStatus(
+  async updateOrderPaymentStatus(
     tx: any,
     orderId: number,
     paymentState: string,

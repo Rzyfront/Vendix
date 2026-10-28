@@ -3170,6 +3170,15 @@
       (confirmed)="onCreditInvoiceConfirmed($event)"
     ></app-credit-invoice-modal>
 
+    <!-- DATOS DEL CLIENTE INCOMPLETOS (409 de la emisión: completar o Consumidor final) -->
+    <app-customer-holder-completion-modal
+      [(isOpen)]="showHolderModal"
+      [issue]="holderIssue()"
+      [busy]="isEmittingInvoice()"
+      (saved)="onHolderCompleted()"
+      (useFinalConsumer)="onHolderUseFinalConsumer()"
+    ></app-customer-holder-completion-modal>
+
     <!-- COURIER NAME (despacho rápido: "Entrega completa" pide el domiciliario) -->
     <app-courier-name-modal
       [isOpen]="showCourierNameModal()"

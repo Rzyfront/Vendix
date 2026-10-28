@@ -46,6 +46,9 @@ import { CustomersModule } from '../customers/customers.module';
 import { PosFiscalController } from './pos/pos-fiscal.controller';
 import { PosFiscalEmissionService } from './pos/pos-fiscal-emission.service';
 import { OneShotEmissionService } from './one-shot-emission.service';
+import { OrdersBulkInvoicingController } from './bulk/orders-bulk-invoicing.controller';
+import { OrdersBulkInvoicingService } from './bulk/orders-bulk-invoicing.service';
+import { OrderLeaseModule } from '../../../common/locks/order-lease.module';
 import { ManualInvoiceEmissionService } from './manual-invoice-emission.service';
 import { PosSaleCompletedListener } from './pos/pos-sale-completed.listener';
 import { ProfilesController } from './profiles/profiles.controller';
@@ -90,6 +93,8 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // SÍ declara su propio controller (ver `invoice-delivery.controller.ts`):
     // su ruta de 4 segmentos no colisiona con el `:id` de `InvoicingController`.
     InvoiceDeliveryModule,
+    // Lease por orden en Redis (`emitOrder` y la facturación masiva).
+    OrderLeaseModule,
   ],
   controllers: [
     DianConfigController,
@@ -116,6 +121,8 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // `store/invoicing/scan-draft/async` ANTES de `InvoicingController`, que
     // monta `@Post(':id/...')` sobre el mismo prefijo.
     InvoiceDraftScanController,
+    // `store/orders/bulk/invoice`: prefijo propio, sin choque con `InvoicingController`.
+    OrdersBulkInvoicingController,
     InvoicingController,
     // Superficie fiscal del POS. Controller aparte a propósito: no lleva
     // `@RequireModuleFlow('invoicing')`, porque el indicador del cajero tiene
@@ -179,6 +186,7 @@ import { StoreDocumentReceptionConnectionsController } from '../../received-docu
     // después del commit de la venta.
     PosFiscalEmissionService,
     OneShotEmissionService,
+    OrdersBulkInvoicingService,
     // Creación manual + emisión opcional (`emit_immediately`) reusando
     // `InvoiceFlowService.validate` + `send`.
     ManualInvoiceEmissionService,

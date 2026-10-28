@@ -2366,6 +2366,40 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'La fecha de vencimiento no puede ser anterior a hoy.',
   },
+  // Facturación masiva de órdenes: el titular resuelto al ejecutar ya no es el
+  // que se mostró en la vista previa.
+  INVOICING_BULK_HOLDER_CHANGED_001: {
+    code: 'INVOICING_BULK_HOLDER_CHANGED_001',
+    httpStatus: 409,
+    devMessage: 'El titular cambió desde la vista previa; vuelve a revisar.',
+  },
+  // Lease por orden (Redis): otra operación (facturación, transición, ruta)
+  // ya la está procesando.
+  ORDERS_BULK_LOCKED_001: {
+    code: 'ORDERS_BULK_LOCKED_001',
+    httpStatus: 409,
+    devMessage:
+      'Esta orden se está procesando en otra operación; inténtalo cuando termine.',
+  },
+  INVOICING_BULK_HOLDER_INCOMPLETE_001: {
+    code: 'INVOICING_BULK_HOLDER_INCOMPLETE_001',
+    httpStatus: 409,
+    devMessage:
+      'El cliente de la orden no tiene datos suficientes para una factura nominativa.',
+  },
+  INVOICING_BULK_EMISSION_FAILED_001: {
+    code: 'INVOICING_BULK_EMISSION_FAILED_001',
+    httpStatus: 422,
+    devMessage: 'La emisión de la factura no se completó.',
+  },
+  // Facturar una orden cuyo cliente (o datos de invitado) no alcanza para una
+  // factura nominativa: la factura saldría a Consumidor final en silencio.
+  INVOICING_HOLDER_INCOMPLETE_001: {
+    code: 'INVOICING_HOLDER_INCOMPLETE_001',
+    httpStatus: 409,
+    devMessage:
+      'El cliente no tiene los datos completos para facturar a su nombre; la factura saldría a Consumidor final.',
+  },
   INVOICING_STATUS_001: {
     code: 'INVOICING_STATUS_001',
     httpStatus: 400,
@@ -4749,6 +4783,24 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage:
       'Partial deliveries are not enabled on dispatch routes; payment must be total (delivered) or the stop must be rejected/released',
+  },
+  DISPATCH_ROUTE_STOP_ALREADY_PAID: {
+    code: 'DISPATCH_ROUTE_STOP_ALREADY_PAID',
+    httpStatus: 400,
+    devMessage:
+      'The stop order has no pending balance; it must be settled with collected 0',
+  },
+  DISPATCH_ROUTE_STOP_ALREADY_SETTLED: {
+    code: 'DISPATCH_ROUTE_STOP_ALREADY_SETTLED',
+    httpStatus: 409,
+    devMessage:
+      'The stop is already settled (delivered/released) and cannot be settled again with a different result',
+  },
+  DISPATCH_ROUTE_COLLECTION_MISMATCH: {
+    code: 'DISPATCH_ROUTE_COLLECTION_MISMATCH',
+    httpStatus: 400,
+    devMessage:
+      'Collected + advance + withholding must equal the pending balance of the stop (COD / free credit), or not exceed it (installments credit)',
   },
   DISPATCH_ROUTE_NOT_RESPONSIBLE: {
     code: 'DISPATCH_ROUTE_NOT_RESPONSIBLE',

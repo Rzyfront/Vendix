@@ -683,6 +683,10 @@ export interface OrderQuery {
   /** Store payment method ID; matches any settled/captured leg. */
   payment_method_id?: number;
   date_range?: string;
+  /** Electronic invoice state of the order (bulk module filter). */
+  invoice_status?: 'none' | 'invoiced' | 'rejected';
+  /** true = orders with a customer; false = without customer (Consumidor final). */
+  has_customer?: boolean;
 
   // Filtros de fecha
   date_from?: string;

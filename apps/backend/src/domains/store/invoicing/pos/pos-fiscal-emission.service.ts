@@ -308,7 +308,12 @@ export class PosFiscalEmissionService {
       );
     }
 
-    const existing = await find();
+    let existing = await find();
+    // Borrador descartado por un intento fallido anterior de la emisión en un
+    // paso: no es una anulación deliberada, se vuelve a crear.
+    if (opts?.recreate_after_discard && existing?.status === 'cancelled') {
+      existing = null;
+    }
 
     // Ya aceptado: no hay nada que hacer y volver a transmitir sería emitir dos
     // veces el mismo hecho económico.

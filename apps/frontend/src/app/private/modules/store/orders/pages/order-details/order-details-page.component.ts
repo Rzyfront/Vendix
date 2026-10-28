@@ -186,6 +186,11 @@ import {
   CreditInvoiceModalComponent,
   type CreditInvoiceSubmit,
 } from '../../components/credit-invoice-modal/credit-invoice-modal.component';
+import { CustomerHolderCompletionModalComponent } from '../../../customers/components/customer-holder-completion-modal/customer-holder-completion-modal.component';
+import {
+  holderIssueFromDetails,
+  type HolderIssue,
+} from '../../../customers/components/customer-holder-completion-modal/holder-issue.model';
 import { OrderItemsEditModalComponent } from '../../components/order-items-edit-modal/order-items-edit-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
 import {
@@ -1052,6 +1057,7 @@ export interface InvoiceCardView {
     ItemCancellationModalComponent,
     OrderPaymentModalComponent,
     CreditInvoiceModalComponent,
+    CustomerHolderCompletionModalComponent,
     OrderItemsEditModalComponent,
     OrderRefundModalComponent,
     OrderCompleteModalComponent,
@@ -7623,6 +7629,13 @@ export class OrderDetailsPageComponent {
   /** Modal «Facturar a crédito» y el saldo que el backend reportó sin cobrar. */
   readonly showCreditModal = signal(false);
   readonly creditBalance = signal(0);
+  /** «Datos del cliente incompletos»: hallazgo del 409 y modal para completarlos. */
+  readonly holderIssue = signal<HolderIssue | null>(null);
+  readonly showHolderModal = signal(false);
+  /** Card key of the emission that hit the holder 409 (the retry reuses it). */
+  private holderEmitKey = 'order';
+  /** The user explicitly accepted Consumidor final: threaded into the credit retry too. */
+  private emitAllowFinalConsumer = false;
   readonly isRepairingShippingTax = signal(false);
 
   /**
@@ -7640,12 +7653,14 @@ export class OrderDetailsPageComponent {
       return;
     }
     if (!this.orderId || this.hasSalesInvoice()) return;
+    this.emitAllowFinalConsumer = false;
     this.runEmit('order', null);
   }
 
   /** Acción «Facturar» / «Reintentar» de una tarjeta de factura. */
   emitFromCard(card: InvoiceCardView): void {
     if (card.accountId == null && this.hasSalesInvoice()) return;
+    this.emitAllowFinalConsumer = false;
     this.runEmit(
       card.emitKey === 'order-new' ? 'order' : card.emitKey,
       card.accountId,
@@ -7661,6 +7676,7 @@ export class OrderDetailsPageComponent {
     key: string,
     accountId: number | null,
     credit?: CreditInvoiceSubmit,
+    allowFinalConsumer = false,
   ): void {
     if (this.emittingKeys().has(key)) return;
     const orderId = Number(this.orderId);
@@ -7668,7 +7684,15 @@ export class OrderDetailsPageComponent {
     const request$ =
       accountId != null
         ? this.invoicingService.emitFinancialAccount(accountId)
-        : this.invoicingService.emitOrder(orderId, credit ? { credit } : undefined);
+        : this.invoicingService.emitOrder(
+            orderId,
+            credit || allowFinalConsumer
+              ? {
+                  ...(credit ? { credit } : {}),
+                  ...(allowFinalConsumer ? { allow_final_consumer: true } : {}),
+                }
+              : undefined,
+          );
     this.setEmitting(key, true);
     this.setEmitError(key, null);
     request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
@@ -7711,6 +7735,10 @@ export class OrderDetailsPageComponent {
         // de Angular, nunca el mensaje del backend.
         const parsed = parseApiError(err);
         this.showCreditModal.set(false);
+        // The holder check runs BEFORE the unpaid/credit check on the backend.
+        if (accountId == null && this.handleHolderIncomplete(key, parsed)) {
+          return;
+        }
         if (accountId == null && this.handleUnpaidEmitRejection(key, parsed)) {
           return;
         }
@@ -7748,6 +7776,42 @@ export class OrderDetailsPageComponent {
   }
 
   /**
+   * `INVOICING_HOLDER_INCOMPLETE_001`: el cliente de la orden no alcanza para una
+   * factura nominativa. Nunca cae a Consumidor final en silencio: abre el modal
+   * para completar los datos (o aceptar Consumidor final de forma explícita).
+   * Devuelve `true` cuando atendió el rechazo.
+   */
+  private handleHolderIncomplete(
+    key: string,
+    parsed: ReturnType<typeof parseApiError>,
+  ): boolean {
+    if (parsed.errorCode !== 'INVOICING_HOLDER_INCOMPLETE_001') return false;
+    const issue = holderIssueFromDetails(parsed.details);
+    if (!issue) {
+      this.setEmitError(key, parsed.userMessage);
+      this.toastService.error(parsed.userMessage);
+      return true;
+    }
+    this.holderEmitKey = key;
+    this.holderIssue.set(issue);
+    this.showHolderModal.set(true);
+    return true;
+  }
+
+  /** The customer was completed and saved: retry the emission automatically. */
+  onHolderCompleted(): void {
+    this.showHolderModal.set(false);
+    this.runEmit(this.holderEmitKey, null, undefined, this.emitAllowFinalConsumer);
+  }
+
+  /** Explicit «Emitir como Consumidor final»: retry with the override. */
+  onHolderUseFinalConsumer(): void {
+    this.showHolderModal.set(false);
+    this.emitAllowFinalConsumer = true;
+    this.runEmit(this.holderEmitKey, null, undefined, true);
+  }
+
+  /**
    * `INVOICING_ORDER_UNPAID_001`: la orden tiene saldo sin cobrar. Si el backend
    * dice que admite crédito (`details.credit_eligible`) abre el modal «Facturar
    * a crédito» y NO es un error; si no, avisa el bloqueo (`credit_blocker`).
@@ -7782,7 +7846,7 @@ export class OrderDetailsPageComponent {
 
   /** Confirmación del modal «Facturar a crédito»: reenvía la emisión con `credit`. */
   onCreditInvoiceConfirmed(credit: CreditInvoiceSubmit): void {
-    this.runEmit('order', null, credit);
+    this.runEmit('order', null, credit, this.emitAllowFinalConsumer);
   }
 
   /**

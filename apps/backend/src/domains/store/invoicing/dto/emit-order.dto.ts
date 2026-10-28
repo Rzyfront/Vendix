@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsOptional,
   Matches,
   ValidateNested,
@@ -39,4 +40,14 @@ export class EmitOrderDto {
   @ValidateNested()
   @Type(() => EmitOrderCreditDto)
   credit?: EmitOrderCreditDto;
+
+  /**
+   * Opt-in explícito: si el cliente de la orden no tiene datos para una
+   * factura nominativa, emitir a Consumidor final (`222222222222`) en vez de
+   * responder 409 `INVOICING_HOLDER_INCOMPLETE_001`. Se ignora si el titular
+   * está completo o si el problema no es sobrescribible.
+   */
+  @IsOptional()
+  @IsBoolean()
+  allow_final_consumer?: boolean;
 }

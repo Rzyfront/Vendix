@@ -1,0 +1,360 @@
+<app-modal
+  [(isOpen)]="modalOpen"
+  size="xl"
+  [dialog]="true"
+  title="Facturar electrónicamente"
+  [subtitle]="
+    stage() === 'running' || stage() === 'done'
+      ? 'Emisión en curso, una factura a la vez'
+      : 'Revisa a nombre de quién sale cada factura antes de emitir'
+  "
+  [closeOnBackdrop]="false"
+  [closeOnEscape]="!invoiceRunning()"
+  [showCloseButton]="!invoiceRunning()"
+  [canClose]="canCloseFn"
+>
+  <!-- ═══ Preview en curso ═══ -->
+  @if (stage() === 'previewing') {
+    <div class="flex flex-col items-center gap-2 py-10">
+      <app-icon name="loader-2" [size]="26" class="text-primary" [spin]="true" />
+      <p class="text-sm font-semibold text-text-primary">
+        Revisando {{ ids().length }}
+        {{ ids().length === 1 ? 'orden' : 'órdenes' }}…
+      </p>
+      <p class="text-[11px] text-text-secondary">
+        Es una simulación: todavía no se emite ninguna factura.
+      </p>
+    </div>
+  }
+
+  <!-- ═══ Preview caído ═══ -->
+  @if (stage() === 'preview-failed') {
+    <div class="flex flex-col gap-3 py-2">
+      <app-alert-banner variant="danger" icon="alert-triangle">
+        No pudimos calcular la previsualización, así que no se emitió ninguna
+        factura.
+      </app-alert-banner>
+      @if (failureMessage()) {
+        <p class="rounded-lg border border-border bg-surface px-3 py-2 text-[11px] leading-tight text-text-secondary">
+          {{ failureMessage() }}
+        </p>
+      }
+    </div>
+  }
+
+  <!-- ═══ Preview listo ═══ -->
+  @if (stage() === 'ready' && preview(); as data) {
+    <div class="flex flex-col gap-3">
+      @if (!data.store_eligible) {
+        <app-alert-banner
+          variant="danger"
+          icon="alert-triangle"
+          heading="La tienda no puede facturar electrónicamente"
+        >
+          {{
+            data.store_blocker ||
+              'Completa la configuración de facturación electrónica para poder emitir.'
+          }}
+        </app-alert-banner>
+      }
+
+      <!-- Resumen: chips neutros, un solo acento. -->
+      <div class="grid grid-cols-2 gap-2 md:grid-cols-5">
+        <div class="rounded-xl border border-border bg-surface px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-text-secondary">Seleccionadas</p>
+          <p class="text-lg font-bold text-text-primary">{{ data.summary.total }}</p>
+        </div>
+        <div class="rounded-xl border border-border bg-surface px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-text-secondary">Pagadas</p>
+          <p class="text-lg font-bold text-text-primary">
+            {{ data.summary.paid + data.summary.credit_existing }}
+          </p>
+        </div>
+        <div class="rounded-xl border border-border bg-surface px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-text-secondary">Pasan a crédito</p>
+          <p class="text-lg font-bold text-text-primary">{{ data.summary.to_credit }}</p>
+        </div>
+        <div class="rounded-xl border border-border bg-surface px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-text-secondary">Consumidor final</p>
+          <p class="text-lg font-bold text-text-primary">{{ data.summary.final_consumer }}</p>
+        </div>
+        <div class="rounded-xl border border-border bg-surface px-3 py-2">
+          <p class="text-[10px] font-semibold uppercase text-text-secondary">No se facturarán</p>
+          <p class="text-lg font-bold" [class.text-error]="data.summary.blocked > 0" [class.text-text-primary]="data.summary.blocked === 0">
+            {{ data.summary.blocked }}
+          </p>
+        </div>
+      </div>
+
+      @if (partialRows().length > 0) {
+        <app-alert-banner
+          variant="warning"
+          icon="alert-triangle"
+          heading="Órdenes con abonos parciales"
+        >
+          {{ partialRows().length }}
+          {{ partialRows().length === 1 ? 'orden tiene' : 'órdenes tienen' }}
+          pagos parciales y se
+          {{ partialRows().length === 1 ? 'omitirá' : 'omitirán' }}:
+          {{ partialRows()[0].order_number }}@if (partialRows().length > 1) {
+            y {{ partialRows().length - 1 }} más
+          }. Complétales el pago o regístralas a crédito desde su detalle.
+        </app-alert-banner>
+      }
+
+      @if (cfCount() > 0) {
+        <app-alert-banner
+          variant="info"
+          icon="info"
+          heading="Clientes sin datos suficientes para factura nominativa"
+        >
+          Las facturas de {{ cfCount() }}
+          {{ cfCount() === 1 ? 'orden saldrían' : 'órdenes saldrían' }} a
+          «Consumidor final · 222222222222» porque a su cliente le faltan datos.
+          Por defecto no se emiten.
+        </app-alert-banner>
+        <label class="flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary">
+          <input
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border"
+            [checked]="allowFinalConsumer()"
+            (change)="onToggleFinalConsumer($any($event.target).checked)"
+          />
+          <span>
+            Emitir también estas {{ cfCount() }}
+            {{ cfCount() === 1 ? 'orden' : 'órdenes' }} como Consumidor final
+          </span>
+        </label>
+      }
+
+      <!-- Lista por orden: tarjetas en móvil, filas en grid desde md. -->
+      <div class="overflow-hidden rounded-lg border border-border bg-surface">
+        <div
+          class="hidden grid-cols-[110px_110px_150px_1fr] gap-3 border-b border-border bg-background/50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-text-secondary md:grid"
+          aria-hidden="true"
+        >
+          <span>N°</span>
+          <span class="text-right">Total</span>
+          <span>Pago</span>
+          <span>Titular</span>
+        </div>
+        <ul class="max-h-[40vh] divide-y divide-border overflow-y-auto">
+          @for (row of rows(); track row.id) {
+            @let problem = rowProblemText(row, allowFinalConsumer());
+            <li
+              class="grid grid-cols-2 gap-x-3 gap-y-1 px-3 py-2 text-sm md:grid-cols-[110px_110px_150px_1fr] md:items-start"
+              [class.bg-red-50]="problem !== ''"
+            >
+              <span class="font-semibold text-text-primary">#{{ row.order_number }}</span>
+              <span class="text-right text-text-primary md:text-right">
+                {{ asNumber(row.grand_total) | currency }}
+              </span>
+              <span>
+                <span
+                  class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                  [class.border-red-300]="row.payment === 'blocked'"
+                  [class.text-error]="row.payment === 'blocked'"
+                  [class.border-border]="row.payment !== 'blocked'"
+                  [class.text-text-secondary]="row.payment !== 'blocked'"
+                >
+                  {{ paymentLabel(row) }}
+                </span>
+              </span>
+              <div class="col-span-2 min-w-0 md:col-span-1">
+                <p class="break-words text-text-primary" [class.text-error]="problem !== ''">
+                  {{ rowHolderText(row, allowFinalConsumer()) }}
+                </p>
+                @if (problem !== '') {
+                  <p class="mt-0.5 text-[11px] leading-tight text-error">{{ problem }}</p>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+      </div>
+    </div>
+  }
+
+  <!-- ═══ Paso de crédito ═══ -->
+  @if (stage() === 'credit') {
+    <form [formGroup]="creditForm" (ngSubmit)="onConfirmCredit()" class="space-y-4">
+      <app-alert-banner
+        variant="warning"
+        tone="token"
+        icon="alert-triangle"
+        heading="Hay órdenes sin pagos registrados"
+      >
+        Al facturarlas, pasarán a venta a crédito: el saldo quedará en Cartera
+        como cuenta por cobrar y las órdenes ya no se podrán modificar. El
+        vencimiento y el medio de pago aplican a todas ellas.
+      </app-alert-banner>
+
+      <div>
+        <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">Plazo</p>
+        <div class="flex flex-wrap gap-2" role="group" aria-label="Plazo en días">
+          @for (days of termDays; track days) {
+            <button
+              type="button"
+              class="min-h-[40px] rounded-full border px-3 text-sm font-medium transition-colors"
+              [class.border-primary-600]="selectedDays() === days"
+              [class.bg-primary-50]="selectedDays() === days"
+              [class.text-primary-700]="selectedDays() === days"
+              [class.border-border]="selectedDays() !== days"
+              [attr.aria-pressed]="selectedDays() === days"
+              (click)="applyTerm(days)"
+            >
+              {{ days }} días
+            </button>
+          }
+        </div>
+      </div>
+
+      <app-input
+        label="Fecha de vencimiento"
+        type="date"
+        formControlName="due_date"
+        [control]="creditForm.controls.due_date"
+        [min]="today"
+        [required]="true"
+        [error]="dueDateError()"
+      ></app-input>
+
+      <app-selector
+        label="Medio de pago esperado (opcional)"
+        formControlName="payment_means_code"
+        [options]="paymentMeansOptions"
+      ></app-selector>
+    </form>
+  }
+
+  <!-- ═══ Espera / resultado ═══ -->
+  @if (stage() === 'running' || stage() === 'done') {
+    <div class="flex flex-col gap-3">
+      <div>
+        <div class="flex items-center justify-between text-xs text-text-secondary">
+          <span>
+            @if (stage() === 'running') {
+              Facturando… no cierres esta ventana.
+            } @else {
+              Proceso terminado.
+            }
+          </span>
+          <span class="font-semibold text-text-primary">
+            {{ doneCount() }}/{{ runTotal() }}
+          </span>
+        </div>
+        <div
+          class="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-border"
+          role="progressbar"
+          aria-label="Avance de la facturación"
+          [attr.aria-valuenow]="runPercent()"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        >
+          <div class="run-bar h-full rounded-full bg-primary" [style.width.%]="runPercent()"></div>
+        </div>
+        <p class="sr-only" aria-live="polite">
+          {{ doneCount() }} de {{ runTotal() }} órdenes procesadas
+        </p>
+      </div>
+
+      @if (stage() === 'done') {
+        <app-alert-banner
+          [variant]="runSummary().failed === 0 ? 'success' : 'warning'"
+          [icon]="runSummary().failed === 0 ? 'circle-check' : 'alert-triangle'"
+        >
+          {{ runSummary().successful }}
+          {{ runSummary().successful === 1 ? 'factura emitida' : 'facturas emitidas' }}
+          @if (runSummary().failed > 0) {
+            y {{ runSummary().failed }}
+            {{ runSummary().failed === 1 ? 'orden falló' : 'órdenes fallaron' }}.
+            Las que fallaron no se emitieron: revísalas e inténtalo de nuevo.
+          }
+        </app-alert-banner>
+      }
+
+      <ul class="max-h-[45vh] divide-y divide-border overflow-y-auto rounded-lg border border-border bg-surface">
+        @for (entry of runEntries(); track entry.id) {
+          <li
+            class="run-row flex items-start gap-2 px-3 py-2 text-sm"
+            [class.bg-red-50]="entry.status === 'error'"
+          >
+            <span class="mt-0.5 shrink-0">
+              @switch (entry.status) {
+                @case ('ok') {
+                  <app-icon class="run-icon inline-block text-primary" name="circle-check" [size]="16" />
+                }
+                @case ('error') {
+                  <app-icon class="run-icon inline-block text-error" name="circle-x" [size]="16" />
+                }
+                @case ('running') {
+                  <app-icon name="loader-2" [size]="16" class="text-primary" [spin]="true" />
+                }
+                @default {
+                  <app-icon name="minus-circle" [size]="16" class="text-text-secondary" />
+                }
+              }
+            </span>
+            <div class="min-w-0 flex-1">
+              <p class="font-semibold text-text-primary">#{{ entry.order_number }}</p>
+              <p
+                class="text-[12px] leading-tight"
+                [class.text-error]="entry.status === 'error'"
+                [class.text-text-secondary]="entry.status !== 'error'"
+              >
+                @switch (entry.status) {
+                  @case ('pending') {
+                    En espera
+                  }
+                  @case ('running') {
+                    Emitiendo…
+                  }
+                  @default {
+                    {{ entry.detail }}
+                  }
+                }
+              </p>
+            </div>
+          </li>
+        }
+      </ul>
+    </div>
+  }
+
+  <!-- ═══ Footer ═══ -->
+  <div slot="footer">
+    <div class="flex items-center justify-end gap-3">
+      @switch (stage()) {
+        @case ('preview-failed') {
+          <app-button variant="outline" (clicked)="onClose()">Cerrar</app-button>
+          <app-button variant="primary" (clicked)="onRetryPreview()">Reintentar</app-button>
+        }
+        @case ('ready') {
+          <app-button variant="outline" (clicked)="onClose()">Cancelar</app-button>
+          <app-button variant="primary" [disabled]="!canConfirm()" (clicked)="onConfirm()">
+            Facturar {{ includedCount() }}
+            {{ includedCount() === 1 ? 'orden' : 'órdenes' }}
+          </app-button>
+        }
+        @case ('credit') {
+          <app-button variant="outline" (clicked)="onBackFromCredit()">Volver</app-button>
+          <app-button variant="primary" [disabled]="!canStartFromCredit()" (clicked)="onConfirmCredit()">
+            Facturar {{ includedCount() }}
+            {{ includedCount() === 1 ? 'orden' : 'órdenes' }}
+          </app-button>
+        }
+        @case ('running') {
+          <app-button variant="primary" [disabled]="true" [loading]="true">
+            Facturando…
+          </app-button>
+        }
+        @case ('done') {
+          <app-button variant="primary" (clicked)="onClose()">Cerrar</app-button>
+        }
+        @default {
+          <app-button variant="outline" (clicked)="onClose()">Cancelar</app-button>
+        }
+      }
+    </div>
+  </div>
+</app-modal>

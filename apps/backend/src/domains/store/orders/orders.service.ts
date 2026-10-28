@@ -1094,6 +1094,8 @@ export class OrdersService {
       // `status && !dispatchable` que evita que ambos spreads pisen la
       // misma clave `state` del `where`.
       dispatchable,
+      invoice_status,
+      has_customer,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -1125,6 +1127,11 @@ export class OrdersService {
         state: Array.isArray(status) ? { in: status } : status,
       }),
       ...(customer_id && { customer_id }),
+      // Filtro «cliente» del módulo de operaciones masivas: con / sin cliente.
+      // Un `customer_id` explícito manda sobre `has_customer`.
+      ...(!customer_id && has_customer !== undefined && {
+        customer_id: has_customer ? { not: null } : null,
+      }),
       // Carril B — B2: filtra órdenes que tengan al menos una table_session
       // apuntando a la mesa solicitada (incluye sesiones ya cerradas; la orden
       // pudo haber migrado entre mesas durante su vida).
@@ -1215,6 +1222,36 @@ export class OrdersService {
           }
         : {}),
     };
+
+    // Filtro «factura» (operaciones masivas). «Documento de venta» = mismo
+    // criterio que `assertOrderNotInvoiceLocked`: sales_invoice, export_invoice
+    // o pos_equivalent_document de la orden (no de una cuenta del reparto).
+    if (invoice_status) {
+      const saleDoc = (statuses: string[]): Prisma.ordersWhereInput => ({
+        invoices: {
+          some: {
+            invoice_type: {
+              in: ['sales_invoice', 'export_invoice', 'pos_equivalent_document'],
+            },
+            financial_account_id: null,
+            status: { in: statuses as any },
+          },
+        },
+      });
+      const live = ['validated', 'sent', 'accepted'];
+      const extra: Prisma.ordersWhereInput[] =
+        invoice_status === 'none'
+          ? [{ NOT: saleDoc([...live, 'rejected']) }]
+          : invoice_status === 'invoiced'
+            ? [saleDoc(live)]
+            : // rejected: el rechazado no fue reemplazado por uno vigente.
+              [saleDoc(['rejected']), { NOT: saleDoc(live) }];
+      const current = where.AND;
+      where.AND = [
+        ...(Array.isArray(current) ? current : current ? [current] : []),
+        ...extra,
+      ];
+    }
 
     const orderBy: Prisma.ordersOrderByWithRelationInput = {};
     if (sort_by) {

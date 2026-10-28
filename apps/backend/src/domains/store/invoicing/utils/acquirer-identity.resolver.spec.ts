@@ -101,6 +101,69 @@ describe('resolveAcquirerPersonType', () => {
 });
 
 describe('resolveAcquirerIdentity', () => {
+  it('factura nacida a Consumidor final con ficha sin número: no mezcla el nombre ni el contacto de la ficha', () => {
+    // Orden 924: cliente Miguel Santos sin documento → la factura nace CF
+    // (222222222222). Antes salía «Miguel Santos · CC 222222222222».
+    const result = resolveAcquirerIdentity({
+      snapshot: {
+        customer_name: 'Consumidor Final',
+        customer_tax_id: '222222222222',
+        customer_document_type: '13',
+      },
+      customer: {
+        id: 12,
+        first_name: 'Miguel',
+        last_name: 'Santos',
+        email: 'miguel@example.com',
+        phone: '3001234567',
+        document_number: null,
+        document_type: null,
+      },
+    });
+
+    expect(result.name).toBe('Consumidor Final');
+    expect(result.document_number).toBe('222222222222');
+    expect(result.document_type_code).toBe('13');
+    expect(result.email).toBeNull();
+    expect(result.phone).toBeNull();
+    expect(result.first_name).toBeNull();
+    expect(result.last_name).toBeNull();
+  });
+
+  it('B1: snapshot CF + ficha completa o parcial: SIEMPRE Consumidor final puro (la ficha ya no manda)', () => {
+    const cf = {
+      customer_name: 'Consumidor Final',
+      customer_tax_id: '222222222222',
+      customer_document_type: '13',
+      customer_email: 'viejo@example.com',
+      customer_verification_digit: '7',
+      customer_person_type: 'JURIDICA',
+      customer_fiscal_responsibilities: ['O-13'],
+    };
+    for (const customer of [
+      // missing_name: número sin nombre completo
+      { id: 12, first_name: 'Juan', last_name: '', document_number: '1020304050', document_type: 'CC', email: 'j@x.co', phone: '300', verification_digit: '1', person_type: 'NATURAL', fiscal_responsibilities: ['R-99'] },
+      // sentinel customer
+      { id: 13, first_name: 'Miguel', last_name: 'Santos', document_number: '222222222222', document_type: 'CC' },
+      // complete customer
+      { id: 14, first_name: 'Ana', last_name: 'Gómez', document_number: '1020304050', document_type: 'CC' },
+    ]) {
+      const result = resolveAcquirerIdentity({ snapshot: cf, customer });
+      expect(result).toMatchObject({
+        name: 'Consumidor Final',
+        document_number: '222222222222',
+        document_type_code: '13',
+        verification_digit: null,
+        email: null,
+        phone: null,
+        first_name: null,
+        last_name: null,
+        person_type: 'NATURAL',
+      });
+      expect(result.tax_responsibilities).toEqual([]);
+    }
+  });
+
   it('incidente real: factura manual sin customer_id, snapshot NIT/31 con DV y correo', () => {
     // Óptica Panorama SAS — NIT 800214345-7, factura manual de Pollo Árabe.
     const result = resolveAcquirerIdentity({

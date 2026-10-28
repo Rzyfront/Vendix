@@ -52,6 +52,7 @@ import { InvoicingModule } from '../invoicing/invoicing.module';
 import { OrderItemChangesController } from './item-changes/order-item-changes.controller';
 import { OrderItemChangesService } from './item-changes/order-item-changes.service';
 import { KitchenFireModule } from '../kitchen-fire/kitchen-fire.module'; // QUI-650: fire en la misma tx (sin ciclo: KitchenFireModule no importa OrdersModule)
+import { OrderLeaseModule } from '../../../common/locks/order-lease.module';
 import { OrderHistoryModule } from './order-history/order-history.module'; // Plan order-truth-and-invoice-tz — OrdersService inyecta OrderHistoryService directo (customer_changed / shipping_assigned)
 
 @Module({
@@ -59,6 +60,7 @@ import { OrderHistoryModule } from './order-history/order-history.module'; // Pl
     ResponseModule,
     PrismaModule,
     S3Module,
+    OrderLeaseModule, // lease por orden de las operaciones masivas
     StockTransfersModule,
     ReturnOrdersModule,
     forwardRef(() => PaymentsModule),

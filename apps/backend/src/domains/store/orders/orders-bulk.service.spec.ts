@@ -9,6 +9,8 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { createHash } from 'crypto';
+import { OrderLeaseService } from '@common/locks/order-lease.service';
+import { ErrorCodes } from '@common/errors';
 
 describe('OrdersBulkService', () => {
   let service: OrdersBulkService;
@@ -24,6 +26,7 @@ describe('OrdersBulkService', () => {
     cash_register_sessions: { findFirst: jest.Mock };
     store_settings: { findUnique: jest.Mock };
   };
+  let lease_keys: Map<string, string>;
   let ordersServiceMock: { assignShipping: jest.Mock };
   let stockValidator: {
     resolveInventoryPolicy: jest.Mock;
@@ -57,6 +60,19 @@ describe('OrdersBulkService', () => {
       assertLinesAvailable: jest.fn().mockResolvedValue([]),
     };
 
+    lease_keys = new Map();
+    const lease = new OrderLeaseService({
+      set: jest.fn(async (k: string, v: string) => {
+        if (lease_keys.has(k)) return null;
+        lease_keys.set(k, v);
+        return 'OK';
+      }),
+      get: jest.fn(async (k: string) => lease_keys.get(k) ?? null),
+      eval: jest.fn(async (_s: string, _n: number, k: string, t: string) => {
+        if (lease_keys.get(k) === t) lease_keys.delete(k);
+        return 1;
+      }),
+    } as any);
     const moduleRef = await Test.createTestingModule({
       providers: [
         OrdersBulkService,
@@ -66,6 +82,7 @@ describe('OrdersBulkService', () => {
         { provide: DispatchNotesService, useValue: dispatchNotesService },
         { provide: DispatchRoutesService, useValue: dispatchRoutesService },
         { provide: StockValidatorService, useValue: stockValidator },
+        { provide: OrderLeaseService, useValue: lease },
       ],
     }).compile();
 
@@ -416,6 +433,69 @@ describe('OrdersBulkService', () => {
         actorId: 7,
       });
       expect(orderFlowService.forceOrderState).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('lease por orden (S6b)', () => {
+    beforeEach(() => {
+      jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(1);
+    });
+
+    it('transition: la orden en proceso falla con ORDERS_BULK_LOCKED_001 y las demás siguen', async () => {
+      lease_keys.set('lease:order:1:1', 'otra-operacion');
+      orderFlowService.forceOrderState.mockResolvedValue(undefined);
+
+      const result = await service.bulkTransition({
+        ids: [1, 2],
+        targetState: 'finished',
+      } as any);
+
+      expect(orderFlowService.forceOrderState).toHaveBeenCalledTimes(1);
+      expect(orderFlowService.forceOrderState).toHaveBeenCalledWith(2, 'finished', expect.anything());
+      expect(result.results[0]).toMatchObject({
+        id: 1,
+        status: 'error',
+        code: ErrorCodes.ORDERS_BULK_LOCKED_001.code,
+        message: 'Esta orden se está procesando en otra operación; inténtalo cuando termine.',
+      });
+      expect(result.results[1]).toMatchObject({ id: 2, status: 'ok' });
+      expect(lease_keys.get('lease:order:1:1')).toBe('otra-operacion');
+    });
+
+    it('transition: libera la lease tras éxito y tras fallo', async () => {
+      orderFlowService.forceOrderState
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('boom'));
+      await service.bulkTransition({ ids: [1, 2], targetState: 'finished' } as any);
+      expect(lease_keys.size).toBe(0);
+    });
+
+    it('assign-route: la orden en proceso se reporta con el código y no entra al lote', async () => {
+      lease_keys.set('lease:order:1:1', 'otra-operacion');
+      dispatchNotesService.createFromOrdersBatch.mockResolvedValue({
+        results: [
+          { status: 'created', order_id: 2, dispatch_note_id: 502, dispatch_number: 'DSP-502' },
+        ],
+      });
+      dispatchRoutesService.addStops.mockResolvedValue(undefined);
+
+      const result = await service.bulkAssignRoute({ ids: [1, 2], route_id: 7 } as any);
+
+      expect(dispatchNotesService.createFromOrdersBatch).toHaveBeenCalledWith(
+        expect.objectContaining({ orders: [2] }),
+      );
+      expect(result).toMatchObject({ total: 2, successful: 1, failed: 1 });
+      expect(result.results.find((r) => r.id === 1)).toMatchObject({
+        status: 'error',
+        code: ErrorCodes.ORDERS_BULK_LOCKED_001.code,
+      });
+      expect(lease_keys.size).toBe(1); // only the foreign lease remains
+    });
+
+    it('assign-route: libera las leases tras terminar y también si el lote falla', async () => {
+      dispatchNotesService.createFromOrdersBatch.mockRejectedValue(new Error('boom'));
+      await service.bulkAssignRoute({ ids: [1, 2], route_id: 7 } as any);
+      expect(lease_keys.size).toBe(0);
     });
   });
 
