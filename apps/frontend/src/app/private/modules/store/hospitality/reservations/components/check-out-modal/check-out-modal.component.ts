@@ -11,6 +11,7 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import {
   ButtonComponent,
@@ -18,6 +19,7 @@ import {
   ModalComponent,
   SelectorComponent,
   SelectorOption,
+  SpinnerComponent,
   ToastService,
   ToggleComponent,
 } from '../../../../../../../shared/components/index';
@@ -28,22 +30,30 @@ import { PosCustomer } from '../../../../pos/models/customer.model';
 import { CheckOutResult, FolioDetail, SplitAccountInvoice, SplitResult } from '../../interfaces/folio.interface';
 import { LodgingReservation } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import { invoiceStateLabel } from '../../../shared/hospitality-labels';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 /** Methods the desk registers by hand; gateways settle themselves. */
 const MANUAL_METHODS = ['cash', 'card', 'bank_transfer'];
 
 type BillTo = 'guest' | 'company';
 
+/** U4 (R-FB-02) — where the payment methods stand; a failure is never an empty list. */
+type MethodsState = 'loading' | 'ready' | 'error';
+
 function newRequestId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 /**
- * Hospitality Suite (H3.7) — check-out: review the folio, pay the balance
- * (or charge it to the company's credit), pick who is invoiced and confirm.
- * The result shows the electronic invoice ("Factura FE-xxxx aceptada por
- * DIAN") with its PDF. Confirming again with the same attempt never emits a
- * second invoice: it only retries the same one.
+ * Hospitality Suite (H3.7) — check-out: review the guest account, pay the
+ * balance (or charge it to the company's credit), pick who is invoiced and
+ * confirm. The result shows the electronic invoice ("Factura FE-xxxx aceptada
+ * por la DIAN") with its PDF. Confirming again with the same attempt never
+ * emits a second invoice: it only retries the same one.
+ *
+ * U4 — a failed load of the account or of the payment methods shows its error
+ * with "Reintentar" and keeps the confirm button disabled (R-MOD-05, R-FB-02).
  */
 @Component({
   selector: 'app-check-out-modal',
@@ -56,6 +66,9 @@ function newRequestId(): string {
     SelectorComponent,
     ToggleComponent,
     PosCustomerSelectorComponent,
+    SpinnerComponent,
+    RouterLink,
+    HospitalityLoadErrorComponent,
   ],
   template: `
     <app-modal
@@ -64,14 +77,19 @@ function newRequestId(): string {
       title="Check-out"
       [subtitle]="subtitle()"
       size="md"
+      [fullScreenOnMobile]="true"
     >
       @if (loading()) {
-        <p class="text-sm text-text-secondary">Cargando folio…</p>
+        <app-spinner [center]="true" text="Cargando la cuenta…" />
+      } @else if (loadError() !== null) {
+        <div data-testid="check-out-load-error">
+          <app-hospitality-load-error what="la cuenta" [message]="loadError()" (retry)="retryLoad()" />
+        </div>
       } @else if (result(); as r) {
         <div class="space-y-3 text-sm" data-testid="check-out-result">
           <p class="flex items-center gap-2 font-medium text-success">
             <app-icon name="log-out" [size]="16" />
-            Salida registrada · folio cerrado · habitación sucia
+            Salida registrada · cuenta cerrada · habitación sucia
           </p>
           @if (r.invoices; as list) {
             @for (row of list; track row.account_id) {
@@ -79,7 +97,7 @@ function newRequestId(): string {
                 <div>
                   <p class="font-medium text-text-primary">{{ row.label }} · {{ money(Number(row.grand_total)) }}</p>
                   <p class="text-xs text-text-secondary">
-                    {{ row.invoice_number ? 'Factura ' + row.invoice_number : 'Factura electrónica' }}{{ row.status ? ' · ' + (row.status === 'issued' ? 'aceptada por DIAN' : row.status) : '' }}
+                    {{ row.invoice_number ? 'Factura ' + row.invoice_number : 'Factura electrónica' }}{{ row.status ? ' · ' + invoiceStateLabel(row.status) : '' }}
                   </p>
                 </div>
                 @if (row.invoice_id) {
@@ -93,7 +111,7 @@ function newRequestId(): string {
           } @else if (r.invoice; as inv) {
             <div class="rounded-lg border border-border px-3 py-2" data-testid="check-out-invoice">
               @if (inv.state === 'issued') {
-                <p class="font-medium text-text-primary">Factura {{ inv.invoice_number }} aceptada por DIAN</p>
+                <p class="font-medium text-text-primary">Factura {{ inv.invoice_number }} {{ invoiceStateLabel('issued') }}</p>
               } @else {
                 <p class="font-medium text-text-primary">
                   {{ inv.invoice_number ? 'Factura ' + inv.invoice_number : 'Factura electrónica' }}
@@ -108,7 +126,7 @@ function newRequestId(): string {
       } @else if (folio(); as f) {
         <div class="space-y-4 text-sm">
           <dl class="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border border-border px-3 py-2">
-            <dt class="text-text-secondary">Total del folio</dt>
+            <dt class="text-text-secondary">Total de la cuenta</dt>
             <dd class="text-right">{{ money(f.total) }}</dd>
             <dt class="text-text-secondary">Pagado</dt>
             <dd class="text-right">{{ money(f.paid) }}</dd>
@@ -129,7 +147,7 @@ function newRequestId(): string {
 
           @if (split(); as sp) {
             <div class="space-y-2" data-testid="check-out-split">
-              <p class="font-medium text-text-primary">Cuentas del folio dividido</p>
+              <p class="font-medium text-text-primary">Cuenta dividida</p>
               @for (a of sp.accounts; track a.id) {
                 <div class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
                   <span>{{ a.label }} · {{ money(Number(a.grand_total)) }}</span>
@@ -148,17 +166,17 @@ function newRequestId(): string {
             @if (f.verified_current) {
               <p class="flex items-center gap-1 font-medium text-success" data-testid="check-out-verified">
                 <app-icon name="check-circle" [size]="14" />
-                Folio verificado
+                Cuenta verificada
               </p>
             } @else {
               <app-toggle
                 [checked]="verifyNow()"
-                label="Verifico el folio ahora"
+                label="Verifico la cuenta ahora"
                 (changed)="verifyNow.set($event)"
               />
               <p class="text-xs text-text-secondary">
-                {{ f.verified_at ? 'El folio cambió después de verificarlo.' : 'Aún no está verificado.' }}
-                Lo verifica un usuario con el permiso «Verificar el folio».
+                {{ f.verified_at ? 'La cuenta cambió después de verificarla.' : 'Aún no está verificada.' }}
+                La verifica un usuario con permiso para verificar la cuenta (folio) antes de facturar.
               </p>
             }
           </div>
@@ -210,6 +228,22 @@ function newRequestId(): string {
                 />
               }
               @if (!chargeToCredit() || billTo() !== 'company') {
+                @if (methodsState() === 'loading') {
+                  <p class="text-xs text-text-secondary" role="status">Cargando medios de pago…</p>
+                } @else if (methodsState() === 'error') {
+                  <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/40 px-3 py-2" role="alert" data-testid="check-out-methods-error">
+                    <span class="text-xs text-error">No pudimos cargar los medios de pago.</span>
+                    <app-button variant="outline" size="sm" (clicked)="loadMethods()">
+                      <app-icon slot="icon" name="refresh-cw" [size]="14" />
+                      Reintentar
+                    </app-button>
+                  </div>
+                } @else if (methodOptions().length === 0) {
+                  <div class="rounded-lg border border-border px-3 py-2" data-testid="check-out-no-methods">
+                    <p class="text-xs text-text-secondary">No hay medios de pago para cobrar el saldo en recepción.</p>
+                    <a class="text-sm font-medium text-primary underline" routerLink="/admin/settings/payments">Configura un medio de pago</a>
+                  </div>
+                } @else {
                 <app-selector
                   label="Cobrar el saldo con"
                   placeholder="Elige el medio"
@@ -217,6 +251,7 @@ function newRequestId(): string {
                   [value]="methodId()"
                   (valueChange)="methodId.set($event === null ? null : Number($event))"
                 />
+                }
               } @else {
                 <p class="text-xs text-text-secondary">El saldo pasa a cuentas por cobrar de la empresa.</p>
               }
@@ -225,29 +260,34 @@ function newRequestId(): string {
         </div>
       }
 
-      <div slot="footer" class="flex flex-wrap justify-end gap-2">
+      <div
+        slot="footer"
+        class="flex flex-col-reverse gap-2 pb-[env(safe-area-inset-bottom)] sm:flex-row sm:flex-wrap sm:justify-end"
+      >
         @if (result(); as r) {
           @if (!r.invoices && (r.invoice?.state === 'failed' || r.invoice === null)) {
-            <app-button variant="outline" [loading]="busy()" (clicked)="confirm()">Reintentar factura</app-button>
+            <app-button variant="outline" customClasses="w-full min-h-11 sm:w-auto sm:min-h-0" [loading]="busy()" (clicked)="confirm()">Reintentar factura</app-button>
           }
           @if (!r.invoices && r.invoice?.invoice_id) {
-            <app-button variant="outline" [loading]="busy()" (clicked)="downloadPdf()" data-testid="check-out-pdf">
+            <app-button variant="outline" customClasses="w-full min-h-11 sm:w-auto sm:min-h-0" [loading]="busy()" (clicked)="downloadPdf()" data-testid="check-out-pdf">
               <app-icon slot="icon" name="download" [size]="14" />
               Descargar PDF
             </app-button>
           }
-          <app-button variant="primary" (clicked)="close()">Listo</app-button>
+          <app-button variant="primary" class="w-full sm:w-auto" customClasses="w-full min-h-12 sm:min-h-0" (clicked)="close()">Listo</app-button>
         } @else {
-          <app-button variant="ghost" (clicked)="close()">Volver</app-button>
+          <app-button variant="ghost" customClasses="w-full min-h-11 sm:w-auto sm:min-h-0" (clicked)="close()">Volver</app-button>
           <app-button
             variant="primary"
+            class="w-full sm:w-auto"
+            customClasses="w-full min-h-12 sm:min-h-0"
             [loading]="busy()"
             [disabled]="!canConfirm()"
             (clicked)="confirm()"
             data-testid="check-out-confirm"
           >
             <app-icon slot="icon" name="log-out" [size]="16" />
-            Confirmar check-out
+            {{ confirmLabel() }}
           </app-button>
         }
       </div>
@@ -272,6 +312,9 @@ export class CheckOutModalComponent {
   readonly split = signal<SplitResult | null>(null);
   readonly result = signal<CheckOutResult | null>(null);
   readonly loading = signal(false);
+  /** U4 — reason the account could not be loaded; null when it loaded. */
+  readonly loadError = signal<string | null>(null);
+  readonly methodsState = signal<MethodsState>('loading');
   readonly busy = signal(false);
   readonly verifyNow = signal(false);
   readonly billTo = signal<BillTo>('guest');
@@ -282,6 +325,7 @@ export class CheckOutModalComponent {
   private requestId = newRequestId();
   readonly allPaid = computed(() => this.split()?.accounts.every((a) => a.payment_state === 'paid') ?? true);
   protected readonly Number = Number;
+  protected readonly invoiceStateLabel = invoiceStateLabel;
 
   readonly subtitle = computed(() => {
     const r = this.reservation();
@@ -309,6 +353,15 @@ export class CheckOutModalComponent {
     if (this.split()) return this.allPaid();
     if (this.billTo() === 'company' && !this.company()) return false;
     return this.due() === 0 || this.credit() || this.methodId() !== null;
+  });
+
+  /** U4 (R-FORM-10) — verb + object, with the amount the desk collects. */
+  readonly confirmLabel = computed(() => {
+    const due = this.due();
+    if (this.split() || due === 0) return 'Confirmar check-out';
+    return this.credit()
+      ? `Confirmar check-out · a crédito ${this.money(due)}`
+      : `Confirmar check-out · cobrar ${this.money(due)}`;
   });
 
   /** Only a different reservation reopens it (a reload after the check-out does not). */
@@ -396,6 +449,39 @@ export class CheckOutModalComponent {
     this.closed.emit();
   }
 
+  retryLoad(): void {
+    const id = this.reservationId();
+    if (id !== null) this.open(id);
+  }
+
+  /**
+   * The shared catalog answers a failed request with its offline fallback
+   * (cash/card/transfer with text ids), which the desk cannot charge. That
+   * list is reported as a load error, not as "no methods" (R-FB-02).
+   */
+  loadMethods(): void {
+    this.methodsState.set('loading');
+    this.paymentMethods
+      .getEnabledMethods()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (methods) => {
+          const fromStore = methods.filter((m) => Number.isInteger(Number(m.id)));
+          if (methods.length > 0 && fromStore.length === 0) {
+            this.methodsState.set('error');
+            return;
+          }
+          this.methodOptions.set(
+            fromStore
+              .filter((m) => m.enabled && MANUAL_METHODS.includes(m.type))
+              .map((m) => ({ value: Number(m.id), label: m.displayName || m.name })),
+          );
+          this.methodsState.set('ready');
+        },
+        error: () => this.methodsState.set('error'),
+      });
+  }
+
   private open(id: number): void {
     this.reset();
     this.loading.set(true);
@@ -409,26 +495,18 @@ export class CheckOutModalComponent {
         },
         error: (message: string) => {
           this.loading.set(false);
-          this.toastService.error(message);
+          this.loadError.set(message);
         },
       });
-    if (this.methodOptions().length > 0) return;
-    this.paymentMethods
-      .getEnabledMethods()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((methods) =>
-        this.methodOptions.set(
-          methods
-            .filter((m) => m.enabled && MANUAL_METHODS.includes(m.type) && Number.isInteger(Number(m.id)))
-            .map((m) => ({ value: Number(m.id), label: m.displayName || m.name })),
-        ),
-      );
+    if (this.methodsState() === 'ready' && this.methodOptions().length > 0) return;
+    this.loadMethods();
   }
 
   private reset(): void {
     this.folio.set(null);
     this.split.set(null);
     this.result.set(null);
+    this.loadError.set(null);
     this.verifyNow.set(false);
     this.billTo.set('guest');
     this.company.set(null);

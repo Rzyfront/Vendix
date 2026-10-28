@@ -49,3 +49,28 @@ const VAT_EXEMPTION_REASON_PHRASES: ReadonlyArray<[RegExp, string]> = [
 export function vatExemptionReasonLabel(reason: string): string {
   return VAT_EXEMPTION_REASON_PHRASES.find(([pattern]) => pattern.test(reason))?.[1] ?? reason;
 }
+
+/**
+ * U4 (R-TERM-01) — the desk phrase of an electronic invoice state. The
+ * check-out reports either the fiscal emission state (`issued`, `pending`…)
+ * or the stored invoice status (`accepted`, `rejected`…); an unknown value
+ * reads as a generic "en proceso" instead of the raw enum.
+ */
+const INVOICE_STATE_LABELS: Record<string, string> = {
+  issued: 'aceptada por la DIAN',
+  accepted: 'aceptada por la DIAN',
+  pending: 'en envío a la DIAN',
+  sent: 'en envío a la DIAN',
+  draft: 'en preparación',
+  validated: 'en preparación',
+  contingency: 'en contingencia: se enviará a la DIAN',
+  failed: 'no se pudo emitir',
+  rejected: 'rechazada por la DIAN',
+  not_applicable: 'sin factura electrónica',
+  cancelled: 'anulada',
+  voided: 'anulada',
+};
+
+export function invoiceStateLabel(state: string): string {
+  return INVOICE_STATE_LABELS[state] ?? 'en proceso';
+}
