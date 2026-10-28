@@ -1,5 +1,7 @@
 import { Component, inject } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 
+import { HospitalityIcalChannelsComponent } from '../../../hospitality/channels/components/ical-channels/ical-channels.component';
 import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { HospitalitySettingsForm } from '../components/hospitality-settings-form/hospitality-settings-form.component';
@@ -21,6 +23,7 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
     AlertBannerComponent,
     SettingsSectionComponent,
     HospitalitySettingsForm,
+    HospitalityIcalChannelsComponent,
   ],
   template: `
     <div class="settings-page">
@@ -64,10 +67,28 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
           "
           (settingsChange)="store.onSectionChange('hospitality', $event)" />
       </app-settings-section>
+
+      <!-- R2 — former "Canales" screen; /admin/hospitality/channels lands here. -->
+      <app-settings-section
+        anchorId="section-ical"
+        icon="calendar-check"
+        iconTone="purple"
+        title="Calendarios externos (Airbnb, Booking…)"
+        hint="Comparte la disponibilidad de cada habitación con Airbnb o Booking y bloquea aquí las fechas que vendan ellos.">
+        <app-hospitality-ical-channels (ready)="scrollToFragment()" />
+      </app-settings-section>
     </div>
   `,
   styleUrls: ['./_settings-page.scss'],
 })
 export class HospitalitySettingsPage {
   protected readonly store = inject(GeneralSettingsStore);
+
+  /** `#section-ical` from the old Canales URL; the router has no anchor scrolling. */
+  private readonly fragment = inject(ActivatedRoute).snapshot.fragment;
+
+  /** Scroll once the lists render, otherwise the page is too short to reach it. */
+  protected scrollToFragment(): void {
+    if (this.fragment) document.getElementById(this.fragment)?.scrollIntoView({ block: 'start' });
+  }
 }

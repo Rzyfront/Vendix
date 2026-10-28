@@ -857,12 +857,6 @@ export class BreadcrumbService {
       icon: 'sparkles',
     },
     {
-      path: '/admin/hospitality/channels',
-      title: 'Canales',
-      parent: 'Hotelería',
-      icon: 'share-2',
-    },
-    {
       path: '/admin/hospitality/night-audit',
       title: 'Cierre del día',
       parent: 'Hotelería',

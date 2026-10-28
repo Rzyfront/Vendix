@@ -1,4 +1,5 @@
-import { Routes } from '@angular/router';
+import { inject } from '@angular/core';
+import { Router, Routes } from '@angular/router';
 import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
@@ -1061,12 +1062,13 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.HospitalityHousekeepingPageComponent),
           },
           {
-            // H6.1 — Canales → iCal export; same panel_ui key as Tarifas.
+            // R2 — iCal channels live in Configuración → General → Hotelería.
             path: 'channels',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/hospitality/channels/pages/ical-export-page/ical-export-page.component'
-              ).then((c) => c.HospitalityIcalExportPageComponent),
+            pathMatch: 'full',
+            redirectTo: () =>
+              inject(Router).createUrlTree(['/admin/settings/general/hoteleria'], {
+                fragment: 'section-ical',
+              }),
           },
           {
             // H7.1 — "Cierre del día" (night audit); same panel_ui key as Reservas.
