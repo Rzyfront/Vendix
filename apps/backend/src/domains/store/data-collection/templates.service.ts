@@ -77,6 +77,9 @@ export class TemplatesService {
         entity_type: (dto.entity_type as any) ?? 'booking',
         station_type: dto.station_type ?? null,
         is_default: dto.is_default ?? false,
+        checkin_show_budget: dto.checkin_show_budget ?? true,
+        checkin_show_products: dto.checkin_show_products ?? true,
+        checkin_show_notes: dto.checkin_show_notes ?? true,
       },
     });
 
@@ -136,6 +139,9 @@ export class TemplatesService {
         entity_type: dto.entity_type as any,
         ...(dto.station_type !== undefined && { station_type: dto.station_type }),
         is_default: dto.is_default,
+        ...(dto.checkin_show_budget !== undefined && { checkin_show_budget: dto.checkin_show_budget }),
+        ...(dto.checkin_show_products !== undefined && { checkin_show_products: dto.checkin_show_products }),
+        ...(dto.checkin_show_notes !== undefined && { checkin_show_notes: dto.checkin_show_notes }),
         updated_at: new Date(),
       },
     });

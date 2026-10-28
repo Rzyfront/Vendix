@@ -11153,6 +11153,12 @@ model data_collection_templates {
   entity_type entity_type_enum     @default(booking)
   /// Tipo de estación para el que se diseñó (carro, moto, barberia…); null = plantilla general.
   station_type             String?                             @db.VarChar(32)
+  /// Bloques fijos de la recepción (Asignar) que esta plantilla muestra.
+  /// Servicio y técnico van siempre; presupuesto, productos y notas los
+  /// puede quitar el administrador por plantilla.
+  checkin_show_budget   Boolean @default(true)
+  checkin_show_products Boolean @default(true)
+  checkin_show_notes    Boolean @default(true)
   is_default  Boolean              @default(false)
   created_at  DateTime             @default(now()) @db.Timestamp(6)
   updated_at  DateTime             @default(now()) @db.Timestamp(6)

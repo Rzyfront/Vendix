@@ -762,6 +762,7 @@
       </div>
 
       <!-- Presupuesto del Cliente Opcional (Común para TODOS los tipos) -->
+      @if (checkinShowBudget()) {
       <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/80 space-y-3">
         <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
           <app-icon name="dollar-sign" [size]="14" class="text-emerald-500" />
@@ -776,6 +777,7 @@
           hint="Monto máximo que el cliente autoriza gastar"
         />
       </div>
+      }
 
       <!-- Servicio inicial: sus datos y campos de recepción quedan guardados en esta atención -->
       <div class="grid grid-cols-1 gap-3" [class.sm:grid-cols-2]="checkinTracksTime()">
@@ -803,6 +805,7 @@
       </div>
 
       <!-- Cuenta de la estación: productos que entran desde el ingreso y total -->
+      @if (checkinShowProducts()) {
       <div class="rounded-xl border border-[var(--color-border)] p-3 space-y-3">
         <div class="flex items-center justify-between gap-2">
           <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
@@ -856,6 +859,7 @@
         </div>
         <p class="text-[11px] text-[var(--color-text-secondary)]">Estimado: el IVA de cada producto se aplica según su configuración (incluido o adicional).</p>
       </div>
+      }
 
       @if (checkinIntakeLoading()) {
         <div class="rounded-xl border border-[var(--color-border)] p-4 flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
@@ -942,6 +946,7 @@
         }
       </div>
 
+      @if (checkinShowNotes()) {
       <app-textarea
         label="Instrucciones Especiales / Notas (Opcional)"
         [ngModel]="checkinNotes()"
@@ -949,6 +954,7 @@
         placeholder="Notas de recepción, estado inicial, indicaciones del cliente..."
         [rows]="2"
       />
+      }
     </div>
 
     <div slot="footer" class="flex items-center justify-end gap-2.5">

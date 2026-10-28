@@ -308,6 +308,114 @@ interface Selection {
                   (actionClick)="showPreview.set(false); openSuggested()"
                 />
               }
+              @if (showFixedCheckinBlocks()) {
+                <div
+                  class="mb-6 rounded-xl p-4"
+                  style="background: var(--color-surface); border: 1px dashed var(--color-border)"
+                >
+                  <div class="flex items-center gap-2 mb-1">
+                    <app-icon name="list-checks" [size]="16" color="var(--color-primary)"></app-icon>
+                    <h3
+                      class="text-sm font-semibold"
+                      style="color: var(--color-text)"
+                    >
+                      En Asignar estación también se pide
+                    </h3>
+                  </div>
+                  <p
+                    class="text-xs mb-3"
+                    style="color: var(--color-text-muted)"
+                  >
+                    Bloques fijos de la recepción, en el mismo orden: se activan o quitan en el editor, bloque "Bloques fijos de Asignar".
+                  </p>
+                  <div class="space-y-2">
+                    @if (formData().checkin_show_budget) {
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
+                      style="background: var(--color-surface-secondary); border: 1px solid var(--color-border)"
+                    >
+                      <div>
+                        <p class="text-sm font-medium" style="color: var(--color-text)">Presupuesto del cliente</p>
+                        <p class="text-xs" style="color: var(--color-text-muted)">Monto máximo que autoriza gastar</p>
+                      </div>
+                      <span
+                        class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                        style="color: var(--color-text-muted); border: 1px solid var(--color-border)"
+                        >Opcional</span
+                      >
+                    </div>
+                    }
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
+                      style="background: var(--color-surface-secondary); border: 1px solid var(--color-border)"
+                    >
+                      <div>
+                        <p class="text-sm font-medium" style="color: var(--color-text)">Servicio</p>
+                        <p class="text-xs" style="color: var(--color-text-muted)">Servicio inicial de la atención</p>
+                      </div>
+                      <span
+                        class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                        style="color: var(--color-primary); border: 1px solid var(--color-primary)"
+                        >Requerido</span
+                      >
+                    </div>
+                    @if (formData().checkin_show_products) {
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
+                      style="background: var(--color-surface-secondary); border: 1px solid var(--color-border)"
+                    >
+                      <div>
+                        <p class="text-sm font-medium" style="color: var(--color-text)">Productos de la cuenta</p>
+                        <p class="text-xs" style="color: var(--color-text-muted)">Insumos que entran a la cuenta</p>
+                      </div>
+                      <span
+                        class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                        style="color: var(--color-text-muted); border: 1px solid var(--color-border)"
+                        >Opcional</span
+                      >
+                    </div>
+                    }
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
+                      style="background: var(--color-surface-secondary); border: 1px solid var(--color-border)"
+                    >
+                      <div>
+                        <p class="text-sm font-medium" style="color: var(--color-text)">Técnico / Especialista asignado</p>
+                        <p class="text-xs" style="color: var(--color-text-muted)">Personal de servicio que atiende</p>
+                      </div>
+                      <span
+                        class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                        style="color: var(--color-primary); border: 1px solid var(--color-primary)"
+                        >Requerido</span
+                      >
+                    </div>
+                    @if (formData().checkin_show_notes) {
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
+                      style="background: var(--color-surface-secondary); border: 1px solid var(--color-border)"
+                    >
+                      <div>
+                        <p class="text-sm font-medium" style="color: var(--color-text)">Notas</p>
+                        <p class="text-xs" style="color: var(--color-text-muted)">Instrucciones y estado inicial</p>
+                      </div>
+                      <span
+                        class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                        style="color: var(--color-text-muted); border: 1px solid var(--color-border)"
+                        >Opcional</span
+                      >
+                    </div>
+                    }
+                    @if (hiddenCheckinBlocks().length) {
+                      <p
+                        class="text-[11px]"
+                        style="color: var(--color-text-muted)"
+                      >
+                        Ocultos en Asignar: {{ hiddenCheckinBlocks().join(', ') }}.
+                      </p>
+                    }
+                  </div>
+                </div>
+              }
             </div>
           </div>
         } @else {
@@ -363,6 +471,72 @@ interface Selection {
                   }
                 "
               ></ng-container>
+            }
+
+            <!-- Bloques fijos predefinidos (fuera de secciones y pestañas) -->
+            @if (formData().entity_type === 'service_session') {
+              <div
+                class="rounded-xl p-4"
+                style="background: var(--color-surface); border: 1px dashed var(--color-primary)"
+              >
+                <div class="flex items-center gap-2 mb-1">
+                  <app-icon name="list-checks" [size]="16" color="var(--color-primary)"></app-icon>
+                  <h3
+                    class="text-sm font-semibold"
+                    style="color: var(--color-text)"
+                  >
+                    Bloques fijos de Asignar
+                  </h3>
+                </div>
+                <p
+                  class="text-xs mb-3"
+                  style="color: var(--color-text-muted)"
+                >
+                  Predefinidos de la recepción: aparecen en Asignar en este orden, fuera de las pestañas. Servicio y técnico siempre obligatorios.
+                </p>
+                <div class="space-y-2">
+                  <app-setting-toggle
+                    label="Presupuesto del cliente"
+                    description="Monto máximo que autoriza gastar"
+                    [ngModel]="formData().checkin_show_budget"
+                    (ngModelChange)="updateFormData('checkin_show_budget', $event)"
+                  />
+                  <div class="flex items-center justify-between gap-2">
+                    <div>
+                      <p class="text-xs font-semibold" style="color: var(--color-text)">Servicio</p>
+                      <p class="text-[11px]" style="color: var(--color-text-muted)">Servicio inicial de la atención</p>
+                    </div>
+                    <span
+                      class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                      style="color: var(--color-primary); border: 1px solid var(--color-primary)"
+                      >Requerido</span
+                    >
+                  </div>
+                  <app-setting-toggle
+                    label="Productos de la cuenta"
+                    description="Insumos que entran a la cuenta"
+                    [ngModel]="formData().checkin_show_products"
+                    (ngModelChange)="updateFormData('checkin_show_products', $event)"
+                  />
+                  <div class="flex items-center justify-between gap-2">
+                    <div>
+                      <p class="text-xs font-semibold" style="color: var(--color-text)">Técnico / Especialista asignado</p>
+                      <p class="text-[11px]" style="color: var(--color-text-muted)">Personal de servicio que atiende</p>
+                    </div>
+                    <span
+                      class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                      style="color: var(--color-primary); border: 1px solid var(--color-primary)"
+                      >Requerido</span
+                    >
+                  </div>
+                  <app-setting-toggle
+                    label="Notas"
+                    description="Instrucciones y estado inicial"
+                    [ngModel]="formData().checkin_show_notes"
+                    (ngModelChange)="updateFormData('checkin_show_notes', $event)"
+                  />
+                </div>
+              </div>
             }
 
             <!-- Add Section Button -->
@@ -903,6 +1077,9 @@ export class TemplateEditorComponent implements OnInit {
     station_type: string | null;
     status: string;
     is_default: boolean;
+    checkin_show_budget: boolean;
+    checkin_show_products: boolean;
+    checkin_show_notes: boolean;
     use_tabs: boolean;
     tabs: TabForm[];
     sections: SectionForm[];
@@ -914,6 +1091,9 @@ export class TemplateEditorComponent implements OnInit {
     station_type: null,
     status: 'active',
     is_default: false,
+    checkin_show_budget: true,
+    checkin_show_products: true,
+    checkin_show_notes: true,
     use_tabs: false,
     tabs: [],
     sections: [],
@@ -1059,6 +1239,9 @@ export class TemplateEditorComponent implements OnInit {
         station_type: t.station_type ?? null,
         status: t.status,
         is_default: t.is_default,
+        checkin_show_budget: t.checkin_show_budget ?? true,
+        checkin_show_products: t.checkin_show_products ?? true,
+        checkin_show_notes: t.checkin_show_notes ?? true,
         use_tabs: true,
         tabs: t.tabs.map((tab) => ({
           id: tab.id,
@@ -1078,6 +1261,9 @@ export class TemplateEditorComponent implements OnInit {
         station_type: t.station_type ?? null,
         status: t.status,
         is_default: t.is_default,
+        checkin_show_budget: t.checkin_show_budget ?? true,
+        checkin_show_products: t.checkin_show_products ?? true,
+        checkin_show_notes: t.checkin_show_notes ?? true,
         use_tabs: false,
         tabs: [],
         sections: (t.sections || []).map((s) => this.mapSectionForm(s)),
@@ -1179,6 +1365,9 @@ export class TemplateEditorComponent implements OnInit {
       station_type: fd.entity_type === 'service_session' ? fd.station_type || null : undefined,
       status: fd.status,
       is_default: fd.is_default,
+      checkin_show_budget: fd.entity_type === 'service_session' ? fd.checkin_show_budget : undefined,
+      checkin_show_products: fd.entity_type === 'service_session' ? fd.checkin_show_products : undefined,
+      checkin_show_notes: fd.entity_type === 'service_session' ? fd.checkin_show_notes : undefined,
     };
 
     if (fd.use_tabs && fd.tabs.length) {
@@ -1303,6 +1492,28 @@ export class TemplateEditorComponent implements OnInit {
     if (!sections[index] || !this.sectionHasCustomerField(sections[index])) return false;
     return !sections.slice(0, index).some((s) => this.sectionHasCustomerField(s));
   }
+
+  /**
+   * Bloques fijos de la recepción (Asignar): en plantillas de estación la
+   * vista previa los muestra una sola vez, al final del último paso, con su
+   * marca de requerido/opcional para que diseñar sea WYSIWYG.
+   */
+  showFixedCheckinBlocks(): boolean {
+    if (this.formData().entity_type !== 'service_session') return false;
+    const steps = this.previewSteps();
+    if (steps.length === 0) return true;
+    return this.previewStep() >= steps.length - 1;
+  }
+
+  /** Nombres de los bloques fijos ocultos en Asignar según los toggles (previa). */
+  hiddenCheckinBlocks = computed(() => {
+    const fd = this.formData();
+    const hidden: string[] = [];
+    if (!fd.checkin_show_budget) hidden.push('presupuesto');
+    if (!fd.checkin_show_products) hidden.push('productos');
+    if (!fd.checkin_show_notes) hidden.push('notas');
+    return hidden;
+  });
 
   // --- Form Data Updates ---
 

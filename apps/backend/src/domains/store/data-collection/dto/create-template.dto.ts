@@ -135,6 +135,23 @@ export class CreateTemplateDto {
   @IsBoolean()
   is_default?: boolean;
 
+  /**
+   * Bloques fijos de la recepción (Asignar) que la plantilla muestra.
+   * Servicio y técnico van siempre; presupuesto, productos y notas los puede
+   * quitar el administrador por plantilla. Sin valor: visibles.
+   */
+  @IsOptional()
+  @IsBoolean()
+  checkin_show_budget?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  checkin_show_products?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  checkin_show_notes?: boolean;
+
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

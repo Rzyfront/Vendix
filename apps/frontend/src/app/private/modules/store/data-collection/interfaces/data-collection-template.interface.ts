@@ -49,6 +49,10 @@ export interface DataCollectionTemplate {
   entity_type: string;
   /** Tipo de estación para el que se diseñó (plantillas de atención). */
   station_type?: string | null;
+  /** Bloques fijos de la recepción que la plantilla muestra (servicio y técnico van siempre). */
+  checkin_show_budget?: boolean;
+  checkin_show_products?: boolean;
+  checkin_show_notes?: boolean;
   is_default: boolean;
   tabs?: TemplateTab[];
   sections: TemplateSection[];

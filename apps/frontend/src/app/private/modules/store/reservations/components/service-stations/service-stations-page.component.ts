@@ -1731,6 +1731,11 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   readonly templateHandlesCustomer = computed(() => !!this.templateCustomerFieldIds()['nombre_cliente']);
 
+  /** Bloques fijos visibles según la plantilla (sin plantilla u opciones = visibles). */
+  readonly checkinShowBudget = computed(() => this.checkinIntakeTemplate()?.checkin_show_budget ?? true);
+  readonly checkinShowProducts = computed(() => this.checkinIntakeTemplate()?.checkin_show_products ?? true);
+  readonly checkinShowNotes = computed(() => this.checkinIntakeTemplate()?.checkin_show_notes ?? true);
+
   /** Lleva lo escrito en "Datos del cliente" de la plantilla a los datos de contacto de la atención. */
   private syncCustomerFromTemplate(): void {
     if (!this.templateHasCustomerFields()) return;
@@ -1864,7 +1869,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     const doc = this.checkinCustomerDoc().trim();
     const phone = this.checkinCustomerPhone().trim();
     const email = this.checkinCustomerEmail().trim();
-    const notes = this.checkinNotes().trim();
+    const notes = this.checkinShowNotes() ? this.checkinNotes().trim() : '';
 
     // Spec: Label del subject: vehículo "<modelo> - <placa>", celular "<modelo equipo>", persona: nombre del cliente
     let label = customerName;
@@ -1929,8 +1934,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       },
     };
 
-    const budgetVal = this.checkinBudgetAmount();
-    const initialLines = this.checkinLines()
+    const budgetVal = this.checkinShowBudget() ? this.checkinBudgetAmount() : null;
+    const initialLines = (this.checkinShowProducts() ? this.checkinLines() : [])
       .filter((line) => line.product_id)
       .map((line) => ({
         product_id: line.product_id!,

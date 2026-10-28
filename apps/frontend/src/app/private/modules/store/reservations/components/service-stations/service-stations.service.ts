@@ -99,6 +99,10 @@ export interface IntakeTemplate {
   id: number;
   name: string;
   description?: string | null;
+  /** Bloques fijos de la recepción que la plantilla muestra (ausente = visibles). */
+  checkin_show_budget?: boolean | null;
+  checkin_show_products?: boolean | null;
+  checkin_show_notes?: boolean | null;
   tabs?: Array<{ id: number; title: string; sort_order?: number; sections?: IntakeTemplateSection[] }>;
   sections?: IntakeTemplateSection[];
 }
