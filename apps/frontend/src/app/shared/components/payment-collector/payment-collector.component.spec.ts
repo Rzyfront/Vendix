@@ -45,6 +45,30 @@ describe('PaymentCollectorComponent — QUI-839 Installment Options Formatting',
     fixture.componentRef.setInput('amount', 100000);
   });
 
+  describe('cod-auto-invoicing S3 — switchToFreeCredit', () => {
+    it('opens the credit plan with «libre» preselected when there is a customer', () => {
+      fixture.componentRef.setInput('context', 'pos');
+      fixture.componentRef.setInput('allowCredit', true);
+      fixture.componentRef.setInput('customer', { id: 7, name: 'Ana' });
+      fixture.detectChanges();
+
+      expect(component.switchToFreeCredit()).toBeTrue();
+      fixture.detectChanges();
+
+      expect(component.mode()).toBe('credito');
+      expect(component.creditTerms()?.type).toBe('free');
+    });
+
+    it('changes nothing without a customer (the sale stays contado)', () => {
+      fixture.componentRef.setInput('context', 'pos');
+      fixture.componentRef.setInput('allowCredit', true);
+      fixture.detectChanges();
+
+      expect(component.switchToFreeCredit()).toBeFalse();
+      expect(component.mode()).toBe('contado');
+    });
+  });
+
   describe('formatInstallmentDate', () => {
     it('formatea fechas UTC en formato dd/MM/yyyy sin desfases de zona horaria', () => {
       expect(component.formatInstallmentDate('2026-10-13T00:00:00.000Z')).toBe('13/10/2026');

@@ -6,6 +6,7 @@ import {
   inject,
   input,
   model,
+  OnInit,
   signal,
 } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -46,7 +47,7 @@ interface InstallmentPreview {
   templateUrl: './payment-credit-fields.component.html',
   styleUrl: './payment-credit-fields.component.scss',
 })
-export class PaymentCreditFieldsComponent {
+export class PaymentCreditFieldsComponent implements OnInit {
   private readonly currencyFormat = inject(CurrencyFormatService);
   readonly currencySymbol = this.currencyFormat.currencySymbol;
   /** Two-way terms model; `null` until the plan is usable. */
@@ -56,6 +57,8 @@ export class PaymentCreditFieldsComponent {
   readonly financeBase = input<number>(0);
   /** Methods offered for the optional initial (down) payment. */
   readonly paymentMethods = input<PaymentMethod[]>([]);
+  /** Credit shape to open with; the cashier can still toggle it. */
+  readonly initialCreditType = input<'installments' | 'free'>('installments');
   readonly currencyDecimals = input<number>();
 
   // Independent slices — one signal per concern.
@@ -163,6 +166,10 @@ export class PaymentCreditFieldsComponent {
       initialPaymentMethodId,
     };
   });
+
+  ngOnInit(): void {
+    this.creditType.set(this.initialCreditType());
+  }
 
   constructor() {
     // Push the derived terms into the two-way model. Reads `computedTerms`

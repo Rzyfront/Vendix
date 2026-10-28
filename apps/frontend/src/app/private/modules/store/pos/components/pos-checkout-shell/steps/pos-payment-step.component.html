@@ -24,6 +24,7 @@
       [allowMultiTender]="true"
       [paymentResetKey]="paymentResetKey()"
       (submit)="onCollectorSubmit($event)"
+      (methodSelected)="onCollectorMethodSelected($event)"
       (requestCustomer)="requestCustomer.emit()"
       (walletLookup)="onWalletLookup($event)"
       (amountConfirmed)="onCollectorAmountConfirmed()"

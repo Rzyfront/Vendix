@@ -54,6 +54,10 @@ import { PosSerialSelectionModalComponent } from '../../pos-serial-selection-mod
 import { SerialNumbersService } from '../../../../serial-numbers/services/serial-numbers.service';
 import { PosCashRegisterService } from '../../../services/pos-cash-register.service';
 import { CartItem } from '../../../models/cart.model';
+import {
+  COD_FREE_CREDIT_NOTICE,
+  shouldSwitchCodToFreeCredit,
+} from '../../../utils/cod-free-credit.util';
 import { MultiSelectorOption } from '../../../../../../../shared/components/multi-selector/multi-selector.component';
 
 /**
@@ -751,6 +755,25 @@ export class PosPaymentStepComponent implements OnInit {
           this.toastService.error('Error al consultar wallet del cliente');
         },
       });
+  }
+
+  /**
+   * cod-auto-invoicing S3 — with POS auto-emission on, choosing «contra
+   * entrega» in contado switches the sale to free credit and tells the cashier
+   * why. Non-blocking: without a real customer or the flag, nothing changes.
+   */
+  onCollectorMethodSelected(method: { type?: string | null } | null): void {
+    const collector = this.collector();
+    if (!collector) return;
+    const switchToCredit = shouldSwitchCodToFreeCredit({
+      methodType: method?.type ?? null,
+      mode: collector.mode(),
+      autoEmit: Boolean(this.settingsFacade.settings()?.invoicing?.pos?.auto_emit ?? false),
+      hasRealCustomer: !this.isAnonymous() && !this.isAlias() && !!this.cartState()?.customer,
+    });
+    if (switchToCredit && collector.switchToFreeCredit()) {
+      this.toastService.info(COD_FREE_CREDIT_NOTICE);
+    }
   }
 
   // ── The single collector submit handler (all POS gates preserved) ────────
