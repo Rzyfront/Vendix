@@ -162,6 +162,25 @@ export class CustomersController {
     return this.customersService.findOne(req.user.store_id, id);
   }
 
+  /**
+   * Tarifa preferencial vigente del cliente en esta tienda. El POS y el
+   * detalle de la orden la consultan al elegir cliente para preguntar si se
+   * aplica (`price_tier: null` = no hay nada que preguntar).
+   */
+  @Get(':id/price-tier')
+  @Permissions('store:customers:read')
+  async getPriceTier(
+    @Req() req: AuthenticatedRequest,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    if (!req.user.store_id) throw new Error('Store context required');
+    const result = await this.customersService.getCustomerPriceTier(
+      req.user.store_id,
+      id,
+    );
+    return this.responseService.success(result);
+  }
+
   @Patch(':id')
   @Permissions('store:customers:update')
   update(

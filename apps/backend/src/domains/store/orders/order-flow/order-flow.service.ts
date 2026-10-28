@@ -77,7 +77,10 @@ import {
   ReactivateOrderDto,
 } from './dto';
 import { SettingsService } from '../../settings/settings.service';
-import { DEFAULT_POS_AUTO_EMIT } from '../../settings/interfaces/store-settings.interface';
+import {
+  DEFAULT_ECOMMERCE_AUTO_EMIT,
+  DEFAULT_POS_AUTO_EMIT,
+} from '../../settings/interfaces/store-settings.interface';
 import {
   POS_SALE_COMPLETED_EVENT,
   PosSaleCompletedEvent,
@@ -2806,6 +2809,10 @@ export class OrderFlowService {
       // aquí), pero el pago SÍ existe y debe reconocer su caja/banco.
       await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
 
+      // cod-auto-invoicing S2 — orden ya entregada que termina de cobrarse:
+      // se factura ahora (después del asiento del pago, nunca en paralelo).
+      await this.emitDeliveredOrderInvoiceIfReady(orderId, 'pay_order.delivered');
+
       await this.projectPaidOrderToTable(orderId, legPayments[0].payment.id);
 
       return {
@@ -4664,6 +4671,9 @@ export class OrderFlowService {
     });
 
     this.logger.log(`Order #${orderId} delivered`);
+    // cod-auto-invoicing S2 — entregada y ya cobrada: se factura sola si la
+    // tienda lo encendió. Nunca lanza.
+    await this.emitDeliveredOrderInvoiceIfReady(orderId, 'deliver_order');
     return updatedOrder;
   }
 
@@ -6490,6 +6500,7 @@ export class OrderFlowService {
     });
 
     this.logger.log(`Order #${orderId} delivery confirmed, order finished`);
+    await this.emitDeliveredOrderInvoiceIfReady(orderId, 'confirm_delivery');
     return updatedOrder;
   }
 
@@ -6707,6 +6718,10 @@ export class OrderFlowService {
       this.logger.log(
         `[reconcileOrderFromDispatch] order #${order_id} reconciled '${currentState}' → '${RECONCILE_LADDER[finalRank]}' (store #${store_id})`,
       );
+      const reachedState = RECONCILE_LADDER[finalRank];
+      if (reachedState === 'delivered' || reachedState === 'finished') {
+        await this.emitDeliveredOrderInvoiceIfReady(order_id, 'dispatch_reconcile');
+      }
     } catch (error) {
       // Best-effort mirror of the COD listener: never break the caller.
       this.logger.error(
@@ -6881,8 +6896,20 @@ export class OrderFlowService {
     const isCreditSale = order.payment_form === '2';
     // A credit sale is only settled by a ROUTE collection (stopId present). Any
     // other caller (e.g. `dispatch_note.invoiced`) must not fake a payment: the
-    // debt stays in cartera.
-    if (isCreditSale && input.stopId == null) {
+    // debt stays in cartera. Exception (cod-auto-invoicing S6): a contra entrega
+    // sale invoiced on credit before delivery keeps its (cancelled) ON_DELIVERY
+    // promise, so the standalone remisión still collects it and settles the AR.
+    const isCodOriginCredit =
+      isCreditSale &&
+      input.stopId == null &&
+      (await this.prisma.payments.findFirst({
+        where: {
+          order_id: order.id,
+          store_payment_method: { system_payment_method: { processing_mode: 'ON_DELIVERY' } },
+        },
+        select: { id: true },
+      })) != null;
+    if (isCreditSale && input.stopId == null && !isCodOriginCredit) {
       this.logger.debug(
         `[applyDispatchCodPayment] credit order #${order.id} outside a route collection — NO-OP (${input.correlationKey})`,
       );
@@ -7012,6 +7039,11 @@ export class OrderFlowService {
             }
           : {}),
       });
+    }
+
+    // cod-auto-invoicing S2 — recaudo de contado de una orden ya entregada.
+    if (!isCreditOrder && newRemaining <= 0) {
+      await this.emitDeliveredOrderInvoiceIfReady(order.id, 'dispatch_cod_payment');
     }
 
     this.logger.log(
@@ -7155,6 +7187,18 @@ export class OrderFlowService {
       throw new InternalServerErrorException(
         'KitchenFireService no disponible en OrderFlowService (revisar imports de OrderFlowModule)',
       );
+    }
+
+    // cod-auto-invoicing S5 — nota crédito TOTAL confirmada por el operador,
+    // ANTES del claim: el gate DIAN de la transacción exige la nota `accepted`.
+    // Solo si nada más bloquea la cancelación (no emitir una nota fiscal para
+    // una orden que igual no se va a cancelar). Si la DIAN no la acepta en
+    // línea, el gate responde el 409 de siempre y la nota queda para reintento.
+    if (dto.issueCreditNote === true) {
+      const blocker = getCancellationBlocker(order);
+      if (blocker === null || blocker === 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001') {
+        await this.issueCancellationCreditNotes(order, dto.reason);
+      }
     }
 
     // Egreso de caja (PRE-LECTURA, fuera de la transacción — patrón
@@ -7750,6 +7794,62 @@ export class OrderFlowService {
       amount: new Prisma.Decimal(row.amount as any),
       method_type: row.store_payment_method?.system_payment_method?.type ?? null,
     }));
+  }
+
+  /**
+   * cod-auto-invoicing S5 — emite una nota crédito TOTAL (solo
+   * `related_invoice_id`: sin líneas ni reembolso) por cada factura de venta
+   * `accepted` de la orden que aún no tiene su nota `accepted`. Reutiliza un
+   * borrador en vez de crear otro y no duplica una nota ya validada o enviada
+   * a la DIAN (esa la termina la cola de reintentos). Los errores de facturación se propagan tal cual al operador.
+   */
+  private async issueCancellationCreditNotes(
+    order: { id: number; store_id: number; order_number?: string | null },
+    reason: string,
+  ): Promise<void> {
+    const acceptedInvoices = await this.prisma.invoices.findMany({
+      where: {
+        order_id: order.id,
+        store_id: order.store_id,
+        invoice_type: 'sales_invoice',
+        status: 'accepted',
+      },
+      select: { id: true, invoice_number: true, accounting_entity_id: true },
+    });
+    if (acceptedInvoices.length === 0) return;
+    // Resolución perezosa: InvoicingModule ya depende de órdenes; inyectarlo en
+    // el constructor cerraría un ciclo de providers (patrón de TableSessions).
+    if (!this.moduleRef) return;
+    const { CreditNotesService: CreditNotesToken } = require('../../invoicing/credit-notes/credit-notes.service') as typeof import('../../invoicing/credit-notes/credit-notes.service');
+    const creditNotes = this.moduleRef.get(CreditNotesToken, { strict: false });
+
+    for (const invoice of acceptedInvoices) {
+      const notes = await this.prisma.invoices.findMany({
+        where: {
+          related_invoice_id: invoice.id,
+          accounting_entity_id: invoice.accounting_entity_id,
+          invoice_type: 'credit_note',
+        },
+        orderBy: { id: 'desc' },
+        select: { id: true, status: true },
+      });
+      // `validated` = el envío falló y la cola de reintentos la transmitirá:
+      // re-validarla choca con la máquina de estados (validated → validated).
+      if (notes.some((n) => ['accepted', 'sent', 'validated'].includes(n.status))) continue;
+      const pending = notes.find((n) => n.status === 'draft');
+      const noteId =
+        pending?.id ??
+        (
+          await creditNotes.createCreditNote({
+            related_invoice_id: invoice.id,
+            reason: `Anulación de la orden ${order.order_number ?? `#${order.id}`}: ${reason}`,
+          })
+        ).id;
+      await creditNotes.issueNote(noteId);
+      this.logger.log(
+        `[cancel credit note] order=${order.id} invoice=${invoice.id} note=${noteId}`,
+      );
+    }
   }
 
   /**
@@ -10454,6 +10554,12 @@ export class OrderFlowService {
           payments: { select: { state: true, amount: true } },
         },
       });
+      // cod-auto-invoicing S2 — un domicilio se factura al ENTREGARSE y
+      // cobrarse, no al cobrarse: lo decide `emitDeliveredOrderInvoiceIfReady`.
+      if (order?.delivery_type === 'home_delivery') {
+        await this.emitDeliveredOrderInvoiceIfReady(orderId, source);
+        return;
+      }
       if (!order || !isPresentialPosSale(order)) return;
       if (order.active_financial_split_id != null) return;
 
@@ -10488,37 +10594,184 @@ export class OrderFlowService {
         );
       }
 
-      const context = RequestContextService.getContext();
-      let organizationId = context?.organization_id;
-      if (typeof organizationId !== 'number') {
-        // Defensa: los webhooks (webhook-handler → confirmPayment) corren dentro
-        // de `StoreContextRunner.runInStoreContext`, que SÍ fija
-        // organization_id desde la tienda. Este fallback cubre un llamador
-        // futuro que invoque el flujo con un contexto sin organización.
-        const store = await this.prisma.stores.findFirst({
-          where: { id: order.store_id },
-          select: { organization_id: true },
-        });
-        organizationId = store?.organization_id ?? undefined;
-      }
-      if (typeof organizationId !== 'number') {
-        this.logger.warn(
-          `[pos invoice emit] order=${orderId}: sin organization_id resoluble; no se dispara la facturación (${source})`,
-        );
-        return;
-      }
-
-      this.eventEmitter.emit(POS_SALE_COMPLETED_EVENT, {
-        organization_id: organizationId,
-        store_id: order.store_id,
-        user_id: context?.user_id,
-        order_id: orderId,
-        order_number: order.order_number,
-        auto_emit: autoEmit,
-      } as PosSaleCompletedEvent);
+      await this.dispatchSaleCompletedEvent(order, autoEmit, source);
     } catch (err) {
       this.logger.error(
         `[pos invoice emit] order=${orderId} (${source}) falló al preparar la emisión: ${(err as Error)?.message}`,
+        (err as Error)?.stack,
+      );
+    }
+  }
+
+  /**
+   * Emite `POS_SALE_COMPLETED_EVENT` (dueño único de la emisión:
+   * `PosSaleCompletedListener` → `PosFiscalEmissionService.emitForOrder`).
+   */
+  private async dispatchSaleCompletedEvent(
+    order: { id: number; store_id: number; order_number: string },
+    autoEmit: boolean,
+    source: string,
+  ): Promise<void> {
+    const orderId = order.id;
+    const context = RequestContextService.getContext();
+    let organizationId = context?.organization_id;
+    if (typeof organizationId !== 'number') {
+      // Defensa: los webhooks (webhook-handler → confirmPayment) corren dentro
+      // de `StoreContextRunner.runInStoreContext`, que SÍ fija
+      // organization_id desde la tienda. Este fallback cubre un llamador
+      // futuro que invoque el flujo con un contexto sin organización.
+      const store = await this.prisma.stores.findFirst({
+        where: { id: order.store_id },
+        select: { organization_id: true },
+      });
+      organizationId = store?.organization_id ?? undefined;
+    }
+    if (typeof organizationId !== 'number') {
+      this.logger.warn(
+        `[pos invoice emit] order=${orderId}: sin organization_id resoluble; no se dispara la facturación (${source})`,
+      );
+      return;
+    }
+
+    this.eventEmitter.emit(POS_SALE_COMPLETED_EVENT, {
+      organization_id: organizationId,
+      store_id: order.store_id,
+      user_id: context?.user_id,
+      order_id: orderId,
+      order_number: order.order_number,
+      auto_emit: autoEmit,
+    } as PosSaleCompletedEvent);
+  }
+
+  /**
+   * cod-auto-invoicing S2 — factura automática de un pedido con entrega
+   * (contra entrega / domicilio del POS, o pedido de tienda en línea).
+   *
+   * Regla de negocio (Rafael, 2026-10-28): «se emite cuando se marca entregado
+   * y si ya el pago está registrado; si no está registrado el pago, entonces
+   * después de registrar el pago de una orden ya entregada. Pero esto sólo
+   * cuando la factura electrónica esté marcada en los flags de emisión
+   * automática».
+   *
+   * Por eso se llama en los DOS momentos (marcar entregado y registrar el
+   * pago) y aquí se exigen ambos hechos. El borrador del checkout se reusa y
+   * `runEmission` le recalcula forma/medio de pago antes de prevalidar.
+   *
+   * Compuertas:
+   *  - pedido con entrega: `home_delivery`, o cualquier pedido de tienda en
+   *    línea que no sea mesa QR;
+   *  - `delivered`/`finished`, sin reparto activo y PAGADO completo;
+   *  - no a crédito (`payment_form = '2'`): ese documento sale por su carril;
+   *  - sin documento ya transmitido;
+   *  - bandera del carril (`invoicing.pos` o `invoicing.ecommerce`
+   *    `.auto_emit`) encendida — default apagado;
+   *  - anti doble ingreso: el recaudo de planilla contabiliza su asiento sin
+   *    `payment_id` (invisible a `findPriorSaleRecognition`). Si ese recaudo
+   *    entró SIN una factura previa, ya reconoció el ingreso y emitir ahora lo
+   *    contaría dos veces: se deja para revisión manual con un aviso en log.
+   *    Con un borrador previo, el recaudo cruzó contra 1305 y emitir cuadra.
+   *
+   * Se llama DESPUÉS del asiento del pago (los llamadores lo garantizan) y
+   * nunca lanza.
+   */
+  private async emitDeliveredOrderInvoiceIfReady(
+    orderId: number,
+    source: string,
+  ): Promise<void> {
+    try {
+      const order = await this.prisma.orders.findFirst({
+        where: { id: orderId },
+        select: {
+          id: true,
+          store_id: true,
+          order_number: true,
+          channel: true,
+          delivery_type: true,
+          state: true,
+          payment_form: true,
+          grand_total: true,
+          active_financial_split_id: true,
+          payments: {
+            select: {
+              state: true,
+              amount: true,
+              created_at: true,
+              gateway_response: true,
+            },
+          },
+        },
+      });
+      if (!order) return;
+      const presential = isPresentialPosSale(order);
+      const isDeliveryOrder =
+        order.delivery_type === 'home_delivery' || !presential;
+      if (!isDeliveryOrder) return;
+      if (order.state !== 'delivered' && order.state !== 'finished') return;
+      if (order.active_financial_split_id != null) return;
+      if (order.payment_form === '2') return;
+
+      const collected = (order.payments ?? []).filter(
+        (p) => p.state === 'succeeded' || p.state === 'captured',
+      );
+      const paid = collected.reduce(
+        (sum, p) => sum.plus(new Prisma.Decimal(p.amount ?? 0)),
+        new Prisma.Decimal(0),
+      );
+      if (paid.lt(new Prisma.Decimal(order.grand_total ?? 0))) return;
+
+      const latestInvoice = await this.prisma.invoices.findFirst({
+        where: { order_id: orderId, invoice_type: 'sales_invoice', financial_account_id: null },
+        orderBy: { created_at: 'desc' },
+        select: { id: true, status: true, created_at: true },
+      });
+      if (
+        latestInvoice &&
+        !['draft', 'validated', 'rejected'].includes(latestInvoice.status)
+      ) {
+        return;
+      }
+
+      const routeCollections = collected.filter(
+        (p) =>
+          (p.gateway_response as { payment_type?: string } | null)?.payment_type ===
+          'dispatch_route',
+      );
+      if (routeCollections.length > 0) {
+        const firstRoute = Math.min(
+          ...routeCollections.map((p) => new Date(p.created_at).getTime()),
+        );
+        const invoicedBefore =
+          latestInvoice?.created_at != null &&
+          new Date(latestInvoice.created_at).getTime() <= firstRoute;
+        if (!invoicedBefore) {
+          this.logger.warn(
+            `[delivered invoice emit] order=${orderId} (${source}): cobrada en planilla sin factura previa; el recaudo ya reconoció el ingreso, no se emite automáticamente para no contarlo dos veces. Facturar a mano tras revisar el asiento.`,
+          );
+          return;
+        }
+      }
+
+      const lane = presential ? 'pos' : 'ecommerce';
+      const defaultFlag = presential
+        ? DEFAULT_POS_AUTO_EMIT
+        : DEFAULT_ECOMMERCE_AUTO_EMIT;
+      let autoEmit = defaultFlag;
+      try {
+        const settings = await this.settingsService.getSettings();
+        const flag = (settings as { invoicing?: Record<string, { auto_emit?: unknown }> })
+          ?.invoicing?.[lane]?.auto_emit;
+        if (typeof flag === 'boolean') autoEmit = flag;
+      } catch (settingsErr) {
+        this.logger.warn(
+          `[delivered invoice emit] order=${orderId}: no se pudieron leer los ajustes; se usa el default auto_emit=${defaultFlag}: ${(settingsErr as Error).message}`,
+        );
+      }
+      if (!autoEmit) return;
+
+      await this.dispatchSaleCompletedEvent(order, true, source);
+    } catch (err) {
+      this.logger.error(
+        `[delivered invoice emit] order=${orderId} (${source}) falló al preparar la emisión: ${(err as Error)?.message}`,
         (err as Error)?.stack,
       );
     }

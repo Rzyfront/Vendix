@@ -387,6 +387,8 @@ export class PaymentCollectorComponent implements OnInit {
   readonly wompiSlice = signal<WompiSlice | null>(null);
   /** Two-way bound to the credit child; null = no usable plan. */
   readonly creditTerms = signal<CreditTerms | null>(null);
+  /** Credit shape the credit child opens with (S3: contra entrega → free). */
+  readonly preferredCreditType = signal<'installments' | 'free'>('installments');
   private readonly loadedMethods = signal<PaymentMethod[] | null>(null);
 
   // ── QUI-728 — multi-cuenta bancaria para transferencia ───────────────────
@@ -925,6 +927,19 @@ export class PaymentCollectorComponent implements OnInit {
     // In the stepped layout, choosing the mode advances past the mode picker:
     // contado → Método, credito → Plan de crédito (both = modoOffset).
     if (this.layout() === 'stepped') this.subStep.set(this.modoOffset());
+  }
+
+  /**
+   * cod-auto-invoicing S3 — switches the sale to free credit (fiado libre).
+   * Returns false, changing nothing, when credit is not offered here or there
+   * is no customer: the caller then keeps the sale as contado (never blocks).
+   */
+  switchToFreeCredit(): boolean {
+    if (!this.config().allowCredit || !this.customer()) return false;
+    this.selectedMethod.set(null);
+    this.preferredCreditType.set('free');
+    this.setMode('credito');
+    return true;
   }
 
   /** Jump the stepped sub-wizard to a given sub-step (clamped to range). */
@@ -1653,6 +1668,7 @@ export class PaymentCollectorComponent implements OnInit {
     this.flashSection.set(null);
     this.flashMessage.set('');
     this.selectedMethod.set(null);
+    this.preferredCreditType.set('installments');
     // 5a2 — salir del modo multi y destruir sus controles (fuera del contexto
     // reactivo: resetState corre dentro de untracked).
     this.multiEnabled.set(false);

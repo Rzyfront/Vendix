@@ -61,6 +61,9 @@ import {
 } from '../settings/interfaces/store-settings.interface';
 import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
 import {
+  isMutualAgreementCash,
+  isMutualAgreementFinalConsumerInvoice,
+  MUTUAL_AGREEMENT_CASH_MEANS,
   ORDER_PAYMENT_MEANS_INCLUDE,
   resolveOrderDianPaymentMeans,
 } from '../payments/order-payment-means.contract';
@@ -314,6 +317,13 @@ export interface CreateFromOrderOptions {
    * persona) no se copia a la factura.
    */
   force_final_consumer?: boolean;
+  /**
+   * Con `force_final_consumer` sobre una orden sin cobrar: la factura sale de
+   * CONTADO con medio de pago «Acuerdo mutuo» (ZZZ) aunque no haya pago
+   * registrado. La orden no cambia (su saldo sigue pendiente). Sin
+   * `force_final_consumer` se ignora: sólo Consumidor final sale así.
+   */
+  cash_by_mutual_agreement?: boolean;
   /**
    * Un documento `cancelled` (borrador descartado por un intento fallido de la
    * emisión en un paso) no cuenta como anulación deliberada: la emisión crea uno
@@ -3127,12 +3137,14 @@ export class InvoicingService {
   async refreshDraftAcquirer(
     invoice_id: number,
     order_id: number,
-    opts?: Pick<CreateFromOrderOptions, 'force_final_consumer'>,
+    opts?: Pick<CreateFromOrderOptions, 'force_final_consumer' | 'cash_by_mutual_agreement'>,
   ): Promise<boolean> {
     const invoice = await this.prisma.invoices.findFirst({
       where: { id: invoice_id, order_id, status: 'draft' },
       select: {
         id: true,
+        payment_form: true,
+        payment_means_code: true,
         customer_name: true,
         customer_tax_id: true,
         customer_document_type: true,
@@ -3163,16 +3175,24 @@ export class InvoicingService {
     });
     if (!order) return false;
     const snapshot = this.buildOrderAcquirerSnapshot(order, opts);
+    // Un borrador viejo de una orden sin cobrar nació a crédito: si ahora sale a
+    // Consumidor final de contado, su forma y medio de pago también se alinean.
+    const mutual = isMutualAgreementCash(opts);
     const changed =
       invoice.customer_name !== snapshot.customer_name ||
       invoice.customer_tax_id !== snapshot.customer_tax_id ||
       invoice.customer_document_type !== snapshot.customer_document_type ||
       (invoice.customer_verification_digit ?? null) !==
-        snapshot.customer_verification_digit;
+        snapshot.customer_verification_digit ||
+      (mutual &&
+        (invoice.payment_form !== MUTUAL_AGREEMENT_CASH_MEANS.payment_form ||
+          invoice.payment_means_code !== MUTUAL_AGREEMENT_CASH_MEANS.payment_means_code));
     if (!changed) return false;
     await this.prisma.invoices.updateMany({
       where: { id: invoice_id, status: 'draft' },
-      data: snapshot,
+      data: mutual
+        ? { ...snapshot, ...MUTUAL_AGREEMENT_CASH_MEANS, due_date: null }
+        : snapshot,
     });
     this.logger.log(`Invoice #${invoice_id} draft holder refreshed from order #${order_id}`);
     return true;
@@ -3829,7 +3849,10 @@ export class InvoicingService {
      * «Método de pago» de los reportes. Si divergiera, una orden podría
      * imprimirse «Tarjeta» y declararse «Efectivo».
      */
-    const resolved_means = resolveOrderDianPaymentMeans(order, order.payments);
+    // Consumidor final sin cobrar: contado «Acuerdo mutuo» (ver la opción).
+    const resolved_means = isMutualAgreementCash(opts)
+      ? MUTUAL_AGREEMENT_CASH_MEANS
+      : resolveOrderDianPaymentMeans(order, order.payments);
     const payment_form = resolved_means.payment_form;
     // Crédito: el medio lo puede declarar quien factura (modal «Facturar a
     // crédito»); con contado se queda el que salió de los pagos cobrados.
@@ -3926,6 +3949,66 @@ export class InvoicingService {
    * un `PaymentDueDate` anterior a la emisión contradice el documento, y sin
    * él la factura sale como antes (vence al emitirse).
    */
+  /**
+   * cod-auto-invoicing S2 — recalcula forma/medio de pago (y vencimiento) de un
+   * borrador de factura de ORDEN con el estado real de la orden, justo antes
+   * de emitirlo. El borrador del checkout en línea nace sin cobro y el
+   * resolver lo declara «crédito» sin vencimiento; al emitirse ya cobrado debe
+   * salir de contado con el medio real. Mismo contrato que `createFromOrder`
+   * (`resolveOrderDianPaymentMeans`), así que no hay una segunda política.
+   *
+   * No toca: documentos ya numerados/transmitidos, ni el Consumidor final de
+   * contado «Acuerdo mutuo» (elección explícita del cajero).
+   */
+  async refreshOrderDraftPaymentMeans(
+    invoice_id: number,
+    order_id: number,
+  ): Promise<void> {
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { id: invoice_id, order_id },
+      select: {
+        id: true,
+        status: true,
+        payment_form: true,
+        payment_means_code: true,
+        customer_tax_id: true,
+        due_date: true,
+      },
+    });
+    if (!invoice || !['draft', 'validated'].includes(invoice.status)) return;
+    if (isMutualAgreementFinalConsumerInvoice(invoice)) return;
+
+    const order = await this.prisma.orders.findFirst({
+      where: { id: order_id },
+      select: { id: true, payment_form: true, payments: ORDER_PAYMENT_MEANS_INCLUDE },
+    });
+    if (!order) return;
+
+    const means = resolveOrderDianPaymentMeans(order, order.payments);
+    const due_date =
+      means.payment_form === '2'
+        ? (invoice.due_date ?? (await this.resolveCreditDueDate(order.id)))
+        : null;
+    // Un crédito ya declarado conserva el medio que eligió quien facturó.
+    const payment_means_code =
+      means.payment_form === '2' && invoice.payment_form === '2' && invoice.payment_means_code
+        ? invoice.payment_means_code
+        : means.payment_means_code;
+
+    if (
+      invoice.payment_form === means.payment_form &&
+      invoice.payment_means_code === payment_means_code &&
+      (invoice.due_date?.getTime() ?? null) === (due_date?.getTime() ?? null)
+    ) {
+      return;
+    }
+
+    await this.prisma.invoices.update({
+      where: { id: invoice.id },
+      data: { payment_form: means.payment_form, payment_means_code, due_date },
+    });
+  }
+
   private async resolveCreditDueDate(order_id: number): Promise<Date | null> {
     const due_date = await this.findCreditDueDate(order_id);
     if (!due_date) return null;

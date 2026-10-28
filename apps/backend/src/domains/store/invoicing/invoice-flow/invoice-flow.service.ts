@@ -125,6 +125,7 @@ import {
 import { tryResolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
 import { assertNoteOriginalHasNoAcceptedRadianEvent } from '../utils/invoice-radian-note-coherence';
 import { markContractFiscalAcceptance } from '../../contracts/contract-invoice-lifecycle';
+import { isMutualAgreementFinalConsumerInvoice } from '../../payments/order-payment-means.contract';
 
 /**
  * Re-export del hallazgo unificado. La definición vive en
@@ -1086,8 +1087,14 @@ export class InvoiceFlowService {
   private async resolveUnpaidOrderBalance(invoice: {
     order_id?: number | null;
     invoice_type?: string | null;
+    payment_form?: string | null;
+    payment_means_code?: string | null;
+    customer_tax_id?: string | null;
   }): Promise<string | null> {
     if (invoice.order_id == null) return null;
+    // Consumidor final de contado «Acuerdo mutuo»: el cajero decidió emitirla
+    // sin el pago registrado (la orden conserva su saldo y se cobra después).
+    if (isMutualAgreementFinalConsumerInvoice(invoice)) return null;
     if (
       !['sales_invoice', 'export_invoice', 'pos_equivalent_document'].includes(
         String(invoice.invoice_type),
@@ -1112,6 +1119,9 @@ export class InvoiceFlowService {
     id?: number;
     order_id?: number | null;
     invoice_type?: string | null;
+    payment_form?: string | null;
+    payment_means_code?: string | null;
+    customer_tax_id?: string | null;
   }): Promise<void> {
     const remaining = await this.resolveUnpaidOrderBalance(invoice);
     if (remaining !== null) {

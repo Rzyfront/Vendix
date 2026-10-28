@@ -45,6 +45,11 @@ import {
   CreatePosCustomerRequest,
   PaginatedCustomersResponse } from '../models/customer.model';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import {
+  customerDocumentHint,
+  customerDocumentRequirement,
+} from '../utils/customer-document-requirement.util';
 import { CustomerModalComponent } from '../../customers/components/customer-modal/customer-modal.component';
 import { CustomersService } from '../../customers/services/customers.service';
 import {
@@ -418,7 +423,7 @@ import {
                   label="Tipo Doc."
                   [options]="documentTypeOptions"
                   [size]="'md'"
-                  [required]="true"
+                  [required]="documentRequirement().typeRequired"
                   [placeholder]="'Seleccionar'"
                   [errorText]="getFieldError('documentType') ?? ''"
                   >
@@ -429,7 +434,7 @@ import {
                   [placeholder]="documentNumberPlaceholder()"
                   type="text"
                   [size]="'md'"
-                  [required]="true"
+                  [required]="documentRequirement().numberRequired"
                   [helperText]="documentNumberHint()"
                   [error]="getFieldError('documentNumber')"
                   (blur)="onFieldBlur('documentNumber')"
@@ -733,7 +738,7 @@ export class PosCustomerModalComponent {
   readonly documentNumberHint = computed(() => {
     const type = this.selectedDocumentType();
     if (!type) {
-      return 'Selecciona primero el tipo de documento';
+      return this.documentHint() ?? 'Opcional';
     }
     const min = this.documentNumberMin() ?? 0;
     const max = this.documentNumberMax() ?? 0;
@@ -800,6 +805,23 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
   private storeContextService = inject(StoreContextService);
   private queueService = inject(PosQueueService);
   private documentPrint = inject(DocumentPrintService);
+  private settingsFacade = inject(StoreSettingsFacade);
+
+  /** Tipo de documento elegido (señal espejo del FormControl). */
+  private readonly documentTypeCode = signal<string>('');
+  /**
+   * cod-auto-invoicing S4 — el documento nunca es obligatorio por sí solo:
+   * sólo se exige el par (número ⇒ tipo, tipo ⇒ número).
+   */
+  readonly documentRequirement = computed(() =>
+    customerDocumentRequirement(this.documentTypeCode(), this.documentNumberValue()),
+  );
+  /** Con emisión automática encendida se avisa que sin documento sale a Consumidor final. */
+  readonly documentHint = computed(() =>
+    customerDocumentHint(
+      Boolean(this.settingsFacade.settings()?.invoicing?.pos?.auto_emit ?? false),
+    ),
+  );
 
   constructor() {
     this.customerForm = this.createCustomerForm();
@@ -814,7 +836,16 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
     // Mantener `selectedDocumentType` sincronizado con el FormControl.
     effect(() => {
       const code = documentTypeValue();
+      this.documentTypeCode.set(code ?? '');
       this.selectedDocumentType.set(findDocumentType(code));
+    });
+
+    // Tipo requerido sólo cuando hay número sin tipo (ver documentRequirement).
+    effect(() => {
+      const { typeRequired } = this.documentRequirement();
+      const typeCtrl = this.customerForm.controls['documentType'];
+      typeCtrl.setValidators(typeRequired ? [Validators.required] : []);
+      typeCtrl.updateValueAndValidity({ emitEvent: false });
     });
 
     // Validadores dinámicos del número de documento según el tipo elegido.
@@ -833,7 +864,7 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
         this.documentNumberMax.set(type.maxLength);
         this.documentNumberIsAlphanumeric.set(isAlphanumericRegex(type.regex));
       } else {
-        ctrl.setValidators([Validators.required]);
+        ctrl.setValidators([]);
         this.documentNumberMin.set(null);
         this.documentNumberMax.set(null);
         this.documentNumberIsAlphanumeric.set(false);
@@ -925,8 +956,8 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       firstName: ['', [Validators.required, Validators.minLength(2)]],
       lastName: ['', [Validators.required, Validators.minLength(2)]],
       phone: ['', [Validators.required, Validators.pattern(/^\d{10}$/)]],
-      documentType: ['', [Validators.required]],
-      documentNumber: ['', [Validators.required]],
+      documentType: [''],
+      documentNumber: [''],
       taxRegime: ['', [Validators.required]],
       personType: ['', [Validators.required]],
       // Razón social (JURIDICA). Validators reales los pone

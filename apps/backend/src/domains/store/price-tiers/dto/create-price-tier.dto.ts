@@ -11,6 +11,12 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+import {
+  TIER_ADJUSTMENT_TYPES,
+  TIER_AMOUNT_SCOPES,
+  TierAdjustmentType,
+  TierAmountScope,
+} from '../../products/services/tier-adjustment.util';
 
 /**
  * DTO to create a store-scoped price tier (multi-tarifa).
@@ -79,6 +85,42 @@ export class CreatePriceTierDto {
   @Min(0)
   @Max(100)
   discount_percentage?: number;
+
+  @ApiProperty({
+    required: false,
+    enum: TIER_ADJUSTMENT_TYPES,
+    description:
+      'Cómo ajusta la tarifa el precio cuando el producto no tiene precio propio: ' +
+      '`percent_discount` (por defecto, usa discount_percentage), `percent_surcharge` ' +
+      '(+%), `fixed_amount_discount` (-monto), `fixed_amount_surcharge` (+monto) o ' +
+      '`fixed_price` (todos valen el monto). Los tipos nuevos usan adjustment_value.',
+  })
+  @IsOptional()
+  @IsIn(TIER_ADJUSTMENT_TYPES as unknown as string[])
+  adjustment_type?: TierAdjustmentType;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Valor de la regla: porcentaje para percent_surcharge, monto en dinero para los ' +
+      'tipos fixed_*. Mayor que 0. No aplica a percent_discount.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  adjustment_value?: number | null;
+
+  @ApiProperty({
+    required: false,
+    enum: TIER_AMOUNT_SCOPES,
+    description:
+      'Para montos fijos en una presentación de varias unidades: `per_unit` (el monto ' +
+      'se aplica a cada unidad, por defecto) o `per_package` (una sola vez al paquete).',
+  })
+  @IsOptional()
+  @IsIn(TIER_AMOUNT_SCOPES as unknown as string[])
+  amount_scope?: TierAmountScope;
 
   @ApiProperty({
     required: false,

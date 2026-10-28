@@ -375,6 +375,24 @@ export class PosFiscalEmissionService {
       }
     }
 
+    // cod-auto-invoicing S2 — el borrador de una orden pudo nacer antes del
+    // cobro (checkout de tienda en línea, contra entrega) con forma de pago
+    // «crédito» sin vencimiento. Antes de prevalidar se recalcula con el
+    // estado real de la orden. Nunca frena la emisión.
+    if (
+      account_id === null &&
+      (invoice.status === 'draft' || invoice.status === 'validated')
+    ) {
+      try {
+        await this.invoicing.refreshOrderDraftPaymentMeans(invoice.id, order_id);
+        invoice = (await find()) ?? invoice;
+      } catch (error) {
+        this.logger.warn(
+          `POS: no se pudo refrescar la forma de pago del borrador #${invoice.id} del pedido #${order_id}: ${this.describe(error)}`,
+        );
+      }
+    }
+
     // PUERTA ÚNICA DE VALIDACIÓN. `validate()` corre identidad del adquiriente
     // + prevalidación fiscal DIAN. Que falle NO tumba la venta, pero tampoco se
     // transmite: un documento que el prevalidador rechaza sería un rechazo de

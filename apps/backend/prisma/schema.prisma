@@ -306,14 +306,19 @@ model user_settings {
 
 /// Relación flexible entre usuarios y tiendas (clientes, staff, managers, etc)
 model store_users {
-  id        Int      @id @default(autoincrement())
-  store_id  Int
-  user_id   Int
-  createdAt DateTime @default(now())
-  store     stores   @relation(fields: [store_id], references: [id])
-  user      users    @relation(fields: [user_id], references: [id])
+  id            Int          @id @default(autoincrement())
+  store_id      Int
+  user_id       Int
+  createdAt     DateTime     @default(now())
+  /// Tarifa preferencial del cliente en esta tienda (solo `customer_tier`).
+  /// Borrar la tarifa deja al cliente sin tarifa, nunca borra la membresía.
+  price_tier_id Int?
+  store         stores       @relation(fields: [store_id], references: [id])
+  user          users        @relation(fields: [user_id], references: [id])
+  price_tier    price_tiers? @relation(fields: [price_tier_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([store_id, user_id])
+  @@index([price_tier_id])
 }
 
 model roles {
@@ -2290,6 +2295,16 @@ model price_tiers {
   // explicit override exists in product_price_tier_overrides. Stored as the
   // discount percentage itself (e.g. 15.00 means -15%).
   discount_percentage Decimal              @default(0) @db.Decimal(5, 2)
+  // How the tier adjusts the price when no product override exists. The
+  // default keeps the historical rule (percent discount read from
+  // discount_percentage). Every other type reads adjustment_value.
+  adjustment_type     price_tier_adjustment_type_enum @default(percent_discount)
+  // Percent (percent_surcharge) or money amount (fixed_*). Null for
+  // percent_discount, whose value stays in discount_percentage.
+  adjustment_value    Decimal?             @db.Decimal(12, 2)
+  // For fixed_* types on a tier with packSize > 1: whether the amount applies
+  // to each unit (then x packSize) or once to the whole package.
+  amount_scope        price_tier_amount_scope_enum @default(per_unit)
   is_active           Boolean              @default(true)
   is_default          Boolean              @default(false)
   // Discriminador de los dos ejes que conviven en esta tabla: tarifa de
@@ -2311,6 +2326,7 @@ model price_tiers {
 
   store               stores                           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   product_overrides   product_price_tier_overrides[]
+  store_users         store_users[]
   product_assignments product_price_tier_assignments[]
   order_items         order_items[]                    @relation("order_items_applied_price_tier")
   quotation_items     quotation_items[]                @relation("quotation_items_applied_price_tier")
@@ -4982,6 +4998,19 @@ enum product_state_enum {
 enum price_tier_kind_enum {
   customer_tier
   sale_unit
+}
+
+enum price_tier_adjustment_type_enum {
+  percent_discount
+  percent_surcharge
+  fixed_amount_discount
+  fixed_amount_surcharge
+  fixed_price
+}
+
+enum price_tier_amount_scope_enum {
+  per_unit
+  per_package
 }
 
 enum pricing_type_enum {

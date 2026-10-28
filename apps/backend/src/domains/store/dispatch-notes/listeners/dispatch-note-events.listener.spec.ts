@@ -1169,10 +1169,14 @@ describe('DispatchNoteEventsListener — handleInvoiced → no fake payment on c
   };
   const event: any = { dispatch_note_id: 900, dispatch_number: 'REM-1', store_id: 100 };
 
-  it('credit order (payment_form 2): the debt stays in cartera, no payment applied, order still reconciled', async () => {
+  it('credit order (payment_form 2): the shared helper decides (pure credit stays in cartera, COD invoiced on credit settles the AR — cod-auto-invoicing S6), order still reconciled', async () => {
     const { listener, orderFlowMock } = build({ remaining_balance: 500, payment_form: '2' });
     await listener.handleInvoiced(event);
-    expect(orderFlowMock.applyDispatchCodPayment).not.toHaveBeenCalled();
+    // Sin stopId: el helper sólo abona la cartera de una venta contra entrega
+    // (ver order-flow.history.spec «B2» y «S6»); nunca finge un pago de contado.
+    expect(orderFlowMock.applyDispatchCodPayment).toHaveBeenCalledWith(
+      expect.not.objectContaining({ stopId: expect.anything() }),
+    );
     expect(orderFlowMock.reconcileOrderFromDispatch).toHaveBeenCalledWith(7777, 100);
   });
 

@@ -52,6 +52,7 @@ import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
 import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { PosHolderWarningComponent } from '../pos-holder-warning.component';
 import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
@@ -92,6 +93,7 @@ export type { EntregaChoice };
     PosShippingStepComponent,
     NgTemplateOutlet,
     RoomChargeModalComponent,
+    PosHolderWarningComponent,
   ],
   templateUrl: './pos-checkout-shell.component.html',
   styleUrl: './pos-checkout-shell.component.scss',
@@ -522,11 +524,21 @@ export class PosCheckoutShellComponent {
   private lastCartWasEmpty: boolean | null = null;
   private emptyCartBoundary = false;
 
+  /**
+   * cod-auto-invoicing S4 — cliente de la venta para el aviso de titular del
+   * paso Cobro: sin documento, la factura automática sale a Consumidor final y
+   * el cajero lo puede confirmar ahí mismo, sin bloquear el cobro.
+   */
+  readonly cartCustomerId = computed<number | null>(() => {
+    const id = this.cartState()?.customer?.id;
+    return typeof id === 'number' && id > 0 ? id : null;
+  });
+
   /** La venta sale con factura electrónica automática (misma regla que la confirmación POS). */
   readonly requiresElectronicInvoicing = computed<boolean>(() => {
     const areas = (this.authFacade.activeFiscalAreas() || []) as string[];
     if (!areas.includes('invoicing')) return false;
-    return Boolean(this.settingsFacade.settings()?.invoicing?.pos?.auto_emit ?? true);
+    return Boolean(this.settingsFacade.settings()?.invoicing?.pos?.auto_emit ?? false);
   });
   readonly allowAnonymousSales = computed(
     () => this.settingsFacade.pos()?.allow_anonymous_sales ?? false,

@@ -11,6 +11,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SYS_FORBIDDEN_001: 'No tiene permisos para realizar esta accion.',
   SYS_UNAUTHORIZED_001: 'Debe iniciar sesion para continuar.',
   SYS_CONFLICT_001: 'El recurso ya existe o esta en conflicto.',
+
+  // Tarifas: la regla de ajuste (precio fijo, monto o porcentaje) sin valor.
+  PRICE_TIER_ADJUSTMENT_001:
+    'Indica el valor de la regla de la tarifa: un monto o porcentaje mayor que 0 (el recargo porcentual llega hasta 1000 %).',
   // Red de seguridad del filtro global: la peticion llego mal formada y el
   // backend lo detecto en la capa de datos. Antes salian como 500, asi que el
   // usuario leia «error inesperado» ante algo que si puede corregir.
@@ -249,6 +253,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Para eliminar variantes con stock, selecciona un modo de eliminación de stock.',
   PROD_HAS_RESERVATIONS_001:
     'Esta operación está bloqueada porque existen reservas de stock activas.',
+  PRICE_TIER_OVERRIDE_VARIANT_001:
+    'La variante no pertenece a este producto. Recarga la página e inténtalo de nuevo.',
+  PROD_VARIANT_HAS_STOCK_001:
+    'La variante tiene existencias. Ajusta su stock a 0 desde Inventario antes de quitarla.',
   PROD_SKU_COLLISION_001:
     'El SKU ya lo usa otro producto activo o inactivo de esta tienda.',
   INV_VARIANT_TRACKING_001:
@@ -372,6 +380,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
 
   // Customers
   CUST_FIND_001: 'Cliente no encontrado.',
+  CUST_PRICE_TIER_001:
+    'La tarifa elegida no existe en esta tienda o no es una tarifa de cliente.',
   CUST_CREATE_001: 'Error al crear el cliente.',
   CUST_VALIDATE_001: 'La validacion del cliente fallo.',
   CUST_PERM_001: 'No tiene permisos para acceder a este cliente.',

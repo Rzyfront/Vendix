@@ -35,8 +35,10 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { startWith } from 'rxjs';
 
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { unpaidFinalConsumerConfirm } from '../utils/unpaid-final-consumer-confirm.util';
 import { AlertBannerComponent } from '../../../../../shared/components/alert-banner/alert-banner.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
@@ -67,6 +69,7 @@ import {
   rowProblemText,
   sortPreviewRows,
   summarizeRun,
+  unpaidFinalConsumerCount,
   type BulkInvoiceRunSummary,
 } from './orders-bulk-invoice.util';
 import { OrdersBulkService } from './orders-bulk.service';
@@ -145,6 +148,7 @@ export class OrdersBulkInvoiceModalComponent {
   private readonly bulkService = inject(OrdersBulkService);
   private readonly fb = inject(FormBuilder);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly dialogService = inject(DialogService);
 
   readonly modalOpen = model<boolean>(false);
   /** True while the chunks are being sent. The page locks every other action on it. */
@@ -270,7 +274,24 @@ export class OrdersBulkInvoiceModalComponent {
 
   // ── actions ────────────────────────────────────────────────────────────────
 
-  onToggleFinalConsumer(checked: boolean): void {
+  /**
+   * Opting in sends unpaid rows out cash as if paid: confirm first. «Volver»
+   * leaves it off and unticks the checkbox (the signal did not change).
+   */
+  async onToggleFinalConsumer(
+    checked: boolean,
+    checkbox?: HTMLInputElement,
+  ): Promise<void> {
+    const unpaid = checked ? unpaidFinalConsumerCount(this.rows()) : 0;
+    if (unpaid > 0) {
+      const ok = await this.dialogService.confirm(unpaidFinalConsumerConfirm(unpaid), {
+        size: 'md',
+      });
+      if (!ok) {
+        if (checkbox) checkbox.checked = false;
+        return;
+      }
+    }
     this.allowFinalConsumer.set(checked);
   }
 

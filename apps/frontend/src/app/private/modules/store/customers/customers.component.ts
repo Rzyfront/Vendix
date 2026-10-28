@@ -94,6 +94,7 @@ import { customerDisplayName } from '../../../../shared/utils/customer-display-n
         [isOpen]="isModalOpen()"
         [customer]="selectedCustomer()"
         [loading]="actionLoading()"
+        [showPriceTier]="true"
         (closed)="closeModal()"
         (save)="onSave($event)"
         (addressData)="onAddressData($event)"

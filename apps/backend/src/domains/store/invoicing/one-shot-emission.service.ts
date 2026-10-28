@@ -21,9 +21,16 @@ import { EmitOrderCreditDto } from './dto/emit-order.dto';
 import {
   describeHolderSource,
   evaluateOrderHolder,
+  holderCurrentData,
   isCfOverridable,
 } from './utils/order-acquirer-holder.util';
 import { OrderLeaseService } from '../../../common/locks/order-lease.service';
+
+/** Options the holder gate can force on the emission. */
+type HolderForce = Pick<
+  CreateFromOrderOptions,
+  'force_final_consumer' | 'cash_by_mutual_agreement'
+>;
 
 /** A credit sale needs an identified holder: it is never issued as Consumidor final. */
 export const CREDIT_FINAL_CONSUMER_MESSAGE =
@@ -35,6 +42,21 @@ export type CreditBlocker =
   | 'partial_payment'
   | 'order_state'
   | null;
+
+/** Campos de un pago que delatan la promesa contra entrega. */
+type CodPromiseProbe = {
+  store_payment_method?: {
+    system_payment_method?: { processing_mode?: string | null } | null;
+  } | null;
+};
+
+/** Pago `pending` de contra entrega: promesa de cobro, no abono. */
+function isCodPromise(payment: { state: string | null } & CodPromiseProbe): boolean {
+  return (
+    payment.state === 'pending' &&
+    payment.store_payment_method?.system_payment_method?.processing_mode === 'ON_DELIVERY'
+  );
+}
 
 export type OneShotEmissionState = 'issued' | 'pending' | 'failed';
 
@@ -163,7 +185,16 @@ export class OneShotEmissionService {
         payment_form: true,
         grand_total: true,
         active_financial_split_id: true,
-        payments: { select: { state: true, amount: true } },
+        payments: {
+          select: {
+            id: true,
+            state: true,
+            amount: true,
+            store_payment_method: {
+              select: { system_payment_method: { select: { processing_mode: true } } },
+            },
+          },
+        },
         users: {
           select: {
             document_type: true,
@@ -199,7 +230,12 @@ export class OneShotEmissionService {
     // Titular: misma regla que `createFromOrder` y la vista previa masiva. Se
     // evalúa ANTES del saldo/crédito para no convertir una orden a crédito y
     // luego descubrir que la factura saldría a Consumidor final.
-    const force = await this.resolveHolderGate(order, emit_options);
+    const force = this.resolveFinalConsumerCash(
+      order,
+      await this.resolveHolderGate(order, emit_options, !!credit),
+      emit_options,
+      !!credit,
+    );
     // Borrador colgado de un intento anterior: su titular se re-sincroniza con
     // la evaluación actual (misma construcción que la creación) antes de numerar.
     await this.refreshHangingDraftHolder(order_id, force);
@@ -241,6 +277,16 @@ export class OneShotEmissionService {
       select: { id: true },
     });
     if (numbered) {
+      return this.toResult(
+        await this.emitFor(order_id, recreate, ...this.optsArg(undefined, force)),
+      );
+    }
+
+    // Consumidor final pedido sobre una orden sin cobrar (decisión del 28-oct):
+    // sale de contado con «Acuerdo mutuo» (ZZZ) sin exigir el pago. La orden
+    // no se convierte a crédito ni se le inventa un pago: su saldo sigue
+    // pendiente y se cobra después como cualquier orden.
+    if (force?.cash_by_mutual_agreement) {
       return this.toResult(
         await this.emitFor(order_id, recreate, ...this.optsArg(undefined, force)),
       );
@@ -300,7 +346,8 @@ export class OneShotEmissionService {
       invoice_data_requests?: Parameters<typeof evaluateOrderHolder>[0]['invoice_data_requests'];
     },
     emit_options?: Pick<CreateFromOrderOptions, 'force_final_consumer'>,
-  ): Promise<Pick<CreateFromOrderOptions, 'force_final_consumer'> | undefined> {
+    credit_requested = false,
+  ): Promise<HolderForce | undefined> {
     // El titular se evalúa mientras no exista un documento numerado, también
     // en órdenes que ya son crédito (`payment_form '2'`).
     const holder = evaluateOrderHolder(order);
@@ -317,44 +364,77 @@ export class OneShotEmissionService {
     if (numbered) return undefined;
 
     const overridable = isCfOverridable(holder.issue);
+    const details = {
+      order_id: order.id,
+      customer_id: order.customer_id,
+      customer_name: describeHolderSource(order),
+      issue_code: holder.issue.code,
+      missing_fields: holder.issue.missing_fields,
+      // What the holder already has: the UI prefills it and asks only the rest.
+      current: holderCurrentData(order),
+    };
     if (overridable && emit_options?.force_final_consumer) {
-      // Venta a crédito (ya crédito o con saldo): nunca sale a Consumidor final.
-      const is_credit =
-        order.payment_form === '2' ||
-        computeOrderUnpaidBalance(order as any).remaining.greaterThanOrEqualTo(0.01);
-      if (!is_credit) return { force_final_consumer: true };
-      throw new VendixHttpException(
-        ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001,
-        CREDIT_FINAL_CONSUMER_MESSAGE,
-        {
-          order_id: order.id,
-          customer_id: order.customer_id,
-          issue_code: holder.issue.code,
-          missing_fields: holder.issue.missing_fields,
-          message: CREDIT_FINAL_CONSUMER_MESSAGE,
-          cf_overridable: false,
-        },
-      );
+      // Venta a crédito (ya crédito o pedida a crédito): nunca sale a Consumidor final.
+      if (order.payment_form === '2' || credit_requested) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001,
+          CREDIT_FINAL_CONSUMER_MESSAGE,
+          {
+            ...details,
+            message: CREDIT_FINAL_CONSUMER_MESSAGE,
+            cf_overridable: false,
+            cf_blocker: 'credit_sale',
+          },
+        );
+      }
+      // Saldo sin cobrar: sale de contado a Consumidor final con medio de pago
+      // «Acuerdo mutuo» (ZZZ), sin pago registrado. Si el cajero quiere crédito,
+      // completa los datos del cliente (flujo de crédito con titular).
+      const { remaining } = computeOrderUnpaidBalance(order as any);
+      if (remaining.lessThan(0.01)) return { force_final_consumer: true };
+      return { force_final_consumer: true, cash_by_mutual_agreement: true };
     }
     throw new VendixHttpException(
       ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001,
       undefined,
       {
-        order_id: order.id,
-        customer_id: order.customer_id,
-        customer_name: describeHolderSource(order),
-        issue_code: holder.issue.code,
-        missing_fields: holder.issue.missing_fields,
+        ...details,
         message: holder.issue.message,
         cf_overridable: overridable,
       },
     );
   }
 
+  /**
+   * Consumidor final pedido explícitamente sobre una orden SIN cobrar cuyo
+   * titular no necesita el bloqueo (cliente completo o sin cliente): el cajero
+   * rechazó el crédito, así que sale de contado «Acuerdo mutuo» (ZZZ). En una
+   * orden pagada con cliente completo la bandera sigue ignorándose (la factura
+   * nominativa es mejor), y una venta ya a crédito, una orden cancelada o una
+   * emisión pedida a crédito nunca salen así.
+   */
+  private resolveFinalConsumerCash(
+    order: Parameters<typeof computeOrderUnpaidBalance>[0] & {
+      state: string;
+      payment_form: string | null;
+    },
+    gate: HolderForce | undefined,
+    emit_options: Pick<CreateFromOrderOptions, 'force_final_consumer'> | undefined,
+    credit_requested: boolean,
+  ): HolderForce | undefined {
+    if (gate || !emit_options?.force_final_consumer || credit_requested) return gate;
+    if (order.payment_form === '2' || ['cancelled', 'refunded'].includes(order.state)) {
+      return undefined;
+    }
+    const { remaining } = computeOrderUnpaidBalance(order);
+    if (remaining.lessThan(0.01)) return undefined;
+    return { force_final_consumer: true, cash_by_mutual_agreement: true };
+  }
+
   /** Extra `emitForOrder` argument only when there is something to pass. */
   private optsArg(
     base: CreateFromOrderOptions | undefined,
-    force: Pick<CreateFromOrderOptions, 'force_final_consumer'> | undefined,
+    force: HolderForce | undefined,
   ): [CreateFromOrderOptions] | [] {
     if (!base && !force) return [];
     return [{ ...(base ?? {}), ...(force ?? {}) }];
@@ -373,7 +453,9 @@ export class OneShotEmissionService {
       payment_form: string | null;
       grand_total: Prisma.Decimal | number | string | null;
       active_financial_split_id: number | null;
-      payments?: ReadonlyArray<{ state: string | null; amount: Prisma.Decimal | number | string }> | null;
+      payments?: ReadonlyArray<
+        { state: string | null; amount: Prisma.Decimal | number | string } & CodPromiseProbe
+      > | null;
     },
     has_rejected_document = false,
   ): {
@@ -406,7 +488,7 @@ export class OneShotEmissionService {
     order: {
       state: string;
       customer_id: number | null;
-      payments?: ReadonlyArray<{ state: string | null }> | null;
+      payments?: ReadonlyArray<{ state: string | null } & CodPromiseProbe> | null;
     },
     settled: Prisma.Decimal,
   ): CreditBlocker {
@@ -414,8 +496,12 @@ export class OneShotEmissionService {
     if (order.customer_id == null) return 'customer_required';
     // Un cobro en vuelo (Wompi pendiente, tarjeta autorizada) cuenta como
     // abono: si se confirma después quedarían caja Y cartera por la misma venta.
-    const in_flight = (order.payments ?? []).some((payment) =>
-      ['pending', 'authorized'].includes(String(payment.state)),
+    // La promesa contra entrega (`ON_DELIVERY` pendiente) no es un cobro: la
+    // conversión la anula y el recaudo en ruta salda la cartera.
+    const in_flight = (order.payments ?? []).some(
+      (payment) =>
+        ['pending', 'authorized'].includes(String(payment.state)) &&
+        !isCodPromise(payment),
     );
     if (settled.greaterThan(0) || in_flight) return 'partial_payment';
     return null;
@@ -478,7 +564,12 @@ export class OneShotEmissionService {
    * asiento (DR clientes / CR ingresos) lo genera la aceptación de la factura.
    */
   private async convertToCredit(
-    order: { id: number; store_id: number; state: string },
+    order: {
+      id: number;
+      store_id: number;
+      state: string;
+      payments?: ReadonlyArray<{ id?: number; state: string | null } & CodPromiseProbe> | null;
+    },
     remaining: Prisma.Decimal,
     options: CreateFromOrderOptions,
   ): Promise<void> {
@@ -501,6 +592,18 @@ export class OneShotEmissionService {
         updated_at: new Date(),
       },
     });
+    // Promesa contra entrega → anulada (mismo trato que `payOrder` al cobrarla):
+    // el cobro posterior abona la cartera y nunca entra además como contado. La
+    // fila anulada conserva el origen contra entrega para el recaudo sin planilla.
+    const cod_promise_ids = (order.payments ?? [])
+      .filter((payment) => isCodPromise(payment) && payment.id != null)
+      .map((payment) => payment.id as number);
+    if (cod_promise_ids.length > 0) {
+      await this.prisma.payments.updateMany({
+        where: { id: { in: cod_promise_ids }, order_id: order.id, state: 'pending' },
+        data: { state: 'cancelled', updated_at: new Date() },
+      });
+    }
     await this.moveToPendingPayment(order);
     // Idempotente por `source_id`: reintentos no duplican la cuenta por cobrar.
     await this.receivables.createCreditSaleFromEvent({
@@ -551,7 +654,7 @@ export class OneShotEmissionService {
 
   private async refreshHangingDraftHolder(
     order_id: number,
-    force: Pick<CreateFromOrderOptions, 'force_final_consumer'> | undefined,
+    force: HolderForce | undefined,
   ): Promise<void> {
     const draft = await this.prisma.invoices.findFirst({
       where: {

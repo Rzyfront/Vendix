@@ -31,6 +31,7 @@ import {
 
 import { PriceTier, PriceTierKind } from '../../interfaces';
 import { PriceTiersService, PriceTierCacheService } from '../../services';
+import { describePriceTierRule } from '../../utils/price-tier-rule.util';
 
 interface PriceTiersStats {
   total: number;
@@ -139,10 +140,10 @@ export class PriceTiersListPageComponent implements OnInit {
     },
     {
       key: 'discount_percentage',
-      label: 'Descuento',
+      label: 'Regla de precio',
       priority: 1,
-      transform: (value: number | string | null) =>
-        value == null ? '0%' : `${Number(value)}%`,
+      transform: (_value: unknown, tier?: PriceTier) =>
+        (tier && describePriceTierRule(tier)) ?? 'Sin ajuste',
     },
     {
       key: 'is_default',
@@ -202,10 +203,10 @@ export class PriceTiersListPageComponent implements OnInit {
     detailKeys: [
       {
         key: 'discount_percentage',
-        label: 'Descuento',
+        label: 'Regla de precio',
         icon: 'percent',
-        transform: (v: number | string | null) =>
-          v == null ? '0%' : `${Number(v)}%`,
+        transform: (_v: unknown, tier?: PriceTier) =>
+          (tier && describePriceTierRule(tier)) ?? 'Sin ajuste',
       },
       { key: 'sort_order', label: 'Orden', icon: 'arrow-up-down' },
       {

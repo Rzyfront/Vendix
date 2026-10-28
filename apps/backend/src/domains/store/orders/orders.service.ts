@@ -1446,6 +1446,11 @@ export class OrdersService {
                   where: { is_main: true },
                   take: 1,
                 },
+                // Tarifas habilitadas: el detalle ofrece aplicar la tarifa
+                // del cliente solo en las líneas que la admiten.
+                product_price_tier_assignments: {
+                  select: { price_tier_id: true },
+                },
               },
             },
             product_variants: true,

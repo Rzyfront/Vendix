@@ -5,7 +5,8 @@
  * Queue order (S6a): independent operations first, dependent last.
  *   group 0 — `paid` and `credit_existing` (emit as they are)
  *   group 1 — `to_credit` (needs the credit conversion first)
- *   group 2 — Consumidor final opt-in rows (holder override), whatever their payment
+ *   group 2 — Consumidor final opt-in rows (holder override), whatever their payment.
+ *             An unpaid one goes out cash with payment means «Acuerdo mutuo» (ZZZ).
  */
 
 import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
@@ -109,7 +110,11 @@ export function chunkBy<T>(
 export function queueRequiresCredit(
   queue: readonly BulkInvoiceQueueEntry[],
 ): boolean {
-  return queue.some((e) => e.row.payment === 'to_credit');
+  // An unpaid row opted into Consumidor final goes out cash («Acuerdo mutuo»):
+  // it never needs the credit conversion.
+  return queue.some(
+    (e) => e.row.payment === 'to_credit' && !e.item.allow_final_consumer,
+  );
 }
 
 /** «Nombre · TIPO número[-DV]»; CF rows read «Consumidor final · 222222222222». */
@@ -124,7 +129,18 @@ export function formatHolder(holder: BulkInvoiceHolder): string {
   return [holder.name, doc].filter(Boolean).join(' · ') || 'Sin titular';
 }
 
-export function paymentLabel(row: BulkInvoicePreviewRow): string {
+/** Unpaid rows that go out cash («Acuerdo mutuo») once Consumidor final is opted in. */
+export function unpaidFinalConsumerCount(rows: BulkInvoicePreviewRow[]): number {
+  return rows.filter((r) => r.cf_overridable && r.payment === 'to_credit').length;
+}
+
+export function paymentLabel(
+  row: BulkInvoicePreviewRow,
+  allowFinalConsumer = false,
+): string {
+  if (rowKind(row, allowFinalConsumer) === 'emit_cf' && row.payment === 'to_credit') {
+    return 'Contado · Acuerdo mutuo';
+  }
   switch (row.payment) {
     case 'paid':
       return 'Pagada';

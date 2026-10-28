@@ -2,10 +2,12 @@
  * «Datos del cliente incompletos»: reusable modal shown when a customer cannot
  * be the holder of an electronic invoice (order detail 409, POS holder-check).
  *
- * It shows the backend message and the missing fields in Spanish, loads the
- * customer to prefill an inline form (document type, number, DV for NIT, legal
- * name or first + last name) and saves it through the EXISTING
- * `CustomersService.updateCustomer` (PATCH store/customers/:id).
+ * It shows the backend message, the data the customer ALREADY has (with its
+ * value) and the data that is missing, and asks ONLY for the missing fields
+ * («Corregir otros datos» opens the rest). The form is prefilled from the 409
+ * `details.current`; payloads without it (POS holder-check) load the customer.
+ * It saves through the EXISTING `CustomersService.updateCustomer`
+ * (PATCH store/customers/:id).
  *
  * The component never retries an emission or a check itself: it emits
  *  - `saved`: the customer was updated (parent retries / re-checks),
@@ -48,9 +50,14 @@ import { computeNitDv, isValidNitDv } from '../../../../../../shared/utils/nit.u
 import type { UpdateCustomerRequest } from '../../models/customer.model';
 import { CustomersService } from '../../services/customers.service';
 import {
+  effectiveMissingFields,
+  holderCurrentFrom,
   isNameMissing,
   missingFieldLabels,
+  presentHolderData,
+  type HolderCurrentData,
   type HolderIssue,
+  type HolderMissingField,
 } from './holder-issue.model';
 
 /** Name rule of the DIAN holder: legal name, OR first AND last name. */
@@ -84,9 +91,29 @@ function nameGroupValidator(group: AbstractControl): ValidationErrors | null {
     >
       @if (issue(); as data) {
         <div class="space-y-4">
-          <app-alert-banner variant="warning" tone="token" icon="alert-triangle">
+          <app-alert-banner
+            [variant]="data.cf_blocker ? 'danger' : 'warning'"
+            tone="token"
+            icon="alert-triangle"
+          >
             {{ data.message }}
           </app-alert-banner>
+
+          @if (present().length > 0) {
+            <div>
+              <p class="mb-1 text-xs font-semibold uppercase tracking-wider text-text-secondary">
+                Datos que ya tiene
+              </p>
+              <dl class="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+                @for (row of present(); track row.label) {
+                  <div class="flex min-w-0 gap-1">
+                    <dt class="shrink-0 text-text-secondary">{{ row.label }}:</dt>
+                    <dd class="truncate font-medium text-text-primary">{{ row.value }}</dd>
+                  </div>
+                }
+              </dl>
+            </div>
+          }
 
           @if (labels().length > 0) {
             <div>
@@ -115,57 +142,80 @@ function nameGroupValidator(group: AbstractControl): ValidationErrors | null {
           }
 
           <form [formGroup]="form" (ngSubmit)="onSave()" class="space-y-3">
-            <div class="grid grid-cols-1 gap-3" [class.sm:grid-cols-3]="isNit()" [class.sm:grid-cols-2]="!isNit()">
-              <app-selector
-                label="Tipo de documento *"
-                placeholder="Tipo"
-                formControlName="document_type"
-                [options]="documentTypeOptions"
-              ></app-selector>
-              <app-input
-                label="Número de documento *"
-                formControlName="document_number"
-                [control]="form.controls.document_number"
-                [required]="true"
-                customWrapperClass="mt-0"
-              ></app-input>
-              @if (isNit()) {
-                <app-input
-                  label="DV"
-                  formControlName="verification_digit"
-                  [control]="form.controls.verification_digit"
-                  [maxlength]="1"
-                  [error]="dvError()"
-                  customWrapperClass="mt-0"
-                ></app-input>
-              }
-            </div>
+            @if (show('document_type') || show('document_number')) {
+              <div class="grid grid-cols-1 gap-3" [class.sm:grid-cols-3]="isNit()" [class.sm:grid-cols-2]="!isNit()">
+                @if (show('document_type')) {
+                  <app-selector
+                    label="Tipo de documento *"
+                    placeholder="Tipo"
+                    formControlName="document_type"
+                    [options]="documentTypeOptions"
+                  ></app-selector>
+                }
+                @if (show('document_number')) {
+                  <app-input
+                    label="Número de documento"
+                    formControlName="document_number"
+                    [control]="form.controls.document_number"
+                    [required]="true"
+                    customWrapperClass="mt-0"
+                  ></app-input>
+                  @if (isNit()) {
+                    <app-input
+                      label="DV"
+                      formControlName="verification_digit"
+                      [control]="form.controls.verification_digit"
+                      [maxlength]="1"
+                      [error]="dvError()"
+                      customWrapperClass="mt-0"
+                    ></app-input>
+                  }
+                }
+              </div>
+            }
 
-            <app-input
-              label="Razón social"
-              formControlName="legal_name"
-              [control]="form.controls.legal_name"
-              placeholder="Solo si es persona jurídica"
-              customWrapperClass="mt-0"
-            ></app-input>
-            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            @if (show('legal_name')) {
               <app-input
-                label="Nombres"
-                formControlName="first_name"
-                [control]="form.controls.first_name"
+                label="Razón social"
+                formControlName="legal_name"
+                [control]="form.controls.legal_name"
+                placeholder="Solo si es persona jurídica"
                 customWrapperClass="mt-0"
               ></app-input>
-              <app-input
-                label="Apellidos"
-                formControlName="last_name"
-                [control]="form.controls.last_name"
-                customWrapperClass="mt-0"
-              ></app-input>
-            </div>
+            }
+            @if (show('first_name') || show('last_name')) {
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                @if (show('first_name')) {
+                  <app-input
+                    label="Nombres"
+                    formControlName="first_name"
+                    [control]="form.controls.first_name"
+                    customWrapperClass="mt-0"
+                  ></app-input>
+                }
+                @if (show('last_name')) {
+                  <app-input
+                    label="Apellidos"
+                    formControlName="last_name"
+                    [control]="form.controls.last_name"
+                    customWrapperClass="mt-0"
+                  ></app-input>
+                }
+              </div>
+            }
             @if (showNameError()) {
               <p class="text-xs text-error">
                 Indica la razón social, o los nombres y apellidos.
               </p>
+            }
+            @if (!editAll()) {
+              <button
+                type="button"
+                class="text-xs font-medium text-primary hover:underline"
+                (click)="editAll.set(true)"
+              >
+                Corregir otros datos del cliente
+              </button>
             }
           </form>
 
@@ -218,6 +268,10 @@ export class CustomerHolderCompletionModalComponent {
   readonly saving = signal(false);
   readonly saveError = signal('');
   readonly loadFailed = signal(false);
+  /** Data on file: from the 409 `details.current`, or the loaded customer. */
+  readonly current = signal<HolderCurrentData | null>(null);
+  /** «Corregir otros datos»: also show the fields that are already complete. */
+  readonly editAll = signal(false);
 
   protected readonly documentTypeOptions = DOCUMENT_TYPES.map((t) => ({
     value: t.code,
@@ -246,12 +300,13 @@ export class CustomerHolderCompletionModalComponent {
   );
 
   protected readonly isNit = computed(() => this.formValue().document_type === 'NIT');
-  protected readonly labels = computed(() =>
-    missingFieldLabels(this.issue()?.missing_fields ?? []),
+  /** Backend list + the document type when it is also empty. */
+  readonly missing = computed(() =>
+    effectiveMissingFields(this.issue()?.missing_fields ?? [], this.current()),
   );
-  protected readonly nameMissing = computed(() =>
-    isNameMissing(this.issue()?.missing_fields ?? []),
-  );
+  protected readonly labels = computed(() => missingFieldLabels(this.missing()));
+  readonly present = computed(() => presentHolderData(this.current(), this.missing()));
+  protected readonly nameMissing = computed(() => isNameMissing(this.missing()));
   protected readonly customerLabel = computed(() => this.issue()?.customer_name ?? '');
 
   protected readonly dvError = computed(() => {
@@ -284,13 +339,18 @@ export class CustomerHolderCompletionModalComponent {
 
   protected readonly canCloseFn = (): boolean => !this.saving();
 
+  /** Only the missing fields are asked; «Corregir otros datos» shows them all. */
+  show(field: HolderMissingField): boolean {
+    return this.editAll() || this.missing().includes(field);
+  }
+
   constructor() {
     // Each opening reloads the customer so the form starts from the live record.
     effect(() => {
       const open = this.isOpen();
       const issue = this.issue();
       if (open && issue) {
-        untracked(() => this.loadCustomer(issue.customer_id));
+        untracked(() => this.loadCustomer(issue));
       }
     });
   }
@@ -342,34 +402,41 @@ export class CustomerHolderCompletionModalComponent {
     this.isOpen.set(false);
   }
 
-  private loadCustomer(customerId: number): void {
+  /** Prefills from the 409 data; without it (POS) loads the customer record. */
+  private loadCustomer(issue: HolderIssue): void {
     this.saveError.set('');
     this.loadFailed.set(false);
-    this.form.reset({
-      document_type: '',
-      document_number: '',
-      verification_digit: '',
-      legal_name: '',
-      first_name: '',
-      last_name: '',
-    });
+    this.editAll.set(false);
+    if (issue.current) {
+      this.applyCurrent(issue.current);
+      return;
+    }
+    this.applyCurrent(null);
     this.customersService
-      .getCustomer(customerId)
+      .getCustomer(issue.customer_id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (c) => {
-          this.form.reset({
-            document_type: c.document_type ?? '',
-            // The Consumidor final sentinel is not a real document: start blank.
-            document_number:
-              c.document_number === '222222222222' ? '' : (c.document_number ?? ''),
-            verification_digit: c.verification_digit ?? '',
-            legal_name: c.legal_name ?? '',
-            first_name: c.first_name ?? '',
-            last_name: c.last_name ?? '',
-          });
+        next: (response: unknown) => {
+          // Tolerate an `{ data }` envelope as well as the bare record.
+          const record =
+            response && typeof response === 'object' && 'data' in response
+              ? (response as { data: unknown }).data
+              : response;
+          this.applyCurrent(holderCurrentFrom(record));
         },
         error: () => this.loadFailed.set(true),
       });
+  }
+
+  private applyCurrent(current: HolderCurrentData | null): void {
+    this.current.set(current);
+    this.form.reset({
+      document_type: current?.document_type ?? '',
+      document_number: current?.document_number ?? '',
+      verification_digit: current?.verification_digit ?? '',
+      legal_name: current?.legal_name ?? '',
+      first_name: current?.first_name ?? '',
+      last_name: current?.last_name ?? '',
+    });
   }
 }

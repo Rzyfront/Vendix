@@ -56,7 +56,13 @@ interface BulkOrderRow {
   payment_form: string | null;
   grand_total: Prisma.Decimal | number | string | null;
   active_financial_split_id: number | null;
-  payments: Array<{ state: string | null; amount: Prisma.Decimal | number | string }>;
+  payments: Array<{
+    state: string | null;
+    amount: Prisma.Decimal | number | string;
+    store_payment_method?: {
+      system_payment_method?: { processing_mode?: string | null } | null;
+    } | null;
+  }>;
   users: Parameters<typeof evaluateOrderHolder>[0]['users'];
   invoice_data_requests: Parameters<typeof evaluateOrderHolder>[0]['invoice_data_requests'];
 }
@@ -194,7 +200,7 @@ export class OrdersBulkInvoicingService {
         );
       }
 
-      if (row.payment === 'to_credit' && !credit) {
+      if (row.payment === 'to_credit' && !credit && !override) {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_CREDIT_DUE_DATE_001,
           'La orden está sin cobrar: indica la fecha de vencimiento para facturarla a crédito.',
@@ -204,7 +210,7 @@ export class OrdersBulkInvoicingService {
 
       const emission = await this.one_shot.emitOrder(
         item.order_id,
-        row.payment === 'to_credit' ? credit : undefined,
+        row.payment === 'to_credit' && !override ? credit : undefined,
         override ? { force_final_consumer: true } : undefined,
       );
       // S10: «Emitida y aceptada». Éxito sólo con la factura aceptada por la
@@ -248,7 +254,15 @@ export class OrdersBulkInvoicingService {
         payment_form: true,
         grand_total: true,
         active_financial_split_id: true,
-        payments: { select: { state: true, amount: true } },
+        payments: {
+          select: {
+            state: true,
+            amount: true,
+            store_payment_method: {
+              select: { system_payment_method: { select: { processing_mode: true } } },
+            },
+          },
+        },
         users: {
           select: {
             document_type: true,
@@ -316,10 +330,10 @@ export class OrdersBulkInvoicingService {
 
       const holder = evaluateOrderHolder(found);
       const has_issue = holder.issue !== null;
-      // A credit sale (to_credit / credit_existing) is never issued as Consumidor
-      // final: the CF opt-in does not include it.
-      const is_credit =
-        classification.payment === 'to_credit' || classification.payment === 'credit_existing';
+      // An existing credit sale is never issued as Consumidor final. An unpaid
+      // order (to_credit) can be: with the CF opt-in it goes out cash with
+      // payment means «Acuerdo mutuo» (ZZZ) instead of becoming credit.
+      const is_credit = classification.payment === 'credit_existing';
       const cf_overridable =
         has_issue && holder.issue!.code !== 'document_type_required' && !is_credit;
       rows.push({

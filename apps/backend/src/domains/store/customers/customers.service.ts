@@ -140,6 +140,35 @@ function withBillingAddress<T extends { addresses?: any[] | null }>(
   };
 }
 
+/** Campos de la tarifa del cliente que el POS y el detalle de orden necesitan. */
+const CUSTOMER_PRICE_TIER_SELECT = {
+  id: true,
+  name: true,
+  kind: true,
+  is_active: true,
+  discount_percentage: true,
+  adjustment_type: true,
+  adjustment_value: true,
+  amount_scope: true,
+} as const;
+
+/** Membresía de ESTA tienda: de ahí sale la tarifa preferencial del cliente. */
+const customerTierInclude = (storeId: number) => ({
+  where: { store_id: storeId },
+  select: { price_tier_id: true },
+});
+
+/**
+ * Aplana `store_users` (filtrado a la tienda) en `price_tier_id` sin exponer
+ * las membresías de otras tiendas.
+ */
+function withPriceTierId<T extends { store_users?: { price_tier_id: number | null }[] }>(
+  user: T,
+): Omit<T, 'store_users'> & { price_tier_id: number | null } {
+  const { store_users, ...rest } = user;
+  return { ...rest, price_tier_id: store_users?.[0]?.price_tier_id ?? null };
+}
+
 @Injectable()
 export class CustomersService {
   private readonly logger = new Logger(CustomersService.name);
@@ -1377,6 +1406,10 @@ export class CustomersService {
       throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
     }
 
+    const priceTierId = await this.resolveCustomerPriceTierId(
+      dto.price_tier_id,
+    );
+
     // Email efectivo para plataforma. El correo es OPCIONAL: si el cliente no
     // proporcionó uno, queda `null` (no se generan placeholders ni correos
     // falsos). La identificación se hace por documento, teléfono o nombre.
@@ -1611,6 +1644,7 @@ export class CustomersService {
         store_users: {
           create: {
             store_id: store.id,
+            ...(priceTierId != null ? { price_tier_id: priceTierId } : {}),
           },
         },
         user_settings: {
@@ -1699,13 +1733,14 @@ export class CustomersService {
         omit: CUSTOMER_PRIVATE_COLUMNS,
         include: {
           addresses: CUSTOMER_ADDRESSES_INCLUDE,
+          store_users: customerTierInclude(storeId),
         },
       }),
       this.prisma.users.count({ where }),
     ]);
 
     return {
-      data: data.map((u) => withBillingAddress(u)),
+      data: data.map((u) => withPriceTierId(withBillingAddress(u))),
       meta: {
         total,
         page,
@@ -1776,10 +1811,13 @@ export class CustomersService {
       omit: CUSTOMER_PRIVATE_COLUMNS,
       include: {
         addresses: CUSTOMER_ADDRESSES_INCLUDE,
+        store_users: customerTierInclude(storeId),
       },
     });
 
-    const usersById = new Map(users.map((u) => [u.id, withBillingAddress(u)]));
+    const usersById = new Map(
+      users.map((u) => [u.id, withPriceTierId(withBillingAddress(u))]),
+    );
 
     // Preserva el orden del ranking del groupBy y adjunta order_count.
     return ranking
@@ -1811,6 +1849,7 @@ export class CustomersService {
       omit: CUSTOMER_PRIVATE_COLUMNS,
       include: {
         addresses: CUSTOMER_ADDRESSES_INCLUDE,
+        store_users: customerTierInclude(storeId),
       },
     });
 
@@ -1843,7 +1882,7 @@ export class CustomersService {
 
     const row = stats[0];
     return {
-      ...withBillingAddress(user),
+      ...withPriceTierId(withBillingAddress(user)),
       total_orders: row?._count?.id ?? 0,
       total_spend: row?._sum?.grand_total ? Number(row._sum.grand_total) : 0,
       last_order_date: row?._max?.created_at ?? null,
@@ -2015,8 +2054,50 @@ export class CustomersService {
     return latest?.currency ?? null;
   }
 
+  /**
+   * Valida la tarifa preferencial que llega en el payload. `undefined` = no se
+   * toca; `null` = se quita; un id debe ser una tarifa de cliente
+   * (`customer_tier`) de esta tienda (el cliente Prisma ya está escopado).
+   */
+  private async resolveCustomerPriceTierId(
+    value: number | null | undefined,
+  ): Promise<number | null | undefined> {
+    if (value === undefined || value === null) return value;
+    const tier = await this.prisma.price_tiers.findFirst({
+      where: { id: value, kind: 'customer_tier' },
+      select: { id: true },
+    });
+    if (!tier) {
+      throw new VendixHttpException(ErrorCodes.CUST_PRICE_TIER_001);
+    }
+    return tier.id;
+  }
+
+  /**
+   * Tarifa preferencial vigente del cliente en esta tienda, para que el POS y
+   * el detalle de la orden pregunten si aplicarla. Una tarifa inactiva no se
+   * ofrece (`null`).
+   */
+  async getCustomerPriceTier(storeId: number, id: number) {
+    const membership = await this.prisma.store_users.findUnique({
+      where: { store_id_user_id: { store_id: storeId, user_id: id } },
+      select: { price_tier: { select: CUSTOMER_PRICE_TIER_SELECT } },
+    });
+    if (!membership) {
+      throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
+    }
+    const tier = membership.price_tier;
+    return {
+      price_tier:
+        tier && tier.is_active && tier.kind === 'customer_tier' ? tier : null,
+    };
+  }
+
   async update(storeId: number, id: number, dto: UpdateCustomerDto) {
     const user = await this.findOne(storeId, id);
+    const priceTierId = await this.resolveCustomerPriceTierId(
+      dto.price_tier_id,
+    );
     const effectiveEmail =
       dto.email !== undefined
         ? this.resolveCustomerEmail(dto.email)
@@ -2179,7 +2260,7 @@ export class CustomersService {
       lastNameUpdate = '';
     }
 
-    return this.prisma.users.update({
+    const updated = await this.prisma.users.update({
       where: { id: user.id },
       data: {
         first_name:
@@ -2230,6 +2311,21 @@ export class CustomersService {
       },
       omit: CUSTOMER_PRIVATE_COLUMNS,
     });
+
+    if (priceTierId !== undefined) {
+      await this.prisma.store_users.update({
+        where: { store_id_user_id: { store_id: storeId, user_id: user.id } },
+        data: { price_tier_id: priceTierId },
+      });
+    }
+
+    return {
+      ...updated,
+      price_tier_id:
+        priceTierId !== undefined
+          ? priceTierId
+          : ((user as { price_tier_id?: number | null }).price_tier_id ?? null),
+    };
   }
 
   async remove(storeId: number, id: number) {

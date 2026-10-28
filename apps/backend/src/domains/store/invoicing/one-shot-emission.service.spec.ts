@@ -1,7 +1,10 @@
 import { VendixHttpException, FinancialSplitErrors, ErrorCodes } from 'src/common/errors';
 import { OrderLeaseService } from 'src/common/locks/order-lease.service';
 import { RequestContextService } from 'src/common/context/request-context.service';
-import { CREDIT_FINAL_CONSUMER_MESSAGE, OneShotEmissionService } from './one-shot-emission.service';
+import {
+  CREDIT_FINAL_CONSUMER_MESSAGE,
+  OneShotEmissionService,
+} from './one-shot-emission.service';
 import { PosFiscalEmissionService } from './pos/pos-fiscal-emission.service';
 import { PaymentsService } from '../payments/payments.service';
 import { OrderFlowService } from '../orders/order-flow/order-flow.service';
@@ -380,6 +383,81 @@ describe('OneShotEmissionService', () => {
         }),
       });
       expect(receivables.createCreditSaleFromEvent).not.toHaveBeenCalled();
+    });
+
+    describe('cod-auto-invoicing S6: promesa contra entrega', () => {
+      const codPromise = {
+        id: 90,
+        state: 'pending',
+        amount: '1000.00',
+        store_payment_method: {
+          system_payment_method: { processing_mode: 'ON_DELIVERY' },
+        },
+      };
+
+      it('no cuenta como abono: la orden es convertible a crédito', async () => {
+        const { service } = build({ order: unpaid({ payments: [codPromise] }) });
+        await expect(service.emitOrder(1)).rejects.toMatchObject({
+          response: expect.objectContaining({
+            error_code: 'INVOICING_ORDER_UNPAID_001',
+            details: expect.objectContaining({
+              credit_eligible: true,
+              credit_blocker: null,
+            }),
+          }),
+        });
+      });
+
+      it('al facturar a crédito anula la promesa (no se confirma luego como contado) y crea la cartera', async () => {
+        const { service, prisma, receivables } = build({
+          order: unpaid({ payments: [codPromise] }),
+        });
+        prisma.payments = { updateMany: jest.fn().mockResolvedValue({ count: 1 }) };
+        const r = await service.emitOrder(1, { due_date: tomorrow() } as any);
+        expect(r.state).toBe('issued');
+        expect(prisma.payments.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: [90] }, order_id: 1, state: 'pending' },
+          data: expect.objectContaining({ state: 'cancelled' }),
+        });
+        expect(prisma.orders.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ payment_form: '2', remaining_balance: 1000 }),
+          }),
+        );
+        expect(receivables.createCreditSaleFromEvent).toHaveBeenCalledTimes(1);
+      });
+
+      it('un cobro digital pendiente (no contra entrega) sigue bloqueando', async () => {
+        const { service } = build({
+          order: unpaid({
+            payments: [
+              {
+                ...codPromise,
+                store_payment_method: { system_payment_method: { processing_mode: 'ONLINE' } },
+              },
+            ],
+          }),
+        });
+        await expect(service.emitOrder(1)).rejects.toMatchObject({
+          response: expect.objectContaining({
+            details: expect.objectContaining({ credit_blocker: 'partial_payment' }),
+          }),
+        });
+      });
+
+      it('vista previa masiva: la orden contra entrega sale to_credit', () => {
+        const { service } = build();
+        expect(
+          service.classifyOrderPayment({
+            state: 'processing',
+            customer_id: 12,
+            payment_form: '1',
+            grand_total: '1000.00',
+            active_financial_split_id: null,
+            payments: [codPromise],
+          }),
+        ).toEqual({ payment: 'to_credit', blocked_code: null });
+      });
     });
 
     it('tienda sin facturación electrónica: con credit NO convierte ni crea cartera', async () => {
@@ -769,7 +847,7 @@ describe('OneShotEmissionService', () => {
         service.emitOrder(1, undefined, { force_final_consumer: true }),
       );
       expect(body.message).toBe(CREDIT_FINAL_CONSUMER_MESSAGE);
-      expect(body.details).toMatchObject({ cf_overridable: false });
+      expect(body.details).toMatchObject({ cf_overridable: false, cf_blocker: 'credit_sale' });
       expect(emitSpy).not.toHaveBeenCalled();
       expect(invoicing.createFromOrder).not.toHaveBeenCalled();
     });
@@ -787,6 +865,106 @@ describe('OneShotEmissionService', () => {
       );
       expect(body.message).toBe(CREDIT_FINAL_CONSUMER_MESSAGE);
       expect(emitSpy).not.toHaveBeenCalled();
+    });
+
+    it('el 409 trae los datos que el cliente YA tiene (`current`) para precargar el formulario', async () => {
+      const { service } = build({
+        order: baseOrder({
+          users: customerRow({ document_type: null, document_number: null, last_name: 'Pérez' }),
+        }),
+      });
+      const body = await holderError(service.emitOrder(1));
+      expect(body.details.current).toEqual({
+        document_type: null,
+        document_number: null,
+        verification_digit: null,
+        legal_name: null,
+        first_name: 'Juan',
+        last_name: 'Pérez',
+      });
+    });
+
+    it('`current` no expone el documento centinela de Consumidor final', async () => {
+      const { service } = build({
+        order: baseOrder({ users: customerRow({ document_number: '222222222222' }) }),
+      });
+      const body = await holderError(service.emitOrder(1));
+      expect(body.details.current).toMatchObject({ document_type: 'CC', document_number: null });
+    });
+
+    it('A5: orden sin cobrar (no es crédito) + allow_final_consumer: sale de contado a Consumidor final con «Acuerdo mutuo»', async () => {
+      const { service, invoicing, receivables, order_flow, prisma } = build({
+        order: incompleteOrder({ payments: [{ state: 'pending', amount: 100 }], state: 'finished' }),
+      });
+      const r = await service.emitOrder(1, undefined, { force_final_consumer: true });
+      expect(r.state).toBe('issued');
+      expect(invoicing.createFromOrder).toHaveBeenCalledWith(1, {
+        force_final_consumer: true,
+        cash_by_mutual_agreement: true,
+      });
+      // La orden no se convierte a crédito ni se inventa un pago.
+      expect(receivables.createCreditSaleFromEvent).not.toHaveBeenCalled();
+      expect(order_flow.promoteDraftForCreditInvoicing).not.toHaveBeenCalled();
+      const order_writes = prisma.orders.updateMany.mock.calls.map((c: any[]) => c[0].data);
+      expect(order_writes.some((d: any) => 'payment_form' in d || 'state' in d)).toBe(false);
+    });
+
+    it('A5: orden sin cobrar con cliente COMPLETO + allow_final_consumer (rechazó el crédito): contado «Acuerdo mutuo» a Consumidor final', async () => {
+      const { service, invoicing, receivables } = build({
+        order: baseOrder({ payments: [], state: 'finished' }),
+      });
+      const r = await service.emitOrder(1, undefined, { force_final_consumer: true });
+      expect(r.state).toBe('issued');
+      expect(invoicing.createFromOrder).toHaveBeenCalledWith(1, {
+        force_final_consumer: true,
+        cash_by_mutual_agreement: true,
+      });
+      expect(receivables.createCreditSaleFromEvent).not.toHaveBeenCalled();
+    });
+
+    it('A5: orden sin cobrar SIN cliente + allow_final_consumer: contado «Acuerdo mutuo» (antes: «asigna un cliente»)', async () => {
+      const { service, invoicing } = build({
+        order: baseOrder({ customer_id: null, users: null, payments: [], state: 'finished' }),
+      });
+      const r = await service.emitOrder(1, undefined, { force_final_consumer: true });
+      expect(r.state).toBe('issued');
+      expect(invoicing.createFromOrder).toHaveBeenCalledWith(1, {
+        force_final_consumer: true,
+        cash_by_mutual_agreement: true,
+      });
+    });
+
+    it('A5: orden sin cobrar con cliente completo SIN allow: sigue ofreciendo crédito (409 ORDER_UNPAID, credit_eligible)', async () => {
+      const { service, invoicing } = build({
+        order: baseOrder({ payments: [], state: 'finished' }),
+      });
+      const err: any = await service.emitOrder(1).catch((e) => e);
+      expect(err.errorCode).toBe(ErrorCodes.INVOICING_ORDER_UNPAID_001.code);
+      expect(err.getResponse().details).toMatchObject({ credit_eligible: true });
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
+
+    it('A5: orden cancelada + allow_final_consumer: no sale a Consumidor final', async () => {
+      const { service, invoicing } = build({
+        order: baseOrder({ payments: [], state: 'cancelled' }),
+      });
+      await service.emitOrder(1, undefined, { force_final_consumer: true }).catch(() => undefined);
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
+
+    it('A5: orden pagada + allow_final_consumer: Consumidor final con el medio de pago real (sin «Acuerdo mutuo»)', async () => {
+      const { service, invoicing } = build({ order: incompleteOrder() });
+      await service.emitOrder(1, undefined, { force_final_consumer: true });
+      expect(invoicing.createFromOrder).toHaveBeenCalledWith(1, { force_final_consumer: true });
+    });
+
+    it('A5: orden sin cobrar SIN allow_final_consumer: sigue ofreciendo crédito primero (409 de titular)', async () => {
+      const { service, invoicing } = build({
+        order: incompleteOrder({ payments: [], state: 'finished' }),
+      });
+      const body = await holderError(service.emitOrder(1));
+      expect(body.details).toMatchObject({ cf_overridable: true });
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
     });
 
     it('factura ya numerada: el reintento no se bloquea (titular congelado)', async () => {

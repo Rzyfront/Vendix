@@ -1244,9 +1244,11 @@ export class DispatchNoteEventsListener {
             select: { remaining_balance: true, payment_form: true },
           });
           const remaining = Number(order?.remaining_balance ?? 0);
-          // Credit orders (payment_form '2') stay in cartera: invoicing the
-          // remisión is NOT a payment. Only a route collection settles them.
-          if (remaining > 0 && order?.payment_form !== '2') {
+          // Credit orders (payment_form '2') are filtered inside the helper:
+          // a pure credit sale stays in cartera (invoicing the remisión is NOT
+          // a payment); a contra entrega sale invoiced on credit before
+          // delivery is collected here and settles its AR (cod-auto-invoicing S6).
+          if (remaining > 0) {
             await this.orderFlowService.applyDispatchCodPayment({
               storeId: store_id,
               dispatchNoteId: dispatch_note.id,

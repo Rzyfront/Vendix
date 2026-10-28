@@ -461,9 +461,9 @@ export interface PosInvoicingSettings {
   /**
    * Emitir el documento electrónico automáticamente al cerrar la venta.
    *
-   * Default `true` (ver `DEFAULT_POS_AUTO_EMIT`). La emisión ocurre SIEMPRE
-   * fuera de la transacción del cobro, así que apagarlo no hace la caja más
-   * rápida: sólo obliga a pedir el documento a mano desde el POS.
+   * Default `false` (ver `DEFAULT_POS_AUTO_EMIT`): sólo emite sola la tienda
+   * que lo enciende explícitamente. Apagado, el documento se pide a mano con
+   * «Facturar». La emisión ocurre SIEMPRE fuera de la transacción del cobro.
    */
   auto_emit?: boolean;
   /**
@@ -487,7 +487,8 @@ export interface EcommerceInvoicingSettings {
   /**
    * Emitir el documento electrónico automáticamente al cerrar la venta online.
    *
-   * Default `true` (ver `DEFAULT_ECOMMERCE_AUTO_EMIT`).
+   * Default `false` (ver `DEFAULT_ECOMMERCE_AUTO_EMIT`): sólo emite sola la
+   * tienda que lo enciende explícitamente.
    */
   auto_emit?: boolean;
 }
@@ -502,15 +503,14 @@ export interface InvoicingSettings {
 }
 
 /**
- * Emisión automática al cerrar la venta, activa salvo que la tienda la apague.
+ * Emisión automática al cerrar la venta: APAGADA salvo que la tienda la encienda.
  *
- * El default es `true` porque una tienda habilitada ante la DIAN debe soportar
- * cada venta con un documento: dejarlo apagado por defecto convertiría la
- * obligación en un clic que alguien tiene que acordarse de dar. No hay riesgo
- * para quien no factura electrónicamente — la compuerta de habilitación corta
- * antes de crear nada y la venta ni se entera.
+ * Decisión de negocio (2026-10-28): sólo emite automáticamente la tienda que
+ * lo enciende explícitamente (`invoicing.pos.auto_emit = true`). Sin valor
+ * guardado, la factura se emite a mano con «Facturar». Cambiar este default
+ * no toca datos: las tiendas que guardaron `true` siguen emitiendo.
  */
-export const DEFAULT_POS_AUTO_EMIT = true;
+export const DEFAULT_POS_AUTO_EMIT = false;
 
 /**
  * Ante un fallo de emisión en el POS, dejar constancia.
@@ -524,13 +524,12 @@ export const DEFAULT_POS_AUTO_EMIT = true;
 export const DEFAULT_POS_DIAN_FAILURE_POLICY: PosDianFailurePolicy = 'queue';
 
 /**
- * Emisión automática de e-commerce, en `true` a propósito.
+ * Emisión automática de e-commerce: APAGADA salvo que la tienda la encienda.
  *
- * Hoy la tienda en línea emite SIEMPRE, sin ninguna bandera que lo controle.
- * Si este default fuera `false`, el día que se despliegue la clave apagaría
- * la emisión de TODAS las tiendas de golpe, sin que nadie lo haya pedido.
+ * Misma decisión que `DEFAULT_POS_AUTO_EMIT` (2026-10-28): sólo emite sola la
+ * tienda con `invoicing.ecommerce.auto_emit = true` guardado.
  */
-export const DEFAULT_ECOMMERCE_AUTO_EMIT = true;
+export const DEFAULT_ECOMMERCE_AUTO_EMIT = false;
 
 export interface StoreSettings {
   /**

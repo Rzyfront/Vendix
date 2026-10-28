@@ -34,9 +34,15 @@ import {
 import {
   CreatePriceTierDto,
   PriceTier,
+  PriceTierAdjustmentType,
+  PriceTierAmountScope,
   PriceTierKind,
   UpdatePriceTierDto,
 } from '../../interfaces';
+import {
+  buildPriceTierRulePayload,
+  isFixedAmountTierType,
+} from '../../utils/price-tier-rule.util';
 import { PriceTiersService, PriceTierCacheService } from '../../services';
 
 /**
@@ -55,6 +61,12 @@ interface PriceTierFormControls {
   code: FormControl<string>;
   description: FormControl<string>;
   discount_percentage: FormControl<number | null>;
+  /** Cómo la tarifa ajusta el precio; `percent_discount` usa `discount_percentage`. */
+  adjustment_type: FormControl<PriceTierAdjustmentType>;
+  /** Valor de los tipos nuevos (porcentaje de recargo o monto). */
+  adjustment_value: FormControl<number | null>;
+  /** Solo para montos fijos: por unidad o por paquete. */
+  amount_scope: FormControl<PriceTierAmountScope>;
   is_active: FormControl<boolean>;
   is_default: FormControl<boolean>;
   /**
@@ -64,6 +76,24 @@ interface PriceTierFormControls {
    */
   units_per_package: FormControl<number | null>;
   sort_order: FormControl<number | null>;
+}
+
+/**
+ * Valida el valor de ajuste contra el tipo elegido (mismo builder que arma el
+ * payload). El error lleva el texto a mostrar.
+ */
+function tierRuleValueValidator(): ValidatorFn {
+  return (control: AbstractControl): ValidationErrors | null => {
+    const group = control.parent;
+    if (!group) return null;
+    const { error } = buildPriceTierRulePayload({
+      adjustment_type: group.get('adjustment_type')?.value ?? 'percent_discount',
+      discount_percentage: group.get('discount_percentage')?.value ?? 0,
+      adjustment_value: control.value,
+      amount_scope: group.get('amount_scope')?.value ?? 'per_unit',
+    });
+    return error ? { rule: error } : null;
+  };
 }
 
 /**
@@ -115,6 +145,39 @@ export class PriceTierFormPageComponent implements OnInit {
     },
   ];
 
+  readonly adjustmentTypeOptions = [
+    {
+      value: 'percent_discount',
+      label: 'Descuento porcentual',
+      description: 'Ej.: 10 % menos sobre el precio base',
+    },
+    {
+      value: 'percent_surcharge',
+      label: 'Recargo porcentual',
+      description: 'Ej.: 10 % más sobre el precio base',
+    },
+    {
+      value: 'fixed_amount_discount',
+      label: 'Descuento de monto fijo',
+      description: 'Ej.: $500 menos',
+    },
+    {
+      value: 'fixed_amount_surcharge',
+      label: 'Recargo de monto fijo',
+      description: 'Ej.: $500 más',
+    },
+    {
+      value: 'fixed_price',
+      label: 'Precio fijo',
+      description: 'Todos los productos con esta tarifa valen lo mismo',
+    },
+  ];
+
+  readonly amountScopeOptions = [
+    { value: 'per_unit', label: 'Por unidad' },
+    { value: 'per_package', label: 'Por paquete' },
+  ];
+
   private readonly fb = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
@@ -143,6 +206,13 @@ export class PriceTierFormPageComponent implements OnInit {
       discount_percentage: new FormControl<number | null>(0, {
         validators: [Validators.min(0), Validators.max(100)],
       }),
+      adjustment_type:
+        this.fb.nonNullable.control<PriceTierAdjustmentType>('percent_discount'),
+      adjustment_value: new FormControl<number | null>(null, {
+        validators: [tierRuleValueValidator()],
+      }),
+      amount_scope:
+        this.fb.nonNullable.control<PriceTierAmountScope>('per_unit'),
       is_active: this.fb.nonNullable.control(true),
       is_default: this.fb.nonNullable.control(false),
       units_per_package: new FormControl<number | null>(null, {
@@ -163,6 +233,42 @@ export class PriceTierFormPageComponent implements OnInit {
     this.form.statusChanges.pipe(startWith(this.form.status)),
     { initialValue: this.form.status },
   );
+
+  readonly adjustmentType = toSignal(
+    this.form.controls.adjustment_type.valueChanges.pipe(
+      startWith(this.form.controls.adjustment_type.value),
+    ),
+    { initialValue: this.form.controls.adjustment_type.value },
+  );
+  readonly isPercentDiscount = computed(
+    () => this.adjustmentType() === 'percent_discount',
+  );
+  readonly showsAmountScope = computed(() =>
+    isFixedAmountTierType(this.adjustmentType()),
+  );
+  readonly adjustmentValueLabel = computed(() => {
+    switch (this.adjustmentType()) {
+      case 'percent_surcharge':
+        return 'Recargo (%)';
+      case 'fixed_amount_discount':
+        return 'Monto a descontar';
+      case 'fixed_amount_surcharge':
+        return 'Monto a sumar';
+      case 'fixed_price':
+        return 'Precio fijo';
+      default:
+        return 'Valor';
+    }
+  });
+
+  constructor() {
+    // El valor se valida contra el tipo: cambiar el tipo re-evalúa el valor.
+    this.form.controls.adjustment_type.valueChanges
+      .pipe(takeUntilDestroyed())
+      .subscribe(() =>
+        this.form.controls.adjustment_value.updateValueAndValidity(),
+      );
+  }
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     {
@@ -225,6 +331,10 @@ export class PriceTierFormPageComponent implements OnInit {
         tier.discount_percentage == null
           ? 0
           : Number(tier.discount_percentage),
+      adjustment_type: tier.adjustment_type ?? 'percent_discount',
+      adjustment_value:
+        tier.adjustment_value == null ? null : Number(tier.adjustment_value),
+      amount_scope: tier.amount_scope ?? 'per_unit',
       is_active: tier.is_active,
       is_default: tier.is_default,
       units_per_package:
@@ -264,13 +374,24 @@ export class PriceTierFormPageComponent implements OnInit {
       Number.isInteger(unitsPerPackage) &&
       unitsPerPackage >= 2;
 
+    const rule = buildPriceTierRulePayload({
+      adjustment_type: raw.adjustment_type,
+      discount_percentage: raw.discount_percentage,
+      adjustment_value: raw.adjustment_value,
+      amount_scope: raw.amount_scope,
+    });
+    if (rule.error) {
+      this.form.controls.adjustment_value.markAsTouched();
+      this.toastService.warning(rule.error);
+      return;
+    }
+
     const payload: CreatePriceTierDto = {
       name: raw.name.trim(),
       kind: raw.kind,
       code: raw.code?.trim() ? raw.code.trim() : undefined,
       description: raw.description?.trim() ? raw.description.trim() : undefined,
-      discount_percentage:
-        raw.discount_percentage == null ? 0 : Number(raw.discount_percentage),
+      ...rule.payload,
       is_active: raw.is_active,
       is_default: raw.is_default,
       // On create: only send packaging when present (omit otherwise).
@@ -319,6 +440,7 @@ export class PriceTierFormPageComponent implements OnInit {
   getError(fieldName: keyof PriceTierFormControls): string {
     const control = this.form.get(fieldName);
     if (!control || !control.touched || !control.errors) return '';
+    if (control.errors['rule']) return control.errors['rule'];
     if (control.errors['required']) return 'Este campo es requerido';
     if (control.errors['maxlength']) return 'Texto demasiado largo';
     if (control.errors['integer']) return 'Debe ser un número entero';

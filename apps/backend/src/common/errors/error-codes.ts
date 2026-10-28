@@ -1814,6 +1814,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Customer not found',
   },
+  CUST_PRICE_TIER_001: {
+    code: 'CUST_PRICE_TIER_001',
+    httpStatus: 400,
+    devMessage:
+      'The price tier does not exist in this store or is not a customer tier',
+  },
   CUST_CREATE_001: {
     code: 'CUST_CREATE_001',
     httpStatus: 400,
@@ -6205,6 +6211,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Datos inválidos para la tarifa de precios',
   },
+  PRICE_TIER_ADJUSTMENT_001: {
+    code: 'PRICE_TIER_ADJUSTMENT_001',
+    httpStatus: 400,
+    devMessage:
+      'La regla de la tarifa necesita un valor mayor que 0 (y un recargo porcentual de máximo 1000 %)',
+  },
   PRICE_TIER_NOT_ALLOWED: {
     code: 'PRICE_TIER_NOT_ALLOWED',
     httpStatus: 422,
@@ -6220,6 +6232,11 @@ export const ErrorCodes = {
     code: 'PRICE_TIER_OVERRIDE_PRODUCT_001',
     httpStatus: 404,
     devMessage: 'Producto no encontrado para asignar override de tarifa',
+  },
+  PRICE_TIER_OVERRIDE_VARIANT_001: {
+    code: 'PRICE_TIER_OVERRIDE_VARIANT_001',
+    httpStatus: 404,
+    devMessage: 'La variante no pertenece a este producto',
   },
   PROD_UOM_NOT_STOCK_ELIGIBLE: {
     code: 'PROD_UOM_NOT_STOCK_ELIGIBLE',

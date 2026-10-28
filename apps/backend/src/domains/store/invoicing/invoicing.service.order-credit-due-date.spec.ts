@@ -64,7 +64,12 @@ describe('InvoicingService.createFromOrder — crédito: due_date y medio de pag
 
   const create = async (
     order: Record<string, unknown>,
-    opts?: { due_date?: Date; payment_means_code?: string },
+    opts?: {
+      due_date?: Date;
+      payment_means_code?: string;
+      force_final_consumer?: boolean;
+      cash_by_mutual_agreement?: boolean;
+    },
   ) => {
     prisma.orders.findFirst.mockResolvedValue(
       buildOrder({
@@ -158,5 +163,25 @@ describe('InvoicingService.createFromOrder — crédito: due_date y medio de pag
     expect(data.payment_means_code).toBe('10');
     expect(data).not.toHaveProperty('due_date');
     expect(prisma.accounts_receivable.findFirst).not.toHaveBeenCalled();
+  });
+  it('Consumidor final sin cobrar: contado «Acuerdo mutuo» (ZZZ), sin vencimiento ni cartera', async () => {
+    const data = await create(
+      { payment_form: null, payments: [] },
+      { force_final_consumer: true, cash_by_mutual_agreement: true },
+    );
+    expect(data.payment_form).toBe('1');
+    expect(data.payment_means_code).toBe('ZZZ');
+    expect(data.customer_tax_id).toBe('222222222222');
+    expect(data).not.toHaveProperty('due_date');
+    expect(prisma.accounts_receivable.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('«Acuerdo mutuo» sin force_final_consumer se ignora: la orden sin pagos sigue resolviéndose a crédito', async () => {
+    const data = await create(
+      { payment_form: null, payments: [] },
+      { cash_by_mutual_agreement: true },
+    );
+    expect(data.payment_form).toBe('2');
+    expect(data.payment_means_code).not.toBe('ZZZ');
   });
 });

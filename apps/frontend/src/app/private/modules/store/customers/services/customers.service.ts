@@ -155,6 +155,20 @@ export class CustomersService {
     }
 
     /**
+     * Tarifa preferencial del cliente (`GET /store/customers/:id/price-tier`).
+     * `null` sin tarifa o si la lectura falla: el aviso no debe romper el flujo.
+     */
+    getCustomerPriceTier(id: number): Observable<{ id: number; name: string } | null> {
+        return this.http.get<any>(`${this.apiUrl}/${id}/price-tier`).pipe(
+            map((response) => {
+                const tier = (response?.data ?? response)?.price_tier;
+                return tier?.id ? { id: Number(tier.id), name: String(tier.name) } : null;
+            }),
+            catchError(() => of(null)),
+        );
+    }
+
+    /**
      * Paso 5 — `GET /store/customers/lookup?document_number=&document_type=`.
      * Busca el titular en la organización (el backend lo vincula al store si
      * falta el link). `null` = sin coincidencia. Los errores resuelven a

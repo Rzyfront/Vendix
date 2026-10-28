@@ -106,14 +106,39 @@
             </p>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <app-input
-              label="Descuento (%)"
-              formControlName="discount_percentage"
-              type="number"
-              placeholder="0"
-              [error]="getError('discount_percentage')"
+          <div class="mb-3">
+            <app-selector
+              label="Regla de precio"
+              formControlName="adjustment_type"
+              [options]="adjustmentTypeOptions"
             />
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            @if (isPercentDiscount()) {
+              <app-input
+                label="Descuento (%)"
+                formControlName="discount_percentage"
+                type="number"
+                placeholder="0"
+                [error]="getError('discount_percentage')"
+              />
+            } @else {
+              <app-input
+                [label]="adjustmentValueLabel()"
+                formControlName="adjustment_value"
+                type="number"
+                placeholder="0"
+                [error]="getError('adjustment_value')"
+              />
+            }
+            @if (showsAmountScope()) {
+              <app-selector
+                label="El monto aplica"
+                formControlName="amount_scope"
+                [options]="amountScopeOptions"
+              />
+            }
             <app-input
               label="Orden de visualización"
               formControlName="sort_order"
@@ -124,8 +149,10 @@
           </div>
 
           <p class="mt-3 text-xs text-text-secondary">
-            El descuento (0 a 100) se aplica sobre el precio base del producto
-            cuando no hay un precio específico definido para esta tarifa.
+            La regla se aplica sobre el precio base del producto (en su misma
+            convención de IVA) cuando no hay un precio específico definido para
+            esta tarifa. El precio fijo reemplaza el precio de todos los
+            productos que la usen.
           </p>
 
           <div class="mt-3">

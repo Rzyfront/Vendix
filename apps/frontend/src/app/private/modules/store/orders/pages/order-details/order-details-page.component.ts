@@ -89,8 +89,13 @@ import {
   OrderEvent,
   OrderEventType,
   OrderEventSource,
+  ItemChangesDto,
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import {
+  cancelCreditNoteConfirm,
+  readCancelCreditNoteRequired,
+} from '../../utils/cancel-credit-note.util';
 import { SETTLED_PAYMENT_STATES_FE } from '../../utils/order-settlement.util';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
@@ -187,6 +192,7 @@ import {
   type CreditInvoiceSubmit,
 } from '../../components/credit-invoice-modal/credit-invoice-modal.component';
 import { CustomerHolderCompletionModalComponent } from '../../../customers/components/customer-holder-completion-modal/customer-holder-completion-modal.component';
+import { unpaidFinalConsumerConfirm } from '../../utils/unpaid-final-consumer-confirm.util';
 import {
   holderIssueFromDetails,
   type HolderIssue,
@@ -200,6 +206,12 @@ import {
 // Paso 5: reutiliza el modal canónico de clientes (quick/advanced,
 // NATURAL/JURIDICA) para capturar el nuevo titular de la orden.
 import { CustomerModalComponent } from '../../../customers/components/customer-modal/customer-modal.component';
+import { PosCustomerTierModalComponent } from '../../../pos/components/pos-customer-tier-modal.component';
+import {
+  CustomerTierPrompt,
+  followUpRestorePrompt,
+} from '../../../pos/utils/customer-tier-prompt.util';
+import { orderCustomerTierPrompt } from '../../utils/order-customer-tier-prompt.util';
 import { ChangeTitularSearchModalComponent } from '../../components/change-titular-search-modal/change-titular-search-modal.component';
 import {
   CustomersService,
@@ -1059,6 +1071,7 @@ export interface InvoiceCardView {
     CreditInvoiceModalComponent,
     CustomerHolderCompletionModalComponent,
     OrderItemsEditModalComponent,
+    PosCustomerTierModalComponent,
     OrderRefundModalComponent,
     OrderCompleteModalComponent,
     CustomerModalComponent,
@@ -2367,6 +2380,17 @@ export class OrderDetailsPageComponent {
       } as OrderActionConfig);
     }
 
+    // S6 — tarifa preferencial del titular sobre los productos de la orden.
+    if (order.customer_id && this.canRetierOrder()) {
+      buttons.push({
+        id: 'apply-customer-tier',
+        label: 'Aplicar tarifa del cliente',
+        icon: 'tag',
+        variant: 'secondary',
+        enabled: !this.applyingCustomerTier(),
+      } as OrderActionConfig);
+    }
+
     // Con saldo por cobrar, Finalizar se sustituye por el aviso de saldo.
     const visibleButtons = this.showUnpaidBalanceNotice()
       ? buttons.filter((b) => b.id !== 'finish')
@@ -3258,6 +3282,9 @@ export class OrderDetailsPageComponent {
         break;
       case 'edit-order':
         this.openItemsEditModal();
+        break;
+      case 'apply-customer-tier':
+        this.offerCustomerTier(null, this.order()?.customer_id ?? null, true);
         break;
       case 'ship':
         this.openShipModal();
@@ -4299,6 +4326,11 @@ export class OrderDetailsPageComponent {
       ...(disposition != null ? { kitchenDisposition: disposition } : {}),
     };
 
+    this.sendCancellation(payload);
+  }
+
+  private sendCancellation(payload: FlowCancelOrderDto): void {
+    if (!this.orderId) return;
     this.isProcessingAction.set(true);
     this.ordersService
       .flowCancelOrder(this.orderId, payload)
@@ -4308,11 +4340,22 @@ export class OrderDetailsPageComponent {
           this.showCancelModal.set(false);
           this.isProcessingAction.set(false);
           this.cancelKitchenDisposition.set('reuse');
-          this.toastService.success('Orden cancelada');
+          this.toastService.success(
+            payload.issueCreditNote
+              ? 'Nota crédito emitida y orden cancelada'
+              : 'Orden cancelada',
+          );
           this.loadData();
         },
         error: (err: unknown) => {
           this.isProcessingAction.set(false);
+          // cod-auto-invoicing S5 — factura aceptada por la DIAN: se ofrece
+          // emitir la nota crédito total y cancelar, con confirmación clara.
+          const creditNoteBlock = readCancelCreditNoteRequired(err);
+          if (creditNoteBlock && payload.issueCreditNote !== true) {
+            void this.confirmCancelWithCreditNote(payload, creditNoteBlock.invoiceNumber);
+            return;
+          }
           // 403 (permiso de cancelar comandas) → copy fijo, sin romper
           // la vista: el modal queda abierto para reintentar o salir.
           // 422 (p. ej. decisión requerida) u otro → mensaje del backend
@@ -4335,6 +4378,17 @@ export class OrderDetailsPageComponent {
           );
         },
       });
+  }
+
+  private async confirmCancelWithCreditNote(
+    payload: FlowCancelOrderDto,
+    invoiceNumber: string | null,
+  ): Promise<void> {
+    const confirmed = await this.dialogService.confirm(
+      cancelCreditNoteConfirm(invoiceNumber),
+    );
+    if (!confirmed) return;
+    this.sendCancellation({ ...payload, issueCreditNote: true });
   }
 
   // ── Plan refund-gateway-dispatch-fix (Step C.1): manual refund resolve ──
@@ -5736,6 +5790,7 @@ export class OrderDetailsPageComponent {
   onTitularSearchSelected(customer: Customer): void {
     const id = this.order()?.id;
     if (!id) return;
+    const previousCustomerId = this.order()?.customer_id ?? null;
     this.showTitularSearchModal.set(false);
     this.changingCustomer.set(true);
     this.ordersService
@@ -5748,6 +5803,34 @@ export class OrderDetailsPageComponent {
         next: () => {
           this.toastService.success('Titular de la orden actualizado');
           this.refreshOrder();
+          this.offerCustomerTier(previousCustomerId, customer.id);
+        },
+        error: (error: unknown) => this.handleChangeCustomerError(error),
+      });
+  }
+
+  /**
+   * «Cambiar a consumidor final»: quita el titular (`customer_id: null`). El
+   * backend aplica las mismas guardas que al cambiar de cliente (factura
+   * transmitida, cartera abierta) y propaga el cambio al borrador.
+   */
+  onTitularSearchUseFinalConsumer(): void {
+    const order = this.order();
+    if (!order?.id) return;
+    const previousCustomerId = order.customer_id ?? null;
+    this.showTitularSearchModal.set(false);
+    this.changingCustomer.set(true);
+    this.ordersService
+      .updateOrderCustomer(String(order.id), null)
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.changingCustomer.set(false)),
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success('La orden quedó a nombre de Consumidor final');
+          this.refreshOrder();
+          this.offerCustomerTier(previousCustomerId, null);
         },
         error: (error: unknown) => this.handleChangeCustomerError(error),
       });
@@ -5772,6 +5855,7 @@ export class OrderDetailsPageComponent {
   onChangeCustomerSave(data: CreateCustomerRequest): void {
     const id = this.order()?.id;
     if (!id) return;
+    const previousCustomerId = this.order()?.customer_id ?? null;
     this.changingCustomer.set(true);
     const doc = data.document_number?.trim();
     const lookup$ = doc
@@ -5802,7 +5886,7 @@ export class OrderDetailsPageComponent {
             .pipe(
               switchMap((order) => {
                 this.persistChangeCustomerAddress(resolved.customer.id);
-                return of(order);
+                return of({ order, customerId: resolved.customer.id });
               }),
             ),
         ),
@@ -5810,12 +5894,13 @@ export class OrderDetailsPageComponent {
         finalize(() => this.changingCustomer.set(false)),
       )
       .subscribe({
-        next: () => {
+        next: ({ customerId }) => {
           this.toastService.success('Titular de la orden actualizado');
           this.showChangeCustomerModal.set(false);
           this.changeCustomerInitialValues.set(null);
           this.pendingChangeCustomerAddress.set(null);
           this.refreshOrder();
+          this.offerCustomerTier(previousCustomerId, customerId);
         },
         error: (error: unknown) => this.handleChangeCustomerError(error),
       });
@@ -5853,6 +5938,127 @@ export class OrderDetailsPageComponent {
           this.toastService.warning(
             'Titular actualizado, pero no se pudo guardar su dirección.',
           );
+        },
+      });
+  }
+
+  // ─── S6 — tarifa preferencial del cliente ─────────────────────────
+  readonly customerTierPrompt = signal<CustomerTierPrompt | null>(null);
+  readonly applyingCustomerTier = signal(false);
+
+  /**
+   * Cambiar la tarifa de las líneas usa el mismo motor que «Modificar
+   * Orden»: solo en una orden editable, sin cobro, sin factura ni división,
+   * y con permiso para aplicar tarifas (el backend vuelve a validarlo).
+   */
+  readonly canRetierOrder = computed(() => {
+    const order = this.order();
+    return (
+      !!order &&
+      (order.available_actions ?? []).some(
+        (action) => action.code === 'edit_order' && action.enabled !== false,
+      ) &&
+      !order.active_financial_split_id &&
+      !this.invoiceLocked() &&
+      !isOrderItemCancellationPaid(order) &&
+      this.hasNamedPermission('store:products:apply_pricing_tier')
+    );
+  });
+
+  /**
+   * Pregunta si aplicar la tarifa del nuevo titular (o restaurar el precio
+   * regular de las líneas con la del anterior). `fromAction`: el usuario lo
+   * pidió desde el botón, así que un «no hay nada que aplicar» se explica.
+   */
+  private offerCustomerTier(
+    previousCustomerId: number | null,
+    nextCustomerId: number | null,
+    fromAction = false,
+  ): void {
+    if (!this.canRetierOrder() || previousCustomerId === nextCustomerId) return;
+    forkJoin({
+      previous: previousCustomerId
+        ? this.customersService.getCustomerPriceTier(previousCustomerId)
+        : of(null),
+      next: nextCustomerId
+        ? this.customersService.getCustomerPriceTier(nextCustomerId)
+        : of(null),
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(({ previous, next }) => {
+        const prompt = orderCustomerTierPrompt({
+          items: this.order()?.order_items ?? [],
+          previousTier: previous,
+          nextTier: next,
+          canApplyTier: true,
+        });
+        this.customerTierPrompt.set(prompt);
+        if (!prompt && fromAction) {
+          this.toastService.info(
+            next
+              ? `Ningún producto de la orden admite la tarifa ${next.name} o ya la tienen`
+              : 'El cliente no tiene tarifa preferencial',
+          );
+        }
+      });
+  }
+
+  /** Aplica (o restaura) la tarifa en las líneas elegidas: preview → apply. */
+  /** "No aplicar": las líneas siguen con la tarifa del cliente anterior. */
+  onCustomerTierDismissed(): void {
+    this.customerTierPrompt.set(
+      followUpRestorePrompt(this.customerTierPrompt(), []),
+    );
+  }
+
+  onCustomerTierConfirmed(itemIds: string[]): void {
+    const prompt = this.customerTierPrompt();
+    this.customerTierPrompt.set(null);
+    const order = this.order();
+    if (!prompt || !order || itemIds.length === 0) return;
+    const followUp = followUpRestorePrompt(prompt, itemIds);
+    const dto: ItemChangesDto = {
+      retier: itemIds.map((itemId) => ({
+        order_item_id: Number(itemId),
+        price_tier_id: prompt.mode === 'apply' ? prompt.tier.id : null,
+      })),
+    };
+    this.applyingCustomerTier.set(true);
+    this.ordersService
+      .previewItemChanges(order.id, dto)
+      .pipe(
+        switchMap((preview) => {
+          if (!preview.can_apply) {
+            const blocked = preview.lines.find((line) => line.blocked);
+            throw new Error(
+              blocked?.blocked_reason ?? 'No se pudo aplicar la tarifa',
+            );
+          }
+          return this.ordersService.applyItemChanges(order.id, {
+            ...dto,
+            expected_version: preview.version,
+          });
+        }),
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.applyingCustomerTier.set(false)),
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            prompt.mode === 'apply'
+              ? `Tarifa ${prompt.tier.name} aplicada`
+              : 'Precio regular restaurado',
+          );
+          this.loadData();
+          if (followUp) this.customerTierPrompt.set(followUp);
+        },
+        error: (error: unknown) => {
+          this.toastService.error(
+            error instanceof Error && error.message
+              ? error.message
+              : 'No se pudo aplicar la tarifa',
+          );
+          this.loadData();
         },
       });
   }
@@ -7736,7 +7942,10 @@ export class OrderDetailsPageComponent {
         const parsed = parseApiError(err);
         this.showCreditModal.set(false);
         // The holder check runs BEFORE the unpaid/credit check on the backend.
-        if (accountId == null && this.handleHolderIncomplete(key, parsed)) {
+        if (
+          accountId == null &&
+          this.handleHolderIncomplete(key, parsed, allowFinalConsumer)
+        ) {
           return;
         }
         if (accountId == null && this.handleUnpaidEmitRejection(key, parsed)) {
@@ -7779,18 +7988,27 @@ export class OrderDetailsPageComponent {
    * `INVOICING_HOLDER_INCOMPLETE_001`: el cliente de la orden no alcanza para una
    * factura nominativa. Nunca cae a Consumidor final en silencio: abre el modal
    * para completar los datos (o aceptar Consumidor final de forma explícita).
+   * Si el rechazo llega DESPUÉS de pedir Consumidor final (venta a crédito o
+   * saldo sin cobrar), el motivo se avisa siempre (toast + tarjeta) antes de
+   * reabrir el modal: el clic nunca queda mudo.
    * Devuelve `true` cuando atendió el rechazo.
    */
   private handleHolderIncomplete(
     key: string,
     parsed: ReturnType<typeof parseApiError>,
+    afterFinalConsumer = false,
   ): boolean {
     if (parsed.errorCode !== 'INVOICING_HOLDER_INCOMPLETE_001') return false;
     const issue = holderIssueFromDetails(parsed.details);
-    if (!issue) {
-      this.setEmitError(key, parsed.userMessage);
-      this.toastService.error(parsed.userMessage);
-      return true;
+    if (!issue || afterFinalConsumer) {
+      const message = issue?.message || parsed.userMessage;
+      this.setEmitError(key, message);
+      this.toastService.show({
+        description: message,
+        variant: 'error',
+        duration: 8000,
+      });
+      if (!issue) return true;
     }
     this.holderEmitKey = key;
     this.holderIssue.set(issue);
@@ -7804,11 +8022,14 @@ export class OrderDetailsPageComponent {
     this.runEmit(this.holderEmitKey, null, undefined, this.emitAllowFinalConsumer);
   }
 
-  /** Explicit «Emitir como Consumidor final»: retry with the override. */
-  onHolderUseFinalConsumer(): void {
+  /**
+   * Explicit «Emitir como Consumidor final»: retry with the override. An unpaid
+   * order asks first; «Volver» keeps the holder modal open.
+   */
+  async onHolderUseFinalConsumer(): Promise<void> {
+    if (!(await this.confirmFinalConsumerCash(false))) return;
     this.showHolderModal.set(false);
-    this.emitAllowFinalConsumer = true;
-    this.runEmit(this.holderEmitKey, null, undefined, true);
+    this.emitAsFinalConsumerCash(this.holderEmitKey);
   }
 
   /**
@@ -7835,13 +8056,62 @@ export class OrderDetailsPageComponent {
     const blocker = details['credit_blocker'];
     const message =
       blocker === 'customer_required'
-        ? 'Asigna un cliente identificado para facturar a crédito.'
+        ? 'La orden no tiene cliente identificado: no puede facturarse a crédito. Puedes emitirla como Consumidor final de contado.'
         : blocker === 'partial_payment'
-          ? 'La orden tiene abonos; registra el saldo o anula los abonos para facturar a crédito.'
+          ? 'La orden tiene abonos: no puede facturarse a crédito. Registra el saldo o emítela como Consumidor final de contado.'
           : parsed.userMessage;
     this.setEmitError(key, message);
+    // Sin crédito posible, la salida sin fricción es Consumidor final de
+    // contado («Acuerdo mutuo»): se ofrece en el mismo aviso.
+    if (blocker === 'customer_required' || blocker === 'partial_payment') {
+      this.toastService.show({
+        description: message,
+        variant: 'error',
+        duration: 10000,
+        action: {
+          label: 'Emitir como Consumidor final (contado)',
+          onClick: () => {
+            void this.confirmFinalConsumerCash(true).then((ok) => {
+              if (ok) this.emitAsFinalConsumerCash(key);
+            });
+          },
+        },
+      });
+      return true;
+    }
     this.toastService.error(message);
     return true;
+  }
+
+  /**
+   * «Facturar a crédito» → el cajero prefirió Consumidor final de contado. La
+   * orden está sin pagar (de ahí el modal): confirma antes; «Volver» deja el
+   * modal de crédito abierto.
+   */
+  async onCreditUseFinalConsumer(): Promise<void> {
+    if (!(await this.confirmFinalConsumerCash(true))) return;
+    this.showCreditModal.set(false);
+    this.emitAsFinalConsumerCash('order');
+  }
+
+  /**
+   * Orden sin pagar → Consumidor final: avisa que se recomienda crédito y que
+   * la factura sale de contado como ya pagada. `knownUnpaid`: el backend ya
+   * rechazó por saldo (`INVOICING_ORDER_UNPAID_001`); si no, decide el saldo
+   * local. Una orden pagada no pregunta.
+   */
+  private async confirmFinalConsumerCash(knownUnpaid: boolean): Promise<boolean> {
+    if (!knownUnpaid && !this.hasUnpaidBalance()) return true;
+    return this.dialogService.confirm(unpaidFinalConsumerConfirm(), { size: 'md' });
+  }
+
+  /**
+   * Orden sin cobrar emitida a Consumidor final: el backend la declara de
+   * contado con medio de pago «Acuerdo mutuo» (ZZZ) sin exigir el pago.
+   */
+  private emitAsFinalConsumerCash(key: string): void {
+    this.emitAllowFinalConsumer = true;
+    this.runEmit(key, null, undefined, true);
   }
 
   /** Confirmación del modal «Facturar a crédito»: reenvía la emisión con `credit`. */

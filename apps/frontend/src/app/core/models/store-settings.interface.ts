@@ -217,19 +217,16 @@ export interface InvoicingSettings {
  * que deja constancia consultable del fallo.
  */
 export const POS_INVOICING_SETTINGS_DEFAULTS: Required<PosInvoicingSettings> = {
-  auto_emit: true,
+  auto_emit: false,
   on_failure: 'queue',
 };
 
 /**
- * Default del carril e-commerce, en `true` A PROPÓSITO: hoy la tienda en línea
- * emite SIEMPRE, sin ninguna bandera que lo controle. Si este default fuera
- * `false`, el día que se despliegue la clave apagaría la emisión de TODAS las
- * tiendas de golpe, sin que nadie lo haya pedido. Espejo de
- * `DEFAULT_ECOMMERCE_AUTO_EMIT` del backend.
+ * Default del carril e-commerce: apagado. Sólo emite sola la tienda que lo
+ * enciende explícitamente. Espejo de `DEFAULT_ECOMMERCE_AUTO_EMIT` del backend.
  */
 export const ECOMMERCE_INVOICING_SETTINGS_DEFAULTS: Required<EcommerceInvoicingSettings> = {
-  auto_emit: true,
+  auto_emit: false,
 };
 
 /**

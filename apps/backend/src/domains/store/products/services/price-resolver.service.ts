@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { resolvePackSize } from './packaging.util';
+import {
+  applyTierAdjustment,
+  describeTierAdjustment,
+  TierAdjustmentRule,
+} from './tier-adjustment.util';
 
 export interface PriceResolverParams {
   product: {
@@ -68,6 +73,10 @@ export interface PriceResolverWithTierParams {
     id: number;
     name: string;
     discount_percentage: number;
+    /** Regla general (S1). Ausente = `percent_discount` histórico. */
+    adjustment_type?: TierAdjustmentRule['adjustment_type'];
+    adjustment_value?: TierAdjustmentRule['adjustment_value'];
+    amount_scope?: TierAdjustmentRule['amount_scope'];
     is_package_unit: boolean;
     units_per_package: number | null;
   } | null;
@@ -286,7 +295,9 @@ export class PriceResolverService {
    *   c. Otherwise apply the tier rule on the full-package base:
    *      base = variant.price_override (if > 0) or product.base_price.
    *      packageBase = base * packSize.
-   *      unitPrice = packageBase * (1 - discount_percentage / 100).
+   *      unitPrice = applyTierAdjustment(base, packSize, tier): percent
+   *      discount (historical), percent surcharge, fixed amount +/- or fixed
+   *      price; fixed amounts apply per unit or per package (`amount_scope`).
    *      `source = 'tier_rule'`.
    *
    *      With packSize === 1 the math is identical to the legacy single-unit
@@ -382,12 +393,11 @@ export class PriceResolverService {
       source = 'tier_override';
       reason = `Explicit package price for tier "${priceTier.name}"`;
     } else {
-      // (c) Apply discount rule on the full-package base.
-      const discount = Number(priceTier.discount_percentage ?? 0);
-      const clampedDiscount = Math.max(0, Math.min(100, discount));
-      unitPrice = packageBase * (1 - clampedDiscount / 100);
+      // (c) Apply the tier rule (discount, surcharge, fixed amount or fixed
+      // price) through the shared kernel, mirrored in the frontend.
+      unitPrice = applyTierAdjustment(ruleBasePrice, packSize, priceTier);
       source = 'tier_rule';
-      reason = `Tier "${priceTier.name}" rule (${clampedDiscount}% off, x${packSize})`;
+      reason = `Tier "${priceTier.name}" rule (${describeTierAdjustment(priceTier)}, x${packSize})`;
     }
 
     const compareAtPrice = packageBase > unitPrice ? packageBase : null;
