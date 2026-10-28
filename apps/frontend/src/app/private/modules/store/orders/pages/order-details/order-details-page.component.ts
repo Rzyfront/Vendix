@@ -92,6 +92,10 @@ import {
   ItemChangesDto,
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import {
+  cancelCreditNoteConfirm,
+  readCancelCreditNoteRequired,
+} from '../../utils/cancel-credit-note.util';
 import { SETTLED_PAYMENT_STATES_FE } from '../../utils/order-settlement.util';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { formatStockWarningSummary } from '../../../../../../core/utils/stock-shortage.util';
@@ -4322,6 +4326,11 @@ export class OrderDetailsPageComponent {
       ...(disposition != null ? { kitchenDisposition: disposition } : {}),
     };
 
+    this.sendCancellation(payload);
+  }
+
+  private sendCancellation(payload: FlowCancelOrderDto): void {
+    if (!this.orderId) return;
     this.isProcessingAction.set(true);
     this.ordersService
       .flowCancelOrder(this.orderId, payload)
@@ -4331,11 +4340,22 @@ export class OrderDetailsPageComponent {
           this.showCancelModal.set(false);
           this.isProcessingAction.set(false);
           this.cancelKitchenDisposition.set('reuse');
-          this.toastService.success('Orden cancelada');
+          this.toastService.success(
+            payload.issueCreditNote
+              ? 'Nota crédito emitida y orden cancelada'
+              : 'Orden cancelada',
+          );
           this.loadData();
         },
         error: (err: unknown) => {
           this.isProcessingAction.set(false);
+          // cod-auto-invoicing S5 — factura aceptada por la DIAN: se ofrece
+          // emitir la nota crédito total y cancelar, con confirmación clara.
+          const creditNoteBlock = readCancelCreditNoteRequired(err);
+          if (creditNoteBlock && payload.issueCreditNote !== true) {
+            void this.confirmCancelWithCreditNote(payload, creditNoteBlock.invoiceNumber);
+            return;
+          }
           // 403 (permiso de cancelar comandas) → copy fijo, sin romper
           // la vista: el modal queda abierto para reintentar o salir.
           // 422 (p. ej. decisión requerida) u otro → mensaje del backend
@@ -4358,6 +4378,17 @@ export class OrderDetailsPageComponent {
           );
         },
       });
+  }
+
+  private async confirmCancelWithCreditNote(
+    payload: FlowCancelOrderDto,
+    invoiceNumber: string | null,
+  ): Promise<void> {
+    const confirmed = await this.dialogService.confirm(
+      cancelCreditNoteConfirm(invoiceNumber),
+    );
+    if (!confirmed) return;
+    this.sendCancellation({ ...payload, issueCreditNote: true });
   }
 
   // ── Plan refund-gateway-dispatch-fix (Step C.1): manual refund resolve ──

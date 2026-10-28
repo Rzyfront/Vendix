@@ -7177,6 +7177,18 @@ export class OrderFlowService {
       );
     }
 
+    // cod-auto-invoicing S5 — nota crédito TOTAL confirmada por el operador,
+    // ANTES del claim: el gate DIAN de la transacción exige la nota `accepted`.
+    // Solo si nada más bloquea la cancelación (no emitir una nota fiscal para
+    // una orden que igual no se va a cancelar). Si la DIAN no la acepta en
+    // línea, el gate responde el 409 de siempre y la nota queda para reintento.
+    if (dto.issueCreditNote === true) {
+      const blocker = getCancellationBlocker(order);
+      if (blocker === null || blocker === 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001') {
+        await this.issueCancellationCreditNotes(order, dto.reason);
+      }
+    }
+
     // Egreso de caja (PRE-LECTURA, fuera de la transacción — patrón
     // `settleStop`): cancelar una venta ya COBRADA EN EFECTIVO devuelve el
     // dinero al cliente, así que el billete sale del cajón y la sesión de caja
@@ -7770,6 +7782,60 @@ export class OrderFlowService {
       amount: new Prisma.Decimal(row.amount as any),
       method_type: row.store_payment_method?.system_payment_method?.type ?? null,
     }));
+  }
+
+  /**
+   * cod-auto-invoicing S5 — emite una nota crédito TOTAL (solo
+   * `related_invoice_id`: sin líneas ni reembolso) por cada factura de venta
+   * `accepted` de la orden que aún no tiene su nota `accepted`. Reutiliza un
+   * borrador pendiente en vez de crear otro y no duplica una nota ya enviada a
+   * la DIAN. Los errores de facturación se propagan tal cual al operador.
+   */
+  private async issueCancellationCreditNotes(
+    order: { id: number; store_id: number; order_number?: string | null },
+    reason: string,
+  ): Promise<void> {
+    const acceptedInvoices = await this.prisma.invoices.findMany({
+      where: {
+        order_id: order.id,
+        store_id: order.store_id,
+        invoice_type: 'sales_invoice',
+        status: 'accepted',
+      },
+      select: { id: true, invoice_number: true, accounting_entity_id: true },
+    });
+    if (acceptedInvoices.length === 0) return;
+    // Resolución perezosa: InvoicingModule ya depende de órdenes; inyectarlo en
+    // el constructor cerraría un ciclo de providers (patrón de TableSessions).
+    if (!this.moduleRef) return;
+    const { CreditNotesService: CreditNotesToken } = require('../../invoicing/credit-notes/credit-notes.service') as typeof import('../../invoicing/credit-notes/credit-notes.service');
+    const creditNotes = this.moduleRef.get(CreditNotesToken, { strict: false });
+
+    for (const invoice of acceptedInvoices) {
+      const notes = await this.prisma.invoices.findMany({
+        where: {
+          related_invoice_id: invoice.id,
+          accounting_entity_id: invoice.accounting_entity_id,
+          invoice_type: 'credit_note',
+        },
+        orderBy: { id: 'desc' },
+        select: { id: true, status: true },
+      });
+      if (notes.some((n) => n.status === 'accepted' || n.status === 'sent')) continue;
+      const pending = notes.find((n) => n.status === 'draft' || n.status === 'validated');
+      const noteId =
+        pending?.id ??
+        (
+          await creditNotes.createCreditNote({
+            related_invoice_id: invoice.id,
+            reason: `Anulación de la orden ${order.order_number ?? `#${order.id}`}: ${reason}`,
+          })
+        ).id;
+      await creditNotes.issueNote(noteId);
+      this.logger.log(
+        `[cancel credit note] order=${order.id} invoice=${invoice.id} note=${noteId}`,
+      );
+    }
   }
 
   /**

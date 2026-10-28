@@ -90,6 +90,8 @@ export type KitchenDisposition = 'reuse' | 'waste';
  */
 export interface FlowCancelOrderDto extends CancelOrderDto {
   kitchenDisposition?: KitchenDisposition;
+  /** cod-auto-invoicing S5 — emit the TOTAL credit note before cancelling. */
+  issueCreditNote?: boolean;
 }
 
 /**
