@@ -569,10 +569,10 @@ describe('InvoicingService.getEcommerceInvoicingSettings', () => {
     await expect(result).resolves.toEqual({ auto_emit: false });
   });
 
-  it('sin bloque invoicing y sin receipts.auto_issue_invoice → default true', async () => {
+  it('sin bloque invoicing y sin receipts.auto_issue_invoice → default false (solo emite quien lo enciende)', async () => {
     const { result } = runWithSettings({});
 
-    await expect(result).resolves.toEqual({ auto_emit: true });
+    await expect(result).resolves.toEqual({ auto_emit: false });
   });
 
   it('auto_emit escrito como la cadena "false" no se acepta → cae al legado/default', async () => {
@@ -594,7 +594,7 @@ describe('InvoicingService.getEcommerceInvoicingSettings', () => {
       () => harness.getEcommerceInvoicingSettings(),
     );
 
-    expect(result).toEqual({ auto_emit: true });
+    expect(result).toEqual({ auto_emit: false });
     expect(findFirst).not.toHaveBeenCalled();
   });
 
@@ -606,10 +606,46 @@ describe('InvoicingService.getEcommerceInvoicingSettings', () => {
       harness.getEcommerceInvoicingSettings(),
     );
 
-    expect(result).toEqual({ auto_emit: true });
+    expect(result).toEqual({ auto_emit: false });
     expect(findFirst).toHaveBeenCalledWith({
       where: { store_id: 2 },
       select: { settings: true },
+    });
+  });
+});
+
+describe('InvoicingService.getPosInvoicingSettings — default off', () => {
+  interface PosSettingsHarness {
+    prisma: { store_settings: { findFirst: jest.Mock } };
+    logger: Pick<Logger, 'warn'>;
+    getPosInvoicingSettings(): Promise<{ auto_emit: boolean; on_failure: string }>;
+  }
+
+  const ctx = {
+    user_id: 9,
+    organization_id: 1,
+    store_id: 2,
+    is_super_admin: false,
+    is_owner: true,
+  };
+
+  const run = (settings: Record<string, any>) => {
+    const service = Object.create(InvoicingService.prototype) as PosSettingsHarness;
+    service.prisma = {
+      store_settings: { findFirst: jest.fn().mockResolvedValue({ settings }) },
+    };
+    service.logger = { warn: jest.fn() };
+    return RequestContextService.run(ctx, () => service.getPosInvoicingSettings());
+  };
+
+  it('a store that never set invoicing.pos.auto_emit does not auto-emit', async () => {
+    await expect(run({})).resolves.toEqual({ auto_emit: false, on_failure: 'queue' });
+  });
+
+  it('a store that explicitly turned it on keeps auto-emitting', async () => {
+    await expect(run({ invoicing: { pos: { auto_emit: true } } })).resolves.toEqual({
+      auto_emit: true,
+      on_failure: 'queue',
     });
   });
 });

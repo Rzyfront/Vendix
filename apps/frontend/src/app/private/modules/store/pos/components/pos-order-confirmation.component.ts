@@ -1299,7 +1299,7 @@ private authFacade = inject(AuthFacade);
     if (!hasInvoicing) return false;
 
     const settings = this.settingsFacade.settings() as any;
-    const autoEmit = settings?.invoicing?.pos?.auto_emit ?? true;
+    const autoEmit = settings?.invoicing?.pos?.auto_emit ?? false;
     return Boolean(autoEmit);
   }
 

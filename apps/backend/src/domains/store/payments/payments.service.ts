@@ -2861,10 +2861,8 @@ export class PaymentsService {
             user_id: user?.id,
             order_id: Number(result.order.id),
             order_number: result.order.order_number,
-            // La tienda decide si el documento sale solo. Ausente ≡ sí: una
-            // tienda habilitada ante la DIAN debe soportar cada venta con un
-            // documento, y esperar a que alguien se acuerde de pedirlo a mano
-            // es como se acumulan ventas sin soporte.
+            // La tienda decide si el documento sale solo. Ausente ≡ no: sólo
+            // emite sola la tienda que lo encendió (`DEFAULT_POS_AUTO_EMIT`).
             auto_emit:
               (settings as any)?.invoicing?.pos?.auto_emit ??
               DEFAULT_POS_AUTO_EMIT,

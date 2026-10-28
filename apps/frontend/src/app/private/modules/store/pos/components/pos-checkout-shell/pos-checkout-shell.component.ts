@@ -526,7 +526,7 @@ export class PosCheckoutShellComponent {
   readonly requiresElectronicInvoicing = computed<boolean>(() => {
     const areas = (this.authFacade.activeFiscalAreas() || []) as string[];
     if (!areas.includes('invoicing')) return false;
-    return Boolean(this.settingsFacade.settings()?.invoicing?.pos?.auto_emit ?? true);
+    return Boolean(this.settingsFacade.settings()?.invoicing?.pos?.auto_emit ?? false);
   });
   readonly allowAnonymousSales = computed(
     () => this.settingsFacade.pos()?.allow_anonymous_sales ?? false,
