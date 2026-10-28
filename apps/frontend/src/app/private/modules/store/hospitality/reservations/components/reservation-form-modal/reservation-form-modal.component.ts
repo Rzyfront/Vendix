@@ -43,6 +43,8 @@ import {
 import { describePolicy, SellableRatePlan } from '../../../rates/interfaces/rate-plan.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
+import { storeToday } from '../../../../../../../shared/utils/date.util';
 
 interface RoomLineForm {
   unit_type_id: FormControl<number | null>;
@@ -107,8 +109,12 @@ export function formatShortDate(date: string): string {
       (opened)="reset()"
       [size]="'md'"
       [dialog]="true"
-      title="Nueva reserva"
-      subtitle="Fechas, habitaciones y huésped titular"
+      [title]="walkIn() ? 'Llegada sin reserva' : 'Nueva reserva'"
+      [subtitle]="
+        walkIn()
+          ? 'Llega hoy: al guardar se hace el check-in'
+          : 'Fechas, habitaciones y huésped titular'
+      "
     >
       <form [formGroup]="form" class="space-y-4">
         <div class="grid grid-cols-2 gap-3">
@@ -299,8 +305,8 @@ export function formatShortDate(date: string): string {
           [disabled]="!canConfirm() || !customer()"
           (clicked)="onSubmit()"
         >
-          <app-icon slot="icon" name="calendar-check" [size]="16" />
-          Confirmar
+          <app-icon slot="icon" [name]="walkIn() ? 'log-in' : 'calendar-check'" [size]="16" />
+          {{ walkIn() ? 'Guardar y hacer check-in' : 'Confirmar' }}
         </app-button>
       </div>
     </app-modal>
@@ -313,8 +319,14 @@ export class ReservationFormModalComponent {
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly authFacade = inject(AuthFacade);
+  private readonly settingsFacade = inject(StoreSettingsFacade);
 
   readonly isOpen = input(false);
+  /**
+   * U1 — "Llegada sin reserva": the stay starts today (store day) and the
+   * parent checks the guest in once the reservation is saved.
+   */
+  readonly walkIn = input(false);
   readonly unitTypes = input<UnitType[]>([]);
 
   readonly isOpenChange = output<boolean>();
@@ -495,12 +507,16 @@ export class ReservationFormModalComponent {
     rooms.clear({ emitEvent: false });
     rooms.push(this.roomLine(null), { emitEvent: false });
     this.lineCount.set(1);
+    const today = this.walkIn() ? storeToday(this.settingsFacade.timezone()) : '';
     this.form.reset({
-      arrival_date: '',
-      departure_date: '',
+      arrival_date: today,
+      departure_date: today ? nextDay(today) : '',
       rooms: [{ unit_type_id: this.defaultTypeId(), rate_plan_id: BASE_PRICE, adults: 2, children: 0 }],
       notes: '',
     });
+    // A walk-in arrives today: only the departure is chosen.
+    if (this.walkIn()) this.form.controls.arrival_date.disable({ emitEvent: false });
+    else this.form.controls.arrival_date.enable({ emitEvent: false });
     this.overrideControl.reset('');
     this.customer.set(null);
     this.customerSelector()?.reset();
@@ -617,9 +633,10 @@ export class ReservationFormModalComponent {
       .subscribe({
         next: (reservation) => {
           this.saving.set(false);
-          this.toastService.success(
-            `Reserva ${reservation.reservation_number} confirmada`,
-          );
+          // A walk-in gets the check-in toast instead, once the parent checks in.
+          if (!this.walkIn()) {
+            this.toastService.success(`Reserva ${reservation.reservation_number} confirmada`);
+          }
           this.saved.emit(reservation);
           this.isOpenChange.emit(false);
         },
@@ -689,6 +706,13 @@ export class ReservationFormModalComponent {
   private defaultTypeId(): number | null {
     return (this.typeOptions()[0]?.value as number | undefined) ?? null;
   }
+}
+
+/** `2026-11-10` → `2026-11-11`. */
+function nextDay(date: string): string {
+  const day = new Date(`${date}T00:00:00.000Z`);
+  day.setUTCDate(day.getUTCDate() + 1);
+  return day.toISOString().slice(0, 10);
 }
 
 /** Rooms asked per type id. */

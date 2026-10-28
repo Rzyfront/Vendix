@@ -27,6 +27,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
 import { LodgingUnit } from '../../../rooms/interfaces/unit.interface';
 import { LodgingUnitsService } from '../../../rooms/services/units.service';
 import {
+  checkInDoneMessage,
   countNights,
   LodgingOnlinePayment,
   LodgingReservation,
@@ -375,6 +376,11 @@ export class ReservationDetailModalComponent {
 
   /** Reservation to show; `null` keeps the modal closed. */
   readonly reservationId = input<number | null>(null);
+  /**
+   * U1 — step to open once loaded: the check-in room picker or the
+   * check-out, when the reservation's status allows it.
+   */
+  readonly startWith = input<'check_in' | 'check_out' | null>(null);
   readonly closed = output<void>();
   /** Emitted after a status change, so the list and stats refresh. */
   readonly changed = output<void>();
@@ -499,7 +505,7 @@ export class ReservationDetailModalComponent {
     // Load each time a reservation is opened.
     effect(() => {
       const id = this.reservationId();
-      if (id !== null) untracked(() => this.load(id));
+      if (id !== null) untracked(() => this.load(id, this.startWith()));
     });
   }
 
@@ -600,7 +606,7 @@ export class ReservationDetailModalComponent {
           this.pending.set(null);
           this.dirtyWarning.set('');
           this.reservation.set(updated);
-          this.toastService.success('Check-in realizado');
+          this.toastService.success(checkInDoneMessage(updated));
           this.changed.emit();
         },
         error: (message: string) => {
@@ -614,7 +620,8 @@ export class ReservationDetailModalComponent {
     return RESERVATION_STATUS_LABELS[status] ?? status;
   }
 
-  load(id: number): void {
+  /** `step` opens once, on the opening load only (later reloads stay put). */
+  load(id: number, step: 'check_in' | 'check_out' | null = null): void {
     this.loading.set(true);
     this.pending.set(null);
     this.reservation.set(null);
@@ -625,6 +632,10 @@ export class ReservationDetailModalComponent {
         next: (reservation) => {
           this.reservation.set(reservation);
           this.loading.set(false);
+          if (step === 'check_in' && this.canCheckIn()) this.startCheckIn();
+          if (step === 'check_out' && reservation.status === 'checked_in') {
+            this.checkOutOpen.set(true);
+          }
         },
         error: (message: unknown) => {
           this.loading.set(false);

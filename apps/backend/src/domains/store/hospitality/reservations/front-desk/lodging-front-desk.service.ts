@@ -49,6 +49,8 @@ export interface FrontDeskRow {
   guest_name: string;
   /** "101 · Doble, Sin asignar · Suite". */
   rooms: string;
+  /** Active rooms without a physical room yet: check-in must pick them first. */
+  unassigned_rooms: number;
   adults: number;
   children: number;
   folio_id: number | null;
@@ -99,6 +101,7 @@ function toRow(reservation: FrontDeskReservation): FrontDeskRow {
     rooms: reservation.rooms
       .map((room) => `${room.unit?.code ?? 'Sin asignar'} · ${room.unit_type.name}`)
       .join(', '),
+    unassigned_rooms: reservation.rooms.filter((room) => !room.unit).length,
     adults: reservation.rooms.reduce((sum, room) => sum + room.adults, 0),
     children: reservation.rooms.reduce((sum, room) => sum + room.children, 0),
     folio_id: reservation.folio?.id ?? null,

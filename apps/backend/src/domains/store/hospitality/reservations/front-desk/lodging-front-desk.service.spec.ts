@@ -152,6 +152,7 @@ describe('buildFrontDesk (H3.3)', () => {
       children: 1,
       folio_id: 73,
       balance: '150000.00',
+      unassigned_rooms: 0,
     });
   });
 
@@ -163,6 +164,7 @@ describe('buildFrontDesk (H3.3)', () => {
 
     expect(board.arrivals[0]).toMatchObject({
       rooms: 'Sin asignar · Doble',
+      unassigned_rooms: 1,
       folio_id: null,
       balance: null,
     });

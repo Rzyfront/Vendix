@@ -184,11 +184,21 @@ export interface FrontDeskRow {
   guest_name: string;
   /** "101 · Doble, Sin asignar · Suite". */
   rooms: string;
+  /** Active rooms without a physical room yet: check-in must pick them first. */
+  unassigned_rooms: number;
   adults: number;
   children: number;
   folio_id: number | null;
   /** Folio balance (charges − payments) as a decimal string; null without a folio. */
   balance: string | null;
+}
+
+/** U1 — "Check-in realizado · 203" (every active room of the stay). */
+export function checkInDoneMessage(reservation: LodgingReservation): string {
+  const codes = reservation.rooms
+    .filter((room) => !room.cancelled_at && room.unit)
+    .map((room) => room.unit!.code);
+  return codes.length ? `Check-in realizado · ${codes.join(', ')}` : 'Check-in realizado';
 }
 
 /** H3.3 — today's arrivals, departures and guests in house (store business day). */

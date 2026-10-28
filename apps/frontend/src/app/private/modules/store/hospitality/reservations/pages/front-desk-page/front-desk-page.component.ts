@@ -10,10 +10,12 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import {
+  ButtonComponent,
   CardComponent,
   DropdownAction,
   EmptyStateComponent,
   FilterConfig,
+  IconComponent,
   FilterValues,
   InputsearchComponent,
   ItemListCardConfig,
@@ -29,9 +31,14 @@ import {
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ReservationDetailModalComponent } from '../../components/reservation-detail-modal/reservation-detail-modal.component';
+import { ReservationFormModalComponent } from '../../components/reservation-form-modal/reservation-form-modal.component';
+import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
+import { UnitTypesService } from '../../../rooms/services/unit-types.service';
 import {
+  checkInDoneMessage,
   FrontDeskBoard,
   FrontDeskRow,
+  LodgingReservation,
   LodgingReservationStatus,
   RESERVATION_STATUS_LABELS,
 } from '../../interfaces/reservation.interface';
@@ -43,6 +50,12 @@ import {
 import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 type FrontDeskTab = 'arrivals' | 'departures' | 'in_house';
+type DetailStep = 'check_in' | 'check_out' | null;
+
+/** R-LIST-08 — "Pérez" matches "perez": lower case without accents. */
+function normalize(text: string): string {
+  return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
 
 interface BoardRow extends FrontDeskRow {
   stay: string;
@@ -113,7 +126,19 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     EmptyStateComponent,
+    ButtonComponent,
+    IconComponent,
     ReservationDetailModalComponent,
+    ReservationFormModalComponent,
+  ],
+  // R-ROW-02 — card actions are 44 px touch targets on mobile.
+  styles: [
+    `
+      :host ::ng-deep .footer-actions .footer-action-btn {
+        width: 44px;
+        height: 44px;
+      }
+    `,
   ],
   template: `
     <div class="w-full md:space-y-4">
@@ -190,11 +215,37 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
               <app-inputsearch
                 class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 size="sm"
-                placeholder="Buscar reserva, huésped o habitación..."
+                placeholder="Buscar por reserva, huésped o habitación…"
                 [debounceTime]="300"
                 [ngModel]="search()"
                 (ngModelChange)="onSearch($event)"
               />
+              <app-button
+                variant="primary"
+                size="md"
+                [iconOnlyMobile]="true"
+                customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 !rounded-[10px]"
+                class="shrink-0"
+                ariaLabel="Nueva reserva"
+                (clicked)="openForm(false)"
+                data-testid="front-desk-new-reservation"
+              >
+                <app-icon slot="icon" name="plus" [size]="18" />
+                Nueva reserva
+              </app-button>
+              <app-button
+                variant="outline"
+                size="md"
+                [iconOnlyMobile]="true"
+                customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 bg-surface !rounded-[10px]"
+                class="shrink-0"
+                ariaLabel="Llegada sin reserva"
+                (clicked)="openForm(true)"
+                data-testid="front-desk-walk-in"
+              >
+                <app-icon slot="icon" name="user-plus" [size]="18" />
+                Llegada sin reserva
+              </app-button>
               <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="filterConfigs()"
@@ -237,25 +288,43 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
               [showActionButton]="false"
             />
           } @else {
-            <app-responsive-data-view
-              [data]="rows()"
-              [columns]="columns()"
-              [cardConfig]="cardConfig()"
-              [actions]="actions"
-              [mobileActions]="actions"
-              [striped]="true"
-              [hoverable]="true"
-              emptyMessage="No hay estadías con ese criterio"
-              emptyIcon="search"
-              (rowClick)="openDetail($event)"
-            />
+            @if (reloading()) {
+              <p class="sr-only" role="status">Actualizando recepción…</p>
+            }
+            <!-- R-FB-04: a reload dims the board instead of emptying it. -->
+            <div
+              class="transition-opacity"
+              [class.opacity-50]="reloading()"
+              [attr.aria-busy]="reloading()"
+            >
+              <app-responsive-data-view
+                [data]="rows()"
+                [columns]="columns()"
+                [cardConfig]="cardConfig()"
+                [actions]="actions"
+                [mobileActions]="actions"
+                [striped]="true"
+                [hoverable]="true"
+                emptyMessage="No hay estadías con ese criterio"
+                emptyIcon="search"
+                (rowClick)="openDetail($event)"
+              />
+            </div>
           }
         </div>
       </app-card>
 
+      <app-reservation-form-modal
+        [isOpen]="formOpen()"
+        [walkIn]="walkIn()"
+        [unitTypes]="unitTypes()"
+        (isOpenChange)="formOpen.set($event)"
+        (saved)="onSaved($event)"
+      />
       <app-reservation-detail-modal
         [reservationId]="detailId()"
-        (closed)="detailId.set(null)"
+        [startWith]="detailStep()"
+        (closed)="closeDetail()"
         (changed)="load()"
       />
     </div>
@@ -265,13 +334,22 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
   private readonly reservationsService = inject(LodgingReservationsService);
   private readonly currency = inject(CurrencyFormatService);
   private readonly toastService = inject(ToastService);
+  private readonly unitTypesService = inject(UnitTypesService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly board = signal<FrontDeskBoard | null>(null);
+  /** R-FB-04 — a reload of a board already shown. */
+  readonly reloading = signal(false);
   /** R-FB-02 — reason of the last failed load; null = loaded or loading. */
   readonly loadError = signal<string | null>(null);
   readonly tab = signal<FrontDeskTab>('arrivals');
   readonly detailId = signal<number | null>(null);
+  /** Step the detail opens on: the check-in room picker or the check-out. */
+  readonly detailStep = signal<DetailStep>(null);
+  /** U1 — "Nueva reserva" / "Llegada sin reserva" form. */
+  readonly formOpen = signal(false);
+  readonly walkIn = signal(false);
+  readonly unitTypes = signal<UnitType[]>([]);
   /** Reservation whose quick check-in is in flight (blocks a double click). */
   readonly checkingIn = signal<number | null>(null);
 
@@ -340,13 +418,13 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
   readonly emptyText = computed(() => EMPTY_TEXT[this.tab()]);
 
   readonly rows = computed<BoardRow[]>(() => {
-    const term = this.search().toLowerCase();
+    const term = normalize(this.search());
     const balance = this.balanceFilter();
     const list = (this.board()?.[this.tab()] ?? []).filter((row) => {
       if (
         term &&
         ![row.reservation_number, row.guest_name, row.rooms].some((value) =>
-          value.toLowerCase().includes(term),
+          normalize(value).includes(term),
         )
       ) {
         return false;
@@ -398,51 +476,84 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
     ...(this.tab() !== 'arrivals' ? { footerKey: 'balance_label', footerLabel: 'Saldo' } : {}),
   }));
 
+  /**
+   * R-ROW-03 — most likely action first: an arrival checks in; a guest in
+   * house shows the account, then checks out (from any tab: an early
+   * departure leaves from "En casa" too). R-ROW-02: the dark `secondary`
+   * icon keeps its contrast; the theme green on its tint does not.
+   */
   readonly actions: TableAction[] = [
     {
       label: 'Check-in',
       icon: 'log-in',
-      variant: 'primary',
+      variant: 'secondary',
       show: (row: BoardRow) => row.status === 'confirmed',
       disabled: () => this.checkingIn() !== null,
       action: (row: BoardRow) => this.quickCheckIn(row),
     },
     {
-      // H3.7 — opens the reservation detail, whose "Check-out" pays the
-      // balance, closes the folio and emits the invoice.
-      label: 'Check-out',
-      icon: 'log-out',
+      label: 'Ver cuenta',
+      icon: 'receipt',
       variant: 'secondary',
-      show: (row: BoardRow) =>
-        row.status === 'checked_in' && this.tab() === 'departures',
+      show: (row: BoardRow) => row.folio_id !== null,
       action: (row: BoardRow) => this.openDetail(row),
     },
     {
-      label: 'Ver folio',
-      icon: 'receipt',
-      variant: 'ghost',
-      show: (row: BoardRow) => row.folio_id !== null,
-      action: (row: BoardRow) => this.openDetail(row),
+      // H3.7 — the check-out pays the balance, closes the account and emits the invoice.
+      label: 'Check-out',
+      icon: 'log-out',
+      variant: 'secondary',
+      show: (row: BoardRow) => row.status === 'checked_in',
+      action: (row: BoardRow) => this.openDetail(row, 'check_out'),
     },
   ];
 
   ngOnInit(): void {
     this.load();
+    this.unitTypesService
+      .list()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (list) => this.unitTypes.set(list),
+        error: () => this.unitTypes.set([]),
+      });
   }
 
   load(): void {
     this.loadError.set(null);
+    this.reloading.set(this.board() !== null);
     this.reservationsService
       .frontDesk()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (board) => this.board.set(board),
+        next: (board) => {
+          this.reloading.set(false);
+          this.board.set(board);
+        },
         // R-FB-02: a failed load shows the error block, never an empty board.
         error: (message: string) => {
+          this.reloading.set(false);
           this.board.set(null);
           this.loadError.set(message);
         },
       });
+  }
+
+  openForm(walkIn: boolean): void {
+    this.walkIn.set(walkIn);
+    this.formOpen.set(true);
+  }
+
+  /** A walk-in is checked in right away; a booking just refreshes the board. */
+  onSaved(reservation: LodgingReservation): void {
+    if (!this.walkIn()) {
+      this.load();
+      return;
+    }
+    const unassigned = reservation.rooms.filter(
+      (room) => !room.cancelled_at && !room.unit,
+    ).length;
+    this.checkIn(reservation.id, reservation.reservation_number, unassigned);
   }
 
   onTab(id: string): void {
@@ -462,40 +573,52 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
     if (action === 'refresh') this.load();
   }
 
-  openDetail(row: FrontDeskRow): void {
+  openDetail(row: Pick<FrontDeskRow, 'id'>, step: DetailStep = null): void {
+    this.detailStep.set(step);
     this.detailId.set(row.id);
   }
 
-  /**
-   * One-click check-in when the reservation is ready. A room still to pick,
-   * a missing holder or a dirty room open the detail, where H3.2 resolves
-   * them.
-   */
+  closeDetail(): void {
+    this.detailId.set(null);
+    this.detailStep.set(null);
+  }
+
   quickCheckIn(row: BoardRow): void {
-    if (row.rooms.includes('Sin asignar')) {
-      this.openDetail(row);
+    this.checkIn(row.id, row.reservation_number, row.unassigned_rooms);
+  }
+
+  /**
+   * R-CONF-05 — one-click check-in only when every room is assigned. A room
+   * still to pick opens the detail on its room picker; a missing holder or a
+   * dirty room open the detail too, where H3.2 resolves them.
+   */
+  private checkIn(id: number, reservationNumber: string, unassignedRooms: number): void {
+    if (unassignedRooms > 0) {
+      this.load();
+      this.openDetail({ id }, 'check_in');
       return;
     }
-    this.checkingIn.set(row.id);
+    this.checkingIn.set(id);
     this.reservationsService
-      .checkIn(row.id, {})
+      .checkIn(id, {})
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: ({ dirtyWarning }) => {
+        next: ({ reservation, dirtyWarning }) => {
           this.checkingIn.set(null);
-          if (dirtyWarning) {
+          if (!reservation) {
             // The detail asks to confirm checking in to a dirty room.
             this.toastService.error(dirtyWarning);
-            this.openDetail(row);
+            this.openDetail({ id }, 'check_in');
             return;
           }
-          this.toastService.success(`Check-in de ${row.reservation_number} realizado`);
+          this.toastService.success(checkInDoneMessage(reservation));
           this.load();
         },
         error: (message: string) => {
           this.checkingIn.set(null);
-          this.toastService.error(message);
-          this.openDetail(row);
+          this.toastService.error(message || `No se pudo hacer el check-in de ${reservationNumber}`);
+          this.load();
+          this.openDetail({ id });
         },
       });
   }
