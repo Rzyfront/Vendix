@@ -193,27 +193,31 @@ export function notBeforeToday(control: AbstractControl): ValidationErrors | nul
       </form>
 
       <div slot="footer">
-        <div class="flex flex-col-reverse items-stretch justify-end gap-2 sm:flex-row sm:items-center sm:gap-3">
-          <app-button variant="ghost" [disabled]="busy()" (clicked)="onCancel()">
-            Cancelar
-          </app-button>
-          @if (allowFinalConsumer()) {
-            <app-button
-              variant="outline"
-              [disabled]="busy()"
-              (clicked)="onUseFinalConsumer()"
-            >
-              Emitir como Consumidor final (contado)
+        <div class="flex flex-col gap-2">
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <app-button variant="ghost" [disabled]="busy()" (clicked)="onCancel()">
+              Cancelar
             </app-button>
+            <app-button
+              variant="primary"
+              [disabled]="!canConfirm()"
+              [loading]="busy()"
+              (clicked)="onConfirm()"
+            >
+              Facturar a crédito
+            </app-button>
+          </div>
+          @if (allowFinalConsumer()) {
+            <div class="flex justify-end border-t border-border pt-2">
+              <app-button
+                variant="outline"
+                [disabled]="busy()"
+                (clicked)="onUseFinalConsumer()"
+              >
+                Emitir como Consumidor final (contado)
+              </app-button>
+            </div>
           }
-          <app-button
-            variant="primary"
-            [disabled]="!canConfirm()"
-            [loading]="busy()"
-            (clicked)="onConfirm()"
-          >
-            Facturar a crédito
-          </app-button>
         </div>
       </div>
     </app-modal>
