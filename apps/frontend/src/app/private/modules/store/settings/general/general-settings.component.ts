@@ -62,7 +62,11 @@ export class GeneralSettingsComponent {
       shortLabel: tab.shortLabel,
       icon: tab.icon,
       visible:
-        tab.requiresIndustry === 'restaurant' ? this.store.isRestaurant() : true,
+        tab.requiresIndustry === 'restaurant'
+          ? this.store.isRestaurant()
+          : tab.requiresIndustry === 'hospitality'
+            ? this.store.isHospitality()
+            : true,
     })),
   );
 

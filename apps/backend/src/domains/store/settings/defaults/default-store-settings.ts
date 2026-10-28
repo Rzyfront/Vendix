@@ -479,6 +479,29 @@ export function getDefaultStoreSettings(): StoreSettings {
       enable_dispatch_to_pool: true,
     },
 
+    // Hotelería (H0.5) - check-in/check-out hours a hotel can change, and its
+    // RNT number (empty until the owner fills it).
+    hospitality: {
+      check_in_time: '15:00',
+      check_out_time: '12:00',
+      no_show_time: '06:00',
+      // H3.4 - night audit: from this time the nights that already passed
+      // (the business day before) are charged to each in-house folio.
+      night_audit_time: '02:00',
+      rnt_number: '',
+      // H1.6 - overbooking a new room type starts with (0 = never oversell).
+      default_overbooking_allowance: 0,
+      // H3.6 - folio origin of a POS or table room charge.
+      room_charge_origin: 'Restaurante',
+      // H3.7 / D11 - the folio invoice waits for a review by a user holding
+      // store:lodging:folio:verify. Off: the desk invoices without it.
+      folio_invoice_verification: true,
+      // H6.6 - minutes a web booking holds its rooms waiting for the payment.
+      booking_hold_minutes: 15,
+      // H6.2 - minutes between two automatic syncs of an imported iCal calendar.
+      ical_import_interval_minutes: 15,
+    },
+
     // Restaurant - restaurant suite behavior toggles. Table checkout is
     // opt-in (false by default) so existing stores keep paying via POS.
     // QR scan defaults to `menu_only` (show menu, no table state change)

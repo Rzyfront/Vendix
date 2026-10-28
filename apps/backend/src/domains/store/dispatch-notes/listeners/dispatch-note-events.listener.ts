@@ -1241,10 +1241,12 @@ export class DispatchNoteEventsListener {
         try {
           const order = await this.prisma.orders.findFirst({
             where: { id: dispatch_note.order_id, store_id },
-            select: { remaining_balance: true },
+            select: { remaining_balance: true, payment_form: true },
           });
           const remaining = Number(order?.remaining_balance ?? 0);
-          if (remaining > 0) {
+          // Credit orders (payment_form '2') stay in cartera: invoicing the
+          // remisión is NOT a payment. Only a route collection settles them.
+          if (remaining > 0 && order?.payment_form !== '2') {
             await this.orderFlowService.applyDispatchCodPayment({
               storeId: store_id,
               dispatchNoteId: dispatch_note.id,

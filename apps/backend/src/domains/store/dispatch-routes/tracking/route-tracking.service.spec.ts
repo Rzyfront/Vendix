@@ -143,6 +143,42 @@ describe('RouteTrackingService', () => {
     expect(res.last_position.recorded_at).toBe(rows[1199].recorded_at.toISOString());
   });
 
+  it('getTracking: responsible linked when they dispatched the route themselves', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(
+      route({ dispatched_by_user_id: USER_ID }),
+    );
+    const res: any = await service.getTracking(ROUTE_ID);
+    expect(res.is_responsible_linked).toBe(true);
+  });
+
+  it('getTracking: responsible not linked when another user dispatched and no position was reported', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(
+      route({ dispatched_by_user_id: 99 }),
+    );
+    const res: any = await service.getTracking(ROUTE_ID);
+    expect(res.tracking_enabled).toBe(true);
+    expect(res.is_responsible_linked).toBe(false);
+  });
+
+  it('getTracking: responsible linked once they reported a position (synced)', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(
+      route({ dispatched_by_user_id: 99 }),
+    );
+    positionsMock.findMany.mockResolvedValue([
+      { lat: 4.6, lng: -74.1, accuracy: null, heading: null, speed: null, recorded_at: new Date() },
+    ]);
+    const res: any = await service.getTracking(ROUTE_ID);
+    expect(res.is_responsible_linked).toBe(true);
+  });
+
+  it('getTracking: external responsible is never linked', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(
+      route({ is_primary_driver_external: true, dispatched_by_user_id: USER_ID }),
+    );
+    const res: any = await service.getTracking(ROUTE_ID);
+    expect(res.is_responsible_linked).toBe(false);
+  });
+
   it('SSE service cleans the Subject when no subscribers remain', () => {
     const s = sse.stream(ROUTE_ID).subscribe();
     expect((sse as any).subjects.size).toBe(1);

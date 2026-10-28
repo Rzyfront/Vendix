@@ -26,6 +26,7 @@ import {
   TableColumn,
   TableAction,
   ItemListCardConfig,
+  DialogService,
 } from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency';
@@ -38,10 +39,18 @@ import { RouteSheetScannerModalComponent } from '../../components/route-sheet-sc
 import { StopDetailModalComponent } from '../../components/stop-detail-modal/stop-detail-modal.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
-import { RoutePositionPublisherService } from '../../services/route-position-publisher.service';
+import {
+  RoutePositionPublisherService,
+  dispatchByOtherWarning,
+} from '../../services/route-position-publisher.service';
+import { RouteTrackingService } from '../../services/route-tracking.service';
 import { AddNotesModalComponent } from '../../components/add-notes-modal/add-notes-modal.component';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
-import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
+import {
+  DispatchNote,
+  DispatchNoteStatus,
+} from '../../../dispatch-notes/interfaces/dispatch-note.interface';
+import { DispatchNotePrintService } from '../../../dispatch-notes/services/dispatch-note-print.service';
 import {
   CloseDispatchRouteDto,
   DispatchDeliveryAddress,
@@ -129,12 +138,33 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
             </div>
           }
 
-          @if (dispatchBlockedReason(); as blockedReason) {
+          @if (dispatchByOtherNotice(); as notice) {
             <div
               class="p-3 rounded-md text-sm bg-yellow-50 text-yellow-800 border border-yellow-200"
               role="status"
             >
-              {{ blockedReason }}
+              {{ notice }}
+            </div>
+          }
+
+          @if (needsLocationSync()) {
+            <div
+              class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 flex flex-wrap items-center gap-3"
+              role="status"
+            >
+              <app-icon
+                name="map-pin"
+                [size]="18"
+                class="text-amber-600 shrink-0"
+              ></app-icon>
+              <p class="min-w-0 flex-1 text-sm text-amber-800">
+                Esta ruta fue despachada por otro usuario y aún no rastrea tu recorrido.
+                Sincroniza tu ubicación para ver la ruta respecto a ti y que tu equipo pueda seguirte.
+              </p>
+              <app-button variant="primary" size="sm" (clicked)="syncLocation()">
+                <app-icon slot="icon" name="map-pin" [size]="16"></app-icon>
+                Sincronizar mi ubicación
+              </app-button>
             </div>
           }
 
@@ -315,6 +345,8 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
         [stop]="settleStop()!"
         [grandTotal]="+(settleStop()!.dispatch_note?.grand_total || 0)"
         [isPrepaid]="!!settleStop()!.is_prepaid"
+        [pendingAmount]="settleStop()!.pending_amount != null ? +settleStop()!.pending_amount! : null"
+        [busy]="actionLoading()"
         (close)="settleStop.set(null)"
         (submitted)="onSettle($event)"
       ></app-stop-settle-modal>
@@ -390,22 +422,68 @@ export class PlanillaDetailPageComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly dispatchNotesService = inject(DispatchNotesService);
+  private readonly dispatchNotePrint = inject(DispatchNotePrintService);
   private readonly authFacade = inject(AuthFacade);
   private readonly positionPublisher = inject(RoutePositionPublisherService);
+  private readonly trackingService = inject(RouteTrackingService);
+  private readonly dialog = inject(DialogService);
+
+  /**
+   * Whether the responsible's device is linked to the route, as reported by
+   * the tracking snapshot (null = not checked yet). Only fetched when the
+   * viewer is the responsible of an in-progress route.
+   */
+  private readonly remoteLinked = signal<boolean | null>(null);
+  /** The responsible pressed "Sincronizar mi ubicación" in this session. */
+  private readonly syncRequested = signal(false);
+
+  private readonly isViewerResponsible = computed(() => {
+    const responsible = this.responsibleUserId();
+    return responsible !== null && responsible === this.currentUserId();
+  });
+
+  private readonly inProgress = computed(() => {
+    const s = this.route()?.status;
+    return s === 'dispatched' || s === 'in_transit';
+  });
+
+  /**
+   * The responsible's journey is tracked when they dispatched the route
+   * themselves, already synced (positions reported) or is sharing right now.
+   */
+  private readonly responsibleLinked = computed(() => {
+    const r = this.route();
+    if (!r) return false;
+    return (
+      (r.dispatched_by_user_id != null &&
+        r.dispatched_by_user_id === this.responsibleUserId()) ||
+      this.remoteLinked() === true ||
+      this.syncRequested() ||
+      // Already sharing for this route (e.g. synced from the route view).
+      (this.positionPublisher.state() !== 'idle' &&
+        this.positionPublisher.currentRouteId === r.id)
+    );
+  });
+
+  /** Responsible on a route dispatched by someone else, not yet synced. */
+  readonly needsLocationSync = computed(
+    () =>
+      this.isViewerResponsible() &&
+      this.inProgress() &&
+      this.remoteLinked() !== null &&
+      !this.responsibleLinked(),
+  );
 
   /**
    * The responsible (internal driver) shares live position while the route is
-   * in progress; spectators never touch geolocation. The publisher outlives
-   * this page on purpose (see RoutePositionPublisherService).
+   * in progress and linked; spectators never touch geolocation. The publisher
+   * outlives this page on purpose (see RoutePositionPublisherService).
    */
   private readonly publishPositionEffect = effect(() => {
     const r = this.route();
     if (!r) return;
-    const responsible = this.responsibleUserId();
     const run =
-      responsible !== null &&
-      responsible === this.currentUserId() &&
-      (r.status === 'dispatched' || r.status === 'in_transit');
+      this.isViewerResponsible() && this.inProgress() && this.responsibleLinked();
     untracked(() => {
       if (run) this.positionPublisher.start(r.id);
       else if (this.positionPublisher.currentRouteId === r.id) {
@@ -422,7 +500,7 @@ export class PlanillaDetailPageComponent {
 
   /**
    * D1: the "encargado" is `driver_user_id` when the primary driver is not
-   * external. Only that user may dispatch; external => anyone with permission.
+   * external. Anyone with the permission may dispatch (D2).
    */
   private readonly responsibleUserId = computed<number | null>(() => {
     const r = this.route();
@@ -436,14 +514,47 @@ export class PlanillaDetailPageComponent {
     return name || 'el encargado';
   });
 
-  /** Non-null text when the current user cannot dispatch (not the encargado). */
-  readonly dispatchBlockedReason = computed<string | null>(() => {
+  /**
+   * Informative (non-blocking) text when the current user is not the
+   * encargado of a draft route: dispatching is allowed, tracking is not.
+   */
+  readonly dispatchByOtherNotice = computed<string | null>(() => {
     const r = this.route();
     if (!r || r.status !== 'draft') return null;
     const responsible = this.responsibleUserId();
     if (responsible === null || responsible === this.currentUserId()) return null;
-    return `Solo ${this.responsibleName()} puede despachar esta ruta`;
+    const name = this.responsibleName();
+    return `La ruta está asignada a ${name}. Puedes despacharla, pero su recorrido no se rastreará hasta que ${name} sincronice su ubicación desde la ruta.`;
   });
+
+  /** Starts sharing the responsible's location on a route dispatched by someone else. */
+  syncLocation(): void {
+    const r = this.route();
+    if (!r || !this.isViewerResponsible() || !this.inProgress()) return;
+    this.syncRequested.set(true);
+    // Called from the click so the browser ties the permission prompt to it.
+    this.positionPublisher.start(r.id);
+    this.toast.success('Sincronizando tu ubicación con la ruta');
+  }
+
+  /** Asks the tracking snapshot whether the responsible is already linked. */
+  private checkResponsibleLink(r: DispatchRoute): void {
+    const responsible = r.is_primary_driver_external ? null : (r.driver_user_id ?? null);
+    const active = r.status === 'dispatched' || r.status === 'in_transit';
+    if (responsible === null || responsible !== this.currentUserId() || !active) return;
+    if (r.dispatched_by_user_id === responsible) {
+      this.remoteLinked.set(true);
+      return;
+    }
+    this.trackingService
+      .getTracking(r.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (t) => this.remoteLinked.set(!!t.is_responsible_linked),
+        // Unknown => offer the sync; syncing an already linked route is harmless.
+        error: () => this.remoteLinked.set(false),
+      });
+  }
 
   /** Closed-route summary line: where the collection was handed in. */
   readonly settlementCashLabel = computed(() => {
@@ -461,8 +572,6 @@ export class PlanillaDetailPageComponent {
   private routeActionError(e: unknown, fallback: string): string {
     const parsed = parseApiError(e);
     switch (parsed.errorCode) {
-      case 'DISPATCH_ROUTE_NOT_RESPONSIBLE':
-        return 'Solo el encargado de la ruta puede despacharla.';
       case 'DISPATCH_ROUTE_CASH_SESSION_REQUIRED':
         return 'Selecciona la caja donde se entrega el recaudo.';
       case 'DISPATCH_ROUTE_CASH_SESSION_INVALID':
@@ -528,9 +637,33 @@ export class PlanillaDetailPageComponent {
     return i < 0 ? 0 : i;
   });
 
+  /** True while the route's remisiones are being rendered and printed. */
+  readonly printingNotes = signal(false);
+
+  /**
+   * Remisiones still on this route (released stops left it), in stop order,
+   * for "Imprimir remisiones" (S3).
+   */
+  readonly routeDispatchNotes = computed(() =>
+    [...(this.route()?.stops ?? [])]
+      .filter((stop) => stop.status !== 'released' && !!stop.dispatch_note)
+      .sort((a, b) => a.stop_sequence - b.stop_sequence)
+      .map((stop) => ({
+        id: stop.dispatch_note!.id,
+        dispatch_number: stop.dispatch_note!.dispatch_number,
+        status: stop.dispatch_note!.status as DispatchNoteStatus,
+      })),
+  );
+
   /** Documental / AI actions surfaced in the Paradas options dropdown. */
   readonly documentalActions = computed<DropdownAction[]>(() => [
     { label: 'Imprimir ruta', icon: 'printer', action: 'print' },
+    {
+      label: this.printingNotes() ? 'Imprimiendo remisiones…' : 'Imprimir remisiones',
+      icon: 'printer',
+      action: 'print-notes',
+      disabled: this.printingNotes() || this.routeDispatchNotes().length === 0,
+    },
     {
       label: this.downloadingPdf() ? 'Descargando…' : 'Descargar PDF',
       icon: 'download',
@@ -576,8 +709,7 @@ export class PlanillaDetailPageComponent {
     const actions: StickyHeaderActionButton[] = [];
 
     if (r.status === 'draft') {
-      const notResponsible = this.dispatchBlockedReason();
-      const blocked = !this.canDispatch() || notResponsible !== null;
+      const blocked = !this.canDispatch();
       actions.push({
         id: 'dispatch',
         label: 'Despachar',
@@ -585,9 +717,7 @@ export class PlanillaDetailPageComponent {
         icon: 'truck',
         loading: busy,
         disabled: busy || blocked,
-        title: notResponsible
-          ? notResponsible
-          : blocked
+        title: blocked
           ? `No se puede despachar: las siguientes remisiones no tienen dirección de entrega: ${this.stopsWithoutAddressLabel()}`
           : undefined,
       });
@@ -947,6 +1077,7 @@ export class PlanillaDetailPageComponent {
         next: (r) => {
           this.route.set(r);
           this.loading.set(false);
+          this.checkResponsibleLink(r);
         },
         error: (e) => {
           this.loading.set(false);
@@ -966,6 +1097,23 @@ export class PlanillaDetailPageComponent {
       );
       return;
     }
+    if (this.dispatchByOtherNotice() === null) {
+      this.runDispatch();
+      return;
+    }
+    void this.dialog
+      .confirm({
+        title: '¿Despachar la ruta?',
+        message: dispatchByOtherWarning(this.responsibleName()),
+        confirmText: 'Despachar',
+        cancelText: 'Cancelar',
+      })
+      .then((confirmed) => {
+        if (confirmed) this.runDispatch();
+      });
+  }
+
+  private runDispatch(): void {
     this.actionLoading.set(true);
     this.service
       .dispatch(this.routeId())
@@ -1068,6 +1216,20 @@ export class PlanillaDetailPageComponent {
     this.showPdfViewer.set(true);
   }
 
+  /** Prints every remisión of the route in one dialog (S3), configured format. */
+  async printRouteDispatchNotes(): Promise<void> {
+    const notes = this.routeDispatchNotes();
+    if (notes.length === 0 || this.printingNotes()) return;
+    this.printingNotes.set(true);
+    try {
+      await this.dispatchNotePrint.printDispatchNotes(notes);
+    } catch (e) {
+      this.toast.error(parseApiError(e).userMessage);
+    } finally {
+      this.printingNotes.set(false);
+    }
+  }
+
   /** Download the route-sheet PDF as a file (blob → anchor download). */
   downloadPdf() {
     const r = this.route();
@@ -1138,6 +1300,9 @@ export class PlanillaDetailPageComponent {
       case 'print':
         this.print();
         break;
+      case 'print-notes':
+        void this.printRouteDispatchNotes();
+        break;
       case 'download':
         this.downloadPdf();
         break;
@@ -1167,7 +1332,18 @@ export class PlanillaDetailPageComponent {
         },
         error: (e) => {
           this.actionLoading.set(false);
-          this.toast.error(e?.error?.message || e?.message || 'Error al liquidar la parada');
+          const msg: string = e?.error?.message || e?.message || '';
+          if (
+            e?.errorCode === 'DISPATCH_ROUTE_STOP_ALREADY_SETTLED' ||
+            /ya est[aá] '(delivered|rejected|released)'/.test(msg)
+          ) {
+            // Already settled elsewhere / double submit: refresh, not an error.
+            this.settleStop.set(null);
+            this.toast.info('La parada ya estaba liquidada');
+            this.load();
+            return;
+          }
+          this.toast.error(msg || 'Error al liquidar la parada');
         },
       });
   }

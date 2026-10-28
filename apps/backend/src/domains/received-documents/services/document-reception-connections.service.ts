@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException, 
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { RequestContextService } from '../../../common/context/request-context.service';
-import { ErrorCodes } from '../../../common/errors/error-codes';
+import { ErrorCodes, findErrorCodeEntry } from '../../../common/errors/error-codes';
 import { EncryptionService } from '../../../common/services/encryption.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { ReceivedDocumentsContext, ReceivedDocumentsService } from '../received-documents.service';
@@ -376,7 +376,7 @@ export class DocumentReceptionConnectionsService {
 
   private safeErrorCode(value: unknown): string | undefined {
     if (typeof value !== 'string') return undefined;
-    return Object.values(ErrorCodes).find((entry) => entry.code === value)?.code;
+    return findErrorCodeEntry(value)?.code;
   }
 
   private assertLeaseEditable(record: ConnectionRecord): void {

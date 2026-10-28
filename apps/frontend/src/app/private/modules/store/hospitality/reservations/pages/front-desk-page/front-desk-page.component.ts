@@ -1,0 +1,501 @@
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  DestroyRef,
+  inject,
+  OnInit,
+  signal,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormsModule } from '@angular/forms';
+import {
+  CardComponent,
+  DropdownAction,
+  EmptyStateComponent,
+  FilterConfig,
+  FilterValues,
+  InputsearchComponent,
+  ItemListCardConfig,
+  OptionsDropdownComponent,
+  ResponsiveDataViewComponent,
+  ScrollableTab,
+  ScrollableTabsComponent,
+  StatsComponent,
+  TableAction,
+  TableColumn,
+  ToastService,
+} from '../../../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { ParsedApiError } from '../../../../../../../core/utils/parse-api-error';
+import { ReservationDetailModalComponent } from '../../components/reservation-detail-modal/reservation-detail-modal.component';
+import {
+  FrontDeskBoard,
+  FrontDeskRow,
+  LodgingReservationStatus,
+  RESERVATION_STATUS_LABELS,
+} from '../../interfaces/reservation.interface';
+import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+
+type FrontDeskTab = 'arrivals' | 'departures' | 'in_house';
+
+interface BoardRow extends FrontDeskRow {
+  stay: string;
+  guests: string;
+  /** "$150.000" when the folio has a pending balance, "Al día" when paid, "—" without folio. */
+  balance_label: string;
+}
+
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+/** `2026-11-10` → `10-nov`. */
+function shortDate(date: string): string {
+  const [, month, day] = date.split('-').map(Number);
+  return `${day}-${MONTHS[month - 1]}`;
+}
+
+const STATUS_BADGE = {
+  type: 'custom' as const,
+  size: 'sm' as const,
+  colorMap: {
+    tentative: '#f59e0b',
+    confirmed: '#3b82f6',
+    checked_in: '#10b981',
+    checked_out: '#6b7280',
+    cancelled: '#ef4444',
+    no_show: '#9ca3af',
+  } satisfies Record<LodgingReservationStatus, string>,
+};
+
+const statusLabel = (value: LodgingReservationStatus): string =>
+  RESERVATION_STATUS_LABELS[value] ?? value;
+
+const TAB_TITLES: Record<FrontDeskTab, string> = {
+  arrivals: 'Llegadas',
+  departures: 'Salidas',
+  in_house: 'En casa',
+};
+
+const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; description: string }> = {
+  arrivals: {
+    icon: 'log-in',
+    title: 'Sin llegadas pendientes',
+    description: 'Las reservas confirmadas que llegan hoy aparecen aquí para su check-in.',
+  },
+  departures: {
+    icon: 'log-out',
+    title: 'Sin salidas pendientes',
+    description: 'Los huéspedes en casa que salen hoy aparecen aquí con el saldo de su folio.',
+  },
+  in_house: {
+    icon: 'bed-double',
+    title: 'No hay huéspedes en casa',
+    description: 'Después del check-in, cada estadía aparece aquí hasta su salida.',
+  },
+};
+
+/**
+ * Hospitality Suite — Recepción (H3.3). Today's arrivals, departures and
+ * guests in house of the store business day, each row with its quick action.
+ * Check-in runs right here; when it needs the desk (room to pick, holder to
+ * register, dirty room to confirm) the reservation detail opens instead.
+ *
+ * Standard admin list module: four stats, the board tabs, one card with the
+ * sticky search, the options dropdown (balance filter + refresh) and the
+ * responsive data view. Search and filter run on the loaded board.
+ */
+@Component({
+  selector: 'app-hospitality-front-desk-page',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [
+    FormsModule,
+    StatsComponent,
+    CardComponent,
+    ScrollableTabsComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
+    ResponsiveDataViewComponent,
+    EmptyStateComponent,
+    ReservationDetailModalComponent,
+  ],
+  template: `
+    <div class="w-full md:space-y-4">
+      <!-- Stats: sticky on mobile, static on desktop -->
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
+        <app-stats
+          title="Llegadas hoy"
+          [value]="board()?.arrivals?.length ?? 0"
+          smallText="reservas por hacer check-in"
+          iconName="log-in"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-500"
+          [loading]="board() === null"
+        />
+        <app-stats
+          title="Salidas hoy"
+          [value]="board()?.departures?.length ?? 0"
+          smallText="huéspedes por hacer check-out"
+          iconName="log-out"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-500"
+          [loading]="board() === null"
+        />
+        <app-stats
+          title="En casa"
+          [value]="board()?.in_house?.length ?? 0"
+          smallText="estadías alojadas"
+          iconName="bed-double"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-500"
+          [loading]="board() === null"
+        />
+        <app-stats
+          title="Saldo por cobrar"
+          [value]="pendingBalance()"
+          [smallText]="pendingBalanceText()"
+          iconName="wallet"
+          iconBgColor="bg-emerald-100"
+          iconColor="text-emerald-500"
+          [loading]="board() === null"
+        />
+      </div>
+
+      <app-scrollable-tabs
+        ariaLabel="Recepción"
+        [tabs]="tabs()"
+        [activeTab]="tab()"
+        (tabChange)="onTab($event)"
+      />
+
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
+        <!-- Sticky search header -->
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                 md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+        >
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+          >
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide
+                     md:text-lg md:font-semibold md:text-text-primary"
+            >
+              {{ tabTitle() }}
+              <span class="text-text-secondary font-normal">({{ rows().length }})</span>
+              @if (businessDate()) {
+                <span class="text-text-secondary font-normal"> · {{ businessDate() }}</span>
+              }
+            </h2>
+
+            <div class="flex items-center gap-2 w-full md:w-auto">
+              <app-inputsearch
+                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                size="sm"
+                placeholder="Buscar reserva, huésped o habitación..."
+                [debounceTime]="300"
+                [ngModel]="search()"
+                (ngModelChange)="onSearch($event)"
+              />
+              <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [filters]="filterConfigs()"
+                [filterValues]="filterValues()"
+                [actions]="dropdownActions"
+                [isLoading]="board() === null"
+                (filterChange)="filterValues.set($event)"
+                (clearAllFilters)="filterValues.set({})"
+                (actionClick)="onActionClick($event)"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="px-2 pb-2 pt-3 md:p-4">
+          @if (board() === null) {
+            <div class="p-4 md:p-6 text-center">
+              <div
+                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
+              <p class="mt-2 text-text-secondary">Cargando recepción...</p>
+            </div>
+          } @else if (rows().length === 0 && hasFilters()) {
+            <app-empty-state
+              icon="search"
+              title="Sin resultados"
+              description="Ninguna estadía coincide con la búsqueda o los filtros."
+              actionButtonText="Limpiar filtros"
+              [showActionButton]="true"
+              (actionClick)="clearFilters()"
+            />
+          } @else if (rows().length === 0) {
+            <app-empty-state
+              [icon]="emptyText().icon"
+              [title]="emptyText().title"
+              [description]="emptyText().description"
+              [showActionButton]="false"
+            />
+          } @else {
+            <app-responsive-data-view
+              [data]="rows()"
+              [columns]="columns()"
+              [cardConfig]="cardConfig()"
+              [actions]="actions"
+              [mobileActions]="actions"
+              [striped]="true"
+              [hoverable]="true"
+              emptyMessage="No hay estadías con ese criterio"
+              emptyIcon="search"
+              (rowClick)="openDetail($event)"
+            />
+          }
+        </div>
+      </app-card>
+
+      <app-reservation-detail-modal
+        [reservationId]="detailId()"
+        (closed)="detailId.set(null)"
+        (changed)="load()"
+      />
+    </div>
+  `,
+})
+export class HospitalityFrontDeskPageComponent implements OnInit {
+  private readonly reservationsService = inject(LodgingReservationsService);
+  private readonly currency = inject(CurrencyFormatService);
+  private readonly toastService = inject(ToastService);
+  private readonly destroyRef = inject(DestroyRef);
+
+  readonly board = signal<FrontDeskBoard | null>(null);
+  readonly tab = signal<FrontDeskTab>('arrivals');
+  readonly detailId = signal<number | null>(null);
+  /** Reservation whose quick check-in is in flight (blocks a double click). */
+  readonly checkingIn = signal<number | null>(null);
+
+  readonly search = signal('');
+  readonly filterValues = signal<FilterValues>({});
+
+  readonly businessDate = computed(() => {
+    const date = this.board()?.business_date;
+    return date ? `Hoy, ${shortDate(date)}` : '';
+  });
+
+  readonly tabTitle = computed(() => TAB_TITLES[this.tab()]);
+
+  /** Arrivals have no folio yet: the balance filter only applies after check-in. */
+  readonly filterConfigs = computed<FilterConfig[]>(() => [
+    {
+      key: 'balance',
+      label: 'Saldo del folio',
+      type: 'select',
+      disabled: this.tab() === 'arrivals',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'pending', label: 'Con saldo pendiente' },
+        { value: 'paid', label: 'Al día' },
+      ],
+    },
+  ]);
+
+  readonly dropdownActions: DropdownAction[] = [
+    { label: 'Actualizar', icon: 'refresh-cw', action: 'refresh', variant: 'outline' },
+  ];
+
+  private readonly balanceFilter = computed(() => {
+    const value = this.filterValues()['balance'];
+    return this.tab() !== 'arrivals' && typeof value === 'string' ? value : '';
+  });
+
+  readonly hasFilters = computed(() => !!(this.search() || this.balanceFilter()));
+
+  /** Open balance of the stays in house (their folios are the ones still billing). */
+  private readonly pendingRows = computed(() =>
+    (this.board()?.in_house ?? []).filter((row) => Number(row.balance ?? 0) > 0),
+  );
+
+  readonly pendingBalance = computed(() =>
+    this.currency.format(
+      this.pendingRows().reduce((sum, row) => sum + Number(row.balance), 0),
+      0,
+    ),
+  );
+
+  readonly pendingBalanceText = computed(() => {
+    const count = this.pendingRows().length;
+    return count === 1 ? '1 folio en casa con saldo' : `${count} folios en casa con saldo`;
+  });
+
+  readonly tabs = computed<ScrollableTab[]>(() => {
+    const board = this.board();
+    return [
+      { id: 'arrivals', label: `Llegadas (${board?.arrivals.length ?? 0})`, icon: 'log-in' },
+      { id: 'departures', label: `Salidas (${board?.departures.length ?? 0})`, icon: 'log-out' },
+      { id: 'in_house', label: `En casa (${board?.in_house.length ?? 0})`, icon: 'bed-double' },
+    ];
+  });
+
+  readonly emptyText = computed(() => EMPTY_TEXT[this.tab()]);
+
+  readonly rows = computed<BoardRow[]>(() => {
+    const term = this.search().toLowerCase();
+    const balance = this.balanceFilter();
+    const list = (this.board()?.[this.tab()] ?? []).filter((row) => {
+      if (
+        term &&
+        ![row.reservation_number, row.guest_name, row.rooms].some((value) =>
+          value.toLowerCase().includes(term),
+        )
+      ) {
+        return false;
+      }
+      if (balance === 'pending') return Number(row.balance ?? 0) > 0;
+      if (balance === 'paid') return row.balance !== null && Number(row.balance) <= 0;
+      return true;
+    });
+    return list.map((row) => ({
+      ...row,
+      stay: `${shortDate(row.arrival_date)} → ${shortDate(row.departure_date)}`,
+      guests: row.children > 0 ? `${row.adults} + ${row.children} niños` : `${row.adults}`,
+      balance_label: this.balanceLabel(row.balance),
+    }));
+  });
+
+  /** Arrivals have no folio yet: the balance column only shows after check-in. */
+  readonly columns = computed<TableColumn[]>(() => {
+    const columns: TableColumn[] = [
+      { key: 'reservation_number', label: 'Reserva' },
+      { key: 'guest_name', label: 'Huésped' },
+      { key: 'rooms', label: 'Habitación' },
+      { key: 'stay', label: 'Llegada → Salida' },
+      { key: 'guests', label: 'Huéspedes', align: 'center' },
+    ];
+    if (this.tab() !== 'arrivals') {
+      columns.push({ key: 'balance_label', label: 'Saldo', align: 'right' });
+    }
+    columns.push({
+      key: 'status',
+      label: 'Estado',
+      badge: true,
+      badgeConfig: STATUS_BADGE,
+      transform: statusLabel,
+    });
+    return columns;
+  });
+
+  readonly cardConfig = computed<ItemListCardConfig>(() => ({
+    titleKey: 'reservation_number',
+    subtitleKey: 'guest_name',
+    badgeKey: 'status',
+    badgeConfig: STATUS_BADGE,
+    badgeTransform: statusLabel,
+    detailKeys: [
+      { key: 'rooms', label: 'Habitación' },
+      { key: 'stay', label: 'Estadía' },
+    ],
+    ...(this.tab() !== 'arrivals' ? { footerKey: 'balance_label', footerLabel: 'Saldo' } : {}),
+  }));
+
+  readonly actions: TableAction[] = [
+    {
+      label: 'Check-in',
+      icon: 'log-in',
+      variant: 'primary',
+      show: (row: BoardRow) => row.status === 'confirmed',
+      disabled: () => this.checkingIn() !== null,
+      action: (row: BoardRow) => this.quickCheckIn(row),
+    },
+    {
+      // H3.7 — opens the reservation detail, whose "Check-out" pays the
+      // balance, closes the folio and emits the invoice.
+      label: 'Check-out',
+      icon: 'log-out',
+      variant: 'secondary',
+      show: (row: BoardRow) =>
+        row.status === 'checked_in' && this.tab() === 'departures',
+      action: (row: BoardRow) => this.openDetail(row),
+    },
+    {
+      label: 'Ver folio',
+      icon: 'receipt',
+      variant: 'ghost',
+      show: (row: BoardRow) => row.folio_id !== null,
+      action: (row: BoardRow) => this.openDetail(row),
+    },
+  ];
+
+  ngOnInit(): void {
+    this.load();
+  }
+
+  load(): void {
+    this.reservationsService
+      .frontDesk()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (board) => this.board.set(board),
+        error: (message: unknown) => {
+          this.board.set({ business_date: '', arrivals: [], departures: [], in_house: [] });
+          this.toastService.error(
+            typeof message === 'string' ? message : 'No se pudo cargar la recepción',
+          );
+        },
+      });
+  }
+
+  onTab(id: string): void {
+    this.tab.set(id as FrontDeskTab);
+  }
+
+  onSearch(term: string | null): void {
+    this.search.set((term ?? '').trim());
+  }
+
+  clearFilters(): void {
+    this.search.set('');
+    this.filterValues.set({});
+  }
+
+  onActionClick(action: string): void {
+    if (action === 'refresh') this.load();
+  }
+
+  openDetail(row: FrontDeskRow): void {
+    this.detailId.set(row.id);
+  }
+
+  /**
+   * One-click check-in when the reservation is ready. A room still to pick,
+   * a missing holder or a dirty room open the detail, where H3.2 resolves
+   * them.
+   */
+  quickCheckIn(row: BoardRow): void {
+    if (row.rooms.includes('Sin asignar')) {
+      this.openDetail(row);
+      return;
+    }
+    this.checkingIn.set(row.id);
+    this.reservationsService
+      .checkIn(row.id, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.checkingIn.set(null);
+          this.toastService.success(`Check-in de ${row.reservation_number} realizado`);
+          this.load();
+        },
+        error: (error: ParsedApiError) => {
+          this.checkingIn.set(null);
+          this.toastService.error(error.userMessage);
+          this.openDetail(row);
+        },
+      });
+  }
+
+  private balanceLabel(balance: string | null): string {
+    if (balance === null) return '—';
+    const amount = Number(balance);
+    return amount > 0 ? this.currency.format(amount, 0) : 'Al día';
+  }
+}

@@ -21,6 +21,7 @@ import { deliveryTypeToEntregaChoice } from '../../models/cart.model';
 import { shouldAutoPrintDispatchTicket } from '../../../../../../shared/services/print/dispatch-ticket-autoprint';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
+import { LodgingReservationsService } from '../../../hospitality/reservations/services/lodging-reservations.service';
 
 /**
  * CP-POS-CHECKOUT-KEYBOARD — matriz teclado × paso del modal de pago.
@@ -317,7 +318,10 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     TestBed.configureTestingModule({
       imports: [PosCheckoutShellComponent],
       providers: [
-        { provide: AuthFacade, useValue: { activeFiscalAreas: signal([]) } },
+        {
+          provide: AuthFacade,
+          useValue: { activeFiscalAreas: signal([]), isHospitality: signal(false), userPermissions: signal([]) },
+        },
         { provide: StoreSettingsFacade, useValue: settingsMock },
         { provide: PosCartService, useValue: {} },
         { provide: PosPaymentService, useValue: {} },
@@ -326,6 +330,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         { provide: ToastService, useValue: {} },
         { provide: CurrencyFormatService, useValue: { loadCurrency: () => {} } },
         { provide: KitchenTicketPrintService, useValue: { printAfterFire: () => {} } },
+        { provide: LodgingReservationsService, useValue: {} },
       ],
     });
 

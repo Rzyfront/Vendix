@@ -14,6 +14,7 @@ import { EcommerceTablesModule } from './tables/ecommerce-tables.module';
 import { EcommercePromotionsModule } from './promotions/ecommerce-promotions.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
 import { RoutingModule } from './routing/routing.module';
+import { EcommerceHospitalityModule } from './hospitality/ecommerce-hospitality.module';
 
 /**
  * 🛒 Ecommerce Domain Module
@@ -44,6 +45,7 @@ import { RoutingModule } from './routing/routing.module';
     EcommercePromotionsModule,
     GeocodingModule,
     RoutingModule,
+    EcommerceHospitalityModule,
   ],
 })
 export class EcommerceDomainModule {}

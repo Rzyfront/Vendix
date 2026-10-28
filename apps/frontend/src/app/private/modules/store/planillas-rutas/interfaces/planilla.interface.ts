@@ -74,6 +74,10 @@ export interface DispatchNoteOrderSummary {
   order_number?: string | null;
   status?: string | null;
   shipping_address_snapshot?: DispatchDeliveryAddress | null;
+  /** '2' = credit. Optional: only present when the backend includes it. */
+  payment_form?: string | null;
+  /** 'installments' | 'free' | null. Installments credit may settle with a balance. */
+  credit_type?: string | null;
 }
 
 export interface DispatchNoteSummary {
@@ -129,6 +133,11 @@ export interface DispatchRouteStop {
   is_extra_route: boolean;
   is_prepaid: boolean;
   /**
+   * Live amount still owed on this stop (derived by the backend on read from the
+   * order's remaining balance, capped by the remisión total; 0 when paid).
+   */
+  pending_amount?: number | string | null;
+  /**
    * Optional flag indicating the stop still requires cash collection (COD).
    * Not a persisted backend column today — the detail page derives it from
    * `is_prepaid`, the stop `status`/`result`, and `collected_amount`. Kept
@@ -157,6 +166,7 @@ export interface DispatchRoute {
   status: DispatchRouteStatus;
   vehicle_id?: number | null;
   driver_user_id?: number | null;
+  dispatched_by_user_id?: number | null;
   external_driver_name?: string | null;
   external_driver_id_number?: string | null;
   is_primary_driver_external: boolean;

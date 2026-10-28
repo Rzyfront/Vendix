@@ -24,6 +24,11 @@ export interface RouteTrackingSnapshot {
   responsible: { user_id: number; name: string } | null;
   is_external_responsible: boolean;
   is_viewer_responsible: boolean;
+  /**
+   * The responsible's device shares its position with the route: they
+   * dispatched it themselves or already synced (reported positions).
+   */
+  is_responsible_linked: boolean;
   route_status: string;
   last_position: RoutePosition | null;
   trail: RoutePosition[];

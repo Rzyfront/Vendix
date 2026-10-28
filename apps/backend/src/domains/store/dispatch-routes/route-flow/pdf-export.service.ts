@@ -700,7 +700,7 @@ export class PdfExportService {
       '#',
       'Remisión',
       'Cliente / Dirección',
-      'A cobrar',
+      'Valor',
       'Entrega',
       'Recaudo',
       'Recaudado',
@@ -781,12 +781,10 @@ export class PdfExportService {
         ? '(Rechazada)'
         : dn?.customer_name || '—';
 
-    // A cobrar: COD/no-prepaid grand_total. Prepaid stops have nothing to collect.
-    const toCollect = stop.is_prepaid
-      ? 'PREPAGADO'
-      : dn
-        ? COP.format(Number(dn.grand_total))
-        : '—';
+    // Valor: the remisión's grand_total is always printed, paid or not; a
+    // prepaid stop adds a gray «Pagada» line so the driver knows there is
+    // nothing to collect there.
+    const noteValue = dn ? COP.format(Number(dn.grand_total)) : '—';
 
     // Real state for closed routes.
     const delivered = stop.result === 'delivered' || stop.result === 'partial';
@@ -840,12 +838,21 @@ export class PdfExportService {
     }
     x += col_widths[2];
 
-    // Col 3: A cobrar
-    doc.text(toCollect, x, line1_y, {
+    // Col 3: Valor (+ «Pagada» on line 2 for prepaid stops)
+    doc.text(noteValue, x, line1_y, {
       width: col_widths[3],
       align: aligns[3],
       ...clip,
     });
+    if (stop.is_prepaid && dn) {
+      doc.font('Helvetica').fontSize(this.fz(L, 7)).fillColor('#555');
+      doc.text('Pagada', x, y + this.sz(L, 14), {
+        width: col_widths[3],
+        align: aligns[3],
+        ...clip,
+      });
+      doc.font('Helvetica').fontSize(this.fz(L, 9)).fillColor('black');
+    }
     x += col_widths[3];
 
     // Col 4: Entrega checkbox (centered in its column)

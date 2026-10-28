@@ -290,12 +290,60 @@ export class CashSettlementService {
     // la sesión que el usuario elige. `options.cashMovementHandled` se conserva
     // por compatibilidad de firma y ya no tiene efecto.
 
+    // Credit-sale orders (payment_form '2') are booked by the
+    // `installment_payment.received` that the order-flow bridge emits (DR Caja /
+    // CR CxC). Flag the event so the accounting listener skips its "venta
+    // directa" entry. COD payloads stay byte-identical (no extra key).
+    let isCreditOrderCollection = false;
+    let accountingOrderId: number | null = null;
+    if (input.dispatch_note_id) {
+      try {
+        const note = await this.prisma.dispatch_notes.findFirst({
+          where: { id: input.dispatch_note_id, store_id: input.store_id },
+          select: { order: { select: { id: true, payment_form: true } } },
+        });
+        isCreditOrderCollection = note?.order?.payment_form === '2';
+        // Real orders.id for the accounting listener (invoice-branch lookup).
+        // `order_id` stays null on the event on purpose.
+        if (!isCreditOrderCollection && note?.order?.id) {
+          accountingOrderId = note.order.id;
+        }
+      } catch (error) {
+        // Never break the already-committed settlement: fall back to the
+        // legacy (unflagged) payload.
+        this.logger.warn(
+          `[emitPaymentReceived] could not resolve order payment_form for note #${input.dispatch_note_id}: ${(error as Error).message}`,
+        );
+      }
+    }
+
     // Emit payment.received so existing listeners create auto-entries, AR, notifications
     // NOTE: `order_id` is intentionally null for dispatch_route. The legacy
     // sales_orders id is carried separately as `sales_order_id` to avoid being
     // mistaken for the COD `orders.id`. The COD payment bridge
     // (PaymentFromDispatchRouteListener) resolves the real orders.id from
     // dispatch_notes.order_id via `dispatch_note_id`, never from this field.
+    const withholdingLines = input.withholding_breakdown
+      ? Object.entries(input.withholding_breakdown)
+          .filter(([_, v]) => Number(v) > 0)
+          .map(([code, amount]) => ({
+            code,
+            amount: Number(amount),
+            // Shape expected by the accounting `resolveWithholdingLines`
+            // (the route only knows the tax type and the amount).
+            withholding_type: code,
+            concept_code: code,
+            rate: 0,
+            base: 0,
+            role: 'suffered' as const,
+            account_role: `withholding.suffered.${code}_receivable`,
+          }))
+      : [];
+    const withholdingTotal = withholdingLines.reduce(
+      (sum, l) => sum + l.amount,
+      0,
+    );
+
     this.eventEmitter.emit('payment.received', {
       payment_id: null,
       source_type: 'dispatch_route',
@@ -307,18 +355,23 @@ export class CashSettlementService {
       sales_order_id: input.sales_order_id,
       dispatch_note_id: input.dispatch_note_id,
       amount: input.amount,
-      subtotal_amount: input.amount,
+      // With withholding the sale value is cash + retention; without it the
+      // payload stays byte-identical to the legacy one.
+      subtotal_amount:
+        withholdingTotal > 0
+          ? Math.round((input.amount + withholdingTotal) * 100) / 100
+          : input.amount,
       tax_amount: 0,
       tax_breakdown: [],
-      withholding_breakdown: input.withholding_breakdown
-        ? Object.entries(input.withholding_breakdown)
-            .filter(([_, v]) => Number(v) > 0)
-            .map(([code, amount]) => ({ code, amount: Number(amount) }))
-        : [],
+      withholding_breakdown: withholdingLines,
       discount_amount: 0,
       currency: 'COP',
       payment_method: input.payment_method,
       user_id: input.user_id,
+      ...(isCreditOrderCollection ? { credit_order_collection: true } : {}),
+      ...(accountingOrderId != null
+        ? { accounting_order_id: accountingOrderId }
+        : {}),
     });
   }
 

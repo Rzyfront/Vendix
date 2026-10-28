@@ -241,6 +241,57 @@ describe('gating de contratos por industria (A.2, ADR-02)', () => {
   });
 });
 
+describe('gating de hotelería por industria (H0.1)', () => {
+  const HOSPITALITY_KEYS = [
+    'hospitality',
+    'hospitality_rooms',
+    'hospitality_reservations',
+    'hospitality_rates',
+  ];
+
+  it('hospitality sola ve Hotelería y no la agenda de citas', () => {
+    const hidden = getModulesHiddenByIndustries(['hospitality']);
+    for (const key of HOSPITALITY_KEYS) {
+      expect(hidden).withContext(key).not.toContain(key);
+    }
+    expect(hidden).toContain('orders_reservations');
+    expect(hidden).toContain('restaurant_ops');
+  });
+
+  it('hospitality + restaurant ve Hotelería y Mesas', () => {
+    const hidden = getModulesHiddenByIndustries(['hospitality', 'restaurant']);
+    for (const key of [...HOSPITALITY_KEYS, 'restaurant_ops', 'restaurant_ops_tables']) {
+      expect(hidden).withContext(key).not.toContain(key);
+    }
+  });
+
+  it('toda industria sin hospitality oculta Hotelería', () => {
+    for (const industries of [
+      ['retail'],
+      ['restaurant'],
+      ['manufacturing'],
+      ['service'],
+      ['gym'],
+      ['construction'],
+    ]) {
+      const hidden = getModulesHiddenByIndustries(industries);
+      for (const key of HOSPITALITY_KEYS) {
+        expect(hidden)
+          .withContext(`industrias [${industries.join(',')}] → ${key}`)
+          .toContain(key);
+      }
+    }
+  });
+
+  it('las keys de hotelería existen en APP_MODULES y MODULE_ROUTES', () => {
+    const keys = allStoreAdminKeys();
+    for (const key of HOSPITALITY_KEYS) {
+      expect(keys).withContext(key).toContain(key);
+      expect(MODULE_ROUTES[key]).withContext(key).toMatch(/^\/admin\/hospitality\//);
+    }
+  });
+});
+
 describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
   let service: MenuFilterService;
   let authFacade: {
@@ -493,5 +544,20 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
 
     setAreas(['payroll']);
     expect(await routes()).toEqual(['/admin/invoicing/activation']);
+  });
+
+  it('H0.5: an alwaysVisible group with every child hidden is not rendered', async () => {
+    const tree: MenuItem[] = [{
+      label: 'Configuración', icon: 'settings', alwaysVisible: true,
+      children: [{ label: 'General', icon: 'circle', route: '/admin/settings/general' }],
+    }];
+    const labels = async () => (await firstValueFrom(service.filterMenuItems(tree).pipe(take(1)))).map((i) => i.label);
+
+    // Receptionist preset: settings_general is off → no empty "Configuración".
+    expect(await labels()).toEqual([]);
+
+    // Control: with the child visible the group still shows.
+    visibleModules$.next(['fiscal_operations', 'settings', 'settings_general']);
+    expect(await labels()).toEqual(['Configuración']);
   });
 });

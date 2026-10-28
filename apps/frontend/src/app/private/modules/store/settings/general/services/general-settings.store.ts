@@ -88,6 +88,9 @@ export class GeneralSettingsStore {
    */
   readonly isRestaurant = this.authFacade.isRestaurant;
 
+  /** True cuando la tienda activa es un hotel. Gatea la pestaña "Hotelería". */
+  readonly isHospitality = this.authFacade.isHospitality;
+
   /**
    * True cuando la tienda activa es un gimnasio. Gatea la sección "Zona Fit"
    * dentro de Logística. Misma cascada que `isRestaurant`.
@@ -543,6 +546,7 @@ export class GeneralSettingsStore {
         'carrier',
         'restaurant',
         'membership',
+        'hospitality',
         'panel_ui',
         'reservations',
         'promotions',

@@ -37,6 +37,8 @@ const ASSIGNABLE_ROLES = [
   'carrier',
   'waiter',
   'kitchen',
+  'receptionist',
+  'housekeeper',
 ] as const;
 
 function describeError(error: any): string {

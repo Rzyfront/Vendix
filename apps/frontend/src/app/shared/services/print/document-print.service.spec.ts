@@ -409,4 +409,62 @@ describe('DocumentPrintService Print Formats gates', () => {
       expect(service.withGatewayPrintGuard(once)).toBe(once);
     });
   });
+  describe('printGatewayBatch', () => {
+    const doc = (label: string) =>
+      `<html><head><style>.n{}</style></head><body class="note"><p>${label}</p></body></html>`;
+
+    it('prints every document in one dialog, one sheet each, with one head', async () => {
+      gateway.renderDocument.and.callFake(((_f: PrintFormatType, id: number | string) =>
+        of({ html: doc(`R-${id}`), copies: 1 } as any)) as any);
+
+      const result = await service.printGatewayBatch({
+        formatType: 'dispatch_note',
+        documentIds: [1, 2, 3],
+      });
+
+      expect(result).toEqual({ printedIds: [1, 2, 3], failedIds: [] });
+      expect(gateway.renderDocument.calls.allArgs().map((a) => a[0])).toEqual([
+        'dispatch_note',
+        'dispatch_note',
+        'dispatch_note',
+      ]);
+      expect((service as any).sendToPrinter).toHaveBeenCalledTimes(1);
+      const sent = (service as any).sendToPrinter.calls.mostRecent().args[0] as string;
+      expect(sent.match(/<head>/gi)?.length).toBe(1);
+      expect(sent.indexOf('R-1')).toBeLessThan(sent.indexOf('R-2'));
+      expect(sent.indexOf('R-2')).toBeLessThan(sent.indexOf('R-3'));
+      expect(sent.match(/break-before: page/g)?.length).toBe(2);
+      expect(sent).toContain('<body class="note">');
+    });
+
+    it('reports a document that fails to render and still prints the rest', async () => {
+      gateway.renderDocument.and.callFake(((_f: PrintFormatType, id: number | string) =>
+        id === 2
+          ? throwError(() => new Error('render failed'))
+          : of({ html: doc(`R-${id}`), copies: 1 } as any)) as any);
+
+      const result = await service.printGatewayBatch({
+        formatType: 'dispatch_note',
+        documentIds: [1, 2, 3],
+      });
+
+      expect(result).toEqual({ printedIds: [1, 3], failedIds: [2] });
+      const sent = (service as any).sendToPrinter.calls.mostRecent().args[0] as string;
+      expect(sent).not.toContain('R-2');
+    });
+
+    it('aborts the whole batch when the format is inactive (403)', async () => {
+      gateway.renderDocument.and.returnValue(
+        throwError(() => new HttpErrorResponse({ status: 403 })),
+      );
+
+      const result = await service.printGatewayBatch({
+        formatType: 'dispatch_note',
+        documentIds: [1, 2],
+      });
+
+      expect(result).toBeNull();
+      expect((service as any).sendToPrinter).not.toHaveBeenCalled();
+    });
+  });
 });

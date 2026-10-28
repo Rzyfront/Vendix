@@ -93,6 +93,11 @@ import {
   DIAN_AIU_NOTE_PREFIX,
 } from './providers/dian-direct/xml/ubl-common.builder';
 import { InvoiceWithholdingInputDto } from './dto/invoice-withholding-input.dto';
+import {
+  buildDeclaredAcquirer,
+  evaluateOrderHolder,
+  isCfOverridable,
+} from './utils/order-acquirer-holder.util';
 import { resolveAcquirerRail } from './validators/acquirer-rail.resolver';
 import type { StoredTechnicalKey } from '../../../common/services/technical-key-vault.service';
 import { CUSTOMER_FOR_INVOICE_SELECT } from './utils/customer-invoice-data.adapter';
@@ -297,6 +302,25 @@ export interface InvoiceTaxRowInput {
  * los `invoice_items.id` a los que apuntar.
  */
 export type DocumentLineTaxes = InvoiceTaxRowInput[][];
+
+/** Plazo y medio de pago declarados al facturar una orden a crédito. */
+export interface CreateFromOrderOptions {
+  due_date?: Date;
+  payment_means_code?: string;
+  /**
+   * Emite la factura a Consumidor final aunque la orden tenga cliente. Sólo lo
+   * pide la facturación masiva con opt-in explícito del usuario; la ficha del
+   * cliente no se modifica y su snapshot fiscal (DV, responsabilidades, tipo de
+   * persona) no se copia a la factura.
+   */
+  force_final_consumer?: boolean;
+  /**
+   * Un documento `cancelled` (borrador descartado por un intento fallido de la
+   * emisión en un paso) no cuenta como anulación deliberada: la emisión crea uno
+   * nuevo en vez de responder «fue anulado». Sólo lo usa `OneShotEmissionService`.
+   */
+  recreate_after_discard?: boolean;
+}
 
 /**
  * ¿El documento nacido de una orden parte sus tributos por línea?
@@ -1038,6 +1062,47 @@ export class InvoicingService {
    * copia de la regla se desincroniza el primer día y dejaría al POS emitiendo
    * donde el carril fiscal bloquea, o al revés.
    */
+  /**
+   * Evalúa la ficha de UN cliente con la regla de titular de la emisión
+   * (`evaluateOrderHolder`). Acotado a la organización del contexto: un id de
+   * otro tenant responde igual que uno inexistente.
+   */
+  async getHolderCheck(customer_id: number) {
+    const context = this.getContext();
+    const customer = await this.prisma.users.findFirst({
+      where: { id: customer_id, organization_id: Number(context.organization_id) },
+      select: {
+        document_type: true,
+        document_number: true,
+        legal_name: true,
+        first_name: true,
+        last_name: true,
+        verification_digit: true,
+      },
+    });
+    if (!customer) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_004,
+        `El cliente ${customer_id} no existe en esta organización.`,
+        { customer_id },
+      );
+    }
+    const holder = evaluateOrderHolder({ users: customer, invoice_data_requests: [] });
+    return {
+      rail: holder.rail,
+      holder: {
+        rail: holder.rail,
+        source: holder.source,
+        name: holder.name,
+        document_type: holder.document_type,
+        document_number: holder.document_number,
+        verification_digit: holder.verification_digit,
+      },
+      holder_issue: holder.issue,
+      cf_overridable: isCfOverridable(holder.issue),
+    };
+  }
+
   async getElectronicEmissionEligibility(): Promise<{
     eligible: boolean;
     reason: string | null;
@@ -3012,6 +3077,108 @@ export class InvoicingService {
   }
 
   /**
+   * Snapshot del adquiriente de una factura nacida de una orden. UNA sola
+   * construcción para la creación y para el refresco de un borrador colgado
+   * (`refreshDraftAcquirer`): la fuente es completa (ficha `users` o datos del
+   * invitado), nunca mezclada, y con `force_final_consumer` sale Consumidor
+   * final sin copiar la ficha fiscal del cliente.
+   */
+  private buildOrderAcquirerSnapshot(
+    order: {
+      users?: any;
+      invoice_data_requests?: any[] | null;
+    },
+    opts?: Pick<CreateFromOrderOptions, 'force_final_consumer'>,
+  ) {
+    const invoiceDataRequest = order.invoice_data_requests?.[0];
+    const declaredAcquirer = opts?.force_final_consumer
+      ? {}
+      : buildDeclaredAcquirer(order).input;
+    const acquirerRail = resolveAcquirerRail(declaredAcquirer);
+    return {
+      customer_name: acquirerRail.identity.name,
+      // Nunca `undefined`: el carril consumidor final persiste el número oficial
+      // `222222222222` (ver `resolveAcquirerRail`).
+      customer_tax_id: acquirerRail.identity.document_number,
+      customer_document_type: acquirerRail.identity.document_type,
+      customer_email: opts?.force_final_consumer ? null : (order.users?.email ?? invoiceDataRequest?.email ?? null),
+      customer_phone: opts?.force_final_consumer ? null : (order.users?.phone ?? invoiceDataRequest?.phone ?? null),
+      customer_verification_digit: opts?.force_final_consumer
+        ? null
+        : (order.users?.verification_digit ?? null),
+      customer_fiscal_responsibilities:
+        !opts?.force_final_consumer && order.users?.fiscal_responsibilities?.length
+          ? order.users.fiscal_responsibilities
+          : undefined,
+      customer_person_type: opts?.force_final_consumer
+        ? undefined
+        : (order.users?.person_type ?? undefined),
+    };
+  }
+
+  /**
+   * Re-sincroniza el titular de un BORRADOR sin numerar con la evaluación actual
+   * de la orden (misma construcción que la creación). Un borrador viejo puede
+   * traer un Consumidor final de antes, un nombre de una fuente y el número de
+   * otra, o ignorar `force_final_consumer`; emitirlo así quemaría el consecutivo
+   * con un titular equivocado. Devuelve `true` si cambió algo. Sólo toca
+   * `draft`: un documento ya numerado tiene el titular congelado.
+   */
+  async refreshDraftAcquirer(
+    invoice_id: number,
+    order_id: number,
+    opts?: Pick<CreateFromOrderOptions, 'force_final_consumer'>,
+  ): Promise<boolean> {
+    const invoice = await this.prisma.invoices.findFirst({
+      where: { id: invoice_id, order_id, status: 'draft' },
+      select: {
+        id: true,
+        customer_name: true,
+        customer_tax_id: true,
+        customer_document_type: true,
+        customer_verification_digit: true,
+        customer_person_type: true,
+      },
+    });
+    if (!invoice) return false;
+    const order = await this.prisma.orders.findFirst({
+      where: { id: order_id },
+      select: {
+        users: {
+          select: {
+            email: true,
+            phone: true,
+            document_type: true,
+            document_number: true,
+            legal_name: true,
+            first_name: true,
+            last_name: true,
+            verification_digit: true,
+            person_type: true,
+            fiscal_responsibilities: true,
+          },
+        },
+        invoice_data_requests: { orderBy: { created_at: 'desc' }, take: 1 },
+      },
+    });
+    if (!order) return false;
+    const snapshot = this.buildOrderAcquirerSnapshot(order, opts);
+    const changed =
+      invoice.customer_name !== snapshot.customer_name ||
+      invoice.customer_tax_id !== snapshot.customer_tax_id ||
+      invoice.customer_document_type !== snapshot.customer_document_type ||
+      (invoice.customer_verification_digit ?? null) !==
+        snapshot.customer_verification_digit;
+    if (!changed) return false;
+    await this.prisma.invoices.updateMany({
+      where: { id: invoice_id, status: 'draft' },
+      data: snapshot,
+    });
+    this.logger.log(`Invoice #${invoice_id} draft holder refreshed from order #${order_id}`);
+    return true;
+  }
+
+  /**
    * NINGÚN DOCUMENTO DE ORIGEN SE FACTURA DOS VECES.
    *
    * Va **antes** de `generateNextNumber()`, y el orden no es estilístico: ese
@@ -3064,7 +3231,7 @@ export class InvoicingService {
     );
   }
 
-  async createFromOrder(order_id: number) {
+  async createFromOrder(order_id: number, opts?: CreateFromOrderOptions) {
     const context = this.getContext();
     await this.assertInvoicingAreaActive(context);
     const accounting_entity_id =
@@ -3632,7 +3799,6 @@ export class InvoicingService {
       this.buildInvoiceTaxCreateInput(tax_item),
     );
 
-    const invoiceDataRequest = order.invoice_data_requests?.[0];
     // El adquiriente declarado para ESTE documento sale de UNA sola fuente
     // completa — la fila `users` del pedido si hay cliente identificado, o los
     // datos que el comprador cargó como invitado (`invoice_data_requests`) — y
@@ -3642,25 +3808,11 @@ export class InvoicingService {
     // 'Consumidor Final' y `customer_tax_id` caía a `undefined` de forma
     // independiente, y esa mitad de identidad hacía fallar la emisión DESPUÉS
     // de haber numerado (ver el docblock del resolver).
-    const declaredAcquirer = order.users
-      ? {
-          document_type: order.users.document_type,
-          document_number: order.users.document_number,
-          legal_name: order.users.legal_name,
-          first_name: order.users.first_name,
-          last_name: order.users.last_name,
-        }
-      : invoiceDataRequest
-        ? {
-            document_type: invoiceDataRequest.document_type,
-            document_number: invoiceDataRequest.document_number,
-            legal_name: null,
-            first_name: invoiceDataRequest.first_name,
-            last_name: invoiceDataRequest.last_name,
-          }
-        : {};
-    const acquirerRail = resolveAcquirerRail(declaredAcquirer);
-    const customer_name = acquirerRail.identity.name;
+    // Misma construcción que la vista previa de facturación masiva
+    // (`buildDeclaredAcquirer`): una sola fuente, una sola regla. Con
+    // `force_final_consumer` (opt-in explícito del lote) el adquiriente se
+    // declara vacío, o sea Consumidor final, SIN tocar la ficha del cliente.
+    const acquirerSnapshot = this.buildOrderAcquirerSnapshot(order, opts);
 
     /**
      * CÓMO SE PAGÓ ESTA ORDEN, DICHO EN EL IDIOMA DE LA DIAN.
@@ -3677,10 +3829,21 @@ export class InvoicingService {
      * «Método de pago» de los reportes. Si divergiera, una orden podría
      * imprimirse «Tarjeta» y declararse «Efectivo».
      */
-    const { payment_form, payment_means_code } = resolveOrderDianPaymentMeans(
-      order,
-      order.payments,
-    );
+    const resolved_means = resolveOrderDianPaymentMeans(order, order.payments);
+    const payment_form = resolved_means.payment_form;
+    // Crédito: el medio lo puede declarar quien factura (modal «Facturar a
+    // crédito»); con contado se queda el que salió de los pagos cobrados.
+    const payment_means_code =
+      payment_form === '2' && opts?.payment_means_code
+        ? opts.payment_means_code
+        : resolved_means.payment_means_code;
+    // Crédito: el vencimiento declarado manda; si no, el de la cuenta por
+    // cobrar de la orden y, en su defecto, el de la primera cuota. Sin esto el
+    // XML llevaba `PaymentDueDate = issue_date` en facturas «a crédito».
+    const due_date =
+      payment_form === '2'
+        ? (opts?.due_date ?? (await this.resolveCreditDueDate(order.id)))
+        : undefined;
 
     const invoice = await this.prisma.invoices.create({
       data: {
@@ -3691,37 +3854,7 @@ export class InvoicingService {
         invoice_type: 'sales_invoice',
         status: 'draft',
         customer_id: order.customer_id,
-        customer_name,
-        // Nunca `undefined`: el carril consumidor final persiste el número
-        // oficial `222222222222`, así que `dian-direct.provider.ts` lo
-        // reconoce como `declares_final_consumer` en vez de caer al carril
-        // nominativo con media identidad — que es lo que quemaba el
-        // consecutivo en cada venta anónima.
-        customer_tax_id: acquirerRail.identity.document_number,
-        customer_document_type: acquirerRail.identity.document_type,
-        // Snapshot del adquiriente congelado al facturar: email/teléfono para
-        // `cac:Contact`, DV y responsabilidades para recalcular el MISMO CUFE
-        // en reenvíos años después. La fuente es la misma del carril (ficha
-        // `users` o datos del invitado) y nunca se mezclan.
-        // `customer_tax_regime` NO se copia: la columna espera código DIAN
-        // ('48'/'49') y `users.tax_regime` es etiqueta RUT ('COMUN'…); la
-        // emisión lo resuelve de la ficha viva.
-        customer_email:
-          order.users?.email ?? invoiceDataRequest?.email ?? null,
-        customer_phone:
-          order.users?.phone ?? invoiceDataRequest?.phone ?? null,
-        customer_verification_digit:
-          order.users?.verification_digit ?? null,
-        customer_fiscal_responsibilities:
-          order.users?.fiscal_responsibilities?.length
-            ? order.users.fiscal_responsibilities
-            : undefined,
-        // Task E — sin esto, una venta de mostrador SIN cliente identificado
-        // (consumidor final) queda con `customer_person_type` NULL, que
-        // `resolveAcquirerIdentity` respalda correctamente derivando del
-        // código de documento en emisión; con cliente identificado, congela
-        // su `person_type` real en vez de re-derivarlo después.
-        customer_person_type: order.users?.person_type ?? undefined,
+        ...acquirerSnapshot,
         order_id: order.id,
         invoice_number: null,
         resolution_id: null,
@@ -3744,6 +3877,7 @@ export class InvoicingService {
         // desde los pagos cobrados de la orden.
         payment_form,
         payment_means_code,
+        ...(due_date ? { due_date } : {}),
         created_by_user_id: context.user_id,
         invoice_items: {
           create: items,
@@ -3784,6 +3918,37 @@ export class InvoicingService {
       `Invoice #${created.id} created numberless from order #${order_id} (A.1: numbered at validate)`,
     );
     return created;
+  }
+
+  /**
+   * Vencimiento de una orden a crédito sin plazo declarado: su cuenta por
+   * cobrar, o su primera cuota. Un plazo heredado que ya venció no se declara:
+   * un `PaymentDueDate` anterior a la emisión contradice el documento, y sin
+   * él la factura sale como antes (vence al emitirse).
+   */
+  private async resolveCreditDueDate(order_id: number): Promise<Date | null> {
+    const due_date = await this.findCreditDueDate(order_id);
+    if (!due_date) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    return due_date.toISOString().slice(0, 10) < today ? null : due_date;
+  }
+
+  private async findCreditDueDate(order_id: number): Promise<Date | null> {
+    const receivable = await this.prisma.accounts_receivable.findFirst({
+      where: {
+        source_id: order_id,
+        source_type: { in: ['credit_sale', 'order'] },
+      },
+      orderBy: { id: 'asc' },
+      select: { due_date: true },
+    });
+    if (receivable?.due_date) return receivable.due_date;
+    const installment = await this.prisma.order_installments.findFirst({
+      where: { order_id },
+      orderBy: { installment_number: 'asc' },
+      select: { due_date: true },
+    });
+    return installment?.due_date ?? null;
   }
 
   /** Independently invoiceable account: no new physical order or inventory line. */

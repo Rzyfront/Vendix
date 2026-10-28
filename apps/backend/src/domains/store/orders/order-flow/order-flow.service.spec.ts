@@ -90,6 +90,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
       payments: paymentsMock,
     };
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn(async (callback: any) => callback(tx)),
       orders: {
         findFirst: jest.fn(async ({ select }: any) => select?.state
@@ -853,6 +854,7 @@ describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
 
   const harness = (state: string, lines: any[]) => {
     const prisma: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: { findMany: jest.fn().mockResolvedValue(lines) },
     };
     const service = new OrderFlowService(
@@ -960,6 +962,7 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
   beforeEach(() => {
     projectTablePayment = jest.fn().mockResolvedValue(null);
     prismaMock = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       store_payment_methods: {
         findFirst: jest
           .fn()
@@ -1398,6 +1401,7 @@ describe('OrderFlowService.reconcileOrderFromDispatch — tabla de derivación',
     mode?: 'live' | 'on_close';
   }) => {
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn().mockResolvedValue(
           opts.order
@@ -1643,6 +1647,7 @@ describe('OrderFlowService.markKitchenOrderDelivered — restaurant bridge', () 
     order: { state: string; delivery_type?: string } | null,
   ) => {
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn().mockResolvedValue(null),
       },
@@ -1745,6 +1750,7 @@ describe('OrderFlowService.markKitchenOrderDelivered — restaurant bridge', () 
     // lanza 409 ORDER_INVALID_TRANSITION. El listener captura con try/catch
     // (log + swallow) — pero el service NO debe silenciar el error.
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     const service = new OrderFlowService(
@@ -1792,6 +1798,7 @@ describe('OrderFlowService.revertKitchenOrderDelivery — kitchen bridge reverse
 
   const buildService = (order: { id: number; state: string } | null) => {
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn().mockResolvedValue(order),
       },
@@ -1944,6 +1951,8 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
       order_item_taxes?: Array<{ tax_amount: number | null }>;
     }>;
     withKds?: boolean;
+    // Factura de venta vigente de la orden (bloqueo ORD_INVOICED_LOCKED_001).
+    lockingInvoice?: { id: number; status: string } | null;
   }) => {
     const txMock: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
@@ -1984,6 +1993,9 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
           .mockResolvedValue(
             opts.item === undefined ? unfiredItem() : opts.item,
           ),
+      },
+      invoices: {
+        findFirst: jest.fn().mockResolvedValue(opts.lockingInvoice ?? null),
       },
       $transaction: jest.fn((cb: any) => cb(txMock)),
     };
@@ -2043,6 +2055,33 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
       ORDER_ID, ITEM_ID, 'cliente se arrepintió',
     )).rejects.toMatchObject({ errorCode: 'SPLIT_ACCOUNT_LOCKED' });
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('no cancela una línea de una orden con factura electrónica vigente', async () => {
+    const { service, prismaMock } = buildService({
+      lockingInvoice: { id: 195, status: 'accepted' },
+    });
+
+    await expect(service.cancelOrderItem(
+      ORDER_ID, ITEM_ID, 'cliente se arrepintió',
+    )).rejects.toMatchObject({ errorCode: 'ORD_INVOICED_LOCKED_001' });
+    expect(prismaMock.invoices.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          order_id: ORDER_ID,
+          financial_account_id: null,
+          status: { in: ['validated', 'sent', 'accepted', 'rejected'] },
+        }),
+      }),
+    );
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('cancela la línea cuando la orden no tiene factura vigente', async () => {
+    const { service, txMock } = buildService({ lockingInvoice: null });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió');
+    expect(txMock.order_items.update).toHaveBeenCalled();
   });
 
   it('si el split aparece tras la prelectura, el lock lo detecta antes del soft cancel', async () => {
@@ -2403,6 +2442,7 @@ describe('OrderFlowService — charge-time shipping gate (A.2 CP-facturacion-fix
 
   const buildService = (probe: any) => {
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn().mockResolvedValue(probe),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -2549,6 +2589,7 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
       ...(opts.order ?? {}),
     };
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn(async (callback: any) => callback(prismaMock)),
       // kitchen_mode (modo cocina fisica): sin ajustes => 'virtual'.
       store_settings: {
@@ -2852,6 +2893,7 @@ describe('OrderFlowService.cancelOrderItem — guarda delivered (1060 paso 1)', 
       orders: { update: jest.fn().mockResolvedValue({}) },
     };
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: { findFirst: jest.fn().mockResolvedValue(item) },
       $transaction: jest.fn((cb: any) => cb(txMock)),
     };
@@ -2957,6 +2999,7 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
       total_price: number;
       order_item_taxes?: Array<{ tax_amount: number | null }>;
     }>;
+    lockingInvoice?: { id: number; status: string } | null;
   }) => {
     const txMock: any = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
@@ -2987,6 +3030,9 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
           .mockResolvedValue(
             opts.item === undefined ? deliveredItem() : opts.item,
           ),
+      },
+      invoices: {
+        findFirst: jest.fn().mockResolvedValue(opts.lockingInvoice ?? null),
       },
       $transaction: jest.fn((cb: any) => cb(txMock)),
     };
@@ -3032,6 +3078,19 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
       expect(auditService.logCustom).not.toHaveBeenCalled();
     },
   );
+
+  it('no reversa una línea entregada de una orden con factura electrónica vigente', async () => {
+    const { service, prismaMock, stockLevelManager } = buildService({
+      order: { state: 'created', payments: [] },
+      lockingInvoice: { id: 195, status: 'sent' },
+    });
+
+    await expect(service.cancelDeliveredOrderItem(
+      ORDER_ID, ITEM_ID, 'cliente se arrepintió', 'waste',
+    )).rejects.toMatchObject({ errorCode: 'ORD_INVOICED_LOCKED_001' });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+  });
 
   it('no reversa una línea entregada mientras exista split financiero activo', async () => {
     const { service, prismaMock, stockLevelManager } = buildService({
@@ -3375,6 +3434,7 @@ describe('D.2 — cancelación de una línea prepared ya consumida', () => {
       audit_logs: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ id: 99 }) },
     };
     const prisma: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: { findFirst: jest.fn().mockResolvedValue(item) },
       $transaction: jest.fn((fn: any) => fn(tx)),
     };
@@ -3570,6 +3630,7 @@ describe('D.4 — recálculo de propina al cancelar (F-001)', () => {
       },
     };
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: {
         findFirst: jest.fn().mockResolvedValue({
           id: ITEM_ID,
@@ -3654,6 +3715,7 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
 
   const buildService = () => {
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       store_payment_methods: {
         findFirst: jest
           .fn()
@@ -3965,6 +4027,18 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     await expect(service.cancelOrder(ORDER_ID, DTO)).rejects.toMatchObject({
       errorCode: 'ORD_CANCEL_OPEN_TABLE_001',
       response: expect.objectContaining({ details: { table_session_id: 55 } }),
+    });
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(stock.releaseReservationsByReference).not.toHaveBeenCalled();
+  });
+
+  it('rechaza cancelar el draft de un folio hotelero abierto, sin escribir', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+      ...cancelableOrder([]), state: 'draft', order_items: [], lodging_folio: { id: 40 },
+    });
+
+    await expect(service.cancelOrder(ORDER_ID, DTO)).rejects.toMatchObject({
+      errorCode: 'ORD_STATUS_001',
     });
     expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
     expect(stock.releaseReservationsByReference).not.toHaveBeenCalled();
@@ -5167,6 +5241,7 @@ describe('OrderFlowService.registerCreditPayment — table projection (B.2/T5)',
       order_installments: [],
     };
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn(async () => orderRow),
         update: jest.fn(async () => ({ id: 1 })),
@@ -5306,6 +5381,7 @@ describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_0
   it('payOrder sin caja: rechaza CASH_SESSION_REQUIRED_001 antes del claim de estado', async () => {
     mockRequestContext({ store_id: 4, organization_id: 1, user_id: USER_B });
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn(async () => null),
         updateMany: jest.fn(async () => ({ count: 1 })),
@@ -5344,6 +5420,7 @@ describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_0
   it('registerCreditPayment sin caja: rechaza CASH_SESSION_REQUIRED_001 sin crear el pago', async () => {
     mockRequestContext({ store_id: 4, organization_id: 1, user_id: USER_B });
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: { findFirst: jest.fn(async () => null) },
       payments: { create: jest.fn() },
     };
@@ -5390,6 +5467,7 @@ describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_0
       order_installments: [],
     };
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn(async () => orderRow),
         update: jest.fn(async () => ({ id: 1 })),
@@ -5559,6 +5637,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     const stateUpdates: Array<{ state: string; metadata: unknown }> = [];
     const createdPayments: any[] = [];
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       store_payment_methods: {
         findFirst: jest.fn().mockResolvedValue(LEG_METHODS[0]),
         // El harness histórico no mockeaba `findMany`: el carril multi lo
@@ -6273,6 +6352,7 @@ describe('OrderFlowService.payOrder — B4/B8 delivered/finished sin pago liquid
     let txnSeq = 0;
     const stateUpdates: Array<{ state: string; metadata: unknown }> = [];
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       store_payment_methods: {
         findFirst: jest.fn().mockResolvedValue({
           id: 1,
@@ -6455,6 +6535,7 @@ describe('OrderFlowService.payOrder — B4/B8 delivered/finished sin pago liquid
 describe('OrderFlowService.shipOrder — allowExemptDeliveryTypes (Task B, solo fast track)', () => {
   const buildService = (order: Record<string, unknown>) => {
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn(async () => ({ id: 1, store_id: 4, stores: { organization_id: null } })),
       },
@@ -6530,6 +6611,7 @@ describe('OrderFlowService.shipOrder — allowExemptDeliveryTypes (Task B, solo 
 describe('OrderFlowService.fastTrackOrder — pickup/dine_in sin método de envío (Task B)', () => {
   const buildService = () => {
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: { findFirst: jest.fn(async () => ({ id: 1, state: 'finished' })) },
     };
     const service = new OrderFlowService(
@@ -6627,6 +6709,7 @@ describe('OrderFlowService.settleFinancialSplitSource — guardia de stock (docs
 
   const build = () => {
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       table_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -6723,6 +6806,7 @@ describe('OrderFlowService.settleFinancialSplitSource — guardia de stock (docs
 describe('OrderFlowService.emitLegPaymentReceivedEvents — base de reteIVA', () => {
   it('ivaAmount suma sólo IVA (y filas sin tipar); INC queda fuera', async () => {
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: {
         findMany: jest.fn().mockResolvedValue([
           {
@@ -6859,6 +6943,7 @@ describe('OrderFlowService.emitLegPaymentReceivedEvents — prorrateo y persisti
   const build = (persistImpl?: () => Promise<unknown>) => {
     const calls: string[] = [];
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: {
         findMany: jest.fn().mockResolvedValue([
           {
@@ -7090,6 +7175,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
     const confirmedInPlace: any[] = [];
     const stateUpdates: Array<{ state: string; metadata: unknown }> = [];
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       store_payment_methods: {
         findFirst: jest.fn().mockImplementation(async ({ where }: any) =>
           LEG_METHODS.find((row) => row.id === where?.id) ?? LEG_METHODS[0],
@@ -7870,6 +7956,7 @@ describe('OrderFlowService — ORD_FINISH_UNPAID_BALANCE_001 (guard único de sa
   const build = (previous: any, orderOverrides: any = {}) => {
     const emit = jest.fn();
     const prisma: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findUnique: jest.fn().mockResolvedValue(previous),
         findMany: jest.fn(),
@@ -8078,6 +8165,7 @@ describe('OrderFlowService.finishCashSessionOrders — lote atómico de cierre',
       },
     };
     const prisma: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction: jest.fn(async (callback: (tx: any) => Promise<unknown>) => {
         const result = await callback(tx);
         for (const [id, state] of pendingStates) committedStates.set(id, state);
@@ -8205,6 +8293,7 @@ describe('OrderFlowService.updateItemNotes — nota por ítem en cualquier orden
       },
     };
     const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: {
         findFirst: jest
           .fn()

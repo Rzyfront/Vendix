@@ -14,9 +14,14 @@ import { dispatch_route_stop_result_enum } from '@prisma/client';
 /**
  * Payload de liquidación de una parada de ruta DSD.
  *
- * NO acepta `credit_amount`: en ruta no hay venta a crédito ni pago parcial —
- * una parada se entrega con pago total (o es prepaga) y si el cliente no paga se
- * marca `rejected`. El `ValidationPipe` global corre con `whitelist: true` +
+ * NO acepta `credit_amount`: la columna no se escribe y no existe el resultado
+ * `partial`. Regla de pago por parada entregada: contra entrega y crédito libre
+ * (`credit_type` 'free' o null) exigen recaudo + anticipo + retención >= total
+ * (o la parada es prepaga); una orden a crédito POR CUOTAS
+ * (`payment_form` '2' + `credit_type` 'installments') se entrega con cualquier
+ * recaudo, incluido 0: lo cobrado abona las cuotas y la CxC y el saldo sigue en
+ * cartera. Si el cliente no paga y no hay cuotas, se marca `rejected`. El
+ * `ValidationPipe` global corre con `whitelist: true` +
  * `forbidNonWhitelisted: true` (ver `main.ts`), así que enviar `credit_amount`
  * produce un 400 en validación en vez de colarse hasta el servicio. La columna
  * `dispatch_route_stops.credit_amount` sigue en el schema (siempre 0) porque

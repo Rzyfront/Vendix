@@ -96,5 +96,15 @@ describe('bulk-editable-fields registry (QUI-752)', () => {
       expect(coerceBulkEditValue(field('account_code'), null)).toBeNull();
       expect(coerceBulkEditValue(field('account_code'), '413550')).toBe('413550');
     });
+
+    it('tax_category_action: envía el flag incluido marcado en el chip', () => {
+      expect(
+        coerceBulkEditValue(field('tax_category_action'), {
+          mode: 'replace',
+          ids: [19],
+          inclusive: { 19: true },
+        }),
+      ).toEqual({ mode: 'replace', ids: [19], tax_inclusive_map: { '19': true } });
+    });
   });
 });

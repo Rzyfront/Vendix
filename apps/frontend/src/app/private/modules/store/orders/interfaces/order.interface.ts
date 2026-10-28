@@ -309,6 +309,13 @@ export interface OrderInvoiceSnapshot {
   transmission_status?: OrderInvoiceTransmissionStatus;
   send_status?: OrderInvoiceSendStatus;
   issue_date?: string;
+  /**
+   * Venta a crédito: `payment_form === '2'` y `due_date` (fecha DIAN de
+   * vencimiento). Opcionales: sólo los proyecta `findOne` cuando el backend
+   * los incluye; sin ellos la UI cae a `order.payment_form`.
+   */
+  payment_form?: string | null;
+  due_date?: string | null;
 }
 
 export interface OrderAccountInvoice {
@@ -676,6 +683,10 @@ export interface OrderQuery {
   /** Store payment method ID; matches any settled/captured leg. */
   payment_method_id?: number;
   date_range?: string;
+  /** Electronic invoice state of the order (bulk module filter). */
+  invoice_status?: 'none' | 'invoiced' | 'rejected';
+  /** true = orders with a customer; false = without customer (Consumidor final). */
+  has_customer?: boolean;
 
   // Filtros de fecha
   date_from?: string;

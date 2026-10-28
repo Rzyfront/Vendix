@@ -374,7 +374,13 @@ export interface RouteLiveTotals {
  * `Number()` / truthiness.
  */
 export interface DerivableStopInput {
+  /** Stop status + settled amounts: a stop collected on the route is not prepaid. */
+  status?: string | null;
+  collected_amount?: unknown;
+  anticipo_amount?: unknown;
+  withholding_amount?: unknown;
   dispatch_note?: {
+    grand_total?: unknown;
     needs_collection?: boolean | null;
     invoice?: { payment_date?: unknown } | null;
     order?: { remaining_balance?: unknown } | null;
@@ -393,6 +399,18 @@ export interface DerivableStopInput {
 export function deriveStopIsPrepaid(stop: DerivableStopInput): boolean {
   const note = stop.dispatch_note;
   if (!note) return false;
+  // A stop the driver already settled WITH money (cash, anticipo or
+  // withholding) was collected on this route: its order balance is now 0
+  // because of that very collection, so the live signal below would flip it
+  // to prepaid and drop it from total_collected, the close cash filter and
+  // the PDF. What was collected on the route stays a collection.
+  if (stop.status === 'delivered') {
+    const settled =
+      Number(stop.collected_amount ?? 0) +
+      Number(stop.anticipo_amount ?? 0) +
+      Number(stop.withholding_amount ?? 0);
+    if (settled > PAID_BALANCE_TOLERANCE) return false;
+  }
   return resolveIsPrepaid({
     needs_collection: note.needs_collection,
     invoice: note.invoice
@@ -402,6 +420,27 @@ export function deriveStopIsPrepaid(stop: DerivableStopInput): boolean {
       ? { remaining_balance: note.order.remaining_balance as number | string | null }
       : null,
   });
+}
+
+/**
+ * Amount the driver must still collect on this stop, derived on read from the
+ * LIVE payment state (never the frozen note total): the linked order's real
+ * `remaining_balance` capped by the remisión's own `grand_total` (a remisión may
+ * cover only part of the order). Fully paid order (or prepaid) → 0. Without an
+ * order balance signal (legacy sales-order path) it is the note total unless the
+ * stop is prepaid. Always rounded to cents.
+ */
+export function derivePendingAmount(stop: DerivableStopInput): number {
+  const note = stop.dispatch_note;
+  if (!note) return 0;
+  const grand_total = Number((note.grand_total as number | string | null | undefined) ?? 0);
+  if (deriveStopIsPrepaid(stop)) return 0;
+  const remaining = note.order?.remaining_balance;
+  const base =
+    remaining != null
+      ? Math.min(Math.max(Number(remaining), 0), grand_total)
+      : grand_total;
+  return Math.round(base * 100) / 100;
 }
 
 /**

@@ -364,7 +364,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
         result: 'delivered',
         collected_amount: 0,
       } as any),
-    ).rejects.toThrow(/menor que el total de la remisión/);
+    ).rejects.toThrow(/debe cubrir el saldo pendiente/);
 
     expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
   });
@@ -551,6 +551,183 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     );
   });
 
+  // ── j2) RECAUDO EN ÓRDENES A CRÉDITO (Parte B) ─────────────────────
+  describe('recaudo por tipo de orden (contra entrega / crédito libre / cuotas)', () => {
+    const creditStop = (creditType: string | null, paymentForm: string | null = '2') =>
+      buildStop({
+        dispatch_note: {
+          ...buildStop().dispatch_note,
+          order_id: 321,
+          needs_collection: true,
+          invoice: null,
+          order: {
+            remaining_balance: new Prisma.Decimal(200),
+            payment_form: paymentForm,
+            credit_type: creditType,
+          },
+        },
+      });
+
+    beforeEach(() => {
+      prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    });
+
+    it('cuotas con recaudo parcial: queda delivered y el recaudo se emite para abonar cuotas/CxC', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(creditStop('installments'));
+
+      await service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'delivered',
+        collected_amount: 50,
+        payment_method: 'cash',
+      } as any);
+
+      expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: 'delivered', collected_amount: 50 }),
+        }),
+      );
+      expect(cashSettlementMock.emitPaymentReceived).toHaveBeenCalledWith(
+        expect.objectContaining({ stop_id: STOP_ID, amount: 50 }),
+        { cashMovementHandled: true },
+      );
+      const stopUpdateData = prismaMock.dispatch_route_stops.update.mock.calls[0][0].data;
+      expect(stopUpdateData).not.toHaveProperty('credit_amount');
+    });
+
+    it('cuotas con recaudo 0: delivered sin pago emitido', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(creditStop('installments'));
+
+      await service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 0 } as any);
+
+      expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'delivered' }) }),
+      );
+      expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
+    });
+
+    it('cuotas con recaudo 0 y retención: delivered y el pago (monto 0 + retención) se emite', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(creditStop('installments'));
+
+      await service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'delivered',
+        collected_amount: 0,
+        withholding_amount: 20,
+        withholding_breakdown: { retefuente: 20 },
+      } as any);
+
+      expect(cashSettlementMock.emitPaymentReceived).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 0, withholding_breakdown: { retefuente: 20 } }),
+        { cashMovementHandled: true },
+      );
+    });
+
+    it('crédito libre con recaudo parcial: 400 y nada se liquida', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(creditStop('free'));
+
+      await expect(
+        service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 50 } as any),
+      ).rejects.toMatchObject({ errorCode: 'DISPATCH_ROUTE_COLLECTION_MISMATCH' });
+      expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+      expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
+    });
+
+    it('crédito sin credit_type (null) con recaudo parcial: 400 como crédito libre', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(creditStop(null));
+
+      await expect(
+        service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 50 } as any),
+      ).rejects.toMatchObject({ errorCode: 'DISPATCH_ROUTE_COLLECTION_MISMATCH' });
+    });
+
+    it('contra entrega con recaudo parcial: 400 (comportamiento previo)', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(creditStop(null, '1'));
+
+      await expect(
+        service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 50 } as any),
+      ).rejects.toThrow(/contra entrega o a cr[eé]dito libre/);
+      expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+    });
+
+    it('contra entrega con sobre-recaudo: 400 COLLECTION_MISMATCH', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(creditStop(null, '1'));
+
+      await expect(
+        service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 250 } as any),
+      ).rejects.toMatchObject({ errorCode: 'DISPATCH_ROUTE_COLLECTION_MISMATCH' });
+      expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
+    });
+
+    it('cuotas con sobre-recaudo: 400 COLLECTION_MISMATCH', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(creditStop('installments'));
+
+      await expect(
+        service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 250 } as any),
+      ).rejects.toMatchObject({ errorCode: 'DISPATCH_ROUTE_COLLECTION_MISMATCH' });
+    });
+
+    it('parada ya entregada con otro resultado: 409 STOP_ALREADY_SETTLED', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue({
+        ...creditStop('installments'),
+        status: 'delivered',
+      });
+
+      await expect(
+        service.settleStop(ROUTE_ID, STOP_ID, { result: 'rejected' } as any),
+      ).rejects.toMatchObject({ errorCode: 'DISPATCH_ROUTE_STOP_ALREADY_SETTLED' });
+    });
+
+    const paidStop = () => {
+      const stop = creditStop(null, '1');
+      (stop.dispatch_note.order as any).remaining_balance = new Prisma.Decimal(0);
+      return stop;
+    };
+
+    it('orden ya pagada con recaudo 0: delivered y sin pago emitido', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(paidStop());
+
+      await service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 0 } as any);
+
+      expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalled();
+      expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
+    });
+
+    it('orden ya pagada con recaudo > 0: 400 STOP_ALREADY_PAID', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(paidStop());
+
+      await expect(
+        service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 10 } as any),
+      ).rejects.toMatchObject({ errorCode: 'DISPATCH_ROUTE_STOP_ALREADY_PAID' });
+      expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+    });
+
+    it('crédito libre con recaudo total: delivered y pago emitido', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(creditStop('free'));
+
+      await service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'delivered',
+        collected_amount: 200,
+        payment_method: 'cash',
+      } as any);
+
+      expect(cashSettlementMock.emitPaymentReceived).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 200 }),
+        { cashMovementHandled: true },
+      );
+    });
+
+    it('reintento de la misma parada ya entregada: respuesta idempotente y sin segundo pago', async () => {
+      prismaMock.dispatch_route_stops.findFirst.mockResolvedValue({
+        ...creditStop('installments'),
+        status: 'delivered',
+      });
+
+      await expect(
+        service.settleStop(ROUTE_ID, STOP_ID, { result: 'delivered', collected_amount: 50 } as any),
+      ).resolves.toBeDefined();
+      expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
+    });
+  });
+
   // ── k) CIERRE CON ENTREGAS INCOMPLETAS ─────────────────────────────
   //
   // La regla es por NIVEL y estos dos casos la fijan:
@@ -640,8 +817,8 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     });
   });
 
-  // ── D2: despacho solo por el encargado ────────────────────────────────
-  describe('dispatch() — solo el encargado (D2)', () => {
+  // ── D2: any user with the permission may dispatch ─────────────────────
+  describe('dispatch() — encargado u otro usuario con permiso (D2)', () => {
     const dispatchableStop = () =>
       buildStop({
         dispatch_note: {
@@ -659,14 +836,24 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
         ...overrides,
       });
 
-    it('no encargado: 403 DISPATCH_ROUTE_NOT_RESPONSIBLE con el nombre del encargado', async () => {
-      prismaMock.dispatch_routes.findFirst.mockResolvedValue(draftRoute());
-      const err: any = await service.dispatch(ROUTE_ID).catch((e) => e);
-      expect(err).toBeInstanceOf(VendixHttpException);
-      expect(err.errorCode).toBe('DISPATCH_ROUTE_NOT_RESPONSIBLE');
-      expect(err.getStatus()).toBe(403);
-      expect(err.message).toContain('Ana Ruiz');
-      expect(prismaMock.dispatch_routes.update).not.toHaveBeenCalled();
+    it('another permitted user (not the responsible) can dispatch', async () => {
+      context.user_id = 42;
+      const route = draftRoute();
+      prismaMock.dispatch_routes.findFirst.mockResolvedValue(route);
+      prismaMock.dispatch_routes.update.mockResolvedValue({
+        ...route,
+        status: 'dispatched',
+      });
+      const res = await service.dispatch(ROUTE_ID);
+      expect(res.status).toBe('dispatched');
+      expect(prismaMock.dispatch_routes.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'dispatched',
+            dispatched_by_user_id: 42,
+          }),
+        }),
+      );
     });
 
     it('encargado: despacha OK', async () => {

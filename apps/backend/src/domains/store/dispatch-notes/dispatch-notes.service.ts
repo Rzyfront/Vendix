@@ -9,6 +9,10 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import {
+  customerDisplayName,
+  resolveCustomerSnapshotName,
+} from '../../../common/helpers/customer-display-name.helper';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
 import { parseAiJson } from '../../../ai-engine/utils/ai-json.util';
@@ -90,6 +94,7 @@ const DISPATCH_NOTE_INCLUDE = {
       id: true,
       first_name: true,
       last_name: true,
+      legal_name: true,
       email: true,
       phone: true,
     },
@@ -1200,6 +1205,7 @@ export class DispatchNotesService {
         id: true,
         first_name: true,
         last_name: true,
+        legal_name: true,
         document_number: true,
       },
     });
@@ -1208,8 +1214,7 @@ export class DispatchNotesService {
       throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
     }
 
-    const customer_name =
-      `${customer.first_name || ''} ${customer.last_name || ''}`.trim();
+    const customer_name = customerDisplayName(customer);
 
     // Calculate totals from items
     const items: any[] = dto.items || [];
@@ -1507,7 +1512,13 @@ export class DispatchNotesService {
           },
         },
         customer: {
-          select: { id: true, first_name: true, last_name: true, document_number: true },
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            legal_name: true,
+            document_number: true,
+          },
         },
       },
     });
@@ -1521,8 +1532,7 @@ export class DispatchNotesService {
 
     // Denormalize customer data from the original dispatch
     const customer = related.customer;
-    const customer_name =
-      `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim();
+    const customer_name = customerDisplayName(customer);
 
     // Calculate totals from items
     const items: any[] = dto.items || [];
@@ -1850,6 +1860,7 @@ export class DispatchNotesService {
             id: true,
             first_name: true,
             last_name: true,
+            legal_name: true,
             document_number: true,
           },
         },
@@ -1886,8 +1897,7 @@ export class DispatchNotesService {
       );
     }
 
-    const customer_name =
-      `${sales_order.customer?.first_name || ''} ${sales_order.customer?.last_name || ''}`.trim();
+    const customer_name = customerDisplayName(sales_order.customer);
 
     // Build items from sales order items
     const items_map = new Map(dto.items.map((i) => [i.sales_order_item_id, i]));
@@ -2057,6 +2067,7 @@ export class DispatchNotesService {
             id: true,
             first_name: true,
             last_name: true,
+            legal_name: true,
             document_number: true,
           },
         },
@@ -2160,7 +2171,7 @@ export class DispatchNotesService {
     }
 
     const customer_name = order.users
-      ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
+      ? customerDisplayName(order.users)
       : order.customer_alias?.trim() || '';
 
     // Resolve the default dispatch location: the active reservation's location
@@ -2982,6 +2993,7 @@ export class DispatchNotesService {
               id: true,
               first_name: true,
               last_name: true,
+              legal_name: true,
               email: true,
             },
           },
@@ -3011,7 +3023,13 @@ export class DispatchNotesService {
     ]);
 
     return {
-      data,
+      data: data.map((note) => ({
+        ...note,
+        customer_name: resolveCustomerSnapshotName(
+          note.customer_name,
+          note.customer,
+        ),
+      })),
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -3026,7 +3044,13 @@ export class DispatchNotesService {
       throw new NotFoundException('Remisión no encontrada');
     }
 
-    return dispatch_note;
+    return {
+      ...dispatch_note,
+      customer_name: resolveCustomerSnapshotName(
+        dispatch_note.customer_name,
+        dispatch_note.customer,
+      ),
+    };
   }
 
   /**
@@ -3104,13 +3128,13 @@ export class DispatchNotesService {
             select: {
               first_name: true,
               last_name: true,
+              legal_name: true,
               document_number: true,
             },
           });
           if (customer) {
             customer_data = {
-              customer_name:
-                `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+              customer_name: customerDisplayName(customer),
               customer_tax_id: customer.document_number || null,
             };
           }
@@ -3171,12 +3195,16 @@ export class DispatchNotesService {
     if (dto.customer_id && dto.customer_id !== dispatch_note.customer_id) {
       const customer = await this.prisma.users.findUnique({
         where: { id: dto.customer_id },
-        select: { first_name: true, last_name: true, document_number: true },
+        select: {
+          first_name: true,
+          last_name: true,
+          legal_name: true,
+          document_number: true,
+        },
       });
       if (customer) {
         customer_data = {
-          customer_name:
-            `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+          customer_name: customerDisplayName(customer),
           customer_tax_id: customer.document_number || null,
         };
       }
@@ -3570,7 +3598,9 @@ export class DispatchNotesService {
       this.prisma.dispatch_notes.findMany({
         where,
         include: {
-          customer: { select: { id: true, first_name: true, last_name: true } },
+          customer: {
+            select: { id: true, first_name: true, last_name: true, legal_name: true },
+          },
           dispatch_note_items: true,
         },
         orderBy: { emission_date: 'desc' },
@@ -3618,7 +3648,9 @@ export class DispatchNotesService {
       this.prisma.dispatch_notes.findMany({
         where,
         include: {
-          customer: { select: { id: true, first_name: true, last_name: true } },
+          customer: {
+            select: { id: true, first_name: true, last_name: true, legal_name: true },
+          },
           dispatch_note_items: {
             include: {
               product: { select: { id: true, name: true, sku: true } },

@@ -14,9 +14,11 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
 import { WizardStepSectionComponent } from './wizard-step-section.component';
 import {
   DispatchNoteWizardService,
+  WizardCustomer,
   WizardTerminalAction,
 } from '../../services/dispatch-note-wizard.service';
 import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
+import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
 
 /**
  * Review step (ref plan wizard remisión bidireccional — Ola 2, paso 4).
@@ -71,7 +73,7 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
                     <span class="font-medium">#{{ order.order_number }}</span>
                     @if (wizardService.customer(); as c) {
                       <span class="text-[var(--color-text-muted)]">
-                        · {{ c.first_name }} {{ c.last_name }}
+                        · {{ customerName(c) }}
                       </span>
                     }
                   </p>
@@ -322,6 +324,10 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
 })
 export class ReviewStepComponent {
   readonly wizardService = inject(DispatchNoteWizardService);
+
+  customerName(customer: WizardCustomer): string {
+    return customerDisplayName(customer, '');
+  }
 
   // Inputs
   readonly created = input<boolean>(false);

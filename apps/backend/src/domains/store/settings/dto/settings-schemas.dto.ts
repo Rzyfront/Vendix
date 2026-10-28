@@ -1196,6 +1196,117 @@ export class DispatchSettingsDto {
   enable_dispatch_to_pool?: boolean;
 }
 
+const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export class HospitalitySettingsDto {
+  @ApiProperty({
+    example: '15:00',
+    required: false,
+    description: 'Hotel check-in time (HH:mm, store time zone).',
+  })
+  @IsOptional()
+  @Matches(HH_MM, { message: 'check_in_time debe tener formato HH:mm' })
+  check_in_time?: string;
+
+  @ApiProperty({
+    example: '12:00',
+    required: false,
+    description: 'Hotel check-out time (HH:mm, store time zone).',
+  })
+  @IsOptional()
+  @Matches(HH_MM, { message: 'check_out_time debe tener formato HH:mm' })
+  check_out_time?: string;
+
+  @ApiProperty({
+    example: '06:00',
+    required: false,
+    description:
+      'Time (HH:mm, store time zone) of the day after arrival when an unarrived confirmed reservation becomes no-show.',
+  })
+  @IsOptional()
+  @Matches(HH_MM, { message: 'no_show_time debe tener formato HH:mm' })
+  no_show_time?: string;
+
+  @ApiProperty({
+    example: '02:00',
+    required: false,
+    description:
+      'Night audit time (HH:mm, store time zone): from then the nights before the current business day are charged to the in-house folios.',
+  })
+  @IsOptional()
+  @Matches(HH_MM, { message: 'night_audit_time debe tener formato HH:mm' })
+  night_audit_time?: string;
+
+  @ApiProperty({
+    example: '12345',
+    required: false,
+    description: 'Registro Nacional de Turismo (RNT) number of the hotel.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  rnt_number?: string;
+
+  @ApiProperty({
+    example: 0,
+    required: false,
+    description:
+      'Overbooking allowance new room types start with (reservations above active rooms).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(99)
+  default_overbooking_allowance?: number;
+
+  @ApiProperty({
+    example: 'Restaurante',
+    required: false,
+    description: 'Folio origin shown for a POS sale or table bill charged to a room (H3.6).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  room_charge_origin?: string;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'H3.7 / D11 — the folio invoice requires a prior review by a user with store:lodging:folio:verify.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  folio_invoice_verification?: boolean;
+
+  @ApiProperty({
+    example: 15,
+    required: false,
+    description:
+      'H6.6 — minutes a web booking holds its rooms waiting for the online payment (5-120).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(5)
+  @Max(120)
+  booking_hold_minutes?: number;
+
+  @ApiProperty({
+    example: 15,
+    required: false,
+    description:
+      'H6.2 — minutes between two automatic syncs of an imported iCal calendar (5-1440).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(5)
+  @Max(1440)
+  ical_import_interval_minutes?: number;
+}
+
 export class RestaurantSettingsDto {
   @ApiProperty({
     example: false,

@@ -3,6 +3,7 @@ import { print_format_type_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { S3Service } from '../../../../common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { customerDisplayName } from '../../../../common/helpers/customer-display-name.helper';
 import { IDocumentDataProvider } from '../interfaces/document-data-provider.interface';
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import {
@@ -332,9 +333,7 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
       },
       customer: customer.id
         ? {
-            name:
-              `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
-              'Cliente',
+            name: customerDisplayName(customer, 'Cliente'),
             tax_id: customer.document_number,
             phone: customer.phone,
             email: customer.email,

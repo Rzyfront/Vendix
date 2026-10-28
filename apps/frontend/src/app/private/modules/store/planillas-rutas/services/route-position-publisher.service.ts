@@ -6,6 +6,14 @@ import {
   PublishPositionPoint,
 } from '../interfaces/route-tracking.interface';
 
+/**
+ * Copy shown when someone other than the responsible dispatches a route:
+ * the responsible's journey is not tracked until they sync their location.
+ */
+export function dispatchByOtherWarning(responsibleName: string): string {
+  return `No eres el encargado de esta ruta. Si la despachas, no se rastreará el recorrido de ${responsibleName} hasta que sincronice su ubicación desde la ruta.`;
+}
+
 const MAX_BUFFER = 200;
 const FLUSH_INTERVAL_MS = 10_000;
 const FLUSH_THRESHOLD = 20;

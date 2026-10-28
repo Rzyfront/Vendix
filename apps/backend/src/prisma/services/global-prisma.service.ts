@@ -865,4 +865,18 @@ export class GlobalPrismaService extends BasePrismaService {
   get store_weekly_reports() {
     return this.baseClient.store_weekly_reports;
   }
+
+  // Hospitality (H6.1) — public iCal feed resolves the room by its secret
+  // token, outside any store context; callers filter by store_id/unit_id.
+  get lodging_units() {
+    return this.baseClient.lodging_units;
+  }
+
+  get lodging_room_nights() {
+    return this.baseClient.lodging_room_nights;
+  }
+
+  get lodging_inventory_blocks() {
+    return this.baseClient.lodging_inventory_blocks;
+  }
 }

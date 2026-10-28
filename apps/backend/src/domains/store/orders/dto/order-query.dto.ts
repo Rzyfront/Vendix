@@ -1,4 +1,5 @@
 import {
+  IsIn,
   IsOptional,
   IsString,
   IsInt,
@@ -13,6 +14,9 @@ import {
   order_channel_enum,
 } from '@prisma/client';
 import { Transform } from 'class-transformer';
+
+export const ORDER_INVOICE_STATUS_FILTERS = ['none', 'invoiced', 'rejected'] as const;
+export type OrderInvoiceStatusFilter = (typeof ORDER_INVOICE_STATUS_FILTERS)[number];
 
 /**
  * Normaliza un filtro que acepta uno o varios valores (paso 3 del plan
@@ -109,6 +113,25 @@ export class OrderQueryDto {
   @Transform(normalizeMultiValue)
   @IsEnum(order_channel_enum, { each: true })
   channel?: order_channel_enum | order_channel_enum[];
+
+  /**
+   * Bulk-operations invoice filter: `none` = no current sale document
+   * (validated|sent|accepted|rejected), `invoiced` = validated|sent|accepted,
+   * `rejected` = rejected and not superseded by a current one.
+   */
+  @IsOptional()
+  @IsIn(ORDER_INVOICE_STATUS_FILTERS)
+  invoice_status?: OrderInvoiceStatusFilter;
+
+  /** `true`: orders with a customer; `false`: orders without one. */
+  @IsOptional()
+  @Transform(({ value }) =>
+    value === undefined || value === null || value === ''
+      ? undefined
+      : value === 'true' || value === true,
+  )
+  @IsBoolean()
+  has_customer?: boolean;
 
   @IsOptional()
   @Transform(({ value }) => value === 'true' || value === true)

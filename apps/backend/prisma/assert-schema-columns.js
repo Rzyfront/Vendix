@@ -102,6 +102,47 @@ const REQUIRED_COLUMNS = [
   'accounts_receivable.cancelled_at',
   'accounts_receivable.cancellation_reason',
   'refunds.ar_payment_id',
+
+  // --- Hotelería H1.5 · cancelar una habitación de una reserva multi-habitación
+  'lodging_reservation_rooms.cancelled_at',
+
+  // --- Hotelería H2.1 · plan tarifario con el que se vendió cada habitación
+  'lodging_reservation_rooms.rate_plan_id',
+
+  // --- Hotelería H2.2 · precio de un plan dentro de una temporada
+  'lodging_rate_prices.season_id',
+
+  // --- Hotelería H2.4 · política de cancelación y depósito
+  'lodging_rate_plans.cancellation_policy_id',
+  'lodging_reservation_rooms.cancellation_policy_snapshot',
+  'lodging_reservations.cancellation_penalty_amount',
+
+  // --- Hotelería H2.5 · cupos para agencias y empresas
+  'lodging_allotments.release_days',
+
+  // --- Hotelería H3.1 · registro de huéspedes y acompañantes
+  'lodging_guests.travel_purpose',
+
+  // --- Hotelería H3.2 · check-in que abre el folio
+  'lodging_folios.order_id',
+
+  // --- Hotelería H3.4 · noches y cargos manuales en el folio
+  'lodging_room_nights.posted_order_item_id',
+
+  // --- Hotelería H3.5 · depósitos y anticipos
+  'lodging_deposits.wallet_transaction_id',
+
+  // --- Hotelería H3.6 · cargo a habitación desde POS y mesa
+  'lodging_folios.charges_blocked',
+  'lodging_room_charges.item_ids',
+
+  // --- Hotelería H3.7 · check-out con cobro y factura
+  'lodging_folios.verified_total',
+  'lodging_folios.closed_by_user_id',
+  // H7.1 — night posting skips the nights of a closed business day.
+  'lodging_night_audits.status',
+  // H6.6 — penalty kept from an online payment of a cancelled reservation.
+  'lodging_reservation_payments.retained_amount',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

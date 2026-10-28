@@ -21,6 +21,8 @@ interface PaymentReceivedEvent {
   amount?: number;
   currency?: string;
   payment_method?: string;
+  /** `[{ code: 'retefuente'|'reteiva'|'reteica', amount }]` from the route. */
+  withholding_breakdown?: Array<{ code: string; amount: number }>;
 }
 
 /**
@@ -77,7 +79,13 @@ export class PaymentFromDispatchRouteListener {
       );
       return;
     }
-    if (!(amount > 0)) return;
+    // Cash can be 0 when the stop is settled only by withholding (credit
+    // order). Anything with neither cash nor withholding is a no-op.
+    const withholdingTotal = (event.withholding_breakdown ?? []).reduce(
+      (sum, line) => sum + (Number(line?.amount) > 0 ? Number(line.amount) : 0),
+      0,
+    );
+    if (!(amount > 0) && !(withholdingTotal > 0)) return;
 
     try {
       await this.storeContextRunner.runInStoreContext(storeId, () =>
@@ -88,6 +96,7 @@ export class PaymentFromDispatchRouteListener {
           amount,
           currency: event.currency,
           paymentMethod: event.payment_method,
+          withholdingBreakdown: event.withholding_breakdown,
         }),
       );
     } catch (error) {
@@ -115,7 +124,25 @@ export class PaymentFromDispatchRouteListener {
     amount: number;
     currency?: string;
     paymentMethod?: string;
+    withholdingBreakdown?: Array<{ code: string; amount: number }>;
   }): Promise<void> {
+    // Fold the route's `[{code, amount}]` into the typed object. Only credit
+    // sales consume it (see `applyDispatchCodPayment`); COD ignores it.
+    const breakdown: { retefuente?: number; reteiva?: number; reteica?: number } = {};
+    for (const line of input.withholdingBreakdown ?? []) {
+      if (
+        (line.code === 'retefuente' ||
+          line.code === 'reteiva' ||
+          line.code === 'reteica') &&
+        Number(line.amount) > 0
+      ) {
+        breakdown[line.code] = Number(line.amount);
+      }
+    }
+    const withholdingAmount =
+      (breakdown.retefuente ?? 0) +
+      (breakdown.reteiva ?? 0) +
+      (breakdown.reteica ?? 0);
     await this.orderFlow.applyDispatchCodPayment({
       storeId: input.storeId,
       dispatchNoteId: input.dispatchNoteId,
@@ -124,6 +151,9 @@ export class PaymentFromDispatchRouteListener {
       correlationKey: `dispatch_route_stop:${input.stopId}`,
       currency: input.currency,
       paymentMethod: input.paymentMethod,
+      ...(withholdingAmount > 0
+        ? { withholdingAmount, withholdingBreakdown: breakdown }
+        : {}),
     });
   }
 }

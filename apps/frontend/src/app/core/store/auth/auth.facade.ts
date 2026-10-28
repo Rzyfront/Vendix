@@ -279,6 +279,10 @@ export class AuthFacade {
   readonly isGym = computed<boolean>(() =>
     this.storeIndustries().includes('gym'),
   );
+  /** True if the active store is a hotel (same industries cascade). */
+  readonly isHospitality = computed<boolean>(() =>
+    this.storeIndustries().includes('hospitality'),
+  );
   readonly storeSettings = toSignal(this.storeSettings$, { initialValue: null as any });
   readonly fiscalStatus = toSignal(this.fiscalStatus$, { initialValue: null as any });
   readonly activeFiscalAreas = toSignal(this.activeFiscalAreas$, { initialValue: [] as FiscalArea[] });

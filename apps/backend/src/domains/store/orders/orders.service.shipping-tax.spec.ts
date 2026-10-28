@@ -25,6 +25,7 @@ describe('OrdersService.assignShipping — impuesto del envío', () => {
       store_id: 1, organization_id: 1, user_id: 9,
     } as any);
     prisma = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn().mockResolvedValue({
           id: 10, store_id: 1, state: 'created',
@@ -490,6 +491,7 @@ describe('OrdersService.assignShipping — propina, intacta y split (paso 5 B2)'
       store_id: 1, organization_id: 1, user_id: 9,
     } as any);
     prisma = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn().mockResolvedValue({
           id: 10, store_id: 1, state: 'created',
@@ -587,6 +589,7 @@ describe('OrdersService.assignShipping — bloqueo de cambio de costo con pagos 
       store_id: 1, organization_id: 1, user_id: 9,
     } as any);
     prisma = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn().mockResolvedValue({
           id: 10, store_id: 1, state: 'created',

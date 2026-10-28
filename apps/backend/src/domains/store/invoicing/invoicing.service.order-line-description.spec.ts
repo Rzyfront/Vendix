@@ -109,6 +109,8 @@ describe('InvoicingService.createFromOrder — la factura persiste y emite el no
 
     prisma = createPrismaMock({
       orders: ['findFirst'],
+      accounts_receivable: ['findFirst'],
+      order_installments: ['findFirst'],
       invoices: ['findFirst', 'create'],
       invoice_items: ['findMany'],
       invoice_taxes: ['createMany'],

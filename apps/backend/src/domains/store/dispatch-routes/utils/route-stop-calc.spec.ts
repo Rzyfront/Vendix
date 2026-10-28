@@ -3,6 +3,8 @@ import {
   buildRouteReconciliation,
   buildStopsData,
   computeRouteTotals,
+  derivePendingAmount,
+  deriveStopIsPrepaid,
   resolveIsPrepaid,
 } from './route-stop-calc';
 
@@ -227,5 +229,77 @@ describe('computeRouteTotals + buildRouteReconciliation consistency', () => {
     expect(r.by_stop[0].is_prepaid).toBe(false);
     expect(r.by_stop[2].is_prepaid).toBe(true);
     expect(r.by_stop[2].expected).toBe(0);
+  });
+});
+
+describe('deriveStopIsPrepaid after a route collection', () => {
+  const note = { grand_total: 10000, order: { remaining_balance: 0 } };
+
+  it('a COD stop collected on the route is NOT prepaid even though the order balance is now 0', () => {
+    expect(
+      deriveStopIsPrepaid({
+        status: 'delivered',
+        collected_amount: 10000,
+        dispatch_note: note,
+      }),
+    ).toBe(false);
+  });
+
+  it('a stop settled only with withholding is NOT prepaid', () => {
+    expect(
+      deriveStopIsPrepaid({
+        status: 'delivered',
+        collected_amount: 0,
+        withholding_amount: 350,
+        dispatch_note: note,
+      }),
+    ).toBe(false);
+  });
+
+  it('a paid stop delivered with collection 0 stays prepaid', () => {
+    expect(
+      deriveStopIsPrepaid({
+        status: 'delivered',
+        collected_amount: 0,
+        dispatch_note: note,
+      }),
+    ).toBe(true);
+  });
+
+  it('a pending stop of a paid order stays prepaid (live derivation unchanged)', () => {
+    expect(
+      deriveStopIsPrepaid({ status: 'pending', dispatch_note: note }),
+    ).toBe(true);
+  });
+});
+
+describe('derivePendingAmount', () => {
+  const stop = (note: any, extra: any = {}) =>
+    ({ is_prepaid: false, dispatch_note: note, ...extra }) as any;
+
+  it('uses the live order balance, capped at the note total', () => {
+    expect(
+      derivePendingAmount(
+        stop({ grand_total: 200, order: { remaining_balance: 120.5 } }),
+      ),
+    ).toBe(120.5);
+    expect(
+      derivePendingAmount(
+        stop({ grand_total: 100, order: { remaining_balance: 500 } }),
+      ),
+    ).toBe(100);
+  });
+
+  it('is 0 for a fully paid order', () => {
+    expect(
+      derivePendingAmount(
+        stop({ grand_total: 200, order: { remaining_balance: 0 } }),
+      ),
+    ).toBe(0);
+  });
+
+  it('falls back to grand_total without an order balance, 0 without a note', () => {
+    expect(derivePendingAmount(stop({ grand_total: 80 }))).toBe(80);
+    expect(derivePendingAmount(stop(null))).toBe(0);
   });
 });

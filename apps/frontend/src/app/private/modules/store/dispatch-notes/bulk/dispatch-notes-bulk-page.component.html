@@ -1,0 +1,236 @@
+<!--
+  Operaciones masivas de remisiones. `app-sticky-header` va en la raíz, sin
+  padre con padding; el padding vive en el bloque de contenido.
+-->
+<div class="w-full">
+  <app-sticky-header
+    title="Operaciones masivas de remisiones"
+    subtitle="Selecciona remisiones y ejecuta acciones en lote: imprimir, confirmar, entregar, anular"
+    icon="layers"
+    [actions]="headerActions()"
+    [metadataContent]="headerMetadata()"
+    (actionClicked)="onHeaderAction($event)"
+  />
+
+  <div class="flex flex-col gap-3 p-2 md:gap-4 md:p-4">
+    @if (blockedReason()) {
+      <p
+        class="flex items-start gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 text-[11px] leading-tight text-text-secondary"
+      >
+        <app-icon name="info" [size]="13" class="mt-px shrink-0 text-primary" />
+        {{ blockedReason() }}
+      </p>
+    }
+
+    <!-- Barra de acciones sobre la selección -->
+    @if (mutatingActions().length > 0) {
+      <div
+        class="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2"
+      >
+        <span class="mr-1 text-xs font-semibold text-text-secondary">
+          Sobre la selección:
+        </span>
+        @for (action of mutatingActions(); track action.id) {
+          <app-button
+            [variant]="action.variant"
+            size="sm"
+            [disabled]="selectedCount() === 0 || overLimit() || running()"
+            (clicked)="openAction(action.id)"
+          >
+            <app-icon slot="icon" [name]="action.icon" [size]="14" />
+            {{ action.label }}
+          </app-button>
+        }
+        @if (selectedCount() > 0) {
+          <app-button
+            class="ml-auto"
+            variant="ghost"
+            size="sm"
+            (clicked)="onClearSelection()"
+          >
+            Limpiar selección
+          </app-button>
+        }
+      </div>
+    }
+
+    <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <!-- Buscador + filtro de estado -->
+      <div
+        class="flex flex-col gap-2 border-b border-border px-2 py-2 md:flex-row md:items-center md:gap-3 md:px-4 md:py-3"
+      >
+        <h2 class="text-sm font-semibold text-text-primary md:mr-auto">
+          Remisiones ({{ totalItems() }})
+        </h2>
+        <app-inputsearch
+          class="md:w-64"
+          size="sm"
+          placeholder="Buscar por número o cliente..."
+          [debounceTime]="500"
+          [ngModel]="searchTerm()"
+          (ngModelChange)="onSearchChange($event)"
+        ></app-inputsearch>
+        <select
+          class="rounded-md border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-primary"
+          aria-label="Filtrar por estado"
+          [value]="selectedStatus()"
+          (change)="onStatusChange($any($event.target).value)"
+        >
+          @for (opt of statusOptions; track opt.value) {
+            <option [value]="opt.value">{{ opt.label }}</option>
+          }
+        </select>
+      </div>
+
+      <div class="px-2 pb-2 pt-3 md:p-4">
+        <app-responsive-data-view
+          [data]="notes()"
+          [columns]="columns"
+          [cardConfig]="cardConfig"
+          [loading]="fetching()"
+          [selectable]="true"
+          rowIdKey="id"
+          [selectedIds]="selectedIds()"
+          (selectedIdsChange)="onSelectionChange($event)"
+          emptyIcon="file-text"
+          emptyMessage="No se encontraron remisiones"
+        ></app-responsive-data-view>
+
+        <app-pagination
+          [currentPage]="page()"
+          [totalPages]="totalPages()"
+          [total]="totalItems()"
+          [limit]="limit"
+          (pageChange)="onPageChanged($event)"
+        ></app-pagination>
+      </div>
+    </app-card>
+  </div>
+</div>
+
+<!-- Confirmación / progreso / resultado por remisión -->
+<app-modal
+  [isOpen]="modalOpen()"
+  (isOpenChange)="onModalOpenChange($event)"
+  size="lg"
+  [dialog]="true"
+  [closeOnBackdrop]="false"
+  [closeOnEscape]="!running()"
+  [showCloseButton]="!running()"
+  [title]="activeAction() ? activeAction()!.verb + ' remisiones' : 'Operación masiva'"
+  [subtitle]="selectedCount() + ' seleccionadas'"
+>
+  @if (activeAction(); as action) {
+    @if (modalStage() === 'confirm') {
+      <div class="flex flex-col gap-3">
+        <div class="grid grid-cols-2 gap-2">
+          <div class="rounded-xl border border-border bg-green-50 px-3 py-2">
+            <p class="text-[10px] font-semibold uppercase text-green-700">Se procesarán</p>
+            <p class="text-lg font-bold text-green-700">{{ plan().eligible.length }}</p>
+          </div>
+          <div class="rounded-xl border border-border bg-gray-50 px-3 py-2">
+            <p class="text-[10px] font-semibold uppercase text-text-secondary">Se omitirán</p>
+            <p class="text-lg font-bold text-text-secondary">{{ plan().skipped.length }}</p>
+          </div>
+        </div>
+
+        <app-alert-banner [variant]="action.variant === 'danger' ? 'danger' : 'warning'" icon="alert-triangle">
+          {{ action.warning }}
+        </app-alert-banner>
+
+        @if (action.id === 'void') {
+          <app-textarea
+            label="Motivo de la anulación"
+            placeholder="Describe por qué se anulan estas remisiones"
+            [rows]="3"
+            [required]="true"
+            [error]="voidReason().length > voidReasonMax ? 'Máximo ' + voidReasonMax + ' caracteres' : ''"
+            helperText="Obligatorio. Máximo 500 caracteres; se aplica a todas."
+            (valueChange)="voidReason.set($event)"
+          ></app-textarea>
+        }
+
+        @if (plan().skipped.length > 0) {
+          <div>
+            <p class="mb-1 text-xs font-semibold text-text-secondary">Omitidas</p>
+            <ul class="max-h-40 divide-y divide-border/50 overflow-y-auto rounded-lg border border-border bg-surface">
+              @for (row of plan().skipped; track row.id) {
+                <li class="flex items-center justify-between gap-2 px-3 py-1.5 text-xs">
+                  <span class="font-semibold text-text-primary">#{{ row.number }}</span>
+                  <span class="text-text-secondary">{{ row.message }}</span>
+                </li>
+              }
+            </ul>
+          </div>
+        }
+
+        @if (plan().eligible.length === 0) {
+          <p class="text-xs text-text-secondary">
+            Ninguna de las remisiones seleccionadas se puede {{ action.verb.toLowerCase() }}.
+          </p>
+        }
+      </div>
+    }
+
+    @if (modalStage() === 'running' || modalStage() === 'done') {
+      <div class="flex flex-col gap-3">
+        @if (modalStage() === 'running') {
+          <div class="flex items-center gap-2 text-sm text-text-primary">
+            <app-icon name="loader-2" [size]="18" class="text-primary" [spin]="true" />
+            Procesando {{ progressDone() }} de {{ plan().eligible.length }}…
+          </div>
+          <div class="h-1.5 w-full overflow-hidden rounded-full bg-border">
+            <div
+              class="h-full rounded-full bg-primary transition-all"
+              [style.width.%]="plan().eligible.length ? (progressDone() / plan().eligible.length) * 100 : 0"
+            ></div>
+          </div>
+        } @else {
+          <p class="text-sm text-text-primary">
+            {{ resultCounts().ok }} correctas, {{ resultCounts().error }} con error,
+            {{ resultCounts().skipped }} omitidas.
+          </p>
+        }
+
+        <ul class="max-h-80 divide-y divide-border/50 overflow-y-auto rounded-lg border border-border bg-surface">
+          @for (row of results(); track row.id) {
+            <li class="flex items-start justify-between gap-2 px-3 py-1.5 text-xs">
+              <span class="font-semibold text-text-primary">#{{ row.number }}</span>
+              <span
+                class="flex-1 text-right"
+                [class.text-green-700]="row.outcome === 'ok'"
+                [class.text-red-600]="row.outcome === 'error'"
+                [class.text-text-secondary]="row.outcome === 'skipped'"
+              >
+                @switch (row.outcome) {
+                  @case ('ok') { OK · {{ row.message }} }
+                  @case ('error') { Error · {{ row.message }} }
+                  @default { Omitida · {{ row.message }} }
+                }
+              </span>
+            </li>
+          }
+        </ul>
+      </div>
+    }
+  }
+
+  <div slot="footer" class="flex w-full flex-wrap justify-end gap-2">
+    @if (modalStage() === 'confirm') {
+      <app-button variant="outline" size="sm" (clicked)="closeModal()">Cancelar</app-button>
+      <app-button
+        [variant]="activeAction()?.variant === 'danger' ? 'danger' : 'primary'"
+        size="sm"
+        [disabled]="!canRun()"
+        (clicked)="runAction()"
+      >
+        <app-icon slot="icon" name="check" [size]="14" />
+        {{ activeAction()?.verb }} {{ plan().eligible.length }}
+        {{ plan().eligible.length === 1 ? 'remisión' : 'remisiones' }}
+      </app-button>
+    }
+    @if (modalStage() === 'done') {
+      <app-button variant="primary" size="sm" (clicked)="closeModal()">Cerrar</app-button>
+    }
+  </div>
+</app-modal>

@@ -5,8 +5,8 @@ import { ProductsBulkEditService } from './products-bulk-edit.service';
 /**
  * Regresión A.6 — impuestos del lote por modo (A.2).
  *
- * Cubre F-009/F-017/F-029: ADD conserva flags existentes, REPLACE usa el
- * mapa (parcial ⇒ 400), REMOVE prohíbe el mapa. Se ejercitan los resolvedores
+ * Cubre F-009/F-017/F-029: ADD conserva flags existentes sin entrada explícita, REPLACE usa el
+ * mapa (la ausente hereda el catálogo), REMOVE prohíbe el mapa. Se ejercitan los resolvedores
  * REALES compartidos por preview/apply (`resolveBulkTaxTarget` puro y las
  * guardas por modo de `resolveBulkTaxContext`), sin DB.
  */
@@ -28,8 +28,8 @@ describe('bulk tax_category_action — semántica por modo (F-017/F-029)', () =>
       catalogDefault,
     );
 
-  describe('ADD — las ya asignadas CONSERVAN su flag (F-009)', () => {
-    it('existente true + mapa false ⇒ conserva true; nueva resuelve mapa ?? catálogo', () => {
+  describe('ADD — la ya asignada conserva su flag salvo entrada explícita', () => {
+    it('existente true + mapa false ⇒ toma el mapa; nueva resuelve mapa ?? catálogo', () => {
       const out = targetOf(
         RelationalActionMode.ADD,
         [19, 8],
@@ -38,8 +38,20 @@ describe('bulk tax_category_action — semántica por modo (F-017/F-029)', () =>
         () => false,
       );
       expect(out.targetIds).toEqual(expect.arrayContaining([19, 8]));
-      expect(out.nextFlags.get(19)).toBe(true); // conserva, sin reversión
+      expect(out.nextFlags.get(19)).toBe(false); // el usuario lo marcó
       expect(out.nextFlags.get(8)).toBe(false); // nueva: mapa ausente ⇒ catálogo
+    });
+
+    it('existente sin entrada en el mapa conserva su flag (sin reversión)', () => {
+      const out = targetOf(
+        RelationalActionMode.ADD,
+        [19, 8],
+        new Map([[8, true]]),
+        [[19, true]],
+        () => false,
+      );
+      expect(out.nextFlags.get(19)).toBe(true);
+      expect(out.nextFlags.get(8)).toBe(true);
     });
 
     it('nueva con entrada en el mapa toma el mapa', () => {
@@ -115,14 +127,28 @@ describe('bulk tax_category_action — semántica por modo (F-017/F-029)', () =>
       ).rejects.toBeInstanceOf(VendixHttpException);
     });
 
-    it('REPLACE con mapa parcial ⇒ 400 con missing_ids', async () => {
-      const err = await contextOf({
-        mode: RelationalActionMode.REPLACE,
-        ids: [19, 8],
-        tax_inclusive_map: { '19': true },
-      }).catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(VendixHttpException);
-      expect((err as VendixHttpException).errorCode).toBe('PROD_TAXMAP_001');
+    it('REPLACE con mapa parcial pasa: la ausente hereda el catálogo', async () => {
+      const findMany = jest.fn().mockResolvedValue([
+        { id: 19, name: 'IVA', is_inclusive: false, tax_rates: [] },
+        { id: 8, name: 'INC', is_inclusive: true, tax_rates: [] },
+      ]);
+      const ctx = await contextOf(
+        {
+          mode: RelationalActionMode.REPLACE,
+          ids: [19, 8],
+          tax_inclusive_map: { '19': true },
+        },
+        { tax_categories: { findMany } },
+      );
+      const out = targetOf(
+        RelationalActionMode.REPLACE,
+        [19, 8],
+        ctx.normalizedMap,
+        [[19, false]],
+        (cid) => ctx.catalogById.get(cid).catalogDefault,
+      );
+      expect(out.nextFlags.get(19)).toBe(true);
+      expect(out.nextFlags.get(8)).toBe(true);
     });
 
     it('REPLACE con mapa completo y catálogo con scope pasa el contexto', async () => {

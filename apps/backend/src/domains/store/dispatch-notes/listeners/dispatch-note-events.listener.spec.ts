@@ -1145,3 +1145,42 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
     expect(orderFlowMock.reconcileOrderFromDispatch).toHaveBeenCalledWith(7777, 100);
   });
 });
+
+describe('DispatchNoteEventsListener — handleInvoiced → no fake payment on credit orders (B2)', () => {
+  const build = (order: { remaining_balance: number; payment_form: string | null }) => {
+    const prismaMock: any = {
+      dispatch_notes: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 900, sales_order_id: null, order_id: 7777, dispatch_number: 'REM-1',
+        }),
+      },
+      orders: { findFirst: jest.fn().mockResolvedValue(order) },
+    };
+    const orderFlowMock: any = {
+      applyDispatchCodPayment: jest.fn().mockResolvedValue(undefined),
+      reconcileOrderFromDispatch: jest.fn().mockResolvedValue(undefined),
+    };
+    const listener = new DispatchNoteEventsListener(
+      prismaMock as unknown as StorePrismaService,
+      {} as any, {} as any, undefined, undefined, undefined,
+      orderFlowMock, { runInStoreContext: jest.fn() } as any,
+    );
+    return { listener, orderFlowMock };
+  };
+  const event: any = { dispatch_note_id: 900, dispatch_number: 'REM-1', store_id: 100 };
+
+  it('credit order (payment_form 2): the debt stays in cartera, no payment applied, order still reconciled', async () => {
+    const { listener, orderFlowMock } = build({ remaining_balance: 500, payment_form: '2' });
+    await listener.handleInvoiced(event);
+    expect(orderFlowMock.applyDispatchCodPayment).not.toHaveBeenCalled();
+    expect(orderFlowMock.reconcileOrderFromDispatch).toHaveBeenCalledWith(7777, 100);
+  });
+
+  it('COD order with balance: unchanged, clears it with the dispatch_note key', async () => {
+    const { listener, orderFlowMock } = build({ remaining_balance: 500, payment_form: '1' });
+    await listener.handleInvoiced(event);
+    expect(orderFlowMock.applyDispatchCodPayment).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 500, correlationKey: 'dispatch_note:900' }),
+    );
+  });
+});
