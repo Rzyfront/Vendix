@@ -7788,8 +7788,8 @@ export class OrderFlowService {
    * cod-auto-invoicing S5 — emite una nota crédito TOTAL (solo
    * `related_invoice_id`: sin líneas ni reembolso) por cada factura de venta
    * `accepted` de la orden que aún no tiene su nota `accepted`. Reutiliza un
-   * borrador pendiente en vez de crear otro y no duplica una nota ya enviada a
-   * la DIAN. Los errores de facturación se propagan tal cual al operador.
+   * borrador en vez de crear otro y no duplica una nota ya validada o enviada
+   * a la DIAN (esa la termina la cola de reintentos). Los errores de facturación se propagan tal cual al operador.
    */
   private async issueCancellationCreditNotes(
     order: { id: number; store_id: number; order_number?: string | null },
@@ -7821,8 +7821,10 @@ export class OrderFlowService {
         orderBy: { id: 'desc' },
         select: { id: true, status: true },
       });
-      if (notes.some((n) => n.status === 'accepted' || n.status === 'sent')) continue;
-      const pending = notes.find((n) => n.status === 'draft' || n.status === 'validated');
+      // `validated` = el envío falló y la cola de reintentos la transmitirá:
+      // re-validarla choca con la máquina de estados (validated → validated).
+      if (notes.some((n) => ['accepted', 'sent', 'validated'].includes(n.status))) continue;
+      const pending = notes.find((n) => n.status === 'draft');
       const noteId =
         pending?.id ??
         (

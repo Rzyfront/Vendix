@@ -88,6 +88,13 @@ describe('OrderFlowService — nota crédito total al cancelar (S5)', () => {
     expect(creditNotes.issueNote).not.toHaveBeenCalled();
   });
 
+  it('leaves a validated note to the DIAN retry queue instead of re-validating it', async () => {
+    notes = [{ id: 955, status: 'validated' }];
+    await service.issueCancellationCreditNotes(ORDER, 'x');
+    expect(creditNotes.createCreditNote).not.toHaveBeenCalled();
+    expect(creditNotes.issueNote).not.toHaveBeenCalled();
+  });
+
   it('creates a new note when the previous one was rejected', async () => {
     notes = [{ id: 954, status: 'rejected' }];
     await service.issueCancellationCreditNotes(ORDER, 'x');
