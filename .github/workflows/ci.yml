@@ -323,6 +323,7 @@ jobs:
           --include='**/customers/components/customer-modal/customer-modal.component.spec.ts'
           --include='**/pos/utils/customer-tier-prompt.util.spec.ts'
           --include='**/pos/components/pos-customer-tier-modal.component.spec.ts'
+          --include='**/orders/utils/order-customer-tier-prompt.util.spec.ts'
 
   mobile:
     name: Mobile

@@ -2990,6 +2990,13 @@
       />
     }
 
+    <!-- S6 — tarifa preferencial del titular -->
+    <app-pos-customer-tier-modal
+      [prompt]="customerTierPrompt()"
+      (confirmed)="onCustomerTierConfirmed($event)"
+      (dismissed)="customerTierPrompt.set(null)"
+    />
+
     <!-- SHIP MODAL (delivery-type aware) -->
     <app-modal
       [isOpen]="showShipModal()"

@@ -89,6 +89,7 @@ import {
   OrderEvent,
   OrderEventType,
   OrderEventSource,
+  ItemChangesDto,
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { SETTLED_PAYMENT_STATES_FE } from '../../utils/order-settlement.util';
@@ -200,6 +201,9 @@ import {
 // Paso 5: reutiliza el modal canónico de clientes (quick/advanced,
 // NATURAL/JURIDICA) para capturar el nuevo titular de la orden.
 import { CustomerModalComponent } from '../../../customers/components/customer-modal/customer-modal.component';
+import { PosCustomerTierModalComponent } from '../../../pos/components/pos-customer-tier-modal.component';
+import { CustomerTierPrompt } from '../../../pos/utils/customer-tier-prompt.util';
+import { orderCustomerTierPrompt } from '../../utils/order-customer-tier-prompt.util';
 import { ChangeTitularSearchModalComponent } from '../../components/change-titular-search-modal/change-titular-search-modal.component';
 import {
   CustomersService,
@@ -1059,6 +1063,7 @@ export interface InvoiceCardView {
     CreditInvoiceModalComponent,
     CustomerHolderCompletionModalComponent,
     OrderItemsEditModalComponent,
+    PosCustomerTierModalComponent,
     OrderRefundModalComponent,
     OrderCompleteModalComponent,
     CustomerModalComponent,
@@ -2367,6 +2372,17 @@ export class OrderDetailsPageComponent {
       } as OrderActionConfig);
     }
 
+    // S6 — tarifa preferencial del titular sobre los productos de la orden.
+    if (order.customer_id && this.canRetierOrder()) {
+      buttons.push({
+        id: 'apply-customer-tier',
+        label: 'Aplicar tarifa del cliente',
+        icon: 'tag',
+        variant: 'secondary',
+        enabled: !this.applyingCustomerTier(),
+      } as OrderActionConfig);
+    }
+
     // Con saldo por cobrar, Finalizar se sustituye por el aviso de saldo.
     const visibleButtons = this.showUnpaidBalanceNotice()
       ? buttons.filter((b) => b.id !== 'finish')
@@ -3258,6 +3274,9 @@ export class OrderDetailsPageComponent {
         break;
       case 'edit-order':
         this.openItemsEditModal();
+        break;
+      case 'apply-customer-tier':
+        this.offerCustomerTier(null, this.order()?.customer_id ?? null, true);
         break;
       case 'ship':
         this.openShipModal();
@@ -5736,6 +5755,7 @@ export class OrderDetailsPageComponent {
   onTitularSearchSelected(customer: Customer): void {
     const id = this.order()?.id;
     if (!id) return;
+    const previousCustomerId = this.order()?.customer_id ?? null;
     this.showTitularSearchModal.set(false);
     this.changingCustomer.set(true);
     this.ordersService
@@ -5748,6 +5768,7 @@ export class OrderDetailsPageComponent {
         next: () => {
           this.toastService.success('Titular de la orden actualizado');
           this.refreshOrder();
+          this.offerCustomerTier(previousCustomerId, customer.id);
         },
         error: (error: unknown) => this.handleChangeCustomerError(error),
       });
@@ -5772,6 +5793,7 @@ export class OrderDetailsPageComponent {
   onChangeCustomerSave(data: CreateCustomerRequest): void {
     const id = this.order()?.id;
     if (!id) return;
+    const previousCustomerId = this.order()?.customer_id ?? null;
     this.changingCustomer.set(true);
     const doc = data.document_number?.trim();
     const lookup$ = doc
@@ -5802,7 +5824,7 @@ export class OrderDetailsPageComponent {
             .pipe(
               switchMap((order) => {
                 this.persistChangeCustomerAddress(resolved.customer.id);
-                return of(order);
+                return of({ order, customerId: resolved.customer.id });
               }),
             ),
         ),
@@ -5810,12 +5832,13 @@ export class OrderDetailsPageComponent {
         finalize(() => this.changingCustomer.set(false)),
       )
       .subscribe({
-        next: () => {
+        next: ({ customerId }) => {
           this.toastService.success('Titular de la orden actualizado');
           this.showChangeCustomerModal.set(false);
           this.changeCustomerInitialValues.set(null);
           this.pendingChangeCustomerAddress.set(null);
           this.refreshOrder();
+          this.offerCustomerTier(previousCustomerId, customerId);
         },
         error: (error: unknown) => this.handleChangeCustomerError(error),
       });
@@ -5853,6 +5876,118 @@ export class OrderDetailsPageComponent {
           this.toastService.warning(
             'Titular actualizado, pero no se pudo guardar su dirección.',
           );
+        },
+      });
+  }
+
+  // ─── S6 — tarifa preferencial del cliente ─────────────────────────
+  readonly customerTierPrompt = signal<CustomerTierPrompt | null>(null);
+  readonly applyingCustomerTier = signal(false);
+
+  /**
+   * Cambiar la tarifa de las líneas usa el mismo motor que «Modificar
+   * Orden»: solo en una orden editable, sin cobro, sin factura ni división,
+   * y con permiso para aplicar tarifas (el backend vuelve a validarlo).
+   */
+  readonly canRetierOrder = computed(() => {
+    const order = this.order();
+    return (
+      !!order &&
+      (order.available_actions ?? []).some(
+        (action) => action.code === 'edit_order' && action.enabled !== false,
+      ) &&
+      !order.active_financial_split_id &&
+      !this.invoiceLocked() &&
+      !isOrderItemCancellationPaid(order) &&
+      this.hasNamedPermission('store:products:apply_pricing_tier')
+    );
+  });
+
+  /**
+   * Pregunta si aplicar la tarifa del nuevo titular (o restaurar el precio
+   * regular de las líneas con la del anterior). `fromAction`: el usuario lo
+   * pidió desde el botón, así que un «no hay nada que aplicar» se explica.
+   */
+  private offerCustomerTier(
+    previousCustomerId: number | null,
+    nextCustomerId: number | null,
+    fromAction = false,
+  ): void {
+    if (!this.canRetierOrder() || previousCustomerId === nextCustomerId) return;
+    forkJoin({
+      previous: previousCustomerId
+        ? this.customersService.getCustomerPriceTier(previousCustomerId)
+        : of(null),
+      next: nextCustomerId
+        ? this.customersService.getCustomerPriceTier(nextCustomerId)
+        : of(null),
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(({ previous, next }) => {
+        const prompt = orderCustomerTierPrompt({
+          items: this.order()?.order_items ?? [],
+          previousTier: previous,
+          nextTier: next,
+          canApplyTier: true,
+        });
+        this.customerTierPrompt.set(prompt);
+        if (!prompt && fromAction) {
+          this.toastService.info(
+            next
+              ? `Ningún producto de la orden admite la tarifa ${next.name} o ya la tienen`
+              : 'El cliente no tiene tarifa preferencial',
+          );
+        }
+      });
+  }
+
+  /** Aplica (o restaura) la tarifa en las líneas elegidas: preview → apply. */
+  onCustomerTierConfirmed(itemIds: string[]): void {
+    const prompt = this.customerTierPrompt();
+    this.customerTierPrompt.set(null);
+    const order = this.order();
+    if (!prompt || !order || itemIds.length === 0) return;
+    const dto: ItemChangesDto = {
+      retier: itemIds.map((itemId) => ({
+        order_item_id: Number(itemId),
+        price_tier_id: prompt.mode === 'apply' ? prompt.tier.id : null,
+      })),
+    };
+    this.applyingCustomerTier.set(true);
+    this.ordersService
+      .previewItemChanges(order.id, dto)
+      .pipe(
+        switchMap((preview) => {
+          if (!preview.can_apply) {
+            const blocked = preview.lines.find((line) => line.blocked);
+            throw new Error(
+              blocked?.blocked_reason ?? 'No se pudo aplicar la tarifa',
+            );
+          }
+          return this.ordersService.applyItemChanges(order.id, {
+            ...dto,
+            expected_version: preview.version,
+          });
+        }),
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.applyingCustomerTier.set(false)),
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            prompt.mode === 'apply'
+              ? `Tarifa ${prompt.tier.name} aplicada`
+              : 'Precio regular restaurado',
+          );
+          this.loadData();
+        },
+        error: (error: unknown) => {
+          this.toastService.error(
+            error instanceof Error && error.message
+              ? error.message
+              : 'No se pudo aplicar la tarifa',
+          );
+          this.loadData();
         },
       });
   }
