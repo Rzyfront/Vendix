@@ -1103,12 +1103,13 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.HospitalityCancellationsPageComponent),
           },
           {
-            // H3.9 — "Servicios exentos" report; same panel_ui key as Reservas.
+            // R3 — "Servicios exentos" lives in Configuración → General → Facturación.
             path: 'exempt-services',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/hospitality/reservations/pages/vat-exempt-services-page/vat-exempt-services-page.component'
-              ).then((c) => c.HospitalityVatExemptServicesPageComponent),
+            pathMatch: 'full',
+            redirectTo: () =>
+              inject(Router).createUrlTree(['/admin/settings/general/facturacion'], {
+                fragment: 'section-vat-exempt',
+              }),
           },
         ],
       },

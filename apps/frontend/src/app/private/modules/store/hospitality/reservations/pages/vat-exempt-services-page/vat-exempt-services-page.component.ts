@@ -1,10 +1,13 @@
 import {
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
   DestroyRef,
   inject,
+  Injector,
   OnInit,
+  output,
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -57,9 +60,13 @@ function defaultPeriod(): FilterValues {
  * out with VAT 0 % "Exento – art. 481 lit. d ET", with the holder's passport
  * and entry permit as support for the accountant.
  *
- * Standard admin list module: four stats, one card with the sticky search,
- * the options dropdown (period filter + refresh) and the responsive data view.
+ * Standard admin list module: four stats, one card with the search, the
+ * options dropdown (period filter + refresh) and the responsive data view.
  * The period reloads from the server; the search filters the loaded report.
+ *
+ * R3: embedded as a section of Configuración → General → Facturación (only for
+ * hospitality stores), so the stats and the search header no longer stick —
+ * the settings shell owns the sticky header.
  */
 @Component({
   selector: 'app-hospitality-vat-exempt-services-page',
@@ -76,10 +83,7 @@ function defaultPeriod(): FilterValues {
   ],
   template: `
     <div class="w-full md:space-y-4">
-      <!-- Stats: sticky on mobile, static on desktop -->
-      <div
-        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
-      >
+      <div class="stats-container">
         <app-stats
           title="Facturas exentas"
           [value]="report().length"
@@ -119,11 +123,7 @@ function defaultPeriod(): FilterValues {
       </div>
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
-        <!-- Sticky search header -->
-        <div
-          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                 md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
-        >
+        <div class="px-2 py-1.5 md:px-6 md:py-4 md:border-b md:border-border">
           <div
             class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
           >
@@ -205,6 +205,11 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
   private readonly currency = inject(CurrencyFormatService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly injector = inject(Injector);
+
+  /** Fires once, after the first load renders, so the host can scroll to it. */
+  readonly ready = output<void>();
+  private announced = false;
 
   private readonly storeSettings = inject(StoreSettingsFacade);
 
@@ -335,13 +340,21 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
         next: (report) => {
           this.report.set(report.rows);
           this.loading.set(false);
+          this.announceReady();
         },
         error: (message: unknown) => {
           this.loading.set(false);
+          this.announceReady();
           this.toastService.error(
             typeof message === 'string' ? message : 'No se pudo cargar el reporte',
           );
         },
       });
+  }
+
+  private announceReady(): void {
+    if (this.announced) return;
+    this.announced = true;
+    afterNextRender(() => this.ready.emit(), { injector: this.injector });
   }
 }

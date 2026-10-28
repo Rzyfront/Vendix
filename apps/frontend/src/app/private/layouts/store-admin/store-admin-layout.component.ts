@@ -566,8 +566,9 @@ export class StoreAdminLayoutComponent {
       // for every industry except `hospitality`. Labels map to panel_ui keys
       // via MenuFilterService ('Hotelería' → hospitality, Habitaciones →
       // hospitality_rooms). R1: only daily operation, in front-desk order;
-      // settings (iCal, VAT-exempt services) and the loose reports left the
-      // group and stay reachable by URL until they move (R2–R4).
+      // settings left the group: iCal → Configuración → General → Hotelería
+      // (R2), VAT-exempt services → Configuración → General → Facturación (R3);
+      // the loose reports stay reachable by URL until R4.
       label: 'Hotelería',
       icon: 'hotel',
       children: [

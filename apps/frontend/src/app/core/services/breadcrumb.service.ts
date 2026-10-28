@@ -845,12 +845,6 @@ export class BreadcrumbService {
       icon: 'concierge-bell',
     },
     {
-      path: '/admin/hospitality/exempt-services',
-      title: 'Servicios exentos',
-      parent: 'Hotelería',
-      icon: 'file-check',
-    },
-    {
       path: '/admin/hospitality/housekeeping',
       title: 'Limpieza',
       parent: 'Hotelería',
