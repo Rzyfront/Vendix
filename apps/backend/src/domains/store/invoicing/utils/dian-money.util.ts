@@ -143,6 +143,13 @@ export function toDecimal(value: DianNumericInput | unknown): Prisma.Decimal {
   return toPrismaDecimal(Kernel.toDecimal(value));
 }
 
+/**
+ * Anexo 1.9 §5.2.1.1: «Los elementos que definen valores monetarios
+ * permitirán una tolerancia de error + o - 2.00». Única copia: la usan el
+ * prevalidador y el validador del XML, para que no bloqueen distinto.
+ */
+export const DIAN_MONETARY_TOLERANCE = new Prisma.Decimal('2.00');
+
 /** Ver {@link Kernel.absorbRateToFraction}. Misma firma; `fraction` vuelve como `Prisma.Decimal`. */
 export function absorbRateToFraction(
   rate: DianNumericInput | unknown,
