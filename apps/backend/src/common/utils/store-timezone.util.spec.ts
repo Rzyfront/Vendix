@@ -231,6 +231,21 @@ describe('store-timezone.util', () => {
       // Same as Bogota (the default) → UTC-5 boundary.
       expect(startDate.toISOString()).toBe('2026-06-30T05:00:00.000Z');
     });
+
+    it("explicit dates win over preset 'day' (single-day picker)", () => {
+      const { startDate, endDate } = resolveLocalDateRange(
+        { date_from: '2026-10-11', date_to: '2026-10-11', date_preset: 'day' },
+        BOGOTA,
+      );
+      expect(startDate.toISOString()).toBe('2026-10-11T05:00:00.000Z');
+      expect(endDate.toISOString()).toBe('2026-10-12T04:59:59.999Z');
+    });
+
+    it("orphan preset 'day' without dates falls back to today (closed end)", () => {
+      const { startDate, endDate } = resolveLocalDateRange({ date_preset: 'day' }, BOGOTA);
+      expect(endDate.getTime()).toBeGreaterThan(startDate.getTime());
+      expect(endDate.getTime() - startDate.getTime()).toBeLessThan(24 * 60 * 60 * 1000);
+    });
   });
 
   describe('localPeriodKey — the QUI-487 bug', () => {

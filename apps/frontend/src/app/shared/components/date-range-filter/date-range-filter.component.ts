@@ -39,6 +39,18 @@ imports: [
         </div>
       }
 
+      <!-- Single-day picker (native calendar) for Día específico -->
+      @if (selectedPreset() === 'day') {
+        <div class="flex items-center gap-2 w-full" [class.sm:w-auto]="!stacked()">
+          <input
+            type="date"
+            [ngModel]="customStartDate()"
+            (ngModelChange)="onDayChange($event)"
+            class="flex-1 px-3 py-2 text-sm border-[3px] border-black rounded-2xl bg-background text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-colors w-full"
+          />
+        </div>
+      }
+
       <!-- Date Range Inputs (only when custom is selected, or presets are off) -->
       @if (selectedPreset() === 'custom' || !showPresets()) {
         <div class="flex items-center gap-2 w-full" [class.sm:w-auto]="!stacked()">
@@ -93,6 +105,7 @@ export class DateRangeFilterComponent {
   presetOptions: SelectorOption[] = [
     { value: 'today', label: 'Hoy' },
     { value: 'yesterday', label: 'Ayer' },
+    { value: 'day', label: 'Día específico' },
     { value: 'thisWeek', label: 'Esta Semana' },
     { value: 'lastWeek', label: 'Semana Pasada' },
     { value: 'thisMonth', label: 'Este Mes' },
@@ -115,6 +128,7 @@ export class DateRangeFilterComponent {
       month: 'short',
       timeZone: 'UTC',
     });
+    if (range.start_date === range.end_date) return start;
     return `${start} - ${end}`;
   });
 
@@ -152,6 +166,21 @@ export class DateRangeFilterComponent {
 
   onPresetChange(preset: string): void {
     this.selectedPreset.set(preset as DatePreset);
+    if (preset === 'day') {
+      if (!this.customStartDate()) {
+        const today = toLocalDateString(new Date());
+        this.customStartDate.set(today);
+        this.customEndDate.set(today);
+      } else {
+        this.customEndDate.set(this.customStartDate());
+      }
+      this.valueChange.emit({
+        start_date: this.customStartDate(),
+        end_date: this.customStartDate(),
+        preset: 'day',
+      });
+      return;
+    }
     if (preset === 'custom') {
       // Hay que emitir también 'custom': el padre (p. ej. options-dropdown)
       // reconstruye `value` con su preset guardado y el effect revertía la
@@ -171,6 +200,14 @@ export class DateRangeFilterComponent {
     this.customStartDate.set(date);
     this.selectedPreset.set('custom');
     this.emitCustomRange();
+  }
+
+  onDayChange(date: string): void {
+    if (!date) return;
+    this.customStartDate.set(date);
+    this.customEndDate.set(date);
+    this.selectedPreset.set('day');
+    this.valueChange.emit({ start_date: date, end_date: date, preset: 'day' });
   }
 
   onEndDateChange(date: string): void {
@@ -206,6 +243,10 @@ export class DateRangeFilterComponent {
         start = new Date(today);
         start.setDate(start.getDate() - 1);
         end = start;
+        break;
+      case 'day':
+        start = today;
+        end = today;
         break;
       case 'thisWeek':
         start = new Date(today);
