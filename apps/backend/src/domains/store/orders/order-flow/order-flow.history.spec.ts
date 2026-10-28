@@ -1570,3 +1570,273 @@ describe('OrderFlowService.cancelOrder — item_cancelled en cascada (cascade: t
     });
   });
 });
+
+describe('OrderFlowService.applyDispatchCodPayment — credit orders (payment_form 2, route collection)', () => {
+  const ORDER_ID = 7401;
+  const STORE_ID = 42;
+  const NOTE_ID = 89;
+  const PAYMENT_ID = 6701;
+
+  const build = (orderOverrides: Record<string, unknown> = {}) => {
+    const prismaMock = createPrismaMock({
+      dispatch_notes: ['findFirst'],
+      payments: ['findFirst', 'create'],
+      orders: ['findFirst', 'updateMany'],
+      order_installments: ['findMany', 'update'],
+    });
+    prismaMock.dispatch_notes.findFirst.mockResolvedValue({ order_id: ORDER_ID });
+    prismaMock.payments.findFirst.mockResolvedValue(null);
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: ORDER_ID,
+      order_number: 'ORD-7401',
+      currency: 'COP',
+      total_paid: 0,
+      remaining_balance: 300,
+      customer_id: 12,
+      payment_form: '2',
+      credit_type: 'installments',
+      active_financial_split_id: null,
+      stores: { organization_id: 3 },
+      ...orderOverrides,
+    });
+    prismaMock.payments.create.mockResolvedValue({ id: PAYMENT_ID });
+    prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.order_installments.findMany.mockResolvedValue([
+      { id: 1, installment_number: 1, amount_paid: 0, remaining_balance: 100 },
+      { id: 2, installment_number: 2, amount_paid: 0, remaining_balance: 200 },
+    ]);
+    const eventEmitter = { emit: jest.fn() };
+    const orderHistoryService = { record: jest.fn().mockResolvedValue(null) };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      eventEmitter as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      orderHistoryService as any,
+    );
+    return { prismaMock, eventEmitter, service };
+  };
+
+  const input = (amount: number, extra: Record<string, unknown> = {}) => ({
+    storeId: STORE_ID,
+    dispatchNoteId: NOTE_ID,
+    stopId: 9,
+    amount,
+    correlationKey: 'dispatch_route_stop:9',
+    ...extra,
+  });
+
+  it('cuotas: el recaudo parcial abona las cuotas en orden de número, baja el saldo y avisa a la CxC', async () => {
+    const { prismaMock, eventEmitter, service } = build();
+
+    await service.applyDispatchCodPayment(input(150));
+
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { total_paid: 150, remaining_balance: 150 },
+      }),
+    );
+    expect(prismaMock.order_installments.update).toHaveBeenCalledTimes(2);
+    expect(prismaMock.order_installments.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 1 },
+      data: expect.objectContaining({ amount_paid: 100, remaining_balance: 0, state: 'paid' }),
+    });
+    expect(prismaMock.order_installments.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 2 },
+      data: expect.objectContaining({ amount_paid: 50, remaining_balance: 150, state: 'partial' }),
+    });
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'installment_payment.received',
+      expect.objectContaining({
+        order_id: ORDER_ID,
+        payment_id: PAYMENT_ID,
+        amount: 150,
+        store_id: STORE_ID,
+        organization_id: 3,
+      }),
+    );
+  });
+
+  it('crédito libre con recaudo total: salda la orden, no toca cuotas y avisa a la CxC', async () => {
+    const { prismaMock, eventEmitter, service } = build({ credit_type: 'free' });
+
+    await service.applyDispatchCodPayment(input(300));
+
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { total_paid: 300, remaining_balance: 0 } }),
+    );
+    expect(prismaMock.order_installments.update).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'installment_payment.received',
+      expect.objectContaining({ order_id: ORDER_ID, amount: 300 }),
+    );
+  });
+
+  it('contra entrega (payment_form distinto de 2): sin cuotas ni evento de CxC', async () => {
+    const { prismaMock, eventEmitter, service } = build({ payment_form: '1', credit_type: null });
+
+    await service.applyDispatchCodPayment(input(300));
+
+    expect(prismaMock.order_installments.update).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('reintento con la misma llave: NO-OP, sin doble abono ni segundo evento', async () => {
+    const { prismaMock, eventEmitter, service } = build();
+    prismaMock.payments.findFirst.mockResolvedValue({ id: PAYMENT_ID });
+
+    await service.applyDispatchCodPayment(input(150));
+
+    expect(prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(prismaMock.order_installments.update).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('cuotas con retención: la orden y las cuotas consumen C + W, el pago en caja es solo C y el evento lleva W y su desglose', async () => {
+    const { prismaMock, eventEmitter, service } = build();
+
+    await service.applyDispatchCodPayment(
+      input(100, { withholdingAmount: 20, withholdingBreakdown: { retefuente: 20 } }),
+    );
+
+    expect(prismaMock.payments.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ amount: 100 }) }),
+    );
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { total_paid: 100, remaining_balance: 180 } }),
+    );
+    expect(prismaMock.order_installments.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 1 },
+      data: expect.objectContaining({ amount_paid: 100, state: 'paid' }),
+    });
+    expect(prismaMock.order_installments.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 2 },
+      data: expect.objectContaining({ amount_paid: 20, remaining_balance: 180, state: 'partial' }),
+    });
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'installment_payment.received',
+      expect.objectContaining({
+        amount: 100,
+        withholding_amount: 20,
+        withholding_breakdown: { retefuente: 20 },
+      }),
+    );
+  });
+
+  it('cuotas con C = 0 y W > 0: se aplica W (saldo, cuotas, evento) con fila de pago en 0 que lleva la llave de idempotencia', async () => {
+    const { prismaMock, eventEmitter, service } = build();
+
+    await service.applyDispatchCodPayment(
+      input(0, { withholdingAmount: 20, withholdingBreakdown: { retefuente: 20 } }),
+    );
+
+    expect(prismaMock.payments.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ amount: 0, gateway_reference: 'dispatch_route_stop:9' }),
+      }),
+    );
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { total_paid: 0, remaining_balance: 280 } }),
+    );
+    expect(prismaMock.order_installments.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 1 },
+      data: expect.objectContaining({ amount_paid: 20, remaining_balance: 80, state: 'partial' }),
+    });
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'installment_payment.received',
+      expect.objectContaining({ amount: 0, withholding_amount: 20, withholding_breakdown: { retefuente: 20 } }),
+    );
+  });
+
+  it('C = 0 y W = 0 en crédito: NO-OP (sin fila de pago)', async () => {
+    const { prismaMock, eventEmitter, service } = build();
+    await service.applyDispatchCodPayment(input(0));
+    expect(prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('contra entrega con C = 0: NO-OP aunque venga retención', async () => {
+    const { prismaMock, service } = build({ payment_form: '1', credit_type: null });
+    await service.applyDispatchCodPayment(
+      input(0, { withholdingAmount: 20, withholdingBreakdown: { retefuente: 20 } }),
+    );
+    expect(prismaMock.payments.create).not.toHaveBeenCalled();
+  });
+
+  it('sobrecobro (C + W > saldo): W entra primero, el efectivo se recorta al resto y el saldo cierra en 0 con W intacta', async () => {
+    const { prismaMock, eventEmitter, service } = build();
+
+    await service.applyDispatchCodPayment(
+      input(250, { withholdingAmount: 100, withholdingBreakdown: { retefuente: 100 } }),
+    );
+
+    expect(prismaMock.payments.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ amount: 200 }) }),
+    );
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { total_paid: 200, remaining_balance: 0 } }),
+    );
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'installment_payment.received',
+      expect.objectContaining({ amount: 200, withholding_amount: 100, withholding_breakdown: { retefuente: 100 } }),
+    );
+  });
+
+  it('B2: crédito sin stopId (remisión facturada): NO-OP, nada de cuotas ni evento ni pago', async () => {
+    const { prismaMock, eventEmitter, service } = build();
+
+    await service.applyDispatchCodPayment({
+      storeId: STORE_ID,
+      dispatchNoteId: NOTE_ID,
+      amount: 300,
+      correlationKey: `dispatch_note:${NOTE_ID}`,
+    });
+
+    expect(prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(prismaMock.order_installments.update).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('crédito sin retención: el evento no lleva campos de retención (comportamiento previo)', async () => {
+    const { eventEmitter, service } = build();
+
+    await service.applyDispatchCodPayment(input(150));
+
+    const payload = (eventEmitter.emit.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('withholding_amount');
+    expect(payload).not.toHaveProperty('withholding_breakdown');
+  });
+
+  it('contra entrega con retención: se ignora (saldo baja solo C, sin evento)', async () => {
+    const { prismaMock, eventEmitter, service } = build({ payment_form: '1', credit_type: null });
+
+    await service.applyDispatchCodPayment(
+      input(100, { withholdingAmount: 20, withholdingBreakdown: { retefuente: 20 } }),
+    );
+
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { total_paid: 100, remaining_balance: 200 } }),
+    );
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('allocateCreditPaymentToInstallments: respeta installment_id primero y el resto en orden', async () => {
+    const { prismaMock, service } = build();
+    prismaMock.order_installments.findFirst = jest
+      .fn()
+      .mockResolvedValue({ id: 2, amount_paid: 0, remaining_balance: 200 });
+    prismaMock.order_installments.findMany.mockResolvedValue([
+      { id: 1, installment_number: 1, amount_paid: 0, remaining_balance: 100 },
+    ]);
+
+    await (service as any).allocateCreditPaymentToInstallments(prismaMock, ORDER_ID, 250, 2);
+
+    expect(prismaMock.order_installments.update).toHaveBeenNthCalledWith(1, {
+      where: { id: 2 },
+      data: expect.objectContaining({ amount_paid: 200, remaining_balance: 0, state: 'paid' }),
+    });
+    expect(prismaMock.order_installments.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 1 },
+      data: expect.objectContaining({ amount_paid: 50, remaining_balance: 50, state: 'partial' }),
+    });
+  });
+});

@@ -62,4 +62,20 @@ describe('ArEventsListener — financial account isolation from source-order AR'
     });
     expect(prisma.accounts_receivable.findFirst).not.toHaveBeenCalled();
   });
+  it('installment_payment.received con retención: la CxC baja una sola vez por C + W', async () => {
+    await listener.handleInstallmentPaymentReceived({
+      payment_id: 5, order_id: 9001, amount: 100, withholding_amount: 20,
+      store_id: 2, organization_id: 1, user_id: 7,
+    } as any);
+    expect(ar.registerPayment).toHaveBeenCalledTimes(1);
+    expect(ar.registerPayment).toHaveBeenCalledWith(
+      8, expect.objectContaining({ amount: 120, payment_id: 5 }), 7,
+    );
+  });
+  it('installment_payment.received sin retención: monto = C (sin cambio)', async () => {
+    await listener.handleInstallmentPaymentReceived({
+      payment_id: 5, order_id: 9001, amount: 100, store_id: 2, organization_id: 1, user_id: 7,
+    } as any);
+    expect(ar.registerPayment).toHaveBeenCalledWith(8, expect.objectContaining({ amount: 100 }), 7);
+  });
 });

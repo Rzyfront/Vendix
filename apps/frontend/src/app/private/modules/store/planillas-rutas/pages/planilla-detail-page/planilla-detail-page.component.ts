@@ -345,6 +345,8 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
         [stop]="settleStop()!"
         [grandTotal]="+(settleStop()!.dispatch_note?.grand_total || 0)"
         [isPrepaid]="!!settleStop()!.is_prepaid"
+        [pendingAmount]="settleStop()!.pending_amount != null ? +settleStop()!.pending_amount! : null"
+        [busy]="actionLoading()"
         (close)="settleStop.set(null)"
         (submitted)="onSettle($event)"
       ></app-stop-settle-modal>
@@ -1330,7 +1332,18 @@ export class PlanillaDetailPageComponent {
         },
         error: (e) => {
           this.actionLoading.set(false);
-          this.toast.error(e?.error?.message || e?.message || 'Error al liquidar la parada');
+          const msg: string = e?.error?.message || e?.message || '';
+          if (
+            e?.errorCode === 'DISPATCH_ROUTE_STOP_ALREADY_SETTLED' ||
+            /ya est[aá] '(delivered|rejected|released)'/.test(msg)
+          ) {
+            // Already settled elsewhere / double submit: refresh, not an error.
+            this.settleStop.set(null);
+            this.toast.info('La parada ya estaba liquidada');
+            this.load();
+            return;
+          }
+          this.toast.error(msg || 'Error al liquidar la parada');
         },
       });
   }

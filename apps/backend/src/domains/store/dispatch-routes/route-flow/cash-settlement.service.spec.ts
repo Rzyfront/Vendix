@@ -23,6 +23,10 @@ describe('CashSettlementService.emitPaymentReceived — close-session lock', () 
     };
     const prisma = {
       stores: { findUnique: jest.fn() },
+      // Default: the stop's order is COD (payment_form '1').
+      dispatch_notes: {
+        findFirst: jest.fn().mockResolvedValue({ order: { payment_form: '1' } }),
+      },
       cash_register_sessions: {
         findFirst: jest.fn().mockResolvedValue({ id: SESSION_ID }),
       },
@@ -72,6 +76,49 @@ describe('CashSettlementService.emitPaymentReceived — close-session lock', () 
       { event: 'payment.received', inTransaction: false },
     ]);
     expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
+  });
+
+  it('credit order (payment_form 2): payment.received is flagged credit_order_collection so accounting does not book a second entry', async () => {
+    const { service, prisma, eventEmitter, input } = createHarness([{ id: SESSION_ID }]);
+    prisma.dispatch_notes.findFirst.mockResolvedValue({ order: { payment_form: '2' } });
+
+    await service.emitPaymentReceived(input);
+
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'payment.received',
+      expect.objectContaining({ source_type: 'dispatch_route', credit_order_collection: true }),
+    );
+  });
+
+  it('COD: payment.received payload carries no credit_order_collection flag (unchanged)', async () => {
+    const { service, eventEmitter, input } = createHarness([{ id: SESSION_ID }]);
+
+    await service.emitPaymentReceived(input);
+
+    const payload = (eventEmitter.emit.mock.calls[0] as unknown[])[1];
+    expect(payload).not.toHaveProperty('credit_order_collection');
+  });
+
+  it('COD order: resolved order id goes in accounting_order_id (order_id stays null) and W is normalised with subtotal = C + W', async () => {
+    const { service, prisma, eventEmitter, input } = createHarness([{ id: SESSION_ID }]);
+    prisma.dispatch_notes.findFirst.mockResolvedValue({ order: { id: 321, payment_form: '1' } });
+
+    await service.emitPaymentReceived({
+      ...input,
+      withholding_breakdown: { retefuente: 15, reteiva: 5 },
+    } as any);
+
+    const payload = (eventEmitter.emit.mock.calls[0] as unknown[])[1] as any;
+    expect(payload.order_id).toBeNull();
+    expect(payload.accounting_order_id).toBe(321);
+    expect(payload.subtotal_amount).toBe(18020);
+    expect(payload.withholding_breakdown).toEqual([
+      expect.objectContaining({
+        code: 'retefuente', amount: 15, withholding_type: 'retefuente',
+        account_role: 'withholding.suffered.retefuente_receivable', role: 'suffered',
+      }),
+      expect.objectContaining({ code: 'reteiva', amount: 5, withholding_type: 'reteiva' }),
+    ]);
   });
 
   it('fails closed when the close lock is lost while recording COD in the stop transaction', async () => {

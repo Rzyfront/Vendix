@@ -211,7 +211,15 @@ export class PlanillasRutasService {
       )
       .pipe(
         map((r) => r.data),
-        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+        // Keep the backend error_code: the pages react to
+        // DISPATCH_ROUTE_STOP_ALREADY_SETTLED by code, not by message text.
+        catchError((e) =>
+          throwError(() =>
+            Object.assign(new Error(this.extractMessage(e)), {
+              errorCode: (e?.error?.error_code as string | undefined) ?? null,
+            }),
+          ),
+        ),
       );
   }
 

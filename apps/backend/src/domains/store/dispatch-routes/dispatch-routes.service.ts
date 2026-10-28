@@ -31,6 +31,7 @@ import {
   computeRouteTotals,
   buildRouteReconciliation,
   deriveStopIsPrepaid,
+  derivePendingAmount,
   resolveIsPrepaid,
   RouteReconciliation,
   ReconciliationStopInput,
@@ -79,6 +80,8 @@ const DISPATCH_ROUTE_INCLUDE = {
             select: {
               id: true,
               remaining_balance: true,
+              payment_form: true,
+              credit_type: true,
               shipping_address_snapshot: true,
             },
           },
@@ -736,10 +739,14 @@ export class DispatchRoutesService {
     const stops_with_alias = (route.stops ?? []).map((stop: any) => {
       const dn = stop.dispatch_note ?? null;
       const is_prepaid = deriveStopIsPrepaid(stop);
-      if (!dn) return { ...stop, is_prepaid };
+      // Live amount still to collect on this stop (planilla UI reads this, not
+      // dispatch_note.grand_total): 0 when the order is already paid.
+      const pending_amount = derivePendingAmount(stop);
+      if (!dn) return { ...stop, is_prepaid, pending_amount };
       return {
         ...stop,
         is_prepaid,
+        pending_amount,
         dispatch_note: {
           ...dn,
           customer_name: resolveCustomerSnapshotName(
