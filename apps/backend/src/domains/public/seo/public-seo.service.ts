@@ -169,6 +169,9 @@ Disallow: /
             store_id: context.store_id,
             state: 'active',
             available_for_ecommerce: true,
+            // Hotelería (R5): las noches "Noche – {tipo}" se cobran desde la cuenta
+            // del huésped, nunca se venden en la tienda en línea.
+            lodging_unit_type: { is: null },
           },
           select: { slug: true, updated_at: true },
           orderBy: { updated_at: 'desc' },

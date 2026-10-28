@@ -41,6 +41,7 @@ import {
   IconComponent,  // FIX QUI-503
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 // QUI-729 — el filtro tri-estado vive ahora en `app-options-dropdown` como
 // una entrada más de `filterConfigs` (label "Productos e insumos"). El
@@ -71,6 +72,7 @@ import './product-list.component.css';
 })
 export class ProductListComponent {
   private currencyService = inject(CurrencyFormatService);
+  private readonly authFacade = inject(AuthFacade);
 
   readonly products = input<Product[]>([]);
   readonly isLoading = input(false);
@@ -183,6 +185,27 @@ export class ProductListComponent {
       ],
     },
   ]);
+
+  /**
+   * Hotelería (R5) — filtro de las noches "Noche – {tipo}" que crea cada tipo
+   * de habitación. Solo existe en tiendas con la industria Hotelería.
+   */
+  private readonly lodgingFilter: FilterConfig = {
+    key: 'is_lodging',
+    label: 'Hotelería',
+    type: 'select',
+    options: [
+      { value: '', label: 'Todos' },
+      { value: 'only', label: 'Solo noches de hotel' },
+      { value: 'exclude', label: 'Sin noches de hotel' },
+    ],
+  };
+
+  readonly visibleFilterConfigs = computed<FilterConfig[]>(() =>
+    this.authFacade.isHospitality()
+      ? [...this.filterConfigs(), this.lodgingFilter]
+      : this.filterConfigs(),
+  );
 
   // Current filter values. Inicia con el default unico del modulo de
   // productos para que el primer render ya llegue filtrado al backend
@@ -489,6 +512,13 @@ export class ProductListComponent {
       query.is_ingredient = false;
     } else if (ingredient === 'ingredients') {
       query.is_ingredient = true;
+    }
+
+    const lodging = this.filterValues['is_lodging'];
+    if (lodging === 'only') {
+      query.is_lodging = true;
+    } else if (lodging === 'exclude') {
+      query.is_lodging = false;
     }
 
     this.filter.emit(query);

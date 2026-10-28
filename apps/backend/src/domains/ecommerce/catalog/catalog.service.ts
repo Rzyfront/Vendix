@@ -184,6 +184,9 @@ export class CatalogService {
       is_sellable: true,
       // Los insumos nunca se publican en la tienda en línea (defensa de datos viejos).
       is_ingredient: false,
+      // Hotelería (R5): las noches "Noche – {tipo}" se cobran desde la cuenta
+      // del huésped, nunca se venden en la tienda en línea.
+      lodging_unit_type: { is: null },
       // store_id se aplica automáticamente por EcommercePrismaService
     };
     const andFilters: any[] = [];
@@ -857,6 +860,9 @@ export class CatalogService {
         available_for_ecommerce: true,
         is_sellable: true,
         is_ingredient: false,
+        // Hotelería (R5): las noches "Noche – {tipo}" se cobran desde la cuenta
+        // del huésped, nunca se venden en la tienda en línea.
+        lodging_unit_type: { is: null },
         // store_id se aplica automáticamente por EcommercePrismaService
       },
       include,

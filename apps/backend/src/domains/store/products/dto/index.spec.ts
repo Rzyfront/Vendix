@@ -67,6 +67,31 @@ describe('ProductQueryDto.is_ingredient (ValidationPipe real)', () => {
   });
 });
 
+describe('ProductQueryDto.is_lodging (ValidationPipe real)', () => {
+  const pipe = new ValidationPipe({
+    transform: true,
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transformOptions: { enableImplicitConversion: true },
+  });
+  const transform = (payload: Record<string, unknown>) =>
+    pipe.transform(payload, { type: 'query', metatype: ProductQueryDto });
+
+  it.each([
+    ['false', false],
+    ['true', true],
+    ['', undefined],
+  ])("coacciona '%s' a %p", async (raw, expected) => {
+    const result = await transform({ is_lodging: raw });
+    expect(result.is_lodging).toBe(expected);
+  });
+
+  it('ausente queda undefined (sin filtro)', async () => {
+    const result = await transform({});
+    expect(result.is_lodging).toBeUndefined();
+  });
+});
+
 describe('ProductQueryDto.without_category / without_brand (ValidationPipe real)', () => {
   const pipe = new ValidationPipe({
     transform: true,

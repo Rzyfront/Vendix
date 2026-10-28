@@ -310,6 +310,25 @@ describe('product-search-trigram (C.3)', () => {
       expect(counted).toContain('p.state = $');
     });
 
+    it('isLodging (R5): false excluye noches de hotel, true deja solo ellas, null no filtra', () => {
+      const whereOf = (isLodging: boolean | null) =>
+        extractWhereClause(
+          buildTrigramRankedQuery(1, ['noche'], { isLodging }, 'noche', 20, 0)
+            .sql,
+        );
+      const lodgingSubquery =
+        'EXISTS (SELECT 1 FROM public.lodging_unit_types lut WHERE lut.product_id = p.id)';
+      expect(whereOf(false)).toContain(`NOT ${lodgingSubquery}`);
+      expect(whereOf(true)).toContain(lodgingSubquery);
+      expect(whereOf(true)).not.toContain(`NOT ${lodgingSubquery}`);
+      expect(whereOf(null)).not.toContain('lodging_unit_types');
+      // COUNT twin hereda el mismo predicado (total honesto en el POS).
+      const counted = extractWhereClause(
+        buildTrigramCountQuery(1, ['noche'], { isLodging: false }).sql,
+      );
+      expect(counted).toContain(`NOT ${lodgingSubquery}`);
+    });
+
     it('isIngredient tri-estado: undefined = sin filtro', () => {
       const where = extractWhereClause(
         buildTrigramRankedQuery(

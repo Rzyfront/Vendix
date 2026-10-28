@@ -65,6 +65,9 @@ export class WishlistService {
         state: 'active',
         available_for_ecommerce: true,
         is_ingredient: false,
+        // Hotelería (R5): las noches "Noche – {tipo}" se cobran desde la cuenta
+        // del huésped, nunca se venden en la tienda en línea.
+        lodging_unit_type: { is: null },
       },
     });
 

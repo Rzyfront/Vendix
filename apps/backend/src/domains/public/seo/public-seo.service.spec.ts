@@ -94,7 +94,13 @@ describe('PublicSeoService (VENDIX_LANDING)', () => {
     expect(xml).toContain('<lastmod>2026-09-01T12:00:00.000Z</lastmod>');
     expect(xml.match(/<loc>/g)).toHaveLength(5);
     expect(findMany).toHaveBeenCalledWith({
-      where: { store_id: 42, state: 'active', available_for_ecommerce: true },
+      where: {
+        store_id: 42,
+        state: 'active',
+        available_for_ecommerce: true,
+        // Hotelería (R5): las noches de hotel no se indexan.
+        lodging_unit_type: { is: null },
+      },
       select: { slug: true, updated_at: true },
       orderBy: { updated_at: 'desc' },
     });
