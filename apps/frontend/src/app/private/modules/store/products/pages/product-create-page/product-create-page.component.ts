@@ -90,6 +90,7 @@ import {
   withoutTaxFromMap,
 } from '../../utils/product-tax-inclusive.util';
 import { ProductUtils } from '../../utils/product.utils';
+import { getVariantStockRequirements } from '../../utils/variant-stock-requirements.util';
 import { ValidationUtils } from '../../utils/validation.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
@@ -2640,8 +2641,10 @@ export class ProductCreatePageComponent {
         return;
       }
 
+      // Solo hay stock que redistribuir si el producto maneja inventario.
       const currentStock = this.productForm.get('stock_quantity')?.value || 0;
-      if (this.isEditMode() && currentStock > 0) {
+      const tracksInventory = !!this.productForm.get('track_inventory')?.value;
+      if (this.isEditMode() && tracksInventory && currentStock > 0) {
         this.showStockTransferDialog(currentStock);
         return;
       }
@@ -4096,61 +4099,16 @@ export class ProductCreatePageComponent {
         });
       }
 
-      // Edit mode, transición simple→variantes, stock base > 0.
-      const baseline = this.originalBaseStock();
-      const isTransitioning =
-        this.isEditMode() && !this.originalHadVariants() && baseline > 0;
-      if (isTransitioning) {
-        if (!this.stockTransferMode || this.stockTransferMode === 'reset') {
-          requirements.push({
-            id: 'stock-redistribute',
-            label: 'Redistribuir stock base',
-            reason:
-              "Debes redistribuir el stock base. Elige 'Asignar a una variante' o 'Distribuir'.",
-            severity: 'required',
-            action: {
-              label: 'Configurar redistribución',
-              kind: 'scroll',
-              target: 'variants',
-            },
-          });
-        } else if (this.totalVariantStock !== baseline) {
-          requirements.push({
-            id: 'stock-misaligned',
-            label: 'Totales de stock desalineados',
-            reason: `La suma de stock de las variantes (${this.totalVariantStock}) debe igualar el stock base original (${baseline}).`,
-            severity: 'required',
-            action: {
-              label: 'Configurar redistribución',
-              kind: 'scroll',
-              target: 'variants',
-            },
-          });
-        }
-      }
-
-      const trackInventoryEnabled =
-        !!this.productForm.get('track_inventory')?.value;
-      if (trackInventoryEnabled) {
-        const allVariantsTrackInventory = this.generatedVariants.every((v) => {
-          if (v.track_inventory_override === false) return false;
-          return true;
-        });
-        if (allVariantsTrackInventory && this.totalVariantStock <= 0) {
-          requirements.push({
-            id: 'variant-stock-required',
-            label: 'Stock de variantes requerido',
-            reason:
-              'Todas las variantes que manejan stock tienen 0 unidades. Asigna al menos 1 unidad antes de guardar.',
-            severity: 'required',
-            action: {
-              label: 'Configurar variantes',
-              kind: 'scroll',
-              target: 'variants',
-            },
-          });
-        }
-      }
+      requirements.push(
+        ...getVariantStockRequirements({
+          isEditMode: this.isEditMode(),
+          originalHadVariants: this.originalHadVariants(),
+          baselineStock: this.originalBaseStock(),
+          trackInventory: !!this.productForm.get('track_inventory')?.value,
+          stockTransferMode: this.stockTransferMode,
+          totalVariantStock: this.totalVariantStock,
+        }),
+      );
 
       const invalidSaleVariant = this.generatedVariants.find((v) => {
         if (!v.is_on_sale) return false;
