@@ -91,6 +91,10 @@ import {
 } from '../../utils/product-tax-inclusive.util';
 import { ProductUtils } from '../../utils/product.utils';
 import { getVariantStockRequirements } from '../../utils/variant-stock-requirements.util';
+import {
+  followBasePrice,
+  variantPriceOverrideToSend,
+} from '../../utils/variant-price-inheritance.util';
 import { ValidationUtils } from '../../utils/validation.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
@@ -2120,6 +2124,22 @@ export class ProductCreatePageComponent {
     costCtrl?.valueChanges.subscribe(() => this.recalculateMarginFromCost(form));
     marginCtrl?.valueChanges.subscribe(() => this.recalculateBasePriceFromMargin(form));
     basePriceCtrl?.valueChanges.subscribe(() => this.recalculateMarginFromBasePrice(form));
+
+    // Variants priced at the product's base price inherit it: keep them on it.
+    let previousBase = Number(basePriceCtrl?.value || 0);
+    basePriceCtrl?.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => {
+        const nextBase = Number(value || 0);
+        const before = this.generatedVariants;
+        const after = followBasePrice(before, previousBase, nextBase);
+        previousBase = nextBase;
+        if (after === before) return;
+        after.forEach((v, i) => {
+          if (v !== before[i]) this.onVariantPriceChange(v);
+        });
+        this.generatedVariants = after;
+      });
   }
 
   private isCalculating = false;
@@ -4434,8 +4454,8 @@ export class ProductCreatePageComponent {
           sku: v.sku,
           barcode: v.barcode?.trim() ? v.barcode.trim() : undefined,
           name: v.name,
-          // Only send price_override when intentionally non-zero; 0 is ambiguous (backend rejects)
-          price_override: Number(v.price) > 0 ? Number(v.price) : null,
+          // Same price as the product = no own price: null keeps it inherited.
+          price_override: variantPriceOverrideToSend(v.price, formValue.base_price),
           cost_price: Number(v.cost_price),
           profit_margin: Number(v.profit_margin),
           is_on_sale: !!v.is_on_sale,

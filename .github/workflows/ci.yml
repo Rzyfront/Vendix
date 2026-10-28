@@ -316,6 +316,7 @@ jobs:
           --include='**/shared/directives/pull-to-refresh.directive.spec.ts'
           --include='**/reviews/review-summary.component.spec.ts'
           --include='**/products/utils/variant-stock-requirements.util.spec.ts'
+          --include='**/products/utils/variant-price-inheritance.util.spec.ts'
 
   mobile:
     name: Mobile
