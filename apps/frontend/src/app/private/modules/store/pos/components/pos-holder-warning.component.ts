@@ -43,7 +43,9 @@ import { InvoicingService } from '../../invoicing/services/invoicing.service';
   template: `
     @if (visibleIssue(); as data) {
       <div
-        class="fixed bottom-24 left-3 right-3 z-40 mx-auto max-w-md rounded-xl border border-yellow-300 bg-yellow-50 p-3 shadow-lg lg:bottom-6 lg:left-auto lg:right-[430px] lg:mx-0"
+        [class]="inline()
+          ? 'mb-3 rounded-xl border border-yellow-300 bg-yellow-50 p-3'
+          : 'fixed bottom-24 left-3 right-3 z-40 mx-auto max-w-md rounded-xl border border-yellow-300 bg-yellow-50 p-3 shadow-lg lg:bottom-6 lg:left-auto lg:right-[430px] lg:mx-0'"
         role="status"
         aria-live="polite"
       >
@@ -93,6 +95,11 @@ export class PosHolderWarningComponent {
 
   /** Customer assigned to the sale, or null. */
   readonly customerId = input<number | null>(null);
+  /**
+   * cod-auto-invoicing S4 — renders in the flow (no floating card) so the
+   * checkout payment step can offer «Seguir como Consumidor final» in place.
+   */
+  readonly inline = input<boolean>(false);
 
   readonly issue = signal<HolderIssue | null>(null);
   readonly showModal = signal(false);

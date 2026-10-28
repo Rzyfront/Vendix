@@ -79,6 +79,12 @@
              y triggerSubmit() funcione desde cualquier paso. -->
         @if (stepKeys().includes('cobro')) {
           <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'cobro'">
+            @if (requiresElectronicInvoicing()) {
+              <app-pos-holder-warning
+                [inline]="true"
+                [customerId]="cartCustomerId()"
+              ></app-pos-holder-warning>
+            }
             <app-pos-payment-step
               [cartState]="cartState()"
               [checkoutIntent]="effectiveIntent()"
