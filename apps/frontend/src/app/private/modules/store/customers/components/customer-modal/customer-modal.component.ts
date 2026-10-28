@@ -10,7 +10,11 @@ import {
   computed,
   untracked,
 } from '@angular/core';
-import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import {
+  toSignal,
+  toObservable,
+  takeUntilDestroyed,
+} from '@angular/core/rxjs-interop';
 import {
   FormBuilder,
   FormGroup,
@@ -49,7 +53,12 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
 import { CustomersService } from '../../services/customers.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { Observable, of } from 'rxjs';
-import { finalize } from 'rxjs/operators';
+import { finalize, switchMap } from 'rxjs/operators';
+import { PriceTierCacheService } from '../../../price-tiers/services';
+import {
+  customerPriceTierOptions,
+  toCustomerPriceTierId,
+} from '../../../price-tiers/utils/price-tier-rule.util';
 
 /**
  * Validador NIT ↔ DV atado a los nombres de control de ESTE formulario. El
@@ -256,6 +265,17 @@ interface AddressDtoPayload {
               </p>
             </div>
           </label>
+        }
+
+        @if (showPriceTier() && priceTierOptions().length > 1) {
+          <div class="mt-3">
+            <app-selector
+              formControlName="price_tier_id"
+              label="Tarifa preferencial"
+              [options]="priceTierOptions()"
+              helpText="Al venderle, el POS y el detalle de la orden preguntan si aplicarla."
+            ></app-selector>
+          </div>
         }
 
         <!-- ============================================================ -->
@@ -544,6 +564,27 @@ export class CustomerModalComponent {
   private destroyRef = inject(DestroyRef);
 
   readonly isOpen = input(false);
+  /**
+   * Muestra la "Tarifa preferencial". Solo la ficha de clientes la activa: los
+   * demás usos del modal envían el payload a endpoints (p. ej. `resolve`) que
+   * no aceptan el campo.
+   */
+  readonly showPriceTier = input(false);
+  private priceTierCache = inject(PriceTierCacheService);
+
+  /** Tarifas activas, pedidas solo cuando el selector se muestra. */
+  private readonly activeTiers = toSignal(
+    toObservable(this.showPriceTier).pipe(
+      switchMap((show) => (show ? this.priceTierCache.getActiveTiers() : of([]))),
+    ),
+    { initialValue: [] },
+  );
+  readonly priceTierOptions = computed(() =>
+    customerPriceTierOptions(
+      this.activeTiers(),
+      this.customer()?.price_tier_id ?? null,
+    ),
+  );
   readonly customer = input<Customer | null>(null);
   /**
    * Prellenado para el modo alta (ej. identidad RUES, documento digitado).
@@ -767,6 +808,7 @@ export class CustomerModalComponent {
       person_type: [''],
       is_withholding_agent: [false],
       fiscal_responsibilities: this.fb.control<string[]>([]),
+      price_tier_id: this.fb.control<number | ''>(''),
     });
 
     // Bridge document_type valueChanges -> signal (Zoneless-safe reactive read).
@@ -973,6 +1015,7 @@ export class CustomerModalComponent {
           person_type: customer.person_type ?? null,
           is_withholding_agent: customer.is_withholding_agent ?? false,
           fiscal_responsibilities: customer.fiscal_responsibilities ?? [],
+          price_tier_id: customer.price_tier_id ?? '',
         });
 
         // Cargar la dirección de envío existente (si la hay) para el hijo.
@@ -1018,6 +1061,7 @@ export class CustomerModalComponent {
         this.form.reset({
           is_withholding_agent: false,
           fiscal_responsibilities: [],
+          price_tier_id: '',
         });
         // Prellenado opcional (sin tracking: cambiar `initialValues` con el
         // modal abierto no debe pisar lo que el operador ya digitó).
@@ -1258,7 +1302,13 @@ export class CustomerModalComponent {
     // `getRawValue()` para incluir controles deshabilitados (document_number
     // se deshabilita cuando no hay tipo seleccionado, pero igual queremos
     // emitir el valor actual del formulario).
-    const data = this.form.getRawValue() as CreateCustomerRequest;
+    const raw = this.form.getRawValue();
+    const data = raw as CreateCustomerRequest;
+    if (this.showPriceTier()) {
+      data.price_tier_id = toCustomerPriceTierId(raw.price_tier_id);
+    } else {
+      delete data.price_tier_id;
+    }
     if (data.document_type !== 'NIT') {
       data.verification_digit = null;
     }

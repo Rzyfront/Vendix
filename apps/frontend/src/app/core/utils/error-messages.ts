@@ -380,6 +380,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
 
   // Customers
   CUST_FIND_001: 'Cliente no encontrado.',
+  CUST_PRICE_TIER_001:
+    'La tarifa elegida no existe en esta tienda o no es una tarifa de cliente.',
   CUST_CREATE_001: 'Error al crear el cliente.',
   CUST_VALIDATE_001: 'La validacion del cliente fallo.',
   CUST_PERM_001: 'No tiene permisos para acceder a este cliente.',

@@ -5,6 +5,7 @@ import {
   validateTierAdjustment,
 } from '../../../../../shared/services/pricing/tier-adjustment.util';
 import {
+  PriceTier,
   PriceTierAdjustmentType,
   PriceTierAmountScope,
 } from '../interfaces/price-tier.interface';
@@ -106,4 +107,44 @@ export function buildPriceTierRulePayload(form: PriceTierRuleFormValue): {
           ? 'Tipo de regla no válido.'
           : null;
   return { payload, error };
+}
+
+export interface CustomerPriceTierOption {
+  value: number | '';
+  label: string;
+  description?: string;
+}
+
+/**
+ * Opciones del selector "Tarifa preferencial" del cliente: solo tarifas de
+ * cliente (una unidad de venta no se asigna a personas). Si el cliente tiene
+ * una tarifa que ya no está activa, se mantiene visible para poder quitarla.
+ */
+export function customerPriceTierOptions(
+  tiers: PriceTier[],
+  currentId: number | null | undefined,
+): CustomerPriceTierOption[] {
+  const options: CustomerPriceTierOption[] = [{ value: '', label: 'Sin tarifa' }];
+  for (const tier of tiers) {
+    if (tier.kind && tier.kind !== 'customer_tier') continue;
+    const rule = describePriceTierRule(tier);
+    options.push({
+      value: tier.id,
+      label: tier.name,
+      ...(rule ? { description: rule } : {}),
+    });
+  }
+  if (currentId != null && !options.some((o) => o.value === currentId)) {
+    options.push({ value: currentId, label: 'Tarifa inactiva o eliminada' });
+  }
+  return options;
+}
+
+/** Valor del selector → `price_tier_id` del payload (`''` = sin tarifa). */
+export function toCustomerPriceTierId(
+  value: number | string | null | undefined,
+): number | null {
+  if (value === '' || value == null) return null;
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
 }

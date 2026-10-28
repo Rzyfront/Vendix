@@ -25,6 +25,8 @@ export interface Customer {
     tax_regime?: TaxRegime | null;
     person_type?: PersonType | null;
     is_withholding_agent?: boolean;
+    /** Tarifa preferencial del cliente en esta tienda (`null` = sin tarifa). */
+    price_tier_id?: number | null;
     created_at?: string;
     updated_at?: string;
     total_orders?: number;
@@ -78,6 +80,8 @@ export interface CreateCustomerRequest {
     tax_regime?: TaxRegime | null;
     person_type?: PersonType | null;
     is_withholding_agent?: boolean;
+    /** Tarifa preferencial del cliente en esta tienda (`null` = sin tarifa). */
+    price_tier_id?: number | null;
 }
 
 /** Fuente pública que resolvió la identidad externa. */

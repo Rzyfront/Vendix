@@ -1814,6 +1814,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Customer not found',
   },
+  CUST_PRICE_TIER_001: {
+    code: 'CUST_PRICE_TIER_001',
+    httpStatus: 400,
+    devMessage:
+      'The price tier does not exist in this store or is not a customer tier',
+  },
   CUST_CREATE_001: {
     code: 'CUST_CREATE_001',
     httpStatus: 400,

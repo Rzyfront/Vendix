@@ -1,8 +1,11 @@
 import {
   buildPriceTierRulePayload,
+  customerPriceTierOptions,
   describePriceTierRule,
   tierFallbackPackagePrice,
+  toCustomerPriceTierId,
 } from './price-tier-rule.util';
+import { PriceTier } from '../interfaces/price-tier.interface';
 
 /**
  * Etiquetas y precio sugerido de la regla de una tarifa en el admin.
@@ -122,5 +125,45 @@ describe('buildPriceTierRulePayload', () => {
         amount_scope: 'per_unit',
       }).error,
     ).toBe('El recargo no puede pasar de 1000 %.');
+  });
+});
+
+describe('customerPriceTierOptions', () => {
+  const tier = (over: Partial<PriceTier>): PriceTier =>
+    ({
+      id: 1,
+      name: 'Mayorista',
+      kind: 'customer_tier',
+      is_active: true,
+      discount_percentage: 10,
+      ...over,
+    }) as PriceTier;
+
+  it('ofrece "Sin tarifa" y solo las tarifas de cliente, con su regla', () => {
+    expect(
+      customerPriceTierOptions(
+        [tier({}), tier({ id: 2, name: 'Bulto', kind: 'sale_unit' })],
+        null,
+      ),
+    ).toEqual([
+      { value: '', label: 'Sin tarifa' },
+      { value: 1, label: 'Mayorista', description: '10 % de descuento' },
+    ]);
+  });
+
+  it('una tarifa asignada que ya no está activa sigue visible para poder quitarla', () => {
+    expect(customerPriceTierOptions([tier({})], 9).at(-1)).toEqual({
+      value: 9,
+      label: 'Tarifa inactiva o eliminada',
+    });
+  });
+});
+
+describe('toCustomerPriceTierId', () => {
+  it('"Sin tarifa" se guarda como null y un id como número', () => {
+    expect(toCustomerPriceTierId('')).toBeNull();
+    expect(toCustomerPriceTierId(null)).toBeNull();
+    expect(toCustomerPriceTierId('7')).toBe(7);
+    expect(toCustomerPriceTierId(7)).toBe(7);
   });
 });
