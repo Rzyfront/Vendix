@@ -22,14 +22,22 @@ import {
   TableAction,
   TableColumn,
   ToastService,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { HOUSEKEEPING_STATUS_LABELS } from '../../../rooms/interfaces/unit.interface';
 import {
   HOUSEKEEPING_TASK_TYPE_LABELS,
   HousekeepingTask,
+  HousekeepingTaskStatus,
   HousekeepingTasksDay,
 } from '../../interfaces/housekeeping.interface';
 import { LodgingHousekeepingService } from '../../services/housekeeping.service';
+import {
+  statusBadgeConfig,
+  TASK_STATUS_CHIPS,
+  TASK_STATUS_LABELS,
+} from '../../../shared/hospitality-status';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 /** `0` stands for "Sin asignar" in the selector (options need a value). */
 const UNASSIGNED = 0;
@@ -41,14 +49,10 @@ interface TaskRow extends HousekeepingTask {
   assignee_label: string;
 }
 
-const TASK_STATUS_BADGE = {
-  type: 'custom' as const,
-  size: 'sm' as const,
-  colorMap: { pending: '#f59e0b', done: '#10b981' },
-};
+const TASK_STATUS_BADGE = statusBadgeConfig(TASK_STATUS_CHIPS);
 
-const taskStatusLabel = (value: string): string =>
-  value === 'done' ? 'Terminada' : 'Pendiente';
+const taskStatusLabel = (value: HousekeepingTaskStatus): string =>
+  TASK_STATUS_LABELS[value] ?? value;
 
 /** Case- and accent-insensitive "contains". */
 function matches(term: string, ...values: (string | null | undefined)[]): boolean {
@@ -73,6 +77,8 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    HospitalityLoadErrorComponent,
+    SpinnerComponent,
     AlertBannerComponent,
     ButtonComponent,
     EmptyStateComponent,
@@ -81,10 +87,15 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
     SelectorComponent,
   ],
   template: `
-    @if (day() === null) {
-      <div class="p-4 md:p-6 text-center">
-        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        <p class="mt-2 text-text-secondary">Cargando tareas...</p>
+    @if (loadError() !== null) {
+      <app-hospitality-load-error
+        what="las tareas de limpieza"
+        [message]="loadError()"
+        (retry)="load()"
+      />
+    } @else if (day() === null) {
+      <div class="p-4 md:p-6">
+        <app-spinner [center]="true" text="Cargando tareas…" />
       </div>
     } @else {
       @if (mode() === 'assign' && (day()?.staff ?? []).length === 0 && day()!.tasks.length > 0) {
@@ -176,6 +187,8 @@ export class HousekeepingTasksPanelComponent implements OnInit {
   readonly clearFilters = output<void>();
 
   readonly day = signal<HousekeepingTasksDay | null>(null);
+  /** R-FB-02 — reason of the last failed load; null = loaded or loading. */
+  readonly loadError = signal<string | null>(null);
   readonly saving = signal<number | null>(null);
   readonly assigning = signal<TaskRow | null>(null);
   readonly assignTo = signal<number>(UNASSIGNED);
@@ -264,11 +277,15 @@ export class HousekeepingTasksPanelComponent implements OnInit {
   load(): void {
     const request =
       this.mode() === 'assign' ? this.housekeepingService.tasks() : this.housekeepingService.myTasks();
+    this.loadError.set(null);
     request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (day) => this.day.set(day),
+      // R-FB-02: a failed load shows the error block, never "no tasks".
       error: (message: unknown) => {
-        this.day.set({ business_date: '', tasks: [], staff: [] });
-        this.toastService.error(typeof message === 'string' ? message : 'No se pudieron cargar las tareas');
+        this.day.set(null);
+        this.loadError.set(
+          typeof message === 'string' ? message : 'Revisa tu conexión e inténtalo de nuevo.',
+        );
       },
     });
   }

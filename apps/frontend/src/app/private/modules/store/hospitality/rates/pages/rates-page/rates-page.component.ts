@@ -81,7 +81,7 @@ const CREATE_ACTIONS: Partial<Record<RatesTab, DropdownAction>> = {
 const STATUS_BADGE = {
   type: 'custom' as const,
   size: 'sm' as const,
-  colorMap: { active: '#10b981', inactive: '#9ca3af' },
+  colorMap: { active: 'var(--color-success)', inactive: 'var(--color-text-secondary)' },
 };
 
 const STATUS_FILTER: FilterConfig = {

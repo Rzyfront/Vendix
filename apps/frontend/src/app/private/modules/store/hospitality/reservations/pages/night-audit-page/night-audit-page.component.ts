@@ -30,6 +30,7 @@ import {
   TableColumn,
   ToastService,
   ToggleComponent,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
@@ -56,7 +57,7 @@ const STATUS_LABELS: Record<NightAuditView['status'], { label: string; variant: 
 const REASON_BADGE = {
   type: 'custom' as const,
   size: 'sm' as const,
-  colorMap: { not_posted: '#f59e0b', voided: '#ef4444' },
+  colorMap: { not_posted: 'var(--color-warning)', voided: 'var(--color-error)' },
 };
 
 const reasonLabel = (value: string): string =>
@@ -112,6 +113,7 @@ const EMPTY_TEXT: Record<AuditTab, { icon: string; title: string; description: s
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    SpinnerComponent,
     FormsModule,
     StatsComponent,
     CardComponent,
@@ -239,11 +241,8 @@ const EMPTY_TEXT: Record<AuditTab, { icon: string; title: string; description: s
           }
 
           @if (loading() && !audit()) {
-            <div class="p-4 md:p-6 text-center">
-              <div
-                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-              ></div>
-              <p class="mt-2 text-text-secondary">Cargando el día...</p>
+            <div class="p-4 md:p-6">
+              <app-spinner [center]="true" text="Cargando el día…" />
             </div>
           } @else if (rows().length === 0 && search()) {
             <app-empty-state

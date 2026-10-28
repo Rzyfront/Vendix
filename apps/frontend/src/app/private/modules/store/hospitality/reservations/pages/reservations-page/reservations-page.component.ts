@@ -23,6 +23,7 @@ import {
   StatsComponent,
   TableColumn,
   ToastService,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
@@ -38,6 +39,11 @@ import {
   toDateOnly,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import {
+  RESERVATION_STATUS_CHIPS,
+  statusBadgeConfig,
+} from '../../../shared/hospitality-status';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 interface ReservationRow extends LodgingReservation {
   guest: string;
@@ -49,18 +55,7 @@ interface ReservationRow extends LodgingReservation {
 
 const PAGE_SIZE = 20;
 
-const STATUS_BADGE = {
-  type: 'custom' as const,
-  size: 'sm' as const,
-  colorMap: {
-    tentative: '#f59e0b',
-    confirmed: '#3b82f6',
-    checked_in: '#10b981',
-    checked_out: '#6b7280',
-    cancelled: '#ef4444',
-    no_show: '#9ca3af',
-  } satisfies Record<LodgingReservationStatus, string>,
-};
+const STATUS_BADGE = statusBadgeConfig(RESERVATION_STATUS_CHIPS);
 
 /**
  * Hospitality Suite — Reservas. H1.1: create a nightly reservation. H1.2:
@@ -76,6 +71,8 @@ const STATUS_BADGE = {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    HospitalityLoadErrorComponent,
+    SpinnerComponent,
     FormsModule,
     StatsComponent,
     EmptyStateComponent,
@@ -95,39 +92,39 @@ const STATUS_BADGE = {
       >
         <app-stats
           title="Llegadas de hoy"
-          [value]="stats()?.arrivals_today ?? 0"
+          [value]="stats() === null && loadError() ? '—' : stats()?.arrivals_today ?? 0"
           smallText="reservas que entran hoy"
           iconName="log-in"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
-          [loading]="stats() === null"
+          [loading]="stats() === null && !loadError()"
         />
         <app-stats
           title="En casa"
-          [value]="stats()?.in_house ?? 0"
+          [value]="stats() === null && loadError() ? '—' : stats()?.in_house ?? 0"
           smallText="huéspedes alojados"
           iconName="bed-double"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-500"
-          [loading]="stats() === null"
+          [loading]="stats() === null && !loadError()"
         />
         <app-stats
           title="Ocupación hoy"
-          [value]="(stats()?.occupancy_percent ?? 0) + '%'"
+          [value]="stats() === null && loadError() ? '—' : (stats()?.occupancy_percent ?? 0) + '%'"
           [smallText]="occupancyText()"
           iconName="gauge"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-500"
-          [loading]="stats() === null"
+          [loading]="stats() === null && !loadError()"
         />
         <app-stats
           title="Libres hoy"
-          [value]="freeTonight()"
+          [value]="stats() === null && loadError() ? '—' : freeTonight()"
           smallText="habitaciones sin ocupar esta noche"
           iconName="door-open"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-500"
-          [loading]="stats() === null"
+          [loading]="stats() === null && !loadError()"
         />
       </div>
 
@@ -172,12 +169,15 @@ const STATUS_BADGE = {
         </div>
 
         <div class="px-2 pb-2 pt-3 md:p-4">
-          @if (isLoading() && reservations().length === 0) {
-            <div class="p-4 md:p-6 text-center">
-              <div
-                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-              ></div>
-              <p class="mt-2 text-text-secondary">Cargando reservas...</p>
+          @if (loadError() !== null) {
+            <app-hospitality-load-error
+              what="las reservas"
+              [message]="loadError()"
+              (retry)="refresh()"
+            />
+          } @else if (isLoading() && reservations().length === 0) {
+            <div class="p-4 md:p-6">
+              <app-spinner [center]="true" text="Cargando reservas…" />
             </div>
           } @else if (reservations().length === 0 && hasFilters()) {
             <app-empty-state
@@ -256,6 +256,8 @@ export class HospitalityReservationsPageComponent implements OnInit {
   readonly reservations = signal<LodgingReservation[]>([]);
   readonly unitTypes = signal<UnitType[]>([]);
   readonly isLoading = signal(true);
+  /** R-FB-02 — reason of the last failed load; null = loaded or loading. */
+  readonly loadError = signal<string | null>(null);
   readonly isFormOpen = signal(false);
   readonly detailId = signal<number | null>(null);
   readonly stats = signal<ReservationStats | null>(null);
@@ -388,6 +390,7 @@ export class HospitalityReservationsPageComponent implements OnInit {
   }
 
   refresh(): void {
+    this.stats.set(null);
     this.loadReservations();
     this.loadStats();
   }
@@ -431,11 +434,15 @@ export class HospitalityReservationsPageComponent implements OnInit {
     this.reservationsService
       .stats()
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (stats) => this.stats.set(stats), error: () => {} });
+      .subscribe({
+        next: (stats) => this.stats.set(stats),
+        error: (message: string) => this.loadError.set(message),
+      });
   }
 
   loadReservations(): void {
     this.isLoading.set(true);
+    this.loadError.set(null);
     this.reservationsService
       .list({
         search: this.search() || undefined,
@@ -453,11 +460,10 @@ export class HospitalityReservationsPageComponent implements OnInit {
           this.totalPages.set(result.totalPages);
           this.isLoading.set(false);
         },
-        error: (message: unknown) => {
+        // R-FB-02: a failed load shows the error block, never "Sin resultados".
+        error: (message: string) => {
           this.isLoading.set(false);
-          this.toastService.error(
-            typeof message === 'string' ? message : 'No se pudieron cargar las reservas',
-          );
+          this.loadError.set(message);
         },
       });
   }

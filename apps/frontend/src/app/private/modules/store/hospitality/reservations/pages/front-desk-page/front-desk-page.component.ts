@@ -25,9 +25,9 @@ import {
   TableAction,
   TableColumn,
   ToastService,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
-import { ParsedApiError } from '../../../../../../../core/utils/parse-api-error';
 import { ReservationDetailModalComponent } from '../../components/reservation-detail-modal/reservation-detail-modal.component';
 import {
   FrontDeskBoard,
@@ -36,6 +36,11 @@ import {
   RESERVATION_STATUS_LABELS,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import {
+  RESERVATION_STATUS_CHIPS,
+  statusBadgeConfig,
+} from '../../../shared/hospitality-status';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 type FrontDeskTab = 'arrivals' | 'departures' | 'in_house';
 
@@ -54,18 +59,7 @@ function shortDate(date: string): string {
   return `${day}-${MONTHS[month - 1]}`;
 }
 
-const STATUS_BADGE = {
-  type: 'custom' as const,
-  size: 'sm' as const,
-  colorMap: {
-    tentative: '#f59e0b',
-    confirmed: '#3b82f6',
-    checked_in: '#10b981',
-    checked_out: '#6b7280',
-    cancelled: '#ef4444',
-    no_show: '#9ca3af',
-  } satisfies Record<LodgingReservationStatus, string>,
-};
+const STATUS_BADGE = statusBadgeConfig(RESERVATION_STATUS_CHIPS);
 
 const statusLabel = (value: LodgingReservationStatus): string =>
   RESERVATION_STATUS_LABELS[value] ?? value;
@@ -109,6 +103,8 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    HospitalityLoadErrorComponent,
+    SpinnerComponent,
     FormsModule,
     StatsComponent,
     CardComponent,
@@ -127,39 +123,39 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
       >
         <app-stats
           title="Llegadas hoy"
-          [value]="board()?.arrivals?.length ?? 0"
+          [value]="loadError() ? '—' : board()?.arrivals?.length ?? 0"
           smallText="reservas por hacer check-in"
           iconName="log-in"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
-          [loading]="board() === null"
+          [loading]="board() === null && !loadError()"
         />
         <app-stats
           title="Salidas hoy"
-          [value]="board()?.departures?.length ?? 0"
+          [value]="loadError() ? '—' : board()?.departures?.length ?? 0"
           smallText="huéspedes por hacer check-out"
           iconName="log-out"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-500"
-          [loading]="board() === null"
+          [loading]="board() === null && !loadError()"
         />
         <app-stats
           title="En casa"
-          [value]="board()?.in_house?.length ?? 0"
+          [value]="loadError() ? '—' : board()?.in_house?.length ?? 0"
           smallText="estadías alojadas"
           iconName="bed-double"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-500"
-          [loading]="board() === null"
+          [loading]="board() === null && !loadError()"
         />
         <app-stats
           title="Saldo por cobrar"
-          [value]="pendingBalance()"
-          [smallText]="pendingBalanceText()"
+          [value]="loadError() ? '—' : pendingBalance()"
+          [smallText]="loadError() ? '' : pendingBalanceText()"
           iconName="wallet"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-500"
-          [loading]="board() === null"
+          [loading]="board() === null && !loadError()"
         />
       </div>
 
@@ -214,12 +210,15 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
         </div>
 
         <div class="px-2 pb-2 pt-3 md:p-4">
-          @if (board() === null) {
-            <div class="p-4 md:p-6 text-center">
-              <div
-                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-              ></div>
-              <p class="mt-2 text-text-secondary">Cargando recepción...</p>
+          @if (loadError() !== null) {
+            <app-hospitality-load-error
+              what="la recepción"
+              [message]="loadError()"
+              (retry)="load()"
+            />
+          } @else if (board() === null) {
+            <div class="p-4 md:p-6">
+              <app-spinner [center]="true" text="Cargando recepción…" />
             </div>
           } @else if (rows().length === 0 && hasFilters()) {
             <app-empty-state
@@ -269,6 +268,8 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly board = signal<FrontDeskBoard | null>(null);
+  /** R-FB-02 — reason of the last failed load; null = loaded or loading. */
+  readonly loadError = signal<string | null>(null);
   readonly tab = signal<FrontDeskTab>('arrivals');
   readonly detailId = signal<number | null>(null);
   /** Reservation whose quick check-in is in flight (blocks a double click). */
@@ -430,16 +431,16 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
   }
 
   load(): void {
+    this.loadError.set(null);
     this.reservationsService
       .frontDesk()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (board) => this.board.set(board),
-        error: (message: unknown) => {
-          this.board.set({ business_date: '', arrivals: [], departures: [], in_house: [] });
-          this.toastService.error(
-            typeof message === 'string' ? message : 'No se pudo cargar la recepción',
-          );
+        // R-FB-02: a failed load shows the error block, never an empty board.
+        error: (message: string) => {
+          this.board.set(null);
+          this.loadError.set(message);
         },
       });
   }
@@ -480,14 +481,20 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
       .checkIn(row.id, {})
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: ({ dirtyWarning }) => {
           this.checkingIn.set(null);
+          if (dirtyWarning) {
+            // The detail asks to confirm checking in to a dirty room.
+            this.toastService.error(dirtyWarning);
+            this.openDetail(row);
+            return;
+          }
           this.toastService.success(`Check-in de ${row.reservation_number} realizado`);
           this.load();
         },
-        error: (error: ParsedApiError) => {
+        error: (message: string) => {
           this.checkingIn.set(null);
-          this.toastService.error(error.userMessage);
+          this.toastService.error(message);
           this.openDetail(row);
         },
       });

@@ -25,6 +25,7 @@ import {
   TableAction,
   TableColumn,
   ToastService,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
@@ -37,6 +38,10 @@ import {
   LodgingUnit,
 } from '../../interfaces/unit.interface';
 import { LodgingUnitsService } from '../../services/units.service';
+import {
+  HOUSEKEEPING_STATUS_CHIPS,
+  statusBadgeConfig,
+} from '../../../shared/hospitality-status';
 import { UnitTypesService } from '../../services/unit-types.service';
 
 type RoomsTab = 'types' | 'units';
@@ -46,18 +51,10 @@ type RoomsTab = 'types' | 'units';
  * looks booleans up as `true`/`false`, the card as `active`/`inactive`.
  */
 const ACTIVE_COLOR_MAP: Record<string, string> = {
-  true: '#10b981',
-  false: '#9ca3af',
-  active: '#10b981',
-  inactive: '#9ca3af',
-};
-
-const HOUSEKEEPING_COLOR_MAP: Record<HousekeepingStatus, string> = {
-  clean: '#10b981',
-  inspected: '#3b82f6',
-  dirty: '#f59e0b',
-  out_of_order: '#ef4444',
-  out_of_service: '#6b7280',
+  true: 'var(--color-success)',
+  false: 'var(--color-text-secondary)',
+  active: 'var(--color-success)',
+  inactive: 'var(--color-text-secondary)',
 };
 
 const ACTIVE_BADGE = {
@@ -66,11 +63,7 @@ const ACTIVE_BADGE = {
   colorMap: ACTIVE_COLOR_MAP,
 };
 
-const HOUSEKEEPING_BADGE = {
-  type: 'custom' as const,
-  size: 'sm' as const,
-  colorMap: HOUSEKEEPING_COLOR_MAP,
-};
+const HOUSEKEEPING_BADGE = statusBadgeConfig(HOUSEKEEPING_STATUS_CHIPS);
 
 /** Rooms that can be sold tonight: active and clean or inspected. */
 const SELLABLE_STATUSES: HousekeepingStatus[] = ['clean', 'inspected'];
@@ -141,6 +134,7 @@ function matchesActive(filter: FilterValues[string], isActive: boolean): boolean
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    SpinnerComponent,
     FormsModule,
     StatsComponent,
     EmptyStateComponent,
@@ -253,11 +247,8 @@ function matchesActive(filter: FilterValues[string], isActive: boolean): boolean
         <div class="px-2 pb-2 pt-3 md:p-4">
           @if (activeTab() === 'types') {
             @if (isLoading()) {
-              <div class="p-4 md:p-6 text-center">
-                <div
-                  class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-                ></div>
-                <p class="mt-2 text-text-secondary">Cargando tipos...</p>
+              <div class="p-4 md:p-6">
+                <app-spinner [center]="true" text="Cargando tipos…" />
               </div>
             } @else if (unitTypes().length === 0) {
               <app-empty-state
@@ -284,11 +275,8 @@ function matchesActive(filter: FilterValues[string], isActive: boolean): boolean
             }
           } @else {
             @if (isLoadingUnits()) {
-              <div class="p-4 md:p-6 text-center">
-                <div
-                  class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-                ></div>
-                <p class="mt-2 text-text-secondary">Cargando habitaciones...</p>
+              <div class="p-4 md:p-6">
+                <app-spinner [center]="true" text="Cargando habitaciones…" />
               </div>
             } @else if (!hasActiveTypes()) {
               <app-empty-state

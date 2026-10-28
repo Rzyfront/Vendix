@@ -214,10 +214,10 @@ export function formatShortDate(date: string): string {
               <span class="text-text-secondary">Consultando disponibilidad…</span>
             }
             @case ('error') {
-              <span class="text-red-600">{{ quoteMessage() }}</span>
+              <span class="text-error">{{ quoteMessage() }}</span>
             }
             @case ('ready') {
-              <span [class]="canBook() ? 'font-semibold text-text-primary' : 'text-red-600'">
+              <span [class]="canBook() ? 'font-semibold text-text-primary' : 'text-error'">
                 {{ quoteMessage() }}
               </span>
               @if (allotmentHint()) {
@@ -226,7 +226,7 @@ export function formatShortDate(date: string): string {
                 </p>
               }
               @if (restrictionMessages().length) {
-                <ul class="mt-1 space-y-0.5 text-xs font-semibold text-red-600" data-testid="reservation-restrictions">
+                <ul class="mt-1 space-y-0.5 text-xs font-semibold text-error" data-testid="reservation-restrictions">
                   @for (message of restrictionMessages(); track message) {
                     <li>{{ message }}</li>
                   }

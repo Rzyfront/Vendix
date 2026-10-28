@@ -26,6 +26,7 @@ import {
   TableColumn,
   ToastService,
   TooltipComponent,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { LodgingPickupReport } from '../../interfaces/pickup.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
@@ -85,6 +86,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    SpinnerComponent,
     FormsModule,
     StatsComponent,
     CardComponent,
@@ -182,11 +184,8 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
 
         <div class="px-2 pb-2 pt-3 md:p-4">
           @if (loading() && !report()) {
-            <div class="p-4 md:p-6 text-center">
-              <div
-                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-              ></div>
-              <p class="mt-2 text-text-secondary">Cargando pronóstico...</p>
+            <div class="p-4 md:p-6">
+              <app-spinner [center]="true" text="Cargando pronóstico…" />
             </div>
           } @else if (!report()) {
             <app-empty-state

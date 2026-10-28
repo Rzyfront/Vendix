@@ -25,6 +25,7 @@ import {
   StatsComponent,
   TableColumn,
   ToastService,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
@@ -73,6 +74,7 @@ function defaultPeriod(): FilterValues {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    SpinnerComponent,
     FormsModule,
     StatsComponent,
     CardComponent,
@@ -160,11 +162,8 @@ function defaultPeriod(): FilterValues {
 
         <div class="px-2 pb-2 pt-3 md:p-4">
           @if (loading() && report().length === 0) {
-            <div class="p-4 md:p-6 text-center">
-              <div
-                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-              ></div>
-              <p class="mt-2 text-text-secondary">Cargando servicios exentos...</p>
+            <div class="p-4 md:p-6">
+              <app-spinner [center]="true" text="Cargando servicios exentos…" />
             </div>
           } @else if (rows().length === 0 && search()) {
             <app-empty-state

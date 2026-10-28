@@ -15,14 +15,8 @@ export type LodgingReservationStatus =
   | 'cancelled'
   | 'no_show';
 
-export const RESERVATION_STATUS_LABELS: Record<LodgingReservationStatus, string> = {
-  tentative: 'Tentativa',
-  confirmed: 'Confirmada',
-  checked_in: 'En casa',
-  checked_out: 'Salida',
-  cancelled: 'Cancelada',
-  no_show: 'No-show',
-};
+/** Labels live with the chip colors (R-CHIP-02). */
+export { RESERVATION_STATUS_LABELS } from '../../shared/hospitality-status';
 
 export interface LodgingReservationRoom {
   id: number;
@@ -135,6 +129,14 @@ export interface CheckInRequest {
   rooms?: { room_id: number; unit_id: number }[];
   confirm_dirty?: boolean;
 }
+
+/**
+ * Check-in outcome: the updated reservation, or the dirty-room warning the
+ * desk must confirm (resend with `confirm_dirty`). Errors stay plain text.
+ */
+export type CheckInResult =
+  | { reservation: LodgingReservation; dirtyWarning?: undefined }
+  | { reservation?: undefined; dirtyWarning: string };
 
 /** One status change of a reservation (H1.2). `user` null = automatic. */
 export interface LodgingReservationEvent {

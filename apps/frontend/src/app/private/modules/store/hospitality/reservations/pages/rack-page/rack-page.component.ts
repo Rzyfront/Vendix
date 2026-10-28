@@ -12,6 +12,7 @@ import { FormsModule } from '@angular/forms';
 import { addDays, format, isWeekend, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
+  BadgeComponent,
   ButtonComponent,
   CardComponent,
   DropdownAction,
@@ -49,10 +50,14 @@ import { LodgingReservationsService } from '../../services/lodging-reservations.
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { storeToday } from '../../../../../../../shared/utils/date.util';
+import { HousekeepingStatus } from '../../../rooms/interfaces/unit.interface';
 import {
-  HOUSEKEEPING_STATUS_LABELS,
-  HousekeepingStatus,
-} from '../../../rooms/interfaces/unit.interface';
+  HOUSEKEEPING_STATUS_CHIPS,
+  RESERVATION_STATUS_CHIPS,
+  StatusChip,
+  variantTint,
+} from '../../../shared/hospitality-status';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 /** Days the arrows move the window. */
 const STEP_DAYS = 14;
@@ -82,13 +87,9 @@ function typeMatches(type: RackType, term: string): boolean {
   );
 }
 
-/** One status, one shade of the theme's single accent. */
-const BAR_CLASSES: Partial<Record<LodgingReservationStatus, string>> = {
-  tentative: 'border border-dashed border-primary bg-primary/5 text-primary',
-  confirmed: 'border border-primary/40 bg-primary/15 text-primary',
-  checked_in: 'border border-primary bg-primary text-white',
-  checked_out: 'border border-border bg-surface-secondary text-text-secondary',
-};
+/** Bar border: dashed while the stay is still pending (R-CHIP-02 colors). */
+const barClasses = (status: LodgingReservationStatus): string =>
+  status === 'tentative' ? 'border border-dashed' : 'border';
 
 /** Statuses whose room and dates can still change (H1.4). */
 const MOVABLE_STATUSES: LodgingReservationStatus[] = ['tentative', 'confirmed', 'checked_in'];
@@ -113,6 +114,8 @@ interface RackRow {
   overbooking?: string;
   muted?: boolean;
   hint?: string;
+  /** Room status worth a glance (dirty or out of sale), same chip as Limpieza. */
+  chip?: StatusChip;
 }
 
 interface PlacedBlock extends RackBlock {
@@ -124,6 +127,7 @@ interface PlacedBlock extends RackBlock {
 interface PlacedBar extends RackBar {
   row: number;
   classes: string;
+  style: Record<string, string>;
   title: string;
   movable: boolean;
 }
@@ -156,7 +160,9 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    HospitalityLoadErrorComponent,
     FormsModule,
+    BadgeComponent,
     ButtonComponent,
     CardComponent,
     EmptyStateComponent,
@@ -177,8 +183,8 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
       >
         <app-stats
           title="Habitaciones"
-          [value]="stats().rooms"
-          [smallText]="'activas en ' + stats().types + ' tipos'"
+          [value]="loadError() ? '—' : stats().rooms"
+          [smallText]="loadError() ? '' : 'activas en ' + stats().types + ' tipos'"
           iconName="door-open"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
@@ -186,8 +192,8 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
         />
         <app-stats
           title="Ocupación"
-          [value]="stats().occupancy + '%'"
-          [smallText]="stats().soldNights + ' de ' + stats().roomNights + ' noches'"
+          [value]="loadError() ? '—' : stats().occupancy + '%'"
+          [smallText]="loadError() ? '' : stats().soldNights + ' de ' + stats().roomNights + ' noches'"
           iconName="gauge"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-500"
@@ -195,8 +201,8 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
         />
         <app-stats
           title="Estadías"
-          [value]="stats().stays"
-          [smallText]="stats().unassigned + ' sin habitación asignada'"
+          [value]="loadError() ? '—' : stats().stays"
+          [smallText]="loadError() ? '' : stats().unassigned + ' sin habitación asignada'"
           iconName="calendar-check"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-500"
@@ -204,7 +210,7 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
         />
         <app-stats
           title="Bloqueos"
-          [value]="stats().blocks"
+          [value]="loadError() ? '—' : stats().blocks"
           smallText="mantenimiento, propietario o canal"
           iconName="lock"
           iconBgColor="bg-amber-100"
@@ -271,12 +277,15 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
         </div>
 
         <div class="px-2 pb-2 pt-3 md:p-4">
-          @if (loading() && !rack()) {
-            <div class="p-4 md:p-6 text-center">
-              <div
-                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-              ></div>
-              <p class="mt-2 text-text-secondary">Cargando rack...</p>
+          @if (loadError() !== null) {
+            <app-hospitality-load-error
+              what="el rack"
+              [message]="loadError()"
+              (retry)="load()"
+            />
+          } @else if (loading() && !rack()) {
+            <div class="p-4 md:p-6">
+              <app-spinner [center]="true" text="Cargando rack…" />
             </div>
           } @else if ((rack()?.types ?? []).length === 0) {
             <app-empty-state
@@ -332,11 +341,16 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                     [class.text-text-secondary]="row.muted || row.kind === 'unassigned'"
                     [class.italic]="row.kind === 'unassigned'"
                     [class.line-through]="row.muted"
-                    [attr.title]="row.hint ?? row.label"
+                    [attr.title]="row.hint ?? row.chip?.label ?? row.label"
                     [style.grid-row]="row.row"
                     [style.grid-column]="1"
                   >
                     <span class="truncate">{{ row.label }}</span>
+                    @if (row.chip; as chip) {
+                      <app-badge class="ml-1 shrink-0" size="sm" [variant]="chip.variant">{{
+                        chip.label
+                      }}</app-badge>
+                    }
                     @if (row.overbooking) {
                       <span
                         class="ml-1 shrink-0 rounded bg-primary/10 px-1 text-[10px] font-bold text-primary"
@@ -411,6 +425,7 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                     type="button"
                     class="relative z-10 mx-0.5 my-1 flex min-w-0 items-center truncate px-1.5 text-left text-[11px] font-medium"
                     [class]="bar.classes"
+                    [style]="bar.style"
                     [class.rounded-l-md]="!bar.continues_before"
                     [class.rounded-r-md]="!bar.continues_after"
                     [class.cursor-grab]="bar.movable"
@@ -542,6 +557,8 @@ export class HospitalityRackPageComponent implements OnInit {
   readonly days = signal(DEFAULT_DAYS);
   readonly rack = signal<Rack | null>(null);
   readonly loading = signal(false);
+  /** R-FB-02 — reason of the last failed load; null = loaded or loading. */
+  readonly loadError = signal<string | null>(null);
   readonly detailId = signal<number | null>(null);
   /** Bar being dragged and whether it moves or resizes. */
   readonly drag = signal<{ bar: PlacedBar; mode: DragMode } | null>(null);
@@ -612,10 +629,10 @@ export class HospitalityRackPageComponent implements OnInit {
           unitId: unit.id,
           muted: !unit.is_active || outOfOrder,
           // H5.1 — housekeeping status set on the Housekeeping board.
-          hint: !unit.is_active
-            ? 'Inactiva'
-            : outOfOrder || unit.housekeeping_status === 'dirty'
-              ? HOUSEKEEPING_STATUS_LABELS[unit.housekeeping_status as HousekeepingStatus]
+          hint: !unit.is_active ? 'Inactiva' : undefined,
+          chip:
+            unit.is_active && (outOfOrder || unit.housekeeping_status === 'dirty')
+              ? HOUSEKEEPING_STATUS_CHIPS[unit.housekeeping_status as HousekeepingStatus]
               : undefined,
         });
         unitRow.set(unit.id, row);
@@ -646,7 +663,8 @@ export class HospitalityRackPageComponent implements OnInit {
           {
             ...bar,
             row,
-            classes: BAR_CLASSES[bar.status] ?? BAR_CLASSES.confirmed!,
+            classes: barClasses(bar.status),
+            style: variantTint(RESERVATION_STATUS_CHIPS[bar.status].variant),
             title: `${bar.reservation_number} · ${bar.guest} · ${RESERVATION_STATUS_LABELS[bar.status]} · ${bar.arrival_date} → ${bar.departure_date}`,
             movable: MOVABLE_STATUSES.includes(bar.status),
           },
@@ -696,6 +714,7 @@ export class HospitalityRackPageComponent implements OnInit {
     const from = this.from();
     const to = toDateString(addDays(parseISO(from), this.days()));
     this.loading.set(true);
+    this.loadError.set(null);
     this.reservationsService
       .rack(from, to)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -704,9 +723,11 @@ export class HospitalityRackPageComponent implements OnInit {
           this.rack.set(rack);
           this.loading.set(false);
         },
+        // R-FB-02: a failed load shows the error block, never a stale rack.
         error: (message: string) => {
           this.loading.set(false);
-          this.toast.error(message);
+          this.rack.set(null);
+          this.loadError.set(message);
         },
       });
   }

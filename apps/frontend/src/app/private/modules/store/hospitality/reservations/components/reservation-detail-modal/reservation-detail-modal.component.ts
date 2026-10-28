@@ -24,7 +24,6 @@ import {
   ToastService,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
-import { ParsedApiError } from '../../../../../../../core/utils/parse-api-error';
 import { LodgingUnit } from '../../../rooms/interfaces/unit.interface';
 import { LodgingUnitsService } from '../../../rooms/services/units.service';
 import {
@@ -592,21 +591,21 @@ export class ReservationDetailModalComponent {
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (updated) => {
+        next: ({ reservation: updated, dirtyWarning }) => {
           this.saving.set(false);
+          if (!updated) {
+            this.dirtyWarning.set(dirtyWarning ?? '');
+            return;
+          }
           this.pending.set(null);
           this.dirtyWarning.set('');
           this.reservation.set(updated);
           this.toastService.success('Check-in realizado');
           this.changed.emit();
         },
-        error: (error: ParsedApiError) => {
+        error: (message: string) => {
           this.saving.set(false);
-          if (error.errorCode === 'LODGING_CHECKIN_DIRTY_001') {
-            this.dirtyWarning.set(error.userMessage);
-            return;
-          }
-          this.toastService.error(error.userMessage || 'No se pudo hacer el check-in');
+          this.toastService.error(message || 'No se pudo hacer el check-in');
         },
       });
   }

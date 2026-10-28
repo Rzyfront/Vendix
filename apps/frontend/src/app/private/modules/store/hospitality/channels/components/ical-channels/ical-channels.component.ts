@@ -38,6 +38,7 @@ import {
   TableAction,
   TableColumn,
   ToastService,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import {
   IcalExportUnit,
@@ -65,7 +66,11 @@ interface ImportRow extends IcalImport {
 const LINK_BADGE = {
   type: 'custom' as const,
   size: 'sm' as const,
-  colorMap: { published: '#10b981', none: '#9ca3af', inactive: '#6b7280' },
+  colorMap: {
+    published: 'var(--color-success)',
+    none: 'var(--color-text-secondary)',
+    inactive: 'var(--color-text-secondary)',
+  },
 };
 
 const LINK_LABELS: Record<ExportRow['link_state'], string> = {
@@ -77,7 +82,12 @@ const LINK_LABELS: Record<ExportRow['link_state'], string> = {
 const SYNC_BADGE = {
   type: 'custom' as const,
   size: 'sm' as const,
-  colorMap: { ok: '#10b981', warning: '#f59e0b', error: '#ef4444', never: '#9ca3af' },
+  colorMap: {
+    ok: 'var(--color-success)',
+    warning: 'var(--color-warning)',
+    error: 'var(--color-error)',
+    never: 'var(--color-text-secondary)',
+  },
 };
 
 const SYNC_LABELS: Record<ImportRow['sync_state'], string> = {
@@ -137,6 +147,7 @@ function shortLink(url: string): string {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    SpinnerComponent,
     FormsModule,
     ReactiveFormsModule,
     NgTemplateOutlet,
@@ -227,9 +238,8 @@ function shortLink(url: string): string {
 
           @if (tab() === 'export') {
             @if (units() === null) {
-              <div class="p-4 md:p-6 text-center">
-                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                <p class="mt-2 text-text-secondary">Cargando habitaciones...</p>
+              <div class="p-4 md:p-6">
+                <app-spinner [center]="true" text="Cargando habitaciones…" />
               </div>
             } @else if (units()!.length === 0) {
               <app-empty-state
@@ -256,9 +266,8 @@ function shortLink(url: string): string {
             }
           } @else {
             @if (imports() === null) {
-              <div class="p-4 md:p-6 text-center">
-                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                <p class="mt-2 text-text-secondary">Cargando calendarios...</p>
+              <div class="p-4 md:p-6">
+                <app-spinner [center]="true" text="Cargando calendarios…" />
               </div>
             } @else if (imports()!.length === 0) {
               <app-empty-state

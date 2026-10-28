@@ -1,12 +1,14 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, throwError } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
-import { parseApiError, ParsedApiError } from '../../../../../../core/utils/parse-api-error';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { hospitalityErrorMessage } from '../../shared/hospitality-errors';
 import {
   CancellationQuote,
   CheckInRequest,
+  CheckInResult,
   CreateInventoryBlockRequest,
   CreateReservationRequest,
   FrontDeskBoard,
@@ -121,15 +123,21 @@ export class LodgingReservationsService {
   }
 
   /**
-   * H3.2 — check-in that opens the folio. Rejects with the parsed error so
-   * the screen can tell a dirty room (asks to confirm) from other errors.
+   * H3.2 — check-in that opens the folio. A dirty room is not an error but a
+   * warning the desk confirms; any other failure rejects with text like the
+   * rest of the calls.
    */
-  checkIn(id: number, request: CheckInRequest): Observable<LodgingReservation> {
+  checkIn(id: number, request: CheckInRequest): Observable<CheckInResult> {
     return this.http
       .post<ApiResponse<LodgingReservation>>(`${this.baseUrl}/${id}/check-in`, request)
       .pipe(
-        map((res) => res.data),
-        catchError((error: unknown) => throwError((): ParsedApiError => parseApiError(error))),
+        map((res): CheckInResult => ({ reservation: res.data })),
+        catchError((error: unknown) => {
+          const parsed = parseApiError(error);
+          return parsed.errorCode === 'LODGING_CHECKIN_DIRTY_001'
+            ? of<CheckInResult>({ dirtyWarning: parsed.userMessage })
+            : this.handleError(error);
+        }),
       );
   }
 
@@ -494,9 +502,12 @@ export class LodgingReservationsService {
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
-  /** Rejects with the user-facing message so screens can show it as-is. */
+  /**
+   * Every call rejects with one type: the user-facing text, so screens show
+   * it as-is and never render `[object Object]`.
+   */
   private handleError(error: unknown): Observable<never> {
-    return throwError(() => parseApiError(error).userMessage);
+    return throwError((): string => hospitalityErrorMessage(error));
   }
 }
 

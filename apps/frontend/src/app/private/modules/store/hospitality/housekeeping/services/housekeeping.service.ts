@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
-import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { hospitalityErrorMessage } from '../../shared/hospitality-errors';
 import { HousekeepingStatus } from '../../rooms/interfaces/unit.interface';
 import {
   HousekeepingBoard,
@@ -72,6 +72,6 @@ export class LodgingHousekeepingService {
 
   /** Rejects with the user-facing message so screens can toast it as-is. */
   private handleError(error: unknown): Observable<never> {
-    return throwError(() => parseApiError(error).userMessage);
+    return throwError((): string => hospitalityErrorMessage(error));
   }
 }

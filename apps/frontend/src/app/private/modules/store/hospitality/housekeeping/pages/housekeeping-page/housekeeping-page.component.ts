@@ -25,6 +25,7 @@ import {
   ScrollableTabsComponent,
   StatsComponent,
   ToastService,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { BadgeVariant } from '../../../../../../../shared/components/badge/badge.component';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
@@ -40,26 +41,14 @@ import {
   HousekeepingBoardUnit,
 } from '../../interfaces/housekeeping.interface';
 import { LodgingHousekeepingService } from '../../services/housekeeping.service';
+import {
+  HOUSEKEEPING_STATUS_CHIPS,
+  VARIANT_BORDER,
+} from '../../../shared/hospitality-status';
 import { HousekeepingTasksPanelComponent } from '../../components/housekeeping-tasks-panel/housekeeping-tasks-panel.component';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 type HousekeepingTab = 'rooms' | 'tasks';
-
-/** Status colors: warning asks for attention, error is out of sale. */
-const STATUS_BADGE: Record<HousekeepingStatus, BadgeVariant> = {
-  dirty: 'warning',
-  clean: 'success',
-  inspected: 'primary',
-  out_of_order: 'error',
-  out_of_service: 'neutral',
-};
-
-const STATUS_BORDER: Record<HousekeepingStatus, string> = {
-  dirty: 'border-l-warning',
-  clean: 'border-l-success',
-  inspected: 'border-l-primary',
-  out_of_order: 'border-l-error',
-  out_of_service: 'border-l-border',
-};
 
 const OCCUPANCY_LABELS = { in_house: 'En casa', departs_today: 'Sale hoy' } as const;
 
@@ -98,6 +87,8 @@ const stringFilter = (values: FilterValues, key: string): string => {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    HospitalityLoadErrorComponent,
+    SpinnerComponent,
     FormsModule,
     StatsComponent,
     CardComponent,
@@ -118,39 +109,39 @@ const stringFilter = (values: FilterValues, key: string): string => {
       >
         <app-stats
           title="Sucias"
-          [value]="count('dirty')"
+          [value]="loadError() ? '—' : count('dirty')"
           smallText="por limpiar"
           iconName="alert-circle"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-500"
-          [loading]="board() === null"
+          [loading]="board() === null && !loadError()"
         />
         <app-stats
           title="Limpias"
-          [value]="count('clean')"
+          [value]="loadError() ? '—' : count('clean')"
           smallText="por inspeccionar"
           iconName="sparkles"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-500"
-          [loading]="board() === null"
+          [loading]="board() === null && !loadError()"
         />
         <app-stats
           title="Inspeccionadas"
-          [value]="count('inspected')"
+          [value]="loadError() ? '—' : count('inspected')"
           smallText="listas para la venta"
           iconName="clipboard-check"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
-          [loading]="board() === null"
+          [loading]="board() === null && !loadError()"
         />
         <app-stats
           title="Fuera de venta"
-          [value]="count('out_of_order') + count('out_of_service')"
+          [value]="loadError() ? '—' : count('out_of_order') + count('out_of_service')"
           smallText="fuera de servicio o no disponibles"
           iconName="ban"
           iconBgColor="bg-red-100"
           iconColor="text-red-500"
-          [loading]="board() === null"
+          [loading]="board() === null && !loadError()"
         />
       </div>
 
@@ -224,12 +215,15 @@ const stringFilter = (values: FilterValues, key: string): string => {
               (roomChanged)="load()"
               (clearFilters)="clearFilters()"
             />
+          } @else if (loadError() !== null) {
+            <app-hospitality-load-error
+              what="las habitaciones"
+              [message]="loadError()"
+              (retry)="load()"
+            />
           } @else if (board() === null) {
-            <div class="p-4 md:p-6 text-center">
-              <div
-                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-              ></div>
-              <p class="mt-2 text-text-secondary">Cargando habitaciones...</p>
+            <div class="p-4 md:p-6">
+              <app-spinner [center]="true" text="Cargando habitaciones…" />
             </div>
           } @else if ((board()?.units ?? []).length === 0) {
             <app-empty-state
@@ -334,6 +328,8 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
   readonly tasksPanel = viewChild(HousekeepingTasksPanelComponent);
 
   readonly board = signal<HousekeepingBoard | null>(null);
+  /** R-FB-02 — reason of the last failed load; null = loaded or loading. */
+  readonly loadError = signal<string | null>(null);
   /** Room whose status change is in flight (blocks a double click). */
   readonly saving = signal<number | null>(null);
   readonly selected = signal<HousekeepingBoardUnit | null>(null);
@@ -476,15 +472,17 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
   }
 
   load(): void {
+    this.loadError.set(null);
     this.housekeepingService
       .board()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (board) => this.board.set(board),
+        // R-FB-02: a failed load shows the error block, never an empty board.
         error: (message: unknown) => {
-          this.board.set({ business_date: '', units: [] });
-          this.toastService.error(
-            typeof message === 'string' ? message : 'No se pudo cargar el tablero',
+          this.board.set(null);
+          this.loadError.set(
+            typeof message === 'string' ? message : 'Revisa tu conexión e inténtalo de nuevo.',
           );
         },
       });
@@ -519,11 +517,11 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
   }
 
   badge(unit: HousekeepingBoardUnit): BadgeVariant {
-    return STATUS_BADGE[unit.housekeeping_status];
+    return HOUSEKEEPING_STATUS_CHIPS[unit.housekeeping_status].variant;
   }
 
   border(unit: HousekeepingBoardUnit): string {
-    return STATUS_BORDER[unit.housekeeping_status];
+    return VARIANT_BORDER[HOUSEKEEPING_STATUS_CHIPS[unit.housekeeping_status].variant];
   }
 
   occupancy(unit: HousekeepingBoardUnit): string {
