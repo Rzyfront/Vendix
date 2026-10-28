@@ -4,7 +4,7 @@ import { Cache } from 'cache-manager';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { PublicDomainsService } from '../domains/public-domains.service';
 import { DomainConfigService } from '@common/config/domain.config';
-import { normalizeHostname } from '@common/utils/tenant-hostname.util';
+import { API_HOSTS, normalizeHostname } from '@common/utils/tenant-hostname.util';
 import { isValidSlug } from '@common/utils/slug.util';
 import { MARKETING_SITEMAP_PAGES, marketingSitemapVersion } from './marketing-sitemap.registry';
 
@@ -71,6 +71,16 @@ export class PublicSeoService {
     // Same contract as generateSitemap: normalize before it becomes a cache key.
     hostname =
       normalizeHostname(hostname) || DomainConfigService.getBaseDomain();
+
+    // El host propio de la API (api.vendix.online / api.vendix.com) no es un
+    // sitio: no se indexa (SEO-TECH-22). Solo llega aquí cuando la petición va
+    // dirigida a la API — `resolveTenantHostname` entrega el host de la API
+    // únicamente si no hay un `X-Forwarded-Host` de tenant —, así que marketing
+    // y tiendas no cambian. Va antes del caché para no servir un `Allow: /`
+    // viejo de `seo:robots:<api host>`.
+    if (API_HOSTS.has(hostname)) {
+      return 'User-agent: *\nDisallow: /\n';
+    }
 
     const cacheKey = `seo:robots:${hostname}`;
     const cached = await this.cache.get<string>(cacheKey);

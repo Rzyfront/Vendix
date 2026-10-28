@@ -251,6 +251,19 @@ describe('PublicSeoService (VENDIX_LANDING)', () => {
     expect(await service.generateRobotsTxt('admin.example')).toBe('User-agent: *\nDisallow: /\n');
   });
 
+  it('blocks all indexing on the API host without touching domain resolution or cache', async () => {
+    expect(await service.generateRobotsTxt('api.vendix.online')).toBe('User-agent: *\nDisallow: /\n');
+    expect(await service.generateRobotsTxt('API.vendix.com:443')).toBe('User-agent: *\nDisallow: /\n');
+    expect(resolveDomain).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('keeps marketing and store robots open', async () => {
+    expect(await service.generateRobotsTxt('vendix.online')).toContain('Allow: /');
+    resolveDomain.mockResolvedValue({ app: 'STORE_ECOMMERCE', store_id: 42 });
+    expect(await service.generateRobotsTxt('tienda.example')).toContain('Allow: /catalog');
+  });
+
   it('robots.txt points to the sitemap', async () => {
     const robots = await service.generateRobotsTxt('vendix.online');
     expect(robots).toContain('Sitemap: https://vendix.online/sitemap.xml');
