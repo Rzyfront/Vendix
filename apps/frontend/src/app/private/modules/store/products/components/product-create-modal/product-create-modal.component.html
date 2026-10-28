@@ -67,6 +67,7 @@
           helperText="Cantidad mínima antes de alertar stock bajo. Si se deja vacío, usa el valor por defecto de la tienda."
           [error]="getErrorMessage('min_stock_level')"
         ></app-input>
+        <small class="text-xs text-amber-600 mt-0.5 block">Las notificaciones de stock bajo no funcionan si el control de inventario no está activado. Actívalo en Configuración avanzada, en la parte de abajo.</small>
       </div>
 
       @if (!isEditMode) {
