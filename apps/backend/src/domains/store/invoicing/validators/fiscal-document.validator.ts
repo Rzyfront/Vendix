@@ -24,6 +24,7 @@ import {
   usesInvoiceOperationTypes,
 } from '../fiscal-document-requirements';
 import {
+  DIAN_MONETARY_TOLERANCE,
   DianNumericInput,
   dianAmount,
   dianArithmetic,
@@ -1208,7 +1209,11 @@ export class FiscalDocumentValidator {
 
       const expected = this.expectedTaxAmount(taxable, rate, scheme);
       const difference = declared.minus(toDecimal(expected));
-      if (!difference.abs().greaterThan(ONE_CENT)) return;
+      // HOLGURA ±2.00 (Anexo 1.9 §5.2.1.1), no un centavo: el importe de la
+      // fila es Σ del IVA truncado línea por línea, y con muchas líneas ese
+      // truncado se acumula a varios centavos (1.484,82 contra 1.484,87 en
+      // 7.815,12 al 19 %). La DIAN lo acepta; bloquearlo frenaba la factura.
+      if (!difference.abs().greaterThan(DIAN_MONETARY_TOLERANCE)) return;
 
       // A.3 (F-056) — el `fix` se ramifica por CAUSA. Una diferencia de 1–3¢
       // no es una base mal capturada: es residuo de truncado (borrador

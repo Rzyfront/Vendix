@@ -215,6 +215,49 @@ describe('FiscalDocumentValidator', () => {
       expect(codesOf(report)).not.toContain('TAX_SUBTOTAL_MISMATCH');
     });
 
+    it('tolera la holgura de ±2.00 del Anexo 1.9 §5.2.1.1 (truncado acumulado de varias líneas)', () => {
+      // Caso real: Σ del IVA truncado línea por línea = 1.484,82 y
+      // 7.815,12 × 19 % = 1.484,87. La DIAN lo acepta; bloquearlo frenaba
+      // toda factura con suficientes líneas gravadas.
+      const report = validator.validate(
+        baseInput({
+          tax_amount: '1484.82',
+          total_amount: '3484.82',
+          taxes: [
+            {
+              tax_name: 'IVA 19%',
+              tax_type: 'iva',
+              tax_rate: '19.00',
+              taxable_amount: '7815.12',
+              tax_amount: '1484.82',
+            },
+          ],
+        }),
+      );
+
+      expect(codesOf(report)).not.toContain('TAX_SUBTOTAL_MISMATCH');
+    });
+
+    it('sigue bloqueando una diferencia mayor a 2.00', () => {
+      const report = validator.validate(
+        baseInput({
+          tax_amount: '382.01',
+          total_amount: '2382.01',
+          taxes: [
+            {
+              tax_name: 'IVA 19%',
+              tax_type: 'iva',
+              tax_rate: '19.00',
+              taxable_amount: '2000.00',
+              tax_amount: '382.01',
+            },
+          ],
+        }),
+      );
+
+      expect(blockerCodesOf(report)).toEqual(['TAX_SUBTOTAL_MISMATCH']);
+    });
+
     it('el ICA va POR MIL: 7 sobre 2.000 son 14,00 y no 140,00', () => {
       const ica = {
         tax_name: 'ICA',
