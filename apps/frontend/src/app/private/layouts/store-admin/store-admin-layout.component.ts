@@ -615,7 +615,7 @@ export class StoreAdminLayoutComponent {
           panelUiKey: 'hospitality_rooms',
         },
         {
-          // H7.1–H7.4 — one entry for the hotel reports (tabs land with R4).
+          // R4 — one entry for the four hotel reports, shown as tabs.
           label: 'Reportes de hotel',
           icon: 'chart-line',
           route: '/admin/hospitality/reports',

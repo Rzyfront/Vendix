@@ -851,28 +851,10 @@ export class BreadcrumbService {
       icon: 'sparkles',
     },
     {
-      path: '/admin/hospitality/night-audit',
-      title: 'Cierre del día',
-      parent: 'Hotelería',
-      icon: 'moon',
-    },
-    {
-      path: '/admin/hospitality/performance',
-      title: 'Indicadores',
+      path: '/admin/hospitality/reports',
+      title: 'Reportes de hotel',
       parent: 'Hotelería',
       icon: 'chart-line',
-    },
-    {
-      path: '/admin/hospitality/pickup',
-      title: 'Pickup y pronóstico',
-      parent: 'Hotelería',
-      icon: 'calendar-clock',
-    },
-    {
-      path: '/admin/hospitality/cancellations',
-      title: 'No-shows y cancelaciones',
-      parent: 'Hotelería',
-      icon: 'calendar-x',
     },
 
     // Customers
