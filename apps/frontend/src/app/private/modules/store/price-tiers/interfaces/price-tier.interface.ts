@@ -25,6 +25,16 @@
  */
 export type PriceTierKind = 'customer_tier' | 'sale_unit';
 
+/** Regla de la tarifa; ver shared/services/pricing/tier-adjustment.util.ts. */
+export type PriceTierAdjustmentType =
+  | 'percent_discount'
+  | 'percent_surcharge'
+  | 'fixed_amount_discount'
+  | 'fixed_amount_surcharge'
+  | 'fixed_price';
+
+export type PriceTierAmountScope = 'per_unit' | 'per_package';
+
 export interface PriceTier {
   id: number;
   store_id: number;
@@ -32,6 +42,11 @@ export interface PriceTier {
   code?: string | null;
   description?: string | null;
   discount_percentage?: number | null;
+  /** Sin tipo (filas viejas) = `percent_discount` con `discount_percentage`. */
+  adjustment_type?: PriceTierAdjustmentType | null;
+  /** Valor de los tipos nuevos (monto o porcentaje); Decimal llega como string. */
+  adjustment_value?: number | string | null;
+  amount_scope?: PriceTierAmountScope | null;
   kind: PriceTierKind;
   is_active: boolean;
   /** Tarifa por defecto de la TIENDA. No confundir con la presentación por
@@ -103,6 +118,9 @@ export interface CreatePriceTierDto {
   code?: string;
   description?: string;
   discount_percentage?: number;
+  adjustment_type?: PriceTierAdjustmentType;
+  adjustment_value?: number | null;
+  amount_scope?: PriceTierAmountScope;
   /** Omitirlo equivale a `customer_tier` (default del backend). */
   kind?: PriceTierKind;
   is_active?: boolean;

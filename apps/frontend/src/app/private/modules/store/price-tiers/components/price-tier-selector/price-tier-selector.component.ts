@@ -25,6 +25,7 @@ import { fromEvent } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { PriceTier, PriceTierKind } from '../../interfaces';
+import { describePriceTierRule } from '../../utils/price-tier-rule.util';
 
 /**
  * Compact dropdown to select a price tier on a single sale line.
@@ -101,13 +102,13 @@ import { PriceTier, PriceTierKind } from '../../interfaces';
                         tier.kind === 'sale_unit'
                           ? 'Unidad de venta'
                           : 'Tarifa de cliente'
-                      }}@if (tier.discount_percentage) {
-                        · {{ tier.discount_percentage }}% off
+                      }}@if (ruleLabel(tier); as rule) {
+                        · {{ rule }}
                       }
                     </span>
-                  } @else if (tier.discount_percentage) {
+                  } @else if (ruleLabel(tier); as rule) {
                     <span class="text-[10px] text-text-secondary">
-                      {{ tier.discount_percentage }}% off
+                      {{ rule }}
                     </span>
                   }
                 </div>
@@ -186,6 +187,8 @@ export class PriceTierSelectorComponent implements OnDestroy {
   readonly selectedTierIdChange = output<number | null>();
 
   readonly isOpen = signal(false);
+  /** Texto de la regla de precio de la tarifa (pura, sin estado). */
+  readonly ruleLabel = describePriceTierRule;
   readonly trigger = viewChild<ElementRef<HTMLButtonElement>>('trigger');
   readonly menuTpl = viewChild<TemplateRef<unknown>>('menuTpl');
 

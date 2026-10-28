@@ -317,6 +317,9 @@ jobs:
           --include='**/reviews/review-summary.component.spec.ts'
           --include='**/products/utils/variant-stock-requirements.util.spec.ts'
           --include='**/products/utils/variant-price-inheritance.util.spec.ts'
+          --include='**/shared/services/pricing/price-resolver.service.spec.ts'
+          --include='**/price-tiers/utils/price-tier-rule.util.spec.ts'
+          --include='**/price-tier-form-page/price-tier-form-page.component.spec.ts'
 
   mobile:
     name: Mobile

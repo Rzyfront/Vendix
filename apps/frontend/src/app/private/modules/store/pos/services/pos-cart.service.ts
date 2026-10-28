@@ -2203,6 +2203,9 @@ export class PosCartService {
             id: tier.id,
             name: tier.name,
             discount_percentage: tier.discount_percentage ?? 0,
+            adjustment_type: tier.adjustment_type ?? null,
+            adjustment_value: tier.adjustment_value ?? null,
+            amount_scope: tier.amount_scope ?? null,
             is_package_unit: !!tier.is_package_unit,
             // Packaging cascade source — pack size lives on the tier.
             units_per_package: tier.units_per_package ?? null,

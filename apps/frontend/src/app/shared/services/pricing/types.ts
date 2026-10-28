@@ -27,6 +27,10 @@ export interface PriceTierLike {
   id: number;
   name: string;
   discount_percentage?: number | null;
+  /** Regla de la tarifa (ver tier-adjustment.util.ts). Sin tipo = % descuento. */
+  adjustment_type?: string | null;
+  adjustment_value?: number | string | null;
+  amount_scope?: string | null;
   is_package_unit?: boolean | null;
   /** Units per package carried by the tier (packaging cascade source). */
   units_per_package?: number | null;

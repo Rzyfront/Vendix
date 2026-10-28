@@ -92,6 +92,10 @@ import {
 import { ProductUtils } from '../../utils/product.utils';
 import { getVariantStockRequirements } from '../../utils/variant-stock-requirements.util';
 import {
+  describePriceTierRule,
+  tierFallbackPackagePrice,
+} from '../../../price-tiers/utils/price-tier-rule.util';
+import {
   followBasePrice,
   variantPriceOverrideToSend,
 } from '../../utils/variant-price-inheritance.util';
@@ -5152,7 +5156,8 @@ export class ProductCreatePageComponent {
   private tierOptionDescription(tier: PriceTier): string | undefined {
     const parts: string[] = [];
     if (tier.is_default) parts.push('Por defecto');
-    if (tier.discount_percentage) parts.push(`${tier.discount_percentage}%`);
+    const rule = describePriceTierRule(tier);
+    if (rule) parts.push(rule);
     const pack = resolvePackSize(tier.units_per_package, null);
     if (pack > 1) parts.push(`Empaque x${pack}`);
     return parts.length ? parts.join(' · ') : undefined;
@@ -5283,15 +5288,17 @@ export class ProductCreatePageComponent {
   }
 
   /**
-   * Computed whole-package price suggested when no override is set:
-   * base_price * (1 - tier%) * packSize. Returns null if base_price is 0.
+   * Whole-package price suggested when no override is set: the tier rule on
+   * base_price × packSize (same kernel as the backend). Null when the rule is
+   * relative and base_price is 0.
    */
   getTierFallbackPrice(row: PriceTierOverrideRow): number | null {
     const basePrice = Number(this.productForm.get('base_price')?.value || 0);
-    if (basePrice <= 0) return null;
-    const discount = Number(row.tier.discount_percentage || 0);
-    const unitPrice = discount ? basePrice * (1 - discount / 100) : basePrice;
-    return Number((unitPrice * this.getRowPackSize(row)).toFixed(2));
+    return tierFallbackPackagePrice(
+      basePrice,
+      this.getRowPackSize(row),
+      row.tier,
+    );
   }
 
   /** Effective whole-package price used for margin display: override or fallback. */
