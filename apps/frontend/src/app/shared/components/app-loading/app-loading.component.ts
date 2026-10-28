@@ -21,7 +21,7 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
         <span class="app-loading-ring"></span>
         <img
           class="app-loading-logo"
-          src="/vlogomono.png"
+          src="/vlogomono-64.png"
           alt="Vendix"
           width="22"
           height="22"
