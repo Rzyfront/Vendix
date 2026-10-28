@@ -20,6 +20,7 @@ import {
   FilterConfig,
   FilterValues,
   IconComponent,
+  InputComponent,
   InputsearchComponent,
   OptionsDropdownComponent,
   SelectorOption,
@@ -65,16 +66,19 @@ import {
 } from '../../../shared/hospitality-status';
 import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
-/** Days the arrows move the window. */
-const STEP_DAYS = 14;
-
-/** Window sizes the desk can pick. */
+/** Window sizes the desk can pick (desktop). */
 const WINDOW_OPTIONS: SelectorOption[] = [
   { value: '', label: '14 días' },
   { value: '30', label: '30 días' },
 ];
 
 const DEFAULT_DAYS = 14;
+
+/** U7 — phones see a 7-night window that fits 390 px without page scroll. */
+const MOBILE_DAYS = 7;
+
+/** Same breakpoint as the `md:` layout of the page. */
+const DESKTOP_QUERY = '(min-width: 768px)';
 
 /** Case- and accent-insensitive "contains". */
 function matches(term: string, ...values: (string | null | undefined)[]): boolean {
@@ -166,6 +170,9 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
  *
  * U6: tapping a free night of a room opens "Nueva reserva" with that room,
  * arriving that night and leaving the next day.
+ *
+ * U7: phones see 7 nights that fit the width (no drag there), a date picker
+ * jumps the window, and a legend explains the marks of the grid.
  */
 @Component({
   selector: 'app-hospitality-rack-page',
@@ -179,6 +186,7 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
     CardComponent,
     EmptyStateComponent,
     IconComponent,
+    InputComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     SpinnerComponent,
@@ -288,22 +296,69 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
           </div>
         </div>
 
-        <!-- Date navigation of the window -->
-        <div class="flex items-center gap-1 px-2 pt-3 md:px-6">
-          <app-button variant="outline" size="sm" ariaLabel="14 días antes" (clicked)="move(-1)">
-            <app-icon slot="icon" name="chevron-left" [size]="16" />
-          </app-button>
-          <app-button variant="outline" size="sm" (clicked)="goToday()">Hoy</app-button>
-          <app-button variant="outline" size="sm" ariaLabel="14 días después" (clicked)="move(1)">
-            <app-icon slot="icon" name="chevron-right" [size]="16" />
-          </app-button>
-          <span class="ml-2 text-sm font-medium text-text-primary" data-testid="rack-range">
-            {{ rangeLabel() }}
-          </span>
-          @if (loading() && rack()) {
-            <app-spinner size="sm" class="ml-2" />
-          }
+        <!-- U7 — the arrows move one whole window; the picker jumps to a date -->
+        <div class="flex flex-wrap items-end gap-x-3 gap-y-2 px-2 pt-3 md:px-6">
+          <div class="flex items-center gap-1">
+            <app-button
+              variant="outline"
+              size="sm"
+              [ariaLabel]="days() + ' días antes'"
+              (clicked)="move(-1)"
+              data-testid="rack-prev"
+            >
+              <app-icon slot="icon" name="chevron-left" [size]="16" />
+            </app-button>
+            <app-button variant="outline" size="sm" (clicked)="goToday()">Hoy</app-button>
+            <app-button
+              variant="outline"
+              size="sm"
+              [ariaLabel]="days() + ' días después'"
+              (clicked)="move(1)"
+              data-testid="rack-next"
+            >
+              <app-icon slot="icon" name="chevron-right" [size]="16" />
+            </app-button>
+            <span class="ml-2 text-sm font-medium text-text-primary" data-testid="rack-range">
+              {{ rangeLabel() }}
+            </span>
+            @if (loading() && rack()) {
+              <app-spinner size="sm" class="ml-2" />
+            }
+          </div>
+          <app-input
+            class="w-40 md:ml-auto"
+            label="Ir a la fecha"
+            type="date"
+            size="sm"
+            customWrapperClass="mt-0"
+            [ngModel]="from()"
+            (ngModelChange)="goTo($event)"
+            data-testid="rack-date"
+          />
         </div>
+
+        <!-- U7 — what the marks of the grid mean -->
+        <ul
+          class="flex flex-wrap items-center gap-x-4 gap-y-1 px-2 pt-2 text-xs text-text-secondary md:px-6"
+          aria-label="Leyenda del rack"
+          data-testid="rack-legend"
+        >
+          <li><span class="font-medium text-text-primary">101 · Piso 1</span> habitación y piso</li>
+          <li class="flex items-center gap-1">
+            <span class="rounded px-1 text-[10px] font-bold" [style]="heldTint">5</span>
+            Cupos para agencias: 5
+          </li>
+          <li class="flex items-center gap-1">
+            <span class="rounded bg-primary/10 px-1 text-[10px] font-bold text-primary"
+              >Sobreventa: 3 de 2 permitidas</span
+            >
+            vendidas sobre las habitaciones del tipo
+          </li>
+          <li class="flex items-center gap-1">
+            <app-icon name="lock" [size]="12" />
+            habitación bloqueada
+          </li>
+        </ul>
 
         <div class="px-2 pb-2 pt-3 md:p-4">
           @if (loadError() !== null) {
@@ -334,7 +389,8 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
           } @else {
             <div class="overflow-x-auto rounded-md border border-border" data-testid="rack-scroll">
               <div
-                class="grid w-max min-w-full text-xs"
+                class="grid min-w-full text-xs"
+                [class.w-max]="isDesktop()"
                 [style.grid-template-columns]="gridColumns()"
                 [style.grid-template-rows]="'repeat(' + (rows().length + 1) + ', 2.75rem)'"
                 data-testid="rack-grid"
@@ -382,10 +438,18 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                     }
                     @if (row.overbooking) {
                       <span
-                        class="ml-1 shrink-0 rounded bg-primary/10 px-1 text-[10px] font-bold text-primary"
+                        class="ml-1 hidden shrink-0 rounded bg-primary/10 px-1 text-[10px] font-bold text-primary md:inline"
                         title="Noches vendidas por encima de las habitaciones del tipo"
                         >{{ row.overbooking }}</span
                       >
+                      <!-- Phones: the first column is too narrow for the text -->
+                      <app-icon
+                        name="alert-triangle"
+                        [size]="14"
+                        class="ml-1 shrink-0 text-primary md:hidden"
+                        role="img"
+                        [attr.aria-label]="row.overbooking"
+                      />
                     }
                   </div>
                   @for (night of nightHeaders(); track night.date; let i = $index) {
@@ -419,16 +483,18 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                             (row.overbooked?.[i] ? 'Sobreventa: ' : '') +
                             row.free[i] +
                             ' libres' +
-                            (row.held?.[i] ? ' · ' + row.held?.[i] + ' en cupo' : '') +
+                            (row.held?.[i] ? ' · Cupos para agencias: ' + row.held?.[i] : '') +
                             (row.blocked?.[i] ? ' · ' + row.blocked?.[i] + ' bloqueadas' : '')
                           "
                           >{{ row.free[i] }}</span
                         >
                         @if (row.held?.[i]) {
                           <span
-                            class="ml-0.5 rounded bg-amber-100 px-0.5 text-[9px] leading-tight text-amber-800"
+                            class="ml-0.5 rounded px-0.5 text-[9px] font-bold leading-tight"
+                            [style]="heldTint"
+                            [attr.title]="'Cupos para agencias: ' + row.held?.[i]"
                             data-testid="rack-held"
-                            >{{ row.held?.[i] }}c</span
+                            >{{ row.held?.[i] }}</span
                           >
                         }
                       }
@@ -463,13 +529,13 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                     [style]="bar.style"
                     [class.rounded-l-md]="!bar.continues_before"
                     [class.rounded-r-md]="!bar.continues_after"
-                    [class.cursor-grab]="bar.movable"
+                    [class.cursor-grab]="bar.movable && isDesktop()"
                     [class.pointer-events-none]="drag() !== null"
                     [class.opacity-50]="drag()?.bar?.reservation_room_id === bar.reservation_room_id"
                     [style.grid-row]="bar.row"
                     [style.grid-column]="bar.start + 2 + ' / span ' + bar.span"
                     [attr.title]="bar.title"
-                    [attr.draggable]="bar.movable"
+                    [attr.draggable]="bar.movable && isDesktop()"
                     [attr.data-testid]="'rack-bar-' + bar.reservation_number"
                     (click)="detailId.set(bar.reservation_id)"
                     (dragstart)="onDragStart($event, bar, 'move')"
@@ -479,9 +545,9 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                       <span aria-hidden="true">‹&nbsp;</span>
                     }
                     <span class="truncate">{{ bar.guest || bar.reservation_number }}</span>
-                    @if (bar.movable && !bar.continues_after) {
+                    @if (bar.movable && !bar.continues_after && isDesktop()) {
                       <span
-                        class="absolute inset-y-0 right-0 hidden w-2 cursor-ew-resize rounded-r-md bg-current opacity-20 hover:opacity-50 md:block"
+                        class="absolute inset-y-0 right-0 w-2 cursor-ew-resize rounded-r-md bg-current opacity-20 hover:opacity-50"
                         draggable="true"
                         title="Arrastra para alargar o acortar la estadía"
                         [attr.data-testid]="'rack-resize-' + bar.reservation_number"
@@ -567,12 +633,10 @@ export class HospitalityRackPageComponent implements OnInit {
         ...(this.rack()?.types ?? []).map((t) => ({ value: String(t.id), label: t.name })),
       ],
     },
-    {
-      key: 'days',
-      label: 'Ventana',
-      type: 'select',
-      options: WINDOW_OPTIONS,
-    },
+    // U7 — phones always see 7 nights, so the window choice is desktop only.
+    ...(this.isDesktop()
+      ? [{ key: 'days', label: 'Ventana', type: 'select' as const, options: WINDOW_OPTIONS }]
+      : []),
   ]);
 
   /** Types shown after the search and the type filter. */
@@ -609,8 +673,19 @@ export class HospitalityRackPageComponent implements OnInit {
   /** The store's civil date, not the browser's (the desk may be elsewhere). */
   private readonly today = () => storeToday(this.settingsFacade.timezone());
 
+  /** U7 — viewport at or above `md:`; phones get a 7-night window and no drag. */
+  readonly isDesktop = signal(
+    typeof window === 'undefined' || window.matchMedia(DESKTOP_QUERY).matches,
+  );
+
+  /** Window picked in the options dropdown (desktop only). */
+  private readonly chosenDays = signal(DEFAULT_DAYS);
+
   readonly from = signal(this.today());
-  readonly days = signal(DEFAULT_DAYS);
+  readonly days = computed(() => (this.isDesktop() ? this.chosenDays() : MOBILE_DAYS));
+
+  /** R-CHIP-03 — allotment chip in the theme's warning tint. */
+  readonly heldTint = variantTint('warning');
   readonly rack = signal<Rack | null>(null);
   readonly loading = signal(false);
   /** R-FB-02 — reason of the last failed load; null = loaded or loading. */
@@ -624,8 +699,11 @@ export class HospitalityRackPageComponent implements OnInit {
   /** H5.3 — block being created or viewed. */
   readonly blockTarget = signal<RoomBlockTarget | null>(null);
 
-  readonly gridColumns = computed(
-    () => `minmax(6.5rem, 9rem) repeat(${this.days()}, minmax(2.5rem, 1fr))`,
+  /** On phones the 7 nights share the width, so the page never scrolls sideways. */
+  readonly gridColumns = computed(() =>
+    this.isDesktop()
+      ? `minmax(6.5rem, 9rem) repeat(${this.days()}, minmax(2.5rem, 1fr))`
+      : `5.5rem repeat(${this.days()}, minmax(0, 1fr))`,
   );
 
   readonly rangeLabel = computed(() => {
@@ -672,7 +750,10 @@ export class HospitalityRackPageComponent implements OnInit {
         held: type.held,
         blocked: type.blocked,
         overbooked,
-        overbooking: peak > type.capacity ? `Sobreventa: ${peak}/${type.capacity}` : undefined,
+        overbooking:
+          peak > type.capacity
+            ? `Sobreventa: ${peak - type.capacity} de ${type.overbooking_allowance} permitidas`
+            : undefined,
       });
       for (const unit of type.units) {
         const outOfOrder =
@@ -681,7 +762,7 @@ export class HospitalityRackPageComponent implements OnInit {
         const row = push({
           kind: 'unit',
           key: `u${unit.id}`,
-          label: unit.floor ? `${unit.code} · ${unit.floor}` : unit.code,
+          label: unit.floor ? `${unit.code} · Piso ${unit.floor}` : unit.code,
           typeId: type.id,
           unitId: unit.id,
           code: unit.code,
@@ -801,6 +882,7 @@ export class HospitalityRackPageComponent implements OnInit {
   );
 
   ngOnInit(): void {
+    this.watchViewport();
     this.load();
     if (this.canBook()) {
       this.unitTypesService
@@ -932,9 +1014,29 @@ export class HospitalityRackPageComponent implements OnInit {
     });
   }
 
+  /** U7 — the arrows move one whole window, as their label says. */
   move(direction: 1 | -1): void {
-    this.from.set(toDateString(addDays(parseISO(this.from()), direction * STEP_DAYS)));
+    this.from.set(toDateString(addDays(parseISO(this.from()), direction * this.days())));
     this.load();
+  }
+
+  /** U7 — the date picker starts the window on the chosen night. */
+  goTo(date: string | null): void {
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date) || date === this.from()) return;
+    this.from.set(date);
+    this.load();
+  }
+
+  /** Crossing the `md:` breakpoint swaps the window size, so it reloads. */
+  private watchViewport(): void {
+    if (typeof window === 'undefined') return;
+    const query = window.matchMedia(DESKTOP_QUERY);
+    const onChange = (event: MediaQueryListEvent) => {
+      this.isDesktop.set(event.matches);
+      this.load();
+    };
+    query.addEventListener('change', onChange);
+    this.destroyRef.onDestroy(() => query.removeEventListener('change', onChange));
   }
 
   goToday(): void {
@@ -945,9 +1047,9 @@ export class HospitalityRackPageComponent implements OnInit {
   onFilterChange(values: FilterValues): void {
     const days = Number(values['days']) === 30 ? 30 : DEFAULT_DAYS;
     this.filterValues.set({ ...values, days: days === 30 ? '30' : '' });
-    if (days !== this.days()) {
-      this.days.set(days);
-      this.load();
+    if (days !== this.chosenDays()) {
+      this.chosenDays.set(days);
+      if (this.isDesktop()) this.load();
     }
   }
 
