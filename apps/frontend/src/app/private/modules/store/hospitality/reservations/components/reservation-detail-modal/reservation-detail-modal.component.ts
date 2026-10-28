@@ -55,6 +55,9 @@ import { FolioPanelComponent } from '../folio-panel/folio-panel.component';
 import { DepositPanelComponent } from '../deposit-panel/deposit-panel.component';
 import { CheckOutModalComponent } from '../check-out-modal/check-out-modal.component';
 
+/** Step a list opens the detail on (U1 check-in/out, U8 cancel). */
+export type DetailStartStep = 'check_in' | 'check_out' | 'cancel' | null;
+
 /** `cancel_room` cancels one room of a multi-room reservation (H1.5). */
 type PendingAction = 'cancel' | 'no_show' | 'cancel_room' | 'check_in' | null;
 
@@ -462,9 +465,10 @@ export class ReservationDetailModalComponent {
   readonly reservationId = input<number | null>(null);
   /**
    * U1 — step to open once loaded: the check-in room picker or the
-   * check-out, when the reservation's status allows it.
+   * check-out, when the reservation's status allows it. U8: `cancel` opens
+   * the cancellation (penalty, reason and confirm) from a list row.
    */
-  readonly startWith = input<'check_in' | 'check_out' | null>(null);
+  readonly startWith = input<DetailStartStep>(null);
   readonly closed = output<void>();
   /** Emitted after a status change, so the list and stats refresh. */
   readonly changed = output<void>();
@@ -735,7 +739,7 @@ export class ReservationDetailModalComponent {
   }
 
   /** `step` opens once, on the opening load only (later reloads stay put). */
-  load(id: number, step: 'check_in' | 'check_out' | null = null): void {
+  load(id: number, step: DetailStartStep = null): void {
     this.loading.set(true);
     this.pending.set(null);
     this.reservation.set(null);
@@ -751,6 +755,7 @@ export class ReservationDetailModalComponent {
           if (step === 'check_out' && reservation.status === 'checked_in') {
             this.checkOutOpen.set(true);
           }
+          if (step === 'cancel' && this.canCancel()) this.startAction('cancel');
         },
         error: (message: unknown) => {
           this.loading.set(false);
