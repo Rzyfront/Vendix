@@ -13,6 +13,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   BadgeComponent,
   ButtonComponent,
+  DialogService,
   IconComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
@@ -73,7 +74,7 @@ interface RoomGuests {
                           <app-badge variant="primary" size="xs">Titular</app-badge>
                         }
                         @if (guest.reports_sire) {
-                          <app-badge variant="warning" size="xs" data-testid="guest-sire">Reporta SIRE</app-badge>
+                          <app-badge variant="warning" size="xs" data-testid="guest-sire">Reporta a Migración (SIRE)</app-badge>
                         }
                       </p>
                       <p class="text-xs text-text-secondary">
@@ -84,10 +85,23 @@ interface RoomGuests {
                     </div>
                     @if (editable()) {
                       <div class="flex gap-1">
-                        <app-button variant="ghost" size="sm" ariaLabel="Editar huésped" (clicked)="edit(guest)">
+                        <app-button
+                          variant="ghost"
+                          size="sm"
+                          customClasses="min-h-11 min-w-11 sm:min-h-0 sm:min-w-0"
+                          [ariaLabel]="'Editar a ' + guest.first_name"
+                          (clicked)="edit(guest)"
+                        >
                           <app-icon slot="icon" name="pencil" [size]="14" />
                         </app-button>
-                        <app-button variant="ghost" size="sm" ariaLabel="Quitar huésped" (clicked)="remove(guest)">
+                        <app-button
+                          variant="ghost"
+                          size="sm"
+                          customClasses="min-h-11 min-w-11 sm:min-h-0 sm:min-w-0"
+                          [ariaLabel]="'Quitar a ' + guest.first_name"
+                          data-testid="guest-remove"
+                          (clicked)="remove(guest)"
+                        >
                           <app-icon slot="icon" name="trash-2" [size]="14" />
                         </app-button>
                       </div>
@@ -121,6 +135,7 @@ interface RoomGuests {
 export class GuestRegisterComponent {
   private readonly reservationsService = inject(LodgingReservationsService);
   private readonly toastService = inject(ToastService);
+  private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly countryNames = new Intl.DisplayNames(['es'], { type: 'region' });
 
@@ -178,7 +193,16 @@ export class GuestRegisterComponent {
     });
   }
 
-  remove(guest: LodgingGuest): void {
+  async remove(guest: LodgingGuest): Promise<void> {
+    const name = `${guest.first_name} ${guest.last_name}`.trim();
+    const confirmed = await this.dialogService.confirm({
+      title: 'Quitar huésped',
+      message: `${name} dejará de figurar en el registro de esta reserva y no se incluirá en los reportes de huéspedes.`,
+      confirmText: 'Quitar huésped',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) return;
     this.reservationsService
       .removeGuest(this.reservation().id, guest.id)
       .pipe(takeUntilDestroyed(this.destroyRef))

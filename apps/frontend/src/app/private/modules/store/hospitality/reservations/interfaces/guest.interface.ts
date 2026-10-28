@@ -78,27 +78,38 @@ export function reportsSire(nationality: string | null): boolean {
   return !!nationality && nationality !== HOME_COUNTRY_CODE;
 }
 
-/** Desk messages of the missing fields ("Falta ciudad de residencia"). */
-export function guestFieldErrors(guest: LodgingGuestRequest): string[] {
+/** Fields of the guest form that can carry an error under them. */
+export type GuestField =
+  | 'document_type'
+  | 'document_number'
+  | 'first_name'
+  | 'last_name'
+  | 'nationality_country_code'
+  | 'birth_date'
+  | 'residence_city'
+  | 'origin_city'
+  | 'travel_purpose';
+
+/** U5 — the message under each missing field ("Escribe la ciudad de residencia"). */
+export function guestFieldErrorMap(guest: LodgingGuestRequest): Partial<Record<GuestField, string>> {
   const filled = (value: string | undefined) => !!value?.trim();
-  const errors: string[] = [];
-  if (!filled(guest.document_type)) errors.push('Falta tipo de documento');
-  if (!filled(guest.document_number)) errors.push('Falta número de documento');
-  if (!filled(guest.first_name)) errors.push('Falta nombre');
-  if (!filled(guest.last_name)) errors.push('Falta apellido');
+  const errors: Partial<Record<GuestField, string>> = {};
+  if (!filled(guest.document_type)) errors.document_type = 'Elige el tipo de documento';
+  if (!filled(guest.document_number)) errors.document_number = 'Escribe el número de documento';
+  if (!filled(guest.first_name)) errors.first_name = 'Escribe los nombres';
+  if (!filled(guest.last_name)) errors.last_name = 'Escribe los apellidos';
   const nationality = resolveNationality(guest.document_type, guest.nationality_country_code);
   if (!nationality) {
-    errors.push(
+    errors.nationality_country_code =
       guest.document_type === 'PA'
         ? 'El pasaporte exige nacionalidad'
-        : 'El documento extranjero exige nacionalidad',
-    );
+        : 'El documento extranjero exige nacionalidad';
   }
-  if (!filled(guest.residence_city)) errors.push('Falta ciudad de residencia');
-  if (!filled(guest.origin_city)) errors.push('Falta ciudad de procedencia');
-  if (!TRAVEL_PURPOSES[guest.travel_purpose]) errors.push('Falta motivo de viaje');
+  if (!filled(guest.residence_city)) errors.residence_city = 'Escribe la ciudad de residencia';
+  if (!filled(guest.origin_city)) errors.origin_city = 'Escribe la ciudad de procedencia';
+  if (!TRAVEL_PURPOSES[guest.travel_purpose]) errors.travel_purpose = 'Elige el motivo de viaje';
   if (reportsSire(nationality) && !guest.birth_date) {
-    errors.push('Falta fecha de nacimiento (reporta SIRE)');
+    errors.birth_date = 'Escribe la fecha de nacimiento: se reporta a Migración';
   }
   return errors;
 }

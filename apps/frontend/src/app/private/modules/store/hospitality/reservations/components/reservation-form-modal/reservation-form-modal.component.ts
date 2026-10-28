@@ -2,6 +2,7 @@ import {
   Component,
   computed,
   DestroyRef,
+  ElementRef,
   inject,
   input,
   output,
@@ -24,8 +25,10 @@ import {
   IconComponent,
   InputComponent,
   ModalComponent,
+  QuantityControlComponent,
   SelectorComponent,
   SelectorOption,
+  TextareaComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
@@ -99,6 +102,8 @@ export function formatShortDate(date: string): string {
     InputComponent,
     SelectorComponent,
     IconComponent,
+    QuantityControlComponent,
+    TextareaComponent,
     PosCustomerSelectorComponent,
   ],
   template: `
@@ -113,10 +118,42 @@ export function formatShortDate(date: string): string {
       [subtitle]="
         walkIn()
           ? 'Llega hoy: al guardar se hace el check-in'
-          : 'Fechas, habitaciones y huésped titular'
+          : 'Huésped, fechas, habitación y tarifa'
       "
     >
-      <form [formGroup]="form" class="space-y-4">
+      <!-- Outside the form: the selector has its own form, and Enter in its
+           search only searches, it never submits the booking. -->
+      <div class="mb-4 space-y-2" data-testid="reservation-customer">
+        <p class="mb-2 block text-[11px] font-medium uppercase tracking-[0.05em] text-[var(--color-text-muted)]">
+          Huésped <span class="ml-1 text-[var(--color-destructive)]" aria-hidden="true">*</span>
+        </p>
+        @if (customer(); as c) {
+          <div class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+            <span class="flex items-center gap-2 text-sm">
+              <app-icon name="user-check" [size]="16" />
+              {{ c.first_name }} {{ c.last_name ?? '' }}
+            </span>
+            <app-button variant="ghost" size="sm" (clicked)="clearCustomer()">
+              Cambiar
+            </app-button>
+          </div>
+        } @else {
+          <app-pos-customer-selector (customerSelected)="customer.set($event)" />
+        }
+        @if (submitted() && !customer()) {
+          <p class="text-xs text-error" role="alert" data-testid="reservation-customer-error">
+            Busca o crea el huésped
+          </p>
+        }
+      </div>
+
+      <form
+        [formGroup]="form"
+        id="reservation-form"
+        class="space-y-4"
+        novalidate
+        (ngSubmit)="onSubmit()"
+      >
         <div class="grid grid-cols-2 gap-3">
           <app-input
             formControlName="arrival_date"
@@ -130,6 +167,7 @@ export function formatShortDate(date: string): string {
             label="Salida"
             type="date"
             [required]="true"
+            [error]="datesError()"
             customWrapperClass="mt-0"
           />
         </div>
@@ -145,16 +183,18 @@ export function formatShortDate(date: string): string {
                 <app-selector
                   class="flex-1"
                   formControlName="unit_type_id"
-                  [label]="lineCount() > 1 ? 'Habitación ' + (i + 1) : 'Tipo de habitación'"
-                  placeholder="Selecciona un tipo"
+                  [label]="lineCount() > 1 ? 'Habitación ' + (i + 1) : 'Habitación'"
+                  placeholder="Elige el tipo de habitación"
                   [required]="true"
                   [options]="typeOptions()"
+                  [errorText]="roomError(line)"
+                  data-testid="reservation-room-type"
                 />
                 @if (lineCount() > 1) {
                   <app-button
                     variant="ghost"
                     size="sm"
-                    [attr.aria-label]="'Quitar habitación ' + (i + 1)"
+                    [ariaLabel]="'Quitar habitación ' + (i + 1)"
                     (clicked)="removeRoom(i)"
                   >
                     <app-icon name="trash-2" [size]="16" />
@@ -165,26 +205,33 @@ export function formatShortDate(date: string): string {
                 <app-selector
                   class="col-span-2"
                   formControlName="rate_plan_id"
-                  label="Plan tarifario"
+                  label="Tarifa"
                   [options]="plans"
                   data-testid="reservation-rate-plan"
                 />
               }
-              <app-input
-                formControlName="adults"
-                label="Adultos"
-                type="number"
-                [min]="1"
-                [required]="true"
-                customWrapperClass="mt-0"
-              />
-              <app-input
-                formControlName="children"
-                label="Niños"
-                type="number"
-                [min]="0"
-                customWrapperClass="mt-0"
-              />
+              <div data-testid="reservation-adults">
+                <p class="mb-2 block text-[11px] font-medium uppercase tracking-[0.05em] text-[var(--color-text-muted)]">
+                  Adultos <span class="ml-1 text-[var(--color-destructive)]" aria-hidden="true">*</span>
+                </p>
+                <app-quantity-control
+                  size="md"
+                  [min]="1"
+                  [max]="maxGuests"
+                  [value]="line.controls.adults.value"
+                  (valueChange)="line.controls.adults.setValue($event)"
+                />
+              </div>
+              <div data-testid="reservation-children">
+                <p class="mb-2 block text-[11px] font-medium uppercase tracking-[0.05em] text-[var(--color-text-muted)]">Niños</p>
+                <app-quantity-control
+                  size="md"
+                  [min]="0"
+                  [max]="maxGuests"
+                  [value]="line.controls.children.value"
+                  (valueChange)="line.controls.children.setValue($event)"
+                />
+              </div>
               @if (lineBreakdown(i); as breakdown) {
                 <p
                   class="col-span-2 text-xs text-text-secondary"
@@ -220,7 +267,7 @@ export function formatShortDate(date: string): string {
               <span class="text-text-secondary">Consultando disponibilidad…</span>
             }
             @case ('error') {
-              <span class="text-error">{{ quoteMessage() }}</span>
+              <span class="text-error" role="alert">{{ quoteMessage() }}</span>
             }
             @case ('ready') {
               <span [class]="canBook() ? 'font-semibold text-text-primary' : 'text-error'">
@@ -249,26 +296,9 @@ export function formatShortDate(date: string): string {
             }
             @default {
               <span class="text-text-secondary">
-                Elige las fechas y el tipo para ver la disponibilidad.
+                Elige las fechas y la habitación para ver la disponibilidad.
               </span>
             }
-          }
-        </div>
-
-        <div class="space-y-2">
-          <p class="text-sm font-medium text-text-primary">Huésped titular</p>
-          @if (customer(); as c) {
-            <div class="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
-              <span class="flex items-center gap-2 text-sm">
-                <app-icon name="user-check" [size]="16" />
-                {{ c.first_name }} {{ c.last_name ?? '' }}
-              </span>
-              <app-button variant="ghost" size="sm" (clicked)="clearCustomer()">
-                Cambiar
-              </app-button>
-            </div>
-          } @else {
-            <app-pos-customer-selector (customerSelected)="customer.set($event)" />
           }
         </div>
 
@@ -283,30 +313,34 @@ export function formatShortDate(date: string): string {
             type="text"
             placeholder="Ej. Cliente frecuente, autorizado por gerencia"
             helperText="Requiere permiso para editar tarifas. Queda en el historial de la reserva."
+            [required]="true"
+            [error]="submitted() && !overrideReason().trim() ? 'Escribe el motivo para forzar la reserva' : ''"
             customWrapperClass="mt-0"
             data-testid="reservation-override-reason"
           />
         }
 
-        <app-input
+        <app-textarea
           formControlName="notes"
           label="Notas"
-          type="text"
-          placeholder="Opcional"
+          placeholder="Opcional: hora de llegada, preferencias, celebraciones…"
+          [rows]="3"
           customWrapperClass="mt-0"
+          data-testid="reservation-notes"
         />
       </form>
 
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
         <app-button
+          type="submit"
+          form="reservation-form"
           variant="primary"
           [loading]="saving()"
-          [disabled]="!canConfirm() || !customer()"
-          (clicked)="onSubmit()"
+          data-testid="reservation-submit"
         >
           <app-icon slot="icon" [name]="walkIn() ? 'log-in' : 'calendar-check'" [size]="16" />
-          {{ walkIn() ? 'Guardar y hacer check-in' : 'Confirmar' }}
+          {{ walkIn() ? 'Guardar y hacer check-in' : 'Crear reserva' }}
         </app-button>
       </div>
     </app-modal>
@@ -341,6 +375,11 @@ export class ReservationFormModalComponent {
   readonly lineCount = signal(1);
   /** Same cap as the API (`MAX_ROOMS_PER_RESERVATION`). */
   readonly maxRooms = 30;
+  /** Guests per room the +/− control allows. */
+  readonly maxGuests = 20;
+  /** U5 — a submit attempt shows every missing field under it. */
+  readonly submitted = signal(false);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
 
   readonly typeOptions = computed<SelectorOption[]>(() =>
@@ -507,13 +546,17 @@ export class ReservationFormModalComponent {
     rooms.clear({ emitEvent: false });
     rooms.push(this.roomLine(null), { emitEvent: false });
     this.lineCount.set(1);
-    const today = this.walkIn() ? storeToday(this.settingsFacade.timezone()) : '';
+    // U5 — arrival today and departure tomorrow (a walk-in always arrives today).
+    const today = storeToday(this.settingsFacade.timezone());
     this.form.reset({
       arrival_date: today,
-      departure_date: today ? nextDay(today) : '',
-      rooms: [{ unit_type_id: this.defaultTypeId(), rate_plan_id: BASE_PRICE, adults: 2, children: 0 }],
+      departure_date: nextDay(today),
+      rooms: [{ unit_type_id: this.defaultTypeId(), rate_plan_id: BASE_PRICE, adults: 1, children: 0 }],
       notes: '',
     });
+    this.submitted.set(false);
+    this.pickFirstFreeType(today, nextDay(today));
+    this.focusCustomerSoon();
     // A walk-in arrives today: only the departure is chosen.
     if (this.walkIn()) this.form.controls.arrival_date.disable({ emitEvent: false });
     else this.form.controls.arrival_date.enable({ emitEvent: false });
@@ -605,10 +648,34 @@ export class ReservationFormModalComponent {
     this.isOpenChange.emit(false);
   }
 
+  /** "La salida debe ser después de la llegada" under the departure. */
+  datesError(): string {
+    const { arrival_date, departure_date } = this.form.getRawValue();
+    return arrival_date && departure_date && departure_date <= arrival_date
+      ? 'La salida debe ser después de la llegada'
+      : '';
+  }
+
+  /** "Elige una habitación" under a room line left without a type. */
+  roomError(line: FormGroup<RoomLineForm>): string {
+    const control = line.controls.unit_type_id;
+    // The emptied selector gives '' rather than null.
+    return !control.value && (control.touched || this.submitted())
+      ? 'Elige una habitación'
+      : '';
+  }
+
   onSubmit(): void {
+    if (this.saving()) return;
     const request = this.quoteRequest();
     const customer = this.customer();
-    if (!request || !customer || !this.canConfirm()) return;
+    if (!request || !customer || !this.canConfirm() || this.datesError()) {
+      // R-FORM-02 — mark what is missing under each field and go to the first.
+      this.submitted.set(true);
+      this.form.markAllAsTouched();
+      this.focusFirstError();
+      return;
+    }
 
     this.saving.set(true);
     const raw = this.form.getRawValue();
@@ -657,7 +724,7 @@ export class ReservationFormModalComponent {
       !raw.arrival_date ||
       !raw.departure_date ||
       raw.rooms.length === 0 ||
-      raw.rooms.some((room) => room.unit_type_id == null)
+      raw.rooms.some((room) => !room.unit_type_id)
     ) {
       return null;
     }
@@ -693,7 +760,7 @@ export class ReservationFormModalComponent {
         validators: [Validators.required],
       }),
       rate_plan_id: this.fb.nonNullable.control(this.defaultPlanFor(unitTypeId)),
-      adults: this.fb.nonNullable.control(2, { validators: [Validators.min(1)] }),
+      adults: this.fb.nonNullable.control(1, { validators: [Validators.min(1)] }),
       children: this.fb.nonNullable.control(0, { validators: [Validators.min(0)] }),
     });
     // A new type preselects the default plan again (or the base price).
@@ -701,6 +768,73 @@ export class ReservationFormModalComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((typeId) => line.controls.rate_plan_id.setValue(this.defaultPlanFor(typeId)));
     return line;
+  }
+
+  /**
+   * U5 — the first room type with a free room for the default stay, while the
+   * receptionist has not changed the single line yet.
+   */
+  private pickFirstFreeType(arrival: string, departure: string): void {
+    const types = this.typeOptions().map((option) => Number(option.value));
+    if (types.length < 2) return;
+    const line = this.form.controls.rooms.at(0);
+    const initial = line.controls.unit_type_id.value;
+    forkJoin(
+      types.map((unit_type_id) =>
+        this.reservationsService
+          .quote({ unit_type_id, arrival_date: arrival, departure_date: departure, adults: 1, children: 0 })
+          .pipe(catchError(() => of(null))),
+      ),
+    )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((quotes) => {
+        const free = quotes.find((quote) => quote && quote.available > 0);
+        const untouched =
+          this.lineCount() === 1 &&
+          line.controls.unit_type_id.value === initial &&
+          !line.controls.unit_type_id.dirty;
+        if (free && untouched && free.unit_type.id !== initial) {
+          line.controls.unit_type_id.setValue(free.unit_type.id);
+        }
+      });
+  }
+
+  /**
+   * R-FORM-05 — the form opens on "Huésped" (the customer search), after the
+   * modal moved the focus to its own container.
+   */
+  private focusCustomerSoon(): void {
+    setTimeout(() => {
+      const block = this.host.nativeElement.querySelector<HTMLElement>(
+        '[data-testid="reservation-customer"]',
+      );
+      const search = block?.querySelector<HTMLInputElement>('input');
+      if (search) {
+        search.focus();
+        return;
+      }
+      // The shared selector resets to its summary: open its search first.
+      block?.querySelector<HTMLButtonElement>('button')?.click();
+      setTimeout(() => block?.querySelector<HTMLInputElement>('input')?.focus());
+    }, 250);
+  }
+
+  /** Moves to the first field that says what is missing. */
+  private focusFirstError(): void {
+    setTimeout(() => {
+      const root = this.host.nativeElement;
+      const roomIndex = this.form.controls.rooms.controls.findIndex((line) => this.roomError(line));
+      const target = !this.customer()
+        ? root.querySelector<HTMLElement>('[data-testid="reservation-customer"] input')
+        : (root.querySelector<HTMLElement>('[aria-invalid="true"]') ??
+          (roomIndex >= 0
+            ? root.querySelectorAll<HTMLElement>('[data-testid="reservation-room-type"]')[roomIndex]
+                ?.querySelector<HTMLElement>('select, button')
+            : null) ??
+          root.querySelector<HTMLElement>('[data-testid="reservation-quote"]'));
+      target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      target?.focus?.();
+    });
   }
 
   private defaultTypeId(): number | null {
