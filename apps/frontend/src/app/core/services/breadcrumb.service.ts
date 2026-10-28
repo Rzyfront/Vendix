@@ -822,7 +822,7 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/hospitality/reservations',
-      title: 'Reservas',
+      title: 'Reservas de hotel',
       parent: 'Hotelería',
       icon: 'calendar-check',
     },
@@ -852,7 +852,7 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/hospitality/housekeeping',
-      title: 'Housekeeping',
+      title: 'Limpieza',
       parent: 'Hotelería',
       icon: 'sparkles',
     },

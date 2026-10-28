@@ -156,7 +156,7 @@ const stringFilter = (values: FilterValues, key: string): string => {
 
       @if (tasksMode()) {
         <app-scrollable-tabs
-          ariaLabel="Housekeeping"
+          ariaLabel="Limpieza"
           [tabs]="tabs()"
           [activeTab]="tab()"
           (tabChange)="onTab($event)"

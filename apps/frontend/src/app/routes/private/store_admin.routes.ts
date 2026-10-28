@@ -12,6 +12,7 @@ import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; /
 import {
   panelUiGuard,
   firstActiveModuleRedirectGuard,
+  hospitalityHomeRedirectGuard,
 } from '../../core/guards/panel-ui.guard'; // A.4 + B.1
 import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
 import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
@@ -1000,9 +1001,19 @@ export const storeAdminRoutes: Routes = [
         path: 'hospitality',
         children: [
           {
+            // R1 — each role lands on its first daily screen: Recepción,
+            // then Limpieza (Camarera), then the first visible entry.
             path: '',
             pathMatch: 'full',
-            redirectTo: 'rooms',
+            canActivate: [hospitalityHomeRedirectGuard],
+            children: [],
+          },
+          {
+            // R1 — "Reportes de hotel" menu entry; R4 mounts the tabbed
+            // reports page here. Until then it opens the first report.
+            path: 'reports',
+            pathMatch: 'full',
+            redirectTo: 'night-audit',
           },
           {
             path: 'rooms',

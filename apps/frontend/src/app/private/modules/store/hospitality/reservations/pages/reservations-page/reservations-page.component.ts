@@ -144,7 +144,7 @@ const STATUS_BADGE = {
               class="text-[13px] font-bold text-gray-600 tracking-wide
                      md:text-lg md:font-semibold md:text-text-primary"
             >
-              Reservas
+              Reservas de hotel
               <span class="text-text-secondary font-normal">({{ total() }})</span>
             </h2>
 
