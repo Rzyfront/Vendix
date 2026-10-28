@@ -137,11 +137,19 @@ export class ReportDataAdapterService {
   private adaptSummary(normalized: NormalizedResponse): ReportAdaptedData {
     const rawSummary = normalized.data[0] || {};
 
-    // For reports with a nested array (e.g., category_breakdown), use that as tabular data.
+    // For reports with a nested array of OBJECTS (e.g., category_breakdown,
+    // trial-balance accounts, tax-summary breakdown), use that as tabular data.
     // Otherwise keep the normalized data rows for the table.
-    const arrayKey = Object.keys(rawSummary).find(
-      k => Array.isArray(rawSummary[k])
-    );
+    // QUI-696: a primitive array (e.g., purchases `committed_states`) is
+    // metadata, not tabular rows — using it painted one empty row per element
+    // while the cards showed data. An empty array still yields an empty table.
+    const arrayKey = Object.keys(rawSummary).find((k) => {
+      const value = rawSummary[k];
+      if (!Array.isArray(value)) return false;
+      if (value.length === 0) return true;
+      const first = value[0];
+      return typeof first === 'object' && first !== null && !Array.isArray(first);
+    });
     const tableData = arrayKey ? rawSummary[arrayKey] : normalized.data;
 
     // Build summaryData from non-array, non-object primitives
