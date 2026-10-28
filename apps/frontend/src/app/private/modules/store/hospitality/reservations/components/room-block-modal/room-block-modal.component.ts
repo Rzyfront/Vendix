@@ -16,6 +16,7 @@ import { addDays, format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
   ButtonComponent,
+  DialogService,
   IconComponent,
   InputComponent,
   ModalComponent,
@@ -35,7 +36,7 @@ import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 /** What the modal opens on: a new block (optionally on a room) or an existing one. */
 export type RoomBlockTarget =
   | { mode: 'create'; unit_id?: number; from_date: string }
-  | { mode: 'view'; block: RackBlock; unit_label: string };
+  | { mode: 'view'; block: RackBlock; unit_label: string; unit_code: string };
 
 const REASON_OPTIONS: SelectorOption[] = [
   { value: 'maintenance', label: INVENTORY_BLOCK_REASON_LABELS.maintenance },
@@ -164,6 +165,7 @@ export class RoomBlockModalComponent {
   private readonly fb = inject(FormBuilder);
   private readonly reservationsService = inject(LodgingReservationsService);
   private readonly toastService = inject(ToastService);
+  private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
   /** Without the inventory write permission the block is read-only. */
   readonly canRelease = inject(AuthFacade).hasPermission('store:lodging:inventory:write');
@@ -254,7 +256,17 @@ export class RoomBlockModalComponent {
       });
   }
 
-  release(blockId: number): void {
+  /** R-CONF-02 — releasing puts the room back on sale: confirm first. */
+  async release(blockId: number): Promise<void> {
+    const code = this.viewed()?.unit_code ?? '';
+    const confirmed = await this.dialogService.confirm({
+      title: 'Liberar habitación',
+      message: `La ${code} vuelve a estar a la venta y se podrá reservar en las noches que tenía bloqueadas.`,
+      confirmText: 'Liberar habitación',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) return;
     this.saving.set(true);
     this.reservationsService
       .releaseBlock(blockId)

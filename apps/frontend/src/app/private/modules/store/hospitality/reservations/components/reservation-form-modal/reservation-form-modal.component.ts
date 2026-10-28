@@ -57,6 +57,18 @@ interface RoomLineForm {
   children: FormControl<number>;
 }
 
+/**
+ * U6 — a stay started from a free rack cell: that room and that night. The
+ * reservation is booked by type and the room is assigned right after.
+ */
+export interface ReservationPrefill {
+  arrival_date: string;
+  unit_type_id: number;
+  unit_id: number;
+  /** Room code as the desk says it ("904"). */
+  unit_code: string;
+}
+
 /** Plan option value for "no plan": the room type base price. */
 const BASE_PRICE = 0;
 
@@ -201,6 +213,12 @@ export function formatShortDate(date: string): string {
                   </app-button>
                 }
               </div>
+              @if (i === 0 && prefilledRoom(); as room) {
+                <p class="col-span-2 -mt-1 flex items-center gap-1 text-xs font-medium text-text-primary" data-testid="reservation-prefilled-room">
+                  <app-icon name="door-open" [size]="14" />
+                  Habitación {{ room }}: se asigna al crear la reserva
+                </p>
+              }
               @if (planOptionsFor(line.controls.unit_type_id.value); as plans) {
                 <app-selector
                   class="col-span-2"
@@ -362,6 +380,8 @@ export class ReservationFormModalComponent {
    */
   readonly walkIn = input(false);
   readonly unitTypes = input<UnitType[]>([]);
+  /** U6 — room and arrival chosen on the rack; null = an ordinary booking. */
+  readonly prefill = input<ReservationPrefill | null>(null);
 
   readonly isOpenChange = output<boolean>();
   readonly saved = output<LodgingReservation>();
@@ -381,6 +401,21 @@ export class ReservationFormModalComponent {
   readonly submitted = signal(false);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
+
+  /** Line values as a signal (the form is not), for the prefilled room hint. */
+  private readonly formValue = signal(this.emptyFormValue());
+
+  /**
+   * U6 — code of the rack room this booking takes, while the first line still
+   * asks for its type and the stay is a single room.
+   */
+  readonly prefilledRoom = computed(() => {
+    const prefill = this.prefill();
+    const rooms = this.formValue().rooms;
+    return prefill && rooms.length === 1 && Number(rooms[0]?.unit_type_id) === prefill.unit_type_id
+      ? prefill.unit_code
+      : null;
+  });
 
   readonly typeOptions = computed<SelectorOption[]>(() =>
     this.unitTypes()
@@ -508,6 +543,9 @@ export class ReservationFormModalComponent {
   readonly overrideReason = toSignal(this.overrideControl.valueChanges, { initialValue: '' });
 
   constructor() {
+    this.form.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.formValue.set(this.form.getRawValue()));
     // H2.5 — the holder matters too: an agency also sees its allotment rooms.
     merge(this.form.valueChanges, toObservable(this.customer))
       .pipe(
@@ -547,15 +585,25 @@ export class ReservationFormModalComponent {
     rooms.push(this.roomLine(null), { emitEvent: false });
     this.lineCount.set(1);
     // U5 — arrival today and departure tomorrow (a walk-in always arrives today).
-    const today = storeToday(this.settingsFacade.timezone());
+    // U6 — from a rack cell: that night and that room's type instead.
+    const prefill = this.walkIn() ? null : this.prefill();
+    const arrival = prefill?.arrival_date ?? storeToday(this.settingsFacade.timezone());
     this.form.reset({
-      arrival_date: today,
-      departure_date: nextDay(today),
-      rooms: [{ unit_type_id: this.defaultTypeId(), rate_plan_id: BASE_PRICE, adults: 1, children: 0 }],
+      arrival_date: arrival,
+      departure_date: nextDay(arrival),
+      rooms: [
+        {
+          unit_type_id: prefill?.unit_type_id ?? this.defaultTypeId(),
+          rate_plan_id: BASE_PRICE,
+          adults: 1,
+          children: 0,
+        },
+      ],
       notes: '',
     });
+    this.formValue.set(this.form.getRawValue());
     this.submitted.set(false);
-    this.pickFirstFreeType(today, nextDay(today));
+    if (!prefill) this.pickFirstFreeType(arrival, nextDay(arrival));
     this.focusCustomerSoon();
     // A walk-in arrives today: only the departure is chosen.
     if (this.walkIn()) this.form.controls.arrival_date.disable({ emitEvent: false });
@@ -699,6 +747,11 @@ export class ReservationFormModalComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (reservation) => {
+          const room = this.prefilledRoom();
+          if (room && !this.walkIn()) {
+            this.assignPrefilledRoom(reservation, room);
+            return;
+          }
           this.saving.set(false);
           // A walk-in gets the check-in toast instead, once the parent checks in.
           if (!this.walkIn()) {
@@ -713,6 +766,47 @@ export class ReservationFormModalComponent {
             typeof message === 'string' ? message : 'No se pudo crear la reserva';
           this.quoteState.set({ kind: 'error', message: text });
           this.toastService.error(text);
+        },
+      });
+  }
+
+  /**
+   * U6 — puts the booked room in the rack room it was started from. Same
+   * type and dates, so nothing is repriced; if the room was taken meanwhile
+   * the booking stays confirmed without a room and the desk is told.
+   */
+  private assignPrefilledRoom(reservation: LodgingReservation, code: string): void {
+    const prefill = this.prefill();
+    const room = reservation.rooms.find((r) => !r.cancelled_at);
+    const finish = (saved: LodgingReservation) => {
+      this.saving.set(false);
+      this.saved.emit(saved);
+      this.isOpenChange.emit(false);
+    };
+    if (!prefill || !room) {
+      this.toastService.success(`Reserva ${reservation.reservation_number} confirmada`);
+      finish(reservation);
+      return;
+    }
+    this.reservationsService
+      .changeRoom(room.id, { unit_id: prefill.unit_id })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.toastService.success(
+            `Reserva ${reservation.reservation_number} confirmada en la ${code}`,
+          );
+          finish(updated);
+        },
+        error: (message: unknown) => {
+          this.toastService.warning(
+            `Reserva ${reservation.reservation_number} confirmada sin habitación: ` +
+              (typeof message === 'string' ? message : `no se pudo asignar la ${code}`) +
+              '. Asígnala desde el detalle.',
+            undefined,
+            6000,
+          );
+          finish(reservation);
         },
       });
   }
@@ -835,6 +929,10 @@ export class ReservationFormModalComponent {
       target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
       target?.focus?.();
     });
+  }
+
+  private emptyFormValue(): ReturnType<FormGroup<ReservationForm>['getRawValue']> {
+    return { arrival_date: '', departure_date: '', rooms: [], notes: '' };
   }
 
   private defaultTypeId(): number | null {

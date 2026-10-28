@@ -29,6 +29,10 @@ import {
 } from '../../../../../../../shared/components/index';
 import { ReservationDetailModalComponent } from '../../components/reservation-detail-modal/reservation-detail-modal.component';
 import {
+  ReservationFormModalComponent,
+  ReservationPrefill,
+} from '../../components/reservation-form-modal/reservation-form-modal.component';
+import {
   RoomChangeModalComponent,
   RoomChangeTarget,
 } from '../../components/room-change-modal/room-change-modal.component';
@@ -51,6 +55,8 @@ import { StoreSettingsFacade } from '../../../../../../../core/store/store-setti
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { storeToday } from '../../../../../../../shared/utils/date.util';
 import { HousekeepingStatus } from '../../../rooms/interfaces/unit.interface';
+import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
+import { UnitTypesService } from '../../../rooms/services/unit-types.service';
 import {
   HOUSEKEEPING_STATUS_CHIPS,
   RESERVATION_STATUS_CHIPS,
@@ -100,6 +106,8 @@ interface RackRow {
   kind: 'type' | 'unit' | 'unassigned';
   key: string;
   label: string;
+  /** Room code ("904"), unit rows only. */
+  code?: string;
   /** 1-based CSS grid row (row 1 is the nights header). */
   row: number;
   typeId: number;
@@ -151,9 +159,13 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
  * the block shows on its room row and tapping it releases it.
  *
  * Standard admin module around the grid: four stats of the window, one card
- * with the sticky search (type, room, guest or reservation), the options
- * dropdown ("Bloquear habitación" + type and window filters) and the date
- * navigation. Search and type filter hide whole types client-side.
+ * with the sticky search (type, room, guest or reservation), "+ Nueva
+ * reserva", the options dropdown ("Bloquear habitación" + type and window
+ * filters) and the date navigation. Search and type filter hide whole types
+ * client-side.
+ *
+ * U6: tapping a free night of a room opens "Nueva reserva" with that room,
+ * arriving that night and leaving the next day.
  */
 @Component({
   selector: 'app-hospitality-rack-page',
@@ -172,6 +184,7 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
     SpinnerComponent,
     StatsComponent,
     ReservationDetailModalComponent,
+    ReservationFormModalComponent,
     RoomChangeModalComponent,
     RoomBlockModalComponent,
   ],
@@ -245,11 +258,27 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                 [ngModel]="searchTerm()"
                 (ngModelChange)="searchTerm.set($event ?? '')"
               />
+              @if (canBook()) {
+                <app-button
+                  variant="primary"
+                  size="md"
+                  [iconOnlyMobile]="true"
+                  customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 !rounded-[10px]"
+                  class="shrink-0"
+                  ariaLabel="Nueva reserva"
+                  (clicked)="openForm(null)"
+                  data-testid="rack-new-reservation"
+                >
+                  <app-icon slot="icon" name="plus" [size]="18" />
+                  Nueva reserva
+                </app-button>
+              }
               <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="filterConfigs()"
                 [filterValues]="filterValues()"
                 [actions]="dropdownActions"
+                triggerIcon="more-horizontal"
                 [isLoading]="loading()"
                 (filterChange)="onFilterChange($event)"
                 (clearAllFilters)="onFilterChange({})"
@@ -307,7 +336,7 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
               <div
                 class="grid w-max min-w-full text-xs"
                 [style.grid-template-columns]="gridColumns()"
-                [style.grid-template-rows]="'repeat(' + (rows().length + 1) + ', 2.25rem)'"
+                [style.grid-template-rows]="'repeat(' + (rows().length + 1) + ', 2.75rem)'"
                 data-testid="rack-grid"
               >
                 <!-- Nights header -->
@@ -361,9 +390,15 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                   </div>
                   @for (night of nightHeaders(); track night.date; let i = $index) {
                     <div
-                      class="flex items-center justify-center border-b border-r border-border/50"
+                      class="flex items-center justify-center border-b border-r border-border/50 [&[role=button]]:cursor-pointer [&[role=button]]:hover:bg-primary/10 [&[role=button]]:focus-visible:ring-2 [&[role=button]]:focus-visible:ring-inset [&[role=button]]:focus-visible:ring-primary [&[role=button]]:outline-none"
                       [class.bg-surface-secondary]="row.kind === 'type' || night.weekend"
                       [class.bg-surface]="row.kind !== 'type' && !night.weekend"
+                      [attr.role]="isFree(row, i) ? 'button' : null"
+                      [attr.tabindex]="isFree(row, i) ? 0 : null"
+                      [attr.aria-label]="isFree(row, i) ? 'Nueva reserva en la ' + row.code + ' el ' + night.long : null"
+                      [attr.data-testid]="isFree(row, i) ? 'rack-free-' + row.code + '-' + night.date : null"
+                      (click)="openCell(row, i)"
+                      (keydown.enter)="openCell(row, i)"
                       [class.ring-2]="dropHover() === row.key + ':' + i"
                       [class.ring-inset]="dropHover() === row.key + ':' + i"
                       [class.ring-primary]="dropHover() === row.key + ':' + i"
@@ -462,6 +497,14 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
         </div>
       </app-card>
 
+      <app-reservation-form-modal
+        [isOpen]="formOpen()"
+        [unitTypes]="unitTypes()"
+        [prefill]="prefill()"
+        (isOpenChange)="formOpen.set($event)"
+        (saved)="load()"
+      />
+
       <app-reservation-detail-modal
         [reservationId]="detailId()"
         (closed)="detailId.set(null)"
@@ -489,6 +532,7 @@ export class HospitalityRackPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
   private readonly settingsFacade = inject(StoreSettingsFacade);
   private readonly authFacade = inject(AuthFacade);
+  private readonly unitTypesService = inject(UnitTypesService);
 
   readonly searchTerm = signal('');
   /** `days` empty = default 14-night window (not counted as an active filter). */
@@ -496,6 +540,18 @@ export class HospitalityRackPageComponent implements OnInit {
 
   /** H5.3: blocking and releasing need the inventory write permission. */
   readonly canBlock = this.authFacade.hasPermission('store:lodging:inventory:write');
+
+  /** U6 — "+ Nueva reserva" and free cells need the reservations write permission. */
+  readonly canBook = computed(
+    () =>
+      this.authFacade.ownerFlag() ||
+      this.authFacade.hasPermission('store:lodging:reservations:write'),
+  );
+
+  /** U6 — "Nueva reserva" form; `prefill` set when opened from a free cell. */
+  readonly formOpen = signal(false);
+  readonly prefill = signal<ReservationPrefill | null>(null);
+  readonly unitTypes = signal<UnitType[]>([]);
 
   readonly dropdownActions: DropdownAction[] = this.canBlock
     ? [{ label: 'Bloquear habitación', icon: 'lock', action: 'block', variant: 'primary' }]
@@ -587,6 +643,7 @@ export class HospitalityRackPageComponent implements OnInit {
       return {
         date: value,
         weekday: format(date, 'EEEEEE', { locale: es }),
+        long: format(date, "d 'de' MMMM", { locale: es }),
         day: format(date, 'd'),
         weekend: isWeekend(date),
         today: value === today,
@@ -627,6 +684,7 @@ export class HospitalityRackPageComponent implements OnInit {
           label: unit.floor ? `${unit.code} · ${unit.floor}` : unit.code,
           typeId: type.id,
           unitId: unit.id,
+          code: unit.code,
           muted: !unit.is_active || outOfOrder,
           // H5.1 — housekeeping status set on the Housekeeping board.
           hint: !unit.is_active ? 'Inactiva' : undefined,
@@ -697,6 +755,42 @@ export class HospitalityRackPageComponent implements OnInit {
     );
   });
 
+  /**
+   * U6 — `unitId:night` of the window nights a room is already taken
+   * (assigned stay or block); the rest of an active room's nights are free.
+   */
+  private readonly takenNights = computed(() => {
+    const taken = new Set<string>();
+    const mark = (unitId: number, start: number, span: number) => {
+      for (let i = start; i < start + span; i++) taken.add(`${unitId}:${i}`);
+    };
+    for (const type of this.visibleTypes()) {
+      for (const bar of type.bars) if (bar.unit_id !== null) mark(bar.unit_id, bar.start, bar.span);
+      for (const block of type.blocks) mark(block.unit_id, block.start, block.span);
+    }
+    return taken;
+  });
+
+  /**
+   * U6 — `unitId:night` of the nights that can be booked from the rack: an
+   * active room with no stay or block, from the store's today on.
+   */
+  private readonly freeCells = computed(() => {
+    const free = new Set<string>();
+    if (!this.canBook()) return free;
+    const today = this.today();
+    const nights = this.nightHeaders();
+    const taken = this.takenNights();
+    for (const row of this.rows()) {
+      if (row.kind !== 'unit' || row.muted || row.unitId === undefined) continue;
+      nights.forEach((night, i) => {
+        const key = `${row.unitId}:${i}`;
+        if (night.date >= today && !taken.has(key)) free.add(key);
+      });
+    }
+    return free;
+  });
+
   /** Rooms the manager can block: active rooms of the rack. */
   readonly unitOptions = computed(() =>
     (this.rack()?.types ?? []).flatMap((type) =>
@@ -708,6 +802,36 @@ export class HospitalityRackPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.load();
+    if (this.canBook()) {
+      this.unitTypesService
+        .list()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (list) => this.unitTypes.set(list),
+          error: () => this.unitTypes.set([]),
+        });
+    }
+  }
+
+  /** U6 — a night of an active room with no stay or block, from today on. */
+  isFree(row: RackRow, night: number): boolean {
+    return row.unitId !== undefined && this.freeCells().has(`${row.unitId}:${night}`);
+  }
+
+  /** U6 — "Nueva reserva" in that room, arriving that night, leaving the next day. */
+  openCell(row: RackRow, night: number): void {
+    if (this.drag() !== null || !this.isFree(row, night) || row.unitId === undefined) return;
+    this.openForm({
+      arrival_date: this.nightHeaders()[night].date,
+      unit_type_id: row.typeId,
+      unit_id: row.unitId,
+      unit_code: row.code ?? row.label,
+    });
+  }
+
+  openForm(prefill: ReservationPrefill | null): void {
+    this.prefill.set(prefill);
+    this.formOpen.set(true);
   }
 
   load(): void {
@@ -800,7 +924,12 @@ export class HospitalityRackPageComponent implements OnInit {
 
   openBlock(block: PlacedBlock): void {
     const row = this.rows().find((r) => r.unitId === block.unit_id);
-    this.blockTarget.set({ mode: 'view', block, unit_label: row?.label ?? '' });
+    this.blockTarget.set({
+      mode: 'view',
+      block,
+      unit_label: row?.label ?? '',
+      unit_code: row?.code ?? row?.label ?? '',
+    });
   }
 
   move(direction: 1 | -1): void {
