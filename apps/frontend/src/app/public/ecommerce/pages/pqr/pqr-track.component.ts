@@ -6,7 +6,9 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { CommonModule, DatePipe } from '@angular/common';
+import { CommonModule, DOCUMENT, DatePipe } from '@angular/common';
+import { Meta, Title } from '@angular/platform-browser';
+import { applyMarketingPageMetadata, MARKETING_PAGES } from '../../../marketing-page-metadata';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
@@ -44,6 +46,17 @@ type TrackState = 'idle' | 'loading' | 'loaded' | 'not_found' | 'error';
   styleUrls: ['./pqr-track.component.scss'],
 })
 export class PqrTrackComponent {
+  // SEO-TECH-04: noindex y sin canonical a la portada en el host comercial (en tiendas no toca nada).
+  private readonly restoreMarketingMetadata = applyMarketingPageMetadata(
+    inject(DOCUMENT),
+    inject(Title),
+    inject(Meta),
+    MARKETING_PAGES.pqrTrack,
+  );
+  private readonly marketingMetadataCleanup = inject(DestroyRef).onDestroy(
+    this.restoreMarketingMetadata,
+  );
+
   private destroyRef = inject(DestroyRef);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);

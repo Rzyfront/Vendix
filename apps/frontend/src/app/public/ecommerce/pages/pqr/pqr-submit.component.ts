@@ -6,7 +6,9 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CommonModule } from '@angular/common';
+import { CommonModule, DOCUMENT } from '@angular/common';
+import { Meta, Title } from '@angular/platform-browser';
+import { applyMarketingPageMetadata, MARKETING_PAGES } from '../../../marketing-page-metadata';
 import {
   FormBuilder,
   FormGroup,
@@ -44,6 +46,17 @@ type SubmitState = 'idle' | 'submitting' | 'success' | 'error';
   styleUrls: ['./pqr-submit.component.scss'],
 })
 export class PqrSubmitComponent {
+  // SEO-TECH-04: noindex y sin canonical a la portada en el host comercial (en tiendas no toca nada).
+  private readonly restoreMarketingMetadata = applyMarketingPageMetadata(
+    inject(DOCUMENT),
+    inject(Title),
+    inject(Meta),
+    MARKETING_PAGES.pqr,
+  );
+  private readonly marketingMetadataCleanup = inject(DestroyRef).onDestroy(
+    this.restoreMarketingMetadata,
+  );
+
   private destroyRef = inject(DestroyRef);
   private readonly fb = inject(FormBuilder);
   private readonly pqrService = inject(PqrService);

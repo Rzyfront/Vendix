@@ -1,6 +1,9 @@
 import {Component, OnInit, inject, signal,
   DestroyRef, effect} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DOCUMENT } from '@angular/common';
+import { Meta, Title } from '@angular/platform-browser';
+import { applyMarketingPageMetadata, MARKETING_PAGES } from '../../../marketing-page-metadata';
 import { ConfigFacade } from '../../../../core/store/config';
 
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
@@ -172,6 +175,17 @@ import { IconComponent } from '../../../../shared/components';
     `,
   styleUrls: []})
 export class EmailVerificationComponent implements OnInit {
+  // SEO-TECH-04: noindex y sin canonical a la portada en el host comercial (en tiendas no toca nada).
+  private readonly restoreMarketingMetadata = applyMarketingPageMetadata(
+    inject(DOCUMENT),
+    inject(Title),
+    inject(Meta),
+    MARKETING_PAGES.verifyEmail,
+  );
+  private readonly marketingMetadataCleanup = inject(DestroyRef).onDestroy(
+    this.restoreMarketingMetadata,
+  );
+
   private destroyRef = inject(DestroyRef);
   private toast = inject(ToastService);
   private configFacade = inject(ConfigFacade);

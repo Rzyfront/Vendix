@@ -1,5 +1,8 @@
 import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DOCUMENT } from '@angular/common';
+import { Meta, Title } from '@angular/platform-browser';
+import { applyMarketingPageMetadata, MARKETING_PAGES } from '../../../marketing-page-metadata';
 
 import { RouterModule, Router } from '@angular/router';
 import {
@@ -133,6 +136,17 @@ import { IconComponent } from '../../../../shared/components';
   styleUrls: [],
 })
 export class ForgotOwnerPasswordComponent implements OnInit {
+  // SEO-TECH-04: noindex y sin canonical a la portada en el host comercial (en tiendas no toca nada).
+  private readonly restoreMarketingMetadata = applyMarketingPageMetadata(
+    inject(DOCUMENT),
+    inject(Title),
+    inject(Meta),
+    MARKETING_PAGES.forgotPassword,
+  );
+  private readonly marketingMetadataCleanup = inject(DestroyRef).onDestroy(
+    this.restoreMarketingMetadata,
+  );
+
   private destroyRef = inject(DestroyRef);
   forgotPasswordForm: FormGroup;
   readonly isLoading = signal(false);
