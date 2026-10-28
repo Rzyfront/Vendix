@@ -67,15 +67,16 @@ describe('PopCartComponent — QUI-855 correcciones de auditoría', () => {
 
   it('QUI-861: la línea expone actual / mínimo (variante gana a base)', () => {
     const item = {
-      product: { stock: 17, stock_quantity: 17, min_stock_level: 10 },
+      product: { stock_quantity: 17, min_stock_level: 10 },
       variant: null,
     } as unknown as PopCartItem;
+    expect(component.hasLineStockData(item)).toBe(true);
     expect(component.lineStock(item)).toBe(17);
     expect(component.lineLowStockThreshold(item)).toBe(10);
     expect(component.isLineLowStock(item)).toBe(false);
 
     const withVariant = {
-      product: { stock: 17, min_stock_level: 10 },
+      product: { stock_quantity: 17, min_stock_level: 10 },
       variant: { stock_quantity: 4 },
     } as unknown as PopCartItem;
     expect(component.lineStock(withVariant)).toBe(4);
@@ -84,7 +85,7 @@ describe('PopCartComponent — QUI-855 correcciones de auditoría', () => {
 
   it('QUI-861: stock igual al mínimo ya es stock bajo (frontera)', () => {
     const item = {
-      product: { stock: 10, min_stock_level: 10 },
+      product: { stock_quantity: 10, min_stock_level: 10 },
       variant: null,
     } as unknown as PopCartItem;
     expect(component.isLineLowStock(item)).toBe(true);
@@ -92,10 +93,25 @@ describe('PopCartComponent — QUI-855 correcciones de auditoría', () => {
 
   it('QUI-861: sin mínimo propio usa el default de tienda (10)', () => {
     const item = {
-      product: { stock: 5 },
+      product: { stock_quantity: 5 },
       variant: null,
     } as unknown as PopCartItem;
     expect(component.lineLowStockThreshold(item)).toBe(10);
     expect(component.isLineLowStock(item)).toBe(true);
+  });
+
+  it('QUI-861: oculta la fila sin tracking o en borrador restaurado', () => {
+    expect(
+      component.hasLineStockData({
+        product: { stock_quantity: 17, track_inventory: false },
+        variant: null,
+      } as unknown as PopCartItem),
+    ).toBe(false);
+    expect(
+      component.hasLineStockData({
+        product: { stock: 0 },
+        variant: null,
+      } as unknown as PopCartItem),
+    ).toBe(false);
   });
 });

@@ -32,6 +32,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import {
   popLineAvailableStock,
+  popLineHasStockData,
   resolvePopLowStockThreshold,
 } from '../utils/low-stock-threshold.util';
 
@@ -357,20 +358,22 @@ import {
                       SKU: {{ item.variant?.sku || item.product.code }}
                     </div>
                     <!-- QUI-861: actual vs mínimo para guiar la reposición. -->
-                    <div
-                      class="text-[10px] mb-2 flex items-center gap-1 flex-wrap"
-                      [class.text-amber-600]="isLineLowStock(item)"
-                      [class.font-semibold]="isLineLowStock(item)"
-                      [class.text-text-secondary]="!isLineLowStock(item)"
-                    >
-                      <app-icon name="package" [size]="10"></app-icon>
-                      <span>
-                        Stock: {{ lineStock(item) }} / Mín: {{ lineLowStockThreshold(item) }}
-                        @if (isLineLowStock(item)) {
-                          <span>· Stock bajo</span>
-                        }
-                      </span>
-                    </div>
+                    @if (hasLineStockData(item)) {
+                      <div
+                        class="text-[10px] mb-2 flex items-center gap-1 flex-wrap"
+                        [class.text-amber-600]="isLineLowStock(item)"
+                        [class.font-semibold]="isLineLowStock(item)"
+                        [class.text-text-secondary]="!isLineLowStock(item)"
+                      >
+                        <app-icon name="package" [size]="10"></app-icon>
+                        <span>
+                          Stock: {{ lineStock(item) }} / Mín: {{ lineLowStockThreshold(item) }}
+                          @if (isLineLowStock(item)) {
+                            <span>· Stock bajo</span>
+                          }
+                        </span>
+                      </div>
+                    }
                     <div class="flex justify-between items-end">
                       <!-- Unit Cost Input (Editable for POP) -->
                       <div class="flex flex-col">
@@ -652,6 +655,11 @@ export class PopCartComponent {
     );
     return Number.isFinite(threshold) && threshold >= 0 ? threshold : 10;
   });
+
+  /** `false` si la línea no trae stock real (sin tracking o restaurada). */
+  hasLineStockData(item: PopCartItem): boolean {
+    return popLineHasStockData(item);
+  }
 
   /** Stock actual de la línea (variante o base) para "actual / mínimo". */
   lineStock(item: PopCartItem): number {

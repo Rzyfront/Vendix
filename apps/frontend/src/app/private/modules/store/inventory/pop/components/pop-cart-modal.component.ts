@@ -17,6 +17,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import {
   popLineAvailableStock,
+  popLineHasStockData,
   resolvePopLowStockThreshold,
 } from '../utils/low-stock-threshold.util';
 
@@ -137,15 +138,17 @@ import {
                         <span class="item-sku">{{ item.product.code }}</span>
                       }
                       <!-- QUI-861: actual vs mínimo para guiar la reposición. -->
-                      <span
-                        class="item-stock"
-                        [class.item-stock-low]="isLineLowStock(item)"
-                      >
-                        Stock: {{ lineStock(item) }} / Mín: {{ lineLowStockThreshold(item) }}
-                        @if (isLineLowStock(item)) {
-                          <span>· Stock bajo</span>
-                        }
-                      </span>
+                      @if (hasLineStockData(item)) {
+                        <span
+                          class="item-stock"
+                          [class.item-stock-low]="isLineLowStock(item)"
+                        >
+                          Stock: {{ lineStock(item) }} / Mín: {{ lineLowStockThreshold(item) }}
+                          @if (isLineLowStock(item)) {
+                            <span>· Stock bajo</span>
+                          }
+                        </span>
+                      }
                       <!-- Editable Unit Cost -->
                       <div class="cost-input">
                         <span class="currency">$</span>
@@ -920,6 +923,11 @@ export class PopCartModalComponent {
     );
     return Number.isFinite(threshold) && threshold >= 0 ? threshold : 10;
   });
+
+  /** `false` si la línea no trae stock real (sin tracking o restaurada). */
+  hasLineStockData(item: PopCartItem): boolean {
+    return popLineHasStockData(item);
+  }
 
   /** Stock actual de la línea (variante o base) para "actual / mínimo". */
   lineStock(item: PopCartItem): number {

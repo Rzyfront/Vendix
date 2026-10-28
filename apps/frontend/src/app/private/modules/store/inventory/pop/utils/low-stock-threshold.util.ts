@@ -41,14 +41,35 @@ export function resolvePopLowStockThreshold(
   return { threshold: storeDefault, fromProduct: false };
 }
 
-/** Stock actual de la línea: variante si la hay, si no el producto base. */
+/**
+ * `true` si la línea trae stock real para comparar. Dos casos ocultan la
+ * fila: producto sin tracking (el catálogo muestra "Disponible", la cifra
+ * no significa nada) y borradores restaurados de una orden, cuyo producto
+ * se reconstruye con `stock: 0` placeholder (`pop-cart.service`).
+ */
+export function popLineHasStockData(
+  item: Pick<PopCartItem, 'product' | 'variant'> | null | undefined,
+): boolean {
+  if (!item || item.product?.track_inventory === false) return false;
+  // Solo `stock_quantity` (lo que el catálogo muestra): los borradores
+  // restaurados traen `stock: 0` placeholder sin `stock_quantity`.
+  const raw = item.variant?.stock_quantity ?? item.product?.stock_quantity;
+  return (
+    raw !== null && raw !== undefined && Number.isFinite(Number(raw))
+  );
+}
+
+/**
+ * Stock actual de la línea: variante si la hay, si no el producto base.
+ * Prefiere `stock_quantity` (lo que el catálogo muestra) sobre `stock`.
+ */
 export function popLineAvailableStock(
   item: Pick<PopCartItem, 'product' | 'variant'> | null | undefined,
 ): number {
   const raw =
     item?.variant?.stock_quantity ??
-    item?.product?.stock ??
     item?.product?.stock_quantity ??
+    item?.product?.stock ??
     0;
   const stock = Number(raw);
   return Number.isFinite(stock) ? stock : 0;

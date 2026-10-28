@@ -1,5 +1,6 @@
 import {
   popLineAvailableStock,
+  popLineHasStockData,
   resolvePopLowStockThreshold,
 } from './low-stock-threshold.util';
 
@@ -42,17 +43,37 @@ describe('low-stock-threshold.util (QUI-861)', () => {
     });
   });
 
-  it('stock actual: variante gana a base; no numérico cae a 0', () => {
+  it('stock actual: variante gana a base; stock_quantity gana a stock', () => {
     expect(
       popLineAvailableStock({
-        product: { stock: 17 },
+        product: { stock_quantity: 17 },
         variant: { stock_quantity: 4 },
       } as any),
     ).toBe(4);
     expect(
-      popLineAvailableStock({ product: { stock_quantity: 9 } } as any),
+      popLineAvailableStock(
+        { product: { stock_quantity: 9, stock: 3 } } as any,
+      ),
     ).toBe(9);
     expect(popLineAvailableStock({ product: {} } as any)).toBe(0);
     expect(popLineAvailableStock(null)).toBe(0);
+  });
+
+  it('gate: oculta sin tracking o en borrador restaurado (stock:0 placeholder)', () => {
+    expect(
+      popLineHasStockData({ product: { stock_quantity: 17 } } as any),
+    ).toBe(true);
+    // Sin tracking: la cifra no significa nada (el catálogo dice "Disponible").
+    expect(
+      popLineHasStockData(
+        { product: { stock_quantity: 17, track_inventory: false } } as any,
+      ),
+    ).toBe(false);
+    // Borrador restaurado: pop-cart.service reconstruye con stock:0 y sin
+    // stock_quantity — mostrarlo sería un "Stock bajo" inventado.
+    expect(
+      popLineHasStockData({ product: { stock: 0 } } as any),
+    ).toBe(false);
+    expect(popLineHasStockData(null)).toBe(false);
   });
 });
