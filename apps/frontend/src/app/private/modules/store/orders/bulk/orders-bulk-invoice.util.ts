@@ -129,6 +129,11 @@ export function formatHolder(holder: BulkInvoiceHolder): string {
   return [holder.name, doc].filter(Boolean).join(' · ') || 'Sin titular';
 }
 
+/** Unpaid rows that go out cash («Acuerdo mutuo») once Consumidor final is opted in. */
+export function unpaidFinalConsumerCount(rows: BulkInvoicePreviewRow[]): number {
+  return rows.filter((r) => r.cf_overridable && r.payment === 'to_credit').length;
+}
+
 export function paymentLabel(
   row: BulkInvoicePreviewRow,
   allowFinalConsumer = false,

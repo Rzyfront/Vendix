@@ -119,7 +119,7 @@
             type="checkbox"
             class="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border"
             [checked]="allowFinalConsumer()"
-            (change)="onToggleFinalConsumer($any($event.target).checked)"
+            (change)="onToggleFinalConsumer($any($event.target).checked, $any($event.target))"
           />
           <span>
             Emitir también estas {{ cfCount() }}

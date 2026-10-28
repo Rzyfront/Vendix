@@ -188,6 +188,7 @@ import {
   type CreditInvoiceSubmit,
 } from '../../components/credit-invoice-modal/credit-invoice-modal.component';
 import { CustomerHolderCompletionModalComponent } from '../../../customers/components/customer-holder-completion-modal/customer-holder-completion-modal.component';
+import { unpaidFinalConsumerConfirm } from '../../utils/unpaid-final-consumer-confirm.util';
 import {
   holderIssueFromDetails,
   type HolderIssue,
@@ -5777,6 +5778,33 @@ export class OrderDetailsPageComponent {
       });
   }
 
+  /**
+   * «Cambiar a consumidor final»: quita el titular (`customer_id: null`). El
+   * backend aplica las mismas guardas que al cambiar de cliente (factura
+   * transmitida, cartera abierta) y propaga el cambio al borrador.
+   */
+  onTitularSearchUseFinalConsumer(): void {
+    const order = this.order();
+    if (!order?.id) return;
+    const previousCustomerId = order.customer_id ?? null;
+    this.showTitularSearchModal.set(false);
+    this.changingCustomer.set(true);
+    this.ordersService
+      .updateOrderCustomer(String(order.id), null)
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.changingCustomer.set(false)),
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success('La orden quedó a nombre de Consumidor final');
+          this.refreshOrder();
+          this.offerCustomerTier(previousCustomerId, null);
+        },
+        error: (error: unknown) => this.handleChangeCustomerError(error),
+      });
+  }
+
   closeChangeCustomer(): void {
     this.showChangeCustomerModal.set(false);
     this.changeCustomerInitialValues.set(null);
@@ -7963,8 +7991,12 @@ export class OrderDetailsPageComponent {
     this.runEmit(this.holderEmitKey, null, undefined, this.emitAllowFinalConsumer);
   }
 
-  /** Explicit «Emitir como Consumidor final»: retry with the override. */
-  onHolderUseFinalConsumer(): void {
+  /**
+   * Explicit «Emitir como Consumidor final»: retry with the override. An unpaid
+   * order asks first; «Volver» keeps the holder modal open.
+   */
+  async onHolderUseFinalConsumer(): Promise<void> {
+    if (!(await this.confirmFinalConsumerCash(false))) return;
     this.showHolderModal.set(false);
     this.emitAsFinalConsumerCash(this.holderEmitKey);
   }
@@ -8007,7 +8039,11 @@ export class OrderDetailsPageComponent {
         duration: 10000,
         action: {
           label: 'Emitir como Consumidor final (contado)',
-          onClick: () => this.emitAsFinalConsumerCash(key),
+          onClick: () => {
+            void this.confirmFinalConsumerCash(true).then((ok) => {
+              if (ok) this.emitAsFinalConsumerCash(key);
+            });
+          },
         },
       });
       return true;
@@ -8016,10 +8052,26 @@ export class OrderDetailsPageComponent {
     return true;
   }
 
-  /** «Facturar a crédito» → el cajero prefirió Consumidor final de contado. */
-  onCreditUseFinalConsumer(): void {
+  /**
+   * «Facturar a crédito» → el cajero prefirió Consumidor final de contado. La
+   * orden está sin pagar (de ahí el modal): confirma antes; «Volver» deja el
+   * modal de crédito abierto.
+   */
+  async onCreditUseFinalConsumer(): Promise<void> {
+    if (!(await this.confirmFinalConsumerCash(true))) return;
     this.showCreditModal.set(false);
     this.emitAsFinalConsumerCash('order');
+  }
+
+  /**
+   * Orden sin pagar → Consumidor final: avisa que se recomienda crédito y que
+   * la factura sale de contado como ya pagada. `knownUnpaid`: el backend ya
+   * rechazó por saldo (`INVOICING_ORDER_UNPAID_001`); si no, decide el saldo
+   * local. Una orden pagada no pregunta.
+   */
+  private async confirmFinalConsumerCash(knownUnpaid: boolean): Promise<boolean> {
+    if (!knownUnpaid && !this.hasUnpaidBalance()) return true;
+    return this.dialogService.confirm(unpaidFinalConsumerConfirm(), { size: 'md' });
   }
 
   /**

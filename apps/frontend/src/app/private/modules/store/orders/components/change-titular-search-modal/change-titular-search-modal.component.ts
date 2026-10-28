@@ -298,7 +298,18 @@ type TitularSearchStep = 'search' | 'create';
       }
 
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3">
+        <div class="flex flex-wrap items-center justify-end gap-3">
+          @if (canUseFinalConsumer()) {
+            <app-button
+              variant="outline-secondary"
+              customClasses="sm:mr-auto"
+              ariaLabel="Quitar el cliente y dejar la orden a nombre de Consumidor final"
+              (clicked)="onUseFinalConsumer()"
+            >
+              <app-icon name="user-x" [size]="16" slot="icon"></app-icon>
+              Cambiar a consumidor final
+            </app-button>
+          }
           <app-button variant="outline" (clicked)="onClose()">
             Cancelar
           </app-button>
@@ -320,6 +331,10 @@ export class ChangeTitularSearchModalComponent {
   readonly createNew = output<Partial<CreateCustomerRequest> | void>();
   /** Emitted when the operator dismisses the modal. */
   readonly closed = output<void>();
+  /** Shows «Cambiar a consumidor final» (the order currently has a customer). */
+  readonly canUseFinalConsumer = input<boolean>(false);
+  /** Emitted when the operator returns the order to Consumidor final. */
+  readonly useFinalConsumer = output<void>();
 
   readonly currentStep = signal<TitularSearchStep>('search');
   readonly searchResults = signal<Customer[]>([]);
@@ -471,6 +486,11 @@ export class ChangeTitularSearchModalComponent {
     this.reset();
     this.isOpenChange.emit(false);
     this.closed.emit();
+  }
+
+  onUseFinalConsumer(): void {
+    this.reset();
+    this.useFinalConsumer.emit();
   }
 
   /** Plain methods (not computed): read the row fresh on each CD run. */

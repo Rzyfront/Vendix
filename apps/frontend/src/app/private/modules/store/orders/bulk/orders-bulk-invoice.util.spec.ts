@@ -3,7 +3,10 @@ import {
   buildInvoiceQueue,
   paymentLabel,
   queueRequiresCredit,
+  unpaidFinalConsumerCount,
 } from './orders-bulk-invoice.util';
+import { signal } from '@angular/core';
+import { OrdersBulkInvoiceModalComponent } from './orders-bulk-invoice-modal.component';
 
 describe('orders-bulk-invoice.util — unpaid order to Consumidor final', () => {
   const row = (over: Partial<BulkInvoicePreviewRow> = {}): BulkInvoicePreviewRow => ({
@@ -42,5 +45,44 @@ describe('orders-bulk-invoice.util — unpaid order to Consumidor final', () => 
     expect(paymentLabel(unpaidCf(), true)).toBe('Contado · Acuerdo mutuo');
     expect(paymentLabel(unpaidCf(), false)).toBe('Pasa a crédito');
     expect(paymentLabel(row())).toBe('Pasa a crédito');
+  });
+
+  it('counts only the unpaid rows that can go out as Consumidor final', () => {
+    const paidCf = row({ ...unpaidCf(), payment: 'paid' });
+    expect(unpaidFinalConsumerCount([unpaidCf(), unpaidCf(), paidCf, row()])).toBe(2);
+  });
+
+  describe('opting into Consumidor final', () => {
+    const proto = OrdersBulkInvoiceModalComponent.prototype;
+    const build = (rows: BulkInvoicePreviewRow[], answer: boolean) => ({
+      rows: () => rows,
+      allowFinalConsumer: signal(false),
+      dialogService: { confirm: jasmine.createSpy('confirm').and.resolveTo(answer) },
+    });
+
+    it('asks before emitting unpaid orders cash; «Volver» keeps it off', async () => {
+      const self = build([unpaidCf(), unpaidCf()], false);
+      await proto.onToggleFinalConsumer.call(self as never, true);
+      const data = self.dialogService.confirm.calls.mostRecent().args[0];
+      expect(data.title).toBe('Órdenes sin pagar');
+      expect(data.message).toContain('2 órdenes no están pagadas');
+      expect(data.message).toContain('de contado, como ya pagada');
+      expect(self.allowFinalConsumer()).toBe(false);
+    });
+
+    it('turns it on after «Sí, emitir a Consumidor final»', async () => {
+      const self = build([unpaidCf()], true);
+      await proto.onToggleFinalConsumer.call(self as never, true);
+      expect(self.allowFinalConsumer()).toBe(true);
+    });
+
+    it('paid rows and unchecking never ask', async () => {
+      const self = build([row({ ...unpaidCf(), payment: 'paid' })], false);
+      await proto.onToggleFinalConsumer.call(self as never, true);
+      expect(self.allowFinalConsumer()).toBe(true);
+      await proto.onToggleFinalConsumer.call(self as never, false);
+      expect(self.allowFinalConsumer()).toBe(false);
+      expect(self.dialogService.confirm).not.toHaveBeenCalled();
+    });
   });
 });

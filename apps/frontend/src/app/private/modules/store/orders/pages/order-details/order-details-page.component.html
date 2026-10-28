@@ -3268,6 +3268,8 @@
       (closed)="closeTitularSearch()"
       (selected)="onTitularSearchSelected($event)"
       (createNew)="onTitularSearchCreateNew($event)"
+      [canUseFinalConsumer]="!!orderData.customer_id"
+      (useFinalConsumer)="onTitularSearchUseFinalConsumer()"
     ></app-change-titular-search-modal>
 
     <!-- Paso 5: CAMBIO DE TITULAR (reutiliza app-customer-modal en crear-mode) -->
