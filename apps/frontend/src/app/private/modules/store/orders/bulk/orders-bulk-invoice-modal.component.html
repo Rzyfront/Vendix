@@ -111,7 +111,8 @@
           Las facturas de {{ cfCount() }}
           {{ cfCount() === 1 ? 'orden saldrían' : 'órdenes saldrían' }} a
           «Consumidor final · 222222222222» porque a su cliente le faltan datos.
-          Por defecto no se emiten.
+          Por defecto no se emiten. Las que están sin cobrar salen de contado
+          con medio de pago «Acuerdo mutuo».
         </app-alert-banner>
         <label class="flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary">
           <input
@@ -157,7 +158,7 @@
                   [class.border-border]="row.payment !== 'blocked'"
                   [class.text-text-secondary]="row.payment !== 'blocked'"
                 >
-                  {{ paymentLabel(row) }}
+                  {{ paymentLabel(row, allowFinalConsumer()) }}
                 </span>
               </span>
               <div class="col-span-2 min-w-0 md:col-span-1">

@@ -3175,6 +3175,7 @@
       [balance]="creditBalance()"
       [busy]="isEmittingInvoice()"
       (confirmed)="onCreditInvoiceConfirmed($event)"
+      (finalConsumer)="onCreditUseFinalConsumer()"
     ></app-credit-invoice-modal>
 
     <!-- DATOS DEL CLIENTE INCOMPLETOS (409 de la emisión: completar o Consumidor final) -->
@@ -3182,6 +3183,7 @@
       [(isOpen)]="showHolderModal"
       [issue]="holderIssue()"
       [busy]="isEmittingInvoice()"
+      [finalConsumerLabel]="hasUnpaidBalance() ? 'Emitir como Consumidor final (contado)' : 'Emitir como Consumidor final'"
       (saved)="onHolderCompleted()"
       (useFinalConsumer)="onHolderUseFinalConsumer()"
     ></app-customer-holder-completion-modal>

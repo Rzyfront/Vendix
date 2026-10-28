@@ -324,6 +324,9 @@ jobs:
           --include='**/pos/utils/customer-tier-prompt.util.spec.ts'
           --include='**/pos/components/pos-customer-tier-modal.component.spec.ts'
           --include='**/orders/utils/order-customer-tier-prompt.util.spec.ts'
+          --include='**/customer-holder-completion-modal/holder-issue.model.spec.ts'
+          --include='**/orders/bulk/orders-bulk-invoice.util.spec.ts'
+          --include='**/credit-invoice-modal/credit-invoice-modal.component.spec.ts'
 
   mobile:
     name: Mobile

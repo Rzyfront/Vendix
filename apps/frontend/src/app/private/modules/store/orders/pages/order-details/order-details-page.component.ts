@@ -7966,8 +7966,7 @@ export class OrderDetailsPageComponent {
   /** Explicit «Emitir como Consumidor final»: retry with the override. */
   onHolderUseFinalConsumer(): void {
     this.showHolderModal.set(false);
-    this.emitAllowFinalConsumer = true;
-    this.runEmit(this.holderEmitKey, null, undefined, true);
+    this.emitAsFinalConsumerCash(this.holderEmitKey);
   }
 
   /**
@@ -7994,13 +7993,42 @@ export class OrderDetailsPageComponent {
     const blocker = details['credit_blocker'];
     const message =
       blocker === 'customer_required'
-        ? 'Asigna un cliente identificado para facturar a crédito.'
+        ? 'La orden no tiene cliente identificado: no puede facturarse a crédito. Puedes emitirla como Consumidor final de contado.'
         : blocker === 'partial_payment'
-          ? 'La orden tiene abonos; registra el saldo o anula los abonos para facturar a crédito.'
+          ? 'La orden tiene abonos: no puede facturarse a crédito. Registra el saldo o emítela como Consumidor final de contado.'
           : parsed.userMessage;
     this.setEmitError(key, message);
+    // Sin crédito posible, la salida sin fricción es Consumidor final de
+    // contado («Acuerdo mutuo»): se ofrece en el mismo aviso.
+    if (blocker === 'customer_required' || blocker === 'partial_payment') {
+      this.toastService.show({
+        description: message,
+        variant: 'error',
+        duration: 10000,
+        action: {
+          label: 'Emitir como Consumidor final (contado)',
+          onClick: () => this.emitAsFinalConsumerCash(key),
+        },
+      });
+      return true;
+    }
     this.toastService.error(message);
     return true;
+  }
+
+  /** «Facturar a crédito» → el cajero prefirió Consumidor final de contado. */
+  onCreditUseFinalConsumer(): void {
+    this.showCreditModal.set(false);
+    this.emitAsFinalConsumerCash('order');
+  }
+
+  /**
+   * Orden sin cobrar emitida a Consumidor final: el backend la declara de
+   * contado con medio de pago «Acuerdo mutuo» (ZZZ) sin exigir el pago.
+   */
+  private emitAsFinalConsumerCash(key: string): void {
+    this.emitAllowFinalConsumer = true;
+    this.runEmit(key, null, undefined, true);
   }
 
   /** Confirmación del modal «Facturar a crédito»: reenvía la emisión con `credit`. */
