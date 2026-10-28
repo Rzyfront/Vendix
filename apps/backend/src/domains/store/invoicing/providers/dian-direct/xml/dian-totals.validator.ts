@@ -1,5 +1,8 @@
 import { DOMParser } from '@xmldom/xmldom';
-import { toDecimal } from '../../../utils/dian-money.util';
+import {
+  DIAN_MONETARY_TOLERANCE,
+  toDecimal,
+} from '../../../utils/dian-money.util';
 import {
   DIAN_RULES,
   type DianRuleKey,
@@ -785,7 +788,7 @@ export class DianTotalsValidator {
    * Anexo 1.9 §5.2.1.1: «Los elementos que definen valores monetarios
    * permitirán una tolerancia de error + o - 2.00».
    */
-  private static readonly MONETARY_TOLERANCE = toDecimal('2.00');
+  private static readonly MONETARY_TOLERANCE = DIAN_MONETARY_TOLERANCE;
 
   /**
    * El valor SIN redondear (al menos 2 decimales): un `toFixed(2)` de

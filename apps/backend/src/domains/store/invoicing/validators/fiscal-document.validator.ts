@@ -24,6 +24,7 @@ import {
   usesInvoiceOperationTypes,
 } from '../fiscal-document-requirements';
 import {
+  DIAN_MONETARY_TOLERANCE,
   DianNumericInput,
   dianAmount,
   dianArithmetic,
@@ -1208,7 +1209,12 @@ export class FiscalDocumentValidator {
 
       const expected = this.expectedTaxAmount(taxable, rate, scheme);
       const difference = declared.minus(toDecimal(expected));
-      if (!difference.abs().greaterThan(ONE_CENT)) return;
+      // HOLGURA ±2.00 (Anexo 1.9 §5.2.1.1), no un centavo: con precio con IVA
+      // incluido la base es cantidad × unitario redondeado y el IVA absorbe el
+      // residuo para respetar el precio de venta, así que se separa de
+      // base × tarifa en centavos que crecen con la cantidad (1.484,82 contra
+      // 1.484,87 en 6 uds). La DIAN lo acepta; bloquearlo frenaba la factura.
+      if (!difference.abs().greaterThan(DIAN_MONETARY_TOLERANCE)) return;
 
       // A.3 (F-056) — el `fix` se ramifica por CAUSA. Una diferencia de 1–3¢
       // no es una base mal capturada: es residuo de truncado (borrador

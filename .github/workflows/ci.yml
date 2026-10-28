@@ -152,7 +152,7 @@ jobs:
         run: npm run buildcheck:types
       - name: nest build
         working-directory: apps/backend
-        # Mismo heap que el Dockerfile de producción (NODE_OPTIONS 6144).
+
         env:
           NODE_OPTIONS: --max-old-space-size=6144
         run: npm run build
