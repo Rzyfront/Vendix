@@ -662,4 +662,52 @@ describe('PosFiscalEmissionService', () => {
       });
     });
   });
+  describe('cod-auto-invoicing S2 — order draft is refreshed with how the order was really paid', () => {
+    const draft = {
+      id: 7,
+      invoice_number: null,
+      status: 'draft',
+      transmission_status: null,
+      cufe: null,
+      pdf_url: null,
+      contingency_deadline: null,
+    };
+
+    it('refreshes payment form/means of an existing order draft before validating it', async () => {
+      const calls: string[] = [];
+      const { service, prisma, invoicing, invoice_flow } = createService({
+        invoicing: {
+          refreshOrderDraftPaymentMeans: jest.fn(async () => {
+            calls.push('refresh');
+          }),
+        },
+        invoice_flow: {
+          validate: jest.fn(async () => {
+            calls.push('validate');
+          }),
+          send: jest.fn().mockResolvedValue(undefined),
+        },
+      });
+      prisma.invoices.findFirst.mockResolvedValue(draft);
+
+      await service.emitForOrder(1);
+
+      expect(invoicing.refreshOrderDraftPaymentMeans).toHaveBeenCalledWith(7, 1);
+      expect(calls.slice(0, 2)).toEqual(['refresh', 'validate']);
+      expect(invoice_flow.validate).toHaveBeenCalledWith(7);
+    });
+
+    it('a refresh failure never stops the emission', async () => {
+      const { service, prisma, invoice_flow } = createService({
+        invoicing: {
+          refreshOrderDraftPaymentMeans: jest.fn().mockRejectedValue(new Error('db down')),
+        },
+      });
+      prisma.invoices.findFirst.mockResolvedValue(draft);
+
+      await service.emitForOrder(1);
+
+      expect(invoice_flow.validate).toHaveBeenCalledWith(7);
+    });
+  });
 });
