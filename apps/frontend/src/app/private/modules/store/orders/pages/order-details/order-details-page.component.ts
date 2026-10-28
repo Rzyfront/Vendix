@@ -202,7 +202,10 @@ import {
 // NATURAL/JURIDICA) para capturar el nuevo titular de la orden.
 import { CustomerModalComponent } from '../../../customers/components/customer-modal/customer-modal.component';
 import { PosCustomerTierModalComponent } from '../../../pos/components/pos-customer-tier-modal.component';
-import { CustomerTierPrompt } from '../../../pos/utils/customer-tier-prompt.util';
+import {
+  CustomerTierPrompt,
+  followUpRestorePrompt,
+} from '../../../pos/utils/customer-tier-prompt.util';
 import { orderCustomerTierPrompt } from '../../utils/order-customer-tier-prompt.util';
 import { ChangeTitularSearchModalComponent } from '../../components/change-titular-search-modal/change-titular-search-modal.component';
 import {
@@ -5942,11 +5945,19 @@ export class OrderDetailsPageComponent {
   }
 
   /** Aplica (o restaura) la tarifa en las líneas elegidas: preview → apply. */
+  /** "No aplicar": las líneas siguen con la tarifa del cliente anterior. */
+  onCustomerTierDismissed(): void {
+    this.customerTierPrompt.set(
+      followUpRestorePrompt(this.customerTierPrompt(), []),
+    );
+  }
+
   onCustomerTierConfirmed(itemIds: string[]): void {
     const prompt = this.customerTierPrompt();
     this.customerTierPrompt.set(null);
     const order = this.order();
     if (!prompt || !order || itemIds.length === 0) return;
+    const followUp = followUpRestorePrompt(prompt, itemIds);
     const dto: ItemChangesDto = {
       retier: itemIds.map((itemId) => ({
         order_item_id: Number(itemId),
@@ -5980,6 +5991,7 @@ export class OrderDetailsPageComponent {
               : 'Precio regular restaurado',
           );
           this.loadData();
+          if (followUp) this.customerTierPrompt.set(followUp);
         },
         error: (error: unknown) => {
           this.toastService.error(

@@ -2994,7 +2994,7 @@
     <app-pos-customer-tier-modal
       [prompt]="customerTierPrompt()"
       (confirmed)="onCustomerTierConfirmed($event)"
-      (dismissed)="customerTierPrompt.set(null)"
+      (dismissed)="onCustomerTierDismissed()"
     />
 
     <!-- SHIP MODAL (delivery-type aware) -->

@@ -10,6 +10,8 @@ import { CustomerTierPrompt } from '../utils/customer-tier-prompt.util';
  * Pregunta si aplicar la tarifa preferencial del cliente (o restaurar el
  * precio regular al quitarlo) en todas las líneas ofrecidas o solo en las
  * elegidas. Cancelar no cambia nada. Spec: odd/tasks/price-tier-adjustments-customers.md S6.
+ * Todo cierre del modal pasa por `close()`, que emite `cancel` una vez: no
+ * escuchar también `isOpenChange` (dispararía `dismissed` dos veces).
  */
 @Component({
   selector: 'app-pos-customer-tier-modal',
@@ -18,7 +20,6 @@ import { CustomerTierPrompt } from '../utils/customer-tier-prompt.util';
   template: `
     <app-modal
       [isOpen]="prompt() !== null"
-      (isOpenChange)="!$event && dismissed.emit()"
       (cancel)="dismissed.emit()"
       [size]="'md'"
       [showCloseButton]="true"

@@ -1,5 +1,5 @@
 import { CartItem } from '../models/cart.model';
-import { customerTierPrompt } from './customer-tier-prompt.util';
+import { customerTierPrompt, followUpRestorePrompt } from './customer-tier-prompt.util';
 
 /**
  * Aviso de la tarifa preferencial al elegir o quitar cliente en el POS.
@@ -124,6 +124,68 @@ describe('customerTierPrompt', () => {
       tier: mayorista,
       lines: [{ itemId: 'a1', label: 'Producto a1' }],
     });
+  });
+
+  it('cambiar a un cliente con otra tarifa guarda las líneas de la anterior para preguntar después', () => {
+    const prompt = customerTierPrompt({
+      items: [
+        line('a1', { applied_price_tier_id: 7 }, [7, 8]),
+        line('b2', { applied_price_tier_id: 7 }, [7]),
+        line('c3', {}, [7, 8]),
+      ],
+      previousTier: mayorista,
+      nextTier: distribuidor,
+      canApplyTier: true,
+    });
+    expect(prompt).toEqual({
+      mode: 'apply',
+      tier: distribuidor,
+      lines: [
+        { itemId: 'a1', label: 'Producto a1' },
+        { itemId: 'c3', label: 'Producto c3' },
+      ],
+      restoreAfter: {
+        tier: mayorista,
+        lines: [
+          { itemId: 'a1', label: 'Producto a1' },
+          { itemId: 'b2', label: 'Producto b2' },
+        ],
+      },
+    });
+  });
+
+  it('tras aplicar la nueva tarifa pregunta restaurar las líneas que siguen con la anterior', () => {
+    const prompt = customerTierPrompt({
+      items: [
+        line('a1', { applied_price_tier_id: 7 }, [7, 8]),
+        line('b2', { applied_price_tier_id: 7 }, [7]),
+      ],
+      previousTier: mayorista,
+      nextTier: distribuidor,
+      canApplyTier: true,
+    });
+    expect(followUpRestorePrompt(prompt, ['a1'])).toEqual({
+      mode: 'restore',
+      tier: mayorista,
+      lines: [{ itemId: 'b2', label: 'Producto b2' }],
+    });
+    // "No aplicar": todas las líneas de la tarifa anterior.
+    expect(followUpRestorePrompt(prompt, [])?.lines.map((l) => l.itemId)).toEqual([
+      'a1',
+      'b2',
+    ]);
+    expect(followUpRestorePrompt(prompt, ['a1', 'b2'])).toBeNull();
+  });
+
+  it('sin tarifa anterior pendiente no hay segundo aviso', () => {
+    const prompt = customerTierPrompt({
+      items: [line('a1')],
+      previousTier: null,
+      nextTier: mayorista,
+      canApplyTier: true,
+    });
+    expect(followUpRestorePrompt(prompt, [])).toBeNull();
+    expect(followUpRestorePrompt(null, [])).toBeNull();
   });
 
   it('la etiqueta de la línea lleva la variante cuando existe', () => {

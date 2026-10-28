@@ -19,6 +19,13 @@ export interface CustomerTierPrompt {
   mode: 'apply' | 'restore';
   tier: CustomerTierRef;
   lines: CustomerTierPromptLine[];
+  /**
+   * Solo en `apply` al cambiar entre dos clientes con tarifa: líneas que llevan
+   * la tarifa del cliente anterior. Las que no reciban la nueva se ofrecen
+   * después para restaurar (`followUpRestorePrompt`), así no quedan con el
+   * precio del cliente anterior.
+   */
+  restoreAfter?: { tier: CustomerTierRef; lines: CustomerTierPromptLine[] };
 }
 
 const lineLabel = (item: CartItem): string =>
@@ -53,6 +60,13 @@ export function customerTierPrompt(input: {
   const { items, previousTier, nextTier, canApplyTier } = input;
   if (!canApplyTier) return null;
 
+  const restoreLines =
+    previousTier && previousTier.id !== nextTier?.id
+      ? items
+          .filter((item) => item.applied_price_tier_id === previousTier.id)
+          .map((item) => ({ itemId: item.id, label: lineLabel(item) }))
+      : [];
+
   if (nextTier && nextTier.id !== previousTier?.id) {
     const lines = items
       .filter(
@@ -61,15 +75,42 @@ export function customerTierPrompt(input: {
           item.applied_price_tier_id !== nextTier.id,
       )
       .map((item) => ({ itemId: item.id, label: lineLabel(item) }));
-    if (lines.length > 0) return { mode: 'apply', tier: nextTier, lines };
+    if (lines.length > 0) {
+      return withRestoreAfter({ mode: 'apply', tier: nextTier, lines }, previousTier, restoreLines);
+    }
   }
 
-  if (previousTier && previousTier.id !== nextTier?.id) {
-    const lines = items
-      .filter((item) => item.applied_price_tier_id === previousTier.id)
-      .map((item) => ({ itemId: item.id, label: lineLabel(item) }));
-    if (lines.length > 0) return { mode: 'restore', tier: previousTier, lines };
+  if (previousTier && restoreLines.length > 0) {
+    return { mode: 'restore', tier: previousTier, lines: restoreLines };
   }
 
   return null;
+}
+
+/** Adjunta al aviso de aplicar las líneas de la tarifa anterior, si hay. */
+export function withRestoreAfter(
+  prompt: CustomerTierPrompt,
+  previousTier: CustomerTierRef | null,
+  restoreLines: CustomerTierPromptLine[],
+): CustomerTierPrompt {
+  return previousTier && restoreLines.length > 0
+    ? { ...prompt, restoreAfter: { tier: previousTier, lines: restoreLines } }
+    : prompt;
+}
+
+/**
+ * Segundo aviso tras responder uno de `apply` que cambió de cliente con
+ * tarifa: restaurar las líneas que siguen con la tarifa anterior, es decir,
+ * las que no recibieron la nueva (`appliedIds`; vacío si se eligió "No
+ * aplicar"). `null` si no queda ninguna.
+ */
+export function followUpRestorePrompt(
+  prompt: CustomerTierPrompt | null,
+  appliedIds: string[],
+): CustomerTierPrompt | null {
+  const pending = prompt?.mode === 'apply' ? prompt.restoreAfter : undefined;
+  if (!pending) return null;
+  const applied = new Set(appliedIds);
+  const lines = pending.lines.filter((line) => !applied.has(line.itemId));
+  return lines.length > 0 ? { mode: 'restore', tier: pending.tier, lines } : null;
 }

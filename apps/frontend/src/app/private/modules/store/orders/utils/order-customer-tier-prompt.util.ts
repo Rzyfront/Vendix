@@ -2,6 +2,7 @@ import { OrderItem } from '../interfaces/order.interface';
 import {
   CustomerTierPrompt,
   CustomerTierRef,
+  withRestoreAfter,
 } from '../../pos/utils/customer-tier-prompt.util';
 
 const lineLabel = (item: OrderItem): string =>
@@ -40,6 +41,16 @@ export function orderCustomerTierPrompt(input: {
   const { items, previousTier, nextTier, canApplyTier } = input;
   if (!canApplyTier) return null;
 
+  const restoreLines =
+    previousTier && previousTier.id !== nextTier?.id
+      ? items
+          .filter(
+            (item) =>
+              isRetierable(item) && item.applied_price_tier_id === previousTier.id,
+          )
+          .map((item) => ({ itemId: String(item.id), label: lineLabel(item) }))
+      : [];
+
   if (nextTier && nextTier.id !== previousTier?.id) {
     const lines = items
       .filter(
@@ -48,17 +59,13 @@ export function orderCustomerTierPrompt(input: {
           item.applied_price_tier_id !== nextTier.id,
       )
       .map((item) => ({ itemId: String(item.id), label: lineLabel(item) }));
-    if (lines.length > 0) return { mode: 'apply', tier: nextTier, lines };
+    if (lines.length > 0) {
+      return withRestoreAfter({ mode: 'apply', tier: nextTier, lines }, previousTier, restoreLines);
+    }
   }
 
-  if (previousTier && previousTier.id !== nextTier?.id) {
-    const lines = items
-      .filter(
-        (item) =>
-          isRetierable(item) && item.applied_price_tier_id === previousTier.id,
-      )
-      .map((item) => ({ itemId: String(item.id), label: lineLabel(item) }));
-    if (lines.length > 0) return { mode: 'restore', tier: previousTier, lines };
+  if (previousTier && restoreLines.length > 0) {
+    return { mode: 'restore', tier: previousTier, lines: restoreLines };
   }
 
   return null;

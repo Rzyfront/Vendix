@@ -74,6 +74,32 @@ describe('orderCustomerTierPrompt', () => {
     });
   });
 
+  it('al cambiar a un cliente con otra tarifa guarda las líneas editables de la anterior', () => {
+    const OTHER = { id: 90, name: 'Mayorista' };
+    const prompt = orderCustomerTierPrompt({
+      items: [
+        item(1, { applied_price_tier_id: 90 }),
+        item(2, {
+          applied_price_tier_id: 90,
+          products: { ...item(2).products!, product_price_tier_assignments: [{ price_tier_id: 90 }] },
+        }),
+        item(3, { applied_price_tier_id: 90, is_price_overridden: true }),
+      ],
+      previousTier: OTHER,
+      nextTier: TIER,
+      canApplyTier: true,
+    });
+    expect(prompt?.mode).toBe('apply');
+    expect(prompt?.lines.map((l) => l.itemId)).toEqual(['1']);
+    expect(prompt?.restoreAfter).toEqual({
+      tier: OTHER,
+      lines: [
+        { itemId: '1', label: 'Producto 1' },
+        { itemId: '2', label: 'Producto 2' },
+      ],
+    });
+  });
+
   it('sin permiso para aplicar tarifas no pregunta', () => {
     expect(
       orderCustomerTierPrompt({

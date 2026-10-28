@@ -144,6 +144,7 @@ import {
   CustomerTierPrompt,
   CustomerTierRef,
   customerTierPrompt,
+  followUpRestorePrompt,
 } from './utils/customer-tier-prompt.util';
 import { PriceTierCacheService } from '../price-tiers/services/price-tier-cache.service';
 import type { PriceTier } from '../price-tiers/interfaces';
@@ -226,7 +227,7 @@ export function resolvePosPaymentCustomerName(
       <app-pos-customer-tier-modal
         [prompt]="customerTierPromptState()"
         (confirmed)="onCustomerTierConfirmed($event)"
-        (dismissed)="customerTierPromptState.set(null)"
+        (dismissed)="onCustomerTierDismissed()"
       />
 
       <app-pos-split-bill-modal [(isOpen)]="showSplitAccounts" [sourceOrderId]="splitSourceOrderId()" [items]="splitSourceItems()" (splitCompleted)="onSplitAccountsCompleted($event)" />
@@ -1749,10 +1750,18 @@ export class PosComponent {
       });
   }
 
+  /** "No aplicar": las líneas siguen con la tarifa del cliente anterior. */
+  onCustomerTierDismissed(): void {
+    this.customerTierPromptState.set(
+      followUpRestorePrompt(this.customerTierPromptState(), []),
+    );
+  }
+
   onCustomerTierConfirmed(itemIds: string[]): void {
     const prompt = this.customerTierPromptState();
     this.customerTierPromptState.set(null);
     if (!prompt || itemIds.length === 0) return;
+    const followUp = followUpRestorePrompt(prompt, itemIds);
 
     const tier$: Observable<PriceTier | null | undefined> =
       prompt.mode === 'restore'
@@ -1777,12 +1786,14 @@ export class PosComponent {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
-        next: () =>
+        next: () => {
           this.toastService.success(
             prompt.mode === 'restore'
               ? 'Precio regular restaurado'
               : `Tarifa "${prompt.tier.name}" aplicada a ${itemIds.length} producto(s)`,
-          ),
+          );
+          if (followUp) this.customerTierPromptState.set(followUp);
+        },
         error: (error: Error) =>
           this.toastService.error(
             error?.message || 'No se pudo aplicar la tarifa del cliente',

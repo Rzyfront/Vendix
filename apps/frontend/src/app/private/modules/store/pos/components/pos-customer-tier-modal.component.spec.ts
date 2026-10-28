@@ -1,5 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { ModalComponent } from '../../../../../shared/components';
 import { PosCustomerTierModalComponent } from './pos-customer-tier-modal.component';
 import { CustomerTierPrompt } from '../utils/customer-tier-prompt.util';
 
@@ -48,5 +50,16 @@ describe('PosCustomerTierModalComponent', () => {
     expect(document.body.textContent ?? '').toContain(
       'El cliente anterior tenía la tarifa Mayorista',
     );
+  });
+
+  it('cerrar el modal (X, Escape, fondo) emite "dismissed" una sola vez', async () => {
+    const fixture = await render(prompt);
+    let dismissals = 0;
+    fixture.componentInstance.dismissed.subscribe(() => dismissals++);
+    const modal = fixture.debugElement.query(By.directive(ModalComponent))
+      .componentInstance as ModalComponent;
+    modal.close();
+    await fixture.whenStable();
+    expect(dismissals).toBe(1);
   });
 });
