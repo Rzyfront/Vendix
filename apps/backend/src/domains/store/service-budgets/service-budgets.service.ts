@@ -10,6 +10,13 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
+import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
+import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
+import {
+  reserveSessionLineStock,
+  writeSessionOrderTotals,
+} from '../service-sessions/utils/session-order-lines.util';
 import { CreateServiceProposalDto, DecideServiceProposalDto, SetServiceBudgetDto } from './dto';
 import { buildProposalSnapshotHash } from './utils/service-proposal-snapshot.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
@@ -35,6 +42,9 @@ export function staffChangeNeedsCustomerProposal(
   return requested.greaterThan(current.amount);
 }
 
+const toMoney = (value: Prisma.Decimal | number | string | null | undefined) =>
+  new Prisma.Decimal(value ?? 0).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+
 @Injectable()
 export class ServiceBudgetsService {
   private eventId = 0;
@@ -42,6 +52,9 @@ export class ServiceBudgetsService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly notifications: NotificationsSseService,
+    private readonly stockLevelManager: StockLevelManager,
+    private readonly stockValidator: StockValidatorService,
+    private readonly sellableStockAllocator: SellableStockAllocator,
   ) {}
 
   private get storeId(): number {
@@ -297,6 +310,17 @@ export class ServiceBudgetsService {
             // Base × unidades (sin impuesto), igual que addItemTx: así un
             // recálculo posterior de la orden no duplica el IVA de estas líneas.
             total_price: Number(lineSubtotal.toFixed(2)),
+            // Desglose por tasa (montos de línea) con la misma forma que
+            // buildSessionTaxedLine: decideWithToken lo persiste en
+            // order_item_taxes sin re-resolver el catálogo.
+            tax_breakdown: resolved.taxRows.map(({ row, tax_amount }) => ({
+              tax_rate_id: row.tax_rate_id,
+              tax_name: row.name,
+              tax_rate: Math.round((row.rate + Number.EPSILON) * 100000) / 100000,
+              tax_amount,
+              tax_type: row.tax_type,
+              is_inclusive: row.is_inclusive,
+            })),
             item_type: item.item_type ?? 'physical',
             total: Number(lineSubtotal.plus(lineTax).toFixed(2)),
           },
@@ -473,7 +497,7 @@ export class ServiceBudgetsService {
         const locked = await lockOrderLifecycle(tx, session.order_id!, this.storeId);
         const order = await tx.orders.findFirst({
           where: { id: session.order_id!, store_id: this.storeId },
-          select: { service_version: true, currency: true },
+          select: { service_version: true, currency: true, discount_amount: true },
         });
         if (!order || locked.state !== 'draft' || order.service_version !== proposal.order_version || order.currency !== proposal.currency) {
           await tx.service_change_proposals.updateMany({
@@ -520,17 +544,6 @@ export class ServiceBudgetsService {
           },
         });
         if (dto.decision === 'approved') {
-          await tx.service_budgets.create({
-            data: {
-              store_id: this.storeId,
-              session_id: sessionToken.session_id,
-              version: (currentBudget?.version ?? 0) + 1,
-              amount: proposal.total,
-              currency: proposal.currency,
-              approved_at: now,
-            },
-          });
-
           const storedLinesPayload = proposal.lines as { items?: any[] } | any[];
           const items = Array.isArray(storedLinesPayload)
             ? storedLinesPayload
@@ -540,87 +553,105 @@ export class ServiceBudgetsService {
 
           for (const item of items) {
             const qty = Math.max(1, Number(item.quantity || 1));
+            const productId = item.product_id ? Number(item.product_id) : null;
+            const variantId = item.product_variant_id ? Number(item.product_variant_id) : null;
+            const lineName = String(item.product_name || item.name || item.description || 'Servicio adicional');
+            // El snapshot de createProposal ya trae la base despejada: en líneas con
+            // producto, `total_price` es base × unidades y `tax_breakdown` el desglose
+            // por tasa (montos de línea); en líneas libres no hay desglose y
+            // `tax_amount_item` es el impuesto de la línea, que se prorratea por unidad
+            // para que el recalc lo sume con su criterio legacy.
+            const lineBase = productId != null
+              ? toMoney(item.total_price ?? item.total ?? Number(item.unit_price ?? 0) * qty)
+              : toMoney(item.total_price ?? Number(item.unit_price ?? 0) * qty);
+            const breakdown = Array.isArray(item.tax_breakdown) ? item.tax_breakdown : [];
+            const unitTax = productId != null
+              ? toMoney(item.tax_amount_item)
+              : toMoney(item.tax_amount_item).dividedBy(qty);
             await tx.order_items.create({
               data: {
                 order_id: session.order_id!,
                 service_session_id: sessionToken.session_id,
-                product_id: item.product_id ? Number(item.product_id) : null,
-                product_variant_id: item.product_variant_id ? Number(item.product_variant_id) : null,
-                product_name: String(item.product_name || item.name || item.description || 'Servicio adicional'),
+                product_id: productId,
+                product_variant_id: variantId,
+                product_name: lineName,
                 description: item.description ? String(item.description) : null,
                 quantity: qty,
                 unit_price: new Prisma.Decimal(item.unit_price ?? item.total ?? 0),
-                total_price: new Prisma.Decimal(
-                  item.total_price ?? item.total ?? (Number(item.unit_price ?? 0) * qty),
-                ),
+                total_price: new Prisma.Decimal(Number(lineBase.toFixed(2))),
                 tax_rate: item.tax_rate != null ? new Prisma.Decimal(item.tax_rate) : null,
-                tax_amount_item: item.tax_amount_item != null ? new Prisma.Decimal(item.tax_amount_item) : null,
+                tax_amount_item: new Prisma.Decimal(Number(unitTax.toFixed(2))),
                 item_type: item.item_type || (item.product_id ? 'physical' : 'service'),
                 updated_at: now,
+                ...(breakdown.length > 0
+                  ? {
+                      order_item_taxes: {
+                        create: breakdown.map((row: any) => ({
+                          tax_rate_id: row.tax_rate_id ?? null,
+                          tax_name: String(row.tax_name ?? ''),
+                          tax_rate: row.tax_rate ?? 0,
+                          tax_amount: row.tax_amount ?? 0,
+                          tax_type: row.tax_type ?? null,
+                          is_compound: false,
+                          is_inclusive: row.is_inclusive ?? false,
+                        })),
+                      },
+                    }
+                  : {}),
               },
             });
 
-            if (item.product_id) {
+            if (productId) {
               const prod = await tx.products.findFirst({
-                where: { id: Number(item.product_id), store_id: this.storeId },
-                select: { id: true, track_inventory: true },
+                where: { id: productId, store_id: this.storeId },
+                select: { id: true, track_inventory: true, product_type: true },
               });
-              if (prod?.track_inventory) {
-                const stockLevel = await tx.stock_levels.findFirst({
-                  where: {
-                    product_id: prod.id,
-                    product_variant_id: item.product_variant_id ? Number(item.product_variant_id) : null,
+              if (prod?.track_inventory && prod.product_type === 'physical') {
+                await reserveSessionLineStock(
+                  {
+                    stockValidator: this.stockValidator,
+                    sellableStockAllocator: this.sellableStockAllocator,
+                    stockLevelManager: this.stockLevelManager,
                   },
-                  orderBy: { quantity_available: 'desc' },
-                  select: { id: true, location_id: true, quantity_available: true },
-                });
-                if (stockLevel) {
-                  if (stockLevel.quantity_available < qty) {
-                    throw new VendixHttpException(
-                      ErrorCodes.INV_STOCK_INSUFFICIENT_LINES,
-                      'Stock insuficiente para aplicar la propuesta en el producto ' + (item.product_name || prod.id),
-                    );
-                  }
-                  const store = await tx.stores.findUnique({
-                    where: { id: this.storeId },
-                    select: { organization_id: true },
-                  });
-                  if (store?.organization_id) {
-                    await tx.stock_reservations.create({
-                      data: {
-                        organization_id: store.organization_id,
-                        product_id: prod.id,
-                        product_variant_id: item.product_variant_id ? Number(item.product_variant_id) : null,
-                        location_id: stockLevel.location_id,
-                        quantity: qty,
-                        reserved_for_type: 'order',
-                        reserved_for_id: session.order_id!,
-                        status: 'active',
-                      },
-                    });
-                    await tx.stock_levels.update({
-                      where: { id: stockLevel.id },
-                      data: {
-                        quantity_reserved: { increment: qty },
-                        quantity_available: { decrement: qty },
-                        updated_at: now,
-                      },
-                    });
-                  }
-                }
+                  tx,
+                  {
+                    storeId: this.storeId,
+                    productId: prod.id,
+                    variantId,
+                    lineName,
+                    quantity: qty,
+                    orderId: session.order_id!,
+                    actorUserId: null,
+                  },
+                );
               }
             }
           }
 
+          // La propuesta SUMA a la cuenta: los totales se recalculan sobre todas las
+          // líneas (base + order_item_taxes, remaining incluido) en vez de copiar los
+          // de la propuesta; el descuento de la propuesta se acumula al de la orden.
+          const totals = await writeSessionOrderTotals(tx, session.order_id!, now);
           await tx.orders.update({
             where: { id: session.order_id! },
             data: {
-              subtotal_amount: proposal.subtotal,
-              tax_amount: proposal.tax,
-              discount_amount: proposal.discount,
-              grand_total: proposal.total,
+              discount_amount: new Prisma.Decimal(
+                Number(toMoney(order?.discount_amount).plus(toMoney(proposal.discount)).toFixed(2)),
+              ),
               service_version: { increment: 1 },
               updated_at: now,
+            },
+          });
+          await tx.service_budgets.create({
+            data: {
+              store_id: this.storeId,
+              session_id: sessionToken.session_id,
+              version: (currentBudget?.version ?? 0) + 1,
+              // El presupuesto aprobado cubre TODA la cuenta recalculada, no solo la
+              // propuesta: el cobro compara el total de la orden contra este monto.
+              amount: new Prisma.Decimal(totals.grandTotal),
+              currency: proposal.currency,
+              approved_at: now,
             },
           });
         }

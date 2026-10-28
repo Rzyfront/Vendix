@@ -376,7 +376,12 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
     const setup = (budget: any) => {
       jest.spyOn(service, 'findOne').mockResolvedValue({ id: 77, order_id: 88 } as any);
       const tx = {
-        orders: { findFirst: jest.fn().mockResolvedValue({ grand_total: 119000, tip_amount: 0, currency: 'COP' }) },
+        orders: {
+          findFirst: jest.fn().mockResolvedValue({ grand_total: 119000, tip_amount: 0, currency: 'COP' }),
+          findUnique: jest.fn().mockResolvedValue({ total_paid: 0 }),
+          update: jest.fn().mockResolvedValue({ store_id: 1, service_session_id: 77 }),
+        },
+        order_items: { findMany: jest.fn().mockResolvedValue([]) },
         service_budgets: { findFirst: jest.fn().mockResolvedValue(budget), create: jest.fn() },
       };
       prisma.$transaction.mockImplementation((fn: any) => fn({ $queryRaw: jest.fn().mockResolvedValue([{ id: 88, state: 'draft' }]), service_sessions: prisma.service_sessions, ...tx }));

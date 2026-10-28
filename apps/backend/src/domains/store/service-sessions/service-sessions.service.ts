@@ -2,9 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { entity_type_enum, order_items, Prisma } from '@prisma/client';
 import { filter } from 'rxjs';
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
-import { FullTaxRow, resolveFullTaxRowsByProductId } from '../orders/utils/catalog-line-pricing.util';
-import { resolveLineUnits, roundMoney2 } from '../taxes/utils/final-price.util';
-import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
+import { resolveFullTaxRowsByProductId } from '../orders/utils/catalog-line-pricing.util';
+import {
+  buildSessionTaxedLine,
+  reserveSessionLineStock,
+  writeSessionOrderTotals,
+} from './utils/session-order-lines.util';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { resolveStoreTimezone } from '../../../common/utils/store-timezone.util';
@@ -58,39 +61,6 @@ function catalogUnitPrice(
   if (Number.isFinite(override) && override > 0) return override;
   const sale = product.is_on_sale === true ? Number(product.sale_price ?? 0) : 0;
   return sale > 0 ? sale : Number(product.base_price ?? 0);
-}
-
-/**
- * Columnas de precio/impuesto de una línea de la cuenta SVC, igual que `addItems` de la
- * mesa: el precio publicado se despeja una vez con las tasas del producto (incluidas →
- * se extrae la base; sumadas → se agregan encima) y se persiste la BASE. `tax_amount_item`
- * es por unidad; `order_item_taxes` lleva el total de línea por tasa.
- */
-function buildTaxedLine(publishedUnitPrice: number, quantity: number, rows: FullTaxRow[]) {
-  const lineUnits = resolveLineUnits({ quantity, price_unit_quantity: null });
-  const resolved = resolveLineTotals(publishedUnitPrice, rows);
-  return {
-    unit_price: new Prisma.Decimal(roundMoney2(resolved.base)),
-    total_price: new Prisma.Decimal(roundMoney2(resolved.base * lineUnits)),
-    tax_rate: new Prisma.Decimal(Math.round((resolved.total_rate + Number.EPSILON) * 100000) / 100000),
-    tax_amount_item: new Prisma.Decimal(roundMoney2(resolved.total_tax_amount)),
-    final_unit_price: new Prisma.Decimal(roundMoney2(resolved.total)),
-    ...(rows.length > 0
-      ? {
-          order_item_taxes: {
-            create: rows.map((row, index) => ({
-              tax_rate_id: row.tax_rate_id,
-              tax_name: row.name,
-              tax_rate: Math.round((row.rate + Number.EPSILON) * 100000) / 100000,
-              tax_amount: roundMoney2(resolved.taxes[index].amount * lineUnits),
-              tax_type: row.tax_type,
-              is_compound: false,
-              is_inclusive: row.is_inclusive,
-            })),
-          },
-        }
-      : {}),
-  };
 }
 
 @Injectable()
@@ -289,7 +259,7 @@ export class ServiceSessionsService {
               quantity: 1,
               item_type: 'service',
               updated_at: now,
-              ...buildTaxedLine(catalogUnitPrice(product), 1, taxRows.get(product.id) ?? []),
+              ...buildSessionTaxedLine(catalogUnitPrice(product), 1, taxRows.get(product.id) ?? []),
             },
           });
           await this.recalcOrderTotals(tx, orderId, now);
@@ -873,7 +843,12 @@ export class ServiceSessionsService {
     const { storeId } = this.requireContext();
     const session = await this.findOne(id);
     if (!session.order_id) throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención aún no tiene cuenta para cobrar.');
-    const { covered } = await this.prisma.$transaction((tx) => this.ensureChargeBudget(tx, storeId, id, session.order_id!));
+    const { covered } = await this.prisma.$transaction(async (tx) => {
+      // El cobro parte del total recalculado (base + order_item_taxes), no del último
+      // total persistido: una propuesta aprobada suma líneas a la orden.
+      await this.recalcOrderTotals(tx, session.order_id!, new Date());
+      return this.ensureChargeBudget(tx, storeId, id, session.order_id!);
+    });
     if (!covered) {
       throw new VendixHttpException(
         ErrorCodes.SERVICE_BUDGET_001,
@@ -1224,27 +1199,23 @@ export class ServiceSessionsService {
     const orderId = session.order_id;
 
     if (tracksInventory && product.product_type === 'physical') {
-      // Mismo camino que mesas y POS: ubicaciones vendibles + StockLevelManager, cuyo
-      // claim es atómico (dos cargas sobre la última unidad no pasan las dos).
-      const { allowOversell } = await this.stockValidator.resolveInventoryPolicy(storeId, tx);
-      const allocation = await this.sellableStockAllocator.allocateForLine(storeId, product.id, variant?.id ?? undefined, qty, [], tx);
-      let slices = allocation.slices;
-      if (allocation.shortfall > 0) {
-        if (!allowOversell) {
-          throw new VendixHttpException(ErrorCodes.INV_STOCK_INSUFFICIENT_LINES, `Stock insuficiente para ${lineName}`, {
-            items: [{ product_id: product.id, product_variant_id: variant?.id ?? null, product_name: lineName, kind: 'product', requested: qty, available: allocation.available }],
-          });
-        }
-        const fallbackLocationId = allocation.slices[0]?.location_id
-          ?? (await this.stockLevelManager.getDefaultLocationForProduct(product.id, variant?.id ?? undefined, tx));
-        slices = this.sellableStockAllocator.absorbShortfall(allocation, fallbackLocationId);
-      }
-      for (const slice of slices) {
-        await this.stockLevelManager.reserveStock(
-          product.id, variant?.id ?? undefined, slice.location_id, slice.quantity, 'order', orderId,
-          userId ?? undefined, !allowOversell, tx, undefined, false, undefined, allowOversell,
-        );
-      }
+      await reserveSessionLineStock(
+        {
+          stockValidator: this.stockValidator,
+          sellableStockAllocator: this.sellableStockAllocator,
+          stockLevelManager: this.stockLevelManager,
+        },
+        tx,
+        {
+          storeId,
+          productId: product.id,
+          variantId: variant?.id ?? null,
+          lineName,
+          quantity: qty,
+          orderId,
+          actorUserId: userId,
+        },
+      );
     }
 
     const item = await tx.order_items.create({
@@ -1259,7 +1230,7 @@ export class ServiceSessionsService {
         item_type: product.product_type === 'physical' ? 'physical' : 'service',
         is_price_overridden: priceOverridden,
         updated_at: now,
-        ...buildTaxedLine(unitPrice, qty, taxRows.get(product.id) ?? []),
+        ...buildSessionTaxedLine(unitPrice, qty, taxRows.get(product.id) ?? []),
       },
     });
 
@@ -1273,41 +1244,13 @@ export class ServiceSessionsService {
    * por unidad si la línea no tiene desglose), total = subtotal + IVA.
    */
   private async recalcOrderTotals(tx: Prisma.TransactionClient, orderId: number, now: Date) {
-    const [items, order] = await Promise.all([
-      tx.order_items.findMany({
-        where: { order_id: orderId, cancelled_at: null },
-        select: {
-          total_price: true,
-          tax_amount_item: true,
-          quantity: true,
-          weight: true,
-          price_unit_quantity: true,
-          order_item_taxes: { select: { tax_amount: true } },
-        },
-      }),
-      tx.orders.findUnique({ where: { id: orderId }, select: { total_paid: true } }),
-    ]);
-    const subtotal = roundMoney2(items.reduce((acc, it) => acc + Number(it.total_price), 0));
-    const tax = roundMoney2(items.reduce((acc, it) => {
-      if (it.order_item_taxes.length > 0) {
-        return acc + it.order_item_taxes.reduce((sum, t) => sum + Number(t.tax_amount || 0), 0);
-      }
-      const units = resolveLineUnits({ quantity: it.quantity, weight: it.weight, price_unit_quantity: it.price_unit_quantity });
-      return acc + Number(it.tax_amount_item ?? 0) * units;
-    }, 0));
-    const grandTotal = roundMoney2(subtotal + tax);
-    const remaining = roundMoney2(Math.max(0, grandTotal - Number(order?.total_paid ?? 0)));
-    const updatedOrder = await tx.orders.update({
-      where: { id: orderId },
-      data: { subtotal_amount: subtotal, tax_amount: tax, grand_total: grandTotal, remaining_balance: remaining, updated_at: now },
-      select: { store_id: true, service_session_id: true },
-    });
+    const totals = await writeSessionOrderTotals(tx, orderId, now);
     // Un presupuesto base del sistema (no fijado por nadie) acompaña al total para que
     // cobrar nunca choque contra un "tope" que el cliente no puso.
-    if (updatedOrder?.service_session_id) {
-      await this.ensureChargeBudget(tx, updatedOrder.store_id, updatedOrder.service_session_id, orderId);
+    if (totals.service_session_id && totals.store_id) {
+      await this.ensureChargeBudget(tx, totals.store_id, totals.service_session_id, orderId);
     }
-    return { subtotal, tax_amount: tax, grand_total: grandTotal };
+    return { subtotal: totals.subtotal, tax_amount: totals.tax, grand_total: totals.grandTotal };
   }
 
   async removeItem(sessionId: number, itemId: number) {

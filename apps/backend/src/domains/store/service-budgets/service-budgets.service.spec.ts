@@ -33,20 +33,27 @@ describe('ServiceBudgetsService', () => {
   let prisma: Record<string, any>;
   let tx: Record<string, any>;
   let notifications: { push: jest.Mock };
+  let stockLevelManager: Record<string, jest.Mock>;
+  let stockValidator: Record<string, jest.Mock>;
+  let allocator: Record<string, jest.Mock>;
 
   const session = { id: 7, store_id: 1, order_id: 33, status: 'open' };
 
   beforeEach(() => {
     tx = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: 33, state: 'draft' }]),
-      orders: { findFirst: jest.fn(), update: jest.fn() },
+      orders: {
+        findFirst: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({ total_paid: 0 }),
+        update: jest.fn().mockResolvedValue({ store_id: 1, service_session_id: 7 }),
+      },
       payments: { findFirst: jest.fn() },
       products: { findFirst: jest.fn() },
       service_budgets: { findFirst: jest.fn(), create: jest.fn() },
       service_change_proposals: { findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
       service_proposal_decisions: { create: jest.fn(), findFirst: jest.fn() },
       service_progress_events: { create: jest.fn() },
-      order_items: { create: jest.fn() },
+      order_items: { create: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
       stores: { findUnique: jest.fn() },
       stock_levels: { findFirst: jest.fn(), update: jest.fn() },
       stock_reservations: { create: jest.fn() },
@@ -63,7 +70,19 @@ describe('ServiceBudgetsService', () => {
       product_tax_assignments: { findMany: jest.fn().mockResolvedValue([]) },
     };
     notifications = { push: jest.fn() };
-    service = new ServiceBudgetsService(prisma as unknown as StorePrismaService, notifications as any);
+    stockLevelManager = { reserveStock: jest.fn(), getDefaultLocationForProduct: jest.fn() };
+    stockValidator = { resolveInventoryPolicy: jest.fn().mockResolvedValue({ allowOversell: false }) };
+    allocator = {
+      allocateForLine: jest.fn().mockResolvedValue({ slices: [{ location_id: 7, quantity: 2 }], shortfall: 0, available: 10 }),
+      absorbShortfall: jest.fn((a: any) => a.slices),
+    };
+    service = new ServiceBudgetsService(
+      prisma as unknown as StorePrismaService,
+      notifications as any,
+      stockLevelManager as any,
+      stockValidator as any,
+      allocator as any,
+    );
   });
 
   const run = <T>(fn: () => Promise<T>) => RequestContextService.runIsolated(context, fn);
@@ -259,6 +278,24 @@ describe('ServiceBudgetsService', () => {
         expect(stored.total.toFixed(2)).toBe('23800.00');
       });
 
+      it('congela el desglose por tasa en el snapshot para persistirlo al aprobar', async () => {
+        await run(() =>
+          service.createProposal(7, {
+            items: [{ quantity: 2, unit_price: 10000, product_id: 2, product_name: 'Aceite' }],
+          }),
+        );
+        const stored = tx.service_change_proposals.create.mock.calls[0][0].data;
+        expect(stored.lines.items[0].tax_breakdown).toEqual([
+          expect.objectContaining({
+            tax_rate_id: 1,
+            tax_name: 'IVA',
+            tax_rate: 0.19,
+            tax_amount: 3800,
+            is_inclusive: false,
+          }),
+        ]);
+      });
+
       it('rechaza precio distinto si el producto no permite override (POS_PRICE_OVERRIDE_NOT_ALLOWED_001)', async () => {
         await expect(
           run(() => service.createProposal(7, { items: [{ quantity: 1, unit_price: 1, product_id: 2 }] })),
@@ -329,18 +366,113 @@ describe('ServiceBudgetsService', () => {
 
     const decideDto = { decision: 'approved' as const, proposal_version: 2, snapshot_hash: 'b'.repeat(64) };
 
-    it('aprueba: aplica líneas, crea presupuesto aprobado y registra la decisión', async () => {
+    it('aprueba: la propuesta SUMA a la cuenta (recalcula totales, no los copia)', async () => {
+      prisma.service_change_proposals.findFirst.mockResolvedValue({
+        ...proposal,
+        lines: {
+          items: [
+            {
+              product_id: 2,
+              product_variant_id: null,
+              product_name: 'Aceite',
+              description: null,
+              quantity: 2,
+              unit_price: 10000,
+              tax_rate: 0.19,
+              tax_amount_item: 1900,
+              total_price: 20000,
+              item_type: 'physical',
+              total: 23800,
+              tax_breakdown: [
+                {
+                  tax_rate_id: 1,
+                  tax_name: 'IVA',
+                  tax_rate: 0.19,
+                  tax_amount: 3800,
+                  tax_type: 'IVA',
+                  is_inclusive: false,
+                },
+              ],
+            },
+          ],
+          budget_snapshot: { version: 2 },
+        },
+      });
+      tx.products.findFirst.mockResolvedValue({ id: 2, track_inventory: true, product_type: 'physical' });
+      // Estado post-inserción: línea previa ($100.000 + IVA) + línea aprobada.
+      tx.order_items.findMany.mockResolvedValue([
+        {
+          total_price: 100000,
+          tax_amount_item: 0,
+          quantity: 1,
+          weight: null,
+          price_unit_quantity: null,
+          order_item_taxes: [{ tax_amount: 19000 }],
+        },
+        {
+          total_price: 20000,
+          tax_amount_item: 1900,
+          quantity: 2,
+          weight: null,
+          price_unit_quantity: null,
+          order_item_taxes: [{ tax_amount: 3800 }],
+        },
+      ]);
+
       const result = await run(() => service.decideWithToken(token, decideDto));
+
+      expect(tx.order_items.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          order_id: 33,
+          product_id: 2,
+          quantity: 2,
+          order_item_taxes: {
+            create: [
+              expect.objectContaining({ tax_rate_id: 1, tax_name: 'IVA', tax_amount: 3800, is_compound: false }),
+            ],
+          },
+        }),
+      });
+      // Recálculo sobre TODAS las líneas: 100.000 + 20.000 base, 19.000 + 3.800 IVA.
+      expect(tx.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 33 },
+          data: expect.objectContaining({
+            subtotal_amount: 120000,
+            tax_amount: 22800,
+            grand_total: 142800,
+            remaining_balance: 142800,
+          }),
+        }),
+      );
       expect(tx.service_budgets.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ version: 3, currency: 'COP', approved_at: expect.any(Date) }),
       });
+      expect(Number(tx.service_budgets.create.mock.calls[0][0].data.amount)).toBe(142800);
       expect(tx.service_proposal_decisions.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ decision: 'approved', actor_type: 'customer' }),
       });
-      expect(tx.orders.update).toHaveBeenCalledWith({
-        where: { id: 33 },
-        data: expect.objectContaining({ grand_total: proposal.total }),
-      });
+      // Stock por el mismo camino que addItemTx: sin escrituras directas.
+      expect(stockValidator.resolveInventoryPolicy).toHaveBeenCalledWith(1, tx);
+      expect(allocator.allocateForLine).toHaveBeenCalledWith(1, 2, undefined, 2, [], tx);
+      expect(stockLevelManager.reserveStock).toHaveBeenCalledWith(
+        2,
+        undefined,
+        7,
+        2,
+        'order',
+        33,
+        undefined,
+        true,
+        tx,
+        undefined,
+        false,
+        undefined,
+        false,
+      );
+      expect(tx.stock_levels.findFirst).not.toHaveBeenCalled();
+      expect(tx.stock_levels.update).not.toHaveBeenCalled();
+      expect(tx.stock_reservations.create).not.toHaveBeenCalled();
       expect(notifications.push).toHaveBeenCalled();
       expect(result).toMatchObject({ status: 'approved' });
     });
