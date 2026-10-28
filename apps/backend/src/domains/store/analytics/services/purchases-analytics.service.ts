@@ -69,7 +69,7 @@ interface PurchaseWindowAggregate {
 }
 
 /** Una fila del detalle por orden de {@link PurchasesAnalyticsService.listWindowOrders}. */
-interface PurchaseOrderRow {
+export interface PurchaseOrderRow {
   order_number: string;
   supplier_name: string;
   created_by_name: string | null;
@@ -759,10 +759,20 @@ export class PurchasesAnalyticsService {
 
     const tz = await resolveStoreTimezone(this.prisma, storeId);
     let asOfDate: Date;
+    // Single-day window (from = to): `resolveLocalDateRange` only honours
+    // the explicit branch when BOTH dates travel — a lone `date_to` falls
+    // through to the default preset (today) and silently re-dates every
+    // aging bucket.
     if (query.as_of) {
-      asOfDate = resolveLocalDateRange({ date_to: query.as_of }, tz).endDate;
+      asOfDate = resolveLocalDateRange(
+        { date_from: query.as_of, date_to: query.as_of },
+        tz,
+      ).endDate;
     } else if (query.date_to) {
-      asOfDate = resolveLocalDateRange({ date_to: query.date_to }, tz).endDate;
+      asOfDate = resolveLocalDateRange(
+        { date_from: query.date_to, date_to: query.date_to },
+        tz,
+      ).endDate;
     } else {
       asOfDate = new Date();
     }
