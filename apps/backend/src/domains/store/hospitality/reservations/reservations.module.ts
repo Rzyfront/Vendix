@@ -16,6 +16,8 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { LodgingAvailabilityService } from './lodging-availability.service';
 import { LodgingRoomChangesService } from './room-changes.service';
 import { LodgingNoShowJob } from './jobs/lodging-no-show.job';
+import { LodgingRntRenewalJob } from '../compliance/rnt-renewal.job';
+import { NotificationsModule } from '../../notifications/notifications.module';
 import { LodgingRackController } from './rack/rack.controller';
 import { LodgingRackService } from './rack/lodging-rack.service';
 import { LodgingRatesModule } from '../rates/rates.module';
@@ -96,6 +98,8 @@ import { LodgingKeyHandoversService } from './key-handovers/key-handovers.servic
     // H6.6 — the booking engine signs room photos and emails the guest.
     S3Module,
     EmailModule,
+    // H4.3 — the March RNT renewal reminder goes to the store bell.
+    NotificationsModule,
   ],
   controllers: [
     LodgingReservationsController,
@@ -123,6 +127,7 @@ import { LodgingKeyHandoversService } from './key-handovers/key-handovers.servic
     LodgingAvailabilityService,
     LodgingRoomChangesService,
     LodgingNoShowJob,
+    LodgingRntRenewalJob,
     LodgingRackService,
     LodgingAllotmentsService,
     LodgingGuestsService,

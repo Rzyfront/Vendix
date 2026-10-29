@@ -1,6 +1,7 @@
 import { FullTaxRow } from '../../../orders/utils/catalog-line-pricing.util';
 import { TaxFiscalType } from '../../../taxes/dto';
 import { HOME_COUNTRY_CODE } from './lodging-guest-rules';
+import { RNT_MISSING_REASON } from '../../compliance/rnt';
 
 /**
  * Hospitality Suite (H3.9) — VAT exemption of the lodging sold to a
@@ -65,9 +66,7 @@ export function vatExemptionBlockers(
   holder: VatExemptionGuest | null,
 ): string[] {
   const reasons: string[] = [];
-  if (!rnt_number?.trim()) {
-    reasons.push('La tienda no tiene RNT: regístralo en Configuración → Hotelería');
-  }
+  if (!rnt_number?.trim()) reasons.push(RNT_MISSING_REASON);
   if (!holder || !holder.is_primary) {
     reasons.push('Registra al titular de la reserva');
     return reasons;

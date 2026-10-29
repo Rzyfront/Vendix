@@ -4830,6 +4830,8 @@ enum notification_type_enum {
   /// ya no es una alerta para el operador; lo silencia el listener de
   /// `order.status_changed` cuando `source === 'kitchen_bridge'`.
   kitchen_ticket_ready
+  /// H4.3 — yearly reminder (March) to renew the hotel's RNT before March 31.
+  lodging_rnt_renewal
 }
 
 model notifications {

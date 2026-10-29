@@ -17,6 +17,7 @@ const DEFAULT_HOSPITALITY: HospitalitySettings = {
   no_show_time: '06:00',
   night_audit_time: '02:00',
   rnt_number: '',
+  rnt_renewal_reminder: true,
   default_overbooking_allowance: 0,
   room_charge_origin: 'Restaurante',
   folio_invoice_verification: true,
@@ -69,6 +70,15 @@ const AUTOSAVE_DELAY_MS = 600;
           Estos ajustes sólo surten efecto en tiendas con industria
           «Hotelería». Agrégala en Negocio → Tipos de Negocio para que la
           pestaña aparezca en el menú de secciones.
+        </app-alert-banner>
+      }
+
+      @if (store.isHospitality() && !(hospitality().rnt_number ?? '').trim()) {
+        <!-- H4.3 / D14 — informative only: the hotel keeps operating without it. -->
+        <app-alert-banner variant="info" icon="info" data-testid="rnt-missing-notice">
+          Aún no registras el Registro Nacional de Turismo (RNT). El hotel opera
+          igual; mientras falte, no se aplica la exención de IVA a extranjeros y el
+          número no sale en la confirmación de la reserva ni en la factura.
         </app-alert-banner>
       }
 

@@ -14,6 +14,7 @@ import { LODGING_AMENITIES } from '../../unit-types/lodging-media';
 import { asPolicySnapshot } from '../../rates/lodging-cancellation-penalty';
 import { LodgingReservationsService } from '../reservations.service';
 import { stayNights } from '../stay-dates';
+import { storeRnt } from '../../compliance/rnt';
 import { BookingSearchDto, CreateBookingHoldDto } from './booking-engine.dto';
 import {
   amountDueNow,
@@ -49,6 +50,8 @@ interface HotelSettings {
   check_out_time: string;
   hold_minutes: number;
   currency: string;
+  /** H4.3 — printed on the voucher and the booking engine; null when unset. */
+  rnt_number: string | null;
 }
 
 /** A room type as the traveler sees it in the search results. */
@@ -107,6 +110,18 @@ export class LodgingBookingEngineService {
     private readonly eventEmitter: EventEmitter2,
     private readonly storeContextRunner: StoreContextRunner,
   ) {}
+
+  // ------------------------------------------------------------------ hotel
+
+  /** H4.3 — what the booking engine shows before any search: the hotel's RNT and hours. */
+  async hotelInfo() {
+    const settings = await this.loadSettings(this.requireStoreId());
+    return {
+      rnt_number: settings.rnt_number,
+      check_in_time: settings.check_in_time,
+      check_out_time: settings.check_out_time,
+    };
+  }
 
   // ---------------------------------------------------------------- search
 
@@ -551,12 +566,14 @@ export class LodgingBookingEngineService {
       check_in_time?: string;
       check_out_time?: string;
       booking_hold_minutes?: number;
+      rnt_number?: string;
     };
     return {
       check_in_time: hospitality.check_in_time || '15:00',
       check_out_time: hospitality.check_out_time || '12:00',
       hold_minutes: bookingHoldMinutes(hospitality.booking_hold_minutes),
       currency: settings?.general?.currency || 'COP',
+      rnt_number: storeRnt(hospitality),
     };
   }
 
@@ -611,6 +628,7 @@ export class LodgingBookingEngineService {
         check_in_time: settings.check_in_time,
         check_out_time: settings.check_out_time,
         policy: policyText(asPolicySnapshot(room?.cancellation_policy_snapshot)),
+        rnt_number: settings.rnt_number,
       });
       const result = await this.email.sendEmail(to, message.subject, message.html, message.text);
       if (!result.success) {

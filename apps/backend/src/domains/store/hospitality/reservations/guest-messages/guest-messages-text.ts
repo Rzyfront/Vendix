@@ -1,5 +1,6 @@
 import { zonedWallClockToUtc } from '@common/utils/store-timezone.util';
 import { formatShortDate } from '../stay-dates';
+import { rntLine, storeRnt } from '../../compliance/rnt';
 
 /**
  * Hospitality Suite (H8.2) — pure pieces of the automatic guest emails: which
@@ -18,6 +19,8 @@ export interface GuestMessageSettings {
   post_stay_review: boolean;
   check_in_time: string;
   check_out_time: string;
+  /** H4.3 — the hotel's RNT for the foot of the emails; null when unset. */
+  rnt_number: string | null;
 }
 
 export const DEFAULT_PRE_ARRIVAL_HOURS = 48;
@@ -38,6 +41,7 @@ export function guestMessageSettings(hospitality: Record<string, unknown> | unde
     post_stay_review: h.guest_email_post_stay_review !== false,
     check_in_time: time(h.check_in_time, '15:00'),
     check_out_time: time(h.check_out_time, '12:00'),
+    rnt_number: storeRnt(h),
   };
 }
 
@@ -75,6 +79,8 @@ export interface GuestMessageData {
   precheckin_done?: boolean;
   /** Post-stay only (H8.5): private stay rating link; null when off, rated or without an online domain. */
   review_url?: string | null;
+  /** H4.3 — the hotel's RNT, printed at the foot of every guest email; null when unset. */
+  rnt_number?: string | null;
 }
 
 export interface GuestEmail {
@@ -110,6 +116,7 @@ function render(
         )
         .join('')}</table>`
     : '';
+  const rnt = rntLine(data.rnt_number);
   const button = link
     ? `<p style="margin: 24px 0;"><a href="${escape(link.url)}" style="background:#0f766e; color:#ffffff; padding:12px 20px; border-radius:8px; text-decoration:none; display:inline-block;">${escape(link.label)}</a></p>`
     : '';
@@ -120,6 +127,7 @@ function render(
       ${button}
       ${table}
       <p style="color:#6a737d; font-size: 12px; margin-top: 32px;">Este es un mensaje automático. Si tienes preguntas, responde a este correo o contacta al hotel.</p>
+      ${rnt ? `<p style="color:#6a737d; font-size: 12px;">${escape(data.store_name)} · ${escape(rnt)}</p>` : ''}
     </div>
   `;
   const text = [
@@ -127,6 +135,7 @@ function render(
     ...paragraphs,
     ...(link ? [`${link.label}: ${link.url}`] : []),
     ...rows.map(([label, value]) => `${label}: ${value}`),
+    ...(rnt ? [`${data.store_name} · ${rnt}`] : []),
   ].join('\n');
   return { subject, html, text };
 }

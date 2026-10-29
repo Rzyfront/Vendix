@@ -22,6 +22,7 @@ import {
   formatStoreDate,
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
+import { notesWithRnt, RntSettings, storeRnt } from '../../hospitality/compliance/rnt';
 
 /**
  * El PDF no publica la fila de la resolución —devuelve un buffer—, así que esto
@@ -252,7 +253,8 @@ export class InvoicePdfService {
         ? this.formatDate(invoice.payment_date, tz)
         : undefined,
       currency: invoice.currency || 'COP',
-      notes: invoice.notes || undefined,
+      // H4.3 — a hotel prints its RNT at the foot, next to the notes.
+      notes: notesWithRnt(invoice.notes, storeRnt(this.hospitalitySettings(store))),
 
       // Pago
       //
@@ -670,6 +672,10 @@ export class InvoicePdfService {
    * printing is a per-store concern even when the fiscal identity is the
    * organization's. Falls back to `letter`, the historical hardcoded layout.
    */
+  private hospitalitySettings(store: any): RntSettings | undefined {
+    return (store?.store_settings?.settings as { hospitality?: RntSettings } | null)?.hospitality;
+  }
+
   private resolveInvoiceFormat(store: any): PrintFormat {
     const receipts = (store?.store_settings?.settings as any)?.receipts;
     const format = receipts?.invoice_format;

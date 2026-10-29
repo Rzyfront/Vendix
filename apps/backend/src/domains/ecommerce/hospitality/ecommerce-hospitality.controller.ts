@@ -35,6 +35,13 @@ export class EcommerceHospitalityController {
     private readonly stayReview: LodgingStayReviewService,
   ) {}
 
+  /** H4.3 — the hotel's RNT and hours, shown by the booking engine. */
+  @Public()
+  @Get('hotel')
+  async hotel() {
+    return { success: true, data: await this.bookingEngine.hotelInfo() };
+  }
+
   @Public()
   @Get('search')
   @Header('Cache-Control', 'no-store')

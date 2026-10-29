@@ -331,6 +331,7 @@ describe('guest messages rules', () => {
       post_stay_review: true,
       check_in_time: '15:00',
       check_out_time: '12:00',
+      rnt_number: null,
     });
     expect(guestMessageSettings({ guest_email_pre_arrival_hours: 500 }).pre_arrival_hours).toBe(48);
     expect(guestMessageSettings({ guest_email_post_stay: false }).post_stay).toBe(false);
@@ -353,5 +354,26 @@ describe('guest messages rules', () => {
     expect(email.text).toContain('Tu pre-registro ya está completo');
     expect(email.html).not.toContain('href=');
     expect(email.html).toContain('&lt;b&gt;Ana&lt;/b&gt;');
+  });
+
+  it('H4.3 — la confirmación lleva el RNT del hotel al pie; sin RNT no imprime la línea', () => {
+    const data = {
+      guest_name: 'Ana',
+      store_name: 'Hotel Roku',
+      reservation_number: 'H-1',
+      arrival_date: '2026-11-12',
+      departure_date: '2026-11-14',
+      nights: 2,
+      room_type: 'Doble',
+      check_in_time: '15:00',
+      check_out_time: '12:00',
+    };
+    expect(guestMessageSettings({ rnt_number: ' 12345 ' }).rnt_number).toBe('12345');
+    const withRnt = guestMessageEmail('confirmation', { ...data, rnt_number: '12345' });
+    expect(withRnt.html).toContain('Hotel Roku · RNT 12345');
+    expect(withRnt.text).toContain('Hotel Roku · RNT 12345');
+    const without = guestMessageEmail('confirmation', { ...data, rnt_number: null });
+    expect(without.html).not.toContain('RNT');
+    expect(without.text).not.toContain('RNT');
   });
 });

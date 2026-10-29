@@ -1,5 +1,5 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -22,6 +22,11 @@ import { apiMessage, dateFromToday, formatDateOnly } from './hotel-date.util';
         <app-icon name="hotel" [size]="22" />
         Reservar habitación
       </h1>
+      @if (rnt(); as rntNumber) {
+        <p class="text-xs text-text-secondary" data-testid="hotel-rnt">
+          Registro Nacional de Turismo (RNT) {{ rntNumber }}
+        </p>
+      }
 
       <form class="grid grid-cols-2 gap-3 rounded-lg border border-border p-3 md:grid-cols-5" (submit)="submit($event)">
         <label class="flex flex-col gap-1 text-sm">
@@ -155,6 +160,7 @@ export class HotelSearchComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly storeUi = inject(StoreUiService);
   private readonly auth = inject(AuthFacade);
   private readonly authenticated = toSignal(this.auth.isAuthenticated$, { initialValue: false });
@@ -169,8 +175,14 @@ export class HotelSearchComponent implements OnInit {
   readonly searching = signal(false);
   readonly reservingId = signal<number | null>(null);
   readonly errorMessage = signal<string | null>(null);
+  /** H4.3 — the hotel's RNT; hidden while unknown or unset. */
+  readonly rnt = signal<string | null>(null);
 
   ngOnInit(): void {
+    this.service
+      .hotel()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ next: (info) => this.rnt.set(info.rnt_number), error: () => this.rnt.set(null) });
     const q = this.route.snapshot.queryParamMap;
     const arrival = q.get('arrival_date');
     const departure = q.get('departure_date');

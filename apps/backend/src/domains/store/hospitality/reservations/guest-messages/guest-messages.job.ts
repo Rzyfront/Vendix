@@ -320,6 +320,7 @@ export class LodgingGuestMessagesJob {
         precheckin_done,
         precheckin_url,
         review_url: key === 'post_stay' && settings.post_stay_review ? await this.reviewUrl(reservation.id) : null,
+        rnt_number: settings.rnt_number,
       });
       const result = await this.email.sendEmail(to, message.subject, message.html, message.text);
       if (result.success) return 1;

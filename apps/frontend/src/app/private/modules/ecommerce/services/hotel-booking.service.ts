@@ -44,6 +44,13 @@ export interface HotelSearchResult {
   room_types: HotelRoomType[];
 }
 
+/** H4.3 — what the booking engine shows before any search. */
+export interface HotelInfo {
+  rnt_number: string | null;
+  check_in_time: string;
+  check_out_time: string;
+}
+
 export interface HotelHold {
   reservation_id: number;
   reservation_number: string;
@@ -126,6 +133,12 @@ export class HotelBookingService {
   private headers(): HttpHeaders {
     const storeId = this.tenant.getCurrentDomainConfig()?.store_id;
     return new HttpHeaders({ 'x-store-id': storeId?.toString() || '' });
+  }
+
+  hotel(): Observable<HotelInfo> {
+    return this.http
+      .get<{ data: HotelInfo }>(`${this.apiUrl}/hotel`, { headers: this.headers() })
+      .pipe(map((r) => r.data));
   }
 
   search(query: HotelSearchQuery): Observable<HotelSearchResult> {

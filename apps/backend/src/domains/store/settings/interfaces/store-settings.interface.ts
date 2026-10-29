@@ -1162,6 +1162,8 @@ export interface HospitalitySettings {
   night_audit_time?: string;
   /** Registro Nacional de Turismo number. Empty until the owner sets it. */
   rnt_number?: string;
+  /** H4.3 — notify every March to renew the RNT before March 31. Default true. */
+  rnt_renewal_reminder?: boolean;
   /**
    * Overbooking allowance a new room type starts with: reservations it may
    * sell above its active rooms (H1.6). Default `0`.

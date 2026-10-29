@@ -489,6 +489,8 @@ export function getDefaultStoreSettings(): StoreSettings {
       // (the business day before) are charged to each in-house folio.
       night_audit_time: '02:00',
       rnt_number: '',
+      // H4.3 - every March, remind to renew the RNT before March 31.
+      rnt_renewal_reminder: true,
       // H1.6 - overbooking a new room type starts with (0 = never oversell).
       default_overbooking_allowance: 0,
       // H3.6 - folio origin of a POS or table room charge.

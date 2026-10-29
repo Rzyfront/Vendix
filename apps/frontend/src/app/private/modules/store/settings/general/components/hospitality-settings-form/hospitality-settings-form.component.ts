@@ -96,10 +96,20 @@ const OTHER_ORIGIN = '__other__';
         [control]="rntControl"
         label="Registro Nacional de Turismo (RNT)"
         placeholder="12345"
-        helperText="Número de registro del hotel ante el Ministerio de Comercio. Sale en los documentos del huésped."
+        helperText="Número de registro del hotel ante el Ministerio de Comercio. Sale en la confirmación de la reserva, la reserva en línea y el pie de la factura."
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
+      <div>
+        <app-toggle
+          [checked]="renewalReminder()"
+          label="Recordarme renovar el RNT en marzo"
+          (changed)="onRenewalReminderChange($event)"
+        />
+        <p class="mt-1 text-xs text-text-secondary">
+          Cada marzo llega un aviso a la campana para renovarlo antes del 31 de marzo.
+        </p>
+      </div>
       <app-input
         [formControl]="overbookingControl"
         [control]="overbookingControl"
@@ -228,6 +238,8 @@ export class HospitalitySettingsForm {
 
   /** H3.7 / D11 — signal, so the toggle re-renders zoneless. */
   readonly verification = signal(true);
+  /** H4.3 — March reminder to renew the RNT. */
+  readonly renewalReminder = signal(true);
 
   readonly form = new FormGroup({
     check_in_time: this.checkInControl,
@@ -257,11 +269,17 @@ export class HospitalitySettingsForm {
         }
       }
       this.verification.set(current.folio_invoice_verification ?? true);
+      this.renewalReminder.set(current.rnt_renewal_reminder ?? true);
     });
   }
 
   onVerificationChange(checked: boolean): void {
     this.verification.set(checked);
+    this.onFieldChange();
+  }
+
+  onRenewalReminderChange(checked: boolean): void {
+    this.renewalReminder.set(checked);
     this.onFieldChange();
   }
 
@@ -281,7 +299,10 @@ export class HospitalitySettingsForm {
 
   /** Emits the valid fields only; the invalid ones show «Este campo es requerido» & co. */
   onFieldChange(): void {
-    const patch: Record<string, unknown> = { folio_invoice_verification: this.verification() };
+    const patch: Record<string, unknown> = {
+      folio_invoice_verification: this.verification(),
+      rnt_renewal_reminder: this.renewalReminder(),
+    };
     for (const [key, control] of Object.entries(this.form.controls)) {
       if (control.dirty) control.markAsTouched();
       if (control.invalid) continue;

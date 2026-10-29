@@ -397,6 +397,8 @@ export interface HospitalitySettings {
   /** H3.4 — `HH:mm`: from this time last night is charged to each folio. */
   night_audit_time?: string;
   rnt_number: string;
+  /** H4.3 — notify every March to renew the RNT before March 31. Default true. */
+  rnt_renewal_reminder?: boolean;
   /** H1.6 — overbooking a new room type starts with (0 = never oversell). */
   default_overbooking_allowance?: number;
   /** H6.6 — minutes a web booking holds the room while the guest pays (5-120, default 15). */

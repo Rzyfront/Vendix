@@ -1248,6 +1248,16 @@ export class HospitalitySettingsDto {
   rnt_number?: string;
 
   @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'H4.3 — notify the store every March to renew the RNT before March 31. Default true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  rnt_renewal_reminder?: boolean;
+
+  @ApiProperty({
     example: 0,
     required: false,
     description:

@@ -131,6 +131,25 @@ describe('LodgingBookingEngineService (H6.6)', () => {
     jest.restoreAllMocks();
   });
 
+  describe('hotelInfo (H4.3)', () => {
+    it('el motor muestra el RNT del hotel y sus horas antes de buscar', async () => {
+      const { service, prisma } = build();
+      (prisma.store_settings.findFirst as jest.Mock).mockResolvedValueOnce({
+        settings: { hospitality: { rnt_number: ' 12345 ', check_in_time: '14:00' } },
+      });
+      await expect(service.hotelInfo()).resolves.toEqual({
+        rnt_number: '12345',
+        check_in_time: '14:00',
+        check_out_time: '12:00',
+      });
+    });
+
+    it('sin RNT el motor sigue funcionando y no muestra número', async () => {
+      const { service } = build();
+      await expect(service.hotelInfo()).resolves.toMatchObject({ rnt_number: null });
+    });
+  });
+
   describe('search', () => {
     const STAY = { arrival_date: '2026-11-20', departure_date: '2026-11-23', adults: 2, children: 0 };
 
