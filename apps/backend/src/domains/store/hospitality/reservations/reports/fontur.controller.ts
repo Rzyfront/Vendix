@@ -52,7 +52,7 @@ export class LodgingFonturController {
         {
           name: `Fontur T${report.quarter} ${report.year}`,
           columns,
-          rows: report.lines,
+          rows: report.lines as unknown as Record<string, unknown>[],
           tz,
           totals: { label: 'Total', documents: report.totals.documents, base: report.totals.base },
         },
