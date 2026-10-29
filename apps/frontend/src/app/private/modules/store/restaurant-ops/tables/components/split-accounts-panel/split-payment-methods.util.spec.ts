@@ -34,6 +34,17 @@ describe('selectChargeableSplitMethods', () => {
     expect(selectChargeableSplitMethods(methods).map((m) => m.id)).toEqual(['1', '2', '3']);
   });
 
+  it('incluye datáfono (voucher) aunque su processing_mode sea ONLINE', () => {
+    const voucher = method({
+      id: '9',
+      type: PaymentMethodType.VOUCHER,
+      name: 'Datáfono',
+      processingMode: 'ONLINE',
+    });
+
+    expect(selectChargeableSplitMethods([voucher])).toEqual([voucher]);
+  });
+
   it('descarta métodos deshabilitados, sin id numérico o de otro tipo', () => {
     const methods = [
       method({ id: '1', enabled: false }),

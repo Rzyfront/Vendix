@@ -10,7 +10,13 @@ import type { PaymentMethod } from '../../../../../../../shared/models/payment-m
  * justamente así, y filtrarlo por `DIRECT` lo hacía desaparecer del cobro
  * (el cajero no podía registrar una transferencia en una cuenta dividida).
  */
-const SPLIT_ALLOWED_TYPES = new Set(['cash', 'card', 'bank_transfer', 'wompi']);
+const SPLIT_ALLOWED_TYPES = new Set([
+  'cash',
+  'card',
+  'bank_transfer',
+  'voucher',
+  'wompi',
+]);
 
 export function selectChargeableSplitMethods(
   methods: PaymentMethod[] | null | undefined,

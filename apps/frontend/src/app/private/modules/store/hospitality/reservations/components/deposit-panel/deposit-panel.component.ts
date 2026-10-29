@@ -27,7 +27,7 @@ import { LodgingDepositSummary } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 
 /** Methods the desk registers by hand; the Wompi link settles itself. */
-const MANUAL_METHODS = ['cash', 'card', 'bank_transfer'];
+const MANUAL_METHODS = ['cash', 'card', 'bank_transfer', 'voucher'];
 /** Selector value of the Wompi link option (store payment method ids are numbers). */
 const LINK_METHOD = 'wompi_link';
 
