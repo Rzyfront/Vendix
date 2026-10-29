@@ -61,7 +61,7 @@ export interface NightAuditView {
 
 export interface NightAuditClosePreview {
   nights: number;
-  /** Sum of the nights' `rate_amount`, as "Cargar noche" prices them. */
+  /** Gross the guests pay for those nights: taxes and VAT exemption included, as "Cargar noche" charges them. */
   amount: string;
 }
 
@@ -108,33 +108,12 @@ export class LodgingNightAuditService {
   }
 
   /**
-   * U15 — the nights `close()` will post: the same set `postNightsThrough`
-   * takes for every open in-house folio (active, unposted, up to the day,
-   * outside the frozen closed days).
+   * U15 — the nights `close()` will post and what the guests pay for them:
+   * the folio prices them exactly as `postNightsThrough` charges them.
    */
   private async closePreview(business_date: string): Promise<NightAuditClosePreview> {
-    const bound = dateOnlyToDb(business_date);
-    const frozen = await this.prisma.lodging_night_audits.findMany({
-      where: { status: 'closed', business_date: { lte: bound } },
-      select: { business_date: true },
-    });
-    const result = await this.prisma.lodging_room_nights.aggregate({
-      where: {
-        is_active: true,
-        posted_order_item_id: null,
-        night_date: { lte: bound, notIn: frozen.map((a) => a.business_date) },
-        reservation_room: {
-          cancelled_at: null,
-          reservation: { status: 'checked_in', folio: { status: 'open' } },
-        },
-      },
-      _count: { _all: true },
-      _sum: { rate_amount: true },
-    });
-    return {
-      nights: result._count._all,
-      amount: Number(result._sum.rate_amount ?? 0).toFixed(2),
-    };
+    const preview = await this.folios.previewNightsThrough(business_date);
+    return { nights: preview.nights, amount: preview.amount.toFixed(2) };
   }
 
   /** "Cerrar día": posts the nights, marks no-shows and freezes the day. */

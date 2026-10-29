@@ -250,6 +250,14 @@ function build(
         const due = unposted(where);
         return due.length > 0 ? { night_date: due[0].night_date } : null;
       }),
+      // U15 — the "Cerrar día" preview reads the due nights of every in-house folio.
+      findMany: jest.fn(async ({ where }: any) =>
+        unposted(where).map(() => ({
+          rate_amount: 250000,
+          reservation_room: { reservation_id: 1 },
+          unit_type: { product: { id: 900, price_unit_quantity: null } },
+        })),
+      ),
     },
     lodging_night_audits: {
       findMany: jest.fn(async ({ where }: any) =>
@@ -445,6 +453,63 @@ describe('LodgingFolioService (H3.4)', () => {
       closedDays.length = 0;
       expect(await service.postNightsThrough(folio, '2026-11-11', true)).toBe(1);
       expect(nights[0].posted_order_item_id).toBe(items[1].id);
+    });
+
+    describe('"Cerrar día" preview (U15)', () => {
+      const folio = { id: 70, status: 'open', reservation_id: 1, order_id: 500 };
+      const inclusiveIva = async () => [
+        {
+          product_id: 900,
+          is_inclusive: true,
+          tax_categories: { tax_type: 'iva', tax_rates: [{ id: 7, name: 'IVA 19%', rate: 0.19 }] },
+        },
+      ];
+
+      it('previews the gross the guest pays — rate + IVA 19 % — and writes nothing', async () => {
+        const { service, items, order } = build();
+
+        const preview = await service.previewNightsThrough('2026-11-11');
+
+        expect(preview).toEqual({ nights: 2, amount: 595000 });
+        expect(items).toHaveLength(0);
+        await service.postNightsThrough(folio, '2026-11-11', true);
+        expect(order.grand_total).toBe(preview.amount);
+      });
+
+      it('an exempt holder previews the nights without IVA, as they are charged', async () => {
+        const { service, order } = build({ holder: touristHolder({ vat_exempt_at: new Date() }) });
+
+        const preview = await service.previewNightsThrough('2026-11-11');
+
+        expect(preview).toEqual({ nights: 2, amount: 500000 });
+        await service.postNightsThrough(folio, '2026-11-11', true);
+        expect(order.grand_total).toBe(preview.amount);
+      });
+
+      it('IVA included and an exempt holder: previews the pre-tax base that is charged, not the rate', async () => {
+        const { service, order, tx } = build({ holder: touristHolder({ vat_exempt_at: new Date() }) });
+        tx.product_tax_assignments.findMany.mockImplementation(inclusiveIva);
+
+        const preview = await service.previewNightsThrough('2026-11-11');
+
+        expect(preview.nights).toBe(2);
+        expect(preview.amount).toBeLessThan(500000);
+        await service.postNightsThrough(folio, '2026-11-11', true);
+        expect(order.grand_total).toBeCloseTo(preview.amount, 2);
+      });
+
+      it('leaves out the nights of a closed business day, which stay frozen', async () => {
+        const { service, closedDays } = build();
+        closedDays.push('2026-11-10');
+
+        expect(await service.previewNightsThrough('2026-11-11')).toEqual({ nights: 1, amount: 297500 });
+      });
+
+      it('nothing due previews zero nights and zero amount', async () => {
+        const { service } = build();
+
+        expect(await service.previewNightsThrough('2026-11-09')).toEqual({ nights: 0, amount: 0 });
+      });
     });
 
     it('a closed folio takes no nights', async () => {

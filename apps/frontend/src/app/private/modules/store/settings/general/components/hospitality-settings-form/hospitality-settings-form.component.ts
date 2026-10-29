@@ -1,5 +1,12 @@
 import { Component, effect, input, output, signal } from '@angular/core';
-import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import {
+  AbstractControl,
+  FormControl,
+  FormGroup,
+  ReactiveFormsModule,
+  ValidationErrors,
+  Validators,
+} from '@angular/forms';
 
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import {
@@ -11,6 +18,21 @@ import { HospitalitySettings } from '../../../../../../../core/models/store-sett
 
 /** Same `HH:mm` rule the backend DTO enforces. */
 const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * The backend takes these as integers (`@IsInt()`): `app-input` emits the typed text, so «20.5»
+ * would pass `min/max` and reject the whole PATCH. Empty is left to `required`.
+ */
+const wholeNumber = (control: AbstractControl): ValidationErrors | null => {
+  const value = String(control.value ?? '').trim();
+  return value === '' || /^\d+$/.test(value) ? null : { wholeNumber: true };
+};
+const WHOLE_NUMBER_ERROR = 'Escribe un número entero, sin decimales.';
+const NUMERIC_FIELDS = new Set([
+  'default_overbooking_allowance',
+  'booking_hold_minutes',
+  'ical_import_interval_minutes',
+]);
 
 /** Usual room-charge origins; «Otro» keeps the setting free text (U17). */
 const ROOM_CHARGE_ORIGINS = ['Restaurante', 'Bar', 'Cafetería', 'Minibar', 'Servicio a la habitación'];
@@ -81,6 +103,7 @@ const OTHER_ORIGIN = '__other__';
       <app-input
         [formControl]="overbookingControl"
         [control]="overbookingControl"
+        [error]="wholeNumberError(overbookingControl)"
         [required]="true"
         type="number"
         [min]="0"
@@ -93,6 +116,7 @@ const OTHER_ORIGIN = '__other__';
       <app-input
         [formControl]="holdMinutesControl"
         [control]="holdMinutesControl"
+        [error]="wholeNumberError(holdMinutesControl)"
         [required]="true"
         type="number"
         [min]="5"
@@ -105,6 +129,7 @@ const OTHER_ORIGIN = '__other__';
       <app-input
         [formControl]="icalIntervalControl"
         [control]="icalIntervalControl"
+        [error]="wholeNumberError(icalIntervalControl)"
         [required]="true"
         type="number"
         [min]="5"
@@ -183,17 +208,17 @@ export class HospitalitySettingsForm {
 
   readonly overbookingControl = new FormControl<number>(0, {
     nonNullable: true,
-    validators: [Validators.required, Validators.min(0), Validators.max(99)],
+    validators: [Validators.required, Validators.min(0), Validators.max(99), wholeNumber],
   });
 
   readonly holdMinutesControl = new FormControl<number>(15, {
     nonNullable: true,
-    validators: [Validators.required, Validators.min(5), Validators.max(120)],
+    validators: [Validators.required, Validators.min(5), Validators.max(120), wholeNumber],
   });
 
   readonly icalIntervalControl = new FormControl<number>(15, {
     nonNullable: true,
-    validators: [Validators.required, Validators.min(5), Validators.max(1440)],
+    validators: [Validators.required, Validators.min(5), Validators.max(1440), wholeNumber],
   });
 
   readonly roomChargeOriginControl = new FormControl('Restaurante', {
@@ -249,6 +274,11 @@ export class HospitalitySettingsForm {
     this.onFieldChange();
   }
 
+  /** The decimal error under the field; the other errors keep `app-input`'s own message. */
+  wholeNumberError(control: FormControl<number>): string | null {
+    return control.touched && control.hasError('wholeNumber') ? WHOLE_NUMBER_ERROR : null;
+  }
+
   /** Emits the valid fields only; the invalid ones show «Este campo es requerido» & co. */
   onFieldChange(): void {
     const patch: Record<string, unknown> = { folio_invoice_verification: this.verification() };
@@ -256,7 +286,8 @@ export class HospitalitySettingsForm {
       if (control.dirty) control.markAsTouched();
       if (control.invalid) continue;
       const value: unknown = control.value;
-      patch[key] = typeof value === 'string' ? value.trim() : Math.trunc(Number(value));
+      // `app-input` emits text even with type="number": numeric fields go out as numbers.
+      patch[key] = NUMERIC_FIELDS.has(key) ? Number(value) : String(value ?? '').trim();
     }
     this.settingsChange.emit(patch as Partial<HospitalitySettings>);
   }

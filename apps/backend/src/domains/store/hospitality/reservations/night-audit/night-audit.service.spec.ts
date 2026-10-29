@@ -63,15 +63,6 @@ function build() {
     lodging_units: { count: jest.fn(async () => 5) },
     lodging_room_nights: {
       findMany: jest.fn(async () => nights),
-      // U15 — what "Cerrar día" will charge: the unposted nights of in-house guests.
-      aggregate: jest.fn(async () => ({
-        _count: { _all: nights.filter((n) => !n.posted_order_item).length },
-        _sum: {
-          rate_amount: nights
-            .filter((n) => !n.posted_order_item)
-            .reduce((sum, n) => sum.add(n.rate_amount), new Prisma.Decimal(0)),
-        },
-      })),
     },
     lodging_reservations: {
       findMany: jest.fn(async ({ where }: any) =>
@@ -119,6 +110,8 @@ function build() {
     users: { findMany: jest.fn(async () => [{ id: 42, first_name: 'Ana', last_name: 'Ríos' }]) },
   };
   const folios = {
+    // U15 — the folio prices what "Cerrar día" will charge: H-0002's night + IVA 19 %.
+    previewNightsThrough: jest.fn(async () => ({ nights: 1, amount: 214200 })),
     // "Cargar noche" of H-0002: its night gets its folio line.
     postNightsThrough: jest.fn(async (folio: { id: number }) => {
       if (folio.id !== 71) return 0;
@@ -185,63 +178,18 @@ describe('LodgingNightAuditService (H7.1)', () => {
       });
     });
 
-    it('tells how many nights and how much "Cerrar día" will charge (U15)', async () => {
-      const { service, prisma } = build();
+    it('tells how many nights and what the guests pay when "Cerrar día" charges them (U15)', async () => {
+      const { service, folios } = build();
 
       const view = await service.get('2026-11-10');
 
-      expect(view.close_preview).toEqual({ nights: 1, amount: '180000.00' });
-      expect(prisma.lodging_room_nights.aggregate).toHaveBeenCalledWith({
-        where: {
-          is_active: true,
-          posted_order_item_id: null,
-          night_date: { lte: day('2026-11-10'), notIn: [] },
-          reservation_room: {
-            cancelled_at: null,
-            reservation: { status: 'checked_in', folio: { status: 'open' } },
-          },
-        },
-        _count: { _all: true },
-        _sum: { rate_amount: true },
-      });
-    });
-
-    it('the preview leaves out the nights of days already closed, which stay frozen', async () => {
-      const { service, prisma, audits } = build();
-      audits.push({
-        id: 9,
-        store_id: 3,
-        business_date: day('2026-11-08'),
-        status: 'closed',
-        summary: {},
-        closed_by_user_id: 42,
-        closed_at: new Date(),
-        reopened_by_user_id: null,
-        reopened_at: null,
-        reopen_reason: null,
-      });
-
-      await service.get('2026-11-10');
-
-      expect(prisma.lodging_night_audits.findMany).toHaveBeenCalledWith({
-        where: { status: 'closed', business_date: { lte: day('2026-11-10') } },
-        select: { business_date: true },
-      });
-      expect(prisma.lodging_room_nights.aggregate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            night_date: { lte: day('2026-11-10'), notIn: [day('2026-11-08')] },
-          }),
-        }),
-      );
+      expect(view.close_preview).toEqual({ nights: 1, amount: '214200.00' });
+      expect(folios.previewNightsThrough).toHaveBeenCalledWith('2026-11-10');
     });
 
     it('a day with nothing to charge previews zero nights and zero amount', async () => {
-      const { service, prisma } = build();
-      prisma.lodging_room_nights.aggregate.mockResolvedValueOnce({
-        _count: { _all: 0 },
-        _sum: { rate_amount: null as unknown as Prisma.Decimal },
-      });
+      const { service, folios } = build();
+      folios.previewNightsThrough.mockResolvedValueOnce({ nights: 0, amount: 0 });
 
       expect((await service.get('2026-11-10')).close_preview).toEqual({ nights: 0, amount: '0.00' });
     });
