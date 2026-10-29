@@ -78,6 +78,20 @@
           <p class="text-[var(--color-text-secondary)]">No hay planes disponibles en este momento.</p>
         </div>
       }
+
+      <!-- SEO-TECH-09: enlaces rastreables de salida (Google y lectores de pantalla siguen <a href>) -->
+      <nav
+        class="mt-12 md:mt-16 pt-8 border-t border-[var(--color-border)] max-w-6xl mx-auto"
+        aria-label="Más sobre Vendix"
+      >
+        <ul class="flex flex-wrap justify-center gap-x-6 gap-y-3 text-sm">
+          <li><a routerLink="/" class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] underline-offset-4 hover:underline">Inicio</a></li>
+          <li><a routerLink="/ayuda" class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] underline-offset-4 hover:underline">Centro de ayuda</a></li>
+          <li><a routerLink="/auth/register" class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] underline-offset-4 hover:underline">Crear cuenta</a></li>
+          <li><a routerLink="/auth/login" class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] underline-offset-4 hover:underline">Iniciar sesión</a></li>
+          <li><a routerLink="/legal/terminos" class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] underline-offset-4 hover:underline">Términos y condiciones</a></li>
+        </ul>
+      </nav>
     </div>
   </section>
 </div>
