@@ -25,7 +25,23 @@ import {
 
 const RECEIVED: payments_state_enum[] = ['succeeded', 'captured'];
 const BUDGETED: payments_state_enum[] = [...RECEIVED, 'pending', 'authorized'];
-const MANUAL_METHODS = ['cash', 'card', 'bank_transfer'];
+const MANUAL_METHODS = ['cash', 'card', 'bank_transfer', 'voucher'];
+
+/**
+ * Un método manual se registra en caja, sin pasarela. El datáfono (`voucher`)
+ * entra aquí aunque su `processing_mode` sea ONLINE en el seed
+ * (`payment_vouchers` → ONLINE): se cobra en un equipo físico y el cajero lo
+ * registra a mano, igual que efectivo o transferencia.
+ */
+function isManualMethod(
+  type: string | null | undefined,
+  mode: string | null | undefined,
+): boolean {
+  return (
+    MANUAL_METHODS.includes(type ?? '') &&
+    (mode === 'DIRECT' || type === 'voucher')
+  );
+}
 const money = (value: unknown) => new Prisma.Decimal(String(value ?? 0));
 
 /**
@@ -242,12 +258,11 @@ export class SplitAccountPaymentService {
           return {
             payment: existing,
             created: false,
-            manual:
+            manual: isManualMethod(
+              existing.store_payment_method?.system_payment_method?.type,
               existing.store_payment_method?.system_payment_method
-                ?.processing_mode === 'DIRECT' &&
-              MANUAL_METHODS.includes(
-                existing.store_payment_method?.system_payment_method?.type,
-              ),
+                ?.processing_mode,
+            ),
           };
         }
         // Gate único de caja (`assertSessionForSales`): conserva la posición
@@ -269,10 +284,10 @@ export class SplitAccountPaymentService {
           );
         const type = method.system_payment_method.type;
         const mode = method.system_payment_method.processing_mode;
-        const manual = mode === 'DIRECT' && MANUAL_METHODS.includes(type);
+        const manual = isManualMethod(type, mode);
         if (!manual && (mode !== 'ONLINE' || type !== 'wompi')) {
           this.reject(
-            'Las cuentas admiten efectivo, tarjeta o transferencia manual y pasarela Wompi; este medio no está integrado.',
+            'Las cuentas admiten efectivo, tarjeta, transferencia o datáfono manual y pasarela Wompi; este medio no está integrado.',
             'SPLIT_PAYMENT_METHOD',
           );
         }
@@ -460,8 +475,10 @@ export class SplitAccountPaymentService {
       const method = payment.store_payment_method;
       if (
         method?.store_id !== store_id ||
-        method.system_payment_method?.processing_mode !== 'DIRECT' ||
-        !MANUAL_METHODS.includes(method.system_payment_method?.type)
+        !isManualMethod(
+          method.system_payment_method?.type,
+          method.system_payment_method?.processing_mode,
+        )
       ) {
         this.reject(
           'Los pagos de pasarela solo se confirman mediante el proveedor.',

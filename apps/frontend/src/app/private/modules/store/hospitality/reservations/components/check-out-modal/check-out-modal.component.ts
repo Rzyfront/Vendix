@@ -35,7 +35,7 @@ import { invoiceStateLabel } from '../../../shared/hospitality-labels';
 import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 /** Methods the desk registers by hand; gateways settle themselves. */
-const MANUAL_METHODS = ['cash', 'card', 'bank_transfer'];
+const MANUAL_METHODS = ['cash', 'card', 'bank_transfer', 'voucher'];
 
 type BillTo = 'guest' | 'company';
 
