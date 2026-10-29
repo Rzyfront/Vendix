@@ -114,7 +114,15 @@ const RESERVATION_DETAIL_INCLUDE = {
       status: true,
       opened_at: true,
       closed_at: true,
-      order: { select: { id: true, order_number: true, grand_total: true } },
+      order: {
+        select: {
+          id: true,
+          order_number: true,
+          grand_total: true,
+          // H8.5 — private rating the guest gave after check-out.
+          order_review: { select: { rating: true, comment: true, created_at: true } },
+        },
+      },
     },
   },
   // H6.6 — direct payments made online with the booking engine.

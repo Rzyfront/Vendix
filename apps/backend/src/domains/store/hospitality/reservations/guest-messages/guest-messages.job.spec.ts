@@ -53,9 +53,16 @@ describe('LodgingGuestMessagesJob', () => {
       ),
     };
     const precheckin = { getLink: jest.fn(async () => ({ url: 'https://roku.example/pre-registro/tok' })) };
+    const stayReview = { linkFor: jest.fn(async () => 'https://roku.example/calificar-estadia/tok') };
     const runner = { runInStoreContext: jest.fn(async (_id: number, fn: () => Promise<number>) => fn()) };
-    const job = new LodgingGuestMessagesJob(prisma as any, email as any, precheckin as any, runner as any);
-    return { job, findMany, create, deleteMany, email, precheckin };
+    const job = new LodgingGuestMessagesJob(
+      prisma as any,
+      email as any,
+      precheckin as any,
+      stayReview as any,
+      runner as any,
+    );
+    return { job, findMany, create, deleteMany, email, precheckin, stayReview };
   };
 
   // 2026-11-10 10:00 Bogotá: 53 h before a 15:00 check-in on 2026-11-12.
@@ -119,6 +126,36 @@ describe('LodgingGuestMessagesJob', () => {
     );
   });
 
+  it('H8.5: el agradecimiento pide calificar la estadía con el enlace privado', async () => {
+    const { job, email, stayReview } = build({ byStatus: { checked_out: [reservation()] } });
+    await job.run(IN_WINDOW);
+    const [, , html, text] = email.sendEmail.mock.calls[0];
+    expect(stayReview.linkFor).toHaveBeenCalledWith(7);
+    expect(text).toContain('Califica tu estadía en un minuto');
+    expect(text).toContain('Calificar mi estadía: https://roku.example/calificar-estadia/tok');
+    expect(html).toContain('href="https://roku.example/calificar-estadia/tok"');
+  });
+
+  it('H8.5: con la calificación apagada el agradecimiento sale sin enlace', async () => {
+    const { job, email, stayReview } = build({
+      hospitality: { guest_email_post_stay_review: false },
+      byStatus: { checked_out: [reservation()] },
+    });
+    await job.run(IN_WINDOW);
+    expect(stayReview.linkFor).not.toHaveBeenCalled();
+    expect(email.sendEmail).toHaveBeenCalledTimes(1);
+    const [, , html, text] = email.sendEmail.mock.calls[0];
+    expect(text).not.toContain('Calificar');
+    expect(html).not.toContain('href=');
+  });
+
+  it('H8.5: si el enlace de calificación falla el agradecimiento sale igual', async () => {
+    const { job, email, stayReview } = build({ byStatus: { checked_out: [reservation()] } });
+    stayReview.linkFor.mockRejectedValueOnce(new Error('sin dominio'));
+    await expect(job.run(IN_WINDOW)).resolves.toBe(1);
+    expect(email.sendEmail.mock.calls[0][3]).not.toContain('Calificar');
+  });
+
   it('no repite: si el log ya existe (otra corrida lo reclamó) no envía', async () => {
     const { job, email } = build({ duplicate: true, byStatus: { checked_out: [reservation()] } });
     await expect(job.run(IN_WINDOW)).resolves.toBe(0);
@@ -166,6 +203,7 @@ describe('guest messages rules', () => {
       pre_arrival: true,
       pre_arrival_hours: 48,
       post_stay: true,
+      post_stay_review: true,
       check_in_time: '15:00',
       check_out_time: '12:00',
     });

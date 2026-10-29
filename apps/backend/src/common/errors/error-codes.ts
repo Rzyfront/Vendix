@@ -6090,6 +6090,22 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Activa la tienda en línea para compartir el enlace de pre-registro',
   },
+  // Hospitality Suite (H8.5) — private stay rating the guest gives after check-out.
+  LODGING_STAY_REVIEW_FIND_001: {
+    code: 'LODGING_STAY_REVIEW_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Este enlace para calificar tu estadía no existe',
+  },
+  LODGING_STAY_REVIEW_CLOSED_001: {
+    code: 'LODGING_STAY_REVIEW_CLOSED_001',
+    httpStatus: 410,
+    devMessage: 'Este enlace para calificar ya no está disponible: se abre al salir del hotel y vence a los 30 días',
+  },
+  LODGING_STAY_REVIEW_DUP_001: {
+    code: 'LODGING_STAY_REVIEW_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya recibimos tu calificación de esta estadía. ¡Gracias!',
+  },
   // Hospitality Suite (H3.2) — check-in that opens the folio.
   LODGING_CHECKIN_EARLY_001: {
     code: 'LODGING_CHECKIN_EARLY_001',

@@ -507,6 +507,8 @@ export function getDefaultStoreSettings(): StoreSettings {
       guest_email_pre_arrival: true,
       guest_email_pre_arrival_hours: 48,
       guest_email_post_stay: true,
+      // H8.5 - the thank-you asks the guest for a private rating of the stay.
+      guest_email_post_stay_review: true,
     },
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is

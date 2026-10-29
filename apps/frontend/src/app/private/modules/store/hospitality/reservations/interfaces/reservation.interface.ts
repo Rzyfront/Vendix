@@ -118,7 +118,20 @@ export interface LodgingFolio {
   status: 'open' | 'closed';
   opened_at: string;
   closed_at: string | null;
-  order: { id: number; order_number: string; grand_total: string };
+  order: {
+    id: number;
+    order_number: string;
+    grand_total: string;
+    /** H8.5 — private rating the guest gave after check-out. */
+    order_review?: LodgingStayReview | null;
+  };
+}
+
+/** H8.5 — the guest's private rating of the stay (1-5 stars). */
+export interface LodgingStayReview {
+  rating: number;
+  comment: string | null;
+  created_at: string;
 }
 
 export const FOLIO_STATUS_LABELS: Record<LodgingFolio['status'], string> = {

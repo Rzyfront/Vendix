@@ -251,6 +251,14 @@ export const storeEcommercePublicRoutes: Routes = [
           ),
       },
       {
+        // H8.5 — private stay rating link in the thank-you email (no login).
+        path: 'calificar-estadia/:token',
+        loadComponent: () =>
+          import('../../private/modules/ecommerce/pages/hotel-booking/hotel-stay-review.component').then(
+            (c) => c.HotelStayReviewComponent,
+          ),
+      },
+      {
         path: 'pqr',
         loadComponent: () =>
           import('../../public/ecommerce/pages/pqr/pqr-submit.component').then(

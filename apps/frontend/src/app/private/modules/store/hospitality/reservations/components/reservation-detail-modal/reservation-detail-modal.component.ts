@@ -103,6 +103,7 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
  * U2: stay and balance on top, then tabs (Resumen · Cuenta · Huéspedes ·
  * Llaves · Historial); full screen on mobile with the primary action fixed below.
  * H8.4 (D12): "Llaves" logs each key or card handed to a guest and its return.
+ * H8.5: the summary shows the private rating the guest gave after check-out.
  */
 @Component({
   selector: 'app-reservation-detail-modal',
@@ -237,6 +238,17 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
               }
               <dt class="text-text-secondary">Cancelación</dt>
               <dd data-testid="reservation-policy">{{ policySummary() }}</dd>
+              @if (r.folio?.order?.order_review; as review) {
+                <dt class="text-text-secondary">Calificación del huésped</dt>
+                <dd data-testid="reservation-stay-review">
+                  <span class="font-medium text-warning" [attr.aria-label]="review.rating + ' de 5 estrellas'">
+                    {{ stars(review.rating) }}
+                  </span>
+                  @if (review.comment) {
+                    <span class="block text-xs text-text-secondary">“{{ review.comment }}”</span>
+                  }
+                </dd>
+              }
             </dl>
 
             @if (penaltyLabel(); as penalty) {
@@ -488,6 +500,12 @@ export class ReservationDetailModalComponent {
   /** Room picked for `cancel_room`. */
   readonly pendingRoomId = signal<number | null>(null);
   readonly moveTarget = signal<RoomChangeTarget | null>(null);
+  /** H8.5 — the guest's 1-5 rating as stars ("★★★★☆"). */
+  stars(rating: number): string {
+    const full = Math.max(0, Math.min(5, Math.round(rating)));
+    return '★'.repeat(full) + '☆'.repeat(5 - full);
+  }
+
   /** H3.5 — bumped to make the deposit and folio panels re-fetch each other. */
   readonly depositVersion = signal(0);
   readonly folioVersion = signal(0);

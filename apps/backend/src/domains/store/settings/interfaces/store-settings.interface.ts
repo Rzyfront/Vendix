@@ -1183,6 +1183,8 @@ export interface HospitalitySettings {
   guest_email_pre_arrival_hours?: number;
   /** H8.2 — email a thank-you after check-out. Default true. */
   guest_email_post_stay?: boolean;
+  /** H8.5 — the thank-you asks for a private rating of the stay. Default true. */
+  guest_email_post_stay_review?: boolean;
 }
 
 // ============================================================================

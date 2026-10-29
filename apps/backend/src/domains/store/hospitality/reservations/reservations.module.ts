@@ -19,6 +19,7 @@ import { LodgingGuestsController } from './guests/guests.controller';
 import { LodgingGuestsService } from './guests/guests.service';
 import { LodgingPrecheckinController } from './precheckin/precheckin.controller';
 import { LodgingPrecheckinService } from './precheckin/precheckin.service';
+import { LodgingStayReviewService } from './stay-review/stay-review.service';
 import { LodgingCheckInService } from './check-in/check-in.service';
 import { LodgingFrontDeskController } from './front-desk/front-desk.controller';
 import { LodgingFrontDeskService } from './front-desk/lodging-front-desk.service';
@@ -120,6 +121,7 @@ import { LodgingKeyHandoversService } from './key-handovers/key-handovers.servic
     LodgingAllotmentsService,
     LodgingGuestsService,
     LodgingPrecheckinService,
+    LodgingStayReviewService,
     LodgingCheckInService,
     LodgingFrontDeskService,
     LodgingFolioService,
@@ -145,6 +147,7 @@ import { LodgingKeyHandoversService } from './key-handovers/key-handovers.servic
     LodgingAvailabilityService,
     LodgingBookingEngineService,
     LodgingPrecheckinService,
+    LodgingStayReviewService,
   ],
 })
 export class LodgingReservationsModule {}

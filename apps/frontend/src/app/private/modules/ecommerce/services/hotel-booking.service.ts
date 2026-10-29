@@ -82,6 +82,15 @@ export interface HotelPrecheckin {
   completed_at: string | null;
 }
 
+/** H8.5 — the stay the guest rates (no personal data) and the rating already given. */
+export interface HotelStayReview {
+  store_name: string;
+  reservation_number: string;
+  arrival_date: string;
+  departure_date: string;
+  review: { rating: number; comment: string | null; created_at: string } | null;
+}
+
 /** H8.1 — one guest of the online check-in: the TRA and SIRE fields. */
 export interface HotelPrecheckinGuest {
   reservation_room_id?: number;
@@ -152,6 +161,28 @@ export class HotelBookingService {
     return this.http
       .post<{ data: { guests: number; completed_at: string } }>(
         `${this.apiUrl}/precheckin/${encodeURIComponent(token)}`,
+        body,
+        { headers: this.headers() },
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  /** H8.5 — private stay rating by link token, no login. */
+  getStayReview(token: string): Observable<HotelStayReview> {
+    return this.http
+      .get<{ data: HotelStayReview }>(`${this.apiUrl}/stay-review/${encodeURIComponent(token)}`, {
+        headers: this.headers(),
+      })
+      .pipe(map((r) => r.data));
+  }
+
+  submitStayReview(
+    token: string,
+    body: { rating: number; comment?: string | null },
+  ): Observable<NonNullable<HotelStayReview['review']>> {
+    return this.http
+      .post<{ data: NonNullable<HotelStayReview['review']> }>(
+        `${this.apiUrl}/stay-review/${encodeURIComponent(token)}`,
         body,
         { headers: this.headers() },
       )

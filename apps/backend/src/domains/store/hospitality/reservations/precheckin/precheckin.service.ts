@@ -42,6 +42,19 @@ export class LodgingPrecheckinService {
     if (!precheckinLinkOpen(reservation, await this.storeToday(store_id))) {
       throw new VendixHttpException(ErrorCodes.LODGING_PRECHECKIN_EXPIRED_001);
     }
+    return {
+      url: await this.guestUrl(reservation, PRECHECKIN_PATH),
+      completed_at: reservation.precheckin_completed_at,
+    };
+  }
+
+  /**
+   * The reservation's guest link on the store's online domain: `path` is the
+   * storefront page (online check-in, H8.5 stay rating); the token is created
+   * on first use and is the same for every guest page of the reservation.
+   */
+  async guestUrl(reservation: { id: number; precheckin_token: string | null }, path: string): Promise<string> {
+    const store_id = this.requireStoreId();
     const domain = await this.prisma.domain_settings.findFirst({
       where: { store_id, domain_type: 'ecommerce', status: 'active', is_primary: true },
       orderBy: { updated_at: 'desc' },
@@ -58,10 +71,7 @@ export class LodgingPrecheckinService {
       });
     }
     const base = /^https?:\/\//.test(domain.hostname) ? domain.hostname : `https://${domain.hostname}`;
-    return {
-      url: `${base.replace(/\/+$/, '')}/${PRECHECKIN_PATH}/${token}`,
-      completed_at: reservation.precheckin_completed_at,
-    };
+    return `${base.replace(/\/+$/, '')}/${path}/${token}`;
   }
 
   /** Guest: what the form needs, with no personal data of the party. */

@@ -6,6 +6,7 @@ import { localDateString, resolveStoreTimezone } from '@common/utils/store-timez
 import { EmailService } from '../../../../../email/email.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { LodgingPrecheckinService } from '../precheckin/precheckin.service';
+import { LodgingStayReviewService } from '../stay-review/stay-review.service';
 import { stayNights } from '../stay-dates';
 import {
   GuestMessageKey,
@@ -45,7 +46,7 @@ const notSent = (key: GuestMessageKey) => ({
  * Hospitality Suite (H8.2) — emails the guest without desk work: the
  * confirmation of a reservation, a reminder with the online check-in link
  * `guest_email_pre_arrival_hours` before arrival and a thank-you after
- * check-out. Each one is on/off in Configuración → Hotelería.
+ * check-out that asks for a private rating of the stay (H8.5). Each one is on/off in Configuración → Hotelería.
  *
  * Idempotent: the `lodging_guest_message_logs` row is claimed (unique per
  * reservation, message and channel) before sending, so overlapping runs never
@@ -62,6 +63,7 @@ export class LodgingGuestMessagesJob {
     private readonly prisma: StorePrismaService,
     private readonly email: EmailService,
     private readonly precheckin: LodgingPrecheckinService,
+    private readonly stayReview: LodgingStayReviewService,
     private readonly storeContextRunner: StoreContextRunner,
   ) {}
 
@@ -202,6 +204,7 @@ export class LodgingGuestMessagesJob {
         check_out_time: settings.check_out_time,
         precheckin_done,
         precheckin_url: key === 'pre_arrival' && !precheckin_done ? await this.precheckinUrl(reservation.id) : null,
+        review_url: key === 'post_stay' && settings.post_stay_review ? await this.reviewUrl(reservation.id) : null,
       });
       const result = await this.email.sendEmail(to, message.subject, message.html, message.text);
       if (result.success) return 1;
@@ -219,6 +222,15 @@ export class LodgingGuestMessagesJob {
   private async precheckinUrl(reservation_id: number): Promise<string | null> {
     try {
       return (await this.precheckin.getLink(reservation_id)).url;
+    } catch {
+      return null;
+    }
+  }
+
+  /** H8.5 — the stay rating link; without it (no online domain) the thank-you still goes out. */
+  private async reviewUrl(reservation_id: number): Promise<string | null> {
+    try {
+      return await this.stayReview.linkFor(reservation_id);
     } catch {
       return null;
     }

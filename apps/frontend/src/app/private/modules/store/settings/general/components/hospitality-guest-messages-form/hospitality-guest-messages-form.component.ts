@@ -17,7 +17,11 @@ const wholeNumber = (control: AbstractControl): ValidationErrors | null => {
   return value === '' || /^\d+$/.test(value) ? null : { wholeNumber: true };
 };
 
-type GuestEmailFlag = 'guest_email_confirmation' | 'guest_email_pre_arrival' | 'guest_email_post_stay';
+type GuestEmailFlag =
+  | 'guest_email_confirmation'
+  | 'guest_email_pre_arrival'
+  | 'guest_email_post_stay'
+  | 'guest_email_post_stay_review';
 
 /**
  * Hotelería → «Correos al huésped» (H8.2): which automatic emails the guest
@@ -78,6 +82,19 @@ type GuestEmailFlag = 'guest_email_confirmation' | 'guest_email_pre_arrival' | '
           Después del check-out, el huésped recibe un mensaje de gracias por su estadía.
         </p>
       </div>
+      @if (postStay()) {
+        <div>
+          <app-toggle
+            [checked]="postStayReview()"
+            label="Pedir una calificación privada"
+            (changed)="onFlagChange('guest_email_post_stay_review', $event)"
+          />
+          <p class="mt-1 text-xs text-text-secondary">
+            El agradecimiento incluye un enlace para calificar la estadía de 1 a 5 estrellas. Solo la ve el hotel,
+            en Clientes → Reseñas y en la reserva.
+          </p>
+        </div>
+      }
     </div>
   `,
 })
@@ -89,6 +106,7 @@ export class HospitalityGuestMessagesForm {
   protected readonly confirmation = signal(true);
   protected readonly preArrival = signal(true);
   protected readonly postStay = signal(true);
+  protected readonly postStayReview = signal(true);
 
   readonly hoursControl = new FormControl<number>(48, {
     nonNullable: true,
@@ -102,6 +120,7 @@ export class HospitalityGuestMessagesForm {
       this.confirmation.set(current.guest_email_confirmation ?? true);
       this.preArrival.set(current.guest_email_pre_arrival ?? true);
       this.postStay.set(current.guest_email_post_stay ?? true);
+      this.postStayReview.set(current.guest_email_post_stay_review ?? true);
       // A value the user left invalid keeps what they typed (and its error).
       if (!(this.hoursControl.dirty && this.hoursControl.invalid)) {
         this.hoursControl.setValue(current.guest_email_pre_arrival_hours ?? 48, { emitEvent: false });
@@ -114,6 +133,7 @@ export class HospitalityGuestMessagesForm {
       guest_email_confirmation: this.confirmation,
       guest_email_pre_arrival: this.preArrival,
       guest_email_post_stay: this.postStay,
+      guest_email_post_stay_review: this.postStayReview,
     }[flag];
     target.set(checked);
     this.emit();
@@ -131,6 +151,7 @@ export class HospitalityGuestMessagesForm {
       guest_email_confirmation: this.confirmation(),
       guest_email_pre_arrival: this.preArrival(),
       guest_email_post_stay: this.postStay(),
+      guest_email_post_stay_review: this.postStayReview(),
     };
     const hours = this.hoursControl;
     if (hours.dirty) hours.markAsTouched();

@@ -26,6 +26,7 @@ const DEFAULT_HOSPITALITY: HospitalitySettings = {
   guest_email_pre_arrival: true,
   guest_email_pre_arrival_hours: 48,
   guest_email_post_stay: true,
+  guest_email_post_stay_review: true,
 };
 
 /** Typing in a text field emits per keystroke; one save per pause. */

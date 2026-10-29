@@ -14,6 +14,8 @@ export interface GuestMessageSettings {
   pre_arrival: boolean;
   pre_arrival_hours: number;
   post_stay: boolean;
+  /** H8.5 — the thank-you asks for a private rating of the stay. */
+  post_stay_review: boolean;
   check_in_time: string;
   check_out_time: string;
 }
@@ -33,6 +35,7 @@ export function guestMessageSettings(hospitality: Record<string, unknown> | unde
     pre_arrival_hours:
       Number.isInteger(hours) && hours >= 12 && hours <= 168 ? hours : DEFAULT_PRE_ARRIVAL_HOURS,
     post_stay: h.guest_email_post_stay !== false,
+    post_stay_review: h.guest_email_post_stay_review !== false,
     check_in_time: time(h.check_in_time, '15:00'),
     check_out_time: time(h.check_out_time, '12:00'),
   };
@@ -70,6 +73,8 @@ export interface GuestMessageData {
   precheckin_url?: string | null;
   /** Pre-arrival only: the party is already registered. */
   precheckin_done?: boolean;
+  /** Post-stay only (H8.5): private stay rating link; null when off, rated or without an online domain. */
+  review_url?: string | null;
 }
 
 export interface GuestEmail {
@@ -146,15 +151,20 @@ export function guestMessageEmail(key: GuestMessageKey, data: GuestMessageData):
       }
       return render(data, `Te esperamos pronto · ${data.store_name}`, paragraphs, stayRows(data), link);
     }
-    case 'post_stay':
+    case 'post_stay': {
+      const paragraphs = [`Gracias por elegir ${data.store_name}. Esperamos que hayas disfrutado tu estadía.`];
+      if (data.review_url) {
+        paragraphs.push('¿Cómo te fue? Califica tu estadía en un minuto: tu opinión llega solo al hotel y nos ayuda a mejorar.');
+      }
+      paragraphs.push('Será un gusto recibirte de nuevo.');
+      const link = data.review_url ? { label: 'Calificar mi estadía', url: data.review_url } : undefined;
       return render(
         data,
         `Gracias por hospedarte en ${data.store_name}`,
-        [
-          `Gracias por elegir ${data.store_name}. Esperamos que hayas disfrutado tu estadía.`,
-          'Será un gusto recibirte de nuevo.',
-        ],
+        paragraphs,
         [['Reserva', data.reservation_number]],
+        link,
       );
+    }
   }
 }

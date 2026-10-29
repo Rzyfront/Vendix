@@ -1344,6 +1344,15 @@ export class HospitalitySettingsDto {
   @IsOptional()
   @IsBoolean()
   guest_email_post_stay?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'H8.5 — the thank-you email asks the guest for a private rating of the stay.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  guest_email_post_stay_review?: boolean;
 }
 
 export class RestaurantSettingsDto {
