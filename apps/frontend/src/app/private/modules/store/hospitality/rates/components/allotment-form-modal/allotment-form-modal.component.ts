@@ -6,6 +6,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { injectFocusFirstField } from '../../../shared/focus-first-field';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ButtonComponent,
@@ -62,7 +63,7 @@ interface AllotmentCustomer {
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      (opened)="reset()"
+      (opened)="reset(); focusFirstField()"
       [size]="'md'"
       [dialog]="true"
       [title]="allotment() ? 'Editar cupo para agencia' : 'Nuevo cupo para agencia'"
@@ -85,7 +86,7 @@ interface AllotmentCustomer {
               }
             </div>
           } @else {
-            <app-pos-customer-selector (customerSelected)="pickCustomer($event)" />
+            <app-pos-customer-selector data-autofocus (customerSelected)="pickCustomer($event)" />
             @if (customerError()) {
               <p class="text-xs text-error" role="alert">Elige la agencia o empresa</p>
             }
@@ -100,6 +101,7 @@ interface AllotmentCustomer {
           (ngSubmit)="onSubmit()"
         >
           <app-selector
+            data-autofocus
             formControlName="unit_type_id"
             label="Tipo de habitación"
             placeholder="Elige el tipo"
@@ -185,6 +187,7 @@ export class AllotmentFormModalComponent {
   private readonly allotmentsService = inject(AllotmentsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  protected readonly focusFirstField = injectFocusFirstField();
 
   readonly isOpen = input(false);
   /** Allotment to edit; null creates a new one. */
@@ -229,6 +232,12 @@ export class AllotmentFormModalComponent {
     this.form.controls.release_days.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((value) => this.releaseDays.set(Number(value) || 0));
+    // The type error clears as soon as a type is picked.
+    this.form.controls.unit_type_id.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => {
+        if (value !== null) this.typeError.set(false);
+      });
   }
 
   reset(): void {

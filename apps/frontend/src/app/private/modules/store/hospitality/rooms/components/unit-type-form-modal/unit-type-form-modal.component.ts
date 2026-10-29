@@ -3,7 +3,6 @@ import {
   computed,
   DestroyRef,
   effect,
-  ElementRef,
   inject,
   input,
   output,
@@ -16,6 +15,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { injectFocusFirstField } from '../../../shared/focus-first-field';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { catchError, map, startWith } from 'rxjs/operators';
 import { forkJoin, of } from 'rxjs';
@@ -121,6 +121,7 @@ interface UnitTypeForm {
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <app-input
             data-testid="unit-type-name"
+            data-autofocus
             class="md:col-span-2"
             formControlName="name"
             label="Nombre"
@@ -276,7 +277,7 @@ export class UnitTypeFormModalComponent {
   private readonly toastService = inject(ToastService);
   private readonly imageUploadService = inject(ImageUploadService);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly focusFirstField = injectFocusFirstField();
   private readonly authFacade = inject(AuthFacade);
 
   readonly isOpen = input(false);
@@ -461,19 +462,7 @@ export class UnitTypeFormModalComponent {
 
   onOpened(): void {
     this.syncFromUnitType();
-    this.focusFirstFieldSoon();
-  }
-
-  /**
-   * R-FORM-05 — the form opens on its first field, after the modal moved the
-   * focus to its own container.
-   */
-  private focusFirstFieldSoon(): void {
-    setTimeout(() => {
-      this.host.nativeElement
-        .querySelector<HTMLInputElement>('[data-testid="unit-type-name"] input')
-        ?.focus();
-    }, 250);
+    this.focusFirstField();
   }
 
   onCancel(): void {

@@ -314,7 +314,7 @@ interface SeasonRow extends Season {
                   [hoverable]="true"
                   emptyMessage="No hay planes con ese criterio"
                   emptyIcon="search"
-                  (rowClick)="openForm($event)"
+                  (rowClick)="canWrite() && openForm($event)"
                 />
               }
             }
@@ -340,7 +340,7 @@ interface SeasonRow extends Season {
                   [hoverable]="true"
                   emptyMessage="No hay temporadas con ese criterio"
                   emptyIcon="search"
-                  (rowClick)="openSeasonForm($event)"
+                  (rowClick)="canWrite() && openSeasonForm($event)"
                 />
               }
             }
@@ -366,7 +366,7 @@ interface SeasonRow extends Season {
                   [hoverable]="true"
                   emptyMessage="No hay políticas con ese criterio"
                   emptyIcon="search"
-                  (rowClick)="openPolicyForm($event)"
+                  (rowClick)="canWrite() && openPolicyForm($event)"
                 />
               }
             }
@@ -392,7 +392,7 @@ interface SeasonRow extends Season {
                   [hoverable]="true"
                   emptyMessage="No hay cupos con ese criterio"
                   emptyIcon="search"
-                  (rowClick)="openAllotmentForm($event)"
+                  (rowClick)="canWrite() && openAllotmentForm($event)"
                 />
               }
             }
@@ -575,14 +575,19 @@ export class HospitalityRatesPageComponent implements OnInit {
     const defaultPlan = plans.find((p) => p.is_default);
     const activeAllotments = this.allotments().filter((a) => a.is_active);
     const policies = this.policies();
-    const usedPolicyIds = new Set(plans.map((p) => p.cancellation_policy_id));
+    // Only active plans apply a policy to new bookings.
+    const usedPolicyIds = new Set(
+      plans
+        .filter((p) => p.is_active && p.cancellation_policy_id !== null)
+        .map((p) => p.cancellation_policy_id),
+    );
     return {
       activePlans: plans.filter((p) => p.is_active).length,
       defaultPlan: defaultPlan ? `Predeterminado: ${defaultPlan.name}` : 'Sin plan predeterminado',
       activeSeasons: this.seasons().filter((s) => s.is_active).length,
       totalSeasons: this.seasons().length,
       activePolicies: policies.filter((p) => p.is_active).length,
-      // TR5 — "2 políticas · 1 en uso": registered policies and those some plan uses.
+      // TR5 — "2 políticas · 1 en uso": registered policies and those an active plan uses.
       policiesInUse: `${plural(policies.length, 'política', 'políticas')} · ${
         policies.filter((p) => usedPolicyIds.has(p.id)).length
       } en uso`,

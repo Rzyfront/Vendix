@@ -1,5 +1,6 @@
 import { Component, computed, DestroyRef, inject, input, output, signal } from '@angular/core';
 import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { injectFocusFirstField } from '../../../shared/focus-first-field';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ButtonComponent,
@@ -52,7 +53,7 @@ interface RestrictionForm {
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      (opened)="reset()"
+      (opened)="reset(); focusFirstField()"
       [size]="'md'"
       [dialog]="true"
       title="Restricciones de venta"
@@ -67,6 +68,7 @@ interface RestrictionForm {
       >
         <div class="grid grid-cols-2 gap-3">
           <app-input
+            data-autofocus
             formControlName="from_date"
             label="Desde la noche"
             type="date"
@@ -135,6 +137,7 @@ export class RestrictionFormModalComponent {
   private readonly restrictionsService = inject(RestrictionsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  protected readonly focusFirstField = injectFocusFirstField();
 
   readonly isOpen = input(false);
   /** Night clicked in the calendar, `YYYY-MM-DD`. */

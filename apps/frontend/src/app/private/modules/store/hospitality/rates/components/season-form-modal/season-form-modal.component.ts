@@ -6,6 +6,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { injectFocusFirstField } from '../../../shared/focus-first-field';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ButtonComponent,
@@ -66,7 +67,7 @@ const DEFAULT_SEASON_COLOR: string = SEASON_COLORS[0].value;
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      (opened)="reset()"
+      (opened)="reset(); focusFirstField()"
       [size]="'md'"
       [dialog]="true"
       [title]="season() ? 'Editar temporada' : 'Nueva temporada'"
@@ -80,6 +81,7 @@ const DEFAULT_SEASON_COLOR: string = SEASON_COLORS[0].value;
         (ngSubmit)="onSubmit()"
       >
         <app-input
+          data-autofocus
           formControlName="name"
           label="Nombre"
           type="text"
@@ -163,6 +165,7 @@ export class SeasonFormModalComponent {
   private readonly seasonsService = inject(SeasonsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  protected readonly focusFirstField = injectFocusFirstField();
 
   readonly isOpen = input(false);
   /** Season to edit; null creates a new one. */

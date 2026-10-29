@@ -41,7 +41,7 @@ interface CalendarDay {
   date: string;
   day: number;
   season: Season | null;
-  /** H2.3 — short labels of the night's restrictions ("Mín. 3", "CTA"…). */
+  /** H2.3 — short cell labels of the night's restrictions ("Mín. 3", "Sin lleg."…). */
   labels: string[];
   /** Full description for the tooltip. */
   title: string;
@@ -128,6 +128,7 @@ function currentMonth(): string {
             [style.background-color]="day.season ? day.season.color + '33' : null"
             [style.border-color]="day.season ? day.season.color : null"
             [attr.title]="day.title"
+            [attr.aria-label]="day.day + ': ' + day.title"
             [attr.data-season]="day.season?.name ?? null"
             [attr.data-date]="day.date"
             data-testid="rates-calendar-day"
@@ -139,7 +140,7 @@ function currentMonth(): string {
             }
             @for (label of day.labels; track label) {
               <span
-                class="mt-0.5 truncate rounded bg-error/10 px-1 text-[10px] font-semibold text-error"
+                class="mt-0.5 break-words rounded bg-error/10 px-0.5 text-[10px] font-semibold leading-tight text-error"
                 data-testid="rates-calendar-restriction"
               >
                 {{ label }}
@@ -151,7 +152,8 @@ function currentMonth(): string {
 
       <p class="text-xs text-text-secondary">
         Toca una noche para fijar sus restricciones. Mín./Máx.: noches de estancia para llegar esa
-        noche · Sin llegadas / Sin salidas ese día · Venta cerrada: no se vende esa noche.
+        noche · Sin lleg. / Sin sal.: sin llegadas o sin salidas ese día · Sin venta: venta
+        cerrada, no se vende esa noche.
       </p>
 
       <div class="flex flex-wrap gap-3 text-xs text-text-secondary">
@@ -212,14 +214,16 @@ export class RatesCalendarComponent implements OnInit {
     return Array.from({ length: count }, (_, i) => {
       const date = `${year}-${pad(month)}-${pad(i + 1)}`;
       const season = winningSeason(date, seasons);
-      // Every-type rows read "Mín. 3"; a type row reads "Suite: Stop".
-      const labels = this.restrictions()
-        .filter((r) => r.date === date)
-        .flatMap((r) => {
+      // Every-type rows read "Mín. 3"; a type row reads "Suite: Sin venta". The
+      // cell uses short labels (a phone cell is 1/7 wide); the tooltip, long ones.
+      const nightRows = this.restrictions().filter((r) => r.date === date);
+      const describe = (format: 'long' | 'short') =>
+        nightRows.flatMap((r) => {
           const prefix = r.unit_type_id == null ? '' : `${names.get(r.unit_type_id) ?? 'Tipo'}: `;
-          return restrictionLabels(r).map((label) => prefix + label);
+          return restrictionLabels(r, format).map((label) => prefix + label);
         });
-      const title = [season ? season.name : 'Precio normal', ...labels].join(' · ');
+      const labels = describe('short');
+      const title = [season ? season.name : 'Precio normal', ...describe('long')].join(' · ');
       return { date, day: i + 1, season, labels, title };
     });
   });

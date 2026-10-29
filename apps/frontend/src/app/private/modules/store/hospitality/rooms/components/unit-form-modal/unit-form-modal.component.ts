@@ -3,7 +3,6 @@ import {
   computed,
   DestroyRef,
   effect,
-  ElementRef,
   inject,
   input,
   output,
@@ -16,6 +15,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { injectFocusFirstField } from '../../../shared/focus-first-field';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable } from 'rxjs';
 import {
@@ -90,6 +90,7 @@ interface UnitForm {
           @if (isRange()) {
             <app-input
               data-testid="unit-first-field"
+              data-autofocus
               formControlName="range_from"
               label="Desde"
               type="number"
@@ -111,6 +112,7 @@ interface UnitForm {
           } @else {
             <app-input
               data-testid="unit-first-field"
+              data-autofocus
               class="md:col-span-2"
               formControlName="code"
               label="Número"
@@ -161,7 +163,7 @@ export class UnitFormModalComponent {
   private readonly unitsService = inject(LodgingUnitsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly focusFirstField = injectFocusFirstField();
 
   readonly isOpen = input(false);
   readonly unit = input<LodgingUnit | null>(null);
@@ -225,25 +227,13 @@ export class UnitFormModalComponent {
 
   onOpened(): void {
     this.syncFromUnit();
-    this.focusFirstFieldSoon();
+    this.focusFirstField();
   }
 
   /** Switching to range mode swaps "Número" for "Desde": focus it too. */
   setRange(enabled: boolean): void {
     this.isRange.set(enabled);
-    this.focusFirstFieldSoon();
-  }
-
-  /**
-   * R-FORM-05 — the form opens on its first field, after the modal moved the
-   * focus to its own container.
-   */
-  private focusFirstFieldSoon(): void {
-    setTimeout(() => {
-      this.host.nativeElement
-        .querySelector<HTMLInputElement>('[data-testid="unit-first-field"] input')
-        ?.focus();
-    }, 250);
+    this.focusFirstField();
   }
 
   onCancel(): void {

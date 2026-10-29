@@ -7,6 +7,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { injectFocusFirstField } from '../../../shared/focus-first-field';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ButtonComponent,
@@ -72,7 +73,7 @@ const PENALTY_OPTIONS: SelectorOption[] = [
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      (opened)="reset()"
+      (opened)="reset(); focusFirstField()"
       [size]="'md'"
       [dialog]="true"
       [title]="policy() ? 'Editar política' : 'Nueva política de cancelación'"
@@ -86,6 +87,7 @@ const PENALTY_OPTIONS: SelectorOption[] = [
         (ngSubmit)="onSubmit()"
       >
         <app-input
+          data-autofocus
           formControlName="name"
           label="Nombre"
           type="text"
@@ -181,6 +183,7 @@ export class CancellationPolicyFormModalComponent {
   private readonly policiesService = inject(CancellationPoliciesService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  protected readonly focusFirstField = injectFocusFirstField();
 
   readonly isOpen = input(false);
   /** Policy to edit; null creates a new one. */
@@ -193,6 +196,8 @@ export class CancellationPolicyFormModalComponent {
   /** Per-row errors ("Hay otra penalidad con las mismas horas"), shown after a submit attempt. */
   readonly ruleErrors = signal<RuleErrors[]>([]);
   readonly noShowError = signal('');
+  /** Errors appear on the first save attempt, then update as the user types. */
+  private readonly submitted = signal(false);
   readonly summary = signal('');
   readonly noShowType = signal<NoShowType>('none');
   readonly penaltyOptions = PENALTY_OPTIONS;
@@ -212,10 +217,12 @@ export class CancellationPolicyFormModalComponent {
   });
 
   constructor() {
-    // Keep the readable summary and the no-show field in sync with the form.
+    // Keep the readable summary and the no-show field in sync with the form;
+    // after a failed save, errors follow the fields as they are corrected.
     this.form.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       this.noShowType.set(this.form.controls.no_show_type.value);
       this.summary.set(describePolicy(this.toPayload()));
+      if (this.submitted()) this.showErrors();
     });
   }
 
@@ -231,6 +238,7 @@ export class CancellationPolicyFormModalComponent {
       no_show_value: policy?.no_show_penalty?.penalty_value ?? 100,
       is_active: policy?.is_active ?? true,
     });
+    this.submitted.set(false);
     this.ruleErrors.set([]);
     this.noShowError.set('');
   }
@@ -243,7 +251,13 @@ export class CancellationPolicyFormModalComponent {
 
   removeRule(index: number): void {
     this.form.controls.rules.removeAt(index);
-    this.ruleErrors.update((errors) => errors.filter((_, i) => i !== index));
+  }
+
+  private showErrors(): ReturnType<typeof policyErrors> {
+    const problems = policyErrors(this.toPayload());
+    this.ruleErrors.set(problems.rules);
+    this.noShowError.set(problems.noShow);
+    return problems;
   }
 
   onCancel(): void {
@@ -252,13 +266,12 @@ export class CancellationPolicyFormModalComponent {
 
   onSubmit(): void {
     this.form.markAllAsTouched();
-    const payload = this.toPayload();
-    const problems = policyErrors(payload);
-    this.ruleErrors.set(problems.rules);
-    this.noShowError.set(problems.noShow);
+    this.submitted.set(true);
+    const problems = this.showErrors();
     const hasProblem = !!problems.noShow || problems.rules.some((r) => r.hours || r.value);
     if (this.form.invalid || hasProblem) return;
 
+    const payload = this.toPayload();
     const policy = this.policy();
     const request = policy
       ? this.policiesService.update(policy.id, payload)

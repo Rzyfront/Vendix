@@ -159,14 +159,21 @@ export interface RestrictionPayload {
   stop_sell: boolean;
 }
 
-/** Short calendar labels of a restriction: "Mín. 3", "Sin llegadas", "Venta cerrada"… */
-export function restrictionLabels(r: LodgingRestriction): string[] {
+/**
+ * Labels of a restriction. `long` reads "Sin llegadas", "Venta cerrada" (legend,
+ * tooltip); `short` fits a phone calendar cell: "Sin lleg.", "Sin venta".
+ */
+export function restrictionLabels(
+  r: LodgingRestriction,
+  format: 'long' | 'short' = 'long',
+): string[] {
+  const short = format === 'short';
   return [
     r.min_stay ? `Mín. ${r.min_stay}` : '',
     r.max_stay ? `Máx. ${r.max_stay}` : '',
-    r.closed_to_arrival ? 'Sin llegadas' : '',
-    r.closed_to_departure ? 'Sin salidas' : '',
-    r.stop_sell ? 'Venta cerrada' : '',
+    r.closed_to_arrival ? (short ? 'Sin lleg.' : 'Sin llegadas') : '',
+    r.closed_to_departure ? (short ? 'Sin sal.' : 'Sin salidas') : '',
+    r.stop_sell ? (short ? 'Sin venta' : 'Venta cerrada') : '',
   ].filter(Boolean);
 }
 

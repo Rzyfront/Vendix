@@ -15,6 +15,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { injectFocusFirstField } from '../../../shared/focus-first-field';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ButtonComponent,
@@ -88,7 +89,7 @@ const hasValue = (value: number | null | undefined): value is number =>
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      (opened)="reset()"
+      (opened)="reset(); focusFirstField()"
       [size]="'lg'"
       [dialog]="true"
       [title]="plan() ? 'Editar plan tarifario' : 'Nuevo plan tarifario'"
@@ -103,6 +104,7 @@ const hasValue = (value: number | null | undefined): value is number =>
       >
         <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
           <app-input
+            data-autofocus
             formControlName="name"
             label="Nombre"
             type="text"
@@ -219,6 +221,7 @@ export class RatePlanFormModalComponent {
   private readonly ratePlansService = inject(RatePlansService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  protected readonly focusFirstField = injectFocusFirstField();
 
   readonly isOpen = input(false);
   /** Plan to edit; null creates a new one. */
