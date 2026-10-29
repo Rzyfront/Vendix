@@ -208,6 +208,8 @@ export interface FrontDeskRow {
   balance: string | null;
   /** H8.4 — keys or cards handed over and not returned yet. */
   keys_out: number;
+  /** H8.1 — guests already registered (online check-in or desk). */
+  registered_guests: number;
 }
 
 /** U1 — "Check-in realizado · 203" (every active room of the stay). */

@@ -84,7 +84,7 @@ type GuestErrors = Partial<Record<GuestField | 'reservation_room_id', string>>;
         <div class="space-y-3 rounded-lg border border-border p-4" data-testid="precheckin-error">
           <p class="text-sm">{{ message }}</p>
           @if (retryable()) {
-            <app-button variant="outline" (clicked)="load()">
+            <app-button variant="outline" customClasses="min-h-11 sm:min-h-0" (clicked)="load()">
               <app-icon slot="icon" name="refresh-cw" [size]="14" />
               Reintentar
             </app-button>
@@ -92,13 +92,27 @@ type GuestErrors = Partial<Record<GuestField | 'reservation_room_id', string>>;
         </div>
       } @else if (done()) {
         <div class="space-y-2 rounded-lg border border-border p-4 text-center" data-testid="precheckin-done">
-          <app-icon name="circle-check" [size]="32" class="text-success" />
-          <p class="text-lg font-semibold">Pre-registro completo ✓</p>
-          <p class="text-sm text-text-secondary">
-            Recibimos los datos de {{ savedCount() }} {{ savedCount() === 1 ? 'huésped' : 'huéspedes' }}.
-            En recepción solo confirmaremos tu documento.
-          </p>
-          <app-button variant="outline" (clicked)="startAgain()">Agregar o corregir huéspedes</app-button>
+          @if (missingGuests() > 0) {
+            <app-icon name="alert-triangle" [size]="32" class="text-warning" />
+            <p class="text-lg font-semibold" data-testid="precheckin-partial">
+              {{ missingGuests() === 1 ? 'Falta 1 acompañante' : 'Faltan ' + missingGuests() + ' acompañantes' }}
+              por registrar
+            </p>
+            <p class="text-sm text-text-secondary">
+              Recibimos los datos de {{ savedCount() }} {{ savedCount() === 1 ? 'huésped' : 'huéspedes' }}.
+              Registra a los demás ahora o en recepción con su documento.
+            </p>
+          } @else {
+            <app-icon name="circle-check" [size]="32" class="text-success" />
+            <p class="text-lg font-semibold">Pre-registro completo ✓</p>
+            <p class="text-sm text-text-secondary">
+              Recibimos los datos de {{ savedCount() }} {{ savedCount() === 1 ? 'huésped' : 'huéspedes' }}.
+              En recepción solo confirmaremos tu documento.
+            </p>
+          }
+          <app-button variant="outline" customClasses="min-h-11 sm:min-h-0" (clicked)="startAgain()">
+            {{ missingGuests() > 0 ? 'Registrar a los que faltan' : 'Agregar o corregir huéspedes' }}
+          </app-button>
         </div>
       } @else if (info(); as r) {
         <div class="space-y-1 rounded-lg border border-border p-4 text-sm">
@@ -113,6 +127,16 @@ type GuestErrors = Partial<Record<GuestField | 'reservation_room_id', string>>;
           }
           @if (r.completed_at) {
             <app-badge variant="success" size="sm">Pre-registro completo ✓</app-badge>
+          } @else if (r.registered_count && r.registered_count < r.expected_guests) {
+            <app-badge variant="warning" size="sm">
+              Pre-registro parcial: {{ r.registered_count }} de {{ r.expected_guests }} huéspedes
+            </app-badge>
+          }
+          @if (r.checked_in) {
+            <p class="text-text-secondary" data-testid="precheckin-in-house">
+              Ya estás en el hotel: aquí solo puedes agregar acompañantes nuevos. Para corregir
+              datos ya registrados, acércate a recepción.
+            </p>
           }
         </div>
 
@@ -248,7 +272,12 @@ type GuestErrors = Partial<Record<GuestField | 'reservation_room_id', string>>;
           </div>
 
           @if (guests.length < maxGuests) {
-            <app-button variant="outline" (clicked)="addGuest()" data-testid="precheckin-add">
+            <app-button
+              variant="outline"
+              customClasses="min-h-11 sm:min-h-0"
+              (clicked)="addGuest()"
+              data-testid="precheckin-add"
+            >
               <app-icon slot="icon" name="user-plus" [size]="16" />
               Agregar acompañante
             </app-button>
@@ -284,6 +313,7 @@ type GuestErrors = Partial<Record<GuestField | 'reservation_room_id', string>>;
             [fullWidth]="true"
             [loading]="saving()"
             [disabled]="!consent()"
+            customClasses="min-h-11"
             data-testid="precheckin-submit"
           >
             <app-icon slot="icon" name="send" [size]="16" />
@@ -316,6 +346,8 @@ export class HotelPrecheckinComponent implements OnInit {
   readonly submitError = signal<string | null>(null);
   readonly done = signal(false);
   readonly savedCount = signal(0);
+  /** Guests of the party still unregistered after the last send. */
+  readonly missingGuests = signal(0);
   readonly consent = signal(false);
   readonly errors = signal<GuestErrors[]>([]);
   /** Bumped on every form change so the per-guest SIRE hints recompute. */
@@ -431,6 +463,7 @@ export class HotelPrecheckinComponent implements OnInit {
         next: (result) => {
           this.saving.set(false);
           this.savedCount.set(result.guests);
+          this.missingGuests.set(Math.max(0, result.expected_guests - result.registered_count));
           this.done.set(true);
         },
         error: (err) => {

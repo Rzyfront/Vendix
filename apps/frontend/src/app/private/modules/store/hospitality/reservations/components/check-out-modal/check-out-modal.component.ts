@@ -29,6 +29,7 @@ import { PosCustomerSelectorComponent } from '../../../../pos/components/pos-cus
 import { PosCustomer } from '../../../../pos/models/customer.model';
 import { CheckOutResult, FolioDetail, SplitAccountInvoice, SplitResult } from '../../interfaces/folio.interface';
 import { LodgingReservation } from '../../interfaces/reservation.interface';
+import { LodgingKeyHandover } from '../../interfaces/key-handover.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 import { invoiceStateLabel } from '../../../shared/hospitality-labels';
 import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
@@ -125,6 +126,36 @@ function newRequestId(): string {
         </div>
       } @else if (folio(); as f) {
         <div class="space-y-4 text-sm">
+          @if (keysOut().length) {
+            <div
+              class="space-y-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2"
+              role="status"
+              data-testid="check-out-keys-out"
+            >
+              <p class="flex items-center gap-2 font-medium text-text-primary">
+                <app-icon name="key-round" [size]="16" />
+                {{ keysOut().length === 1 ? 'El huésped tiene 1 llave sin devolver' : 'El huésped tiene ' + keysOut().length + ' llaves sin devolver' }}
+              </p>
+              <ul class="space-y-1">
+                @for (key of keysOut(); track key.id) {
+                  <li class="flex flex-wrap items-center justify-between gap-2">
+                    <span>{{ key.key_label }} · {{ key.guest_name }}</span>
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      customClasses="min-h-11 sm:min-h-0"
+                      [loading]="returningKeyId() === key.id"
+                      [disabled]="returningKeyId() !== null"
+                      (clicked)="returnKey(key)"
+                    >
+                      Registrar devolución
+                    </app-button>
+                  </li>
+                }
+              </ul>
+              <p class="text-xs text-text-secondary">Puedes registrarla ahora o seguir con el check-out.</p>
+            </div>
+          }
           <dl class="grid grid-cols-2 gap-x-4 gap-y-1 rounded-lg border border-border px-3 py-2">
             <dt class="text-text-secondary">Total de la cuenta</dt>
             <dd class="text-right">{{ money(f.total) }}</dd>
@@ -323,6 +354,9 @@ export class CheckOutModalComponent {
   readonly methodId = signal<number | null>(null);
   readonly methodOptions = signal<SelectorOption[]>([]);
   private requestId = newRequestId();
+  /** H8.4 (D12) — keys the guests still have: a reminder, never a block. */
+  readonly keysOut = signal<LodgingKeyHandover[]>([]);
+  readonly returningKeyId = signal<number | null>(null);
   readonly allPaid = computed(() => this.split()?.accounts.every((a) => a.payment_state === 'paid') ?? true);
   protected readonly Number = Number;
   protected readonly invoiceStateLabel = invoiceStateLabel;
@@ -482,9 +516,38 @@ export class CheckOutModalComponent {
       });
   }
 
+  returnKey(key: LodgingKeyHandover): void {
+    if (this.returningKeyId() !== null) return;
+    this.returningKeyId.set(key.id);
+    this.reservationsService
+      .returnKey(key.reservation_id, key.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.returningKeyId.set(null);
+          this.keysOut.update((keys) => keys.filter((row) => row.id !== key.id));
+          this.toastService.success(`Devolución de ${key.key_label} registrada`);
+        },
+        error: (message: unknown) => {
+          this.returningKeyId.set(null);
+          this.toastService.error(
+            typeof message === 'string' ? message : 'No se pudo registrar la devolución',
+          );
+        },
+      });
+  }
+
   private open(id: number): void {
     this.reset();
     this.loading.set(true);
+    // Best effort: without the key list the check-out still works.
+    this.reservationsService
+      .listKeys(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (keys) => this.keysOut.set(keys.filter((key) => !key.returned_at)),
+        error: () => this.keysOut.set([]),
+      });
     forkJoin({ folio: this.reservationsService.getFolio(id), split: this.reservationsService.getFolioSplit(id) })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -512,6 +575,8 @@ export class CheckOutModalComponent {
     this.company.set(null);
     this.chargeToCredit.set(false);
     this.methodId.set(null);
+    this.keysOut.set([]);
+    this.returningKeyId.set(null);
     this.requestId = newRequestId();
   }
 }

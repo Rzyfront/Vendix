@@ -77,9 +77,20 @@ export interface HotelPrecheckin {
   arrival_date: string;
   departure_date: string;
   expected_guests: number;
+  registered_count: number;
+  /** The guest is in house: the link only adds new companions. */
+  checked_in: boolean;
   rooms: { id: number; name: string }[];
   registered: { name: string; is_primary: boolean }[];
   completed_at: string | null;
+}
+
+/** Result of sending the online check-in: partial while guests are missing. */
+export interface HotelPrecheckinResult {
+  guests: number;
+  completed_at: string | null;
+  registered_count: number;
+  expected_guests: number;
 }
 
 /** H8.5 — the stay the guest rates (no personal data) and the rating already given. */
@@ -157,9 +168,9 @@ export class HotelBookingService {
   submitPrecheckin(
     token: string,
     body: { guests: HotelPrecheckinGuest[]; data_consent: boolean },
-  ): Observable<{ guests: number; completed_at: string }> {
+  ): Observable<HotelPrecheckinResult> {
     return this.http
-      .post<{ data: { guests: number; completed_at: string } }>(
+      .post<{ data: HotelPrecheckinResult }>(
         `${this.apiUrl}/precheckin/${encodeURIComponent(token)}`,
         body,
         { headers: this.headers() },

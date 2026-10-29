@@ -98,13 +98,15 @@ export class LodgingGuestsService {
    * H8.1 — the guest's own online check-in: saves the party in one go, holder
    * first. A guest whose document is already registered is updated (the desk
    * may have typed it); desk-only fields (customer link, IVA exemption,
-   * permit) are kept. The first guest becomes the holder when the
-   * reservation has none, linked to the reservation customer.
+   * permit) are kept unless `updateExisting` is false (guest already in
+   * house: only new companions are added). The first guest becomes the holder
+   * when the reservation has none, linked to the reservation customer.
    */
   async registerParty(
     reservationId: number,
     guests: LodgingGuestDto[],
     holderCustomerId: number | null,
+    { updateExisting = true }: { updateExisting?: boolean } = {},
   ) {
     const store_id = this.requireStoreId();
     const reservation = await this.findRegistrableReservation(reservationId);
@@ -119,6 +121,8 @@ export class LodgingGuestsService {
     const rows = await Promise.all(guests.map((guest) => this.buildData(reservation, guest)));
     return this.saveGuarded<number>(() =>
       this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        // Serializes concurrent submits so the party never gets two holders.
+        await tx.$executeRaw`SELECT id FROM lodging_reservations WHERE id = ${reservationId} AND store_id = ${store_id} FOR UPDATE`;
         let hasHolder =
           (await tx.lodging_guests.count({
             where: { reservation_id: reservationId, is_primary: true },
@@ -133,6 +137,7 @@ export class LodgingGuestsService {
             select: { id: true },
           });
           if (existing) {
+            if (!updateExisting) continue;
             await tx.lodging_guests.update({
               where: { id: existing.id },
               data: { ...data, updated_at: new Date() },

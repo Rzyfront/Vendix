@@ -61,7 +61,13 @@ type KeyField = 'key_label' | 'guest_name' | 'reservation_room_id';
           </p>
         </div>
         @if (canDeliver()) {
-          <app-button variant="primary" size="sm" (clicked)="open()" data-testid="key-deliver">
+          <app-button
+            variant="primary"
+            size="sm"
+            customClasses="min-h-11 sm:min-h-0"
+            (clicked)="open()"
+            data-testid="key-deliver"
+          >
             <app-icon slot="icon" name="plus" [size]="14" />
             Entregar llave
           </app-button>
@@ -73,7 +79,14 @@ type KeyField = 'key_label' | 'guest_name' | 'reservation_room_id';
       } @else if (loadError()) {
         <div class="flex flex-wrap items-center gap-2 text-sm">
           <p class="text-error">{{ loadError() }}</p>
-          <app-button variant="outline" size="sm" (clicked)="load(reservation().id)">Reintentar</app-button>
+          <app-button
+            variant="outline"
+            size="sm"
+            customClasses="min-h-11 sm:min-h-0"
+            (clicked)="load(reservation().id)"
+          >
+            Reintentar
+          </app-button>
         </div>
       } @else if (keys().length === 0) {
         <div class="rounded-lg border border-dashed border-border px-3 py-4 text-center text-sm" data-testid="key-empty">
@@ -81,7 +94,7 @@ type KeyField = 'key_label' | 'guest_name' | 'reservation_room_id';
             {{ canDeliver() ? 'Aún no has entregado llaves en esta reserva.' : 'Las llaves se entregan después del check-in.' }}
           </p>
           @if (canDeliver()) {
-            <app-button variant="outline" size="sm" customClasses="mt-2" (clicked)="open()">
+            <app-button variant="outline" size="sm" customClasses="mt-2 min-h-11 sm:min-h-0" (clicked)="open()">
               <app-icon slot="icon" name="key-round" [size]="14" />
               Entregar la primera llave
             </app-button>

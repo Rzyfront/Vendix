@@ -38,6 +38,10 @@ function build(
     domain?: string | null;
     existing?: { id: number; document_number: string }[];
     holder?: boolean;
+    /** Guests of the reservation after the submit (default: the full party of 3). */
+    registered?: number;
+    /** Token another writer stored first (the conditional update matches nothing). */
+    raced?: string;
   } = {},
 ) {
   const reservation = {
@@ -60,6 +64,7 @@ function build(
     ],
   };
   const tx = {
+    $executeRaw: jest.fn(async () => 1),
     lodging_guests: {
       count: jest.fn(async () => (options.holder ? 1 : 0)),
       findFirst: jest.fn(async ({ where }: any) => {
@@ -82,8 +87,17 @@ function build(
         return null;
       }),
       update: jest.fn(async ({ data }: any) => ({ ...reservation, ...data })),
+      updateMany: jest.fn(async ({ data }: any) => {
+        if (options.raced) {
+          reservation.precheckin_token = options.raced;
+          return { count: 0 };
+        }
+        reservation.precheckin_token = data.precheckin_token;
+        return { count: 1 };
+      }),
     },
     lodging_guests: {
+      count: jest.fn(async () => options.registered ?? 3),
       findMany: jest.fn(async () => [{ first_name: 'Ana', last_name: 'Pérez', is_primary: true }]),
     },
     domain_settings: {
@@ -155,12 +169,20 @@ describe('LodgingPrecheckinService (H8.1)', () => {
   it('gives the desk the storefront link and creates the token only once', async () => {
     const { service, prisma } = build({ token: null });
     const link = await service.getLink(1);
-    const token = prisma.lodging_reservations.update.mock.calls[0][0].data.precheckin_token;
-    expect(link.url).toBe(`https://roku.vendix.com/pre-registro/${token}`);
+    const create = prisma.lodging_reservations.updateMany.mock.calls[0][0];
+    expect(create.where).toEqual({ id: 1, precheckin_token: null });
+    expect(link.url).toBe(`https://roku.vendix.com/pre-registro/${create.data.precheckin_token}`);
 
     const again = build({ token: TOKEN });
     expect((await again.service.getLink(1)).url).toBe(`https://roku.vendix.com/pre-registro/${TOKEN}`);
-    expect(again.prisma.lodging_reservations.update).not.toHaveBeenCalled();
+    expect(again.prisma.lodging_reservations.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('keeps the link another writer already created instead of replacing it', async () => {
+    const { service, prisma } = build({ token: null, raced: 'tok_sent_by_reminder' });
+    const link = await service.getLink(1);
+    expect(link.url).toBe('https://roku.vendix.com/pre-registro/tok_sent_by_reminder');
+    expect(prisma.lodging_reservations.update).not.toHaveBeenCalled();
   });
 
   it('asks to turn on the online store when there is no storefront domain', async () => {
@@ -177,6 +199,8 @@ describe('LodgingPrecheckinService (H8.1)', () => {
       arrival_date: '2026-11-12',
       departure_date: '2026-11-14',
       expected_guests: 3,
+      registered_count: 1,
+      checked_in: false,
       rooms: [{ id: 11, name: 'Doble' }],
       registered: [{ name: 'Ana P.', is_primary: true }],
     });
@@ -214,9 +238,33 @@ describe('LodgingPrecheckinService (H8.1)', () => {
     });
     expect(holder.data_consent_at).toBeInstanceOf(Date);
     expect(companion).toMatchObject({ is_primary: false, customer_id: null, nationality_country_code: 'US' });
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
     const update = prisma.lodging_reservations.update.mock.calls[0][0];
     expect(update.where).toEqual({ id: 1 });
     expect(update.data.precheckin_completed_at).toBeInstanceOf(Date);
+    expect(result).toMatchObject({ registered_count: 3, expected_guests: 3 });
+  });
+
+  it('leaves the check-in partial while part of the party is missing (1 of 3)', async () => {
+    const { service, prisma } = build({ registered: 1 });
+    const result = await service.submit(TOKEN, submit([HOLDER]));
+
+    expect(result).toMatchObject({ completed_at: null, registered_count: 1, expected_guests: 3 });
+    const update = prisma.lodging_reservations.update.mock.calls[0][0];
+    expect(update.data.precheckin_completed_at).toBeNull();
+  });
+
+  it('only adds new companions once the guest is in house', async () => {
+    const { service, tx } = build({
+      status: 'checked_in',
+      holder: true,
+      existing: [{ id: 40, document_number: 'x1234567' }],
+    });
+    await service.submit(TOKEN, submit([COMPANION, { ...HOLDER, document_number: '555' }]));
+
+    expect(tx.lodging_guests.update).not.toHaveBeenCalled();
+    expect(tx.lodging_guests.create).toHaveBeenCalledTimes(1);
+    expect(tx.lodging_guests.create.mock.calls[0][0].data.document_number).toBe('555');
   });
 
   it('updates a guest the desk already registered without touching desk-only fields', async () => {

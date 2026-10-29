@@ -64,9 +64,17 @@ interface BoardRow extends FrontDeskRow {
   balance_label: string;
   /** H8.4 — "2 llaves" the guests still have, "—" with none. */
   keys_label: string;
+  /** H8.1 — "✓ 3/3", "Parcial 1/3" or "—" on arrivals. */
+  precheckin_label: string;
 }
 
 /** H8.4 — keys handed over and not returned: "1 llave", "2 llaves", "—". */
+/** H8.1 — online check-in progress of an arrival: "✓ 3/3", "Parcial 1/3" or "—". */
+function precheckinLabel(registered: number, expected: number): string {
+  if (!registered) return '—';
+  return registered >= expected ? `✓ ${registered}/${expected}` : `Parcial ${registered}/${expected}`;
+}
+
 function keysLabel(count: number): string {
   if (!count) return '—';
   return count === 1 ? '1 llave' : `${count} llaves`;
@@ -447,6 +455,7 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
       guests: row.children > 0 ? `${row.adults} + ${row.children} niños` : `${row.adults}`,
       balance_label: this.balanceLabel(row.balance),
       keys_label: keysLabel(row.keys_out),
+      precheckin_label: precheckinLabel(row.registered_guests, row.adults + row.children),
     }));
   });
 
@@ -459,7 +468,9 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
       { key: 'stay', label: 'Llegada → Salida' },
       { key: 'guests', label: 'Huéspedes', align: 'center' },
     ];
-    if (this.tab() !== 'arrivals') {
+    if (this.tab() === 'arrivals') {
+      columns.push({ key: 'precheckin_label', label: 'Pre-registro', align: 'center' });
+    } else {
       columns.push({ key: 'keys_label', label: 'Llaves', align: 'center' });
       columns.push({ key: 'balance_label', label: 'Saldo', align: 'right' });
     }
@@ -482,7 +493,9 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
     detailKeys: [
       { key: 'rooms', label: 'Habitación' },
       { key: 'stay', label: 'Estadía' },
-      ...(this.tab() !== 'arrivals' ? [{ key: 'keys_label', label: 'Llaves' }] : []),
+      this.tab() === 'arrivals'
+        ? { key: 'precheckin_label', label: 'Pre-registro' }
+        : { key: 'keys_label', label: 'Llaves' },
     ],
     ...(this.tab() !== 'arrivals' ? { footerKey: 'balance_label', footerLabel: 'Saldo' } : {}),
   }));

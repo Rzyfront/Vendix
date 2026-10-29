@@ -24,6 +24,15 @@ const LINK_SELECT = {
  * capability; the store comes from the storefront host (scoped Prisma), so a
  * token never opens another hotel's reservation.
  */
+/** Adults plus children of the reservation's active rooms. */
+function expectedGuests(
+  rooms: { adults: number; children: number; cancelled_at: Date | null }[],
+): number {
+  return rooms
+    .filter((room) => !room.cancelled_at)
+    .reduce((sum, room) => sum + room.adults + room.children, 0);
+}
+
 @Injectable()
 export class LodgingPrecheckinService {
   constructor(
@@ -62,14 +71,7 @@ export class LodgingPrecheckinService {
     });
     if (!domain) throw new VendixHttpException(ErrorCodes.LODGING_PRECHECKIN_DOMAIN_001);
 
-    let token = reservation.precheckin_token;
-    if (!token) {
-      token = newPrecheckinToken();
-      await this.prisma.lodging_reservations.update({
-        where: { id: reservation.id },
-        data: { precheckin_token: token, updated_at: new Date() },
-      });
-    }
+    const token = reservation.precheckin_token ?? (await this.ensureToken(reservation.id));
     const base = /^https?:\/\//.test(domain.hostname) ? domain.hostname : `https://${domain.hostname}`;
     return `${base.replace(/\/+$/, '')}/${path}/${token}`;
   }
@@ -94,7 +96,9 @@ export class LodgingPrecheckinService {
       reservation_number: reservation.reservation_number,
       arrival_date: reservation.arrival_date.toISOString().slice(0, 10),
       departure_date: reservation.departure_date.toISOString().slice(0, 10),
-      expected_guests: rooms.reduce((sum, room) => sum + room.adults + room.children, 0),
+      checked_in: reservation.status === 'checked_in',
+      expected_guests: expectedGuests(reservation.rooms),
+      registered_count: guests.length,
       rooms: rooms.map((room) => ({ id: room.id, name: room.unit_type.name })),
       // First name and initial only: the link must not reveal documents.
       registered: guests.map((guest) => ({
@@ -105,20 +109,53 @@ export class LodgingPrecheckinService {
     };
   }
 
-  /** Guest: saves the party and marks the online check-in complete. */
+  /**
+   * Guest: saves the party. The online check-in is complete only once every
+   * expected guest is registered; a partial party leaves it open, so the desk
+   * never checks in a group with guests missing their TRA. Once the guest is
+   * in house the link only adds new companions: guests the desk already
+   * verified against their document are not rewritten.
+   */
   async submit(token: string, dto: PrecheckinSubmitDto) {
     const reservation = await this.findOpenByToken(token);
     const saved = await this.guestsService.registerParty(
       reservation.id,
       dto.guests.map((guest) => ({ ...guest, data_consent: dto.data_consent })),
       reservation.customer_id,
+      { updateExisting: reservation.status !== 'checked_in' },
     );
-    const completed_at = new Date();
+    const registered_count = await this.prisma.lodging_guests.count({
+      where: { reservation_id: reservation.id },
+    });
+    const expected_guests = expectedGuests(reservation.rooms);
+    const now = new Date();
+    const completed_at = registered_count >= expected_guests ? now : null;
     await this.prisma.lodging_reservations.update({
       where: { id: reservation.id },
-      data: { precheckin_completed_at: completed_at, updated_at: completed_at },
+      data: { precheckin_completed_at: completed_at, updated_at: now },
     });
-    return { guests: saved, completed_at };
+    return { guests: saved, completed_at, registered_count, expected_guests };
+  }
+
+  /**
+   * Creates the reservation token only if it has none: a concurrent writer
+   * (desk link, reminder job, stay review) never replaces a link already sent.
+   */
+  private async ensureToken(reservationId: number): Promise<string> {
+    const token = newPrecheckinToken();
+    const { count } = await this.prisma.lodging_reservations.updateMany({
+      where: { id: reservationId, precheckin_token: null },
+      data: { precheckin_token: token, updated_at: new Date() },
+    });
+    if (count) return token;
+    const stored = await this.prisma.lodging_reservations.findFirst({
+      where: { id: reservationId },
+      select: { precheckin_token: true },
+    });
+    if (!stored?.precheckin_token) {
+      throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_FIND_001);
+    }
+    return stored.precheckin_token;
   }
 
   private async findOpenByToken(token: string) {

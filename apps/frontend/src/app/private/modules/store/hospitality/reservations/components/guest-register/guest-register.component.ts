@@ -56,7 +56,7 @@ interface RoomGuests {
           </app-button>
         }
       </div>
-      @if (reservation().precheckin_completed_at || editable()) {
+      @if (precheckinComplete() || partialParty() || editable()) {
         <div
           class="mb-3 space-y-2 rounded-lg border border-border px-3 py-2"
           data-testid="precheckin"
@@ -65,9 +65,13 @@ interface RoomGuests {
             <div>
               <p class="flex flex-wrap items-center gap-1 text-sm font-medium text-text-primary">
                 Pre-registro en línea
-                @if (reservation().precheckin_completed_at) {
+                @if (precheckinComplete()) {
                   <app-badge variant="success" size="xs" data-testid="precheckin-complete">
                     Pre-registro completo ✓
+                  </app-badge>
+                } @else if (partialParty()) {
+                  <app-badge variant="warning" size="xs" data-testid="precheckin-partial">
+                    Pre-registro parcial: {{ guests().length }} de {{ expectedGuests() }} huéspedes
                   </app-badge>
                 }
               </p>
@@ -81,6 +85,7 @@ interface RoomGuests {
                 variant="outline"
                 size="sm"
                 [loading]="linkLoading()"
+                customClasses="min-h-11 sm:min-h-0"
                 (clicked)="shareLink()"
                 data-testid="precheckin-link"
               >
@@ -202,6 +207,19 @@ export class GuestRegisterComponent {
 
   readonly editable = computed(() => EDITABLE_STATUSES.includes(this.reservation().status));
   readonly hasHolder = computed(() => this.guests().some((guest) => guest.is_primary));
+  /** H8.1 — adults plus children of the active rooms. */
+  readonly expectedGuests = computed(() =>
+    this.reservation()
+      .rooms.filter((room) => !room.cancelled_at)
+      .reduce((sum, room) => sum + room.adults + room.children, 0),
+  );
+  /** Some of the party registered, not all: the desk still owes TRA cards. */
+  readonly partialParty = computed(
+    () => this.guests().length > 0 && this.guests().length < this.expectedGuests(),
+  );
+  readonly precheckinComplete = computed(
+    () => !!this.reservation().precheckin_completed_at && !this.partialParty(),
+  );
   /** Guests by active room (plus any left without a room). */
   readonly groups = computed<RoomGuests[]>(() => {
     const guests = this.guests();

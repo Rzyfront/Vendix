@@ -42,7 +42,7 @@ const MAX_COMMENT = 1000;
         <div class="space-y-3 rounded-lg border border-border p-4" data-testid="stay-review-error">
           <p class="text-sm">{{ message }}</p>
           @if (retryable()) {
-            <app-button variant="outline" (clicked)="load()">
+            <app-button variant="outline" customClasses="min-h-11 sm:min-h-0" (clicked)="load()">
               <app-icon slot="icon" name="refresh-cw" [size]="14" />
               Reintentar
             </app-button>
@@ -120,6 +120,7 @@ const MAX_COMMENT = 1000;
               variant="primary"
               [fullWidth]="true"
               [loading]="saving()"
+              customClasses="min-h-11"
               data-testid="stay-review-submit"
             >
               <app-icon slot="icon" name="send" [size]="16" />

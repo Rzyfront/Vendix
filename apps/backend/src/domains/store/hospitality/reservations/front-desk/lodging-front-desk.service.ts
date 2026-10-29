@@ -35,7 +35,7 @@ const FRONT_DESK_SELECT = {
     },
   },
   // H8.4 (D12) — keys the guests of the stay still have.
-  _count: { select: { key_handovers: { where: { returned_at: null } } } },
+  _count: { select: { key_handovers: { where: { returned_at: null } }, guests: true } },
 } satisfies Prisma.lodging_reservationsSelect;
 
 type FrontDeskReservation = Prisma.lodging_reservationsGetPayload<{
@@ -60,6 +60,8 @@ export interface FrontDeskRow {
   balance: string | null;
   /** H8.4 — keys or cards handed over and not returned yet. */
   keys_out: number;
+  /** H8.1 — guests already registered (online check-in or desk), vs adults + children. */
+  registered_guests: number;
 }
 
 export interface FrontDeskBoard {
@@ -113,6 +115,7 @@ function toRow(reservation: FrontDeskReservation): FrontDeskRow {
       ? new Prisma.Decimal(order.grand_total).minus(order.total_paid).toFixed(2)
       : null,
     keys_out: reservation._count.key_handovers,
+    registered_guests: reservation._count.guests,
   };
 }
 
