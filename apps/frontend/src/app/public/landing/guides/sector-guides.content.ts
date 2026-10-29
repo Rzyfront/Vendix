@@ -159,4 +159,109 @@ export const SECTOR_GUIDES: Readonly<Record<string, SectorGuide>> = {
       'Entorno de prueba y limpieza al finalizar.',
     ],
   },
+  // SEO-OPS-23 (2026-10-29): borradores de caja e inventario. Publicación desactivada con el
+  // mismo gate (sectorGuidesEnabled=false en producción). Fuentes de código y revisiones
+  // pendientes (QA en cuenta demo, contador) en docs/seo/seguimiento/entregas.
+  'cierre-de-caja': {
+    title: 'Cómo hacer el cierre de caja diario, paso a paso',
+    description:
+      'Cuadra la caja al final del turno: qué contar, cómo calcular el efectivo esperado, errores frecuentes y cómo se hace el cierre en Vendix.',
+    category: 'Caja y punto de venta',
+    intro:
+      'El cierre de caja responde una pregunta sencilla: ¿el dinero que hay en la caja es el que debería haber? Hacerlo al final de cada turno te permite encontrar errores cuando todavía recuerdas qué pasó.',
+    sections: [
+      {
+        heading: 'Qué necesitas antes de empezar',
+        paragraphs: [
+          'El efectivo con el que abriste el turno (la base), las ventas del turno separadas por medio de pago, las entradas y salidas de efectivo que no son ventas, las devoluciones pagadas en efectivo y el cierre del datáfono.',
+        ],
+      },
+      {
+        heading: 'El cuadre de efectivo, en una fórmula',
+        paragraphs: [
+          'Efectivo esperado = base + ventas en efectivo + entradas − salidas − devoluciones en efectivo. Por ejemplo (cifras ilustrativas): con $100.000 de base, $450.000 en ventas en efectivo, $20.000 de entrada, $60.000 de salida y $15.000 de devolución, el esperado es $495.000. Si contaste $490.000, hay un faltante de $5.000.',
+          'Las ventas con tarjeta o transferencia no van en esta cuenta porque no entran al cajón: se revisan aparte contra el datáfono y el banco.',
+        ],
+      },
+      {
+        heading: 'Paso a paso',
+        paragraphs: [
+          'Deja de vender en esa caja y cierra las ventas pendientes. Cuenta el efectivo por denominación, calcula el esperado y compara. Revisa tarjeta y transferencias por fuera, explica por escrito cualquier diferencia, separa la base del siguiente turno y guarda el informe.',
+        ],
+      },
+      {
+        heading: 'Errores frecuentes',
+        paragraphs: [
+          'Sacar dinero del cajón sin registrarlo, registrar como efectivo una venta con tarjeta, mezclar la base con las ventas, que dos personas cobren en el mismo cajón y cerrar sin anotar la diferencia. Las diferencias pequeñas y repetidas son una señal.',
+        ],
+      },
+      {
+        heading: 'Cómo se hace en Vendix',
+        paragraphs: [
+          'Activa el control de caja en la configuración del POS. Al iniciar el turno eliges Abrir Caja y escribes el Monto de Apertura; una caja no puede tener dos turnos abiertos y cada usuario trabaja con una caja a la vez. Las entradas y salidas que no son ventas se registran como Movimiento de Efectivo, con monto y referencia.',
+          'Al cerrar, Vendix muestra las ventas por medio de pago y el Efectivo Esperado en Caja, calculado con la misma fórmula. Escribes el Conteo Real de Efectivo y Vendix indica si hay sobrante o faltante; puedes dejar notas de cierre e imprimir el informe. Si quedan órdenes pendientes, te avisa y pide un motivo para cerrar de todas formas.',
+          'Vendix muestra el efectivo esperado antes de que escribas tu conteo. Si quieres contar a ciegas, cuenta primero y anota tu cifra antes de abrir el cierre. Abrir, cerrar y registrar movimientos son permisos distintos.',
+        ],
+      },
+    ],
+    checklist: [
+      'Base de apertura registrada al iniciar el turno.',
+      'Entradas y salidas de efectivo con referencia.',
+      'Ventas pendientes cerradas antes de contar.',
+      'Efectivo contado por denominación.',
+      'Diferencia anotada y explicada por escrito.',
+      'Tarjeta y transferencias revisadas contra datáfono y banco.',
+      'Informe de cierre impreso o archivado.',
+    ],
+  },
+  'control-de-inventario': {
+    title: 'Cómo controlar el inventario de tu negocio',
+    description:
+      'Cuenta, ajusta con motivo, define un stock mínimo y traslada mercancía con registro. Incluye cómo se hace en Vendix y un checklist semanal.',
+    category: 'Inventario',
+    intro:
+      'Controlar el inventario es lograr que el número del sistema sea el que hay en la estantería. El método tiene cuatro piezas: contar, ajustar con motivo, avisar a tiempo con un stock mínimo y mover mercancía con registro.',
+    sections: [
+      {
+        heading: 'Cuenta lo que tienes',
+        paragraphs: [
+          'Combina un conteo completo una o dos veces al año con conteos por partes cada semana: los productos que más vendes, los más caros o los que más se pierden. Congela la zona mientras cuentas, cuenta en la unidad en que vendes, anota por ubicación y compara contra el sistema solo al final.',
+        ],
+      },
+      {
+        heading: 'Ajusta las diferencias, siempre con motivo',
+        paragraphs: [
+          'No es lo mismo una diferencia de conteo que un daño, un vencimiento, una pérdida o una corrección de digitación. Separar los motivos muestra dónde se va el dinero: si casi todo es vencido, el problema está en las compras.',
+        ],
+      },
+      {
+        heading: 'Define un stock mínimo para cada producto',
+        paragraphs: [
+          'Stock mínimo = ventas diarias promedio × (días de entrega del proveedor + días de margen). Por ejemplo (cifras ilustrativas): 4 unidades al día × (5 + 2) días = 28 unidades. Revísalo cuando cambie la temporada o el proveedor.',
+        ],
+      },
+      {
+        heading: 'Mueve la mercancía con registro',
+        paragraphs: [
+          'Cada traslado entre bodega y local, o entre sedes, debe decir qué sale, de dónde, a dónde y cuánto llegó. Quien recibe cuenta lo que llegó y lo confirma en ese momento.',
+        ],
+      },
+      {
+        heading: 'Cómo se hace en Vendix',
+        paragraphs: [
+          'En Inventario › Ubicaciones creas cada bodega o local y marcas la bodega principal; con la configuración por defecto, el punto de venta descuenta de ella. En Ajustes de Stock registras la cantidad contada con su tipo (Daño, Pérdida, Robo, Vencido, Conteo o Corrección) y Vendix calcula la diferencia; para un conteo completo puedes usar la carga masiva con la plantilla de productos existentes.',
+          'El umbral de stock bajo se define para toda la tienda (10 unidades por defecto) o por producto, y Vendix crea una notificación de stock bajo cuando se alcanza. En Transferencias registras origen, destino y productos; al aprobar se apartan las unidades y al recibir se suman al destino. En Movimientos ves el historial de ventas, compras, ajustes y transferencias.',
+        ],
+      },
+    ],
+    checklist: [
+      'Contar cada semana un grupo de productos.',
+      'Registrar cada diferencia como ajuste con su tipo.',
+      'Revisar los avisos de stock bajo y hacer los pedidos.',
+      'Recibir las transferencias contando lo que llegó.',
+      'Sumar cada mes los ajustes por tipo.',
+      'Revisar los mínimos de lo que se agotó o sobró.',
+      'Conteo completo una o dos veces al año.',
+    ],
+  },
 };
