@@ -380,6 +380,22 @@ export class GeneralSettingsStore {
   }
 
   /**
+   * Autoguardado de una sola sección (Hotelería, U17): PATCH sólo de ese
+   * bloque. El toast «Ajustes guardados» lo da `updateStoreSettingsSuccess$`
+   * en cada guardado de ajustes. No toca `hasUnsavedChanges`: lo pendiente de
+   * las otras pestañas sigue esperando a «Guardar Cambios».
+   */
+  saveSectionNow(section: keyof StoreSettings, value: StoreSettings[keyof StoreSettings]): void {
+    this.settings.update((s) => ({ ...s, [section]: value }));
+    this.settingsService
+      .saveSettingsNow({ [section]: value } as Partial<StoreSettings>)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        error: (error) => this.toastService.error(parseApiError(error).userMessage),
+      });
+  }
+
+  /**
    * La sección Recibos edita `pos.auto_print_receipt`, que pertenece al bloque
    * POS. Se enruta aquí en vez de copiar la bandera dentro de `receipts` para
    * que el ajuste conserve un único hogar.

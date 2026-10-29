@@ -695,9 +695,7 @@ export class AuthEffects {
       this.actions$.pipe(
         ofType(AuthActions.updateStoreSettingsSuccess),
         tap(() => {
-          this.toast.success(
-            'Configuración de tienda actualizada correctamente',
-          );
+          this.toast.success('Ajustes guardados');
         }),
       ),
     { dispatch: false },
