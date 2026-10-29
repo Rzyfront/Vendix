@@ -6601,6 +6601,54 @@ export const ErrorCodes = {
     devMessage:
       'La cantidad debe ser un múltiplo exacto de lo que rinde la receta (tandas completas)',
   },
+  // ── Manufacturing (MVP) ────────────────────────────────────────────
+  MFG_ORDER_NOT_FOUND: {
+    code: 'MFG_ORDER_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Orden de producción de manufactura no encontrada',
+  },
+  MFG_ORDER_INVALID_STATE: {
+    code: 'MFG_ORDER_INVALID_STATE',
+    httpStatus: 409,
+    devMessage: 'Transición de estado inválida para la orden de producción',
+  },
+  MFG_ORDER_NOT_EDITABLE: {
+    code: 'MFG_ORDER_NOT_EDITABLE',
+    httpStatus: 409,
+    devMessage: 'Solo se puede editar una orden en borrador o liberada',
+  },
+  MFG_CANCEL_AFTER_PARTIAL: {
+    code: 'MFG_CANCEL_AFTER_PARTIAL',
+    httpStatus: 409,
+    devMessage:
+      'Una orden con producción parcial ya movió inventario y no puede cancelarse',
+  },
+  MFG_FORMULA_NOT_ACTIVE: {
+    code: 'MFG_FORMULA_NOT_ACTIVE',
+    httpStatus: 422,
+    devMessage: 'La fórmula debe estar activa para crear una orden de producción',
+  },
+  MFG_QTY_EXCEEDS_REMAINING: {
+    code: 'MFG_QTY_EXCEEDS_REMAINING',
+    httpStatus: 422,
+    devMessage: 'La cantidad producida excede lo pendiente de la orden',
+  },
+  MFG_INVALID_LOCATION: {
+    code: 'MFG_INVALID_LOCATION',
+    httpStatus: 422,
+    devMessage: 'La bodega indicada no existe en la tienda',
+  },
+  MFG_BATCH_NUMBER_DUPLICATE: {
+    code: 'MFG_BATCH_NUMBER_DUPLICATE',
+    httpStatus: 409,
+    devMessage: 'Ya existe un lote con ese número para el producto',
+  },
+  MFG_SEQUENCE_FAILED: {
+    code: 'MFG_SEQUENCE_FAILED',
+    httpStatus: 500,
+    devMessage: 'No se pudo generar el consecutivo de la orden de producción',
+  },
+
   // ── Kitchen Fire (Restaurant Suite Fase D) ─────────────────────────
   KITCHEN_FIRE_ORDER_NOT_FOUND: {
     code: 'KITCHEN_FIRE_ORDER_NOT_FOUND',
