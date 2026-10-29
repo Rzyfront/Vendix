@@ -1,2 +1,0 @@
-apps/backend/src/domains/store/tables/table-sessions.service.ts:1786:      const marked = await this.markSessionPaid(openSession.id, paymentId, client);
-apps/backend/src/domains/store/tables/table-sessions.service.ts:1823:  async markSessionPaid(
