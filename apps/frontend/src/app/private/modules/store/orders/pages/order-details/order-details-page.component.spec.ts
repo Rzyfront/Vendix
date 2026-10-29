@@ -653,3 +653,84 @@ describe('Cambiar a consumidor final desde el cambio de titular', () => {
     expect(self.offerCustomerTier).toHaveBeenCalledWith(42, null);
   });
 });
+
+describe('Facturar una orden de comprador no identificado nunca queda bloqueado', () => {
+  const proto = OrderDetailsPageComponent.prototype as any;
+  const build = () => {
+    const self: any = {
+      showCreditModal: signal(false),
+      creditCustomerRequired: signal(false),
+      creditBalance: signal(0),
+      showHolderModal: signal(false),
+      holderIssue: signal(null),
+      holderEmitKey: 'order',
+      holderEmitCredit: undefined,
+      emitAllowFinalConsumer: false,
+      setEmitError: jasmine.createSpy('setEmitError'),
+      toastService: jasmine.createSpyObj('ToastService', ['show', 'error']),
+      runEmit: jasmine.createSpy('runEmit'),
+      openChangeCustomer: jasmine.createSpy('openChangeCustomer').and.resolveTo(),
+    };
+    return self;
+  };
+
+  it('sin pagar y sin cliente (customer_required): abre el modal de crédito para asignar cliente, sin toast de error', () => {
+    const self = build();
+    const handled = proto.handleUnpaidEmitRejection.call(self, 'order', {
+      errorCode: 'INVOICING_ORDER_UNPAID_001',
+      details: { remaining_balance: '53000.00', credit_eligible: false, credit_blocker: 'customer_required' },
+    });
+    expect(handled).toBeTrue();
+    expect(self.showCreditModal()).toBeTrue();
+    expect(self.creditCustomerRequired()).toBeTrue();
+    expect(self.creditBalance()).toBe(53000);
+    expect(self.toastService.show).not.toHaveBeenCalled();
+    expect(self.toastService.error).not.toHaveBeenCalled();
+  });
+
+  it('sin pagar con cliente: abre el modal de crédito normal', () => {
+    const self = build();
+    proto.handleUnpaidEmitRejection.call(self, 'order', {
+      errorCode: 'INVOICING_ORDER_UNPAID_001',
+      details: { remaining_balance: '100', credit_eligible: true, credit_blocker: null },
+    });
+    expect(self.showCreditModal()).toBeTrue();
+    expect(self.creditCustomerRequired()).toBeFalse();
+  });
+
+  it('409 de titular sin customer_id (invitado): abre el modal, no sólo un toast', () => {
+    const self = build();
+    const handled = proto.handleHolderIncomplete.call(self, 'order', {
+      errorCode: 'INVOICING_HOLDER_INCOMPLETE_001',
+      details: {
+        customer_id: null,
+        customer_name: 'Andrea león',
+        issue_code: 'missing_name',
+        missing_fields: ['last_name'],
+        message: 'Al comprador…',
+        cf_overridable: true,
+      },
+    });
+    expect(handled).toBeTrue();
+    expect(self.showHolderModal()).toBeTrue();
+    expect(self.holderIssue()?.customer_id).toBeNull();
+  });
+
+  it('«Asignar cliente» cierra los modales y abre «Cambiar cliente»', async () => {
+    const self = build();
+    self.showCreditModal.set(true);
+    self.showHolderModal.set(true);
+    await proto.onAssignCustomerForInvoice.call(self);
+    expect(self.showCreditModal()).toBeFalse();
+    expect(self.showHolderModal()).toBeFalse();
+    expect(self.openChangeCustomer).toHaveBeenCalled();
+  });
+
+  it('completar los datos tras pedir crédito reintenta el MISMO crédito', () => {
+    const self = build();
+    const credit = { due_date: '2026-11-27' };
+    self.holderEmitCredit = credit;
+    proto.onHolderCompleted.call(self);
+    expect(self.runEmit).toHaveBeenCalledWith('order', null, credit, false);
+  });
+});

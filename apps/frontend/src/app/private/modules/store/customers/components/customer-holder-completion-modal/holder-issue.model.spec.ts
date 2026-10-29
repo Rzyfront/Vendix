@@ -103,4 +103,33 @@ describe('holder-issue.model', () => {
       last_name: null,
     });
   });
+
+  it('reads a buyer without customer (guest billing data, prod order 15298) instead of dropping it', () => {
+    const issue = holderIssueFromDetails({
+      order_id: 15298,
+      customer_id: null,
+      customer_name: 'Andrea león',
+      issue_code: 'missing_document_number',
+      missing_fields: ['document_number', 'last_name'],
+      current: {
+        document_type: null,
+        document_number: null,
+        verification_digit: null,
+        legal_name: null,
+        first_name: 'Andrea león',
+        last_name: null,
+      },
+      message: 'Al comprador (datos de facturación del pedido) Andrea león le falta…',
+      cf_overridable: true,
+    });
+    expect(issue).not.toBeNull();
+    expect(issue?.customer_id).toBeNull();
+    expect(issue?.customer_name).toBe('Andrea león');
+    expect(issue?.cf_overridable).toBeTrue();
+  });
+
+  it('is null for a payload that is not a holder issue', () => {
+    expect(holderIssueFromDetails({ order_id: 1, customer_id: null })).toBeNull();
+  });
 });
+

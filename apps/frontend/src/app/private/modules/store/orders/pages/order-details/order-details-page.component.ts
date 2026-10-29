@@ -7835,11 +7835,15 @@ export class OrderDetailsPageComponent {
   /** Modal «Facturar a crédito» y el saldo que el backend reportó sin cobrar. */
   readonly showCreditModal = signal(false);
   readonly creditBalance = signal(0);
+  /** El modal de crédito se abrió sin deudor identificable: pide asignar cliente. */
+  readonly creditCustomerRequired = signal(false);
   /** «Datos del cliente incompletos»: hallazgo del 409 y modal para completarlos. */
   readonly holderIssue = signal<HolderIssue | null>(null);
   readonly showHolderModal = signal(false);
   /** Card key of the emission that hit the holder 409 (the retry reuses it). */
   private holderEmitKey = 'order';
+  /** Credit requested when the holder 409 came back: the retry after saving keeps it. */
+  private holderEmitCredit: CreditInvoiceSubmit | undefined;
   /** The user explicitly accepted Consumidor final: threaded into the credit retry too. */
   private emitAllowFinalConsumer = false;
   readonly isRepairingShippingTax = signal(false);
@@ -7946,6 +7950,7 @@ export class OrderDetailsPageComponent {
           accountId == null &&
           this.handleHolderIncomplete(key, parsed, allowFinalConsumer)
         ) {
+          this.holderEmitCredit = credit;
           return;
         }
         if (accountId == null && this.handleUnpaidEmitRejection(key, parsed)) {
@@ -8019,7 +8024,22 @@ export class OrderDetailsPageComponent {
   /** The customer was completed and saved: retry the emission automatically. */
   onHolderCompleted(): void {
     this.showHolderModal.set(false);
-    this.runEmit(this.holderEmitKey, null, undefined, this.emitAllowFinalConsumer);
+    this.runEmit(
+      this.holderEmitKey,
+      null,
+      this.holderEmitCredit,
+      this.emitAllowFinalConsumer,
+    );
+  }
+
+  /**
+   * Comprador sin cliente identificado (invitado, o el cliente Consumidor final
+   * a crédito): «Asignar cliente» abre el flujo existente «Cambiar cliente».
+   */
+  async onAssignCustomerForInvoice(): Promise<void> {
+    this.showCreditModal.set(false);
+    this.showHolderModal.set(false);
+    await this.openChangeCustomer();
   }
 
   /**
@@ -8047,23 +8067,24 @@ export class OrderDetailsPageComponent {
       parsed.details && typeof parsed.details === 'object'
         ? (parsed.details as Record<string, unknown>)
         : {};
-    if (details['credit_eligible'] === true) {
+    const blocker = details['credit_blocker'];
+    // Sin deudor identificable, el modal de crédito igual se abre: ahí se
+    // asigna el cliente o se emite como Consumidor final de contado.
+    if (details['credit_eligible'] === true || blocker === 'customer_required') {
       const remaining = Number(details['remaining_balance']);
       this.creditBalance.set(Number.isFinite(remaining) ? remaining : 0);
+      this.creditCustomerRequired.set(blocker === 'customer_required');
       this.showCreditModal.set(true);
       return true;
     }
-    const blocker = details['credit_blocker'];
     const message =
-      blocker === 'customer_required'
-        ? 'La orden no tiene cliente identificado: no puede facturarse a crédito. Puedes emitirla como Consumidor final de contado.'
-        : blocker === 'partial_payment'
-          ? 'La orden tiene abonos: no puede facturarse a crédito. Registra el saldo o emítela como Consumidor final de contado.'
-          : parsed.userMessage;
+      blocker === 'partial_payment'
+        ? 'La orden tiene abonos: no puede facturarse a crédito. Registra el saldo o emítela como Consumidor final de contado.'
+        : parsed.userMessage;
     this.setEmitError(key, message);
     // Sin crédito posible, la salida sin fricción es Consumidor final de
     // contado («Acuerdo mutuo»): se ofrece en el mismo aviso.
-    if (blocker === 'customer_required' || blocker === 'partial_payment') {
+    if (blocker === 'partial_payment') {
       this.toastService.show({
         description: message,
         variant: 'error',

@@ -12,7 +12,9 @@
  * The component never retries an emission or a check itself: it emits
  *  - `saved`: the customer was updated (parent retries / re-checks),
  *  - `useFinalConsumer`: the user explicitly accepted Consumidor final
- *    (only offered when `issue().cf_overridable`).
+ *    (only offered when `issue().cf_overridable`),
+ *  - `assignCustomer`: guest buyer (`customer_id` null, no record to complete):
+ *    the parent opens its «Cambiar cliente» flow.
  *
  * Zoneless: signals + `model()`; form status bridged with `toSignal`.
  */
@@ -141,6 +143,13 @@ function nameGroupValidator(group: AbstractControl): ValidationErrors | null {
             </app-alert-banner>
           }
 
+          @if (isGuest()) {
+            <p class="text-sm text-text-secondary">
+              El comprador de esta orden no está registrado como cliente. Para
+              facturar a su nombre, asígnale un cliente; si no, emítela como
+              Consumidor final.
+            </p>
+          } @else {
           <form [formGroup]="form" (ngSubmit)="onSave()" class="space-y-3">
             @if (show('document_type') || show('document_number')) {
               <div class="grid grid-cols-1 gap-3" [class.sm:grid-cols-3]="isNit()" [class.sm:grid-cols-2]="!isNit()">
@@ -218,6 +227,7 @@ function nameGroupValidator(group: AbstractControl): ValidationErrors | null {
               </button>
             }
           </form>
+          }
 
           @if (saveError()) {
             <app-alert-banner variant="danger" icon="alert-triangle">
@@ -237,14 +247,20 @@ function nameGroupValidator(group: AbstractControl): ValidationErrors | null {
               {{ finalConsumerLabel() }}
             </app-button>
           }
-          <app-button
-            variant="primary"
-            [disabled]="!canSave()"
-            [loading]="saving()"
-            (clicked)="onSave()"
-          >
-            Guardar y continuar
-          </app-button>
+          @if (isGuest()) {
+            <app-button variant="primary" [disabled]="busy()" (clicked)="onAssignCustomer()">
+              Asignar cliente
+            </app-button>
+          } @else {
+            <app-button
+              variant="primary"
+              [disabled]="!canSave()"
+              [loading]="saving()"
+              (clicked)="onSave()"
+            >
+              Guardar y continuar
+            </app-button>
+          }
         </div>
       </div>
     </app-modal>
@@ -264,6 +280,8 @@ export class CustomerHolderCompletionModalComponent {
 
   readonly saved = output<void>();
   readonly useFinalConsumer = output<void>();
+  /** Guest buyer (no customer to complete): assign one with «Cambiar cliente». */
+  readonly assignCustomer = output<void>();
 
   readonly saving = signal(false);
   readonly saveError = signal('');
@@ -308,6 +326,8 @@ export class CustomerHolderCompletionModalComponent {
   readonly present = computed(() => presentHolderData(this.current(), this.missing()));
   protected readonly nameMissing = computed(() => isNameMissing(this.missing()));
   protected readonly customerLabel = computed(() => this.issue()?.customer_name ?? '');
+  /** The buyer is not a registered customer: there is no record to complete. */
+  readonly isGuest = computed(() => this.issue()?.customer_id == null);
 
   protected readonly dvError = computed(() => {
     const v = this.formValue();
@@ -358,7 +378,7 @@ export class CustomerHolderCompletionModalComponent {
   protected onSave(): void {
     this.form.markAllAsDirty();
     const issue = this.issue();
-    if (!issue || !this.canSave()) return;
+    if (!issue || issue.customer_id == null || !this.canSave()) return;
 
     const v = this.form.getRawValue();
     const documentNumber = v.document_number.trim();
@@ -397,6 +417,11 @@ export class CustomerHolderCompletionModalComponent {
     this.useFinalConsumer.emit();
   }
 
+  protected onAssignCustomer(): void {
+    this.isOpen.set(false);
+    this.assignCustomer.emit();
+  }
+
   protected onCancel(): void {
     if (this.saving()) return;
     this.isOpen.set(false);
@@ -412,6 +437,7 @@ export class CustomerHolderCompletionModalComponent {
       return;
     }
     this.applyCurrent(null);
+    if (issue.customer_id == null) return;
     this.customersService
       .getCustomer(issue.customer_id)
       .pipe(takeUntilDestroyed(this.destroyRef))
