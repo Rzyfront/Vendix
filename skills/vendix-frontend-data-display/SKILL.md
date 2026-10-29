@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.3"
+  version: "2.4"
   scope: [root]
   auto_invoke: "Displaying data lists, implementing responsive tables, creating mobile card views"
 ---
@@ -46,6 +46,7 @@ Exceptions only: embedded child rows of an already paginated parent (dispatch-no
 - Use `priority` on columns to control mobile/tablet hiding.
 - Money transforms via `vendix-currency-formatting`; dates via `vendix-date-timezone`; icons must be registered (`vendix-frontend-icons`).
 - Row multi-selection: prefer the built-in `selectable` + `[(selectedIds)]` over a custom checkbox column.
+- Visual style is Soft UI (`vendix-ui-ux` → `references/soft-ui.md`): status cells use `<app-badge>` semantic variants (never hand-built or fixed-palette badges); custom cards/cells use `rounded-2xl` cards, 1px `border-border`, and the icon-button recipe (24/28px, `rounded-md`, tinted); tokens only, no hardcoded CSS.
 
 ## Related
 

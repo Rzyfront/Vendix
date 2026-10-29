@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke: "Implementing stats cards or dashboard metrics with mobile scroll"
 ---
@@ -75,14 +75,19 @@ Do not duplicate the global CSS in components.
 
 ## Color Guidance
 
+Soft UI tokens only (`vendix-ui-ux` → `references/soft-ui.md`): semantic or brand token + alpha, never
+fixed palettes (`blue-*`, `amber-*`, `purple-*`, `red-*`), which ignore tenant branding and dark mode.
+
 | Meaning | Background | Icon Color | Common Icons |
 | --- | --- | --- | --- |
-| Total/primary | `bg-blue-100` | `text-blue-500` | `shopping-cart`, `users`, `package` |
-| Pending/warning | `bg-amber-100` | `text-amber-500` | `clock`, `alert-circle` |
-| Success/active | `bg-emerald-100` | `text-emerald-500` | `check-circle`, `check` |
-| Money/revenue | `bg-purple-100` | `text-purple-500` | `dollar-sign`, `credit-card` |
-| Critical | `bg-red-100` | `text-red-500` | `x-circle`, `alert-triangle` |
-| Neutral | `bg-gray-100` | `text-gray-500` | `info`, `help-circle` |
+| Total/primary | `bg-primary/10` | `text-primary` | `shopping-cart`, `users`, `package` |
+| Pending/warning | `bg-warning/10` | `text-warning` | `clock`, `alert-circle` |
+| Success/active | `bg-success/10` | `text-success` | `check-circle`, `check` |
+| Money/revenue | `bg-info-light` | `text-info` | `dollar-sign`, `credit-card` |
+| Critical | `bg-error/10` | `text-error` | `x-circle`, `alert-triangle` |
+| Neutral | `bg-text-secondary/10` | `text-text-secondary` | `info`, `help-circle` |
+
+Existing stats with fixed palettes migrate over time; new stats use this table.
 
 Always verify icon names against `icons.registry.ts` before using them.
 
