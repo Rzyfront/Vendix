@@ -3531,7 +3531,12 @@ export class PosComponent {
     }
 
     const results = await firstValueFrom(
-      this.productService.searchProducts({ query } as any, 1, 8),
+      // Same catalog as the POS grid: hotel nights (lodging) stay out of the sale.
+      this.productService.searchProducts(
+        { query, pos_optimized: true, is_sellable: true } as any,
+        1,
+        8,
+      ),
     ).catch(() => null);
 
     const products: Product[] = (results as any)?.products ?? [];

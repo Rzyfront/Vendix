@@ -46,6 +46,7 @@ import {
   IcalImportStatus,
 } from '../../interfaces/ical-export.interface';
 import { LodgingIcalExportService } from '../../services/ical-export.service';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 type ChannelTab = 'export' | 'import';
 
@@ -148,6 +149,7 @@ function shortLink(url: string): string {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     SpinnerComponent,
+    HospitalityLoadErrorComponent,
     FormsModule,
     ReactiveFormsModule,
     NgTemplateOutlet,
@@ -195,9 +197,11 @@ function shortLink(url: string): string {
                      md:text-base md:font-semibold md:text-text-primary"
             >
               {{ tab() === 'export' ? 'Exportar calendario' : 'Calendarios importados' }}
-              <span class="text-text-secondary font-normal">
-                ({{ tab() === 'export' ? exportRows().length : importRows().length }})
-              </span>
+              @if ((tab() === 'export' ? units() : imports()) !== null) {
+                <span class="text-text-secondary font-normal">
+                  ({{ tab() === 'export' ? exportRows().length : importRows().length }})
+                </span>
+              }
             </h2>
 
             <div class="flex items-center gap-2 w-full md:w-auto">
@@ -214,7 +218,7 @@ function shortLink(url: string): string {
                 [filters]="filterConfigs()"
                 [filterValues]="filterValues()"
                 [actions]="dropdownActions()"
-                [isLoading]="units() === null || imports() === null"
+                [isLoading]="(units() === null && unitsError() === null) || (imports() === null && importsError() === null)"
                 (filterChange)="filterValues.set($event)"
                 (clearAllFilters)="filterValues.set({})"
                 (actionClick)="onActionClick($event)"
@@ -237,7 +241,13 @@ function shortLink(url: string): string {
           </p>
 
           @if (tab() === 'export') {
-            @if (units() === null) {
+            @if (unitsError() !== null) {
+              <app-hospitality-load-error
+                what="las habitaciones"
+                [message]="unitsError()"
+                (retry)="load()"
+              />
+            } @else if (units() === null) {
               <div class="p-4 md:p-6">
                 <app-spinner [center]="true" text="Cargando habitaciones…" />
               </div>
@@ -265,7 +275,13 @@ function shortLink(url: string): string {
               />
             }
           } @else {
-            @if (imports() === null) {
+            @if (importsError() !== null) {
+              <app-hospitality-load-error
+                what="los calendarios"
+                [message]="importsError()"
+                (retry)="loadImports()"
+              />
+            } @else if (imports() === null) {
               <div class="p-4 md:p-6">
                 <app-spinner [center]="true" text="Cargando calendarios…" />
               </div>
@@ -397,6 +413,10 @@ export class HospitalityIcalChannelsComponent implements OnInit {
 
   /** H6.2 — imported calendars; null while loading. */
   readonly imports = signal<IcalImport[] | null>(null);
+  /** R-FB-02 — failed loads show "No pudimos cargar … · Reintentar", never an empty list. */
+  readonly unitsError = signal<string | null>(null);
+  readonly importsError = signal<string | null>(null);
+  private announced = false;
   /** Import whose sync or removal is in flight. */
   readonly syncing = signal<number | null>(null);
   readonly adding = signal(false);
@@ -432,8 +452,9 @@ export class HospitalityIcalChannelsComponent implements OnInit {
   );
 
   readonly tabs = computed<ScrollableTab[]>(() => [
-    { id: 'export', label: `Exportar (${this.units()?.length ?? 0})`, icon: 'upload' },
-    { id: 'import', label: `Importar (${this.imports()?.length ?? 0})`, icon: 'download' },
+    // No count until loaded: a failed load must not read as "(0)".
+    { id: 'export', label: this.countLabel('Exportar', this.units()), icon: 'upload' },
+    { id: 'import', label: this.countLabel('Importar', this.imports()), icon: 'download' },
   ]);
 
   readonly filterConfigs = computed<FilterConfig[]>(() =>
@@ -672,17 +693,14 @@ export class HospitalityIcalChannelsComponent implements OnInit {
   }
 
   loadImports(): void {
+    this.importsError.set(null);
     this.icalService
       .imports()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (imports) => this.imports.set(imports),
-        error: (message: unknown) => {
-          this.imports.set([]);
-          this.toastService.error(
-            typeof message === 'string' ? message : 'No se pudieron cargar los calendarios',
-          );
-        },
+        error: (message: unknown) =>
+          this.importsError.set(typeof message === 'string' ? message : ''),
       });
   }
 
@@ -768,22 +786,30 @@ export class HospitalityIcalChannelsComponent implements OnInit {
   }
 
   load(): void {
+    this.unitsError.set(null);
     this.icalService
       .units()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (units) => {
-          const first = this.units() === null;
           this.units.set(units);
-          if (first) afterNextRender(() => this.ready.emit(), { injector: this.injector });
+          this.announceReady();
         },
         error: (message: unknown) => {
-          this.units.set([]);
-          this.toastService.error(
-            typeof message === 'string' ? message : 'No se pudieron cargar las habitaciones',
-          );
+          this.unitsError.set(typeof message === 'string' ? message : '');
+          this.announceReady();
         },
       });
+  }
+
+  private countLabel(label: string, list: unknown[] | null): string {
+    return list === null ? label : `${label} (${list.length})`;
+  }
+
+  private announceReady(): void {
+    if (this.announced) return;
+    this.announced = true;
+    afterNextRender(() => this.ready.emit(), { injector: this.injector });
   }
 
   url(token: string): string {
