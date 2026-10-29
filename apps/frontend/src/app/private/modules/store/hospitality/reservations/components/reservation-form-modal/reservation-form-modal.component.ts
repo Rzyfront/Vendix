@@ -411,12 +411,16 @@ export class ReservationFormModalComponent {
 
   /**
    * U6 — code of the rack room this booking takes, while the first line still
-   * asks for its type and the stay is a single room.
+   * asks for its type, the stay is a single room and it still arrives on the
+   * night of the rack cell (other nights may find that room taken).
    */
   readonly prefilledRoom = computed(() => {
     const prefill = this.prefill();
-    const rooms = this.formValue().rooms;
-    return prefill && rooms.length === 1 && Number(rooms[0]?.unit_type_id) === prefill.unit_type_id
+    const { rooms, arrival_date } = this.formValue();
+    return prefill &&
+      arrival_date === prefill.arrival_date &&
+      rooms.length === 1 &&
+      Number(rooms[0]?.unit_type_id) === prefill.unit_type_id
       ? prefill.unit_code
       : null;
   });

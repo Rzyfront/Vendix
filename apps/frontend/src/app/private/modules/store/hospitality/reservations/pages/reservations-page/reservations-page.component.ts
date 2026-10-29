@@ -32,6 +32,7 @@ import {
   SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
 import { UnitTypesService } from '../../../rooms/services/unit-types.service';
 import { ReservationFormModalComponent } from '../../components/reservation-form-modal/reservation-form-modal.component';
@@ -190,20 +191,22 @@ type ListResult =
                 (ngModelChange)="onSearch($event)"
               />
               <!-- R-CTA-01/06: visible create button; blocked without room types. -->
-              <app-button
-                variant="primary"
-                size="md"
-                [iconOnlyMobile]="true"
-                customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 !rounded-[10px]"
-                class="shrink-0"
-                [disabled]="noActiveTypes()"
-                [ariaLabel]="noActiveTypes() ? 'Nueva reserva: primero crea un tipo de habitación' : 'Nueva reserva'"
-                (clicked)="isFormOpen.set(true)"
-                data-testid="reservations-new"
-              >
-                <app-icon slot="icon" name="plus" [size]="18" />
-                Nueva reserva
-              </app-button>
+              @if (canBook()) {
+                <app-button
+                  variant="primary"
+                  size="md"
+                  [iconOnlyMobile]="true"
+                  customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 !rounded-[10px]"
+                  class="shrink-0"
+                  [disabled]="noActiveTypes()"
+                  [ariaLabel]="noActiveTypes() ? 'Nueva reserva: primero crea un tipo de habitación' : 'Nueva reserva'"
+                  (clicked)="isFormOpen.set(true)"
+                  data-testid="reservations-new"
+                >
+                  <app-icon slot="icon" name="plus" [size]="18" />
+                  Nueva reserva
+                </app-button>
+              }
               <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="filterConfigs"
@@ -260,7 +263,7 @@ type ListResult =
               description="Crea una reserva por noches para bloquear las habitaciones de esas fechas."
               actionButtonText="Nueva reserva"
               actionButtonIcon="plus"
-              [showActionButton]="hasActiveTypes()"
+              [showActionButton]="hasActiveTypes() && canBook()"
               (actionClick)="isFormOpen.set(true)"
             />
           } @else {
@@ -321,6 +324,14 @@ export class HospitalityReservationsPageComponent implements OnInit {
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly router = inject(Router);
+  private readonly authFacade = inject(AuthFacade);
+
+  /** Creating and cancelling need the reservations write permission (as on the rack). */
+  readonly canBook = computed(
+    () =>
+      this.authFacade.ownerFlag() ||
+      this.authFacade.hasPermission('store:lodging:reservations:write'),
+  );
   /** RV3 — each list request cancels the one still in flight. */
   private readonly listRequests = new Subject<void>();
 
@@ -454,7 +465,8 @@ export class HospitalityReservationsPageComponent implements OnInit {
       label: 'Cancelar',
       icon: 'x-circle',
       variant: 'danger',
-      show: (row: ReservationRow) => row.status === 'tentative' || row.status === 'confirmed',
+      show: (row: ReservationRow) =>
+        this.canBook() && (row.status === 'tentative' || row.status === 'confirmed'),
       action: (row: ReservationRow) => this.openDetail(row, 'cancel'),
     },
   ];
