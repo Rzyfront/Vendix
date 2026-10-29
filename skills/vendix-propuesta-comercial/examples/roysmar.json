@@ -1,0 +1,47 @@
+{
+  "cliente": {
+    "empresa": "Roysmar · Centro Recreacional y Vacacional",
+    "empresa_corta": "Roysmar",
+    "contacto": "Sr. José Romero",
+    "cargo": ""
+  },
+  "fecha": "29 / 10 / 2026",
+  "industrias": ["hospitality", "restaurant", "service", "retail"],
+  "intro": "Vendix ayuda a Roysmar a operar en una sola plataforma sus cuatro ejes: hotelería, restaurante, servicios recreativos y ventas, sin convertir la tecnología en una carga. Reservas, mesas, pasadías, caja, inventario y reportes quedan conectados, con acompañamiento humano para que el equipo trabaje con claridad y la dirección decida mejor.",
+  "pilares": [
+    {"titulo": "Hotelería", "texto": "Habitaciones, reservas, recepción, housekeeping y reservas en línea en un solo tablero."},
+    {"titulo": "Restaurante", "texto": "Mesas, comandas a cocina, carta en línea, recetas e insumos."},
+    {"titulo": "Servicios", "texto": "Pasadías, piscina, eventos y servicios recreativos con reserva."},
+    {"titulo": "Ventas", "texto": "Punto de venta, facturación electrónica, caja y reportes del negocio."}
+  ],
+  "capacidades_intro": "Seis frentes conectados alrededor de los cuatro ejes de Roysmar: hotelería, restaurante, servicios y ventas. Se habilitan según el plan y la configuración.",
+  "capacidades": [
+    {"titulo": "Ventas y caja", "texto": "Ventas en taquilla, bar y tienda con facturación electrónica DIAN, caja y métodos de pago."},
+    {"titulo": "Reservas en línea", "texto": "Motor de reservas propio con pago Wompi y calendarios sincronizados con Airbnb y Booking."},
+    {"titulo": "Restaurante y bar", "texto": "Mesas, cuenta abierta, comandas a cocina, carta en línea, recetas e insumos con su inventario."},
+    {"titulo": "Servicios recreativos", "texto": "Pasadías, entradas a piscina, eventos y servicios con agenda o reserva, y su base de clientes."},
+    {"titulo": "Hotelería y recepción", "texto": "Rack de habitaciones, tarifas, bloqueos, housekeeping y auditoría nocturna para cerrar cada día."},
+    {"titulo": "Reportes y control", "texto": "Ocupación, ADR y RevPAR, ventas por línea, contabilidad automatizada, roles y permisos."}
+  ],
+  "resultado": "Hotelería, restaurante, servicios y ventas conectados en una sola plataforma: un equipo más tranquilo y una dirección que ve todo el negocio.",
+  "alcance_incluido": [
+    "Cuenta, módulos y usuarios configurados.",
+    "Habitaciones, tarifas, carta, servicios e inventario base.",
+    "Hotelería, restaurante, servicios y punto de venta activos.",
+    "Reservas en línea, pagos y elementos administrativos.",
+    "Capacitación inicial y soporte de estabilización."
+  ],
+  "configuracion_carga": "Cuenta, usuarios, habitaciones y tarifas, carta, servicios, inventario, pagos y parámetros.",
+  "plan": {
+    "nombre": "Empresarial Pro",
+    "ciclo": "Anual",
+    "precio": 969000,
+    "incluye_fe": true,
+    "detalle": "Software en la nube con facturación electrónica · IVA 0%"
+  },
+  "implementacion_detalle": "Configuración avanzada de hotelería, restaurante y servicios, y personalización de marca",
+  "condiciones_extra": [
+    "El plan incluye facturación y nómina electrónica DIAN; su habilitación requiere la resolución de numeración y el certificado digital de Roysmar.",
+    "El hardware no está incluido; su recomendación va en un documento aparte."
+  ]
+}
