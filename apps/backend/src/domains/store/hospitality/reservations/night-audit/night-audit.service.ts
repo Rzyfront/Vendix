@@ -18,6 +18,8 @@ export interface NightAuditReservationRow {
 export interface NightAuditDiscrepancy {
   reservation_id: number;
   reservation_number: string;
+  /** U15 — holder of the reservation (additive; older closed snapshots lack it). */
+  guest_name?: string;
   /** "101 · Doble" (or the type alone when unassigned). */
   room: string;
   rate_amount: string;
@@ -49,6 +51,18 @@ export interface NightAuditView {
   reopen_reason: string | null;
   /** Stored snapshot when closed, live figures otherwise. */
   summary: NightAuditSummary;
+  /**
+   * U15 — what "Cerrar día" will charge now: the unposted nights of in-house
+   * guests up to this day (closed days stay frozen) and their rate. Null on
+   * a closed day.
+   */
+  close_preview: NightAuditClosePreview | null;
+}
+
+export interface NightAuditClosePreview {
+  nights: number;
+  /** Sum of the nights' `rate_amount`, as "Cargar noche" prices them. */
+  amount: string;
 }
 
 const guestName = (customer: { first_name: string | null; last_name: string | null } | null) =>
@@ -89,6 +103,37 @@ export class LodgingNightAuditService {
         audit?.status === 'closed'
           ? (audit.summary as unknown as NightAuditSummary)
           : await this.summarize(business_date),
+      close_preview: audit?.status === 'closed' ? null : await this.closePreview(business_date),
+    };
+  }
+
+  /**
+   * U15 — the nights `close()` will post: the same set `postNightsThrough`
+   * takes for every open in-house folio (active, unposted, up to the day,
+   * outside the frozen closed days).
+   */
+  private async closePreview(business_date: string): Promise<NightAuditClosePreview> {
+    const bound = dateOnlyToDb(business_date);
+    const frozen = await this.prisma.lodging_night_audits.findMany({
+      where: { status: 'closed', business_date: { lte: bound } },
+      select: { business_date: true },
+    });
+    const result = await this.prisma.lodging_room_nights.aggregate({
+      where: {
+        is_active: true,
+        posted_order_item_id: null,
+        night_date: { lte: bound, notIn: frozen.map((a) => a.business_date) },
+        reservation_room: {
+          cancelled_at: null,
+          reservation: { status: 'checked_in', folio: { status: 'open' } },
+        },
+      },
+      _count: { _all: true },
+      _sum: { rate_amount: true },
+    });
+    return {
+      nights: result._count._all,
+      amount: Number(result._sum.rate_amount ?? 0).toFixed(2),
     };
   }
 
@@ -193,7 +238,7 @@ export class LodgingNightAuditService {
           unit: { select: { code: true } },
           unit_type: { select: { name: true } },
           posted_order_item: { select: { total_price: true, cancelled_at: true } },
-          reservation_room: { select: { reservation: { select: { id: true, reservation_number: true } } } },
+          reservation_room: { select: { reservation: { select: reservationSelect } } },
         },
         orderBy: { id: 'asc' },
       }),
@@ -223,6 +268,7 @@ export class LodgingNightAuditService {
       discrepancies.push({
         reservation_id: reservation.id,
         reservation_number: reservation.reservation_number,
+        guest_name: guestName(reservation.customer),
         room: [night.unit?.code, night.unit_type.name].filter(Boolean).join(' · '),
         rate_amount: Number(night.rate_amount).toFixed(2),
         reason: item ? 'voided' : 'not_posted',
