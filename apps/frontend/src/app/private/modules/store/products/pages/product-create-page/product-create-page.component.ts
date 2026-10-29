@@ -2611,6 +2611,12 @@ export class ProductCreatePageComponent {
         this.patchForm(product);
         // Volviendo del editor de plantillas: lo que el usuario llevaba va encima de lo cargado.
         this.applyIntakeDraft();
+        // Hotelería (R5): the night's name and state follow its room type
+        // ("Noche – {tipo}"); getRawValue() still sends them unchanged.
+        if (product?.lodging_unit_type) {
+          this.productForm.get('name')?.disable({ emitEvent: false });
+          this.productForm.get('state')?.disable({ emitEvent: false });
+        }
         // Form ya poblado → render con `is_ingredient` resuelto (sin flash).
         this.productLoaded.set(true);
         // Auto-load tier rows if the product already has multi-tarifa enabled.

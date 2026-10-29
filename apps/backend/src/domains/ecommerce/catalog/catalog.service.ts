@@ -2364,6 +2364,8 @@ export class CatalogService {
                     // detail/cart/checkout would reject.
                     state: true,
                     available_for_ecommerce: true,
+                    // Hotelería (R5): a night is never sold in the storefront.
+                    lodging_unit_type: { select: { id: true } },
                     product_images: {
                       where: { is_main: true },
                       take: 1,
@@ -2411,7 +2413,8 @@ export class CatalogService {
                 item.product &&
                 item.product.state === 'active' &&
                 item.product.available_for_ecommerce === true &&
-                item.product.is_ingredient !== true,
+                item.product.is_ingredient !== true &&
+                !item.product.lodging_unit_type,
             );
             const items = await Promise.all(
               buyableItems.map(async (item) => {

@@ -1,0 +1,138 @@
+{% extends "_base.html.j2" %}
+{% import "_base.html.j2" as ui with context %}
+{% set label = "Propuesta comercial · " ~ d.cliente.empresa_corta|default(d.cliente.empresa) %}
+{% block title %}Propuesta comercial · {{ d.cliente.empresa }}{% endblock %}
+
+{% block styles %}
+.intro{font-size:10.5pt;color:var(--muted);margin:0 0 16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.card{background:#f7faf8;border:1px solid var(--line);border-left:3px solid var(--green);padding:14px 16px;font-size:9.5pt;color:var(--muted);min-height:30mm}
+.card h3{font-size:11.5pt;color:var(--ink);margin-bottom:3px}
+.grid2.caps .card{min-height:36mm}
+.result{display:flex;gap:14px;align-items:center;background:var(--dark);color:#fff;padding:18px 20px;margin-top:18px;font-size:10.5pt}
+.result img{width:14mm;border-radius:8px}
+.result small{display:block;font-family:"Urbanist";font-weight:700;font-size:7pt;color:var(--green);text-transform:uppercase;margin-bottom:2px}
+.steps{display:flex;flex-direction:column;gap:13px}
+.step{display:flex;gap:14px;align-items:stretch}
+.step .n{font-family:"Urbanist";font-weight:700;font-size:26pt;color:var(--green);width:16mm;display:flex;align-items:center;justify-content:center}
+.step div:last-child{flex:1;background:#f7faf8;border-left:3px solid var(--green);padding:13px 15px;font-size:9.5pt;color:var(--muted)}
+.step h3{font-size:11.5pt;color:var(--ink)}
+.scope{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.scope .col{border:1px solid var(--line);border-left:3px solid var(--green);background:#f7faf8;padding:14px 16px;font-size:9.5pt}
+.scope .col.alt{border-left-color:var(--orange);background:#fff}
+.scope small{font-family:"Urbanist";font-weight:700;font-size:7pt;color:var(--green2);text-transform:uppercase}
+.scope .alt small{color:var(--orange)}
+.scope h3{font-size:11.5pt;margin:2px 0 6px}
+.scope ul{list-style:none;margin:0;padding:0}
+.scope li{padding-left:14px;position:relative;margin-bottom:4px}
+.scope li:before{content:"—";position:absolute;left:0;color:var(--green)}
+.scope .alt li:before{color:var(--orange)}
+table.route{width:100%;border-collapse:collapse;font-size:9pt;margin-top:8px}
+table.route th{background:var(--dark);color:#fff;font-family:"Urbanist";font-size:7.5pt;text-align:left;padding:7px 8px}
+table.route td{border:1px solid var(--line);padding:9px 10px;vertical-align:middle}
+table.route td:first-child{color:var(--green2);font-weight:700;width:9mm}
+h3.sub{font-size:15pt;margin:22px 0 4px}
+.summary{background:var(--dark);color:#fff;padding:18px 22px 8px}
+.summary small.h{font-family:"Urbanist";font-weight:700;font-size:7pt;color:var(--green);text-transform:uppercase}
+.summary .row{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid var(--green2);padding:13px 0}
+.summary .row:last-child{border-bottom:0}
+.summary .row b{font-family:"Urbanist";font-size:12.5pt}
+.summary .row i{display:block;font-size:8.5pt;opacity:.8}
+.summary .row .v{font-family:"Urbanist";font-weight:700;color:var(--green);font-size:13pt;white-space:nowrap}
+.cond{background:#f7faf8;border-left:3px solid var(--green);border:1px solid var(--line);border-left:3px solid var(--green);padding:15px 18px;margin-top:18px;font-size:9.8pt}
+.cond h3{font-size:11.5pt;margin-bottom:4px}
+.cond p{margin:0 0 7px}
+.cond p.legal{font-style:italic;color:var(--muted);font-size:8.8pt;margin:0}
+{% endblock %}
+
+{% block pages %}
+<section class="page"><div class="page-body">
+  {{ ui.cover("PROPUESTA  COMERCIAL", "Una forma más clara,<br>humana y conectada de crecer."|safe) }}
+  {{ ui.meta_table(d) }}
+</div>{{ ui.foot(label, 1) }}</section>
+
+<section class="page"><div class="page-body">
+  <div class="eyebrow">Sección 01 · Nuestra propuesta</div>
+  <h2>Una propuesta para que tu empresa<br>respire mejor</h2>
+  <p class="intro">{{ d.intro }}</p>
+  <div class="note" style="margin:0 0 14px"><h3>La promesa</h3><p>No entregamos solo una plataforma: acompañamos a la empresa para que pueda usarla, entenderla y convertirla en una ventaja real para vender, operar y crecer.</p></div>
+  <div class="grid2">
+    {% for p in d.pilares %}<div class="card"><h3>{{ p.titulo }}</h3>{{ p.texto }}</div>{% endfor %}
+  </div>
+</div>{{ ui.foot(label, 2) }}</section>
+
+<section class="page"><div class="page-body">
+  <div class="eyebrow">Sección 02 · Capacidades</div>
+  <h2>Qué ofrece Vendix</h2>
+  <p class="intro">{{ d.capacidades_intro }}</p>
+  <div class="grid2 caps">
+    {% for c in d.capacidades %}<div class="card"><h3>{{ c.titulo }}</h3>{{ c.texto }}</div>{% endfor %}
+  </div>
+  <div class="result"><img src="{{ assets }}/icono.png" alt=""><div><small>El resultado esperado</small>{{ d.resultado }}</div></div>
+</div>{{ ui.foot(label, 3) }}</section>
+
+<section class="page"><div class="page-body">
+  <div class="eyebrow">Sección 03 · Ecosistema humano</div>
+  <h2>El equipo detrás de Vendix</h2>
+  <p class="intro">La tecnología funciona cuando las personas la adoptan. Por eso nuestro proceso combina plataforma, escucha, implementación, capacitación, soporte y mejora continua.</p>
+  <div class="steps">
+    {% for n, t, x in [("01","Escuchamos","Entendemos el negocio, sus dolores y prioridades antes de recomendar un alcance."),
+                       ("02","Configuramos","Activamos módulos, datos, usuarios y flujos con una ruta clara y realista."),
+                       ("03","Capacitamos","Entrenamos al equipo con casos reales, lenguaje sencillo y enfoque práctico."),
+                       ("04","Acompañamos","Damos soporte, resolvemos dudas y ajustamos lo necesario durante la estabilización."),
+                       ("05","Evolucionamos","Revisamos nuevas necesidades, integraciones y mejoras futuras con criterio.")] %}
+    <div class="step"><div class="n">{{ n }}</div><div><h3>{{ t }}</h3>{{ x }}</div></div>
+    {% endfor %}
+  </div>
+  <div class="note"><h3>Nuestro tono de relación</h3><p>Vendix busca una relación cercana, formal y fraterna: comunicación clara, acuerdos documentados, explicación sencilla de los cambios y presencia activa durante toda la implementación.</p></div>
+</div>{{ ui.foot(label, 4) }}</section>
+
+<section class="page"><div class="page-body">
+  <div class="eyebrow">Sección 04 · Alcance</div>
+  <h2>Alcance comercial sugerido</h2>
+  <p class="intro">Una base clara de lo que está incluido y lo que puede cotizarse aparte. El alcance final se confirma después del diagnóstico inicial.</p>
+  <div class="scope">
+    <div class="col"><small>Incluido como base</small><h3>Lo esencial para empezar</h3><ul>{% for i in d.alcance_incluido %}<li>{{ i }}</li>{% endfor %}</ul></div>
+    <div class="col alt"><small>Cotizable aparte</small><h3>Servicios adicionales</h3><ul>
+      {% for i in d.alcance_aparte|default(["Diseño gráfico, fotografía o pauta digital.","Desarrollos a medida fuera del alcance estándar.","Hardware, dominios, certificados o proveedores externos.","Asesoría legal, tributaria o contable especializada."]) %}<li>{{ i }}</li>{% endfor %}
+    </ul></div>
+  </div>
+  <h3 class="sub">Ruta de implementación</h3>
+  <p class="intro" style="margin-bottom:4px">Cinco etapas claras desde el primer contacto hasta el lanzamiento acompañado. Los tiempos son referenciales y se ajustan según el volumen de datos, las integraciones y la disponibilidad del equipo del cliente.</p>
+  <table class="route">
+    <tr><th>Etapa</th><th>Nombre</th><th>Actividades clave</th><th>Tiempo</th></tr>
+    <tr><td>01</td><td>Diagnóstico ejecutivo</td><td>Objetivos, operación actual, responsables, canales de venta, datos disponibles y alcance inicial.</td><td>1 a 2 días</td></tr>
+    <tr><td>02</td><td>Diseño de ruta</td><td>Plan de módulos, prioridades, dependencias, servicios externos y cronograma realista.</td><td>1 a 3 días</td></tr>
+    <tr><td>03</td><td>Configuración y carga</td><td>{{ d.configuracion_carga|default("Cuenta, usuarios, catálogo, inventario, pagos y parámetros operativos.") }}</td><td>2 a 5 días</td></tr>
+    <tr><td>04</td><td>Pruebas y capacitación</td><td>Validación de flujos, correcciones, entrenamiento y preparación de lanzamiento.</td><td>3 a 5 días</td></tr>
+    <tr><td>05</td><td>Lanzamiento acompañado</td><td>Puesta en marcha, monitoreo, soporte de estabilización y acuerdos de continuidad.</td><td>7 a 15 días</td></tr>
+  </table>
+</div>{{ ui.foot(label, 5) }}</section>
+
+<section class="page"><div class="page-body">
+  <div class="eyebrow">Sección 05 · Inversión</div>
+  <h2>Inversión</h2>
+  <p class="intro">Inversión estimada para {{ d.cliente.empresa_corta|default(d.cliente.empresa) }} en el primer año: {{ d.plan.precio|cop }} COP por el Plan {{ d.plan.nombre }} {{ d.plan.ciclo|lower }}{% if d.plan.incluye_fe %}, con facturación electrónica{% endif %} (servicio en la nube, IVA 0%).</p>
+  <div class="summary">
+    <small class="h">Resumen comercial</small>
+    <div class="row"><div><b>Plan {{ d.plan.nombre }}  ·  {{ d.plan.ciclo }}</b><i>{{ d.plan.detalle|default("Suscripción de software en la nube · IVA 0%") }}</i></div><div class="v">{{ d.plan.precio|cop }} COP / {{ {"Anual":"año","Mensual":"mes","Trimestral":"trimestre"}[d.plan.ciclo] }}</div></div>
+    <div class="row"><div><b>Puesta en marcha</b><i>Sesión inicial de configuración y capacitación de arranque</i></div><div class="v">Gratis</div></div>
+    <div class="row"><div><b>Sesiones de implementación adicional</b><i>{{ d.implementacion_detalle|default("Instalación técnica, configuración avanzada y personalización de marca") }} · IVA incluido</i></div><div class="v">$40.000 COP / hora</div></div>
+  </div>
+  <div class="cond">
+    <h3>Condiciones responsables</h3>
+    <p>Los términos, precios y alcances pueden cambiar por infraestructura, mercado, proveedores externos, regulación, crecimiento de uso o cambios solicitados que usted puede sugerir sin problema. Cualquier incremento o decremento será informado con previo aviso y pactado por canales formales, de manera personal o digital.</p>
+    <p>Implementación: $40.000 COP por hora, IVA incluido, acordada antes de cada sesión.</p>
+    {% for c in d.condiciones_extra|default([]) %}<p>{{ c }}</p>{% endfor %}
+    <p class="legal">Esta propuesta es una base comercial y no reemplaza el contrato, orden de servicio, términos y condiciones o anexos técnicos que formalicen la relación.</p>
+  </div>
+</div>{{ ui.foot(label, 6) }}</section>
+
+<section class="page"><div class="page-body">
+  <div class="eyebrow">Sección 06 · Cierre</div>
+  <h2>Listos para acompañarte</h2>
+  <p class="intro">Esta propuesta no constituye un contrato ni exige firma del cliente para su revisión. Su propósito es presentar una ruta de trabajo, capacidades, alcance sugerido y condiciones comerciales base para iniciar una conversación formal.</p>
+  <div class="close"><img src="{{ assets }}/icono.png" alt="">Vendix está preparado para acompañar a {{ d.cliente.empresa }} con tecnología clara, operación conectada y una relación cercana, seria y fraterna.<small>{{ emisor.lema }}</small></div>
+  {{ ui.signature(d, "Responsable de la propuesta", "Esta propuesta es validada y emitida por:") }}
+</div>{{ ui.foot(label, 7) }}</section>
+{% endblock %}

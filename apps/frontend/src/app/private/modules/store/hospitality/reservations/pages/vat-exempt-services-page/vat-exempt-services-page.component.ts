@@ -29,6 +29,7 @@ import {
   TooltipComponent,
   IconComponent,
 } from '../../../../../../../shared/components/index';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 import { CountryService } from '../../../../../../../core/services/country.service';
 import { ReportExportService } from '../../../../reports/services/report-export.service';
 import { entryPermitLabel } from '../../../shared/hospitality-labels';
@@ -93,6 +94,7 @@ function defaultPeriod(): FilterValues {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     SpinnerComponent,
+    HospitalityLoadErrorComponent,
     FormsModule,
     StatsComponent,
     CardComponent,
@@ -109,7 +111,7 @@ function defaultPeriod(): FilterValues {
       <div class="stats-container">
         <app-stats
           title="Facturas exentas"
-          [value]="report().length"
+          [value]="loadError() ? '—' : report().length"
           smallText="alojamiento con IVA 0 % en el periodo"
           iconName="receipt"
           iconBgColor="bg-blue-100"
@@ -118,7 +120,7 @@ function defaultPeriod(): FilterValues {
         />
         <app-stats
           title="Base exenta"
-          [value]="exemptTotal()"
+          [value]="loadError() ? '—' : exemptTotal()"
           smallText="alojamiento de turistas extranjeros"
           iconName="percent"
           iconBgColor="bg-emerald-100"
@@ -127,7 +129,7 @@ function defaultPeriod(): FilterValues {
         />
         <app-stats
           title="Total facturado"
-          [value]="invoicedTotal()"
+          [value]="loadError() ? '—' : invoicedTotal()"
           smallText="incluye consumos con impuesto"
           iconName="banknote"
           iconBgColor="bg-amber-100"
@@ -136,8 +138,8 @@ function defaultPeriod(): FilterValues {
         />
         <app-stats
           title="Huéspedes"
-          [value]="guestCount()"
-          [smallText]="countriesText()"
+          [value]="loadError() ? '—' : guestCount()"
+          [smallText]="loadError() ? 'sin datos' : countriesText()"
           iconName="globe"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-500"
@@ -151,7 +153,7 @@ function defaultPeriod(): FilterValues {
             class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
           >
             <h2
-              class="text-[13px] font-bold text-gray-600 tracking-wide
+              class="text-[13px] font-bold text-text-secondary tracking-wide
                      md:text-lg md:font-semibold md:text-text-primary"
             >
               Servicios exentos
@@ -192,7 +194,13 @@ function defaultPeriod(): FilterValues {
         </div>
 
         <div class="px-2 pb-2 pt-3 md:p-4">
-          @if (loading() && report().length === 0) {
+          @if (loadError() !== null) {
+            <app-hospitality-load-error
+              what="los servicios exentos"
+              [message]="loadError()"
+              (retry)="load()"
+            />
+          } @else if (loading() && report().length === 0) {
             <div class="p-4 md:p-6">
               <app-spinner [center]="true" text="Cargando servicios exentos…" />
             </div>
@@ -255,6 +263,8 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
   private readonly storeSettings = inject(StoreSettingsFacade);
 
   readonly loading = signal(true);
+  /** R-FB-02 — failed load: never show zeros or the previous period. */
+  readonly loadError = signal<string | null>(null);
   readonly report = signal<VatExemptServiceRow[]>([]);
   readonly search = signal('');
   readonly exporting = signal(false);
@@ -424,6 +434,7 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
   load(): void {
     const { from, to } = this.filterValues();
     this.loading.set(true);
+    this.loadError.set(null);
     this.reservationsService
       .vatExemptServices(String(from), String(to))
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -434,11 +445,10 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
           this.announceReady();
         },
         error: (message: unknown) => {
+          this.report.set([]);
+          this.loadError.set(typeof message === 'string' ? message : null);
           this.loading.set(false);
           this.announceReady();
-          this.toastService.error(
-            typeof message === 'string' ? message : 'No se pudo cargar el reporte',
-          );
         },
       });
   }

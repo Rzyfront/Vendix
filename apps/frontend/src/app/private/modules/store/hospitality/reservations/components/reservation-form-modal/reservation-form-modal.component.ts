@@ -282,7 +282,9 @@ export function formatShortDate(date: string): string {
         >
           @switch (quoteState().kind) {
             @case ('loading') {
-              <span class="text-text-secondary">Consultando disponibilidad…</span>
+              <span class="text-text-secondary" role="status">
+                Consultando disponibilidad…{{ pendingSubmit() ? ' La reserva se crea al terminar.' : '' }}
+              </span>
             }
             @case ('error') {
               <span class="text-error" role="alert">{{ quoteMessage() }}</span>
@@ -399,6 +401,8 @@ export class ReservationFormModalComponent {
   readonly maxGuests = 20;
   /** U5 — a submit attempt shows every missing field under it. */
   readonly submitted = signal(false);
+  /** Enter pressed while the quote loads: submit once it is ready. */
+  readonly pendingSubmit = signal(false);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
 
@@ -407,12 +411,16 @@ export class ReservationFormModalComponent {
 
   /**
    * U6 — code of the rack room this booking takes, while the first line still
-   * asks for its type and the stay is a single room.
+   * asks for its type, the stay is a single room and it still arrives on the
+   * night of the rack cell (other nights may find that room taken).
    */
   readonly prefilledRoom = computed(() => {
     const prefill = this.prefill();
-    const rooms = this.formValue().rooms;
-    return prefill && rooms.length === 1 && Number(rooms[0]?.unit_type_id) === prefill.unit_type_id
+    const { rooms, arrival_date } = this.formValue();
+    return prefill &&
+      arrival_date === prefill.arrival_date &&
+      rooms.length === 1 &&
+      Number(rooms[0]?.unit_type_id) === prefill.unit_type_id
       ? prefill.unit_code
       : null;
   });
@@ -576,7 +584,12 @@ export class ReservationFormModalComponent {
         ),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe((state) => this.quoteState.set(state));
+      .subscribe((state) => {
+        this.quoteState.set(state);
+        if (state.kind === 'loading' || !this.pendingSubmit()) return;
+        this.pendingSubmit.set(false);
+        if (state.kind === 'ready') this.onSubmit();
+      });
   }
 
   reset(): void {
@@ -603,6 +616,7 @@ export class ReservationFormModalComponent {
     });
     this.formValue.set(this.form.getRawValue());
     this.submitted.set(false);
+    this.pendingSubmit.set(false);
     if (!prefill) this.pickFirstFreeType(arrival, nextDay(arrival));
     this.focusCustomerSoon();
     // A walk-in arrives today: only the departure is chosen.
@@ -717,6 +731,10 @@ export class ReservationFormModalComponent {
     if (this.saving()) return;
     const request = this.quoteRequest();
     const customer = this.customer();
+    if (request && customer && !this.datesError() && this.quoteState().kind === 'loading') {
+      this.pendingSubmit.set(true);
+      return;
+    }
     if (!request || !customer || !this.canConfirm() || this.datesError()) {
       // R-FORM-02 — mark what is missing under each field and go to the first.
       this.submitted.set(true);

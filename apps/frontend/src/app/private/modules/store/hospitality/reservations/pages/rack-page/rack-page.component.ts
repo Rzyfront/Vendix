@@ -10,6 +10,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { addDays, format, isWeekend, parseISO } from 'date-fns';
+import { catchError, debounceTime, map, of, Subject, switchMap } from 'rxjs';
 import { es } from 'date-fns/locale';
 import {
   BadgeComponent,
@@ -105,6 +106,11 @@ const barClasses = (status: LodgingReservationStatus): string =>
 const MOVABLE_STATUSES: LodgingReservationStatus[] = ['tentative', 'confirmed', 'checked_in'];
 
 type DragMode = 'move' | 'resize';
+
+/** Rack response tagged with the window it was asked for. */
+type RackResult =
+  | { ok: true; from: string; days: number; rack: Rack }
+  | { ok: false; from: string; days: number; message: string };
 
 interface RackRow {
   kind: 'type' | 'unit' | 'unassigned';
@@ -302,16 +308,24 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
             <app-button
               variant="outline"
               size="sm"
+              customClasses="!h-11 !min-w-11 md:!h-9 md:!min-w-0"
               [ariaLabel]="days() + ' días antes'"
               (clicked)="move(-1)"
               data-testid="rack-prev"
             >
               <app-icon slot="icon" name="chevron-left" [size]="16" />
             </app-button>
-            <app-button variant="outline" size="sm" (clicked)="goToday()">Hoy</app-button>
             <app-button
               variant="outline"
               size="sm"
+              customClasses="!h-11 !min-w-11 md:!h-9 md:!min-w-0"
+              (clicked)="goToday()"
+              >Hoy</app-button
+            >
+            <app-button
+              variant="outline"
+              size="sm"
+              customClasses="!h-11 !min-w-11 md:!h-9 md:!min-w-0"
               [ariaLabel]="days() + ' días después'"
               (clicked)="move(1)"
               data-testid="rack-next"
@@ -331,8 +345,9 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
             type="date"
             size="sm"
             customWrapperClass="mt-0"
+            customInputClass="!h-11 md:!h-9"
             [ngModel]="from()"
-            (ngModelChange)="goTo($event)"
+            (ngModelChange)="dateInputs.next($event)"
             data-testid="rack-date"
           />
         </div>
@@ -343,16 +358,23 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
           aria-label="Leyenda del rack"
           data-testid="rack-legend"
         >
-          <li><span class="font-medium text-text-primary">101 · Piso 1</span> habitación y piso</li>
+          <li class="hidden md:list-item">
+            <span class="font-medium text-text-primary">101 · Piso 1</span> habitación y piso
+          </li>
+          <li class="md:hidden"><span class="font-medium text-text-primary">101</span> habitación</li>
           <li class="flex items-center gap-1">
             <span class="rounded px-1 text-[10px] font-bold" [style]="heldTint">5</span>
             Cupos para agencias: 5
           </li>
           <li class="flex items-center gap-1">
             <span class="rounded bg-primary/10 px-1 text-[10px] font-bold text-primary"
-              >Sobreventa: 3 de 2 permitidas</span
+              >Sobreventa: 1 de 2 permitidas</span
             >
             vendidas sobre las habitaciones del tipo
+          </li>
+          <li class="flex items-center gap-1 md:hidden">
+            <app-icon name="alert-triangle" [size]="12" class="text-primary" />
+            sobreventa en el tipo
           </li>
           <li class="flex items-center gap-1">
             <app-icon name="lock" [size]="12" />
@@ -360,7 +382,7 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
           </li>
         </ul>
 
-        <div class="px-2 pb-2 pt-3 md:p-4">
+        <div class="pb-2 pt-3 md:p-4">
           @if (loadError() !== null) {
             <app-hospitality-load-error
               what="el rack"
@@ -393,6 +415,7 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                 [class.w-max]="isDesktop()"
                 [style.grid-template-columns]="gridColumns()"
                 [style.grid-template-rows]="'repeat(' + (rows().length + 1) + ', 2.75rem)'"
+                [attr.aria-busy]="loading()"
                 data-testid="rack-grid"
               >
                 <!-- Nights header -->
@@ -430,7 +453,10 @@ const toDateString = (date: Date) => format(date, 'yyyy-MM-dd');
                     [style.grid-row]="row.row"
                     [style.grid-column]="1"
                   >
-                    <span class="truncate">{{ row.label }}</span>
+                    <!-- Phones: the room code only; the legend explains it -->
+                    <span class="truncate">{{
+                      isDesktop() || !row.code ? row.label : row.code
+                    }}</span>
                     @if (row.chip; as chip) {
                       <app-badge class="ml-1 shrink-0" size="sm" [variant]="chip.variant">{{
                         chip.label
@@ -699,11 +725,20 @@ export class HospitalityRackPageComponent implements OnInit {
   /** H5.3 — block being created or viewed. */
   readonly blockTarget = signal<RoomBlockTarget | null>(null);
 
-  /** On phones the 7 nights share the width, so the page never scrolls sideways. */
+  /** One rack request at a time: a new load cancels the one in flight. */
+  private readonly rackRequests = new Subject<void>();
+  /** U7 — "Ir a la fecha" input; typing a year emits partial dates. */
+  readonly dateInputs = new Subject<string | null>();
+
+  /**
+   * On phones the 7 nights share the width, so the page never scrolls sideways:
+   * at 390 px a 3.5rem first column (room code only) leaves each night ≥ 44 px,
+   * the touch minimum of R-MOB-02 that narrower phones keep by scrolling the rack.
+   */
   readonly gridColumns = computed(() =>
     this.isDesktop()
       ? `minmax(6.5rem, 9rem) repeat(${this.days()}, minmax(2.5rem, 1fr))`
-      : `5.5rem repeat(${this.days()}, minmax(0, 1fr))`,
+      : `3.5rem repeat(${this.days()}, minmax(2.75rem, 1fr))`,
   );
 
   readonly rangeLabel = computed(() => {
@@ -858,7 +893,8 @@ export class HospitalityRackPageComponent implements OnInit {
    */
   private readonly freeCells = computed(() => {
     const free = new Set<string>();
-    if (!this.canBook()) return free;
+    // While the rack reloads its bars belong to the previous window: offer nothing.
+    if (!this.canBook() || this.loading()) return free;
     const today = this.today();
     const nights = this.nightHeaders();
     const taken = this.takenNights();
@@ -880,6 +916,44 @@ export class HospitalityRackPageComponent implements OnInit {
         .map((unit) => ({ value: unit.id, label: `${unit.code} · ${type.name}` })),
     ),
   );
+
+  constructor() {
+    this.rackRequests
+      .pipe(
+        switchMap(() => {
+          const from = this.from();
+          const days = this.days();
+          const to = toDateString(addDays(parseISO(from), days));
+          return this.reservationsService.rack(from, to).pipe(
+            map((rack): RackResult => ({ ok: true, from, days, rack })),
+            catchError((message: unknown) =>
+              of<RackResult>({
+                ok: false,
+                from,
+                days,
+                message: typeof message === 'string' ? message : 'Error de conexión',
+              }),
+            ),
+          );
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((response) => {
+        // A window the desk already left: the load of the current one follows.
+        if (response.from !== this.from() || response.days !== this.days()) return;
+        this.loading.set(false);
+        if (!response.ok) {
+          // R-FB-02: a failed load shows the error block, never a stale rack.
+          this.rack.set(null);
+          this.loadError.set(response.message);
+          return;
+        }
+        this.rack.set(response.rack);
+      });
+    this.dateInputs
+      .pipe(debounceTime(400), takeUntilDestroyed(this.destroyRef))
+      .subscribe((date) => this.goTo(date));
+  }
 
   ngOnInit(): void {
     this.watchViewport();
@@ -917,25 +991,9 @@ export class HospitalityRackPageComponent implements OnInit {
   }
 
   load(): void {
-    const from = this.from();
-    const to = toDateString(addDays(parseISO(from), this.days()));
     this.loading.set(true);
     this.loadError.set(null);
-    this.reservationsService
-      .rack(from, to)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (rack) => {
-          this.rack.set(rack);
-          this.loading.set(false);
-        },
-        // R-FB-02: a failed load shows the error block, never a stale rack.
-        error: (message: string) => {
-          this.loading.set(false);
-          this.rack.set(null);
-          this.loadError.set(message);
-        },
-      });
+    this.rackRequests.next();
   }
 
   onDragStart(event: DragEvent, bar: PlacedBar, mode: DragMode): void {
@@ -1020,7 +1078,7 @@ export class HospitalityRackPageComponent implements OnInit {
     this.load();
   }
 
-  /** U7 — the date picker starts the window on the chosen night. */
+  /** U7 — the date picker starts the window on the chosen night (debounced input). */
   goTo(date: string | null): void {
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date) || date === this.from()) return;
     this.from.set(date);

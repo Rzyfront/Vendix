@@ -308,7 +308,7 @@ export class LodgingFolioService {
         if (order && toCents(getSettledOrderAmount(order)) > toCents(order.grand_total)) {
           throw new VendixHttpException(
             ErrorCodes.LODGING_VAT_EXEMPT_001,
-            'Los pagos del folio superarían el nuevo total',
+            'Los pagos de la cuenta superarían el nuevo total',
           );
         }
       },
@@ -337,8 +337,8 @@ export class LodgingFolioService {
     if (reasons.length > 0) {
       throw new VendixHttpException(
         ErrorCodes.LODGING_VAT_EXEMPT_001,
-        `La exención de IVA ya no aplica: ${reasons.join('. ')}. Quítala del folio para facturar` +
-          (folio.order_id && (await this.hasActiveSplit(folio.order_id)) ? ' (cancela antes la división del folio)' : ''),
+        `La exención de IVA ya no aplica: ${reasons.join('. ')}. Quítala de la cuenta para facturar` +
+          (folio.order_id && (await this.hasActiveSplit(folio.order_id)) ? ' (cancela antes la división de la cuenta)' : ''),
       );
     }
   }
@@ -545,7 +545,7 @@ export class LodgingFolioService {
           if (marked.count !== 1) {
             throw new VendixHttpException(
               ErrorCodes.LODGING_FOLIO_CHARGE_001,
-              'La noche ya estaba cargada; recarga el folio',
+              'La noche ya estaba cargada; recarga la cuenta',
             );
           }
         }
@@ -757,7 +757,7 @@ export class LodgingFolioService {
           },
         });
         if (!item) {
-          throw new VendixHttpException(ErrorCodes.LODGING_FOLIO_VOID_001, 'El cargo no pertenece a este folio');
+          throw new VendixHttpException(ErrorCodes.LODGING_FOLIO_VOID_001, 'El cargo no pertenece a esta cuenta');
         }
         if (item.cancelled_at) return; // Already voided: nothing to write.
         await this.assertNightDayOpen(item.id);
@@ -772,7 +772,7 @@ export class LodgingFolioService {
         if (toCents(order.grand_total) - lineCents < paidCents) {
           throw new VendixHttpException(
             ErrorCodes.LODGING_FOLIO_VOID_001,
-            'El folio quedaría por debajo de lo ya pagado: no se puede anular este cargo',
+            'La cuenta quedaría por debajo de lo ya pagado: no se puede anular este cargo',
           );
         }
         await tx.order_items.update({
@@ -863,7 +863,7 @@ export class LodgingFolioService {
         if (amountCents > balanceCents) {
           throw new VendixHttpException(
             ErrorCodes.LODGING_FOLIO_PAYMENT_001,
-            `El pago supera el saldo del folio (${(balanceCents / 100).toFixed(2)})`,
+            `El pago supera el saldo de la cuenta (${(balanceCents / 100).toFixed(2)})`,
           );
         }
         const amount = amountCents / 100;
@@ -943,7 +943,7 @@ export class LodgingFolioService {
       async (tx) => {
         const order = await this.lockFolioOrder(tx, folio, store_id);
         if (!order.customer_id) {
-          throw new VendixHttpException(ErrorCodes.LODGING_DEPOSIT_001, 'El folio no tiene titular');
+          throw new VendixHttpException(ErrorCodes.LODGING_DEPOSIT_001, 'La cuenta no tiene titular');
         }
         const rows = await tx.lodging_deposits.findMany({
           where: { store_id, reservation_id },
@@ -955,7 +955,7 @@ export class LodgingFolioService {
         }
         const balanceCents = toCents(order.grand_total) - toCents(getSettledOrderAmount(order));
         if (balanceCents <= 0) {
-          throw new VendixHttpException(ErrorCodes.LODGING_DEPOSIT_001, 'El folio no tiene saldo por cubrir');
+          throw new VendixHttpException(ErrorCodes.LODGING_DEPOSIT_001, 'La cuenta no tiene saldo por cubrir');
         }
         const wallet = await tx.wallets.findFirst({
           where: { store_id, customer_id: order.customer_id },
