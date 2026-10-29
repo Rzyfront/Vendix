@@ -3,6 +3,7 @@ import {
   computed,
   DestroyRef,
   effect,
+  ElementRef,
   inject,
   input,
   output,
@@ -95,7 +96,7 @@ interface UnitTypeForm {
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      (opened)="syncFromUnitType()"
+      (opened)="onOpened()"
       [size]="'md'"
       [dialog]="true"
       [title]="title()"
@@ -111,11 +112,15 @@ interface UnitTypeForm {
 
       <form
         [formGroup]="form"
+        id="unit-type-form"
+        novalidate
+        (ngSubmit)="onSubmit()"
         class="space-y-4 mt-4"
         [class.hidden]="activeTab() !== 'data'"
       >
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <app-input
+            data-testid="unit-type-name"
             class="md:col-span-2"
             formControlName="name"
             label="Nombre"
@@ -256,7 +261,7 @@ interface UnitTypeForm {
 
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
-        <app-button variant="primary" [loading]="saving()" (clicked)="onSubmit()">
+        <app-button type="submit" form="unit-type-form" variant="primary" [loading]="saving()">
           <app-icon slot="icon" [name]="isEditMode() ? 'save' : 'plus'" [size]="16" />
           {{ isEditMode() ? 'Guardar cambios' : 'Crear tipo' }}
         </app-button>
@@ -271,6 +276,7 @@ export class UnitTypeFormModalComponent {
   private readonly toastService = inject(ToastService);
   private readonly imageUploadService = inject(ImageUploadService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly authFacade = inject(AuthFacade);
 
   readonly isOpen = input(false);
@@ -451,6 +457,23 @@ export class UnitTypeFormModalComponent {
         ? current.filter((c) => c !== code)
         : [...current, code],
     );
+  }
+
+  onOpened(): void {
+    this.syncFromUnitType();
+    this.focusFirstFieldSoon();
+  }
+
+  /**
+   * R-FORM-05 — the form opens on its first field, after the modal moved the
+   * focus to its own container.
+   */
+  private focusFirstFieldSoon(): void {
+    setTimeout(() => {
+      this.host.nativeElement
+        .querySelector<HTMLInputElement>('[data-testid="unit-type-name"] input')
+        ?.focus();
+    }, 250);
   }
 
   onCancel(): void {

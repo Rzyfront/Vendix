@@ -3,6 +3,7 @@ import {
   computed,
   DestroyRef,
   effect,
+  ElementRef,
   inject,
   input,
   output,
@@ -65,23 +66,30 @@ interface UnitForm {
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      (opened)="syncFromUnit()"
+      (opened)="onOpened()"
       [size]="'md'"
       [dialog]="true"
       [title]="title()"
       subtitle="Número, tipo y ubicación de la habitación"
     >
-      <form [formGroup]="form" class="space-y-4">
+      <form
+        [formGroup]="form"
+        id="unit-form"
+        class="space-y-4"
+        novalidate
+        (ngSubmit)="onSubmit()"
+      >
         @if (!isEditMode()) {
           <app-toggle
             label="Crear varias (rango)"
             [checked]="isRange()"
-            (toggled)="isRange.set($event)"
+            (toggled)="setRange($event)"
           />
         }
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           @if (isRange()) {
             <app-input
+              data-testid="unit-first-field"
               formControlName="range_from"
               label="Desde"
               type="number"
@@ -102,6 +110,7 @@ interface UnitForm {
             />
           } @else {
             <app-input
+              data-testid="unit-first-field"
               class="md:col-span-2"
               formControlName="code"
               label="Número"
@@ -139,7 +148,7 @@ interface UnitForm {
 
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
-        <app-button variant="primary" [loading]="saving()" (clicked)="onSubmit()">
+        <app-button type="submit" form="unit-form" variant="primary" [loading]="saving()">
           <app-icon slot="icon" [name]="isEditMode() ? 'save' : 'plus'" [size]="16" />
           {{ isEditMode() ? 'Guardar cambios' : 'Crear' }}
         </app-button>
@@ -152,6 +161,7 @@ export class UnitFormModalComponent {
   private readonly unitsService = inject(LodgingUnitsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
   readonly isOpen = input(false);
   readonly unit = input<LodgingUnit | null>(null);
@@ -211,6 +221,29 @@ export class UnitFormModalComponent {
       floor: u?.floor ?? '',
       zone: u?.zone ?? '',
     });
+  }
+
+  onOpened(): void {
+    this.syncFromUnit();
+    this.focusFirstFieldSoon();
+  }
+
+  /** Switching to range mode swaps "Número" for "Desde": focus it too. */
+  setRange(enabled: boolean): void {
+    this.isRange.set(enabled);
+    this.focusFirstFieldSoon();
+  }
+
+  /**
+   * R-FORM-05 — the form opens on its first field, after the modal moved the
+   * focus to its own container.
+   */
+  private focusFirstFieldSoon(): void {
+    setTimeout(() => {
+      this.host.nativeElement
+        .querySelector<HTMLInputElement>('[data-testid="unit-first-field"] input')
+        ?.focus();
+    }, 250);
   }
 
   onCancel(): void {
