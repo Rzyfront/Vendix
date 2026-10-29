@@ -52,7 +52,11 @@ export class LodgingFonturController {
         {
           name: `Fontur T${report.quarter} ${report.year}`,
           columns,
-          rows: report.lines,
+          rows: report.lines.map((line) => ({
+            label: line.label,
+            documents: line.documents,
+            base: line.base,
+          })),
           tz,
           totals: { label: 'Total', documents: report.totals.documents, base: report.totals.base },
         },
