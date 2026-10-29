@@ -329,6 +329,28 @@ export class LodgingReservationsService {
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
+  /** U16 — the performance report of the period as XLSX (built by the backend). */
+  exportPerformance(from: string, to: string): Observable<Blob> {
+    const params = new HttpParams().set('from', from).set('to', to);
+    return this.http
+      .get(`${environment.apiUrl}/store/hospitality/reports/performance/export`, {
+        params,
+        responseType: 'blob',
+      })
+      .pipe(catchError(this.handleError));
+  }
+
+  /** U16 — the pickup report of the next `days` stay dates as XLSX (built by the backend). */
+  exportPickup(days: number): Observable<Blob> {
+    const params = new HttpParams().set('days', String(days));
+    return this.http
+      .get(`${environment.apiUrl}/store/hospitality/reports/pickup/export`, {
+        params,
+        responseType: 'blob',
+      })
+      .pipe(catchError(this.handleError));
+  }
+
   /** H7.4 — no-shows and cancellations by channel with their penalties. */
   cancellations(query: LodgingLossesQuery): Observable<LodgingLossesReport> {
     return this.http

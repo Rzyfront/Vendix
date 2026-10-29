@@ -29,6 +29,10 @@ import {
   SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { ReportExportService } from '../../../../reports/services/report-export.service';
+import { hospitalityChartColors } from '../../../shared/chart-theme';
+import { HOSPITALITY_TERMS } from '../../../shared/hospitality-labels';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 import {
   LodgingPerformanceReport,
   LodgingPerformanceRow,
@@ -50,12 +54,31 @@ interface ReportRow {
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
-/** The three formulas, shown in a tooltip next to each KPI. */
-const FORMULAS = [
-  { label: 'Ocupación', text: 'Ocupación = noches vendidas / noches disponibles' },
-  { label: 'ADR', text: 'ADR = ingreso de alojamiento / noches vendidas' },
-  { label: 'RevPAR', text: 'RevPAR = ingreso de alojamiento / noches disponibles' },
-];
+/**
+ * U16 (R-TERM-02, R-REP-02) — each metric with its Spanish name and a plain
+ * explanation, shown on hover over its stat and next to the chart.
+ */
+const METRICS = {
+  occupancy: {
+    label: 'Ocupación',
+    help: 'Qué parte de las noches disponibles se vendió (noches vendidas ÷ noches disponibles).',
+  },
+  adr: {
+    label: HOSPITALITY_TERMS.adr,
+    help: 'Cuánto entra en promedio por cada noche vendida (ingreso de alojamiento ÷ noches vendidas).',
+  },
+  revpar: {
+    label: HOSPITALITY_TERMS.revpar,
+    help: 'Cuánto entra en promedio por cada habitación disponible, se venda o no (ingreso de alojamiento ÷ noches disponibles).',
+  },
+  revenue: {
+    label: 'Ingreso de alojamiento',
+    help: 'Lo que dejaron las noches del periodo, antes de impuestos.',
+  },
+} as const;
+
+/** The three formulas, shown in a tooltip next to the chart. */
+const FORMULAS = [METRICS.occupancy, METRICS.adr, METRICS.revpar];
 
 /** Local civil date `YYYY-MM-DD` of the browser (the store's desk). */
 function civilDate(date: Date): string {
@@ -89,12 +112,13 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
 }
 
 /**
- * Hospitality Suite — "Indicadores" (H7.2). Occupancy, ADR and RevPAR by
+ * Hospitality Suite — "Indicadores" (H7.2, U16). Occupancy, ADR and RevPAR by
  * business day (store timezone) and month: a chart for the trend and a table
  * with the figures. Days closed by the night audit use its frozen snapshot.
  *
  * Standard admin list module: four stats, one card with the sticky search
- * and the options dropdown (period date range + day/month grouping + refresh),
+ * and the options dropdown (period date range + day/month grouping, export to
+ * Excel, refresh),
  * the trend chart and the responsive data view. Clearing the filters goes
  * back to the current month by day.
  */
@@ -114,6 +138,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     EmptyStateComponent,
+    HospitalityLoadErrorComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
@@ -122,34 +147,38 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
         class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
-          title="Ocupación"
+          [title]="metrics.occupancy.label"
+          [attr.title]="metrics.occupancy.label + ': ' + metrics.occupancy.help"
           [value]="pct(totals()?.occupancy_pct)"
-          smallText="Noches vendidas / disponibles"
+          smallText="Noches vendidas de las disponibles"
           iconName="bed-double"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
           [loading]="loading() && !report()"
         />
         <app-stats
-          title="ADR"
+          [title]="metrics.adr.label"
+          [attr.title]="metrics.adr.label + ': ' + metrics.adr.help"
           [value]="money(totals()?.adr)"
-          smallText="Ingreso / noches vendidas"
+          smallText="Promedio por noche vendida"
           iconName="dollar-sign"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-500"
           [loading]="loading() && !report()"
         />
         <app-stats
-          title="RevPAR"
+          [title]="metrics.revpar.label"
+          [attr.title]="metrics.revpar.label + ': ' + metrics.revpar.help"
           [value]="money(totals()?.revpar)"
-          smallText="Ingreso / noches disponibles"
+          smallText="Promedio por habitación, vendida o no"
           iconName="trending-up"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-500"
           [loading]="loading() && !report()"
         />
         <app-stats
-          title="Ingreso alojamiento"
+          [title]="metrics.revenue.label"
+          [attr.title]="metrics.revenue.label + ': ' + metrics.revenue.help"
           [value]="money(totals()?.room_revenue)"
           [smallText]="periodText()"
           iconName="wallet"
@@ -189,7 +218,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="filterConfigs"
                 [filterValues]="filterValues()"
-                [actions]="dropdownActions"
+                [actions]="dropdownActions()"
                 [isLoading]="loading()"
                 (filterChange)="onFilterChange($event)"
                 (clearAllFilters)="onFilterChange({})"
@@ -200,7 +229,9 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
         </div>
 
         <div class="px-2 pb-2 pt-3 md:p-4">
-          @if (loading() && !report()) {
+          @if (loadError(); as message) {
+            <app-hospitality-load-error what="los indicadores" [message]="message" (retry)="load()" />
+          } @else if (loading() && !report()) {
             <div class="p-4 md:p-6">
               <app-spinner [center]="true" text="Cargando indicadores…" />
             </div>
@@ -208,7 +239,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
             <app-empty-state
               icon="chart-line"
               title="Sin datos en el periodo"
-              description="Elige otro periodo en los filtros para ver la ocupación, el ADR y el RevPAR."
+              description="Elige otro periodo en los filtros para ver la ocupación y las tarifas medias."
               [showActionButton]="false"
             />
           } @else {
@@ -218,7 +249,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
                 @for (f of formulas; track f.label) {
                   <span class="inline-flex items-center gap-1 text-text-secondary">
                     {{ f.label }}
-                    <app-tooltip [content]="f.text" position="bottom" size="sm">
+                    <app-tooltip [content]="f.help" position="bottom" size="sm">
                       <app-icon name="info" [size]="14" class="text-text-secondary" />
                     </app-tooltip>
                   </span>
@@ -226,7 +257,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
               </div>
               <app-chart [options]="chartOptions()" size="large" data-testid="kpi-chart" />
               <p class="mt-2 text-xs text-text-secondary">
-                Día de negocio en la zona horaria de la tienda; los días cerrados usan la auditoría nocturna.
+                Día de negocio en la zona horaria de la tienda; los días cerrados usan las cifras del {{ nightAuditTerm }}.
               </p>
             </div>
 
@@ -260,12 +291,18 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
 export class HospitalityPerformancePageComponent implements OnInit {
   private readonly reservationsService = inject(LodgingReservationsService);
   private readonly currency = inject(CurrencyFormatService);
+  private readonly exportService = inject(ReportExportService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
+  readonly metrics = METRICS;
   readonly formulas = FORMULAS;
+  readonly nightAuditTerm = HOSPITALITY_TERMS.nightAudit.toLowerCase();
 
   readonly loading = signal(true);
+  readonly exporting = signal(false);
+  /** U16 (R-FB-02) — a failed load shows this with "Reintentar", never zeros. */
+  readonly loadError = signal<string | null>(null);
   readonly report = signal<LodgingPerformanceReport | null>(null);
   readonly search = signal('');
   readonly filterValues = signal<FilterValues>(defaultFilters());
@@ -291,9 +328,16 @@ export class HospitalityPerformancePageComponent implements OnInit {
     },
   ];
 
-  readonly dropdownActions: DropdownAction[] = [
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      label: this.exporting() ? 'Exportando...' : 'Exportar a Excel',
+      icon: 'download',
+      action: 'export',
+      variant: 'outline',
+      disabled: this.exporting() || !this.report(),
+    },
     { label: 'Actualizar', icon: 'refresh-cw', action: 'refresh', variant: 'outline' },
-  ];
+  ]);
 
   readonly granularity = computed<Granularity>(() =>
     this.filterValues()['granularity'] === 'month' ? 'month' : 'day',
@@ -334,9 +378,9 @@ export class HospitalityPerformancePageComponent implements OnInit {
     { key: 'available_label', label: 'Noches disponibles', align: 'right' as const },
     { key: 'sold_label', label: 'Noches vendidas', align: 'right' as const },
     { key: 'occupancy_label', label: 'Ocupación', align: 'right' as const },
-    { key: 'revenue_label', label: 'Ingreso alojamiento', align: 'right' as const },
-    { key: 'adr_label', label: 'ADR', align: 'right' as const },
-    { key: 'revpar_label', label: 'RevPAR', align: 'right' as const },
+    { key: 'revenue_label', label: METRICS.revenue.label, align: 'right' as const },
+    { key: 'adr_label', label: METRICS.adr.label, align: 'right' as const },
+    { key: 'revpar_label', label: METRICS.revpar.label, align: 'right' as const },
   ]);
 
   readonly cardConfig: ItemListCardConfig = {
@@ -345,8 +389,8 @@ export class HospitalityPerformancePageComponent implements OnInit {
     detailKeys: [
       { key: 'sold_label', label: 'Vendidas' },
       { key: 'available_label', label: 'Disponibles' },
-      { key: 'adr_label', label: 'ADR' },
-      { key: 'revpar_label', label: 'RevPAR' },
+      { key: 'adr_label', label: 'Tarifa media por noche' },
+      { key: 'revpar_label', label: 'Ingreso por habitación disponible' },
     ],
     footerKey: 'occupancy_label',
     footerLabel: 'Ocupación',
@@ -354,14 +398,13 @@ export class HospitalityPerformancePageComponent implements OnInit {
 
   readonly chartOptions = computed<EChartsOption>(() => {
     const series = this.series();
-    const style = getComputedStyle(document.documentElement);
-    const primary = style.getPropertyValue('--color-primary').trim() || '#3b82f6';
-    const border = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
-    const text = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const { primary, primarySoft, neutral, border, text } = hospitalityChartColors();
     const money = (value: number) => this.currency.formatChartAxis(value);
+    const adr = 'Tarifa media por noche';
+    const revpar = 'Ingreso por habitación disponible';
     return {
       tooltip: { trigger: 'axis' },
-      legend: { data: ['Ocupación %', 'ADR', 'RevPAR'], bottom: 0, textStyle: { color: text } },
+      legend: { data: ['Ocupación %', adr, revpar], bottom: 0, textStyle: { color: text } },
       grid: { left: '3%', right: '4%', bottom: '14%', containLabel: true },
       xAxis: {
         type: 'category',
@@ -388,11 +431,25 @@ export class HospitalityPerformancePageComponent implements OnInit {
           name: 'Ocupación %',
           type: 'bar',
           yAxisIndex: 1,
-          itemStyle: { color: `${primary}55` },
+          itemStyle: { color: primarySoft },
           data: series.map((row) => row.occupancy_pct),
         },
-        { name: 'ADR', type: 'line', smooth: true, data: series.map((row) => row.adr) },
-        { name: 'RevPAR', type: 'line', smooth: true, data: series.map((row) => row.revpar) },
+        {
+          name: adr,
+          type: 'line',
+          smooth: true,
+          itemStyle: { color: primary },
+          lineStyle: { color: primary },
+          data: series.map((row) => row.adr),
+        },
+        {
+          name: revpar,
+          type: 'line',
+          smooth: true,
+          itemStyle: { color: neutral },
+          lineStyle: { color: neutral, type: 'dashed' },
+          data: series.map((row) => row.revpar),
+        },
       ],
     };
   });
@@ -422,11 +479,13 @@ export class HospitalityPerformancePageComponent implements OnInit {
 
   onActionClick(action: string): void {
     if (action === 'refresh') this.load();
+    if (action === 'export') this.export();
   }
 
   load(): void {
     const { from, to } = this.filterValues();
     this.loading.set(true);
+    this.loadError.set(null);
     this.reservationsService
       .performance(String(from), String(to))
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -437,7 +496,29 @@ export class HospitalityPerformancePageComponent implements OnInit {
         },
         error: (message: unknown) => {
           this.loading.set(false);
-          this.toastService.error(typeof message === 'string' ? message : 'No se pudieron cargar los indicadores');
+          this.report.set(null);
+          this.loadError.set(typeof message === 'string' ? message : null);
+        },
+      });
+  }
+
+  /** Downloads the XLSX of the current period (the backend builds it). */
+  export(): void {
+    if (!this.report() || this.exporting()) return;
+    const from = String(this.filterValues()['from']);
+    const to = String(this.filterValues()['to']);
+    this.exporting.set(true);
+    this.reservationsService
+      .exportPerformance(from, to)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (blob) => {
+          this.exporting.set(false);
+          this.exportService.downloadBlob(blob, `indicadores_${from}_${to}`);
+        },
+        error: () => {
+          this.exporting.set(false);
+          this.toastService.error('No se pudo exportar el reporte');
         },
       });
   }

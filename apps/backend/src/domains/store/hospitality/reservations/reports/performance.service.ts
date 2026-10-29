@@ -29,6 +29,8 @@ export interface LodgingPerformanceDayRow extends LodgingPerformanceRow {
 export interface LodgingPerformanceReport {
   from: string;
   to: string;
+  /** Store IANA timezone the business days were resolved in. */
+  timezone: string;
   totals: LodgingPerformanceRow;
   days: LodgingPerformanceDayRow[];
   months: LodgingPerformanceRow[];
@@ -57,7 +59,8 @@ export class LodgingPerformanceService {
     const store_id = RequestContextService.getContext()?.store_id;
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     // Business days are store-civil dates: "today" is the store's.
-    const today = localDateString(new Date(), await resolveStoreTimezone(this.prisma, store_id));
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const today = localDateString(new Date(), timezone);
     const from = query.from ?? `${today.slice(0, 8)}01`;
     // No figures yet for days to come (forecast is H7.3).
     const to = !query.to || query.to > today ? today : query.to;
@@ -127,6 +130,7 @@ export class LodgingPerformanceService {
     return {
       from,
       to,
+      timezone,
       totals: row(`${from}/${to}`, total),
       days,
       months: [...monthly].map(([month, acc]) => row(month, acc)),

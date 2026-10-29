@@ -33,8 +33,12 @@ import {
   LodgingLossType,
 } from '../../interfaces/cancellations.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import { ReservationDetailModalComponent } from '../../components/reservation-detail-modal/reservation-detail-modal.component';
+import { HOSPITALITY_TERMS } from '../../../shared/hospitality-labels';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 interface LossTableRow {
+  reservation_id: number;
   occurred_label: string;
   reservation_number: string;
   guest_name: string;
@@ -51,12 +55,12 @@ const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', '
 
 const CHANNEL_LABELS: Record<LodgingChannel, string> = {
   front_desk: 'Recepción',
-  web: 'Motor web',
+  web: 'Tienda en línea',
 };
 
 const TYPE_LABELS: Record<LodgingLossType, string> = {
   cancelled: 'Cancelación',
-  no_show: 'No-show',
+  no_show: HOSPITALITY_TERMS.noShow,
 };
 
 /** `2026-11-05` → `5 nov 2026`. */
@@ -88,6 +92,20 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
   return !needle || values.some((v) => !!v && normalize(v).includes(needle));
 }
 
+/** U16 (R-TERM-02, R-REP-02) — each stat with a plain explanation, shown on hover. */
+const METRICS = {
+  cancellations: { label: 'Cancelaciones', help: 'Reservas que se cancelaron en el periodo.' },
+  noShows: {
+    label: HOSPITALITY_TERMS.noShow,
+    help: 'Reservas cuyo huésped no llegó ni avisó: la habitación quedó vacía.',
+  },
+  lost: { label: 'Valor perdido', help: 'Lo que valían las estadías canceladas o no presentadas.' },
+  penalties: {
+    label: 'Penalidades',
+    help: 'Lo que se cobra al huésped según la política de cancelación del hotel.',
+  },
+} as const;
+
 function isChannel(value: unknown): value is LodgingChannel {
   return value === 'front_desk' || value === 'web';
 }
@@ -97,10 +115,10 @@ function isLossType(value: unknown): value is LodgingLossType {
 }
 
 /**
- * Hospitality Suite — "No-shows y cancelaciones" (H7.4). The reservations
+ * Hospitality Suite — "Cancelaciones" (H7.4, U16). The reservations
  * lost in the period by channel, with the stay value and the policy penalty,
- * so the manager spots leaks. The XLSX is built by the backend from the same
- * dataset, so screen and file match.
+ * so the manager spots leaks; each row opens its reservation. The XLSX is
+ * built by the backend from the same dataset, so screen and file match.
  *
  * Standard admin list module: four stats, one card with the sticky search and
  * the options dropdown (period, channel, type, export, refresh) and the
@@ -119,6 +137,8 @@ function isLossType(value: unknown): value is LodgingLossType {
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     EmptyStateComponent,
+    HospitalityLoadErrorComponent,
+    ReservationDetailModalComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
@@ -127,7 +147,8 @@ function isLossType(value: unknown): value is LodgingLossType {
         class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
-          title="Cancelaciones"
+          [title]="metrics.cancellations.label"
+          [attr.title]="metrics.cancellations.label + ': ' + metrics.cancellations.help"
           [value]="count(totals()?.cancellations)"
           [smallText]="periodText()"
           iconName="calendar-x"
@@ -136,7 +157,8 @@ function isLossType(value: unknown): value is LodgingLossType {
           [loading]="loading() && !report()"
         />
         <app-stats
-          title="No-shows"
+          [title]="metrics.noShows.label"
+          [attr.title]="metrics.noShows.label + ': ' + metrics.noShows.help"
           [value]="count(totals()?.no_shows)"
           smallText="Huéspedes que no llegaron"
           iconName="user-x"
@@ -145,7 +167,8 @@ function isLossType(value: unknown): value is LodgingLossType {
           [loading]="loading() && !report()"
         />
         <app-stats
-          title="Valor perdido"
+          [title]="metrics.lost.label"
+          [attr.title]="metrics.lost.label + ': ' + metrics.lost.help"
           [value]="money(totals()?.lost_amount)"
           smallText="Valor de las estadías perdidas"
           iconName="trending-down"
@@ -154,7 +177,8 @@ function isLossType(value: unknown): value is LodgingLossType {
           [loading]="loading() && !report()"
         />
         <app-stats
-          title="Penalidades"
+          [title]="metrics.penalties.label"
+          [attr.title]="metrics.penalties.label + ': ' + metrics.penalties.help"
           [value]="money(totals()?.penalty_amount)"
           smallText="Según la política de cancelación"
           iconName="receipt"
@@ -177,7 +201,7 @@ function isLossType(value: unknown): value is LodgingLossType {
               class="text-[13px] font-bold text-gray-600 tracking-wide
                      md:text-lg md:font-semibold md:text-text-primary"
             >
-              No-shows y cancelaciones
+              Cancelaciones y huéspedes que no se presentaron
               <span class="text-text-secondary font-normal">({{ rows().length }})</span>
             </h2>
 
@@ -205,21 +229,16 @@ function isLossType(value: unknown): value is LodgingLossType {
         </div>
 
         <div class="px-2 pb-2 pt-3 md:p-4">
-          @if (loading() && !report()) {
+          @if (loadError(); as message) {
+            <app-hospitality-load-error what="las cancelaciones" [message]="message" (retry)="load()" />
+          } @else if (!report()) {
             <div class="p-4 md:p-6">
               <app-spinner [center]="true" text="Cargando reporte…" />
             </div>
-          } @else if (!report()) {
-            <app-empty-state
-              icon="calendar-x"
-              title="Sin reporte"
-              description="No se pudo cargar el reporte. Usa Actualizar para reintentar."
-              [showActionButton]="false"
-            />
           } @else if (rows().length === 0) {
             <app-empty-state
               [icon]="search() ? 'search' : 'calendar-check'"
-              [title]="search() ? 'Sin resultados' : 'Sin cancelaciones ni no-shows'"
+              [title]="search() ? 'Sin resultados' : 'Sin cancelaciones ni huéspedes que no se presentaron'"
               [description]="
                 search()
                   ? 'Ninguna reserva coincide con la búsqueda.'
@@ -236,16 +255,23 @@ function isLossType(value: unknown): value is LodgingLossType {
               [cardConfig]="cardConfig"
               [striped]="true"
               [hoverable]="true"
+              (rowClick)="openReservation($event)"
               emptyMessage="No hay reservas con ese criterio"
               emptyIcon="search"
               data-testid="cancellations-table"
             />
             <p class="mt-2 text-xs text-text-secondary">
-              Fecha del evento en la zona horaria de la tienda. No incluye reservas web que vencieron sin pagar.
+              Fecha del evento en la zona horaria de la tienda. No incluye reservas de la tienda en línea que vencieron sin pagar.
             </p>
           }
         </div>
       </app-card>
+
+      <app-reservation-detail-modal
+        [reservationId]="detailId()"
+        (closed)="detailId.set(null)"
+        (changed)="load()"
+      />
     </div>
   `,
 })
@@ -256,8 +282,14 @@ export class HospitalityCancellationsPageComponent implements OnInit {
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
+  readonly metrics = METRICS;
+
   readonly loading = signal(true);
   readonly exporting = signal(false);
+  /** U16 (R-FB-02) — a failed load shows this with "Reintentar", never zeros. */
+  readonly loadError = signal<string | null>(null);
+  /** U16 (R-NAV-07) — the reservation a row opened. */
+  readonly detailId = signal<number | null>(null);
   readonly report = signal<LodgingLossesReport | null>(null);
   readonly search = signal('');
   readonly filterValues = signal<FilterValues>(defaultFilters());
@@ -285,17 +317,17 @@ export class HospitalityCancellationsPageComponent implements OnInit {
       key: 'type',
       label: 'Tipo',
       type: 'select',
-      placeholder: 'Cancelaciones y no-shows',
+      placeholder: 'Todos los tipos',
       options: [
         { value: 'cancelled', label: 'Cancelaciones' },
-        { value: 'no_show', label: 'No-shows' },
+        { value: 'no_show', label: HOSPITALITY_TERMS.noShow },
       ],
     },
   ];
 
   readonly dropdownActions = computed<DropdownAction[]>(() => [
     {
-      label: this.exporting() ? 'Exportando...' : 'Exportar XLSX',
+      label: this.exporting() ? 'Exportando...' : 'Exportar a Excel',
       icon: 'download',
       action: 'export',
       variant: 'outline',
@@ -314,6 +346,7 @@ export class HospitalityCancellationsPageComponent implements OnInit {
   readonly rows = computed<LossTableRow[]>(() =>
     (this.report()?.rows ?? [])
       .map((row) => ({
+        reservation_id: row.reservation_id,
         occurred_label: dateLabel(row.occurred_on),
         reservation_number: row.reservation_number,
         guest_name: row.guest_name || '—',
@@ -391,8 +424,13 @@ export class HospitalityCancellationsPageComponent implements OnInit {
     if (action === 'export') this.export();
   }
 
+  openReservation(row: LossTableRow): void {
+    this.detailId.set(row.reservation_id);
+  }
+
   load(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.reservationsService
       .cancellations(this.query())
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -403,7 +441,8 @@ export class HospitalityCancellationsPageComponent implements OnInit {
         },
         error: (message: unknown) => {
           this.loading.set(false);
-          this.toastService.error(typeof message === 'string' ? message : 'No se pudo cargar el reporte');
+          this.report.set(null);
+          this.loadError.set(typeof message === 'string' ? message : null);
         },
       });
   }
@@ -420,7 +459,7 @@ export class HospitalityCancellationsPageComponent implements OnInit {
       .subscribe({
         next: (blob) => {
           this.exporting.set(false);
-          this.exportService.downloadBlob(blob, `no_shows_cancelaciones_${query.from}_${query.to}`);
+          this.exportService.downloadBlob(blob, `cancelaciones_${query.from}_${query.to}`);
         },
         error: () => {
           this.exporting.set(false);

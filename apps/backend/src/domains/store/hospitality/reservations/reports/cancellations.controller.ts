@@ -12,7 +12,7 @@ import { LodgingCancellationsService } from './cancellations.service';
 import { LodgingCancellationsQueryDto } from './cancellations.dto';
 import { LODGING_CHANNEL_LABELS } from './reservation-channel';
 
-const TYPE_LABELS = { cancelled: 'Cancelación', no_show: 'No-show' } as const;
+const TYPE_LABELS = { cancelled: 'Cancelación', no_show: 'No se presentó' } as const;
 
 /** Hospitality Suite (H7.4) — no-shows and cancellations by channel with their penalties. */
 @Controller('store/hospitality/reports/cancellations')
@@ -32,7 +32,7 @@ export class LodgingCancellationsController {
   }
 
   /** Same dataset and totals as the screen, as XLSX. */
-  @ApiOperation({ summary: 'Exportar no-shows y cancelaciones (XLSX)' })
+  @ApiOperation({ summary: 'Exportar cancelaciones y no presentados (XLSX)' })
   @Get('export')
   @Permissions('store:lodging:reports:read')
   async export(@Query() query: LodgingCancellationsQueryDto, @Res() res: Response): Promise<void> {
@@ -63,19 +63,19 @@ export class LodgingCancellationsController {
     const buffer = await buildReportBuffer({
       sheets: [
         {
-          name: 'No-shows y cancelaciones',
+          name: 'Cancelaciones',
           columns,
           rows,
           tz,
           totals: {
             reservation_number: 'Total',
-            type: `${totals.cancellations} cancelaciones · ${totals.no_shows} no-shows`,
+            type: `Cancelaciones: ${totals.cancellations} · No se presentó: ${totals.no_shows}`,
             total_amount: totals.lost_amount,
             penalty_amount: totals.penalty_amount,
           },
         },
       ],
     });
-    sendXlsxReport(res, buffer, buildReportFilename('no_shows_cancelaciones', { tz }));
+    sendXlsxReport(res, buffer, buildReportFilename('cancelaciones', { tz }));
   }
 }
