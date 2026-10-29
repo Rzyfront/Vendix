@@ -125,6 +125,14 @@ export function notBeforeToday(control: AbstractControl): ValidationErrors | nul
           «Acuerdo mutuo»).
         </app-alert-banner>
 
+        @if (customerRequired()) {
+          <app-alert-banner variant="info" tone="token" icon="user">
+            Esta orden no tiene un cliente identificado: para facturarla a
+            crédito, asígnale un cliente. Si no es una venta a crédito, emítela
+            como Consumidor final de contado.
+          </app-alert-banner>
+        }
+
         <dl class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div class="rounded-lg border border-border bg-surface p-3">
             <dt class="text-xs font-semibold uppercase tracking-wider text-text-secondary">
@@ -152,6 +160,7 @@ export function notBeforeToday(control: AbstractControl): ValidationErrors | nul
           </div>
         </dl>
 
+        @if (!customerRequired()) {
         <div>
           <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-text-secondary">
             Plazo
@@ -190,6 +199,7 @@ export function notBeforeToday(control: AbstractControl): ValidationErrors | nul
           formControlName="payment_means_code"
           [options]="paymentMeansOptions"
         ></app-selector>
+        }
       </form>
 
       <div slot="footer">
@@ -198,14 +208,20 @@ export function notBeforeToday(control: AbstractControl): ValidationErrors | nul
             <app-button variant="ghost" [disabled]="busy()" (clicked)="onCancel()">
               Cancelar
             </app-button>
-            <app-button
-              variant="primary"
-              [disabled]="!canConfirm()"
-              [loading]="busy()"
-              (clicked)="onConfirm()"
-            >
-              Facturar a crédito
-            </app-button>
+            @if (customerRequired()) {
+              <app-button variant="primary" [disabled]="busy()" (clicked)="onAssignCustomer()">
+                Asignar cliente
+              </app-button>
+            } @else {
+              <app-button
+                variant="primary"
+                [disabled]="!canConfirm()"
+                [loading]="busy()"
+                (clicked)="onConfirm()"
+              >
+                Facturar a crédito
+              </app-button>
+            }
           </div>
           @if (allowFinalConsumer()) {
             <div class="flex justify-end border-t border-border pt-2">
@@ -235,11 +251,18 @@ export class CreditInvoiceModalComponent {
   readonly busy = input<boolean>(false);
   /** Ofrece salir de contado a Consumidor final en vez de crédito. */
   readonly allowFinalConsumer = input<boolean>(true);
+  /**
+   * La orden no tiene un deudor identificable (sin cliente, o el cliente es el
+   * Consumidor final): no se ofrece el plazo, sólo asignar cliente o contado.
+   */
+  readonly customerRequired = input<boolean>(false);
 
   readonly confirmed = output<CreditInvoiceSubmit>();
   readonly cancelled = output<void>();
   /** El cajero no quiere crédito: emitir a Consumidor final de contado («Acuerdo mutuo»). */
   readonly finalConsumer = output<void>();
+  /** Sin cliente identificado: el padre abre «Cambiar cliente». */
+  readonly assignCustomer = output<void>();
 
   protected readonly termDays = CREDIT_TERM_DAYS;
   protected readonly paymentMeansOptions = CREDIT_PAYMENT_MEANS_OPTIONS;
@@ -307,7 +330,7 @@ export class CreditInvoiceModalComponent {
   }
 
   protected onConfirm(): void {
-    if (this.busy()) return;
+    if (this.busy() || this.customerRequired()) return;
     this.form.markAllAsTouched();
     if (this.form.invalid) return;
     const { due_date, payment_means_code } = this.form.getRawValue();
@@ -315,6 +338,12 @@ export class CreditInvoiceModalComponent {
       due_date,
       ...(payment_means_code ? { payment_means_code } : {}),
     });
+  }
+
+  protected onAssignCustomer(): void {
+    if (this.busy()) return;
+    this.isOpen.set(false);
+    this.assignCustomer.emit();
   }
 
   protected onUseFinalConsumer(): void {
