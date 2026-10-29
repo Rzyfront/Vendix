@@ -51,6 +51,8 @@ export interface HousekeepingTaskView {
   assigned_user_id: number | null;
   notes: string | null;
   completed_at: Date | null;
+  /** U13 — who holds the task, by name (today's list only; null = unassigned or unknown). */
+  assigned_user_name?: string | null;
   unit: {
     id: number;
     code: string;
@@ -142,7 +144,45 @@ export class HousekeepingTasksService {
       }),
       this.staff(store_id),
     ]);
-    return { business_date: today, tasks: stillDue(tasks, current).map(toView), staff };
+    const names = await this.assigneeNames(store_id, tasks, staff);
+    return {
+      business_date: today,
+      tasks: stillDue(tasks, current)
+        .map(toView)
+        .map((task) => ({
+          ...task,
+          assigned_user_name:
+            task.assigned_user_id == null ? null : (names.get(task.assigned_user_id) ?? null),
+        })),
+      staff,
+    };
+  }
+
+  /**
+   * U13 — the name of every assignee of the day. A task may still be held by
+   * someone who lost the housekeeper role, so names missing from the staff
+   * are read from the store's users (read only).
+   */
+  private async assigneeNames(
+    store_id: number,
+    tasks: { assigned_user_id: number | null }[],
+    staff: HousekeepingStaffMember[],
+  ): Promise<Map<number, string>> {
+    const names = new Map(staff.map((member) => [member.id, member.name]));
+    const missing = [
+      ...new Set(
+        tasks
+          .map((task) => task.assigned_user_id)
+          .filter((id): id is number => id != null && !names.has(id)),
+      ),
+    ];
+    if (missing.length === 0) return names;
+    const users = await this.prisma.users.findMany({
+      where: { id: { in: missing }, store_users: { some: { store_id } } },
+      select: { id: true, first_name: true, last_name: true },
+    });
+    for (const u of users) names.set(u.id, `${u.first_name} ${u.last_name}`.trim());
+    return names;
   }
 
   /** Housekeeper: only the tasks of today assigned to the current user. */

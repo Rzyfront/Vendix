@@ -10,6 +10,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { RouterLink } from '@angular/router';
 import {
   AlertBannerComponent,
   ButtonComponent,
@@ -85,6 +86,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
     ModalComponent,
     ResponsiveDataViewComponent,
     SelectorComponent,
+    RouterLink,
   ],
   template: `
     @if (loadError() !== null) {
@@ -102,6 +104,18 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
         <app-alert-banner variant="info" icon="info" class="mb-3 block">
           No hay usuarios con el rol Camarera en esta tienda. Créalos en Usuarios para asignarles
           habitaciones.
+          <!-- R-EMPTY-03: the notice carries the button that solves it. -->
+          <div bannerActions class="mt-2">
+            <app-button
+              variant="outline"
+              size="sm"
+              customClasses="!min-h-11"
+              routerLink="/admin/settings/users"
+              data-testid="hk-go-users"
+            >
+              Ir a Usuarios
+            </app-button>
+          </div>
         </app-alert-banner>
       }
       @if (rows().length === 0 && hasFilters()) {
@@ -174,6 +188,34 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
         </app-button>
       </div>
     </app-modal>
+
+    <!-- R-ROW-01: a finished task still opens something. -->
+    <app-modal
+      [isOpen]="viewing() !== null"
+      (isOpenChange)="!$event && viewing.set(null)"
+      (cancel)="viewing.set(null)"
+      size="sm"
+      [title]="'Habitación ' + (viewing()?.room ?? '')"
+      [subtitle]="viewing()?.type_label ?? ''"
+    >
+      @if (viewing(); as task) {
+        <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm" data-testid="hk-task-view">
+          <dt class="text-text-secondary">Estado</dt>
+          <dd class="text-text-primary">{{ statusLabel(task.status) }}</dd>
+          <dt class="text-text-secondary">Camarera</dt>
+          <dd class="text-text-primary">{{ task.assignee_label }}</dd>
+          <dt class="text-text-secondary">Habitación</dt>
+          <dd class="text-text-primary">{{ task.room_status_label }}</dd>
+          @if (task.notes) {
+            <dt class="text-text-secondary">Nota</dt>
+            <dd class="text-text-primary whitespace-pre-line">{{ task.notes }}</dd>
+          }
+        </dl>
+      }
+      <div slot="footer" class="flex justify-end">
+        <app-button variant="ghost" (clicked)="viewing.set(null)">Cerrar</app-button>
+      </div>
+    </app-modal>
   `,
 })
 export class HousekeepingTasksPanelComponent implements OnInit {
@@ -202,6 +244,9 @@ export class HousekeepingTasksPanelComponent implements OnInit {
   readonly saving = signal<number | null>(null);
   readonly assigning = signal<TaskRow | null>(null);
   readonly assignTo = signal<number>(UNASSIGNED);
+  /** Finished task shown read-only (its row's "Ver"). */
+  readonly viewing = signal<TaskRow | null>(null);
+  protected readonly statusLabel = taskStatusLabel;
 
   readonly staffOptions = computed<SelectorOption[]>(() => [
     { value: UNASSIGNED, label: 'Sin asignar' },
@@ -277,6 +322,13 @@ export class HousekeepingTasksPanelComponent implements OnInit {
       show: (row: TaskRow) => this.mode() === 'mine' && row.status === 'pending',
       disabled: () => this.saving() !== null,
       action: (row: TaskRow) => this.complete(row),
+    },
+    {
+      label: 'Ver',
+      icon: 'eye',
+      variant: 'ghost',
+      show: (row: TaskRow) => row.status === 'done',
+      action: (row: TaskRow) => this.viewing.set(row),
     },
   ];
 
@@ -369,7 +421,9 @@ export class HousekeepingTasksPanelComponent implements OnInit {
           ? 'Sin asignar'
           : this.mode() === 'mine'
             ? 'Tú'
-            : (this.staffNames().get(task.assigned_user_id) ?? 'Asignada'),
+            : (task.assigned_user_name ??
+              this.staffNames().get(task.assigned_user_id) ??
+              'Usuario retirado'),
     };
   }
 

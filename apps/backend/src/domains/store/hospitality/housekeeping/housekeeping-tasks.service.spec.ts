@@ -131,6 +131,40 @@ describe('HousekeepingTasksService', () => {
     });
   });
 
+  describe("today's assignee names", () => {
+    // Finished tasks always stay on the day's list.
+    const done = { ...view, status: 'done' };
+
+    it('names the housekeeper from the staff and reads the ones who left it', async () => {
+      tasks.findMany.mockResolvedValue([
+        done,
+        { ...done, id: 2, assigned_user_id: 33, unit: { ...view.unit, id: 8, code: '102' } },
+        { ...done, id: 3, assigned_user_id: null, unit: { ...view.unit, id: 9, code: '103' } },
+      ]);
+      users.findMany
+        .mockResolvedValueOnce([{ id: 21, first_name: 'Ana', last_name: 'Ruiz' }])
+        .mockResolvedValueOnce([{ id: 33, first_name: 'Luz', last_name: 'Gil' }]);
+
+      const result = await service.today();
+
+      expect(result.tasks.map((t) => t.assigned_user_name)).toEqual(['Ana Ruiz', 'Luz Gil', null]);
+      expect(users.findMany).toHaveBeenLastCalledWith({
+        where: { id: { in: [33] }, store_users: { some: { store_id: 5 } } },
+        select: { id: true, first_name: true, last_name: true },
+      });
+    });
+
+    it('no extra read when every assignee is in the staff', async () => {
+      tasks.findMany.mockResolvedValue([done]);
+      users.findMany.mockResolvedValueOnce([{ id: 21, first_name: 'Ana', last_name: 'Ruiz' }]);
+
+      const result = await service.today();
+
+      expect(result.tasks[0].assigned_user_name).toBe('Ana Ruiz');
+      expect(users.findMany).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('my tasks', () => {
     it('the housekeeper only reads the tasks assigned to her', async () => {
       rooms.findMany.mockResolvedValue([stay(7, '2026-11-08', '2026-11-10', 'checked_in')]);

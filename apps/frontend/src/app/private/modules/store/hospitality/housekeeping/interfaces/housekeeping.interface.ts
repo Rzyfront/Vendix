@@ -37,6 +37,23 @@ export const HOUSEKEEPING_STATUS_PERMISSIONS: Partial<Record<HousekeepingStatus,
   out_of_service: ['store:lodging:housekeeping:assign', 'store:lodging:inventory:write'],
 };
 
+/**
+ * U13 (R-TERM) — the two ways a room leaves the sale, with what each is for.
+ * The board badges keep the short term; choosing one shows this.
+ */
+export const OFF_SALE_STATUS_HELP: Partial<
+  Record<HousekeepingStatus, { label: string; help: string }>
+> = {
+  out_of_order: {
+    label: 'Fuera de servicio (reparación)',
+    help: 'Daño o mantenimiento: no se vende hasta que se repare.',
+  },
+  out_of_service: {
+    label: 'Bloqueada (uso interno)',
+    help: 'En buen estado pero reservada para el hotel (personal, depósito, muestra).',
+  },
+};
+
 /** Next step of the cleaning cycle, offered as the room's quick action. */
 export const HOUSEKEEPING_QUICK_ACTION: Partial<
   Record<HousekeepingStatus, { to: HousekeepingStatus; label: string }>
@@ -64,6 +81,8 @@ export interface HousekeepingTask {
   type: HousekeepingTaskType;
   status: HousekeepingTaskStatus;
   assigned_user_id: number | null;
+  /** U13 — assignee's name (today's list only). */
+  assigned_user_name?: string | null;
   notes: string | null;
   completed_at: string | null;
   unit: {
