@@ -10,11 +10,13 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { catchError, concatMap, from, map, of, toArray } from 'rxjs';
 import { RouterLink } from '@angular/router';
 import {
   AlertBannerComponent,
   ButtonComponent,
   EmptyStateComponent,
+  IconComponent,
   ItemListCardConfig,
   ModalComponent,
   ResponsiveDataViewComponent,
@@ -83,6 +85,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
     AlertBannerComponent,
     ButtonComponent,
     EmptyStateComponent,
+    IconComponent,
     ModalComponent,
     ResponsiveDataViewComponent,
     SelectorComponent,
@@ -147,6 +150,40 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
           [showActionButton]="false"
         />
       } @else {
+        <!-- R-ROW-05: assign several rooms to one housekeeper at once. -->
+        @if (bulkIds().length > 0) {
+          <div
+            class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2"
+            role="region"
+            aria-label="Acciones de la selección"
+            data-testid="hk-bulk-bar"
+          >
+            <span class="text-sm font-medium text-text-primary">
+              {{ bulkIds().length }} {{ bulkIds().length === 1 ? 'seleccionada' : 'seleccionadas' }}
+            </span>
+            <div class="flex gap-2">
+              <app-button
+                variant="ghost"
+                size="sm"
+                customClasses="!min-h-11"
+                (clicked)="selectedIds.set(emptySelection())"
+              >
+                Quitar selección
+              </app-button>
+              <app-button
+                variant="primary"
+                size="sm"
+                customClasses="!min-h-11"
+                [disabled]="saving() !== null"
+                (clicked)="openBulkAssign()"
+                data-testid="hk-bulk-assign"
+              >
+                <app-icon slot="icon" name="user-plus" [size]="16" />
+                Asignar a…
+              </app-button>
+            </div>
+          </div>
+        }
         <app-responsive-data-view
           [data]="rows()"
           [columns]="columns()"
@@ -155,6 +192,9 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
           [mobileActions]="actions"
           [striped]="true"
           [hoverable]="true"
+          [selectable]="mode() === 'assign'"
+          rowLabelKey="room"
+          [(selectedIds)]="selectedIds"
           emptyMessage="No hay tareas con ese criterio"
           emptyIcon="search"
           data-testid="hk-tasks"
@@ -163,12 +203,12 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
     }
 
     <app-modal
-      [isOpen]="assigning() !== null"
-      (isOpenChange)="!$event && assigning.set(null)"
-      (cancel)="assigning.set(null)"
+      [isOpen]="assigning() !== null || bulkAssigning()"
+      (isOpenChange)="!$event && closeAssign()"
+      (cancel)="closeAssign()"
       size="sm"
-      [title]="'Asignar habitación ' + (assigning()?.room ?? '')"
-      [subtitle]="assigning()?.type_label ?? ''"
+      [title]="assignTitle()"
+      [subtitle]="bulkAssigning() ? '' : (assigning()?.type_label ?? '')"
     >
       <app-selector
         label="Camarera"
@@ -177,12 +217,13 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
         (valueChange)="assignTo.set($event === null ? UNASSIGNED : Number($event))"
       />
       <div slot="footer" class="flex justify-end gap-2">
-        <app-button variant="ghost" (clicked)="assigning.set(null)">Cancelar</app-button>
+        <app-button variant="ghost" (clicked)="closeAssign()">Cancelar</app-button>
         <app-button
           variant="primary"
           [loading]="saving() !== null"
           [disabled]="saving() !== null"
-          (clicked)="assign()"
+          (clicked)="bulkAssigning() ? assignSelected() : assign()"
+          data-testid="hk-assign-save"
         >
           Guardar
         </app-button>
@@ -244,6 +285,11 @@ export class HousekeepingTasksPanelComponent implements OnInit {
   readonly saving = signal<number | null>(null);
   readonly assigning = signal<TaskRow | null>(null);
   readonly assignTo = signal<number>(UNASSIGNED);
+  /** U14 — rows ticked in the list (task ids). */
+  readonly selectedIds = signal<Set<string | number>>(new Set<string | number>());
+  /** U14 — the assign modal works on the selection instead of one row. */
+  readonly bulkAssigning = signal(false);
+  protected readonly emptySelection = () => new Set<string | number>();
   /** Finished task shown read-only (its row's "Ver"). */
   readonly viewing = signal<TaskRow | null>(null);
   protected readonly statusLabel = taskStatusLabel;
@@ -278,6 +324,25 @@ export class HousekeepingTasksPanelComponent implements OnInit {
           (!assignment ||
             (assignment === 'assigned') === (row.assigned_user_id !== null)),
       );
+  });
+
+  /**
+   * U14 — selected tasks that can still be assigned: pending and visible with
+   * the current search and filters (a hidden row is never touched by surprise).
+   */
+  readonly bulkIds = computed<number[]>(() => {
+    const selected = this.selectedIds();
+    return this.rows()
+      .filter((row) => row.status === 'pending' && selected.has(row.id))
+      .map((row) => row.id);
+  });
+
+  readonly assignTitle = computed(() => {
+    if (this.bulkAssigning()) {
+      const count = this.bulkIds().length;
+      return `Asignar ${count} ${count === 1 ? 'tarea' : 'tareas'}`;
+    }
+    return 'Asignar habitación ' + (this.assigning()?.room ?? '');
   });
 
   readonly columns = computed<TableColumn[]>(() => [
@@ -355,6 +420,62 @@ export class HousekeepingTasksPanelComponent implements OnInit {
   openAssign(row: TaskRow): void {
     this.assignTo.set(row.assigned_user_id ?? UNASSIGNED);
     this.assigning.set(row);
+  }
+
+  openBulkAssign(): void {
+    if (this.bulkIds().length === 0) return;
+    this.assignTo.set(UNASSIGNED);
+    this.bulkAssigning.set(true);
+  }
+
+  closeAssign(): void {
+    this.assigning.set(null);
+    this.bulkAssigning.set(false);
+  }
+
+  /**
+   * U14 — assigns every selected task to one housekeeper, one call after the
+   * other (no bulk endpoint while a hotel has a few dozen rooms). A refused
+   * task does not stop the rest; the toast tells how many went through.
+   */
+  assignSelected(): void {
+    const ids = this.bulkIds();
+    if (ids.length === 0 || this.saving() !== null) return;
+    const userId = this.assignTo() === UNASSIGNED ? null : this.assignTo();
+    const name = userId === null ? null : (this.staffNames().get(userId) ?? 'la camarera');
+    this.saving.set(ids[0]);
+    from(ids)
+      .pipe(
+        concatMap((id) =>
+          this.housekeepingService.assignTask(id, userId).pipe(
+            map((task): HousekeepingTask | null => task),
+            catchError(() => of(null)),
+          ),
+        ),
+        toArray(),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((results) => {
+        const done = results.filter((task): task is HousekeepingTask => task !== null);
+        done.forEach((task) => this.replace(task));
+        this.saving.set(null);
+        this.closeAssign();
+        this.selectedIds.set(new Set<string | number>());
+        const what = `${done.length} ${done.length === 1 ? 'tarea' : 'tareas'}`;
+        const outcome =
+          name === null
+            ? `${what} ${done.length === 1 ? 'quedó' : 'quedaron'} sin asignar`
+            : `${what} ${done.length === 1 ? 'asignada' : 'asignadas'} a ${name}`;
+        const failed = ids.length - done.length;
+        if (failed === 0) {
+          this.toastService.success(outcome);
+        } else {
+          this.toastService.error(
+            `${outcome}. ${failed} no se ${failed === 1 ? 'pudo' : 'pudieron'} asignar`,
+          );
+          this.load();
+        }
+      });
   }
 
   assign(): void {
