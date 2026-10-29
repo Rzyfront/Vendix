@@ -813,6 +813,56 @@ export class BreadcrumbService {
       icon: 'eye',
     },
 
+    // Manufactura (MVP)
+    {
+      path: '/admin/manufacturing/formulas',
+      title: 'Fórmulas',
+      parent: 'Manufactura',
+      icon: 'factory',
+    },
+    {
+      path: '/admin/manufacturing/formulas/new',
+      title: 'Nueva fórmula',
+      parent: 'Manufactura',
+      icon: 'factory',
+    },
+    {
+      path: '/admin/manufacturing/formulas/:id/edit',
+      title: 'Editar fórmula',
+      parent: 'Manufactura',
+      icon: 'factory',
+    },
+    {
+      path: '/admin/manufacturing/orders',
+      title: 'Órdenes de producción',
+      parent: 'Manufactura',
+      icon: 'factory',
+    },
+    {
+      path: '/admin/manufacturing/orders/new',
+      title: 'Nueva orden de producción',
+      parent: 'Manufactura',
+      icon: 'factory',
+    },
+    {
+      path: '/admin/manufacturing/orders/:id/edit',
+      title: 'Editar orden de producción',
+      parent: 'Manufactura',
+      icon: 'factory',
+    },
+    {
+      path: '/admin/manufacturing/orders/:id',
+      title: 'Detalle de orden de producción',
+      parent: 'Manufactura',
+      icon: 'factory',
+    },
+    {
+      path: '/admin/manufacturing/settings',
+      title: 'Planta',
+      parent: 'Manufactura',
+      icon: 'factory',
+    },
+
     // Hospitality
     {
       path: '/admin/hospitality/rooms',

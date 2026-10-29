@@ -1,0 +1,119 @@
+<div class="w-full overflow-x-hidden">
+  <app-sticky-header
+    [title]="isEditMode() ? 'Editar orden de producción' : 'Nueva orden de producción'"
+    subtitle="Elige la fórmula, la cantidad a fabricar y la fecha de entrega"
+    icon="factory"
+    variant="glass"
+    [showBackButton]="true"
+    backRoute="/admin/manufacturing/orders"
+  />
+
+  <div class="px-2 py-3 md:p-4 space-y-5">
+    @if (submitError(); as err) {
+      <div
+        role="alert"
+        aria-live="assertive"
+        class="flex items-start gap-2 p-3 rounded-md border border-red-200 bg-red-50 text-red-900 text-sm"
+      >
+        <app-icon name="x-circle" [size]="18" class="text-red-600 mt-0.5 shrink-0" />
+        <p>{{ err }}</p>
+      </div>
+    }
+
+    <app-card
+      title="Datos de la orden"
+      subtitle="El número de orden (OP-000001) se asigna automáticamente al crearla"
+      [overflow]="'visible'"
+    >
+      <form
+        [formGroup]="form"
+        (ngSubmit)="onSubmit()"
+        class="grid grid-cols-1 md:grid-cols-2 gap-4"
+      >
+        <div class="md:col-span-2">
+          <app-selector
+            formControlName="recipe_id"
+            label="Producto / fórmula"
+            [placeholder]="
+              formulaOptions().length === 0
+                ? 'No hay fórmulas activas'
+                : 'Selecciona la fórmula a fabricar'
+            "
+            helpText="Solo aparecen fórmulas en estado Activa. El producto se toma de la fórmula."
+            [options]="formulaOptions()"
+            [searchable]="true"
+            [required]="true"
+            [disabled]="isEditMode()"
+          />
+        </div>
+
+        <app-input
+          type="number"
+          formControlName="planned_qty"
+          label="Cantidad a producir"
+          placeholder="Ej. 10"
+          step="0.0001"
+          [min]="0"
+          [required]="true"
+          [helperText]="
+            selectedFormula()
+              ? 'La fórmula rinde ' +
+                selectedFormula()!.yield_quantity +
+                ' ' +
+                selectedFormula()!.yield_unit +
+                ' por lote.'
+              : 'Cantidad en la unidad del producto terminado.'
+          "
+        />
+
+        <app-input
+          type="date"
+          formControlName="due_date"
+          label="Fecha de entrega"
+        />
+
+        <app-selector
+          formControlName="location_id"
+          label="Bodega"
+          placeholder="Bodega por defecto de la planta"
+          helpText="Bodega donde se consumen los insumos."
+          [options]="locationOptions()"
+          [searchable]="true"
+        />
+
+        <app-selector
+          formControlName="priority"
+          label="Prioridad"
+          [options]="priorityOptions"
+        />
+
+        <div class="md:col-span-2">
+          <app-textarea
+            formControlName="notes"
+            label="Notas (opcional)"
+            placeholder="Notas internas (turno, cliente, observaciones)"
+            [rows]="3"
+          />
+        </div>
+
+        <div
+          class="md:col-span-2 flex flex-col-reverse md:flex-row md:justify-end gap-2 pt-2"
+        >
+          <app-button variant="outline" (clicked)="onCancel()" [disabled]="isSubmitting()">
+            <app-icon name="x" [size]="16" slot="icon" />
+            Cancelar
+          </app-button>
+          <app-button
+            variant="primary"
+            type="submit"
+            [loading]="isSubmitting()"
+            [disabled]="isSubmitting() || isLoading()"
+          >
+            <app-icon name="check" [size]="16" slot="icon" />
+            {{ isEditMode() ? 'Guardar cambios' : 'Crear orden' }}
+          </app-button>
+        </div>
+      </form>
+    </app-card>
+  </div>
+</div>

@@ -1,0 +1,202 @@
+<div class="w-full overflow-x-hidden">
+  @if (order(); as o) {
+    <app-sticky-header
+      [title]="o.order_number || 'Orden #' + o.id"
+      [subtitle]="o.product?.name || 'Producto #' + o.product_id"
+      icon="factory"
+      variant="glass"
+      [showBackButton]="true"
+      backRoute="/admin/manufacturing/orders"
+      [badgeText]="statusLabel(o.status)"
+      [actions]="headerActions()"
+      (actionClicked)="onHeaderAction($event)"
+    />
+
+    <div class="px-2 py-3 md:p-4 space-y-4">
+      <!-- Resumen -->
+      <app-card title="Resumen" [responsive]="true">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-text-secondary">Estado</p>
+            <app-badge [variant]="statusVariant(o.status)" size="sm">
+              {{ statusLabel(o.status) }}
+            </app-badge>
+          </div>
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-text-secondary">Fórmula</p>
+            <p class="font-semibold">
+              {{ o.recipe?.code || 'F-' + o.recipe_id }}
+              @if (o.recipe?.version != null) {
+                <span class="text-text-secondary">v{{ o.recipe?.version }}</span>
+              }
+            </p>
+          </div>
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-text-secondary">Planeado</p>
+            <p class="font-semibold">{{ num(o.planned_qty) }} {{ o.recipe?.yield_unit }}</p>
+          </div>
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-text-secondary">Producido</p>
+            <p class="font-semibold">{{ num(o.produced_qty ?? 0) }} {{ o.recipe?.yield_unit }}</p>
+          </div>
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-text-secondary">Entrega</p>
+            <p class="font-semibold">{{ dateLabel(o.due_date) }}</p>
+          </div>
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-text-secondary">Prioridad</p>
+            <p class="font-semibold">{{ priorityLabel(o) }}</p>
+          </div>
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-text-secondary">Inicio</p>
+            <p class="font-semibold">{{ dateLabel(o.started_at) }}</p>
+          </div>
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-text-secondary">Última producción</p>
+            <p class="font-semibold">{{ dateLabel(o.produced_at) }}</p>
+          </div>
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-text-secondary">Costo planeado</p>
+            <p class="font-semibold">
+              @if (toNumber(o.planned_cost) != null) {
+                {{ toNumber(o.planned_cost) | currency }}
+              } @else {
+                —
+              }
+            </p>
+          </div>
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-text-secondary">Costo real</p>
+            <p class="font-semibold">
+              @if (toNumber(o.actual_cost) != null) {
+                {{ toNumber(o.actual_cost) | currency }}
+              } @else {
+                —
+              }
+            </p>
+          </div>
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-text-secondary">Costo unitario</p>
+            <p class="font-semibold">
+              @if (toNumber(o.unit_cost) != null) {
+                {{ toNumber(o.unit_cost) | currency }}
+              } @else {
+                —
+              }
+            </p>
+          </div>
+        </div>
+        @if (o.notes) {
+          <p class="mt-3 text-sm text-text-secondary whitespace-pre-wrap">{{ o.notes }}</p>
+        }
+      </app-card>
+
+      <!-- Faltantes -->
+      @if (showShortages()) {
+        <app-card title="Faltantes de insumos" [responsive]="true">
+          @if (hasShortages()) {
+            <div
+              class="flex items-start gap-2 p-3 mb-3 rounded-md border border-amber-200 bg-amber-50 text-amber-900 text-sm"
+              role="alert"
+            >
+              <app-icon name="alert-triangle" [size]="16" class="mt-0.5 shrink-0" />
+              <p>Hay insumos sin stock suficiente para producir esta orden.</p>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr class="text-left text-[11px] uppercase text-text-secondary">
+                    <th class="py-1 pr-2">Insumo</th>
+                    <th class="py-1 pr-2 text-right">Requerido</th>
+                    <th class="py-1 pr-2 text-right">Disponible</th>
+                    <th class="py-1 text-right">Falta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (s of shortages(); track s.product_id) {
+                    <tr class="border-t border-[var(--color-border)]">
+                      <td class="py-1 pr-2">{{ s.name }}</td>
+                      <td class="py-1 pr-2 text-right">{{ num(s.required) }}</td>
+                      <td class="py-1 pr-2 text-right">{{ num(s.available) }}</td>
+                      <td
+                        class="py-1 text-right font-semibold"
+                        [class.text-red-600]="s.missing > 0"
+                      >
+                        {{ num(s.missing) }}
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          } @else {
+            <p class="text-sm text-green-700 flex items-center gap-2">
+              <app-icon name="check-circle" [size]="16" />
+              Hay stock suficiente de todos los insumos.
+            </p>
+          }
+        </app-card>
+      }
+
+      <!-- Líneas -->
+      <app-card title="Insumos: planificado vs consumido" [responsive]="true">
+        @if (lines().length === 0) {
+          <p class="text-sm text-text-secondary">
+            Esta orden aún no tiene líneas de insumos.
+          </p>
+        } @else {
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-[11px] uppercase text-text-secondary">
+                  <th class="py-1 pr-2">Insumo</th>
+                  <th class="py-1 pr-2 text-right">Planificado</th>
+                  <th class="py-1 pr-2 text-right">Consumido</th>
+                  <th class="py-1 pr-2 text-right">Costo unit.</th>
+                  <th class="py-1 text-right">Costo total</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (line of lines(); track line.id) {
+                  <tr class="border-t border-[var(--color-border)]">
+                    <td class="py-1 pr-2">{{ lineName(line) }}</td>
+                    <td class="py-1 pr-2 text-right">{{ num(line.planned_qty) }}</td>
+                    <td class="py-1 pr-2 text-right">{{ num(line.consumed_qty ?? 0) }}</td>
+                    <td class="py-1 pr-2 text-right">
+                      @if (toNumber(line.unit_cost) != null) {
+                        {{ toNumber(line.unit_cost) | currency }}
+                      } @else {
+                        —
+                      }
+                    </td>
+                    <td class="py-1 text-right font-medium">
+                      @if (toNumber(line.total_cost) != null) {
+                        {{ toNumber(line.total_cost) | currency }}
+                      } @else {
+                        —
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </app-card>
+    </div>
+
+    <app-complete-order-modal
+      [(isOpen)]="completeModalOpen"
+      [order]="o"
+      [lotRequired]="lotRequired()"
+      (completed)="onCompleted($event)"
+    />
+  } @else if (isLoading()) {
+    <div class="p-6 text-center">
+      <div
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+      ></div>
+      <p class="mt-2 text-text-secondary">Cargando orden...</p>
+    </div>
+  }
+</div>

@@ -134,9 +134,19 @@ export const INDUSTRY_OPTIONS: ReadonlyArray<IndustryMeta> =
  * restaurant (`['hospitality','restaurant']`) sees both "Hotelería" and the
  * restaurant suite ("Mesas") because each half of the intersection keeps
  * its own suite visible.
+ *
+ * Manufacturing Suite (MVP): the `manufacturing` parent and its submodules
+ * (`manufacturing_formulas`, `manufacturing_orders`, `manufacturing_settings`)
+ * are visible ⟺ the store's industry includes `manufacturing`. Every other
+ * industry lists them as hidden. `manufacturing` itself keeps `restaurant_ops`
+ * hidden (it is not a restaurant).
  */
 export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   retail: [
+    'manufacturing',
+    'manufacturing_formulas',
+    'manufacturing_orders',
+    'manufacturing_settings',
     'hospitality',
     'hospitality_rooms',
     'hospitality_reservations',
@@ -147,6 +157,10 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'orders_contracts',
   ],
   restaurant: [
+    'manufacturing',
+    'manufacturing_formulas',
+    'manufacturing_orders',
+    'manufacturing_settings',
     'hospitality',
     'hospitality_rooms',
     'hospitality_reservations',
@@ -180,6 +194,10 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'reports_dispatch',
   ],
   service: [
+    'manufacturing',
+    'manufacturing_formulas',
+    'manufacturing_orders',
+    'manufacturing_settings',
     'hospitality',
     'hospitality_rooms',
     'hospitality_reservations',
@@ -196,6 +214,10 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'reports_dispatch',
   ],
   gym: [
+    'manufacturing',
+    'manufacturing_formulas',
+    'manufacturing_orders',
+    'manufacturing_settings',
     'hospitality',
     'hospitality_rooms',
     'hospitality_reservations',
@@ -222,6 +244,10 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   // secciones que no le sirven y que enseñan a ignorar el menú. Si una
   // constructora pide despacho de materiales a obra, se quita 'dispatch' de acá.
   construction: [
+    'manufacturing',
+    'manufacturing_formulas',
+    'manufacturing_orders',
+    'manufacturing_settings',
     // `orders_contracts` is INTENTIONALLY absent here: the contracts suite
     // (A.2, ADR-02) is visible ⟺ the store includes `construction`. Every
     // other industry lists it above, so the OR-semantics intersection keeps
@@ -246,6 +272,10 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   // contratos de obra, ni membresías, ni flota de reparto. Restaurante y citas
   // se destapan sumando `restaurant` o `service` a las industrias de la tienda.
   hospitality: [
+    'manufacturing',
+    'manufacturing_formulas',
+    'manufacturing_orders',
+    'manufacturing_settings',
     // `hospitality` / `hospitality_rooms` are INTENTIONALLY absent here: the
     // lodging suite is visible ⟺ the store includes `hospitality`. Every
     // other industry lists them, so the OR-semantics intersection keeps them

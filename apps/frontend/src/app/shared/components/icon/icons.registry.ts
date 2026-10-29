@@ -267,6 +267,8 @@ import {
   ZapOff,
   // Restaurant-ops module icons
   ChefHat,
+  // Manufacturing module icons
+  Factory,
   LayoutList,
   Split,
   Square,
@@ -715,6 +717,8 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Restaurant-ops module icons
   'chef-hat': ChefHat,
+  // Manufacturing module icons
+  'factory': Factory,
   'layout-list': LayoutList,
   'split': Split,
   'square': Square,

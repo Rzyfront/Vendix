@@ -292,6 +292,49 @@ describe('gating de hotelería por industria (H0.1)', () => {
   });
 });
 
+describe('gating de manufactura por industria', () => {
+  const MANUFACTURING_KEYS = [
+    'manufacturing',
+    'manufacturing_formulas',
+    'manufacturing_orders',
+    'manufacturing_settings',
+  ];
+
+  it('manufacturing sola ve Manufactura y sigue ocultando restaurant_ops', () => {
+    const hidden = getModulesHiddenByIndustries(['manufacturing']);
+    for (const key of MANUFACTURING_KEYS) {
+      expect(hidden).withContext(key).not.toContain(key);
+    }
+    expect(hidden).toContain('restaurant_ops');
+  });
+
+  it('toda industria sin manufacturing oculta Manufactura', () => {
+    for (const industries of [
+      ['retail'],
+      ['restaurant'],
+      ['service'],
+      ['gym'],
+      ['construction'],
+      ['hospitality'],
+    ]) {
+      const hidden = getModulesHiddenByIndustries(industries);
+      for (const key of MANUFACTURING_KEYS) {
+        expect(hidden)
+          .withContext(`industrias [${industries.join(',')}] → ${key}`)
+          .toContain(key);
+      }
+    }
+  });
+
+  it('las keys de manufactura existen en APP_MODULES y MODULE_ROUTES', () => {
+    const keys = allStoreAdminKeys();
+    for (const key of MANUFACTURING_KEYS) {
+      expect(keys).withContext(key).toContain(key);
+      expect(MODULE_ROUTES[key]).withContext(key).toMatch(/^\/admin\/manufacturing\//);
+    }
+  });
+});
+
 describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
   let service: MenuFilterService;
   let authFacade: {
