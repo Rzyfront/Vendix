@@ -172,12 +172,18 @@ describe('OrdersBulkInvoicingService', () => {
       expect(r.summary.final_consumer).toBe(1);
     });
 
-    it('unpaid order of the Consumidor final customer is blocked for credit (customer_required)', async () => {
+    it('unpaid order of the Consumidor final customer keeps the CF cash opt-in (not blocked)', async () => {
       const { service } = build({
         orders: [order(1, { users: customer({ document_number: '222222222222' }), payments: [], state: 'created' })],
       });
       const r = await service.preview({ ids: [1] });
-      expect(r.results[0]).toMatchObject({ payment: 'blocked', blocked_code: 'customer_required' });
+      expect(r.results[0]).toMatchObject({
+        payment: 'to_credit',
+        blocked_code: null,
+        will_emit: false,
+        cf_overridable: true,
+        holder_issue: { code: 'final_consumer_sentinel' },
+      });
     });
 
     it('document_type_required: not overridable, nominative with empty type', async () => {

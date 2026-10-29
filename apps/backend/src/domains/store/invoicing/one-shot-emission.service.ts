@@ -25,7 +25,6 @@ import {
   isCfOverridable,
   isFinalConsumerCustomer,
   isUnidentifiedHolder,
-  type OrderHolderSourceRows,
 } from './utils/order-acquirer-holder.util';
 import { OrderLeaseService } from '../../../common/locks/order-lease.service';
 
@@ -297,14 +296,18 @@ export class OneShotEmissionService {
 
     const blocker = this.resolveCreditBlocker(order, settled);
     if (!credit_options) {
+      // El cliente Consumidor final (centinela) no es un deudor identificable:
+      // el modal de crédito pide asignar un cliente (o contado a CF).
+      const offered =
+        blocker ?? (isFinalConsumerCustomer(order) ? 'customer_required' : null);
       throw new VendixHttpException(
         ErrorCodes.INVOICING_ORDER_UNPAID_001,
         undefined,
         {
           order_id,
           remaining_balance: remaining.toFixed(2),
-          credit_eligible: blocker === null,
-          credit_blocker: blocker,
+          credit_eligible: offered === null,
+          credit_blocker: offered,
         },
       );
     }
@@ -465,7 +468,7 @@ export class OneShotEmissionService {
    * motivo. Sólo lee; la facturación masiva la usa para su vista previa.
    */
   classifyOrderPayment(
-    order: Pick<OrderHolderSourceRows, 'users'> & {
+    order: {
       state: string;
       customer_id: number | null;
       payment_form: string | null;
@@ -503,7 +506,7 @@ export class OneShotEmissionService {
   }
 
   private resolveCreditBlocker(
-    order: Pick<OrderHolderSourceRows, 'users'> & {
+    order: {
       state: string;
       customer_id: number | null;
       payments?: ReadonlyArray<{ state: string | null } & CodPromiseProbe> | null;
@@ -511,10 +514,7 @@ export class OneShotEmissionService {
     settled: Prisma.Decimal,
   ): CreditBlocker {
     if (['cancelled', 'refunded'].includes(order.state)) return 'order_state';
-    // El cliente Consumidor final (centinela) no es un deudor identificable.
-    if (order.customer_id == null || isFinalConsumerCustomer(order)) {
-      return 'customer_required';
-    }
+    if (order.customer_id == null) return 'customer_required';
     // Un cobro en vuelo (Wompi pendiente, tarjeta autorizada) cuenta como
     // abono: si se confirma después quedarían caja Y cartera por la misma venta.
     // La promesa contra entrega (`ON_DELIVERY` pendiente) no es un cobro: la
