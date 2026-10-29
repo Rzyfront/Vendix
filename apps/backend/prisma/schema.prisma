@@ -2573,6 +2573,11 @@ model lodging_reservations {
   // H6.6 — web booking: a tentative reservation is held until it is paid or
   // this moment passes (then the hold job cancels it). Null = not a web hold.
   hold_expires_at    DateTime?                       @db.Timestamp(6)
+  // H8.1 — online check-in: link token the guest opens without login, and
+  // when the guest last completed it ("Pre-registro completo ✓"). The link
+  // stops working once the stay is over (status or departure date).
+  precheckin_token        String?                    @unique @db.VarChar(64)
+  precheckin_completed_at DateTime?                  @db.Timestamp(6)
   created_by_user_id Int?
   created_at         DateTime?                       @default(now()) @db.Timestamp(6)
   updated_at         DateTime?                       @default(now()) @db.Timestamp(6)

@@ -248,6 +248,8 @@ export class LodgingReservationsService {
       this.prisma.lodging_reservations.findMany({
         where,
         include: RESERVATION_INCLUDE,
+        // H8.1 — the online check-in token is shared through its own endpoint only.
+        omit: { precheckin_token: true },
         orderBy: [{ id: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
@@ -283,6 +285,8 @@ export class LodgingReservationsService {
     const reservation = await this.prisma.lodging_reservations.findFirst({
       where: { id },
       include: RESERVATION_DETAIL_INCLUDE,
+      // H8.1 — the online check-in token is shared through its own endpoint only.
+      omit: { precheckin_token: true },
     });
     if (!reservation) {
       throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_FIND_001);

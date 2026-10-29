@@ -94,6 +94,70 @@ export class LodgingGuestsService {
     return this.present(row);
   }
 
+  /**
+   * H8.1 — the guest's own online check-in: saves the party in one go, holder
+   * first. A guest whose document is already registered is updated (the desk
+   * may have typed it); desk-only fields (customer link, IVA exemption,
+   * permit) are kept. The first guest becomes the holder when the
+   * reservation has none, linked to the reservation customer.
+   */
+  async registerParty(
+    reservationId: number,
+    guests: LodgingGuestDto[],
+    holderCustomerId: number | null,
+  ) {
+    const store_id = this.requireStoreId();
+    const reservation = await this.findRegistrableReservation(reservationId);
+    const missing = guests.flatMap((guest, index) =>
+      guestFieldErrors(guest).map((error) => `Huésped ${index + 1}: ${error}`),
+    );
+    if (missing.length) {
+      throw new VendixHttpException(ErrorCodes.LODGING_GUEST_FIELDS_001, missing.join('. '), {
+        missing,
+      });
+    }
+    const rows = await Promise.all(guests.map((guest) => this.buildData(reservation, guest)));
+    return this.saveGuarded<number>(() =>
+      this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        let hasHolder =
+          (await tx.lodging_guests.count({
+            where: { reservation_id: reservationId, is_primary: true },
+          })) > 0;
+        for (const { customer_id, entry_permit_type, is_non_resident, ...data } of rows) {
+          const existing = await tx.lodging_guests.findFirst({
+            where: {
+              reservation_id: reservationId,
+              document_type: data.document_type,
+              document_number: { equals: data.document_number, mode: 'insensitive' },
+            },
+            select: { id: true },
+          });
+          if (existing) {
+            await tx.lodging_guests.update({
+              where: { id: existing.id },
+              data: { ...data, updated_at: new Date() },
+            });
+            continue;
+          }
+          const is_primary = !hasHolder;
+          hasHolder = true;
+          await tx.lodging_guests.create({
+            data: {
+              ...data,
+              store_id,
+              reservation_id: reservationId,
+              is_primary,
+              customer_id: is_primary ? holderCustomerId : null,
+              entry_permit_type,
+              is_non_resident,
+            },
+          });
+        }
+        return rows.length;
+      }),
+    );
+  }
+
   async remove(reservationId: number, guestId: number) {
     await this.findRegistrableReservation(reservationId);
     await this.findGuest(reservationId, guestId);

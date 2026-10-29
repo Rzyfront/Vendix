@@ -70,6 +70,32 @@ export interface HotelReservation {
   checkout_url: string | null;
 }
 
+/** H8.1 — what the online check-in form shows (no personal data of the party). */
+export interface HotelPrecheckin {
+  store_name: string;
+  reservation_number: string;
+  arrival_date: string;
+  departure_date: string;
+  expected_guests: number;
+  rooms: { id: number; name: string }[];
+  registered: { name: string; is_primary: boolean }[];
+  completed_at: string | null;
+}
+
+/** H8.1 — one guest of the online check-in: the TRA and SIRE fields. */
+export interface HotelPrecheckinGuest {
+  reservation_room_id?: number;
+  document_type: string;
+  document_number: string;
+  first_name: string;
+  last_name: string;
+  nationality_country_code?: string;
+  birth_date?: string;
+  residence_city: string;
+  origin_city: string;
+  travel_purpose: string;
+}
+
 /** H6.6 — hotel booking engine of the storefront. */
 @Injectable({ providedIn: 'root' })
 export class HotelBookingService {
@@ -105,6 +131,28 @@ export class HotelBookingService {
       .post<{ data: HotelHold }>(
         `${this.apiUrl}/holds`,
         { ...body, return_url: `${window.location.origin}/hotel/reserva` },
+        { headers: this.headers() },
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  /** H8.1 — online check-in by link token, no login. */
+  getPrecheckin(token: string): Observable<HotelPrecheckin> {
+    return this.http
+      .get<{ data: HotelPrecheckin }>(`${this.apiUrl}/precheckin/${encodeURIComponent(token)}`, {
+        headers: this.headers(),
+      })
+      .pipe(map((r) => r.data));
+  }
+
+  submitPrecheckin(
+    token: string,
+    body: { guests: HotelPrecheckinGuest[]; data_consent: boolean },
+  ): Observable<{ guests: number; completed_at: string }> {
+    return this.http
+      .post<{ data: { guests: number; completed_at: string } }>(
+        `${this.apiUrl}/precheckin/${encodeURIComponent(token)}`,
+        body,
         { headers: this.headers() },
       )
       .pipe(map((r) => r.data));

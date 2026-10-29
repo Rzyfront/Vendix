@@ -17,6 +17,8 @@ import { LodgingAllotmentsController } from './allotments/allotments.controller'
 import { LodgingAllotmentsService } from './allotments/allotments.service';
 import { LodgingGuestsController } from './guests/guests.controller';
 import { LodgingGuestsService } from './guests/guests.service';
+import { LodgingPrecheckinController } from './precheckin/precheckin.controller';
+import { LodgingPrecheckinService } from './precheckin/precheckin.service';
 import { LodgingCheckInService } from './check-in/check-in.service';
 import { LodgingFrontDeskController } from './front-desk/front-desk.controller';
 import { LodgingFrontDeskService } from './front-desk/lodging-front-desk.service';
@@ -90,6 +92,7 @@ import { LodgingCancellationsService } from './reports/cancellations.service';
     LodgingRackController,
     LodgingAllotmentsController,
     LodgingGuestsController,
+    LodgingPrecheckinController,
     LodgingFrontDeskController,
     LodgingFolioController,
     LodgingDepositsController,
@@ -111,6 +114,7 @@ import { LodgingCancellationsService } from './reports/cancellations.service';
     LodgingRackService,
     LodgingAllotmentsService,
     LodgingGuestsService,
+    LodgingPrecheckinService,
     LodgingCheckInService,
     LodgingFrontDeskService,
     LodgingFolioService,
@@ -128,6 +132,11 @@ import { LodgingCancellationsService } from './reports/cancellations.service';
     LodgingPickupService,
     LodgingCancellationsService,
   ],
-  exports: [LodgingReservationsService, LodgingAvailabilityService, LodgingBookingEngineService],
+  exports: [
+    LodgingReservationsService,
+    LodgingAvailabilityService,
+    LodgingBookingEngineService,
+    LodgingPrecheckinService,
+  ],
 })
 export class LodgingReservationsModule {}

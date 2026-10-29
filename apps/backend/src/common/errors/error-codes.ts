@@ -6048,6 +6048,22 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Cliente no encontrado en la tienda',
   },
+  // Hospitality Suite (H8.1) — online check-in link
+  LODGING_PRECHECKIN_FIND_001: {
+    code: 'LODGING_PRECHECKIN_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Este enlace de pre-registro no existe. Pide uno nuevo al hotel',
+  },
+  LODGING_PRECHECKIN_EXPIRED_001: {
+    code: 'LODGING_PRECHECKIN_EXPIRED_001',
+    httpStatus: 410,
+    devMessage: 'El enlace de pre-registro venció: la estadía ya terminó o fue cancelada',
+  },
+  LODGING_PRECHECKIN_DOMAIN_001: {
+    code: 'LODGING_PRECHECKIN_DOMAIN_001',
+    httpStatus: 409,
+    devMessage: 'Activa la tienda en línea para compartir el enlace de pre-registro',
+  },
   // Hospitality Suite (H3.2) — check-in that opens the folio.
   LODGING_CHECKIN_EARLY_001: {
     code: 'LODGING_CHECKIN_EARLY_001',

@@ -92,6 +92,8 @@ export interface LodgingReservation {
   /** H2.4 — penalty computed when cancelled or no-show ("1 noche"). */
   cancellation_penalty_amount?: string | null;
   cancellation_penalty_detail?: string | null;
+  /** H8.1 — when the guest completed the online check-in ("Pre-registro completo ✓"). */
+  precheckin_completed_at?: string | null;
   /** Status history, oldest first (detail only). */
   events?: LodgingReservationEvent[];
   /** H3.2 — guest folio opened at check-in (detail only). */

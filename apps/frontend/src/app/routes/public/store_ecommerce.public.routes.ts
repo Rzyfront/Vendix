@@ -243,6 +243,14 @@ export const storeEcommercePublicRoutes: Routes = [
           ),
       },
       {
+        // H8.1 — online check-in link the hotel sends to the guest (no login).
+        path: 'pre-registro/:token',
+        loadComponent: () =>
+          import('../../private/modules/ecommerce/pages/hotel-booking/hotel-precheckin.component').then(
+            (c) => c.HotelPrecheckinComponent,
+          ),
+      },
+      {
         path: 'pqr',
         loadComponent: () =>
           import('../../public/ecommerce/pages/pqr/pqr-submit.component').then(

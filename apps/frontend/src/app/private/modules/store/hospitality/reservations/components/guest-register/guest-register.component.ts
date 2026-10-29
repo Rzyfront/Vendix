@@ -38,6 +38,7 @@ interface RoomGuests {
 /**
  * Hospitality Suite (H3.1) — "Huéspedes" section of the reservation detail:
  * who sleeps in each room, holder first, with "Reporta SIRE" on foreigners.
+ * H8.1 adds the online check-in link and "Pre-registro completo ✓".
  */
 @Component({
   selector: 'app-guest-register',
@@ -55,6 +56,57 @@ interface RoomGuests {
           </app-button>
         }
       </div>
+      @if (reservation().precheckin_completed_at || editable()) {
+        <div
+          class="mb-3 space-y-2 rounded-lg border border-border px-3 py-2"
+          data-testid="precheckin"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p class="flex flex-wrap items-center gap-1 text-sm font-medium text-text-primary">
+                Pre-registro en línea
+                @if (reservation().precheckin_completed_at) {
+                  <app-badge variant="success" size="xs" data-testid="precheckin-complete">
+                    Pre-registro completo ✓
+                  </app-badge>
+                }
+              </p>
+              <p class="text-xs text-text-secondary">
+                El huésped llena sus datos y los de sus acompañantes desde un enlace, sin crear
+                cuenta. El enlace deja de funcionar después del check-out.
+              </p>
+            </div>
+            @if (editable()) {
+              <app-button
+                variant="outline"
+                size="sm"
+                [loading]="linkLoading()"
+                (clicked)="shareLink()"
+                data-testid="precheckin-link"
+              >
+                <app-icon slot="icon" name="link" [size]="14" />
+                Copiar enlace de pre-registro
+              </app-button>
+            }
+          </div>
+          @if (link(); as url) {
+            <div class="flex flex-wrap items-center gap-2" data-testid="precheckin-url">
+              <p class="min-w-0 flex-1 break-all rounded bg-background px-2 py-1 text-xs text-text-secondary">
+                {{ url }}
+              </p>
+              <a
+                class="inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary sm:min-h-0"
+                [href]="whatsappUrl(url)"
+                target="_blank"
+                rel="noopener"
+              >
+                <app-icon name="message-circle" [size]="14" />
+                Enviar por WhatsApp
+              </a>
+            </div>
+          }
+        </div>
+      }
       @if (loading()) {
         <p class="text-xs text-text-secondary">Cargando huéspedes…</p>
       } @else {
@@ -144,6 +196,9 @@ export class GuestRegisterComponent {
   readonly guests = signal<LodgingGuest[]>([]);
   readonly loading = signal(false);
   readonly formTarget = signal<GuestFormTarget | null>(null);
+  /** H8.1 — online check-in link, shown once the desk asks for it. */
+  readonly link = signal<string | null>(null);
+  readonly linkLoading = signal(false);
 
   readonly editable = computed(() => EDITABLE_STATUSES.includes(this.reservation().status));
   readonly hasHolder = computed(() => this.guests().some((guest) => guest.is_primary));
@@ -167,8 +222,41 @@ export class GuestRegisterComponent {
   constructor() {
     effect(() => {
       const id = this.reservation().id;
-      untracked(() => this.load(id));
+      untracked(() => {
+        this.link.set(null);
+        this.load(id);
+      });
     });
+  }
+
+  /** H8.1 — gets the online check-in link, copies it and shows it to share. */
+  shareLink(): void {
+    if (this.linkLoading()) return;
+    this.linkLoading.set(true);
+    this.reservationsService
+      .getPrecheckinLink(this.reservation().id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: ({ url }) => {
+          this.linkLoading.set(false);
+          this.link.set(url);
+          navigator.clipboard
+            ?.writeText(url)
+            .then(() => this.toastService.success('Enlace copiado: envíalo al huésped'))
+            .catch(() => this.toastService.info('Copia el enlace y envíalo al huésped'));
+        },
+        error: (message: unknown) => {
+          this.linkLoading.set(false);
+          this.toastService.error(
+            typeof message === 'string' ? message : 'No se pudo crear el enlace de pre-registro',
+          );
+        },
+      });
+  }
+
+  whatsappUrl(url: string): string {
+    const text = `Hola, completa tu pre-registro de la reserva ${this.reservation().reservation_number} aquí: ${url}`;
+    return `https://wa.me/?text=${encodeURIComponent(text)}`;
   }
 
   countryName(code: string): string {

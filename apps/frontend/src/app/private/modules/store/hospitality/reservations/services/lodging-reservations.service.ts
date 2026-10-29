@@ -240,6 +240,18 @@ export class LodgingReservationsService {
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
+  /** H8.1 — online check-in link to share with the guest (created on first use). */
+  getPrecheckinLink(
+    reservationId: number,
+  ): Observable<{ url: string; completed_at: string | null }> {
+    return this.http
+      .post<ApiResponse<{ url: string; completed_at: string | null }>>(
+        `${this.baseUrl}/${reservationId}/precheckin-link`,
+        {},
+      )
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
   /** H3.4 — guest folio of a checked-in reservation. */
   getFolio(reservationId: number): Observable<FolioDetail> {
     return this.http
