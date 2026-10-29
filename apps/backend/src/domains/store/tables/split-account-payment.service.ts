@@ -28,19 +28,26 @@ const BUDGETED: payments_state_enum[] = [...RECEIVED, 'pending', 'authorized'];
 const MANUAL_METHODS = ['cash', 'card', 'bank_transfer', 'voucher'];
 
 /**
- * Un método manual se registra en caja, sin pasarela. El datáfono (`voucher`)
- * entra aquí aunque su `processing_mode` sea ONLINE en el seed
- * (`payment_vouchers` → ONLINE): se cobra en un equipo físico y el cajero lo
- * registra a mano, igual que efectivo o transferencia.
+ * Proveedores que cobran por pasarela: su pago lo confirma el proveedor, nunca
+ * el cajero. Todo lo demás (internal / organization) se registra a mano en caja.
+ */
+const GATEWAY_PROVIDERS = ['stripe', 'paypal', 'wompi', 'mercadopago'];
+
+/**
+ * Un método manual se registra en caja, sin pasarela.
+ *
+ * El discriminador es el PROVEEDOR, no `processing_mode`: el seed marca
+ * `payment_vouchers` (datáfono) y varios métodos internos como ONLINE aunque se
+ * cobren en un equipo físico y el cajero los registre a mano. Exigir DIRECT
+ * dejaba al datáfono (y a cualquier `card` interno en ONLINE) fuera del cobro de
+ * cuentas divididas con SPLIT_PAYMENT_METHOD.
  */
 function isManualMethod(
   type: string | null | undefined,
-  mode: string | null | undefined,
+  provider: string | null | undefined,
 ): boolean {
-  return (
-    MANUAL_METHODS.includes(type ?? '') &&
-    (mode === 'DIRECT' || type === 'voucher')
-  );
+  if (!MANUAL_METHODS.includes(type ?? '')) return false;
+  return !GATEWAY_PROVIDERS.includes((provider ?? '').toLowerCase());
 }
 const money = (value: unknown) => new Prisma.Decimal(String(value ?? 0));
 
@@ -82,8 +89,13 @@ export class SplitAccountPaymentService {
   private reject(
     message: string,
     code: keyof typeof FinancialSplitErrors = 'SPLIT_ACCOUNT_LOCKED',
+    details?: Record<string, unknown>,
   ): never {
-    throw new VendixHttpException(FinancialSplitErrors[code], message);
+    throw new VendixHttpException(
+      FinancialSplitErrors[code],
+      message,
+      details as any,
+    );
   }
 
   private async lockedAccount(tx: any, orderId: number, accountId: number) {
@@ -260,8 +272,7 @@ export class SplitAccountPaymentService {
             created: false,
             manual: isManualMethod(
               existing.store_payment_method?.system_payment_method?.type,
-              existing.store_payment_method?.system_payment_method
-                ?.processing_mode,
+              existing.store_payment_method?.system_payment_method?.provider,
             ),
           };
         }
@@ -284,11 +295,17 @@ export class SplitAccountPaymentService {
           );
         const type = method.system_payment_method.type;
         const mode = method.system_payment_method.processing_mode;
-        const manual = isManualMethod(type, mode);
+        const provider = method.system_payment_method.provider;
+        const manual = isManualMethod(type, provider);
         if (!manual && (mode !== 'ONLINE' || type !== 'wompi')) {
           this.reject(
             'Las cuentas admiten efectivo, tarjeta, transferencia o datáfono manual y pasarela Wompi; este medio no está integrado.',
             'SPLIT_PAYMENT_METHOD',
+            {
+              method_type: type,
+              processing_mode: mode,
+              provider,
+            },
           );
         }
         if (!manual && !dto.wompi_payment_method)
@@ -477,7 +494,7 @@ export class SplitAccountPaymentService {
         method?.store_id !== store_id ||
         !isManualMethod(
           method.system_payment_method?.type,
-          method.system_payment_method?.processing_mode,
+          method.system_payment_method?.provider,
         )
       ) {
         this.reject(
