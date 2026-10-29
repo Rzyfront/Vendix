@@ -401,6 +401,10 @@ export interface HospitalitySettings {
   rnt_renewal_reminder?: boolean;
   /** H4.1 — report each check-in and check-out to the MinCIT TRA. Default true. */
   tra_enabled?: boolean;
+  /** H4.2 — list each entry and exit of a foreign guest for the SIRE. Default true. */
+  sire_enabled?: boolean;
+  /** H4.2 — hours after which a pending SIRE movement is shown in red. Default 24. */
+  sire_overdue_hours?: number;
   /** H4.4 — Fontur contribution rate in per mil (‰) of the quarterly estimate. Default 2.5. */
   fontur_rate_per_mil?: number;
   /** H1.6 — overbooking a new room type starts with (0 = never oversell). */

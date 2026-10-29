@@ -494,6 +494,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       // H4.1 - report each check-in and check-out to the MinCIT TRA (informative,
       // never blocks the desk; off = nothing is recorded).
       tra_enabled: true,
+      // H4.2 - list each entry and exit of a foreign guest for the SIRE
+      // (assisted, never blocks the desk; off = nothing is recorded) and the
+      // hours after which a pending one is shown in red (no verified deadline).
+      sire_enabled: true,
+      sire_overdue_hours: 24,
       // H4.4 - Fontur contribution rate (per mil) of the quarterly estimate.
       fontur_rate_per_mil: 2.5,
       // H1.6 - overbooking a new room type starts with (0 = never oversell).

@@ -1268,6 +1268,27 @@ export class HospitalitySettingsDto {
   tra_enabled?: boolean;
 
   @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'H4.2 — list each entry and exit of a foreign guest for the SIRE (assisted). Informative only; off = nothing is recorded. Default true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  sire_enabled?: boolean;
+
+  @ApiProperty({
+    example: 24,
+    required: false,
+    description: 'H4.2 — hours after which a pending SIRE movement is shown in red (1-720). Default 24.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(720)
+  sire_overdue_hours?: number;
+
+  @ApiProperty({
     example: 2.5,
     required: false,
     description:

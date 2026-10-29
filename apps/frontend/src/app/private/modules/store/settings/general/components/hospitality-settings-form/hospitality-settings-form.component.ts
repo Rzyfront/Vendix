@@ -38,6 +38,7 @@ const rateNumber = (control: AbstractControl): ValidationErrors | null => {
 const RATE_ERROR = 'Escribe la tarifa por mil, por ejemplo 2,5.';
 const NUMERIC_FIELDS = new Set([
   'default_overbooking_allowance',
+  'sire_overdue_hours',
   'booking_hold_minutes',
   'ical_import_interval_minutes',
 ]);
@@ -129,6 +130,31 @@ const OTHER_ORIGIN = '__other__';
           El token y los envíos se ven en Hotelería → Cumplimiento. Nunca detiene el check-in.
         </p>
       </div>
+      <div>
+        <app-toggle
+          [checked]="sireEnabled()"
+          label="Listar huéspedes extranjeros para el SIRE"
+          (changed)="onSireEnabledChange($event)"
+        />
+        <p class="mt-1 text-xs text-text-secondary">
+          Cada entrada y salida de un extranjero queda pendiente en Hotelería → Cumplimiento → Planilla de
+          viajeros (SIRE) para reportarla en el portal de Migración Colombia. Nunca detiene el check-in.
+        </p>
+      </div>
+      <app-input
+        [formControl]="sireOverdueControl"
+        [control]="sireOverdueControl"
+        [error]="wholeNumberError(sireOverdueControl)"
+        [required]="true"
+        type="number"
+        [min]="1"
+        [max]="720"
+        step="1"
+        label="Horas para marcar un reporte SIRE como atrasado"
+        helperText="Pasado este tiempo sin reportar, el movimiento se ve en rojo. Por defecto 24 horas."
+        size="sm"
+        (inputChange)="onFieldChange()"
+      ></app-input>
       <app-input
         [formControl]="fonturRateControl"
         [control]="fonturRateControl"
@@ -254,6 +280,11 @@ export class HospitalitySettingsForm {
     validators: [Validators.required, Validators.min(0), Validators.max(100), rateNumber],
   });
 
+  readonly sireOverdueControl = new FormControl<number>(24, {
+    nonNullable: true,
+    validators: [Validators.required, Validators.min(1), Validators.max(720), wholeNumber],
+  });
+
   readonly overbookingControl = new FormControl<number>(0, {
     nonNullable: true,
     validators: [Validators.required, Validators.min(0), Validators.max(99), wholeNumber],
@@ -279,6 +310,7 @@ export class HospitalitySettingsForm {
   /** H4.3 — March reminder to renew the RNT. */
   readonly renewalReminder = signal(true);
   readonly traEnabled = signal(true);
+  readonly sireEnabled = signal(true);
 
   readonly form = new FormGroup({
     check_in_time: this.checkInControl,
@@ -287,6 +319,7 @@ export class HospitalitySettingsForm {
     night_audit_time: this.nightAuditControl,
     rnt_number: this.rntControl,
     fontur_rate_per_mil: this.fonturRateControl,
+    sire_overdue_hours: this.sireOverdueControl,
     default_overbooking_allowance: this.overbookingControl,
     booking_hold_minutes: this.holdMinutesControl,
     ical_import_interval_minutes: this.icalIntervalControl,
@@ -311,6 +344,7 @@ export class HospitalitySettingsForm {
       this.verification.set(current.folio_invoice_verification ?? true);
       this.renewalReminder.set(current.rnt_renewal_reminder ?? true);
       this.traEnabled.set(current.tra_enabled ?? true);
+      this.sireEnabled.set(current.sire_enabled ?? true);
     });
   }
 
@@ -326,6 +360,11 @@ export class HospitalitySettingsForm {
 
   onTraEnabledChange(checked: boolean): void {
     this.traEnabled.set(checked);
+    this.onFieldChange();
+  }
+
+  onSireEnabledChange(checked: boolean): void {
+    this.sireEnabled.set(checked);
     this.onFieldChange();
   }
 
@@ -355,6 +394,7 @@ export class HospitalitySettingsForm {
       folio_invoice_verification: this.verification(),
       rnt_renewal_reminder: this.renewalReminder(),
       tra_enabled: this.traEnabled(),
+      sire_enabled: this.sireEnabled(),
     };
     for (const [key, control] of Object.entries(this.form.controls)) {
       if (control.dirty) control.markAsTouched();

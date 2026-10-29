@@ -1019,12 +1019,12 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.HospitalityReportsPageComponent),
           },
           {
-            // H4.1 — "Cumplimiento": TRA reports of each check-in/check-out.
+            // H4.1/H4.2 — "Cumplimiento": TRA and SIRE (foreign guests) as tabs.
             path: 'compliance',
             loadComponent: () =>
               import(
-                '../../private/modules/store/hospitality/compliance/pages/tra-page/tra-page.component'
-              ).then((c) => c.HospitalityTraPageComponent),
+                '../../private/modules/store/hospitality/compliance/pages/compliance-page/compliance-page.component'
+              ).then((c) => c.HospitalityCompliancePageComponent),
           },
           {
             path: 'rooms',

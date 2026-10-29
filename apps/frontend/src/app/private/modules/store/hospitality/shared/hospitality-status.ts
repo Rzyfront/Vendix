@@ -45,6 +45,16 @@ export const TRA_STATUS_CHIPS: Record<'pending' | 'sent' | 'manual' | 'failed', 
   failed: { label: 'Rechazado', variant: 'error' },
 };
 
+/**
+ * H4.2 — SIRE movement of a foreign guest. `overdue` is a pending one past the
+ * store threshold (24 h by default): red, with its own text (R-CHIP-01).
+ */
+export const SIRE_STATUS_CHIPS: Record<'pending' | 'overdue' | 'manual', StatusChip> = {
+  pending: { label: 'Pendiente', variant: 'warning' },
+  overdue: { label: 'Atrasado', variant: 'error' },
+  manual: { label: 'Reportado ✓', variant: 'success' },
+};
+
 /** Theme color of each badge variant (R-CHIP-03: no loose hex). */
 const VARIANT_COLOR: Record<BadgeVariant, string> = {
   success: 'var(--color-success)',
@@ -101,3 +111,4 @@ export const RESERVATION_STATUS_LABELS = labelsOf(RESERVATION_STATUS_CHIPS);
 export const HOUSEKEEPING_STATUS_LABELS = labelsOf(HOUSEKEEPING_STATUS_CHIPS);
 export const TASK_STATUS_LABELS = labelsOf(TASK_STATUS_CHIPS);
 export const TRA_STATUS_LABELS = labelsOf(TRA_STATUS_CHIPS);
+export const SIRE_STATUS_LABELS = labelsOf(SIRE_STATUS_CHIPS);

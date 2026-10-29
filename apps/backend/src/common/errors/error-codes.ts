@@ -6054,6 +6054,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Pega primero el token TRA que el MinCIT envió al correo del RNT',
   },
+  // Hospitality Suite (H4.2) — SIRE sheet of a movement that is not in the store
+  LODGING_SIRE_NOT_FOUND_001: {
+    code: 'LODGING_SIRE_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'El registro SIRE no existe en esta tienda',
+  },
   // Hospitality Suite (H8.4, D12) — key / access card handover log
   LODGING_KEY_STATUS_001: {
     code: 'LODGING_KEY_STATUS_001',

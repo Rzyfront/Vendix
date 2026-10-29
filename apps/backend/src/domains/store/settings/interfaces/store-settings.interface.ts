@@ -1170,6 +1170,13 @@ export interface HospitalitySettings {
    */
   tra_enabled?: boolean;
   /**
+   * H4.2 — list each entry and exit of a foreign guest for the SIRE (assisted,
+   * Migración Colombia). Never blocks the desk (D14); off = nothing is recorded.
+   */
+  sire_enabled?: boolean;
+  /** H4.2 — hours after which a pending SIRE movement is shown in red. Default 24. */
+  sire_overdue_hours?: number;
+  /**
    * H4.4 — Fontur contribution rate in per mil (‰) used by the quarterly
    * estimate. Default `2.5`; editable because the lodging rate is only
    * verified by secondary sources.
