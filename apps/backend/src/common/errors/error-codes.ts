@@ -6048,6 +6048,32 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Cliente no encontrado en la tienda',
   },
+  // Hospitality Suite (H8.4, D12) — key / access card handover log
+  LODGING_KEY_STATUS_001: {
+    code: 'LODGING_KEY_STATUS_001',
+    httpStatus: 409,
+    devMessage: 'Las llaves se entregan a huéspedes en casa: haz el check-in primero',
+  },
+  LODGING_KEY_DUP_001: {
+    code: 'LODGING_KEY_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Esa llave ya está entregada: registra su devolución antes de entregarla de nuevo',
+  },
+  LODGING_KEY_FIND_001: {
+    code: 'LODGING_KEY_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Entrega de llave no encontrada en la reserva',
+  },
+  LODGING_KEY_RETURNED_001: {
+    code: 'LODGING_KEY_RETURNED_001',
+    httpStatus: 409,
+    devMessage: 'Esa llave ya fue devuelta',
+  },
+  LODGING_KEY_ROOM_001: {
+    code: 'LODGING_KEY_ROOM_001',
+    httpStatus: 400,
+    devMessage: 'Elige una habitación activa de la reserva',
+  },
   // Hospitality Suite (H8.1) — online check-in link
   LODGING_PRECHECKIN_FIND_001: {
     code: 'LODGING_PRECHECKIN_FIND_001',

@@ -58,6 +58,8 @@ import { LodgingPickupController } from './reports/pickup.controller';
 import { LodgingPickupService } from './reports/pickup.service';
 import { LodgingCancellationsController } from './reports/cancellations.controller';
 import { LodgingCancellationsService } from './reports/cancellations.service';
+import { LodgingKeyHandoversController } from './key-handovers/key-handovers.controller';
+import { LodgingKeyHandoversService } from './key-handovers/key-handovers.service';
 
 @Module({
   imports: [
@@ -106,6 +108,8 @@ import { LodgingCancellationsService } from './reports/cancellations.service';
     LodgingPerformanceController,
     LodgingPickupController,
     LodgingCancellationsController,
+    // H8.4 (D12) — key / access card handover log.
+    LodgingKeyHandoversController,
   ],
   providers: [
     LodgingReservationsService,
@@ -134,6 +138,7 @@ import { LodgingCancellationsService } from './reports/cancellations.service';
     LodgingPerformanceService,
     LodgingPickupService,
     LodgingCancellationsService,
+    LodgingKeyHandoversService,
   ],
   exports: [
     LodgingReservationsService,

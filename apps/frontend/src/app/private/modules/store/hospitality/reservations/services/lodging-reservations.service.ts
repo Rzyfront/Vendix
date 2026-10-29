@@ -26,6 +26,7 @@ import {
 } from '../interfaces/reservation.interface';
 import { SellableRatePlan } from '../../rates/interfaces/rate-plan.interface';
 import { LodgingGuest, LodgingGuestRequest } from '../interfaces/guest.interface';
+import { DeliverKeyRequest, LodgingKeyHandover } from '../interfaces/key-handover.interface';
 import {
   FolioChargeRequest,
   FolioDetail,
@@ -237,6 +238,28 @@ export class LodgingReservationsService {
   removeGuest(reservationId: number, guestId: number): Observable<{ id: number }> {
     return this.http
       .delete<ApiResponse<{ id: number }>>(`${this.baseUrl}/${reservationId}/guests/${guestId}`)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H8.4 (D12) — keys and access cards handed over and returned. */
+  listKeys(reservationId: number): Observable<LodgingKeyHandover[]> {
+    return this.http
+      .get<ApiResponse<LodgingKeyHandover[]>>(`${this.baseUrl}/${reservationId}/keys`)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  deliverKey(reservationId: number, body: DeliverKeyRequest): Observable<LodgingKeyHandover> {
+    return this.http
+      .post<ApiResponse<LodgingKeyHandover>>(`${this.baseUrl}/${reservationId}/keys`, body)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  returnKey(reservationId: number, keyId: number): Observable<LodgingKeyHandover> {
+    return this.http
+      .post<ApiResponse<LodgingKeyHandover>>(
+        `${this.baseUrl}/${reservationId}/keys/${keyId}/return`,
+        {},
+      )
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 

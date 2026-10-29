@@ -206,6 +206,8 @@ model users {
   lodging_reservations_customer   lodging_reservations[]        @relation("lodging_reservations_customer")
   lodging_reservations_created    lodging_reservations[]        @relation("lodging_reservations_created_by")
   lodging_reservation_events      lodging_reservation_events[]  @relation("lodging_reservation_events_user")
+  lodging_keys_delivered          lodging_key_handovers[]       @relation("lodging_key_handovers_delivered_by")
+  lodging_keys_received           lodging_key_handovers[]       @relation("lodging_key_handovers_returned_by")
   lodging_allotments_customer     lodging_allotments[]          @relation("lodging_allotments_customer")
   lodging_guests_customer         lodging_guests[]              @relation("lodging_guests_customer")
   // Appointment redesign phase 2 — `booking_reschedule_requests`
@@ -1076,6 +1078,7 @@ model stores {
   lodging_reservation_rooms      lodging_reservation_rooms[]
   lodging_reservation_events     lodging_reservation_events[]
   lodging_guest_message_logs     lodging_guest_message_logs[]
+  lodging_key_handovers          lodging_key_handovers[]
   lodging_room_nights            lodging_room_nights[]
   lodging_rate_plans             lodging_rate_plans[]
   lodging_rate_prices            lodging_rate_prices[]
@@ -2593,6 +2596,7 @@ model lodging_reservations {
   deposits   lodging_deposits[]
   online_payments lodging_reservation_payments[]
   guest_message_logs lodging_guest_message_logs[]
+  key_handovers      lodging_key_handovers[]
 
   @@unique([store_id, reservation_number])
   @@index([status, hold_expires_at])
@@ -2640,6 +2644,37 @@ model lodging_guest_message_logs {
   @@index([store_id, sent_at])
 }
 
+// Hospitality Suite (H8.4, D12) — key / access card handover log: which key
+// or card was given to which guest, by which staff user and when, and its
+// return (who received it, when). `returned_at` null = the guest still has it.
+// A key is with one guest at a time: also unique per store case-insensitive
+// while open via `lodging_key_handovers_open_key_label_key`
+// ON (store_id, lower(key_label)) WHERE returned_at IS NULL.
+model lodging_key_handovers {
+  id                   Int       @id @default(autoincrement())
+  store_id             Int
+  reservation_id       Int
+  reservation_room_id  Int?
+  key_label            String    @db.VarChar(60)
+  guest_name           String    @db.VarChar(150)
+  notes                String?   @db.VarChar(300)
+  delivered_by_user_id Int?
+  delivered_at         DateTime  @default(now()) @db.Timestamp(6)
+  returned_by_user_id  Int?
+  returned_at          DateTime? @db.Timestamp(6)
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @default(now()) @db.Timestamp(6)
+
+  store            stores                     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation      lodging_reservations       @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation_room lodging_reservation_rooms? @relation(fields: [reservation_room_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  delivered_by     users?                     @relation("lodging_key_handovers_delivered_by", fields: [delivered_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  returned_by      users?                     @relation("lodging_key_handovers_returned_by", fields: [returned_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([reservation_id])
+  @@index([store_id, returned_at])
+}
+
 // Hospitality Suite (H1.1) — one room of a reservation: the room type sold,
 // the physical room once assigned, and the occupancy. A reservation holds one
 // or more rooms (H1.5, groups and families under one holder).
@@ -2671,6 +2706,7 @@ model lodging_reservation_rooms {
   rate_plan   lodging_rate_plans?   @relation(fields: [rate_plan_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   nights      lodging_room_nights[]
   guests      lodging_guests[]
+  key_handovers lodging_key_handovers[]
 
   @@index([reservation_id])
   @@index([unit_type_id])

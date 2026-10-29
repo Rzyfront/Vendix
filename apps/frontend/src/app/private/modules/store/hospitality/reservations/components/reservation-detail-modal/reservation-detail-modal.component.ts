@@ -51,6 +51,7 @@ import {
   RoomChangeTarget,
 } from '../room-change-modal/room-change-modal.component';
 import { GuestRegisterComponent } from '../guest-register/guest-register.component';
+import { KeyHandoversPanelComponent } from '../key-handovers-panel/key-handovers-panel.component';
 import { FolioPanelComponent } from '../folio-panel/folio-panel.component';
 import { DepositPanelComponent } from '../deposit-panel/deposit-panel.component';
 import { CheckOutModalComponent } from '../check-out-modal/check-out-modal.component';
@@ -68,12 +69,13 @@ const SUCCESS_MESSAGES: Record<Exclude<PendingAction, null | 'check_in'>, string
 };
 
 /** U2 (R-MOD-04) — the detail's sections. */
-type DetailTab = 'summary' | 'account' | 'guests' | 'history';
+type DetailTab = 'summary' | 'account' | 'guests' | 'keys' | 'history';
 
 const DETAIL_TABS: ScrollableTab[] = [
   { id: 'summary', label: 'Resumen', icon: 'file-text' },
   { id: 'account', label: 'Cuenta', icon: 'receipt' },
   { id: 'guests', label: 'Huéspedes', icon: 'users' },
+  { id: 'keys', label: 'Llaves', icon: 'key-round' },
   { id: 'history', label: 'Historial', icon: 'history' },
 ];
 
@@ -99,7 +101,8 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
  * H3.4: the folio panel shows nights, charges, voids, payments and balance.
  * H3.7: "Check-out" pays the balance, closes the folio and emits the invoice.
  * U2: stay and balance on top, then tabs (Resumen · Cuenta · Huéspedes ·
- * Historial); full screen on mobile with the primary action fixed below.
+ * Llaves · Historial); full screen on mobile with the primary action fixed below.
+ * H8.4 (D12): "Llaves" logs each key or card handed to a guest and its return.
  */
 @Component({
   selector: 'app-reservation-detail-modal',
@@ -118,6 +121,7 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
     SelectorComponent,
     RoomChangeModalComponent,
     GuestRegisterComponent,
+    KeyHandoversPanelComponent,
     FolioPanelComponent,
     DepositPanelComponent,
     CheckOutModalComponent,
@@ -341,6 +345,10 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
 
           <div [class.hidden]="activeTab() !== 'guests'" data-testid="reservation-tab-guests">
             <app-guest-register [reservation]="r" />
+          </div>
+
+          <div [class.hidden]="activeTab() !== 'keys'" data-testid="reservation-tab-keys">
+            <app-key-handovers-panel [reservation]="r" (changed)="changed.emit()" />
           </div>
 
           <div [class.hidden]="activeTab() !== 'history'" data-testid="reservation-tab-history">

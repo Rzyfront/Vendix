@@ -193,6 +193,8 @@ export interface FrontDeskRow {
   folio_id: number | null;
   /** Folio balance (charges − payments) as a decimal string; null without a folio. */
   balance: string | null;
+  /** H8.4 — keys or cards handed over and not returned yet. */
+  keys_out: number;
 }
 
 /** U1 — "Check-in realizado · 203" (every active room of the stay). */

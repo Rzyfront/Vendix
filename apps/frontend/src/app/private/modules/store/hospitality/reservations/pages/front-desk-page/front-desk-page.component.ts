@@ -62,6 +62,14 @@ interface BoardRow extends FrontDeskRow {
   guests: string;
   /** "$150.000" when the folio has a pending balance, "Al día" when paid, "—" without folio. */
   balance_label: string;
+  /** H8.4 — "2 llaves" the guests still have, "—" with none. */
+  keys_label: string;
+}
+
+/** H8.4 — keys handed over and not returned: "1 llave", "2 llaves", "—". */
+function keysLabel(count: number): string {
+  if (!count) return '—';
+  return count === 1 ? '1 llave' : `${count} llaves`;
 }
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -438,6 +446,7 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
       stay: `${shortDate(row.arrival_date)} → ${shortDate(row.departure_date)}`,
       guests: row.children > 0 ? `${row.adults} + ${row.children} niños` : `${row.adults}`,
       balance_label: this.balanceLabel(row.balance),
+      keys_label: keysLabel(row.keys_out),
     }));
   });
 
@@ -451,6 +460,7 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
       { key: 'guests', label: 'Huéspedes', align: 'center' },
     ];
     if (this.tab() !== 'arrivals') {
+      columns.push({ key: 'keys_label', label: 'Llaves', align: 'center' });
       columns.push({ key: 'balance_label', label: 'Saldo', align: 'right' });
     }
     columns.push({
@@ -472,6 +482,7 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
     detailKeys: [
       { key: 'rooms', label: 'Habitación' },
       { key: 'stay', label: 'Estadía' },
+      ...(this.tab() !== 'arrivals' ? [{ key: 'keys_label', label: 'Llaves' }] : []),
     ],
     ...(this.tab() !== 'arrivals' ? { footerKey: 'balance_label', footerLabel: 'Saldo' } : {}),
   }));
