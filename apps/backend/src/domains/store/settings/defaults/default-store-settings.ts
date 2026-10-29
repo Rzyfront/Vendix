@@ -500,6 +500,13 @@ export function getDefaultStoreSettings(): StoreSettings {
       booking_hold_minutes: 15,
       // H6.2 - minutes between two automatic syncs of an imported iCal calendar.
       ical_import_interval_minutes: 15,
+      // H8.2 - automatic guest emails: confirmation, a reminder with the online
+      // check-in link this many hours before arrival, and a thank-you after
+      // check-out.
+      guest_email_confirmation: true,
+      guest_email_pre_arrival: true,
+      guest_email_pre_arrival_hours: 48,
+      guest_email_post_stay: true,
     },
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is

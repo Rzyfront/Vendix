@@ -1175,6 +1175,14 @@ export interface HospitalitySettings {
   booking_hold_minutes?: number;
   /** H6.2 — minutes between two automatic syncs of an imported iCal calendar. Default 15. */
   ical_import_interval_minutes?: number;
+  /** H8.2 — email the guest when a desk reservation is confirmed. Default true. */
+  guest_email_confirmation?: boolean;
+  /** H8.2 — email a reminder with the online check-in link before arrival. Default true. */
+  guest_email_pre_arrival?: boolean;
+  /** H8.2 — hours before the check-in time the reminder goes out (12-168). Default 48. */
+  guest_email_pre_arrival_hours?: number;
+  /** H8.2 — email a thank-you after check-out. Default true. */
+  guest_email_post_stay?: boolean;
 }
 
 // ============================================================================

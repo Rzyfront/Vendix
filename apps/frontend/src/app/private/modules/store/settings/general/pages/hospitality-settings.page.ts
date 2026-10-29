@@ -5,6 +5,7 @@ import { HospitalityIcalChannelsComponent } from '../../../hospitality/channels/
 import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { HospitalitySettingsForm } from '../components/hospitality-settings-form/hospitality-settings-form.component';
+import { HospitalityGuestMessagesForm } from '../components/hospitality-guest-messages-form/hospitality-guest-messages-form.component';
 import { SettingsSectionComponent } from '../components/settings-section/settings-section.component';
 import { GeneralSettingsStore } from '../services/general-settings.store';
 import { HospitalitySettings } from '../../../../../../core/models/store-settings.interface';
@@ -21,6 +22,10 @@ const DEFAULT_HOSPITALITY: HospitalitySettings = {
   folio_invoice_verification: true,
   booking_hold_minutes: 15,
   ical_import_interval_minutes: 15,
+  guest_email_confirmation: true,
+  guest_email_pre_arrival: true,
+  guest_email_pre_arrival_hours: 48,
+  guest_email_post_stay: true,
 };
 
 /** Typing in a text field emits per keystroke; one save per pause. */
@@ -41,6 +46,7 @@ const AUTOSAVE_DELAY_MS = 600;
     AlertBannerComponent,
     SettingsSectionComponent,
     HospitalitySettingsForm,
+    HospitalityGuestMessagesForm,
     HospitalityIcalChannelsComponent,
   ],
   template: `
@@ -52,8 +58,8 @@ const AUTOSAVE_DELAY_MS = 600;
         <p class="page-intro__text">
           <span class="page-intro__lead">Opera el hotel.</span>
           Define los horarios de llegada, salida y cierre del día, el Registro
-          Nacional de Turismo (RNT), las reservas, la cuenta del huésped y los
-          calendarios externos. Cada cambio se guarda solo.
+          Nacional de Turismo (RNT), las reservas, la cuenta del huésped, los
+          correos al huésped y los calendarios externos. Cada cambio se guarda solo.
         </p>
       </div>
 
@@ -72,6 +78,18 @@ const AUTOSAVE_DELAY_MS = 600;
         title="Hotelería"
         hint="Las horas usan la zona horaria de la tienda.">
         <app-hospitality-settings-form
+          [settings]="hospitality()"
+          (settingsChange)="queueSave($event)" />
+      </app-settings-section>
+
+      <!-- H8.2 — automatic guest emails. -->
+      <app-settings-section
+        anchorId="section-guest-messages"
+        icon="mail"
+        iconTone="blue"
+        title="Correos al huésped"
+        hint="Se envían solos al correo del huésped titular de la reserva.">
+        <app-hospitality-guest-messages-form
           [settings]="hospitality()"
           (settingsChange)="queueSave($event)" />
       </app-settings-section>

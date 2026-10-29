@@ -275,8 +275,8 @@ export class HospitalitySettingsForm {
   }
 
   /** The decimal error under the field; the other errors keep `app-input`'s own message. */
-  wholeNumberError(control: FormControl<number>): string | null {
-    return control.touched && control.hasError('wholeNumber') ? WHOLE_NUMBER_ERROR : null;
+  wholeNumberError(control: FormControl<number>): string | undefined {
+    return control.touched && control.hasError('wholeNumber') ? WHOLE_NUMBER_ERROR : undefined;
   }
 
   /** Emits the valid fields only; the invalid ones show «Este campo es requerido» & co. */

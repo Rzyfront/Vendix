@@ -1075,6 +1075,7 @@ model stores {
   lodging_reservations           lodging_reservations[]
   lodging_reservation_rooms      lodging_reservation_rooms[]
   lodging_reservation_events     lodging_reservation_events[]
+  lodging_guest_message_logs     lodging_guest_message_logs[]
   lodging_room_nights            lodging_room_nights[]
   lodging_rate_plans             lodging_rate_plans[]
   lodging_rate_prices            lodging_rate_prices[]
@@ -2591,6 +2592,7 @@ model lodging_reservations {
   folio      lodging_folios?
   deposits   lodging_deposits[]
   online_payments lodging_reservation_payments[]
+  guest_message_logs lodging_guest_message_logs[]
 
   @@unique([store_id, reservation_number])
   @@index([status, hold_expires_at])
@@ -2616,6 +2618,26 @@ model lodging_reservation_events {
   user        users?               @relation("lodging_reservation_events_user", fields: [user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([reservation_id])
+}
+
+// Hospitality Suite (H8.2) — automatic guest emails already sent: the
+// confirmation, the pre-arrival reminder with the online check-in link and
+// the thank-you after check-out. One row per reservation, message and channel
+// (claimed before sending), so a message never goes out twice. `channel`
+// leaves room for WhatsApp (H8.3).
+model lodging_guest_message_logs {
+  id             Int      @id @default(autoincrement())
+  store_id       Int
+  reservation_id Int
+  message_key    String   @db.VarChar(30)
+  channel        String   @default("email") @db.VarChar(20)
+  sent_at        DateTime @default(now()) @db.Timestamp(6)
+
+  store       stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([reservation_id, message_key, channel])
+  @@index([store_id, sent_at])
 }
 
 // Hospitality Suite (H1.1) — one room of a reservation: the room type sold,

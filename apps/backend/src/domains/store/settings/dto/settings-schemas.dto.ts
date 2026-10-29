@@ -1305,6 +1305,45 @@ export class HospitalitySettingsDto {
   @Min(5)
   @Max(1440)
   ical_import_interval_minutes?: number;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'H8.2 — email the guest when a desk reservation is confirmed.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  guest_email_confirmation?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'H8.2 — email a reminder with the online check-in link before arrival.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  guest_email_pre_arrival?: boolean;
+
+  @ApiProperty({
+    example: 48,
+    required: false,
+    description: 'H8.2 — hours before the check-in time the pre-arrival reminder goes out (12-168).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(12)
+  @Max(168)
+  guest_email_pre_arrival_hours?: number;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'H8.2 — email a thank-you to the guest after check-out.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  guest_email_post_stay?: boolean;
 }
 
 export class RestaurantSettingsDto {

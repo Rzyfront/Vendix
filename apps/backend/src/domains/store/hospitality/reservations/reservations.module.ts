@@ -25,6 +25,7 @@ import { LodgingFrontDeskService } from './front-desk/lodging-front-desk.service
 import { LodgingFolioController } from './folio/folio.controller';
 import { LodgingFolioService } from './folio/folio.service';
 import { LodgingNightAuditJob } from './jobs/lodging-night-audit.job';
+import { LodgingGuestMessagesJob } from './guest-messages/guest-messages.job';
 import { WalletModule } from '../../wallet/wallet.module';
 import { PaymentLinksModule } from '../../payment-links/payment-links.module';
 import { LodgingDepositsController } from './deposits/deposits.controller';
@@ -119,6 +120,8 @@ import { LodgingCancellationsService } from './reports/cancellations.service';
     LodgingFrontDeskService,
     LodgingFolioService,
     LodgingNightAuditJob,
+    // H8.2 — automatic guest emails (confirmation, pre-arrival, thank-you).
+    LodgingGuestMessagesJob,
     LodgingDepositsService,
     LodgingRoomChargesService,
     LodgingCheckOutService,

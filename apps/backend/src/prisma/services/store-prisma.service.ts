@@ -142,6 +142,8 @@ export class StorePrismaService extends BasePrismaService {
     'lodging_room_nights',
     // Hospitality Suite (H1.2)
     'lodging_reservation_events',
+    // Hospitality Suite (H8.2)
+    'lodging_guest_message_logs',
     // Hospitality Suite (H2.1)
     'lodging_rate_plans',
     'lodging_rate_prices',
@@ -1861,6 +1863,11 @@ export class StorePrismaService extends BasePrismaService {
 
   get lodging_reservation_events() {
     return this.scoped_client.lodging_reservation_events;
+  }
+
+  // Hospitality Suite (H8.2)
+  get lodging_guest_message_logs() {
+    return this.scoped_client.lodging_guest_message_logs;
   }
 
   // Hospitality Suite (H2.1)
