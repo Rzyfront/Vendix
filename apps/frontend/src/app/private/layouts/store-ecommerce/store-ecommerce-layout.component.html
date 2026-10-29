@@ -516,13 +516,13 @@
         <a routerLink="/pqr">Peticiones, Quejas y Reclamos</a>
         }
         @if (hasFaq()) {
-        <a class="cursor-pointer hover:text-[var(--color-primary)]" (click)="show_faq_modal.set(true)">Preguntas Frecuentes</a>
+        <button type="button" class="footer-link-button" (click)="show_faq_modal.set(true)">Preguntas Frecuentes</button>
         }
         @if (hasShippingInfo()) {
-        <a class="cursor-pointer hover:text-[var(--color-primary)]" (click)="show_shipping_modal.set(true)">Envíos</a>
+        <button type="button" class="footer-link-button" (click)="show_shipping_modal.set(true)">Envíos</button>
         }
         @if (hasReturnsInfo()) {
-        <a class="cursor-pointer hover:text-[var(--color-primary)]" (click)="show_returns_modal.set(true)">Devoluciones</a>
+        <button type="button" class="footer-link-button" (click)="show_returns_modal.set(true)">Devoluciones</button>
         }
         @if (!hasFaq() && !hasShippingInfo() && !hasReturnsInfo()) {
         <p class="text-sm text-[var(--color-text-muted)]">Contáctanos para ayuda</p>
