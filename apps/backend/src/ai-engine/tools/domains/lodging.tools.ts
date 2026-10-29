@@ -7,6 +7,11 @@ import { LodgingBookingEngineService } from '../../../domains/store/hospitality/
 import { BookingSearchDto } from '../../../domains/store/hospitality/reservations/booking-engine/booking-engine.dto';
 import { LodgingReservationsService } from '../../../domains/store/hospitality/reservations/reservations.service';
 import { LodgingDepositsService } from '../../../domains/store/hospitality/reservations/deposits/deposits.service';
+import {
+  LodgingGuestMessagesJob,
+  PrecheckinArrival,
+} from '../../../domains/store/hospitality/reservations/guest-messages/guest-messages.job';
+import { formatShortDate } from '../../../domains/store/hospitality/reservations/stay-dates';
 
 export interface LodgingToolDeps {
   bookingEngine: Pick<LodgingBookingEngineService, 'search'>;
@@ -18,6 +23,7 @@ export interface LodgingToolDeps {
   findReservation: (
     reservation_number: string,
   ) => Promise<{ id: number; reservation_number: string; guest_name: string } | null>;
+  guestMessages: Pick<LodgingGuestMessagesJob, 'precheckinArrivals' | 'sendPrecheckinNow'>;
 }
 
 type SearchResult = Awaited<ReturnType<LodgingBookingEngineService['search']>>;
@@ -179,6 +185,70 @@ async function planDepositLink(
     amount,
     open_link,
   };
+}
+
+const PRECHECKIN = 'Pre check-in de las llegadas';
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+interface PlannedPrecheckin {
+  arrival_date: string;
+  /** Pending online check-in and with email: the ones that get it. */
+  to_send: PrecheckinArrival[];
+  without_email: PrecheckinArrival[];
+  completed: PrecheckinArrival[];
+}
+
+/**
+ * H9.4 — who gets the online check-in link among the confirmed arrivals of a
+ * date (tomorrow by default). Run by the preview and the handler, so the
+ * apply re-checks the list.
+ */
+async function planPrecheckin(
+  deps: LodgingToolDeps,
+  args: Record<string, unknown>,
+  context: ToolExecutionContext,
+): Promise<PlannedPrecheckin | { error: string; next_step?: string }> {
+  if (!context.store_id) {
+    return { error: 'Sin tienda en contexto: las llegadas siempre son de un hotel.' };
+  }
+  const raw = args.arrival_date === undefined || args.arrival_date === null ? '' : String(args.arrival_date).trim();
+  if (raw && (!DATE_ONLY.test(raw) || Number.isNaN(Date.parse(`${raw}T00:00:00.000Z`)))) {
+    return { error: 'La fecha de llegada no es válida.', next_step: 'Pide la fecha de llegada en formato YYYY-MM-DD.' };
+  }
+  const found = await deps.guestMessages.precheckinArrivals(raw || undefined);
+  const day = formatShortDate(found.arrival_date);
+  if (found.arrival_date < found.today) {
+    return { error: `El ${day} ya pasó: el pre check-in se envía antes de la llegada.` };
+  }
+  if (!found.has_link) {
+    return {
+      error: 'El enlace de pre check-in necesita la tienda en línea del hotel activa.',
+      next_step: 'Pide activar el dominio de la tienda en línea en Configuración y volver a intentarlo.',
+    };
+  }
+  const pending = found.arrivals.filter((a) => !a.precheckin_done);
+  const plan: PlannedPrecheckin = {
+    arrival_date: found.arrival_date,
+    to_send: pending.filter((a) => a.email),
+    without_email: pending.filter((a) => !a.email),
+    completed: found.arrivals.filter((a) => a.precheckin_done),
+  };
+  if (!found.arrivals.length) {
+    return { error: `No hay llegadas confirmadas para el ${day}.` };
+  }
+  if (!plan.to_send.length) {
+    const reasons = [
+      plan.completed.length ? `${plan.completed.length} ya completaron el pre check-in` : '',
+      plan.without_email.length
+        ? `sin correo: ${plan.without_email.map((a) => a.reservation_number).join(', ')}`
+        : '',
+    ].filter(Boolean);
+    return {
+      error: `No hay a quién enviarle el pre check-in del ${day} (${reasons.join('; ')}).`,
+      next_step: plan.without_email.length ? 'Agrega el correo del huésped en su reserva.' : undefined,
+    };
+  }
+  return plan;
 }
 
 function guidedError(error: string, nextStep?: string): string {
@@ -513,6 +583,92 @@ export function createLodgingTools(deps: LodgingToolDeps): RegisteredTool[] {
             amount: created.amount,
             payment_link: created.checkout_url,
             note: 'El depósito aparece en la reserva cuando el huésped pague.',
+          });
+        } catch (error) {
+          return guidedError(errorMessage(error));
+        }
+      },
+    },
+    /**
+     * H9.4 — "mándale el pre check-in a las llegadas de mañana". The preview
+     * lists who gets the email; once confirmed it sends the same pre-arrival
+     * email of H8.2 (with the H8.1 online check-in link) and answers how many
+     * went out. Already pre-registered guests and guests without email are
+     * left out and named.
+     */
+    {
+      name: 'send_lodging_precheckin',
+      version: '1',
+      domain: 'lodging',
+      description:
+        'Hotel: envía por correo el enlace de pre check-in (registro en línea antes de llegar) a los huéspedes con reserva confirmada que llegan en una fecha (por defecto mañana) y aún no lo completaron. La persona ve la lista y confirma antes de enviar; responde cuántos correos salieron.',
+      parameters: {
+        type: 'object',
+        properties: {
+          arrival_date: {
+            type: 'string',
+            description: 'Fecha de llegada (YYYY-MM-DD). Opcional: por defecto, mañana.',
+          },
+        },
+      },
+      requiredPermissions: ['store:lodging:front_desk:operate'],
+      requiresConfirmation: true,
+      discovery: {
+        synonyms: ['pre check-in', 'pre registro huéspedes', 'registro en línea llegadas', 'check-in online correo'],
+        examples: [
+          { intent: 'Mándale el pre check-in a las llegadas de mañana', arguments: {} },
+          { intent: 'Envía el pre registro a los que llegan el 12 de noviembre', arguments: { arrival_date: '2026-11-12' } },
+        ],
+      },
+      preview: async (args, context): Promise<ToolPreview> => {
+        let plan: Awaited<ReturnType<typeof planPrecheckin>>;
+        try {
+          plan = await planPrecheckin(deps, args, context);
+        } catch (error) {
+          return { status: 'error', target: PRECHECKIN, changes: [], message: errorMessage(error), domain: 'lodging' };
+        }
+        if ('error' in plan) {
+          return { status: 'error', target: PRECHECKIN, changes: [], message: plan.error, domain: 'lodging' };
+        }
+        const resent = plan.to_send.filter((a) => a.reminder_sent).length;
+        const notes = [
+          `Se enviarán ${plan.to_send.length} correo(s) con el enlace de pre check-in.`,
+          plan.without_email.length
+            ? `Sin correo, no se envía: ${plan.without_email.map((a) => `${a.reservation_number} (${a.guest_name})`).join(', ')}.`
+            : '',
+          plan.completed.length ? `Ya completaron el pre check-in: ${plan.completed.length}.` : '',
+          resent ? `${resent} ya habían recibido el recordatorio automático; se les reenvía.` : '',
+        ].filter(Boolean);
+        return {
+          status: plan.without_email.length || resent ? 'warning' : 'ok',
+          target: `Pre check-in de las llegadas del ${formatShortDate(plan.arrival_date)}`,
+          domain: 'lodging',
+          changes: plan.to_send.map((a) => ({
+            field: a.reservation_number,
+            label: `${a.reservation_number} · ${a.guest_name}`,
+            from: null,
+            to: a.email,
+          })),
+          message: notes.join(' '),
+        };
+      },
+      handler: async (args, context) => {
+        try {
+          const plan = await planPrecheckin(deps, args, context);
+          if ('error' in plan) return guidedError(plan.error, plan.next_step);
+          const { sent, failed } = await deps.guestMessages.sendPrecheckinNow(
+            plan.to_send.map((a) => a.reservation_id),
+          );
+          const day = formatShortDate(plan.arrival_date);
+          return JSON.stringify({
+            arrival_date: plan.arrival_date,
+            sent: sent.length,
+            sent_to: sent,
+            not_sent: failed,
+            without_email: plan.without_email.map((a) => a.reservation_number),
+            already_completed: plan.completed.length,
+            summary: `Salieron ${sent.length} de ${plan.to_send.length} correo(s) de pre check-in para las llegadas del ${day}.`,
+            ...(failed.length ? { next_step: 'Los que no salieron se pueden reintentar más tarde o enviar el enlace desde la reserva.' } : {}),
           });
         } catch (error) {
           return guidedError(errorMessage(error));

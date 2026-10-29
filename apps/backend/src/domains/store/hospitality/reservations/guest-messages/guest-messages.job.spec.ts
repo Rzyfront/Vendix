@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { RequestContextService } from '@common/context/request-context.service';
 import { LodgingGuestMessagesJob } from './guest-messages.job';
 import { guestMessageEmail, guestMessageSettings, preArrivalDue } from './guest-messages-text';
 
@@ -52,7 +53,10 @@ describe('LodgingGuestMessagesJob', () => {
         opts.sendOk === false ? { success: false, error: 'smtp' } : { success: true },
       ),
     };
-    const precheckin = { getLink: jest.fn(async () => ({ url: 'https://roku.example/pre-registro/tok' })) };
+    const precheckin = {
+      getLink: jest.fn(async () => ({ url: 'https://roku.example/pre-registro/tok' })),
+      hasGuestDomain: jest.fn(async () => true),
+    };
     const stayReview = { linkFor: jest.fn(async () => 'https://roku.example/calificar-estadia/tok') };
     const runner = { runInStoreContext: jest.fn(async (_id: number, fn: () => Promise<number>) => fn()) };
     const job = new LodgingGuestMessagesJob(
@@ -185,6 +189,99 @@ describe('LodgingGuestMessagesJob', () => {
     await job.run(IN_WINDOW);
     expect(create).not.toHaveBeenCalled();
     expect(email.sendEmail).not.toHaveBeenCalled();
+  });
+
+  describe('H9.4: pre check-in a pedido de recepción (Vexi)', () => {
+    let contextSpy: jest.SpyInstance;
+    beforeEach(() => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 5 } as any);
+    });
+    afterEach(() => contextSpy.mockRestore());
+
+    it('lista las llegadas confirmadas de mañana (zona de la tienda) con correo, pre-registro y recordatorio', async () => {
+      const { job, findMany } = build({
+        byStatus: {
+          confirmed: [
+            reservation({
+              guest_message_logs: [{ id: 1 }],
+              customer: { email: ' ana@x.co ', first_name: 'Ana', last_name: 'Ruiz' },
+            }),
+            reservation({
+              id: 8,
+              reservation_number: 'H-0008',
+              precheckin_completed_at: new Date(),
+              guest_message_logs: [],
+              customer: { email: null, first_name: 'Luis', last_name: null },
+            }),
+          ],
+        },
+      });
+      jest.useFakeTimers().setSystemTime(new Date('2026-11-11T04:00:00Z')); // 10-nov 23:00 Bogotá
+      try {
+        const result = await job.precheckinArrivals();
+        expect(findMany.mock.calls[0][0].where).toEqual({
+          status: 'confirmed',
+          arrival_date: new Date('2026-11-11T00:00:00.000Z'),
+        });
+        expect(result).toEqual({
+          today: '2026-11-10',
+          arrival_date: '2026-11-11',
+          has_link: true,
+          arrivals: [
+            {
+              reservation_id: 7,
+              reservation_number: 'H-0007',
+              guest_name: 'Ana Ruiz',
+              email: 'ana@x.co',
+              precheckin_done: false,
+              reminder_sent: true,
+            },
+            {
+              reservation_id: 8,
+              reservation_number: 'H-0008',
+              guest_name: 'Luis',
+              email: null,
+              precheckin_done: true,
+              reminder_sent: false,
+            },
+          ],
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('envía el recordatorio con el enlace aunque el automático esté apagado o ya enviado, y no borra el log existente', async () => {
+      const { job, email, create, deleteMany } = build({
+        duplicate: true,
+        hospitality: { guest_email_pre_arrival: false },
+        byStatus: { confirmed: [reservation()] },
+      });
+      await expect(job.sendPrecheckinNow([7])).resolves.toEqual({ sent: ['H-0007'], failed: [] });
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { store_id: 5, reservation_id: 7, message_key: 'pre_arrival', channel: 'email' },
+        }),
+      );
+      expect(email.sendEmail).toHaveBeenCalledTimes(1);
+      expect(email.sendEmail.mock.calls[0][0]).toBe('guest@example.com');
+      expect(email.sendEmail.mock.calls[0][2]).toContain('https://roku.example/pre-registro/tok');
+      expect(deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('solo confirmadas sin pre-registro; sin enlace queda como no enviado y libera su log', async () => {
+      const { job, findMany, precheckin, deleteMany, email } = build({ byStatus: { confirmed: [reservation()] } });
+      precheckin.getLink.mockRejectedValueOnce(new Error('no domain'));
+      await expect(job.sendPrecheckinNow([7])).resolves.toEqual({ sent: [], failed: ['H-0007'] });
+      expect(findMany.mock.calls[0][0].where).toEqual({
+        id: { in: [7] },
+        status: 'confirmed',
+        precheckin_completed_at: null,
+      });
+      expect(email.sendEmail).not.toHaveBeenCalled();
+      expect(deleteMany).toHaveBeenCalledWith({ where: { id: 99 } });
+      await expect(job.sendPrecheckinNow([])).resolves.toEqual({ sent: [], failed: [] });
+    });
   });
 });
 

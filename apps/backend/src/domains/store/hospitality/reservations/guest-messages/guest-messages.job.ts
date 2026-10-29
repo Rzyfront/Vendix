@@ -2,12 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { localDateString, resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { EmailService } from '../../../../../email/email.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { LodgingPrecheckinService } from '../precheckin/precheckin.service';
 import { LodgingStayReviewService } from '../stay-review/stay-review.service';
-import { stayNights } from '../stay-dates';
+import { dateOnlyToDb, stayNights } from '../stay-dates';
 import {
   GuestMessageKey,
   GuestMessageSettings,
@@ -27,7 +28,7 @@ const RESERVATION_SELECT = {
   arrival_date: true,
   departure_date: true,
   precheckin_completed_at: true,
-  customer: { select: { email: true, first_name: true } },
+  customer: { select: { email: true, first_name: true, last_name: true } },
   store: { select: { name: true } },
   rooms: {
     where: { cancelled_at: null },
@@ -37,6 +38,29 @@ const RESERVATION_SELECT = {
 } satisfies Prisma.lodging_reservationsSelect;
 
 type Candidate = Prisma.lodging_reservationsGetPayload<{ select: typeof RESERVATION_SELECT }>;
+
+/** H9.4 — a confirmed arrival of a date as the desk sees it before sending the online check-in link. */
+export interface PrecheckinArrival {
+  reservation_id: number;
+  reservation_number: string;
+  guest_name: string;
+  email: string | null;
+  precheckin_done: boolean;
+  /** The automatic pre-arrival reminder already went out. */
+  reminder_sent: boolean;
+}
+
+export interface PrecheckinArrivals {
+  /** Store-local today, YYYY-MM-DD. */
+  today: string;
+  arrival_date: string;
+  /** The store has an online domain, so the link can be built. */
+  has_link: boolean;
+  arrivals: PrecheckinArrival[];
+}
+
+/** Arrivals listed and sent per request; a hotel's day stays far below it. */
+const MAX_ARRIVALS = 200;
 
 const notSent = (key: GuestMessageKey) => ({
   guest_message_logs: { none: { message_key: key, channel: CHANNEL } },
@@ -107,14 +131,87 @@ export class LodgingGuestMessagesJob {
     }
   }
 
-  private async runStore(store_id: number, now: Date): Promise<number> {
+  /**
+   * H9.4 — "mándale el pre check-in a las llegadas de mañana": the confirmed
+   * arrivals of a date (tomorrow in the store time zone by default) of the
+   * current store, with who already completed it, has no email or already got
+   * the automatic reminder. Read-only: Vexi's proposal shows this list.
+   */
+  async precheckinArrivals(arrival_date?: string): Promise<PrecheckinArrivals> {
+    const store_id = this.requireStoreId();
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const today = localDateString(new Date(), timezone);
+    const date = arrival_date ?? new Date(dateOnlyToDb(today).getTime() + DAY_MS).toISOString().slice(0, 10);
+    const rows = await this.prisma.lodging_reservations.findMany({
+      where: { status: 'confirmed', arrival_date: dateOnlyToDb(date) },
+      select: {
+        ...RESERVATION_SELECT,
+        guest_message_logs: { where: { message_key: 'pre_arrival', channel: CHANNEL }, select: { id: true } },
+      },
+      orderBy: { reservation_number: 'asc' },
+      take: MAX_ARRIVALS,
+    });
+    return {
+      today,
+      arrival_date: date,
+      has_link: await this.precheckin.hasGuestDomain(),
+      arrivals: rows.map((r) => ({
+        reservation_id: r.id,
+        reservation_number: r.reservation_number,
+        guest_name: `${r.customer.first_name ?? ''} ${r.customer.last_name ?? ''}`.trim(),
+        email: r.customer.email?.trim() || null,
+        precheckin_done: !!r.precheckin_completed_at,
+        reminder_sent: r.guest_message_logs.length > 0,
+      })),
+    };
+  }
+
+  /**
+   * H9.4 — sends now, at the desk's explicit request, the pre-arrival email
+   * with the online check-in link (same message as the automatic reminder) to
+   * these reservations of the current store. It goes out even if the store
+   * turned the automatic reminder off or it was already sent; it is logged as
+   * the reminder, so the job does not send it again afterwards. Reservations
+   * no longer confirmed, already pre-registered or without email are skipped.
+   */
+  async sendPrecheckinNow(reservation_ids: number[]): Promise<{ sent: string[]; failed: string[] }> {
+    const store_id = this.requireStoreId();
+    const settings = await this.loadSettings(store_id);
+    const rows = reservation_ids.length
+      ? await this.prisma.lodging_reservations.findMany({
+          where: { id: { in: reservation_ids.slice(0, MAX_ARRIVALS) }, status: 'confirmed', precheckin_completed_at: null },
+          select: RESERVATION_SELECT,
+          orderBy: { reservation_number: 'asc' },
+        })
+      : [];
+    const sent: string[] = [];
+    const failed: string[] = [];
+    for (const r of rows) {
+      if (!r.customer.email?.trim()) continue;
+      const ok = await this.send(store_id, 'pre_arrival', r, settings, true);
+      (ok ? sent : failed).push(r.reservation_number);
+    }
+    return { sent, failed };
+  }
+
+  private async loadSettings(store_id: number): Promise<GuestMessageSettings> {
     const row = await this.prisma.store_settings.findFirst({
       where: { store_id },
       select: { settings: true },
     });
-    const settings = guestMessageSettings(
+    return guestMessageSettings(
       (row?.settings as { hospitality?: Record<string, unknown> } | null)?.hospitality,
     );
+  }
+
+  private requireStoreId(): number {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) throw new Error('Store context required');
+    return store_id;
+  }
+
+  private async runStore(store_id: number, now: Date): Promise<number> {
+    const settings = await this.loadSettings(store_id);
     if (!settings.confirmation && !settings.pre_arrival && !settings.post_stay) return 0;
 
     const timezone = await resolveStoreTimezone(this.prisma, store_id);
@@ -167,16 +264,21 @@ export class LodgingGuestMessagesJob {
     return sent;
   }
 
-  /** Claims the log row, sends, and releases the claim if the email did not go out. Never throws. */
+  /**
+   * Claims the log row, sends, and releases the claim if the email did not go
+   * out. Never throws. `manual` (H9.4, the desk asked for it) sends even when
+   * the row already exists and requires the online check-in link.
+   */
   private async send(
     store_id: number,
     key: GuestMessageKey,
     reservation: Candidate,
     settings: GuestMessageSettings,
+    manual = false,
   ): Promise<number> {
     const to = reservation.customer.email?.trim();
     if (!to) return 0;
-    let logId: number;
+    let logId: number | null = null;
     try {
       const log = await this.prisma.lodging_guest_message_logs.create({
         data: { store_id, reservation_id: reservation.id, message_key: key, channel: CHANNEL },
@@ -184,14 +286,21 @@ export class LodgingGuestMessagesJob {
       });
       logId = log.id;
     } catch (err: unknown) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') return 0;
-      throw err;
+      const duplicate = err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+      if (!duplicate) {
+        if (manual) return 0;
+        throw err;
+      }
+      if (!manual) return 0;
     }
 
     try {
       const arrival = reservation.arrival_date.toISOString().slice(0, 10);
       const departure = reservation.departure_date.toISOString().slice(0, 10);
       const precheckin_done = !!reservation.precheckin_completed_at;
+      const precheckin_url =
+        key === 'pre_arrival' && !precheckin_done ? await this.precheckinUrl(reservation.id) : null;
+      if (manual && !precheckin_url) throw new Error('online check-in link unavailable');
       const message = guestMessageEmail(key, {
         guest_name: reservation.customer.first_name?.trim() || 'Hola',
         store_name: reservation.store?.name ?? 'el hotel',
@@ -203,7 +312,7 @@ export class LodgingGuestMessagesJob {
         check_in_time: settings.check_in_time,
         check_out_time: settings.check_out_time,
         precheckin_done,
-        precheckin_url: key === 'pre_arrival' && !precheckin_done ? await this.precheckinUrl(reservation.id) : null,
+        precheckin_url,
         review_url: key === 'post_stay' && settings.post_stay_review ? await this.reviewUrl(reservation.id) : null,
       });
       const result = await this.email.sendEmail(to, message.subject, message.html, message.text);
@@ -214,7 +323,9 @@ export class LodgingGuestMessagesJob {
         `Guest ${key} email for reservation ${reservation.id} failed: ${err instanceof Error ? err.message : err}`,
       );
     }
-    await this.prisma.lodging_guest_message_logs.deleteMany({ where: { id: logId } }).catch(() => undefined);
+    if (logId !== null) {
+      await this.prisma.lodging_guest_message_logs.deleteMany({ where: { id: logId } }).catch(() => undefined);
+    }
     return 0;
   }
 

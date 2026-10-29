@@ -86,6 +86,31 @@ function depositSummary(
   };
 }
 
+/** `LodgingGuestMessagesJob.precheckinArrivals` of tomorrow (2026-10-29). */
+function arrivals(overrides: Record<string, unknown> = {}) {
+  const arrival = (n: number, over: Record<string, unknown> = {}) => ({
+    reservation_id: n,
+    reservation_number: `RES-00${n}`,
+    guest_name: `Huésped ${n}`,
+    email: `h${n}@example.com`,
+    precheckin_done: false,
+    reminder_sent: false,
+    ...over,
+  });
+  return {
+    today: '2026-10-28',
+    arrival_date: '2026-10-29',
+    has_link: true,
+    arrivals: [
+      arrival(31),
+      arrival(32, { reminder_sent: true }),
+      arrival(33, { email: null }),
+      arrival(34, { precheckin_done: true }),
+    ],
+    ...overrides,
+  };
+}
+
 function setup() {
   const bookingEngine = { search: jest.fn().mockResolvedValue(SEARCH_RESULT) };
   const reservations = {
@@ -101,17 +126,35 @@ function setup() {
   const findReservation = jest
     .fn()
     .mockResolvedValue({ id: 31, reservation_number: 'RES-0031', guest_name: 'Juan Pérez' });
+  const guestMessages = {
+    precheckinArrivals: jest.fn().mockResolvedValue(arrivals()),
+    sendPrecheckinNow: jest.fn().mockResolvedValue({ sent: ['RES-0031', 'RES-0032'], failed: [] }),
+  };
   const tools = createLodgingTools({
     bookingEngine: bookingEngine as any,
     reservations: reservations as any,
     findCustomerName,
     deposits: deposits as any,
     findReservation,
+    guestMessages,
   });
   const tool = tools.find((t) => t.name === 'quote_lodging_availability')!;
   const book = tools.find((t) => t.name === 'book_lodging_stay')!;
   const link = tools.find((t) => t.name === 'create_lodging_deposit_link')!;
-  return { tool, book, link, tools, bookingEngine, reservations, findCustomerName, deposits, findReservation };
+  const precheckin = tools.find((t) => t.name === 'send_lodging_precheckin')!;
+  return {
+    tool,
+    book,
+    link,
+    precheckin,
+    tools,
+    bookingEngine,
+    reservations,
+    findCustomerName,
+    deposits,
+    findReservation,
+    guestMessages,
+  };
 }
 
 const CTX = { store_id: 7, user_id: 1 };
@@ -495,6 +538,120 @@ describe('create_lodging_deposit_link (H9.3)', () => {
       expect(failure.errorCode).toBe('AI_AGENT_004');
       expect(confirmations.issue).not.toHaveBeenCalled();
       expect(deposits.createLink).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('send_lodging_precheckin (H9.4)', () => {
+  it('is a confirmed write behind the front desk permission of the online check-in link', () => {
+    const { precheckin } = setup();
+    expect(precheckin.requiresConfirmation).toBe(true);
+    expect(precheckin.requiredPermissions).toEqual(['store:lodging:front_desk:operate']);
+    expect(TOOL_DISCOVERY_QUERIES_ES.send_lodging_precheckin.length).toBeGreaterThan(0);
+    expect(() => buildToolDocument(precheckin)).not.toThrow();
+  });
+
+  it("proposes tomorrow's arrivals that get the email, naming who has no email and who already completed it", async () => {
+    const { precheckin, guestMessages } = setup();
+    const preview = await precheckin.preview!({}, CTX);
+
+    expect(guestMessages.precheckinArrivals).toHaveBeenCalledWith(undefined);
+    expect(preview.status).toBe('warning');
+    expect(preview.target).toBe('Pre check-in de las llegadas del 29-oct');
+    expect(preview.changes.map((c) => [c.label, c.to])).toEqual([
+      ['RES-0031 · Huésped 31', 'h31@example.com'],
+      ['RES-0032 · Huésped 32', 'h32@example.com'],
+    ]);
+    expect(preview.message).toContain('Se enviarán 2 correo(s)');
+    expect(preview.message).toContain('Sin correo, no se envía: RES-0033 (Huésped 33)');
+    expect(preview.message).toContain('Ya completaron el pre check-in: 1');
+    expect(preview.message).toContain('1 ya habían recibido el recordatorio automático');
+    expect(guestMessages.sendPrecheckinNow).not.toHaveBeenCalled();
+  });
+
+  it('sends once confirmed and the summary says how many went out', async () => {
+    const { precheckin, guestMessages } = setup();
+    guestMessages.sendPrecheckinNow.mockResolvedValue({ sent: ['RES-0031'], failed: ['RES-0032'] });
+    const result = JSON.parse((await precheckin.handler!({ arrival_date: '2026-10-29' }, CTX)) as string);
+
+    expect(guestMessages.precheckinArrivals).toHaveBeenCalledWith('2026-10-29');
+    expect(guestMessages.sendPrecheckinNow).toHaveBeenCalledWith([31, 32]);
+    expect(result).toMatchObject({
+      sent: 1,
+      sent_to: ['RES-0031'],
+      not_sent: ['RES-0032'],
+      without_email: ['RES-0033'],
+      already_completed: 1,
+      summary: 'Salieron 1 de 2 correo(s) de pre check-in para las llegadas del 29-oct.',
+    });
+    expect(result.next_step).toBeDefined();
+  });
+
+  it('refuses a past date, a hotel without online store, a day without arrivals and a day with nobody to send', async () => {
+    const { precheckin, guestMessages } = setup();
+    const error = async (data: Record<string, unknown>) => {
+      guestMessages.precheckinArrivals.mockResolvedValueOnce(arrivals(data));
+      return JSON.parse((await precheckin.handler!({}, CTX)) as string).error as string;
+    };
+    expect(await error({ arrival_date: '2026-10-27' })).toContain('ya pasó');
+    expect(await error({ has_link: false })).toContain('tienda en línea');
+    expect(await error({ arrivals: [] })).toBe('No hay llegadas confirmadas para el 29-oct.');
+    expect(
+      await error({
+        arrivals: [
+          { reservation_id: 33, reservation_number: 'RES-0033', guest_name: 'A', email: null, precheckin_done: false, reminder_sent: false },
+          { reservation_id: 34, reservation_number: 'RES-0034', guest_name: 'B', email: 'b@x.co', precheckin_done: true, reminder_sent: false },
+        ],
+      }),
+    ).toBe('No hay a quién enviarle el pre check-in del 29-oct (1 ya completaron el pre check-in; sin correo: RES-0033).');
+    expect(guestMessages.sendPrecheckinNow).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed date and a missing store without reading arrivals', async () => {
+    const { precheckin, guestMessages } = setup();
+    expect(JSON.parse((await precheckin.handler!({ arrival_date: 'mañana' }, CTX)) as string).error).toContain(
+      'no es válida',
+    );
+    expect(JSON.parse((await precheckin.handler!({}, { user_id: 1 })) as string).error).toContain('Sin tienda');
+    expect(guestMessages.precheckinArrivals).not.toHaveBeenCalled();
+  });
+
+  describe('through the registry', () => {
+    let contextSpy: jest.SpyInstance;
+    afterEach(() => contextSpy.mockRestore());
+
+    function registryWith(permissions: string[]) {
+      contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ ...CTX, permissions, roles: [] } as any);
+      const confirmations = { issue: jest.fn().mockResolvedValue('tok-1'), redeem: jest.fn() };
+      const { precheckin, guestMessages } = setup();
+      const registry = new AIToolRegistry(confirmations as any);
+      registry.register(precheckin);
+      return { registry, guestMessages, confirmations };
+    }
+
+    it('without a token returns the list to confirm and sends nothing', async () => {
+      const { registry, guestMessages } = registryWith(['store:lodging:front_desk:operate']);
+      const failure: VendixHttpException = await registry
+        .executeTool('send_lodging_precheckin', {})
+        .catch((error) => error);
+
+      expect(failure.errorCode).toBe('AI_AGENT_005');
+      const body = failure.getResponse() as any;
+      expect(body.details.preview.target).toBe('Pre check-in de las llegadas del 29-oct');
+      expect(guestMessages.sendPrecheckinNow).not.toHaveBeenCalled();
+    });
+
+    it('refuses a user without the front desk permission', async () => {
+      const { registry, guestMessages, confirmations } = registryWith(['store:lodging:reservations:read']);
+      const failure: VendixHttpException = await registry
+        .executeTool('send_lodging_precheckin', {}, { confirmationToken: 'tok-1' })
+        .catch((error) => error);
+
+      expect(failure.errorCode).toBe('AI_AGENT_004');
+      expect(confirmations.issue).not.toHaveBeenCalled();
+      expect(guestMessages.sendPrecheckinNow).not.toHaveBeenCalled();
     });
   });
 });

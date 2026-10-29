@@ -2270,6 +2270,16 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Parce, sácame el link del anticipo para enviárselo al cliente',
     '¿Me das el link para cobrar el depósito de la habitación?',
   ],
+  send_lodging_precheckin: [
+    'Mándale el pre check-in a las llegadas de mañana',
+    'Envía el enlace de registro en línea a los huéspedes que llegan mañana',
+    'Oe, mándales el pre registro a los que llegan el viernes',
+    'Que los huéspedes de mañana llenen sus datos antes de llegar',
+    'Mándale el check-in online a todas las reservas que entran el 12 de noviembre',
+    'Parce, envíales el link del pre check-in a las llegadas de hoy',
+    '¿Puedes mandarle el formulario de registro a los que llegan mañana?',
+    'No quiero mandar el pre check-in uno por uno, envíalo a todas las llegadas',
+  ],
   book_lodging_stay: [
     'Resérvale la doble a Juan Pérez del 10 al 13',
     'Hazle la reserva de la suite a la señora Gómez para este fin de semana',

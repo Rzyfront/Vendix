@@ -63,17 +63,26 @@ export class LodgingPrecheckinService {
    * on first use and is the same for every guest page of the reservation.
    */
   async guestUrl(reservation: { id: number; precheckin_token: string | null }, path: string): Promise<string> {
-    const store_id = this.requireStoreId();
-    const domain = await this.prisma.domain_settings.findFirst({
-      where: { store_id, domain_type: 'ecommerce', status: 'active', is_primary: true },
-      orderBy: { updated_at: 'desc' },
-      select: { hostname: true },
-    });
+    const domain = await this.guestDomain();
     if (!domain) throw new VendixHttpException(ErrorCodes.LODGING_PRECHECKIN_DOMAIN_001);
 
     const token = reservation.precheckin_token ?? (await this.ensureToken(reservation.id));
     const base = /^https?:\/\//.test(domain.hostname) ? domain.hostname : `https://${domain.hostname}`;
     return `${base.replace(/\/+$/, '')}/${path}/${token}`;
+  }
+
+  /** H9.4 — whether guest links can be built: the store has an active online domain. */
+  async hasGuestDomain(): Promise<boolean> {
+    return !!(await this.guestDomain());
+  }
+
+  private guestDomain() {
+    const store_id = this.requireStoreId();
+    return this.prisma.domain_settings.findFirst({
+      where: { store_id, domain_type: 'ecommerce', status: 'active', is_primary: true },
+      orderBy: { updated_at: 'desc' },
+      select: { hostname: true },
+    });
   }
 
   /** Guest: what the form needs, with no personal data of the party. */

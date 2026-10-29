@@ -162,6 +162,7 @@ export class LodgingReservationsModule implements OnModuleInit {
     private readonly bookingEngine: LodgingBookingEngineService,
     private readonly reservations: LodgingReservationsService,
     private readonly deposits: LodgingDepositsService,
+    private readonly guestMessages: LodgingGuestMessagesJob,
     private readonly prisma: StorePrismaService,
   ) {}
 
@@ -201,6 +202,8 @@ export class LodgingReservationsModule implements OnModuleInit {
             guest_name: `${first_name} ${last_name}`.trim(),
           };
         },
+        // H9.4 — the pre check-in email of tomorrow's arrivals, same message as H8.2.
+        guestMessages: this.guestMessages,
       }),
     );
   }
