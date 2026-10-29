@@ -193,6 +193,9 @@ export class StorePrismaService extends BasePrismaService {
     'menus',
     'menu_sections',
     'menu_availability_windows',
+    // ===== Manufacturing module (MVP) =====
+    'manufacturing_settings',
+    'store_sequences',
     // ===== Membership core (generalized) =====
     // Las 5 tablas de membresía llevan store_id directo → scoping directo por
     // tienda. membership_access_logs también scopea por store_id (bitácora).
@@ -455,6 +458,7 @@ export class StorePrismaService extends BasePrismaService {
       'kitchen_ticket_items', // Relational (via kitchen_ticket.store_id)
       'menu_section_items', // Relational (via menu_section.store_id)
       'table_waiters', // Relational (via tables.store_id)
+      'production_order_lines', // Relational (via production_orders.store_id)
     ];
 
     for (const model of all_scoped_models) {
@@ -686,6 +690,7 @@ export class StorePrismaService extends BasePrismaService {
         kitchen_ticket: { store_id: context.store_id },
       },
       menu_section_items: { menu_section: { store_id: context.store_id } },
+      production_order_lines: { order: { store_id: context.store_id } },
       // table_waiters is the N:M pivot (table_id ↔ user_id) with no direct
       // store_id column. Scope it via its parent `tables` so a direct query
       // like `table_waiters.findMany({ where: { user_id } })` (the reverse
@@ -1978,6 +1983,19 @@ export class StorePrismaService extends BasePrismaService {
 
   get production_orders() {
     return this.scoped_client.production_orders;
+  }
+
+  // ===== Manufacturing module (MVP) =====
+  get production_order_lines() {
+    return this.scoped_client.production_order_lines;
+  }
+
+  get manufacturing_settings() {
+    return this.scoped_client.manufacturing_settings;
+  }
+
+  get store_sequences() {
+    return this.scoped_client.store_sequences;
   }
 
   get tables() {
