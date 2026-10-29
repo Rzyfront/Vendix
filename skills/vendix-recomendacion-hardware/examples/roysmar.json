@@ -1,0 +1,124 @@
+{
+  "cliente": {
+    "empresa": "Roysmar · Centro Recreacional y Vacacional",
+    "empresa_corta": "Roysmar",
+    "contacto": "Sr. José Romero",
+    "cargo": ""
+  },
+  "fecha": "29 / 10 / 2026",
+  "fecha_consulta": "29 de octubre de 2026",
+  "tienda": "Mercado Libre",
+  "porque": [
+    "Complementa la propuesta comercial de Vendix para Roysmar. Recomendamos solo lo que hace falta: Roysmar ya cuenta con un portátil y con una impresora POS marca SAT con puerto para apertura de cajón, y no trabajará con pistolas lectoras.",
+    "Los equipos cubren los tres puntos de cocina (KDS) del restaurante, el cajón de la caja y, de forma opcional, un computador fijo para recepción o caja."
+  ],
+  "resumen_esencial": "3 tablets + 1 cajón",
+  "resumen_opcionales": "3 tablets + 1 cajón + ThinkCentre",
+  "nota_resumen": {
+    "titulo": "¿Uno o dos cajones?",
+    "puntos": [
+      "<b>Un cajón</b> si Roysmar cobra en efectivo desde una sola caja.",
+      "<b>Dos cajones</b> si habilita dos cajas (por ejemplo, recepción y bar). Cada cajón abre desde su propia impresora POS, así que la segunda caja también necesita una impresora con puerto de apertura."
+    ]
+  },
+  "equipos": [
+    {
+      "nombre": "Lenovo Idea Tab 11 · 128 GB con Tab Pen",
+      "nombre_corto": "Tablet",
+      "resumen": "128 GB · 8 GB RAM · Tab Pen y funda",
+      "uso": "Pantallas de cocina (KDS) en los 3 puntos del restaurante",
+      "seccion": "Cocina · Pantallas KDS × 3",
+      "cantidad": 3,
+      "precio": 670000,
+      "url": "https://www.mercadolibre.com.co/lenovo-idea-tab-11-128gb-con-tab-pen/p/MCO61753207",
+      "imagen": "https://http2.mlstatic.com/D_NQ_NP_685145-MLA96908624866_112025-O.webp",
+      "reputacion": "Nuevo · +50 vendidos · Calificación 4.9 / 5 (74 opiniones) · Vendido por WILTECHNO SAS (+1.000 ventas)",
+      "incluye": [
+        "Pantalla de 11\" táctil, 2560 × 1600, 274 ppp",
+        "Procesador MediaTek Dimensity 6300 de 8 núcleos, 8 GB de RAM",
+        "128 GB de almacenamiento, ampliable con microSD",
+        "Batería de 7.040 mAh · Wi-Fi y Bluetooth 5.2 · Android 15",
+        "Lenovo Tab Pen y funda incluidos"
+      ],
+      "puntos": [
+        "Cada tablet muestra en tiempo real las comandas que llegan del punto de venta y de las mesas a su estación.",
+        "Pantalla grande y nítida: se lee a distancia en cocina o barra.",
+        "Es versión Wi-Fi: cada punto KDS necesita buena señal.",
+        "La publicación no indica la garantía: confirmarla con el vendedor antes de comprar."
+      ]
+    },
+    {
+      "nombre": "Cajón monedero SAT RS130 · 4 puestos, RJ11",
+      "nombre_corto": "Cajón",
+      "resumen": "4 billetes · RJ11 · apertura automática",
+      "uso": "Caja: se conecta a la impresora SAT y abre al cobrar",
+      "seccion": "Caja · Cajón monedero × 1 o 2",
+      "cantidad_min": 1,
+      "cantidad_max": 2,
+      "precio": 174118,
+      "url": "https://articulo.mercadolibre.com.co/MCO-1618051069",
+      "imagen": "https://http2.mlstatic.com/D_NQ_NP_756863-MCO93032060432_092025-O.webp",
+      "reputacion": "Nuevo · +500 vendidos · Más vendido (3º en máquinas registradoras) · Calificación 4.8 / 5 (93 opiniones) · Vendido por Bodega Tecnológica Mayorista (MercadoLíder, +50 mil ventas)",
+      "incluye": [
+        "Cajón metálico en acero laminado en frío",
+        "4 compartimientos para billetes con pisabilletes y ranura frontal para documentos",
+        "Bandeja interior extraíble",
+        "Cerradura de 3 posiciones: cerrado, abierto y libre",
+        "Cable RJ11 incluido · 33 × 36 × 8 cm",
+        "12 meses de garantía de fábrica"
+      ],
+      "puntos": [
+        "Es de la misma marca que la impresora POS SAT de Roysmar: se conecta a su puerto de apertura con el cable RJ11.",
+        "Compatible con Vendix: el cajón abre automáticamente al imprimir el ticket del cobro.",
+        "No necesita enchufe ni puerto USB del computador.",
+        "Para un segundo cajón se requiere una segunda impresora POS con puerto de apertura."
+      ]
+    },
+    {
+      "nombre": "Lenovo ThinkCentre Neo 50a G5 · Todo-en-uno 23,8\"",
+      "nombre_corto": "ThinkCentre",
+      "resumen": "Todo-en-uno 23,8\" · i5 · 8 GB · SSD 512 GB",
+      "uso": "Computador fijo para recepción o caja (ya cuentan con portátil)",
+      "seccion": "Recepción o caja · Opcional × 1",
+      "opcional": true,
+      "cantidad": 1,
+      "precio": 2015000,
+      "precio_antes": 2899000,
+      "descuento": "30% OFF",
+      "url": "https://www.mercadolibre.com.co/lenovo-thinkcentre-neo-50a-g5-ram-ddr5-8gb-ssd-512gb-desktop-luna-grey/p/MCO65168657",
+      "imagen": "https://http2.mlstatic.com/D_NQ_NP_634589-MLA105716079332_012026-O.webp",
+      "reputacion": "Nuevo · +100 vendidos · Calificación 5.0 / 5 (19 opiniones) · Vendido por JERSAGROUP (+25 ventas)",
+      "incluye": [
+        "Intel Core i5-13420H de 13.ª generación, hasta 4,6 GHz",
+        "8 GB de RAM DDR5 (ampliable a 64 GB) · SSD de 512 GB",
+        "Pantalla de 23,8\" Full HD · cámara de 5 MP, micrófono y parlantes",
+        "USB-C, USB 3.2, 2 USB 2.0, HDMI de entrada y salida, red LAN, Wi-Fi 6",
+        "Teclado, mouse y cable de alimentación · 12 meses de garantía de fábrica"
+      ],
+      "puntos": [
+        "Opcional: Roysmar ya cuenta con un portátil. Sirve para dejar un equipo fijo en recepción o caja.",
+        "Rendimiento de sobra para Vendix, que funciona en el navegador.",
+        "La pantalla no es táctil: se opera con teclado y mouse.",
+        "La publicación indica Windows 11 Pro de prueba: confirmar con el vendedor que incluya la licencia activada."
+      ]
+    }
+  ],
+  "revisar": [
+    {
+      "titulo": "Wi-Fi en cocina y barra",
+      "texto": "Las comandas llegan a los KDS por internet. Confirmar buena señal en los tres puntos antes de instalarlos."
+    },
+    {
+      "titulo": "Soportes y carga de las tablets",
+      "texto": "Un soporte de pared o de mesa por tablet, lejos del calor y la grasa, y su cargador conectado: los KDS permanecen encendidos todo el turno."
+    },
+    {
+      "titulo": "Impresora para la factura electrónica",
+      "texto": "Con el Plan Empresarial Pro se imprimen facturas electrónicas. El ticket de 80 mm muestra mejor el QR y el CUFE; si la impresora SAT actual es de 58 mm, también funciona."
+    },
+    {
+      "titulo": "Papel térmico",
+      "texto": "Tener rollos de repuesto del ancho de la impresora actual."
+    }
+  ]
+}

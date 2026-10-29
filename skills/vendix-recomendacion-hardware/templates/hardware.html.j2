@@ -1,0 +1,116 @@
+{% extends "_base.html.j2" %}
+{% import "_base.html.j2" as ui with context %}
+{% set label = "Recomendación de compra · Hardware " ~ d.cliente.empresa_corta|default(d.cliente.empresa) %}
+{% set n_fichas = d.equipos|length %}
+{% block title %}Recomendación de hardware · {{ d.cliente.empresa }}{% endblock %}
+
+{% block styles %}
+body{font-size:10pt}
+h2{font-size:22pt}
+.cover{padding:13mm 14mm 12mm}
+.cover img{width:30mm}
+.cover h1{font-size:21pt}
+table.meta{margin-top:7mm;font-size:9.5pt}
+table.meta td{padding:8px 12px}
+.note{margin-top:6mm}
+.close{padding:12px 20px;margin:10px 0;font-size:10pt}
+.sign-title{margin-top:10px}
+.sign{padding:10px 16px;font-size:9pt}
+.sign img{height:13mm}
+.contact{margin-top:10px;padding:11px 16px;font-size:9pt}
+table.sum{width:100%;border-collapse:collapse;font-size:9.5pt;margin-top:4px}
+table.sum th{background:var(--dark);color:#fff;font-family:"Urbanist";font-weight:700;text-align:left;padding:8px 9px;font-size:8.5pt}
+table.sum td{border-bottom:1px solid var(--line);padding:9px;vertical-align:top}
+table.sum td.n,table.sum th.n{text-align:right;white-space:nowrap}
+table.sum small{color:var(--muted)}
+.tag-opt{display:inline-block;font-family:"Urbanist";font-weight:700;font-size:7pt;color:var(--orange);border:1px solid var(--orange);border-radius:3px;padding:0 5px;margin-left:4px;vertical-align:1px}
+.totals{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.totals.one{grid-template-columns:1fr}
+.tot{background:var(--dark);color:#fff;padding:13px 15px}
+.tot small{display:block;font-family:"Urbanist";font-weight:700;font-size:7.5pt;color:var(--green);text-transform:uppercase;letter-spacing:.05em}
+.tot b{font-family:"Urbanist";font-size:17pt;display:block;margin:2px 0}
+.tot span{font-size:8.5pt;opacity:.85}
+.thumbs{display:grid;gap:10px;margin-top:14px;text-align:center;font-size:8.5pt;color:var(--muted)}
+.thumbs img{height:30mm;max-width:100%;object-fit:contain;display:block;margin:0 auto 4px}
+.thumbs b{color:var(--ink)}
+.sub{color:var(--muted);font-size:9pt;margin-bottom:10px}
+.hero{border:1px solid var(--line);padding:8px;display:flex;justify-content:center;height:72mm}
+.hero img{height:100%;max-width:100%;object-fit:contain}
+.price{font-family:"Urbanist";font-weight:700;font-size:24pt;margin:10px 0 2px}
+.price small{font-size:10.5pt;color:var(--muted);font-weight:600;margin-left:6px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px}
+.qr{display:flex;gap:14px;align-items:center;background:var(--dark);color:#fff;padding:12px 14px;margin-top:12px}
+.qr img{width:25mm;height:25mm;background:#fff;padding:3px}
+.qr small{display:block;font-family:"Urbanist";font-weight:700;color:var(--green);font-size:7.5pt;text-transform:uppercase;letter-spacing:.05em}
+.qr p{margin:3px 0;font-size:9.5pt}
+.qr a{color:var(--green);font-size:8pt;word-break:break-all;text-decoration:none}
+.checks{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+{% endblock %}
+
+{% block pages %}
+<section class="page"><div class="page-body">
+  {{ ui.cover("RECOMENDACIÓN DE COMPRA", d.titulo|default("Equipos para " ~ (d.cliente.empresa_corta|default(d.cliente.empresa)) ~ ",<br>listos para trabajar con Vendix.")|safe) }}
+  {{ ui.meta_table(d, "Recomendación de compra · Hardware") }}
+  <div class="note">
+    <h3>Por qué este documento</h3>
+    {% for p in d.porque %}<p>{{ p }}</p>{% endfor %}
+  </div>
+</div>{{ ui.foot(label, 1) }}</section>
+
+<section class="page"><div class="page-body">
+  <div class="eyebrow">Sección 01 · Resumen</div>
+  <h2>Los equipos, de un vistazo</h2>
+  <p class="lead">{{ d.nota_precios|default("Precios de referencia con IVA incluido, consultados el " ~ d.fecha_consulta|default(d.fecha) ~ ".") }}</p>
+  <table class="sum">
+    <tr><th>Equipo</th><th>Para qué</th><th class="n">Cant.</th><th class="n">Precio unidad</th><th class="n">Subtotal</th></tr>
+    {% for e in d.equipos %}
+    <tr>
+      <td><b>{{ e.nombre }}</b>{% if e.opcional %} <span class="tag-opt">OPCIONAL</span>{% endif %}<br><small>{{ e.resumen }}</small></td>
+      <td>{{ e.uso }}</td>
+      <td class="n">{{ e.cantidad_txt }}</td>
+      <td class="n">{{ e.precio|cop }}</td>
+      <td class="n">{{ e.subtotal_min|cop }}{% if e.subtotal_max != e.subtotal_min %}<br><small>{{ e.cantidad_max }} und: {{ e.subtotal_max|cop }}</small>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <div class="totals{% if not d.hay_opcionales %} one{% endif %}">
+    <div class="tot"><small>Inversión esencial</small><b>{{ d.total_esencial|cop }}</b><span>{{ d.resumen_esencial|default("Equipos no opcionales") }}{% if d.total_esencial_max != d.total_esencial %} · máximo: {{ d.total_esencial_max|cop }}{% endif %}</span></div>
+    {% if d.hay_opcionales %}
+    <div class="tot"><small>Con los opcionales</small><b>{{ d.total_con_opcionales|cop }}</b><span>{{ d.resumen_opcionales|default("Esencial + opcionales") }}{% if d.total_con_opcionales_max != d.total_con_opcionales %} · máximo: {{ d.total_con_opcionales_max|cop }}{% endif %}</span></div>
+    {% endif %}
+  </div>
+  <div class="thumbs" style="grid-template-columns:repeat({{ [n_fichas, 4]|min }},1fr)">
+    {% for e in d.equipos[:4] %}<div>{% if e.imagen %}<img src="{{ e.imagen }}" alt="">{% endif %}<b>{{ e.nombre_corto|default(e.nombre) }} × {{ e.cantidad_txt }}</b> · {{ e.precio|cop }}{% if e.opcional %} · opcional{% endif %}</div>{% endfor %}
+  </div>
+  {% if d.nota_resumen %}<div class="note"><h3>{{ d.nota_resumen.titulo }}</h3><ul>{% for i in d.nota_resumen.puntos %}<li>{{ i|safe }}</li>{% endfor %}</ul></div>{% endif %}
+</div>{{ ui.foot(label, 2) }}</section>
+
+{% for e in d.equipos %}
+<section class="page"><div class="page-body">
+  <div class="eyebrow">Sección {{ "%02d"|format(loop.index + 1) }} · {{ e.seccion }}</div>
+  <h2>{{ e.nombre }}</h2>
+  <div class="sub">{% if e.tienda %}{{ e.tienda }}{% if e.reputacion %} · {% endif %}{% endif %}{{ e.reputacion or "" }}</div>
+  {% if e.imagen %}<div class="hero"><img src="{{ e.imagen }}" alt=""></div>{% endif %}
+  <div class="price">{{ e.precio|cop }} <small>{% if e.precio_antes %}antes {{ e.precio_antes|cop }}{% if e.descuento %} · {{ e.descuento }}{% endif %}{% elif e.cantidad_max > 1 %}c/u · {{ e.cantidad_max }} unidades: {{ e.subtotal_max|cop }}{% endif %}</small></div>
+  <div class="cols">
+    <div class="box"><h3>Qué incluye</h3><ul>{% for i in e.incluye %}<li>{{ i }}</li>{% endfor %}</ul></div>
+    <div class="box warn"><h3>Puntos a tener en cuenta</h3><ul>{% for i in e.puntos %}<li>{{ i }}</li>{% endfor %}</ul></div>
+  </div>
+  {% if e.qr %}<div class="qr"><img src="{{ e.qr }}" alt=""><div><small>Escanea y ve la publicación</small><p>Apunta la cámara de tu celular al código para abrir este equipo{% if e.tienda %} en {{ e.tienda }}{% endif %}.</p><a>{{ e.url_corta }}</a></div></div>{% endif %}
+</div>{{ ui.foot(label, loop.index + 2) }}</section>
+{% endfor %}
+
+<section class="page"><div class="page-body">
+  <div class="eyebrow">Sección {{ "%02d"|format(n_fichas + 2) }} · Antes de comprar</div>
+  <h2>Lo que conviene revisar</h2>
+  <p class="lead">Puntos que no tienen costo en este documento, pero hacen que los equipos funcionen bien desde el primer día.</p>
+  {% if d.revisar %}<div class="checks">{% for r in d.revisar %}<div class="box"><h3>{{ r.titulo }}</h3>{{ r.texto }}</div>{% endfor %}</div>{% endif %}
+  <div class="note" style="margin-top:12px">
+    <h3>Condiciones a tener en cuenta</h3>
+    <p>Este documento es una recomendación de compra, no una cotización. Vendix no vende estos equipos: la compra se hace directamente con cada tienda o proveedor, y los precios, envíos y garantías dependen de cada vendedor. Precios consultados el {{ d.fecha_consulta|default(d.fecha) }}, sujetos a cambios y disponibilidad.</p>
+    <p>La instalación y configuración de los equipos con Vendix se presta como implementación adicional a <b>$40.000 COP por hora, IVA incluido</b>.</p>
+  </div>
+  <div class="close" style="padding:12px 20px">Vendix está preparado para acompañar a {{ d.cliente.empresa_corta|default(d.cliente.empresa) }} con tecnología clara, operación conectada y una relación cercana, seria y fraterna.<small>{{ emisor.lema }}</small></div>
+  {{ ui.signature(d, "Responsable de la recomendación", "Esta recomendación es emitida por:") }}
+</div>{{ ui.foot(label, n_fichas + 3) }}</section>
+{% endblock %}
