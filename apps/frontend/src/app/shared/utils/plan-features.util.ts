@@ -46,7 +46,7 @@ export interface FeatureComparison {
 /** Minimal label map for legacy object-shaped `feature_matrix` rows. Mirrors
  *  FEATURE_HUMAN_LABELS in the backend public plans service. */
 const LEGACY_FEATURE_LABELS: Record<string, string> = {
-  pos: 'Punto de Venta POS (Online/Offline)',
+  pos: 'Punto de Venta POS en la nube',
   ecommerce: 'Tienda Online & Pedidos WhatsApp',
   accounting: 'Facturación Electrónica DIAN',
   inventory: 'Gestión de Inventario en Tiempo Real',
