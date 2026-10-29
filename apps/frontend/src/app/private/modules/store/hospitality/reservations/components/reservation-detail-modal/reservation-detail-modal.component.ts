@@ -41,6 +41,7 @@ import {
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 import { RESERVATION_STATUS_CHIPS } from '../../../shared/hospitality-status';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
@@ -56,8 +57,8 @@ import { FolioPanelComponent } from '../folio-panel/folio-panel.component';
 import { DepositPanelComponent } from '../deposit-panel/deposit-panel.component';
 import { CheckOutModalComponent } from '../check-out-modal/check-out-modal.component';
 
-/** Step a list opens the detail on (U1 check-in/out, U8 cancel). */
-export type DetailStartStep = 'check_in' | 'check_out' | 'cancel' | null;
+/** Step a list opens the detail on (U1 check-in/out and account tab, U8 cancel). */
+export type DetailStartStep = 'check_in' | 'check_out' | 'cancel' | 'account' | null;
 
 /** `cancel_room` cancels one room of a multi-room reservation (H1.5). */
 type PendingAction = 'cancel' | 'no_show' | 'cancel_room' | 'check_in' | null;
@@ -126,6 +127,7 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
     FolioPanelComponent,
     DepositPanelComponent,
     CheckOutModalComponent,
+    HospitalityLoadErrorComponent,
   ],
   template: `
     <app-modal
@@ -145,6 +147,12 @@ const BLOCKED_HOUSEKEEPING = ['out_of_order', 'out_of_service'];
       }
       @if (loading()) {
         <div class="flex justify-center py-8"><app-spinner size="md" text="Cargando reserva…" /></div>
+      } @else if (loadError() !== null) {
+        <app-hospitality-load-error
+          what="la reserva"
+          [message]="loadError()"
+          (retry)="load(reservationId()!, startWith())"
+        />
       } @else if (reservation(); as r) {
         <div class="space-y-4 text-sm" data-testid="reservation-detail">
           <!-- U2 (R-MOD-04): balance and stay always above the fold. -->
@@ -495,6 +503,8 @@ export class ReservationDetailModalComponent {
 
   readonly reservation = signal<LodgingReservation | null>(null);
   readonly loading = signal(false);
+  /** R-MOD-05: failed load shows the error with "Reintentar", never an empty modal. */
+  readonly loadError = signal<string | null>(null);
   readonly saving = signal(false);
   readonly pending = signal<PendingAction>(null);
   /** Room picked for `cancel_room`. */
@@ -647,8 +657,9 @@ export class ReservationDetailModalComponent {
     effect(() => {
       const id = this.reservationId();
       if (id !== null) untracked(() => {
-        this.activeTab.set('summary');
-        this.load(id, this.startWith());
+        const step = this.startWith();
+        this.activeTab.set(step === 'account' ? 'account' : 'summary');
+        this.load(id, step);
       });
     });
   }
@@ -767,6 +778,7 @@ export class ReservationDetailModalComponent {
   /** `step` opens once, on the opening load only (later reloads stay put). */
   load(id: number, step: DetailStartStep = null): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.pending.set(null);
     this.reservation.set(null);
     this.due.set(null);
@@ -785,9 +797,7 @@ export class ReservationDetailModalComponent {
         },
         error: (message: unknown) => {
           this.loading.set(false);
-          this.toastService.error(
-            typeof message === 'string' ? message : 'No se pudo cargar la reserva',
-          );
+          this.loadError.set(typeof message === 'string' ? message : 'No se pudo cargar la reserva');
         },
       });
   }

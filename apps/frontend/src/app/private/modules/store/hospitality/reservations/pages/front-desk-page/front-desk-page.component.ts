@@ -50,7 +50,7 @@ import {
 import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 type FrontDeskTab = 'arrivals' | 'departures' | 'in_house';
-type DetailStep = 'check_in' | 'check_out' | null;
+type DetailStep = 'check_in' | 'check_out' | 'account' | null;
 
 /** R-LIST-08 — "Pérez" matches "perez": lower case without accents. */
 function normalize(text: string): string {
@@ -267,7 +267,7 @@ const EMPTY_TEXT: Record<FrontDeskTab, { icon: string; title: string; descriptio
                 [filters]="filterConfigs()"
                 [filterValues]="filterValues()"
                 [actions]="dropdownActions"
-                [isLoading]="board() === null"
+                [isLoading]="board() === null && loadError() === null"
                 (filterChange)="filterValues.set($event)"
                 (clearAllFilters)="filterValues.set({})"
                 (actionClick)="onActionClick($event)"
@@ -520,7 +520,7 @@ export class HospitalityFrontDeskPageComponent implements OnInit {
       icon: 'receipt',
       variant: 'secondary',
       show: (row: BoardRow) => row.folio_id !== null,
-      action: (row: BoardRow) => this.openDetail(row),
+      action: (row: BoardRow) => this.openDetail(row, 'account'),
     },
     {
       // H3.7 — the check-out pays the balance, closes the account and emits the invoice.

@@ -127,7 +127,7 @@ export class LodgingCheckOutService {
     if (split && (dto.charge_to_credit || dto.bill_to_customer_id != null)) {
       throw new VendixHttpException(
         ErrorCodes.LODGING_CHECKOUT_BILL_TO_001,
-        'El folio está dividido: cada cuenta se factura a su titular',
+        'La cuenta está dividida: cada parte se factura a su titular',
       );
     }
 
@@ -176,14 +176,14 @@ export class LodgingCheckOutService {
     if (split && current.balance > 0) {
       throw new VendixHttpException(
         ErrorCodes.LODGING_CHECKOUT_BALANCE_001,
-        'El folio está dividido: cobra cada cuenta antes del check-out',
+        'La cuenta está dividida: cobra cada parte antes del check-out',
       );
     }
     if (current.balance > 0 && !dto.charge_to_credit) {
       if (!dto.store_payment_method_id) {
         throw new VendixHttpException(
           ErrorCodes.LODGING_CHECKOUT_BALANCE_001,
-          `El folio tiene un saldo de ${current.balance.toFixed(2)}: cóbralo o cárgalo a crédito de la empresa`,
+          `La cuenta tiene un saldo de ${current.balance.toFixed(2)}: cóbralo o cárgalo a crédito de la empresa`,
         );
       }
       await this.folios.registerPayment(reservation_id, {
@@ -216,7 +216,7 @@ export class LodgingCheckOutService {
           if (toCents(stored?.verified_total) !== toCents(order.grand_total)) {
             throw new VendixHttpException(
               ErrorCodes.LODGING_CHECKOUT_VERIFY_001,
-              'El folio cambió después de verificarlo: un usuario con permiso debe verificarlo de nuevo',
+              'La cuenta cambió después de verificarla: un usuario con permiso debe verificarla de nuevo',
             );
           }
         }
@@ -354,7 +354,7 @@ export class LodgingCheckOutService {
       orderBy: { id: 'desc' },
     });
     if (!invoice) {
-      throw new VendixHttpException(ErrorCodes.INVOICING_FIND_003, 'El folio no tiene factura');
+      throw new VendixHttpException(ErrorCodes.INVOICING_FIND_003, 'La cuenta no tiene factura');
     }
     return { url: await this.pdfService.getPdf(invoice.id) };
   }
@@ -615,8 +615,8 @@ export class LodgingCheckOutService {
     throw new VendixHttpException(
       ErrorCodes.LODGING_CHECKOUT_VERIFY_001,
       current.verified_at
-        ? 'El folio cambió después de verificarlo: un usuario con permiso debe verificarlo de nuevo'
-        : 'Un usuario con permiso «Verificar el folio» debe revisarlo antes de facturar',
+        ? 'La cuenta cambió después de verificarla: un usuario con permiso debe verificarla de nuevo'
+        : 'Un usuario con permiso «Verificar cuenta» debe revisarla antes de facturar',
     );
   }
 

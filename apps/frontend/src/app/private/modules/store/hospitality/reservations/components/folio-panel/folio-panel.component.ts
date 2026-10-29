@@ -13,6 +13,8 @@ import {
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { startWith } from 'rxjs/operators';
+import { NgTemplateOutlet } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -65,6 +67,8 @@ function newRequestId(): string {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     ReactiveFormsModule,
+    NgTemplateOutlet,
+    RouterLink,
     BadgeComponent,
     ButtonComponent,
     IconComponent,
@@ -75,6 +79,32 @@ function newRequestId(): string {
     FolioSplitModalComponent,
   ],
   template: `
+    <!-- R-FB-02 / R-EMPTY: the payment method picker never stays silently empty. -->
+    <ng-template #methodPicker>
+      @if (methodsState() === 'loading') {
+        <p class="text-xs text-text-secondary sm:self-end" role="status">Cargando medios de pago…</p>
+      } @else if (methodsState() === 'error') {
+        <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-error/40 px-3 py-2" role="alert" data-testid="folio-methods-error">
+          <span class="text-xs text-error">No pudimos cargar los medios de pago.</span>
+          <app-button variant="outline" size="sm" customClasses="min-h-11 sm:min-h-0" (clicked)="loadMethods(true)">
+            <app-icon slot="icon" name="refresh-cw" [size]="14" />
+            Reintentar
+          </app-button>
+        </div>
+      } @else if (methodOptions().length === 0) {
+        <div class="rounded-lg border border-border px-3 py-2" data-testid="folio-no-methods">
+          <p class="text-xs text-text-secondary">No hay medios de pago para cobrar en recepción.</p>
+          <a class="text-sm font-medium text-primary underline" routerLink="/admin/settings/payments">Configura un medio de pago</a>
+        </div>
+      } @else {
+        <app-selector
+          [formControl]="paymentForm.controls.method_id"
+          label="Medio de pago"
+          placeholder="Elige el medio"
+          [options]="methodOptions()"
+        />
+      }
+    </ng-template>
     <div class="rounded-lg border border-border" data-testid="folio-panel">
       <div class="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
         <p class="flex items-center gap-2 font-medium text-text-primary" data-testid="reservation-folio">
@@ -416,12 +446,7 @@ function newRequestId(): string {
               size="sm"
               [helperText]="'Saldo ' + money(payTarget()?.remaining_balance ?? 0)"
             />
-            <app-selector
-              [formControl]="paymentForm.controls.method_id"
-              label="Medio de pago"
-              placeholder="Elige el medio"
-              [options]="methodOptions()"
-            />
+            <ng-container [ngTemplateOutlet]="methodPicker" />
           </div>
           <div class="flex justify-end gap-2">
             <app-button variant="ghost" size="sm" customClasses="min-h-11 sm:min-h-0" (clicked)="cancelAction()">Volver</app-button>
@@ -434,7 +459,7 @@ function newRequestId(): string {
               [disabled]="paymentStatus() !== 'VALID'"
               data-testid="folio-split-pay-save"
             >
-              Cobrar {{ money(paymentAmount() ?? 0) }}
+              Cobrar {{ money(paymentAmount() ?? 0) }}{{ methodSuffix() }}
             </app-button>
           </div>
         </form>
@@ -502,12 +527,7 @@ function newRequestId(): string {
               size="sm"
               [helperText]="'Saldo ' + money(due())"
             />
-            <app-selector
-              [formControl]="paymentForm.controls.method_id"
-              label="Medio de pago"
-              placeholder="Elige el medio"
-              [options]="methodOptions()"
-            />
+            <ng-container [ngTemplateOutlet]="methodPicker" />
           </div>
           <div class="flex flex-wrap gap-2" data-testid="folio-payment-quick">
             @for (q of quickAmounts(); track q.label) {
@@ -532,7 +552,7 @@ function newRequestId(): string {
               [disabled]="paymentStatus() !== 'VALID'"
               data-testid="folio-payment-save"
             >
-              Registrar pago {{ money(paymentAmount() ?? 0) }}
+              Registrar pago {{ money(paymentAmount() ?? 0) }}{{ methodSuffix() }}
             </app-button>
           </div>
         </form>
@@ -606,6 +626,9 @@ export class FolioPanelComponent {
   readonly voidTarget = signal<FolioLine | null>(null);
   private readonly products = signal<Product[]>([]);
   readonly methodOptions = signal<SelectorOption[]>([]);
+  readonly methodsState = signal<'loading' | 'ready' | 'error'>('loading');
+  /** Id of the store's cash method, the default of R-FORM-07. */
+  private cashMethodId: number | null = null;
   /** H3.8 — split of the folio, or null while it is a single account. */
   readonly split = signal<SplitResult | null>(null);
   readonly splitOpen = signal(false);
@@ -637,6 +660,15 @@ export class FolioPanelComponent {
   /** U3 (R-FORM-10) — amount the pay button carries ("Registrar pago $280.000"). */
   readonly paymentAmount = toSignal(this.paymentForm.controls.amount.valueChanges, {
     initialValue: this.paymentForm.controls.amount.value,
+  });
+  private readonly paymentMethodId = toSignal(this.paymentForm.controls.method_id.valueChanges, {
+    initialValue: this.paymentForm.controls.method_id.value,
+  });
+  /** " · Efectivo" on the pay button once a method is picked. */
+  readonly methodSuffix = computed(() => {
+    const id = this.paymentMethodId();
+    const option = this.methodOptions().find((o) => Number(o.value) === id);
+    return option ? ` · ${option.label}` : '';
   });
   private readonly chargeValue = toSignal(this.chargeForm.valueChanges, {
     initialValue: this.chargeForm.getRawValue(),
@@ -954,12 +986,18 @@ export class FolioPanelComponent {
   async applyDeposit(): Promise<void> {
     const folio = this.folio();
     if (!folio || this.busy()) return;
-    // Mirrors the backend: the held deposit up to the open balance.
-    const amount = Math.min(Number(folio.deposit_available ?? 0), Math.max(0, Number(folio.balance)));
-    const after = Math.max(0, Number(folio.balance) - amount - Number(folio.online_payment_available ?? 0));
+    // The held deposit up to the open balance; the backend may apply less when
+    // the holder's wallet has less available, hence "hasta".
+    const balance = Math.max(0, Number(folio.balance));
+    const amount = Math.min(Number(folio.deposit_available ?? 0), balance);
+    const online = Number(folio.online_payment_available ?? 0);
+    const after = balance - amount;
+    const excess = Math.max(0, online - after);
     const confirmed = await this.dialogService.confirm({
       title: 'Aplicar anticipo',
-      message: `Se aplicarán ${this.money(amount)} del anticipo; el saldo queda en ${this.money(after)}.`,
+      message:
+        `Se aplicarán hasta ${this.money(amount)} del anticipo; la cuenta queda con ${this.money(after)} por cubrir.` +
+        (excess > 0 ? ` El pago en línea por aplicar deja ${this.money(excess)} de excedente por devolver.` : ''),
       confirmText: `Aplicar ${this.money(amount)}`,
     });
     if (!confirmed) return;
@@ -1024,29 +1062,44 @@ export class FolioPanelComponent {
     this.loadMethods();
   }
 
-  private loadMethods(): void {
-    if (this.methodOptions().length > 0) {
+  loadMethods(force = false): void {
+    if (!force && this.methodsState() === 'ready') {
       this.preselectMethod();
       return;
     }
+    this.methodsState.set('loading');
     this.paymentMethods
       .getEnabledMethods()
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((methods) => {
-        this.methodOptions.set(
-          methods
-            .filter((m) => m.enabled && MANUAL_METHODS.includes(m.type) && Number.isInteger(Number(m.id)))
-            .map((m) => ({ value: Number(m.id), label: m.displayName || m.name })),
-        );
-        this.preselectMethod();
+      .subscribe({
+        next: (methods) => {
+          const fromStore = methods.filter((m) => Number.isInteger(Number(m.id)));
+          // The catalog's offline fallback carries text ids: not a real empty list.
+          if (methods.length > 0 && fromStore.length === 0) {
+            this.methodsState.set('error');
+            return;
+          }
+          const manual = fromStore.filter((m) => m.enabled && MANUAL_METHODS.includes(m.type));
+          const cash = manual.find((m) => m.type === 'cash');
+          this.cashMethodId = cash ? Number(cash.id) : null;
+          this.methodOptions.set(manual.map((m) => ({ value: Number(m.id), label: m.displayName || m.name })));
+          this.methodsState.set('ready');
+          this.preselectMethod();
+        },
+        error: () => this.methodsState.set('error'),
       });
   }
 
-  /** U3 (R-FORM-01) — the first manual method comes picked, so Enter can register the payment. */
+  /**
+   * R-FORM-07 — cash comes picked (or the only method), never an arbitrary
+   * first one; the button names the method so Enter can't charge the wrong one.
+   */
   private preselectMethod(): void {
-    const first = this.methodOptions()[0];
     const control = this.paymentForm.controls.method_id;
-    if (first && control.value === null) control.setValue(Number(first.value));
+    if (control.value !== null) return;
+    const options = this.methodOptions();
+    const id = this.cashMethodId ?? (options.length === 1 ? Number(options[0].value) : null);
+    if (id !== null) control.setValue(id);
   }
 
   savePayment(): void {
