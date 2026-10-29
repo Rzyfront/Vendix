@@ -393,6 +393,13 @@ const EMPTY_TEXT: Record<AuditTab, { icon: string; title: string; description: s
             (changed)="markNoShows.set($event)"
             data-testid="audit-mark-no-shows"
           />
+          @if (marksNoShows()) {
+            <!-- R-CONF-01 — no-show is terminal and moves money -->
+            <p class="text-error" data-testid="audit-no-show-warning">
+              Marcar como no presentada no se puede deshacer: se cobra la penalidad de la
+              política de cancelación y se retiene el anticipo pagado.
+            </p>
+          }
           <p class="text-text-secondary">
             Después no se podrán cargar ni anular noches de esta fecha sin reabrir el día.
           </p>
@@ -400,7 +407,7 @@ const EMPTY_TEXT: Record<AuditTab, { icon: string; title: string; description: s
         <div slot="footer" class="flex justify-end gap-2">
           <app-button variant="ghost" (clicked)="confirmingClose.set(false)">Cancelar</app-button>
           <app-button
-            variant="primary"
+            [variant]="marksNoShows() ? 'danger' : 'primary'"
             [loading]="busy()"
             [disabled]="busy()"
             (clicked)="close()"
@@ -528,6 +535,9 @@ export class HospitalityNightAuditPageComponent implements OnInit {
       amount: unposted.reduce((sum, d) => sum + Number(d.rate_amount), 0),
     };
   });
+
+  /** The close will move pending arrivals to no-show (irreversible, charges penalty). */
+  readonly marksNoShows = computed(() => this.markNoShows() && this.pendingCount() > 0);
 
   /** R-CONF-01 — "Se cargarán 4 noches por $1.120.000 y se marcará 1 no presentado. Llegadas pendientes: 0". */
   readonly closeFigures = computed(() => {

@@ -7,7 +7,7 @@ import { LodgingFolioService } from '../folio/folio.service';
 import { lodgingBusinessDate } from '../folio/folio-nights';
 import { LodgingReservationsService } from '../reservations.service';
 import { addDays } from '../reservation-status';
-import { dateOnlyToDb } from '../stay-dates';
+import { dateOnlyToDb, formatShortDate } from '../stay-dates';
 
 export interface NightAuditReservationRow {
   id: number;
@@ -118,16 +118,13 @@ export class LodgingNightAuditService {
 
   /** "Cerrar día": posts the nights, marks no-shows and freezes the day. */
   async close(date?: string, markNoShows = true): Promise<NightAuditView> {
-    const { today, business_date: current } = await this.clock();
+    const { business_date: current } = await this.clock();
     const business_date = date ?? current;
-    if (business_date > today) throw new VendixHttpException(ErrorCodes.LODGING_NIGHT_AUDIT_DATE_001);
+    // Before `night_audit_time` the civil date is already tomorrow but the
+    // business day is still today: closing tomorrow would no-show its arrivals.
+    if (business_date > current) throw new VendixHttpException(ErrorCodes.LODGING_NIGHT_AUDIT_DATE_001);
     const existing = await this.findAudit(business_date);
-    if (existing?.status === 'closed') {
-      throw new VendixHttpException(
-        ErrorCodes.LODGING_NIGHT_AUDIT_CLOSED_001,
-        `El día ${business_date} ya está cerrado`,
-      );
-    }
+    if (existing?.status === 'closed') throw this.alreadyClosed(business_date);
     const user_id = RequestContextService.getContext()?.user_id ?? null;
 
     // H3.4 — every in-house folio gets its nights up to this day.
@@ -294,7 +291,7 @@ export class LodgingNightAuditService {
   private alreadyClosed(business_date: string) {
     return new VendixHttpException(
       ErrorCodes.LODGING_NIGHT_AUDIT_CLOSED_001,
-      `El día ${business_date} ya está cerrado`,
+      `El día ${formatShortDate(business_date)} ya está cerrado`,
     );
   }
 

@@ -16,6 +16,7 @@ import { InvoicingService } from '../../../invoicing/invoicing.service';
 import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
 import { buildOrderSaleTaxPayload } from '../../../payments/utils/order-sale-tax-payload.util';
 import { LodgingReservationsService } from '../reservations.service';
+import { formatShortDate } from '../stay-dates';
 import { FolioUser, FolioRow, hasActivePermission, LodgingFolioService } from '../folio/folio.service';
 import { CheckOutDto } from './check-out.dto';
 
@@ -583,7 +584,7 @@ export class LodgingCheckOutService {
       const dates = [...new Set(frozen.map((n) => n.night_date.toISOString().slice(0, 10)))];
       throw new VendixHttpException(
         ErrorCodes.LODGING_CHECKOUT_FROZEN_NIGHTS_001,
-        `Hay noches sin cobrar en días cerrados (${dates.join(', ')}): reabre el día para cobrarlas`,
+        `Hay noches sin cobrar en días cerrados (${dates.map(formatShortDate).join(', ')}): reabre el día para cobrarlas`,
       );
     }
   }

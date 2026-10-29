@@ -281,6 +281,19 @@ describe('LodgingNightAuditService (H7.1)', () => {
       expect(error.errorCode).toBe(ErrorCodes.LODGING_NIGHT_AUDIT_DATE_001.code);
       expect(audits).toHaveLength(0);
     });
+    it('before the audit time it does not close the new civil day nor no-show its arrivals', async () => {
+      // 11-nov 01:00 in Bogotá: the civil date is 11-nov, the business day is still 10-nov.
+      jest.setSystemTime(new Date('2026-11-11T06:00:00Z'));
+      const { service, audits, reservationsService, folios } = build();
+
+      const error = await errorOf(service.close('2026-11-11'));
+
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_NIGHT_AUDIT_DATE_001.code);
+      expect(reservationsService.autoNoShow).not.toHaveBeenCalled();
+      expect(folios.postNightsThrough).not.toHaveBeenCalled();
+      expect(audits).toHaveLength(0);
+      expect((await service.get()).business_date).toBe('2026-11-10');
+    });
   });
 
   describe('reopening the day', () => {

@@ -102,7 +102,8 @@ export class LodgingCancellationsService {
     const events = await this.prisma.lodging_reservation_events.findMany({
       where,
       orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
-      take: MAX_LOSSES_ROWS,
+      // One extra row tells a truncated period apart from an exact fit.
+      take: MAX_LOSSES_ROWS + 1,
       select: {
         id: true,
         to_status: true,
@@ -123,6 +124,13 @@ export class LodgingCancellationsService {
         },
       },
     });
+    // Totals over a cut dataset would lie: ask for a shorter period instead.
+    if (events.length > MAX_LOSSES_ROWS) {
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_LOSSES_RANGE_001,
+        'El periodo tiene más de 10.000 cancelaciones y no presentados: elige un periodo más corto',
+      );
+    }
 
     const totals: LodgingLossTotals = { cancellations: 0, no_shows: 0, lost_amount: 0, penalty_amount: 0 };
     let lostCents = 0;

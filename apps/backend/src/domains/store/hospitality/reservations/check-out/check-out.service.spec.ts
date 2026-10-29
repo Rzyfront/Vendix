@@ -258,7 +258,7 @@ describe('LodgingCheckOutService (H3.7)', () => {
       service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK),
     ).rejects.toMatchObject({
       errorCode: 'LODGING_CHECKOUT_FROZEN_NIGHTS_001',
-      message: expect.stringContaining('2026-10-25'),
+      message: expect.stringContaining('25-oct'),
     });
     expect(prisma.lodging_room_nights.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
