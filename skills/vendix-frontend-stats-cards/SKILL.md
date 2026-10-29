@@ -83,7 +83,7 @@ fixed palettes (`blue-*`, `amber-*`, `purple-*`, `red-*`), which ignore tenant b
 | Total/primary | `bg-primary/10` | `text-primary` | `shopping-cart`, `users`, `package` |
 | Pending/warning | `bg-warning/10` | `text-warning` | `clock`, `alert-circle` |
 | Success/active | `bg-success/10` | `text-success` | `check-circle`, `check` |
-| Money/revenue | `bg-info-light` | `text-info` | `dollar-sign`, `credit-card` |
+| Money/revenue | `bg-info/10` | `text-info` | `dollar-sign`, `credit-card` |
 | Critical | `bg-error/10` | `text-error` | `x-circle`, `alert-triangle` |
 | Neutral | `bg-text-secondary/10` | `text-text-secondary` | `info`, `help-circle` |
 

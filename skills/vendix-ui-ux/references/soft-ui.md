@@ -25,7 +25,7 @@ Existing screens migrate to it over time; new UI starts here.
 
 | Use | Tailwind | SCSS |
 | --- | --- | --- |
-| Icon buttons 24–28px | `rounded-md` (10px) | *no token yet — add one before using in SCSS* |
+| Icon buttons 24–28px | `rounded-md` (10px) | `var(--radius-icon)` (10px) |
 | Controls: buttons, inputs, dropdown triggers, pills with text, chips | `rounded-xl` (12px) | `var(--radius-lg)` (12px) |
 | Cards, panels, modals | `rounded-2xl` (16px) | `var(--radius-xl)` (16px) |
 | Status pills, dots, avatars | `rounded-full` | `9999px` via `rounded-pill` |
@@ -69,9 +69,10 @@ areas ≥40px; a 24px icon button gets its hit area from row padding, not from a
 
 ### Elevation and motion
 
-- No shadow at rest on controls. Cards: no shadow at rest, `shadow-sm` on hover. Floating layers
-  (dropdowns, popovers): `shadow-md`. Modals: `shadow-lg`. Only the config shadows (`xs sm md lg`).
-  **`shadow-2xs` does not exist in our Tailwind v3** — it compiles to nothing.
+- Controls: no shadow, or `shadow-2xs` (`var(--shadow-2xs)`, a 1px hairline lift; stronger in dark
+  mode) for pills and controls that sit on tinted strips. Cards: no shadow at rest, `shadow-sm` on
+  hover. Floating layers (dropdowns, popovers): `shadow-md`. Modals: `shadow-lg`. Only the config
+  shadows (`2xs xs sm md lg`).
 - Transitions: `transition-colors` (or `transition` for transform) with the default duration
   (160ms, configured). No custom durations.
 - Press feedback: `active:scale-95` (a scale token; arbitrary `active:scale-[0.97]` is not
@@ -86,7 +87,7 @@ Copy these class sets; adjust only height and spacing within the scales above.
 
 ```html
 <button class="h-10 sm:h-11 px-3.5 inline-flex items-center justify-center gap-1.5 rounded-xl
-               border border-primary/25 bg-primary/10 text-primary text-xs font-semibold
+               border border-primary/25 bg-primary/10 text-primary-on-tint text-xs font-semibold
                hover:bg-primary/15 active:scale-95 transition
                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20
                disabled:opacity-50 disabled:cursor-not-allowed">
@@ -136,14 +137,14 @@ never solid red. Sibling icon buttons share radius and size.
 
 ```html
 <button class="min-h-8 px-3 inline-flex items-center gap-1.5 rounded-full
-               border border-primary/25 bg-primary/10 text-primary text-xs font-semibold
+               border border-primary/25 bg-primary/10 text-primary-on-tint text-xs font-semibold
                hover:bg-primary/15 active:scale-95 transition">
   <span class="h-1.5 w-1.5 rounded-full bg-success motion-safe:animate-pulse"></span>
 ```
 
 ### Info pill (read-only context)
 `Caja · hora` in the session strip: `min-h-9 px-2 py-1.5 rounded-xl border border-border bg-surface
-shadow-xs`, name `text-xs font-bold text-text-primary`, meta `text-xs text-text-secondary`.
+shadow-2xs`, name `text-xs font-bold text-text-primary`, meta `text-xs text-text-secondary`.
 
 ### Card (selectable item)
 POS product card.
@@ -169,17 +170,18 @@ info) — never hand-built badges. Stock: "N disponibles" success, "Últimas N" 
 - One solid primary action per view (e.g. `Cobrar`). Everything else is tinted, neutral or ghost.
 - Same row ⇒ same height, same radius. Icon-only siblings share size and radius.
 - Meaning by color is always backed by text or icon (accessibility).
-- Text on a tint uses the matching token (`text-primary` on `bg-primary/10`, `text-error` on
-  `bg-error/10`). Known gap: there is no contrast-safe "on-tint" token for very light brand colors;
-  don't patch it per component — raise it as a token change.
-- `info` is mapped without alpha in Tailwind (`bg-info/10` emits nothing); use `bg-info-light` until
-  the token gains an RGB channel.
+- Text on a brand tint uses `text-primary-on-tint` (`--color-primary-on-tint`: the tenant primary
+  mixed 50% with the active text color — darker in light mode, lighter in dark), so light brands
+  (yellow, mint) stay legible. Icons on a tint may stay `text-primary`. Semantic tints use their own
+  token (`text-error` on `bg-error/10`).
+- `success`, `warning`, `error` and `info` all take alpha (`bg-info/10 border-info/25`).
 
 ## 5. Do not copy (known drift in the POS)
 
 | Drift | Use instead |
 | --- | --- |
-| `shadow-2xs` (no CSS emitted) | no shadow, or `shadow-xs` |
+| `shadow-2xs` everywhere "for depth" (it emitted nothing until the token was added, so it now adds a hairline shadow to those controls) | only where the elevation rule above asks for it |
+| `text-primary` on small labels over `bg-primary/10` | `text-primary-on-tint` |
 | `rounded-lg` on Nota/Vaciar (14px) | `rounded-xl` |
 | `rounded` on the cart-line edit button (4px) | `rounded-md` like its trash sibling |
 | `rose-*` for destructive | `error` token |

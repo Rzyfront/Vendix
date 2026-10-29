@@ -34,7 +34,8 @@ unless the task asks.
 - **Alpha steps:** `/5` quiet · `/10` resting · `/15` hover · `/20` strong/ring · `/25` border.
 - **Heights:** 24/28px icon buttons · 32px pills/compact · 40px mobile / 44px desktop controls.
   Same row ⇒ same height and radius.
-- **Borders 1px**, no shadow at rest (`shadow-sm` on card hover); `shadow-2xs` doesn't exist here.
+- **Borders 1px**, no shadow at rest (`shadow-2xs` hairline at most on controls, `shadow-sm` on card
+  hover). Labels on a brand tint use `text-primary-on-tint` (legible with any brand and in dark).
 - **Type:** `text-xs font-semibold` labels, `text-sm` control text, `font-bold` only for numbers
   and headings. Icons 12–14 in small controls, 16 in 40–44px.
 - **Destructive** uses the `error` token tinted (`bg-error/10 border-error/25 text-error`), not
