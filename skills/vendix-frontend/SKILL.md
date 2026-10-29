@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.2"
+  version: "1.3"
   scope: [root]
   auto_invoke:
     - "Editing or creating frontend web code"
@@ -42,6 +42,7 @@ Index for `apps/frontend` (Angular 20 zoneless + signals) plus component, module
 - `inject()`, `input()`/`output()`/`model()`, `signal()`/`computed()`; `@if`/`@for`/`@defer` in new code.
 - Route targets lazy (`loadComponent` / `loadChildren`).
 - Reuse shared components first: check `apps/frontend/src/app/shared/components/index.ts` and their READMEs before creating primitives.
+- Styling follows **Soft UI** (`vendix-ui-ux` → `references/soft-ui.md`): token classes or `var(--…)` only — never hex, `rgba()`, raw `px` or Tailwind arbitrary values — and brand color as `primary` + alpha (multibrand). New or changed shared components adopt its recipes.
 - `panel_ui` visibility is never backend authorization.
 - Match the nearest established pattern in the touched module (loose `*.component.ts`, `components/`, `pages/`, `services/`, `interfaces/`, `*.routes.ts`, inline or separate templates). Do not force folder migrations or a "one folder + README per component" rule.
 - Keep interfaces/services local to the module unless truly shared.

@@ -30,6 +30,7 @@ export { createEcommerceSupportTools } from './domains/ecommerce-support.tools';
 export { createReportingTools } from './domains/reporting.tools';
 export { createKitchenTools } from './domains/kitchen.tools';
 export { createTablesTools, createComensalTools } from './domains/tables.tools';
+export { createLodgingTools } from './domains/lodging.tools';
 export {
   createRecipeTools,
   createMenuTools,

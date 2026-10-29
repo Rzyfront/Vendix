@@ -4,7 +4,7 @@ import { MenuSectionsService } from './menu-sections.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
-import { VendixHttpException } from 'src/common/errors';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 /**
  * Targeted unit tests for the menu/section ownership and uniqueness
@@ -86,7 +86,12 @@ describe('MenusService / MenuSectionsService — ownership & uniqueness', () => 
       },
       products: {
         findFirst: jest.fn().mockImplementation(({ where }: any) => {
-          return Promise.resolve(products[where.id] ?? null);
+          const product = products[where.id] ?? null;
+          // Honors the Hotelería R5 predicate `lodging_unit_type: { is: null }`.
+          if (product?.lodging_unit_type && where.lodging_unit_type?.is === null) {
+            return Promise.resolve(null);
+          }
+          return Promise.resolve(product);
         }),
         // `addItem` promueve is_sellable / available_for_ecommerce cuando el
         // plato no es vendible todavia (menu-sections.service.ts:173). Sin este
@@ -167,6 +172,29 @@ describe('MenusService / MenuSectionsService — ownership & uniqueness', () => 
     await expect(
       sections.addItem(1, 10, { product_id: 99 }),
     ).rejects.toBeInstanceOf(VendixHttpException);
+  });
+
+  it('Hotelería R5: rejects adding a hotel night ("Noche – {tipo}") to a carta', async () => {
+    const mod: TestingModule = await buildMenusModule(
+      { 1: { id: 1, store_id: STORE_ID, name: 'Lunch' } },
+      { 10: { id: 10, store_id: STORE_ID, menu_id: 1, name: 'Entradas' } },
+      {
+        77: {
+          id: 77,
+          store_id: STORE_ID,
+          is_sellable: true,
+          available_for_ecommerce: true,
+          state: 'active',
+          lodging_unit_type: { id: 3 },
+        },
+      },
+    );
+    const sections = mod.get(MenuSectionsService);
+    await expect(sections.addItem(1, 10, { product_id: 77 })).rejects.toMatchObject({
+      errorCode: ErrorCodes.PROD_FIND_001.code,
+    });
+    expect(prismaMock.products.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.menu_section_items.create).not.toHaveBeenCalled();
   });
 
   // `addItem` NO rechaza un plato no vendible: lo promueve, para que aparezca

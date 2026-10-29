@@ -125,7 +125,9 @@ describe('LodgingPerformanceService (H7.2 occupancy, ADR and RevPAR)', () => {
   it('defaults to the store month up to the store today and never goes past it', async () => {
     const { service } = build();
 
-    expect(await service.get({})).toEqual(expect.objectContaining({ from: '2026-11-01', to: '2026-11-10' }));
+    expect(await service.get({})).toEqual(
+      expect.objectContaining({ from: '2026-11-01', to: '2026-11-10', timezone: 'America/Bogota' }),
+    );
     const capped = await service.get({ from: '2026-11-09', to: '2026-12-31' });
     expect(capped.to).toBe('2026-11-10');
     expect(capped.days.map((d) => d.period)).toEqual(['2026-11-09', '2026-11-10']);

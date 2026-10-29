@@ -1,4 +1,4 @@
-import { Component, DestroyRef, inject, input, output, signal } from '@angular/core';
+import { Component, computed, DestroyRef, inject, input, output, signal } from '@angular/core';
 import {
   FormBuilder,
   FormControl,
@@ -6,6 +6,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { injectFocusFirstField } from '../../../shared/focus-first-field';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ButtonComponent,
@@ -27,17 +28,23 @@ interface SeasonForm {
   is_active: FormControl<boolean>;
 }
 
-/** Calendar colors offered for a season (any #RRGGBB is valid in the API). */
+/**
+ * Calendar colors offered for a season, with the name read to the user (any
+ * #RRGGBB is valid in the API). The season color is the user's choice, the
+ * only fixed color allowed in the module.
+ */
 export const SEASON_COLORS = [
-  '#DC2626',
-  '#F59E0B',
-  '#16A34A',
-  '#0EA5E9',
-  '#2563EB',
-  '#7C3AED',
-  '#DB2777',
-  '#64748B',
+  { value: '#DC2626', name: 'Rojo' },
+  { value: '#F59E0B', name: 'Ámbar' },
+  { value: '#16A34A', name: 'Verde' },
+  { value: '#0EA5E9', name: 'Celeste' },
+  { value: '#2563EB', name: 'Azul' },
+  { value: '#7C3AED', name: 'Violeta' },
+  { value: '#DB2777', name: 'Rosa' },
+  { value: '#64748B', name: 'Gris' },
 ] as const;
+
+const DEFAULT_SEASON_COLOR: string = SEASON_COLORS[0].value;
 
 /**
  * Hospitality Suite (H2.2) — create or edit a demand season ("Alta: 15-dic al
@@ -60,19 +67,27 @@ export const SEASON_COLORS = [
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      (opened)="reset()"
+      (opened)="reset(); focusFirstField()"
       [size]="'md'"
       [dialog]="true"
       [title]="season() ? 'Editar temporada' : 'Nueva temporada'"
       subtitle="Fechas con precio propio en cada plan tarifario"
     >
-      <form [formGroup]="form" class="space-y-4">
+      <form
+        [formGroup]="form"
+        id="season-form"
+        class="space-y-4"
+        novalidate
+        (ngSubmit)="onSubmit()"
+      >
         <app-input
+          data-autofocus
           formControlName="name"
           label="Nombre"
           type="text"
           placeholder="Ej. Alta"
           [required]="true"
+          [control]="form.controls.name"
           customWrapperClass="mt-0"
         />
         <div class="grid grid-cols-2 gap-3">
@@ -81,6 +96,7 @@ export const SEASON_COLORS = [
             label="Primera noche"
             type="date"
             [required]="true"
+            [control]="form.controls.from_date"
             customWrapperClass="mt-0"
           />
           <app-input
@@ -88,6 +104,7 @@ export const SEASON_COLORS = [
             label="Última noche"
             type="date"
             [required]="true"
+            [control]="form.controls.to_date"
             [error]="datesError() ? 'Debe ser igual o posterior a la primera noche' : ''"
             customWrapperClass="mt-0"
           />
@@ -98,23 +115,31 @@ export const SEASON_COLORS = [
           type="number"
           [min]="0"
           [max]="1000"
+          [control]="form.controls.priority"
           helperText="Si dos temporadas se solapan, cada noche toma el precio de la de mayor prioridad. Dos temporadas activas con la misma prioridad no pueden solaparse."
           customWrapperClass="mt-0"
         />
         <div>
-          <p class="mb-2 text-sm font-medium text-text-primary">Color en el calendario</p>
-          <div class="flex flex-wrap gap-2">
-            @for (color of colors; track color) {
+          <p id="season-color-label" class="mb-2 text-sm font-medium text-text-primary">
+            Color en el calendario: {{ selectedColorName() }}
+          </p>
+          <div class="flex flex-wrap gap-1" role="group" aria-labelledby="season-color-label">
+            @for (color of colors; track color.value) {
               <button
                 type="button"
-                class="h-8 w-8 rounded-full border-2 transition"
-                [style.background-color]="color"
-                [class.border-text-primary]="selectedColor() === color"
-                [class.border-transparent]="selectedColor() !== color"
-                [attr.aria-label]="'Color ' + color"
-                [attr.aria-pressed]="selectedColor() === color"
-                (click)="pickColor(color)"
-              ></button>
+                class="flex h-11 w-11 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                [attr.aria-label]="color.name"
+                [attr.title]="color.name"
+                [attr.aria-pressed]="selectedColor() === color.value"
+                (click)="pickColor(color.value)"
+              >
+                <span
+                  class="h-8 w-8 rounded-full border-2 transition"
+                  [style.background-color]="color.value"
+                  [class.border-text-primary]="selectedColor() === color.value"
+                  [class.border-transparent]="selectedColor() !== color.value"
+                ></span>
+              </button>
             }
           </div>
         </div>
@@ -127,7 +152,7 @@ export const SEASON_COLORS = [
 
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
-        <app-button variant="primary" [loading]="saving()" (clicked)="onSubmit()">
+        <app-button type="submit" form="season-form" variant="primary" [loading]="saving()">
           <app-icon slot="icon" name="save" [size]="16" />
           Guardar
         </app-button>
@@ -140,6 +165,7 @@ export class SeasonFormModalComponent {
   private readonly seasonsService = inject(SeasonsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  protected readonly focusFirstField = injectFocusFirstField();
 
   readonly isOpen = input(false);
   /** Season to edit; null creates a new one. */
@@ -150,8 +176,14 @@ export class SeasonFormModalComponent {
 
   readonly saving = signal(false);
   readonly datesError = signal(false);
-  readonly selectedColor = signal<string>(SEASON_COLORS[0]);
+  readonly selectedColor = signal<string>(DEFAULT_SEASON_COLOR);
   readonly colors = SEASON_COLORS;
+  /** Name of the picked color; a color saved outside the palette shows its hex. */
+  readonly selectedColorName = computed(
+    () =>
+      SEASON_COLORS.find((c) => c.value.toLowerCase() === this.selectedColor().toLowerCase())
+        ?.name ?? this.selectedColor(),
+  );
 
   readonly form: FormGroup<SeasonForm> = this.fb.group<SeasonForm>({
     name: this.fb.nonNullable.control('', {
@@ -162,13 +194,13 @@ export class SeasonFormModalComponent {
     priority: this.fb.nonNullable.control(0, {
       validators: [Validators.required, Validators.min(0), Validators.max(1000)],
     }),
-    color: this.fb.nonNullable.control<string>(SEASON_COLORS[0]),
+    color: this.fb.nonNullable.control<string>(DEFAULT_SEASON_COLOR),
     is_active: this.fb.nonNullable.control(true),
   });
 
   reset(): void {
     const season = this.season();
-    const color = season?.color ?? SEASON_COLORS[0];
+    const color = season?.color ?? DEFAULT_SEASON_COLOR;
     this.form.reset({
       name: season?.name ?? '',
       from_date: season ? seasonDate(season.from_date) : '',

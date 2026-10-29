@@ -26,7 +26,11 @@ import {
   TableColumn,
   ToastService,
   TooltipComponent,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
+import { ReportExportService } from '../../../../reports/services/report-export.service';
+import { hospitalityChartColors } from '../../../shared/chart-theme';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 import { LodgingPickupReport } from '../../interfaces/pickup.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
 
@@ -46,9 +50,35 @@ const WEEKDAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes
 /** Default horizon of the forecast, in stay dates from today. */
 const DEFAULT_DAYS = '90';
 
+/**
+ * U16 (R-TERM-02, R-REP-02) — each metric with its Spanish name and a plain
+ * explanation, shown on hover over its stat and next to the chart.
+ */
+const METRICS = {
+  occupancy: {
+    label: 'Ocupación proyectada',
+    help: 'Qué parte de las habitaciones ya está reservada para esas fechas (noches reservadas ÷ habitaciones activas).',
+  },
+  onBooks: {
+    label: 'Noches reservadas',
+    help: 'Noches ya vendidas para esas fechas: reservas confirmadas y huéspedes en casa.',
+  },
+  pickup7: {
+    label: 'Reservas nuevas 7 días',
+    help: 'Noches de esas fechas que se reservaron en la última semana: muestra si el ritmo de reservas sube o baja.',
+  },
+  pickup30: {
+    label: 'Reservas nuevas 30 días',
+    help: 'Noches de esas fechas que se reservaron en los últimos 30 días.',
+  },
+} as const;
+
 const FORMULAS = [
-  { label: 'Pickup', text: 'Pickup = noches de esa fecha reservadas en los últimos 7 o 30 días' },
-  { label: 'Ocupación proyectada', text: 'Ocupación proyectada = noches reservadas / habitaciones activas' },
+  {
+    label: 'Reservas nuevas',
+    help: 'Noches de cada fecha reservadas en los últimos 7 o 30 días: si suben, conviene sostener o subir la tarifa.',
+  },
+  METRICS.occupancy,
 ];
 
 /** `2026-11-05` → `5 nov 2026`. */
@@ -71,13 +101,13 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
 }
 
 /**
- * Hospitality Suite — "Pickup y pronóstico" (H7.3). For each future stay
+ * Hospitality Suite — "Ritmo de reservas y pronóstico" (H7.3, U16). For each future stay
  * date: the nights already on the books, how many were booked in the last 7
  * and 30 days, and the projected occupancy, so the manager decides whether to
  * raise or lower the rate.
  *
  * Standard admin list module: four stats, one card with the sticky search and
- * the options dropdown (horizon + refresh), the trend chart and the
+ * the options dropdown (horizon, export to Excel, refresh), the trend chart and the
  * responsive data view.
  */
 @Component({
@@ -85,6 +115,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    SpinnerComponent,
     FormsModule,
     StatsComponent,
     CardComponent,
@@ -95,6 +126,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     EmptyStateComponent,
+    HospitalityLoadErrorComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
@@ -103,7 +135,8 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
         class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
         <app-stats
-          title="Ocupación proyectada"
+          [title]="metrics.occupancy.label"
+          [attr.title]="metrics.occupancy.label + ': ' + metrics.occupancy.help"
           [value]="pct(totals()?.projected_occupancy_pct)"
           [smallText]="horizonText()"
           iconName="bed-double"
@@ -112,7 +145,8 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
           [loading]="loading() && !report()"
         />
         <app-stats
-          title="Noches reservadas"
+          [title]="metrics.onBooks.label"
+          [attr.title]="metrics.onBooks.label + ': ' + metrics.onBooks.help"
           [value]="count(totals()?.on_books)"
           smallText="Reservas confirmadas y en casa"
           iconName="calendar-check"
@@ -121,7 +155,8 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
           [loading]="loading() && !report()"
         />
         <app-stats
-          title="Pickup 7 días"
+          [title]="metrics.pickup7.label"
+          [attr.title]="metrics.pickup7.label + ': ' + metrics.pickup7.help"
           [value]="count(totals()?.pickup_7)"
           smallText="Reservadas en los últimos 7 días"
           iconName="trending-up"
@@ -130,7 +165,8 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
           [loading]="loading() && !report()"
         />
         <app-stats
-          title="Pickup 30 días"
+          [title]="metrics.pickup30.label"
+          [attr.title]="metrics.pickup30.label + ': ' + metrics.pickup30.help"
           [value]="count(totals()?.pickup_30)"
           smallText="Reservadas en los últimos 30 días"
           iconName="calendar-plus"
@@ -153,7 +189,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
               class="text-[13px] font-bold text-gray-600 tracking-wide
                      md:text-lg md:font-semibold md:text-text-primary"
             >
-              Pickup por fecha de estadía
+              Ritmo de reservas por fecha de estadía
               <span class="text-text-secondary font-normal">({{ rows().length }})</span>
             </h2>
 
@@ -170,7 +206,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="filterConfigs"
                 [filterValues]="filterValues()"
-                [actions]="dropdownActions"
+                [actions]="dropdownActions()"
                 [isLoading]="loading()"
                 (filterChange)="onFilterChange($event)"
                 (clearAllFilters)="onFilterChange({})"
@@ -181,28 +217,20 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
         </div>
 
         <div class="px-2 pb-2 pt-3 md:p-4">
-          @if (loading() && !report()) {
-            <div class="p-4 md:p-6 text-center">
-              <div
-                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-              ></div>
-              <p class="mt-2 text-text-secondary">Cargando pronóstico...</p>
+          @if (loadError(); as message) {
+            <app-hospitality-load-error what="el ritmo de reservas" [message]="message" (retry)="load()" />
+          } @else if (loading() && !report()) {
+            <div class="p-4 md:p-6">
+              <app-spinner [center]="true" text="Cargando pronóstico…" />
             </div>
-          } @else if (!report()) {
-            <app-empty-state
-              icon="calendar-clock"
-              title="Sin pronóstico"
-              description="No se pudo cargar el pickup. Usa Actualizar para reintentar."
-              [showActionButton]="false"
-            />
-          } @else {
+          } @else if (report()) {
             <div class="mb-4 rounded-lg border border-border p-2 md:p-4">
               <div class="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm" data-testid="pickup-formulas">
                 <span class="font-semibold text-text-primary">Próximos días</span>
                 @for (f of formulas; track f.label) {
                   <span class="inline-flex items-center gap-1 text-text-secondary">
                     {{ f.label }}
-                    <app-tooltip [content]="f.text" position="bottom" size="sm">
+                    <app-tooltip [content]="f.help" position="bottom" size="sm">
                       <app-icon name="info" [size]="14" class="text-text-secondary" />
                     </app-tooltip>
                   </span>
@@ -210,7 +238,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
               </div>
               <app-chart [options]="chartOptions()" size="large" data-testid="pickup-chart" />
               <p class="mt-2 text-xs text-text-secondary">
-                Fechas de estadía desde hoy en la zona horaria de la tienda; no incluye reservas web sin pagar.
+                Fechas de estadía desde hoy en la zona horaria de la tienda; no incluye reservas de la tienda en línea sin pagar.
               </p>
             </div>
 
@@ -243,12 +271,17 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
 })
 export class HospitalityPickupPageComponent implements OnInit {
   private readonly reservationsService = inject(LodgingReservationsService);
+  private readonly exportService = inject(ReportExportService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
+  readonly metrics = METRICS;
   readonly formulas = FORMULAS;
 
   readonly loading = signal(true);
+  readonly exporting = signal(false);
+  /** U16 (R-FB-02) — a failed load shows this with "Reintentar", never zeros. */
+  readonly loadError = signal<string | null>(null);
   readonly report = signal<LodgingPickupReport | null>(null);
   readonly search = signal('');
   readonly filterValues = signal<FilterValues>({ days: DEFAULT_DAYS });
@@ -269,9 +302,16 @@ export class HospitalityPickupPageComponent implements OnInit {
     },
   ];
 
-  readonly dropdownActions: DropdownAction[] = [
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      label: this.exporting() ? 'Exportando...' : 'Exportar a Excel',
+      icon: 'download',
+      action: 'export',
+      variant: 'outline',
+      disabled: this.exporting() || !this.report(),
+    },
     { label: 'Actualizar', icon: 'refresh-cw', action: 'refresh', variant: 'outline' },
-  ];
+  ]);
 
   readonly totals = computed(() => this.report()?.totals ?? null);
 
@@ -299,8 +339,8 @@ export class HospitalityPickupPageComponent implements OnInit {
     { key: 'weekday_label', label: 'Día' },
     { key: 'rooms_label', label: 'Habitaciones', align: 'right' },
     { key: 'on_books_label', label: 'Noches reservadas', align: 'right' },
-    { key: 'pickup_7_label', label: 'Pickup 7 días', align: 'right' },
-    { key: 'pickup_30_label', label: 'Pickup 30 días', align: 'right' },
+    { key: 'pickup_7_label', label: METRICS.pickup7.label, align: 'right' },
+    { key: 'pickup_30_label', label: METRICS.pickup30.label, align: 'right' },
     { key: 'occupancy_label', label: 'Ocupación proyectada', align: 'right' },
   ];
 
@@ -309,8 +349,8 @@ export class HospitalityPickupPageComponent implements OnInit {
     subtitleKey: 'weekday_label',
     detailKeys: [
       { key: 'on_books_label', label: 'Reservadas' },
-      { key: 'pickup_7_label', label: 'Pickup 7 d' },
-      { key: 'pickup_30_label', label: 'Pickup 30 d' },
+      { key: 'pickup_7_label', label: 'Nuevas 7 días' },
+      { key: 'pickup_30_label', label: 'Nuevas 30 días' },
       { key: 'rooms_label', label: 'Habitaciones' },
     ],
     footerKey: 'occupancy_label',
@@ -319,14 +359,13 @@ export class HospitalityPickupPageComponent implements OnInit {
 
   readonly chartOptions = computed<EChartsOption>(() => {
     const days = this.report()?.days ?? [];
-    const style = getComputedStyle(document.documentElement);
-    const primary = style.getPropertyValue('--color-primary').trim() || '#3b82f6';
-    const border = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
-    const text = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const { primary, primarySoft, neutral, border, text } = hospitalityChartColors();
+    const pickup7 = METRICS.pickup7.label;
+    const pickup30 = METRICS.pickup30.label;
     return {
       tooltip: { trigger: 'axis' },
       legend: {
-        data: ['Ocupación proyectada %', 'Pickup 7 días', 'Pickup 30 días'],
+        data: ['Ocupación proyectada %', pickup7, pickup30],
         bottom: 0,
         textStyle: { color: text },
       },
@@ -357,11 +396,23 @@ export class HospitalityPickupPageComponent implements OnInit {
           name: 'Ocupación proyectada %',
           type: 'bar',
           yAxisIndex: 1,
-          itemStyle: { color: `${primary}55` },
+          itemStyle: { color: primarySoft },
           data: days.map((day) => day.projected_occupancy_pct),
         },
-        { name: 'Pickup 7 días', type: 'line', data: days.map((day) => day.pickup_7) },
-        { name: 'Pickup 30 días', type: 'line', data: days.map((day) => day.pickup_30) },
+        {
+          name: pickup7,
+          type: 'line',
+          itemStyle: { color: primary },
+          lineStyle: { color: primary },
+          data: days.map((day) => day.pickup_7),
+        },
+        {
+          name: pickup30,
+          type: 'line',
+          itemStyle: { color: neutral },
+          lineStyle: { color: neutral, type: 'dashed' },
+          data: days.map((day) => day.pickup_30),
+        },
       ],
     };
   });
@@ -384,10 +435,12 @@ export class HospitalityPickupPageComponent implements OnInit {
 
   onActionClick(action: string): void {
     if (action === 'refresh') this.load();
+    if (action === 'export') this.export();
   }
 
   load(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.reservationsService
       .pickup(Number(this.filterValues()['days']))
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -398,7 +451,28 @@ export class HospitalityPickupPageComponent implements OnInit {
         },
         error: (message: unknown) => {
           this.loading.set(false);
-          this.toastService.error(typeof message === 'string' ? message : 'No se pudo cargar el pronóstico');
+          this.report.set(null);
+          this.loadError.set(typeof message === 'string' ? message : null);
+        },
+      });
+  }
+
+  /** Downloads the XLSX of the current horizon (the backend builds it). */
+  export(): void {
+    const report = this.report();
+    if (!report || this.exporting()) return;
+    this.exporting.set(true);
+    this.reservationsService
+      .exportPickup(Number(this.filterValues()['days']))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (blob) => {
+          this.exporting.set(false);
+          this.exportService.downloadBlob(blob, `ritmo_de_reservas_${report.from}_${report.to}`);
+        },
+        error: () => {
+          this.exporting.set(false);
+          this.toastService.error('No se pudo exportar el reporte');
         },
       });
   }

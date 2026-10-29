@@ -5776,6 +5776,16 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La tarea ya no está pendiente o no está asignada a ti',
   },
+  LODGING_HOUSEKEEPING_TASK_DUP_001: {
+    code: 'LODGING_HOUSEKEEPING_TASK_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe una tarea de ese tipo para la habitación en esa fecha',
+  },
+  LODGING_HOUSEKEEPING_TASK_DATE_001: {
+    code: 'LODGING_HOUSEKEEPING_TASK_DATE_001',
+    httpStatus: 400,
+    devMessage: 'La fecha de la tarea no puede ser anterior a hoy',
+  },
   // Hospitality Suite (H5.3) — inventory blocks (maintenance, owner use)
   LODGING_BLOCK_FIND_001: {
     code: 'LODGING_BLOCK_FIND_001',
@@ -6037,6 +6047,76 @@ export const ErrorCodes = {
     code: 'LODGING_GUEST_CUSTOMER_001',
     httpStatus: 404,
     devMessage: 'Cliente no encontrado en la tienda',
+  },
+  // Hospitality Suite (H4.1) — TRA token (only the "Probar conexión" button)
+  LODGING_TRA_TOKEN_001: {
+    code: 'LODGING_TRA_TOKEN_001',
+    httpStatus: 400,
+    devMessage: 'Pega primero el token TRA que el MinCIT envió al correo del RNT',
+  },
+  // Hospitality Suite (H4.2) — SIRE sheet of a movement that is not in the store
+  LODGING_SIRE_NOT_FOUND_001: {
+    code: 'LODGING_SIRE_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'El registro SIRE no existe en esta tienda',
+  },
+  // Hospitality Suite (H8.4, D12) — key / access card handover log
+  LODGING_KEY_STATUS_001: {
+    code: 'LODGING_KEY_STATUS_001',
+    httpStatus: 409,
+    devMessage: 'Las llaves se entregan a huéspedes en casa: haz el check-in primero',
+  },
+  LODGING_KEY_DUP_001: {
+    code: 'LODGING_KEY_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Esa llave ya está entregada: registra su devolución antes de entregarla de nuevo',
+  },
+  LODGING_KEY_FIND_001: {
+    code: 'LODGING_KEY_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Entrega de llave no encontrada en la reserva',
+  },
+  LODGING_KEY_RETURNED_001: {
+    code: 'LODGING_KEY_RETURNED_001',
+    httpStatus: 409,
+    devMessage: 'Esa llave ya fue devuelta',
+  },
+  LODGING_KEY_ROOM_001: {
+    code: 'LODGING_KEY_ROOM_001',
+    httpStatus: 400,
+    devMessage: 'Elige una habitación activa de la reserva',
+  },
+  // Hospitality Suite (H8.1) — online check-in link
+  LODGING_PRECHECKIN_FIND_001: {
+    code: 'LODGING_PRECHECKIN_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Este enlace de pre-registro no existe. Pide uno nuevo al hotel',
+  },
+  LODGING_PRECHECKIN_EXPIRED_001: {
+    code: 'LODGING_PRECHECKIN_EXPIRED_001',
+    httpStatus: 410,
+    devMessage: 'El enlace de pre-registro venció: la estadía ya terminó o fue cancelada',
+  },
+  LODGING_PRECHECKIN_DOMAIN_001: {
+    code: 'LODGING_PRECHECKIN_DOMAIN_001',
+    httpStatus: 409,
+    devMessage: 'Activa la tienda en línea para compartir el enlace de pre-registro',
+  },
+  // Hospitality Suite (H8.5) — private stay rating the guest gives after check-out.
+  LODGING_STAY_REVIEW_FIND_001: {
+    code: 'LODGING_STAY_REVIEW_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Este enlace para calificar tu estadía no existe',
+  },
+  LODGING_STAY_REVIEW_CLOSED_001: {
+    code: 'LODGING_STAY_REVIEW_CLOSED_001',
+    httpStatus: 410,
+    devMessage: 'Este enlace para calificar ya no está disponible: se abre al salir del hotel y vence a los 30 días',
+  },
+  LODGING_STAY_REVIEW_DUP_001: {
+    code: 'LODGING_STAY_REVIEW_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya recibimos tu calificación de esta estadía. ¡Gracias!',
   },
   // Hospitality Suite (H3.2) — check-in that opens the folio.
   LODGING_CHECKIN_EARLY_001: {
@@ -6489,6 +6569,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Transición de estado inválida para la orden de producción',
   },
+  MFG_ORDER_CONCURRENT_UPDATE: {
+    code: 'MFG_ORDER_CONCURRENT_UPDATE',
+    httpStatus: 409,
+    devMessage:
+      'La orden de producción cambió en otra operación; recarga e intenta de nuevo',
+  },
   PRODUCTION_ORDER_NOT_BATCH: {
     code: 'PRODUCTION_ORDER_NOT_BATCH',
     httpStatus: 422,
@@ -6521,6 +6607,54 @@ export const ErrorCodes = {
     devMessage:
       'La cantidad debe ser un múltiplo exacto de lo que rinde la receta (tandas completas)',
   },
+  // ── Manufacturing (MVP) ────────────────────────────────────────────
+  MFG_ORDER_NOT_FOUND: {
+    code: 'MFG_ORDER_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Orden de producción de manufactura no encontrada',
+  },
+  MFG_ORDER_INVALID_STATE: {
+    code: 'MFG_ORDER_INVALID_STATE',
+    httpStatus: 409,
+    devMessage: 'Transición de estado inválida para la orden de producción',
+  },
+  MFG_ORDER_NOT_EDITABLE: {
+    code: 'MFG_ORDER_NOT_EDITABLE',
+    httpStatus: 409,
+    devMessage: 'Solo se puede editar una orden en borrador o liberada',
+  },
+  MFG_CANCEL_AFTER_PARTIAL: {
+    code: 'MFG_CANCEL_AFTER_PARTIAL',
+    httpStatus: 409,
+    devMessage:
+      'Una orden con producción parcial ya movió inventario y no puede cancelarse',
+  },
+  MFG_FORMULA_NOT_ACTIVE: {
+    code: 'MFG_FORMULA_NOT_ACTIVE',
+    httpStatus: 422,
+    devMessage: 'La fórmula debe estar activa para crear una orden de producción',
+  },
+  MFG_QTY_EXCEEDS_REMAINING: {
+    code: 'MFG_QTY_EXCEEDS_REMAINING',
+    httpStatus: 422,
+    devMessage: 'La cantidad producida excede lo pendiente de la orden',
+  },
+  MFG_INVALID_LOCATION: {
+    code: 'MFG_INVALID_LOCATION',
+    httpStatus: 422,
+    devMessage: 'La bodega indicada no existe en la tienda',
+  },
+  MFG_BATCH_NUMBER_DUPLICATE: {
+    code: 'MFG_BATCH_NUMBER_DUPLICATE',
+    httpStatus: 409,
+    devMessage: 'Ya existe un lote con ese número para el producto',
+  },
+  MFG_SEQUENCE_FAILED: {
+    code: 'MFG_SEQUENCE_FAILED',
+    httpStatus: 500,
+    devMessage: 'No se pudo generar el consecutivo de la orden de producción',
+  },
+
   // ── Kitchen Fire (Restaurant Suite Fase D) ─────────────────────────
   KITCHEN_FIRE_ORDER_NOT_FOUND: {
     code: 'KITCHEN_FIRE_ORDER_NOT_FOUND',

@@ -1,12 +1,14 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, throwError } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
-import { parseApiError, ParsedApiError } from '../../../../../../core/utils/parse-api-error';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { hospitalityErrorMessage } from '../../shared/hospitality-errors';
 import {
   CancellationQuote,
   CheckInRequest,
+  CheckInResult,
   CreateInventoryBlockRequest,
   CreateReservationRequest,
   FrontDeskBoard,
@@ -24,6 +26,7 @@ import {
 } from '../interfaces/reservation.interface';
 import { SellableRatePlan } from '../../rates/interfaces/rate-plan.interface';
 import { LodgingGuest, LodgingGuestRequest } from '../interfaces/guest.interface';
+import { DeliverKeyRequest, LodgingKeyHandover } from '../interfaces/key-handover.interface';
 import {
   FolioChargeRequest,
   FolioDetail,
@@ -42,6 +45,7 @@ import {
 import { NightAuditView } from '../interfaces/night-audit.interface';
 import { LodgingPerformanceReport } from '../interfaces/performance.interface';
 import { LodgingPickupReport } from '../interfaces/pickup.interface';
+import { LodgingFonturReport } from '../interfaces/fontur.interface';
 import { LodgingLossesQuery, LodgingLossesReport } from '../interfaces/cancellations.interface';
 
 interface ApiResponse<T> {
@@ -121,15 +125,21 @@ export class LodgingReservationsService {
   }
 
   /**
-   * H3.2 — check-in that opens the folio. Rejects with the parsed error so
-   * the screen can tell a dirty room (asks to confirm) from other errors.
+   * H3.2 — check-in that opens the folio. A dirty room is not an error but a
+   * warning the desk confirms; any other failure rejects with text like the
+   * rest of the calls.
    */
-  checkIn(id: number, request: CheckInRequest): Observable<LodgingReservation> {
+  checkIn(id: number, request: CheckInRequest): Observable<CheckInResult> {
     return this.http
       .post<ApiResponse<LodgingReservation>>(`${this.baseUrl}/${id}/check-in`, request)
       .pipe(
-        map((res) => res.data),
-        catchError((error: unknown) => throwError((): ParsedApiError => parseApiError(error))),
+        map((res): CheckInResult => ({ reservation: res.data })),
+        catchError((error: unknown) => {
+          const parsed = parseApiError(error);
+          return parsed.errorCode === 'LODGING_CHECKIN_DIRTY_001'
+            ? of<CheckInResult>({ dirtyWarning: parsed.userMessage })
+            : this.handleError(error);
+        }),
       );
   }
 
@@ -232,6 +242,40 @@ export class LodgingReservationsService {
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
+  /** H8.4 (D12) — keys and access cards handed over and returned. */
+  listKeys(reservationId: number): Observable<LodgingKeyHandover[]> {
+    return this.http
+      .get<ApiResponse<LodgingKeyHandover[]>>(`${this.baseUrl}/${reservationId}/keys`)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  deliverKey(reservationId: number, body: DeliverKeyRequest): Observable<LodgingKeyHandover> {
+    return this.http
+      .post<ApiResponse<LodgingKeyHandover>>(`${this.baseUrl}/${reservationId}/keys`, body)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  returnKey(reservationId: number, keyId: number): Observable<LodgingKeyHandover> {
+    return this.http
+      .post<ApiResponse<LodgingKeyHandover>>(
+        `${this.baseUrl}/${reservationId}/keys/${keyId}/return`,
+        {},
+      )
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H8.1 — online check-in link to share with the guest (created on first use). */
+  getPrecheckinLink(
+    reservationId: number,
+  ): Observable<{ url: string; completed_at: string | null }> {
+    return this.http
+      .post<ApiResponse<{ url: string; completed_at: string | null }>>(
+        `${this.baseUrl}/${reservationId}/precheckin-link`,
+        {},
+      )
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
   /** H3.4 — guest folio of a checked-in reservation. */
   getFolio(reservationId: number): Observable<FolioDetail> {
     return this.http
@@ -299,6 +343,17 @@ export class LodgingReservationsService {
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
+  /** U18 — the "Servicios exentos" of the period as XLSX (built by the backend). */
+  exportVatExemptServices(from: string, to: string): Observable<Blob> {
+    const params = new HttpParams().set('from', from).set('to', to);
+    return this.http
+      .get(`${environment.apiUrl}/store/hospitality/reports/vat-exempt-services/export`, {
+        params,
+        responseType: 'blob',
+      })
+      .pipe(catchError(this.handleError));
+  }
+
   /** H7.2 — occupancy, ADR and RevPAR by business day and month. */
   performance(from: string, to: string): Observable<LodgingPerformanceReport> {
     const params = new HttpParams().set('from', from).set('to', to);
@@ -319,6 +374,53 @@ export class LodgingReservationsService {
         { params },
       )
       .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** U16 — the performance report of the period as XLSX (built by the backend). */
+  exportPerformance(from: string, to: string): Observable<Blob> {
+    const params = new HttpParams().set('from', from).set('to', to);
+    return this.http
+      .get(`${environment.apiUrl}/store/hospitality/reports/performance/export`, {
+        params,
+        responseType: 'blob',
+      })
+      .pipe(catchError(this.handleError));
+  }
+
+  /** H4.4 — Fontur base of a quarter; without year/quarter the backend picks the last closed one. */
+  fontur(year?: number, quarter?: number): Observable<LodgingFonturReport> {
+    return this.http
+      .get<ApiResponse<LodgingFonturReport>>(`${environment.apiUrl}/store/hospitality/reports/fontur`, {
+        params: this.fonturParams(year, quarter),
+      })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H4.4 — the same Fontur report as XLSX (built by the backend). */
+  exportFontur(year: number, quarter: number): Observable<Blob> {
+    return this.http
+      .get(`${environment.apiUrl}/store/hospitality/reports/fontur/export`, {
+        params: this.fonturParams(year, quarter),
+        responseType: 'blob',
+      })
+      .pipe(catchError(this.handleError));
+  }
+
+  private fonturParams(year?: number, quarter?: number): HttpParams {
+    let params = new HttpParams();
+    if (year && quarter) params = params.set('year', String(year)).set('quarter', String(quarter));
+    return params;
+  }
+
+  /** U16 — the pickup report of the next `days` stay dates as XLSX (built by the backend). */
+  exportPickup(days: number): Observable<Blob> {
+    const params = new HttpParams().set('days', String(days));
+    return this.http
+      .get(`${environment.apiUrl}/store/hospitality/reports/pickup/export`, {
+        params,
+        responseType: 'blob',
+      })
+      .pipe(catchError(this.handleError));
   }
 
   /** H7.4 — no-shows and cancellations by channel with their penalties. */
@@ -494,9 +596,12 @@ export class LodgingReservationsService {
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
-  /** Rejects with the user-facing message so screens can show it as-is. */
+  /**
+   * Every call rejects with one type: the user-facing text, so screens show
+   * it as-is and never render `[object Object]`.
+   */
   private handleError(error: unknown): Observable<never> {
-    return throwError(() => parseApiError(error).userMessage);
+    return throwError((): string => hospitalityErrorMessage(error));
   }
 }
 

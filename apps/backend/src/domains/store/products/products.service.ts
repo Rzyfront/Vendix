@@ -1705,6 +1705,16 @@ export class ProductsService {
    * y `findIds` comparten `resolveSmartSearchFor` + `buildProductWhere` +
    * predicado ⇒ `findAll`≡`findIds` (DB-17).
    */
+  /**
+   * Hotelería (R5): filtro efectivo de noches de hotel. El explícito gana; sin
+   * él, el POS (`pos_optimized`) las excluye porque las noches se cobran desde
+   * la cuenta del huésped. `undefined` = sin filtro (listado admin "Todos").
+   */
+  private resolveIsLodging(query: ProductQueryDto): boolean | undefined {
+    if (query.is_lodging !== undefined) return query.is_lodging;
+    return query.pos_optimized ? false : undefined;
+  }
+
   private buildProductWhere(
     query: ProductQueryDto,
     smartAllowed?: boolean | null,
@@ -1727,6 +1737,7 @@ export class ProductsService {
       is_ingredient,
       ids,
     } = query;
+    const isLodging = this.resolveIsLodging(query);
 
     // Estado: el query param `state` (vía UI o API) tiene prioridad sobre
     // el default. Si el usuario filtra explícitamente por "Archivado",
@@ -1802,6 +1813,11 @@ export class ProductsService {
       // conjunto, así que "seleccionar todo" conserva la capacidad de incluir
       // insumos cuando el parámetro se omite.
       ...(is_ingredient !== undefined && { is_ingredient }),
+      // Hotelería (R5): noches "Noche – {tipo}" por la relación existente con
+      // su tipo de habitación. El POS las excluye por defecto.
+      ...(isLodging !== undefined && {
+        lodging_unit_type: isLodging ? { isNot: null } : { is: null },
+      }),
       // Hidratación del stack de selección de la edición masiva: el cliente
       // guarda ids que pueden no estar en la página cargada y los pide de golpe.
       // Se combina con el resto de los filtros (no los reemplaza), así que un id
@@ -2222,6 +2238,7 @@ export class ProductsService {
       query.is_sellable ?? '',
       query.is_batch_produced ?? '',
       query.is_ingredient ?? '',
+      this.resolveIsLodging(query) ?? '',
       query.include_inactive ?? '',
       query.pos_optimized ?? '',
       Array.isArray(query.ids) ? [...query.ids].sort((a, b) => a - b).join(',') : '',
@@ -2442,6 +2459,7 @@ export class ProductsService {
       isSellable: query.is_sellable ?? null,
       isBatchProduced: query.is_batch_produced ?? null,
       isIngredient: query.is_ingredient ?? undefined,
+      isLodging: this.resolveIsLodging(query) ?? null,
       ids: query.ids ?? null,
     };
     const ranked = buildTrigramRankedQuery(
@@ -3539,6 +3557,8 @@ export class ProductsService {
           },
         },
         brands: true,
+        // Hotelería (R5): el detalle avisa que la noche se gestiona allí.
+        lodging_unit_type: { select: { id: true, name: true } },
         kds: {
           select: {
             id: true,
@@ -3692,6 +3712,7 @@ export class ProductsService {
       preparation_time_minutes: product.preparation_time_minutes,
       kds_id: product.kds_id,
       kds: product.kds,
+      lodging_unit_type: product.lodging_unit_type ?? null,
       // UoM (Modelo B): el form de edición y el panel de inventario los leen
       // de ESTE mapeo. Sin exponerlos aquí, el detalle del producto pierde la
       // capacidad por unidad y el panel muestra el total crudo en vez de

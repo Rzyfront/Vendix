@@ -5,6 +5,7 @@ import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingNightAuditService } from './night-audit.service';
 import { CloseNightAuditDto, NightAuditQueryDto, ReopenNightAuditDto } from './night-audit.dto';
+import { formatShortDate } from '../stay-dates';
 
 /** Hospitality Suite (H7.1) — night audit: close and reopen the business day. */
 @Controller('store/hospitality/night-audit')
@@ -28,7 +29,7 @@ export class LodgingNightAuditController {
   @Permissions('store:lodging:night_audit:close')
   async close(@Body() dto: CloseNightAuditDto) {
     const result = await this.nightAudit.close(dto.date, dto.mark_no_shows ?? true);
-    return this.responseService.success(result, `Día ${result.business_date} cerrado`);
+    return this.responseService.success(result, `Día ${formatShortDate(result.business_date)} cerrado`);
   }
 
   @ApiOperation({ summary: 'Reabrir un día cerrado con motivo' })
@@ -36,6 +37,6 @@ export class LodgingNightAuditController {
   @Permissions('store:lodging:night_audit:reopen')
   async reopen(@Body() dto: ReopenNightAuditDto) {
     const result = await this.nightAudit.reopen(dto.date, dto.reason);
-    return this.responseService.success(result, `Día ${dto.date} reabierto`);
+    return this.responseService.success(result, `Día ${formatShortDate(dto.date)} reabierto`);
   }
 }

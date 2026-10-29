@@ -11,7 +11,7 @@ export type LodgingChannel = (typeof LODGING_CHANNELS)[number];
 
 export const LODGING_CHANNEL_LABELS: Record<LodgingChannel, string> = {
   front_desk: 'Recepción',
-  web: 'Motor web',
+  web: 'Tienda en línea',
 };
 
 /** The creation event of a web booking (no previous status, a hold). */

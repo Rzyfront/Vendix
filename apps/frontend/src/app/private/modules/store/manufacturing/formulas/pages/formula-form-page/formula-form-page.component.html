@@ -1,0 +1,303 @@
+<app-sticky-header
+  [title]="isEditMode() ? 'Editar fórmula' : 'Nueva fórmula'"
+  [subtitle]="
+    isEditMode()
+      ? 'Modifica el rendimiento, la merma y los componentes de la fórmula.'
+      : 'Define qué insumos lleva el producto, con su merma, y consulta el costo teórico en vivo.'
+  "
+  icon="flask-conical"
+  [showBackButton]="true"
+  backRoute="/admin/manufacturing/formulas"
+  [actions]="headerActions()"
+  (actionClicked)="onHeaderAction($event)"
+></app-sticky-header>
+
+<form
+  [formGroup]="form"
+  (ngSubmit)="submit()"
+  class="space-y-4 md:space-y-6 px-2 pb-4 md:px-0 md:pb-6"
+>
+  @if (submitError(); as err) {
+    <div
+      role="alert"
+      aria-live="assertive"
+      class="flex items-start gap-2 p-3 rounded-md border border-red-200 bg-red-50 text-red-900 text-sm"
+    >
+      <app-icon name="x-circle" [size]="18" class="text-red-600 mt-0.5 shrink-0" />
+      <div>
+        <p class="font-semibold">No se pudo guardar la fórmula</p>
+        <p class="text-red-700 mt-0.5">{{ err }}</p>
+      </div>
+    </div>
+  }
+
+  <app-card [responsive]="true" [padding]="true" [overflow]="'visible'">
+    <div class="space-y-4">
+      <div class="flex items-start gap-2">
+        <app-icon name="factory" [size]="18" class="text-primary mt-0.5" />
+        <div>
+          <h2 class="text-base font-bold text-gray-900">Producto a fabricar</h2>
+          <p class="text-xs text-gray-500 mt-0.5">
+            El producto terminado (o semiterminado) que se obtiene con esta fórmula.
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <app-selector
+          formControlName="product_id"
+          label="Producto"
+          placeholder="Selecciona el producto a fabricar"
+          [options]="productOptions()"
+          [searchable]="true"
+          [required]="true"
+          [disabled]="isEditMode() || isLoadingProducts()"
+          tooltipText="No se puede cambiar el producto de una fórmula ya creada."
+        />
+        <app-selector
+          formControlName="status"
+          label="Estado"
+          [options]="statusOptions"
+          tooltipText="Solo las fórmulas activas se usan para crear órdenes de producción."
+        />
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <app-input
+          formControlName="code"
+          label="Código"
+          placeholder="Ej. F-MESA-01"
+          [maxlength]="30"
+        />
+        <app-input
+          formControlName="version"
+          label="Versión"
+          type="number"
+          [min]="1"
+          step="1"
+        />
+        <app-input
+          formControlName="yield_quantity"
+          label="Rendimiento"
+          type="number"
+          placeholder="1"
+          [min]="0"
+          step="0.0001"
+          [required]="true"
+          tooltipText="Cuánto produce un lote de la fórmula, en la unidad de rendimiento."
+        />
+        <app-selector
+          formControlName="yield_unit"
+          label="Unidad de rendimiento"
+          [options]="yieldUnitOptions"
+          [searchable]="true"
+          [required]="true"
+        />
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <app-input
+          formControlName="waste_percent"
+          label="Merma global (%)"
+          type="number"
+          placeholder="0"
+          [min]="0"
+          [max]="100"
+          step="0.5"
+          tooltipText="Pérdida del producto terminado por el proceso. Se aplica sobre el rendimiento total."
+        />
+        <div class="md:col-span-3">
+          <app-textarea
+            formControlName="preparation_notes"
+            label="Notas de fabricación"
+            placeholder="Pasos, tolerancias, recomendaciones..."
+            [rows]="3"
+            [maxlength]="2000"
+          />
+        </div>
+      </div>
+    </div>
+  </app-card>
+
+  <app-card [responsive]="true" [padding]="true" [overflow]="'visible'">
+    <div class="space-y-3">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h3 class="text-base md:text-lg font-semibold text-text-primary">
+            Componentes de la fórmula
+          </h3>
+          <p class="text-sm text-text-secondary">
+            Insumos y semiterminados que se consumen para producir el rendimiento.
+          </p>
+        </div>
+        <app-button
+          variant="primary"
+          size="sm"
+          [disabled]="isLoadingProducts()"
+          (clicked)="addItem()"
+        >
+          <app-icon slot="icon" name="plus" [size]="16" />
+          Agregar componente
+        </app-button>
+      </div>
+
+      @if (itemsArray.length === 0) {
+        <div
+          class="border border-dashed border-border rounded-lg p-6 text-center text-sm text-text-secondary"
+        >
+          Aún no has agregado componentes. Usa el botón
+          <span class="font-semibold">"Agregar componente"</span> para empezar.
+        </div>
+      }
+
+      <div class="space-y-3">
+        @for (row of itemsArray.controls; track row; let i = $index) {
+          <div
+            class="rounded-lg p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-[var(--color-surface)] border border-[var(--color-border)] shadow-sm"
+            [formGroup]="row"
+          >
+            <div class="md:col-span-6">
+              <app-selector
+                formControlName="component_product_id"
+                label="Insumo"
+                [placeholder]="isLoadingProducts() ? 'Cargando insumos…' : 'Selecciona un insumo'"
+                [options]="componentOptions()"
+                [disabled]="isLoadingProducts()"
+                [searchable]="true"
+                [required]="true"
+              />
+            </div>
+            <div class="md:col-span-3">
+              @let unit = unitOf(row.controls.component_product_id.value);
+              <app-input
+                label="Cantidad"
+                type="number"
+                formControlName="quantity"
+                placeholder="0"
+                [min]="0.0001"
+                step="0.0001"
+                [suffixIcon]="!!unit"
+                tooltipText="Cuánto de este insumo lleva la fórmula, en su unidad de medida."
+              >
+                @if (unit) {
+                  <span
+                    slot="suffix-icon"
+                    class="inline-flex items-center leading-none text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md text-[var(--color-primary)] bg-[rgba(var(--color-primary-rgb),0.12)]"
+                  >
+                    {{ unit }}
+                  </span>
+                }
+              </app-input>
+            </div>
+            <div class="md:col-span-2">
+              <app-input
+                label="Merma %"
+                type="number"
+                formControlName="waste_percent"
+                placeholder="0"
+                [min]="0"
+                [max]="100"
+                step="0.5"
+                tooltipText="Porcentaje que se pierde de este insumo al procesarlo. Sube el costo real."
+              />
+            </div>
+            <div class="md:col-span-1 flex md:justify-end">
+              <app-button
+                variant="outline-danger"
+                size="sm"
+                aria-label="Eliminar componente"
+                (clicked)="removeItem(i)"
+              >
+                <app-icon slot="icon" name="trash-2" [size]="16" />
+              </app-button>
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+  </app-card>
+
+  <!-- Costo teórico en vivo -->
+  <app-card [responsive]="true" [padding]="true" [overflow]="'visible'">
+    <div class="space-y-3">
+      <div class="flex items-start gap-2">
+        <app-icon name="calculator" [size]="18" class="text-primary mt-0.5" />
+        <div>
+          <h3 class="text-base font-semibold text-text-primary">Costo teórico</h3>
+          <p class="text-xs text-text-secondary">
+            Se recalcula al editar cantidades y merma, con el último costo conocido de cada insumo.
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div class="rounded-lg border border-[var(--color-border)] p-3">
+          <p class="text-[11px] uppercase tracking-wide text-text-secondary">
+            Costo del lote
+          </p>
+          <p class="text-lg font-bold text-text-primary">
+            {{ liveCost().total | currency }}
+          </p>
+        </div>
+        <div class="rounded-lg border border-[var(--color-border)] p-3">
+          <p class="text-[11px] uppercase tracking-wide text-text-secondary">
+            Costo por unidad
+          </p>
+          <p class="text-lg font-bold text-text-primary">
+            {{ liveCost().unit | currency }}
+          </p>
+        </div>
+      </div>
+
+      @if (liveCost().missing > 0) {
+        <p class="text-xs text-amber-700">
+          {{ liveCost().missing }} insumo(s) no tienen costo registrado y se
+          cuentan en cero.
+        </p>
+      }
+
+      @if (liveCost().lines.length > 0) {
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-[11px] uppercase text-text-secondary">
+                <th class="py-1 pr-2">Insumo</th>
+                <th class="py-1 pr-2 text-right">Cant. efectiva</th>
+                <th class="py-1 pr-2 text-right">Costo unit.</th>
+                <th class="py-1 text-right">Costo línea</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (line of liveCost().lines; track $index) {
+                <tr class="border-t border-[var(--color-border)]">
+                  <td class="py-1 pr-2">{{ line.name }}</td>
+                  <td class="py-1 pr-2 text-right">
+                    {{ line.effectiveQuantity | number: '1.0-4' }} {{ line.unit }}
+                  </td>
+                  <td class="py-1 pr-2 text-right">
+                    @if (line.unitCost == null) {
+                      —
+                    } @else {
+                      {{ line.unitCost | currency }}
+                    }
+                  </td>
+                  <td class="py-1 text-right font-medium">
+                    {{ line.lineCost | currency }}
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+
+      @if (serverCost(); as saved) {
+        <p class="text-xs text-text-secondary">
+          Costo guardado en el sistema (último cálculo):
+          <strong>{{ saved.total_cost | currency }}</strong> el lote ·
+          <strong>{{ saved.unit_cost | currency }}</strong> por unidad.
+        </p>
+      }
+    </div>
+  </app-card>
+</form>

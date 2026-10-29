@@ -6,13 +6,8 @@ export type HousekeepingStatus =
   | 'out_of_order'
   | 'out_of_service';
 
-export const HOUSEKEEPING_STATUS_LABELS: Record<HousekeepingStatus, string> = {
-  clean: 'Limpia',
-  dirty: 'Sucia',
-  inspected: 'Inspeccionada',
-  out_of_order: 'Fuera de servicio',
-  out_of_service: 'No disponible',
-};
+/** Labels live with the chip colors (R-CHIP-02). */
+export { HOUSEKEEPING_STATUS_LABELS } from '../../shared/hospitality-status';
 
 /** Physical room as returned by the store API. */
 export interface LodgingUnit {

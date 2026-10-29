@@ -7,7 +7,7 @@ import { LodgingFolioService } from '../folio/folio.service';
 import { lodgingBusinessDate } from '../folio/folio-nights';
 import { LodgingReservationsService } from '../reservations.service';
 import { addDays } from '../reservation-status';
-import { dateOnlyToDb } from '../stay-dates';
+import { dateOnlyToDb, formatShortDate } from '../stay-dates';
 
 export interface NightAuditReservationRow {
   id: number;
@@ -18,6 +18,8 @@ export interface NightAuditReservationRow {
 export interface NightAuditDiscrepancy {
   reservation_id: number;
   reservation_number: string;
+  /** U15 — holder of the reservation (additive; older closed snapshots lack it). */
+  guest_name?: string;
   /** "101 · Doble" (or the type alone when unassigned). */
   room: string;
   rate_amount: string;
@@ -49,6 +51,18 @@ export interface NightAuditView {
   reopen_reason: string | null;
   /** Stored snapshot when closed, live figures otherwise. */
   summary: NightAuditSummary;
+  /**
+   * U15 — what "Cerrar día" will charge now: the unposted nights of in-house
+   * guests up to this day (closed days stay frozen) and their rate. Null on
+   * a closed day.
+   */
+  close_preview: NightAuditClosePreview | null;
+}
+
+export interface NightAuditClosePreview {
+  nights: number;
+  /** Gross the guests pay for those nights: taxes and VAT exemption included, as "Cargar noche" charges them. */
+  amount: string;
 }
 
 const guestName = (customer: { first_name: string | null; last_name: string | null } | null) =>
@@ -89,21 +103,28 @@ export class LodgingNightAuditService {
         audit?.status === 'closed'
           ? (audit.summary as unknown as NightAuditSummary)
           : await this.summarize(business_date),
+      close_preview: audit?.status === 'closed' ? null : await this.closePreview(business_date),
     };
+  }
+
+  /**
+   * U15 — the nights `close()` will post and what the guests pay for them:
+   * the folio prices them exactly as `postNightsThrough` charges them.
+   */
+  private async closePreview(business_date: string): Promise<NightAuditClosePreview> {
+    const preview = await this.folios.previewNightsThrough(business_date);
+    return { nights: preview.nights, amount: preview.amount.toFixed(2) };
   }
 
   /** "Cerrar día": posts the nights, marks no-shows and freezes the day. */
   async close(date?: string, markNoShows = true): Promise<NightAuditView> {
-    const { today, business_date: current } = await this.clock();
+    const { business_date: current } = await this.clock();
     const business_date = date ?? current;
-    if (business_date > today) throw new VendixHttpException(ErrorCodes.LODGING_NIGHT_AUDIT_DATE_001);
+    // Before `night_audit_time` the civil date is already tomorrow but the
+    // business day is still today: closing tomorrow would no-show its arrivals.
+    if (business_date > current) throw new VendixHttpException(ErrorCodes.LODGING_NIGHT_AUDIT_DATE_001);
     const existing = await this.findAudit(business_date);
-    if (existing?.status === 'closed') {
-      throw new VendixHttpException(
-        ErrorCodes.LODGING_NIGHT_AUDIT_CLOSED_001,
-        `El día ${business_date} ya está cerrado`,
-      );
-    }
+    if (existing?.status === 'closed') throw this.alreadyClosed(business_date);
     const user_id = RequestContextService.getContext()?.user_id ?? null;
 
     // H3.4 — every in-house folio gets its nights up to this day.
@@ -193,7 +214,7 @@ export class LodgingNightAuditService {
           unit: { select: { code: true } },
           unit_type: { select: { name: true } },
           posted_order_item: { select: { total_price: true, cancelled_at: true } },
-          reservation_room: { select: { reservation: { select: { id: true, reservation_number: true } } } },
+          reservation_room: { select: { reservation: { select: reservationSelect } } },
         },
         orderBy: { id: 'asc' },
       }),
@@ -223,6 +244,7 @@ export class LodgingNightAuditService {
       discrepancies.push({
         reservation_id: reservation.id,
         reservation_number: reservation.reservation_number,
+        guest_name: guestName(reservation.customer),
         room: [night.unit?.code, night.unit_type.name].filter(Boolean).join(' · '),
         rate_amount: Number(night.rate_amount).toFixed(2),
         reason: item ? 'voided' : 'not_posted',
@@ -269,7 +291,7 @@ export class LodgingNightAuditService {
   private alreadyClosed(business_date: string) {
     return new VendixHttpException(
       ErrorCodes.LODGING_NIGHT_AUDIT_CLOSED_001,
-      `El día ${business_date} ya está cerrado`,
+      `El día ${formatShortDate(business_date)} ya está cerrado`,
     );
   }
 

@@ -96,7 +96,8 @@ export interface ReviewFilters {
 
 // ── Experiencia de compra (reseña de la orden) ──────────────────────────────
 export type OrderReviewQuickTag = 'very_easy' | 'normal' | 'difficult';
-export type OrderReviewSource = 'order_confirmation' | 'order_detail';
+/** `stay_review` — Hotelería (H8.5): private rating after check-out. */
+export type OrderReviewSource = 'order_confirmation' | 'order_detail' | 'stay_review';
 
 export interface OrderReview {
   id: number;
@@ -131,4 +132,5 @@ export const ORDER_REVIEW_QUICK_TAG_LABELS: Record<OrderReviewQuickTag, string> 
 export const ORDER_REVIEW_SOURCE_LABELS: Record<OrderReviewSource, string> = {
   order_confirmation: 'Al confirmar el pedido',
   order_detail: 'Desde el detalle del pedido',
+  stay_review: 'Al terminar la estadía',
 };

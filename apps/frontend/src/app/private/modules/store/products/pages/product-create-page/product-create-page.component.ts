@@ -42,6 +42,7 @@ import {
   BadgeComponent,
   TooltipComponent,
   TaxInclusiveChipComponent,
+  AlertBannerComponent,
 } from '../../../../../../shared/components';
 import {
   CurrencyPipe,
@@ -215,6 +216,7 @@ interface PriceTierOverrideRow {
   standalone: true,
   imports: [
     RouterModule,
+    AlertBannerComponent,
     ReactiveFormsModule,
     FormsModule,
     ButtonComponent,
@@ -1043,6 +1045,11 @@ export class ProductCreatePageComponent {
   readonly productLoaded = signal(false);
   productId: number | null = null;
   product: Product | null = null;
+  /**
+   * Hotelería (R5): tipo de habitación dueño de esta noche "Noche – {tipo}".
+   * Su nombre, tipo y estado se gestionan desde Hotelería → Habitaciones.
+   */
+  readonly lodgingUnitType = signal<{ id: number; name: string } | null>(null);
   readonly onlinePurchaseProduct = signal<Product | null>(null);
   readonly isGeneratingOnlinePurchaseLink = signal(false);
   readonly hasOnlinePurchaseLink = computed(() => {
@@ -2311,9 +2318,16 @@ export class ProductCreatePageComponent {
     this.productsService.getProductById(id).subscribe({
       next: (product: Product) => {
         this.product = product;
+        this.lodgingUnitType.set(product?.lodging_unit_type ?? null);
         this.productMinStockLevel.set(product?.min_stock_level ?? null);
         this.onlinePurchaseProduct.set(product);
         this.patchForm(product);
+        // Hotelería (R5): the night's name and state follow its room type
+        // ("Noche – {tipo}"); getRawValue() still sends them unchanged.
+        if (product?.lodging_unit_type) {
+          this.productForm.get('name')?.disable({ emitEvent: false });
+          this.productForm.get('state')?.disable({ emitEvent: false });
+        }
         // Form ya poblado → render con `is_ingredient` resuelto (sin flash).
         this.productLoaded.set(true);
         // Auto-load tier rows if the product already has multi-tarifa enabled.

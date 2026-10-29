@@ -2118,6 +2118,43 @@ describe('ProductsService', () => {
     });
   });
 
+  describe('Hotelería R5 — noches "Noche – {tipo}" (findAll)', () => {
+    const run = async (extra: Partial<ProductQueryDto>) => {
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+      mockPrismaService.products.findMany.mockClear();
+      await service.findAll({ page: 1, limit: 10, ...extra } as ProductQueryDto);
+      return mockPrismaService.products.findMany.mock.calls[0][0].where;
+    };
+
+    it('el POS (pos_optimized) excluye las noches de hotel por defecto', async () => {
+      const where = await run({ pos_optimized: true });
+      expect(where.lodging_unit_type).toEqual({ is: null });
+      expect(where.state).toBe(ProductState.ACTIVE);
+    });
+
+    it('is_lodging=true deja solo las noches (filtro "Hotelería")', async () => {
+      const where = await run({ is_lodging: true });
+      expect(where.lodging_unit_type).toEqual({ isNot: null });
+    });
+
+    it('is_lodging=false las excluye del listado admin', async () => {
+      const where = await run({ is_lodging: false });
+      expect(where.lodging_unit_type).toEqual({ is: null });
+    });
+
+    it('el explícito gana al default del POS', async () => {
+      const where = await run({ pos_optimized: true, is_lodging: true });
+      expect(where.lodging_unit_type).toEqual({ isNot: null });
+    });
+
+    it('sin el param el listado admin no filtra (comportamiento previo)', async () => {
+      const where = await run({ is_ingredient: false });
+      expect(where).not.toHaveProperty('lodging_unit_type');
+      expect(where.is_ingredient).toBe(false);
+    });
+  });
+
   describe('STATE FILTER PRIORITY (findAll)', () => {
     // Regression: previously, the state filter was set with a ternary
     // (pos_optimized ? ACTIVE : include_inactive ? undefined : { not: ARCHIVED })

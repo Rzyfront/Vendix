@@ -1,0 +1,118 @@
+{#- Shared layout for every Vendix commercial document: fonts, brand tokens,
+    A4 pages, cover, signature, contact and the overflow check. Child templates
+    fill the `pages` block and set `doc_label`. -#}
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>{% block title %}{% endblock %}</title>
+<style>
+@font-face{font-family:"DM Sans";src:url("{{ assets }}/fonts/DMSans.ttf");font-weight:100 1000;font-style:normal}
+@font-face{font-family:"DM Sans";src:url("{{ assets }}/fonts/DMSans-Italic.ttf");font-weight:100 1000;font-style:italic}
+@font-face{font-family:"Urbanist";src:url("{{ assets }}/fonts/Urbanist.ttf");font-weight:100 900}
+:root{--dark:#152a20;--green:#2ecc71;--green2:#1e8e4e;--ink:#1b2a22;--muted:#5c6b63;--line:#dfe7e2;--soft:#f2f7f4;--orange:#e07b39}
+@page{size:A4;margin:0}
+*{box-sizing:border-box}
+body{margin:0;font-family:"DM Sans",sans-serif;color:var(--ink);font-size:11pt;line-height:1.55;background:#fff}
+.page{width:210mm;height:297mm;padding:17mm 18mm 18mm;position:relative;page-break-after:always;overflow:hidden}
+.page:last-child{page-break-after:auto}
+.page-body{height:100%}
+.foot{position:absolute;left:18mm;right:18mm;bottom:9mm;border-top:1px solid var(--line);padding-top:5px;display:flex;justify-content:space-between;font-size:7.5pt;color:var(--muted)}
+.overflow-flag{position:absolute;top:4mm;left:18mm;background:#c0392b;color:#fff;font-weight:700;padding:3px 8px;font-size:9pt;z-index:9}
+h1,h2,h3{font-family:"Urbanist",sans-serif;margin:0}
+.eyebrow{font-family:"Urbanist";font-weight:700;font-size:7.5pt;letter-spacing:.06em;color:var(--green2);text-transform:uppercase;margin-bottom:4px}
+h2{font-size:26pt;font-weight:700;line-height:1.15;margin-bottom:6px}
+.lead{color:var(--muted);font-size:10.5pt;margin:0 0 12px}
+.cover{background:var(--dark);color:#fff;text-align:center;padding:20mm 14mm 18mm}
+.cover img{width:38mm;margin-bottom:6px}
+.cover .kicker{font-family:"Urbanist";font-weight:700;color:var(--green);font-size:9.5pt;letter-spacing:.08em;margin:8px 0 12px}
+.cover h1{font-size:26pt;font-weight:700;line-height:1.35}
+.cover .tag{font-style:italic;font-size:9pt;opacity:.85;margin-top:14px}
+table.meta{width:100%;border-collapse:collapse;margin-top:9mm;font-size:10.5pt}
+table.meta td{border:1px solid var(--line);padding:11px 14px}
+table.meta td:first-child{width:28%;background:var(--soft);font-family:"Urbanist";font-weight:700;font-size:7.5pt;color:var(--green2);text-transform:uppercase;border-left:3px solid var(--green)}
+.note{background:var(--soft);border-left:3px solid var(--green);padding:12px 14px;margin-top:7mm}
+.note h3{font-size:11.5pt;margin-bottom:4px}
+.note p{margin:0 0 6px}
+.note p:last-child{margin-bottom:0}
+.note ul{margin:4px 0 0;padding-left:16px}
+.box{background:var(--soft);border-left:3px solid var(--green);padding:11px 13px;font-size:9.5pt}
+.box.warn{background:#fff;border:1px solid var(--line);border-left:3px solid var(--orange)}
+.box h3{font-size:9.5pt;margin-bottom:4px}
+.box ul{margin:0;padding-left:14px}
+.box li{margin-bottom:2px}
+.close{background:var(--dark);color:#fff;text-align:center;padding:18px 24px;margin:14px 0;font-style:italic;font-size:11pt}
+.close img{width:13mm;display:block;margin:0 auto 8px;border-radius:8px}
+.close small{display:block;font-size:8pt;opacity:.8;margin-top:6px;font-style:italic}
+.sign-title{font-family:"Urbanist";font-weight:700;font-size:13pt;margin-top:18px}
+.sign-sub{font-style:italic;color:var(--muted);font-size:8.5pt;margin-bottom:8px}
+.sign{border:1px solid var(--line);border-left:3px solid var(--green);padding:14px 18px;width:68%;font-size:10pt;background:#fbfdfc}
+.sign img{height:15mm;display:block;margin:2px 0}
+.sign .by{font-family:"Urbanist";font-weight:700;font-size:7.5pt;color:var(--green2);letter-spacing:.08em}
+.sign .line{border-top:1px solid var(--ink);margin:-4mm 0 6px;width:92%}
+.contact{background:var(--dark);color:#fff;display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;padding:14px 18px;margin-top:16px;font-size:10pt}
+.contact small{display:block;font-size:7pt;opacity:.7}
+.contact b{font-weight:600}
+.contact .h{grid-column:1/3;font-family:"Urbanist";font-weight:700;font-size:7.5pt;color:var(--green);text-transform:uppercase}
+{% block styles %}{% endblock %}
+</style>
+</head>
+<body>
+{% block pages %}{% endblock %}
+<script>
+// Mark every page whose content does not fit so render.py can reject the PDF.
+function checkOverflow(){
+  document.querySelectorAll('.page').forEach(function(p,i){
+    var body=p.querySelector('.page-body')||p;
+    var limit=p.getBoundingClientRect().bottom-parseFloat(getComputedStyle(p).paddingBottom)+2;
+    var bottom=0;
+    body.querySelectorAll('*').forEach(function(el){var b=el.getBoundingClientRect().bottom;if(b>bottom)bottom=b;});
+    if(bottom>limit){var f=document.createElement('div');f.className='overflow-flag';f.textContent='DESBORDE-PAGINA-'+(i+1);p.appendChild(f);}
+  });
+}
+if(document.fonts&&document.fonts.ready){document.fonts.ready.then(checkOverflow);}else{window.addEventListener('load',checkOverflow);}
+</script>
+</body>
+</html>
+
+{%- macro cover(kicker, titulo) -%}
+  <div class="cover">
+    <img src="{{ assets }}/logo.png" alt="Vendix">
+    <div class="kicker">{{ kicker }}</div>
+    <h1>{{ titulo }}</h1>
+    <div class="tag">{{ emisor.lema }}</div>
+  </div>
+{%- endmacro %}
+
+{%- macro meta_table(d, documento=None) -%}
+  <table class="meta">
+    <tr><td>Cliente</td><td>{{ d.cliente.empresa }}</td></tr>
+    <tr><td>Contacto</td><td>{{ d.cliente.contacto }}{% if d.cliente.cargo %} · {{ d.cliente.cargo }}{% endif %}</td></tr>
+    {% if documento %}<tr><td>Documento</td><td>{{ documento }}</td></tr>{% endif %}
+    <tr><td>Preparado por</td><td>{{ emisor.preparado_por }}</td></tr>
+    <tr><td>Fecha</td><td>{{ d.fecha }}</td></tr>
+  </table>
+{%- endmacro %}
+
+{%- macro foot(label, n) -%}
+  <div class="foot"><span>Vendix · {{ label }}</span><span>vendix.online · {{ n }}</span></div>
+{%- endmacro %}
+
+{%- macro signature(d, titulo, subtitulo) -%}
+  <div class="sign-title">{{ titulo }}</div>
+  <div class="sign-sub">{{ subtitulo }}</div>
+  <div class="sign">
+    <div class="by">POR VENDIX BY QUICKSS S.A.S.</div>
+    <img src="{{ assets }}/firma.png" alt="Firma">
+    <div class="line"></div>
+    <b>{{ emisor.nombre }}</b><br>{{ emisor.cargo }} · {{ emisor.empresa }}<br>
+    <span style="color:var(--muted);font-size:8pt">Fecha de emisión: {{ d.fecha }}</span>
+  </div>
+  <div class="contact">
+    <div class="h">Contacto comercial</div>
+    <div><small>Sitio web</small><b>{{ emisor.web }}</b></div>
+    <div><small>Correo</small><b>{{ emisor.correo }}</b></div>
+    <div><small>WhatsApp</small><b>{{ emisor.whatsapp }}</b></div>
+    <div><small>Instagram</small><b>{{ emisor.instagram }}</b></div>
+  </div>
+{%- endmacro %}

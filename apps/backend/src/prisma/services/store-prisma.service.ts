@@ -142,6 +142,13 @@ export class StorePrismaService extends BasePrismaService {
     'lodging_room_nights',
     // Hospitality Suite (H1.2)
     'lodging_reservation_events',
+    // Hospitality Suite (H8.2)
+    'lodging_guest_message_logs',
+    // Hospitality Suite (H8.4)
+    'lodging_key_handovers',
+    // Hospitality Suite (H4.1)
+    'lodging_compliance_submissions',
+    'lodging_compliance_credentials',
     // Hospitality Suite (H2.1)
     'lodging_rate_plans',
     'lodging_rate_prices',
@@ -186,6 +193,9 @@ export class StorePrismaService extends BasePrismaService {
     'menus',
     'menu_sections',
     'menu_availability_windows',
+    // ===== Manufacturing module (MVP) =====
+    'manufacturing_settings',
+    'store_sequences',
     // ===== Membership core (generalized) =====
     // Las 5 tablas de membresía llevan store_id directo → scoping directo por
     // tienda. membership_access_logs también scopea por store_id (bitácora).
@@ -448,6 +458,7 @@ export class StorePrismaService extends BasePrismaService {
       'kitchen_ticket_items', // Relational (via kitchen_ticket.store_id)
       'menu_section_items', // Relational (via menu_section.store_id)
       'table_waiters', // Relational (via tables.store_id)
+      'production_order_lines', // Relational (via production_orders.store_id)
     ];
 
     for (const model of all_scoped_models) {
@@ -679,6 +690,7 @@ export class StorePrismaService extends BasePrismaService {
         kitchen_ticket: { store_id: context.store_id },
       },
       menu_section_items: { menu_section: { store_id: context.store_id } },
+      production_order_lines: { order: { store_id: context.store_id } },
       // table_waiters is the N:M pivot (table_id ↔ user_id) with no direct
       // store_id column. Scope it via its parent `tables` so a direct query
       // like `table_waiters.findMany({ where: { user_id } })` (the reverse
@@ -1863,6 +1875,24 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.lodging_reservation_events;
   }
 
+  // Hospitality Suite (H8.2)
+  get lodging_guest_message_logs() {
+    return this.scoped_client.lodging_guest_message_logs;
+  }
+
+  // Hospitality Suite (H8.4)
+  get lodging_key_handovers() {
+    return this.scoped_client.lodging_key_handovers;
+  }
+
+  get lodging_compliance_submissions() {
+    return this.scoped_client.lodging_compliance_submissions;
+  }
+
+  get lodging_compliance_credentials() {
+    return this.scoped_client.lodging_compliance_credentials;
+  }
+
   // Hospitality Suite (H2.1)
   get lodging_rate_plans() {
     return this.scoped_client.lodging_rate_plans;
@@ -1953,6 +1983,19 @@ export class StorePrismaService extends BasePrismaService {
 
   get production_orders() {
     return this.scoped_client.production_orders;
+  }
+
+  // ===== Manufacturing module (MVP) =====
+  get production_order_lines() {
+    return this.scoped_client.production_order_lines;
+  }
+
+  get manufacturing_settings() {
+    return this.scoped_client.manufacturing_settings;
+  }
+
+  get store_sequences() {
+    return this.scoped_client.store_sequences;
   }
 
   get tables() {

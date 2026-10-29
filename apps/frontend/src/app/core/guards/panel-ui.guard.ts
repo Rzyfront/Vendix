@@ -1,6 +1,7 @@
 import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
 import { MenuFilterService, PANEL_UI_NO_ACCESS_ROUTE, PANEL_UI_TERMINAL_ROUTE } from '../services/menu-filter.service';
+import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { ToastService } from '../../shared/components/toast/toast.service';
 
@@ -112,4 +113,36 @@ export const firstActiveModuleRedirectGuard: CanActivateFn = () => {
   const menuFilter = inject(MenuFilterService);
   const target = menuFilter.firstActiveModuleRoute(menuFilter.currentMenuTree());
   return router.createUrlTree([target]);
+};
+
+/**
+ * R1 (Hotelería): `/admin/hospitality` opens the first daily screen the role
+ * can see. Recepción wins, then Limpieza (so the Camarera, whose preset also
+ * shows Habitaciones, lands on her task board), then Tarifas. The candidates
+ * are explicit because this guard runs before the layout registers its menu
+ * tree. Like `firstActiveModuleRedirectGuard`, it always returns a `UrlTree`.
+ */
+const HOSPITALITY_HOME: MenuItem = {
+  label: 'Hotelería',
+  icon: '',
+  panelUiKey: 'hospitality',
+  children: [
+    { label: 'Recepción', icon: '', route: '/admin/hospitality/front-desk', panelUiKey: 'hospitality_reservations' },
+    { label: 'Limpieza', icon: '', route: '/admin/hospitality/housekeeping', panelUiKey: 'hospitality_rooms' },
+    { label: 'Tarifas', icon: '', route: '/admin/hospitality/rates', panelUiKey: 'hospitality_rates' },
+  ],
+};
+
+export const hospitalityHomeRedirectGuard: CanActivateFn = () => {
+  const router = inject(Router);
+  const menuFilter = inject(MenuFilterService);
+  const target = menuFilter.firstActiveModuleRoute([HOSPITALITY_HOME]);
+  // Nothing of Hotelería is visible: fall back to the panel-wide first module.
+  const blocked =
+    target === PANEL_UI_NO_ACCESS_ROUTE || target === PANEL_UI_TERMINAL_ROUTE;
+  return router.createUrlTree([
+    blocked
+      ? menuFilter.firstActiveModuleRoute(menuFilter.currentMenuTree())
+      : target,
+  ]);
 };

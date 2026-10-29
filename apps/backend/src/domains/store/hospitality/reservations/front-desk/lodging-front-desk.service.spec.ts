@@ -8,6 +8,8 @@ interface Row {
   departure: string;
   unit?: string | null;
   folio?: { grand_total: string; total_paid: string } | null;
+  keys_out?: number;
+  registered?: number;
 }
 
 function reservation(row: Row) {
@@ -29,6 +31,7 @@ function reservation(row: Row) {
     folio: row.folio
       ? { id: 70 + row.id, status: 'open', order: { id: 500 + row.id, ...row.folio } }
       : null,
+    _count: { key_handovers: row.keys_out ?? 0, guests: row.registered ?? 0 },
   } as any;
 }
 
@@ -152,7 +155,30 @@ describe('buildFrontDesk (H3.3)', () => {
       children: 1,
       folio_id: 73,
       balance: '150000.00',
+      unassigned_rooms: 0,
     });
+  });
+
+  it('H8.4 — counts the keys the guests still have', () => {
+    const board = buildFrontDesk(
+      [
+        reservation({ id: 4, status: 'checked_in', arrival: '2026-11-08', departure: '2026-11-10', keys_out: 2 }),
+        reservation({ id: 5, status: 'confirmed', arrival: '2026-11-10', departure: '2026-11-12' }),
+      ],
+      today,
+    );
+
+    expect(board.in_house[0].keys_out).toBe(2);
+    expect(board.arrivals[0].keys_out).toBe(0);
+  });
+
+  it('H8.1 — tells the desk how many arriving guests are already registered', () => {
+    const board = buildFrontDesk(
+      [reservation({ id: 5, status: 'confirmed', arrival: '2026-11-10', departure: '2026-11-12', registered: 1 })],
+      today,
+    );
+
+    expect(board.arrivals[0]).toMatchObject({ registered_guests: 1, adults: 2, children: 1 });
   });
 
   it('marks unassigned rooms and arrivals without a folio', () => {
@@ -163,6 +189,7 @@ describe('buildFrontDesk (H3.3)', () => {
 
     expect(board.arrivals[0]).toMatchObject({
       rooms: 'Sin asignar · Doble',
+      unassigned_rooms: 1,
       folio_id: null,
       balance: null,
     });

@@ -128,6 +128,19 @@ describe('CatalogService reviews', () => {
     );
   });
 
+  it('Hotelería R5: el detalle nunca sirve una noche "Noche – {tipo}"', async () => {
+    prisma.store_settings.findFirst.mockResolvedValueOnce(disabledSettings);
+    prisma.products.findFirst.mockResolvedValue({ ...baseProduct, reviews: undefined });
+
+    await service.getProductBySlug('producto');
+
+    expect(prisma.products.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ lodging_unit_type: { is: null } }),
+      }),
+    );
+  });
+
   it('uses real approved review aggregates while returning the latest public reviews', async () => {
     prisma.products.findFirst.mockResolvedValue({
       ...baseProduct,
@@ -1138,6 +1151,19 @@ describe('CatalogService public smart search (D.3)', () => {
     expect(result.meta.applied_tokens).toEqual(['cafe', 'sello']);
     expect(result.meta.tokens_truncated).toBe(false);
     expect(result.data).toHaveLength(1);
+  });
+
+  it('Hotelería R5: el listado excluye las noches "Noche – {tipo}"', async () => {
+    prisma.products.findMany.mockResolvedValue([]);
+    prisma.products.count.mockResolvedValue(0);
+
+    await service.getProducts({ page: 1, limit: 10 } as any);
+
+    const args = prisma.products.findMany.mock.calls[0][0];
+    expect(args.where.lodging_unit_type).toEqual({ is: null });
+    expect(prisma.products.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({ lodging_unit_type: { is: null } }),
+    });
   });
 
   it('query acentuada + smart ⇒ OR-frase legacy (paridad, finding #2)', async () => {

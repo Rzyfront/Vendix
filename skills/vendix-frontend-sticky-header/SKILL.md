@@ -6,7 +6,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.2"
+  version: "2.3"
   scope: [root]
   auto_invoke: "Implementing sticky headers or refactoring module headers"
 ---
@@ -95,6 +95,8 @@ onHeaderAction(actionId: string): void {
 ```
 
 `StickyHeaderActionButton` supports `id`, `label`, `variant` (`primary | secondary | outline | outline-danger | ghost | danger`), `icon`, `loading`, `disabled`, `visible`, and `title` (native tooltip, e.g. why it is disabled).
+
+Soft UI (`vendix-ui-ux` → `references/soft-ui.md`): at most one `primary` action per header (save/confirm); the rest `outline`/`ghost`/`secondary`; prefer `outline-danger` over solid `danger`. Badges and custom slots use tokens only.
 
 ## Tabs
 

@@ -4,6 +4,7 @@ import {
   PenaltyTerm,
 } from '../../rates/lodging-cancellation-penalty';
 import { formatShortDate } from '../stay-dates';
+import { rntLine } from '../../compliance/rnt';
 
 /**
  * Hospitality Suite (H6.6) — pure pieces of the booking engine: what the
@@ -73,6 +74,8 @@ export interface BookingConfirmation {
   check_in_time: string;
   check_out_time: string;
   policy: string | null;
+  /** H4.3 — the hotel's RNT, printed at the foot of the voucher; null when unset. */
+  rnt_number?: string | null;
 }
 
 const escape = (value: string) =>
@@ -98,6 +101,7 @@ export function bookingConfirmationEmail(data: BookingConfirmation): {
     ['Saldo en el hotel', data.balance],
   ];
   if (data.policy) rows.push(['Política de cancelación', data.policy]);
+  const rnt = rntLine(data.rnt_number);
   const subject = `Reserva ${data.reservation_number} confirmada · ${data.store_name}`;
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 560px; margin: 0 auto; padding: 24px;">
@@ -112,12 +116,14 @@ export function bookingConfirmationEmail(data: BookingConfirmation): {
           .join('')}
       </table>
       <p style="color:#6a737d; font-size: 12px; margin-top: 32px;">Este es un mensaje automático. Si tienes preguntas, responde a este correo o contacta al hotel.</p>
+      ${rnt ? `<p style="color:#6a737d; font-size: 12px;">${escape(data.store_name)} · ${escape(rnt)}</p>` : ''}
     </div>
   `;
   const text = [
     `Hola ${data.guest_name},`,
     `Tu reserva en ${data.store_name} está confirmada. Recibimos tu pago.`,
     ...rows.map(([label, value]) => `${label}: ${value}`),
+    ...(rnt ? [`${data.store_name} · ${rnt}`] : []),
   ].join('\n');
   return { subject, html, text };
 }

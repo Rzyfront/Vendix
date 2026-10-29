@@ -153,7 +153,13 @@ export class MenuSectionsService {
     // available for ecommerce. Instead of rejecting products that lack
     // either flag, we promote them to true (see promotion below).
     const product = await this.prisma.products.findFirst({
-      where: { id: dto.product_id, store_id: storeId },
+      // Hotelería (R5): a night is charged to the guest's folio, never listed
+      // in a carta (the cart would reject it).
+      where: {
+        id: dto.product_id,
+        store_id: storeId,
+        lodging_unit_type: { is: null },
+      },
       select: {
         id: true,
         is_sellable: true,

@@ -1,6 +1,0 @@
-{
-  "statusCode": 404,
-  "error_code": "TABLE_NOT_FOUND",
-  "message": "Mesa no encontrada",
-  "details": null
-}

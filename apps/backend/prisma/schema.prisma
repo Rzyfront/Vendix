@@ -206,6 +206,9 @@ model users {
   lodging_reservations_customer   lodging_reservations[]        @relation("lodging_reservations_customer")
   lodging_reservations_created    lodging_reservations[]        @relation("lodging_reservations_created_by")
   lodging_reservation_events      lodging_reservation_events[]  @relation("lodging_reservation_events_user")
+  lodging_keys_delivered          lodging_key_handovers[]       @relation("lodging_key_handovers_delivered_by")
+  lodging_keys_received           lodging_key_handovers[]       @relation("lodging_key_handovers_returned_by")
+  lodging_compliance_reported     lodging_compliance_submissions[] @relation("lodging_compliance_submissions_reported_by")
   lodging_allotments_customer     lodging_allotments[]          @relation("lodging_allotments_customer")
   lodging_guests_customer         lodging_guests[]              @relation("lodging_guests_customer")
   // Appointment redesign phase 2 — `booking_reschedule_requests`
@@ -1075,6 +1078,10 @@ model stores {
   lodging_reservations           lodging_reservations[]
   lodging_reservation_rooms      lodging_reservation_rooms[]
   lodging_reservation_events     lodging_reservation_events[]
+  lodging_guest_message_logs     lodging_guest_message_logs[]
+  lodging_key_handovers          lodging_key_handovers[]
+  lodging_compliance_submissions lodging_compliance_submissions[]
+  lodging_compliance_credentials lodging_compliance_credentials[]
   lodging_room_nights            lodging_room_nights[]
   lodging_rate_plans             lodging_rate_plans[]
   lodging_rate_prices            lodging_rate_prices[]
@@ -1098,6 +1105,8 @@ model stores {
   // Restaurant Suite Foundation (Fase A) — back-relations
   recipes                   recipes[]
   production_orders         production_orders[]
+  manufacturing_settings    manufacturing_settings?
+  store_sequences           store_sequences[]
   tables                    tables[]
   table_sessions            table_sessions[]
   kitchen_tickets           kitchen_tickets[]
@@ -2209,6 +2218,7 @@ model products {
   recipes                   recipes[]
   recipe_items_as_component recipe_items[]         @relation("recipe_items_component_product")
   production_orders         production_orders[]
+  production_order_lines    production_order_lines[] @relation("production_order_lines_component_product")
   menu_section_items        menu_section_items[]
   kitchen_ticket_items      kitchen_ticket_items[]
 
@@ -2573,6 +2583,11 @@ model lodging_reservations {
   // H6.6 — web booking: a tentative reservation is held until it is paid or
   // this moment passes (then the hold job cancels it). Null = not a web hold.
   hold_expires_at    DateTime?                       @db.Timestamp(6)
+  // H8.1 — online check-in: link token the guest opens without login, and
+  // when the guest last completed it ("Pre-registro completo ✓"). The link
+  // stops working once the stay is over (status or departure date).
+  precheckin_token        String?                    @unique @db.VarChar(64)
+  precheckin_completed_at DateTime?                  @db.Timestamp(6)
   created_by_user_id Int?
   created_at         DateTime?                       @default(now()) @db.Timestamp(6)
   updated_at         DateTime?                       @default(now()) @db.Timestamp(6)
@@ -2586,6 +2601,9 @@ model lodging_reservations {
   folio      lodging_folios?
   deposits   lodging_deposits[]
   online_payments lodging_reservation_payments[]
+  guest_message_logs lodging_guest_message_logs[]
+  key_handovers      lodging_key_handovers[]
+  compliance_submissions lodging_compliance_submissions[]
 
   @@unique([store_id, reservation_number])
   @@index([status, hold_expires_at])
@@ -2611,6 +2629,113 @@ model lodging_reservation_events {
   user        users?               @relation("lodging_reservation_events_user", fields: [user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([reservation_id])
+}
+
+// Hospitality Suite (H8.2) — automatic guest emails already sent: the
+// confirmation, the pre-arrival reminder with the online check-in link and
+// the thank-you after check-out. One row per reservation, message and channel
+// (claimed before sending), so a message never goes out twice. `channel`
+// leaves room for WhatsApp (H8.3).
+model lodging_guest_message_logs {
+  id             Int      @id @default(autoincrement())
+  store_id       Int
+  reservation_id Int
+  message_key    String   @db.VarChar(30)
+  channel        String   @default("email") @db.VarChar(20)
+  sent_at        DateTime @default(now()) @db.Timestamp(6)
+
+  store       stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([reservation_id, message_key, channel])
+  @@index([store_id, sent_at])
+}
+
+// Hospitality Suite (H8.4, D12) — key / access card handover log: which key
+// or card was given to which guest, by which staff user and when, and its
+// return (who received it, when). `returned_at` null = the guest still has it.
+// A key is with one guest at a time: also unique per store case-insensitive
+// while open via `lodging_key_handovers_open_key_label_key`
+// ON (store_id, lower(key_label)) WHERE returned_at IS NULL.
+model lodging_key_handovers {
+  id                   Int       @id @default(autoincrement())
+  store_id             Int
+  reservation_id       Int
+  reservation_room_id  Int?
+  key_label            String    @db.VarChar(60)
+  guest_name           String    @db.VarChar(150)
+  notes                String?   @db.VarChar(300)
+  delivered_by_user_id Int?
+  delivered_at         DateTime  @default(now()) @db.Timestamp(6)
+  returned_by_user_id  Int?
+  returned_at          DateTime? @db.Timestamp(6)
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @default(now()) @db.Timestamp(6)
+
+  store            stores                     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation      lodging_reservations       @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation_room lodging_reservation_rooms? @relation(fields: [reservation_room_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  delivered_by     users?                     @relation("lodging_key_handovers_delivered_by", fields: [delivered_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  returned_by      users?                     @relation("lodging_key_handovers_returned_by", fields: [returned_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([reservation_id])
+  @@index([store_id, returned_at])
+}
+
+// Hospitality Suite (H4.1) — log of what each guest owes an authority (TRA of
+// the MinCIT; SIRE in H4.2) per event. One row per guest, authority and event,
+// so a check-in is never reported twice. `pending` → `sent` (automatic) or
+// `manual` (reported by hand in the portal); `failed` = rejected by the
+// authority. Informative only (D14): nothing in the desk waits for it.
+model lodging_compliance_submissions {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  reservation_id      Int
+  guest_id            Int?
+  authority           String    @db.VarChar(10)
+  event               String    @db.VarChar(20)
+  status              String    @default("pending") @db.VarChar(20)
+  // Kept so the log still names the guest if the guest row is removed.
+  guest_name          String    @db.VarChar(200)
+  attempts            Int       @default(0)
+  error_code          String?   @db.VarChar(40)
+  last_error          String?   @db.VarChar(300)
+  // Fields sent (Res. 409/2022 art. 7) and the authority's answer.
+  payload             Json?
+  response            Json?
+  sent_at             DateTime? @db.Timestamp(6)
+  reported_by_user_id Int?
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  store       stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  guest       lodging_guests?      @relation(fields: [guest_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  reported_by users?               @relation("lodging_compliance_submissions_reported_by", fields: [reported_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([guest_id, authority, event])
+  @@index([store_id, authority, status])
+  @@index([reservation_id])
+}
+
+// Hospitality Suite (H4.1) — credential of a store with an authority (the TRA
+// token sent by the MinCIT to the RNT email). Encrypted like the payment
+// processor credentials; only the last characters go back to the screen.
+model lodging_compliance_credentials {
+  id               Int       @id @default(autoincrement())
+  store_id         Int
+  authority        String    @db.VarChar(10)
+  secret_encrypted String    @db.Text
+  secret_hint      String    @db.VarChar(8)
+  tested_at        DateTime? @db.Timestamp(6)
+  test_ok          Boolean?
+  test_message     String?   @db.VarChar(300)
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, authority])
 }
 
 // Hospitality Suite (H1.1) — one room of a reservation: the room type sold,
@@ -2644,6 +2769,7 @@ model lodging_reservation_rooms {
   rate_plan   lodging_rate_plans?   @relation(fields: [rate_plan_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   nights      lodging_room_nights[]
   guests      lodging_guests[]
+  key_handovers lodging_key_handovers[]
 
   @@index([reservation_id])
   @@index([unit_type_id])
@@ -2685,6 +2811,7 @@ model lodging_guests {
   reservation lodging_reservations       @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   room        lodging_reservation_rooms? @relation(fields: [reservation_room_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   customer    users?                     @relation("lodging_guests_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  compliance_submissions lodging_compliance_submissions[]
 
   @@unique([reservation_id, document_type, document_number])
   @@index([store_id])
@@ -4767,6 +4894,8 @@ enum notification_type_enum {
   /// ya no es una alerta para el operador; lo silencia el listener de
   /// `order.status_changed` cuando `source === 'kitchen_bridge'`.
   kitchen_ticket_ready
+  /// H4.3 — yearly reminder (March) to renew the hotel's RNT before March 31.
+  lodging_rnt_renewal
 }
 
 model notifications {
@@ -5025,6 +5154,10 @@ enum product_type_enum {
   // Distinguished from physical (sold as-is) and service (bookable time).
   // Default behavior is unchanged: existing rows keep their current value.
   prepared
+  // Finished good produced by the manufacturing module (planta).
+  manufactured
+  // Intermediate good produced and consumed inside manufacturing.
+  semi_finished
 }
 
 enum service_modality_enum {
@@ -12237,6 +12370,10 @@ enum production_order_state_enum {
   completed
   // Cancelled; no inventory effects.
   cancelled
+  // Manufacturing: order released to the plant floor (materials checked).
+  released
+  // Manufacturing: part of the planned quantity was produced.
+  partially_completed
 }
 
 // Lifecycle of a physical restaurant table / dining zone.
@@ -12319,6 +12456,11 @@ model recipes {
   waste_percent     Decimal   @default(0) @db.Decimal(5, 2)
   preparation_notes String?   @db.Text
   is_active         Boolean   @default(true)
+  /// Manufacturing formula code (optional, restaurant recipes leave it NULL).
+  code              String?   @db.VarChar(50)
+  version           Int       @default(1)
+  /// draft | active | archived. `is_active` is kept for backwards compatibility.
+  status            String    @default("active") @db.VarChar(20)
   created_at        DateTime? @default(now()) @db.Timestamp(6)
   updated_at        DateTime? @default(now()) @db.Timestamp(6)
 
@@ -12374,14 +12516,89 @@ model production_orders {
   produced_at  DateTime?                   @db.Timestamp(6)
   created_at   DateTime?                   @default(now()) @db.Timestamp(6)
   updated_at   DateTime?                   @default(now()) @db.Timestamp(6)
+  // Manufacturing fields (all optional: restaurant orders leave them NULL).
+  /// Per-store consecutive (e.g. OP-000123) generated from store_sequences.
+  order_number String?                     @db.VarChar(30)
+  due_date     DateTime?                   @db.Timestamp(6)
+  started_at   DateTime?                   @db.Timestamp(6)
+  /// Finished-goods destination location.
+  location_id  Int?
+  /// Finished-goods batch created on completion.
+  batch_id     Int?
+  /// low | normal | high | urgent
+  priority     String?                     @db.VarChar(20)
+  notes        String?                     @db.Text
+  created_by   Int?
+  /// manual | order (sales order) — origin of the production order.
+  source       String?                     @db.VarChar(20)
+  planned_cost Decimal?                    @db.Decimal(14, 4)
+  actual_cost  Decimal?                    @db.Decimal(14, 4)
+  unit_cost    Decimal?                    @db.Decimal(14, 4)
 
   store   stores   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   product products @relation(fields: [product_id], references: [id], onUpdate: NoAction)
   recipe  recipes  @relation(fields: [recipe_id], references: [id], onUpdate: NoAction)
+  lines   production_order_lines[]
 
+  @@unique([store_id, order_number])
   @@index([store_id, status])
   @@index([store_id, product_id])
   @@index([store_id, created_at])
+}
+
+/// Planned vs consumed component line of a production order (manufacturing).
+/// Cost is frozen at completion time (unit_cost / total_cost / cost_snapshot).
+model production_order_lines {
+  id                   Int       @id @default(autoincrement())
+  order_id             Int
+  component_product_id Int
+  component_variant_id Int?
+  planned_qty          Decimal   @db.Decimal(12, 4)
+  consumed_qty         Decimal   @default(0) @db.Decimal(12, 4)
+  uom_id               Int?
+  unit_cost            Decimal?  @db.Decimal(14, 4)
+  total_cost           Decimal?  @db.Decimal(14, 4)
+  cost_snapshot        Json?
+  sort_order           Int       @default(0)
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @default(now()) @db.Timestamp(6)
+
+  order             production_orders @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  component_product products          @relation("production_order_lines_component_product", fields: [component_product_id], references: [id], onUpdate: NoAction)
+
+  @@index([order_id])
+  @@index([component_product_id])
+}
+
+/// Plant settings of the manufacturing module, one row per store.
+model manufacturing_settings {
+  id                         Int       @id @default(autoincrement())
+  store_id                   Int       @unique
+  default_input_location_id  Int?
+  default_output_location_id Int?
+  /// fifo | cpp
+  cost_method                String    @default("fifo") @db.VarChar(20)
+  lot_required               Boolean   @default(false)
+  wip_account_id             Int?
+  created_at                 DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                 DateTime? @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+}
+
+/// Generic per-store consecutive counters (e.g. key=production_order, prefix=OP-).
+model store_sequences {
+  id          Int       @id @default(autoincrement())
+  store_id    Int
+  key         String    @db.VarChar(40)
+  prefix      String    @db.VarChar(10)
+  next_number Int       @default(1)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+
+  @@unique([store_id, key])
 }
 
 /// A physical table in a restaurant floor. Optional position (pos_x, pos_y)

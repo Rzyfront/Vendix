@@ -9,35 +9,52 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
+import { Router, RouterLink } from '@angular/router';
+import { format, parseISO } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { catchError, map, of, Subject, switchMap } from 'rxjs';
 import {
+  ButtonComponent,
   CardComponent,
-  DropdownAction,
   EmptyStateComponent,
   FilterConfig,
   FilterValues,
+  IconComponent,
   InputsearchComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
   PaginationComponent,
   ResponsiveDataViewComponent,
   StatsComponent,
+  TableAction,
   TableColumn,
   ToastService,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
 import { UnitTypesService } from '../../../rooms/services/unit-types.service';
 import { ReservationFormModalComponent } from '../../components/reservation-form-modal/reservation-form-modal.component';
-import { ReservationDetailModalComponent } from '../../components/reservation-detail-modal/reservation-detail-modal.component';
+import {
+  DetailStartStep,
+  ReservationDetailModalComponent,
+} from '../../components/reservation-detail-modal/reservation-detail-modal.component';
 import {
   countNights,
   LodgingReservation,
+  ReservationListResult,
   LodgingReservationStatus,
   RESERVATION_STATUS_LABELS,
   ReservationStats,
   toDateOnly,
 } from '../../interfaces/reservation.interface';
 import { LodgingReservationsService } from '../../services/lodging-reservations.service';
+import {
+  RESERVATION_STATUS_CHIPS,
+  statusBadgeConfig,
+} from '../../../shared/hospitality-status';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 interface ReservationRow extends LodgingReservation {
   guest: string;
@@ -49,18 +66,15 @@ interface ReservationRow extends LodgingReservation {
 
 const PAGE_SIZE = 20;
 
-const STATUS_BADGE = {
-  type: 'custom' as const,
-  size: 'sm' as const,
-  colorMap: {
-    tentative: '#f59e0b',
-    confirmed: '#3b82f6',
-    checked_in: '#10b981',
-    checked_out: '#6b7280',
-    cancelled: '#ef4444',
-    no_show: '#9ca3af',
-  } satisfies Record<LodgingReservationStatus, string>,
-};
+const STATUS_BADGE = statusBadgeConfig(RESERVATION_STATUS_CHIPS);
+
+/** U8 (R-MOB-03) — `2026-11-20` → `20 nov`, never the ISO date. */
+const shortDate = (date: string) => format(parseISO(date), 'd MMM', { locale: es });
+
+/** One list request; the newest replaces any still in flight (RV3). */
+type ListResult =
+  | { ok: true; result: ReservationListResult }
+  | { ok: false; message: string };
 
 /**
  * Hospitality Suite — Reservas. H1.1: create a nightly reservation. H1.2:
@@ -68,14 +82,20 @@ const STATUS_BADGE = {
  * with history, cancellation and no-show.
  *
  * Standard admin list module: four stats, one card with the sticky search,
- * the options dropdown (create action + status and stay-range filters) and
- * the responsive data view. Search and filters are server-side (paginated).
+ * the visible "Nueva reserva" button, the filters dropdown (status and stay
+ * range) and the responsive data view with "Ver" and "Cancelar" per row.
+ * Search and filters are server-side (paginated).
  */
 @Component({
   selector: 'app-hospitality-reservations-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    ButtonComponent,
+    IconComponent,
+    RouterLink,
+    HospitalityLoadErrorComponent,
+    SpinnerComponent,
     FormsModule,
     StatsComponent,
     EmptyStateComponent,
@@ -87,6 +107,19 @@ const STATUS_BADGE = {
     ReservationFormModalComponent,
     ReservationDetailModalComponent,
   ],
+  // R-ROW-02 — card actions are 44 px touch targets on mobile.
+  // R-MOB-03 — card data in the normal typeface, not the shared monospace.
+  styles: [
+    `
+      :host ::ng-deep .footer-actions .footer-action-btn {
+        width: 44px;
+        height: 44px;
+      }
+      :host ::ng-deep app-item-list .detail-value {
+        font-family: inherit;
+      }
+    `,
+  ],
   template: `
     <div class="w-full md:space-y-4">
       <!-- Stats: sticky on mobile, static on desktop -->
@@ -95,39 +128,39 @@ const STATUS_BADGE = {
       >
         <app-stats
           title="Llegadas de hoy"
-          [value]="stats()?.arrivals_today ?? 0"
+          [value]="stats() === null && statsError() !== null ? '—' : stats()?.arrivals_today ?? 0"
           smallText="reservas que entran hoy"
           iconName="log-in"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
-          [loading]="stats() === null"
+          [loading]="stats() === null && statsError() === null"
         />
         <app-stats
           title="En casa"
-          [value]="stats()?.in_house ?? 0"
+          [value]="stats() === null && statsError() !== null ? '—' : stats()?.in_house ?? 0"
           smallText="huéspedes alojados"
           iconName="bed-double"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-500"
-          [loading]="stats() === null"
+          [loading]="stats() === null && statsError() === null"
         />
         <app-stats
           title="Ocupación hoy"
-          [value]="(stats()?.occupancy_percent ?? 0) + '%'"
+          [value]="stats() === null && statsError() !== null ? '—' : (stats()?.occupancy_percent ?? 0) + '%'"
           [smallText]="occupancyText()"
           iconName="gauge"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-500"
-          [loading]="stats() === null"
+          [loading]="stats() === null && statsError() === null"
         />
         <app-stats
           title="Libres hoy"
-          [value]="freeTonight()"
+          [value]="stats() === null && statsError() !== null ? '—' : freeTonight()"
           smallText="habitaciones sin ocupar esta noche"
           iconName="door-open"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-500"
-          [loading]="stats() === null"
+          [loading]="stats() === null && statsError() === null"
         />
       </div>
 
@@ -144,7 +177,7 @@ const STATUS_BADGE = {
               class="text-[13px] font-bold text-gray-600 tracking-wide
                      md:text-lg md:font-semibold md:text-text-primary"
             >
-              Reservas
+              Reservas de hotel
               <span class="text-text-secondary font-normal">({{ total() }})</span>
             </h2>
 
@@ -157,27 +190,51 @@ const STATUS_BADGE = {
                 [ngModel]="search()"
                 (ngModelChange)="onSearch($event)"
               />
+              <!-- R-CTA-01/06: visible create button; blocked without room types. -->
+              @if (canBook()) {
+                <app-button
+                  variant="primary"
+                  size="md"
+                  [iconOnlyMobile]="true"
+                  customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 !rounded-[10px]"
+                  class="shrink-0"
+                  [disabled]="noActiveTypes()"
+                  [ariaLabel]="noActiveTypes() ? 'Nueva reserva: primero crea un tipo de habitación' : 'Nueva reserva'"
+                  (clicked)="isFormOpen.set(true)"
+                  data-testid="reservations-new"
+                >
+                  <app-icon slot="icon" name="plus" [size]="18" />
+                  Nueva reserva
+                </app-button>
+              }
               <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="filterConfigs"
                 [filterValues]="filterValues()"
-                [actions]="dropdownActions()"
                 [isLoading]="isLoading()"
                 (filterChange)="onFilterChange($event)"
                 (clearAllFilters)="onFilterChange({})"
-                (actionClick)="onActionClick($event)"
               />
             </div>
           </div>
+          @if (noActiveTypes()) {
+            <p class="mt-2 text-sm text-text-secondary" data-testid="reservations-needs-types">
+              Primero crea un tipo de habitación →
+              <a class="font-medium text-primary underline" routerLink="/admin/hospitality/rooms">Ir a Tipos</a>
+            </p>
+          }
         </div>
 
         <div class="px-2 pb-2 pt-3 md:p-4">
-          @if (isLoading() && reservations().length === 0) {
-            <div class="p-4 md:p-6 text-center">
-              <div
-                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-              ></div>
-              <p class="mt-2 text-text-secondary">Cargando reservas...</p>
+          @if (loadError() !== null || statsError() !== null) {
+            <app-hospitality-load-error
+              what="las reservas"
+              [message]="loadError() ?? statsError()"
+              (retry)="refresh()"
+            />
+          } @else if (isLoading() && reservations().length === 0) {
+            <div class="p-4 md:p-6">
+              <app-spinner [center]="true" text="Cargando reservas…" />
             </div>
           } @else if (reservations().length === 0 && hasFilters()) {
             <app-empty-state
@@ -188,11 +245,16 @@ const STATUS_BADGE = {
               [showActionButton]="true"
               (actionClick)="clearFilters()"
             />
-          } @else if (reservations().length === 0 && !hasActiveTypes()) {
+          } @else if (reservations().length === 0 && noActiveTypes()) {
+            <!-- RV4: only once the types loaded, never while they load. -->
             <app-empty-state
               icon="bed-double"
-              title="Primero crea tus habitaciones"
-              description="Las reservas se hacen sobre los tipos de habitación activos de Hotelería → Habitaciones."
+              title="Primero crea un tipo de habitación"
+              description="Las reservas se hacen sobre los tipos de habitación activos."
+              actionButtonText="Ir a Tipos"
+              actionButtonIcon="arrow-right"
+              [showActionButton]="true"
+              (actionClick)="goToTypes()"
             />
           } @else if (reservations().length === 0) {
             <app-empty-state
@@ -201,21 +263,29 @@ const STATUS_BADGE = {
               description="Crea una reserva por noches para bloquear las habitaciones de esas fechas."
               actionButtonText="Nueva reserva"
               actionButtonIcon="plus"
-              [showActionButton]="true"
+              [showActionButton]="hasActiveTypes() && canBook()"
               (actionClick)="isFormOpen.set(true)"
             />
           } @else {
-            <app-responsive-data-view
-              [data]="rows()"
-              [columns]="columns"
-              [cardConfig]="cardConfig"
-              [loading]="isLoading()"
-              [striped]="true"
-              [hoverable]="true"
-              emptyMessage="No hay reservas con ese criterio"
-              emptyIcon="search"
-              (rowClick)="openDetail($event)"
-            />
+            <!-- R-FB-04: a reload dims the previous page instead of emptying it. -->
+            <div
+              class="transition-opacity"
+              [class.opacity-50]="isLoading()"
+              [attr.aria-busy]="isLoading()"
+            >
+              <app-responsive-data-view
+                [data]="rows()"
+                [columns]="columns"
+                [cardConfig]="cardConfig"
+                [actions]="actions"
+                [mobileActions]="actions"
+                [striped]="true"
+                [hoverable]="true"
+                emptyMessage="No hay reservas con ese criterio"
+                emptyIcon="search"
+                (rowClick)="openDetail($event)"
+              />
+            </div>
             @if (totalPages() > 1) {
               <div class="mt-4 flex justify-center">
                 <app-pagination
@@ -240,7 +310,8 @@ const STATUS_BADGE = {
       />
       <app-reservation-detail-modal
         [reservationId]="detailId()"
-        (closed)="detailId.set(null)"
+        [startWith]="detailStep()"
+        (closed)="closeDetail()"
         (changed)="refresh()"
       />
     </div>
@@ -252,13 +323,31 @@ export class HospitalityReservationsPageComponent implements OnInit {
   private readonly currency = inject(CurrencyFormatService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly router = inject(Router);
+  private readonly authFacade = inject(AuthFacade);
+
+  /** Creating and cancelling need the reservations write permission (as on the rack). */
+  readonly canBook = computed(
+    () =>
+      this.authFacade.ownerFlag() ||
+      this.authFacade.hasPermission('store:lodging:reservations:write'),
+  );
+  /** RV3 — each list request cancels the one still in flight. */
+  private readonly listRequests = new Subject<void>();
 
   readonly reservations = signal<LodgingReservation[]>([]);
   readonly unitTypes = signal<UnitType[]>([]);
   readonly isLoading = signal(true);
+  /** R-FB-02 — reason of the last failed load; null = loaded or loading. */
+  readonly loadError = signal<string | null>(null);
+  /** RV2 — failed stats show "—" and the retry block, never zeros. */
+  readonly statsError = signal<string | null>(null);
   readonly isFormOpen = signal(false);
   readonly detailId = signal<number | null>(null);
+  readonly detailStep = signal<DetailStartStep>(null);
   readonly stats = signal<ReservationStats | null>(null);
+  /** RV4 — null until the room types answer. */
+  readonly unitTypesLoaded = signal(false);
 
   readonly search = signal('');
   readonly filterValues = signal<FilterValues>({});
@@ -283,16 +372,6 @@ export class HospitalityReservationsPageComponent implements OnInit {
     { key: 'date_from', label: 'Estadía desde', type: 'date' },
     { key: 'date_to', label: 'Estadía hasta', type: 'date' },
   ];
-
-  readonly dropdownActions = computed<DropdownAction[]>(() => [
-    {
-      label: 'Nueva reserva',
-      icon: 'plus',
-      action: 'create',
-      variant: 'primary',
-      disabled: !this.hasActiveTypes(),
-    },
-  ]);
 
   private readonly filter = (key: string): string => {
     const value = this.filterValues()[key];
@@ -319,11 +398,14 @@ export class HospitalityReservationsPageComponent implements OnInit {
   });
 
   readonly hasActiveTypes = computed(() => this.unitTypes().some((t) => t.is_active));
+  /** Known to have no active room type (false while they load). */
+  readonly noActiveTypes = computed(() => this.unitTypesLoaded() && !this.hasActiveTypes());
 
   readonly rows = computed<ReservationRow[]>(() =>
     this.reservations().map((r) => {
       const arrival = toDateOnly(r.arrival_date);
       const departure = toDateOnly(r.departure_date);
+      const nights = countNights(arrival, departure);
       return {
         ...r,
         guest: [r.customer.first_name, r.customer.last_name].filter(Boolean).join(' '),
@@ -331,8 +413,8 @@ export class HospitalityReservationsPageComponent implements OnInit {
           .filter((room) => !room.cancelled_at)
           .map((room) => room.unit_type.name)
           .join(', '),
-        stay: `${arrival} → ${departure}`,
-        nights: String(countNights(arrival, departure)),
+        stay: `${shortDate(arrival)} → ${shortDate(departure)} · ${nights} ${nights === 1 ? 'noche' : 'noches'}`,
+        nights: String(nights),
         total: this.currency.format(Number(r.total_amount), 0),
       };
     }),
@@ -342,7 +424,7 @@ export class HospitalityReservationsPageComponent implements OnInit {
     { key: 'reservation_number', label: 'Reserva', sortable: true },
     { key: 'guest', label: 'Huésped' },
     { key: 'room_type', label: 'Tipo' },
-    { key: 'stay', label: 'Llegada → Salida' },
+    { key: 'stay', label: 'Estadía' },
     { key: 'nights', label: 'Noches', align: 'center' },
     { key: 'total', label: 'Total', align: 'right' },
     {
@@ -355,21 +437,77 @@ export class HospitalityReservationsPageComponent implements OnInit {
     },
   ];
 
+  /** R-MOB-03 — guest as title, code below, chip, stay with nights and the total. */
   readonly cardConfig: ItemListCardConfig = {
-    titleKey: 'reservation_number',
-    subtitleKey: 'guest',
+    titleKey: 'guest',
+    subtitleKey: 'reservation_number',
     badgeKey: 'status',
     badgeConfig: STATUS_BADGE,
     badgeTransform: (value: keyof typeof RESERVATION_STATUS_LABELS) =>
       RESERVATION_STATUS_LABELS[value] ?? value,
     detailKeys: [
-      { key: 'room_type', label: 'Tipo' },
       { key: 'stay', label: 'Estadía' },
-      { key: 'nights', label: 'Noches' },
+      { key: 'room_type', label: 'Tipo' },
     ],
     footerKey: 'total',
     footerLabel: 'Total',
   };
+
+  /** RV5 (R-ROW-01) — open the detail, or cancel it with its penalty and reason. */
+  readonly actions: TableAction[] = [
+    {
+      label: 'Ver',
+      icon: 'eye',
+      variant: 'secondary',
+      action: (row: ReservationRow) => this.openDetail(row),
+    },
+    {
+      label: 'Cancelar',
+      icon: 'x-circle',
+      variant: 'danger',
+      show: (row: ReservationRow) =>
+        this.canBook() && (row.status === 'tentative' || row.status === 'confirmed'),
+      action: (row: ReservationRow) => this.openDetail(row, 'cancel'),
+    },
+  ];
+
+  constructor() {
+    this.listRequests
+      .pipe(
+        switchMap(() =>
+          this.reservationsService
+            .list({
+              search: this.search() || undefined,
+              status: this.filter('status') as LodgingReservationStatus | '',
+              date_from: this.filter('date_from') || undefined,
+              date_to: this.filter('date_to') || undefined,
+              page: this.page(),
+              limit: PAGE_SIZE,
+            })
+            .pipe(
+              map((result): ListResult => ({ ok: true, result })),
+              catchError((message: unknown) =>
+                of<ListResult>({
+                  ok: false,
+                  message: typeof message === 'string' ? message : 'Error de conexión',
+                }),
+              ),
+            ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((response) => {
+        this.isLoading.set(false);
+        if (!response.ok) {
+          // R-FB-02: a failed load shows the error block, never "Sin resultados".
+          this.loadError.set(response.message);
+          return;
+        }
+        this.reservations.set(response.result.data);
+        this.total.set(response.result.total);
+        this.totalPages.set(response.result.totalPages);
+      });
+  }
 
   ngOnInit(): void {
     this.refresh();
@@ -377,7 +515,10 @@ export class HospitalityReservationsPageComponent implements OnInit {
       .list()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (list) => this.unitTypes.set(list),
+        next: (list) => {
+          this.unitTypes.set(list);
+          this.unitTypesLoaded.set(true);
+        },
         error: (message: unknown) =>
           this.toastService.error(
             typeof message === 'string'
@@ -388,12 +529,24 @@ export class HospitalityReservationsPageComponent implements OnInit {
   }
 
   refresh(): void {
+    this.stats.set(null);
+    this.statsError.set(null);
     this.loadReservations();
     this.loadStats();
   }
 
-  openDetail(row: ReservationRow): void {
+  openDetail(row: ReservationRow, step: DetailStartStep = null): void {
+    this.detailStep.set(step);
     this.detailId.set(row.id);
+  }
+
+  closeDetail(): void {
+    this.detailId.set(null);
+    this.detailStep.set(null);
+  }
+
+  goToTypes(): void {
+    this.router.navigateByUrl('/admin/hospitality/rooms');
   }
 
   onSearch(term: string | null): void {
@@ -413,10 +566,6 @@ export class HospitalityReservationsPageComponent implements OnInit {
     this.onFilterChange({});
   }
 
-  onActionClick(action: string): void {
-    if (action === 'create') this.isFormOpen.set(true);
-  }
-
   onPage(page: number): void {
     this.page.set(page);
     this.loadReservations();
@@ -431,34 +580,16 @@ export class HospitalityReservationsPageComponent implements OnInit {
     this.reservationsService
       .stats()
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (stats) => this.stats.set(stats), error: () => {} });
+      .subscribe({
+        next: (stats) => this.stats.set(stats),
+        error: (message: unknown) =>
+          this.statsError.set(typeof message === 'string' ? message : 'Error de conexión'),
+      });
   }
 
   loadReservations(): void {
     this.isLoading.set(true);
-    this.reservationsService
-      .list({
-        search: this.search() || undefined,
-        status: this.filter('status') as LodgingReservationStatus | '',
-        date_from: this.filter('date_from') || undefined,
-        date_to: this.filter('date_to') || undefined,
-        page: this.page(),
-        limit: PAGE_SIZE,
-      })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          this.reservations.set(result.data);
-          this.total.set(result.total);
-          this.totalPages.set(result.totalPages);
-          this.isLoading.set(false);
-        },
-        error: (message: unknown) => {
-          this.isLoading.set(false);
-          this.toastService.error(
-            typeof message === 'string' ? message : 'No se pudieron cargar las reservas',
-          );
-        },
-      });
+    this.loadError.set(null);
+    this.listRequests.next();
   }
 }

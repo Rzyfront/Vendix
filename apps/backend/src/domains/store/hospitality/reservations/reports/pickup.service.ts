@@ -39,6 +39,8 @@ export interface LodgingPickupDayRow extends LodgingPickupRow {
 export interface LodgingPickupReport {
   from: string;
   to: string;
+  /** Store IANA timezone the stay dates were resolved in. */
+  timezone: string;
   totals: LodgingPickupRow;
   days: LodgingPickupDayRow[];
 }
@@ -65,7 +67,8 @@ export class LodgingPickupService {
       throw new VendixHttpException(ErrorCodes.LODGING_PICKUP_RANGE_001);
     }
     const now = new Date();
-    const from = localDateString(now, await resolveStoreTimezone(this.prisma, store_id));
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const from = localDateString(now, timezone);
     const to = addDays(from, span - 1);
 
     const [rooms, nights] = await Promise.all([
@@ -108,7 +111,7 @@ export class LodgingPickupService {
       total.pickup_30 += counts.pickup_30;
       days.push({ stay_date, ...row(rooms, counts) });
     }
-    return { from, to, totals: row(rooms * span, total), days };
+    return { from, to, timezone, totals: row(rooms * span, total), days };
   }
 }
 

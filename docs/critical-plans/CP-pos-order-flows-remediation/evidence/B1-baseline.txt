@@ -1,2 +1,0 @@
-Local dev baseline after H.3 API QA, before B.2 writer cutover:
-4

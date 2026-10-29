@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke: "Creating or modifying modals in frontend"
 ---
@@ -30,6 +30,7 @@ Source: `apps/frontend/src/app/shared/components/modal/modal.component.ts` (+ `R
 - Backdrop close is a single `click` outside the container and only when `[closeOnBackdrop]="true"`. Do not opt in for forms.
 - Keep `dialog` true except purely decorative modals.
 - Prefer shared components inside the body (preference, not hard rule).
+- Visual style is Soft UI (`vendix-ui-ux` → `references/soft-ui.md`): one solid primary action in the footer, the rest neutral/tinted; destructive actions use the `error` token tinted; footer buttons share height (`h-10 sm:h-11`) and `rounded-xl`; tokens only, no hardcoded CSS in wrappers.
 
 ## Wrapper Pattern
 

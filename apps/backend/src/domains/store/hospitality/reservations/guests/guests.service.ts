@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { dateOnlyToDb } from '../stay-dates';
+import { LODGING_CHECKED_IN_EVENT } from '../stay-events';
 import { LodgingGuestDto } from './guest.dto';
 import {
   guestFieldErrors,
@@ -45,7 +47,10 @@ type GuestRow = Prisma.lodging_guestsGetPayload<{ select: typeof GUEST_SELECT }>
  */
 @Injectable()
 export class LodgingGuestsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly eventEmitter?: EventEmitter2,
+  ) {}
 
   async findAll(reservationId: number) {
     await this.findReservation(reservationId);
@@ -73,6 +78,7 @@ export class LodgingGuestsService {
         });
       }),
     );
+    this.announceArrival(store_id, reservation);
     return this.present(row);
   }
 
@@ -92,6 +98,87 @@ export class LodgingGuestsService {
       }),
     );
     return this.present(row);
+  }
+
+  /**
+   * H8.1 — the guest's own online check-in: saves the party in one go, holder
+   * first. A guest whose document is already registered is updated (the desk
+   * may have typed it); desk-only fields (customer link, IVA exemption,
+   * permit) are kept unless `updateExisting` is false (guest already in
+   * house: only new companions are added). The first guest becomes the holder
+   * when the reservation has none, linked to the reservation customer.
+   */
+  async registerParty(
+    reservationId: number,
+    guests: LodgingGuestDto[],
+    holderCustomerId: number | null,
+    { updateExisting = true }: { updateExisting?: boolean } = {},
+  ) {
+    const store_id = this.requireStoreId();
+    const reservation = await this.findRegistrableReservation(reservationId);
+    const missing = guests.flatMap((guest, index) =>
+      guestFieldErrors(guest).map((error) => `Huésped ${index + 1}: ${error}`),
+    );
+    if (missing.length) {
+      throw new VendixHttpException(ErrorCodes.LODGING_GUEST_FIELDS_001, missing.join('. '), {
+        missing,
+      });
+    }
+    const rows = await Promise.all(guests.map((guest) => this.buildData(reservation, guest)));
+    const saved = await this.saveGuarded<number>(() =>
+      this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        // Serializes concurrent submits so the party never gets two holders.
+        await tx.$executeRaw`SELECT id FROM lodging_reservations WHERE id = ${reservationId} AND store_id = ${store_id} FOR UPDATE`;
+        let hasHolder =
+          (await tx.lodging_guests.count({
+            where: { reservation_id: reservationId, is_primary: true },
+          })) > 0;
+        for (const { customer_id, entry_permit_type, is_non_resident, ...data } of rows) {
+          const existing = await tx.lodging_guests.findFirst({
+            where: {
+              reservation_id: reservationId,
+              document_type: data.document_type,
+              document_number: { equals: data.document_number, mode: 'insensitive' },
+            },
+            select: { id: true },
+          });
+          if (existing) {
+            if (!updateExisting) continue;
+            await tx.lodging_guests.update({
+              where: { id: existing.id },
+              data: { ...data, updated_at: new Date() },
+            });
+            continue;
+          }
+          const is_primary = !hasHolder;
+          hasHolder = true;
+          await tx.lodging_guests.create({
+            data: {
+              ...data,
+              store_id,
+              reservation_id: reservationId,
+              is_primary,
+              customer_id: is_primary ? holderCustomerId : null,
+              entry_permit_type,
+              is_non_resident,
+            },
+          });
+        }
+        return rows.length;
+      }),
+    );
+    this.announceArrival(store_id, reservation);
+    return saved;
+  }
+
+  /**
+   * H4.1/H4.2 — a guest who joins a stay already in house arrives now: the
+   * check-in event (after the commit) lets the TRA and SIRE log the arrival
+   * of the new guest; guests already logged are skipped there.
+   */
+  private announceArrival(store_id: number, reservation: { id: number; status: string }): void {
+    if (reservation.status !== 'checked_in') return;
+    this.eventEmitter?.emit(LODGING_CHECKED_IN_EVENT, { store_id, reservation_id: reservation.id });
   }
 
   async remove(reservationId: number, guestId: number) {

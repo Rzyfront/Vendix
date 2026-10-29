@@ -76,7 +76,7 @@ function newRequestId(): string {
             Depósito recibido {{ money(s.received) }}
           </p>
           @if (s.applied > 0) {
-            <p class="text-text-secondary" data-testid="deposit-applied">Aplicado al folio {{ money(s.applied) }}</p>
+            <p class="text-text-secondary" data-testid="deposit-applied">Aplicado a la cuenta {{ money(s.applied) }}</p>
           }
           @if (s.retained > 0) {
             <p class="text-text-secondary" data-testid="deposit-retained">

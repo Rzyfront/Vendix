@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.2"
+  version: "2.3"
   scope: [root]
   auto_invoke: "Creating or refactoring standard admin modules (stats + table)"
 ---
@@ -114,6 +114,7 @@ The parent page owns stats and module-level state. The child list component owns
 - Keep stats to four cards for the standard row unless the product/design requirement says otherwise.
 - Use `smallText` on stats where meaningful; it is recommended and common, but `StatsComponent` does not require it in code.
 - Do not copy old super-admin roles as the standard pattern; it is a legacy/non-standard layout.
+- Visual style is Soft UI (`vendix-ui-ux` → `references/soft-ui.md`): toolbar controls (search, filters, actions, create) share `h-10 sm:h-11` and `rounded-xl`; the create button is the only solid primary, the rest neutral or tinted; tokens only, no hardcoded CSS.
 
 ## Mandatory: server-side pagination
 

@@ -169,6 +169,12 @@ export class DefaultPanelUIService {
         restaurant_ops_kds: true,
         restaurant_ops_tables: true,
         restaurant_ops_menus: true,
+        // Manufactura (MVP). Visible solo para industria `manufacturing`
+        // (gating en `INDUSTRY_HIDDEN_MODULES` del frontend).
+        manufacturing: true,
+        manufacturing_formulas: true,
+        manufacturing_orders: true,
+        manufacturing_settings: true,
         // Memberships (generalized membership core).
         // `default_visible_for_privileged_users=true` (owner/admin see the
         // parent + submodules on next login), `show_new_badge=yes` (user

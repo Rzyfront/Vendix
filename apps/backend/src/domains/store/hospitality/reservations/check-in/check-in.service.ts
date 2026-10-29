@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { localDateString, resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -8,6 +9,7 @@ import { LodgingReservationsService } from '../reservations.service';
 import { LodgingRoomChangesService } from '../room-changes.service';
 import { canTransition } from '../reservation-status';
 import { formatShortDate } from '../stay-dates';
+import { LODGING_CHECKED_IN_EVENT } from '../stay-events';
 import { CheckInDto } from './check-in.dto';
 import { isSellableHousekeeping } from '../../housekeeping/housekeeping-status';
 
@@ -32,6 +34,7 @@ export class LodgingCheckInService {
     private readonly prisma: StorePrismaService,
     private readonly reservations: LodgingReservationsService,
     private readonly roomChanges: LodgingRoomChangesService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async checkIn(id: number, dto: CheckInDto) {
@@ -183,6 +186,11 @@ export class LodgingCheckInService {
       });
       return true;
     });
+
+    // H4.1 — the TRA report listens after commit; it never blocks the desk.
+    if (checkedIn) {
+      this.eventEmitter.emit(LODGING_CHECKED_IN_EVENT, { store_id, reservation_id: id });
+    }
 
     const result = await this.reservations.findOne(id);
     if (!checkedIn && result.status !== 'checked_in') {

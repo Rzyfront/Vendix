@@ -16,6 +16,8 @@ import { InvoicingService } from '../../../invoicing/invoicing.service';
 import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
 import { buildOrderSaleTaxPayload } from '../../../payments/utils/order-sale-tax-payload.util';
 import { LodgingReservationsService } from '../reservations.service';
+import { formatShortDate } from '../stay-dates';
+import { LODGING_CHECKED_OUT_EVENT } from '../stay-events';
 import { FolioUser, FolioRow, hasActivePermission, LodgingFolioService } from '../folio/folio.service';
 import { CheckOutDto } from './check-out.dto';
 
@@ -125,7 +127,7 @@ export class LodgingCheckOutService {
     if (split && (dto.charge_to_credit || dto.bill_to_customer_id != null)) {
       throw new VendixHttpException(
         ErrorCodes.LODGING_CHECKOUT_BILL_TO_001,
-        'El folio está dividido: cada cuenta se factura a su titular',
+        'La cuenta está dividida: cada parte se factura a su titular',
       );
     }
 
@@ -174,14 +176,14 @@ export class LodgingCheckOutService {
     if (split && current.balance > 0) {
       throw new VendixHttpException(
         ErrorCodes.LODGING_CHECKOUT_BALANCE_001,
-        'El folio está dividido: cobra cada cuenta antes del check-out',
+        'La cuenta está dividida: cobra cada parte antes del check-out',
       );
     }
     if (current.balance > 0 && !dto.charge_to_credit) {
       if (!dto.store_payment_method_id) {
         throw new VendixHttpException(
           ErrorCodes.LODGING_CHECKOUT_BALANCE_001,
-          `El folio tiene un saldo de ${current.balance.toFixed(2)}: cóbralo o cárgalo a crédito de la empresa`,
+          `La cuenta tiene un saldo de ${current.balance.toFixed(2)}: cóbralo o cárgalo a crédito de la empresa`,
         );
       }
       await this.folios.registerPayment(reservation_id, {
@@ -214,7 +216,7 @@ export class LodgingCheckOutService {
           if (toCents(stored?.verified_total) !== toCents(order.grand_total)) {
             throw new VendixHttpException(
               ErrorCodes.LODGING_CHECKOUT_VERIFY_001,
-              'El folio cambió después de verificarlo: un usuario con permiso debe verificarlo de nuevo',
+              'La cuenta cambió después de verificarla: un usuario con permiso debe verificarla de nuevo',
             );
           }
         }
@@ -312,6 +314,9 @@ export class LodgingCheckOutService {
     // A concurrent click closed it first: answer with its result, no emission.
     if (!closed) return this.result(reservation_id, folio.order_id, false);
 
+    // H4.1 — the TRA report of the departure listens; it never blocks the desk.
+    this.eventEmitter.emit(LODGING_CHECKED_OUT_EVENT, { store_id, reservation_id });
+
     // After commit, so the listeners read the closed order.
     if (closed.credit) {
       await this.receivables.createCreditSaleFromEvent({
@@ -349,7 +354,7 @@ export class LodgingCheckOutService {
       orderBy: { id: 'desc' },
     });
     if (!invoice) {
-      throw new VendixHttpException(ErrorCodes.INVOICING_FIND_003, 'El folio no tiene factura');
+      throw new VendixHttpException(ErrorCodes.INVOICING_FIND_003, 'La cuenta no tiene factura');
     }
     return { url: await this.pdfService.getPdf(invoice.id) };
   }
@@ -583,7 +588,7 @@ export class LodgingCheckOutService {
       const dates = [...new Set(frozen.map((n) => n.night_date.toISOString().slice(0, 10)))];
       throw new VendixHttpException(
         ErrorCodes.LODGING_CHECKOUT_FROZEN_NIGHTS_001,
-        `Hay noches sin cobrar en días cerrados (${dates.join(', ')}): reabre el día para cobrarlas`,
+        `Hay noches sin cobrar en días cerrados (${dates.map(formatShortDate).join(', ')}): reabre el día para cobrarlas`,
       );
     }
   }
@@ -610,8 +615,8 @@ export class LodgingCheckOutService {
     throw new VendixHttpException(
       ErrorCodes.LODGING_CHECKOUT_VERIFY_001,
       current.verified_at
-        ? 'El folio cambió después de verificarlo: un usuario con permiso debe verificarlo de nuevo'
-        : 'Un usuario con permiso «Verificar el folio» debe revisarlo antes de facturar',
+        ? 'La cuenta cambió después de verificarla: un usuario con permiso debe verificarla de nuevo'
+        : 'Un usuario con permiso «Verificar cuenta» debe revisarla antes de facturar',
     );
   }
 

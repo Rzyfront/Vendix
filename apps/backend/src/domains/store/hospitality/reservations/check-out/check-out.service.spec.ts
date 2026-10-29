@@ -247,6 +247,11 @@ describe('LodgingCheckOutService (H3.7)', () => {
       'order.completed',
       expect.objectContaining({ order_id: 500, total_cost: 12000 }),
     );
+    // H4.1 — the TRA report of the departure starts after commit.
+    expect(events.emit).toHaveBeenCalledWith('lodging.reservation.checked_out', {
+      store_id: expect.any(Number),
+      reservation_id: 7,
+    });
     expect(result.invoice).toMatchObject({ state: 'issued', invoice_number: 'FE-120' });
     expect(result.reservation).toMatchObject({ status: 'checked_out' });
   });
@@ -258,7 +263,7 @@ describe('LodgingCheckOutService (H3.7)', () => {
       service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK),
     ).rejects.toMatchObject({
       errorCode: 'LODGING_CHECKOUT_FROZEN_NIGHTS_001',
-      message: expect.stringContaining('2026-10-25'),
+      message: expect.stringContaining('25-oct'),
     });
     expect(prisma.lodging_room_nights.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -379,10 +384,11 @@ describe('LodgingCheckOutService (H3.7)', () => {
   });
 
   it('el doble clic que pierde el cierre no emite', async () => {
-    const { service, fiscal, receivables } = build({ closeCount: 0 });
+    const { service, fiscal, receivables, events } = build({ closeCount: 0 });
 
     await service.checkOut(7, { store_payment_method_id: 2, request_id: REQUEST }, DESK);
 
+    expect(events.emit).not.toHaveBeenCalledWith('lodging.reservation.checked_out', expect.anything());
     expect(fiscal.emitForOrder).not.toHaveBeenCalled();
     expect(receivables.createCreditSaleFromEvent).not.toHaveBeenCalled();
   });

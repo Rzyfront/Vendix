@@ -14,6 +14,7 @@ import { LODGING_AMENITIES } from '../../unit-types/lodging-media';
 import { asPolicySnapshot } from '../../rates/lodging-cancellation-penalty';
 import { LodgingReservationsService } from '../reservations.service';
 import { stayNights } from '../stay-dates';
+import { storeRnt } from '../../compliance/rnt';
 import { BookingSearchDto, CreateBookingHoldDto } from './booking-engine.dto';
 import {
   amountDueNow,
@@ -49,6 +50,8 @@ interface HotelSettings {
   check_out_time: string;
   hold_minutes: number;
   currency: string;
+  /** H4.3 — printed on the voucher and the booking engine; null when unset. */
+  rnt_number: string | null;
 }
 
 /** A room type as the traveler sees it in the search results. */
@@ -108,10 +111,27 @@ export class LodgingBookingEngineService {
     private readonly storeContextRunner: StoreContextRunner,
   ) {}
 
+  // ------------------------------------------------------------------ hotel
+
+  /** H4.3 — what the booking engine shows before any search: the hotel's RNT and hours. */
+  async hotelInfo() {
+    const settings = await this.loadSettings(this.requireStoreId());
+    return {
+      rnt_number: settings.rnt_number,
+      check_in_time: settings.check_in_time,
+      check_out_time: settings.check_out_time,
+    };
+  }
+
   // ---------------------------------------------------------------- search
 
-  /** Room types that fit the guests, with price, policy and availability. */
-  async search(dto: BookingSearchDto) {
+  /**
+   * Room types that fit the guests, with price, policy and availability.
+   * Desk callers (Vexi, H9) pass the guest so their allotment counts, as in
+   * the reservation form, and skip signing the photos they do not show.
+   */
+  async search(dto: BookingSearchDto, options: { customer_id?: number; with_images?: boolean } = {}) {
+    const with_images = options.with_images ?? true;
     const store_id = this.requireStoreId();
     const nights = stayNights(dto.arrival_date, dto.departure_date);
     await this.assertNotPast(store_id, dto.arrival_date);
@@ -142,7 +162,7 @@ export class LodgingBookingEngineService {
 
     const room_types: BookableRoomType[] = [];
     for (const type of types) {
-      const quote = await this.quoteType(type.id, dto, plan_id);
+      const quote = await this.quoteType(type.id, dto, plan_id, options.customer_id);
       if (!quote) continue;
       const total = new Prisma.Decimal(quote.total_amount);
       const percent = new Prisma.Decimal(quote.deposit_percent);
@@ -160,9 +180,11 @@ export class LodgingBookingEngineService {
         max_adults: type.max_adults,
         max_children: type.max_children,
         max_occupancy: type.max_occupancy,
-        images: (await Promise.all(type.images.map((key) => this.s3.signUrl(key)))).filter(
-          (url): url is string => !!url,
-        ),
+        images: with_images
+          ? (await Promise.all(type.images.map((key) => this.s3.signUrl(key)))).filter(
+              (url): url is string => !!url,
+            )
+          : [],
         amenities: type.amenities.map((code) => ({ code, label: AMENITY_LABELS.get(code) ?? code })),
         available: Math.max(0, quote.available),
         bookable: reason === null,
@@ -483,9 +505,15 @@ export class LodgingBookingEngineService {
    * type the plan does not price falls back to its base price. Null when
    * the type cannot be sold online (missing, inactive or too small).
    */
-  private async quoteType(unit_type_id: number, dto: BookingSearchDto, plan_id: number | undefined) {
+  private async quoteType(
+    unit_type_id: number,
+    dto: BookingSearchDto,
+    plan_id: number | undefined,
+    customer_id?: number,
+  ) {
     const input = {
       unit_type_id,
+      ...(customer_id ? { customer_id } : {}),
       arrival_date: dto.arrival_date,
       departure_date: dto.departure_date,
       adults: dto.adults,
@@ -538,12 +566,14 @@ export class LodgingBookingEngineService {
       check_in_time?: string;
       check_out_time?: string;
       booking_hold_minutes?: number;
+      rnt_number?: string;
     };
     return {
       check_in_time: hospitality.check_in_time || '15:00',
       check_out_time: hospitality.check_out_time || '12:00',
       hold_minutes: bookingHoldMinutes(hospitality.booking_hold_minutes),
       currency: settings?.general?.currency || 'COP',
+      rnt_number: storeRnt(hospitality),
     };
   }
 
@@ -598,6 +628,7 @@ export class LodgingBookingEngineService {
         check_in_time: settings.check_in_time,
         check_out_time: settings.check_out_time,
         policy: policyText(asPolicySnapshot(room?.cancellation_policy_snapshot)),
+        rnt_number: settings.rnt_number,
       });
       const result = await this.email.sendEmail(to, message.subject, message.html, message.text);
       if (!result.success) {

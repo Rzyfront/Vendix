@@ -1,4 +1,5 @@
-import { Routes } from '@angular/router';
+import { inject } from '@angular/core';
+import { Router, Routes } from '@angular/router';
 import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
@@ -12,6 +13,7 @@ import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; /
 import {
   panelUiGuard,
   firstActiveModuleRedirectGuard,
+  hospitalityHomeRedirectGuard,
 } from '../../core/guards/panel-ui.guard'; // A.4 + B.1
 import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
 import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
@@ -957,6 +959,18 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // Manufactura (MVP: Fórmulas, Órdenes de producción, Planta). Hidden by
+      // INDUSTRY_HIDDEN_MODULES for every industry except `manufacturing`.
+      // Panel_ui keys: manufacturing (parent) · manufacturing_formulas ·
+      // manufacturing_orders · manufacturing_settings. The root
+      // /admin/manufacturing defaults to Fórmulas.
+      {
+        path: 'manufacturing',
+        loadChildren: () =>
+          import(
+            '../../private/modules/store/manufacturing/routes/manufacturing.routes'
+          ).then((m) => m.manufacturingRoutes),
+      },
       // Memberships (Membership Suite: Planes, Socios/Membresías, Accesos). The
       // whole group is hidden by INDUSTRY_HIDDEN_MODULES for every industry
       // except `gym`; visible only when the store's industry includes `gym`.
@@ -1000,9 +1014,29 @@ export const storeAdminRoutes: Routes = [
         path: 'hospitality',
         children: [
           {
+            // R1 — each role lands on its first daily screen: Recepción,
+            // then Limpieza (Camarera), then the first visible entry.
             path: '',
             pathMatch: 'full',
-            redirectTo: 'rooms',
+            canActivate: [hospitalityHomeRedirectGuard],
+            children: [],
+          },
+          {
+            // R4 — "Reportes de hotel": the four hotel reports as tabs (?tab=);
+            // same panel_ui key as Reservas.
+            path: 'reports',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/reports/pages/reports-page/reports-page.component'
+              ).then((c) => c.HospitalityReportsPageComponent),
+          },
+          {
+            // H4.1/H4.2 — "Cumplimiento": TRA and SIRE (foreign guests) as tabs.
+            path: 'compliance',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/compliance/pages/compliance-page/compliance-page.component'
+              ).then((c) => c.HospitalityCompliancePageComponent),
           },
           {
             path: 'rooms',
@@ -1050,52 +1084,55 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.HospitalityHousekeepingPageComponent),
           },
           {
-            // H6.1 — Canales → iCal export; same panel_ui key as Tarifas.
+            // R2 — iCal channels live in Configuración → General → Hotelería.
             path: 'channels',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/hospitality/channels/pages/ical-export-page/ical-export-page.component'
-              ).then((c) => c.HospitalityIcalExportPageComponent),
+            pathMatch: 'full',
+            redirectTo: () =>
+              inject(Router).createUrlTree(['/admin/settings/general/hoteleria'], {
+                fragment: 'section-ical',
+              }),
           },
+          // R4 — the loose report URLs open their tab in Reportes de hotel.
           {
-            // H7.1 — "Cierre del día" (night audit); same panel_ui key as Reservas.
             path: 'night-audit',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/hospitality/reservations/pages/night-audit-page/night-audit-page.component'
-              ).then((c) => c.HospitalityNightAuditPageComponent),
+            pathMatch: 'full',
+            redirectTo: () =>
+              inject(Router).createUrlTree(['/admin/hospitality/reports'], {
+                queryParams: { tab: 'night-audit' },
+              }),
           },
           {
-            // H7.2 — "Indicadores" (occupancy, ADR, RevPAR); same panel_ui key as Reservas.
             path: 'performance',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/hospitality/reservations/pages/performance-page/performance-page.component'
-              ).then((c) => c.HospitalityPerformancePageComponent),
+            pathMatch: 'full',
+            redirectTo: () =>
+              inject(Router).createUrlTree(['/admin/hospitality/reports'], {
+                queryParams: { tab: 'performance' },
+              }),
           },
           {
-            // H7.3 — "Pickup y pronóstico"; same panel_ui key as Reservas.
             path: 'pickup',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/hospitality/reservations/pages/pickup-page/pickup-page.component'
-              ).then((c) => c.HospitalityPickupPageComponent),
+            pathMatch: 'full',
+            redirectTo: () =>
+              inject(Router).createUrlTree(['/admin/hospitality/reports'], {
+                queryParams: { tab: 'pickup' },
+              }),
           },
           {
-            // H7.4 — "No-shows y cancelaciones"; same panel_ui key as Reservas.
             path: 'cancellations',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/hospitality/reservations/pages/cancellations-page/cancellations-page.component'
-              ).then((c) => c.HospitalityCancellationsPageComponent),
+            pathMatch: 'full',
+            redirectTo: () =>
+              inject(Router).createUrlTree(['/admin/hospitality/reports'], {
+                queryParams: { tab: 'cancellations' },
+              }),
           },
           {
-            // H3.9 — "Servicios exentos" report; same panel_ui key as Reservas.
+            // R3 — "Servicios exentos" lives in Configuración → General → Facturación.
             path: 'exempt-services',
-            loadComponent: () =>
-              import(
-                '../../private/modules/store/hospitality/reservations/pages/vat-exempt-services-page/vat-exempt-services-page.component'
-              ).then((c) => c.HospitalityVatExemptServicesPageComponent),
+            pathMatch: 'full',
+            redirectTo: () =>
+              inject(Router).createUrlTree(['/admin/settings/general/facturacion'], {
+                fragment: 'section-vat-exempt',
+              }),
           },
         ],
       },

@@ -15,14 +15,8 @@ export type LodgingReservationStatus =
   | 'cancelled'
   | 'no_show';
 
-export const RESERVATION_STATUS_LABELS: Record<LodgingReservationStatus, string> = {
-  tentative: 'Tentativa',
-  confirmed: 'Confirmada',
-  checked_in: 'En casa',
-  checked_out: 'Salida',
-  cancelled: 'Cancelada',
-  no_show: 'No-show',
-};
+/** Labels live with the chip colors (R-CHIP-02). */
+export { RESERVATION_STATUS_LABELS } from '../../shared/hospitality-status';
 
 export interface LodgingReservationRoom {
   id: number;
@@ -98,6 +92,8 @@ export interface LodgingReservation {
   /** H2.4 — penalty computed when cancelled or no-show ("1 noche"). */
   cancellation_penalty_amount?: string | null;
   cancellation_penalty_detail?: string | null;
+  /** H8.1 — when the guest completed the online check-in ("Pre-registro completo ✓"). */
+  precheckin_completed_at?: string | null;
   /** Status history, oldest first (detail only). */
   events?: LodgingReservationEvent[];
   /** H3.2 — guest folio opened at check-in (detail only). */
@@ -122,12 +118,25 @@ export interface LodgingFolio {
   status: 'open' | 'closed';
   opened_at: string;
   closed_at: string | null;
-  order: { id: number; order_number: string; grand_total: string };
+  order: {
+    id: number;
+    order_number: string;
+    grand_total: string;
+    /** H8.5 — private rating the guest gave after check-out. */
+    order_review?: LodgingStayReview | null;
+  };
+}
+
+/** H8.5 — the guest's private rating of the stay (1-5 stars). */
+export interface LodgingStayReview {
+  rating: number;
+  comment: string | null;
+  created_at: string;
 }
 
 export const FOLIO_STATUS_LABELS: Record<LodgingFolio['status'], string> = {
-  open: 'Abierto',
-  closed: 'Cerrado',
+  open: 'Abierta',
+  closed: 'Cerrada',
 };
 
 /** H3.2 — check-in: rooms picked now and the dirty-room confirmation. */
@@ -135,6 +144,14 @@ export interface CheckInRequest {
   rooms?: { room_id: number; unit_id: number }[];
   confirm_dirty?: boolean;
 }
+
+/**
+ * Check-in outcome: the updated reservation, or the dirty-room warning the
+ * desk must confirm (resend with `confirm_dirty`). Errors stay plain text.
+ */
+export type CheckInResult =
+  | { reservation: LodgingReservation; dirtyWarning?: undefined }
+  | { reservation?: undefined; dirtyWarning: string };
 
 /** One status change of a reservation (H1.2). `user` null = automatic. */
 export interface LodgingReservationEvent {
@@ -182,11 +199,25 @@ export interface FrontDeskRow {
   guest_name: string;
   /** "101 · Doble, Sin asignar · Suite". */
   rooms: string;
+  /** Active rooms without a physical room yet: check-in must pick them first. */
+  unassigned_rooms: number;
   adults: number;
   children: number;
   folio_id: number | null;
   /** Folio balance (charges − payments) as a decimal string; null without a folio. */
   balance: string | null;
+  /** H8.4 — keys or cards handed over and not returned yet. */
+  keys_out: number;
+  /** H8.1 — guests already registered (online check-in or desk). */
+  registered_guests: number;
+}
+
+/** U1 — "Check-in realizado · 203" (every active room of the stay). */
+export function checkInDoneMessage(reservation: LodgingReservation): string {
+  const codes = reservation.rooms
+    .filter((room) => !room.cancelled_at && room.unit)
+    .map((room) => room.unit!.code);
+  return codes.length ? `Check-in realizado · ${codes.join(', ')}` : 'Check-in realizado';
 }
 
 /** H3.3 — today's arrivals, departures and guests in house (store business day). */

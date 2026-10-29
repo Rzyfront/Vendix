@@ -63,8 +63,9 @@ function build(options: { status?: string; rooms?: { id: number; cancelled_at: D
     },
     $transaction: jest.fn(async (fn: any) => fn(tx)),
   };
-  const service = new LodgingGuestsService(prisma as any);
-  return { service, prisma, tx };
+  const events = { emit: jest.fn() };
+  const service = new LodgingGuestsService(prisma as any, events as any);
+  return { service, prisma, tx, events };
 }
 
 async function errorOf(promise: Promise<unknown>) {
@@ -98,6 +99,19 @@ describe('LodgingGuestsService (H3.1)', () => {
     expect(tx.lodging_guests.updateMany).toHaveBeenCalled();
     expect(guest.reports_sire).toBe(false);
     expect(guest.travel_purpose_label).toBe('Vacaciones, recreo y ocio');
+  });
+
+  it('announces the arrival of a companion added with the stay in house, never before check-in', async () => {
+    const inHouse = build({ status: 'checked_in', guests: 1 });
+    await inHouse.service.create(1, COMPANION);
+    expect(inHouse.events.emit).toHaveBeenCalledWith('lodging.reservation.checked_in', {
+      store_id: 5,
+      reservation_id: 1,
+    });
+
+    const confirmed = build({ guests: 1 });
+    await confirmed.service.create(1, COMPANION);
+    expect(confirmed.events.emit).not.toHaveBeenCalled();
   });
 
   it('adds a US passport companion flagged "Reporta SIRE"', async () => {

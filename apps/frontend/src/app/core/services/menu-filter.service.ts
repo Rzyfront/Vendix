@@ -231,6 +231,13 @@ export class MenuFilterService {
     Mesas: 'restaurant_ops_tables',
     Cartas: 'restaurant_ops_menus',
 
+    // Manufactura (MVP) — padre + 3 submódulos. Visible solo cuando la
+    // industria incluye `manufacturing` (INDUSTRY_HIDDEN_MODULES).
+    Manufactura: 'manufacturing',
+    Fórmulas: 'manufacturing_formulas',
+    'Órdenes de producción': 'manufacturing_orders',
+    Planta: 'manufacturing_settings',
+
     // Memberships (Membership Suite) — padre + 3 submódulos. El padre
     // "Zona Fit" mapea al key padre para que el sidebar renderice el grupo
     // cuando la industria (gym o service) lo permita; cada submódulo se mapea a

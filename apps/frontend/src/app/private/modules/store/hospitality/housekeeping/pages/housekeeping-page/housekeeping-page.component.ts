@@ -14,10 +14,12 @@ import {
   BadgeComponent,
   ButtonComponent,
   CardComponent,
+  DialogService,
   DropdownAction,
   EmptyStateComponent,
   FilterConfig,
   FilterValues,
+  IconComponent,
   InputsearchComponent,
   ModalComponent,
   OptionsDropdownComponent,
@@ -25,6 +27,7 @@ import {
   ScrollableTabsComponent,
   StatsComponent,
   ToastService,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { BadgeVariant } from '../../../../../../../shared/components/badge/badge.component';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
@@ -36,30 +39,26 @@ import {
   HOUSEKEEPING_QUICK_ACTION,
   HOUSEKEEPING_STATUS_PERMISSIONS,
   HOUSEKEEPING_TRANSITIONS,
+  OFF_SALE_STATUS_HELP,
   HousekeepingBoard,
   HousekeepingBoardUnit,
+  HousekeepingTask,
 } from '../../interfaces/housekeeping.interface';
 import { LodgingHousekeepingService } from '../../services/housekeeping.service';
+import {
+  HOUSEKEEPING_STATUS_CHIPS,
+  VARIANT_BORDER,
+} from '../../../shared/hospitality-status';
+import { format, parseISO } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { HousekeepingTasksPanelComponent } from '../../components/housekeeping-tasks-panel/housekeeping-tasks-panel.component';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
+import {
+  HousekeepingTaskFormModalComponent,
+  TaskFormPreset,
+} from '../../components/task-form-modal/task-form-modal.component';
 
 type HousekeepingTab = 'rooms' | 'tasks';
-
-/** Status colors: warning asks for attention, error is out of sale. */
-const STATUS_BADGE: Record<HousekeepingStatus, BadgeVariant> = {
-  dirty: 'warning',
-  clean: 'success',
-  inspected: 'primary',
-  out_of_order: 'error',
-  out_of_service: 'neutral',
-};
-
-const STATUS_BORDER: Record<HousekeepingStatus, string> = {
-  dirty: 'border-l-warning',
-  clean: 'border-l-success',
-  inspected: 'border-l-primary',
-  out_of_order: 'border-l-error',
-  out_of_service: 'border-l-border',
-};
 
 const OCCUPANCY_LABELS = { in_house: 'En casa', departs_today: 'Sale hoy' } as const;
 
@@ -98,17 +97,21 @@ const stringFilter = (values: FilterValues, key: string): string => {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    HospitalityLoadErrorComponent,
+    SpinnerComponent,
     FormsModule,
     StatsComponent,
     CardComponent,
     BadgeComponent,
     ButtonComponent,
+    IconComponent,
     EmptyStateComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ScrollableTabsComponent,
     ModalComponent,
     HousekeepingTasksPanelComponent,
+    HousekeepingTaskFormModalComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
@@ -118,50 +121,49 @@ const stringFilter = (values: FilterValues, key: string): string => {
       >
         <app-stats
           title="Sucias"
-          [value]="count('dirty')"
+          [value]="loadError() ? '—' : count('dirty')"
           smallText="por limpiar"
           iconName="alert-circle"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-500"
-          [loading]="board() === null"
+          [loading]="board() === null && !loadError()"
         />
         <app-stats
           title="Limpias"
-          [value]="count('clean')"
+          [value]="loadError() ? '—' : count('clean')"
           smallText="por inspeccionar"
           iconName="sparkles"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-500"
-          [loading]="board() === null"
+          [loading]="board() === null && !loadError()"
         />
         <app-stats
           title="Inspeccionadas"
-          [value]="count('inspected')"
+          [value]="loadError() ? '—' : count('inspected')"
           smallText="listas para la venta"
           iconName="clipboard-check"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
-          [loading]="board() === null"
+          [loading]="board() === null && !loadError()"
         />
         <app-stats
           title="Fuera de venta"
-          [value]="count('out_of_order') + count('out_of_service')"
-          smallText="fuera de servicio o no disponibles"
+          [value]="loadError() ? '—' : count('out_of_order') + count('out_of_service')"
+          smallText="fuera de servicio o bloqueadas"
           iconName="ban"
           iconBgColor="bg-red-100"
           iconColor="text-red-500"
-          [loading]="board() === null"
+          [loading]="board() === null && !loadError()"
         />
       </div>
 
-      @if (tasksMode()) {
-        <app-scrollable-tabs
-          ariaLabel="Housekeeping"
-          [tabs]="tabs()"
-          [activeTab]="tab()"
-          (tabChange)="onTab($event)"
-        />
-      }
+      <!-- R-NAV: the tasks tab never vanishes; without access it says so. -->
+      <app-scrollable-tabs
+        ariaLabel="Limpieza"
+        [tabs]="tabs()"
+        [activeTab]="tab()"
+        (tabChange)="onTab($event)"
+      />
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Sticky search header -->
@@ -179,6 +181,8 @@ const stringFilter = (values: FilterValues, key: string): string => {
               @if (tab() === 'rooms') {
                 Habitaciones
                 <span class="text-text-secondary font-normal">({{ visibleUnits() }})</span>
+              } @else if (!tasksMode()) {
+                Tareas de hoy
               } @else {
                 {{ tasksMode() === 'assign' ? 'Tareas de hoy' : 'Mis tareas de hoy' }}
                 <span class="text-text-secondary font-normal">
@@ -199,6 +203,36 @@ const stringFilter = (values: FilterValues, key: string): string => {
                 [ngModel]="search()"
                 (ngModelChange)="onSearch($event)"
               />
+              <!-- R-CTA-01..03: "+ Nueva tarea" belongs to the tasks tab only. -->
+              @if (tab() === 'tasks' && canCreateTask()) {
+                <app-button
+                  variant="primary"
+                  size="md"
+                  [iconOnlyMobile]="true"
+                  customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 !rounded-[10px]"
+                  class="shrink-0"
+                  [disabled]="board() === null"
+                  [attr.title]="newTaskBlockedReason()"
+                  ariaLabel="Nueva tarea"
+                  (clicked)="openTaskForm({})"
+                  data-testid="hk-new-task"
+                >
+                  <app-icon slot="icon" name="plus" [size]="18" />
+                  Nueva tarea
+                </app-button>
+              }
+              @if (tab() === 'tasks' && canCreateTask() && loadError() !== null) {
+                <!-- R-CTA-06: say why "+ Nueva tarea" is off and how to fix it. -->
+                <app-button
+                  variant="ghost"
+                  size="sm"
+                  class="shrink-0"
+                  (clicked)="load()"
+                  data-testid="hk-new-task-retry"
+                >
+                  No se pudieron cargar las habitaciones · Reintentar
+                </app-button>
+              }
               <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="filterConfigs()"
@@ -223,13 +257,25 @@ const stringFilter = (values: FilterValues, key: string): string => {
               [assignmentFilter]="assignmentFilter()"
               (roomChanged)="load()"
               (clearFilters)="clearFilters()"
+              (createTask)="openTaskForm({})"
+            />
+          } @else if (tab() === 'tasks') {
+            <app-empty-state
+              icon="lock"
+              title="No tienes acceso a las tareas"
+              description="Pide a quien administra la tienda el permiso de Limpieza para ver o asignar las tareas del día."
+              [showActionButton]="false"
+              data-testid="hk-tasks-no-access"
+            />
+          } @else if (loadError() !== null) {
+            <app-hospitality-load-error
+              what="las habitaciones"
+              [message]="loadError()"
+              (retry)="load()"
             />
           } @else if (board() === null) {
-            <div class="p-4 md:p-6 text-center">
-              <div
-                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-              ></div>
-              <p class="mt-2 text-text-secondary">Cargando habitaciones...</p>
+            <div class="p-4 md:p-6">
+              <app-spinner [center]="true" text="Cargando habitaciones…" />
             </div>
           } @else if ((board()?.units ?? []).length === 0) {
             <app-empty-state
@@ -287,6 +333,20 @@ const stringFilter = (values: FilterValues, key: string): string => {
                             {{ action.label }}
                           </app-button>
                         }
+                        @if (canCreateTask()) {
+                          <app-button
+                            variant="ghost"
+                            size="sm"
+                            [fullWidth]="true"
+                            customClasses="!min-h-11"
+                            [ariaLabel]="'Crear tarea para la ' + unit.code"
+                            (clicked)="openTaskForm({ unitId: unit.id })"
+                            [attr.data-testid]="'hk-unit-task-' + unit.code"
+                          >
+                            <app-icon slot="icon" name="plus" [size]="14" />
+                            Crear tarea
+                          </app-button>
+                        }
                       </div>
                     }
                   </div>
@@ -307,21 +367,45 @@ const stringFilter = (values: FilterValues, key: string): string => {
       >
         <div class="flex flex-col gap-2">
           @for (to of targets(); track to) {
-            <app-button
-              [variant]="to === 'out_of_order' || to === 'out_of_service' ? 'outline' : 'secondary'"
-              [fullWidth]="true"
-              [disabled]="saving() !== null"
-              (clicked)="change(selected()!, to)"
-            >
-              {{ label(to) }}
-            </app-button>
+            @if (offSale(to); as off) {
+              <div class="flex flex-col gap-1">
+                <app-button
+                  variant="outline"
+                  [fullWidth]="true"
+                  [disabled]="saving() !== null"
+                  (clicked)="change(selected()!, to)"
+                  [attr.data-testid]="'hk-to-' + to"
+                >
+                  {{ off.label }}
+                </app-button>
+                <p class="px-1 text-xs text-text-secondary">{{ off.help }}</p>
+              </div>
+            } @else {
+              <app-button
+                variant="secondary"
+                [fullWidth]="true"
+                [disabled]="saving() !== null"
+                (clicked)="change(selected()!, to)"
+              >
+                {{ label(to) }}
+              </app-button>
+            }
           }
           <p class="text-xs text-text-secondary">
-            Fuera de servicio y No disponible sacan la habitación de la venta y del check-in.
-            Para cerrarla por fechas usa «Bloquear habitación» en el rack.
+            Las dos sacan la habitación de la venta y del check-in. Para cerrarla solo
+            unas fechas usa «Bloquear habitación» en el rack.
           </p>
         </div>
       </app-modal>
+
+      <app-housekeeping-task-form-modal
+        [preset]="taskPreset()"
+        [units]="board()?.units ?? []"
+        [today]="board()?.business_date ?? ''"
+        [staff]="tasksPanel()?.day()?.staff ?? null"
+        (closed)="taskPreset.set(null)"
+        (created)="onTaskCreated($event)"
+      />
     </div>
   `,
 })
@@ -329,11 +413,14 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
   private readonly housekeepingService = inject(LodgingHousekeepingService);
   private readonly authFacade = inject(AuthFacade);
   private readonly toastService = inject(ToastService);
+  private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly tasksPanel = viewChild(HousekeepingTasksPanelComponent);
 
   readonly board = signal<HousekeepingBoard | null>(null);
+  /** R-FB-02 — reason of the last failed load; null = loaded or loading. */
+  readonly loadError = signal<string | null>(null);
   /** Room whose status change is in flight (blocks a double click). */
   readonly saving = signal<number | null>(null);
   readonly selected = signal<HousekeepingBoardUnit | null>(null);
@@ -346,6 +433,11 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
         : null,
   );
 
+  /** U12 — only who assigns tasks may create them (same API permission). */
+  readonly canCreateTask = computed(() => this.tasksMode() === 'assign');
+  /** Open "+ Nueva tarea" form with what the opener knows; null = closed. */
+  readonly taskPreset = signal<TaskFormPreset | null>(null);
+
   readonly tab = signal<HousekeepingTab>('rooms');
   readonly search = signal('');
   readonly filterValues = signal<FilterValues>({});
@@ -354,7 +446,7 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
     { id: 'rooms', label: `Habitaciones (${this.board()?.units.length ?? 0})`, icon: 'bed-double' },
     {
       id: 'tasks',
-      label: this.tasksMode() === 'assign' ? 'Tareas de hoy' : 'Mis tareas',
+      label: this.tasksMode() === 'mine' ? 'Mis tareas' : 'Tareas de hoy',
       icon: 'clipboard-list',
     },
   ]);
@@ -404,7 +496,7 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
           { value: '', label: 'Todos' },
           ...(Object.keys(HOUSEKEEPING_STATUS_LABELS) as HousekeepingStatus[]).map((s) => ({
             value: s,
-            label: HOUSEKEEPING_STATUS_LABELS[s],
+            label: OFF_SALE_STATUS_HELP[s]?.label ?? HOUSEKEEPING_STATUS_LABELS[s],
           })),
         ],
       },
@@ -476,15 +568,17 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
   }
 
   load(): void {
+    this.loadError.set(null);
     this.housekeepingService
       .board()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (board) => this.board.set(board),
+        // R-FB-02: a failed load shows the error block, never an empty board.
         error: (message: unknown) => {
-          this.board.set({ business_date: '', units: [] });
-          this.toastService.error(
-            typeof message === 'string' ? message : 'No se pudo cargar el tablero',
+          this.board.set(null);
+          this.loadError.set(
+            typeof message === 'string' ? message : 'Revisa tu conexión e inténtalo de nuevo.',
           );
         },
       });
@@ -510,6 +604,30 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
     this.tasksPanel()?.load();
   }
 
+  /** R-CTA-06 — why "+ Nueva tarea" is disabled (it needs the rooms). */
+  readonly newTaskBlockedReason = computed(() => {
+    if (this.board() !== null) return null;
+    return this.loadError() !== null
+      ? 'No se pudieron cargar las habitaciones'
+      : 'Cargando habitaciones…';
+  });
+
+  openTaskForm(preset: TaskFormPreset): void {
+    if (this.canCreateTask() && this.board() !== null) this.taskPreset.set(preset);
+  }
+
+  onTaskCreated(task: HousekeepingTask): void {
+    this.taskPreset.set(null);
+    this.tasksPanel()?.add(task);
+    const day = this.board()?.business_date;
+    // A task of another day is not listed today: say when it shows up.
+    this.toastService.success(
+      task.task_date === day
+        ? `Tarea creada · ${task.unit.code}`
+        : `Tarea creada · ${task.unit.code} · ${format(parseISO(task.task_date), 'd MMM', { locale: es })}; aparecerá ese día`,
+    );
+  }
+
   count(status: HousekeepingStatus): number {
     return (this.board()?.units ?? []).filter((u) => u.housekeeping_status === status).length;
   }
@@ -519,11 +637,11 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
   }
 
   badge(unit: HousekeepingBoardUnit): BadgeVariant {
-    return STATUS_BADGE[unit.housekeeping_status];
+    return HOUSEKEEPING_STATUS_CHIPS[unit.housekeeping_status].variant;
   }
 
   border(unit: HousekeepingBoardUnit): string {
-    return STATUS_BORDER[unit.housekeeping_status];
+    return VARIANT_BORDER[HOUSEKEEPING_STATUS_CHIPS[unit.housekeeping_status].variant];
   }
 
   occupancy(unit: HousekeepingBoardUnit): string {
@@ -536,6 +654,10 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
     return !required || this.authFacade.hasAnyPermission(required);
   }
 
+  offSale(to: HousekeepingStatus) {
+    return OFF_SALE_STATUS_HELP[to] ?? null;
+  }
+
   quickAction(unit: HousekeepingBoardUnit) {
     const action = HOUSEKEEPING_QUICK_ACTION[unit.housekeeping_status];
     return action && this.mayChangeTo(action.to) ? action : null;
@@ -545,7 +667,22 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
     if (this.canOperate()) this.selected.set(unit);
   }
 
-  change(unit: HousekeepingBoardUnit, to: HousekeepingStatus): void {
+  async change(unit: HousekeepingBoardUnit, to: HousekeepingStatus): Promise<void> {
+    if (this.saving() !== null) return;
+    // R-CONF-02 — leaving the sale is a danger confirmation.
+    const off = this.offSale(to);
+    if (
+      off &&
+      !(await this.dialogService.confirm({
+        title: `Sacar de la venta la ${unit.code}`,
+        message: `Quedará ${off.label.toLowerCase()}. ${off.help} No se podrá vender ni hacer check-in hasta que vuelva a servicio.`,
+        confirmText: 'Sacar de la venta',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      }))
+    ) {
+      return;
+    }
     if (this.saving() !== null) return;
     this.saving.set(unit.id);
     this.housekeepingService
@@ -563,7 +700,21 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
               ),
             },
           );
-          this.toastService.success(`La ${updated.code} quedó ${this.label(to).toLowerCase()}`);
+          const message = `La ${updated.code} quedó ${this.label(to).toLowerCase()}`;
+          if (to === 'dirty' && this.canCreateTask()) {
+            // U12 — a room dirtied by hand gets no task on its own: offer one.
+            this.toastService.show({
+              variant: 'success',
+              description: message,
+              duration: 6000,
+              action: {
+                label: 'Crear tarea de limpieza',
+                onClick: () => this.openTaskForm({ unitId: updated.id, type: 'checkout_clean' }),
+              },
+            });
+          } else {
+            this.toastService.success(message);
+          }
         },
         error: (message: unknown) => {
           this.saving.set(null);

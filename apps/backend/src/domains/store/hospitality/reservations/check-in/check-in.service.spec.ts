@@ -63,8 +63,9 @@ function build(options: Options = {}) {
     findOne: jest.fn(async () => ({ id: 1, status: 'checked_in' })),
   };
   const roomChanges = { apply: jest.fn(async () => 1) };
-  const service = new LodgingCheckInService(prisma as any, reservations as any, roomChanges as any);
-  return { service, prisma, tx, reservations, roomChanges };
+  const eventEmitter = { emit: jest.fn() };
+  const service = new LodgingCheckInService(prisma as any, reservations as any, roomChanges as any, eventEmitter as any);
+  return { service, prisma, tx, reservations, roomChanges, eventEmitter };
 }
 
 async function errorOf(promise: Promise<unknown>): Promise<VendixHttpException> {
@@ -91,7 +92,7 @@ describe('LodgingCheckInService (H3.2)', () => {
   });
 
   it('checks in, assigns the picked room and opens the folio as a $0 draft POS order of the holder', async () => {
-    const { service, tx, roomChanges } = build({ unit_id: null });
+    const { service, tx, roomChanges, eventEmitter } = build({ unit_id: null });
     const dto: CheckInDto = { rooms: [{ room_id: 11, unit_id: 101 }] };
 
     const result = await service.checkIn(1, dto);
@@ -122,6 +123,12 @@ describe('LodgingCheckInService (H3.2)', () => {
     expect(tx.lodging_reservation_events.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ from_status: 'confirmed', to_status: 'checked_in', user_id: 42 }),
     });
+    // H4.1 — the TRA report of the arrival starts after commit, once.
+    expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
+    expect(eventEmitter.emit).toHaveBeenCalledWith('lodging.reservation.checked_in', {
+      store_id: 3,
+      reservation_id: 1,
+    });
     expect(result.status).toBe('checked_in');
   });
 
@@ -136,11 +143,12 @@ describe('LodgingCheckInService (H3.2)', () => {
   });
 
   it('two simultaneous clicks: the one whose status update moves no row creates no order', async () => {
-    const { service, tx } = build({ moved: 0 });
+    const { service, tx, eventEmitter } = build({ moved: 0 });
 
     const result = await service.checkIn(1, {});
 
     expect(result.status).toBe('checked_in');
+    expect(eventEmitter.emit).not.toHaveBeenCalled();
     expect(tx.orders.create).not.toHaveBeenCalled();
     expect(tx.lodging_folios.create).not.toHaveBeenCalled();
   });

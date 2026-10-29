@@ -1,0 +1,59 @@
+<div class="w-full overflow-x-hidden">
+  <app-sticky-header
+    title="Planta"
+    subtitle="Bodegas, método de costeo y manejo de lotes de la producción"
+    icon="settings"
+    variant="glass"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
+  />
+
+  <form [formGroup]="form" class="px-2 py-3 md:p-4 space-y-4">
+    <app-card
+      title="Bodegas"
+      subtitle="De dónde salen los insumos y a dónde entra el producto terminado"
+      [overflow]="'visible'"
+    >
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <app-selector
+          formControlName="default_input_location_id"
+          label="Bodega de insumos"
+          placeholder="Bodega por defecto de la tienda"
+          helpText="Se usa para verificar faltantes y consumir los insumos."
+          [options]="locationOptions()"
+          [searchable]="true"
+          [disabled]="isLoading()"
+        />
+        <app-selector
+          formControlName="default_output_location_id"
+          label="Bodega de producto terminado"
+          placeholder="Bodega por defecto de la tienda"
+          helpText="Aquí ingresa el producto terminado al completar una orden."
+          [options]="locationOptions()"
+          [searchable]="true"
+          [disabled]="isLoading()"
+        />
+      </div>
+    </app-card>
+
+    <app-card
+      title="Costeo y lotes"
+      subtitle="Cómo se valoriza el consumo y si el producto terminado se registra por lote"
+      [overflow]="'visible'"
+    >
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+        <app-selector
+          formControlName="cost_method"
+          label="Método de costeo"
+          [options]="costMethodOptions"
+          [disabled]="isLoading()"
+        />
+        <app-setting-toggle
+          formControlName="lot_required"
+          label="Exigir lote en el producto terminado"
+          description="Al completar una orden se pedirá el número de lote."
+        />
+      </div>
+    </app-card>
+  </form>
+</div>

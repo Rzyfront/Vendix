@@ -34,6 +34,8 @@ const FRONT_DESK_SELECT = {
       order: { select: { id: true, grand_total: true, total_paid: true } },
     },
   },
+  // H8.4 (D12) — keys the guests of the stay still have.
+  _count: { select: { key_handovers: { where: { returned_at: null } }, guests: true } },
 } satisfies Prisma.lodging_reservationsSelect;
 
 type FrontDeskReservation = Prisma.lodging_reservationsGetPayload<{
@@ -49,11 +51,17 @@ export interface FrontDeskRow {
   guest_name: string;
   /** "101 · Doble, Sin asignar · Suite". */
   rooms: string;
+  /** Active rooms without a physical room yet: check-in must pick them first. */
+  unassigned_rooms: number;
   adults: number;
   children: number;
   folio_id: number | null;
   /** Folio balance (charges − payments); null without a folio. */
   balance: string | null;
+  /** H8.4 — keys or cards handed over and not returned yet. */
+  keys_out: number;
+  /** H8.1 — guests already registered (online check-in or desk), vs adults + children. */
+  registered_guests: number;
 }
 
 export interface FrontDeskBoard {
@@ -99,12 +107,15 @@ function toRow(reservation: FrontDeskReservation): FrontDeskRow {
     rooms: reservation.rooms
       .map((room) => `${room.unit?.code ?? 'Sin asignar'} · ${room.unit_type.name}`)
       .join(', '),
+    unassigned_rooms: reservation.rooms.filter((room) => !room.unit).length,
     adults: reservation.rooms.reduce((sum, room) => sum + room.adults, 0),
     children: reservation.rooms.reduce((sum, room) => sum + room.children, 0),
     folio_id: reservation.folio?.id ?? null,
     balance: order
       ? new Prisma.Decimal(order.grand_total).minus(order.total_paid).toFixed(2)
       : null,
+    keys_out: reservation._count.key_handovers,
+    registered_guests: reservation._count.guests,
   };
 }
 

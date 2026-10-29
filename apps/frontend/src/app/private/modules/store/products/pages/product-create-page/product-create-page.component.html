@@ -36,6 +36,21 @@
       <p class="text-sm text-text-muted">Cargando producto…</p>
     </div>
   } @else {
+  @if (lodgingUnitType(); as lodging) {
+    <!-- Hotelería (R5): la noche pertenece a un tipo de habitación. -->
+    <app-alert-banner variant="info" icon="bed-double" heading="Se gestiona desde Hotelería → Habitaciones">
+      Esta es la noche del tipo de habitación «{{ lodging.name }}». Su nombre y
+      estado se cambian allí; aquí se editan el precio y los impuestos. No aparece
+      en el POS ni en la tienda online: se cobra desde la cuenta del huésped.
+      <a
+        bannerActions
+        routerLink="/admin/hospitality/rooms"
+        class="mt-2 inline-flex min-h-[44px] items-center gap-1 text-sm font-semibold text-primary-600 hover:underline"
+      >
+        Ir a Habitaciones
+      </a>
+    </app-alert-banner>
+  }
   <form
     [formGroup]="productForm"
     class="space-y-4 md:space-y-6"

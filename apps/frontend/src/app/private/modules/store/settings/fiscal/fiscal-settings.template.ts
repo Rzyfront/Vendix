@@ -15,5 +15,17 @@ export const FISCAL_SETTINGS_TEMPLATE = `
     </div>
 
     <app-pos-invoicing-settings-section></app-pos-invoicing-settings-section>
+
+    <!-- R3 — former Hotelería → "Servicios exentos"; /admin/hospitality/exempt-services lands here. -->
+    @if (store.isHospitality()) {
+      <app-settings-section
+        anchorId="section-vat-exempt"
+        icon="file-check"
+        iconTone="purple"
+        title="Servicios exentos de IVA (turistas extranjeros)"
+        hint="Facturas de alojamiento con IVA 0 % y el pasaporte y permiso de cada huésped, como soporte de la exención.">
+        <app-hospitality-vat-exempt-services-page (ready)="scrollToFragment()" />
+      </app-settings-section>
+    }
   </div>
 `;

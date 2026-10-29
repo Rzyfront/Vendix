@@ -47,6 +47,8 @@ module.exports = {
           800: 'color-mix(in srgb, var(--color-primary) 65%, black)',
           900: 'color-mix(in srgb, var(--color-primary) 50%, black)',
           DEFAULT: 'rgba(var(--color-primary-rgb), <alpha-value>)',
+          // Texto sobre `bg-primary/10`: legible con cualquier marca y en dark.
+          'on-tint': 'var(--color-primary-on-tint)',
         },
         /* ── Remapeo de paleta estática → tokens de escala (con alpha) ──
            gray/slate → neutral, blue → info, emerald/green → success,
@@ -252,8 +254,9 @@ module.exports = {
         'error-light': 'var(--color-error-light)',
         // `--color-info` y `--color-info-light` ya existían en styles.scss (light
         // y dark), pero sin este mapeo no había utilidad que los alcanzara:
-        // escribir `bg-info-light` compilaba a nada, en silencio.
-        info: 'var(--color-info)',
+        // escribir `bg-info-light` compilaba a nada, en silencio. Va por canal RGB
+        // como success/warning/error para que `bg-info/10` emita regla.
+        info: 'rgba(var(--color-info-rgb), <alpha-value>)',
         'info-light': 'var(--color-info-light)',
       },
       borderRadius: {
@@ -267,6 +270,8 @@ module.exports = {
         input: 'var(--radius-input)',
       },
       boxShadow: {
+        // Soft UI: realce mínimo de controles. Antes `shadow-2xs` no emitía nada (es de Tailwind v4).
+        '2xs': 'var(--shadow-2xs)',
         xs: '0 1px 2px rgba(2,6,23,0.04)',
         sm: '0 4px 8px rgba(15,23,42,0.06)',
         md: '0 10px 30px rgba(15,23,42,0.08)',

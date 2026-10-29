@@ -184,6 +184,9 @@ export class CatalogService {
       is_sellable: true,
       // Los insumos nunca se publican en la tienda en línea (defensa de datos viejos).
       is_ingredient: false,
+      // Hotelería (R5): las noches "Noche – {tipo}" se cobran desde la cuenta
+      // del huésped, nunca se venden en la tienda en línea.
+      lodging_unit_type: { is: null },
       // store_id se aplica automáticamente por EcommercePrismaService
     };
     const andFilters: any[] = [];
@@ -857,6 +860,9 @@ export class CatalogService {
         available_for_ecommerce: true,
         is_sellable: true,
         is_ingredient: false,
+        // Hotelería (R5): las noches "Noche – {tipo}" se cobran desde la cuenta
+        // del huésped, nunca se venden en la tienda en línea.
+        lodging_unit_type: { is: null },
         // store_id se aplica automáticamente por EcommercePrismaService
       },
       include,
@@ -2358,6 +2364,8 @@ export class CatalogService {
                     // detail/cart/checkout would reject.
                     state: true,
                     available_for_ecommerce: true,
+                    // Hotelería (R5): a night is never sold in the storefront.
+                    lodging_unit_type: { select: { id: true } },
                     product_images: {
                       where: { is_main: true },
                       take: 1,
@@ -2405,7 +2413,8 @@ export class CatalogService {
                 item.product &&
                 item.product.state === 'active' &&
                 item.product.available_for_ecommerce === true &&
-                item.product.is_ingredient !== true,
+                item.product.is_ingredient !== true &&
+                !item.product.lodging_unit_type,
             );
             const items = await Promise.all(
               buyableItems.map(async (item) => {
