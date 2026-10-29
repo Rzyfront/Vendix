@@ -75,6 +75,10 @@ export const ROLE_DEFAULT_PANEL_UI_KEYS: Record<
       'restaurant_ops_kds',
       'restaurant_ops_tables',
       'restaurant_ops_menus',
+      'manufacturing',
+      'manufacturing_formulas',
+      'manufacturing_orders',
+      'manufacturing_settings',
       'memberships',
       'memberships_plans',
       'memberships_members',
@@ -190,6 +194,40 @@ export const ROLE_DEFAULT_PANEL_UI_KEYS: Record<
       'restaurant_ops_kds',
       'restaurant_ops_production',
       'restaurant_ops_recipes',
+      'help',
+      'help_support',
+      'help_center',
+      'help_videos',
+    ],
+
+    // Manufactura: roles de planta (visibles solo en industria `manufacturing`
+    // por INDUSTRY_HIDDEN_MODULES en el frontend).
+    plant_manager: [
+      'manufacturing',
+      'manufacturing_formulas',
+      'manufacturing_orders',
+      'manufacturing_settings',
+      'help',
+      'help_support',
+      'help_center',
+      'help_videos',
+    ],
+
+    production_planner: [
+      'manufacturing',
+      'manufacturing_formulas',
+      'manufacturing_orders',
+      'manufacturing_settings',
+      'help',
+      'help_support',
+      'help_center',
+      'help_videos',
+    ],
+
+    production_operator: [
+      'manufacturing',
+      'manufacturing_formulas',
+      'manufacturing_orders',
       'help',
       'help_support',
       'help_center',
