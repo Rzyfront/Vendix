@@ -96,6 +96,25 @@ export function isCfOverridable(issue: OrderHolderIssue | null): boolean {
   return issue !== null && issue.code !== 'document_type_required';
 }
 
+/**
+ * Buyer with no real document on file — Consumidor final customer (sentinel
+ * `222222222222`), a guest, or a customer registered only with a reference
+ * name: nobody asked for an invoice in their name. A paid order of such a buyer
+ * is issued to Consumidor final without asking; a partial or wrong document
+ * (number present but no name, missing type) still asks to complete it.
+ */
+export function isUnidentifiedHolder(issue: OrderHolderIssue | null): boolean {
+  return (
+    issue?.code === 'missing_document_number' ||
+    issue?.code === 'final_consumer_sentinel'
+  );
+}
+
+/** The order's customer record IS the Consumidor final (sentinel document). */
+export function isFinalConsumerCustomer(order: OrderHolderSourceRows): boolean {
+  return digits(trim(order.users?.document_number)) === FINAL_CONSUMER_NUMBER;
+}
+
 export interface OrderHolderIssue {
   code: OrderHolderIssueCode;
   missing_fields: OrderHolderMissingField[];

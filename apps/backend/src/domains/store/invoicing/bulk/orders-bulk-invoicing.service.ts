@@ -10,7 +10,7 @@ import { OrderLeaseService } from 'src/common/locks/order-lease.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { InvoicingService } from '../invoicing.service';
 import { CREDIT_FINAL_CONSUMER_MESSAGE, OneShotEmissionService } from '../one-shot-emission.service';
-import { evaluateOrderHolder } from '../utils/order-acquirer-holder.util';
+import { evaluateOrderHolder, isUnidentifiedHolder } from '../utils/order-acquirer-holder.util';
 import {
   BulkInvoiceBlockedCode,
   BulkInvoiceExecuteDto,
@@ -117,7 +117,7 @@ export class OrdersBulkInvoicingService {
       credit_existing: results.filter((r) => r.payment === 'credit_existing').length,
       to_credit: results.filter((r) => r.payment === 'to_credit').length,
       final_consumer: results.filter(
-        (r) => r.will_emit && r.holder.source === 'none',
+        (r) => r.will_emit && r.holder.rail === 'final_consumer',
       ).length,
       blocked: results.filter(
         (r) => r.payment === 'blocked' || (r.holder_issue && !r.cf_overridable),
@@ -328,7 +328,14 @@ export class OrdersBulkInvoicingService {
         continue;
       }
 
-      const holder = evaluateOrderHolder(found);
+      const evaluated = evaluateOrderHolder(found);
+      // Paid order of an unidentified buyer (Consumidor final, guest or customer
+      // with only a name): `emitOrder` issues it to Consumidor final without
+      // the opt-in, so it is not an issue here either.
+      const holder =
+        classification.payment === 'paid' && isUnidentifiedHolder(evaluated.issue)
+          ? { ...evaluated, issue: null }
+          : evaluated;
       const has_issue = holder.issue !== null;
       // An existing credit sale is never issued as Consumidor final. An unpaid
       // order (to_credit) can be: with the CF opt-in it goes out cash with

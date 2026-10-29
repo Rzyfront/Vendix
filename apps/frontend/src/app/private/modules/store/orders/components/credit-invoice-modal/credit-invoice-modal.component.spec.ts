@@ -65,4 +65,22 @@ describe('CreditInvoiceModalComponent — prefilled and Consumidor final option'
     (fixture.componentInstance as unknown as { onUseFinalConsumer(): void }).onUseFinalConsumer();
     expect(calls).toBe(1);
   });
+
+  it('order without an identified customer: asks to assign one instead of the credit form, keeps Consumidor final', () => {
+    const fixture = setup();
+    fixture.componentRef.setInput('customerRequired', true);
+    fixture.detectChanges();
+    const text = (document.body.textContent ?? '') + (fixture.nativeElement.textContent ?? '');
+    expect(text).toContain('Esta orden no tiene un cliente identificado');
+    expect(text).toContain('Asignar cliente');
+    expect(text).toContain('Emitir como Consumidor final (contado)');
+    let assign = 0;
+    const emitted: unknown[] = [];
+    fixture.componentInstance.assignCustomer.subscribe(() => assign++);
+    fixture.componentInstance.confirmed.subscribe((v) => emitted.push(v));
+    (fixture.componentInstance as unknown as { onAssignCustomer(): void }).onAssignCustomer();
+    (fixture.componentInstance as unknown as { onConfirm(): void }).onConfirm();
+    expect(assign).toBe(1);
+    expect(emitted).toEqual([]);
+  });
 });

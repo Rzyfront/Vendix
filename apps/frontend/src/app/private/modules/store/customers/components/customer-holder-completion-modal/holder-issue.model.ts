@@ -31,7 +31,8 @@ export interface HolderCurrentData {
 export type HolderCfBlocker = 'credit_sale' | 'unpaid_balance';
 
 export interface HolderIssue {
-  customer_id: number;
+  /** `null`: the buyer is not a registered customer (guest billing data of the order). */
+  customer_id: number | null;
   customer_name: string;
   issue_code: HolderIssueCode;
   missing_fields: HolderMissingField[];
@@ -139,10 +140,11 @@ export function isNameMissing(fields: readonly HolderMissingField[]): boolean {
 export function holderIssueFromDetails(details: unknown): HolderIssue | null {
   if (!details || typeof details !== 'object') return null;
   const d = details as Record<string, unknown>;
+  if (typeof d['issue_code'] !== 'string') return null;
+  // A guest buyer (no customer) is still an issue: dropping it left only a toast.
   const customerId = Number(d['customer_id']);
-  if (!Number.isFinite(customerId) || customerId <= 0) return null;
   return {
-    customer_id: customerId,
+    customer_id: Number.isFinite(customerId) && customerId > 0 ? customerId : null,
     customer_name: typeof d['customer_name'] === 'string' ? d['customer_name'] : '',
     issue_code: d['issue_code'] as HolderIssueCode,
     missing_fields: Array.isArray(d['missing_fields'])
