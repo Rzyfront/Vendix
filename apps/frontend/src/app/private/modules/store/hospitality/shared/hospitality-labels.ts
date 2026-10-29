@@ -32,6 +32,25 @@ export const HOSPITALITY_TERMS = {
 export type HospitalityTerm = keyof typeof HOSPITALITY_TERMS;
 
 /**
+ * U18 (R-TERM-01) — plain name of each Migración entry permit family, mirrored
+ * from the backend `lodging-vat-exemption.ts` (it names the XLSX the same way).
+ */
+const ENTRY_PERMIT_FAMILIES: Record<string, string> = {
+  PIP: 'Permiso de ingreso y permanencia',
+  TP: 'Visa temporal',
+  PT: 'Permiso temporal',
+};
+
+/** "pip5" or "PIP-5" → "Permiso de ingreso y permanencia (PIP-5)"; an unknown code stays as typed. */
+export function entryPermitLabel(value: string | null | undefined): string {
+  const compact = value?.replace(/[\s_-]+/g, '').toUpperCase();
+  if (!compact) return '';
+  const code = compact.replace(/^([A-Z]+)(\d+)$/, '$1-$2');
+  const family = ENTRY_PERMIT_FAMILIES[code.split('-')[0]];
+  return family ? `${family} (${code})` : code;
+}
+
+/**
  * U3 (R-TERM-01) — the desk phrase of each reason the backend gives for a
  * holder who cannot take the VAT exemption. The permit reason lists raw
  * Migración codes (PIP-3, TP-12, PT…), so it becomes a plain sentence; an

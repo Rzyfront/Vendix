@@ -41,6 +41,21 @@ export function normalizeEntryPermit(value: string | null | undefined): string |
   return compact.replace(/^([A-Z]+)(\d+)$/, '$1-$2');
 }
 
+/** Plain name of each permit family; mirrored in the frontend `hospitality-labels.ts`. */
+const ENTRY_PERMIT_FAMILIES: Record<string, string> = {
+  PIP: 'Permiso de ingreso y permanencia',
+  TP: 'Visa temporal',
+  PT: 'Permiso temporal',
+};
+
+/** U18 (R-TERM-01) — "PIP-5" → "Permiso de ingreso y permanencia (PIP-5)"; unknown stays as typed. */
+export function entryPermitLabel(value: string | null | undefined): string | null {
+  const code = normalizeEntryPermit(value);
+  if (!code) return null;
+  const family = ENTRY_PERMIT_FAMILIES[code.split('-')[0]];
+  return family ? `${family} (${code})` : code;
+}
+
 /**
  * Desk reasons why the holder cannot take the exemption; empty when it can.
  * Shown next to the disabled "No residente – exento de IVA" box.

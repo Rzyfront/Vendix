@@ -26,7 +26,13 @@ import {
   TableColumn,
   ToastService,
   SpinnerComponent,
+  TooltipComponent,
+  IconComponent,
 } from '../../../../../../../shared/components/index';
+import { CountryService } from '../../../../../../../core/services/country.service';
+import { ReportExportService } from '../../../../reports/services/report-export.service';
+import { entryPermitLabel } from '../../../shared/hospitality-labels';
+import { ReservationDetailModalComponent } from '../../components/reservation-detail-modal/reservation-detail-modal.component';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { formatStoreDate } from '../../../../../../../shared/utils/date.util';
@@ -38,7 +44,16 @@ interface ReportRow extends VatExemptServiceRow {
   document_label: string;
   base_label: string;
   total_label: string;
+  nationality_label: string;
+  permit_label: string;
 }
+
+const COUNTRY_NAMES = new Intl.DisplayNames(['es'], { type: 'region' });
+
+/** U18 (R-TERM-05) — the legal ground goes in the help, never in the title. */
+const LEGAL_HELP =
+  'Alojamiento vendido a turistas extranjeros no residentes, exento de IVA (art. 481 lit. d del Estatuto Tributario). ' +
+  'Guarda el pasaporte y el permiso de ingreso de Migración como soporte ante la DIAN.';
 
 /** Local civil date `YYYY-MM-DD` of the browser (the store's desk). */
 function civilDate(date: Date): string {
@@ -65,6 +80,9 @@ function defaultPeriod(): FilterValues {
  * options dropdown (period filter + refresh) and the responsive data view.
  * The period reloads from the server; the search filters the loaded report.
  *
+ * U18: country and entry permit by name, the legal ground in a help, an
+ * "Exportar a Excel" built by the backend and rows that open the reservation.
+ *
  * R3: embedded as a section of Configuración → General → Facturación (only for
  * hospitality stores), so the stats and the search header no longer stick —
  * the settings shell owns the sticky header.
@@ -82,6 +100,9 @@ function defaultPeriod(): FilterValues {
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     EmptyStateComponent,
+    TooltipComponent,
+    IconComponent,
+    ReservationDetailModalComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
@@ -98,7 +119,7 @@ function defaultPeriod(): FilterValues {
         <app-stats
           title="Base exenta"
           [value]="exemptTotal()"
-          smallText="art. 481 lit. d ET"
+          smallText="alojamiento de turistas extranjeros"
           iconName="percent"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-500"
@@ -135,6 +156,16 @@ function defaultPeriod(): FilterValues {
             >
               Servicios exentos
               <span class="text-text-secondary font-normal">({{ rows().length }})</span>
+              <app-tooltip [content]="legalHelp" position="bottom" size="lg">
+                <button
+                  type="button"
+                  class="inline-flex items-center justify-center w-11 h-11 -my-3 align-middle text-text-secondary hover:text-text-primary"
+                  aria-label="¿Qué es esto?"
+                  data-testid="exempt-legal-help"
+                >
+                  <app-icon name="help-circle" [size]="16" />
+                </button>
+              </app-tooltip>
             </h2>
 
             <div class="flex items-center gap-2 w-full md:w-auto">
@@ -150,7 +181,7 @@ function defaultPeriod(): FilterValues {
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="filterConfigs"
                 [filterValues]="filterValues()"
-                [actions]="dropdownActions"
+                [actions]="dropdownActions()"
                 [isLoading]="loading()"
                 (filterChange)="onFilterChange($event)"
                 (clearAllFilters)="onFilterChange({})"
@@ -189,6 +220,7 @@ function defaultPeriod(): FilterValues {
               [loading]="loading()"
               [striped]="true"
               [hoverable]="true"
+              (rowClick)="openReservation($event)"
               emptyMessage="No hay facturas exentas con ese criterio"
               emptyIcon="search"
               data-testid="exempt-table"
@@ -196,6 +228,12 @@ function defaultPeriod(): FilterValues {
           }
         </div>
       </app-card>
+
+      <app-reservation-detail-modal
+        [reservationId]="detailId()"
+        (closed)="detailId.set(null)"
+        (changed)="load()"
+      />
     </div>
   `,
 })
@@ -205,6 +243,10 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly injector = inject(Injector);
+  private readonly countries = inject(CountryService);
+  private readonly exportService = inject(ReportExportService);
+
+  readonly legalHelp = LEGAL_HELP;
 
   /** Fires once, after the first load renders, so the host can scroll to it. */
   readonly ready = output<void>();
@@ -215,6 +257,9 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
   readonly loading = signal(true);
   readonly report = signal<VatExemptServiceRow[]>([]);
   readonly search = signal('');
+  readonly exporting = signal(false);
+  /** U18 (R-NAV-07) — the reservation a row opened. */
+  readonly detailId = signal<number | null>(null);
   readonly filterValues = signal<FilterValues>(defaultPeriod());
 
   readonly filterConfigs: FilterConfig[] = [
@@ -228,9 +273,16 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
     },
   ];
 
-  readonly dropdownActions: DropdownAction[] = [
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      label: this.exporting() ? 'Exportando...' : 'Exportar a Excel',
+      icon: 'download',
+      action: 'export',
+      variant: 'outline',
+      disabled: this.exporting() || this.report().length === 0,
+    },
     { label: 'Actualizar', icon: 'refresh-cw', action: 'refresh', variant: 'outline' },
-  ];
+  ]);
 
   readonly rows = computed<ReportRow[]>(() => {
     const term = this.search().toLowerCase();
@@ -247,6 +299,8 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
       document_label: [row.document_type, row.document_number].filter(Boolean).join(' '),
       base_label: this.currency.format(row.exempt_base, 0),
       total_label: this.currency.format(row.invoice_total, 0),
+      nationality_label: this.countryName(row.nationality_country_code),
+      permit_label: entryPermitLabel(row.entry_permit_type),
     }));
   });
 
@@ -289,8 +343,8 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
     { key: 'reservation_number', label: 'Reserva' },
     { key: 'guest_name', label: 'Huésped' },
     { key: 'document_label', label: 'Documento' },
-    { key: 'nationality_country_code', label: 'Nacionalidad', align: 'center' },
-    { key: 'entry_permit_type', label: 'Permiso', align: 'center' },
+    { key: 'nationality_label', label: 'Nacionalidad' },
+    { key: 'permit_label', label: 'Permiso de ingreso' },
     { key: 'base_label', label: 'Base exenta', align: 'right' },
     { key: 'total_label', label: 'Total factura', align: 'right' },
   ];
@@ -300,7 +354,8 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
     subtitleKey: 'guest_name',
     detailKeys: [
       { key: 'document_label', label: 'Documento' },
-      { key: 'entry_permit_type', label: 'Permiso' },
+      { key: 'nationality_label', label: 'Nacionalidad' },
+      { key: 'permit_label', label: 'Permiso de ingreso' },
       { key: 'date_label', label: 'Fecha' },
     ],
     footerKey: 'base_label',
@@ -327,6 +382,43 @@ export class HospitalityVatExemptServicesPageComponent implements OnInit {
 
   onActionClick(action: string): void {
     if (action === 'refresh') this.load();
+    if (action === 'export') this.export();
+  }
+
+  /** Invoices without a linked reservation have nothing to open. */
+  openReservation(row: ReportRow): void {
+    if (row.reservation_id) this.detailId.set(row.reservation_id);
+  }
+
+  export(): void {
+    if (this.exporting() || this.report().length === 0) return;
+    const { from, to } = this.filterValues();
+    this.exporting.set(true);
+    this.reservationsService
+      .exportVatExemptServices(String(from), String(to))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (blob) => {
+          this.exporting.set(false);
+          this.exportService.downloadBlob(blob, `servicios_exentos_${from}_${to}`);
+        },
+        error: () => {
+          this.exporting.set(false);
+          this.toastService.error('No se pudo exportar el reporte');
+        },
+      });
+  }
+
+  /** "US" → "Estados Unidos": Spanish name like the guest form, then the shared catalog. */
+  private countryName(code: string | null): string {
+    if (!code) return '—';
+    const upper = code.toUpperCase();
+    const catalog = this.countries.getCountryByCode(upper)?.name ?? upper;
+    try {
+      return COUNTRY_NAMES.of(upper) ?? catalog;
+    } catch {
+      return catalog;
+    }
   }
 
   load(): void {

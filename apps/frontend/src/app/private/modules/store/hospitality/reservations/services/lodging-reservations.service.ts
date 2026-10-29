@@ -307,6 +307,17 @@ export class LodgingReservationsService {
       .pipe(map((res) => res.data), catchError(this.handleError));
   }
 
+  /** U18 — the "Servicios exentos" of the period as XLSX (built by the backend). */
+  exportVatExemptServices(from: string, to: string): Observable<Blob> {
+    const params = new HttpParams().set('from', from).set('to', to);
+    return this.http
+      .get(`${environment.apiUrl}/store/hospitality/reports/vat-exempt-services/export`, {
+        params,
+        responseType: 'blob',
+      })
+      .pipe(catchError(this.handleError));
+  }
+
   /** H7.2 — occupancy, ADR and RevPAR by business day and month. */
   performance(from: string, to: string): Observable<LodgingPerformanceReport> {
     const params = new HttpParams().set('from', from).set('to', to);

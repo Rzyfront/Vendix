@@ -6,6 +6,7 @@ import { DianTotalsValidator } from '../../../invoicing/providers/dian-direct/xm
 import { UBL_NAMESPACES } from '../../../invoicing/providers/dian-direct/xml/xml-namespaces';
 import { ProviderInvoiceTax } from '../../../invoicing/providers/invoice-provider.interface';
 import {
+  entryPermitLabel,
   exemptNightTaxRows,
   normalizeEntryPermit,
   VAT_EXEMPTION_TAX_NAME,
@@ -64,6 +65,14 @@ describe('H3.9 — VAT exemption of a non-resident tourist', () => {
       expect(normalizeEntryPermit('pt')).toBe('PT');
       expect(normalizeEntryPermit('')).toBeNull();
       expect(vatExemptionBlockers('12345', { ...tourist, entry_permit_type: 'pip5' })).toEqual([]);
+    });
+
+    it('names the permit by its family and keeps the code (U18)', () => {
+      expect(entryPermitLabel('PIP-5')).toBe('Permiso de ingreso y permanencia (PIP-5)');
+      expect(entryPermitLabel('tp11')).toBe('Visa temporal (TP-11)');
+      expect(entryPermitLabel('pt')).toBe('Permiso temporal (PT)');
+      expect(entryPermitLabel('XYZ-1')).toBe('XYZ-1');
+      expect(entryPermitLabel(null)).toBeNull();
     });
   });
 
