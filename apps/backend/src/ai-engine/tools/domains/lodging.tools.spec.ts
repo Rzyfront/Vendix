@@ -57,20 +57,61 @@ const SEARCH_RESULT = {
   ],
 };
 
+const LINK = 'https://checkout.wompi.co/l/abc123';
+
+/** `LodgingDepositsService.summary` of RES-0031: 30 % of $600.000 required. */
+function depositSummary(
+  links: Array<{ id: number; status: string; amount: number; checkout_url: string | null }> = [],
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    reservation_id: 31,
+    reservation_number: 'RES-0031',
+    required: { percent: '30', amount: '180000.00' },
+    received: 0,
+    applied: 0,
+    retained: 0,
+    balance: 0,
+    pending: 180000,
+    can_collect: true,
+    movements: links.map((row) => ({
+      ...row,
+      kind: 'received',
+      method: 'wompi_link',
+      method_label: 'Link Wompi',
+      created_at: new Date('2026-10-28T10:00:00Z'),
+    })),
+    settlement: null,
+    ...overrides,
+  };
+}
+
 function setup() {
   const bookingEngine = { search: jest.fn().mockResolvedValue(SEARCH_RESULT) };
   const reservations = {
     create: jest.fn().mockResolvedValue({ id: 31, reservation_number: 'RES-0031', total_amount: '600000.00' }),
   };
   const findCustomerName = jest.fn().mockResolvedValue('Juan Pérez');
+  const deposits = {
+    summary: jest.fn().mockResolvedValue(depositSummary()),
+    createLink: jest
+      .fn()
+      .mockResolvedValue(depositSummary([{ id: 5, status: 'pending', amount: 180000, checkout_url: LINK }])),
+  };
+  const findReservation = jest
+    .fn()
+    .mockResolvedValue({ id: 31, reservation_number: 'RES-0031', guest_name: 'Juan Pérez' });
   const tools = createLodgingTools({
     bookingEngine: bookingEngine as any,
     reservations: reservations as any,
     findCustomerName,
+    deposits: deposits as any,
+    findReservation,
   });
   const tool = tools.find((t) => t.name === 'quote_lodging_availability')!;
   const book = tools.find((t) => t.name === 'book_lodging_stay')!;
-  return { tool, book, tools, bookingEngine, reservations, findCustomerName };
+  const link = tools.find((t) => t.name === 'create_lodging_deposit_link')!;
+  return { tool, book, link, tools, bookingEngine, reservations, findCustomerName, deposits, findReservation };
 }
 
 const CTX = { store_id: 7, user_id: 1 };
@@ -310,6 +351,150 @@ describe('book_lodging_stay (H9.2)', () => {
       expect(failure.errorCode).toBe('AI_AGENT_004');
       expect(confirmations.issue).not.toHaveBeenCalled();
       expect(reservations.create).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('create_lodging_deposit_link (H9.3)', () => {
+  const ARGS = { reservation_number: 'res-0031' };
+
+  it('is a confirmed write behind the deposit permission of the reservation screen', () => {
+    const { link } = setup();
+    expect(link.requiresConfirmation).toBe(true);
+    expect(link.readOnly).toBeUndefined();
+    expect(link.requiredPermissions).toEqual(['store:lodging:folio:close']);
+    expect(TOOL_DISCOVERY_QUERIES_ES.create_lodging_deposit_link.length).toBeGreaterThan(0);
+    expect(() => buildToolDocument(link)).not.toThrow();
+  });
+
+  it('proposes the guest, the required deposit and the amount still lacking without creating a link', async () => {
+    const { link, deposits, findReservation } = setup();
+    const preview = await link.preview!(ARGS, CTX);
+
+    expect(findReservation).toHaveBeenCalledWith('res-0031');
+    expect(preview.status).toBe('ok');
+    expect(preview.target).toBe('Depósito de la reserva RES-0031');
+    expect(preview.changes).toEqual([
+      { field: 'guest', label: 'Huésped', from: null, to: 'Juan Pérez' },
+      { field: 'required', label: 'Depósito requerido', from: null, to: '30 % · $180.000' },
+      { field: 'received', label: 'Depósito recibido', from: null, to: '$0' },
+      { field: 'amount', label: 'Monto del link', from: null, to: '$180.000' },
+    ]);
+    expect(deposits.createLink).not.toHaveBeenCalled();
+  });
+
+  it('creates the link for what the deposit lacks once confirmed and returns its URL', async () => {
+    const { link, deposits } = setup();
+    deposits.summary.mockResolvedValue(depositSummary([], { received: 80000, pending: 100000 }));
+    deposits.createLink.mockResolvedValue(
+      depositSummary([{ id: 6, status: 'pending', amount: 100000, checkout_url: LINK }], { received: 80000 }),
+    );
+    const result = JSON.parse((await link.handler!(ARGS, CTX)) as string);
+
+    expect(deposits.createLink).toHaveBeenCalledWith(31, { amount: 100000, request_id: expect.any(String) });
+    expect(result).toEqual({
+      reservation_number: 'RES-0031',
+      guest: 'Juan Pérez',
+      amount: 100000,
+      payment_link: LINK,
+      note: 'El depósito aparece en la reserva cuando el huésped pague.',
+    });
+  });
+
+  it('charges the amount the receptionist names', async () => {
+    const { link, deposits } = setup();
+    await link.handler!({ ...ARGS, amount: 50000 }, CTX);
+    expect(deposits.createLink).toHaveBeenCalledWith(31, { amount: 50000, request_id: expect.any(String) });
+  });
+
+  it('hands back the unpaid link that already covers the deposit instead of creating another', async () => {
+    const { link, deposits } = setup();
+    deposits.summary.mockResolvedValue(
+      depositSummary([{ id: 5, status: 'pending', amount: 180000, checkout_url: LINK }]),
+    );
+
+    const preview = await link.preview!(ARGS, CTX);
+    expect(preview.status).toBe('error');
+    expect(preview.message).toContain(LINK);
+
+    const result = JSON.parse((await link.handler!(ARGS, CTX)) as string);
+    expect(result.payment_link).toBe(LINK);
+    expect(deposits.createLink).not.toHaveBeenCalled();
+  });
+
+  it('refuses a deposit already covered, a reservation that no longer takes deposits and an unknown number', async () => {
+    const { link, deposits, findReservation } = setup();
+    deposits.summary.mockResolvedValueOnce(depositSummary([], { received: 180000, pending: 0 }));
+    expect(JSON.parse((await link.handler!(ARGS, CTX)) as string).error).toBe(
+      'La reserva RES-0031 no tiene depósito pendiente.',
+    );
+
+    deposits.summary.mockResolvedValueOnce(depositSummary([], { can_collect: false }));
+    expect(JSON.parse((await link.handler!(ARGS, CTX)) as string).error).toBe(
+      'La reserva RES-0031 ya no admite depósitos.',
+    );
+
+    findReservation.mockResolvedValueOnce(null);
+    expect(JSON.parse((await link.handler!(ARGS, CTX)) as string).error).toBe(
+      'No encontré la reserva res-0031 en este hotel.',
+    );
+    expect(deposits.createLink).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-positive amount and a missing store without touching the reservation', async () => {
+    const { link, findReservation } = setup();
+    expect(JSON.parse((await link.handler!({ ...ARGS, amount: -5 }, CTX)) as string).error).toContain(
+      'mayor a cero',
+    );
+    expect(JSON.parse((await link.handler!(ARGS, { user_id: 1 })) as string).error).toContain('Sin tienda');
+    expect(findReservation).not.toHaveBeenCalled();
+  });
+
+  it('returns the service message when Wompi does not create the link', async () => {
+    const { link, deposits } = setup();
+    deposits.createLink.mockRejectedValue(
+      new VendixHttpException(ErrorCodes.LODGING_DEPOSIT_001, 'Wompi no creó el link: llaves inválidas'),
+    );
+    const result = JSON.parse((await link.handler!(ARGS, CTX)) as string);
+    expect(result.error).toBe('Wompi no creó el link: llaves inválidas');
+  });
+
+  describe('through the registry', () => {
+    let contextSpy: jest.SpyInstance;
+    afterEach(() => contextSpy.mockRestore());
+
+    function registryWith(permissions: string[]) {
+      contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ ...CTX, permissions, roles: [] } as any);
+      const confirmations = { issue: jest.fn().mockResolvedValue('tok-1'), redeem: jest.fn() };
+      const { link, deposits } = setup();
+      const registry = new AIToolRegistry(confirmations as any);
+      registry.register(link);
+      return { registry, deposits, confirmations };
+    }
+
+    it('without a token returns the proposal to confirm and creates no link', async () => {
+      const { registry, deposits } = registryWith(['store:lodging:folio:close']);
+      const failure: VendixHttpException = await registry
+        .executeTool('create_lodging_deposit_link', ARGS)
+        .catch((error) => error);
+
+      expect(failure.errorCode).toBe('AI_AGENT_005');
+      const body = failure.getResponse() as any;
+      expect(body.details.preview.target).toBe('Depósito de la reserva RES-0031');
+      expect(deposits.createLink).not.toHaveBeenCalled();
+    });
+
+    it('refuses a user without the deposit permission', async () => {
+      const { registry, deposits, confirmations } = registryWith(['store:lodging:reservations:write']);
+      const failure: VendixHttpException = await registry
+        .executeTool('create_lodging_deposit_link', ARGS, { confirmationToken: 'tok-1' })
+        .catch((error) => error);
+
+      expect(failure.errorCode).toBe('AI_AGENT_004');
+      expect(confirmations.issue).not.toHaveBeenCalled();
+      expect(deposits.createLink).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { RegisteredTool, ToolExecutionContext, ToolPreview } from '../interfaces/tool.interface';
@@ -5,12 +6,18 @@ import { VendixHttpException } from '../../../common/errors';
 import { LodgingBookingEngineService } from '../../../domains/store/hospitality/reservations/booking-engine/booking-engine.service';
 import { BookingSearchDto } from '../../../domains/store/hospitality/reservations/booking-engine/booking-engine.dto';
 import { LodgingReservationsService } from '../../../domains/store/hospitality/reservations/reservations.service';
+import { LodgingDepositsService } from '../../../domains/store/hospitality/reservations/deposits/deposits.service';
 
 export interface LodgingToolDeps {
   bookingEngine: Pick<LodgingBookingEngineService, 'search'>;
   reservations: Pick<LodgingReservationsService, 'create'>;
   /** Full name of a customer of the current store, or null when it is not one. */
   findCustomerName: (customer_id: number) => Promise<string | null>;
+  deposits: Pick<LodgingDepositsService, 'summary' | 'createLink'>;
+  /** Reservation of the current store by its number ("RES-0031"), or null. */
+  findReservation: (
+    reservation_number: string,
+  ) => Promise<{ id: number; reservation_number: string; guest_name: string } | null>;
 }
 
 type SearchResult = Awaited<ReturnType<LodgingBookingEngineService['search']>>;
@@ -94,6 +101,84 @@ async function planStay(
   const picked = pickRoomType(result.room_types, String(args.room_type ?? ''));
   if ('error' in picked) return { error: picked.error };
   return { dto, customer_id, customer_name, result, type: picked.type };
+}
+
+type DepositSummary = Awaited<ReturnType<LodgingDepositsService['summary']>>;
+
+const DEPOSIT_LINK = 'Link de pago del depósito';
+
+interface PlannedDepositLink {
+  reservation_id: number;
+  reservation_number: string;
+  guest_name: string;
+  summary: DepositSummary;
+  /** Amount of the new link, or null when an unpaid link already covers the deposit. */
+  amount: number | null;
+  open_link: { amount: number; checkout_url: string } | null;
+}
+
+/**
+ * H9.3 — what the deposit link of a reservation should charge: the amount the
+ * receptionist named, or what the deposit still lacks once the unpaid links
+ * are counted. Run by the preview and the handler, so the apply re-checks.
+ */
+async function planDepositLink(
+  deps: LodgingToolDeps,
+  args: Record<string, unknown>,
+  context: ToolExecutionContext,
+): Promise<PlannedDepositLink | { error: string; next_step?: string }> {
+  if (!context.store_id) {
+    return { error: 'Sin tienda en contexto: los depósitos siempre son de un hotel.' };
+  }
+  const number = String(args.reservation_number ?? '').trim();
+  if (!number) {
+    return { error: 'Falta el número de la reserva.', next_step: 'Pide el número de la reserva (por ejemplo RES-0031).' };
+  }
+  let amount: number | null = null;
+  if (args.amount !== undefined && args.amount !== null && args.amount !== '') {
+    amount = Number(args.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || Math.abs(Math.round(amount * 100) - amount * 100) > 1e-6) {
+      return { error: 'El monto del depósito debe ser mayor a cero y con máximo 2 decimales.' };
+    }
+  }
+  const reservation = await deps.findReservation(number);
+  if (!reservation) {
+    return {
+      error: `No encontré la reserva ${number} en este hotel.`,
+      next_step: 'Confirma el número de la reserva con la persona.',
+    };
+  }
+  const summary = await deps.deposits.summary(reservation.id);
+  if (!summary.can_collect) {
+    return { error: `La reserva ${reservation.reservation_number} ya no admite depósitos.` };
+  }
+  const unpaid = summary.movements.filter(
+    (row) => row.kind === 'received' && row.status === 'pending' && row.method === 'wompi_link' && row.checkout_url,
+  );
+  const open = unpaid.length ? unpaid[unpaid.length - 1] : null;
+  const open_link = open ? { amount: open.amount, checkout_url: open.checkout_url as string } : null;
+  if (amount === null) {
+    const unpaidTotal = unpaid.reduce((sum, row) => sum + row.amount, 0);
+    const lacking = Math.round((Number(summary.pending) - unpaidTotal) * 100) / 100;
+    if (lacking <= 0) {
+      if (!open_link) {
+        return {
+          error: `La reserva ${reservation.reservation_number} no tiene depósito pendiente.`,
+          next_step: 'Si el huésped quiere abonar más, pide el monto.',
+        };
+      }
+    } else {
+      amount = lacking;
+    }
+  }
+  return {
+    reservation_id: reservation.id,
+    reservation_number: reservation.reservation_number,
+    guest_name: reservation.guest_name,
+    summary,
+    amount,
+    open_link,
+  };
 }
 
 function guidedError(error: string, nextStep?: string): string {
@@ -315,6 +400,119 @@ export function createLodgingTools(deps: LodgingToolDeps): RegisteredTool[] {
             amount_due_now: type.amount_due_now,
             cancellation_policy: type.cancellation_policy,
             status: 'Confirmada',
+          });
+        } catch (error) {
+          return guidedError(errorMessage(error));
+        }
+      },
+    },
+    /**
+     * H9.3 — "dame el link del depósito de la RES-0031". The preview shows the
+     * guest, the amount and what the deposit requires; once confirmed it runs
+     * the same "Cobrar depósito → Link Wompi" path as the reservation screen
+     * (`LodgingDepositsService.createLink`: cap under the reservation lock,
+     * single-use link), and Wompi's confirmation credits the deposit (H3.5).
+     * An unpaid link that already covers the deposit is handed back instead
+     * of creating a second one.
+     */
+    {
+      name: 'create_lodging_deposit_link',
+      version: '1',
+      domain: 'lodging',
+      description:
+        'Hotel: genera el link de pago (Wompi) del depósito de una reserva para enviárselo al huésped. Por defecto cobra lo que le falta al depósito requerido; acepta otro monto si la persona lo pide. La persona confirma antes de crearlo. Si ya hay un link sin pagar que cubre el depósito, devuelve ese. El depósito aparece en la reserva cuando el huésped paga.',
+      parameters: {
+        type: 'object',
+        properties: {
+          reservation_number: { type: 'string', description: 'Número de la reserva (por ejemplo "RES-0031").' },
+          amount: {
+            type: 'number',
+            description: 'Monto del link en pesos. Opcional: por defecto, lo que le falta al depósito.',
+          },
+        },
+        required: ['reservation_number'],
+      },
+      requiredPermissions: ['store:lodging:folio:close'],
+      requiresConfirmation: true,
+      discovery: {
+        synonyms: ['link de pago depósito', 'cobrar anticipo reserva', 'link wompi reserva', 'enlace de pago hotel'],
+        examples: [
+          {
+            intent: 'Genérame el link de pago del depósito de la reserva RES-0031',
+            arguments: { reservation_number: 'RES-0031' },
+          },
+        ],
+      },
+      preview: async (args, context): Promise<ToolPreview> => {
+        let plan: Awaited<ReturnType<typeof planDepositLink>>;
+        try {
+          plan = await planDepositLink(deps, args, context);
+        } catch (error) {
+          return { status: 'error', target: DEPOSIT_LINK, changes: [], message: errorMessage(error), domain: 'lodging' };
+        }
+        if ('error' in plan) {
+          return { status: 'error', target: DEPOSIT_LINK, changes: [], message: plan.error, domain: 'lodging' };
+        }
+        const { summary, amount, open_link } = plan;
+        const money = (value: number | string) => formatMoney(String(value), 'COP');
+        const target = `Depósito de la reserva ${plan.reservation_number}`;
+        if (amount === null) {
+          return {
+            status: 'error',
+            target,
+            changes: [],
+            message: `Ya hay un link sin pagar por ${money(open_link!.amount)}: ${open_link!.checkout_url}. Envíale ese al huésped.`,
+            domain: 'lodging',
+          };
+        }
+        const required = summary.required.percent
+          ? `${summary.required.percent} % · ${money(summary.required.amount)}`
+          : money(summary.required.amount);
+        return {
+          status: open_link ? 'warning' : 'ok',
+          target,
+          domain: 'lodging',
+          changes: [
+            { field: 'guest', label: 'Huésped', from: null, to: plan.guest_name },
+            { field: 'required', label: 'Depósito requerido', from: null, to: required },
+            { field: 'received', label: 'Depósito recibido', from: null, to: money(summary.received) },
+            { field: 'amount', label: 'Monto del link', from: null, to: money(amount) },
+          ],
+          message: open_link
+            ? `Ya hay otro link sin pagar por ${money(open_link.amount)}; este se suma.`
+            : 'Link de un solo uso. El depósito se registra cuando el huésped pague.',
+        };
+      },
+      handler: async (args, context) => {
+        try {
+          const plan = await planDepositLink(deps, args, context);
+          if ('error' in plan) return guidedError(plan.error, plan.next_step);
+          if (plan.amount === null) {
+            return JSON.stringify({
+              reservation_number: plan.reservation_number,
+              guest: plan.guest_name,
+              amount: plan.open_link!.amount,
+              payment_link: plan.open_link!.checkout_url,
+              note: 'Ya existía este link sin pagar; no se creó otro.',
+            });
+          }
+          const before = new Set(plan.summary.movements.map((row) => row.id));
+          const summary = await deps.deposits.createLink(plan.reservation_id, {
+            amount: plan.amount,
+            request_id: randomUUID(),
+          });
+          const created = summary.movements.find(
+            (row) => !before.has(row.id) && row.method === 'wompi_link' && row.status === 'pending',
+          );
+          if (!created?.checkout_url) {
+            return guidedError('No se pudo crear el link de pago.', 'Inténtalo de nuevo desde la reserva.');
+          }
+          return JSON.stringify({
+            reservation_number: plan.reservation_number,
+            guest: plan.guest_name,
+            amount: created.amount,
+            payment_link: created.checkout_url,
+            note: 'El depósito aparece en la reserva cuando el huésped pague.',
           });
         } catch (error) {
           return guidedError(errorMessage(error));

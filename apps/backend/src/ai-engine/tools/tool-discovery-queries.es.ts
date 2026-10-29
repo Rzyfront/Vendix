@@ -2260,6 +2260,16 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Confirme que quedó habilitada la DIAN en producción',
     'Deje la facturación electrónica funcionando en producción, sin devuelta',
   ],
+  create_lodging_deposit_link: [
+    'Genérame el link de pago del depósito de la reserva RES-0031',
+    'Dame el link para que el huésped pague el anticipo de su reserva',
+    'Oe, mándame el enlace de Wompi del depósito de la reserva de Juan',
+    'Necesito cobrarle el 30 % de la reserva al huésped por link',
+    'Hazme un link de pago de 200 mil para el depósito de la RES-0012',
+    'El huésped quiere pagar la garantía de la reserva con tarjeta desde su casa',
+    'Parce, sácame el link del anticipo para enviárselo al cliente',
+    '¿Me das el link para cobrar el depósito de la habitación?',
+  ],
   book_lodging_stay: [
     'Resérvale la doble a Juan Pérez del 10 al 13',
     'Hazle la reserva de la suite a la señora Gómez para este fin de semana',

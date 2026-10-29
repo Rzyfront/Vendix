@@ -161,6 +161,7 @@ export class LodgingReservationsModule implements OnModuleInit {
     private readonly toolRegistry: AIToolRegistry,
     private readonly bookingEngine: LodgingBookingEngineService,
     private readonly reservations: LodgingReservationsService,
+    private readonly deposits: LodgingDepositsService,
     private readonly prisma: StorePrismaService,
   ) {}
 
@@ -178,6 +179,27 @@ export class LodgingReservationsModule implements OnModuleInit {
             select: { first_name: true, last_name: true },
           });
           return user ? `${user.first_name} ${user.last_name}`.trim() : null;
+        },
+        // H9.3 — the reservation whose deposit link Vexi creates.
+        deposits: this.deposits,
+        findReservation: async (reservation_number) => {
+          const store_id = RequestContextService.getContext()?.store_id;
+          if (!store_id) return null;
+          const reservation = await this.prisma.lodging_reservations.findFirst({
+            where: { store_id, reservation_number: { equals: reservation_number, mode: 'insensitive' } },
+            select: {
+              id: true,
+              reservation_number: true,
+              customer: { select: { first_name: true, last_name: true } },
+            },
+          });
+          if (!reservation) return null;
+          const { first_name, last_name } = reservation.customer;
+          return {
+            id: reservation.id,
+            reservation_number: reservation.reservation_number,
+            guest_name: `${first_name} ${last_name}`.trim(),
+          };
         },
       }),
     );
