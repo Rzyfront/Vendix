@@ -311,7 +311,7 @@ describe('HousekeepingTasksService', () => {
         .catch((e) => e);
 
       expect((error as VendixHttpException).getResponse()).toMatchObject({
-        message: 'Ya existe una tarea de Repaso para la 905 el 2026-11-11',
+        message: 'Ya existe una tarea de Repaso para la 905 el 11-nov',
       });
     });
 
@@ -384,7 +384,7 @@ describe('HousekeepingTasksService', () => {
   describe('complete', () => {
     it('"Terminada" closes her task and the dirty room becomes clean, pending inspection', async () => {
       tasks.findFirst
-        .mockResolvedValueOnce({ id: 1, unit_id: 7 })
+        .mockResolvedValueOnce({ id: 1, unit_id: 7, type: 'checkout_clean' })
         .mockResolvedValueOnce({ ...view, status: 'done' });
       txTasks.updateMany.mockResolvedValue({ count: 1 });
 
@@ -400,6 +400,22 @@ describe('HousekeepingTasksService', () => {
       });
       expect(result.status).toBe('done');
     });
+
+    it.each(['inspection', 'maintenance'])(
+      'finishing the %s task leaves the room status untouched',
+      async (type) => {
+        tasks.findFirst
+          .mockResolvedValueOnce({ id: 1, unit_id: 7, type })
+          .mockResolvedValueOnce({ ...view, type, status: 'done' });
+        txTasks.updateMany.mockResolvedValue({ count: 1 });
+
+        const result = await service.complete(1);
+
+        expect(txTasks.updateMany).toHaveBeenCalled();
+        expect(txUnits.updateMany).not.toHaveBeenCalled();
+        expect(result.status).toBe('done');
+      },
+    );
 
     it('someone else\'s task (or an already finished one) is rejected and the room is untouched', async () => {
       tasks.findFirst.mockResolvedValue({ id: 1, unit_id: 7 });

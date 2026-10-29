@@ -9,7 +9,7 @@ import { localDateString, resolveStoreTimezone } from '@common/utils/store-timez
 import { HOUSEKEEPER_ROLE } from '@common/constants/lodging-roles.constant';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { dateOnlyToDb } from '../reservations/stay-dates';
+import { dateOnlyToDb, formatShortDate } from '../reservations/stay-dates';
 import { HousekeepingStatus } from './housekeeping-status';
 
 export type HousekeepingTaskType = lodging_housekeeping_task_type_enum;
@@ -98,6 +98,16 @@ export function dailyHousekeepingTasks(
   }
   return [...tasks.values()];
 }
+
+/** Tasks whose completion leaves a dirty room clean. */
+const CLEANING_TASK_TYPES: HousekeepingTaskType[] = ['checkout_clean', 'stayover'];
+
+/**
+ * Note of a hand-made task without one. A non-null note marks a task asked by
+ * hand (`stillDue` keeps it although no stay calls for it), so the generator
+ * must never write `notes`.
+ */
+const HAND_MADE_NOTE = '';
 
 const TASK_SELECT = {
   id: true,
@@ -230,7 +240,7 @@ export class HousekeepingTasksService {
       }
     }
 
-    const notes = input.notes?.trim() ?? '';
+    const notes = input.notes?.trim() || HAND_MADE_NOTE;
     try {
       const task = await this.prisma.lodging_housekeeping_tasks.create({
         data: {
@@ -246,7 +256,7 @@ export class HousekeepingTasksService {
       return toView(task);
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const day = task_date === today ? 'hoy' : `el ${task_date}`;
+        const day = task_date === today ? 'hoy' : `el ${formatShortDate(task_date)}`;
         throw new VendixHttpException(
           ErrorCodes.LODGING_HOUSEKEEPING_TASK_DUP_001,
           `Ya existe una tarea de ${HOUSEKEEPING_TASK_TYPE_LABELS[input.type]} para la ${unit.code} ${day}`,
@@ -293,16 +303,17 @@ export class HousekeepingTasksService {
   }
 
   /**
-   * The housekeeper finishes her task. The room leaves "Sucia" for "Limpia"
-   * (inspection pending); a room in another status (out of service, already
-   * clean) keeps it.
+   * The housekeeper finishes her task. A clean (check-out or stayover) takes
+   * the room from "Sucia" to "Limpia" (inspection pending); a room in another
+   * status (out of service, already clean) keeps it. An inspection or a
+   * repair never changes the room's status.
    */
   async complete(id: number): Promise<HousekeepingTaskView> {
     const store_id = this.requireStoreId();
     const user_id = this.requireUserId();
     const task = await this.prisma.lodging_housekeeping_tasks.findFirst({
       where: { id },
-      select: { id: true, unit_id: true },
+      select: { id: true, unit_id: true, type: true },
     });
     if (!task) {
       throw new VendixHttpException(ErrorCodes.LODGING_HOUSEKEEPING_TASK_FIND_001);
@@ -323,6 +334,7 @@ export class HousekeepingTasksService {
       if (count === 0) {
         throw new VendixHttpException(ErrorCodes.LODGING_HOUSEKEEPING_TASK_STATE_001);
       }
+      if (!CLEANING_TASK_TYPES.includes(task.type)) return;
       await tx.lodging_units.updateMany({
         where: { id: task.unit_id, store_id, housekeeping_status: 'dirty' },
         data: { housekeeping_status: 'clean', updated_at: now },
@@ -358,6 +370,7 @@ export class HousekeepingTasksService {
     });
     const tasks = dailyHousekeepingTasks(stays, today);
     if (tasks.length > 0) {
+      // No `notes` here: a null note marks a generated task (see HAND_MADE_NOTE).
       await this.prisma.lodging_housekeeping_tasks.createMany({
         data: tasks.map((task) => ({ ...task, store_id, task_date: day })),
         skipDuplicates: true,
@@ -436,7 +449,7 @@ function stillDue<
   return tasks.filter(
     (task) =>
       task.status !== 'pending' ||
-      task.notes !== null ||
+      task.notes !== null || // hand-made, see HAND_MADE_NOTE
       current.has(taskKey({ unit_id: task.unit.id, type: task.type })),
   );
 }

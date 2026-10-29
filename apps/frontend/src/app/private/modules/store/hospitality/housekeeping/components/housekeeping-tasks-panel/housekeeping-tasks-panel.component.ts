@@ -160,6 +160,12 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
           >
             <span class="text-sm font-medium text-text-primary">
               {{ bulkIds().length }} {{ bulkIds().length === 1 ? 'seleccionada' : 'seleccionadas' }}
+              @if (selectedDone() > 0) {
+                <span class="font-normal text-text-secondary" data-testid="hk-bulk-skipped">
+                  · {{ selectedDone() }}
+                  {{ selectedDone() === 1 ? 'terminada no se asigna' : 'terminadas no se asignan' }}
+                </span>
+              }
             </span>
             <div class="flex gap-2">
               <app-button
@@ -216,7 +222,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
         [value]="assignTo()"
         (valueChange)="assignTo.set($event === null ? UNASSIGNED : Number($event))"
       />
-      <div slot="footer" class="flex justify-end gap-2">
+      <div slot="footer" class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <app-button variant="ghost" (clicked)="closeAssign()">Cancelar</app-button>
         <app-button
           variant="primary"
@@ -225,7 +231,7 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
           (clicked)="bulkAssigning() ? assignSelected() : assign()"
           data-testid="hk-assign-save"
         >
-          Guardar
+          {{ assignLabel() }}
         </app-button>
       </div>
     </app-modal>
@@ -335,6 +341,19 @@ export class HousekeepingTasksPanelComponent implements OnInit {
     return this.rows()
       .filter((row) => row.status === 'pending' && selected.has(row.id))
       .map((row) => row.id);
+  });
+
+  /** Selected visible tasks already finished: the bulk bar says they are skipped. */
+  readonly selectedDone = computed(() => {
+    const selected = this.selectedIds();
+    return this.rows().filter((row) => row.status !== 'pending' && selected.has(row.id)).length;
+  });
+
+  /** R-FORM-10 — verb + object on the submit button. */
+  readonly assignLabel = computed(() => {
+    if (!this.bulkAssigning()) return 'Asignar tarea';
+    const count = this.bulkIds().length;
+    return `Asignar ${count} ${count === 1 ? 'tarea' : 'tareas'}`;
   });
 
   readonly assignTitle = computed(() => {
@@ -467,7 +486,12 @@ export class HousekeepingTasksPanelComponent implements OnInit {
             ? `${what} ${done.length === 1 ? 'quedó' : 'quedaron'} sin asignar`
             : `${what} ${done.length === 1 ? 'asignada' : 'asignadas'} a ${name}`;
         const failed = ids.length - done.length;
-        if (failed === 0) {
+        if (done.length === 0) {
+          this.toastService.error(
+            ids.length === 1 ? 'No se pudo asignar la tarea' : 'No se pudo asignar ninguna tarea',
+          );
+          this.load();
+        } else if (failed === 0) {
           this.toastService.success(outcome);
         } else {
           this.toastService.error(

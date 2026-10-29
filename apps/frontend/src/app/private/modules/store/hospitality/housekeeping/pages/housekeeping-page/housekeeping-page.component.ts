@@ -49,6 +49,8 @@ import {
   HOUSEKEEPING_STATUS_CHIPS,
   VARIANT_BORDER,
 } from '../../../shared/hospitality-status';
+import { format, parseISO } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { HousekeepingTasksPanelComponent } from '../../components/housekeeping-tasks-panel/housekeeping-tasks-panel.component';
 import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 import {
@@ -210,12 +212,25 @@ const stringFilter = (values: FilterValues, key: string): string => {
                   customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 !rounded-[10px]"
                   class="shrink-0"
                   [disabled]="board() === null"
+                  [attr.title]="newTaskBlockedReason()"
                   ariaLabel="Nueva tarea"
                   (clicked)="openTaskForm({})"
                   data-testid="hk-new-task"
                 >
                   <app-icon slot="icon" name="plus" [size]="18" />
                   Nueva tarea
+                </app-button>
+              }
+              @if (tab() === 'tasks' && canCreateTask() && loadError() !== null) {
+                <!-- R-CTA-06: say why "+ Nueva tarea" is off and how to fix it. -->
+                <app-button
+                  variant="ghost"
+                  size="sm"
+                  class="shrink-0"
+                  (clicked)="load()"
+                  data-testid="hk-new-task-retry"
+                >
+                  No se pudieron cargar las habitaciones · Reintentar
                 </app-button>
               }
               <app-options-dropdown
@@ -589,6 +604,14 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
     this.tasksPanel()?.load();
   }
 
+  /** R-CTA-06 — why "+ Nueva tarea" is disabled (it needs the rooms). */
+  readonly newTaskBlockedReason = computed(() => {
+    if (this.board() !== null) return null;
+    return this.loadError() !== null
+      ? 'No se pudieron cargar las habitaciones'
+      : 'Cargando habitaciones…';
+  });
+
   openTaskForm(preset: TaskFormPreset): void {
     if (this.canCreateTask() && this.board() !== null) this.taskPreset.set(preset);
   }
@@ -596,7 +619,13 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
   onTaskCreated(task: HousekeepingTask): void {
     this.taskPreset.set(null);
     this.tasksPanel()?.add(task);
-    this.toastService.success(`Tarea creada · ${task.unit.code}`);
+    const day = this.board()?.business_date;
+    // A task of another day is not listed today: say when it shows up.
+    this.toastService.success(
+      task.task_date === day
+        ? `Tarea creada · ${task.unit.code}`
+        : `Tarea creada · ${task.unit.code} · ${format(parseISO(task.task_date), 'd MMM', { locale: es })}; aparecerá ese día`,
+    );
   }
 
   count(status: HousekeepingStatus): number {

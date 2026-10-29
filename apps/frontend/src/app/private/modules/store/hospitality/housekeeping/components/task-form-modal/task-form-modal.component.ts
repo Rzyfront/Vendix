@@ -18,6 +18,7 @@ import {
 } from '@angular/forms';
 import {
   ButtonComponent,
+  DialogService,
   IconComponent,
   InputComponent,
   ModalComponent,
@@ -78,6 +79,7 @@ interface TaskForm {
       [isOpen]="preset() !== null"
       (isOpenChange)="!$event && close()"
       (cancel)="close()"
+      [canClose]="canClose"
       (opened)="reset(); focusFirstField()"
       [size]="'md'"
       [dialog]="true"
@@ -138,8 +140,8 @@ interface TaskForm {
         }
       </form>
 
-      <div slot="footer" class="flex justify-end gap-2">
-        <app-button variant="ghost" (clicked)="close()">Cancelar</app-button>
+      <div slot="footer" class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <app-button variant="ghost" (clicked)="cancel()">Cancelar</app-button>
         <app-button
           type="submit"
           form="housekeeping-task-form"
@@ -158,6 +160,7 @@ export class HousekeepingTaskFormModalComponent {
   private readonly fb = inject(FormBuilder);
   private readonly housekeepingService = inject(LodgingHousekeepingService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly dialogService = inject(DialogService);
   protected readonly focusFirstField = injectFocusFirstField();
 
   /** Opens the form when set; `null` keeps it closed. */
@@ -249,6 +252,23 @@ export class HousekeepingTaskFormModalComponent {
     this.serverError.set(null);
     this.saving.set(false);
     if (this.staff() === null && this.loadedStaff() === null) this.loadStaff();
+  }
+
+  /** R-MOD-03 — Escape, the X or Cancelar ask before dropping typed values. */
+  readonly canClose = (): boolean | Promise<boolean> => {
+    if (this.saving()) return false;
+    if (!this.form.dirty) return true;
+    return this.dialogService.confirm({
+      title: '¿Descartar cambios?',
+      message: 'La tarea no se creará.',
+      confirmText: 'Descartar',
+      cancelText: 'Seguir editando',
+      confirmVariant: 'danger',
+    });
+  };
+
+  async cancel(): Promise<void> {
+    if (await this.canClose()) this.close();
   }
 
   close(): void {

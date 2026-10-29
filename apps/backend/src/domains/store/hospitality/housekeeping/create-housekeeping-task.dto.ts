@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Matches,
   MaxLength,
 } from 'class-validator';
 
@@ -25,6 +26,7 @@ export class CreateHousekeepingTaskDto {
   @ApiPropertyOptional({ example: '2026-11-10' })
   @IsOptional()
   @IsDateString({ strict: true })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'La fecha debe tener formato AAAA-MM-DD' })
   task_date?: string;
 
   @ApiPropertyOptional({ type: Number, nullable: true })
