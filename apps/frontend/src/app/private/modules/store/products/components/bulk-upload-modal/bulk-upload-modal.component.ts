@@ -452,7 +452,7 @@ import {
                     Arrastra tu archivo Excel aquí
                   </p>
                   <p class="text-xs text-gray-500 mt-0.5">
-                    o haz clic para seleccionar · .xlsx, .xls, .csv · Máximo 5
+                    o haz clic para seleccionar · .xlsx, .xls, .csv · Máximo 20
                     MB
                   </p>
                 }
