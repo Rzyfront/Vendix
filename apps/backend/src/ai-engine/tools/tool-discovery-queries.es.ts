@@ -2260,6 +2260,16 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Confirme que quedó habilitada la DIAN en producción',
     'Deje la facturación electrónica funcionando en producción, sin devuelta',
   ],
+  book_lodging_stay: [
+    'Resérvale la doble a Juan Pérez del 10 al 13',
+    'Hazle la reserva de la suite a la señora Gómez para este fin de semana',
+    'Oe, apártale una habitación sencilla a Carlos para mañana, una noche',
+    'Reserva la doble para 2 adultos del 20 al 22 a nombre de Ana Torres',
+    'El cliente confirmó, déjale reservada la habitación familiar',
+    'Crea la reserva del hotel para Pedro, llega el viernes y sale el domingo',
+    'Parce, bloquéale la doble a María del 5 al 8 de diciembre',
+    'Mete la reserva de Juan en la suite, son 2 adultos y un niño',
+  ],
   quote_lodging_availability: [
     '¿Tengo dobles del 10 al 13 para 2 adultos y cuánto cuesta?',
     'Cotízame una habitación para este fin de semana, somos 2 adultos y un niño',

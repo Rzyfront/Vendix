@@ -11,6 +11,8 @@ import { CashRegistersModule } from '../../cash-registers/cash-registers.module'
 import { SettingsModule } from '../../settings/settings.module';
 import { LodgingReservationsController } from './reservations.controller';
 import { LodgingReservationsService } from './reservations.service';
+import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { LodgingAvailabilityService } from './lodging-availability.service';
 import { LodgingRoomChangesService } from './room-changes.service';
 import { LodgingNoShowJob } from './jobs/lodging-no-show.job';
@@ -158,9 +160,26 @@ export class LodgingReservationsModule implements OnModuleInit {
   constructor(
     private readonly toolRegistry: AIToolRegistry,
     private readonly bookingEngine: LodgingBookingEngineService,
+    private readonly reservations: LodgingReservationsService,
+    private readonly prisma: StorePrismaService,
   ) {}
 
   onModuleInit(): void {
-    this.toolRegistry.registerMany(createLodgingTools({ bookingEngine: this.bookingEngine }));
+    this.toolRegistry.registerMany(
+      createLodgingTools({
+        bookingEngine: this.bookingEngine,
+        reservations: this.reservations,
+        // H9.2 — the guest named in Vexi's proposal; same store check as the sale.
+        findCustomerName: async (customer_id) => {
+          const store_id = RequestContextService.getContext()?.store_id;
+          if (!store_id) return null;
+          const user = await this.prisma.users.findFirst({
+            where: { id: customer_id, store_users: { some: { store_id } } },
+            select: { first_name: true, last_name: true },
+          });
+          return user ? `${user.first_name} ${user.last_name}`.trim() : null;
+        },
+      }),
+    );
   }
 }
