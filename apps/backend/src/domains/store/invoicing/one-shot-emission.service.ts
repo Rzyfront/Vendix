@@ -23,6 +23,9 @@ import {
   evaluateOrderHolder,
   holderCurrentData,
   isCfOverridable,
+  isFinalConsumerCustomer,
+  isUnidentifiedHolder,
+  type OrderHolderSourceRows,
 } from './utils/order-acquirer-holder.util';
 import { OrderLeaseService } from '../../../common/locks/order-lease.service';
 
@@ -363,6 +366,21 @@ export class OneShotEmissionService {
     });
     if (numbered) return undefined;
 
+    // Comprador no identificado (Consumidor final, invitado o cliente sólo con
+    // nombre): nadie pidió factura a su nombre. Pagada → Consumidor final con el
+    // medio real, sin preguntar. Sin pagar → sigue al flujo de saldo (crédito u
+    // opción Consumidor final de contado). Pedida a crédito o ya crédito, el
+    // bloqueo de abajo pide sus datos (el crédito nunca sale a Consumidor final).
+    const is_credit = order.payment_form === '2' || credit_requested;
+    if (
+      isUnidentifiedHolder(holder.issue) &&
+      !is_credit &&
+      !emit_options?.force_final_consumer
+    ) {
+      const { remaining } = computeOrderUnpaidBalance(order as any);
+      return remaining.lessThan(0.01) ? { force_final_consumer: true } : undefined;
+    }
+
     const overridable = isCfOverridable(holder.issue);
     const details = {
       order_id: order.id,
@@ -375,7 +393,7 @@ export class OneShotEmissionService {
     };
     if (overridable && emit_options?.force_final_consumer) {
       // Venta a crédito (ya crédito o pedida a crédito): nunca sale a Consumidor final.
-      if (order.payment_form === '2' || credit_requested) {
+      if (is_credit) {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001,
           CREDIT_FINAL_CONSUMER_MESSAGE,
@@ -447,7 +465,7 @@ export class OneShotEmissionService {
    * motivo. Sólo lee; la facturación masiva la usa para su vista previa.
    */
   classifyOrderPayment(
-    order: {
+    order: Pick<OrderHolderSourceRows, 'users'> & {
       state: string;
       customer_id: number | null;
       payment_form: string | null;
@@ -485,7 +503,7 @@ export class OneShotEmissionService {
   }
 
   private resolveCreditBlocker(
-    order: {
+    order: Pick<OrderHolderSourceRows, 'users'> & {
       state: string;
       customer_id: number | null;
       payments?: ReadonlyArray<{ state: string | null } & CodPromiseProbe> | null;
@@ -493,7 +511,10 @@ export class OneShotEmissionService {
     settled: Prisma.Decimal,
   ): CreditBlocker {
     if (['cancelled', 'refunded'].includes(order.state)) return 'order_state';
-    if (order.customer_id == null) return 'customer_required';
+    // El cliente Consumidor final (centinela) no es un deudor identificable.
+    if (order.customer_id == null || isFinalConsumerCustomer(order)) {
+      return 'customer_required';
+    }
     // Un cobro en vuelo (Wompi pendiente, tarjeta autorizada) cuenta como
     // abono: si se confirma después quedarían caja Y cartera por la misma venta.
     // La promesa contra entrega (`ON_DELIVERY` pendiente) no es un cobro: la

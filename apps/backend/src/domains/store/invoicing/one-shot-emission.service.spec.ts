@@ -32,6 +32,17 @@ const baseOrder = (over: Record<string, unknown> = {}) => ({
   invoice_data_requests: [],
   ...over,
 });
+/** Plazo válido (mañana) para pedir la emisión a crédito. */
+const tomorrowCredit = () =>
+  ({ due_date: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10) }) as any;
+/** Comprador sin documento: invitado con sólo el nombre de referencia (prod, orden 15298). */
+const guestNameOnly = () => ({
+  customer_id: null,
+  users: null,
+  invoice_data_requests: [
+    { document_type: null, document_number: null, first_name: 'Andrea león', last_name: null },
+  ],
+});
 const incompleteOrder = (over: Record<string, unknown> = {}) =>
   baseOrder({ users: customerRow({ last_name: '' }), ...over });
 
@@ -871,9 +882,11 @@ describe('OneShotEmissionService', () => {
       const { service } = build({
         order: baseOrder({
           users: customerRow({ document_type: null, document_number: null, last_name: 'Pérez' }),
+          payments: [],
+          state: 'finished',
         }),
       });
-      const body = await holderError(service.emitOrder(1));
+      const body = await holderError(service.emitOrder(1, tomorrowCredit()));
       expect(body.details.current).toEqual({
         document_type: null,
         document_number: null,
@@ -886,9 +899,13 @@ describe('OneShotEmissionService', () => {
 
     it('`current` no expone el documento centinela de Consumidor final', async () => {
       const { service } = build({
-        order: baseOrder({ users: customerRow({ document_number: '222222222222' }) }),
+        order: baseOrder({
+          users: customerRow({ document_number: '222222222222' }),
+          payments: [],
+          state: 'finished',
+        }),
       });
-      const body = await holderError(service.emitOrder(1));
+      const body = await holderError(service.emitOrder(1, tomorrowCredit()));
       expect(body.details.current).toMatchObject({ document_type: 'CC', document_number: null });
     });
 
@@ -972,6 +989,113 @@ describe('OneShotEmissionService', () => {
       setInv({ id: 50, status: 'accepted', invoice_number: 'FE-1', cufe: 'x', transmission_status: null, pdf_url: null, contingency_deadline: null, organization_id: 1, store_id: 1 });
       const r = await service.emitOrder(1);
       expect(r.state).toBe('issued');
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
+  });
+  describe('comprador no identificado (CF, invitado o cliente sólo con nombre)', () => {
+    const unpaidError = async (p: Promise<unknown>) => {
+      const err: any = await p.catch((e) => e);
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe(ErrorCodes.INVOICING_ORDER_UNPAID_001.code);
+      return err.getResponse().details as any;
+    };
+    const nameOnlyCustomer = () =>
+      customerRow({ document_type: null, document_number: null, first_name: 'Andrea', last_name: null });
+
+    it('invitado sólo con nombre, orden pagada: factura directo a Consumidor final, sin 409', async () => {
+      const { service, invoicing } = build({ order: baseOrder(guestNameOnly()) });
+      const r = await service.emitOrder(1);
+      expect(r.state).toBe('issued');
+      expect(invoicing.createFromOrder).toHaveBeenCalledWith(1, { force_final_consumer: true });
+    });
+
+    it('cliente registrado sólo con nombre, orden pagada: Consumidor final directo con el medio real', async () => {
+      const { service, invoicing } = build({ order: baseOrder({ users: nameOnlyCustomer() }) });
+      const r = await service.emitOrder(1);
+      expect(r.state).toBe('issued');
+      expect(invoicing.createFromOrder).toHaveBeenCalledWith(1, { force_final_consumer: true });
+    });
+
+    it('cliente registrado que ES el Consumidor final (222222222222), orden pagada: directo', async () => {
+      const { service, invoicing } = build({
+        order: baseOrder({
+          users: customerRow({ document_number: '222222222222', first_name: 'Consumidor', last_name: 'Final' }),
+        }),
+      });
+      const r = await service.emitOrder(1);
+      expect(r.state).toBe('issued');
+      expect(invoicing.createFromOrder).toHaveBeenCalledWith(1, { force_final_consumer: true });
+    });
+
+    it('invitado sólo con nombre, orden SIN pagar: ofrece crédito (409 ORDER_UNPAID, pide asignar cliente), no 409 de titular', async () => {
+      const { service, invoicing } = build({
+        order: baseOrder({ ...guestNameOnly(), payments: [], state: 'finished' }),
+      });
+      const details = await unpaidError(service.emitOrder(1));
+      expect(details).toMatchObject({ credit_eligible: false, credit_blocker: 'customer_required' });
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
+
+    it('cliente sólo con nombre, orden SIN pagar: abre el crédito (credit_eligible)', async () => {
+      const { service, invoicing } = build({
+        order: baseOrder({ users: nameOnlyCustomer(), payments: [], state: 'finished' }),
+      });
+      const details = await unpaidError(service.emitOrder(1));
+      expect(details).toMatchObject({ credit_eligible: true, credit_blocker: null });
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
+
+    it('cliente Consumidor final (centinela), orden SIN pagar: no es elegible a crédito (customer_required)', async () => {
+      const { service } = build({
+        order: baseOrder({
+          users: customerRow({ document_number: '222222222222' }),
+          payments: [],
+          state: 'finished',
+        }),
+      });
+      const details = await unpaidError(service.emitOrder(1));
+      expect(details).toMatchObject({ credit_eligible: false, credit_blocker: 'customer_required' });
+    });
+
+    it('invitado sólo con nombre, SIN pagar + Consumidor final: contado «Acuerdo mutuo» directo', async () => {
+      const { service, invoicing, receivables } = build({
+        order: baseOrder({ ...guestNameOnly(), payments: [], state: 'finished' }),
+      });
+      const r = await service.emitOrder(1, undefined, { force_final_consumer: true });
+      expect(r.state).toBe('issued');
+      expect(invoicing.createFromOrder).toHaveBeenCalledWith(1, {
+        force_final_consumer: true,
+        cash_by_mutual_agreement: true,
+      });
+      expect(receivables.createCreditSaleFromEvent).not.toHaveBeenCalled();
+    });
+
+    it('cliente sólo con nombre pedido a crédito: 409 de titular para completar sus datos', async () => {
+      const { service, invoicing } = build({
+        order: baseOrder({ users: nameOnlyCustomer(), payments: [], state: 'finished' }),
+      });
+      const err: any = await service.emitOrder(1, tomorrowCredit()).catch((e) => e);
+      expect(err.errorCode).toBe(ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001.code);
+      expect(err.getResponse().details).toMatchObject({ customer_id: 5, cf_overridable: true });
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
+
+    it('orden ya a crédito con comprador sin documento: sigue bloqueando (el crédito nunca sale a CF)', async () => {
+      const { service, invoicing } = build({
+        order: baseOrder({ users: nameOnlyCustomer(), payment_form: '2', payments: [] }),
+      });
+      const err: any = await service.emitOrder(1).catch((e) => e);
+      expect(err.errorCode).toBe(ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001.code);
+      expect(invoicing.createFromOrder).not.toHaveBeenCalled();
+    });
+
+    it('documento parcial (número sin nombre), orden pagada: sigue el modal de datos incompletos', async () => {
+      const { service, invoicing } = build({
+        order: baseOrder({ users: customerRow({ last_name: null }) }),
+      });
+      const err: any = await service.emitOrder(1).catch((e) => e);
+      expect(err.errorCode).toBe(ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001.code);
+      expect(err.getResponse().details).toMatchObject({ issue_code: 'missing_name' });
       expect(invoicing.createFromOrder).not.toHaveBeenCalled();
     });
   });
