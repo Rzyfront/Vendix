@@ -44,6 +44,7 @@ import {
 } from '../../../../../../../shared/pipes';
 import { PaymentMethodsCatalogService } from '../../../../../../../shared/services/payment-methods-catalog.service';
 import type { PaymentMethod } from '../../../../../../../shared/models/payment-method.model';
+import { selectChargeableSplitMethods } from './split-payment-methods.util';
 import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { formatStockShortageSummary } from '../../../../../../../core/utils/stock-shortage.util';
@@ -441,17 +442,7 @@ export class SplitAccountsPanelComponent {
       .getEnabledMethods()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((methods) => {
-        this.paymentMethods.set(
-          methods.filter(
-            (method) =>
-              method.enabled &&
-              Number(method.id) > 0 &&
-              ((method.processingMode === 'DIRECT' &&
-                ['cash', 'card', 'bank_transfer'].includes(method.type)) ||
-                (method.processingMode === 'ONLINE' &&
-                  method.type === 'wompi')),
-          ),
-        );
+        this.paymentMethods.set(selectChargeableSplitMethods(methods));
       });
   }
 
