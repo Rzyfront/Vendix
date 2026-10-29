@@ -103,7 +103,8 @@ async function planStay(
       next_step: 'Búscalo con find_customer o créalo primero.',
     };
   }
-  const result = await deps.bookingEngine.search(dto);
+  // The guest's allotment counts as in the reservation form; `create` stays the final judge.
+  const result = await deps.bookingEngine.search(dto, { customer_id, with_images: false });
   const picked = pickRoomType(result.room_types, String(args.room_type ?? ''));
   if ('error' in picked) return { error: picked.error };
   return { dto, customer_id, customer_name, result, type: picked.type };
@@ -196,6 +197,8 @@ interface PlannedPrecheckin {
   to_send: PrecheckinArrival[];
   without_email: PrecheckinArrival[];
   completed: PrecheckinArrival[];
+  /** More arrivals than one request lists; only the first ones are shown and sent. */
+  truncated: boolean;
 }
 
 /**
@@ -232,6 +235,7 @@ async function planPrecheckin(
     to_send: pending.filter((a) => a.email),
     without_email: pending.filter((a) => !a.email),
     completed: found.arrivals.filter((a) => a.precheckin_done),
+    truncated: found.truncated,
   };
   if (!found.arrivals.length) {
     return { error: `No hay llegadas confirmadas para el ${day}.` };
@@ -316,7 +320,7 @@ export function createLodgingTools(deps: LodgingToolDeps): RegisteredTool[] {
           return guidedError('Datos de la estadía inválidos.', INVALID_STAY_STEP);
         }
         try {
-          const result = await bookingEngine.search(dto);
+          const result = await bookingEngine.search(dto, { with_images: false });
           return JSON.stringify({
             arrival_date: result.arrival_date,
             departure_date: result.departure_date,
@@ -524,6 +528,7 @@ export function createLodgingTools(deps: LodgingToolDeps): RegisteredTool[] {
           return { status: 'error', target: DEPOSIT_LINK, changes: [], message: plan.error, domain: 'lodging' };
         }
         const { summary, amount, open_link } = plan;
+        // Deposit links are Wompi links, charged in COP (`LodgingDepositsService.createLink`).
         const money = (value: number | string) => formatMoney(String(value), 'COP');
         const target = `Depósito de la reserva ${plan.reservation_number}`;
         if (amount === null) {
@@ -564,6 +569,7 @@ export function createLodgingTools(deps: LodgingToolDeps): RegisteredTool[] {
               amount: plan.open_link!.amount,
               payment_link: plan.open_link!.checkout_url,
               note: 'Ya existía este link sin pagar; no se creó otro.',
+              applied: false,
             });
           }
           const before = new Set(plan.summary.movements.map((row) => row.id));
@@ -638,9 +644,10 @@ export function createLodgingTools(deps: LodgingToolDeps): RegisteredTool[] {
             : '',
           plan.completed.length ? `Ya completaron el pre check-in: ${plan.completed.length}.` : '',
           resent ? `${resent} ya habían recibido el recordatorio automático; se les reenvía.` : '',
+          plan.truncated ? `Hay más llegadas: se muestran y envían solo las primeras ${plan.to_send.length + plan.without_email.length + plan.completed.length}.` : '',
         ].filter(Boolean);
         return {
-          status: plan.without_email.length || resent ? 'warning' : 'ok',
+          status: plan.without_email.length || resent || plan.truncated ? 'warning' : 'ok',
           target: `Pre check-in de las llegadas del ${formatShortDate(plan.arrival_date)}`,
           domain: 'lodging',
           changes: plan.to_send.map((a) => ({
@@ -667,6 +674,8 @@ export function createLodgingTools(deps: LodgingToolDeps): RegisteredTool[] {
             not_sent: failed,
             without_email: plan.without_email.map((a) => a.reservation_number),
             already_completed: plan.completed.length,
+            ...(plan.truncated ? { truncated: true } : {}),
+            ...(sent.length === 0 ? { applied: false } : {}),
             summary: `Salieron ${sent.length} de ${plan.to_send.length} correo(s) de pre check-in para las llegadas del ${day}.`,
             ...(failed.length ? { next_step: 'Los que no salieron se pueden reintentar más tarde o enviar el enlace desde la reserva.' } : {}),
           });

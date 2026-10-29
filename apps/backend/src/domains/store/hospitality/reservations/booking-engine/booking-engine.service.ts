@@ -110,8 +110,13 @@ export class LodgingBookingEngineService {
 
   // ---------------------------------------------------------------- search
 
-  /** Room types that fit the guests, with price, policy and availability. */
-  async search(dto: BookingSearchDto) {
+  /**
+   * Room types that fit the guests, with price, policy and availability.
+   * Desk callers (Vexi, H9) pass the guest so their allotment counts, as in
+   * the reservation form, and skip signing the photos they do not show.
+   */
+  async search(dto: BookingSearchDto, options: { customer_id?: number; with_images?: boolean } = {}) {
+    const with_images = options.with_images ?? true;
     const store_id = this.requireStoreId();
     const nights = stayNights(dto.arrival_date, dto.departure_date);
     await this.assertNotPast(store_id, dto.arrival_date);
@@ -142,7 +147,7 @@ export class LodgingBookingEngineService {
 
     const room_types: BookableRoomType[] = [];
     for (const type of types) {
-      const quote = await this.quoteType(type.id, dto, plan_id);
+      const quote = await this.quoteType(type.id, dto, plan_id, options.customer_id);
       if (!quote) continue;
       const total = new Prisma.Decimal(quote.total_amount);
       const percent = new Prisma.Decimal(quote.deposit_percent);
@@ -160,9 +165,11 @@ export class LodgingBookingEngineService {
         max_adults: type.max_adults,
         max_children: type.max_children,
         max_occupancy: type.max_occupancy,
-        images: (await Promise.all(type.images.map((key) => this.s3.signUrl(key)))).filter(
-          (url): url is string => !!url,
-        ),
+        images: with_images
+          ? (await Promise.all(type.images.map((key) => this.s3.signUrl(key)))).filter(
+              (url): url is string => !!url,
+            )
+          : [],
         amenities: type.amenities.map((code) => ({ code, label: AMENITY_LABELS.get(code) ?? code })),
         available: Math.max(0, quote.available),
         bookable: reason === null,
@@ -483,9 +490,15 @@ export class LodgingBookingEngineService {
    * type the plan does not price falls back to its base price. Null when
    * the type cannot be sold online (missing, inactive or too small).
    */
-  private async quoteType(unit_type_id: number, dto: BookingSearchDto, plan_id: number | undefined) {
+  private async quoteType(
+    unit_type_id: number,
+    dto: BookingSearchDto,
+    plan_id: number | undefined,
+    customer_id?: number,
+  ) {
     const input = {
       unit_type_id,
+      ...(customer_id ? { customer_id } : {}),
       arrival_date: dto.arrival_date,
       departure_date: dto.departure_date,
       adults: dto.adults,

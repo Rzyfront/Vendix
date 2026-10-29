@@ -227,6 +227,7 @@ describe('LodgingGuestMessagesJob', () => {
           today: '2026-11-10',
           arrival_date: '2026-11-11',
           has_link: true,
+          truncated: false,
           arrivals: [
             {
               reservation_id: 7,
@@ -281,6 +282,33 @@ describe('LodgingGuestMessagesJob', () => {
       expect(email.sendEmail).not.toHaveBeenCalled();
       expect(deleteMany).toHaveBeenCalledWith({ where: { id: 99 } });
       await expect(job.sendPrecheckinNow([])).resolves.toEqual({ sent: [], failed: [] });
+    });
+
+    it('avisa cuando la fecha tiene más llegadas que el tope y lista solo las primeras 200', async () => {
+      const rows = Array.from({ length: 201 }, (_, i) =>
+        reservation({ id: i + 1, reservation_number: `H-${i + 1}`, guest_message_logs: [] }),
+      );
+      const { job, findMany } = build({ byStatus: { confirmed: rows } });
+      const result = await job.precheckinArrivals('2026-11-12');
+      expect((findMany.mock.calls[0][0] as { take?: number }).take).toBe(201);
+      expect(result.truncated).toBe(true);
+      expect(result.arrivals).toHaveLength(200);
+    });
+
+    it('envía en lotes de 5 en paralelo y conserva el orden de la lista', async () => {
+      const rows = Array.from({ length: 7 }, (_, i) => reservation({ id: i + 1, reservation_number: `H-${i + 1}` }));
+      const { job, email } = build({ byStatus: { confirmed: rows } });
+      let inFlight = 0;
+      let peak = 0;
+      email.sendEmail.mockImplementation(async () => {
+        peak = Math.max(peak, ++inFlight);
+        await new Promise((resolve) => setImmediate(resolve));
+        inFlight--;
+        return { success: true };
+      });
+      const result = await job.sendPrecheckinNow(rows.map((r) => r.id));
+      expect(result.sent).toEqual(['H-1', 'H-2', 'H-3', 'H-4', 'H-5', 'H-6', 'H-7']);
+      expect(peak).toBe(5);
     });
   });
 });

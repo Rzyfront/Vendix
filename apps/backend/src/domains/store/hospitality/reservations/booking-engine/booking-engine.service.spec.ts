@@ -43,6 +43,21 @@ function build() {
     },
     stores: { findFirst: jest.fn(async () => ({ timezone: 'America/Bogota' })) },
     lodging_rate_plans: { findFirst: jest.fn(async () => ({ id: 5 })) },
+    lodging_unit_types: {
+      findMany: jest.fn(async () => [
+        {
+          id: 3,
+          name: 'Doble',
+          description: null,
+          bed_config: null,
+          max_adults: 2,
+          max_children: 0,
+          max_occupancy: 2,
+          images: ['rooms/doble.jpg'],
+          amenities: [],
+        },
+      ]),
+    },
     lodging_reservations: {
       findMany: jest.fn(async (): Promise<Array<{ id: number }>> => []),
       findFirst: jest.fn(async (): Promise<Record<string, unknown> | null> => ({ status: 'cancelled' })),
@@ -93,16 +108,17 @@ function build() {
   const email = { sendEmail: jest.fn(async () => ({ success: true })) };
   const events = { emit: jest.fn() };
   const runner = { runInStoreContext: jest.fn(async (_id: number, fn: () => unknown) => fn()) };
+  const s3 = { signUrl: jest.fn(async (key: string) => `https://s3/${key}`) };
   const service = new LodgingBookingEngineService(
     prisma as any,
     reservations as any,
     paymentLinks as any,
-    { signUrl: jest.fn(async (key: string) => `https://s3/${key}`) } as any,
+    s3 as any,
     email as any,
     events as any,
     runner as any,
   );
-  return { service, prisma, reservations, paymentLinks, email, events, payments };
+  return { service, prisma, reservations, paymentLinks, email, events, payments, s3 };
 }
 
 describe('LodgingBookingEngineService (H6.6)', () => {
@@ -113,6 +129,26 @@ describe('LodgingBookingEngineService (H6.6)', () => {
   afterEach(() => {
     jest.useRealTimers();
     jest.restoreAllMocks();
+  });
+
+  describe('search', () => {
+    const STAY = { arrival_date: '2026-11-20', departure_date: '2026-11-23', adults: 2, children: 0 };
+
+    it('la tienda online cotiza sin huésped y con las fotos firmadas', async () => {
+      const { service, reservations, s3 } = build();
+      const result = await service.search(STAY);
+      expect(reservations.quote).toHaveBeenCalledWith(expect.not.objectContaining({ customer_id: expect.anything() }));
+      expect(s3.signUrl).toHaveBeenCalledWith('rooms/doble.jpg');
+      expect(result.room_types[0].images).toEqual(['https://s3/rooms/doble.jpg']);
+    });
+
+    it('recepción (Vexi) cotiza con el cupo del huésped y sin firmar fotos', async () => {
+      const { service, reservations, s3 } = build();
+      const result = await service.search(STAY, { customer_id: 272, with_images: false });
+      expect(reservations.quote).toHaveBeenCalledWith(expect.objectContaining({ customer_id: 272, unit_type_id: 3 }));
+      expect(s3.signUrl).not.toHaveBeenCalled();
+      expect(result.room_types[0].images).toEqual([]);
+    });
   });
 
   describe('hold', () => {

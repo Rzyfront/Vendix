@@ -101,6 +101,7 @@ function arrivals(overrides: Record<string, unknown> = {}) {
     today: '2026-10-28',
     arrival_date: '2026-10-29',
     has_link: true,
+    truncated: false,
     arrivals: [
       arrival(31),
       arrival(32, { reminder_sent: true }),
@@ -185,6 +186,7 @@ describe('quote_lodging_availability (H9.1)', () => {
         adults: 2,
         children: 0,
       }),
+      { with_images: false },
     );
     expect(result.nights).toBe(3);
     expect(result.currency).toBe('COP');
@@ -318,8 +320,11 @@ describe('book_lodging_stay (H9.2)', () => {
   });
 
   it('books the quoted room with the same rate plan once confirmed', async () => {
-    const { book, reservations } = setup();
+    const { book, reservations, bookingEngine } = setup();
     const result = JSON.parse((await book.handler!({ ...ARGS, notes: ' Llega tarde ' }, CTX)) as string);
+
+    // The guest's allotment counts in the quote, as in the reservation form.
+    expect(bookingEngine.search).toHaveBeenCalledWith(expect.anything(), { customer_id: 42, with_images: false });
 
     expect(reservations.create).toHaveBeenCalledWith({
       arrival_date: '2026-11-10',
@@ -462,6 +467,7 @@ describe('create_lodging_deposit_link (H9.3)', () => {
 
     const result = JSON.parse((await link.handler!(ARGS, CTX)) as string);
     expect(result.payment_link).toBe(LINK);
+    expect(result.applied).toBe(false);
     expect(deposits.createLink).not.toHaveBeenCalled();
   });
 
@@ -585,6 +591,27 @@ describe('send_lodging_precheckin (H9.4)', () => {
       summary: 'Salieron 1 de 2 correo(s) de pre check-in para las llegadas del 29-oct.',
     });
     expect(result.next_step).toBeDefined();
+    expect(result.applied).toBeUndefined();
+  });
+
+  it('records nothing applied when no email went out', async () => {
+    const { precheckin, guestMessages } = setup();
+    guestMessages.sendPrecheckinNow.mockResolvedValue({ sent: [], failed: ['RES-0031', 'RES-0032'] });
+    const result = JSON.parse((await precheckin.handler!({}, CTX)) as string);
+
+    expect(result).toMatchObject({ sent: 0, applied: false });
+  });
+
+  it('warns that only the first arrivals are listed and sent when the day has more', async () => {
+    const { precheckin, guestMessages } = setup();
+    guestMessages.precheckinArrivals.mockResolvedValue(arrivals({ truncated: true }));
+
+    const preview = await precheckin.preview!({}, CTX);
+    expect(preview.status).toBe('warning');
+    expect(preview.message).toContain('Hay más llegadas: se muestran y envían solo las primeras 4.');
+
+    const result = JSON.parse((await precheckin.handler!({}, CTX)) as string);
+    expect(result.truncated).toBe(true);
   });
 
   it('refuses a past date, a hotel without online store, a day without arrivals and a day with nobody to send', async () => {

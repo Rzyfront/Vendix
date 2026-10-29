@@ -57,10 +57,14 @@ export interface PrecheckinArrivals {
   /** The store has an online domain, so the link can be built. */
   has_link: boolean;
   arrivals: PrecheckinArrival[];
+  /** The date has more arrivals than MAX_ARRIVALS; only the first ones are listed. */
+  truncated: boolean;
 }
 
 /** Arrivals listed and sent per request; a hotel's day stays far below it. */
 const MAX_ARRIVALS = 200;
+/** Pre check-in emails sent at once by a desk request, so it answers in time. */
+const SEND_CONCURRENCY = 5;
 
 const notSent = (key: GuestMessageKey) => ({
   guest_message_logs: { none: { message_key: key, channel: CHANNEL } },
@@ -149,13 +153,14 @@ export class LodgingGuestMessagesJob {
         guest_message_logs: { where: { message_key: 'pre_arrival', channel: CHANNEL }, select: { id: true } },
       },
       orderBy: { reservation_number: 'asc' },
-      take: MAX_ARRIVALS,
+      take: MAX_ARRIVALS + 1,
     });
     return {
       today,
       arrival_date: date,
       has_link: await this.precheckin.hasGuestDomain(),
-      arrivals: rows.map((r) => ({
+      truncated: rows.length > MAX_ARRIVALS,
+      arrivals: rows.slice(0, MAX_ARRIVALS).map((r) => ({
         reservation_id: r.id,
         reservation_number: r.reservation_number,
         guest_name: `${r.customer.first_name ?? ''} ${r.customer.last_name ?? ''}`.trim(),
@@ -186,10 +191,11 @@ export class LodgingGuestMessagesJob {
       : [];
     const sent: string[] = [];
     const failed: string[] = [];
-    for (const r of rows) {
-      if (!r.customer.email?.trim()) continue;
-      const ok = await this.send(store_id, 'pre_arrival', r, settings, true);
-      (ok ? sent : failed).push(r.reservation_number);
+    const withEmail = rows.filter((r) => r.customer.email?.trim());
+    for (let i = 0; i < withEmail.length; i += SEND_CONCURRENCY) {
+      const batch = withEmail.slice(i, i + SEND_CONCURRENCY);
+      const results = await Promise.all(batch.map((r) => this.send(store_id, 'pre_arrival', r, settings, true)));
+      batch.forEach((r, k) => (results[k] ? sent : failed).push(r.reservation_number));
     }
     return { sent, failed };
   }
