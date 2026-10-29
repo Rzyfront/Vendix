@@ -148,9 +148,9 @@ export class StoreEcommerceLayoutComponent {
 
   // Default links when no footer config exists
   readonly default_links: FooterLink[] = [
-    { label: 'Productos', url: '/products', is_external: false },
-    { label: 'Novedades', url: '/new', is_external: false },
-    { label: 'Ofertas', url: '/sale', is_external: false },
+    { label: 'Productos', url: '/catalog', is_external: false },
+    { label: 'Novedades', url: '/novedades', is_external: false },
+    { label: 'Ofertas', url: '/ofertas', is_external: false },
   ];
 
   // Current year for copyright
