@@ -5776,6 +5776,16 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La tarea ya no está pendiente o no está asignada a ti',
   },
+  LODGING_HOUSEKEEPING_TASK_DUP_001: {
+    code: 'LODGING_HOUSEKEEPING_TASK_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe una tarea de ese tipo para la habitación en esa fecha',
+  },
+  LODGING_HOUSEKEEPING_TASK_DATE_001: {
+    code: 'LODGING_HOUSEKEEPING_TASK_DATE_001',
+    httpStatus: 400,
+    devMessage: 'La fecha de la tarea no puede ser anterior a hoy',
+  },
   // Hospitality Suite (H5.3) — inventory blocks (maintenance, owner use)
   LODGING_BLOCK_FIND_001: {
     code: 'LODGING_BLOCK_FIND_001',

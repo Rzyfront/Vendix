@@ -113,15 +113,23 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
           [showActionButton]="true"
           (actionClick)="clearFilters.emit()"
         />
+      } @else if (rows().length === 0 && mode() === 'assign') {
+        <!-- R-EMPTY-01/04: tasks are made on their own, and by hand too. -->
+        <app-empty-state
+          icon="clipboard-check"
+          title="Sin tareas hoy"
+          description="Las tareas de salidas y huéspedes en casa se crean solas cada día. Puedes crear otras con + Nueva tarea."
+          actionButtonText="Nueva tarea"
+          actionButtonIcon="plus"
+          [showActionButton]="true"
+          (actionClick)="createTask.emit()"
+          data-testid="hk-tasks-empty"
+        />
       } @else if (rows().length === 0) {
         <app-empty-state
           icon="clipboard-check"
-          [title]="mode() === 'assign' ? 'Sin tareas hoy' : 'Sin tareas asignadas'"
-          [description]="
-            mode() === 'assign'
-              ? 'Hoy no hay salidas ni huéspedes en casa que limpiar.'
-              : 'No tienes habitaciones asignadas hoy.'
-          "
+          title="Sin tareas asignadas"
+          description="No tienes habitaciones asignadas hoy."
           [showActionButton]="false"
         />
       } @else {
@@ -185,6 +193,8 @@ export class HousekeepingTasksPanelComponent implements OnInit {
   /** A finished task may have changed a room's status on the board. */
   readonly roomChanged = output<void>();
   readonly clearFilters = output<void>();
+  /** U12 — the empty state asks the page for "+ Nueva tarea". */
+  readonly createTask = output<void>();
 
   readonly day = signal<HousekeepingTasksDay | null>(null);
   /** R-FB-02 — reason of the last failed load; null = loaded or loading. */
@@ -361,6 +371,15 @@ export class HousekeepingTasksPanelComponent implements OnInit {
             ? 'Tú'
             : (this.staffNames().get(task.assigned_user_id) ?? 'Asignada'),
     };
+  }
+
+  /** U12 — a task made by hand joins today's list (other dates do not show here). */
+  add(task: HousekeepingTask): void {
+    this.day.update((day) =>
+      day && task.task_date === day.business_date && !day.tasks.some((t) => t.id === task.id)
+        ? { ...day, tasks: [...day.tasks, task] }
+        : day,
+    );
   }
 
   private replace(updated: HousekeepingTask): void {

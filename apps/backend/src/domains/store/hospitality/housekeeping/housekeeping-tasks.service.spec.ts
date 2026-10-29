@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 import {
@@ -28,15 +29,18 @@ describe('HousekeepingTasksService', () => {
     findMany: jest.fn(),
     findFirst: jest.fn(),
     createMany: jest.fn(),
+    create: jest.fn(),
     updateMany: jest.fn(),
   };
   const rooms = { findMany: jest.fn() };
+  const units = { findFirst: jest.fn() };
   const users = { findMany: jest.fn() };
   const txTasks = { updateMany: jest.fn() };
   const txUnits = { updateMany: jest.fn() };
   const prisma = {
     lodging_housekeeping_tasks: tasks,
     lodging_reservation_rooms: rooms,
+    lodging_units: units,
     users,
     $transaction: jest.fn((fn: (tx: unknown) => unknown) =>
       fn({ lodging_housekeeping_tasks: txTasks, lodging_units: txUnits }),
@@ -159,6 +163,153 @@ describe('HousekeepingTasksService', () => {
         skipDuplicates: true,
       });
       expect(result.tasks.map((t) => t.unit.code)).toEqual(['102', '103']);
+    });
+  });
+
+  describe('tasks created by hand', () => {
+    it('keeps hand-made pending tasks no stay calls for, still hides a moved stayover', async () => {
+      // 905 and 906 have no guest today; their tasks were asked by hand.
+      const inspection = { ...view, id: 4, type: 'inspection', notes: '', unit: { ...view.unit, id: 12, code: '905' } };
+      const clean = { ...view, id: 5, notes: 'Derrame', unit: { ...view.unit, id: 13, code: '906' } };
+      const moved = { ...view, type: 'stayover' };
+      tasks.findMany.mockResolvedValue([moved, inspection, clean]);
+
+      const result = await service.today();
+
+      expect(result.tasks.map((t) => `${t.unit.code}:${t.type}:${t.notes}`)).toEqual([
+        '905:inspection:null',
+        '906:checkout_clean:Derrame',
+      ]);
+    });
+  });
+
+  describe('create', () => {
+    const created = {
+      ...view,
+      id: 9,
+      type: 'inspection',
+      assigned_user_id: 21,
+      notes: 'Revisar aire',
+      unit: { ...view.unit, id: 12, code: '905' },
+    };
+    const duplicate = () =>
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+      });
+
+    beforeEach(() => {
+      units.findFirst.mockResolvedValue({ id: 12, code: '905' });
+    });
+
+    it('creates a task for today in an active room of the store', async () => {
+      users.findMany.mockResolvedValue([{ id: 21, first_name: 'Ana', last_name: 'Ruiz' }]);
+      tasks.create.mockResolvedValue(created);
+
+      const result = await service.create({
+        unit_id: 12,
+        type: 'inspection',
+        assigned_user_id: 21,
+        notes: '  Revisar aire  ',
+      });
+
+      expect(units.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 12, is_active: true } }),
+      );
+      expect(tasks.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            store_id: 5,
+            unit_id: 12,
+            task_date: d('2026-11-10'),
+            type: 'inspection',
+            assigned_user_id: 21,
+            notes: 'Revisar aire',
+          },
+        }),
+      );
+      expect(result).toEqual({ ...created, task_date: '2026-11-10' });
+    });
+
+    it('creates an unassigned task without notes on a later date, marked as hand-made', async () => {
+      tasks.create.mockResolvedValue({ ...created, assigned_user_id: null, notes: '' });
+
+      const result = await service.create({
+        unit_id: 12,
+        type: 'maintenance',
+        task_date: '2026-11-12',
+        notes: '   ',
+      });
+
+      expect(users.findMany).not.toHaveBeenCalled();
+      expect(tasks.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            task_date: d('2026-11-12'),
+            type: 'maintenance',
+            assigned_user_id: null,
+            notes: '',
+          }),
+        }),
+      );
+      expect(result.notes).toBeNull();
+    });
+
+    it('refuses a second task of the same type for the room and day, naming both', async () => {
+      tasks.create.mockRejectedValue(duplicate());
+
+      const error = await service.create({ unit_id: 12, type: 'inspection' }).catch((e) => e);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect((error as VendixHttpException).getStatus()).toBe(409);
+      expect((error as VendixHttpException).getResponse()).toEqual({
+        error_code: 'LODGING_HOUSEKEEPING_TASK_DUP_001',
+        message: 'Ya existe una tarea de Inspección para la 905 hoy',
+        details: { field: 'type' },
+      });
+    });
+
+    it('names the date of a duplicate that is not today', async () => {
+      tasks.create.mockRejectedValue(duplicate());
+
+      const error = await service
+        .create({ unit_id: 12, type: 'stayover', task_date: '2026-11-11' })
+        .catch((e) => e);
+
+      expect((error as VendixHttpException).getResponse()).toMatchObject({
+        message: 'Ya existe una tarea de Repaso para la 905 el 2026-11-11',
+      });
+    });
+
+    it('refuses a past date without writing', async () => {
+      await expectCode(
+        service.create({ unit_id: 12, type: 'inspection', task_date: '2026-11-09' }),
+        'LODGING_HOUSEKEEPING_TASK_DATE_001',
+      );
+      expect(tasks.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a room that is not an active room of the store', async () => {
+      units.findFirst.mockResolvedValue(null);
+
+      await expectCode(service.create({ unit_id: 99, type: 'inspection' }), 'LODGING_UNIT_FIND_001');
+      expect(tasks.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses an assignee who is not a housekeeper of the store', async () => {
+      users.findMany.mockResolvedValue([]);
+
+      await expectCode(
+        service.create({ unit_id: 12, type: 'inspection', assigned_user_id: 77 }),
+        'LODGING_HOUSEKEEPING_TASK_ASSIGNEE_001',
+      );
+      expect(tasks.create).not.toHaveBeenCalled();
+    });
+
+    it('lets any other database error through', async () => {
+      tasks.create.mockRejectedValue(new Error('connection lost'));
+
+      await expect(service.create({ unit_id: 12, type: 'inspection' })).rejects.toThrow('connection lost');
     });
   });
 

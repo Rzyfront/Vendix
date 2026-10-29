@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   lodging_housekeeping_task_status_enum,
   lodging_housekeeping_task_type_enum,
+  Prisma,
 } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { localDateString, resolveStoreTimezone } from '@common/utils/store-timezone.util';
@@ -19,6 +20,23 @@ export type HousekeepingTaskStatus = lodging_housekeeping_task_status_enum;
  * role) so a hotel role added later only needs to be named here.
  */
 export const HOUSEKEEPING_ASSIGNEE_ROLES: readonly string[] = [HOUSEKEEPER_ROLE];
+
+/** Spanish name of each task type, as the screens show it. */
+export const HOUSEKEEPING_TASK_TYPE_LABELS: Readonly<Record<HousekeepingTaskType, string>> = {
+  checkout_clean: 'Limpieza de salida',
+  stayover: 'Repaso',
+  inspection: 'Inspección',
+  maintenance: 'Mantenimiento',
+};
+
+export interface CreateHousekeepingTaskInput {
+  unit_id: number;
+  type: HousekeepingTaskType;
+  /** YYYY-MM-DD; today (store time zone) when omitted. */
+  task_date?: string;
+  assigned_user_id?: number | null;
+  notes?: string | null;
+}
 
 export interface HousekeepingStaffMember {
   id: number;
@@ -137,6 +155,66 @@ export class HousekeepingTasksService {
       orderBy: [{ status: 'asc' }, { unit: { floor: 'asc' } }, { unit: { code: 'asc' } }],
     });
     return { business_date: today, tasks: stillDue(tasks, current).map(toView) };
+  }
+
+  /**
+   * U12 — a task asked by hand: an inspection, a repair or a clean of a room
+   * without a departure. One task per room, day and type (unique key): a
+   * second one is refused naming the type and the room.
+   *
+   * A task made by hand always stores `notes` (empty when none were given);
+   * the daily generation never writes them. That is how `stillDue` tells a
+   * hand-made task from a generated one whose stay moved away.
+   */
+  async create(input: CreateHousekeepingTaskInput): Promise<HousekeepingTaskView> {
+    const store_id = this.requireStoreId();
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const today = localDateString(new Date(), timezone);
+    const task_date = input.task_date ?? today;
+    if (task_date < today) {
+      throw new VendixHttpException(ErrorCodes.LODGING_HOUSEKEEPING_TASK_DATE_001);
+    }
+
+    const unit = await this.prisma.lodging_units.findFirst({
+      where: { id: input.unit_id, is_active: true },
+      select: { id: true, code: true },
+    });
+    if (!unit) {
+      throw new VendixHttpException(ErrorCodes.LODGING_UNIT_FIND_001);
+    }
+    const assigned_user_id = input.assigned_user_id ?? null;
+    if (assigned_user_id != null) {
+      const staff = await this.staff(store_id, assigned_user_id);
+      if (staff.length === 0) {
+        throw new VendixHttpException(ErrorCodes.LODGING_HOUSEKEEPING_TASK_ASSIGNEE_001);
+      }
+    }
+
+    const notes = input.notes?.trim() ?? '';
+    try {
+      const task = await this.prisma.lodging_housekeeping_tasks.create({
+        data: {
+          store_id,
+          unit_id: unit.id,
+          task_date: dateOnlyToDb(task_date),
+          type: input.type,
+          assigned_user_id,
+          notes,
+        },
+        select: TASK_SELECT,
+      });
+      return toView(task);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const day = task_date === today ? 'hoy' : `el ${task_date}`;
+        throw new VendixHttpException(
+          ErrorCodes.LODGING_HOUSEKEEPING_TASK_DUP_001,
+          `Ya existe una tarea de ${HOUSEKEEPING_TASK_TYPE_LABELS[input.type]} para la ${unit.code} ${day}`,
+          { field: 'type' },
+        );
+      }
+      throw error;
+    }
   }
 
   /** `assigned_user_id: null` takes the task back to the unassigned pool. */
@@ -300,20 +378,36 @@ const taskKey = (task: { unit_id: number; type: HousekeepingTaskType }) =>
   `${task.unit_id}:${task.type}`;
 
 /**
- * A pending task whose stay no longer calls for it (cancelled, or moved to
- * another room today) is not shown; finished tasks always stay.
+ * A pending generated task whose stay no longer calls for it (cancelled, or
+ * moved to another room today) is not shown; finished tasks and tasks made
+ * by hand (`notes` not null, see `create`) always stay.
  */
-function stillDue<T extends { status: HousekeepingTaskStatus; type: HousekeepingTaskType; unit: { id: number } }>(
+function stillDue<
+  T extends {
+    status: HousekeepingTaskStatus;
+    type: HousekeepingTaskType;
+    notes: string | null;
+    unit: { id: number };
+  },
+>(
   tasks: T[],
   current: Set<string>,
 ): T[] {
   return tasks.filter(
-    (task) => task.status !== 'pending' || current.has(taskKey({ unit_id: task.unit.id, type: task.type })),
+    (task) =>
+      task.status !== 'pending' ||
+      task.notes !== null ||
+      current.has(taskKey({ unit_id: task.unit.id, type: task.type })),
   );
 }
 
 function toView(
   task: Omit<HousekeepingTaskView, 'task_date'> & { task_date: Date },
 ): HousekeepingTaskView {
-  return { ...task, task_date: task.task_date.toISOString().slice(0, 10) };
+  // An empty note only marks a hand-made task: the screens get null.
+  return {
+    ...task,
+    notes: task.notes || null,
+    task_date: task.task_date.toISOString().slice(0, 10),
+  };
 }

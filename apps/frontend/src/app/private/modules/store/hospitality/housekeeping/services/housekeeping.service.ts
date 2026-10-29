@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
@@ -8,8 +8,19 @@ import { HousekeepingStatus } from '../../rooms/interfaces/unit.interface';
 import {
   HousekeepingBoard,
   HousekeepingTask,
+  HousekeepingTaskError,
+  HousekeepingTaskField,
+  HousekeepingTaskPayload,
   HousekeepingTasksDay,
 } from '../interfaces/housekeeping.interface';
+
+/** API refusals of a new task and the form field each one belongs to. */
+const TASK_ERROR_FIELDS: Record<string, HousekeepingTaskField> = {
+  LODGING_HOUSEKEEPING_TASK_DUP_001: 'type',
+  LODGING_HOUSEKEEPING_TASK_DATE_001: 'task_date',
+  LODGING_UNIT_FIND_001: 'unit_id',
+  LODGING_HOUSEKEEPING_TASK_ASSIGNEE_001: 'assigned_user_id',
+};
 
 interface ApiResponse<T> {
   success: boolean;
@@ -62,6 +73,23 @@ export class LodgingHousekeepingService {
         assigned_user_id: assignedUserId,
       })
       .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** U12 — rejects with the message and the form field it belongs to. */
+  createTask(payload: HousekeepingTaskPayload): Observable<HousekeepingTask> {
+    return this.http.post<ApiResponse<HousekeepingTask>>(`${this.baseUrl}/tasks`, payload).pipe(
+      map((res) => res.data),
+      catchError((error: unknown) => {
+        const code =
+          error instanceof HttpErrorResponse ? (error.error?.error_code as string | undefined) : undefined;
+        return throwError(
+          (): HousekeepingTaskError => ({
+            message: hospitalityErrorMessage(error),
+            field: (code && TASK_ERROR_FIELDS[code]) || null,
+          }),
+        );
+      }),
+    );
   }
 
   completeTask(taskId: number): Observable<HousekeepingTask> {

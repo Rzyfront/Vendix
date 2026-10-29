@@ -86,3 +86,21 @@ export interface HousekeepingTasksDay {
   /** Only on the head housekeeper's view. */
   staff?: HousekeepingStaffMember[];
 }
+
+/** U12 — a task asked by hand from "+ Nueva tarea". */
+export interface HousekeepingTaskPayload {
+  unit_id: number;
+  type: HousekeepingTaskType;
+  /** YYYY-MM-DD. */
+  task_date: string;
+  assigned_user_id: number | null;
+  notes: string;
+}
+
+/** Field of the task form an API refusal belongs to (null: no field). */
+export type HousekeepingTaskField = 'unit_id' | 'type' | 'task_date' | 'assigned_user_id';
+
+export interface HousekeepingTaskError {
+  message: string;
+  field: HousekeepingTaskField | null;
+}

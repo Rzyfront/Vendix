@@ -18,6 +18,7 @@ import {
   EmptyStateComponent,
   FilterConfig,
   FilterValues,
+  IconComponent,
   InputsearchComponent,
   ModalComponent,
   OptionsDropdownComponent,
@@ -39,6 +40,7 @@ import {
   HOUSEKEEPING_TRANSITIONS,
   HousekeepingBoard,
   HousekeepingBoardUnit,
+  HousekeepingTask,
 } from '../../interfaces/housekeeping.interface';
 import { LodgingHousekeepingService } from '../../services/housekeeping.service';
 import {
@@ -47,6 +49,10 @@ import {
 } from '../../../shared/hospitality-status';
 import { HousekeepingTasksPanelComponent } from '../../components/housekeeping-tasks-panel/housekeeping-tasks-panel.component';
 import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
+import {
+  HousekeepingTaskFormModalComponent,
+  TaskFormPreset,
+} from '../../components/task-form-modal/task-form-modal.component';
 
 type HousekeepingTab = 'rooms' | 'tasks';
 
@@ -94,12 +100,14 @@ const stringFilter = (values: FilterValues, key: string): string => {
     CardComponent,
     BadgeComponent,
     ButtonComponent,
+    IconComponent,
     EmptyStateComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ScrollableTabsComponent,
     ModalComponent,
     HousekeepingTasksPanelComponent,
+    HousekeepingTaskFormModalComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
@@ -190,6 +198,23 @@ const stringFilter = (values: FilterValues, key: string): string => {
                 [ngModel]="search()"
                 (ngModelChange)="onSearch($event)"
               />
+              <!-- R-CTA-01..03: "+ Nueva tarea" belongs to the tasks tab only. -->
+              @if (tab() === 'tasks' && canCreateTask()) {
+                <app-button
+                  variant="primary"
+                  size="md"
+                  [iconOnlyMobile]="true"
+                  customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 !rounded-[10px]"
+                  class="shrink-0"
+                  [disabled]="board() === null"
+                  ariaLabel="Nueva tarea"
+                  (clicked)="openTaskForm({})"
+                  data-testid="hk-new-task"
+                >
+                  <app-icon slot="icon" name="plus" [size]="18" />
+                  Nueva tarea
+                </app-button>
+              }
               <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="filterConfigs()"
@@ -214,6 +239,7 @@ const stringFilter = (values: FilterValues, key: string): string => {
               [assignmentFilter]="assignmentFilter()"
               (roomChanged)="load()"
               (clearFilters)="clearFilters()"
+              (createTask)="openTaskForm({})"
             />
           } @else if (loadError() !== null) {
             <app-hospitality-load-error
@@ -281,6 +307,20 @@ const stringFilter = (values: FilterValues, key: string): string => {
                             {{ action.label }}
                           </app-button>
                         }
+                        @if (canCreateTask()) {
+                          <app-button
+                            variant="ghost"
+                            size="sm"
+                            [fullWidth]="true"
+                            customClasses="!min-h-11"
+                            [ariaLabel]="'Crear tarea para la ' + unit.code"
+                            (clicked)="openTaskForm({ unitId: unit.id })"
+                            [attr.data-testid]="'hk-unit-task-' + unit.code"
+                          >
+                            <app-icon slot="icon" name="plus" [size]="14" />
+                            Crear tarea
+                          </app-button>
+                        }
                       </div>
                     }
                   </div>
@@ -316,6 +356,15 @@ const stringFilter = (values: FilterValues, key: string): string => {
           </p>
         </div>
       </app-modal>
+
+      <app-housekeeping-task-form-modal
+        [preset]="taskPreset()"
+        [units]="board()?.units ?? []"
+        [today]="board()?.business_date ?? ''"
+        [staff]="tasksPanel()?.day()?.staff ?? null"
+        (closed)="taskPreset.set(null)"
+        (created)="onTaskCreated($event)"
+      />
     </div>
   `,
 })
@@ -341,6 +390,11 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
         ? 'mine'
         : null,
   );
+
+  /** U12 — only who assigns tasks may create them (same API permission). */
+  readonly canCreateTask = computed(() => this.tasksMode() === 'assign');
+  /** Open "+ Nueva tarea" form with what the opener knows; null = closed. */
+  readonly taskPreset = signal<TaskFormPreset | null>(null);
 
   readonly tab = signal<HousekeepingTab>('rooms');
   readonly search = signal('');
@@ -508,6 +562,16 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
     this.tasksPanel()?.load();
   }
 
+  openTaskForm(preset: TaskFormPreset): void {
+    if (this.canCreateTask() && this.board() !== null) this.taskPreset.set(preset);
+  }
+
+  onTaskCreated(task: HousekeepingTask): void {
+    this.taskPreset.set(null);
+    this.tasksPanel()?.add(task);
+    this.toastService.success(`Tarea creada · ${task.unit.code}`);
+  }
+
   count(status: HousekeepingStatus): number {
     return (this.board()?.units ?? []).filter((u) => u.housekeeping_status === status).length;
   }
@@ -561,7 +625,21 @@ export class HospitalityHousekeepingPageComponent implements OnInit {
               ),
             },
           );
-          this.toastService.success(`La ${updated.code} quedó ${this.label(to).toLowerCase()}`);
+          const message = `La ${updated.code} quedó ${this.label(to).toLowerCase()}`;
+          if (to === 'dirty' && this.canCreateTask()) {
+            // U12 — a room dirtied by hand gets no task on its own: offer one.
+            this.toastService.show({
+              variant: 'success',
+              description: message,
+              duration: 6000,
+              action: {
+                label: 'Crear tarea de limpieza',
+                onClick: () => this.openTaskForm({ unitId: updated.id, type: 'checkout_clean' }),
+              },
+            });
+          } else {
+            this.toastService.success(message);
+          }
         },
         error: (message: unknown) => {
           this.saving.set(null);

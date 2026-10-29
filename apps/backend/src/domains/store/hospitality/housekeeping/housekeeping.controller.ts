@@ -7,6 +7,7 @@ import { HousekeepingService } from './housekeeping.service';
 import { ChangeHousekeepingStatusDto } from './change-housekeeping-status.dto';
 import { HousekeepingTasksService } from './housekeeping-tasks.service';
 import { AssignHousekeepingTaskDto } from './assign-housekeeping-task.dto';
+import { CreateHousekeepingTaskDto } from './create-housekeeping-task.dto';
 
 /** Hospitality Suite — room status board (H5.1) and tasks per housekeeper (H5.2). */
 @Controller('store/hospitality/housekeeping')
@@ -43,6 +44,14 @@ export class HousekeepingController {
   async tasks() {
     const result = await this.tasksService.today();
     return this.responseService.success(result);
+  }
+
+  @ApiOperation({ summary: 'Crear a mano una tarea de limpieza, inspección o mantenimiento' })
+  @Post('tasks')
+  @Permissions('store:lodging:housekeeping:assign')
+  async create(@Body() dto: CreateHousekeepingTaskDto) {
+    const result = await this.tasksService.create(dto);
+    return this.responseService.created(result, `Tarea creada · ${result.unit.code}`);
   }
 
   @ApiOperation({ summary: 'Mis tareas de limpieza del día' })
