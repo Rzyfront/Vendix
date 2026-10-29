@@ -8,13 +8,16 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Observable } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import {
+  ButtonComponent,
   CardComponent,
-  DropdownAction,
+  DialogService,
   EmptyStateComponent,
   FilterConfig,
   FilterValues,
+  IconComponent,
   InputsearchComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
@@ -22,9 +25,11 @@ import {
   ScrollableTab,
   ScrollableTabsComponent,
   StatsComponent,
+  TableAction,
   TableColumn,
   ToastService,
 } from '../../../../../../../shared/components/index';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { UnitType } from '../../../rooms/interfaces/unit-type.interface';
 import { UnitTypesService } from '../../../rooms/services/unit-types.service';
 import {
@@ -70,11 +75,12 @@ const SEARCH_PLACEHOLDERS: Record<RatesTab, string> = {
   calendar: '',
 };
 
-const CREATE_ACTIONS: Partial<Record<RatesTab, DropdownAction>> = {
-  plans: { label: 'Nuevo plan', icon: 'plus', action: 'create-plan', variant: 'primary' },
-  seasons: { label: 'Nueva temporada', icon: 'plus', action: 'create-season', variant: 'primary' },
-  policies: { label: 'Nueva política', icon: 'plus', action: 'create-policy', variant: 'primary' },
-  allotments: { label: 'Nuevo cupo', icon: 'plus', action: 'create-allotment', variant: 'primary' },
+/** R-CTA-03 — the create button names the noun of the active tab. */
+const CREATE_LABELS: Partial<Record<RatesTab, string>> = {
+  plans: 'Nuevo plan',
+  seasons: 'Nueva temporada',
+  policies: 'Nueva política',
+  allotments: 'Nuevo cupo',
 };
 
 /** Masculine/feminine active badge for plans/cupos and seasons/policies. */
@@ -147,7 +153,8 @@ interface SeasonRow extends Season {
  *
  * Standard admin list module: four stats, tabs (plans, seasons, policies,
  * allotments, calendar) and one card per tab with the sticky search, the
- * options dropdown (create action + filters) and the responsive data view.
+ * create button of the active tab, the filters dropdown and the responsive
+ * data view. Every row edits and activates/deactivates in place (U10).
  * Each list is the hotel's whole configuration (tens of rows), so search and
  * filters run client-side.
  */
@@ -160,6 +167,8 @@ interface SeasonRow extends Season {
     StatsComponent,
     EmptyStateComponent,
     CardComponent,
+    ButtonComponent,
+    IconComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ScrollableTabsComponent,
@@ -196,9 +205,9 @@ interface SeasonRow extends Season {
           [loading]="seasonsLoading()"
         />
         <app-stats
-          title="Políticas"
+          title="Políticas activas"
           [value]="stats().activePolicies"
-          [smallText]="'activas · ' + stats().plansWithPolicy"
+          [smallText]="stats().policiesInUse"
           iconName="shield-check"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-500"
@@ -252,15 +261,29 @@ interface SeasonRow extends Season {
                   [ngModel]="searchTerm()"
                   (ngModelChange)="searchTerm.set($event ?? '')"
                 />
+                <!-- R-CTA-01..03/08: the create button follows the active tab. -->
+                @if (canWrite() && createLabel(); as label) {
+                  <app-button
+                    variant="primary"
+                    size="md"
+                    [iconOnlyMobile]="true"
+                    customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 !rounded-[10px]"
+                    class="shrink-0"
+                    [ariaLabel]="label"
+                    (clicked)="openCreate()"
+                    data-testid="rates-new"
+                  >
+                    <app-icon slot="icon" name="plus" [size]="18" />
+                    {{ label }}
+                  </app-button>
+                }
                 <app-options-dropdown
                   class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                   [filters]="filterConfigs()"
                   [filterValues]="filterValues()"
-                  [actions]="dropdownActions()"
                   [isLoading]="activeLoading()"
                   (filterChange)="filterValues.set($event)"
                   (clearAllFilters)="filterValues.set({})"
-                  (actionClick)="onActionClick($event)"
                 />
               </div>
             }
@@ -277,12 +300,13 @@ interface SeasonRow extends Season {
                   description="Sin planes, cada reserva usa el precio base del tipo de habitación. Crea planes como “Con desayuno” con precio por día de la semana."
                   actionButtonText="Nuevo plan"
                   actionButtonIcon="plus"
-                  [showActionButton]="true"
+                  [showActionButton]="canWrite()"
                   (actionClick)="openForm(null)"
                 />
               } @else {
                 <app-responsive-data-view
                   [data]="rows()"
+                  [actions]="planActions"
                   [columns]="columns"
                   [cardConfig]="cardConfig"
                   [loading]="isLoading()"
@@ -302,12 +326,13 @@ interface SeasonRow extends Season {
                   description="Define fechas de alta demanda (ej. Alta: 15-dic al 15-ene) y ponles precio propio en cada plan."
                   actionButtonText="Nueva temporada"
                   actionButtonIcon="plus"
-                  [showActionButton]="true"
+                  [showActionButton]="canWrite()"
                   (actionClick)="openSeasonForm(null)"
                 />
               } @else {
                 <app-responsive-data-view
                   [data]="seasonRows()"
+                  [actions]="seasonActions"
                   [columns]="seasonColumns"
                   [cardConfig]="seasonCardConfig"
                   [loading]="seasonsLoading()"
@@ -327,12 +352,13 @@ interface SeasonRow extends Season {
                   description="Define lo que pierde el huésped si cancela (ej. Flexible: gratis hasta 48 h, luego 1 noche) y asígnala a cada plan junto con el depósito exigido."
                   actionButtonText="Nueva política"
                   actionButtonIcon="plus"
-                  [showActionButton]="true"
+                  [showActionButton]="canWrite()"
                   (actionClick)="openPolicyForm(null)"
                 />
               } @else {
                 <app-responsive-data-view
                   [data]="policyRows()"
+                  [actions]="policyActions"
                   [columns]="policyColumns"
                   [cardConfig]="policyCardConfig"
                   [loading]="policiesLoading()"
@@ -352,12 +378,13 @@ interface SeasonRow extends Season {
                   description="Reserva habitaciones para una agencia o empresa (ej. Viajes X: 3 Dobles en diciembre) con fecha de liberación, para garantizarle disponibilidad sin bloquear el inventario."
                   actionButtonText="Nuevo cupo"
                   actionButtonIcon="plus"
-                  [showActionButton]="true"
+                  [showActionButton]="canWrite()"
                   (actionClick)="openAllotmentForm(null)"
                 />
               } @else {
                 <app-responsive-data-view
                   [data]="allotmentRows()"
+                  [actions]="allotmentActions"
                   [columns]="allotmentColumns"
                   [cardConfig]="allotmentCardConfig"
                   [loading]="allotmentsLoading()"
@@ -375,7 +402,7 @@ interface SeasonRow extends Season {
                 [restrictions]="restrictions()"
                 [unitTypeNames]="unitTypeNames()"
                 (monthChanged)="loadRestrictions($event)"
-                (daySelected)="openRestrictionForm($event)"
+                (daySelected)="canWrite() && openRestrictionForm($event)"
               />
             }
           }
@@ -434,7 +461,12 @@ export class HospitalityRatesPageComponent implements OnInit {
   private readonly policiesService = inject(CancellationPoliciesService);
   private readonly allotmentsService = inject(AllotmentsService);
   private readonly toastService = inject(ToastService);
+  private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
+
+  /** Without rates:write the page only reads: no create, edit or toggle. */
+  readonly canWrite = computed(() => this.authFacade.hasPermission('store:lodging:rates:write'));
 
   readonly plans = signal<RatePlan[]>([]);
   readonly unitTypes = signal<UnitType[]>([]);
@@ -503,10 +535,7 @@ export class HospitalityRatesPageComponent implements OnInit {
     }
   });
 
-  readonly dropdownActions = computed<DropdownAction[]>(() => {
-    const action = CREATE_ACTIONS[this.activeTab()];
-    return action ? [action] : [];
-  });
+  readonly createLabel = computed(() => CREATE_LABELS[this.activeTab()] ?? null);
 
   readonly filterConfigs = computed<FilterConfig[]>(() => {
     switch (this.activeTab()) {
@@ -545,17 +574,18 @@ export class HospitalityRatesPageComponent implements OnInit {
     const plans = this.plans();
     const defaultPlan = plans.find((p) => p.is_default);
     const activeAllotments = this.allotments().filter((a) => a.is_active);
+    const policies = this.policies();
+    const usedPolicyIds = new Set(plans.map((p) => p.cancellation_policy_id));
     return {
       activePlans: plans.filter((p) => p.is_active).length,
       defaultPlan: defaultPlan ? `Predeterminado: ${defaultPlan.name}` : 'Sin plan predeterminado',
       activeSeasons: this.seasons().filter((s) => s.is_active).length,
       totalSeasons: this.seasons().length,
-      activePolicies: this.policies().filter((p) => p.is_active).length,
-      plansWithPolicy: plural(
-        plans.filter((p) => p.cancellation_policy_id !== null).length,
-        'plan con política',
-        'planes con política',
-      ),
+      activePolicies: policies.filter((p) => p.is_active).length,
+      // TR5 — "2 políticas · 1 en uso": registered policies and those some plan uses.
+      policiesInUse: `${plural(policies.length, 'política', 'políticas')} · ${
+        policies.filter((p) => usedPolicyIds.has(p.id)).length
+      } en uso`,
       activeAllotments: activeAllotments.length,
       heldRooms: plural(
         activeAllotments.reduce((sum, a) => sum + a.rooms, 0),
@@ -848,11 +878,138 @@ export class HospitalityRatesPageComponent implements OnInit {
     this.filterValues.set({});
   }
 
-  onActionClick(action: string): void {
-    if (action === 'create-plan') this.openForm(null);
-    else if (action === 'create-season') this.openSeasonForm(null);
-    else if (action === 'create-policy') this.openPolicyForm(null);
-    else if (action === 'create-allotment') this.openAllotmentForm(null);
+  openCreate(): void {
+    switch (this.activeTab()) {
+      case 'plans':
+        return this.openForm(null);
+      case 'seasons':
+        return this.openSeasonForm(null);
+      case 'policies':
+        return this.openPolicyForm(null);
+      case 'allotments':
+        return this.openAllotmentForm(null);
+    }
+  }
+
+  /** R-ROW-04 — "Editar" and "Activar/Desactivar" on every row of a list tab. */
+  private rowActions<T extends { is_active: boolean }>(
+    edit: (item: T) => void,
+    toggle: (item: T) => void,
+  ): TableAction[] {
+    return [
+      {
+        label: 'Editar',
+        icon: 'edit-2',
+        variant: 'primary',
+        show: () => this.canWrite(),
+        action: edit,
+      },
+      {
+        label: (item: T) => (item.is_active ? 'Desactivar' : 'Activar'),
+        icon: (item: T) => (item.is_active ? 'eye-off' : 'eye'),
+        variant: 'secondary',
+        show: () => this.canWrite(),
+        action: toggle,
+      },
+    ];
+  }
+
+  readonly planActions = this.rowActions<RatePlanRow>(
+    (row) => this.openForm(row),
+    (row) =>
+      this.toggleActive(row, {
+        title: '¿Desactivar el plan?',
+        message: `El plan ${row.name} no se ofrecerá en nuevas reservas hasta que lo reactives.${
+          row.is_default ? ' Dejará de ser el plan predeterminado.' : ''
+        }`,
+        done: (active) => (active ? 'Plan activado' : 'Plan desactivado'),
+        failed: 'No se pudo actualizar el plan',
+        save: (is_active) => this.ratePlansService.update(row.id, { is_active }),
+        reload: () => this.refresh(),
+      }),
+  );
+
+  readonly seasonActions = this.rowActions<SeasonRow>(
+    (row) => this.openSeasonForm(row),
+    (row) =>
+      this.toggleActive(row, {
+        title: '¿Desactivar la temporada?',
+        message: `Las noches de ${row.name} (${row.range}) volverán al precio normal hasta que la reactives.`,
+        done: (active) => (active ? 'Temporada activada' : 'Temporada desactivada'),
+        failed: 'No se pudo actualizar la temporada',
+        save: (is_active) => this.seasonsService.update(row.id, { is_active }),
+        reload: () => this.refreshSeasons(),
+      }),
+  );
+
+  readonly policyActions = this.rowActions<PolicyRow>(
+    (row) => this.openPolicyForm(row),
+    (row) =>
+      this.toggleActive(row, {
+        title: '¿Desactivar la política?',
+        message: `${row.name} no se podrá asignar a otros planes hasta que la reactives. Los planes que ya la usan la conservan.`,
+        done: (active) => (active ? 'Política activada' : 'Política desactivada'),
+        failed: 'No se pudo actualizar la política',
+        save: (is_active) => this.policiesService.update(row.id, { is_active }),
+        reload: () => {
+          this.refreshPolicies();
+          this.refresh();
+        },
+      }),
+  );
+
+  readonly allotmentActions = this.rowActions<AllotmentRow>(
+    (row) => this.openAllotmentForm(row),
+    (row) =>
+      this.toggleActive(row, {
+        title: '¿Desactivar el cupo?',
+        message: `${plural(row.rooms, 'habitación guardada', 'habitaciones guardadas')} para ${row.agency} (${row.range}) ${row.rooms === 1 ? 'vuelve' : 'vuelven'} a la venta libre.`,
+        done: (active) => (active ? 'Cupo activado' : 'Cupo desactivado'),
+        failed: 'No se pudo actualizar el cupo',
+        save: (is_active) => this.allotmentsService.update(row.id, { is_active }),
+        reload: () => this.refreshAllotments(),
+      }),
+  );
+
+  /**
+   * R-CONF-02 — deactivating takes the row out of sale, so it asks first;
+   * activating goes straight through. Uses each list's existing `update`.
+   */
+  private async toggleActive(
+    row: { is_active: boolean },
+    opts: {
+      title: string;
+      message: string;
+      done: (active: boolean) => string;
+      failed: string;
+      save: (is_active: boolean) => Observable<unknown>;
+      reload: () => void;
+    },
+  ): Promise<void> {
+    if (
+      row.is_active &&
+      !(await this.dialogService.confirm({
+        title: opts.title,
+        message: opts.message,
+        confirmText: 'Desactivar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      }))
+    ) {
+      return;
+    }
+    const next = !row.is_active;
+    opts
+      .save(next)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(opts.done(next));
+          opts.reload();
+        },
+        error: (message: unknown) =>
+          this.toastService.error(typeof message === 'string' ? message : opts.failed),
+      });
   }
 
   openAllotmentForm(allotment: Allotment | null): void {

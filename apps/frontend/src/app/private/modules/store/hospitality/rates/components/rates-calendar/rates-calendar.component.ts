@@ -7,7 +7,13 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { IconComponent } from '../../../../../../../shared/components/index';
+import { FormsModule } from '@angular/forms';
+import {
+  ButtonComponent,
+  IconComponent,
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../../shared/components/index';
 import {
   LodgingRestriction,
   restrictionLabels,
@@ -43,6 +49,12 @@ interface CalendarDay {
 
 const pad = (value: number) => `${value}`.padStart(2, '0');
 
+/** First day of today's month, `YYYY-MM-01`. */
+function currentMonth(): string {
+  const today = new Date();
+  return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-01`;
+}
+
 /**
  * Hospitality Suite (H2.2) — rates calendar: one month, each night colored by
  * the season that prices it (highest priority when seasons overlap), with a
@@ -53,29 +65,51 @@ const pad = (value: number) => `${value}`.padStart(2, '0');
   selector: 'app-rates-calendar',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent],
+  imports: [FormsModule, ButtonComponent, IconComponent, SelectorComponent],
   template: `
     <div class="space-y-3">
-      <div class="flex items-center justify-between">
-        <button
-          type="button"
-          class="rounded-lg p-2 hover:bg-gray-100"
-          aria-label="Mes anterior"
-          (click)="shift(-1)"
-        >
-          <app-icon name="chevron-left" [size]="18" />
-        </button>
-        <p class="text-sm font-semibold text-text-primary" data-testid="rates-calendar-month">
-          {{ monthLabel() }}
-        </p>
-        <button
-          type="button"
-          class="rounded-lg p-2 hover:bg-gray-100"
-          aria-label="Mes siguiente"
-          (click)="shift(1)"
-        >
-          <app-icon name="chevron-right" [size]="18" />
-        </button>
+      <!-- U10 — arrows move one month, "Hoy" comes back and the selector jumps. -->
+      <div class="flex flex-wrap items-end justify-between gap-2">
+        <div class="flex items-center gap-1">
+          <app-button
+            variant="outline"
+            size="sm"
+            customClasses="!h-11 !w-11 !px-0"
+            ariaLabel="Mes anterior"
+            (clicked)="shift(-1)"
+            data-testid="rates-calendar-prev"
+          >
+            <app-icon slot="icon" name="chevron-left" [size]="18" />
+          </app-button>
+          <app-button
+            variant="outline"
+            size="sm"
+            customClasses="!h-11"
+            (clicked)="goToday()"
+          >
+            Hoy
+          </app-button>
+          <app-button
+            variant="outline"
+            size="sm"
+            customClasses="!h-11 !w-11 !px-0"
+            ariaLabel="Mes siguiente"
+            (clicked)="shift(1)"
+            data-testid="rates-calendar-next"
+          >
+            <app-icon slot="icon" name="chevron-right" [size]="18" />
+          </app-button>
+        </div>
+        <app-selector
+          class="w-44"
+          size="sm"
+          [options]="monthOptions()"
+          [ngModel]="month()"
+          (ngModelChange)="goTo($event)"
+          id="rates-calendar-month"
+          label="Mes"
+          data-testid="rates-calendar-month"
+        />
       </div>
 
       <div class="grid grid-cols-7 gap-1 text-center text-xs text-text-secondary">
@@ -148,18 +182,20 @@ export class RatesCalendarComponent implements OnInit {
 
   readonly weekdayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
   /** First day of the shown month, `YYYY-MM-01`. */
-  private readonly month = signal(
-    (() => {
-      const today = new Date();
-      return `${today.getFullYear()}-${pad(today.getMonth() + 1)}-01`;
-    })(),
-  );
+  readonly month = signal(currentMonth());
 
   readonly activeSeasons = computed(() => this.seasons().filter((s) => s.is_active));
 
-  readonly monthLabel = computed(() => {
+  /** "Octubre 2026" for a year back and two ahead of the shown month. */
+  readonly monthOptions = computed<SelectorOption[]>(() => {
     const [year, month] = this.month().split('-').map(Number);
-    return `${MONTH_NAMES[month - 1]} ${year}`;
+    return Array.from({ length: 37 }, (_, i) => {
+      const date = new Date(Date.UTC(year, month - 1 + i - 12, 1));
+      return {
+        value: `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-01`,
+        label: `${MONTH_NAMES[date.getUTCMonth()]} ${date.getUTCFullYear()}`,
+      };
+    });
   });
 
   /** Empty cells before the 1st so weeks start on Monday. */
@@ -199,7 +235,19 @@ export class RatesCalendarComponent implements OnInit {
   shift(delta: number): void {
     const [year, month] = this.month().split('-').map(Number);
     const next = new Date(Date.UTC(year, month - 1 + delta, 1));
-    this.month.set(`${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-01`);
+    this.goTo(`${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-01`);
+  }
+
+  goToday(): void {
+    this.goTo(currentMonth());
+  }
+
+  /** Shows the month of `value` (`YYYY-MM-01`); the same month is a no-op. */
+  goTo(value: string | number | null): void {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-01$/.test(value) || value === this.month()) {
+      return;
+    }
+    this.month.set(value);
     this.emitMonth();
   }
 
