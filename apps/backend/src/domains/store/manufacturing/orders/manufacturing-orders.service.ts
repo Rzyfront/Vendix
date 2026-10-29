@@ -388,13 +388,13 @@ export class ManufacturingOrdersService {
     const planned = Number(order.planned_qty);
     const done = Number(order.produced_qty ?? 0);
     const remaining = planned - done;
-    const requested = dto.produced_qty ?? remaining;
-    // El motor de inventario trabaja en unidades enteras: se redondea igual.
-    const producedQty = Math.round(requested);
-    if (!Number.isFinite(producedQty) || producedQty <= 0) {
+    // El stock es entero (unidad mínima): cantidades enteras, sin redondeo
+    // que pueda superar lo pendiente. El DTO ya exige enteros.
+    const producedQty = dto.produced_qty ?? remaining;
+    if (!Number.isInteger(producedQty) || producedQty <= 0) {
       throw new VendixHttpException(ErrorCodes.PRODUCTION_INVALID_QTY);
     }
-    if (producedQty - remaining > 0.5 + EPS) {
+    if (producedQty > remaining + EPS) {
       throw new VendixHttpException(
         ErrorCodes.MFG_QTY_EXCEEDS_REMAINING,
         `La cantidad (${producedQty}) excede lo pendiente de la orden (${remaining})`,
@@ -420,6 +420,15 @@ export class ManufacturingOrdersService {
         inputLocationId: settings.default_input_location_id ?? undefined,
         costingMethod: settings.cost_method === 'cpp' ? 'weighted_average' : 'fifo',
         onProduced: async (tx, info) => {
+          // Bloqueo optimista: si otro completado cambió la orden después de
+          // leerla, se aborta la transacción (revierte el stock movido).
+          const claimed = await tx.production_orders.updateMany({
+            where: { id, status: order.status, produced_qty: order.produced_qty },
+            data: { updated_at: new Date() },
+          });
+          if (claimed.count !== 1) {
+            throw new VendixHttpException(ErrorCodes.MFG_ORDER_CONCURRENT_UPDATE);
+          }
           const newProduced = done + info.producedQty;
           const actualCost = Number(order.actual_cost ?? 0) + info.totalCost;
           const finished = newProduced >= planned - EPS;

@@ -2,7 +2,6 @@ import {
   IsDateString,
   IsIn,
   IsInt,
-  IsNumber,
   IsOptional,
   IsPositive,
   IsString,
@@ -32,8 +31,8 @@ export class CreateManufacturingOrderDto {
   @Type(() => Number)
   recipe_id!: number;
 
-  @IsNumber({ maxDecimalPlaces: 4 })
-  @Min(0.0001)
+  @IsInt({ message: 'La cantidad debe ser un número entero (unidad mínima de stock)' })
+  @Min(1)
   @Type(() => Number)
   planned_qty!: number;
 
@@ -59,8 +58,8 @@ export class CreateManufacturingOrderDto {
 
 export class UpdateManufacturingOrderDto {
   @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 4 })
-  @Min(0.0001)
+  @IsInt({ message: 'La cantidad debe ser un número entero (unidad mínima de stock)' })
+  @Min(1)
   @Type(() => Number)
   planned_qty?: number;
 
@@ -102,8 +101,8 @@ export class CompleteBatchDto {
 export class CompleteManufacturingOrderDto {
   /** Por defecto, lo que falta por producir. */
   @IsOptional()
-  @IsNumber({ maxDecimalPlaces: 4 })
-  @Min(0.0001)
+  @IsInt({ message: 'La cantidad debe ser un número entero (unidad mínima de stock)' })
+  @Min(1)
   @Type(() => Number)
   produced_qty?: number;
 

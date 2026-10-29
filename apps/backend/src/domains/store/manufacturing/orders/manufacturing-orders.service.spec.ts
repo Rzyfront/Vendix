@@ -45,6 +45,7 @@ describe('ManufacturingOrdersService', () => {
       production_orders: {
         create: jest.fn().mockResolvedValue({ id: 1 }),
         update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       production_order_lines: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -280,6 +281,33 @@ describe('ManufacturingOrdersService', () => {
         errorCode: 'MFG_QTY_EXCEEDS_REMAINING',
       });
       expect(production.complete).not.toHaveBeenCalled();
+    });
+
+    it('rechaza cantidades fraccionarias en vez de redondearlas', async () => {
+      order = baseOrder({
+        status: 'partially_completed',
+        produced_qty: new Prisma.Decimal(9),
+      });
+      await expect(service.complete(1, { produced_qty: 1.4 })).rejects.toMatchObject({
+        errorCode: 'PRODUCTION_INVALID_QTY',
+      });
+      expect(production.complete).not.toHaveBeenCalled();
+    });
+
+    it('rechaza un completado concurrente (la orden cambió en otra operación)', async () => {
+      order = baseOrder({ status: 'in_progress' });
+      tx.production_orders.updateMany.mockResolvedValue({ count: 0 });
+      runEngine(40);
+
+      await expect(service.complete(1, { produced_qty: 4 })).rejects.toMatchObject({
+        errorCode: 'MFG_ORDER_CONCURRENT_UPDATE',
+      });
+      expect(tx.production_orders.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: 1, status: 'in_progress' }),
+        }),
+      );
+      expect(tx.production_order_lines.update).not.toHaveBeenCalled();
     });
 
     it('crea el lote del terminado cuando lot_required', async () => {

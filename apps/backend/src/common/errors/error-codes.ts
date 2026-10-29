@@ -6569,6 +6569,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Transición de estado inválida para la orden de producción',
   },
+  MFG_ORDER_CONCURRENT_UPDATE: {
+    code: 'MFG_ORDER_CONCURRENT_UPDATE',
+    httpStatus: 409,
+    devMessage:
+      'La orden de producción cambió en otra operación; recarga e intenta de nuevo',
+  },
   PRODUCTION_ORDER_NOT_BATCH: {
     code: 'PRODUCTION_ORDER_NOT_BATCH',
     httpStatus: 422,

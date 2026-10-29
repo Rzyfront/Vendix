@@ -97,7 +97,7 @@ export class OrderFormPageComponent implements OnInit {
       validators: [Validators.required],
     }),
     planned_qty: this.fb.nonNullable.control<number | null>(null, {
-      validators: [Validators.required, Validators.min(0.0001)],
+      validators: [Validators.required, Validators.min(1), Validators.pattern(/^\d+$/)],
     }),
     due_date: this.fb.nonNullable.control(''),
     location_id: this.fb.nonNullable.control<number | null>(null),

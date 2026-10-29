@@ -53,8 +53,8 @@ import { ManufacturingOrdersService } from '../../../services';
           type="number"
           formControlName="produced_qty"
           label="Cantidad producida"
-          step="0.0001"
-          [min]="0"
+          step="1"
+          [min]="1"
           [required]="true"
           [helperText]="
             'Pendiente: ' + remaining() + '. Si produces menos, la orden queda parcialmente completada y podrás completar el resto después.'
@@ -139,7 +139,9 @@ export class CompleteOrderModalComponent {
   readonly form = this.fb.nonNullable.group({
     produced_qty: this.fb.nonNullable.control<number | null>(null, [
       Validators.required,
-      Validators.min(0.0001),
+      Validators.min(1),
+      // El stock se maneja en unidades enteras (unidad mínima).
+      Validators.pattern(/^\d+$/),
     ]),
     batch_number: this.fb.nonNullable.control(''),
     manufacturing_date: this.fb.nonNullable.control(''),
