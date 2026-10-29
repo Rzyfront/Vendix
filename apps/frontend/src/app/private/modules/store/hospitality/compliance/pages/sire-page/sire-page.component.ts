@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import {
   ButtonComponent,
   CardComponent,
@@ -320,6 +320,7 @@ export class HospitalitySirePageComponent implements OnInit {
   private readonly dialogService = inject(DialogService);
   private readonly authFacade = inject(AuthFacade);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly router = inject(Router);
 
   readonly pageSize = PAGE_SIZE;
   readonly portalUrl = SIRE_PORTAL_URL;
@@ -500,7 +501,7 @@ export class HospitalitySirePageComponent implements OnInit {
   }
 
   goToFrontDesk(): void {
-    window.location.assign('/admin/hospitality/front-desk');
+    void this.router.navigate(['/admin/hospitality/front-desk']);
   }
 
   onPage(page: number): void {

@@ -126,6 +126,28 @@ export function buildFonturLines(
   return { lines: sorted, base, contribution: round2((base * rate_per_mil) / 1000) };
 }
 
+/**
+ * Base of each line of a folio closed without a fiscal document: the line's
+ * `total_price` minus its own base discount. Legacy lines (`discount_amount`
+ * null) carry the order discount instead, spread by `total_price`.
+ */
+export function unbilledLineBases(order: {
+  discount_amount: unknown;
+  order_items: Array<{ product_id: number | null; total_price: unknown; discount_amount: unknown }>;
+}): Array<{ product_id: number | null; base: number }> {
+  const items = order.order_items;
+  const legacy = items.every((i) => i.discount_amount === null || i.discount_amount === undefined);
+  const gross = items.reduce((sum, i) => sum + Number(i.total_price), 0);
+  const orderDiscount = legacy ? Number(order.discount_amount ?? 0) : 0;
+  return items.map((i) => {
+    const price = Number(i.total_price);
+    const discount = legacy
+      ? gross > 0 ? (orderDiscount * price) / gross : 0
+      : Number(i.discount_amount ?? 0);
+    return { product_id: i.product_id, base: price - discount };
+  });
+}
+
 /** The store's rate, or the default when unset or not a valid number. */
 export function fonturRate(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
@@ -199,9 +221,10 @@ export class LodgingFonturService {
           // Cancelled lines never reached the subtotal of the sale.
           order: {
             select: {
+              discount_amount: true,
               order_items: {
                 where: { cancelled_at: null },
-                select: { product_id: true, total_price: true },
+                select: { product_id: true, total_price: true, discount_amount: true },
               },
             },
           },
@@ -222,7 +245,7 @@ export class LodgingFonturService {
       ...unbilled.map((f) => ({
         id: `order:${f.order_id}`,
         sign: 1,
-        items: f.order.order_items.map((i) => ({ product_id: i.product_id, base: Number(i.total_price) })),
+        items: unbilledLineBases(f.order),
       })),
     ];
 

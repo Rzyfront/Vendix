@@ -53,6 +53,7 @@ export class LodgingSireController {
       { key: 'procedencia', header: 'Procedencia', type: 'text', width: 20 },
       { key: 'residencia', header: 'Residencia', type: 'text', width: 20 },
       { key: 'habitacion', header: 'Habitación', type: 'text', width: 12 },
+      { key: 'permiso_ingreso', header: 'Permiso de ingreso', type: 'text', width: 30 },
       { key: 'reserva', header: 'Reserva', type: 'text', width: 14 },
       { key: 'antiguedad', header: 'Horas sin reportar', type: 'text', width: 12 },
     ];

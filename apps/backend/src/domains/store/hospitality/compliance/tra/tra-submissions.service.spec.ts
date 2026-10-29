@@ -117,7 +117,12 @@ describe('LodgingTraService — cola TRA idempotente (H4.1)', () => {
     );
     expect(client.lodging_compliance_submissions.updateMany).toHaveBeenCalledWith({
       where: { id: 70, status: { in: ['pending', 'failed'] } },
-      data: expect.objectContaining({ status: 'sent', sent_at: expect.any(Date), error_code: null }),
+      data: expect.objectContaining({
+        status: 'sent',
+        sent_at: expect.any(Date),
+        error_code: null,
+        payload: expect.objectContaining({ prestador: expect.objectContaining({ rnt: expect.any(String) }) }),
+      }),
     });
   });
 
@@ -189,5 +194,7 @@ describe('LodgingTraService — cola TRA idempotente (H4.1)', () => {
         data: expect.objectContaining({ error_code: 'missing_data', last_error: 'Faltan datos para la TRA: RNT del hotel.' }),
       }),
     );
+    // Personal data is not kept for a record the TRA never received.
+    expect((client.lodging_compliance_submissions.updateMany.mock.calls[0] as any)[0].data.payload).toBeUndefined();
   });
 });

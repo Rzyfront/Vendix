@@ -10,6 +10,14 @@ import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingFonturService } from './fontur.service';
 import { LodgingFonturQueryDto } from './fontur.dto';
 
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+/** "2026-03-31" → "31 mar 2026", as the screen shows dates. */
+function civilDate(date: string): string {
+  const [year, month, day] = date.split('-').map(Number);
+  return `${day} ${MONTHS[month - 1]} ${year}`;
+}
+
 /** Hospitality Suite (H4.4) — base of the quarterly Fontur contribution. */
 @Controller('store/hospitality/reports/fontur')
 @UseGuards(PermissionsGuard)
@@ -56,7 +64,10 @@ export class LodgingFonturController {
             { key: 'value', header: 'Valor', type: 'number', width: 20 },
           ],
           rows: [
-            { concept: `Periodo: ${report.from} a ${report.to}`, value: null },
+            {
+              concept: `Periodo: T${report.quarter} ${report.year} (${civilDate(report.from)} – ${civilDate(report.to)})`,
+              value: null,
+            },
             { concept: 'Ingresos sin IVA', value: report.totals.base },
             { concept: 'Tarifa (por mil)', value: report.rate_per_mil },
             { concept: 'Contribución estimada', value: report.totals.contribution },

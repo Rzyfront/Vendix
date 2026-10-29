@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
 import {
@@ -314,6 +314,7 @@ export class HospitalityTraPageComponent implements OnInit {
   private readonly dialogService = inject(DialogService);
   private readonly authFacade = inject(AuthFacade);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly router = inject(Router);
 
   readonly pageSize = PAGE_SIZE;
   readonly tokenUrl = TRA_TOKEN_URL;
@@ -464,7 +465,7 @@ export class HospitalityTraPageComponent implements OnInit {
   }
 
   goToFrontDesk(): void {
-    window.location.assign('/admin/hospitality/front-desk');
+    void this.router.navigate(['/admin/hospitality/front-desk']);
   }
 
   onPage(page: number): void {

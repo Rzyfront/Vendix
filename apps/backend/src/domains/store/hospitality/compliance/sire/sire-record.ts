@@ -1,4 +1,5 @@
 import { HOME_COUNTRY_CODE, reportsSire } from '../../reservations/guests/lodging-guest-rules';
+import { entryPermitLabel } from '../../reservations/guests/lodging-vat-exemption';
 
 /**
  * Hospitality Suite (H4.2) — the SIRE record of one foreign guest (Migración
@@ -88,6 +89,7 @@ export interface SireSource {
     birth_date: Date | string | null;
     residence_city: string;
     origin_city: string;
+    entry_permit_type?: string | null;
   };
   room_code: string | null | undefined;
 }
@@ -105,6 +107,7 @@ export interface SireRecord {
   procedencia: string;
   residencia: string;
   habitacion: string;
+  permiso_ingreso: string;
 }
 
 /** Builds the record; missing data stays empty and is named by `missingSireFields`. */
@@ -127,6 +130,7 @@ export function buildSireRecord(source: SireSource): SireRecord {
     procedencia: guest.origin_city.trim(),
     residencia: guest.residence_city.trim(),
     habitacion: source.room_code?.trim() ?? '',
+    permiso_ingreso: entryPermitLabel(guest.entry_permit_type) ?? '',
   };
 }
 
@@ -138,7 +142,27 @@ export function missingSireFields(record: SireRecord): string[] {
   if (!record.nombres || !record.primer_apellido) missing.push('nombre');
   if (!record.fecha_nacimiento) missing.push('fecha de nacimiento');
   if (!record.procedencia) missing.push('procedencia');
+  // A passport holder enters with a stamped permit; a warning only (D14).
+  if (record.tipo_documento === SIRE_DOCUMENT_LABELS.PA && !record.permiso_ingreso) {
+    missing.push('permiso de ingreso');
+  }
   return missing;
+}
+
+/**
+ * When the movement really happened: the exit is the check-out; the entry is
+ * the check-in, or the guest's registration when the guest joined the stay
+ * later. Falls back to `now` when the stay has no such event recorded.
+ */
+export function movementTime(
+  event: SireEvent,
+  stay: { checked_in_at: Date | null; checked_out_at: Date | null },
+  guest_created_at: Date | null,
+  now: Date,
+): Date {
+  if (event === 'check_out') return stay.checked_out_at ?? now;
+  const checkedIn = stay.checked_in_at ?? now;
+  return guest_created_at && guest_created_at > checkedIn ? guest_created_at : checkedIn;
 }
 
 /** Whole hours since the movement (never negative). */

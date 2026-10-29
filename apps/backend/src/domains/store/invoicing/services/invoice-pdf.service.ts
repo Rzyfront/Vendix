@@ -667,15 +667,16 @@ export class InvoicePdfService {
     };
   }
 
+  /** Hotel settings of the store (RNT for the invoice footer, H4.3). */
+  private hospitalitySettings(store: any): RntSettings | undefined {
+    return (store?.store_settings?.settings as { hospitality?: RntSettings } | null)?.hospitality;
+  }
+
   /**
    * Paper format for the graphic representation. Always the store's setting —
    * printing is a per-store concern even when the fiscal identity is the
    * organization's. Falls back to `letter`, the historical hardcoded layout.
    */
-  private hospitalitySettings(store: any): RntSettings | undefined {
-    return (store?.store_settings?.settings as { hospitality?: RntSettings } | null)?.hospitality;
-  }
-
   private resolveInvoiceFormat(store: any): PrintFormat {
     const receipts = (store?.store_settings?.settings as any)?.receipts;
     const format = receipts?.invoice_format;

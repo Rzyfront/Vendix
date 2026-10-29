@@ -7,6 +7,7 @@ import {
   lastClosedQuarter,
   LodgingFonturService,
   quarterDates,
+  unbilledLineBases,
 } from './fontur.service';
 
 const UNIT_TYPES = new Map([
@@ -69,6 +70,38 @@ describe('H4.4 — Fontur contribution base', () => {
     });
   });
 
+  describe('unbilledLineBases (folio closed without invoice)', () => {
+    it('subtracts each line base discount from its total_price', () => {
+      expect(
+        unbilledLineBases({
+          discount_amount: 30000,
+          order_items: [
+            { product_id: 100, total_price: 200000, discount_amount: 20000 },
+            { product_id: 5, total_price: 50000, discount_amount: 10000 },
+          ],
+        }),
+      ).toEqual([
+        { product_id: 100, base: 180000 },
+        { product_id: 5, base: 40000 },
+      ]);
+    });
+
+    it('spreads the order discount by total_price on legacy lines (no line discount)', () => {
+      expect(
+        unbilledLineBases({
+          discount_amount: 25000,
+          order_items: [
+            { product_id: 100, total_price: 200000, discount_amount: null },
+            { product_id: 5, total_price: 50000, discount_amount: null },
+          ],
+        }),
+      ).toEqual([
+        { product_id: 100, base: 180000 },
+        { product_id: 5, base: 45000 },
+      ]);
+    });
+  });
+
   it('signs fiscal documents by type', () => {
     expect(documentSign('sales_invoice')).toBe(1);
     expect(documentSign('pos_equivalent_document')).toBe(1);
@@ -109,7 +142,13 @@ describe('H4.4 — Fontur contribution base', () => {
         },
         lodging_folios: {
           findMany: jest.fn(async () => [
-            { order_id: 40, order: { order_items: [{ product_id: 100, total_price: 200000 }] } },
+            {
+              order_id: 40,
+              order: {
+                discount_amount: 20000,
+                order_items: [{ product_id: 100, total_price: 220000, discount_amount: 20000 }],
+              },
+            },
           ]),
         },
         lodging_unit_types: {

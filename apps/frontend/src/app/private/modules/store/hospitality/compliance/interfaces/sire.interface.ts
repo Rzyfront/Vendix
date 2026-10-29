@@ -36,6 +36,7 @@ export interface SireRecord {
   procedencia: string;
   residencia: string;
   habitacion: string;
+  permiso_ingreso: string;
 }
 
 export interface SireSheet extends SireSubmission {

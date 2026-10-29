@@ -39,6 +39,7 @@ const FIELDS: { key: keyof SireRecord; label: string }[] = [
   { key: 'procedencia', label: 'Procedencia' },
   { key: 'residencia', label: 'Residencia' },
   { key: 'habitacion', label: 'Habitación' },
+  { key: 'permiso_ingreso', label: 'Permiso de ingreso' },
 ];
 
 /** Portal of Migración Colombia where the desk reports each movement. */

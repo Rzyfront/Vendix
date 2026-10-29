@@ -4,6 +4,7 @@ import {
   isOverdue,
   isSireGuest,
   missingSireFields,
+  movementTime,
   overdueHours,
   splitSurnames,
 } from './sire-record';
@@ -41,7 +42,29 @@ describe('sire-record', () => {
       procedencia: 'Bogotá',
       residencia: 'Miami',
       habitacion: '201',
+      permiso_ingreso: '',
     });
+  });
+
+  it('names the entry permit and warns when a passport holder has none', () => {
+    const withPermit = buildSireRecord({ ...source, guest: { ...source.guest, entry_permit_type: 'pip5' } });
+    expect(withPermit.permiso_ingreso).toBe('Permiso de ingreso y permanencia (PIP-5)');
+    expect(missingSireFields(withPermit)).toEqual([]);
+    expect(missingSireFields(buildSireRecord(source))).toEqual(['permiso de ingreso']);
+  });
+
+  it('dates each movement when it happened, a late companion at its registration', () => {
+    const stay = {
+      checked_in_at: new Date('2026-11-09T20:00:00Z'),
+      checked_out_at: new Date('2026-11-11T15:00:00Z'),
+    };
+    const now = new Date('2026-11-12T00:00:00Z');
+    const early = new Date('2026-11-01T00:00:00Z');
+    const late = new Date('2026-11-10T14:00:00Z');
+    expect(movementTime('check_in', stay, early, now)).toEqual(stay.checked_in_at);
+    expect(movementTime('check_in', stay, late, now)).toEqual(late);
+    expect(movementTime('check_out', stay, late, now)).toEqual(stay.checked_out_at);
+    expect(movementTime('check_out', { checked_in_at: null, checked_out_at: null }, null, now)).toEqual(now);
   });
 
   it('names a check-out "Salida" and lists the missing fields', () => {
@@ -51,7 +74,7 @@ describe('sire-record', () => {
       guest: { ...source.guest, birth_date: null, origin_city: ' ' },
     });
     expect(record.tipo_movimiento).toBe('Salida');
-    expect(missingSireFields(record)).toEqual(['fecha de nacimiento', 'procedencia']);
+    expect(missingSireFields(record)).toEqual(['fecha de nacimiento', 'procedencia', 'permiso de ingreso']);
   });
 
   it('splits one surname without inventing a second one', () => {

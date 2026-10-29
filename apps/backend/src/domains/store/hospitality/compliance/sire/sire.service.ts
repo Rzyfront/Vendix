@@ -14,6 +14,7 @@ import {
   isOverdue,
   isSireGuest,
   missingSireFields,
+  movementTime,
   overdueHours,
 } from './sire-record';
 import { SireListQueryDto } from './sire.dto';
@@ -33,6 +34,23 @@ const ROW_SELECT = {
 
 type SireRow = Prisma.lodging_compliance_submissionsGetPayload<{ select: typeof ROW_SELECT }>;
 
+const GUEST_SELECT = {
+  id: true,
+  reservation_id: true,
+  document_type: true,
+  document_number: true,
+  first_name: true,
+  last_name: true,
+  nationality_country_code: true,
+  birth_date: true,
+  residence_city: true,
+  origin_city: true,
+  entry_permit_type: true,
+  room: { select: { unit: { select: { code: true } } } },
+} satisfies Prisma.lodging_guestsSelect;
+
+type SireGuest = Prisma.lodging_guestsGetPayload<{ select: typeof GUEST_SELECT }>;
+
 /**
  * Hospitality Suite (H4.2) — assisted SIRE (Migración Colombia). Each entry
  * and exit of a foreign guest is logged as "Pendiente" (one row per guest and
@@ -47,17 +65,24 @@ export class LodgingSireService {
 
   // ── Recording (after check-in / check-out commits) ─────────────────────
 
-  /** Logs one pending row per foreign guest and event; existing rows are kept. */
+  /**
+   * Logs one pending row per foreign guest and event; existing rows are kept.
+   * `created_at` of a SIRE row is the moment of the movement (check-in,
+   * check-out, or the registration of a guest who joined the stay later),
+   * so the sheet date, the age and "Atrasado" follow the real movement.
+   */
   async record(store_id: number, reservation_id: number, events: SireEvent[]): Promise<number> {
     const client = this.prisma.withoutScope();
     if (!(await this.settings(store_id)).enabled) return 0;
     const guests = await client.lodging_guests.findMany({
       where: { store_id, reservation_id },
-      select: { id: true, first_name: true, last_name: true, nationality_country_code: true },
+      select: { id: true, first_name: true, last_name: true, nationality_country_code: true, created_at: true },
       orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
     });
     const foreign = guests.filter((guest) => isSireGuest(guest.nationality_country_code));
     if (foreign.length === 0) return 0;
+    const stay = await this.stayTimes(store_id, reservation_id);
+    const now = new Date();
     const result = await client.lodging_compliance_submissions.createMany({
       data: events.flatMap((event) =>
         foreign.map((guest) => ({
@@ -67,11 +92,23 @@ export class LodgingSireService {
           authority: SIRE_AUTHORITY,
           event,
           guest_name: `${guest.first_name} ${guest.last_name}`.trim().slice(0, 200),
+          created_at: movementTime(event, stay, guest.created_at, now),
         })),
       ),
       skipDuplicates: true,
     });
     return result.count;
+  }
+
+  /** Latest check-in and check-out of the reservation, from its status log. */
+  private async stayTimes(store_id: number, reservation_id: number) {
+    const rows = await this.prisma.withoutScope().lodging_reservation_events.findMany({
+      where: { store_id, reservation_id, to_status: { in: ['checked_in', 'checked_out'] } },
+      select: { to_status: true, created_at: true },
+      orderBy: { id: 'desc' },
+    });
+    const at = (status: string) => rows.find((row) => row.to_status === status)?.created_at ?? null;
+    return { checked_in_at: at('checked_in'), checked_out_at: at('checked_out') };
   }
 
   // ── Desk screen (store-scoped) ─────────────────────────────────────────
@@ -151,7 +188,8 @@ export class LodgingSireService {
     if (!row) throw new VendixHttpException(ErrorCodes.LODGING_SIRE_NOT_FOUND_001);
     const { threshold } = await this.settings(store_id);
     const tz = await resolveStoreTimezone(this.prisma, store_id);
-    const record = await this.buildRecord(store_id, row, tz);
+    const guests = await this.guestsOf(store_id, row.guest_id ? [row.guest_id] : []);
+    const record = this.toRecord(row, guests.get(row.guest_id ?? 0), tz);
     return {
       ...this.toItem(row, threshold, new Date()),
       record,
@@ -183,10 +221,14 @@ export class LodgingSireService {
       take: 2000,
       select: ROW_SELECT,
     });
-    const out: { item: ReturnType<LodgingSireService['toItem']>; record: SireRecord | null }[] = [];
-    for (const row of rows) {
-      out.push({ item: this.toItem(row, threshold, now), record: await this.buildRecord(store_id, row, tz) });
-    }
+    const guests = await this.guestsOf(
+      store_id,
+      rows.map((row) => row.guest_id).filter((id): id is number => id !== null),
+    );
+    const out = rows.map((row) => ({
+      item: this.toItem(row, threshold, now),
+      record: this.toRecord(row, guests.get(row.guest_id ?? 0), tz),
+    }));
     return { rows: out, tz };
   }
 
@@ -205,25 +247,22 @@ export class LodgingSireService {
     };
   }
 
-  /** The SIRE record of a guest, read live (edits before reporting are included). */
-  private async buildRecord(store_id: number, row: SireRow, time_zone: string): Promise<SireRecord | null> {
-    if (!row.guest_id) return null;
-    const guest = await this.prisma.withoutScope().lodging_guests.findFirst({
-      where: { id: row.guest_id, store_id, reservation_id: row.reservation_id },
-      select: {
-        document_type: true,
-        document_number: true,
-        first_name: true,
-        last_name: true,
-        nationality_country_code: true,
-        birth_date: true,
-        residence_city: true,
-        origin_city: true,
-        room: { select: { unit: { select: { code: true } } } },
-      },
+  /** Guests of the rows in one query, read live (edits before reporting are included). */
+  private async guestsOf(store_id: number, ids: number[]): Promise<Map<number, SireGuest>> {
+    const guests = await this.prisma.withoutScope().lodging_guests.findMany({
+      where: { id: { in: ids }, store_id },
+      select: GUEST_SELECT,
     });
-    if (!guest) return null;
-    const { room, ...fields } = guest;
+    return new Map(guests.map((guest) => [guest.id, guest]));
+  }
+
+  private toRecord(
+    row: SireRow,
+    guest: SireGuest | undefined,
+    time_zone: string,
+  ): SireRecord | null {
+    if (!guest || guest.reservation_id !== row.reservation_id) return null;
+    const { room, id: _id, reservation_id: _reservation, ...fields } = guest;
     return buildSireRecord({
       event: row.event as SireEvent,
       moved_at: row.created_at ?? new Date(),

@@ -16,10 +16,29 @@ function build(settings: Record<string, unknown> = {}) {
     },
     lodging_guests: {
       findMany: jest.fn(async () => [
-        { id: 5, first_name: 'John', last_name: 'Smith', nationality_country_code: 'US' },
-        { id: 6, first_name: 'Ana', last_name: 'Pérez', nationality_country_code: 'CO' },
+        {
+          id: 5,
+          first_name: 'John',
+          last_name: 'Smith',
+          nationality_country_code: 'US',
+          created_at: new Date('2026-11-08T10:00:00Z'),
+        },
+        {
+          id: 6,
+          first_name: 'Ana',
+          last_name: 'Pérez',
+          nationality_country_code: 'CO',
+          created_at: new Date('2026-11-08T10:00:00Z'),
+        },
       ]),
       findFirst: jest.fn(),
+    },
+    lodging_reservation_events: {
+      // Newest first: checked in on the 9th, checked out on the 11th.
+      findMany: jest.fn(async () => [
+        { to_status: 'checked_out', created_at: new Date('2026-11-11T15:00:00Z') },
+        { to_status: 'checked_in', created_at: new Date('2026-11-09T20:00:00Z') },
+      ]),
     },
     lodging_compliance_submissions: {
       createMany: jest.fn(async ({ data }: { data: unknown[] }) => ({ count: data.length })),
@@ -55,11 +74,43 @@ describe('LodgingSireService', () => {
       expect(count).toBe(2);
       expect(raw.lodging_compliance_submissions.createMany).toHaveBeenCalledWith({
         data: [
-          { store_id: 3, reservation_id: 1, guest_id: 5, authority: 'sire', event: 'check_in', guest_name: 'John Smith' },
-          { store_id: 3, reservation_id: 1, guest_id: 5, authority: 'sire', event: 'check_out', guest_name: 'John Smith' },
+          {
+            store_id: 3,
+            reservation_id: 1,
+            guest_id: 5,
+            authority: 'sire',
+            event: 'check_in',
+            guest_name: 'John Smith',
+            created_at: new Date('2026-11-09T20:00:00Z'),
+          },
+          {
+            store_id: 3,
+            reservation_id: 1,
+            guest_id: 5,
+            authority: 'sire',
+            event: 'check_out',
+            guest_name: 'John Smith',
+            created_at: new Date('2026-11-11T15:00:00Z'),
+          },
         ],
         skipDuplicates: true,
       });
+    });
+
+    it('dates the entry of a companion added with the stay in house at the companion registration', async () => {
+      const { service, raw } = build();
+      raw.lodging_guests.findMany.mockResolvedValueOnce([
+        {
+          id: 8,
+          first_name: 'Marie',
+          last_name: 'Dubois',
+          nationality_country_code: 'FR',
+          created_at: new Date('2026-11-10T14:00:00Z'),
+        },
+      ]);
+      await service.record(3, 1, ['check_in']);
+      const [row] = (raw.lodging_compliance_submissions.createMany.mock.calls[0] as any)[0].data;
+      expect(row).toMatchObject({ guest_id: 8, event: 'check_in', created_at: new Date('2026-11-10T14:00:00Z') });
     });
 
     it('records nothing when the store turned the SIRE off', async () => {

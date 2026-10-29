@@ -140,7 +140,8 @@ export class LodgingTraService {
   private async settle(id: number, result: TraResult, record?: TraRecord): Promise<TraStatus | 'skipped'> {
     const client = this.prisma.withoutScope();
     const now = new Date();
-    const payload = record ? (record as unknown as Prisma.InputJsonValue) : undefined;
+    // Personal data is kept only as evidence of what the TRA accepted.
+    const payload = result.ok && record ? (record as unknown as Prisma.InputJsonValue) : undefined;
     const raw = 'raw' in result && result.raw !== undefined ? (result.raw as Prisma.InputJsonValue) : undefined;
     const status: TraStatus = result.ok ? 'sent' : result.code === 'rejected' ? 'failed' : 'pending';
     const updated = await client.lodging_compliance_submissions.updateMany({
@@ -169,6 +170,7 @@ export class LodgingTraService {
     reservation_id: number,
     guest_id: number | null,
     event: TraEvent,
+    rnt_number?: string,
   ): Promise<TraRecord | null> {
     if (!guest_id) return null;
     const client = this.prisma.withoutScope();
@@ -203,7 +205,7 @@ export class LodgingTraService {
     const room = rooms.find((r) => r.id === guest.reservation_room_id) ?? rooms[0] ?? null;
     return buildTraRecord({
       event,
-      rnt_number: await this.rntNumber(store_id),
+      rnt_number: rnt_number ?? (await this.rntNumber(store_id)),
       guest: { ...guest, document_type: String(guest.document_type) },
       room: room
         ? {
@@ -366,9 +368,10 @@ export class LodgingTraService {
         reservation: { select: { reservation_number: true } },
       },
     });
+    const rnt_number = await this.rntNumber(store_id);
     const out: { row: (typeof rows)[number]; record: TraRecord | null }[] = [];
     for (const row of rows) {
-      const record = await this.buildRecord(store_id, row.reservation_id, row.guest_id, row.event as TraEvent);
+      const record = await this.buildRecord(store_id, row.reservation_id, row.guest_id, row.event as TraEvent, rnt_number);
       out.push({ row, record });
     }
     return out;
