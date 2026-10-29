@@ -17,6 +17,7 @@ import { SessionsService } from '../../../cash-registers/sessions/sessions.servi
 import { buildOrderSaleTaxPayload } from '../../../payments/utils/order-sale-tax-payload.util';
 import { LodgingReservationsService } from '../reservations.service';
 import { formatShortDate } from '../stay-dates';
+import { LODGING_CHECKED_OUT_EVENT } from '../stay-events';
 import { FolioUser, FolioRow, hasActivePermission, LodgingFolioService } from '../folio/folio.service';
 import { CheckOutDto } from './check-out.dto';
 
@@ -312,6 +313,9 @@ export class LodgingCheckOutService {
 
     // A concurrent click closed it first: answer with its result, no emission.
     if (!closed) return this.result(reservation_id, folio.order_id, false);
+
+    // H4.1 — the TRA report of the departure listens; it never blocks the desk.
+    this.eventEmitter.emit(LODGING_CHECKED_OUT_EVENT, { store_id, reservation_id });
 
     // After commit, so the listeners read the closed order.
     if (closed.credit) {

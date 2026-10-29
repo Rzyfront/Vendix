@@ -208,6 +208,7 @@ model users {
   lodging_reservation_events      lodging_reservation_events[]  @relation("lodging_reservation_events_user")
   lodging_keys_delivered          lodging_key_handovers[]       @relation("lodging_key_handovers_delivered_by")
   lodging_keys_received           lodging_key_handovers[]       @relation("lodging_key_handovers_returned_by")
+  lodging_compliance_reported     lodging_compliance_submissions[] @relation("lodging_compliance_submissions_reported_by")
   lodging_allotments_customer     lodging_allotments[]          @relation("lodging_allotments_customer")
   lodging_guests_customer         lodging_guests[]              @relation("lodging_guests_customer")
   // Appointment redesign phase 2 — `booking_reschedule_requests`
@@ -1079,6 +1080,8 @@ model stores {
   lodging_reservation_events     lodging_reservation_events[]
   lodging_guest_message_logs     lodging_guest_message_logs[]
   lodging_key_handovers          lodging_key_handovers[]
+  lodging_compliance_submissions lodging_compliance_submissions[]
+  lodging_compliance_credentials lodging_compliance_credentials[]
   lodging_room_nights            lodging_room_nights[]
   lodging_rate_plans             lodging_rate_plans[]
   lodging_rate_prices            lodging_rate_prices[]
@@ -2597,6 +2600,7 @@ model lodging_reservations {
   online_payments lodging_reservation_payments[]
   guest_message_logs lodging_guest_message_logs[]
   key_handovers      lodging_key_handovers[]
+  compliance_submissions lodging_compliance_submissions[]
 
   @@unique([store_id, reservation_number])
   @@index([status, hold_expires_at])
@@ -2675,6 +2679,62 @@ model lodging_key_handovers {
   @@index([store_id, returned_at])
 }
 
+// Hospitality Suite (H4.1) — log of what each guest owes an authority (TRA of
+// the MinCIT; SIRE in H4.2) per event. One row per guest, authority and event,
+// so a check-in is never reported twice. `pending` → `sent` (automatic) or
+// `manual` (reported by hand in the portal); `failed` = rejected by the
+// authority. Informative only (D14): nothing in the desk waits for it.
+model lodging_compliance_submissions {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  reservation_id      Int
+  guest_id            Int?
+  authority           String    @db.VarChar(10)
+  event               String    @db.VarChar(20)
+  status              String    @default("pending") @db.VarChar(20)
+  // Kept so the log still names the guest if the guest row is removed.
+  guest_name          String    @db.VarChar(200)
+  attempts            Int       @default(0)
+  error_code          String?   @db.VarChar(40)
+  last_error          String?   @db.VarChar(300)
+  // Fields sent (Res. 409/2022 art. 7) and the authority's answer.
+  payload             Json?
+  response            Json?
+  sent_at             DateTime? @db.Timestamp(6)
+  reported_by_user_id Int?
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  store       stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  guest       lodging_guests?      @relation(fields: [guest_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  reported_by users?               @relation("lodging_compliance_submissions_reported_by", fields: [reported_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([guest_id, authority, event])
+  @@index([store_id, authority, status])
+  @@index([reservation_id])
+}
+
+// Hospitality Suite (H4.1) — credential of a store with an authority (the TRA
+// token sent by the MinCIT to the RNT email). Encrypted like the payment
+// processor credentials; only the last characters go back to the screen.
+model lodging_compliance_credentials {
+  id               Int       @id @default(autoincrement())
+  store_id         Int
+  authority        String    @db.VarChar(10)
+  secret_encrypted String    @db.Text
+  secret_hint      String    @db.VarChar(8)
+  tested_at        DateTime? @db.Timestamp(6)
+  test_ok          Boolean?
+  test_message     String?   @db.VarChar(300)
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, authority])
+}
+
 // Hospitality Suite (H1.1) — one room of a reservation: the room type sold,
 // the physical room once assigned, and the occupancy. A reservation holds one
 // or more rooms (H1.5, groups and families under one holder).
@@ -2748,6 +2808,7 @@ model lodging_guests {
   reservation lodging_reservations       @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   room        lodging_reservation_rooms? @relation(fields: [reservation_room_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   customer    users?                     @relation("lodging_guests_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  compliance_submissions lodging_compliance_submissions[]
 
   @@unique([reservation_id, document_type, document_number])
   @@index([store_id])

@@ -37,6 +37,14 @@ export const TASK_STATUS_CHIPS: Record<HousekeepingTaskStatus, StatusChip> = {
   done: { label: 'Terminada', variant: 'success' },
 };
 
+/** H4.1 — status of a guest's TRA report. */
+export const TRA_STATUS_CHIPS: Record<'pending' | 'sent' | 'manual' | 'failed', StatusChip> = {
+  pending: { label: 'Pendiente', variant: 'warning' },
+  sent: { label: 'Enviado ✓', variant: 'success' },
+  manual: { label: 'Reportado en el portal', variant: 'info' },
+  failed: { label: 'Rechazado', variant: 'error' },
+};
+
 /** Theme color of each badge variant (R-CHIP-03: no loose hex). */
 const VARIANT_COLOR: Record<BadgeVariant, string> = {
   success: 'var(--color-success)',
@@ -92,3 +100,4 @@ export function statusBadgeConfig<K extends string>(chips: Record<K, StatusChip>
 export const RESERVATION_STATUS_LABELS = labelsOf(RESERVATION_STATUS_CHIPS);
 export const HOUSEKEEPING_STATUS_LABELS = labelsOf(HOUSEKEEPING_STATUS_CHIPS);
 export const TASK_STATUS_LABELS = labelsOf(TASK_STATUS_CHIPS);
+export const TRA_STATUS_LABELS = labelsOf(TRA_STATUS_CHIPS);

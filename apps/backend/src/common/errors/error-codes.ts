@@ -6048,6 +6048,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Cliente no encontrado en la tienda',
   },
+  // Hospitality Suite (H4.1) — TRA token (only the "Probar conexión" button)
+  LODGING_TRA_TOKEN_001: {
+    code: 'LODGING_TRA_TOKEN_001',
+    httpStatus: 400,
+    devMessage: 'Pega primero el token TRA que el MinCIT envió al correo del RNT',
+  },
   // Hospitality Suite (H8.4, D12) — key / access card handover log
   LODGING_KEY_STATUS_001: {
     code: 'LODGING_KEY_STATUS_001',

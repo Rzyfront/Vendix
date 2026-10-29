@@ -1165,6 +1165,11 @@ export interface HospitalitySettings {
   /** H4.3 — notify every March to renew the RNT before March 31. Default true. */
   rnt_renewal_reminder?: boolean;
   /**
+   * H4.1 — report each check-in and check-out to the MinCIT TRA. Never blocks
+   * the desk (D14); off = no submission is recorded. Default true.
+   */
+  tra_enabled?: boolean;
+  /**
    * H4.4 — Fontur contribution rate in per mil (‰) used by the quarterly
    * estimate. Default `2.5`; editable because the lodging rate is only
    * verified by secondary sources.

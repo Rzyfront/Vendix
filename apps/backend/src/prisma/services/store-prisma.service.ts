@@ -146,6 +146,9 @@ export class StorePrismaService extends BasePrismaService {
     'lodging_guest_message_logs',
     // Hospitality Suite (H8.4)
     'lodging_key_handovers',
+    // Hospitality Suite (H4.1)
+    'lodging_compliance_submissions',
+    'lodging_compliance_credentials',
     // Hospitality Suite (H2.1)
     'lodging_rate_plans',
     'lodging_rate_prices',
@@ -1875,6 +1878,14 @@ export class StorePrismaService extends BasePrismaService {
   // Hospitality Suite (H8.4)
   get lodging_key_handovers() {
     return this.scoped_client.lodging_key_handovers;
+  }
+
+  get lodging_compliance_submissions() {
+    return this.scoped_client.lodging_compliance_submissions;
+  }
+
+  get lodging_compliance_credentials() {
+    return this.scoped_client.lodging_compliance_credentials;
   }
 
   // Hospitality Suite (H2.1)

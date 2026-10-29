@@ -621,6 +621,13 @@ export class StoreAdminLayoutComponent {
           route: '/admin/hospitality/reports',
           panelUiKey: 'hospitality_reservations',
         },
+        {
+          // H4.1 — TRA (MinCIT) guest reports.
+          label: 'Cumplimiento',
+          icon: 'shield-check',
+          route: '/admin/hospitality/compliance',
+          panelUiKey: 'hospitality_reservations',
+        },
       ],
     },
     {

@@ -1019,6 +1019,14 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.HospitalityReportsPageComponent),
           },
           {
+            // H4.1 — "Cumplimiento": TRA reports of each check-in/check-out.
+            path: 'compliance',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/hospitality/compliance/pages/tra-page/tra-page.component'
+              ).then((c) => c.HospitalityTraPageComponent),
+          },
+          {
             path: 'rooms',
             loadChildren: () =>
               import(

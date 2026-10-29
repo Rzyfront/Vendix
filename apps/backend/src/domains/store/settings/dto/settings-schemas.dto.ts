@@ -1258,6 +1258,16 @@ export class HospitalitySettingsDto {
   rnt_renewal_reminder?: boolean;
 
   @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'H4.1 — report each check-in and check-out to the MinCIT TRA. Informative only; off = nothing is recorded. Default true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  tra_enabled?: boolean;
+
+  @ApiProperty({
     example: 2.5,
     required: false,
     description:

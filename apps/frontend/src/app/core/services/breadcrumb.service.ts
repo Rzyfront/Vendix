@@ -856,6 +856,12 @@ export class BreadcrumbService {
       parent: 'Hotelería',
       icon: 'chart-line',
     },
+    {
+      path: '/admin/hospitality/compliance',
+      title: 'Cumplimiento',
+      parent: 'Hotelería',
+      icon: 'shield-check',
+    },
 
     // Customers
     {

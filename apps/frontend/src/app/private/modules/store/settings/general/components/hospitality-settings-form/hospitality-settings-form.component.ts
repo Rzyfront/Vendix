@@ -118,6 +118,17 @@ const OTHER_ORIGIN = '__other__';
           Cada marzo llega un aviso a la campana para renovarlo antes del 31 de marzo.
         </p>
       </div>
+      <div>
+        <app-toggle
+          [checked]="traEnabled()"
+          label="Reportar huéspedes a la TRA del MinCIT"
+          (changed)="onTraEnabledChange($event)"
+        />
+        <p class="mt-1 text-xs text-text-secondary">
+          Cada check-in y check-out se reporta solo a la Tarjeta de Registro de Alojamiento.
+          El token y los envíos se ven en Hotelería → Cumplimiento. Nunca detiene el check-in.
+        </p>
+      </div>
       <app-input
         [formControl]="fonturRateControl"
         [control]="fonturRateControl"
@@ -267,6 +278,7 @@ export class HospitalitySettingsForm {
   readonly verification = signal(true);
   /** H4.3 — March reminder to renew the RNT. */
   readonly renewalReminder = signal(true);
+  readonly traEnabled = signal(true);
 
   readonly form = new FormGroup({
     check_in_time: this.checkInControl,
@@ -298,6 +310,7 @@ export class HospitalitySettingsForm {
       }
       this.verification.set(current.folio_invoice_verification ?? true);
       this.renewalReminder.set(current.rnt_renewal_reminder ?? true);
+      this.traEnabled.set(current.tra_enabled ?? true);
     });
   }
 
@@ -308,6 +321,11 @@ export class HospitalitySettingsForm {
 
   onRenewalReminderChange(checked: boolean): void {
     this.renewalReminder.set(checked);
+    this.onFieldChange();
+  }
+
+  onTraEnabledChange(checked: boolean): void {
+    this.traEnabled.set(checked);
     this.onFieldChange();
   }
 
@@ -336,6 +354,7 @@ export class HospitalitySettingsForm {
     const patch: Record<string, unknown> = {
       folio_invoice_verification: this.verification(),
       rnt_renewal_reminder: this.renewalReminder(),
+      tra_enabled: this.traEnabled(),
     };
     for (const [key, control] of Object.entries(this.form.controls)) {
       if (control.dirty) control.markAsTouched();
