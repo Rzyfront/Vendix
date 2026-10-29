@@ -32,7 +32,7 @@ interface RestrictionForm {
 /**
  * Hospitality Suite (H2.3) — restrictions of one night or a range picked in
  * the rates calendar: minimum/maximum stay for arrivals, closed to arrival or
- * departure and stop-sell, for every room type or one. Saving replaces what
+ * departure and closed sale (stop-sell), for every room type or one. Saving replaces what
  * those nights had for that scope; everything empty removes them.
  */
 @Component({
@@ -56,15 +56,22 @@ interface RestrictionForm {
       [size]="'md'"
       [dialog]="true"
       title="Restricciones de venta"
-      subtitle="Estancia mínima, llegadas, salidas y cierre de venta"
+      subtitle="Estancia mínima, llegadas, salidas y cerrar venta"
     >
-      <form [formGroup]="form" class="space-y-4">
+      <form
+        [formGroup]="form"
+        id="restriction-form"
+        class="space-y-4"
+        novalidate
+        (ngSubmit)="onSubmit()"
+      >
         <div class="grid grid-cols-2 gap-3">
           <app-input
             formControlName="from_date"
             label="Desde la noche"
             type="date"
             [required]="true"
+            [control]="form.controls.from_date"
             customWrapperClass="mt-0"
           />
           <app-input
@@ -72,6 +79,7 @@ interface RestrictionForm {
             label="Hasta la noche"
             type="date"
             [required]="true"
+            [control]="form.controls.to_date"
             [error]="datesError() ? 'Debe ser igual o posterior a la primera noche' : ''"
             customWrapperClass="mt-0"
           />
@@ -88,6 +96,7 @@ interface RestrictionForm {
             type="number"
             [min]="1"
             placeholder="Sin mínimo"
+            [control]="form.controls.min_stay"
             helperText="Para llegar esa noche"
             customWrapperClass="mt-0"
           />
@@ -97,13 +106,14 @@ interface RestrictionForm {
             type="number"
             [min]="1"
             placeholder="Sin máximo"
+            [control]="form.controls.max_stay"
             [error]="stayError() ? 'No puede ser menor que la mínima' : ''"
             customWrapperClass="mt-0"
           />
         </div>
-        <app-toggle formControlName="closed_to_arrival" label="Cerrado a la llegada (no se admiten llegadas)" />
-        <app-toggle formControlName="closed_to_departure" label="Cerrado a la salida (no se admiten salidas)" />
-        <app-toggle formControlName="stop_sell" label="Detener la venta (stop-sell)" />
+        <app-toggle formControlName="closed_to_arrival" label="Sin llegadas ese día (nadie puede llegar)" />
+        <app-toggle formControlName="closed_to_departure" label="Sin salidas ese día (nadie puede salir)" />
+        <app-toggle formControlName="stop_sell" label="Cerrar venta (no se vende esa noche)" />
         <p class="text-sm text-text-secondary">
           Un usuario con permiso para editar tarifas puede forzar una reserva que no cumpla estas
           restricciones indicando el motivo.
@@ -112,7 +122,7 @@ interface RestrictionForm {
 
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
-        <app-button variant="primary" [loading]="saving()" (clicked)="onSubmit()">
+        <app-button type="submit" form="restriction-form" variant="primary" [loading]="saving()">
           <app-icon slot="icon" name="save" [size]="16" />
           Guardar
         </app-button>

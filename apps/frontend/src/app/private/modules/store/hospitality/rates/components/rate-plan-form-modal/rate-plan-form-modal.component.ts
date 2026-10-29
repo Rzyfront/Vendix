@@ -94,7 +94,13 @@ const hasValue = (value: number | null | undefined): value is number =>
       [title]="plan() ? 'Editar plan tarifario' : 'Nuevo plan tarifario'"
       subtitle="Precio por noche de cada tipo de habitación y por día de la semana"
     >
-      <form [formGroup]="form" class="space-y-4">
+      <form
+        [formGroup]="form"
+        id="rate-plan-form"
+        class="space-y-4"
+        novalidate
+        (ngSubmit)="onSubmit()"
+      >
         <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
           <app-input
             formControlName="name"
@@ -102,11 +108,12 @@ const hasValue = (value: number | null | undefined): value is number =>
             type="text"
             placeholder="Ej. Con desayuno"
             [required]="true"
+            [control]="form.controls.name"
             customWrapperClass="mt-0"
           />
           <app-selector
             formControlName="meal_plan"
-            label="Régimen"
+            label="Plan de comidas"
             [options]="mealPlanOptions"
           />
           <app-input
@@ -114,6 +121,7 @@ const hasValue = (value: number | null | undefined): value is number =>
             label="Código"
             type="text"
             placeholder="Opcional, ej. BB"
+            [control]="form.controls.code"
             customWrapperClass="mt-0"
           />
           <div class="flex flex-col justify-center gap-2">
@@ -132,6 +140,7 @@ const hasValue = (value: number | null | undefined): value is number =>
             type="number"
             [min]="0"
             [max]="100"
+            [control]="form.controls.deposit_percent"
             helperText="0 = sin depósito. Se muestra como “Depósito pendiente” en la reserva."
             customWrapperClass="mt-0"
           />
@@ -197,7 +206,7 @@ const hasValue = (value: number | null | undefined): value is number =>
 
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
-        <app-button variant="primary" [loading]="saving()" (clicked)="onSubmit()">
+        <app-button type="submit" form="rate-plan-form" variant="primary" [loading]="saving()">
           <app-icon slot="icon" name="save" [size]="16" />
           Guardar
         </app-button>

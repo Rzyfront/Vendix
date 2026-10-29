@@ -63,7 +63,7 @@ const TAB_TITLES: Record<RatesTab, string> = {
   plans: 'Planes tarifarios',
   seasons: 'Temporadas',
   policies: 'Políticas de cancelación',
-  allotments: 'Cupos',
+  allotments: 'Cupos para agencias',
   calendar: 'Calendario de tarifas',
 };
 
@@ -496,7 +496,7 @@ export class HospitalityRatesPageComponent implements OnInit {
     { id: 'plans', label: 'Planes', icon: 'tag' },
     { id: 'seasons', label: 'Temporadas', icon: 'calendar-days' },
     { id: 'policies', label: 'Políticas', icon: 'shield-check' },
-    { id: 'allotments', label: 'Cupos', icon: 'building-2' },
+    { id: 'allotments', label: 'Cupos para agencias', icon: 'building-2' },
     { id: 'calendar', label: 'Calendario', icon: 'calendar-check' },
   ];
   readonly activeTab = signal<RatesTab>('plans');
@@ -543,7 +543,7 @@ export class HospitalityRatesPageComponent implements OnInit {
         return [
           {
             key: 'meal_plan',
-            label: 'Régimen',
+            label: 'Plan de comidas',
             type: 'select',
             options: [
               { value: '', label: 'Todos' },
@@ -637,7 +637,7 @@ export class HospitalityRatesPageComponent implements OnInit {
 
   readonly columns: TableColumn[] = [
     { key: 'name', label: 'Plan', sortable: true },
-    { key: 'meal_plan_label', label: 'Régimen' },
+    { key: 'meal_plan_label', label: 'Plan de comidas' },
     { key: 'room_types', label: 'Tipos con precio' },
     { key: 'policy_label', label: 'Cancelación y depósito' },
     { key: 'default_label', label: 'Predeterminado', align: 'center' },

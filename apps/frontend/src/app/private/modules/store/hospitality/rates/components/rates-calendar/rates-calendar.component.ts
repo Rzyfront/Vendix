@@ -139,7 +139,7 @@ function currentMonth(): string {
             }
             @for (label of day.labels; track label) {
               <span
-                class="mt-0.5 truncate rounded bg-red-100 px-1 text-[10px] font-semibold text-red-700"
+                class="mt-0.5 truncate rounded bg-error/10 px-1 text-[10px] font-semibold text-error"
                 data-testid="rates-calendar-restriction"
               >
                 {{ label }}
@@ -150,13 +150,13 @@ function currentMonth(): string {
       </div>
 
       <p class="text-xs text-text-secondary">
-        Toca una noche para fijar sus restricciones. Mín./Máx.: estancia para llegar esa noche ·
-        CTA: cerrado a la llegada · CTD: cerrado a la salida · Stop: venta detenida.
+        Toca una noche para fijar sus restricciones. Mín./Máx.: noches de estancia para llegar esa
+        noche · Sin llegadas / Sin salidas ese día · Venta cerrada: no se vende esa noche.
       </p>
 
       <div class="flex flex-wrap gap-3 text-xs text-text-secondary">
         <span class="flex items-center gap-1">
-          <span class="h-3 w-3 rounded-sm border border-border bg-white"></span>
+          <span class="h-3 w-3 rounded-sm border border-border bg-surface"></span>
           Precio normal
         </span>
         @for (season of activeSeasons(); track season.id) {

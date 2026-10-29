@@ -65,10 +65,11 @@ interface AllotmentCustomer {
       (opened)="reset()"
       [size]="'md'"
       [dialog]="true"
-      [title]="allotment() ? 'Editar cupo' : 'Nuevo cupo'"
+      [title]="allotment() ? 'Editar cupo para agencia' : 'Nuevo cupo para agencia'"
       subtitle="Habitaciones reservadas para una agencia o empresa"
     >
-      <form [formGroup]="form" class="space-y-4">
+      <!-- The customer search uses Enter to search, so it stays outside the form. -->
+      <div class="space-y-4">
         <div class="space-y-2">
           <p class="text-sm font-medium text-text-primary">Agencia o empresa</p>
           @if (customer(); as c) {
@@ -86,77 +87,92 @@ interface AllotmentCustomer {
           } @else {
             <app-pos-customer-selector (customerSelected)="pickCustomer($event)" />
             @if (customerError()) {
-              <p class="text-xs text-red-600">Elige la agencia o empresa</p>
+              <p class="text-xs text-error" role="alert">Elige la agencia o empresa</p>
             }
           }
         </div>
 
-        <app-selector
-          formControlName="unit_type_id"
-          label="Tipo de habitación"
-          placeholder="Elige el tipo"
-          [options]="typeOptions()"
-        />
+        <form
+          [formGroup]="form"
+          id="allotment-form"
+          class="space-y-4"
+          novalidate
+          (ngSubmit)="onSubmit()"
+        >
+          <app-selector
+            formControlName="unit_type_id"
+            label="Tipo de habitación"
+            placeholder="Elige el tipo"
+            [required]="true"
+            [options]="typeOptions()"
+            [errorText]="typeError() ? 'Elige el tipo de habitación' : ''"
+          />
 
-        <div class="grid grid-cols-2 gap-3">
-          <app-input
-            formControlName="from_date"
-            label="Primera noche"
-            type="date"
-            [required]="true"
-            customWrapperClass="mt-0"
-          />
-          <app-input
-            formControlName="to_date"
-            label="Última noche"
-            type="date"
-            [required]="true"
-            [error]="datesError() ? 'Debe ser igual o posterior a la primera noche' : ''"
-            customWrapperClass="mt-0"
-          />
-        </div>
+          <div class="grid grid-cols-2 gap-3">
+            <app-input
+              formControlName="from_date"
+              label="Primera noche"
+              type="date"
+              [required]="true"
+              [control]="form.controls.from_date"
+              customWrapperClass="mt-0"
+            />
+            <app-input
+              formControlName="to_date"
+              label="Última noche"
+              type="date"
+              [required]="true"
+              [control]="form.controls.to_date"
+              [error]="datesError() ? 'Debe ser igual o posterior a la primera noche' : ''"
+              customWrapperClass="mt-0"
+            />
+          </div>
 
-        <div class="grid grid-cols-2 gap-3">
-          <app-input
-            formControlName="rooms"
-            label="Habitaciones por noche"
-            type="number"
-            [min]="1"
-            [max]="500"
-            [required]="true"
-            customWrapperClass="mt-0"
-          />
-          <app-input
-            formControlName="release_days"
-            label="Liberar días antes"
-            type="number"
-            [min]="0"
-            [max]="365"
-            [required]="true"
-            customWrapperClass="mt-0"
-          />
-        </div>
-        <p class="text-sm text-text-secondary">
-          Estas habitaciones salen de la venta al público. Las reservas de la agencia las consumen y
-          lo que no haya reservado vuelve al público {{ releaseDays() }}
-          {{ releaseDays() === 1 ? 'día' : 'días' }} antes de cada noche.
-        </p>
+          <div class="grid grid-cols-2 gap-3">
+            <app-input
+              formControlName="rooms"
+              label="Habitaciones por noche"
+              type="number"
+              [min]="1"
+              [max]="500"
+              [required]="true"
+              [control]="form.controls.rooms"
+              customWrapperClass="mt-0"
+            />
+            <app-input
+              formControlName="release_days"
+              label="Liberar días antes de la llegada"
+              type="number"
+              [min]="0"
+              [max]="365"
+              [required]="true"
+              [control]="form.controls.release_days"
+              customWrapperClass="mt-0"
+            />
+          </div>
+          <p class="text-sm text-text-secondary">
+            Estas habitaciones salen de la venta al público. Las reservas de la agencia las consumen y
+            lo que no haya reservado vuelve al público {{ releaseDays() }}
+            {{ releaseDays() === 1 ? 'día' : 'días' }} antes de cada noche.
+          </p>
 
-        <app-input
-          formControlName="notes"
-          label="Notas"
-          type="text"
-          placeholder="Ej. Contrato temporada 2026"
-          customWrapperClass="mt-0"
-        />
-        @if (allotment()) {
-          <app-toggle formControlName="is_active" label="Activo (desactivar libera el cupo)" />
-        }
-      </form>
+          <app-input
+            formControlName="notes"
+            label="Notas"
+            type="text"
+            placeholder="Ej. Contrato temporada 2026"
+            [control]="form.controls.notes"
+            customWrapperClass="mt-0"
+          />
+          @if (allotment()) {
+            <app-toggle formControlName="is_active" label="Activo (desactivar libera el cupo)" />
+          }
+        </form>
+      </div>
 
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
-        <app-button variant="primary" [loading]="saving()" (clicked)="onSubmit()">
+        <app-button type="submit" form="allotment-form" variant="primary" [loading]="saving()">
           <app-icon slot="icon" name="save" [size]="16" />
           Guardar
         </app-button>
@@ -181,6 +197,7 @@ export class AllotmentFormModalComponent {
   readonly saving = signal(false);
   readonly datesError = signal(false);
   readonly customerError = signal(false);
+  readonly typeError = signal(false);
   readonly customer = signal<AllotmentCustomer | null>(null);
   readonly releaseDays = signal(7);
 
@@ -233,6 +250,7 @@ export class AllotmentFormModalComponent {
     );
     this.datesError.set(false);
     this.customerError.set(false);
+    this.typeError.set(false);
   }
 
   pickCustomer(customer: PosCustomer): void {
@@ -255,6 +273,7 @@ export class AllotmentFormModalComponent {
     const customer = this.customer();
     this.datesError.set(!!raw.from_date && !!raw.to_date && raw.to_date < raw.from_date);
     this.customerError.set(!customer);
+    this.typeError.set(raw.unit_type_id === null);
     if (this.form.invalid || this.datesError() || !customer || raw.unit_type_id === null) return;
 
     const terms = {

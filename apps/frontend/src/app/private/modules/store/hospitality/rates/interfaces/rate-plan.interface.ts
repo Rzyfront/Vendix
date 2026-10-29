@@ -159,14 +159,14 @@ export interface RestrictionPayload {
   stop_sell: boolean;
 }
 
-/** Short calendar labels of a restriction: "Mín. 3", "CTA", "Stop"… */
+/** Short calendar labels of a restriction: "Mín. 3", "Sin llegadas", "Venta cerrada"… */
 export function restrictionLabels(r: LodgingRestriction): string[] {
   return [
     r.min_stay ? `Mín. ${r.min_stay}` : '',
     r.max_stay ? `Máx. ${r.max_stay}` : '',
-    r.closed_to_arrival ? 'CTA' : '',
-    r.closed_to_departure ? 'CTD' : '',
-    r.stop_sell ? 'Stop' : '',
+    r.closed_to_arrival ? 'Sin llegadas' : '',
+    r.closed_to_departure ? 'Sin salidas' : '',
+    r.stop_sell ? 'Venta cerrada' : '',
   ].filter(Boolean);
 }
 
@@ -209,7 +209,8 @@ export function penaltyLabel(term: PenaltyTerm): string {
 }
 
 /**
- * "Gratis hasta 48 h antes, luego 1 noche · No-show: 100 %". Windows widest
+ * "Gratis hasta 48 h antes de la llegada, luego 1 noche · Si no se presenta:
+ * 100 %". Windows widest
  * first; without windows the cancellation is free.
  */
 export function describePolicy(
@@ -219,12 +220,12 @@ export function describePolicy(
   const parts = rules.length
     ? rules.map((rule, index) =>
         index === 0
-          ? `Gratis hasta ${rule.hours_before} h antes, luego ${penaltyLabel(rule)}`
+          ? `Gratis hasta ${rule.hours_before} h antes de la llegada, luego ${penaltyLabel(rule)}`
           : `desde ${rule.hours_before} h antes, ${penaltyLabel(rule)}`,
       )
     : ['Cancelación gratis'];
   const noShow = policy.no_show_penalty ? penaltyLabel(policy.no_show_penalty) : 'sin penalidad';
-  return `${parts.join('; ')} · No-show: ${noShow}`;
+  return `${parts.join('; ')} · Si no se presenta: ${noShow}`;
 }
 
 /**

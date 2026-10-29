@@ -22,6 +22,7 @@ import {
   CancellationPolicy,
   CancellationPolicyPayload,
   describePolicy,
+  PenaltyTerm,
   PenaltyType,
 } from '../../interfaces/rate-plan.interface';
 import { CancellationPoliciesService } from '../../services/cancellation-policies.service';
@@ -32,7 +33,7 @@ interface RuleForm {
   penalty_value: FormControl<number>;
 }
 
-/** `none` = a no-show is not charged. */
+/** `none` = a guest who does not show up (no-show) is not charged. */
 type NoShowType = PenaltyType | 'none';
 
 interface PolicyForm {
@@ -77,13 +78,20 @@ const PENALTY_OPTIONS: SelectorOption[] = [
       [title]="policy() ? 'Editar política' : 'Nueva política de cancelación'"
       subtitle="Lo que pierde el huésped si cancela o no llega"
     >
-      <form [formGroup]="form" class="space-y-4">
+      <form
+        [formGroup]="form"
+        id="policy-form"
+        class="space-y-4"
+        novalidate
+        (ngSubmit)="onSubmit()"
+      >
         <app-input
           formControlName="name"
           label="Nombre"
           type="text"
           placeholder="Ej. Flexible"
           [required]="true"
+          [control]="form.controls.name"
           customWrapperClass="mt-0"
         />
 
@@ -92,14 +100,18 @@ const PENALTY_OPTIONS: SelectorOption[] = [
           @for (rule of form.controls.rules.controls; track rule; let i = $index) {
             <div
               [formGroupName]="i"
-              class="grid grid-cols-[1fr_1fr_1fr_auto] items-end gap-2"
+              class="grid grid-cols-[1fr_1fr_auto] items-start gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]"
               data-testid="policy-rule-row"
             >
               <app-input
+                class="col-span-3 sm:col-span-1"
                 formControlName="hours_before"
-                label="Menos de (h antes)"
+                label="Horas antes de la llegada"
                 type="number"
                 [min]="0"
+                helperText="Si cancela con menos horas"
+                [control]="rule.controls.hours_before"
+                [error]="ruleErrors()[i]?.hours ?? ''"
                 customWrapperClass="mt-0"
               />
               <app-selector formControlName="penalty_type" label="Cobra" [options]="penaltyOptions" />
@@ -108,12 +120,15 @@ const PENALTY_OPTIONS: SelectorOption[] = [
                 label="Cantidad"
                 type="number"
                 [min]="0"
+                [control]="rule.controls.penalty_value"
+                [error]="ruleErrors()[i]?.value ?? ''"
                 customWrapperClass="mt-0"
               />
               <app-button
                 variant="ghost"
                 size="sm"
-                [attr.aria-label]="'Quitar penalidad ' + (i + 1)"
+                customClasses="!h-11 !w-11 !px-0 mt-6"
+                [ariaLabel]="'Quitar penalidad ' + (i + 1)"
                 (clicked)="removeRule(i)"
               >
                 <app-icon slot="icon" name="trash-2" [size]="16" />
@@ -128,10 +143,10 @@ const PENALTY_OPTIONS: SelectorOption[] = [
           </app-button>
         </div>
 
-        <div class="grid grid-cols-2 gap-2">
+        <div class="grid grid-cols-2 items-start gap-2">
           <app-selector
             formControlName="no_show_type"
-            label="Si no llega (no-show)"
+            label="Si no se presenta"
             [options]="noShowOptions"
           />
           @if (noShowType() !== 'none') {
@@ -140,6 +155,8 @@ const PENALTY_OPTIONS: SelectorOption[] = [
               label="Cantidad"
               type="number"
               [min]="0"
+              [control]="form.controls.no_show_value"
+              [error]="noShowError()"
               customWrapperClass="mt-0"
             />
           }
@@ -147,14 +164,11 @@ const PENALTY_OPTIONS: SelectorOption[] = [
 
         <app-toggle formControlName="is_active" label="Activa" />
         <p class="text-sm text-text-secondary" data-testid="policy-summary">{{ summary() }}</p>
-        @if (error()) {
-          <p class="text-sm text-error">{{ error() }}</p>
-        }
       </form>
 
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
-        <app-button variant="primary" [loading]="saving()" (clicked)="onSubmit()">
+        <app-button type="submit" form="policy-form" variant="primary" [loading]="saving()">
           <app-icon slot="icon" name="save" [size]="16" />
           Guardar
         </app-button>
@@ -176,7 +190,9 @@ export class CancellationPolicyFormModalComponent {
   readonly saved = output<CancellationPolicy>();
 
   readonly saving = signal(false);
-  readonly error = signal('');
+  /** Per-row errors ("Hay otra penalidad con las mismas horas"), shown after a submit attempt. */
+  readonly ruleErrors = signal<RuleErrors[]>([]);
+  readonly noShowError = signal('');
   readonly summary = signal('');
   readonly noShowType = signal<NoShowType>('none');
   readonly penaltyOptions = PENALTY_OPTIONS;
@@ -215,7 +231,8 @@ export class CancellationPolicyFormModalComponent {
       no_show_value: policy?.no_show_penalty?.penalty_value ?? 100,
       is_active: policy?.is_active ?? true,
     });
-    this.error.set('');
+    this.ruleErrors.set([]);
+    this.noShowError.set('');
   }
 
   addRule(): void {
@@ -226,6 +243,7 @@ export class CancellationPolicyFormModalComponent {
 
   removeRule(index: number): void {
     this.form.controls.rules.removeAt(index);
+    this.ruleErrors.update((errors) => errors.filter((_, i) => i !== index));
   }
 
   onCancel(): void {
@@ -235,9 +253,11 @@ export class CancellationPolicyFormModalComponent {
   onSubmit(): void {
     this.form.markAllAsTouched();
     const payload = this.toPayload();
-    const problem = validationError(payload);
-    this.error.set(problem);
-    if (this.form.invalid || problem) return;
+    const problems = policyErrors(payload);
+    this.ruleErrors.set(problems.rules);
+    this.noShowError.set(problems.noShow);
+    const hasProblem = !!problems.noShow || problems.rules.some((r) => r.hours || r.value);
+    if (this.form.invalid || hasProblem) return;
 
     const policy = this.policy();
     const request = policy
@@ -290,16 +310,34 @@ export class CancellationPolicyFormModalComponent {
   }
 }
 
-/** Same limits as the API: one rule per window, 1-30 whole nights or up to 100 %. */
-function validationError(payload: CancellationPolicyPayload): string {
-  const terms = [...payload.rules, ...(payload.no_show_penalty ? [payload.no_show_penalty] : [])];
-  const badTerm = terms.some((term) =>
-    term.penalty_type === 'nights'
-      ? !Number.isInteger(term.penalty_value) || term.penalty_value < 1 || term.penalty_value > 30
-      : term.penalty_value < 0 || term.penalty_value > 100,
-  );
-  if (badTerm) return 'Usa de 1 a 30 noches enteras o un porcentaje de 0 a 100.';
+/** Error under each field of a penalty row; empty when it is fine. */
+interface RuleErrors {
+  hours: string;
+  value: string;
+}
+
+/** Same limits as the API: 1-30 whole nights or up to 100 %. */
+function termError(term: PenaltyTerm): string {
+  if (term.penalty_type === 'nights') {
+    const value = term.penalty_value;
+    return Number.isInteger(value) && value >= 1 && value <= 30
+      ? ''
+      : 'Usa de 1 a 30 noches enteras';
+  }
+  return term.penalty_value >= 0 && term.penalty_value <= 100 ? '' : 'Usa de 0 a 100 %';
+}
+
+/** Same limits as the API, placed under the field they belong to; one rule per window. */
+function policyErrors(payload: CancellationPolicyPayload): { rules: RuleErrors[]; noShow: string } {
   const windows = payload.rules.map((rule) => rule.hours_before);
-  if (new Set(windows).size !== windows.length) return 'Hay dos penalidades con las mismas horas.';
-  return '';
+  return {
+    rules: payload.rules.map((rule, index) => ({
+      hours:
+        windows.indexOf(rule.hours_before) !== index
+          ? 'Hay otra penalidad con las mismas horas'
+          : '',
+      value: termError(rule),
+    })),
+    noShow: payload.no_show_penalty ? termError(payload.no_show_penalty) : '',
+  };
 }
