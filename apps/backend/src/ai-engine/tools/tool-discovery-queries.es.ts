@@ -2260,6 +2260,16 @@ export const TOOL_DISCOVERY_QUERIES_ES: Readonly<
     'Confirme que quedó habilitada la DIAN en producción',
     'Deje la facturación electrónica funcionando en producción, sin devuelta',
   ],
+  quote_lodging_availability: [
+    '¿Tengo dobles del 10 al 13 para 2 adultos y cuánto cuesta?',
+    'Cotízame una habitación para este fin de semana, somos 2 adultos y un niño',
+    'Oe, ¿qué habitaciones me quedan libres del 20 al 22 y a cómo?',
+    'El cliente pregunta cuánto vale la suite tres noches desde el viernes',
+    '¿Hay cupo en el hotel para 4 personas del 5 al 8 de diciembre?',
+    'Dame la disponibilidad y la tarifa de las sencillas para mañana',
+    '¿Cuánto es el anticipo si reservan la doble dos noches?',
+    'Parce, ¿se puede vender una sola noche el sábado o hay estancia mínima?',
+  ],
   quote_shipping: [
     '¿Cuánto cuesta enviar a la dirección del cliente en Medellín?',
     'Cotízame el envío a Bogotá con estos productos',

@@ -1,4 +1,8 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+// H9.1 — Vexi tools of the hotel. AIToolRegistry comes from the @Global()
+// AIEngineModule, so it is injectable without importing it here.
+import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
+import { createLodgingTools } from '../../../../ai-engine/tools/domains/lodging.tools';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../../prisma/prisma.module';
 import { OrderFlowModule } from '../../orders/order-flow/order-flow.module';
@@ -150,4 +154,13 @@ import { LodgingKeyHandoversService } from './key-handovers/key-handovers.servic
     LodgingStayReviewService,
   ],
 })
-export class LodgingReservationsModule {}
+export class LodgingReservationsModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly bookingEngine: LodgingBookingEngineService,
+  ) {}
+
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(createLodgingTools({ bookingEngine: this.bookingEngine }));
+  }
+}
