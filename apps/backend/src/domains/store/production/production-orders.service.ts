@@ -21,6 +21,55 @@ import {
 } from './dto';
 
 /**
+ * Consumo efectivo de un componente durante un `complete()`.
+ * Lo expone el hook `onProduced` y el payload del evento `production.completed`.
+ */
+export interface ProductionConsumption {
+  component_product_id: number;
+  consumed_qty: number;
+  cost_snapshot: {
+    unit_cost: number;
+    total_cost: number;
+    stock_value: number;
+  } | null;
+}
+
+/** Datos que `complete()` entrega al hook `onProduced` dentro de la transacción. */
+export interface ProductionCompletionInfo {
+  order: { id: number; product_id: number; produced_qty: unknown; planned_qty: unknown };
+  producedQty: number;
+  producedUnitCost: number;
+  totalCost: number;
+  consumptions: ProductionConsumption[];
+}
+
+/**
+ * Opciones OPCIONALES de `complete()`. Sin ellas el comportamiento es el del
+ * restaurante (tandas enteras, `source_module='production'`, estado
+ * `completed`). Las usa el módulo de manufactura.
+ */
+export interface CompleteProductionOptions {
+  /** Permite cantidades que no sean múltiplo exacto del rendimiento. */
+  allowPartialBatch?: boolean;
+  /** `source_module` de los movimientos de inventario (default `production`). */
+  sourceModule?: string;
+  /** Bodega de la que se consumen los insumos (default: la del insumo). */
+  inputLocationId?: number;
+  /** Bodega a la que entra el terminado (default: la del producto). */
+  outputLocationId?: number;
+  /** Método de costeo de las salidas (default: el resuelto por la tienda). */
+  costingMethod?: 'fifo' | 'weighted_average';
+  /**
+   * Hook dentro de la transacción, tras mover el stock. Puede devolver datos
+   * extra para la orden (p. ej. `status`, `produced_qty` acumulado, `actual_cost`).
+   */
+  onProduced?: (
+    tx: Prisma.TransactionClient,
+    info: ProductionCompletionInfo,
+  ) => Promise<Prisma.production_ordersUncheckedUpdateInput | void>;
+}
+
+/**
  * ProductionOrdersService
  *
  * Fase C of the Restaurant Suite — sub-recipe production (batch stock).
@@ -101,6 +150,37 @@ export class ProductionOrdersService {
     }
     const multiplier = (1 + lineWastePct / 100) * (1 + recipeWastePct / 100);
     return Math.round(baseQty * factor * multiplier);
+  }
+
+  /**
+   * Cantidad requerida por componente para producir `qty` unidades, con merma
+   * y escalado por rendimiento. Es EXACTAMENTE lo que `complete()` descuenta
+   * (misma función), así manufactura calcula faltantes y líneas sin duplicar.
+   */
+  computeComponentRequirements(
+    recipe: {
+      waste_percent?: unknown;
+      yield_quantity?: unknown;
+      items: Array<{
+        component_product_id: number;
+        quantity: any;
+        waste_percent?: any;
+        waste_mode?: string | null;
+        waste_absolute?: any;
+      }>;
+    },
+    qty: number,
+  ): Array<{ component_product_id: number; quantity: number }> {
+    const recipeWastePct = Number(recipe.waste_percent || 0);
+    return recipe.items.map((item) => ({
+      component_product_id: item.component_product_id,
+      quantity: this.computeConsumedQty(
+        item,
+        recipeWastePct,
+        qty,
+        recipe.yield_quantity,
+      ),
+    }));
   }
 
   /**
@@ -335,7 +415,11 @@ export class ProductionOrdersService {
   }
 
   // ----------------------------------------------------------------- complete
-  async complete(id: number, dto: CompleteProductionOrderDto) {
+  async complete(
+    id: number,
+    dto: CompleteProductionOrderDto,
+    options?: CompleteProductionOptions,
+  ) {
     const order = await this.findOne(id);
     // docs/plans/no-overselling-stock-guard-plan.md step 9 — the order's own
     // `store_id` (not just the request context) so the resolved policy is
@@ -372,14 +456,23 @@ export class ProductionOrdersService {
         ErrorCodes.PRODUCTION_RECIPE_EMPTY,
       );
     }
-    this.assertWholeBatches(producedQty, recipe.yield_quantity, recipe.yield_unit);
+    if (!options?.allowPartialBatch) {
+      this.assertWholeBatches(
+        producedQty,
+        recipe.yield_quantity,
+        recipe.yield_unit,
+      );
+    }
+    const sourceModule = options?.sourceModule ?? 'production';
 
     // Resolve the location for the produced good. Uses the same default
     // resolver as the rest of the inventory flow so we don't surprise
     // operators with arbitrary location selection.
-    const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
-      order.product_id,
-    );
+    const location_id =
+      options?.outputLocationId ??
+      (await this.stockLevelManager.getDefaultLocationForProduct(
+        order.product_id,
+      ));
 
     // No-overselling guard (docs/plans/no-overselling-stock-guard-plan.md,
     // step 6) — validate every tracked ingredient BEFORE opening the
@@ -425,6 +518,7 @@ export class ProductionOrdersService {
     // commits (auto-entry failures must not roll back the production).
     let totalConsumedCost = 0;
     let consumedLineCount = 0;
+    const consumptions: ProductionConsumption[] = [];
 
     // 1. ATOMIC TRANSACTION — consume each recipe item + produce the batch
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -448,9 +542,10 @@ export class ProductionOrdersService {
         // nunca bajaba y el terminado sí se acreditaba. Inventario inflado en
         // silencio, sin una fila que lo explicara.
         const componentLocationId =
-          await this.stockLevelManager.getDefaultLocationForProduct(
+          options?.inputLocationId ??
+          (await this.stockLevelManager.getDefaultLocationForProduct(
             item.component_product_id,
-          );
+          ));
 
         const result = await this.stockLevelManager.updateStock(
           {
@@ -459,9 +554,12 @@ export class ProductionOrdersService {
             quantity_change: -Math.abs(consumedQty),
             movement_type: 'consumption',
             reason: `Producción #${order.id} – ${order.product.name}`,
-            source_module: 'production',
+            source_module: sourceModule,
             user_id: undefined,
             create_movement: true,
+            ...(options?.costingMethod && {
+              costing_method: options.costingMethod,
+            }),
             // No-overselling guard (plan step 6/9) — the pre-tx check above
             // already blocked an insufficient tracked ingredient WHEN
             // overuse is OFF; `validate_availability` is the defense-in-depth
@@ -481,6 +579,11 @@ export class ProductionOrdersService {
           totalConsumedCost += Number(result.cost_snapshot.total_cost || 0);
           consumedLineCount += 1;
         }
+        consumptions.push({
+          component_product_id: item.component_product_id,
+          consumed_qty: consumedQty,
+          cost_snapshot: result?.cost_snapshot ?? null,
+        });
       }
 
       // 1b. Credit finished-goods stock with the derived unit_cost
@@ -496,13 +599,24 @@ export class ProductionOrdersService {
           quantity_change: Math.abs(producedQty),
           movement_type: 'production',
           reason: `Producción #${order.id} – ${order.product.name}`,
-          source_module: 'production',
+          source_module: sourceModule,
           user_id: undefined,
           create_movement: true,
           unit_cost: producedUnitCost > 0 ? producedUnitCost : undefined,
         },
         tx,
       );
+
+      // 1b'. Hook opcional (manufactura): líneas, lote, estado parcial…
+      const hookData = options?.onProduced
+        ? await options.onProduced(tx, {
+            order: order as ProductionCompletionInfo['order'],
+            producedQty,
+            producedUnitCost,
+            totalCost: totalConsumedCost,
+            consumptions,
+          })
+        : undefined;
 
       // 1c. Persist the order final state
       const final = await tx.production_orders.update({
@@ -512,6 +626,7 @@ export class ProductionOrdersService {
           produced_qty: new Prisma.Decimal(producedQty),
           produced_at: new Date(),
           updated_at: new Date(),
+          ...(hookData ?? {}),
         },
         include: {
           product: {
@@ -547,6 +662,11 @@ export class ProductionOrdersService {
         total_cost: totalConsumedCost,
         consumed_line_count: consumedLineCount,
         user_id: context?.user_id,
+        // Aditivo: solo cuando el llamador (manufactura) pasa opciones.
+        ...(options && {
+          source_module: sourceModule,
+          lines: consumptions,
+        }),
       });
     } catch (err) {
       this.logger.error(

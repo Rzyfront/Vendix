@@ -117,6 +117,12 @@ export const MODULE_ROUTES: Record<string, string> = {
   restaurant_ops_tables: '/admin/restaurant-ops/tables',
   restaurant_ops_menus: '/admin/restaurant-ops/menus',
 
+  // Manufactura
+  manufacturing: '/admin/manufacturing/formulas',
+  manufacturing_formulas: '/admin/manufacturing/formulas',
+  manufacturing_orders: '/admin/manufacturing/orders',
+  manufacturing_settings: '/admin/manufacturing/settings',
+
   // Membresías
   memberships: '/admin/memberships/members',
   memberships_plans: '/admin/memberships/plans',

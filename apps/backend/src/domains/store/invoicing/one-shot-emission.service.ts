@@ -23,6 +23,8 @@ import {
   evaluateOrderHolder,
   holderCurrentData,
   isCfOverridable,
+  isFinalConsumerCustomer,
+  isUnidentifiedHolder,
 } from './utils/order-acquirer-holder.util';
 import { OrderLeaseService } from '../../../common/locks/order-lease.service';
 
@@ -294,14 +296,18 @@ export class OneShotEmissionService {
 
     const blocker = this.resolveCreditBlocker(order, settled);
     if (!credit_options) {
+      // El cliente Consumidor final (centinela) no es un deudor identificable:
+      // el modal de crédito pide asignar un cliente (o contado a CF).
+      const offered =
+        blocker ?? (isFinalConsumerCustomer(order) ? 'customer_required' : null);
       throw new VendixHttpException(
         ErrorCodes.INVOICING_ORDER_UNPAID_001,
         undefined,
         {
           order_id,
           remaining_balance: remaining.toFixed(2),
-          credit_eligible: blocker === null,
-          credit_blocker: blocker,
+          credit_eligible: offered === null,
+          credit_blocker: offered,
         },
       );
     }
@@ -363,6 +369,21 @@ export class OneShotEmissionService {
     });
     if (numbered) return undefined;
 
+    // Comprador no identificado (Consumidor final, invitado o cliente sólo con
+    // nombre): nadie pidió factura a su nombre. Pagada → Consumidor final con el
+    // medio real, sin preguntar. Sin pagar → sigue al flujo de saldo (crédito u
+    // opción Consumidor final de contado). Pedida a crédito o ya crédito, el
+    // bloqueo de abajo pide sus datos (el crédito nunca sale a Consumidor final).
+    const is_credit = order.payment_form === '2' || credit_requested;
+    if (
+      isUnidentifiedHolder(holder.issue) &&
+      !is_credit &&
+      !emit_options?.force_final_consumer
+    ) {
+      const { remaining } = computeOrderUnpaidBalance(order as any);
+      return remaining.lessThan(0.01) ? { force_final_consumer: true } : undefined;
+    }
+
     const overridable = isCfOverridable(holder.issue);
     const details = {
       order_id: order.id,
@@ -375,7 +396,7 @@ export class OneShotEmissionService {
     };
     if (overridable && emit_options?.force_final_consumer) {
       // Venta a crédito (ya crédito o pedida a crédito): nunca sale a Consumidor final.
-      if (order.payment_form === '2' || credit_requested) {
+      if (is_credit) {
         throw new VendixHttpException(
           ErrorCodes.INVOICING_HOLDER_INCOMPLETE_001,
           CREDIT_FINAL_CONSUMER_MESSAGE,

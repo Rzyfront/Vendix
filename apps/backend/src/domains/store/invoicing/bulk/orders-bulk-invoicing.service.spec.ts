@@ -154,6 +154,38 @@ describe('OrdersBulkInvoicingService', () => {
       expect(r.summary.final_consumer).toBe(0);
     });
 
+    it.each([
+      ['guest with only a reference name', { customer_id: null, users: null, invoice_data_requests: [{ document_type: null, document_number: null, first_name: 'Andrea león', last_name: null }] }],
+      ['customer registered only with a name', { users: customer({ document_type: null, document_number: null, last_name: null }) }],
+      ['the Consumidor final customer (sentinel)', { users: customer({ document_number: '222222222222' }) }],
+    ])('paid order of an unidentified buyer (%s): emits as Consumidor final without opt-in', async (_label, over) => {
+      const { service } = build({ orders: [order(1, over)] });
+      const r = await service.preview({ ids: [1] });
+      expect(r.results[0]).toMatchObject({
+        payment: 'paid',
+        will_emit: true,
+        holder_issue: null,
+        cf_overridable: false,
+        skip_reason: null,
+        holder: { rail: 'final_consumer', document_number: '222222222222' },
+      });
+      expect(r.summary.final_consumer).toBe(1);
+    });
+
+    it('unpaid order of the Consumidor final customer keeps the CF cash opt-in (not blocked)', async () => {
+      const { service } = build({
+        orders: [order(1, { users: customer({ document_number: '222222222222' }), payments: [], state: 'created' })],
+      });
+      const r = await service.preview({ ids: [1] });
+      expect(r.results[0]).toMatchObject({
+        payment: 'to_credit',
+        blocked_code: null,
+        will_emit: false,
+        cf_overridable: true,
+        holder_issue: { code: 'final_consumer_sentinel' },
+      });
+    });
+
     it('document_type_required: not overridable, nominative with empty type', async () => {
       const { service } = build({
         orders: [
@@ -231,6 +263,15 @@ describe('OrdersBulkInvoicingService', () => {
         failed: 0,
         results: [{ id: 1, status: 'ok', invoice_number: 'FE-1', invoice_status: 'accepted' }],
       });
+    });
+
+    it('paid order of a guest with only a name: emits to Consumidor final without the opt-in', async () => {
+      const { service, one_shot } = build({
+        orders: [order(1, { customer_id: null, users: null, invoice_data_requests: [{ document_type: null, document_number: null, first_name: 'Andrea', last_name: null }] })],
+      });
+      const r = await service.execute({ items: [item(1, '222222222222')] });
+      expect(one_shot.emitOrder).toHaveBeenCalledWith(1, undefined, undefined);
+      expect(r.results[0].status).toBe('ok');
     });
 
     it('holder changed since the preview: INVOICING_BULK_HOLDER_CHANGED_001 and nothing is emitted', async () => {

@@ -535,6 +535,32 @@ export class StoreAdminLayoutComponent {
       ],
     },
     {
+      // Manufactura (MVP). Hidden by INDUSTRY_HIDDEN_MODULES for every
+      // industry except `manufacturing`. Labels map to panel_ui keys via
+      // MenuFilterService ('Manufactura' → manufacturing, 'Fórmulas' →
+      // manufacturing_formulas, 'Órdenes de producción' → manufacturing_orders,
+      // 'Planta' → manufacturing_settings).
+      label: 'Manufactura',
+      icon: 'factory',
+      children: [
+        {
+          label: 'Fórmulas',
+          icon: 'flask-conical',
+          route: '/admin/manufacturing/formulas',
+        },
+        {
+          label: 'Órdenes de producción',
+          icon: 'clipboard-list',
+          route: '/admin/manufacturing/orders',
+        },
+        {
+          label: 'Planta',
+          icon: 'settings',
+          route: '/admin/manufacturing/settings',
+        },
+      ],
+    },
+    {
       // Memberships (Membership Suite). Hidden by INDUSTRY_HIDDEN_MODULES for
       // every industry except `gym` and `service`; visible only when the
       // store's industry includes `gym` or `service`. Labels map to panel_ui

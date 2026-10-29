@@ -3230,8 +3230,10 @@
       [customerName]="customerDisplayName()"
       [balance]="creditBalance()"
       [busy]="isEmittingInvoice()"
+      [customerRequired]="creditCustomerRequired()"
       (confirmed)="onCreditInvoiceConfirmed($event)"
       (finalConsumer)="onCreditUseFinalConsumer()"
+      (assignCustomer)="onAssignCustomerForInvoice()"
     ></app-credit-invoice-modal>
 
     <!-- DATOS DEL CLIENTE INCOMPLETOS (409 de la emisión: completar o Consumidor final) -->
@@ -3242,6 +3244,7 @@
       [finalConsumerLabel]="hasUnpaidBalance() ? 'Emitir como Consumidor final (contado)' : 'Emitir como Consumidor final'"
       (saved)="onHolderCompleted()"
       (useFinalConsumer)="onHolderUseFinalConsumer()"
+      (assignCustomer)="onAssignCustomerForInvoice()"
     ></app-customer-holder-completion-modal>
 
     <!-- COURIER NAME (despacho rápido: "Entrega completa" pide el domiciliario) -->

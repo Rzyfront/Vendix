@@ -978,6 +978,18 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // Manufactura (MVP: Fórmulas, Órdenes de producción, Planta). Hidden by
+      // INDUSTRY_HIDDEN_MODULES for every industry except `manufacturing`.
+      // Panel_ui keys: manufacturing (parent) · manufacturing_formulas ·
+      // manufacturing_orders · manufacturing_settings. The root
+      // /admin/manufacturing defaults to Fórmulas.
+      {
+        path: 'manufacturing',
+        loadChildren: () =>
+          import(
+            '../../private/modules/store/manufacturing/routes/manufacturing.routes'
+          ).then((m) => m.manufacturingRoutes),
+      },
       // Memberships (Membership Suite: Planes, Socios/Membresías, Accesos). The
       // whole group is hidden by INDUSTRY_HIDDEN_MODULES for every industry
       // except `gym`; visible only when the store's industry includes `gym`.

@@ -143,6 +143,14 @@ const REQUIRED_COLUMNS = [
   'lodging_night_audits.status',
   // H6.6 — penalty kept from an online payment of a cancelled reservation.
   'lodging_reservation_payments.retained_amount',
+  // Manufactura MVP (migración 20261103120000): Prisma selecciona estas
+  // columnas en toda lectura de recetas y órdenes de producción, incluido el
+  // restaurante; sin ellas recetas/producción revientan con ColumnNotFound.
+  'recipes.code',
+  'recipes.version',
+  'recipes.status',
+  'production_orders.order_number',
+  'production_orders.unit_cost',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */
@@ -154,6 +162,10 @@ const REQUIRED_TABLES = [
   // endpoint 201 revienta en caliente (el frontend lo traga, pero la señal
   // CTR del gate de 1 semana se pierde en silencio).
   'pos_search_selections',
+  // Manufactura MVP (migración 20261103120000).
+  'production_order_lines',
+  'manufacturing_settings',
+  'store_sequences',
 ];
 
 /** Tipos enum que el schema referencia y la base debe conocer. */
@@ -179,6 +191,8 @@ const REQUIRED_ENUM_VALUES = {
   // `withholding_calculations.role`.
   withholding_role_enum: ['self'],
   order_installment_state_enum: ['cancelled'],
+  production_order_state_enum: ['released', 'partially_completed'],
+  product_type_enum: ['manufactured', 'semi_finished'],
 };
 
 /** La identidad única de un abono CxC manual evita refund duplicado por retry. */

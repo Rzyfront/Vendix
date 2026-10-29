@@ -649,6 +649,62 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
 
+    // Manufactura (MVP): fórmulas, órdenes de producción y configuración de planta
+    {
+      name: 'store:manufacturing:formulas:read',
+      description: 'Listar y consultar fórmulas de manufactura (costo y explosión)',
+      path: '/api/store/manufacturing/formulas',
+      method: 'GET',
+    },
+    {
+      name: 'store:manufacturing:formulas:create',
+      description: 'Crear fórmula de manufactura',
+      path: '/api/store/manufacturing/formulas',
+      method: 'POST',
+    },
+    {
+      name: 'store:manufacturing:formulas:update',
+      description: 'Actualizar fórmula de manufactura',
+      path: '/api/store/manufacturing/formulas/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:manufacturing:formulas:delete',
+      description: 'Archivar fórmula de manufactura',
+      path: '/api/store/manufacturing/formulas/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:manufacturing:orders:read',
+      description: 'Listar y consultar órdenes de producción de manufactura (incluye faltantes)',
+      path: '/api/store/manufacturing/orders',
+      method: 'GET',
+    },
+    {
+      name: 'store:manufacturing:orders:create',
+      description: 'Crear orden de producción de manufactura',
+      path: '/api/store/manufacturing/orders',
+      method: 'POST',
+    },
+    {
+      name: 'store:manufacturing:orders:update',
+      description: 'Editar, lanzar, iniciar, completar o cancelar orden de producción de manufactura',
+      path: '/api/store/manufacturing/orders/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:manufacturing:settings:read',
+      description: 'Consultar configuración de planta de manufactura',
+      path: '/api/store/manufacturing/settings',
+      method: 'GET',
+    },
+    {
+      name: 'store:manufacturing:settings:update',
+      description: 'Actualizar configuración de planta de manufactura',
+      path: '/api/store/manufacturing/settings',
+      method: 'PATCH',
+    },
+
     // Kitchen Fire (Restaurant Suite — Fase D)
     // Fire-to-kitchen consume + COGS auto-entry seam.
     {
@@ -4807,10 +4863,26 @@ export async function seedPermissionsAndRoles(
     'Camarera (hotel): estado de limpieza de las habitaciones, sin datos de dinero',
   );
 
+  // Manufactura (MVP) — roles de planta. Nombres internos en snake_case como
+  // waiter/kitchen/housekeeper (el panel los resuelve en minúsculas); la UI los
+  // muestra como Jefe de planta, Planeador y Operario de producción.
+  const plantManagerRole = await findOrCreateSystemRole(
+    'plant_manager',
+    'Jefe de planta (manufactura): fórmulas, órdenes de producción y configuración de planta',
+  );
+  const productionPlannerRole = await findOrCreateSystemRole(
+    'production_planner',
+    'Planeador (manufactura): planea fórmulas y órdenes de producción',
+  );
+  const productionOperatorRole = await findOrCreateSystemRole(
+    'production_operator',
+    'Operario de producción (manufactura): consulta fórmulas y ejecuta órdenes',
+  );
+
   // Create-only seed: system roles are inserted with organization_id=null on
   // their initial upsert; existing roles are never mutated by this seed.
 
-  const rolesCreated = 14;
+  const rolesCreated = 17;
 
   // Assign permissions to roles
   const allPermissions = await client.permissions.findMany();
@@ -5617,6 +5689,45 @@ export async function seedPermissionsAndRoles(
   // aditivo basta, no hay asignaciones previas que revocar.
   for (const role of [receptionistRole, housekeeperRole]) {
     const names = LODGING_ROLE_PERMISSIONS[role.name];
+    const ids = allPermissions
+      .filter((p) => names.includes(p.name))
+      .map((p) => p.id);
+    const sync = await syncRolePermissions(client, role.id, ids, role.name);
+    assignmentsCreated += sync.added;
+  }
+
+  // Manufactura (MVP) — roles de planta: lista explícita, roles nuevos (el sync
+  // aditivo basta). owner/admin/manager/supervisor ya reciben todo `store:*`
+  // por su filtro, incluidos los permisos `store:manufacturing:*`.
+  const manufacturingRolePermissions: Array<
+    [{ id: number; name: string }, string[]]
+  > = [
+    [
+      plantManagerRole,
+      allPermissions
+        .filter((p) => p.name.startsWith('store:manufacturing:'))
+        .map((p) => p.name),
+    ],
+    [
+      productionPlannerRole,
+      [
+        'store:manufacturing:formulas:read',
+        'store:manufacturing:orders:read',
+        'store:manufacturing:orders:create',
+        'store:manufacturing:orders:update',
+        'store:manufacturing:settings:read',
+      ],
+    ],
+    [
+      productionOperatorRole,
+      [
+        'store:manufacturing:formulas:read',
+        'store:manufacturing:orders:read',
+        'store:manufacturing:orders:update',
+      ],
+    ],
+  ];
+  for (const [role, names] of manufacturingRolePermissions) {
     const ids = allPermissions
       .filter((p) => names.includes(p.name))
       .map((p) => p.id);

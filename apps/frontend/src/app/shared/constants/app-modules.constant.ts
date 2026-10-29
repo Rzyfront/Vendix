@@ -453,6 +453,32 @@ export const APP_MODULES: {
       ],
     },
 
+    // Manufactura (MVP). Parent module hidden by `INDUSTRY_HIDDEN_MODULES`
+    // for every industry except `manufacturing`.
+    {
+      key: 'manufacturing',
+      label: 'Manufactura',
+      description: 'F\u00f3rmulas, \u00f3rdenes de producci\u00f3n y configuraci\u00f3n de planta',
+      isParent: true,
+      children: [
+        {
+          key: 'manufacturing_formulas',
+          label: 'F\u00f3rmulas',
+          description: 'F\u00f3rmulas de fabricaci\u00f3n con merma y costo te\u00f3rico',
+        },
+        {
+          key: 'manufacturing_orders',
+          label: '\u00d3rdenes de producci\u00f3n',
+          description: 'Planeaci\u00f3n, lanzamiento y cierre de la producci\u00f3n',
+        },
+        {
+          key: 'manufacturing_settings',
+          label: 'Planta',
+          description: 'Bodegas, m\u00e9todo de costeo y lotes de producci\u00f3n',
+        },
+      ],
+    },
+
     // Memberships (Membership Suite). Parent module hidden by
     // `INDUSTRY_HIDDEN_MODULES` for retail/restaurant/manufacturing/service;
     // visible only when the store's industry includes `gym`.

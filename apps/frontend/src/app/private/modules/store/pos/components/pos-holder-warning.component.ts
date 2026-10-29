@@ -109,7 +109,7 @@ export class PosHolderWarningComponent {
 
   readonly visibleIssue = computed(() => {
     const issue = this.issue();
-    return issue && !this.dismissed().has(issue.customer_id) ? issue : null;
+    return issue && !this.dismissed().has(issue.customer_id ?? 0) ? issue : null;
   });
   readonly labels = computed(() =>
     missingFieldLabels(this.issue()?.missing_fields ?? []),
@@ -144,7 +144,7 @@ export class PosHolderWarningComponent {
     const issue = this.issue();
     if (!issue) return;
     this.showModal.set(false);
-    this.dismissed.update((prev) => new Set(prev).add(issue.customer_id));
+    this.dismissed.update((prev) => new Set(prev).add(issue.customer_id ?? 0));
   }
 
   onSaved(): void {

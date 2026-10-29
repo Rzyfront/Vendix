@@ -1110,6 +1110,8 @@ model stores {
   // Restaurant Suite Foundation (Fase A) — back-relations
   recipes                   recipes[]
   production_orders         production_orders[]
+  manufacturing_settings    manufacturing_settings?
+  store_sequences           store_sequences[]
   tables                    tables[]
   table_sessions            table_sessions[]
   kitchen_tickets           kitchen_tickets[]
@@ -2242,6 +2244,7 @@ model products {
   recipes                   recipes[]
   recipe_items_as_component recipe_items[]         @relation("recipe_items_component_product")
   production_orders         production_orders[]
+  production_order_lines    production_order_lines[] @relation("production_order_lines_component_product")
   menu_section_items        menu_section_items[]
   kitchen_ticket_items      kitchen_ticket_items[]
 
@@ -5184,6 +5187,10 @@ enum product_type_enum {
   // Distinguished from physical (sold as-is) and service (bookable time).
   // Default behavior is unchanged: existing rows keep their current value.
   prepared
+  // Finished good produced by the manufacturing module (planta).
+  manufactured
+  // Intermediate good produced and consumed inside manufacturing.
+  semi_finished
 }
 
 enum service_modality_enum {
@@ -12425,6 +12432,10 @@ enum production_order_state_enum {
   completed
   // Cancelled; no inventory effects.
   cancelled
+  // Manufacturing: order released to the plant floor (materials checked).
+  released
+  // Manufacturing: part of the planned quantity was produced.
+  partially_completed
 }
 
 // Lifecycle of a physical restaurant table / dining zone.
@@ -12507,6 +12518,11 @@ model recipes {
   waste_percent     Decimal   @default(0) @db.Decimal(5, 2)
   preparation_notes String?   @db.Text
   is_active         Boolean   @default(true)
+  /// Manufacturing formula code (optional, restaurant recipes leave it NULL).
+  code              String?   @db.VarChar(50)
+  version           Int       @default(1)
+  /// draft | active | archived. `is_active` is kept for backwards compatibility.
+  status            String    @default("active") @db.VarChar(20)
   created_at        DateTime? @default(now()) @db.Timestamp(6)
   updated_at        DateTime? @default(now()) @db.Timestamp(6)
 
@@ -12562,14 +12578,89 @@ model production_orders {
   produced_at  DateTime?                   @db.Timestamp(6)
   created_at   DateTime?                   @default(now()) @db.Timestamp(6)
   updated_at   DateTime?                   @default(now()) @db.Timestamp(6)
+  // Manufacturing fields (all optional: restaurant orders leave them NULL).
+  /// Per-store consecutive (e.g. OP-000123) generated from store_sequences.
+  order_number String?                     @db.VarChar(30)
+  due_date     DateTime?                   @db.Timestamp(6)
+  started_at   DateTime?                   @db.Timestamp(6)
+  /// Finished-goods destination location.
+  location_id  Int?
+  /// Finished-goods batch created on completion.
+  batch_id     Int?
+  /// low | normal | high | urgent
+  priority     String?                     @db.VarChar(20)
+  notes        String?                     @db.Text
+  created_by   Int?
+  /// manual | order (sales order) — origin of the production order.
+  source       String?                     @db.VarChar(20)
+  planned_cost Decimal?                    @db.Decimal(14, 4)
+  actual_cost  Decimal?                    @db.Decimal(14, 4)
+  unit_cost    Decimal?                    @db.Decimal(14, 4)
 
   store   stores   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   product products @relation(fields: [product_id], references: [id], onUpdate: NoAction)
   recipe  recipes  @relation(fields: [recipe_id], references: [id], onUpdate: NoAction)
+  lines   production_order_lines[]
 
+  @@unique([store_id, order_number])
   @@index([store_id, status])
   @@index([store_id, product_id])
   @@index([store_id, created_at])
+}
+
+/// Planned vs consumed component line of a production order (manufacturing).
+/// Cost is frozen at completion time (unit_cost / total_cost / cost_snapshot).
+model production_order_lines {
+  id                   Int       @id @default(autoincrement())
+  order_id             Int
+  component_product_id Int
+  component_variant_id Int?
+  planned_qty          Decimal   @db.Decimal(12, 4)
+  consumed_qty         Decimal   @default(0) @db.Decimal(12, 4)
+  uom_id               Int?
+  unit_cost            Decimal?  @db.Decimal(14, 4)
+  total_cost           Decimal?  @db.Decimal(14, 4)
+  cost_snapshot        Json?
+  sort_order           Int       @default(0)
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @default(now()) @db.Timestamp(6)
+
+  order             production_orders @relation(fields: [order_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  component_product products          @relation("production_order_lines_component_product", fields: [component_product_id], references: [id], onUpdate: NoAction)
+
+  @@index([order_id])
+  @@index([component_product_id])
+}
+
+/// Plant settings of the manufacturing module, one row per store.
+model manufacturing_settings {
+  id                         Int       @id @default(autoincrement())
+  store_id                   Int       @unique
+  default_input_location_id  Int?
+  default_output_location_id Int?
+  /// fifo | cpp
+  cost_method                String    @default("fifo") @db.VarChar(20)
+  lot_required               Boolean   @default(false)
+  wip_account_id             Int?
+  created_at                 DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                 DateTime? @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+}
+
+/// Generic per-store consecutive counters (e.g. key=production_order, prefix=OP-).
+model store_sequences {
+  id          Int       @id @default(autoincrement())
+  store_id    Int
+  key         String    @db.VarChar(40)
+  prefix      String    @db.VarChar(10)
+  next_number Int       @default(1)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+
+  @@unique([store_id, key])
 }
 
 /// A physical table in a restaurant floor. Optional position (pos_x, pos_y)
