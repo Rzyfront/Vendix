@@ -59,6 +59,8 @@ import { EmailModule } from '../../../../email/email.module';
 import { S3Module } from '@common/services/s3.module';
 import { LodgingVatExemptServicesController } from './reports/vat-exempt-services.controller';
 import { LodgingVatExemptServicesService } from './reports/vat-exempt-services.service';
+import { LodgingFonturController } from './reports/fontur.controller';
+import { LodgingFonturService } from './reports/fontur.service';
 import { LodgingNightAuditController } from './night-audit/night-audit.controller';
 import { LodgingNightAuditService } from './night-audit/night-audit.service';
 import { LodgingPerformanceController } from './reports/performance.controller';
@@ -114,6 +116,7 @@ import { LodgingKeyHandoversService } from './key-handovers/key-handovers.servic
     LodgingCheckOutController,
     LodgingFolioSplitController,
     LodgingVatExemptServicesController,
+    LodgingFonturController,
     LodgingInventoryBlocksController,
     LodgingNightAuditController,
     LodgingPerformanceController,
@@ -144,6 +147,7 @@ import { LodgingKeyHandoversService } from './key-handovers/key-handovers.servic
     LodgingCheckOutService,
     LodgingFolioSplitService,
     LodgingVatExemptServicesService,
+    LodgingFonturService,
     LodgingInventoryBlocksService,
     LodgingBookingEngineService,
     BookingHoldExpiryJob,

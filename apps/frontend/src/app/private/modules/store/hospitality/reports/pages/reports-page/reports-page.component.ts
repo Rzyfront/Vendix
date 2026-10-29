@@ -10,14 +10,16 @@ import { HospitalityCancellationsPageComponent } from '../../../reservations/pag
 import { HospitalityNightAuditPageComponent } from '../../../reservations/pages/night-audit-page/night-audit-page.component';
 import { HospitalityPerformancePageComponent } from '../../../reservations/pages/performance-page/performance-page.component';
 import { HospitalityPickupPageComponent } from '../../../reservations/pages/pickup-page/pickup-page.component';
+import { HospitalityFonturPageComponent } from '../../../reservations/pages/fontur-page/fontur-page.component';
 
-export type HospitalityReportTab = 'night-audit' | 'performance' | 'pickup' | 'cancellations';
+export type HospitalityReportTab = 'night-audit' | 'performance' | 'pickup' | 'cancellations' | 'fontur';
 
 const REPORT_TABS: ScrollableTab[] = [
   { id: 'night-audit', label: 'Cierre del día', icon: 'moon' },
   { id: 'performance', label: 'Indicadores', icon: 'chart-line' },
   { id: 'pickup', label: 'Ritmo de reservas', icon: 'calendar-clock' },
   { id: 'cancellations', label: 'Cancelaciones y no presentados', icon: 'calendar-x' },
+  { id: 'fontur', label: 'Fontur', icon: 'landmark' },
 ];
 
 const DEFAULT_TAB: HospitalityReportTab = 'night-audit';
@@ -29,8 +31,8 @@ function toReportTab(value: string | null): HospitalityReportTab {
 }
 
 /**
- * Hospitality Suite — R4. "Reportes de hotel": one menu entry with the four
- * hotel reports as tabs. The active tab lives in `?tab=` so a reload or a
+ * Hospitality Suite — R4. "Reportes de hotel": one menu entry with the hotel
+ * reports as tabs (H4.4 adds Fontur). The active tab lives in `?tab=` so a reload or a
  * shared link reopens the same report; each tab mounts the existing report
  * page untouched (its own four stats, sticky search and options dropdown).
  */
@@ -44,6 +46,7 @@ function toReportTab(value: string | null): HospitalityReportTab {
     HospitalityPerformancePageComponent,
     HospitalityPickupPageComponent,
     HospitalityCancellationsPageComponent,
+    HospitalityFonturPageComponent,
   ],
   template: `
     <div class="w-full md:space-y-4">
@@ -67,6 +70,9 @@ function toReportTab(value: string | null): HospitalityReportTab {
           }
           @case ('cancellations') {
             <app-hospitality-cancellations-page />
+          }
+          @case ('fontur') {
+            <app-hospitality-fontur-page />
           }
         }
       </div>

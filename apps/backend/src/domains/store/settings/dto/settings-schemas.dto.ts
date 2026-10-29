@@ -1258,6 +1258,18 @@ export class HospitalitySettingsDto {
   rnt_renewal_reminder?: boolean;
 
   @ApiProperty({
+    example: 2.5,
+    required: false,
+    description:
+      'H4.4 — Fontur contribution rate in per mil (‰) of the quarterly estimate (0-100). Default 2.5.',
+  })
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 3 })
+  @Min(0)
+  @Max(100)
+  fontur_rate_per_mil?: number;
+
+  @ApiProperty({
     example: 0,
     required: false,
     description:

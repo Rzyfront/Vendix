@@ -45,6 +45,7 @@ import {
 import { NightAuditView } from '../interfaces/night-audit.interface';
 import { LodgingPerformanceReport } from '../interfaces/performance.interface';
 import { LodgingPickupReport } from '../interfaces/pickup.interface';
+import { LodgingFonturReport } from '../interfaces/fontur.interface';
 import { LodgingLossesQuery, LodgingLossesReport } from '../interfaces/cancellations.interface';
 
 interface ApiResponse<T> {
@@ -384,6 +385,31 @@ export class LodgingReservationsService {
         responseType: 'blob',
       })
       .pipe(catchError(this.handleError));
+  }
+
+  /** H4.4 — Fontur base of a quarter; without year/quarter the backend picks the last closed one. */
+  fontur(year?: number, quarter?: number): Observable<LodgingFonturReport> {
+    return this.http
+      .get<ApiResponse<LodgingFonturReport>>(`${environment.apiUrl}/store/hospitality/reports/fontur`, {
+        params: this.fonturParams(year, quarter),
+      })
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** H4.4 — the same Fontur report as XLSX (built by the backend). */
+  exportFontur(year: number, quarter: number): Observable<Blob> {
+    return this.http
+      .get(`${environment.apiUrl}/store/hospitality/reports/fontur/export`, {
+        params: this.fonturParams(year, quarter),
+        responseType: 'blob',
+      })
+      .pipe(catchError(this.handleError));
+  }
+
+  private fonturParams(year?: number, quarter?: number): HttpParams {
+    let params = new HttpParams();
+    if (year && quarter) params = params.set('year', String(year)).set('quarter', String(quarter));
+    return params;
   }
 
   /** U16 — the pickup report of the next `days` stay dates as XLSX (built by the backend). */

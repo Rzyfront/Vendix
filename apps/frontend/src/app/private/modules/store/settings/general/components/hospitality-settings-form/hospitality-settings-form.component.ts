@@ -28,6 +28,14 @@ const wholeNumber = (control: AbstractControl): ValidationErrors | null => {
   return value === '' || /^\d+$/.test(value) ? null : { wholeNumber: true };
 };
 const WHOLE_NUMBER_ERROR = 'Escribe un número entero, sin decimales.';
+
+/** H4.4 — Fontur rate per mil: up to 3 decimals, dot or comma («2,5»). */
+const RATE = /^\d{1,3}([.,]\d{1,3})?$/;
+const rateNumber = (control: AbstractControl): ValidationErrors | null => {
+  const value = String(control.value ?? '').trim();
+  return value === '' || RATE.test(value) ? null : { rate: true };
+};
+const RATE_ERROR = 'Escribe la tarifa por mil, por ejemplo 2,5.';
 const NUMERIC_FIELDS = new Set([
   'default_overbooking_allowance',
   'booking_hold_minutes',
@@ -110,6 +118,20 @@ const OTHER_ORIGIN = '__other__';
           Cada marzo llega un aviso a la campana para renovarlo antes del 31 de marzo.
         </p>
       </div>
+      <app-input
+        [formControl]="fonturRateControl"
+        [control]="fonturRateControl"
+        [error]="rateError()"
+        [required]="true"
+        type="number"
+        [min]="0"
+        [max]="100"
+        step="0.1"
+        label="Tarifa Fontur (por mil)"
+        helperText="Se usa para estimar la contribución trimestral en Reportes de hotel → Fontur. Por defecto 2,5 por mil; confírmala con tu contador."
+        size="sm"
+        (inputChange)="onFieldChange()"
+      ></app-input>
       <app-input
         [formControl]="overbookingControl"
         [control]="overbookingControl"
@@ -216,6 +238,11 @@ export class HospitalitySettingsForm {
     validators: [Validators.maxLength(20)],
   });
 
+  readonly fonturRateControl = new FormControl<number>(2.5, {
+    nonNullable: true,
+    validators: [Validators.required, Validators.min(0), Validators.max(100), rateNumber],
+  });
+
   readonly overbookingControl = new FormControl<number>(0, {
     nonNullable: true,
     validators: [Validators.required, Validators.min(0), Validators.max(99), wholeNumber],
@@ -247,6 +274,7 @@ export class HospitalitySettingsForm {
     no_show_time: this.noShowControl,
     night_audit_time: this.nightAuditControl,
     rnt_number: this.rntControl,
+    fontur_rate_per_mil: this.fonturRateControl,
     default_overbooking_allowance: this.overbookingControl,
     booking_hold_minutes: this.holdMinutesControl,
     ical_import_interval_minutes: this.icalIntervalControl,
@@ -297,6 +325,12 @@ export class HospitalitySettingsForm {
     return control.touched && control.hasError('wholeNumber') ? WHOLE_NUMBER_ERROR : undefined;
   }
 
+  /** The rate format error under the field; empty and range keep `app-input`'s own message. */
+  rateError(): string | undefined {
+    const control = this.fonturRateControl;
+    return control.touched && control.hasError('rate') ? RATE_ERROR : undefined;
+  }
+
   /** Emits the valid fields only; the invalid ones show «Este campo es requerido» & co. */
   onFieldChange(): void {
     const patch: Record<string, unknown> = {
@@ -308,7 +342,12 @@ export class HospitalitySettingsForm {
       if (control.invalid) continue;
       const value: unknown = control.value;
       // `app-input` emits text even with type="number": numeric fields go out as numbers.
-      patch[key] = NUMERIC_FIELDS.has(key) ? Number(value) : String(value ?? '').trim();
+      patch[key] =
+        key === 'fontur_rate_per_mil'
+          ? Number(String(value).trim().replace(',', '.'))
+          : NUMERIC_FIELDS.has(key)
+            ? Number(value)
+            : String(value ?? '').trim();
     }
     this.settingsChange.emit(patch as Partial<HospitalitySettings>);
   }

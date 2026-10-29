@@ -1165,6 +1165,12 @@ export interface HospitalitySettings {
   /** H4.3 — notify every March to renew the RNT before March 31. Default true. */
   rnt_renewal_reminder?: boolean;
   /**
+   * H4.4 — Fontur contribution rate in per mil (‰) used by the quarterly
+   * estimate. Default `2.5`; editable because the lodging rate is only
+   * verified by secondary sources.
+   */
+  fontur_rate_per_mil?: number;
+  /**
    * Overbooking allowance a new room type starts with: reservations it may
    * sell above its active rooms (H1.6). Default `0`.
    */

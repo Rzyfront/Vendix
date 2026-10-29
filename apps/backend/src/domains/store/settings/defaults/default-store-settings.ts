@@ -491,6 +491,8 @@ export function getDefaultStoreSettings(): StoreSettings {
       rnt_number: '',
       // H4.3 - every March, remind to renew the RNT before March 31.
       rnt_renewal_reminder: true,
+      // H4.4 - Fontur contribution rate (per mil) of the quarterly estimate.
+      fontur_rate_per_mil: 2.5,
       // H1.6 - overbooking a new room type starts with (0 = never oversell).
       default_overbooking_allowance: 0,
       // H3.6 - folio origin of a POS or table room charge.
