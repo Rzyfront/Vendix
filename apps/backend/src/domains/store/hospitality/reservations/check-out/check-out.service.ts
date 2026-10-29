@@ -16,6 +16,8 @@ import { InvoicingService } from '../../../invoicing/invoicing.service';
 import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
 import { buildOrderSaleTaxPayload } from '../../../payments/utils/order-sale-tax-payload.util';
 import { LodgingReservationsService } from '../reservations.service';
+import { formatShortDate } from '../stay-dates';
+import { LODGING_CHECKED_OUT_EVENT } from '../stay-events';
 import { FolioUser, FolioRow, hasActivePermission, LodgingFolioService } from '../folio/folio.service';
 import { CheckOutDto } from './check-out.dto';
 
@@ -312,6 +314,9 @@ export class LodgingCheckOutService {
     // A concurrent click closed it first: answer with its result, no emission.
     if (!closed) return this.result(reservation_id, folio.order_id, false);
 
+    // H4.1 — the TRA report of the departure listens; it never blocks the desk.
+    this.eventEmitter.emit(LODGING_CHECKED_OUT_EVENT, { store_id, reservation_id });
+
     // After commit, so the listeners read the closed order.
     if (closed.credit) {
       await this.receivables.createCreditSaleFromEvent({
@@ -565,6 +570,27 @@ export class LodgingCheckOutService {
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     const today = localDateString(new Date(), await resolveStoreTimezone(this.prisma, store_id));
     await this.folios.postNightsThrough(folio, today, false);
+    // H7.1 freezes the nights of a closed business day; a night the night
+    // audit failed to post stays unposted. Closing the folio over it would
+    // never charge it, so the day must be reopened first.
+    const frozen = await this.prisma.lodging_room_nights.findMany({
+      where: {
+        store_id,
+        is_active: true,
+        posted_order_item_id: null,
+        night_date: { lt: new Date(`${today}T00:00:00.000Z`) },
+        reservation_room: { reservation_id: folio.reservation_id, cancelled_at: null },
+      },
+      select: { night_date: true },
+      orderBy: { night_date: 'asc' },
+    });
+    if (frozen.length > 0) {
+      const dates = [...new Set(frozen.map((n) => n.night_date.toISOString().slice(0, 10)))];
+      throw new VendixHttpException(
+        ErrorCodes.LODGING_CHECKOUT_FROZEN_NIGHTS_001,
+        `Hay noches sin cobrar en días cerrados (${dates.map(formatShortDate).join(', ')}): reabre el día para cobrarlas`,
+      );
+    }
   }
 
   /**

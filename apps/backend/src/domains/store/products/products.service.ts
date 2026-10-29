@@ -50,6 +50,12 @@ import {
   assertTiersAllowed,
   assertVariantsAllowed,
 } from './services/tiers-variants-exclusive.util';
+import { syncEnabledTierAssignments } from './services/tier-assignments-sync.util';
+import { assertProductSaleValid } from './services/product-sale.util';
+import {
+  assertVariantRemovalAllowed,
+  VariantRemovalCandidate,
+} from './services/variant-removal-guard.util';
 import { resolvePackSize } from './services/packaging.util';
 import {
   buildSaleConfigExplanation,
@@ -1058,6 +1064,8 @@ export class ProductsService {
       );
       sanitizedDto = this.sanitizeIngredientPayload(sanitizedDto);
 
+      assertProductSaleValid(sanitizedDto, sanitizedDto);
+
       // Verify user context for audit
       const user_id = context?.user_id;
       if (!user_id) {
@@ -1711,6 +1719,16 @@ export class ProductsService {
    * y `findIds` comparten `resolveSmartSearchFor` + `buildProductWhere` +
    * predicado ⇒ `findAll`≡`findIds` (DB-17).
    */
+  /**
+   * Hotelería (R5): filtro efectivo de noches de hotel. El explícito gana; sin
+   * él, el POS (`pos_optimized`) las excluye porque las noches se cobran desde
+   * la cuenta del huésped. `undefined` = sin filtro (listado admin "Todos").
+   */
+  private resolveIsLodging(query: ProductQueryDto): boolean | undefined {
+    if (query.is_lodging !== undefined) return query.is_lodging;
+    return query.pos_optimized ? false : undefined;
+  }
+
   private buildProductWhere(
     query: ProductQueryDto,
     smartAllowed?: boolean | null,
@@ -1733,6 +1751,7 @@ export class ProductsService {
       is_ingredient,
       ids,
     } = query;
+    const isLodging = this.resolveIsLodging(query);
 
     // Estado: el query param `state` (vía UI o API) tiene prioridad sobre
     // el default. Si el usuario filtra explícitamente por "Archivado",
@@ -1808,6 +1827,11 @@ export class ProductsService {
       // conjunto, así que "seleccionar todo" conserva la capacidad de incluir
       // insumos cuando el parámetro se omite.
       ...(is_ingredient !== undefined && { is_ingredient }),
+      // Hotelería (R5): noches "Noche – {tipo}" por la relación existente con
+      // su tipo de habitación. El POS las excluye por defecto.
+      ...(isLodging !== undefined && {
+        lodging_unit_type: isLodging ? { isNot: null } : { is: null },
+      }),
       // Hidratación del stack de selección de la edición masiva: el cliente
       // guarda ids que pueden no estar en la página cargada y los pide de golpe.
       // Se combina con el resto de los filtros (no los reemplaza), así que un id
@@ -2228,6 +2252,7 @@ export class ProductsService {
       query.is_sellable ?? '',
       query.is_batch_produced ?? '',
       query.is_ingredient ?? '',
+      this.resolveIsLodging(query) ?? '',
       query.include_inactive ?? '',
       query.pos_optimized ?? '',
       Array.isArray(query.ids) ? [...query.ids].sort((a, b) => a - b).join(',') : '',
@@ -2448,6 +2473,7 @@ export class ProductsService {
       isSellable: query.is_sellable ?? null,
       isBatchProduced: query.is_batch_produced ?? null,
       isIngredient: query.is_ingredient ?? undefined,
+      isLodging: this.resolveIsLodging(query) ?? null,
       ids: query.ids ?? null,
     };
     const ranked = buildTrigramRankedQuery(
@@ -3549,6 +3575,8 @@ export class ProductsService {
           },
         },
         brands: true,
+        // Hotelería (R5): el detalle avisa que la noche se gestiona allí.
+        lodging_unit_type: { select: { id: true, name: true } },
         kds: {
           select: {
             id: true,
@@ -3702,6 +3730,7 @@ export class ProductsService {
       preparation_time_minutes: product.preparation_time_minutes,
       kds_id: product.kds_id,
       kds: product.kds,
+      lodging_unit_type: product.lodging_unit_type ?? null,
       // UoM (Modelo B): el form de edición y el panel de inventario los leen
       // de ESTE mapeo. Sin exponerlos aquí, el detalle del producto pierde la
       // capacidad por unidad y el panel muestra el total crudo en vez de
@@ -3995,6 +4024,15 @@ export class ProductsService {
       sanitizedDto = this.sanitizeIngredientPayload(
         sanitizedDto,
         existingProduct.is_ingredient,
+      );
+
+      assertProductSaleValid(
+        {
+          is_on_sale: sanitizedDto.is_on_sale ?? existingProduct.is_on_sale,
+          sale_price: sanitizedDto.sale_price ?? existingProduct.sale_price,
+          base_price: sanitizedDto.base_price ?? existingProduct.base_price,
+        },
+        sanitizedDto,
       );
 
       // BLOCK: Check for active stock reservations on the product itself
@@ -4363,19 +4401,12 @@ export class ProductsService {
           }
 
           if (enabled_price_tier_ids !== undefined) {
-            await prisma.product_price_tier_assignments.deleteMany({
-              where: { product_id: id },
-            });
-
-            if (enabled_price_tier_ids.length > 0) {
-              await prisma.product_price_tier_assignments.createMany({
-                data: enabled_price_tier_ids.map((priceTierId) => ({
-                  product_id: id,
-                  price_tier_id: priceTierId,
-                })),
-                skipDuplicates: true,
-              });
-            }
+            await syncEnabledTierAssignments(
+              prisma,
+              id,
+              existingProduct.store_id,
+              enabled_price_tier_ids,
+            );
           }
 
           // Actualizar categorías de impuestos si se proporcionan.
@@ -4835,15 +4866,15 @@ export class ProductsService {
               (ev) => !keptVariantIds.has(ev.id),
             );
             if (variantsToDelete.length > 0 && allExistingVariants.length > 0) {
-              // BLOCK: Deleting variants with stock requires explicit variant_removal_stock_mode
+              // Partial removal with stock or reservations is blocked whatever
+              // the mode: only removing ALL variants has a place (the base
+              // product) to move the balance to.
+              const candidates: VariantRemovalCandidate[] = [];
               for (const vt of variantsToDelete) {
                 const variantStock = await prisma.stock_levels.aggregate({
                   where: { product_variant_id: vt.id },
                   _sum: { quantity_on_hand: true },
                 });
-                const hasStock = (variantStock._sum.quantity_on_hand ?? 0) > 0;
-
-                // Check for active reservations
                 const hasActiveReservations =
                   await prisma.stock_reservations.findFirst({
                     where: {
@@ -4851,17 +4882,18 @@ export class ProductsService {
                       status: 'active',
                     },
                   });
-
-                if (
-                  (hasStock || hasActiveReservations) &&
-                  !sanitizedDto.variant_removal_stock_mode
-                ) {
-                  throw new VendixHttpException(
-                    ErrorCodes.PROD_VALIDATE_001,
-                    'Deleting variants with stock or active reservations requires explicit variant_removal_stock_mode',
-                  );
-                }
+                candidates.push({
+                  id: vt.id,
+                  sku: vt.sku ?? null,
+                  on_hand: Number(variantStock._sum.quantity_on_hand ?? 0),
+                  has_active_reservations: !!hasActiveReservations,
+                });
               }
+              assertVariantRemovalAllowed(candidates, {
+                removingAll:
+                  variantsToDelete.length === allExistingVariants.length,
+                removalMode: sanitizedDto.variant_removal_stock_mode,
+              });
 
               const allVariantsDeleting =
                 variantsToDelete.length === allExistingVariants.length;
@@ -6417,10 +6449,17 @@ export class ProductsService {
         requires_booking: true,
         has_multiple_price_tiers: true,
         brands: { select: { name: true } },
+        // `is_inclusive`: ver findProductPricingForAgent.
         product_tax_assignments: {
           select: {
+            is_inclusive: true,
             tax_categories: {
-              select: { tax_rates: { select: { rate: true, name: true } } },
+              select: {
+                is_inclusive: true,
+                tax_rates: {
+                  select: { rate: true, name: true, is_inclusive: true },
+                },
+              },
             },
           },
         },
@@ -6464,10 +6503,18 @@ export class ProductsService {
         sale_price: true,
         track_inventory: true,
         has_multiple_price_tiers: true,
+        // `is_inclusive` en los tres niveles que lee `extractTypedRates`: sin
+        // él, el IVA incluido se lee como adicional y el precio sube 19 %.
         product_tax_assignments: {
           select: {
+            is_inclusive: true,
             tax_categories: {
-              select: { tax_rates: { select: { rate: true, name: true } } },
+              select: {
+                is_inclusive: true,
+                tax_rates: {
+                  select: { rate: true, name: true, is_inclusive: true },
+                },
+              },
             },
           },
         },
@@ -6509,6 +6556,9 @@ export class ProductsService {
           id: true,
           name: true,
           discount_percentage: true,
+          adjustment_type: true,
+          adjustment_value: true,
+          amount_scope: true,
           is_package_unit: true,
           units_per_package: true,
         },

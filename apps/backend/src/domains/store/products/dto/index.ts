@@ -1492,6 +1492,19 @@ export class ProductQueryDto {
   is_ingredient?: boolean;
 
   /**
+   * Hotelería (R5) — filtra por los productos "Noche – {tipo}" que pertenecen
+   * a un tipo de habitación (`lodging_unit_types.product_id`):
+   *   - `is_lodging=true`  → solo noches de hotel (filtro "Hotelería")
+   *   - `is_lodging=false` → todo menos las noches de hotel
+   *   - ausente            → sin filtro, salvo con `pos_optimized`: el POS
+   *     nunca lista noches (se cobran desde la cuenta del huésped).
+   */
+  @IsOptional()
+  @Transform(strictBooleanQuery)
+  @IsBoolean()
+  is_lodging?: boolean;
+
+  /**
    * Antepone los productos con `is_featured=true` en el orden del listado
    * (desempatando por `created_at desc`). Ausente → el orden actual del
    * catálogo se mantiene intacto (`created_at desc`).

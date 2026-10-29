@@ -237,6 +237,8 @@
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
   --radius-pill: 9999px;
+  /* Soft UI: botones de solo ícono (24–28px). Igual a `rounded-md` de Tailwind (10px). */
+  --radius-icon: 0.625rem;
 
   /* Logo Sizes */
   --logo-sm: 2.25rem;
@@ -247,6 +249,7 @@
   /* 48px */
 
   /* Shadows */
+  --shadow-2xs: 0 1px 2px 0 rgb(0 0 0 / 0.04);
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
@@ -367,6 +370,10 @@
   --color-primary-dark: color-mix(in srgb, var(--color-primary) 78%, #000);
   --color-primary-hover: color-mix(in srgb, var(--color-primary) 88%, #000);
   --color-primary-fade: rgba(var(--color-primary-rgb), 0.08);
+  /* Texto sobre tintes del primario (`bg-primary/10`). Mezcla la marca con el
+     color de texto del modo activo: más oscuro en light y más claro en dark, para
+     que marcas claras (amarillo, menta) se lean sobre su propio tinte. */
+  --color-primary-on-tint: color-mix(in srgb, var(--color-primary) 50%, var(--color-text-primary));
   --color-success-dark: color-mix(in srgb, var(--color-success) 78%, #000);
 
   /* Texto: `--color-text` (≈100 usos) siempre quiso decir el texto primario, y
@@ -543,6 +550,7 @@ select {
   --color-foreground-rgb: 230, 238, 246;
 
   /* Shadows — mayor opacidad en dark para que se lean sobre superficies oscuras */
+  --shadow-2xs: 0 1px 2px 0 rgb(0 0 0 / 0.3);
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.45), 0 2px 4px -2px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.45);

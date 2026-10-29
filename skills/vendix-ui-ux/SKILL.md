@@ -1,11 +1,11 @@
 ---
 name: vendix-ui-ux
 description: >
-  Mobile-first UI/UX philosophy, accessibility standards, visual quality checklist and frontend skill routing. Trigger: designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns.
+  Vendix Soft UI design language (POS look, tokens only, multibrand), mobile-first, accessibility and frontend skill routing. Trigger: designing or building any UI, screen or shared component, UX review.
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "3.0"
   scope: [root]
   auto_invoke: "Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns"
 ---
@@ -16,6 +16,31 @@ metadata:
 
 This is the broad design checklist. For implementation details, use the specialized frontend skills listed below.
 
+## Design Language: Vendix Soft UI (mandatory for new UI)
+
+Every new screen and shared component follows **Soft UI**, the look of the POS (`/admin/pos`): soft,
+clean, tinted, symmetric. Full spec, recipes and scales: [references/soft-ui.md](references/soft-ui.md)
+— read it before designing or styling UI. Existing screens migrate over time; don't restyle them
+unless the task asks.
+
+- **Tokens only.** No hex, `rgb()/rgba()`, raw `px` or Tailwind arbitrary values
+  (`text-[11px]`, `rounded-[10px]`, `shadow-[…]`). Missing value ⇒ add a token, never inline it.
+- **Multibrand.** Brand accents are `primary` + alpha (`bg-primary/10 border-primary/25
+  text-primary`), never a fixed hue; surfaces are `bg-surface`, never white. Works in every tenant
+  brand, dark mode and preset.
+- **Tint, don't fill.** One solid primary action per view; the rest is tinted, neutral or ghost.
+- **Radius scale:** `rounded-md` (10px) icon buttons · `rounded-xl` (12px) controls ·
+  `rounded-2xl` (16px) cards/modals · `rounded-full` pills. Not `rounded-lg` (14px, off-scale).
+- **Alpha steps:** `/5` quiet · `/10` resting · `/15` hover · `/20` strong/ring · `/25` border.
+- **Heights:** 24/28px icon buttons · 32px pills/compact · 40px mobile / 44px desktop controls.
+  Same row ⇒ same height and radius.
+- **Borders 1px**, no shadow at rest (`shadow-2xs` hairline at most on controls, `shadow-sm` on card
+  hover). Labels on a brand tint use `text-primary-on-tint` (legible with any brand and in dark).
+- **Type:** `text-xs font-semibold` labels, `text-sm` control text, `font-bold` only for numbers
+  and headings. Icons 12–14 in small controls, 16 in 40–44px.
+- **Destructive** uses the `error` token tinted (`bg-error/10 border-error/25 text-error`), not
+  `rose-*`/`red-*`. Badges use `<app-badge>` semantic variants.
+
 ## Core Standards
 
 - Mobile-first base styles; add larger-screen behavior with `min-width` media queries.
@@ -23,7 +48,8 @@ This is the broad design checklist. For implementation details, use the speciali
 - Accessible touch targets: at least 44px where practical.
 - Visible focus states; never remove outlines without replacement.
 - Form fields need labels, not placeholders only.
-- Use theme tokens (`var(--color-*)`) instead of hardcoded colors.
+- Use theme tokens (Tailwind token classes or `var(--…)`) for every color, radius, shadow, size and
+  font value; never hardcoded CSS.
 - Animate `transform` and `opacity`; avoid layout-property animations.
 - Respect `prefers-reduced-motion` for substantial motion.
 
@@ -56,9 +82,11 @@ This is the broad design checklist. For implementation details, use the speciali
 
 - One primary goal per screen.
 - Clear hierarchy: title, supporting text, primary action, secondary actions.
-- Consistent spacing and radius within a module.
+- Consistent spacing and radius within a module, on the Soft UI scales.
 - Loading, empty, error, and success states are designed.
-- Avoid generic AI-looking gradients or interchangeable layouts unless the existing design system already uses them.
+- Avoid generic AI-looking gradients or interchangeable layouts unless the existing design system already uses them
+  (the AI visual language in `vendix-ai-style` is the one sanctioned exception).
+- Checked with at least one non-default brand color and in dark mode.
 
 ## Skill Routing
 

@@ -117,6 +117,8 @@ export interface Product {
   is_ingredient?: boolean;
   is_combo?: boolean;
   is_batch_produced?: boolean;
+  /** Hotelería (R5): tipo de habitación dueño de una noche "Noche – {tipo}". */
+  lodging_unit_type?: { id: number; name: string } | null;
   /// Appointment redesign phase 2 — whether this product is eligible
   /// to be performed at the customer's home. When false (default), the
   /// ecommerce booking flow forces `service_location_type='shop'` for
@@ -591,6 +593,8 @@ export interface ProductQueryDto {
   // frontend.
   is_ingredient?: boolean;
   is_sellable?: boolean;
+  // Hotelería (R5): true = solo noches de hotel, false = sin ellas.
+  is_lodging?: boolean;
   // Producibles por lote (insumos con stock propio). El form de Producción
   // envía is_batch_produced=true; el backend lo aplica en el WHERE.
   is_batch_produced?: boolean;

@@ -31,14 +31,18 @@ function build() {
       unit: { code: '101' },
       unit_type: { name: 'Doble' },
       posted_order_item: { total_price: new Prisma.Decimal(250000), cancelled_at: null as Date | null },
-      reservation_room: { reservation: { id: 1, reservation_number: 'H-0001' } },
+      reservation_room: {
+        reservation: { id: 1, reservation_number: 'H-0001', customer: { first_name: 'Ana', last_name: 'Gómez' } },
+      },
     },
     {
       rate_amount: new Prisma.Decimal(180000),
       unit: { code: '102' },
       unit_type: { name: 'Sencilla' },
       posted_order_item: null as { total_price: Prisma.Decimal; cancelled_at: Date | null } | null,
-      reservation_room: { reservation: { id: 2, reservation_number: 'H-0002' } },
+      reservation_room: {
+        reservation: { id: 2, reservation_number: 'H-0002', customer: { first_name: 'Luis', last_name: null } },
+      },
     },
   ];
   const reservations = [
@@ -57,7 +61,9 @@ function build() {
       })),
     },
     lodging_units: { count: jest.fn(async () => 5) },
-    lodging_room_nights: { findMany: jest.fn(async () => nights) },
+    lodging_room_nights: {
+      findMany: jest.fn(async () => nights),
+    },
     lodging_reservations: {
       findMany: jest.fn(async ({ where }: any) =>
         reservations
@@ -78,6 +84,9 @@ function build() {
     lodging_night_audits: {
       findFirst: jest.fn(async ({ where }: any) =>
         audits.find((a) => a.business_date.getTime() === where.business_date.getTime()) ?? null,
+      ),
+      findMany: jest.fn(async () =>
+        audits.filter((a) => a.status === 'closed').map((a) => ({ business_date: a.business_date })),
       ),
       create: jest.fn(async ({ data }: any) => {
         if (audits.some((a) => a.business_date.getTime() === data.business_date.getTime())) {
@@ -101,6 +110,8 @@ function build() {
     users: { findMany: jest.fn(async () => [{ id: 42, first_name: 'Ana', last_name: 'Ríos' }]) },
   };
   const folios = {
+    // U15 — the folio prices what "Cerrar día" will charge: H-0002's night + IVA 19 %.
+    previewNightsThrough: jest.fn(async () => ({ nights: 1, amount: 214200 })),
     // "Cargar noche" of H-0002: its night gets its folio line.
     postNightsThrough: jest.fn(async (folio: { id: number }) => {
       if (folio.id !== 71) return 0;
@@ -155,9 +166,32 @@ describe('LodgingNightAuditService (H7.1)', () => {
         no_shows: [],
         pending_arrivals: [{ id: 3, reservation_number: 'H-0003', guest_name: 'Juan Pérez' }],
         discrepancies: [
-          { reservation_number: 'H-0002', room: '102 · Sencilla', rate_amount: '180000.00', reason: 'not_posted' },
+          {
+            reservation_id: 2,
+            reservation_number: 'H-0002',
+            guest_name: 'Luis',
+            room: '102 · Sencilla',
+            rate_amount: '180000.00',
+            reason: 'not_posted',
+          },
         ],
       });
+    });
+
+    it('tells how many nights and what the guests pay when "Cerrar día" charges them (U15)', async () => {
+      const { service, folios } = build();
+
+      const view = await service.get('2026-11-10');
+
+      expect(view.close_preview).toEqual({ nights: 1, amount: '214200.00' });
+      expect(folios.previewNightsThrough).toHaveBeenCalledWith('2026-11-10');
+    });
+
+    it('a day with nothing to charge previews zero nights and zero amount', async () => {
+      const { service, folios } = build();
+      folios.previewNightsThrough.mockResolvedValueOnce({ nights: 0, amount: 0 });
+
+      expect((await service.get('2026-11-10')).close_preview).toEqual({ nights: 0, amount: '0.00' });
     });
 
     it('a voided night line is a discrepancy, not revenue', async () => {
@@ -221,6 +255,8 @@ describe('LodgingNightAuditService (H7.1)', () => {
 
       expect(view.summary.nights_posted).toBe(2);
       expect(view.summary.discrepancies).toEqual([]);
+      // Nothing left to charge on a frozen day: no preview.
+      expect(view.close_preview).toBeNull();
     });
 
     it('rejects closing the same day twice, also on a concurrent double click', async () => {
@@ -244,6 +280,19 @@ describe('LodgingNightAuditService (H7.1)', () => {
 
       expect(error.errorCode).toBe(ErrorCodes.LODGING_NIGHT_AUDIT_DATE_001.code);
       expect(audits).toHaveLength(0);
+    });
+    it('before the audit time it does not close the new civil day nor no-show its arrivals', async () => {
+      // 11-nov 01:00 in Bogotá: the civil date is 11-nov, the business day is still 10-nov.
+      jest.setSystemTime(new Date('2026-11-11T06:00:00Z'));
+      const { service, audits, reservationsService, folios } = build();
+
+      const error = await errorOf(service.close('2026-11-11'));
+
+      expect(error.errorCode).toBe(ErrorCodes.LODGING_NIGHT_AUDIT_DATE_001.code);
+      expect(reservationsService.autoNoShow).not.toHaveBeenCalled();
+      expect(folios.postNightsThrough).not.toHaveBeenCalled();
+      expect(audits).toHaveLength(0);
+      expect((await service.get()).business_date).toBe('2026-11-10');
     });
   });
 

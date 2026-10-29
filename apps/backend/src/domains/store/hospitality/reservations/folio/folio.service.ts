@@ -556,6 +556,63 @@ export class LodgingFolioService {
     );
   }
 
+  /**
+   * U15 — what "Cerrar día" will charge, without writing: the nights
+   * `postNightsThrough(folio, through, true)` takes for every open in-house
+   * folio, priced the same way (catalog taxes and the holder's VAT exemption).
+   * `amount` is the gross the guests pay: final unit price × line units.
+   */
+  async previewNightsThrough(through: string): Promise<{ nights: number; amount: number }> {
+    const store_id = this.requireStoreId();
+    const bound = new Date(`${through}T00:00:00.000Z`);
+    const frozen = await this.closedNightDates(new Date(0), bound);
+    const nights = await this.prisma.lodging_room_nights.findMany({
+      where: {
+        store_id,
+        is_active: true,
+        posted_order_item_id: null,
+        night_date: { lte: bound, notIn: frozen },
+        reservation_room: {
+          cancelled_at: null,
+          reservation: { status: 'checked_in', folio: { status: 'open' } },
+        },
+      },
+      select: {
+        rate_amount: true,
+        reservation_room: { select: { reservation_id: true } },
+        unit_type: { select: { product: { select: { id: true, price_unit_quantity: true } } } },
+      },
+    });
+    if (nights.length === 0) return { nights: 0, amount: 0 };
+
+    const exempt = new Map<number, boolean>();
+    for (const reservation_id of new Set<number>(nights.map((n) => n.reservation_room.reservation_id))) {
+      exempt.set(reservation_id, !!(await this.findHolder(reservation_id))?.vat_exempt_at);
+    }
+    const taxRows = await resolveFullTaxRowsByProductId(
+      this.prisma,
+      nights.map((n) => n.unit_type.product.id),
+    );
+    let amount = 0;
+    for (const night of nights) {
+      const product = night.unit_type.product;
+      const priced = this.nightPricing(
+        Number(night.rate_amount),
+        product.price_unit_quantity,
+        taxRows.get(product.id) ?? [],
+        exempt.get(night.reservation_room.reservation_id) ?? false,
+      );
+      const line = resolveCatalogLine({
+        catalogUnitPrice: priced.catalogUnitPrice,
+        quantity: 1,
+        priceUnitQuantityRaw: product.price_unit_quantity,
+        rows: priced.rows as FullTaxRow[],
+      });
+      amount += line.finalUnitPrice * line.lineUnits;
+    }
+    return { nights: nights.length, amount: Math.round(amount * 100) / 100 };
+  }
+
   // --------------------------------------------------------------- charges
 
   /**

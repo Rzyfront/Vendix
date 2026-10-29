@@ -15,7 +15,7 @@ import type {
   FireConfirmPayload,
 } from '../restaurant-ops/kds/interfaces';
 import { KitchenConfirmModalComponent } from '../restaurant-ops/kds/components/kitchen-confirm-modal/kitchen-confirm-modal.component';
-import { take, switchMap, catchError } from 'rxjs/operators';
+import { take, switchMap, catchError, map } from 'rxjs/operators';
 import { of as rxjsOf } from 'rxjs';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { firstValueFrom, Observable, Subject } from 'rxjs';
@@ -144,6 +144,15 @@ import { TaxCategory } from '../products/interfaces';
 // multiplicador de línea. Mismo `resolveLineUnits` + división que ya usan
 // `pos-payment.service.ts`/`pos-order.service.ts` para el mismo campo.
 import { resolveLineUnits } from './utils/line-units.util';
+import { PosCustomerTierModalComponent } from './components/pos-customer-tier-modal.component';
+import {
+  CustomerTierPrompt,
+  CustomerTierRef,
+  customerTierPrompt,
+  followUpRestorePrompt,
+} from './utils/customer-tier-prompt.util';
+import { PriceTierCacheService } from '../price-tiers/services/price-tier-cache.service';
+import type { PriceTier } from '../price-tiers/interfaces';
 
 const DEFAULT_CART_SUMMARY: CartSummary = {
   subtotal: 0,
@@ -178,6 +187,7 @@ export function resolvePosPaymentCustomerName(
     PosCustomItemModalComponent,
     PosSplitBillModalComponent,
     PosChargeStationModalComponent,
+    PosCustomerTierModalComponent,
     SpinnerComponent,
     CardComponent,
     PosProductSelectionComponent,
@@ -226,6 +236,12 @@ export function resolvePosPaymentCustomerName(
         (isOpenChange)="showChargeStationModal.set($event)"
         (charged)="onStationCharged($event)"
       />
+      <app-pos-customer-tier-modal
+        [prompt]="customerTierPromptState()"
+        (confirmed)="onCustomerTierConfirmed($event)"
+        (dismissed)="onCustomerTierDismissed()"
+      />
+
       <app-pos-split-bill-modal [(isOpen)]="showSplitAccounts" [sourceOrderId]="splitSourceOrderId()" [items]="splitSourceItems()" (splitCompleted)="onSplitAccountsCompleted($event)" />
 
       <!-- Main POS Interface: Two flush columns directly at root (Stitch favorite design) -->
@@ -844,6 +860,12 @@ export class PosComponent {
     return this.restaurantIntegration.isRestaurantMode();
   }
   selectedCustomer = signal<PosCustomer | null>(null);
+  /** Aviso de tarifa preferencial pendiente (S6); `null` = cerrado. */
+  readonly customerTierPromptState = signal<CustomerTierPrompt | null>(null);
+  /** Tarifa del cliente actual y el cliente al que pertenece. */
+  private currentCustomerTier: CustomerTierRef | null = null;
+  private lastTierCustomerId: number | null | undefined = undefined;
+  private seenCustomerSelections = 0;
   loading = signal(false);
 
   /**
@@ -1291,6 +1313,7 @@ export class PosComponent {
     // modales ni al iniciar la vista; el foco se activa bajo demanda al teclear.
   }
   private customerService = inject(PosCustomerService);
+  private priceTierCache = inject(PriceTierCacheService);
   private vexiPos = inject(VexiPosBridgeService);
   private vexiHosts = inject(VexiUiHostRegistry);
   private vexiUiContext = inject(VexiUiContextService);
@@ -1744,6 +1767,7 @@ export class PosComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((customer: PosCustomer | null) => {
         this.selectedCustomer.set(customer);
+        this.onCustomerTierContext(customer);
       });
 
     toObservable(this.cartService.loading)
@@ -1760,6 +1784,91 @@ export class PosComponent {
       .subscribe({
         next: (taxCategories) => this.taxCategories.set(taxCategories || []),
         error: () => this.taxCategories.set([]),
+      });
+  }
+
+  /**
+   * S6: al elegir, cambiar o quitar el cliente se consulta su tarifa
+   * preferencial y, si hay líneas que la aceptan (o que llevan la del cliente
+   * anterior), se pregunta. Un cliente que no eligió el cajero (carrito
+   * restaurado, orden cargada) solo registra la tarifa sin preguntar.
+   */
+  private onCustomerTierContext(customer: PosCustomer | null): void {
+    const selections = this.cartService.customerSelectionCount();
+    const chosenByCashier = selections !== this.seenCustomerSelections;
+    this.seenCustomerSelections = selections;
+    const id = customer?.id && customer.id > 0 ? Number(customer.id) : null;
+    if (id === this.lastTierCustomerId) return;
+    this.lastTierCustomerId = id;
+    const previousTier = this.currentCustomerTier;
+
+    (id ? this.customerService.getCustomerPriceTier(id) : rxjsOf(null))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((tier) => {
+        if (this.lastTierCustomerId !== id) return; // otro cliente ya llegó
+        this.currentCustomerTier = tier;
+        if (!chosenByCashier) return;
+        this.customerTierPromptState.set(
+          customerTierPrompt({
+            items: this.cartService.getCurrentState().items,
+            previousTier,
+            nextTier: tier,
+            canApplyTier: this.hasPermission(
+              'store:products:apply_pricing_tier',
+            ),
+          }),
+        );
+      });
+  }
+
+  /** "No aplicar": las líneas siguen con la tarifa del cliente anterior. */
+  onCustomerTierDismissed(): void {
+    this.customerTierPromptState.set(
+      followUpRestorePrompt(this.customerTierPromptState(), []),
+    );
+  }
+
+  onCustomerTierConfirmed(itemIds: string[]): void {
+    const prompt = this.customerTierPromptState();
+    this.customerTierPromptState.set(null);
+    if (!prompt || itemIds.length === 0) return;
+    const followUp = followUpRestorePrompt(prompt, itemIds);
+
+    const tier$: Observable<PriceTier | null | undefined> =
+      prompt.mode === 'restore'
+        ? rxjsOf(null)
+        : this.priceTierCache
+            .getActiveTiers()
+            .pipe(
+              map(
+                (tiers) =>
+                  tiers.find((tier) => tier.id === prompt.tier.id) ?? undefined,
+              ),
+            );
+
+    tier$
+      .pipe(
+        switchMap((tier) => {
+          if (tier === undefined) {
+            throw new Error(`La tarifa ${prompt.tier.name} ya no está activa`);
+          }
+          return this.cartService.applyTierToCartItems(itemIds, tier);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            prompt.mode === 'restore'
+              ? 'Precio regular restaurado'
+              : `Tarifa "${prompt.tier.name}" aplicada a ${itemIds.length} producto(s)`,
+          );
+          if (followUp) this.customerTierPromptState.set(followUp);
+        },
+        error: (error: Error) =>
+          this.toastService.error(
+            error?.message || 'No se pudo aplicar la tarifa del cliente',
+          ),
       });
   }
 

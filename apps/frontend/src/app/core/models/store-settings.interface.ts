@@ -217,19 +217,16 @@ export interface InvoicingSettings {
  * que deja constancia consultable del fallo.
  */
 export const POS_INVOICING_SETTINGS_DEFAULTS: Required<PosInvoicingSettings> = {
-  auto_emit: true,
+  auto_emit: false,
   on_failure: 'queue',
 };
 
 /**
- * Default del carril e-commerce, en `true` A PROPÓSITO: hoy la tienda en línea
- * emite SIEMPRE, sin ninguna bandera que lo controle. Si este default fuera
- * `false`, el día que se despliegue la clave apagaría la emisión de TODAS las
- * tiendas de golpe, sin que nadie lo haya pedido. Espejo de
- * `DEFAULT_ECOMMERCE_AUTO_EMIT` del backend.
+ * Default del carril e-commerce: apagado. Sólo emite sola la tienda que lo
+ * enciende explícitamente. Espejo de `DEFAULT_ECOMMERCE_AUTO_EMIT` del backend.
  */
 export const ECOMMERCE_INVOICING_SETTINGS_DEFAULTS: Required<EcommerceInvoicingSettings> = {
-  auto_emit: true,
+  auto_emit: false,
 };
 
 /**
@@ -400,6 +397,16 @@ export interface HospitalitySettings {
   /** H3.4 — `HH:mm`: from this time last night is charged to each folio. */
   night_audit_time?: string;
   rnt_number: string;
+  /** H4.3 — notify every March to renew the RNT before March 31. Default true. */
+  rnt_renewal_reminder?: boolean;
+  /** H4.1 — report each check-in and check-out to the MinCIT TRA. Default true. */
+  tra_enabled?: boolean;
+  /** H4.2 — list each entry and exit of a foreign guest for the SIRE. Default true. */
+  sire_enabled?: boolean;
+  /** H4.2 — hours after which a pending SIRE movement is shown in red. Default 24. */
+  sire_overdue_hours?: number;
+  /** H4.4 — Fontur contribution rate in per mil (‰) of the quarterly estimate. Default 2.5. */
+  fontur_rate_per_mil?: number;
   /** H1.6 — overbooking a new room type starts with (0 = never oversell). */
   default_overbooking_allowance?: number;
   /** H6.6 — minutes a web booking holds the room while the guest pays (5-120, default 15). */
@@ -410,6 +417,16 @@ export interface HospitalitySettings {
   room_charge_origin?: string;
   /** H3.7 / D11 — the folio invoice waits for a verifier's review. Default true. */
   folio_invoice_verification?: boolean;
+  /** H8.2 — email the guest when a desk reservation is confirmed. Default true. */
+  guest_email_confirmation?: boolean;
+  /** H8.2 — email a reminder with the online check-in link before arrival. Default true. */
+  guest_email_pre_arrival?: boolean;
+  /** H8.2 — hours before the check-in time the reminder goes out (12-168, default 48). */
+  guest_email_pre_arrival_hours?: number;
+  /** H8.2 — email a thank-you after check-out. Default true. */
+  guest_email_post_stay?: boolean;
+  /** H8.5 — the thank-you asks for a private rating of the stay. Default true. */
+  guest_email_post_stay_review?: boolean;
 }
 
 export interface RestaurantSettings {

@@ -530,7 +530,7 @@ export class PosInvoicingSettingsSection {
    */
   private seedPos(source: PosInvoicingSettings | undefined): void {
     const normalized: Required<PosInvoicingSettings> = {
-      // Ausente significa el default del backend (true), no false.
+      // Ausente significa el default del backend (false): sólo emite quien lo enciende.
       auto_emit:
         source?.auto_emit ?? POS_INVOICING_SETTINGS_DEFAULTS.auto_emit,
       on_failure:
@@ -547,7 +547,7 @@ export class PosInvoicingSettingsSection {
   /** Igual que `seedPos`, pero para el carril de tienda en línea. */
   private seedEcommerce(source: EcommerceInvoicingSettings | undefined): void {
     const normalized: Required<EcommerceInvoicingSettings> = {
-      // Ausente significa el default del backend (true), no false.
+      // Ausente significa el default del backend (false): sólo emite quien lo enciende.
       auto_emit:
         source?.auto_emit ?? ECOMMERCE_INVOICING_SETTINGS_DEFAULTS.auto_emit,
     };

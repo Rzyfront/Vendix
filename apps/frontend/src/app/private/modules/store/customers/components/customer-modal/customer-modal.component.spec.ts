@@ -1,3 +1,6 @@
+import { of } from 'rxjs';
+import { PriceTierCacheService } from '../../../price-tiers/services';
+import { PriceTier } from '../../../price-tiers/interfaces';
 import { Component, input, output, provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { CustomerModalComponent } from './customer-modal.component';
@@ -41,6 +44,11 @@ const ADDRESS: AddressPayload = {
   longitude: null,
   municipality_code: '11001',
 };
+
+const TIERS = [
+  { id: 1, name: 'Mayorista', kind: 'customer_tier', is_active: true, discount_percentage: 10 },
+  { id: 2, name: 'Bulto', kind: 'sale_unit', is_active: true, discount_percentage: 0 },
+] as PriceTier[];
 
 describe('CustomerModalComponent', () => {
   let fixture: ComponentFixture<CustomerModalComponent>;
@@ -89,6 +97,10 @@ describe('CustomerModalComponent', () => {
           ]),
         },
         { provide: ToastService, useValue: toast },
+        {
+          provide: PriceTierCacheService,
+          useValue: { getActiveTiers: () => of(TIERS) },
+        },
         {
           provide: CurrencyFormatService,
           useValue: {
@@ -279,8 +291,11 @@ describe('CustomerModalComponent', () => {
       expect(order).toEqual(['address', 'save']);
       expect(addresses[0]).toEqual(ADDRESS);
       const saved = saves[0];
+      // La tarifa preferencial solo viaja si la ficha de clientes la muestra.
       expect(Object.keys(saved).sort()).toEqual(
-        Object.keys(component.form.getRawValue()).sort(),
+        Object.keys(component.form.getRawValue())
+          .filter((key) => key !== 'price_tier_id')
+          .sort(),
       );
       expect(Object.keys(saved).sort()).toEqual(
         [
@@ -300,6 +315,60 @@ describe('CustomerModalComponent', () => {
         ].sort(),
       );
       expect(saved.email).toBe('maria@ejemplo.com');
+    });
+  });
+
+  describe('tarifa preferencial', () => {
+    const quickSave = () => {
+      const saves: CreateCustomerRequest[] = [];
+      component.save.subscribe((data) => saves.push(data));
+      fillNaturalBasics();
+      component.form.patchValue({ phone: '3001234567' });
+      component.onSubmit();
+      return saves;
+    };
+
+    it('fuera de la ficha de clientes no se muestra ni viaja', async () => {
+      await open();
+      expect(fixture.nativeElement.textContent).not.toContain('Tarifa preferencial');
+      expect(quickSave()[0]).not.toEqual(
+        jasmine.objectContaining({ price_tier_id: jasmine.anything() }),
+      );
+    });
+
+    it('en la ficha de clientes se elige una tarifa de cliente y se guarda', async () => {
+      fixture = TestBed.createComponent(CustomerModalComponent);
+      component = fixture.componentInstance;
+      fixture.componentRef.setInput('showPriceTier', true);
+      fixture.componentRef.setInput('isOpen', true);
+      await settle();
+
+      expect(fixture.nativeElement.textContent).toContain('Tarifa preferencial');
+      expect(component.priceTierOptions().map((o) => o.label)).toEqual([
+        'Sin tarifa',
+        'Mayorista',
+      ]);
+      component.form.patchValue({ price_tier_id: 1 });
+      expect(quickSave()[0].price_tier_id).toBe(1);
+    });
+
+    it('editar un cliente con tarifa la precarga y "Sin tarifa" la quita (null)', async () => {
+      fixture = TestBed.createComponent(CustomerModalComponent);
+      component = fixture.componentInstance;
+      fixture.componentRef.setInput('showPriceTier', true);
+      fixture.componentRef.setInput('customer', {
+        id: 5,
+        first_name: 'Ana',
+        last_name: 'Díaz',
+        price_tier_id: 1,
+      } as Customer);
+      fixture.componentRef.setInput('isOpen', true);
+      await settle();
+
+      expect(component.form.get('price_tier_id')?.value).toBe(1);
+      component.form.patchValue({ price_tier_id: '' });
+      const raw = component.form.getRawValue();
+      expect(raw.price_tier_id).toBe('');
     });
   });
 

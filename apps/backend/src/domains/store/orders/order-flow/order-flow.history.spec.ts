@@ -1796,6 +1796,48 @@ describe('OrderFlowService.applyDispatchCodPayment — credit orders (payment_fo
     expect(eventEmitter.emit).not.toHaveBeenCalled();
   });
 
+  it('cod-auto-invoicing S6: contra entrega facturada a crédito, remisión cobrada sin planilla: salda la cartera una sola vez', async () => {
+    const { prismaMock, eventEmitter, service } = build({ credit_type: 'free' });
+    // 1.ª consulta: llave de idempotencia libre; 2.ª: la promesa contra entrega anulada.
+    prismaMock.payments.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 90 });
+
+    await service.applyDispatchCodPayment({
+      storeId: STORE_ID,
+      dispatchNoteId: NOTE_ID,
+      amount: 300,
+      correlationKey: `dispatch_note:${NOTE_ID}`,
+    });
+
+    expect(prismaMock.payments.findFirst).toHaveBeenNthCalledWith(2, {
+      where: {
+        order_id: ORDER_ID,
+        store_payment_method: { system_payment_method: { processing_mode: 'ON_DELIVERY' } },
+      },
+      select: { id: true },
+    });
+    expect(prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.payments.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          amount: 300,
+          gateway_reference: `dispatch_note:${NOTE_ID}`,
+          gateway_response: expect.objectContaining({ payment_type: 'dispatch_note' }),
+        }),
+      }),
+    );
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { total_paid: 300, remaining_balance: 0 } }),
+    );
+    // Un solo asiento: el de cartera (DR Caja / CR CxC), nunca un payment.received.
+    expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
+    expect(eventEmitter.emit).toHaveBeenCalledWith(
+      'installment_payment.received',
+      expect.objectContaining({ order_id: ORDER_ID, amount: 300 }),
+    );
+  });
+
   it('crédito sin retención: el evento no lleva campos de retención (comportamiento previo)', async () => {
     const { eventEmitter, service } = build();
 

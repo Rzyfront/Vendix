@@ -1,7 +1,18 @@
 import { Component, effect, input, output, signal } from '@angular/core';
-import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import {
+  AbstractControl,
+  FormControl,
+  FormGroup,
+  ReactiveFormsModule,
+  ValidationErrors,
+  Validators,
+} from '@angular/forms';
 
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../../shared/components/selector/selector.component';
 import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
 import { HospitalitySettings } from '../../../../../../../core/models/store-settings.interface';
 
@@ -9,101 +20,223 @@ import { HospitalitySettings } from '../../../../../../../core/models/store-sett
 const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /**
+ * The backend takes these as integers (`@IsInt()`): `app-input` emits the typed text, so «20.5»
+ * would pass `min/max` and reject the whole PATCH. Empty is left to `required`.
+ */
+const wholeNumber = (control: AbstractControl): ValidationErrors | null => {
+  const value = String(control.value ?? '').trim();
+  return value === '' || /^\d+$/.test(value) ? null : { wholeNumber: true };
+};
+const WHOLE_NUMBER_ERROR = 'Escribe un número entero, sin decimales.';
+
+/** H4.4 — Fontur rate per mil: up to 3 decimals, dot or comma («2,5»). */
+const RATE = /^\d{1,3}([.,]\d{1,3})?$/;
+const rateNumber = (control: AbstractControl): ValidationErrors | null => {
+  const value = String(control.value ?? '').trim();
+  return value === '' || RATE.test(value) ? null : { rate: true };
+};
+const RATE_ERROR = 'Escribe la tarifa por mil, por ejemplo 2,5.';
+const NUMERIC_FIELDS = new Set([
+  'default_overbooking_allowance',
+  'sire_overdue_hours',
+  'booking_hold_minutes',
+  'ical_import_interval_minutes',
+]);
+
+/** Usual room-charge origins; «Otro» keeps the setting free text (U17). */
+const ROOM_CHARGE_ORIGINS = ['Restaurante', 'Bar', 'Cafetería', 'Minibar', 'Servicio a la habitación'];
+const OTHER_ORIGIN = '__other__';
+
+/**
  * Hotelería (H0.5/H1.2/H1.6/H3.4/H3.7): check-in/check-out, no-show and night audit hours, the RNT
  * number and the overbooking new room types start with.
+ *
+ * U17 — autosaved: every change emits a partial patch with the VALID fields only, so an invalid
+ * field shows its error under itself without blocking the others.
  */
 @Component({
   selector: 'app-hospitality-settings-form',
   standalone: true,
-  imports: [ReactiveFormsModule, InputComponent, ToggleComponent],
+  imports: [ReactiveFormsModule, InputComponent, SelectorComponent, ToggleComponent],
   template: `
     <form [formGroup]="form" class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <app-input
         [formControl]="checkInControl"
+        [control]="checkInControl"
+        [required]="true"
         type="time"
-        label="Hora de check-in"
-        helperText="Desde esta hora el huésped puede ocupar la habitación."
+        label="Hora de llegada (check-in)"
+        helperText="Desde esta hora el huésped puede entrar a la habitación."
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
       <app-input
         [formControl]="checkOutControl"
+        [control]="checkOutControl"
+        [required]="true"
         type="time"
-        label="Hora de check-out"
+        label="Hora de salida (check-out)"
         helperText="Hasta esta hora el huésped debe entregar la habitación."
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
       <app-input
         [formControl]="noShowControl"
+        [control]="noShowControl"
+        [required]="true"
         type="time"
-        label="Hora de no-show"
-        helperText="El día siguiente a la llegada, a esta hora, la reserva sin llegada pasa a No-show y libera sus noches."
+        label="Hora para marcar «No se presentó»"
+        helperText="Al día siguiente de la llegada, a esta hora, la reserva del huésped que no llegó pasa a «No se presentó» y deja libres sus noches."
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
       <app-input
         [formControl]="nightAuditControl"
+        [control]="nightAuditControl"
+        [required]="true"
         type="time"
-        label="Hora de auditoría nocturna"
-        helperText="Hora de madrugada: desde ella se carga al folio de cada huésped en casa la noche que acaba de pasar."
+        label="Hora del cierre del día"
+        helperText="Hora de madrugada: desde ella se suma a la cuenta de cada huésped hospedado la noche que acaba de pasar."
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
       <app-input
         [formControl]="rntControl"
-        label="Número RNT"
+        [control]="rntControl"
+        label="Registro Nacional de Turismo (RNT)"
         placeholder="12345"
-        helperText="Registro Nacional de Turismo del hotel."
+        helperText="Número de registro del hotel ante el Ministerio de Comercio. Sale en la confirmación de la reserva, la reserva en línea y el pie de la factura."
+        size="sm"
+        (inputChange)="onFieldChange()"
+      ></app-input>
+      <div>
+        <app-toggle
+          [checked]="renewalReminder()"
+          label="Recordarme renovar el RNT en marzo"
+          (changed)="onRenewalReminderChange($event)"
+        />
+        <p class="mt-1 text-xs text-text-secondary">
+          Cada marzo llega un aviso a la campana para renovarlo antes del 31 de marzo.
+        </p>
+      </div>
+      <div>
+        <app-toggle
+          [checked]="traEnabled()"
+          label="Reportar huéspedes a la TRA del MinCIT"
+          (changed)="onTraEnabledChange($event)"
+        />
+        <p class="mt-1 text-xs text-text-secondary">
+          Cada check-in y check-out se reporta solo a la Tarjeta de Registro de Alojamiento.
+          El token y los envíos se ven en Hotelería → Cumplimiento. Nunca detiene el check-in.
+        </p>
+      </div>
+      <div>
+        <app-toggle
+          [checked]="sireEnabled()"
+          label="Listar huéspedes extranjeros para el SIRE"
+          (changed)="onSireEnabledChange($event)"
+        />
+        <p class="mt-1 text-xs text-text-secondary">
+          Cada entrada y salida de un extranjero queda pendiente en Hotelería → Cumplimiento → Planilla de
+          viajeros (SIRE) para reportarla en el portal de Migración Colombia. Nunca detiene el check-in.
+        </p>
+      </div>
+      <app-input
+        [formControl]="sireOverdueControl"
+        [control]="sireOverdueControl"
+        [error]="wholeNumberError(sireOverdueControl)"
+        [required]="true"
+        type="number"
+        [min]="1"
+        [max]="720"
+        step="1"
+        label="Horas para marcar un reporte SIRE como atrasado"
+        helperText="Pasado este tiempo sin reportar, el movimiento se ve en rojo. Por defecto 24 horas."
+        size="sm"
+        (inputChange)="onFieldChange()"
+      ></app-input>
+      <app-input
+        [formControl]="fonturRateControl"
+        [control]="fonturRateControl"
+        [error]="rateError()"
+        [required]="true"
+        type="number"
+        [min]="0"
+        [max]="100"
+        step="0.1"
+        label="Tarifa Fontur (por mil)"
+        helperText="Se usa para estimar la contribución trimestral en Reportes de hotel → Fontur. Por defecto 2,5 por mil; confírmala con tu contador."
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
       <app-input
         [formControl]="overbookingControl"
+        [control]="overbookingControl"
+        [error]="wholeNumberError(overbookingControl)"
+        [required]="true"
         type="number"
         [min]="0"
         [max]="99"
-        label="Sobreventa por defecto"
-        helperText="Reservas por encima de las habitaciones con las que empieza cada tipo nuevo. 0 = nunca sobrevender."
+        label="Reservas de más por tipo de habitación"
+        helperText="Cuántas reservas por encima de las habitaciones disponibles acepta cada tipo nuevo. 0 = nunca vender de más."
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
       <app-input
         [formControl]="holdMinutesControl"
+        [control]="holdMinutesControl"
+        [error]="wholeNumberError(holdMinutesControl)"
+        [required]="true"
         type="number"
         [min]="5"
         [max]="120"
-        label="Minutos para pagar una reserva web"
-        helperText="Tiempo que se guarda la habitación mientras el huésped paga en línea (5 a 120)."
+        label="Minutos para pagar una reserva en línea"
+        helperText="Tiempo que se aparta la habitación mientras el huésped paga en la tienda en línea (5 a 120)."
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
       <app-input
         [formControl]="icalIntervalControl"
+        [control]="icalIntervalControl"
+        [error]="wholeNumberError(icalIntervalControl)"
+        [required]="true"
         type="number"
         [min]="5"
         [max]="1440"
-        label="Minutos entre sincronizaciones iCal"
-        helperText="Cada cuánto se leen los calendarios importados de Airbnb o Booking (5 a 1440)."
+        label="Minutos entre lecturas de calendarios externos"
+        helperText="Cada cuánto se revisan los calendarios de Airbnb o Booking para bloquear sus fechas (5 a 1440)."
         size="sm"
         (inputChange)="onFieldChange()"
       ></app-input>
-      <app-input
-        [formControl]="roomChargeOriginControl"
-        label="Origen del cargo a habitación"
-        placeholder="Restaurante"
-        helperText="Cómo se ve en el folio un consumo cargado desde el POS o una mesa."
+      <app-selector
+        [options]="originOptions"
+        [value]="originChoice()"
+        [required]="true"
+        label="Origen de cargos"
+        helpText="Cómo aparece en la cuenta del huésped un consumo cargado a la habitación desde el POS o una mesa."
         size="sm"
-        (inputChange)="onFieldChange()"
-      ></app-input>
+        (valueChange)="onOriginChoice($event)"
+      ></app-selector>
+      @if (originChoice() === OTHER_ORIGIN) {
+        <app-input
+          [formControl]="roomChargeOriginControl"
+          [control]="roomChargeOriginControl"
+          [required]="true"
+          label="Nombre del origen"
+          placeholder="Spa"
+          helperText="El nombre que verá el huésped en su cuenta."
+          size="sm"
+          (inputChange)="onFieldChange()"
+        ></app-input>
+      }
       <div class="md:col-span-2">
         <app-toggle
           [checked]="verification()"
-          label="Verificar el folio antes de facturar"
+          label="Revisar la cuenta antes de facturar"
           (changed)="onVerificationChange($event)"
         />
         <p class="mt-1 text-xs text-text-secondary">
-          La factura del check-out espera la revisión de un usuario con el permiso «Verificar el folio».
+          La factura de salida espera a que alguien con permiso para revisar cuentas la apruebe.
         </p>
       </div>
     </form>
@@ -111,7 +244,15 @@ const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
 })
 export class HospitalitySettingsForm {
   readonly settings = input.required<HospitalitySettings>();
-  readonly settingsChange = output<HospitalitySettings>();
+  readonly settingsChange = output<Partial<HospitalitySettings>>();
+
+  protected readonly OTHER_ORIGIN = OTHER_ORIGIN;
+  protected readonly originOptions: SelectorOption[] = [
+    ...ROOM_CHARGE_ORIGINS.map((origin) => ({ value: origin, label: origin })),
+    { value: OTHER_ORIGIN, label: 'Otro' },
+  ];
+  /** Selected option of «Origen de cargos»; `OTHER_ORIGIN` shows the free-text field. */
+  protected readonly originChoice = signal<string>('Restaurante');
 
   readonly checkInControl = new FormControl('15:00', {
     nonNullable: true,
@@ -134,28 +275,42 @@ export class HospitalitySettingsForm {
     validators: [Validators.maxLength(20)],
   });
 
+  readonly fonturRateControl = new FormControl<number>(2.5, {
+    nonNullable: true,
+    validators: [Validators.required, Validators.min(0), Validators.max(100), rateNumber],
+  });
+
+  readonly sireOverdueControl = new FormControl<number>(24, {
+    nonNullable: true,
+    validators: [Validators.required, Validators.min(1), Validators.max(720), wholeNumber],
+  });
+
   readonly overbookingControl = new FormControl<number>(0, {
     nonNullable: true,
-    validators: [Validators.required, Validators.min(0), Validators.max(99)],
+    validators: [Validators.required, Validators.min(0), Validators.max(99), wholeNumber],
   });
 
   readonly holdMinutesControl = new FormControl<number>(15, {
     nonNullable: true,
-    validators: [Validators.required, Validators.min(5), Validators.max(120)],
+    validators: [Validators.required, Validators.min(5), Validators.max(120), wholeNumber],
   });
 
   readonly icalIntervalControl = new FormControl<number>(15, {
     nonNullable: true,
-    validators: [Validators.required, Validators.min(5), Validators.max(1440)],
+    validators: [Validators.required, Validators.min(5), Validators.max(1440), wholeNumber],
   });
 
   readonly roomChargeOriginControl = new FormControl('Restaurante', {
     nonNullable: true,
-    validators: [Validators.maxLength(60)],
+    validators: [Validators.required, Validators.maxLength(60)],
   });
 
   /** H3.7 / D11 — signal, so the toggle re-renders zoneless. */
   readonly verification = signal(true);
+  /** H4.3 — March reminder to renew the RNT. */
+  readonly renewalReminder = signal(true);
+  readonly traEnabled = signal(true);
+  readonly sireEnabled = signal(true);
 
   readonly form = new FormGroup({
     check_in_time: this.checkInControl,
@@ -163,6 +318,8 @@ export class HospitalitySettingsForm {
     no_show_time: this.noShowControl,
     night_audit_time: this.nightAuditControl,
     rnt_number: this.rntControl,
+    fontur_rate_per_mil: this.fonturRateControl,
+    sire_overdue_hours: this.sireOverdueControl,
     default_overbooking_allowance: this.overbookingControl,
     booking_hold_minutes: this.holdMinutesControl,
     ical_import_interval_minutes: this.icalIntervalControl,
@@ -172,10 +329,22 @@ export class HospitalitySettingsForm {
   constructor() {
     effect(() => {
       const current = this.settings();
-      if (current) {
-        this.form.patchValue(current, { emitEvent: false });
-        this.verification.set(current.folio_invoice_verification ?? true);
+      if (!current) return;
+      for (const [key, control] of Object.entries(this.form.controls)) {
+        // A field the user left invalid keeps what they typed (and its error) instead of being
+        // silently rewritten with the last saved value.
+        if (control.dirty && control.invalid) continue;
+        const value = current[key as keyof HospitalitySettings];
+        if (value !== undefined) (control as FormControl<unknown>).setValue(value, { emitEvent: false });
+        if (key === 'room_charge_origin') {
+          const origin = this.roomChargeOriginControl.value;
+          this.originChoice.set(ROOM_CHARGE_ORIGINS.includes(origin) ? origin : OTHER_ORIGIN);
+        }
       }
+      this.verification.set(current.folio_invoice_verification ?? true);
+      this.renewalReminder.set(current.rnt_renewal_reminder ?? true);
+      this.traEnabled.set(current.tra_enabled ?? true);
+      this.sireEnabled.set(current.sire_enabled ?? true);
     });
   }
 
@@ -184,17 +353,61 @@ export class HospitalitySettingsForm {
     this.onFieldChange();
   }
 
+  onRenewalReminderChange(checked: boolean): void {
+    this.renewalReminder.set(checked);
+    this.onFieldChange();
+  }
+
+  onTraEnabledChange(checked: boolean): void {
+    this.traEnabled.set(checked);
+    this.onFieldChange();
+  }
+
+  onSireEnabledChange(checked: boolean): void {
+    this.sireEnabled.set(checked);
+    this.onFieldChange();
+  }
+
+  onOriginChoice(choice: string | number | null): void {
+    const origin = String(choice ?? '');
+    this.originChoice.set(origin);
+    const control = this.roomChargeOriginControl;
+    control.setValue(origin === OTHER_ORIGIN ? '' : origin);
+    control.markAsDirty();
+    this.onFieldChange();
+  }
+
+  /** The decimal error under the field; the other errors keep `app-input`'s own message. */
+  wholeNumberError(control: FormControl<number>): string | undefined {
+    return control.touched && control.hasError('wholeNumber') ? WHOLE_NUMBER_ERROR : undefined;
+  }
+
+  /** The rate format error under the field; empty and range keep `app-input`'s own message. */
+  rateError(): string | undefined {
+    const control = this.fonturRateControl;
+    return control.touched && control.hasError('rate') ? RATE_ERROR : undefined;
+  }
+
+  /** Emits the valid fields only; the invalid ones show «Este campo es requerido» & co. */
   onFieldChange(): void {
-    if (!this.form.valid) return;
-    const value = this.form.getRawValue();
-    this.settingsChange.emit({
-      ...value,
-      rnt_number: value.rnt_number.trim(),
-      room_charge_origin: value.room_charge_origin.trim() || 'Restaurante',
+    const patch: Record<string, unknown> = {
       folio_invoice_verification: this.verification(),
-      default_overbooking_allowance: Math.trunc(Number(value.default_overbooking_allowance)),
-      booking_hold_minutes: Math.trunc(Number(value.booking_hold_minutes)),
-      ical_import_interval_minutes: Math.trunc(Number(value.ical_import_interval_minutes)),
-    });
+      rnt_renewal_reminder: this.renewalReminder(),
+      tra_enabled: this.traEnabled(),
+      sire_enabled: this.sireEnabled(),
+    };
+    for (const [key, control] of Object.entries(this.form.controls)) {
+      if (control.dirty) control.markAsTouched();
+      if (control.invalid) continue;
+      const value: unknown = control.value;
+      // `app-input` emits text even with type="number": numeric fields go out as numbers.
+      patch[key] =
+        key === 'fontur_rate_per_mil'
+          ? Number(String(value).trim().replace(',', '.'))
+          : NUMERIC_FIELDS.has(key)
+            ? Number(value)
+            : String(value ?? '').trim();
+    }
+    this.settingsChange.emit(patch as Partial<HospitalitySettings>);
   }
 }

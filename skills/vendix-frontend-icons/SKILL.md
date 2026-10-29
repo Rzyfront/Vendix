@@ -6,7 +6,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke: "When adding icons to components, buttons, menus, or using <app-icon>"
 ---
@@ -30,6 +30,7 @@ metadata:
 - If missing, import the Lucide symbol and add it to `ICON_REGISTRY`.
 - Use the exact registered key. Aliases exist, but only the registry is authoritative.
 - For Tailwind color classes, pass classes through `class`, not `color`. The `color` input is forwarded to Lucide as a color value.
+- Color icons with token classes (`text-primary`, `text-error`, `text-text-secondary`), never a hex in `color`. Soft UI sizes (`vendix-ui-ux` → `references/soft-ui.md`): 12–14 in 24–32px controls, 16 in 40–44px controls, 18–20 in headers.
 
 ## app-icon API
 

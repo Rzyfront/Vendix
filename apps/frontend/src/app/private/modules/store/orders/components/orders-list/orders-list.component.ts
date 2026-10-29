@@ -56,6 +56,10 @@ import {
 } from './order-kitchen-summary.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
+import {
+  cancelCreditNoteConfirm,
+  readCancelCreditNoteRequired,
+} from '../../utils/cancel-credit-note.util';
 import { environment } from '../../../../../../../environments/environment';
 
 interface OrderPaymentMethodOption {
@@ -1911,11 +1915,44 @@ export class OrdersListComponent {
             this.refresh.emit();
           },
           error: (error: any) => {
+            // cod-auto-invoicing S5 — factura aceptada por la DIAN: ofrecer
+            // nota crédito total + cancelación en vez de un error sin salida.
+            const creditNoteBlock = readCancelCreditNoteRequired(error);
+            if (creditNoteBlock) {
+              void this.cancelOrderWithCreditNote(order, creditNoteBlock.invoiceNumber);
+              return;
+            }
             console.error('Error cancelling order:', error);
             this.toastService.error(extractApiErrorMessage(error));
           },
         });
     }
+  }
+
+  private async cancelOrderWithCreditNote(
+    order: Order,
+    invoiceNumber: string | null,
+  ): Promise<void> {
+    const confirmed = await this.dialogService.confirm(
+      cancelCreditNoteConfirm(invoiceNumber),
+    );
+    if (!confirmed) return;
+    this.ordersService
+      .flowCancelOrder(order.id.toString(), {
+        reason: 'Cancelada desde el listado de órdenes',
+        issueCreditNote: true,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Nota crédito emitida y orden cancelada');
+          this.loadOrders();
+          this.refresh.emit();
+        },
+        error: (error: unknown) => {
+          this.toastService.error(extractApiErrorMessage(error));
+        },
+      });
   }
 
   exportOrders(): void {

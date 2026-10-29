@@ -40,7 +40,7 @@ function newRequestId(): string {
 }
 
 /**
- * Hospitality Suite (H3.8) — "Dividir folio": assign each active line to an
+ * Hospitality Suite (H3.8) — "Dividir cuenta": assign each active line to an
  * account (e.g. nights to the company, the restaurant to the guest), preview
  * the total of every account and confirm. Each account is then collected and
  * invoiced on its own.
@@ -59,7 +59,7 @@ function newRequestId(): string {
     PosCustomerSelectorComponent,
   ],
   template: `
-    <app-modal [isOpen]="open()" (isOpenChange)="!$event && closed.emit()" title="Dividir folio" size="md">
+    <app-modal [isOpen]="open()" (isOpenChange)="!$event && closed.emit()" title="Dividir cuenta" size="md">
       <div class="space-y-4 text-sm" data-testid="folio-split-modal">
         <div class="space-y-2">
           <p class="font-medium text-text-primary">Cuentas</p>
@@ -103,7 +103,7 @@ function newRequestId(): string {
         </div>
 
         <div class="space-y-2">
-          <p class="font-medium text-text-primary">Ítems del folio</p>
+          <p class="font-medium text-text-primary">Ítems de la cuenta</p>
           @for (line of activeLines(); track line.id) {
             <div class="grid grid-cols-[1fr_auto] items-center gap-2" data-testid="split-line">
               <div>
@@ -132,12 +132,16 @@ function newRequestId(): string {
               </div>
             }
             <div class="flex justify-between gap-2 border-t border-border pt-1 font-semibold">
-              <span>Total del folio</span>
+              <span>Total de la cuenta</span>
               <span>{{ money(p.original_total) }}</span>
             </div>
             <p class="flex items-center gap-1 text-xs" [class.text-success]="totalsMatch()" [class.text-error]="!totalsMatch()">
               <app-icon [name]="totalsMatch() ? 'check-circle' : 'alert-circle'" [size]="14" />
-              Total de las cuentas = total del folio
+              La suma de las partes = total de la cuenta
+            </p>
+            <p class="text-xs text-text-secondary" data-testid="split-preview-effect">
+              Cada cuenta se cobra y se factura por separado. La división no se puede quitar después de
+              registrar un pago en alguna de ellas.
             </p>
           </div>
         }
@@ -155,7 +159,7 @@ function newRequestId(): string {
           (clicked)="confirm()"
           data-testid="split-confirm"
         >
-          Confirmar división
+          Dividir en {{ accounts().length }} cuentas
         </app-button>
       </div>
     </app-modal>
@@ -282,7 +286,7 @@ export class FolioSplitModalComponent {
       .subscribe({
         next: (result) => {
           this.busy.set(false);
-          this.toastService.success('Folio dividido');
+          this.toastService.success('Cuenta dividida');
           this.split.emit(result);
         },
         error: (message: string) => {

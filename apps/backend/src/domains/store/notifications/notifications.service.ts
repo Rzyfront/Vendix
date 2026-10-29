@@ -392,6 +392,9 @@ export class NotificationsService {
       // `billing_warning_logs` dedupe row.
       'auto_renew_disabled_no_credential',
       'auto_renew_charge_failed',
+      // H4.3 — recordatorio de marzo para renovar el RNT del hotel; sin la
+      // fila el web push lo filtraría. Se apaga en Configuración → Hotelería.
+      'lodging_rnt_renewal',
     ];
 
     const existing = await this.subscriptionsModel.findMany({

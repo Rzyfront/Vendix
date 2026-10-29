@@ -292,3 +292,51 @@ describe('PosPaymentStepComponent — tip contract', () => {
     }));
   });
 });
+
+describe('PosPaymentStepComponent — cod-auto-invoicing S3 contra entrega → crédito libre', () => {
+  const makeStep = (opts: { autoEmit?: boolean; customer?: object | null; switched?: boolean } = {}) => {
+    const collector = {
+      mode: () => 'contado',
+      switchToFreeCredit: jasmine.createSpy('switchToFreeCredit').and.returnValue(opts.switched ?? true),
+    };
+    const step = Object.assign(Object.create(PosPaymentStepComponent.prototype), {
+      collector: () => collector,
+      settingsFacade: {
+        settings: () => ({ invoicing: { pos: { auto_emit: opts.autoEmit ?? true } } }),
+      },
+      cartState: () => ({ items: [], customer: opts.customer === undefined ? { id: 1 } : opts.customer }),
+      isAnonymous: () => false,
+      isAlias: () => false,
+      toastService: { info: jasmine.createSpy('info') },
+    });
+    return { step, collector };
+  };
+
+  it('switches to free credit and shows the notice when auto-emission is on', () => {
+    const { step, collector } = makeStep();
+    step.onCollectorMethodSelected({ type: 'cash_on_delivery' });
+    expect(collector.switchToFreeCredit).toHaveBeenCalledTimes(1);
+    expect(step.toastService.info).toHaveBeenCalledWith(
+      'El pago contra entrega requiere crédito libre: el modo de pago se cambiará a crédito libre',
+    );
+  });
+
+  it('keeps contado silently when auto-emission is off', () => {
+    const { step, collector } = makeStep({ autoEmit: false });
+    step.onCollectorMethodSelected({ type: 'cash_on_delivery' });
+    expect(collector.switchToFreeCredit).not.toHaveBeenCalled();
+    expect(step.toastService.info).not.toHaveBeenCalled();
+  });
+
+  it('keeps contado for a sale without a saved customer', () => {
+    const { step, collector } = makeStep({ customer: null });
+    step.onCollectorMethodSelected({ type: 'cash_on_delivery' });
+    expect(collector.switchToFreeCredit).not.toHaveBeenCalled();
+  });
+
+  it('shows no notice when the collector cannot offer credit', () => {
+    const { step } = makeStep({ switched: false });
+    step.onCollectorMethodSelected({ type: 'cash_on_delivery' });
+    expect(step.toastService.info).not.toHaveBeenCalled();
+  });
+});

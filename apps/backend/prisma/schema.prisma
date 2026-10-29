@@ -207,6 +207,9 @@ model users {
   lodging_reservations_customer   lodging_reservations[]        @relation("lodging_reservations_customer")
   lodging_reservations_created    lodging_reservations[]        @relation("lodging_reservations_created_by")
   lodging_reservation_events      lodging_reservation_events[]  @relation("lodging_reservation_events_user")
+  lodging_keys_delivered          lodging_key_handovers[]       @relation("lodging_key_handovers_delivered_by")
+  lodging_keys_received           lodging_key_handovers[]       @relation("lodging_key_handovers_returned_by")
+  lodging_compliance_reported     lodging_compliance_submissions[] @relation("lodging_compliance_submissions_reported_by")
   lodging_allotments_customer     lodging_allotments[]          @relation("lodging_allotments_customer")
   lodging_guests_customer         lodging_guests[]              @relation("lodging_guests_customer")
   // Appointment redesign phase 2 — `booking_reschedule_requests`
@@ -309,14 +312,19 @@ model user_settings {
 
 /// Relación flexible entre usuarios y tiendas (clientes, staff, managers, etc)
 model store_users {
-  id        Int      @id @default(autoincrement())
-  store_id  Int
-  user_id   Int
-  createdAt DateTime @default(now())
-  store     stores   @relation(fields: [store_id], references: [id])
-  user      users    @relation(fields: [user_id], references: [id])
+  id            Int          @id @default(autoincrement())
+  store_id      Int
+  user_id       Int
+  createdAt     DateTime     @default(now())
+  /// Tarifa preferencial del cliente en esta tienda (solo `customer_tier`).
+  /// Borrar la tarifa deja al cliente sin tarifa, nunca borra la membresía.
+  price_tier_id Int?
+  store         stores       @relation(fields: [store_id], references: [id])
+  user          users        @relation(fields: [user_id], references: [id])
+  price_tier    price_tiers? @relation(fields: [price_tier_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([store_id, user_id])
+  @@index([price_tier_id])
 }
 
 model roles {
@@ -1075,6 +1083,10 @@ model stores {
   lodging_reservations           lodging_reservations[]
   lodging_reservation_rooms      lodging_reservation_rooms[]
   lodging_reservation_events     lodging_reservation_events[]
+  lodging_guest_message_logs     lodging_guest_message_logs[]
+  lodging_key_handovers          lodging_key_handovers[]
+  lodging_compliance_submissions lodging_compliance_submissions[]
+  lodging_compliance_credentials lodging_compliance_credentials[]
   lodging_room_nights            lodging_room_nights[]
   lodging_rate_plans             lodging_rate_plans[]
   lodging_rate_prices            lodging_rate_prices[]
@@ -2320,6 +2332,16 @@ model price_tiers {
   // explicit override exists in product_price_tier_overrides. Stored as the
   // discount percentage itself (e.g. 15.00 means -15%).
   discount_percentage Decimal              @default(0) @db.Decimal(5, 2)
+  // How the tier adjusts the price when no product override exists. The
+  // default keeps the historical rule (percent discount read from
+  // discount_percentage). Every other type reads adjustment_value.
+  adjustment_type     price_tier_adjustment_type_enum @default(percent_discount)
+  // Percent (percent_surcharge) or money amount (fixed_*). Null for
+  // percent_discount, whose value stays in discount_percentage.
+  adjustment_value    Decimal?             @db.Decimal(12, 2)
+  // For fixed_* types on a tier with packSize > 1: whether the amount applies
+  // to each unit (then x packSize) or once to the whole package.
+  amount_scope        price_tier_amount_scope_enum @default(per_unit)
   is_active           Boolean              @default(true)
   is_default          Boolean              @default(false)
   // Discriminador de los dos ejes que conviven en esta tabla: tarifa de
@@ -2341,6 +2363,7 @@ model price_tiers {
 
   store               stores                           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   product_overrides   product_price_tier_overrides[]
+  store_users         store_users[]
   product_assignments product_price_tier_assignments[]
   order_items         order_items[]                    @relation("order_items_applied_price_tier")
   quotation_items     quotation_items[]                @relation("quotation_items_applied_price_tier")
@@ -2587,6 +2610,11 @@ model lodging_reservations {
   // H6.6 — web booking: a tentative reservation is held until it is paid or
   // this moment passes (then the hold job cancels it). Null = not a web hold.
   hold_expires_at    DateTime?                       @db.Timestamp(6)
+  // H8.1 — online check-in: link token the guest opens without login, and
+  // when the guest last completed it ("Pre-registro completo ✓"). The link
+  // stops working once the stay is over (status or departure date).
+  precheckin_token        String?                    @unique @db.VarChar(64)
+  precheckin_completed_at DateTime?                  @db.Timestamp(6)
   created_by_user_id Int?
   created_at         DateTime?                       @default(now()) @db.Timestamp(6)
   updated_at         DateTime?                       @default(now()) @db.Timestamp(6)
@@ -2600,6 +2628,9 @@ model lodging_reservations {
   folio      lodging_folios?
   deposits   lodging_deposits[]
   online_payments lodging_reservation_payments[]
+  guest_message_logs lodging_guest_message_logs[]
+  key_handovers      lodging_key_handovers[]
+  compliance_submissions lodging_compliance_submissions[]
 
   @@unique([store_id, reservation_number])
   @@index([status, hold_expires_at])
@@ -2625,6 +2656,113 @@ model lodging_reservation_events {
   user        users?               @relation("lodging_reservation_events_user", fields: [user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([reservation_id])
+}
+
+// Hospitality Suite (H8.2) — automatic guest emails already sent: the
+// confirmation, the pre-arrival reminder with the online check-in link and
+// the thank-you after check-out. One row per reservation, message and channel
+// (claimed before sending), so a message never goes out twice. `channel`
+// leaves room for WhatsApp (H8.3).
+model lodging_guest_message_logs {
+  id             Int      @id @default(autoincrement())
+  store_id       Int
+  reservation_id Int
+  message_key    String   @db.VarChar(30)
+  channel        String   @default("email") @db.VarChar(20)
+  sent_at        DateTime @default(now()) @db.Timestamp(6)
+
+  store       stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([reservation_id, message_key, channel])
+  @@index([store_id, sent_at])
+}
+
+// Hospitality Suite (H8.4, D12) — key / access card handover log: which key
+// or card was given to which guest, by which staff user and when, and its
+// return (who received it, when). `returned_at` null = the guest still has it.
+// A key is with one guest at a time: also unique per store case-insensitive
+// while open via `lodging_key_handovers_open_key_label_key`
+// ON (store_id, lower(key_label)) WHERE returned_at IS NULL.
+model lodging_key_handovers {
+  id                   Int       @id @default(autoincrement())
+  store_id             Int
+  reservation_id       Int
+  reservation_room_id  Int?
+  key_label            String    @db.VarChar(60)
+  guest_name           String    @db.VarChar(150)
+  notes                String?   @db.VarChar(300)
+  delivered_by_user_id Int?
+  delivered_at         DateTime  @default(now()) @db.Timestamp(6)
+  returned_by_user_id  Int?
+  returned_at          DateTime? @db.Timestamp(6)
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @default(now()) @db.Timestamp(6)
+
+  store            stores                     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation      lodging_reservations       @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation_room lodging_reservation_rooms? @relation(fields: [reservation_room_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  delivered_by     users?                     @relation("lodging_key_handovers_delivered_by", fields: [delivered_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  returned_by      users?                     @relation("lodging_key_handovers_returned_by", fields: [returned_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([reservation_id])
+  @@index([store_id, returned_at])
+}
+
+// Hospitality Suite (H4.1) — log of what each guest owes an authority (TRA of
+// the MinCIT; SIRE in H4.2) per event. One row per guest, authority and event,
+// so a check-in is never reported twice. `pending` → `sent` (automatic) or
+// `manual` (reported by hand in the portal); `failed` = rejected by the
+// authority. Informative only (D14): nothing in the desk waits for it.
+model lodging_compliance_submissions {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  reservation_id      Int
+  guest_id            Int?
+  authority           String    @db.VarChar(10)
+  event               String    @db.VarChar(20)
+  status              String    @default("pending") @db.VarChar(20)
+  // Kept so the log still names the guest if the guest row is removed.
+  guest_name          String    @db.VarChar(200)
+  attempts            Int       @default(0)
+  error_code          String?   @db.VarChar(40)
+  last_error          String?   @db.VarChar(300)
+  // Fields sent (Res. 409/2022 art. 7) and the authority's answer.
+  payload             Json?
+  response            Json?
+  sent_at             DateTime? @db.Timestamp(6)
+  reported_by_user_id Int?
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  store       stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation lodging_reservations @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  guest       lodging_guests?      @relation(fields: [guest_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  reported_by users?               @relation("lodging_compliance_submissions_reported_by", fields: [reported_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([guest_id, authority, event])
+  @@index([store_id, authority, status])
+  @@index([reservation_id])
+}
+
+// Hospitality Suite (H4.1) — credential of a store with an authority (the TRA
+// token sent by the MinCIT to the RNT email). Encrypted like the payment
+// processor credentials; only the last characters go back to the screen.
+model lodging_compliance_credentials {
+  id               Int       @id @default(autoincrement())
+  store_id         Int
+  authority        String    @db.VarChar(10)
+  secret_encrypted String    @db.Text
+  secret_hint      String    @db.VarChar(8)
+  tested_at        DateTime? @db.Timestamp(6)
+  test_ok          Boolean?
+  test_message     String?   @db.VarChar(300)
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, authority])
 }
 
 // Hospitality Suite (H1.1) — one room of a reservation: the room type sold,
@@ -2658,6 +2796,7 @@ model lodging_reservation_rooms {
   rate_plan   lodging_rate_plans?   @relation(fields: [rate_plan_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   nights      lodging_room_nights[]
   guests      lodging_guests[]
+  key_handovers lodging_key_handovers[]
 
   @@index([reservation_id])
   @@index([unit_type_id])
@@ -2699,6 +2838,7 @@ model lodging_guests {
   reservation lodging_reservations       @relation(fields: [reservation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   room        lodging_reservation_rooms? @relation(fields: [reservation_room_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   customer    users?                     @relation("lodging_guests_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  compliance_submissions lodging_compliance_submissions[]
 
   @@unique([reservation_id, document_type, document_number])
   @@index([store_id])
@@ -4784,6 +4924,8 @@ enum notification_type_enum {
   service_session_email_failed
   service_reminder_due
   checkout_reconciliation_required
+  /// H4.3 — yearly reminder (March) to renew the hotel's RNT before March 31.
+  lodging_rnt_renewal
 }
 
 model notifications {
@@ -5015,6 +5157,19 @@ enum product_state_enum {
 enum price_tier_kind_enum {
   customer_tier
   sale_unit
+}
+
+enum price_tier_adjustment_type_enum {
+  percent_discount
+  percent_surcharge
+  fixed_amount_discount
+  fixed_amount_surcharge
+  fixed_price
+}
+
+enum price_tier_amount_scope_enum {
+  per_unit
+  per_package
 }
 
 enum pricing_type_enum {

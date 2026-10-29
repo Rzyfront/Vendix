@@ -512,6 +512,7 @@
               }
               <app-payment-credit-fields
                 [(terms)]="creditTerms"
+                [initialCreditType]="preferredCreditType()"
                 [financeBase]="effectiveBase()"
                 [paymentMethods]="resolvedMethods()"
                 [currencyDecimals]="currencyDecimals()"
@@ -1003,6 +1004,7 @@
         }
         <app-payment-credit-fields
           [(terms)]="creditTerms"
+          [initialCreditType]="preferredCreditType()"
           [financeBase]="effectiveBase()"
           [paymentMethods]="resolvedMethods()"
           [currencyDecimals]="currencyDecimals()"

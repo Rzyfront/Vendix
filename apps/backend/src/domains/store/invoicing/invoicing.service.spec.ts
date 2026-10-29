@@ -569,10 +569,10 @@ describe('InvoicingService.getEcommerceInvoicingSettings', () => {
     await expect(result).resolves.toEqual({ auto_emit: false });
   });
 
-  it('sin bloque invoicing y sin receipts.auto_issue_invoice → default true', async () => {
+  it('sin bloque invoicing y sin receipts.auto_issue_invoice → default false (solo emite quien lo enciende)', async () => {
     const { result } = runWithSettings({});
 
-    await expect(result).resolves.toEqual({ auto_emit: true });
+    await expect(result).resolves.toEqual({ auto_emit: false });
   });
 
   it('auto_emit escrito como la cadena "false" no se acepta → cae al legado/default', async () => {
@@ -594,7 +594,7 @@ describe('InvoicingService.getEcommerceInvoicingSettings', () => {
       () => harness.getEcommerceInvoicingSettings(),
     );
 
-    expect(result).toEqual({ auto_emit: true });
+    expect(result).toEqual({ auto_emit: false });
     expect(findFirst).not.toHaveBeenCalled();
   });
 
@@ -606,10 +606,152 @@ describe('InvoicingService.getEcommerceInvoicingSettings', () => {
       harness.getEcommerceInvoicingSettings(),
     );
 
-    expect(result).toEqual({ auto_emit: true });
+    expect(result).toEqual({ auto_emit: false });
     expect(findFirst).toHaveBeenCalledWith({
       where: { store_id: 2 },
       select: { settings: true },
+    });
+  });
+});
+
+describe('InvoicingService.getPosInvoicingSettings — default off', () => {
+  interface PosSettingsHarness {
+    prisma: { store_settings: { findFirst: jest.Mock } };
+    logger: Pick<Logger, 'warn'>;
+    getPosInvoicingSettings(): Promise<{ auto_emit: boolean; on_failure: string }>;
+  }
+
+  const ctx = {
+    user_id: 9,
+    organization_id: 1,
+    store_id: 2,
+    is_super_admin: false,
+    is_owner: true,
+  };
+
+  const run = (settings: Record<string, any>) => {
+    const service = Object.create(InvoicingService.prototype) as PosSettingsHarness;
+    service.prisma = {
+      store_settings: { findFirst: jest.fn().mockResolvedValue({ settings }) },
+    };
+    service.logger = { warn: jest.fn() };
+    return RequestContextService.run(ctx, () => service.getPosInvoicingSettings());
+  };
+
+  it('a store that never set invoicing.pos.auto_emit does not auto-emit', async () => {
+    await expect(run({})).resolves.toEqual({ auto_emit: false, on_failure: 'queue' });
+  });
+
+  it('a store that explicitly turned it on keeps auto-emitting', async () => {
+    await expect(run({ invoicing: { pos: { auto_emit: true } } })).resolves.toEqual({
+      auto_emit: true,
+      on_failure: 'queue',
+    });
+  });
+});
+
+describe('InvoicingService.refreshOrderDraftPaymentMeans (cod-auto-invoicing S2)', () => {
+  interface RefreshHarness {
+    prisma: {
+      invoices: { findFirst: jest.Mock; update: jest.Mock };
+      orders: { findFirst: jest.Mock };
+    };
+    resolveCreditDueDate: jest.Mock;
+    refreshOrderDraftPaymentMeans(invoice_id: number, order_id: number): Promise<void>;
+  }
+
+  const paidByTransfer = {
+    id: 40,
+    payment_form: null,
+    payments: [
+      {
+        state: 'succeeded',
+        amount: 100000,
+        store_payment_method: {
+          display_name: 'Transferencia',
+          system_payment_method: { dian_code: '47', display_name: 'Transferencia' },
+        },
+      },
+    ],
+  };
+
+  const build = (invoice: Record<string, unknown> | null, order: unknown) => {
+    const h = Object.create(InvoicingService.prototype) as RefreshHarness;
+    h.prisma = {
+      invoices: {
+        findFirst: jest.fn().mockResolvedValue(invoice),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      orders: { findFirst: jest.fn().mockResolvedValue(order) },
+    };
+    h.resolveCreditDueDate = jest.fn().mockResolvedValue(null);
+    return h;
+  };
+
+  it('a checkout draft born as credit without due date goes out cash with the real means once paid', async () => {
+    const h = build(
+      {
+        id: 7,
+        status: 'draft',
+        payment_form: '2',
+        payment_means_code: '1',
+        customer_tax_id: '1020304050',
+        due_date: null,
+      },
+      paidByTransfer,
+    );
+
+    await h.refreshOrderDraftPaymentMeans(7, 40);
+
+    expect(h.prisma.invoices.update).toHaveBeenCalledWith({
+      where: { id: 7 },
+      data: { payment_form: '1', payment_means_code: '47', due_date: null },
+    });
+  });
+
+  it('keeps the Consumidor final cash «Acuerdo mutuo» draft untouched', async () => {
+    const h = build(
+      {
+        id: 8,
+        status: 'draft',
+        payment_form: '1',
+        payment_means_code: 'ZZZ',
+        customer_tax_id: '222222222222',
+        due_date: null,
+      },
+      paidByTransfer,
+    );
+
+    await h.refreshOrderDraftPaymentMeans(8, 40);
+
+    expect(h.prisma.orders.findFirst).not.toHaveBeenCalled();
+    expect(h.prisma.invoices.update).not.toHaveBeenCalled();
+  });
+
+  it('never rewrites a document already sent', async () => {
+    const h = build(
+      { id: 9, status: 'sent', payment_form: '2', payment_means_code: '1', customer_tax_id: 'x', due_date: null },
+      paidByTransfer,
+    );
+
+    await h.refreshOrderDraftPaymentMeans(9, 40);
+
+    expect(h.prisma.invoices.update).not.toHaveBeenCalled();
+  });
+
+  it('a credit order keeps credit and gets the receivable due date', async () => {
+    const due = new Date('2026-11-27T00:00:00Z');
+    const h = build(
+      { id: 10, status: 'draft', payment_form: '2', payment_means_code: 'ZZZ', customer_tax_id: '1', due_date: null },
+      { id: 41, payment_form: '2', payments: [] },
+    );
+    h.resolveCreditDueDate.mockResolvedValue(due);
+
+    await h.refreshOrderDraftPaymentMeans(10, 41);
+
+    expect(h.prisma.invoices.update).toHaveBeenCalledWith({
+      where: { id: 10 },
+      data: { payment_form: '2', payment_means_code: 'ZZZ', due_date: due },
     });
   });
 });

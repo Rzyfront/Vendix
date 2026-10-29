@@ -420,6 +420,10 @@ export interface OrderItem {
   applied_price_tier_id?: number | null;
   applied_price_tier_name_snapshot?: string | null;
   stock_units_consumed?: number | null;
+  /** Precio editado a mano en el POS: la tarifa del cliente no lo pisa. */
+  is_price_overridden?: boolean | null;
+  /** Producto por peso (Decimal llega como string). */
+  weight?: number | string | null;
   item_type?: string;
   created_at: string;
   updated_at: string;
@@ -538,6 +542,10 @@ export interface Product {
    * del GET /store/orders/:id (findOne incluye products).
    */
   requires_serial_numbers?: boolean;
+  /** Multi-tarifa activa: sin ella la tarifa del cliente no cambia el precio. */
+  has_multiple_price_tiers?: boolean;
+  /** Tarifas habilitadas en el producto (`GET /store/orders/:id`). */
+  product_price_tier_assignments?: Array<{ price_tier_id: number }>;
 }
 
 export interface ProductVariant {
@@ -1330,6 +1338,8 @@ export interface ItemChangesDto {
   }>;
   update?: Array<{ order_item_id: number; quantity: number }>;
   remove?: Array<{ order_item_id: number; cancellation_type?: ItemCancellationType }>;
+  /** Cambia la tarifa de la línea; `null` restaura el precio regular. */
+  retier?: Array<{ order_item_id: number; price_tier_id: number | null }>;
   reason?: string;
   expected_version?: string;
 }

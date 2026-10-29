@@ -25,6 +25,9 @@ export type DefaultSaleUnit = {
     id: number;
     name: string;
     discount_percentage: number;
+    adjustment_type: string;
+    adjustment_value: number | null;
+    amount_scope: string;
     is_package_unit: boolean;
     units_per_package: number | null;
   };
@@ -73,6 +76,9 @@ export async function resolveDefaultSaleUnits(
           id: true,
           name: true,
           discount_percentage: true,
+          adjustment_type: true,
+          adjustment_value: true,
+          amount_scope: true,
           is_package_unit: true,
           units_per_package: true,
         },
@@ -103,6 +109,10 @@ export async function resolveDefaultSaleUnits(
         id: tier.id,
         name: tier.name,
         discount_percentage: Number(tier.discount_percentage ?? 0),
+        adjustment_type: tier.adjustment_type,
+        adjustment_value:
+          tier.adjustment_value == null ? null : Number(tier.adjustment_value),
+        amount_scope: tier.amount_scope,
         is_package_unit: !!tier.is_package_unit,
         units_per_package: tier.units_per_package ?? null,
       },

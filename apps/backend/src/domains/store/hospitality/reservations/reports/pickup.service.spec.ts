@@ -52,6 +52,8 @@ describe('LodgingPickupService (H7.3 pickup and forecast)', () => {
       projected_occupancy_pct: 125,
     });
     expect(result.totals).toMatchObject({ on_books: 5, pickup_7: 2, pickup_30: 4 });
+    // The export dates its file in the store timezone.
+    expect(result.timezone).toBe('America/Bogota');
   });
 
   it('covers the next N stay dates from the store today, with empty days at zero', async () => {

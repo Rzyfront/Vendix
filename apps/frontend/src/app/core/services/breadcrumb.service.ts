@@ -834,7 +834,7 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/hospitality/reservations',
-      title: 'Reservas',
+      title: 'Reservas de hotel',
       parent: 'Hotelería',
       icon: 'calendar-check',
     },
@@ -857,46 +857,22 @@ export class BreadcrumbService {
       icon: 'concierge-bell',
     },
     {
-      path: '/admin/hospitality/exempt-services',
-      title: 'Servicios exentos',
-      parent: 'Hotelería',
-      icon: 'file-check',
-    },
-    {
       path: '/admin/hospitality/housekeeping',
-      title: 'Housekeeping',
+      title: 'Limpieza',
       parent: 'Hotelería',
       icon: 'sparkles',
     },
     {
-      path: '/admin/hospitality/channels',
-      title: 'Canales',
-      parent: 'Hotelería',
-      icon: 'share-2',
-    },
-    {
-      path: '/admin/hospitality/night-audit',
-      title: 'Cierre del día',
-      parent: 'Hotelería',
-      icon: 'moon',
-    },
-    {
-      path: '/admin/hospitality/performance',
-      title: 'Indicadores',
+      path: '/admin/hospitality/reports',
+      title: 'Reportes de hotel',
       parent: 'Hotelería',
       icon: 'chart-line',
     },
     {
-      path: '/admin/hospitality/pickup',
-      title: 'Pickup y pronóstico',
+      path: '/admin/hospitality/compliance',
+      title: 'Cumplimiento',
       parent: 'Hotelería',
-      icon: 'calendar-clock',
-    },
-    {
-      path: '/admin/hospitality/cancellations',
-      title: 'No-shows y cancelaciones',
-      parent: 'Hotelería',
-      icon: 'calendar-x',
+      icon: 'shield-check',
     },
 
     // Customers

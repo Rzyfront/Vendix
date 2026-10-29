@@ -3046,6 +3046,13 @@
       />
     }
 
+    <!-- S6 — tarifa preferencial del titular -->
+    <app-pos-customer-tier-modal
+      [prompt]="customerTierPrompt()"
+      (confirmed)="onCustomerTierConfirmed($event)"
+      (dismissed)="onCustomerTierDismissed()"
+    />
+
     <!-- SHIP MODAL (delivery-type aware) -->
     <app-modal
       [isOpen]="showShipModal()"
@@ -3224,6 +3231,7 @@
       [balance]="creditBalance()"
       [busy]="isEmittingInvoice()"
       (confirmed)="onCreditInvoiceConfirmed($event)"
+      (finalConsumer)="onCreditUseFinalConsumer()"
     ></app-credit-invoice-modal>
 
     <!-- DATOS DEL CLIENTE INCOMPLETOS (409 de la emisión: completar o Consumidor final) -->
@@ -3231,6 +3239,7 @@
       [(isOpen)]="showHolderModal"
       [issue]="holderIssue()"
       [busy]="isEmittingInvoice()"
+      [finalConsumerLabel]="hasUnpaidBalance() ? 'Emitir como Consumidor final (contado)' : 'Emitir como Consumidor final'"
       (saved)="onHolderCompleted()"
       (useFinalConsumer)="onHolderUseFinalConsumer()"
     ></app-customer-holder-completion-modal>
@@ -3315,6 +3324,8 @@
       (closed)="closeTitularSearch()"
       (selected)="onTitularSearchSelected($event)"
       (createNew)="onTitularSearchCreateNew($event)"
+      [canUseFinalConsumer]="!!orderData.customer_id"
+      (useFinalConsumer)="onTitularSearchUseFinalConsumer()"
     ></app-change-titular-search-modal>
 
     <!-- Paso 5: CAMBIO DE TITULAR (reutiliza app-customer-modal en crear-mode) -->

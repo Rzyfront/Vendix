@@ -933,7 +933,8 @@ export class PosProductService {
   }
 
   getProductByBarcode(barcode: string): Observable<Product | null> {
-    const params = new HttpParams().set('barcode', barcode);
+    // Hotelería (R5): una noche de hotel se cobra en la cuenta del huésped.
+    const params = new HttpParams().set('barcode', barcode).set('is_lodging', 'false');
     return this.http.get<any>(this.apiUrl, { params }).pipe(
       map((response) => this.firstTransformedProduct(response)),
       catchError((error: any) => {
@@ -943,7 +944,8 @@ export class PosProductService {
   }
 
   getProductBySku(sku: string): Observable<Product | null> {
-    const params = new HttpParams().set('sku', sku);
+    // Hotelería (R5): una noche de hotel se cobra en la cuenta del huésped.
+    const params = new HttpParams().set('sku', sku).set('is_lodging', 'false');
     return this.http.get<any>(this.apiUrl, { params }).pipe(
       map((response) => this.firstTransformedProduct(response)),
       catchError((error: any) => {

@@ -19,6 +19,8 @@ const NOTIFICATION_TYPES = [
   // T9 — listo de cocina: el mesero puede apagar/encender la campana
   // desde Configuración → Notificaciones, igual que el resto.
   'kitchen_ticket_ready',
+  // H4.3 — recordatorio anual (marzo) de renovar el RNT del hotel.
+  'lodging_rnt_renewal',
 ] as const;
 
 export class UpdateSubscriptionDto {

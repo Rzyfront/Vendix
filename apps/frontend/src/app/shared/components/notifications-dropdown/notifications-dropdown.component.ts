@@ -265,6 +265,8 @@ export class NotificationsDropdownComponent {
       // QUI-647 — espejo de installment_* del lado proveedor.
       ap_installment_due_soon: 'clock',
       ap_installment_overdue: 'alert-triangle',
+      // H4.3 — RNT renewal reminder (opens Configuración → Hotelería via data.route).
+      lodging_rnt_renewal: 'hotel',
       // Bookings — arrival & attending are the most urgent
       booking_created: 'calendar-plus',
       booking_confirmed: 'calendar-check',

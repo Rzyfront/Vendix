@@ -2,6 +2,7 @@ import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OrderItemChangesService } from './order-item-changes.service';
 import { OrdersService } from '../orders.service';
+import { PriceResolverService } from '../../products/services/price-resolver.service';
 
 const ORDER_ID = 100;
 const VERSION = '2026-10-25T10:00:00.000Z';
@@ -86,6 +87,9 @@ const build = (lines: any[], orderOver: Record<string, any> = {}) => {
     product_categories: { findMany: jest.fn().mockResolvedValue([]) },
     coupon_uses: { findFirst: jest.fn().mockResolvedValue(null), update: jest.fn().mockResolvedValue({}) },
     promotions: { findMany: jest.fn().mockResolvedValue([{ id: 1, name: 'Promo X' }, { id: 2, name: 'Promo Y' }]) },
+    price_tiers: { findMany: jest.fn().mockResolvedValue([]) },
+    product_price_tier_assignments: { findMany: jest.fn().mockResolvedValue([]) },
+    product_price_tier_overrides: { findMany: jest.fn().mockResolvedValue([]) },
     order_promotions: {
       deleteMany: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({}),
@@ -155,7 +159,7 @@ const build = (lines: any[], orderOver: Record<string, any> = {}) => {
   const service = new OrderItemChangesService(
     db, orderFlow as any, ordersService as any, kitchen as any,
     stockLevel as any, validator as any, allocator as any, sse as any, audit as any,
-    promotionEngine as any, coupons as any,
+    promotionEngine as any, coupons as any, new PriceResolverService(),
   );
   return { service, db, orderFlow, kitchen, stockLevel, sse, validator, callOrder, order, promotionEngine, coupons, allocator, ordersService };
 };
@@ -1200,5 +1204,115 @@ describe('OrderItemChangesService (QUI-650)', () => {
       ctx.service.apply(ORDER_ID, { ...dto, expected_version: `${VERSION}|x` }),
     ).rejects.toMatchObject({ errorCode: ErrorCodes.ORD_ITEM_CHANGES_INVALID_001.code });
     expect(ctx.orderFlow.cancelOrderItemInTx).not.toHaveBeenCalled();
+  });
+
+  // Tarifa preferencial del cliente sobre líneas existentes (S6, detalle de orden).
+  describe('retier', () => {
+    const TIER = {
+      id: 82, name: 'Preferencial 10', is_package_unit: false, units_per_package: null,
+      discount_percentage: 10, adjustment_type: 'percent_discount', adjustment_value: null, amount_scope: 'per_unit',
+    };
+    const PRODUCT = { id: 11, base_price: 10, is_on_sale: false, sale_price: null, has_multiple_price_tiers: true };
+    const buildTier = (lines: any[], ctxOver: Record<string, any> = { is_owner: true }) => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 4, user_id: 9, ...ctxOver } as any);
+      const ctx = build(lines);
+      ctx.db.products.findMany.mockResolvedValue([PRODUCT]);
+      ctx.db.price_tiers.findMany.mockResolvedValue([TIER]);
+      ctx.db.product_price_tier_assignments.findMany.mockResolvedValue([{ product_id: 11, price_tier_id: 82 }]);
+      return ctx;
+    };
+
+    it('T1) aplica la tarifa: precio del servidor, impuesto re-tasado y snapshot de tarifa', async () => {
+      const ctx = buildTier([mkLine(1), mkLine(2)]);
+      const dto = { retier: [{ order_item_id: 1, price_tier_id: 82 }] };
+      const preview = await ctx.service.preview(ORDER_ID, dto);
+      expect(preview.can_apply).toBe(true);
+      expect(preview.lines[0]).toMatchObject({ order_item_id: 1, action: 'reprice', quantity_after: 2 });
+      expect(preview.lines[0].messages.join(' ')).toContain('Preferencial 10');
+
+      await applyV(ctx, dto);
+      expect(ctx.db.order_items.update).toHaveBeenCalledTimes(1);
+      const arg = ctx.db.order_items.update.mock.calls[0][0];
+      expect(arg.where).toEqual({ id: 1 });
+      expect(arg.data.quantity).toBe(2);
+      expect(Number(arg.data.unit_price)).toBe(9);
+      expect(Number(arg.data.total_price)).toBe(18);
+      expect(Number(arg.data.final_unit_price)).toBe(9.9);
+      expect(Number(arg.data.catalog_unit_price)).toBe(9);
+      expect(arg.data.applied_price_tier_id).toBe(82);
+      expect(arg.data.applied_price_tier_name_snapshot).toBe('Preferencial 10');
+      expect(ctx.db.order_item_taxes.update).toHaveBeenCalledTimes(1);
+      expect(ctx.db.order_item_taxes.update.mock.calls[0][0].where).toEqual({ id: 100 });
+      expect(Number(ctx.db.order_item_taxes.update.mock.calls[0][0].data.tax_amount)).toBe(1.8);
+      expect(ctx.stockLevel.releaseReservationQuantity).not.toHaveBeenCalled();
+    });
+
+    it('T2) price_tier_id null restaura el precio regular y quita la tarifa', async () => {
+      const ctx = buildTier([
+        mkLine(1, { unit_price: 9, final_unit_price: 9.9, total_price: 18, applied_price_tier_id: 82 }),
+      ]);
+      await applyV(ctx, { retier: [{ order_item_id: 1, price_tier_id: null }] });
+      const arg = ctx.db.order_items.update.mock.calls[0][0];
+      expect(Number(arg.data.unit_price)).toBe(10);
+      expect(Number(arg.data.total_price)).toBe(20);
+      expect(Number(arg.data.final_unit_price)).toBe(11);
+      expect(arg.data.applied_price_tier_id).toBeNull();
+      expect(arg.data.applied_price_tier_name_snapshot).toBeNull();
+      expect(Number(ctx.db.order_item_taxes.update.mock.calls[0][0].data.tax_amount)).toBe(2);
+    });
+
+    it('T3) sin permiso de aplicar tarifas: PRICING_TIER_PERMISSION_DENIED y nada se escribe', async () => {
+      const ctx = buildTier([mkLine(1)], { is_owner: false, permissions: [] });
+      const dto = { retier: [{ order_item_id: 1, price_tier_id: 82 }] };
+      await expect(ctx.service.preview(ORDER_ID, dto)).rejects.toMatchObject({
+        errorCode: ErrorCodes.PRICING_TIER_PERMISSION_DENIED.code,
+      });
+      expect(ctx.db.order_items.update).not.toHaveBeenCalled();
+    });
+
+    it('T4) tarifa no habilitada en el producto: PRICE_TIER_NOT_ALLOWED', async () => {
+      const ctx = buildTier([mkLine(1)]);
+      ctx.db.product_price_tier_assignments.findMany.mockResolvedValue([]);
+      await expect(
+        ctx.service.preview(ORDER_ID, { retier: [{ order_item_id: 1, price_tier_id: 82 }] }),
+      ).rejects.toMatchObject({ errorCode: ErrorCodes.PRICE_TIER_NOT_ALLOWED.code });
+    });
+
+    it('T5) una tarifa por paquete se bloquea (se cambia desde el POS)', async () => {
+      const ctx = buildTier([mkLine(1)]);
+      ctx.db.price_tiers.findMany.mockResolvedValue([{ ...TIER, is_package_unit: true, units_per_package: 6 }]);
+      const dto = { retier: [{ order_item_id: 1, price_tier_id: 82 }] };
+      const preview = await ctx.service.preview(ORDER_ID, dto);
+      expect(preview.can_apply).toBe(false);
+      expect(preview.lines[0].blocked_reason).toBe('Esta tarifa es una presentación: cámbiala desde el POS');
+      await expect(applyV(ctx, dto)).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_ITEM_CHANGES_INVALID_001.code,
+      });
+      expect(ctx.db.order_items.update).not.toHaveBeenCalled();
+    });
+
+    it('T6) una línea con precio editado a mano se bloquea (conserva el precio pactado)', async () => {
+      const ctx = buildTier([mkLine(1, { is_price_overridden: true })]);
+      const preview = await ctx.service.preview(ORDER_ID, { retier: [{ order_item_id: 1, price_tier_id: 82 }] });
+      expect(preview.can_apply).toBe(false);
+      expect(preview.lines[0].blocked_reason).toBe('Tiene un precio editado a mano; quítalo y agrégalo de nuevo para aplicar la tarifa');
+    });
+
+    it('T7) la misma línea en retier y update a la vez se rechaza', async () => {
+      const ctx = buildTier([mkLine(1)]);
+      await expect(
+        ctx.service.preview(ORDER_ID, {
+          update: [{ order_item_id: 1, quantity: 3 }],
+          retier: [{ order_item_id: 1, price_tier_id: 82 }],
+        }),
+      ).rejects.toMatchObject({ errorCode: ErrorCodes.ORD_ITEM_CHANGES_INVALID_001.code });
+    });
+
+    it('T8) retier hacia la misma tarifa no es un cambio', async () => {
+      const ctx = buildTier([mkLine(1, { applied_price_tier_id: 82 })]);
+      await expect(
+        ctx.service.preview(ORDER_ID, { retier: [{ order_item_id: 1, price_tier_id: 82 }] }),
+      ).rejects.toMatchObject({ message: expect.stringContaining('No hay cambios para aplicar') });
+    });
   });
 });

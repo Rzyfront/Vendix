@@ -26,7 +26,8 @@ import { CountryService } from '../../../../../../../core/services/country.servi
 import { LodgingReservation, LodgingReservationRoom } from '../../interfaces/reservation.interface';
 import {
   FOREIGN_DOCUMENT_TYPES,
-  guestFieldErrors,
+  GuestField,
+  guestFieldErrorMap,
   LodgingGuest,
   LodgingGuestRequest,
   reportsSire,
@@ -92,38 +93,61 @@ export interface GuestFormTarget {
       [title]="title()"
       [subtitle]="target()?.reservation?.reservation_number ?? ''"
     >
-      <form [formGroup]="form" class="space-y-4" data-testid="guest-form">
+      <form
+        [formGroup]="form"
+        id="guest-form"
+        class="space-y-4"
+        novalidate
+        data-testid="guest-form"
+        (ngSubmit)="onSubmit()"
+      >
         @if (roomOptions().length > 1) {
           <app-selector
             formControlName="reservation_room_id"
             label="Habitación"
             placeholder="Elige la habitación"
+            [required]="true"
             [options]="roomOptions()"
+            [errorText]="roomError()"
           />
         }
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <app-selector
             formControlName="document_type"
             label="Tipo de documento"
             placeholder="Elige el tipo"
             [required]="true"
             [options]="documentTypeOptions"
+            [errorText]="fieldErrors().document_type ?? ''"
           />
           <app-input
             formControlName="document_number"
             label="Número de documento"
             [required]="true"
+            [error]="fieldErrors().document_number ?? ''"
             customWrapperClass="mt-0"
           />
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
-          <app-input formControlName="first_name" label="Nombres" [required]="true" customWrapperClass="mt-0" />
-          <app-input formControlName="last_name" label="Apellidos" [required]="true" customWrapperClass="mt-0" />
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <app-input
+            formControlName="first_name"
+            label="Nombres"
+            [required]="true"
+            [error]="fieldErrors().first_name ?? ''"
+            customWrapperClass="mt-0"
+          />
+          <app-input
+            formControlName="last_name"
+            label="Apellidos"
+            [required]="true"
+            [error]="fieldErrors().last_name ?? ''"
+            customWrapperClass="mt-0"
+          />
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <app-selector
             formControlName="nationality_country_code"
             label="Nacionalidad"
@@ -131,30 +155,41 @@ export interface GuestFormTarget {
             [required]="nationalityRequired()"
             [searchable]="true"
             [options]="countryOptions"
+            [errorText]="fieldErrors().nationality_country_code ?? ''"
           />
           <app-input
             formControlName="birth_date"
             label="Fecha de nacimiento"
             type="date"
             [required]="sire()"
+            [error]="fieldErrors().birth_date ?? ''"
             customWrapperClass="mt-0"
           />
         </div>
         @if (sire()) {
-          <app-badge variant="warning" size="sm" data-testid="guest-form-sire">Reporta SIRE</app-badge>
+          <div class="space-y-1" data-testid="guest-form-sire">
+            <app-badge variant="warning" size="sm">Reporta a Migración (SIRE)</app-badge>
+            <p class="text-xs text-text-secondary" data-testid="guest-form-sire-help">
+              ¿Qué es esto? Los huéspedes extranjeros se reportan a Migración Colombia por el
+              SIRE (Sistema de Información para el Reporte de Extranjeros). Por eso se piden la
+              fecha de nacimiento y el permiso de ingreso.
+            </p>
+          </div>
         }
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <app-input
             formControlName="residence_city"
             label="Ciudad de residencia"
             [required]="true"
+            [error]="fieldErrors().residence_city ?? ''"
             customWrapperClass="mt-0"
           />
           <app-input
             formControlName="origin_city"
             label="Ciudad de procedencia"
             [required]="true"
+            [error]="fieldErrors().origin_city ?? ''"
             customWrapperClass="mt-0"
           />
         </div>
@@ -165,10 +200,11 @@ export interface GuestFormTarget {
           placeholder="Elige el motivo"
           [required]="true"
           [options]="purposeOptions"
+          [errorText]="fieldErrors().travel_purpose ?? ''"
         />
 
         @if (sire()) {
-          <div class="grid grid-cols-2 items-end gap-3">
+          <div class="grid grid-cols-1 items-end gap-3 sm:grid-cols-2">
             <app-input
               formControlName="entry_permit_type"
               label="Permiso de ingreso"
@@ -179,15 +215,14 @@ export interface GuestFormTarget {
           </div>
         }
 
-        @if (errors().length) {
-          <ul
-            class="space-y-1 rounded-lg bg-error/10 px-3 py-2 text-sm font-medium text-text-primary"
+        @if (serverError()) {
+          <p
+            class="rounded-lg bg-error/10 px-3 py-2 text-sm font-medium text-text-primary"
+            role="alert"
             data-testid="guest-errors"
           >
-            @for (error of errors(); track error) {
-              <li>{{ error }}</li>
-            }
-          </ul>
+            {{ serverError() }}
+          </p>
         }
 
         <div
@@ -208,13 +243,21 @@ export interface GuestFormTarget {
         </div>
       </form>
 
-      <div slot="footer" class="flex justify-end gap-2">
+      <div slot="footer" class="flex flex-wrap items-center justify-end gap-2">
+        @if (!consent()) {
+          <p class="mr-auto text-xs text-text-secondary" data-testid="guest-consent-hint">
+            Acepta el aviso de tratamiento de datos
+          </p>
+        }
         <app-button variant="ghost" (clicked)="closed.emit()">Cancelar</app-button>
         <app-button
+          type="submit"
+          form="guest-form"
           variant="primary"
           [loading]="saving()"
           [disabled]="!consent()"
-          (clicked)="onSubmit()"
+          [ariaLabel]="consent() ? '' : 'Guardar: acepta el aviso de tratamiento de datos'"
+          data-testid="guest-save"
         >
           <app-icon slot="icon" name="save" [size]="16" />
           Guardar
@@ -234,7 +277,13 @@ export class GuestFormModalComponent {
   readonly saved = output<LodgingGuest>();
 
   readonly saving = signal(false);
-  readonly errors = signal<string[]>([]);
+  /** U5 — messages under each field, shown after a save attempt. */
+  readonly fieldErrors = signal<Partial<Record<GuestField, string>>>({});
+  readonly roomError = signal('');
+  /** API rejection that no single field owns. */
+  readonly serverError = signal('');
+  /** After a save attempt, fixing a field clears its message right away. */
+  private attempted = false;
   readonly documentType = signal('');
   readonly nationality = signal('');
   readonly consent = signal(false);
@@ -298,6 +347,10 @@ export class GuestFormModalComponent {
     data_consent.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((value) => this.consent.set(value));
+    this.form.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      const target = this.target();
+      if (this.attempted && target) this.validate(this.body(target));
+    });
   }
 
   reset(): void {
@@ -326,15 +379,47 @@ export class GuestFormModalComponent {
     this.documentType.set(raw.document_type);
     this.nationality.set(raw.nationality_country_code);
     this.consent.set(false);
-    this.errors.set([]);
+    this.fieldErrors.set({});
+    this.roomError.set('');
+    this.serverError.set('');
+    this.attempted = false;
   }
 
   onSubmit(): void {
     const target = this.target();
-    if (!target) return;
+    if (!target || this.saving()) return;
+    this.attempted = true;
+    const body = this.body(target);
+    if (!this.validate(body) || !body.data_consent) {
+      this.form.markAllAsTouched();
+      return;
+    }
+    this.serverError.set('');
+
+    const reservationId = target.reservation.id;
+    const request = target.guest
+      ? this.reservationsService.updateGuest(reservationId, target.guest.id, body)
+      : this.reservationsService.createGuest(reservationId, body);
+    this.saving.set(true);
+    request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (guest) => {
+        this.saving.set(false);
+        this.toastService.success(target.guest ? 'Huésped actualizado' : 'Huésped registrado');
+        this.saved.emit(guest);
+      },
+      error: (message: unknown) => {
+        this.saving.set(false);
+        const text = typeof message === 'string' ? message : 'No se pudo guardar el huésped';
+        this.serverError.set(text);
+      },
+    });
+  }
+
+  /** Request body from the form, trimmed. */
+  private body(target: GuestFormTarget): LodgingGuestRequest {
     const raw = this.form.getRawValue();
     const foreign = this.sire();
-    const body: LodgingGuestRequest = {
+    return {
       reservation_room_id: raw.reservation_room_id ?? undefined,
       customer_id: target.guest?.customer_id ?? (target.holder ? target.reservation.customer.id : undefined),
       is_primary: target.guest ? undefined : target.holder,
@@ -351,30 +436,15 @@ export class GuestFormModalComponent {
       is_non_resident: foreign ? raw.is_non_resident : false,
       data_consent: raw.data_consent,
     };
-    const errors = guestFieldErrors(body);
-    if (this.roomOptions().length > 1 && !body.reservation_room_id) {
-      errors.unshift('Elige la habitación');
-    }
-    this.errors.set(errors);
-    if (errors.length || !body.data_consent) return;
+  }
 
-    const reservationId = target.reservation.id;
-    const request = target.guest
-      ? this.reservationsService.updateGuest(reservationId, target.guest.id, body)
-      : this.reservationsService.createGuest(reservationId, body);
-    this.saving.set(true);
-    request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (guest) => {
-        this.saving.set(false);
-        this.toastService.success(target.guest ? 'Huésped actualizado' : 'Huésped registrado');
-        this.saved.emit(guest);
-      },
-      error: (message: unknown) => {
-        this.saving.set(false);
-        const text = typeof message === 'string' ? message : 'No se pudo guardar el huésped';
-        this.errors.set(text.split('. '));
-      },
-    });
+  /** Writes the error under each field; true when nothing is missing. */
+  private validate(body: LodgingGuestRequest): boolean {
+    const errors = guestFieldErrorMap(body);
+    const roomMissing = this.roomOptions().length > 1 && !body.reservation_room_id;
+    this.fieldErrors.set(errors);
+    this.roomError.set(roomMissing ? 'Elige la habitación' : '');
+    return Object.keys(errors).length === 0 && !roomMissing;
   }
 }
 

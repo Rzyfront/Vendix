@@ -44,6 +44,13 @@ export interface HotelSearchResult {
   room_types: HotelRoomType[];
 }
 
+/** H4.3 — what the booking engine shows before any search. */
+export interface HotelInfo {
+  rnt_number: string | null;
+  check_in_time: string;
+  check_out_time: string;
+}
+
 export interface HotelHold {
   reservation_id: number;
   reservation_number: string;
@@ -70,6 +77,52 @@ export interface HotelReservation {
   checkout_url: string | null;
 }
 
+/** H8.1 — what the online check-in form shows (no personal data of the party). */
+export interface HotelPrecheckin {
+  store_name: string;
+  reservation_number: string;
+  arrival_date: string;
+  departure_date: string;
+  expected_guests: number;
+  registered_count: number;
+  /** The guest is in house: the link only adds new companions. */
+  checked_in: boolean;
+  rooms: { id: number; name: string }[];
+  registered: { name: string; is_primary: boolean }[];
+  completed_at: string | null;
+}
+
+/** Result of sending the online check-in: partial while guests are missing. */
+export interface HotelPrecheckinResult {
+  guests: number;
+  completed_at: string | null;
+  registered_count: number;
+  expected_guests: number;
+}
+
+/** H8.5 — the stay the guest rates (no personal data) and the rating already given. */
+export interface HotelStayReview {
+  store_name: string;
+  reservation_number: string;
+  arrival_date: string;
+  departure_date: string;
+  review: { rating: number; comment: string | null; created_at: string } | null;
+}
+
+/** H8.1 — one guest of the online check-in: the TRA and SIRE fields. */
+export interface HotelPrecheckinGuest {
+  reservation_room_id?: number;
+  document_type: string;
+  document_number: string;
+  first_name: string;
+  last_name: string;
+  nationality_country_code?: string;
+  birth_date?: string;
+  residence_city: string;
+  origin_city: string;
+  travel_purpose: string;
+}
+
 /** H6.6 — hotel booking engine of the storefront. */
 @Injectable({ providedIn: 'root' })
 export class HotelBookingService {
@@ -80,6 +133,12 @@ export class HotelBookingService {
   private headers(): HttpHeaders {
     const storeId = this.tenant.getCurrentDomainConfig()?.store_id;
     return new HttpHeaders({ 'x-store-id': storeId?.toString() || '' });
+  }
+
+  hotel(): Observable<HotelInfo> {
+    return this.http
+      .get<{ data: HotelInfo }>(`${this.apiUrl}/hotel`, { headers: this.headers() })
+      .pipe(map((r) => r.data));
   }
 
   search(query: HotelSearchQuery): Observable<HotelSearchResult> {
@@ -105,6 +164,50 @@ export class HotelBookingService {
       .post<{ data: HotelHold }>(
         `${this.apiUrl}/holds`,
         { ...body, return_url: `${window.location.origin}/hotel/reserva` },
+        { headers: this.headers() },
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  /** H8.1 — online check-in by link token, no login. */
+  getPrecheckin(token: string): Observable<HotelPrecheckin> {
+    return this.http
+      .get<{ data: HotelPrecheckin }>(`${this.apiUrl}/precheckin/${encodeURIComponent(token)}`, {
+        headers: this.headers(),
+      })
+      .pipe(map((r) => r.data));
+  }
+
+  submitPrecheckin(
+    token: string,
+    body: { guests: HotelPrecheckinGuest[]; data_consent: boolean },
+  ): Observable<HotelPrecheckinResult> {
+    return this.http
+      .post<{ data: HotelPrecheckinResult }>(
+        `${this.apiUrl}/precheckin/${encodeURIComponent(token)}`,
+        body,
+        { headers: this.headers() },
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  /** H8.5 — private stay rating by link token, no login. */
+  getStayReview(token: string): Observable<HotelStayReview> {
+    return this.http
+      .get<{ data: HotelStayReview }>(`${this.apiUrl}/stay-review/${encodeURIComponent(token)}`, {
+        headers: this.headers(),
+      })
+      .pipe(map((r) => r.data));
+  }
+
+  submitStayReview(
+    token: string,
+    body: { rating: number; comment?: string | null },
+  ): Observable<NonNullable<HotelStayReview['review']>> {
+    return this.http
+      .post<{ data: NonNullable<HotelStayReview['review']> }>(
+        `${this.apiUrl}/stay-review/${encodeURIComponent(token)}`,
+        body,
         { headers: this.headers() },
       )
       .pipe(map((r) => r.data));

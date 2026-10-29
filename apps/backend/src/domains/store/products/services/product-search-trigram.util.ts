@@ -91,6 +91,11 @@ export interface TrigramFilterSet {
   readonly isBatchProduced?: boolean | null;
   /** undefined = sin filtro ("Todos"); true/false = filtra (QUI-729). */
   readonly isIngredient?: boolean | null | undefined;
+  /**
+   * Hotelería (R5): true = solo noches de hotel (producto de un tipo de
+   * habitación), false = sin ellas. El caller ya resolvió el default del POS.
+   */
+  readonly isLodging?: boolean | null;
   readonly ids?: readonly number[] | null;
 }
 
@@ -156,7 +161,7 @@ class ParamAcc {
 
 /**
  * Filtros AND espejo de `buildProductWhere` (F-028). Orden fijo:
- * scope → state → brand → category → flags → ids. El COUNT twin llama a esta
+ * scope → state → brand → category → flags → lodging → ids. El COUNT twin llama a esta
  * misma función: predicados byte-idénticos por construcción (F-029).
  */
 export function buildTrigramFilterClauses(
@@ -232,6 +237,13 @@ export function buildTrigramFilterClauses(
   if (f.isIngredient !== undefined && f.isIngredient !== null) {
     assertBoolean(f.isIngredient, 'isIngredient');
     clauses.push(`p.is_ingredient = ${acc.push(f.isIngredient)}::boolean`);
+  }
+  if (f.isLodging !== undefined && f.isLodging !== null) {
+    assertBoolean(f.isLodging, 'isLodging');
+    // Sin param: el predicado es fijo, la numeración $n del twin no cambia.
+    clauses.push(
+      `${f.isLodging ? '' : 'NOT '}EXISTS (SELECT 1 FROM public.lodging_unit_types lut WHERE lut.product_id = p.id)`,
+    );
   }
   if (f.ids !== undefined && f.ids !== null) {
     if (!Array.isArray(f.ids) || f.ids.length === 0) {

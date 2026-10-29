@@ -8,6 +8,8 @@ export interface NightAuditReservationRow {
 export interface NightAuditDiscrepancy {
   reservation_id: number;
   reservation_number: string;
+  /** U15 — holder; absent in snapshots closed before it existed. */
+  guest_name?: string;
   room: string;
   rate_amount: string;
   reason: 'not_posted' | 'voided';
@@ -33,4 +35,11 @@ export interface NightAuditView {
   reopened_by: string | null;
   reopen_reason: string | null;
   summary: NightAuditSummary;
+  /** U15 — what "Cerrar día" will charge now; null on a closed day. */
+  close_preview?: NightAuditClosePreview | null;
+}
+
+export interface NightAuditClosePreview {
+  nights: number;
+  amount: string;
 }

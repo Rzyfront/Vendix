@@ -1201,6 +1201,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Order has a DIAN-accepted electronic invoice without an accepted credit note; issue the credit note before cancelling',
   },
+  ORD_FISCAL_NOTE_IN_PROGRESS_001: {
+    code: 'ORD_FISCAL_NOTE_IN_PROGRESS_001',
+    httpStatus: 409,
+    devMessage: 'Another request is already issuing a fiscal note for this order; retry in a few seconds',
+  },
   ORD_STOCK_COMMIT_STATE_001: {
     code: 'ORD_STOCK_COMMIT_STATE_001',
     httpStatus: 409,
@@ -1813,6 +1818,12 @@ export const ErrorCodes = {
     code: 'CUST_FIND_001',
     httpStatus: 404,
     devMessage: 'Customer not found',
+  },
+  CUST_PRICE_TIER_001: {
+    code: 'CUST_PRICE_TIER_001',
+    httpStatus: 400,
+    devMessage:
+      'The price tier does not exist in this store or is not a customer tier',
   },
   CUST_CREATE_001: {
     code: 'CUST_CREATE_001',
@@ -5892,6 +5903,16 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La tarea ya no está pendiente o no está asignada a ti',
   },
+  LODGING_HOUSEKEEPING_TASK_DUP_001: {
+    code: 'LODGING_HOUSEKEEPING_TASK_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe una tarea de ese tipo para la habitación en esa fecha',
+  },
+  LODGING_HOUSEKEEPING_TASK_DATE_001: {
+    code: 'LODGING_HOUSEKEEPING_TASK_DATE_001',
+    httpStatus: 400,
+    devMessage: 'La fecha de la tarea no puede ser anterior a hoy',
+  },
   // Hospitality Suite (H5.3) — inventory blocks (maintenance, owner use)
   LODGING_BLOCK_FIND_001: {
     code: 'LODGING_BLOCK_FIND_001',
@@ -6154,6 +6175,76 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Cliente no encontrado en la tienda',
   },
+  // Hospitality Suite (H4.1) — TRA token (only the "Probar conexión" button)
+  LODGING_TRA_TOKEN_001: {
+    code: 'LODGING_TRA_TOKEN_001',
+    httpStatus: 400,
+    devMessage: 'Pega primero el token TRA que el MinCIT envió al correo del RNT',
+  },
+  // Hospitality Suite (H4.2) — SIRE sheet of a movement that is not in the store
+  LODGING_SIRE_NOT_FOUND_001: {
+    code: 'LODGING_SIRE_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'El registro SIRE no existe en esta tienda',
+  },
+  // Hospitality Suite (H8.4, D12) — key / access card handover log
+  LODGING_KEY_STATUS_001: {
+    code: 'LODGING_KEY_STATUS_001',
+    httpStatus: 409,
+    devMessage: 'Las llaves se entregan a huéspedes en casa: haz el check-in primero',
+  },
+  LODGING_KEY_DUP_001: {
+    code: 'LODGING_KEY_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Esa llave ya está entregada: registra su devolución antes de entregarla de nuevo',
+  },
+  LODGING_KEY_FIND_001: {
+    code: 'LODGING_KEY_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Entrega de llave no encontrada en la reserva',
+  },
+  LODGING_KEY_RETURNED_001: {
+    code: 'LODGING_KEY_RETURNED_001',
+    httpStatus: 409,
+    devMessage: 'Esa llave ya fue devuelta',
+  },
+  LODGING_KEY_ROOM_001: {
+    code: 'LODGING_KEY_ROOM_001',
+    httpStatus: 400,
+    devMessage: 'Elige una habitación activa de la reserva',
+  },
+  // Hospitality Suite (H8.1) — online check-in link
+  LODGING_PRECHECKIN_FIND_001: {
+    code: 'LODGING_PRECHECKIN_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Este enlace de pre-registro no existe. Pide uno nuevo al hotel',
+  },
+  LODGING_PRECHECKIN_EXPIRED_001: {
+    code: 'LODGING_PRECHECKIN_EXPIRED_001',
+    httpStatus: 410,
+    devMessage: 'El enlace de pre-registro venció: la estadía ya terminó o fue cancelada',
+  },
+  LODGING_PRECHECKIN_DOMAIN_001: {
+    code: 'LODGING_PRECHECKIN_DOMAIN_001',
+    httpStatus: 409,
+    devMessage: 'Activa la tienda en línea para compartir el enlace de pre-registro',
+  },
+  // Hospitality Suite (H8.5) — private stay rating the guest gives after check-out.
+  LODGING_STAY_REVIEW_FIND_001: {
+    code: 'LODGING_STAY_REVIEW_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Este enlace para calificar tu estadía no existe',
+  },
+  LODGING_STAY_REVIEW_CLOSED_001: {
+    code: 'LODGING_STAY_REVIEW_CLOSED_001',
+    httpStatus: 410,
+    devMessage: 'Este enlace para calificar ya no está disponible: se abre al salir del hotel y vence a los 30 días',
+  },
+  LODGING_STAY_REVIEW_DUP_001: {
+    code: 'LODGING_STAY_REVIEW_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya recibimos tu calificación de esta estadía. ¡Gracias!',
+  },
   // Hospitality Suite (H3.2) — check-in that opens the folio.
   LODGING_CHECKIN_EARLY_001: {
     code: 'LODGING_CHECKIN_EARLY_001',
@@ -6255,6 +6346,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El cliente a facturar no es válido',
   },
+  LODGING_CHECKOUT_FROZEN_NIGHTS_001: {
+    code: 'LODGING_CHECKOUT_FROZEN_NIGHTS_001',
+    httpStatus: 409,
+    devMessage: 'Hay noches sin cobrar en días cerrados: reabre el día',
+  },
   // H3.8 — split folio.
   LODGING_FOLIO_SPLIT_001: {
     code: 'LODGING_FOLIO_SPLIT_001',
@@ -6327,6 +6423,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Datos inválidos para la tarifa de precios',
   },
+  PRICE_TIER_ADJUSTMENT_001: {
+    code: 'PRICE_TIER_ADJUSTMENT_001',
+    httpStatus: 400,
+    devMessage:
+      'La regla de la tarifa necesita un valor mayor que 0 (y un recargo porcentual de máximo 1000 %)',
+  },
   PRICE_TIER_NOT_ALLOWED: {
     code: 'PRICE_TIER_NOT_ALLOWED',
     httpStatus: 422,
@@ -6342,6 +6444,11 @@ export const ErrorCodes = {
     code: 'PRICE_TIER_OVERRIDE_PRODUCT_001',
     httpStatus: 404,
     devMessage: 'Producto no encontrado para asignar override de tarifa',
+  },
+  PRICE_TIER_OVERRIDE_VARIANT_001: {
+    code: 'PRICE_TIER_OVERRIDE_VARIANT_001',
+    httpStatus: 404,
+    devMessage: 'La variante no pertenece a este producto',
   },
   PROD_UOM_NOT_STOCK_ELIGIBLE: {
     code: 'PROD_UOM_NOT_STOCK_ELIGIBLE',

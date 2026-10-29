@@ -35,6 +35,9 @@ import {
 import { SellableStockAllocator } from '../../inventory/shared/services/sellable-stock-allocator.service';
 import { PromotionEngineService } from '../../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../../coupons/coupons.service';
+import { PriceResolverService } from '../../products/services/price-resolver.service';
+import { resolveTierSnapshotsForItems } from '../../products/services/tier-snapshot.util';
+import { TaxFiscalType } from '../../taxes/dto';
 import { OrderItemChangesDto } from './dto/order-item-changes.dto';
 
 type Client = Prisma.TransactionClient | StorePrismaService;
@@ -116,6 +119,17 @@ interface PlannedUpdate {
   /** Impuesto TOTAL resultante de la línea (filas, o `tax_amount_item` × unidades). */
   new_tax_total: number;
   reserve_delta_units: number; // >0 reservar, <0 liberar, 0 nada
+  /** Cambio de tarifa (misma cantidad): precio y snapshot de tarifa nuevos. */
+  retier?: PlannedRetier;
+}
+interface PlannedRetier {
+  /** La línea con el precio y la tarifa nuevos, para cotizar y redistribuir. */
+  line: any;
+  unit_price: number;
+  final_unit_price: number;
+  catalog_unit_price: number;
+  tier_id: number | null;
+  tier_name: string | null;
 }
 /** Línea NO tocada por el usuario cuyo descuento/impuesto cambia al re-cotizar. */
 interface PlannedReprice {
@@ -179,6 +193,7 @@ export class OrderItemChangesService {
     private readonly auditService: AuditService,
     private readonly promotionEngine: PromotionEngineService,
     private readonly couponsService: CouponsService,
+    private readonly priceResolver: PriceResolverService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -270,6 +285,16 @@ export class OrderItemChangesService {
                 : {}),
               ...(u.new_stock_units != null
                 ? { stock_units_consumed: u.new_stock_units }
+                : {}),
+              ...(u.retier
+                ? {
+                    unit_price: new Prisma.Decimal(u.retier.unit_price),
+                    final_unit_price: new Prisma.Decimal(u.retier.final_unit_price),
+                    catalog_unit_price: new Prisma.Decimal(u.retier.catalog_unit_price),
+                    catalog_final_price: new Prisma.Decimal(u.retier.final_unit_price),
+                    applied_price_tier_id: u.retier.tier_id,
+                    applied_price_tier_name_snapshot: u.retier.tier_name,
+                  }
                 : {}),
               updated_at: new Date(),
             },
@@ -952,6 +977,235 @@ export class OrderItemChangesService {
       });
     }
 
+    // ---- retier: tarifa preferencial del cliente (misma cantidad) ------------
+    // El precio lo resuelve el servidor con la misma regla del cobro POS; el
+    // impuesto se re-tasa con las tarifas que la línea YA tiene (snapshot
+    // fiscal de la orden), igual que un cambio de cantidad.
+    const retierDtos = (dto.retier ?? []).filter((r) => {
+      const l = lineById.get(r.order_item_id);
+      if (!l) {
+        throw this.invalid(
+          `La línea #${r.order_item_id} no existe en la orden o ya está cancelada`,
+        );
+      }
+      return (l.applied_price_tier_id ?? null) !== (r.price_tier_id ?? null);
+    });
+    if (retierDtos.length > 0) {
+      const retierLines = retierDtos.map((r) => lineById.get(r.order_item_id));
+      const snapshots = await resolveTierSnapshotsForItems(
+        db,
+        retierLines.map((l, i) => ({
+          product_id: l.product_id,
+          product_variant_id: l.product_variant_id ?? null,
+          quantity: l.quantity,
+          // Una línea personalizada no tiene tarifas: se bloquea abajo.
+          applied_price_tier_id:
+            l.product_id != null ? (retierDtos[i].price_tier_id ?? null) : null,
+        })),
+        RequestContextService.getContext(),
+      );
+      const productIds = [
+        ...new Set(
+          retierLines
+            .map((l) => l.product_id)
+            .filter((id): id is number => typeof id === 'number'),
+        ),
+      ];
+      const variantIds = [
+        ...new Set(
+          retierLines
+            .map((l) => l.product_variant_id)
+            .filter((id): id is number => typeof id === 'number'),
+        ),
+      ];
+      const retierProducts: any[] = productIds.length
+        ? await db.products.findMany({
+            where: { id: { in: productIds } },
+            select: {
+              id: true,
+              base_price: true,
+              is_on_sale: true,
+              sale_price: true,
+              has_multiple_price_tiers: true,
+            },
+          })
+        : [];
+      const retierVariants: any[] = variantIds.length
+        ? await db.product_variants.findMany({
+            where: { id: { in: variantIds } },
+            select: { id: true, price_override: true, is_on_sale: true, sale_price: true },
+          })
+        : [];
+      const productById = new Map<number, any>(retierProducts.map((p) => [p.id, p]));
+      const variantById = new Map<number, any>(retierVariants.map((v) => [v.id, v]));
+      const fmt = (n: number) => `$${roundMoney2(n)}`;
+
+      retierDtos.forEach((r, i) => {
+        const l = retierLines[i];
+        const snap = snapshots[i];
+        const tierId = r.price_tier_id ?? null;
+        const kti = liveKti(l);
+        const line: ItemChangesPreviewLine = {
+          key: `existing:${l.id}`,
+          order_item_id: l.id,
+          product_name: l.product_name,
+          variant_label: variantLabelOf(l),
+          action: 'reprice',
+          quantity_before: l.quantity,
+          quantity_after: l.quantity,
+          kitchen_status: kitchenStatusOf(l),
+          kitchen_ticket_number: kti?.kitchen_ticket?.daily_number ?? null,
+          kitchen_effect: 'none',
+          stock_effect: 'none',
+          requires_cancellation_type: false,
+          blocked: false,
+          blocked_reason: null,
+          messages: [],
+        };
+        lines.push(line);
+        const product = l.product_id != null ? productById.get(l.product_id) : null;
+        const variant =
+          l.product_variant_id != null ? (variantById.get(l.product_variant_id) ?? null) : null;
+        const taxRows: any[] = l.order_item_taxes ?? [];
+        const oldTotal = Number(l.total_price);
+        const blockReason =
+          !product
+            ? 'Es un producto personalizado: no tiene tarifas'
+            : l.is_price_overridden === true
+              ? 'Tiene un precio editado a mano; quítalo y agrégalo de nuevo para aplicar la tarifa'
+              : l.weight != null && Number(l.weight) > 0
+                ? 'Es un producto por peso: quítalo y agrégalo de nuevo con la tarifa'
+                : snap && (snap.is_package_unit || snap.stock_units_consumed != null)
+                  ? 'Esta tarifa es una presentación: cámbiala desde el POS'
+                  : l.stock_units_consumed != null
+                    ? 'La línea se vendió como presentación: cámbiala desde el POS'
+                    : snap && product.has_multiple_price_tiers !== true
+                      ? 'El producto no tiene multi-tarifa activa'
+                      : taxRows.length === 0 && Number(l.tax_amount_item ?? 0) > 0
+                        ? 'Su impuesto no tiene desglose: quítalo y agrégalo de nuevo'
+                        : (orderBlock?.message ?? null);
+        if (blockReason) {
+          markBlocked(
+            line,
+            blockReason,
+            blockReason === orderBlock?.message ? orderBlock.code.code : undefined,
+          );
+          return;
+        }
+
+        const catalogUnitPrice = snap
+          ? roundMoney2(
+              this.priceResolver.resolveWithTier({
+                product: {
+                  base_price: Number(product.base_price ?? 0),
+                  is_on_sale: !!product.is_on_sale,
+                  sale_price: product.sale_price != null ? Number(product.sale_price) : null,
+                  track_inventory: true,
+                  // Snapshot validado: la tarifa aplica (misma regla del cobro POS).
+                  has_multiple_price_tiers: true,
+                },
+                variant: variant
+                  ? {
+                      id: variant.id,
+                      price_override:
+                        variant.price_override != null ? Number(variant.price_override) : null,
+                      is_on_sale: !!variant.is_on_sale,
+                      sale_price: variant.sale_price != null ? Number(variant.sale_price) : null,
+                      track_inventory_override: null,
+                    }
+                  : undefined,
+                priceTier: {
+                  id: snap.tier_id,
+                  name: snap.tier_name,
+                  discount_percentage: snap.discount_percentage,
+                  adjustment_type: snap.adjustment_type as any,
+                  adjustment_value: snap.adjustment_value,
+                  amount_scope: snap.amount_scope as any,
+                  is_package_unit: snap.is_package_unit,
+                  units_per_package: snap.units_per_package,
+                },
+                tierOverrides: [
+                  {
+                    variant_id: l.product_variant_id ?? null,
+                    override_price: snap.override_price,
+                    override_units_per_package: snap.override_units_per_package,
+                  },
+                ],
+                taxRate: 0,
+              }).unitPrice,
+            )
+          : resolveCatalogUnitPrice(product, variant);
+        // Tarifas fiscales de la línea (no las actuales del producto): cambiar
+        // la tarifa de precio no re-clasifica el impuesto de la orden.
+        const fullRows: FullTaxRow[] = taxRows.map((t) => ({
+          tax_rate_id: t.tax_rate_id,
+          name: t.tax_name ?? '',
+          rate: this.rateOfTaxRow(t, oldTotal),
+          tax_type: (t.tax_type ?? TaxFiscalType.IVA) as TaxFiscalType,
+          is_inclusive: t.is_inclusive === true,
+        }));
+        const res = resolveCatalogLine({
+          catalogUnitPrice,
+          quantity: l.quantity,
+          priceUnitQuantityRaw: l.price_unit_quantity,
+          rows: fullRows,
+        });
+        const newBase = res.totalPrice;
+        const newDiscount =
+          l.discount_amount != null
+            ? roundMoney2(Math.min(Number(l.discount_amount), newBase))
+            : null;
+        const netBase = newBase - (newDiscount ?? 0);
+        const newTaxRows = taxRows.map((t, k) => ({
+          id: t.id,
+          tax_amount: roundMoney2(netBase * fullRows[k].rate),
+        }));
+        const rawTaxTotal = roundMoney2(
+          newTaxRows.reduce((sum: number, t) => sum + t.tax_amount, 0),
+        );
+        const tierName = snap?.tier_name ?? null;
+        const retieredLine = {
+          ...l,
+          unit_price: res.unitBase,
+          final_unit_price: res.finalUnitPrice,
+          catalog_unit_price: res.catalogUnitPrice,
+          applied_price_tier_id: tierId,
+          applied_price_tier_name_snapshot: tierName,
+        };
+        const newTaxItem = this.retaxedTaxAmountItem(retieredLine, newBase, rawTaxTotal);
+        line.messages.push(
+          `${tierName ? `Tarifa ${tierName}` : 'Precio regular'}: ${fmt(
+            Number(l.final_unit_price ?? l.unit_price ?? 0),
+          )} → ${fmt(res.finalUnitPrice)} c/u`,
+        );
+        updates.push({
+          line: l,
+          new_quantity: l.quantity,
+          new_total_price: newBase,
+          new_discount: newDiscount,
+          new_stock_units: null,
+          new_tax_rows: newTaxRows,
+          new_tax_amount_item: newTaxItem,
+          new_tax_total: this.persistedLineTax(
+            retieredLine,
+            l.quantity,
+            newTaxItem,
+            newTaxRows.length,
+            rawTaxTotal,
+          ),
+          reserve_delta_units: 0,
+          retier: {
+            line: retieredLine,
+            unit_price: res.unitBase,
+            final_unit_price: res.finalUnitPrice,
+            catalog_unit_price: res.catalogUnitPrice,
+            tier_id: tierId,
+            tier_name: tierName,
+          },
+        });
+      });
+    }
+
     // ---- add -----------------------------------------------------------------
     const addDtos = dto.add ?? [];
     if (addDtos.length > 0) {
@@ -1098,7 +1352,8 @@ export class OrderItemChangesService {
     }
 
     // Updates sin cambio real se descartan: si no queda NADA, no hay cambios.
-    if (removes.length + updates.length + adds.length === 0) {
+    // Un cambio de tarifa bloqueado no planifica escritura pero sí se muestra.
+    if (removes.length + updates.length + adds.length === 0 && lines.length === 0) {
       throw this.invalid('No hay cambios para aplicar');
     }
 
@@ -1339,7 +1594,7 @@ export class OrderItemChangesService {
       resulting.push(
         u
           ? {
-              line: l,
+              line: u.retier?.line ?? l,
               quantity: u.new_quantity,
               base: u.new_total_price,
               discount: u.new_discount,
@@ -2101,17 +2356,24 @@ export class OrderItemChangesService {
     const add = dto.add ?? [];
     const update = dto.update ?? [];
     const remove = dto.remove ?? [];
-    if (add.length + update.length + remove.length === 0) {
+    const retier = dto.retier ?? [];
+    if (add.length + update.length + remove.length + retier.length === 0) {
       throw this.invalid('No hay cambios para aplicar');
     }
     const dup = (ids: number[]) => new Set(ids).size !== ids.length;
     const updateIds = update.map((u) => u.order_item_id);
     const removeIds = remove.map((r) => r.order_item_id);
-    if (dup(updateIds) || dup(removeIds)) {
+    const retierIds = retier.map((r) => r.order_item_id);
+    if (dup(updateIds) || dup(removeIds) || dup(retierIds)) {
       throw this.invalid('Hay líneas repetidas en los cambios');
     }
     if (updateIds.some((id) => removeIds.includes(id))) {
       throw this.invalid('Una línea no puede estar en update y remove a la vez');
+    }
+    if (retierIds.some((id) => updateIds.includes(id) || removeIds.includes(id))) {
+      throw this.invalid(
+        'Una línea no puede cambiar de tarifa y de cantidad (o quitarse) a la vez',
+      );
     }
   }
 

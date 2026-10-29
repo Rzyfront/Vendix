@@ -15,6 +15,7 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { injectFocusFirstField } from '../../../shared/focus-first-field';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { catchError, map, startWith } from 'rxjs/operators';
 import { forkJoin, of } from 'rxjs';
@@ -95,7 +96,7 @@ interface UnitTypeForm {
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
-      (opened)="syncFromUnitType()"
+      (opened)="onOpened()"
       [size]="'md'"
       [dialog]="true"
       [title]="title()"
@@ -111,11 +112,16 @@ interface UnitTypeForm {
 
       <form
         [formGroup]="form"
+        id="unit-type-form"
+        novalidate
+        (ngSubmit)="onSubmit()"
         class="space-y-4 mt-4"
         [class.hidden]="activeTab() !== 'data'"
       >
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <app-input
+            data-testid="unit-type-name"
+            data-autofocus
             class="md:col-span-2"
             formControlName="name"
             label="Nombre"
@@ -256,7 +262,7 @@ interface UnitTypeForm {
 
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
-        <app-button variant="primary" [loading]="saving()" (clicked)="onSubmit()">
+        <app-button type="submit" form="unit-type-form" variant="primary" [loading]="saving()">
           <app-icon slot="icon" [name]="isEditMode() ? 'save' : 'plus'" [size]="16" />
           {{ isEditMode() ? 'Guardar cambios' : 'Crear tipo' }}
         </app-button>
@@ -271,6 +277,7 @@ export class UnitTypeFormModalComponent {
   private readonly toastService = inject(ToastService);
   private readonly imageUploadService = inject(ImageUploadService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly focusFirstField = injectFocusFirstField();
   private readonly authFacade = inject(AuthFacade);
 
   readonly isOpen = input(false);
@@ -451,6 +458,11 @@ export class UnitTypeFormModalComponent {
         ? current.filter((c) => c !== code)
         : [...current, code],
     );
+  }
+
+  onOpened(): void {
+    this.syncFromUnitType();
+    this.focusFirstField();
   }
 
   onCancel(): void {

@@ -1248,6 +1248,59 @@ export class HospitalitySettingsDto {
   rnt_number?: string;
 
   @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'H4.3 — notify the store every March to renew the RNT before March 31. Default true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  rnt_renewal_reminder?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'H4.1 — report each check-in and check-out to the MinCIT TRA. Informative only; off = nothing is recorded. Default true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  tra_enabled?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'H4.2 — list each entry and exit of a foreign guest for the SIRE (assisted). Informative only; off = nothing is recorded. Default true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  sire_enabled?: boolean;
+
+  @ApiProperty({
+    example: 24,
+    required: false,
+    description: 'H4.2 — hours after which a pending SIRE movement is shown in red (1-720). Default 24.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(720)
+  sire_overdue_hours?: number;
+
+  @ApiProperty({
+    example: 2.5,
+    required: false,
+    description:
+      'H4.4 — Fontur contribution rate in per mil (‰) of the quarterly estimate (0-100). Default 2.5.',
+  })
+  @IsOptional()
+  @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 3 })
+  @Min(0)
+  @Max(100)
+  fontur_rate_per_mil?: number;
+
+  @ApiProperty({
     example: 0,
     required: false,
     description:
@@ -1305,6 +1358,54 @@ export class HospitalitySettingsDto {
   @Min(5)
   @Max(1440)
   ical_import_interval_minutes?: number;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'H8.2 — email the guest when a desk reservation is confirmed.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  guest_email_confirmation?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'H8.2 — email a reminder with the online check-in link before arrival.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  guest_email_pre_arrival?: boolean;
+
+  @ApiProperty({
+    example: 48,
+    required: false,
+    description: 'H8.2 — hours before the check-in time the pre-arrival reminder goes out (12-168).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(12)
+  @Max(168)
+  guest_email_pre_arrival_hours?: number;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'H8.2 — email a thank-you to the guest after check-out.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  guest_email_post_stay?: boolean;
+
+  @ApiProperty({
+    example: true,
+    required: false,
+    description: 'H8.5 — the thank-you email asks the guest for a private rating of the stay.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  guest_email_post_stay_review?: boolean;
 }
 
 export class RestaurantSettingsDto {

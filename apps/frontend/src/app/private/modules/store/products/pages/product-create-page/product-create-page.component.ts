@@ -43,6 +43,7 @@ import {
   BadgeComponent,
   TooltipComponent,
   TaxInclusiveChipComponent,
+  AlertBannerComponent,
 } from '../../../../../../shared/components';
 import {
   CurrencyPipe,
@@ -92,6 +93,15 @@ import {
   withoutTaxFromMap,
 } from '../../utils/product-tax-inclusive.util';
 import { ProductUtils } from '../../utils/product.utils';
+import { getVariantStockRequirements } from '../../utils/variant-stock-requirements.util';
+import {
+  describePriceTierRule,
+  tierFallbackPackagePrice,
+} from '../../../price-tiers/utils/price-tier-rule.util';
+import {
+  followBasePrice,
+  variantPriceOverrideToSend,
+} from '../../utils/variant-price-inheritance.util';
 import { ValidationUtils } from '../../utils/validation.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
@@ -208,6 +218,7 @@ interface PriceTierOverrideRow {
   standalone: true,
   imports: [
     RouterModule,
+    AlertBannerComponent,
     ReactiveFormsModule,
     FormsModule,
     ButtonComponent,
@@ -1050,6 +1061,11 @@ export class ProductCreatePageComponent {
   readonly productLoaded = signal(false);
   productId: number | null = null;
   product: Product | null = null;
+  /**
+   * Hotelería (R5): tipo de habitación dueño de esta noche "Noche – {tipo}".
+   * Su nombre, tipo y estado se gestionan desde Hotelería → Habitaciones.
+   */
+  readonly lodgingUnitType = signal<{ id: number; name: string } | null>(null);
   readonly onlinePurchaseProduct = signal<Product | null>(null);
   readonly isGeneratingOnlinePurchaseLink = signal(false);
   readonly hasOnlinePurchaseLink = computed(() => {
@@ -2406,6 +2422,22 @@ export class ProductCreatePageComponent {
     costCtrl?.valueChanges.subscribe(() => this.recalculateMarginFromCost(form));
     marginCtrl?.valueChanges.subscribe(() => this.recalculateBasePriceFromMargin(form));
     basePriceCtrl?.valueChanges.subscribe(() => this.recalculateMarginFromBasePrice(form));
+
+    // Variants priced at the product's base price inherit it: keep them on it.
+    let previousBase = Number(basePriceCtrl?.value || 0);
+    basePriceCtrl?.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => {
+        const nextBase = Number(value || 0);
+        const before = this.generatedVariants;
+        const after = followBasePrice(before, previousBase, nextBase);
+        previousBase = nextBase;
+        if (after === before) return;
+        after.forEach((v, i) => {
+          if (v !== before[i]) this.onVariantPriceChange(v);
+        });
+        this.generatedVariants = after;
+      });
   }
 
   private isCalculating = false;
@@ -2573,6 +2605,7 @@ export class ProductCreatePageComponent {
     this.productsService.getProductById(id).subscribe({
       next: (product: Product) => {
         this.product = product;
+        this.lodgingUnitType.set(product?.lodging_unit_type ?? null);
         this.productMinStockLevel.set(product?.min_stock_level ?? null);
         this.onlinePurchaseProduct.set(product);
         this.patchForm(product);
@@ -2931,8 +2964,10 @@ export class ProductCreatePageComponent {
         return;
       }
 
+      // Solo hay stock que redistribuir si el producto maneja inventario.
       const currentStock = this.productForm.get('stock_quantity')?.value || 0;
-      if (this.isEditMode() && currentStock > 0) {
+      const tracksInventory = !!this.productForm.get('track_inventory')?.value;
+      if (this.isEditMode() && tracksInventory && currentStock > 0) {
         this.showStockTransferDialog(currentStock);
         return;
       }
@@ -3481,9 +3516,11 @@ export class ProductCreatePageComponent {
       try {
         await this.productsService.deleteProductVariant(variant.id).toPromise();
         this.toastService.success('Variante eliminada correctamente');
-      } catch (err: any) {
-        console.error('Error deleting variant:', err);
-        this.toastService.error('Error al eliminar la variante');
+      } catch (err: unknown) {
+        // El motivo (existencias, reservas) le dice al usuario qué hacer.
+        this.toastService.error(
+          extractApiErrorMessage(err) || 'Error al eliminar la variante',
+        );
         return; // Don't remove from UI if backend failed
       }
     }
@@ -4387,61 +4424,16 @@ export class ProductCreatePageComponent {
         });
       }
 
-      // Edit mode, transición simple→variantes, stock base > 0.
-      const baseline = this.originalBaseStock();
-      const isTransitioning =
-        this.isEditMode() && !this.originalHadVariants() && baseline > 0;
-      if (isTransitioning) {
-        if (!this.stockTransferMode || this.stockTransferMode === 'reset') {
-          requirements.push({
-            id: 'stock-redistribute',
-            label: 'Redistribuir stock base',
-            reason:
-              "Debes redistribuir el stock base. Elige 'Asignar a una variante' o 'Distribuir'.",
-            severity: 'required',
-            action: {
-              label: 'Configurar redistribución',
-              kind: 'scroll',
-              target: 'variants',
-            },
-          });
-        } else if (this.totalVariantStock !== baseline) {
-          requirements.push({
-            id: 'stock-misaligned',
-            label: 'Totales de stock desalineados',
-            reason: `La suma de stock de las variantes (${this.totalVariantStock}) debe igualar el stock base original (${baseline}).`,
-            severity: 'required',
-            action: {
-              label: 'Configurar redistribución',
-              kind: 'scroll',
-              target: 'variants',
-            },
-          });
-        }
-      }
-
-      const trackInventoryEnabled =
-        !!this.productForm.get('track_inventory')?.value;
-      if (trackInventoryEnabled) {
-        const allVariantsTrackInventory = this.generatedVariants.every((v) => {
-          if (v.track_inventory_override === false) return false;
-          return true;
-        });
-        if (allVariantsTrackInventory && this.totalVariantStock <= 0) {
-          requirements.push({
-            id: 'variant-stock-required',
-            label: 'Stock de variantes requerido',
-            reason:
-              'Todas las variantes que manejan stock tienen 0 unidades. Asigna al menos 1 unidad antes de guardar.',
-            severity: 'required',
-            action: {
-              label: 'Configurar variantes',
-              kind: 'scroll',
-              target: 'variants',
-            },
-          });
-        }
-      }
+      requirements.push(
+        ...getVariantStockRequirements({
+          isEditMode: this.isEditMode(),
+          originalHadVariants: this.originalHadVariants(),
+          baselineStock: this.originalBaseStock(),
+          trackInventory: !!this.productForm.get('track_inventory')?.value,
+          stockTransferMode: this.stockTransferMode,
+          totalVariantStock: this.totalVariantStock,
+        }),
+      );
 
       const invalidSaleVariant = this.generatedVariants.find((v) => {
         if (!v.is_on_sale) return false;
@@ -4767,8 +4759,8 @@ export class ProductCreatePageComponent {
           sku: v.sku,
           barcode: v.barcode?.trim() ? v.barcode.trim() : undefined,
           name: v.name,
-          // Only send price_override when intentionally non-zero; 0 is ambiguous (backend rejects)
-          price_override: Number(v.price) > 0 ? Number(v.price) : null,
+          // Same price as the product = no own price: null keeps it inherited.
+          price_override: variantPriceOverrideToSend(v.price, formValue.base_price),
           cost_price: Number(v.cost_price),
           profit_margin: Number(v.profit_margin),
           is_on_sale: !!v.is_on_sale,
@@ -5470,7 +5462,8 @@ export class ProductCreatePageComponent {
   private tierOptionDescription(tier: PriceTier): string | undefined {
     const parts: string[] = [];
     if (tier.is_default) parts.push('Por defecto');
-    if (tier.discount_percentage) parts.push(`${tier.discount_percentage}%`);
+    const rule = describePriceTierRule(tier);
+    if (rule) parts.push(rule);
     const pack = resolvePackSize(tier.units_per_package, null);
     if (pack > 1) parts.push(`Empaque x${pack}`);
     return parts.length ? parts.join(' · ') : undefined;
@@ -5601,15 +5594,17 @@ export class ProductCreatePageComponent {
   }
 
   /**
-   * Computed whole-package price suggested when no override is set:
-   * base_price * (1 - tier%) * packSize. Returns null if base_price is 0.
+   * Whole-package price suggested when no override is set: the tier rule on
+   * base_price × packSize (same kernel as the backend). Null when the rule is
+   * relative and base_price is 0.
    */
   getTierFallbackPrice(row: PriceTierOverrideRow): number | null {
     const basePrice = Number(this.productForm.get('base_price')?.value || 0);
-    if (basePrice <= 0) return null;
-    const discount = Number(row.tier.discount_percentage || 0);
-    const unitPrice = discount ? basePrice * (1 - discount / 100) : basePrice;
-    return Number((unitPrice * this.getRowPackSize(row)).toFixed(2));
+    return tierFallbackPackagePrice(
+      basePrice,
+      this.getRowPackSize(row),
+      row.tier,
+    );
   }
 
   /** Effective whole-package price used for margin display: override or fallback. */

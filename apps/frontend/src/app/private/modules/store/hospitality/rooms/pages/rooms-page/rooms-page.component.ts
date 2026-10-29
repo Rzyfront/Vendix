@@ -10,11 +10,13 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import {
+  ButtonComponent,
   CardComponent,
-  DropdownAction,
+  DialogService,
   EmptyStateComponent,
   FilterConfig,
   FilterValues,
+  IconComponent,
   InputsearchComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
@@ -25,6 +27,7 @@ import {
   TableAction,
   TableColumn,
   ToastService,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
@@ -37,6 +40,10 @@ import {
   LodgingUnit,
 } from '../../interfaces/unit.interface';
 import { LodgingUnitsService } from '../../services/units.service';
+import {
+  HOUSEKEEPING_STATUS_CHIPS,
+  statusBadgeConfig,
+} from '../../../shared/hospitality-status';
 import { UnitTypesService } from '../../services/unit-types.service';
 
 type RoomsTab = 'types' | 'units';
@@ -46,18 +53,10 @@ type RoomsTab = 'types' | 'units';
  * looks booleans up as `true`/`false`, the card as `active`/`inactive`.
  */
 const ACTIVE_COLOR_MAP: Record<string, string> = {
-  true: '#10b981',
-  false: '#9ca3af',
-  active: '#10b981',
-  inactive: '#9ca3af',
-};
-
-const HOUSEKEEPING_COLOR_MAP: Record<HousekeepingStatus, string> = {
-  clean: '#10b981',
-  inspected: '#3b82f6',
-  dirty: '#f59e0b',
-  out_of_order: '#ef4444',
-  out_of_service: '#6b7280',
+  true: 'var(--color-success)',
+  false: 'var(--color-text-secondary)',
+  active: 'var(--color-success)',
+  inactive: 'var(--color-text-secondary)',
 };
 
 const ACTIVE_BADGE = {
@@ -66,11 +65,7 @@ const ACTIVE_BADGE = {
   colorMap: ACTIVE_COLOR_MAP,
 };
 
-const HOUSEKEEPING_BADGE = {
-  type: 'custom' as const,
-  size: 'sm' as const,
-  colorMap: HOUSEKEEPING_COLOR_MAP,
-};
+const HOUSEKEEPING_BADGE = statusBadgeConfig(HOUSEKEEPING_STATUS_CHIPS);
 
 /** Rooms that can be sold tonight: active and clean or inspected. */
 const SELLABLE_STATUSES: HousekeepingStatus[] = ['clean', 'inspected'];
@@ -92,9 +87,9 @@ interface UnitRow extends LodgingUnit {
   status: string;
 }
 
-/** "1 unidad" / "2 unidades": active rooms of a type. */
+/** "1 habitación" / "2 habitaciones": active rooms of a type. */
 export function formatUnitCount(count: number): string {
-  return `${count} ${count === 1 ? 'unidad' : 'unidades'}`;
+  return `${count} ${count === 1 ? 'habitación' : 'habitaciones'}`;
 }
 
 /** "2 base · máx. 3 adultos + 1 niño" */
@@ -129,8 +124,9 @@ function matchesActive(filter: FilterValues[string], isActive: boolean): boolean
 
 /**
  * Hospitality Suite — Habitaciones. Standard admin list module: four stats,
- * tabs ("Tipos" / "Unidades") and one card per tab with the sticky search,
- * the dropdown filters and the responsive data view.
+ * tabs ("Tipos" / "Habitaciones") and one card per tab with the sticky
+ * search, the create button of the active tab, the dropdown filters and the
+ * responsive data view.
  *
  * Pagination exception: room types and rooms are a hotel's physical
  * inventory (tens of rows) and the API returns them whole; the stats need the
@@ -141,10 +137,13 @@ function matchesActive(filter: FilterValues[string], isActive: boolean): boolean
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    SpinnerComponent,
     FormsModule,
     StatsComponent,
     EmptyStateComponent,
     CardComponent,
+    ButtonComponent,
+    IconComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ScrollableTabsComponent,
@@ -236,15 +235,30 @@ function matchesActive(filter: FilterValues[string], isActive: boolean): boolean
                 [ngModel]="searchTerm()"
                 (ngModelChange)="onSearch($event)"
               />
+              <!-- R-CTA-01..03/06: the create button follows the active tab. -->
+              @if (canWrite()) {
+                <app-button
+                  variant="primary"
+                  size="md"
+                  [iconOnlyMobile]="true"
+                  customClasses="!h-11 !w-11 !px-0 md:!w-auto md:!px-4 !rounded-[10px]"
+                  class="shrink-0"
+                  [disabled]="activeTab() === 'units' && !hasActiveTypes()"
+                  [ariaLabel]="createLabel()"
+                  (clicked)="activeTab() === 'types' ? openCreate() : openCreateUnit()"
+                  data-testid="rooms-new"
+                >
+                  <app-icon slot="icon" name="plus" [size]="18" />
+                  {{ activeTab() === 'types' ? 'Nuevo tipo' : 'Nueva habitación' }}
+                </app-button>
+              }
               <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="activeFilterConfigs()"
                 [filterValues]="filterValues()"
-                [actions]="dropdownActions()"
                 [isLoading]="activeTab() === 'types' ? isLoading() : isLoadingUnits()"
                 (filterChange)="filterValues.set($event)"
                 (clearAllFilters)="filterValues.set({})"
-                (actionClick)="onActionClick($event)"
               />
             </div>
           </div>
@@ -253,11 +267,8 @@ function matchesActive(filter: FilterValues[string], isActive: boolean): boolean
         <div class="px-2 pb-2 pt-3 md:p-4">
           @if (activeTab() === 'types') {
             @if (isLoading()) {
-              <div class="p-4 md:p-6 text-center">
-                <div
-                  class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-                ></div>
-                <p class="mt-2 text-text-secondary">Cargando tipos...</p>
+              <div class="p-4 md:p-6">
+                <app-spinner [center]="true" text="Cargando tipos…" />
               </div>
             } @else if (unitTypes().length === 0) {
               <app-empty-state
@@ -284,11 +295,8 @@ function matchesActive(filter: FilterValues[string], isActive: boolean): boolean
             }
           } @else {
             @if (isLoadingUnits()) {
-              <div class="p-4 md:p-6 text-center">
-                <div
-                  class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-                ></div>
-                <p class="mt-2 text-text-secondary">Cargando habitaciones...</p>
+              <div class="p-4 md:p-6">
+                <app-spinner [center]="true" text="Cargando habitaciones…" />
               </div>
             } @else if (!hasActiveTypes()) {
               <app-empty-state
@@ -348,6 +356,7 @@ export class HospitalityRoomsPageComponent implements OnInit {
   private readonly unitsService = inject(LodgingUnitsService);
   private readonly currency = inject(CurrencyFormatService);
   private readonly toastService = inject(ToastService);
+  private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly authFacade = inject(AuthFacade);
 
@@ -358,7 +367,7 @@ export class HospitalityRoomsPageComponent implements OnInit {
 
   readonly tabs: ScrollableTab[] = [
     { id: 'types', label: 'Tipos', icon: 'bed-double' },
-    { id: 'units', label: 'Unidades', icon: 'door-open' },
+    { id: 'units', label: 'Habitaciones', icon: 'door-open' },
   ];
   readonly activeTab = signal<RoomsTab>('types');
   readonly searchTerm = signal('');
@@ -425,19 +434,12 @@ export class HospitalityRoomsPageComponent implements OnInit {
     ];
   });
 
-  readonly dropdownActions = computed<DropdownAction[]>(() => {
-    if (!this.canWrite()) return [];
-    return this.activeTab() === 'types'
-      ? [{ label: 'Nuevo tipo', icon: 'plus', action: 'create-type', variant: 'primary' }]
-      : [
-          {
-            label: 'Nueva habitación',
-            icon: 'plus',
-            action: 'create-unit',
-            variant: 'primary',
-            disabled: !this.hasActiveTypes(),
-          },
-        ];
+  /** Mobile shows only the icon, so the label also says why it is blocked. */
+  readonly createLabel = computed(() => {
+    if (this.activeTab() === 'types') return 'Nuevo tipo';
+    return this.hasActiveTypes()
+      ? 'Nueva habitación'
+      : 'Nueva habitación: primero crea un tipo de habitación';
   });
 
   readonly unitTypes = signal<UnitType[]>([]);
@@ -575,6 +577,13 @@ export class HospitalityRoomsPageComponent implements OnInit {
       show: () => this.canWrite(),
       action: (item: UnitType) => this.openEdit(item),
     },
+    {
+      label: (item: UnitType) => (item.is_active ? 'Desactivar' : 'Activar'),
+      icon: (item: UnitType) => (item.is_active ? 'eye-off' : 'eye'),
+      variant: 'secondary',
+      show: () => this.canWrite(),
+      action: (item: UnitType) => this.toggleTypeActive(item),
+    },
   ];
 
   readonly cardConfig: ItemListCardConfig = {
@@ -604,11 +613,6 @@ export class HospitalityRoomsPageComponent implements OnInit {
 
   onSearch(term: string | null): void {
     this.searchTerm.set(term ?? '');
-  }
-
-  onActionClick(action: string): void {
-    if (action === 'create-type') this.openCreate();
-    else if (action === 'create-unit') this.openCreateUnit();
   }
 
   /** Units change the per-type count, so both lists reload together. */
@@ -648,7 +652,20 @@ export class HospitalityRoomsPageComponent implements OnInit {
     this.isUnitFormOpen.set(true);
   }
 
-  toggleUnitActive(unit: LodgingUnit): void {
+  /** R-CONF-02 — deactivating takes the room off sale: confirm first. */
+  async toggleUnitActive(unit: LodgingUnit): Promise<void> {
+    if (
+      unit.is_active &&
+      !(await this.dialogService.confirm({
+        title: `Desactivar la ${unit.code}`,
+        message: `La ${unit.code} no se podrá vender hasta que la reactives.`,
+        confirmText: 'Desactivar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      }))
+    ) {
+      return;
+    }
     this.unitsService
       .update(unit.id, { is_active: !unit.is_active })
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -686,6 +703,39 @@ export class HospitalityRoomsPageComponent implements OnInit {
               : 'No se pudieron cargar los tipos de habitación',
           );
         },
+      });
+  }
+
+  /** R-ROW-04 / R-CONF-02 — uses the existing update with `is_active`. */
+  async toggleTypeActive(unitType: UnitType): Promise<void> {
+    if (
+      unitType.is_active &&
+      !(await this.dialogService.confirm({
+        title: `Desactivar ${unitType.name}`,
+        message: `${unitType.name} no se podrá vender hasta que lo reactives, ni se podrán crear habitaciones de este tipo.`,
+        confirmText: 'Desactivar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      }))
+    ) {
+      return;
+    }
+    this.unitTypesService
+      .update(unitType.id, { is_active: !unitType.is_active })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            unitType.is_active ? 'Tipo desactivado' : 'Tipo activado',
+          );
+          this.load();
+        },
+        error: (message: unknown) =>
+          this.toastService.error(
+            typeof message === 'string'
+              ? message
+              : 'No se pudo actualizar el tipo de habitación',
+          ),
       });
   }
 

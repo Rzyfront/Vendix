@@ -7,6 +7,7 @@ import {
   ProductPriceTierOverrideLike,
 } from './types';
 import { resolvePackSize } from './packaging.util';
+import { applyTierAdjustment, describeTierAdjustment } from './tier-adjustment.util';
 
 /**
  * PriceResolverService
@@ -222,12 +223,11 @@ export class PriceResolverService {
       source = 'tier_override';
       reason = `Explicit package price for tier "${priceTier.name}"`;
     } else {
-      // Apply the discount rule on the full-package base.
-      const discount = Number(priceTier.discount_percentage ?? 0);
-      const clampedDiscount = Math.max(0, Math.min(100, discount));
-      unitPrice = packageBase * (1 - clampedDiscount / 100);
+      // Tier rule on the full package: same kernel as the backend
+      // (`resolveWithTier`), so the POS quotes what the server charges.
+      unitPrice = applyTierAdjustment(ruleBasePrice, packSize, priceTier);
       source = 'tier_rule';
-      reason = `Tier "${priceTier.name}" rule (${clampedDiscount}% off, x${packSize})`;
+      reason = `Tier "${priceTier.name}" rule (${describeTierAdjustment(priceTier)}, x${packSize})`;
     }
 
     const compareAtPrice = packageBase > unitPrice ? packageBase : null;

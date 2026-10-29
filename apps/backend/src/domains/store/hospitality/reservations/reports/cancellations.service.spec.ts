@@ -1,5 +1,5 @@
 import { RequestContextService } from '@common/context/request-context.service';
-import { LodgingCancellationsService } from './cancellations.service';
+import { LodgingCancellationsService, MAX_LOSSES_ROWS } from './cancellations.service';
 
 const day = (date: string) => new Date(`${date}T00:00:00.000Z`);
 
@@ -131,5 +131,12 @@ describe('LodgingCancellationsService (H7.4 no-shows and cancellations)', () => 
     await expect(service.get({ from: '2024-01-01', to: '2026-11-01' })).rejects.toMatchObject({
       errorCode: 'LODGING_LOSSES_RANGE_001',
     });
+  });
+
+  it('rejects a period with more rows than it can total instead of cutting them silently', async () => {
+    const { service, prisma } = build(new Array(MAX_LOSSES_ROWS + 1).fill({}));
+
+    await expect(service.get({})).rejects.toMatchObject({ errorCode: 'LODGING_LOSSES_RANGE_001' });
+    expect(prisma.lodging_reservation_events.findMany.mock.calls[0][0].take).toBe(MAX_LOSSES_ROWS + 1);
   });
 });

@@ -61,7 +61,9 @@ export interface VatExemptServiceRow {
 export class LodgingVatExemptServicesService {
   constructor(private readonly prisma: StorePrismaService) {}
 
-  async list(query: VatExemptServicesQueryDto): Promise<{ from: string; to: string; rows: VatExemptServiceRow[] }> {
+  async list(
+    query: VatExemptServicesQueryDto,
+  ): Promise<{ from: string; to: string; timezone: string; rows: VatExemptServiceRow[] }> {
     const store_id = RequestContextService.getContext()?.store_id;
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     const tz = await resolveStoreTimezone(this.prisma, store_id);
@@ -121,7 +123,7 @@ export class LodgingVatExemptServicesService {
         invoice_total: Number(invoice.total_amount),
       };
     });
-    return { from, to, rows };
+    return { from, to, timezone: tz, rows };
   }
 
   /** UTC instant of the store's local midnight of `date` (+ `days`). */

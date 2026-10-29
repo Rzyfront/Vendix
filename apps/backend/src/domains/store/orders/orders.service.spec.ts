@@ -497,6 +497,47 @@ describe('OrdersService', () => {
     const lastWhere = () =>
       mockPrismaService.orders.findMany.mock.calls[0][0].where;
 
+    describe('date_from / date_to (dia civil de la tienda)', () => {
+      let ctxSpy: jest.SpyInstance;
+      beforeEach(() => {
+        ctxSpy = jest
+          .spyOn(RequestContextService, 'getContext')
+          .mockReturnValue({ store_id: 1, organization_id: 1 } as any);
+        mockPrismaService.store_settings.findFirst.mockResolvedValue({
+          settings: {},
+          stores: { timezone: 'America/Bogota' },
+        });
+      });
+      afterEach(() => ctxSpy.mockRestore());
+
+      it('«hoy a hoy» con fechas sin hora cubre el dia completo en la hora de la tienda', async () => {
+        await service.findAll({ date_from: '2026-10-27', date_to: '2026-10-27' } as any);
+        // Bogota UTC-5: 00:00 local = 05:00Z; 23:59:59.999 local = 04:59:59.999Z del dia siguiente,
+        // asi una orden de las 8 p. m. local (01:00Z del 28) entra en el 27.
+        expect(lastWhere().created_at).toEqual({
+          gte: new Date('2026-10-27T05:00:00.000Z'),
+          lte: new Date('2026-10-28T04:59:59.999Z'),
+        });
+      });
+
+      it('un instante ISO con hora se aplica tal cual (listado principal)', async () => {
+        await service.findAll({
+          date_from: '2026-10-27T05:00:00.000Z',
+          date_to: '2026-10-28T04:59:59.000Z',
+        } as any);
+        expect(lastWhere().created_at).toEqual({
+          gte: new Date('2026-10-27T05:00:00.000Z'),
+          lte: new Date('2026-10-28T04:59:59.000Z'),
+        });
+        expect(mockPrismaService.store_settings.findFirst).not.toHaveBeenCalled();
+      });
+
+      it('cada limite es independiente: solo «desde»', async () => {
+        await service.findAll({ date_from: '2026-10-27' } as any);
+        expect(lastWhere().created_at).toEqual({ gte: new Date('2026-10-27T05:00:00.000Z') });
+      });
+    });
+
     it('A) aplica payment_status via payments.some.state', async () => {
       await service.findAll({
         payment_status: 'succeeded',

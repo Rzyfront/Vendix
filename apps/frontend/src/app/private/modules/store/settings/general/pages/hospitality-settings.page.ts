@@ -1,10 +1,37 @@
-import { Component, inject } from '@angular/core';
+import { Component, DestroyRef, computed, inject } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 
+import { HospitalityIcalChannelsComponent } from '../../../hospitality/channels/components/ical-channels/ical-channels.component';
 import { AlertBannerComponent } from '../../../../../../shared/components/alert-banner/alert-banner.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { HospitalitySettingsForm } from '../components/hospitality-settings-form/hospitality-settings-form.component';
+import { HospitalityGuestMessagesForm } from '../components/hospitality-guest-messages-form/hospitality-guest-messages-form.component';
 import { SettingsSectionComponent } from '../components/settings-section/settings-section.component';
 import { GeneralSettingsStore } from '../services/general-settings.store';
+import { HospitalitySettings } from '../../../../../../core/models/store-settings.interface';
+
+/** Same defaults as the backend (`default-store-settings.ts`) for a store that never saved them. */
+const DEFAULT_HOSPITALITY: HospitalitySettings = {
+  check_in_time: '15:00',
+  check_out_time: '12:00',
+  no_show_time: '06:00',
+  night_audit_time: '02:00',
+  rnt_number: '',
+  rnt_renewal_reminder: true,
+  default_overbooking_allowance: 0,
+  room_charge_origin: 'Restaurante',
+  folio_invoice_verification: true,
+  booking_hold_minutes: 15,
+  ical_import_interval_minutes: 15,
+  guest_email_confirmation: true,
+  guest_email_pre_arrival: true,
+  guest_email_pre_arrival_hours: 48,
+  guest_email_post_stay: true,
+  guest_email_post_stay_review: true,
+};
+
+/** Typing in a text field emits per keystroke; one save per pause. */
+const AUTOSAVE_DELAY_MS = 600;
 
 /**
  * Pestaña «Hotelería» — industria hospitality (H0.5).
@@ -21,6 +48,8 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
     AlertBannerComponent,
     SettingsSectionComponent,
     HospitalitySettingsForm,
+    HospitalityGuestMessagesForm,
+    HospitalityIcalChannelsComponent,
   ],
   template: `
     <div class="settings-page">
@@ -30,8 +59,9 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
         </div>
         <p class="page-intro__text">
           <span class="page-intro__lead">Opera el hotel.</span>
-          Define a qué hora llegan y salen los huéspedes y el número RNT del
-          establecimiento.
+          Define los horarios de llegada, salida y cierre del día, el Registro
+          Nacional de Turismo (RNT), las reservas, la cuenta del huésped, los
+          correos al huésped y los calendarios externos. Cada cambio se guarda solo.
         </p>
       </div>
 
@@ -43,6 +73,15 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
         </app-alert-banner>
       }
 
+      @if (store.isHospitality() && !(hospitality().rnt_number ?? '').trim()) {
+        <!-- H4.3 / D14 — informative only: the hotel keeps operating without it. -->
+        <app-alert-banner variant="info" icon="info" data-testid="rnt-missing-notice">
+          Aún no registras el Registro Nacional de Turismo (RNT). El hotel opera
+          igual; mientras falte, no se aplica la exención de IVA a extranjeros y el
+          número no sale en la confirmación de la reserva ni en la factura.
+        </app-alert-banner>
+      }
+
       <app-settings-section
         anchorId="section-hospitality"
         icon="hotel"
@@ -50,19 +89,30 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
         title="Hotelería"
         hint="Las horas usan la zona horaria de la tienda.">
         <app-hospitality-settings-form
-          [settings]="
-            store.settings().hospitality || {
-              check_in_time: '15:00',
-              check_out_time: '12:00',
-              no_show_time: '06:00',
-              night_audit_time: '02:00',
-              rnt_number: '',
-              default_overbooking_allowance: 0,
-              room_charge_origin: 'Restaurante',
-              folio_invoice_verification: true
-            }
-          "
-          (settingsChange)="store.onSectionChange('hospitality', $event)" />
+          [settings]="hospitality()"
+          (settingsChange)="queueSave($event)" />
+      </app-settings-section>
+
+      <!-- H8.2 — automatic guest emails. -->
+      <app-settings-section
+        anchorId="section-guest-messages"
+        icon="mail"
+        iconTone="blue"
+        title="Correos al huésped"
+        hint="Se envían solos al correo del huésped titular de la reserva.">
+        <app-hospitality-guest-messages-form
+          [settings]="hospitality()"
+          (settingsChange)="queueSave($event)" />
+      </app-settings-section>
+
+      <!-- R2 — former "Canales" screen; /admin/hospitality/channels lands here. -->
+      <app-settings-section
+        anchorId="section-ical"
+        icon="calendar-check"
+        iconTone="purple"
+        title="Calendarios externos (Airbnb, Booking…)"
+        hint="Comparte la disponibilidad de cada habitación con Airbnb o Booking y bloquea aquí las fechas que vendan ellos.">
+        <app-hospitality-ical-channels (ready)="scrollToFragment()" />
       </app-settings-section>
     </div>
   `,
@@ -70,4 +120,41 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
 })
 export class HospitalitySettingsPage {
   protected readonly store = inject(GeneralSettingsStore);
+
+  protected readonly hospitality = computed<HospitalitySettings>(() => ({
+    ...DEFAULT_HOSPITALITY,
+    ...this.store.settings().hospitality,
+  }));
+
+  private pending: Partial<HospitalitySettings> = {};
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor() {
+    // Leaving the tab mid-pause still saves the last change.
+    inject(DestroyRef).onDestroy(() => this.flushSave());
+  }
+
+  /** U17 — autosave: the form emits only its valid fields; they merge over the saved block. */
+  protected queueSave(patch: Partial<HospitalitySettings>): void {
+    this.pending = { ...this.pending, ...patch };
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => this.flushSave(), AUTOSAVE_DELAY_MS);
+  }
+
+  private flushSave(): void {
+    if (!this.saveTimer) return;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    const value = { ...this.hospitality(), ...this.pending };
+    this.pending = {};
+    this.store.saveSectionNow('hospitality', value);
+  }
+
+  /** `#section-ical` from the old Canales URL; the router has no anchor scrolling. */
+  private readonly fragment = inject(ActivatedRoute).snapshot.fragment;
+
+  /** Scroll once the lists render, otherwise the page is too short to reach it. */
+  protected scrollToFragment(): void {
+    if (this.fragment) document.getElementById(this.fragment)?.scrollIntoView({ block: 'start' });
+  }
 }

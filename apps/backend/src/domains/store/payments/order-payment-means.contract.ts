@@ -7,6 +7,7 @@ import {
   DianPaymentMethodCode,
   isDianPaymentMeansCode,
 } from '../invoicing/providers/dian-direct/constants/dian-document-types';
+import { DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER } from '../invoicing/validators/customer-fiscal-identity.validator';
 
 /**
  * CONTRATO DEL MEDIO DE PAGO DE UNA ORDEN
@@ -285,4 +286,40 @@ export function resolveOrderDianPaymentMeans(
       : DIAN_PAYMENT_MEANS.UNDEFINED_INSTRUMENT;
 
   return { payment_form, payment_means_code };
+}
+
+/**
+ * CONSUMIDOR FINAL SIN COBRAR — contado con medio «Acuerdo mutuo» (ZZZ).
+ *
+ * Una orden sin pago registrado que el cajero decide facturar a Consumidor
+ * final (no quiere crédito) sale de contado declarando que las partes acordaron
+ * el medio de pago. Es la ÚNICA factura de contado que la puerta de pago deja
+ * emitir con saldo pendiente: la orden no cambia y su saldo se cobra después.
+ */
+export const MUTUAL_AGREEMENT_CASH_MEANS = {
+  payment_form: DIAN_PAYMENT_METHODS.CASH,
+  payment_means_code: DIAN_PAYMENT_MEANS.MUTUAL_AGREEMENT,
+} as const satisfies OrderDianPaymentMeans;
+
+/** El emisor pidió Consumidor final de contado «Acuerdo mutuo» (ambas banderas). */
+export function isMutualAgreementCash(
+  opts?: { force_final_consumer?: boolean; cash_by_mutual_agreement?: boolean } | null,
+): boolean {
+  return opts?.force_final_consumer === true && opts.cash_by_mutual_agreement === true;
+}
+
+/**
+ * La factura ya persistida es Consumidor final de contado «Acuerdo mutuo»: la
+ * puerta de pago de la emisión (`invoice-flow`) la deja pasar con saldo.
+ */
+export function isMutualAgreementFinalConsumerInvoice(invoice: {
+  payment_form?: string | null;
+  payment_means_code?: string | null;
+  customer_tax_id?: string | null;
+}): boolean {
+  return (
+    invoice.payment_form === MUTUAL_AGREEMENT_CASH_MEANS.payment_form &&
+    invoice.payment_means_code === MUTUAL_AGREEMENT_CASH_MEANS.payment_means_code &&
+    invoice.customer_tax_id === DIAN_FINAL_CONSUMER_DOCUMENT_NUMBER
+  );
 }

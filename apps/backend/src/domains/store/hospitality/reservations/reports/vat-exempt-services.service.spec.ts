@@ -55,6 +55,8 @@ describe('LodgingVatExemptServicesService (H3.9 "Servicios exentos")', () => {
 
     const result = await service.list({ from: '2026-11-01', to: '2026-11-30' });
 
+    // U18 — the export pins its dates to the store's zone.
+    expect(result.timezone).toBe('America/Bogota');
     expect(result.rows).toEqual([
       expect.objectContaining({
         invoice_number: 'FEH-12',

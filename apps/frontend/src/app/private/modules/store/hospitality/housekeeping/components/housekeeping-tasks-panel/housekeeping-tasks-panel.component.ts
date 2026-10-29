@@ -10,10 +10,13 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { catchError, concatMap, from, map, of, toArray } from 'rxjs';
+import { RouterLink } from '@angular/router';
 import {
   AlertBannerComponent,
   ButtonComponent,
   EmptyStateComponent,
+  IconComponent,
   ItemListCardConfig,
   ModalComponent,
   ResponsiveDataViewComponent,
@@ -22,14 +25,22 @@ import {
   TableAction,
   TableColumn,
   ToastService,
+  SpinnerComponent,
 } from '../../../../../../../shared/components/index';
 import { HOUSEKEEPING_STATUS_LABELS } from '../../../rooms/interfaces/unit.interface';
 import {
   HOUSEKEEPING_TASK_TYPE_LABELS,
   HousekeepingTask,
+  HousekeepingTaskStatus,
   HousekeepingTasksDay,
 } from '../../interfaces/housekeeping.interface';
 import { LodgingHousekeepingService } from '../../services/housekeeping.service';
+import {
+  statusBadgeConfig,
+  TASK_STATUS_CHIPS,
+  TASK_STATUS_LABELS,
+} from '../../../shared/hospitality-status';
+import { HospitalityLoadErrorComponent } from '../../../shared/load-error.component';
 
 /** `0` stands for "Sin asignar" in the selector (options need a value). */
 const UNASSIGNED = 0;
@@ -41,14 +52,10 @@ interface TaskRow extends HousekeepingTask {
   assignee_label: string;
 }
 
-const TASK_STATUS_BADGE = {
-  type: 'custom' as const,
-  size: 'sm' as const,
-  colorMap: { pending: '#f59e0b', done: '#10b981' },
-};
+const TASK_STATUS_BADGE = statusBadgeConfig(TASK_STATUS_CHIPS);
 
-const taskStatusLabel = (value: string): string =>
-  value === 'done' ? 'Terminada' : 'Pendiente';
+const taskStatusLabel = (value: HousekeepingTaskStatus): string =>
+  TASK_STATUS_LABELS[value] ?? value;
 
 /** Case- and accent-insensitive "contains". */
 function matches(term: string, ...values: (string | null | undefined)[]): boolean {
@@ -73,24 +80,45 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    HospitalityLoadErrorComponent,
+    SpinnerComponent,
     AlertBannerComponent,
     ButtonComponent,
     EmptyStateComponent,
+    IconComponent,
     ModalComponent,
     ResponsiveDataViewComponent,
     SelectorComponent,
+    RouterLink,
   ],
   template: `
-    @if (day() === null) {
-      <div class="p-4 md:p-6 text-center">
-        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        <p class="mt-2 text-text-secondary">Cargando tareas...</p>
+    @if (loadError() !== null) {
+      <app-hospitality-load-error
+        what="las tareas de limpieza"
+        [message]="loadError()"
+        (retry)="load()"
+      />
+    } @else if (day() === null) {
+      <div class="p-4 md:p-6">
+        <app-spinner [center]="true" text="Cargando tareas…" />
       </div>
     } @else {
       @if (mode() === 'assign' && (day()?.staff ?? []).length === 0 && day()!.tasks.length > 0) {
         <app-alert-banner variant="info" icon="info" class="mb-3 block">
           No hay usuarios con el rol Camarera en esta tienda. Créalos en Usuarios para asignarles
           habitaciones.
+          <!-- R-EMPTY-03: the notice carries the button that solves it. -->
+          <div bannerActions class="mt-2">
+            <app-button
+              variant="outline"
+              size="sm"
+              customClasses="!min-h-11"
+              routerLink="/admin/settings/users"
+              data-testid="hk-go-users"
+            >
+              Ir a Usuarios
+            </app-button>
+          </div>
         </app-alert-banner>
       }
       @if (rows().length === 0 && hasFilters()) {
@@ -102,18 +130,66 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
           [showActionButton]="true"
           (actionClick)="clearFilters.emit()"
         />
+      } @else if (rows().length === 0 && mode() === 'assign') {
+        <!-- R-EMPTY-01/04: tasks are made on their own, and by hand too. -->
+        <app-empty-state
+          icon="clipboard-check"
+          title="Sin tareas hoy"
+          description="Las tareas de salidas y huéspedes en casa se crean solas cada día. Puedes crear otras con + Nueva tarea."
+          actionButtonText="Nueva tarea"
+          actionButtonIcon="plus"
+          [showActionButton]="true"
+          (actionClick)="createTask.emit()"
+          data-testid="hk-tasks-empty"
+        />
       } @else if (rows().length === 0) {
         <app-empty-state
           icon="clipboard-check"
-          [title]="mode() === 'assign' ? 'Sin tareas hoy' : 'Sin tareas asignadas'"
-          [description]="
-            mode() === 'assign'
-              ? 'Hoy no hay salidas ni huéspedes en casa que limpiar.'
-              : 'No tienes habitaciones asignadas hoy.'
-          "
+          title="Sin tareas asignadas"
+          description="No tienes habitaciones asignadas hoy."
           [showActionButton]="false"
         />
       } @else {
+        <!-- R-ROW-05: assign several rooms to one housekeeper at once. -->
+        @if (bulkIds().length > 0) {
+          <div
+            class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2"
+            role="region"
+            aria-label="Acciones de la selección"
+            data-testid="hk-bulk-bar"
+          >
+            <span class="text-sm font-medium text-text-primary">
+              {{ bulkIds().length }} {{ bulkIds().length === 1 ? 'seleccionada' : 'seleccionadas' }}
+              @if (selectedDone() > 0) {
+                <span class="font-normal text-text-secondary" data-testid="hk-bulk-skipped">
+                  · {{ selectedDone() }}
+                  {{ selectedDone() === 1 ? 'terminada no se asigna' : 'terminadas no se asignan' }}
+                </span>
+              }
+            </span>
+            <div class="flex gap-2">
+              <app-button
+                variant="ghost"
+                size="sm"
+                customClasses="!min-h-11"
+                (clicked)="selectedIds.set(emptySelection())"
+              >
+                Quitar selección
+              </app-button>
+              <app-button
+                variant="primary"
+                size="sm"
+                customClasses="!min-h-11"
+                [disabled]="saving() !== null"
+                (clicked)="openBulkAssign()"
+                data-testid="hk-bulk-assign"
+              >
+                <app-icon slot="icon" name="user-plus" [size]="16" />
+                Asignar a…
+              </app-button>
+            </div>
+          </div>
+        }
         <app-responsive-data-view
           [data]="rows()"
           [columns]="columns()"
@@ -122,6 +198,9 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
           [mobileActions]="actions"
           [striped]="true"
           [hoverable]="true"
+          [selectable]="mode() === 'assign'"
+          rowLabelKey="room"
+          [(selectedIds)]="selectedIds"
           emptyMessage="No hay tareas con ese criterio"
           emptyIcon="search"
           data-testid="hk-tasks"
@@ -130,12 +209,12 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
     }
 
     <app-modal
-      [isOpen]="assigning() !== null"
-      (isOpenChange)="!$event && assigning.set(null)"
-      (cancel)="assigning.set(null)"
+      [isOpen]="assigning() !== null || bulkAssigning()"
+      (isOpenChange)="!$event && closeAssign()"
+      (cancel)="closeAssign()"
       size="sm"
-      [title]="'Asignar habitación ' + (assigning()?.room ?? '')"
-      [subtitle]="assigning()?.type_label ?? ''"
+      [title]="assignTitle()"
+      [subtitle]="bulkAssigning() ? '' : (assigning()?.type_label ?? '')"
     >
       <app-selector
         label="Camarera"
@@ -143,16 +222,45 @@ function matches(term: string, ...values: (string | null | undefined)[]): boolea
         [value]="assignTo()"
         (valueChange)="assignTo.set($event === null ? UNASSIGNED : Number($event))"
       />
-      <div slot="footer" class="flex justify-end gap-2">
-        <app-button variant="ghost" (clicked)="assigning.set(null)">Cancelar</app-button>
+      <div slot="footer" class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <app-button variant="ghost" (clicked)="closeAssign()">Cancelar</app-button>
         <app-button
           variant="primary"
           [loading]="saving() !== null"
           [disabled]="saving() !== null"
-          (clicked)="assign()"
+          (clicked)="bulkAssigning() ? assignSelected() : assign()"
+          data-testid="hk-assign-save"
         >
-          Guardar
+          {{ assignLabel() }}
         </app-button>
+      </div>
+    </app-modal>
+
+    <!-- R-ROW-01: a finished task still opens something. -->
+    <app-modal
+      [isOpen]="viewing() !== null"
+      (isOpenChange)="!$event && viewing.set(null)"
+      (cancel)="viewing.set(null)"
+      size="sm"
+      [title]="'Habitación ' + (viewing()?.room ?? '')"
+      [subtitle]="viewing()?.type_label ?? ''"
+    >
+      @if (viewing(); as task) {
+        <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm" data-testid="hk-task-view">
+          <dt class="text-text-secondary">Estado</dt>
+          <dd class="text-text-primary">{{ statusLabel(task.status) }}</dd>
+          <dt class="text-text-secondary">Camarera</dt>
+          <dd class="text-text-primary">{{ task.assignee_label }}</dd>
+          <dt class="text-text-secondary">Habitación</dt>
+          <dd class="text-text-primary">{{ task.room_status_label }}</dd>
+          @if (task.notes) {
+            <dt class="text-text-secondary">Nota</dt>
+            <dd class="text-text-primary whitespace-pre-line">{{ task.notes }}</dd>
+          }
+        </dl>
+      }
+      <div slot="footer" class="flex justify-end">
+        <app-button variant="ghost" (clicked)="viewing.set(null)">Cerrar</app-button>
       </div>
     </app-modal>
   `,
@@ -174,11 +282,23 @@ export class HousekeepingTasksPanelComponent implements OnInit {
   /** A finished task may have changed a room's status on the board. */
   readonly roomChanged = output<void>();
   readonly clearFilters = output<void>();
+  /** U12 — the empty state asks the page for "+ Nueva tarea". */
+  readonly createTask = output<void>();
 
   readonly day = signal<HousekeepingTasksDay | null>(null);
+  /** R-FB-02 — reason of the last failed load; null = loaded or loading. */
+  readonly loadError = signal<string | null>(null);
   readonly saving = signal<number | null>(null);
   readonly assigning = signal<TaskRow | null>(null);
   readonly assignTo = signal<number>(UNASSIGNED);
+  /** U14 — rows ticked in the list (task ids). */
+  readonly selectedIds = signal<Set<string | number>>(new Set<string | number>());
+  /** U14 — the assign modal works on the selection instead of one row. */
+  readonly bulkAssigning = signal(false);
+  protected readonly emptySelection = () => new Set<string | number>();
+  /** Finished task shown read-only (its row's "Ver"). */
+  readonly viewing = signal<TaskRow | null>(null);
+  protected readonly statusLabel = taskStatusLabel;
 
   readonly staffOptions = computed<SelectorOption[]>(() => [
     { value: UNASSIGNED, label: 'Sin asignar' },
@@ -210,6 +330,38 @@ export class HousekeepingTasksPanelComponent implements OnInit {
           (!assignment ||
             (assignment === 'assigned') === (row.assigned_user_id !== null)),
       );
+  });
+
+  /**
+   * U14 — selected tasks that can still be assigned: pending and visible with
+   * the current search and filters (a hidden row is never touched by surprise).
+   */
+  readonly bulkIds = computed<number[]>(() => {
+    const selected = this.selectedIds();
+    return this.rows()
+      .filter((row) => row.status === 'pending' && selected.has(row.id))
+      .map((row) => row.id);
+  });
+
+  /** Selected visible tasks already finished: the bulk bar says they are skipped. */
+  readonly selectedDone = computed(() => {
+    const selected = this.selectedIds();
+    return this.rows().filter((row) => row.status !== 'pending' && selected.has(row.id)).length;
+  });
+
+  /** R-FORM-10 — verb + object on the submit button. */
+  readonly assignLabel = computed(() => {
+    if (!this.bulkAssigning()) return 'Asignar tarea';
+    const count = this.bulkIds().length;
+    return `Asignar ${count} ${count === 1 ? 'tarea' : 'tareas'}`;
+  });
+
+  readonly assignTitle = computed(() => {
+    if (this.bulkAssigning()) {
+      const count = this.bulkIds().length;
+      return `Asignar ${count} ${count === 1 ? 'tarea' : 'tareas'}`;
+    }
+    return 'Asignar habitación ' + (this.assigning()?.room ?? '');
   });
 
   readonly columns = computed<TableColumn[]>(() => [
@@ -255,6 +407,13 @@ export class HousekeepingTasksPanelComponent implements OnInit {
       disabled: () => this.saving() !== null,
       action: (row: TaskRow) => this.complete(row),
     },
+    {
+      label: 'Ver',
+      icon: 'eye',
+      variant: 'ghost',
+      show: (row: TaskRow) => row.status === 'done',
+      action: (row: TaskRow) => this.viewing.set(row),
+    },
   ];
 
   ngOnInit(): void {
@@ -264,11 +423,15 @@ export class HousekeepingTasksPanelComponent implements OnInit {
   load(): void {
     const request =
       this.mode() === 'assign' ? this.housekeepingService.tasks() : this.housekeepingService.myTasks();
+    this.loadError.set(null);
     request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (day) => this.day.set(day),
+      // R-FB-02: a failed load shows the error block, never "no tasks".
       error: (message: unknown) => {
-        this.day.set({ business_date: '', tasks: [], staff: [] });
-        this.toastService.error(typeof message === 'string' ? message : 'No se pudieron cargar las tareas');
+        this.day.set(null);
+        this.loadError.set(
+          typeof message === 'string' ? message : 'Revisa tu conexión e inténtalo de nuevo.',
+        );
       },
     });
   }
@@ -276,6 +439,67 @@ export class HousekeepingTasksPanelComponent implements OnInit {
   openAssign(row: TaskRow): void {
     this.assignTo.set(row.assigned_user_id ?? UNASSIGNED);
     this.assigning.set(row);
+  }
+
+  openBulkAssign(): void {
+    if (this.bulkIds().length === 0) return;
+    this.assignTo.set(UNASSIGNED);
+    this.bulkAssigning.set(true);
+  }
+
+  closeAssign(): void {
+    this.assigning.set(null);
+    this.bulkAssigning.set(false);
+  }
+
+  /**
+   * U14 — assigns every selected task to one housekeeper, one call after the
+   * other (no bulk endpoint while a hotel has a few dozen rooms). A refused
+   * task does not stop the rest; the toast tells how many went through.
+   */
+  assignSelected(): void {
+    const ids = this.bulkIds();
+    if (ids.length === 0 || this.saving() !== null) return;
+    const userId = this.assignTo() === UNASSIGNED ? null : this.assignTo();
+    const name = userId === null ? null : (this.staffNames().get(userId) ?? 'la camarera');
+    this.saving.set(ids[0]);
+    from(ids)
+      .pipe(
+        concatMap((id) =>
+          this.housekeepingService.assignTask(id, userId).pipe(
+            map((task): HousekeepingTask | null => task),
+            catchError(() => of(null)),
+          ),
+        ),
+        toArray(),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((results) => {
+        const done = results.filter((task): task is HousekeepingTask => task !== null);
+        done.forEach((task) => this.replace(task));
+        this.saving.set(null);
+        this.closeAssign();
+        this.selectedIds.set(new Set<string | number>());
+        const what = `${done.length} ${done.length === 1 ? 'tarea' : 'tareas'}`;
+        const outcome =
+          name === null
+            ? `${what} ${done.length === 1 ? 'quedó' : 'quedaron'} sin asignar`
+            : `${what} ${done.length === 1 ? 'asignada' : 'asignadas'} a ${name}`;
+        const failed = ids.length - done.length;
+        if (done.length === 0) {
+          this.toastService.error(
+            ids.length === 1 ? 'No se pudo asignar la tarea' : 'No se pudo asignar ninguna tarea',
+          );
+          this.load();
+        } else if (failed === 0) {
+          this.toastService.success(outcome);
+        } else {
+          this.toastService.error(
+            `${outcome}. ${failed} no se ${failed === 1 ? 'pudo' : 'pudieron'} asignar`,
+          );
+          this.load();
+        }
+      });
   }
 
   assign(): void {
@@ -342,8 +566,19 @@ export class HousekeepingTasksPanelComponent implements OnInit {
           ? 'Sin asignar'
           : this.mode() === 'mine'
             ? 'Tú'
-            : (this.staffNames().get(task.assigned_user_id) ?? 'Asignada'),
+            : (task.assigned_user_name ??
+              this.staffNames().get(task.assigned_user_id) ??
+              'Usuario retirado'),
     };
+  }
+
+  /** U12 — a task made by hand joins today's list (other dates do not show here). */
+  add(task: HousekeepingTask): void {
+    this.day.update((day) =>
+      day && task.task_date === day.business_date && !day.tasks.some((t) => t.id === task.id)
+        ? { ...day, tasks: [...day.tasks, task] }
+        : day,
+    );
   }
 
   private replace(updated: HousekeepingTask): void {

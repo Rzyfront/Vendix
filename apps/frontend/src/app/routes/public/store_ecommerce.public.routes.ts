@@ -257,6 +257,22 @@ export const storeEcommercePublicRoutes: Routes = [
           ),
       },
       {
+        // H8.1 — online check-in link the hotel sends to the guest (no login).
+        path: 'pre-registro/:token',
+        loadComponent: () =>
+          import('../../private/modules/ecommerce/pages/hotel-booking/hotel-precheckin.component').then(
+            (c) => c.HotelPrecheckinComponent,
+          ),
+      },
+      {
+        // H8.5 — private stay rating link in the thank-you email (no login).
+        path: 'calificar-estadia/:token',
+        loadComponent: () =>
+          import('../../private/modules/ecommerce/pages/hotel-booking/hotel-stay-review.component').then(
+            (c) => c.HotelStayReviewComponent,
+          ),
+      },
+      {
         path: 'pqr',
         loadComponent: () =>
           import('../../public/ecommerce/pages/pqr/pqr-submit.component').then(

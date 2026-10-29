@@ -40,6 +40,12 @@ export interface CreditInvoiceSubmit {
 /** Atajos de plazo, en días corridos desde hoy. */
 export const CREDIT_TERM_DAYS: readonly number[] = [15, 30, 60, 90];
 
+/**
+ * Plazo recomendado al abrir el modal. No hay plazos configurados por cliente
+ * ni por tienda: se sugiere 30 días y el cajero lo cambia si quiere.
+ */
+export const DEFAULT_CREDIT_TERM_DAYS = 30;
+
 /** Medios de pago esperados (códigos DIAN MediosPago). '' = sin definir. */
 export const CREDIT_PAYMENT_MEANS_OPTIONS: SelectorOption[] = [
   { value: '', label: 'Sin definir' },
@@ -68,6 +74,9 @@ export function notBeforeToday(control: AbstractControl): ValidationErrors | nul
 /**
  * «Facturar a crédito»: pide el vencimiento (y opcionalmente el medio de pago
  * esperado) para emitir la factura de una orden sin pagos como venta a crédito.
+ * Abre con todo precargado (emisión hoy, vencimiento a 30 días, medio sin
+ * definir); el cajero sólo edita lo que quiera. Si no quiere crédito, «Emitir
+ * como Consumidor final (contado)» sale de contado con «Acuerdo mutuo».
  *
  * Zoneless: `isOpen` es un `model()`; el estado del formulario llega a la
  * plantilla por `toSignal(statusChanges)`, nunca leyendo `form.invalid` dentro
@@ -110,11 +119,13 @@ export function notBeforeToday(control: AbstractControl): ValidationErrors | nul
           icon="alert-triangle"
           heading="Esta orden no tiene pagos registrados"
         >
-          Al facturarla, la orden pasará a venta a crédito: el saldo quedará en
-          Cartera como cuenta por cobrar y la orden ya no se podrá modificar.
+          Al facturarla a crédito, el saldo quedará en Cartera como cuenta por
+          cobrar y la orden ya no se podrá modificar. Si no es una venta a
+          crédito, emítela como Consumidor final de contado (medio de pago
+          «Acuerdo mutuo»).
         </app-alert-banner>
 
-        <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <dl class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div class="rounded-lg border border-border bg-surface p-3">
             <dt class="text-xs font-semibold uppercase tracking-wider text-text-secondary">
               Cliente
@@ -129,6 +140,14 @@ export function notBeforeToday(control: AbstractControl): ValidationErrors | nul
             </dt>
             <dd class="mt-1 text-sm font-bold text-text-primary">
               {{ balance() | currency }}
+            </dd>
+          </div>
+          <div class="rounded-lg border border-border bg-surface p-3">
+            <dt class="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+              Fecha de emisión
+            </dt>
+            <dd class="mt-1 text-sm font-medium text-text-primary">
+              Hoy, {{ todayLabel }}
             </dd>
           </div>
         </dl>
@@ -174,18 +193,31 @@ export function notBeforeToday(control: AbstractControl): ValidationErrors | nul
       </form>
 
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3">
-          <app-button variant="outline" [disabled]="busy()" (clicked)="onCancel()">
-            Cancelar
-          </app-button>
-          <app-button
-            variant="primary"
-            [disabled]="!canConfirm()"
-            [loading]="busy()"
-            (clicked)="onConfirm()"
-          >
-            Facturar a crédito
-          </app-button>
+        <div class="flex flex-col gap-2">
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <app-button variant="ghost" [disabled]="busy()" (clicked)="onCancel()">
+              Cancelar
+            </app-button>
+            <app-button
+              variant="primary"
+              [disabled]="!canConfirm()"
+              [loading]="busy()"
+              (clicked)="onConfirm()"
+            >
+              Facturar a crédito
+            </app-button>
+          </div>
+          @if (allowFinalConsumer()) {
+            <div class="flex justify-end border-t border-border pt-2">
+              <app-button
+                variant="outline"
+                [disabled]="busy()"
+                (clicked)="onUseFinalConsumer()"
+              >
+                Emitir como Consumidor final (contado)
+              </app-button>
+            </div>
+          }
         </div>
       </div>
     </app-modal>
@@ -201,14 +233,23 @@ export class CreditInvoiceModalComponent {
   readonly balance = input<number>(0);
   /** El padre está emitiendo: bloquea los botones. */
   readonly busy = input<boolean>(false);
+  /** Ofrece salir de contado a Consumidor final en vez de crédito. */
+  readonly allowFinalConsumer = input<boolean>(true);
 
   readonly confirmed = output<CreditInvoiceSubmit>();
   readonly cancelled = output<void>();
+  /** El cajero no quiere crédito: emitir a Consumidor final de contado («Acuerdo mutuo»). */
+  readonly finalConsumer = output<void>();
 
   protected readonly termDays = CREDIT_TERM_DAYS;
   protected readonly paymentMeansOptions = CREDIT_PAYMENT_MEANS_OPTIONS;
   /** Hoy en fecha local (YYYY-MM-DD), mínimo del selector de fecha. */
   protected readonly today = toLocalDateString();
+  protected readonly todayLabel = new Date().toLocaleDateString('es-CO', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
 
   readonly form = this.fb.nonNullable.group({
     due_date: ['', [Validators.required, notBeforeToday]],
@@ -247,11 +288,14 @@ export class CreditInvoiceModalComponent {
   });
 
   constructor() {
-    // Cada apertura parte de un formulario limpio.
+    // Cada apertura parte del formulario precargado con lo recomendado.
     effect(() => {
       if (this.isOpen()) {
         untracked(() =>
-          this.form.reset({ due_date: '', payment_means_code: '' }),
+          this.form.reset({
+            due_date: localDatePlusDays(DEFAULT_CREDIT_TERM_DAYS),
+            payment_means_code: '',
+          }),
         );
       }
     });
@@ -271,6 +315,11 @@ export class CreditInvoiceModalComponent {
       due_date,
       ...(payment_means_code ? { payment_means_code } : {}),
     });
+  }
+
+  protected onUseFinalConsumer(): void {
+    if (this.busy()) return;
+    this.finalConsumer.emit();
   }
 
   protected onCancel(): void {

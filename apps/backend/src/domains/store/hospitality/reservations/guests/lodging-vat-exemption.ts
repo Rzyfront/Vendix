@@ -1,6 +1,7 @@
 import { FullTaxRow } from '../../../orders/utils/catalog-line-pricing.util';
 import { TaxFiscalType } from '../../../taxes/dto';
 import { HOME_COUNTRY_CODE } from './lodging-guest-rules';
+import { RNT_MISSING_REASON } from '../../compliance/rnt';
 
 /**
  * Hospitality Suite (H3.9) — VAT exemption of the lodging sold to a
@@ -41,6 +42,21 @@ export function normalizeEntryPermit(value: string | null | undefined): string |
   return compact.replace(/^([A-Z]+)(\d+)$/, '$1-$2');
 }
 
+/** Plain name of each permit family; mirrored in the frontend `hospitality-labels.ts`. */
+const ENTRY_PERMIT_FAMILIES: Record<string, string> = {
+  PIP: 'Permiso de ingreso y permanencia',
+  TP: 'Visa temporal',
+  PT: 'Permiso temporal',
+};
+
+/** U18 (R-TERM-01) — "PIP-5" → "Permiso de ingreso y permanencia (PIP-5)"; unknown stays as typed. */
+export function entryPermitLabel(value: string | null | undefined): string | null {
+  const code = normalizeEntryPermit(value);
+  if (!code) return null;
+  const family = ENTRY_PERMIT_FAMILIES[code.split('-')[0]];
+  return family ? `${family} (${code})` : code;
+}
+
 /**
  * Desk reasons why the holder cannot take the exemption; empty when it can.
  * Shown next to the disabled "No residente – exento de IVA" box.
@@ -50,9 +66,7 @@ export function vatExemptionBlockers(
   holder: VatExemptionGuest | null,
 ): string[] {
   const reasons: string[] = [];
-  if (!rnt_number?.trim()) {
-    reasons.push('La tienda no tiene RNT: regístralo en Configuración → Hotelería');
-  }
+  if (!rnt_number?.trim()) reasons.push(RNT_MISSING_REASON);
   if (!holder || !holder.is_primary) {
     reasons.push('Registra al titular de la reserva');
     return reasons;

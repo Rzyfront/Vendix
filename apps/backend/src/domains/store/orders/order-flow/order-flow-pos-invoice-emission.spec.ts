@@ -280,12 +280,12 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
     expect(posEmits()[0][1]).toEqual(expect.objectContaining({ auto_emit: false }));
   });
 
-  it('auto_emit ausente ⇒ default del mostrador (true)', async () => {
+  it('auto_emit ausente ⇒ default del mostrador (false: solo emite quien lo enciende)', async () => {
     settingsService.getSettings.mockResolvedValue({});
 
     await service.payOrder(ORDER_ID, DIRECT_DTO);
 
-    expect(posEmits()[0][1]).toEqual(expect.objectContaining({ auto_emit: true }));
+    expect(posEmits()[0][1]).toEqual(expect.objectContaining({ auto_emit: false }));
   });
 
   it('un fallo al preparar la emisión nunca rompe el pago', async () => {

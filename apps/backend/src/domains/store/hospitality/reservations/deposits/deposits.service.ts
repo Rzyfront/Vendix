@@ -179,7 +179,7 @@ export class LodgingDepositsService {
         method: row.method,
         method_label:
           row.kind === 'applied'
-            ? 'Aplicado al folio'
+            ? 'Aplicado a la cuenta'
             : row.kind === 'retained'
               ? 'Retenido por penalidad'
               : (METHOD_LABELS[row.method ?? ''] ?? 'Depósito'),

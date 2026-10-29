@@ -461,9 +461,9 @@ export interface PosInvoicingSettings {
   /**
    * Emitir el documento electrónico automáticamente al cerrar la venta.
    *
-   * Default `true` (ver `DEFAULT_POS_AUTO_EMIT`). La emisión ocurre SIEMPRE
-   * fuera de la transacción del cobro, así que apagarlo no hace la caja más
-   * rápida: sólo obliga a pedir el documento a mano desde el POS.
+   * Default `false` (ver `DEFAULT_POS_AUTO_EMIT`): sólo emite sola la tienda
+   * que lo enciende explícitamente. Apagado, el documento se pide a mano con
+   * «Facturar». La emisión ocurre SIEMPRE fuera de la transacción del cobro.
    */
   auto_emit?: boolean;
   /**
@@ -487,7 +487,8 @@ export interface EcommerceInvoicingSettings {
   /**
    * Emitir el documento electrónico automáticamente al cerrar la venta online.
    *
-   * Default `true` (ver `DEFAULT_ECOMMERCE_AUTO_EMIT`).
+   * Default `false` (ver `DEFAULT_ECOMMERCE_AUTO_EMIT`): sólo emite sola la
+   * tienda que lo enciende explícitamente.
    */
   auto_emit?: boolean;
 }
@@ -502,15 +503,14 @@ export interface InvoicingSettings {
 }
 
 /**
- * Emisión automática al cerrar la venta, activa salvo que la tienda la apague.
+ * Emisión automática al cerrar la venta: APAGADA salvo que la tienda la encienda.
  *
- * El default es `true` porque una tienda habilitada ante la DIAN debe soportar
- * cada venta con un documento: dejarlo apagado por defecto convertiría la
- * obligación en un clic que alguien tiene que acordarse de dar. No hay riesgo
- * para quien no factura electrónicamente — la compuerta de habilitación corta
- * antes de crear nada y la venta ni se entera.
+ * Decisión de negocio (2026-10-28): sólo emite automáticamente la tienda que
+ * lo enciende explícitamente (`invoicing.pos.auto_emit = true`). Sin valor
+ * guardado, la factura se emite a mano con «Facturar». Cambiar este default
+ * no toca datos: las tiendas que guardaron `true` siguen emitiendo.
  */
-export const DEFAULT_POS_AUTO_EMIT = true;
+export const DEFAULT_POS_AUTO_EMIT = false;
 
 /**
  * Ante un fallo de emisión en el POS, dejar constancia.
@@ -524,13 +524,12 @@ export const DEFAULT_POS_AUTO_EMIT = true;
 export const DEFAULT_POS_DIAN_FAILURE_POLICY: PosDianFailurePolicy = 'queue';
 
 /**
- * Emisión automática de e-commerce, en `true` a propósito.
+ * Emisión automática de e-commerce: APAGADA salvo que la tienda la encienda.
  *
- * Hoy la tienda en línea emite SIEMPRE, sin ninguna bandera que lo controle.
- * Si este default fuera `false`, el día que se despliegue la clave apagaría
- * la emisión de TODAS las tiendas de golpe, sin que nadie lo haya pedido.
+ * Misma decisión que `DEFAULT_POS_AUTO_EMIT` (2026-10-28): sólo emite sola la
+ * tienda con `invoicing.ecommerce.auto_emit = true` guardado.
  */
-export const DEFAULT_ECOMMERCE_AUTO_EMIT = true;
+export const DEFAULT_ECOMMERCE_AUTO_EMIT = false;
 
 export interface StoreSettings {
   /**
@@ -1163,6 +1162,26 @@ export interface HospitalitySettings {
   night_audit_time?: string;
   /** Registro Nacional de Turismo number. Empty until the owner sets it. */
   rnt_number?: string;
+  /** H4.3 — notify every March to renew the RNT before March 31. Default true. */
+  rnt_renewal_reminder?: boolean;
+  /**
+   * H4.1 — report each check-in and check-out to the MinCIT TRA. Never blocks
+   * the desk (D14); off = no submission is recorded. Default true.
+   */
+  tra_enabled?: boolean;
+  /**
+   * H4.2 — list each entry and exit of a foreign guest for the SIRE (assisted,
+   * Migración Colombia). Never blocks the desk (D14); off = nothing is recorded.
+   */
+  sire_enabled?: boolean;
+  /** H4.2 — hours after which a pending SIRE movement is shown in red. Default 24. */
+  sire_overdue_hours?: number;
+  /**
+   * H4.4 — Fontur contribution rate in per mil (‰) used by the quarterly
+   * estimate. Default `2.5`; editable because the lodging rate is only
+   * verified by secondary sources.
+   */
+  fontur_rate_per_mil?: number;
   /**
    * Overbooking allowance a new room type starts with: reservations it may
    * sell above its active rooms (H1.6). Default `0`.
@@ -1176,6 +1195,16 @@ export interface HospitalitySettings {
   booking_hold_minutes?: number;
   /** H6.2 — minutes between two automatic syncs of an imported iCal calendar. Default 15. */
   ical_import_interval_minutes?: number;
+  /** H8.2 — email the guest when a desk reservation is confirmed. Default true. */
+  guest_email_confirmation?: boolean;
+  /** H8.2 — email a reminder with the online check-in link before arrival. Default true. */
+  guest_email_pre_arrival?: boolean;
+  /** H8.2 — hours before the check-in time the reminder goes out (12-168). Default 48. */
+  guest_email_pre_arrival_hours?: number;
+  /** H8.2 — email a thank-you after check-out. Default true. */
+  guest_email_post_stay?: boolean;
+  /** H8.5 — the thank-you asks for a private rating of the stay. Default true. */
+  guest_email_post_stay_review?: boolean;
 }
 
 // ============================================================================

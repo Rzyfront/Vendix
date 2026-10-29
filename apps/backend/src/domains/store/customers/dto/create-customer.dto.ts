@@ -4,11 +4,14 @@ import {
   IsBoolean,
   IsEmail,
   IsEnum,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   Matches,
   MaxLength,
+  Min,
+  ValidateIf,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
@@ -181,4 +184,15 @@ export class CreateCustomerDto {
   @IsOptional()
   @IsBoolean()
   is_withholding_agent?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Tarifa preferencial del cliente en esta tienda (solo tarifas de cliente). `null` la quita.',
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsInt()
+  @Min(1)
+  price_tier_id?: number | null;
 }

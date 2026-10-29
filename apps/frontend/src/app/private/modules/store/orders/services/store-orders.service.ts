@@ -90,6 +90,8 @@ export type KitchenDisposition = 'reuse' | 'waste';
  */
 export interface FlowCancelOrderDto extends CancelOrderDto {
   kitchenDisposition?: KitchenDisposition;
+  /** cod-auto-invoicing S5 — emit the TOTAL credit note before cancelling. */
+  issueCreditNote?: boolean;
 }
 
 /**
@@ -467,7 +469,11 @@ export class StoreOrdersService {
    * y `customer_alias`; el XOR lo impone el CHECK de BD, así que al asignar
    * un titular real se limpia el alias. Desempaqueta `ResponseService`.
    */
-  updateOrderCustomer(orderId: string, customerId: number): Observable<Order> {
+  /** PATCH the order holder; `null` returns the order to Consumidor final. */
+  updateOrderCustomer(
+    orderId: string,
+    customerId: number | null,
+  ): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}`;
 
     return this.http

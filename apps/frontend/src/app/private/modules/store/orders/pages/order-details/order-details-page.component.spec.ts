@@ -1,4 +1,5 @@
 import { signal } from '@angular/core';
+import { of } from 'rxjs';
 import {
   ORDER_DELIVERY_CONFIG, ORDER_DELIVERY_STEP_LABELS, pendingKitchenLabelsFromError,
   cancellationBody, isOrderItemCancellationPaid, shippingTaxModePrefix,
@@ -566,5 +567,89 @@ describe('QUI-650 — Modificar Orden abre el modal de ítems', () => {
     OrderDetailsPageComponent.prototype.executeAction.call(self as any, 'edit-order');
     expect(showItemsEditModal()).toBeFalse();
     expect(router.navigate).not.toHaveBeenCalled();
+  });
+});
+
+describe('Consumidor final de una orden sin pagar pide confirmación', () => {
+  const proto = OrderDetailsPageComponent.prototype as any;
+  const build = (unpaid: boolean, answer: boolean) => {
+    const self: any = {
+      hasUnpaidBalance: () => unpaid,
+      dialogService: { confirm: jasmine.createSpy('confirm').and.resolveTo(answer) },
+      showCreditModal: signal(true),
+      showHolderModal: signal(true),
+      holderEmitKey: 'order',
+      emitAllowFinalConsumer: false,
+      runEmit: jasmine.createSpy('runEmit'),
+    };
+    self.confirmFinalConsumerCash = proto.confirmFinalConsumerCash.bind(self);
+    self.emitAsFinalConsumerCash = proto.emitAsFinalConsumerCash.bind(self);
+    return self;
+  };
+
+  it('modal de crédito → «Volver» no emite y el modal sigue abierto', async () => {
+    const self = build(true, false);
+    await proto.onCreditUseFinalConsumer.call(self);
+    const data = self.dialogService.confirm.calls.mostRecent().args[0];
+    expect(data.title).toBe('Orden sin pagar');
+    expect(data.message).toContain('se recomienda emitir la factura a crédito');
+    expect(data.message).toContain('se necesitan los datos del cliente');
+    expect(data.message).toContain('de contado, como ya pagada');
+    expect(data.message).toContain('¿Deseas continuar?');
+    expect(data.confirmText).toBe('Sí, emitir a Consumidor final');
+    expect(data.cancelText).toBe('Volver');
+    expect(self.runEmit).not.toHaveBeenCalled();
+    expect(self.showCreditModal()).toBeTrue();
+  });
+
+  it('modal de crédito → «Sí» cierra el modal y emite a Consumidor final', async () => {
+    const self = build(true, true);
+    await proto.onCreditUseFinalConsumer.call(self);
+    expect(self.showCreditModal()).toBeFalse();
+    expect(self.runEmit).toHaveBeenCalledWith('order', null, undefined, true);
+  });
+
+  it('modal del titular en orden sin pagar también confirma', async () => {
+    const self = build(true, false);
+    await proto.onHolderUseFinalConsumer.call(self);
+    expect(self.dialogService.confirm).toHaveBeenCalled();
+    expect(self.runEmit).not.toHaveBeenCalled();
+    expect(self.showHolderModal()).toBeTrue();
+  });
+
+  it('orden pagada: emite directo sin confirmación', async () => {
+    const self = build(false, false);
+    await proto.onHolderUseFinalConsumer.call(self);
+    expect(self.dialogService.confirm).not.toHaveBeenCalled();
+    expect(self.showHolderModal()).toBeFalse();
+    expect(self.runEmit).toHaveBeenCalledWith('order', null, undefined, true);
+  });
+});
+
+describe('Cambiar a consumidor final desde el cambio de titular', () => {
+  it('quita el cliente de la orden y ofrece restaurar la tarifa', () => {
+    const proto = OrderDetailsPageComponent.prototype as any;
+    const updateOrderCustomer = jasmine
+      .createSpy('updateOrderCustomer')
+      .and.returnValue(of({}));
+    const self: any = {
+      order: () => ({ id: 7, customer_id: 42 }),
+      showTitularSearchModal: signal(true),
+      changingCustomer: signal(false),
+      ordersService: { updateOrderCustomer },
+      destroyRef: { onDestroy: () => () => undefined },
+      toastService: jasmine.createSpyObj('ToastService', ['success', 'error']),
+      refreshOrder: jasmine.createSpy('refreshOrder'),
+      offerCustomerTier: jasmine.createSpy('offerCustomerTier'),
+      handleChangeCustomerError: jasmine.createSpy('handleChangeCustomerError'),
+    };
+    proto.onTitularSearchUseFinalConsumer.call(self);
+    expect(updateOrderCustomer).toHaveBeenCalledWith('7', null);
+    expect(self.showTitularSearchModal()).toBeFalse();
+    expect(self.toastService.success).toHaveBeenCalledWith(
+      'La orden quedó a nombre de Consumidor final',
+    );
+    expect(self.refreshOrder).toHaveBeenCalled();
+    expect(self.offerCustomerTier).toHaveBeenCalledWith(42, null);
   });
 });

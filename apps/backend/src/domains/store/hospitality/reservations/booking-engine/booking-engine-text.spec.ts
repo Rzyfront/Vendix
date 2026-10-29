@@ -56,12 +56,39 @@ describe('booking engine text (H6.6)', () => {
       check_in_time: '15:00',
       check_out_time: '12:00',
       policy: null,
+      rnt_number: '12345',
     });
     expect(email.subject).toBe('Reserva H-0012 confirmada · Hotel Roku');
+    // H4.3 — the voucher carries the hotel's RNT at its foot.
+    expect(email.text).toContain('Hotel Roku · RNT 12345');
+    expect(email.html).toContain('Hotel Roku · RNT 12345');
     expect(email.text).toContain('Llegada: 20-nov desde las 15:00');
     expect(email.text).toContain('Pagado en línea: $ 150.000');
     expect(email.text).toContain('Saldo en el hotel: $ 350.000');
     expect(email.html).toContain('&lt;b&gt;Ana&lt;/b&gt;');
     expect(email.html).not.toContain('<b>Ana</b>');
+  });
+
+  it('H4.3 — sin RNT el voucher no imprime la línea del RNT', () => {
+    const email = bookingConfirmationEmail({
+      guest_name: 'Ana',
+      store_name: 'Hotel Roku',
+      reservation_number: 'H-0012',
+      arrival_date: '2026-11-20',
+      departure_date: '2026-11-22',
+      nights: 2,
+      room_type: 'Doble',
+      adults: 2,
+      children: 0,
+      total: '$ 500.000',
+      paid: '$ 150.000',
+      balance: '$ 350.000',
+      check_in_time: '15:00',
+      check_out_time: '12:00',
+      policy: null,
+      rnt_number: null,
+    });
+    expect(email.text).not.toContain('RNT');
+    expect(email.html).not.toContain('RNT');
   });
 });
