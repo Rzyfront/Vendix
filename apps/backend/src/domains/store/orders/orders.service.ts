@@ -1507,6 +1507,11 @@ export class OrdersService {
             // el fix del `create`. Espeja el patrón de
             // `refund-calculation.service.ts:66`.
             order_item_taxes: true,
+            // Adiciones de la línea: el POS las repone al cargar un borrador
+            // para exigir el pedido programado al cobrarlo.
+            order_item_options: {
+              select: { option_id: true, group_name: true, option_name: true, scope: true, price_delta: true },
+            },
             // Restaurant Suite — Fase K Gap 2: surface the KDS state
             // for every order_item so the order detail can show
             // "Cocina: <estado>" badges per dish. We order by id desc

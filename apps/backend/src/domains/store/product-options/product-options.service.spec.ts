@@ -85,3 +85,24 @@ describe('ProductOptionsService.create — component_variant_id', () => {
     expect(prisma.$transaction).toHaveBeenCalled();
   });
 });
+
+describe('ProductOptionsService.isEnabled', () => {
+  function build(settings: unknown) {
+    const prisma: any = {
+      store_settings: { findFirst: jest.fn(async () => ({ settings })) },
+    };
+    return new ProductOptionsService(prisma);
+  }
+
+  it('las adiciones se venden solo con pedidos programados activos', async () => {
+    expect(
+      await build({ product_options: { enabled: true }, scheduled_orders: { enabled: true } }).isEnabled(1),
+    ).toBe(true);
+    expect(
+      await build({ product_options: { enabled: true }, scheduled_orders: { enabled: false } }).isEnabled(1),
+    ).toBe(false);
+    expect(
+      await build({ product_options: { enabled: false }, scheduled_orders: { enabled: true } }).isEnabled(1),
+    ).toBe(false);
+  });
+});

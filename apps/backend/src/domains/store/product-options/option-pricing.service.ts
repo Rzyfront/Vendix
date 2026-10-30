@@ -130,17 +130,18 @@ export class OptionPricingService {
    * insumo y su costo se registran al pasar a producción, y una venta
    * normal no tiene ese paso. Sin agendamiento, ids enviados →
    * OPT_REQUIRES_SCHEDULE; sin ids el producto se vende solo, aunque tenga
-   * grupos obligatorios.
+   * grupos obligatorios. Un borrador (`draft`) guarda las adiciones elegidas
+   * sin agendamiento (no cobra ni descuenta); se agenda al cobrarlo.
    */
   async resolve(
     store_id: number,
     product_id: number | null | undefined,
     option_ids: number[] | undefined,
     line_quantity: number,
-    options: { scheduled: boolean; client?: Prisma.TransactionClient },
+    options: { scheduled: boolean; draft?: boolean; client?: Prisma.TransactionClient },
   ): Promise<ResolvedOptions> {
     const ids = option_ids ?? [];
-    const { scheduled, client } = options;
+    const { scheduled, draft, client } = options;
     if (!product_id) {
       if (ids.length) throw new VendixHttpException(ErrorCodes.OPT_SELECTION_INVALID);
       return EMPTY;
@@ -151,8 +152,8 @@ export class OptionPricingService {
       return EMPTY;
     }
     if (!scheduled) {
-      if (ids.length) throw new VendixHttpException(ErrorCodes.OPT_REQUIRES_SCHEDULE);
-      return EMPTY;
+      if (!ids.length) return EMPTY;
+      if (!draft) throw new VendixHttpException(ErrorCodes.OPT_REQUIRES_SCHEDULE);
     }
     const groups = (await this.productOptions.applicableForProduct(store_id, product_id, {
       withCost: false,

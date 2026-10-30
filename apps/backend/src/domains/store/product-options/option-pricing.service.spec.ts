@@ -127,6 +127,16 @@ describe('OptionPricingService.resolve', () => {
     expect(result.snapshots).toEqual([]);
   });
 
+  it('un borrador sin agendamiento guarda las adiciones elegidas (se agenda al cobrarlo)', async () => {
+    const result = await build(true, [frutas]).resolve(1, 5, [11], 1, { scheduled: false, draft: true });
+    expect(result.snapshots.map((x) => x.option_id)).toEqual([11]);
+  });
+
+  it('un borrador sin agendamiento y sin ids no exige el grupo obligatorio, igual que hoy', async () => {
+    const result = await build(true, [cubierta]).resolve(1, 5, [], 1, { scheduled: false, draft: true });
+    expect(result.snapshots).toEqual([]);
+  });
+
   it('con grupo obligatorio y sin ids rechaza la venta', async () => {
     await expect(build(true, [cubierta]).resolve(1, 5, [], 1, { scheduled: true })).rejects.toThrow('Elige 1 opción en Cubierta');
   });

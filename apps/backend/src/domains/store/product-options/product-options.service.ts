@@ -40,12 +40,18 @@ export class ProductOptionsService {
     return store_id;
   }
 
+  /**
+   * Las adiciones solo se venden en pedidos programados (las descuenta la
+   * producción), así que sin `scheduled_orders.enabled` no existen para la
+   * venta: el POS y la tienda en línea no muestran el selector.
+   */
   async isEnabled(store_id: number): Promise<boolean> {
     const row = await this.prisma.store_settings.findFirst({
       where: { store_id },
       select: { settings: true },
     });
-    return !!mergeStoreSettingsWithDefaults(row?.settings).product_options?.enabled;
+    const settings = mergeStoreSettingsWithDefaults(row?.settings);
+    return !!settings.product_options?.enabled && !!settings.scheduled_orders?.enabled;
   }
 
   private present(group: GroupWithOptions, withCost = true) {

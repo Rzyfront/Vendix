@@ -145,6 +145,8 @@ import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-p
  * el alias local porque el resto del servicio lo referencia por este nombre.
  */
 type PosTierSnapshot = TierSnapshot;
+/** Venta con pedido programado o borrador: los únicos que aceptan adiciones. */
+type PosLineOptionsMode = { scheduled: boolean; draft: boolean };
 
 /**
  * ADR-03 (P1, CP-pos-exclusive-tax-double-charge) — discriminante de
@@ -3832,15 +3834,17 @@ export class PaymentsService {
 
   /**
    * Adiciones de una línea POS. Sin `OptionPricingService` (sólo en specs) o
-   * sin `option_ids` y sin grupos obligatorios → sin efecto. Solo se aceptan
+   * sin `option_ids` y sin grupos obligatorios → sin efecto. Solo se cobran
    * en una venta con pedido programado (`scheduled`), que es quien las
-   * descuenta del inventario al pasar a producción.
+   * descuenta del inventario al pasar a producción. Un borrador (`draft`) las
+   * guarda sin agendamiento: no cobra, no aparta cupo ni descuenta; el
+   * agendamiento se exige al cobrarlo (`assertAdoptedOptionsScheduled`).
    */
   private async resolvePosLineOptions(
     tx: any,
     item: any,
     storeId: number,
-    scheduled: boolean,
+    mode: PosLineOptionsMode,
   ): Promise<ResolvedOptions> {
     const optionIds: number[] | undefined = item.option_ids;
     if (!this.optionPricingService) {
@@ -3852,8 +3856,26 @@ export class PaymentsService {
       item.product_id,
       optionIds,
       Number(item.quantity) || 1,
-      { scheduled, client: tx },
+      { scheduled: mode.scheduled, draft: mode.draft, client: tx },
     );
+  }
+
+  /**
+   * Cobro de un borrador con adiciones: sus líneas persistidas mandan (las del
+   * DTO no se guardan), así que el agendamiento se valida contra ellas. Sin
+   * `schedule` nadie descontaría esas adiciones → OPT_REQUIRES_SCHEDULE.
+   */
+  private async assertAdoptedOptionsScheduled(
+    tx: any,
+    orderId: number,
+    storeId: number,
+  ): Promise<void> {
+    const withOptions = await tx.order_item_options.count({
+      where: { store_id: storeId, order_item: { order_id: orderId } },
+    });
+    if (withOptions > 0) {
+      throw new VendixHttpException(ErrorCodes.OPT_REQUIRES_SCHEDULE);
+    }
   }
 
   private async buildPosOrderItem(
@@ -3869,9 +3891,9 @@ export class PaymentsService {
     // `session.order_id` (cierre de mesa, orden ya existe) u `orderNumber`
     // (venta nueva, recién generado antes de mapear los ítems).
     orderRef?: string | number | null,
-    // Venta con pedido programado: única que acepta adiciones (ver
-    // `resolvePosLineOptions`). El cierre de mesa nunca agenda.
-    scheduled = false,
+    // Venta con pedido programado o borrador: únicos que aceptan adiciones
+    // (ver `resolvePosLineOptions`). El cierre de mesa nunca agenda.
+    optionsMode: PosLineOptionsMode = { scheduled: false, draft: false },
   ): Promise<any> {
     const isCustomItem = item.item_type === 'custom' || !item.product_id;
     const lineUnits = this.getPosLineUnits(item);
@@ -4177,7 +4199,7 @@ export class PaymentsService {
     // Adiciones (S3): el servidor valida las reglas y calcula el delta FINAL
     // por unidad; el cliente solo manda `option_ids`. Sin adiciones el delta
     // es 0 y nada de este bloque cambia el cálculo de hoy.
-    const lineOptions = await this.resolvePosLineOptions(tx, item, dtoStoreId, scheduled);
+    const lineOptions = await this.resolvePosLineOptions(tx, item, dtoStoreId, optionsMode);
     const optionUnitDelta = Number(lineOptions.unit_price_delta);
     const catalogFinalWithOptions = this.roundMoney(catalogFinalPrice + optionUnitDelta);
 
@@ -5981,6 +6003,9 @@ export class PaymentsService {
           `La orden ${orderLabel} ya tiene un pago registrado. Actualiza la lista de órdenes antes de intentarlo de nuevo.`,
         );
       }
+      if (!dto.schedule) {
+        await this.assertAdoptedOptionsScheduled(tx, existingOrder.id, dtoStoreId);
+      }
     }
 
     // Venta normal (sin sesión de mesa): los ítems son obligatorios para
@@ -6027,7 +6052,7 @@ export class PaymentsService {
               user,
               tierSnapshots[index],
               orderNumber,
-              !!dto.schedule,
+              { scheduled: !!dto.schedule, draft: dto.is_draft === true },
             ),
           ),
         );
