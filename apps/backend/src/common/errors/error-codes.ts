@@ -5330,6 +5330,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Token already used',
   },
+  BOOK_CONFIRM_003: {
+    code: 'BOOK_CONFIRM_003',
+    httpStatus: 409,
+    devMessage: 'Booking can no longer be changed from the confirmation link',
+  },
   BOOK_CHECKIN_001: {
     code: 'BOOK_CHECKIN_001',
     httpStatus: 400,

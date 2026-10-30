@@ -1307,6 +1307,24 @@ export class ReservationsService {
    */
   async cancel(id: number) {
     const booking = await this.transition(id, 'cancelled');
+    return this.afterBookingCancelled(booking);
+  }
+
+  /**
+   * QUI-966 S9 — side effects of a cancellation made from the customer's
+   * email link. `BookingConfirmationService` already moved the booking to
+   * `cancelled` atomically with the link's token; this runs the same
+   * effects as `cancel` (order release per S7 + `booking.cancelled`).
+   * Must run inside the booking's store context.
+   */
+  async completeLinkCancellation(id: number) {
+    const booking = await this.findOne(id);
+    return this.afterBookingCancelled(booking);
+  }
+
+  private async afterBookingCancelled(
+    booking: Awaited<ReturnType<ReservationsService['findOne']>>,
+  ) {
     // QUI-966 S7: release (or flag) the booking's order.
     const orderRelease = await this.releaseBookingOrder(booking);
     this.eventEmitter.emit('booking.cancelled', {

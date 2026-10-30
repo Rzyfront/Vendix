@@ -569,12 +569,15 @@ describe('T3 advisory C — email confirmation re-check excludes the booking its
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     };
+    // T5: the link change runs in a transaction on the unscoped client.
+    delegates.$transaction = jest.fn((fn: any) => fn(delegates));
     const prisma: any = { withoutScope: () => delegates, ...delegates };
-    prisma.$transaction = jest.fn((fn: any) => fn(prisma));
     const service = new BookingConfirmationService(
       prisma,
       { emit: jest.fn() } as any,
       { isSlotAvailable } as any,
+      { completeLinkCancellation: jest.fn() } as any,
+      { runInStoreContext: jest.fn((_id: number, cb: () => any) => cb()) } as any,
     );
     await service.processToken('tkn');
     expect(isSlotAvailable).toHaveBeenCalledWith(10, FUTURE, '10:00', '11:00', 5, 42);

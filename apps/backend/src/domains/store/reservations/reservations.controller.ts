@@ -136,7 +136,7 @@ export class ReservationsController {
   @Get('confirm/:token')
   async confirmByToken(@Param('token') token: string) {
     const result = await this.bookingConfirmationService.processToken(token);
-    return this.responseService.success(result);
+    return this.responseService.success(result, result.message);
   }
 
   // ─────────────────────────────────────────────────────────────────────
