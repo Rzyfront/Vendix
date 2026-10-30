@@ -38,8 +38,29 @@ export function freeBookingOverlapWhere(
     date: new Date(date),
     start_time: { lt: end_time },
     end_time: { gt: start_time },
-    status: { notIn: [booking_status_enum.cancelled] },
+    ...slotHoldingBookingWhere(),
     ...(exclude_booking_id ? { id: { not: exclude_booking_id } } : {}),
+  };
+}
+
+/**
+ * Prisma `where` fragment for the bookings that still hold their slot
+ * (QUI-966 T3 advisory A): not cancelled, and not an ecommerce hold that
+ * already expired (`pending` + `expires_at` in the past). Nothing purges
+ * expired holds, so without this they kept seats and providers busy forever.
+ * Spread it into every availability count/grid query; it owns the `status`
+ * and `OR` keys.
+ */
+export function slotHoldingBookingWhere(
+  now: Date = new Date(),
+): Prisma.bookingsWhereInput {
+  return {
+    status: { notIn: [booking_status_enum.cancelled] },
+    OR: [
+      { status: { not: booking_status_enum.pending } },
+      { expires_at: null },
+      { expires_at: { gte: now } },
+    ],
   };
 }
 
@@ -199,7 +220,7 @@ export class AvailabilityService {
           gte: new Date(date_from),
           lte: new Date(date_to),
         },
-        status: { notIn: [booking_status_enum.cancelled] },
+        ...slotHoldingBookingWhere(),
       },
       select: {
         date: true,
@@ -557,7 +578,7 @@ export class AvailabilityService {
         date: targetDate,
         start_time: { lt: end_time },
         end_time: { gt: start_time },
-        status: { notIn: [booking_status_enum.cancelled] },
+        ...slotHoldingBookingWhere(),
       };
       if (exclude_booking_id) {
         where.id = { not: exclude_booking_id };
@@ -681,7 +702,7 @@ export class AvailabilityService {
       date: targetDate,
       start_time: { lt: end_time },
       end_time: { gt: start_time },
-      status: { notIn: [booking_status_enum.cancelled] },
+      ...slotHoldingBookingWhere(),
     };
     if (exclude_booking_id) {
       where.id = { not: exclude_booking_id };
@@ -796,7 +817,7 @@ export class AvailabilityService {
           gte: new Date(date_from),
           lte: new Date(date_to),
         },
-        status: { notIn: [booking_status_enum.cancelled] },
+        ...slotHoldingBookingWhere(),
       },
       select: { date: true, start_time: true, end_time: true },
     });
@@ -958,9 +979,7 @@ export class AvailabilityService {
         gte: new Date(dateFrom),
         lte: new Date(dateTo),
       },
-      status: {
-        notIn: [booking_status_enum.cancelled],
-      },
+      ...slotHoldingBookingWhere(),
     };
     if (productId) {
       bookingWhere.product_id = productId;
@@ -1276,7 +1295,7 @@ export class AvailabilityService {
       where: {
         product_id: product.id,
         date: new Date(`${dateStr}T00:00:00.000Z`),
-        status: { notIn: [booking_status_enum.cancelled] },
+        ...slotHoldingBookingWhere(),
       },
       select: { start_time: true, end_time: true },
     });
@@ -1318,7 +1337,7 @@ export class AvailabilityService {
         product_id: product.id,
         provider_id: { in: providerIds },
         date: new Date(`${dateStr}T00:00:00.000Z`),
-        status: { notIn: [booking_status_enum.cancelled] },
+        ...slotHoldingBookingWhere(),
       },
       select: { provider_id: true, start_time: true, end_time: true },
     });

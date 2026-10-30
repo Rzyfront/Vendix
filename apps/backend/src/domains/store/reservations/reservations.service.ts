@@ -9,7 +9,12 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { booking_status_enum, booking_mode_enum, Prisma } from '@prisma/client';
+import {
+  booking_status_enum,
+  booking_mode_enum,
+  payments_state_enum,
+  Prisma,
+} from '@prisma/client';
 import {
   CreateBookingDto,
   RescheduleBookingDto,
@@ -20,6 +25,7 @@ import {
   AvailabilityService,
   FREE_BOOKING_CAPACITY,
   freeBookingOverlapWhere,
+  slotHoldingBookingWhere,
 } from './availability.service';
 import { OrdersService } from '../orders/orders.service';
 import { S3Service } from '@common/services/s3.service';
@@ -28,7 +34,15 @@ import { TablesService } from '../tables/tables.service';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 import { BusinessHoursService } from './business-hours/business-hours.service';
-import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
+import {
+  dateOnlyString,
+  localDateString,
+  resolveStoreTimezone,
+} from '@common/utils/store-timezone.util';
+import {
+  CANCELABLE_ORDER_STATES,
+  SETTLED_PAYMENT_STATES,
+} from '../orders/order-flow/order-cancellation-policy.util';
 import {
   isSerializationFailure,
   isUniqueViolationOn,
@@ -39,7 +53,43 @@ import {
   BookingSlotInput,
   assertBookingSlotOpen,
   assertBookingSlotShape,
+  isSlotStartInPast,
 } from './booking-time.util';
+
+/** Pricing columns of a product read to price a booking's order. */
+const BOOKING_PRODUCT_PRICING_SELECT = {
+  name: true,
+  base_price: true,
+  is_on_sale: true,
+  sale_price: true,
+  track_inventory: true,
+} as const;
+
+/** Pricing columns of a variant read to price a booking's order. */
+const BOOKING_VARIANT_PRICING_SELECT = {
+  id: true,
+  price_override: true,
+  is_on_sale: true,
+  sale_price: true,
+  track_inventory_override: true,
+} as const;
+
+type BookingPricedProduct = Prisma.productsGetPayload<{
+  select: typeof BOOKING_PRODUCT_PRICING_SELECT;
+}>;
+type BookingPricedVariant = Prisma.product_variantsGetPayload<{
+  select: typeof BOOKING_VARIANT_PRICING_SELECT;
+}>;
+
+/**
+ * What happened to a booking's order when the booking was cancelled or
+ * deleted (QUI-966 S7). Returned to staff/customer next to the booking.
+ */
+export interface BookingOrderRelease {
+  order_cancelled: boolean;
+  order_requires_refund: boolean;
+  order_warning: string | null;
+}
 
 @Injectable()
 export class ReservationsService {
@@ -316,6 +366,222 @@ export class ReservationsService {
     }
   }
 
+  /**
+   * Creates the order a booking is born with (QUI-649), priced on the server
+   * with `PriceResolverService` — the caller never sends the price. Runs in
+   * autocommit BEFORE the booking transaction (hotfix 576); the caller must
+   * compensate it with `compensateOrderForFailedBooking` if the booking write
+   * fails. Shared by `create` and `confirmHold` (QUI-966 S14).
+   */
+  private async preCreateBookingOrder(args: {
+    product: BookingPricedProduct;
+    variant: BookingPricedVariant | null;
+    product_id: number;
+    product_variant_id?: number | null;
+    customer_id?: number | null;
+    booking_number: string;
+    channel: string;
+    user_id?: number;
+  }): Promise<{ id: number }> {
+    const { product, variant } = args;
+    const priceResult = this.priceResolverService.resolvePrice({
+      product: {
+        base_price: Number(product.base_price),
+        is_on_sale: product.is_on_sale,
+        sale_price:
+          product.sale_price != null ? Number(product.sale_price) : null,
+        track_inventory: product.track_inventory,
+      },
+      variant: variant
+        ? {
+            price_override:
+              variant.price_override != null
+                ? Number(variant.price_override)
+                : null,
+            is_on_sale: variant.is_on_sale,
+            sale_price:
+              variant.sale_price != null ? Number(variant.sale_price) : null,
+            track_inventory_override: variant.track_inventory_override,
+          }
+        : undefined,
+    });
+    const price = priceResult.unitPrice;
+    const createdOrder = await this.ordersService.create(
+      {
+        customer_id: args.customer_id,
+        items: [
+          {
+            product_id: args.product_id,
+            product_variant_id: args.product_variant_id ?? undefined,
+            product_name: product.name || 'Servicio',
+            quantity: 1,
+            unit_price: price,
+            total_price: price,
+          },
+        ],
+        subtotal: price,
+        total_amount: price,
+        internal_notes: `Reserva ${args.booking_number} (orden creada antes de la reserva)`,
+        channel: args.channel,
+        skip_schedule_validation: true,
+      } as any,
+      args.user_id,
+    );
+    return { id: createdOrder.id };
+  }
+
+  /**
+   * In-transaction re-check of a slot (QUI-966 S5), by overlap: a
+   * `free_booking` service keeps its fixed capacity, a provider keeps one
+   * booking at a time. `exclude_booking_id` skips the booking being written
+   * (confirm-hold). Expired holds never count (T3 advisory A).
+   */
+  private async assertSlotStillFreeInTx(
+    tx: Prisma.TransactionClient,
+    slot: {
+      product_id: number;
+      date: string;
+      start_time: string;
+      end_time: string;
+      provider_id?: number | null;
+      isFreeBooking: boolean;
+      exclude_booking_id?: number;
+    },
+  ): Promise<void> {
+    let taken = false;
+    if (slot.isFreeBooking) {
+      const seatsTaken = await tx.bookings.count({
+        where: freeBookingOverlapWhere(
+          slot.product_id,
+          slot.date,
+          slot.start_time,
+          slot.end_time,
+          slot.exclude_booking_id,
+        ),
+      });
+      taken = seatsTaken >= FREE_BOOKING_CAPACITY;
+    } else if (slot.provider_id) {
+      const providerBooked = await tx.bookings.count({
+        where: {
+          provider_id: slot.provider_id,
+          date: new Date(slot.date),
+          start_time: { lt: slot.end_time },
+          end_time: { gt: slot.start_time },
+          ...slotHoldingBookingWhere(),
+          ...(slot.exclude_booking_id
+            ? { id: { not: slot.exclude_booking_id } }
+            : {}),
+        },
+      });
+      taken = providerBooked > 0;
+    }
+    if (taken) {
+      throw new ConflictException(
+        'El horario ya no esta disponible (reservado por otro usuario)',
+      );
+    }
+  }
+
+  /**
+   * QUI-966 S7 (decision L2): when a booking is cancelled or deleted, its
+   * order is cancelled through the orders flow (`compensateOrderForFailedBooking`
+   * → `OrdersService.update`, which releases stock and emits
+   * `order.cancelled`) ONLY when it is safe:
+   *  - no settled payment (`SETTLED_PAYMENT_STATES`): a paid order is left
+   *    untouched and staff is told to handle the refund;
+   *  - the order belongs to this booking alone: no line of another product
+   *    and no other live booking on the same order (checkout orders can mix
+   *    services, products and several bookings) — otherwise staff is warned;
+   *  - the order is still in a cancelable state.
+   * Never throws: the booking change already happened.
+   */
+  private async releaseBookingOrder(booking: {
+    id: number;
+    order_id?: number | null;
+    product_id: number;
+    booking_number: string;
+  }): Promise<BookingOrderRelease> {
+    const outcome: BookingOrderRelease = {
+      order_cancelled: false,
+      order_requires_refund: false,
+      order_warning: null,
+    };
+    if (!booking.order_id) return outcome;
+    const warn = (order_warning: string): BookingOrderRelease => ({
+      ...outcome,
+      order_warning,
+    });
+
+    try {
+      const order = await this.prisma.orders.findFirst({
+        where: { id: booking.order_id },
+        select: {
+          id: true,
+          state: true,
+          order_number: true,
+          order_items: { select: { product_id: true } },
+        },
+      });
+      if (!order || order.state === 'cancelled') return outcome;
+      const label = order.order_number || `#${order.id}`;
+
+      const settledPayment = await this.prisma.payments.findFirst({
+        where: {
+          order_id: order.id,
+          state: { in: [...SETTLED_PAYMENT_STATES] as payments_state_enum[] },
+        },
+        select: { id: true },
+      });
+      if (settledPayment) {
+        return {
+          ...outcome,
+          order_requires_refund: true,
+          order_warning: `La orden ${label} ya tiene pagos registrados: no se canceló. Gestiona la devolución del pago desde la orden.`,
+        };
+      }
+
+      const hasOtherProducts = (order.order_items ?? []).some(
+        (item) => item.product_id !== booking.product_id,
+      );
+      const otherBookings = await this.prisma.bookings.count({
+        where: {
+          order_id: order.id,
+          id: { not: booking.id },
+          status: { notIn: [booking_status_enum.cancelled] },
+        },
+      });
+      if (hasOtherProducts || otherBookings > 0) {
+        return warn(
+          `La orden ${label} incluye otros productos o reservas: no se canceló. Ajusta la orden manualmente.`,
+        );
+      }
+
+      if (!(CANCELABLE_ORDER_STATES as readonly string[]).includes(order.state)) {
+        return warn(
+          `La orden ${label} está en estado "${order.state}" y no se canceló. Revísala manualmente.`,
+        );
+      }
+
+      const cancelled = await this.compensateOrderForFailedBooking(
+        order.id,
+        `Reserva ${booking.booking_number} cancelada: se cancela su orden.`,
+      );
+      if (!cancelled) {
+        return warn(
+          `No se pudo cancelar la orden ${label}. Revísala manualmente.`,
+        );
+      }
+      return { ...outcome, order_cancelled: true };
+    } catch (err) {
+      this.logger.error(
+        `Could not release order ${booking.order_id} of booking ${booking.id}: ${(err as Error).message}`,
+      );
+      return warn(
+        'No se pudo revisar la orden de la reserva. Revísala manualmente.',
+      );
+    }
+  }
+
   async create(dto: CreateBookingDto) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -331,15 +597,11 @@ export class ReservationsService {
     const product = await this.prisma.products.findFirst({
       where: { id: dto.product_id },
       select: {
+        ...BOOKING_PRODUCT_PRICING_SELECT,
         id: true,
-        name: true,
         requires_booking: true,
         service_duration_minutes: true,
         booking_mode: true,
-        base_price: true,
-        is_on_sale: true,
-        sale_price: true,
-        track_inventory: true,
       },
     });
 
@@ -348,23 +610,11 @@ export class ReservationsService {
     }
 
     // Validate product_variant_id if provided
-    let selectedVariant: {
-      id: number;
-      price_override: Prisma.Decimal | null;
-      is_on_sale: boolean;
-      sale_price: Prisma.Decimal | null;
-      track_inventory_override: boolean | null;
-    } | null = null;
+    let selectedVariant: BookingPricedVariant | null = null;
     if (dto.product_variant_id) {
       selectedVariant = await this.prisma.product_variants.findFirst({
         where: { id: dto.product_variant_id, product_id: dto.product_id },
-        select: {
-          id: true,
-          price_override: true,
-          is_on_sale: true,
-          sale_price: true,
-          track_inventory_override: true,
-        },
+        select: BOOKING_VARIANT_PRICING_SELECT,
       });
       if (!selectedVariant) {
         throw new BadRequestException('Variant does not belong to product');
@@ -486,53 +736,16 @@ export class ReservationsService {
     //    reserva solo apunta a la fila existente.
     let preCreatedOrder: { id: number } | null = null;
     if (!dto.order_id && !dto.skip_order_creation) {
-      const priceResult = this.priceResolverService.resolvePrice({
-        product: {
-          base_price: Number(product.base_price),
-          is_on_sale: product.is_on_sale,
-          sale_price:
-            product.sale_price != null ? Number(product.sale_price) : null,
-          track_inventory: product.track_inventory,
-        },
-        variant: selectedVariant
-          ? {
-              price_override:
-                selectedVariant.price_override != null
-                  ? Number(selectedVariant.price_override)
-                  : null,
-              is_on_sale: selectedVariant.is_on_sale,
-              sale_price:
-                selectedVariant.sale_price != null
-                  ? Number(selectedVariant.sale_price)
-                  : null,
-              track_inventory_override:
-                selectedVariant.track_inventory_override,
-            }
-          : undefined,
+      preCreatedOrder = await this.preCreateBookingOrder({
+        product,
+        variant: selectedVariant,
+        product_id: dto.product_id,
+        product_variant_id: dto.product_variant_id,
+        customer_id: dto.customer_id,
+        booking_number,
+        channel: dto.channel || 'pos',
+        user_id: context?.user_id,
       });
-      const price = priceResult.unitPrice;
-      const createdOrder = await this.ordersService.create(
-        {
-          customer_id: dto.customer_id,
-          items: [
-            {
-              product_id: dto.product_id,
-              product_variant_id: dto.product_variant_id,
-              product_name: product.name || 'Servicio',
-              quantity: 1,
-              unit_price: price,
-              total_price: price,
-            },
-          ],
-          subtotal: price,
-          total_amount: price,
-          internal_notes: `Reserva ${booking_number} (orden creada antes de la reserva)`,
-          channel: dto.channel || 'pos',
-          skip_schedule_validation: true,
-        } as any,
-        context?.user_id,
-      );
-      preCreatedOrder = { id: createdOrder.id };
     }
 
     let booking: Awaited<ReturnType<typeof this.mapBooking>> | null = null;
@@ -549,38 +762,15 @@ export class ReservationsService {
 
           // Re-verificar disponibilidad dentro de la transaccion (si aplica).
           // QUI-966 S5: por solapamiento, no por hora exacta.
-          if (!shouldSkipAvailability && !isFreeBooking && resolvedProviderId) {
-            const providerBooked = await tx.bookings.count({
-              where: {
-                provider_id: resolvedProviderId,
-                date: new Date(dto.date),
-                start_time: { lt: dto.end_time },
-                end_time: { gt: dto.start_time },
-                status: { notIn: [booking_status_enum.cancelled] },
-              },
+          if (!shouldSkipAvailability) {
+            await this.assertSlotStillFreeInTx(tx, {
+              product_id: dto.product_id,
+              date: dto.date,
+              start_time: dto.start_time,
+              end_time: dto.end_time,
+              provider_id: resolvedProviderId,
+              isFreeBooking,
             });
-
-            if (providerBooked > 0) {
-              throw new ConflictException(
-                'El horario ya no esta disponible (reservado por otro usuario)',
-              );
-            }
-          }
-
-          if (!shouldSkipAvailability && isFreeBooking) {
-            const seatsTaken = await tx.bookings.count({
-              where: freeBookingOverlapWhere(
-                dto.product_id,
-                dto.date,
-                dto.start_time,
-                dto.end_time,
-              ),
-            });
-            if (seatsTaken >= FREE_BOOKING_CAPACITY) {
-              throw new ConflictException(
-                'El horario ya no esta disponible (reservado por otro usuario)',
-              );
-            }
           }
 
           const orderIdForBooking = dto.order_id ?? preCreatedOrder?.id ?? null;
@@ -759,7 +949,17 @@ export class ReservationsService {
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + HOLD_DURATION_MINUTES);
 
+    const isFreeBooking =
+      product.booking_mode === booking_mode_enum.free_booking;
     const booking = await this.runBookingWrite(async (tx) => {
+      // T3 advisory B: same in-transaction capacity re-count as `create`.
+      await this.assertSlotStillFreeInTx(tx, {
+        product_id: dto.product_id,
+        date: dto.date,
+        start_time: dto.start_time,
+        end_time: dto.end_time,
+        isFreeBooking,
+      });
       const booking_number = await this.generateBookingNumber(
         store_id,
         dto.date,
@@ -794,8 +994,20 @@ export class ReservationsService {
     return await this.mapBooking(booking);
   }
 
+  /**
+   * Turns an ecommerce hold into a real booking (QUI-966 S14). The slot is
+   * re-validated (same date/hours gate as `create`, availability excluding
+   * the hold itself, and the in-transaction re-count), and the booking gets
+   * its order priced on the server exactly like `create` does.
+   */
   async confirmHold(id: number) {
     const booking = await this.findOne(id);
+
+    if (booking.status !== booking_status_enum.pending) {
+      throw new BadRequestException(
+        `No se puede confirmar una reserva temporal en estado "${booking.status}"`,
+      );
+    }
 
     if (booking.expires_at && new Date(booking.expires_at) < new Date()) {
       await this.prisma.bookings.delete({ where: { id } });
@@ -804,18 +1016,91 @@ export class ReservationsService {
       );
     }
 
-    const updated = await this.mapBooking(
-      await this.prisma.bookings.update({
-        where: { id },
-        data: {
-          expires_at: null,
-          updated_at: new Date(),
-        },
-        include: this.BOOKING_INCLUDE,
-      }),
-    );
+    // Already confirmed (no expiry, order linked): idempotent.
+    if (!booking.expires_at && booking.order_id) return booking;
 
-    return updated;
+    const date = dateOnlyString(new Date(booking.date));
+    const slot = {
+      date,
+      start_time: booking.start_time,
+      end_time: booking.end_time,
+    };
+    // Ecommerce: past / closed hours can never be forced.
+    await this.assertBookableSlot(booking.store_id, slot);
+
+    const isAvailable = await this.availabilityService.isSlotAvailable(
+      booking.product_id,
+      date,
+      booking.start_time,
+      booking.end_time,
+      booking.provider_id ?? undefined,
+      booking.id,
+    );
+    if (!isAvailable) {
+      throw new ConflictException('El horario solicitado no esta disponible');
+    }
+
+    const product = await this.prisma.products.findFirst({
+      where: { id: booking.product_id },
+      select: { ...BOOKING_PRODUCT_PRICING_SELECT, booking_mode: true },
+    });
+    if (!product) {
+      throw new NotFoundException('Producto/servicio no encontrado');
+    }
+
+    let preCreatedOrder: { id: number } | null = null;
+    if (!booking.order_id) {
+      const variant = booking.product_variant_id
+        ? await this.prisma.product_variants.findFirst({
+            where: {
+              id: booking.product_variant_id,
+              product_id: booking.product_id,
+            },
+            select: BOOKING_VARIANT_PRICING_SELECT,
+          })
+        : null;
+      preCreatedOrder = await this.preCreateBookingOrder({
+        product,
+        variant,
+        product_id: booking.product_id,
+        product_variant_id: booking.product_variant_id,
+        customer_id: booking.customer_id,
+        booking_number: booking.booking_number,
+        channel: booking.channel || 'ecommerce',
+        user_id: RequestContextService.getContext()?.user_id,
+      });
+    }
+
+    try {
+      return await this.runBookingWrite(async (tx) => {
+        await this.assertSlotStillFreeInTx(tx, {
+          ...slot,
+          product_id: booking.product_id,
+          provider_id: booking.provider_id,
+          isFreeBooking:
+            product.booking_mode === booking_mode_enum.free_booking,
+          exclude_booking_id: booking.id,
+        });
+        const updated = await tx.bookings.update({
+          where: { id },
+          data: {
+            expires_at: null,
+            order_id: booking.order_id ?? preCreatedOrder?.id ?? null,
+            updated_at: new Date(),
+          },
+          include: this.BOOKING_INCLUDE,
+        });
+        return await this.mapBooking(updated);
+      });
+    } catch (err) {
+      if (preCreatedOrder) {
+        await this.compensateOrderForFailedBooking(
+          preCreatedOrder.id,
+          `Compensación por fallo al confirmar la reserva ${booking.booking_number}.`,
+        );
+      }
+      throw err;
+    }
   }
 
   /**
@@ -1022,6 +1307,8 @@ export class ReservationsService {
    */
   async cancel(id: number) {
     const booking = await this.transition(id, 'cancelled');
+    // QUI-966 S7: release (or flag) the booking's order.
+    const orderRelease = await this.releaseBookingOrder(booking);
     this.eventEmitter.emit('booking.cancelled', {
       store_id: booking.store_id,
       booking_id: booking.id,
@@ -1036,7 +1323,22 @@ export class ReservationsService {
           : String(booking.date).split('T')[0],
       start_time: booking.start_time,
     });
-    return booking;
+    return { ...booking, ...orderRelease };
+  }
+
+  /**
+   * Deletes a pending booking (store `DELETE /store/reservations/:id`) and
+   * releases its order the same way `cancel` does (QUI-966 S7).
+   */
+  async remove(id: number) {
+    const booking = await this.findOne(id);
+    if (booking.status !== booking_status_enum.pending) {
+      throw new BadRequestException(
+        'Solo se pueden eliminar reservas en estado pendiente',
+      );
+    }
+    await this.prisma.bookings.delete({ where: { id } });
+    return this.releaseBookingOrder(booking);
   }
 
   /**
@@ -1067,6 +1369,22 @@ export class ReservationsService {
    * Marca una reserva como no-show (confirmed -> no_show)
    */
   async noShow(id: number) {
+    // QUI-966 S8: never before the appointment started (store timezone).
+    const current = await this.findOne(id);
+    const timezone = await resolveStoreTimezone(this.prisma, current.store_id);
+    if (
+      !isSlotStartInPast(
+        {
+          date: dateOnlyString(new Date(current.date)),
+          start_time: current.start_time,
+        },
+        timezone,
+      )
+    ) {
+      throw new BadRequestException(
+        'No se puede marcar no-show antes de la hora de la cita',
+      );
+    }
     const booking = await this.transition(id, 'no_show');
     this.eventEmitter.emit('booking.no_show', {
       store_id: booking.store_id,
@@ -1192,6 +1510,23 @@ export class ReservationsService {
       booking.id,
     );
 
+    // QUI-966 S14: `reopen_order` used to flip a cancelled order straight to
+    // `processing` with a raw update (no stock re-reservation, no payment
+    // check, customer-triggered). Reactivating a cancelled order is a staff
+    // decision (`OrderFlowService.reactivateOrder`), so the reschedule is
+    // rejected BEFORE the booking moves.
+    if (dto.reopen_order === true && booking.order_id) {
+      const order = await this.prisma.orders.findFirst({
+        where: { id: booking.order_id },
+        select: { state: true },
+      });
+      if (order?.state === 'cancelled') {
+        throw new ConflictException(
+          'El pedido de esta reserva está cancelado y no se puede reactivar al reprogramar. Contacta a la tienda para reactivarlo.',
+        );
+      }
+    }
+
     const updated = await this.mapBooking(
       await this.prisma.bookings.update({
         where: { id },
@@ -1204,47 +1539,6 @@ export class ReservationsService {
         include: this.BOOKING_INCLUDE,
       }),
     );
-
-    // Side-effect opcional: si el cliente lo pide (`reopen_order=true` desde
-    // ecommerce) y el pedido asociado está cancelado, lo reactivamos a
-    // `processing` (el cliente ya pagó y tiene booking, es el estado
-    // correcto post-pago según VALID_TRANSITIONS del OrderFlowService).
-    // Sin esto, el reschedule mueve la cita pero el pedido se queda
-    // diciendo "Cancelado" — UX rota. El default `false` preserva el
-    // comportamiento histórico del admin flow (no toca orders).
-    if (dto.reopen_order === true && updated.order_id) {
-      const order = await this.prisma.orders.findUnique({
-        where: { id: updated.order_id },
-        select: {
-          id: true,
-          state: true,
-          store_id: true,
-          order_number: true,
-          stores: { select: { organization_id: true } },
-        },
-      });
-      if (order && order.state === 'cancelled') {
-        await this.prisma.orders.update({
-          where: { id: order.id },
-          data: { state: 'processing', updated_at: new Date() },
-        });
-        await this.orderHistory.record(this.prisma, {
-          orderId: order.id,
-          storeId: order.store_id,
-          organizationId: order.stores?.organization_id ?? undefined,
-          type: 'state_changed',
-          fromState: 'cancelled',
-          toState: 'processing',
-        });
-        this.eventEmitter.emit('order.status_changed', {
-          store_id: order.store_id,
-          order_id: order.id,
-          order_number: order.order_number,
-          old_state: 'cancelled',
-          new_state: 'processing',
-        });
-      }
-    }
 
     this.eventEmitter.emit('booking.rescheduled', {
       store_id: updated.store_id,
@@ -1366,6 +1660,22 @@ export class ReservationsService {
     }
 
     const booking = await this.findOne(request.booking_id);
+
+    // QUI-966 S13: the booking may have been cancelled/completed since the
+    // request was made; only pending/confirmed bookings move.
+    if (
+      booking.status !== booking_status_enum.pending &&
+      booking.status !== booking_status_enum.confirmed
+    ) {
+      throw new BadRequestException(
+        `No se puede reprogramar una reserva en estado "${booking.status}"`,
+      );
+    }
+    await this.assertBookableSlot(booking.store_id, {
+      date: this.formatDateOnly(request.requested_date),
+      start_time: request.requested_start_time,
+      end_time: request.requested_end_time,
+    });
 
     // Re-validar slot al momento de aprobar (entre la solicitud y la
     // aprobación algo pudo haber sido ocupado por otro canal).
@@ -1804,6 +2114,17 @@ export class ReservationsService {
         `checkIn idempotente (cliente duplicó): booking ${id} ya marcado a las ${booking.checked_in_at.toISOString()}`,
       );
       return booking;
+    }
+
+    // QUI-966 S8: check-in only on the appointment's day (store timezone).
+    const timezone = await resolveStoreTimezone(this.prisma, booking.store_id);
+    if (
+      dateOnlyString(new Date(booking.date)) !==
+      localDateString(new Date(), timezone)
+    ) {
+      throw new BadRequestException(
+        'Solo se puede hacer check-in el día de la cita',
+      );
     }
 
     const now = new Date();

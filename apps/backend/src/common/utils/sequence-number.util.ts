@@ -70,8 +70,13 @@ export function isSerializationFailure(error: unknown): boolean {
   if (err?.meta?.driverAdapterError?.cause?.originalCode === '40001') {
     return true;
   }
+  // Only the Postgres serialization text or the SQLSTATE as its own code
+  // token ("code: 40001", "SQLSTATE 40001") — never any "40001" substring
+  // (an id, an amount or an order number in an unrelated error message).
   const message = typeof err?.message === 'string' ? err.message : '';
-  return /could not serialize access|40001/i.test(message);
+  return /could not serialize access|\b(?:sqlstate|code)\W{0,3}40001\b/i.test(
+    message,
+  );
 }
 
 /** Small jittered pause between retries so racing writers spread out. */

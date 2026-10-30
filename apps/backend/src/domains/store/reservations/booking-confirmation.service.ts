@@ -133,6 +133,8 @@ export class BookingConfirmationService {
           booking.start_time,
           booking.end_time,
           booking.provider_id ?? undefined,
+          // T3 advisory C: the booking itself never conflicts with itself.
+          booking.id,
         );
       } catch (err: any) {
         // Don't fail the confirmation on a transient availability check.

@@ -434,9 +434,12 @@ export class ReservationsController {
   @Permissions('store:reservations:update')
   async cancel(@Param('id', ParseIntPipe) id: number) {
     const result = await this.reservationsService.cancel(id);
+    // QUI-966 S7: a paid/shared order is not cancelled — tell the staff why.
     return this.responseService.success(
       result,
-      'Reserva cancelada exitosamente',
+      result.order_warning
+        ? `Reserva cancelada. ${result.order_warning}`
+        : 'Reserva cancelada exitosamente',
     );
   }
 
@@ -598,13 +601,12 @@ export class ReservationsController {
   @Delete(':id')
   @Permissions('store:reservations:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
-    const booking = await this.reservationsService.findOne(id);
-    if (booking.status !== 'pending') {
-      throw new BadRequestException(
-        'Solo se pueden eliminar reservas en estado pendiente',
-      );
-    }
-    await this.reservationsService['prisma'].bookings.delete({ where: { id } });
-    return this.responseService.success(null, 'Reserva eliminada exitosamente');
+    const orderRelease = await this.reservationsService.remove(id);
+    return this.responseService.success(
+      orderRelease,
+      orderRelease.order_warning
+        ? `Reserva eliminada. ${orderRelease.order_warning}`
+        : 'Reserva eliminada exitosamente',
+    );
   }
 }
