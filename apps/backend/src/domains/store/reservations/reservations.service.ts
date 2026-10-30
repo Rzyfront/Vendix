@@ -13,6 +13,7 @@ import {
   booking_status_enum,
   booking_mode_enum,
   payments_state_enum,
+  order_state_enum,
   Prisma,
 } from '@prisma/client';
 import {
@@ -28,6 +29,7 @@ import {
   slotHoldingBookingWhere,
 } from './availability.service';
 import { OrdersService } from '../orders/orders.service';
+import { UpdateOrderDto } from '../orders/dto/update-order.dto';
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { TablesService } from '../tables/tables.service';
@@ -346,6 +348,9 @@ export class ReservationsService {
    * QUI-649 invariant "booking and order are born together or not at all".
    * Goes through `OrdersService.update` (the `forceOrderState` seam releases
    * stock reservations, emits `order.cancelled` and audits the transition).
+   * `note` travels as the cancel `reason` (audited with the transition), never
+   * as `internal_notes`: that column holds the `_flow_metadata` JSON and a
+   * blocked cancel must not leave a false note behind (QUI-966 T4b A1).
    * Best effort: a failure is logged and the order stays orphaned.
    */
   async compensateOrderForFailedBooking(
@@ -353,10 +358,11 @@ export class ReservationsService {
     note: string,
   ): Promise<boolean> {
     try {
-      await this.ordersService.update(order_id, {
-        state: 'cancelled',
-        internal_notes: note,
-      } as any);
+      const dto: UpdateOrderDto = {
+        state: order_state_enum.cancelled,
+        reason: note.slice(0, 500),
+      };
+      await this.ordersService.update(order_id, dto);
       return true;
     } catch (cancelErr) {
       this.logger.error(
@@ -487,8 +493,12 @@ export class ReservationsService {
    * order is cancelled through the orders flow (`compensateOrderForFailedBooking`
    * → `OrdersService.update`, which releases stock and emits
    * `order.cancelled`) ONLY when it is safe:
-   *  - no settled payment (`SETTLED_PAYMENT_STATES`): a paid order is left
-   *    untouched and staff is told to handle the refund;
+   *  - no settled payment (`SETTLED_PAYMENT_STATES`) and no fiado abono
+   *    (accounts receivable of the order with `paid_amount > 0` or
+   *    `ar_payments`): a paid order is left untouched and staff is told to
+   *    handle the refund;
+   *  - no payment in flight (`pending`/`authorized`, e.g. Wompi/PSE): the
+   *    order is left untouched and staff is told a payment is in process;
    *  - the order belongs to this booking alone: no line of another product
    *    and no other live booking on the same order (checkout orders can mix
    *    services, products and several bookings) — otherwise staff is warned;
@@ -532,12 +542,39 @@ export class ReservationsService {
         },
         select: { id: true },
       });
-      if (settledPayment) {
+      // Fiado abonos live in `ar_payments`, not in `payments` (T4b A2).
+      const paidReceivable = settledPayment
+        ? null
+        : await this.prisma.accounts_receivable.findFirst({
+            where: {
+              source_type: { in: ['order', 'credit_sale'] },
+              source_id: order.id,
+              OR: [{ paid_amount: { gt: 0 } }, { ar_payments: { some: {} } }],
+            },
+            select: { id: true },
+          });
+      if (settledPayment || paidReceivable) {
         return {
           ...outcome,
           order_requires_refund: true,
           order_warning: `La orden ${label} ya tiene pagos registrados: no se canceló. Gestiona la devolución del pago desde la orden.`,
         };
+      }
+
+      // A gateway payment still in flight could settle after the cancel (T4b A3).
+      const paymentInFlight = await this.prisma.payments.findFirst({
+        where: {
+          order_id: order.id,
+          state: {
+            in: [payments_state_enum.pending, payments_state_enum.authorized],
+          },
+        },
+        select: { id: true },
+      });
+      if (paymentInFlight) {
+        return warn(
+          `La orden ${label} tiene un pago en proceso: no se canceló. Espera a que el pago se confirme o rechace y revisa la orden.`,
+        );
       }
 
       const hasOtherProducts = (order.order_items ?? []).some(
@@ -1072,7 +1109,8 @@ export class ReservationsService {
     }
 
     try {
-      return await this.runBookingWrite(async (tx) => {
+      // `null` = a concurrent confirm-hold linked its order first (T4b A4).
+      const confirmed = await this.runBookingWrite(async (tx) => {
         await this.assertSlotStillFreeInTx(tx, {
           ...slot,
           product_id: booking.product_id,
@@ -1081,17 +1119,47 @@ export class ReservationsService {
             product.booking_mode === booking_mode_enum.free_booking,
           exclude_booking_id: booking.id,
         });
+        const data = {
+          expires_at: null,
+          order_id: booking.order_id ?? preCreatedOrder?.id ?? null,
+          updated_at: new Date(),
+        };
+        if (preCreatedOrder) {
+          // Claim: only a hold still without order takes this call's order.
+          const claim = await tx.bookings.updateMany({
+            where: {
+              id,
+              order_id: null,
+              status: booking_status_enum.pending,
+            },
+            data,
+          });
+          if (claim.count === 0) return null;
+          const claimed = await tx.bookings.findUnique({
+            where: { id },
+            include: this.BOOKING_INCLUDE,
+          });
+          return await this.mapBooking(claimed);
+        }
         const updated = await tx.bookings.update({
           where: { id },
-          data: {
-            expires_at: null,
-            order_id: booking.order_id ?? preCreatedOrder?.id ?? null,
-            updated_at: new Date(),
-          },
+          data,
           include: this.BOOKING_INCLUDE,
         });
         return await this.mapBooking(updated);
       });
+      if (!confirmed) {
+        if (preCreatedOrder) {
+          await this.compensateOrderForFailedBooking(
+            preCreatedOrder.id,
+            `Confirmación duplicada de la reserva ${booking.booking_number}: se cancela la orden sobrante.`,
+          );
+          preCreatedOrder = null;
+        }
+        // Idempotent: the caller gets the booking the winner confirmed.
+        return await this.findOne(id);
+      }
+      return confirmed;
     } catch (err) {
       if (preCreatedOrder) {
         await this.compensateOrderForFailedBooking(

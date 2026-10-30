@@ -30,6 +30,9 @@ function matches(row: Row, where: Row = {}): boolean {
       return value instanceof Date && value.getTime() === cond.getTime();
     }
     if (typeof cond === 'object') {
+      if ('some' in cond) {
+        return Array.isArray(value) && value.some((v: Row) => matches(v, cond.some));
+      }
       if ('notIn' in cond && cond.notIn.includes(value)) return false;
       if ('in' in cond && !cond.in.includes(value)) return false;
       if ('not' in cond && value === cond.not) return false;
@@ -56,6 +59,7 @@ function buildService(opts: { product?: Row; isSlotAvailable?: boolean } = {}) {
   const requests: Row[] = [];
   const orders: Row[] = [];
   const payments: Row[] = [];
+  const receivables: Row[] = [];
   const product = opts.product ?? {
     id: 10,
     name: 'Corte',
@@ -91,6 +95,11 @@ function buildService(opts: { product?: Row; isSlotAvailable?: boolean } = {}) {
         if (!target) throw new Error('not found');
         Object.assign(target, data);
         return Promise.resolve(target);
+      }),
+      updateMany: jest.fn(({ where, data }: any) => {
+        const hits = bookings.filter((b) => matches(b, where));
+        hits.forEach((b) => Object.assign(b, data));
+        return Promise.resolve({ count: hits.length });
       }),
       delete: jest.fn(({ where }: any) => {
         const i = bookings.findIndex((b) => b.id === where.id);
@@ -131,6 +140,11 @@ function buildService(opts: { product?: Row; isSlotAvailable?: boolean } = {}) {
     payments: {
       findFirst: jest.fn(({ where }: any) =>
         Promise.resolve(payments.find((p) => matches(p, where)) ?? null),
+      ),
+    },
+    accounts_receivable: {
+      findFirst: jest.fn(({ where }: any) =>
+        Promise.resolve(receivables.find((r) => matches(r, where)) ?? null),
       ),
     },
     store_users: { findFirst: jest.fn().mockResolvedValue({ id: 1 }) },
@@ -176,6 +190,7 @@ function buildService(opts: { product?: Row; isSlotAvailable?: boolean } = {}) {
     requests,
     orders,
     payments,
+    receivables,
     availabilityService,
     ordersService,
     priceResolverService,
@@ -485,6 +500,108 @@ describe('S14 — confirm-hold and reopen_order', () => {
     } as any);
     expect(result.start_time).toBe('12:00');
     expect(prisma.orders.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('T4b — releasing the order: notes, fiado, payments in flight, double confirm', () => {
+  it('A1: a blocked cancel leaves internal_notes untouched (text goes as the cancel reason)', async () => {
+    const { service, bookings, orders, ordersService } = buildService();
+    bookings.push(booking({ order_id: 900 }));
+    orders.push(order({ internal_notes: '{"_flow_metadata":{"x":1}}' }));
+    ordersService.update.mockRejectedValueOnce(new Error('ORD_CANCEL_STOCK_COMMITTED_001'));
+    const result = await service.cancel(1);
+    expect(result.status).toBe('cancelled');
+    const [, dto] = ordersService.update.mock.calls[0];
+    expect(dto).not.toHaveProperty('internal_notes');
+    expect(dto).toEqual({
+      state: 'cancelled',
+      reason: expect.stringContaining('BKG-20261105-0001'),
+    });
+    expect(orders[0].internal_notes).toBe('{"_flow_metadata":{"x":1}}');
+    expect(orders[0].state).toBe('created');
+    expect(result.order_cancelled).toBe(false);
+    expect(result.order_warning).toMatch(/No se pudo cancelar la orden ORD-900/);
+  });
+
+  it('A2: an order with fiado abonos (accounts receivable paid_amount > 0) is paid → untouched + refund warning', async () => {
+    const { service, bookings, orders, receivables, ordersService } = buildService();
+    bookings.push(booking({ order_id: 900 }));
+    orders.push(order());
+    receivables.push({ id: 5, source_type: 'order', source_id: 900, paid_amount: 5000, ar_payments: [{ id: 1 }] });
+    const result = await service.cancel(1);
+    expect(ordersService.update).not.toHaveBeenCalled();
+    expect(orders[0].state).toBe('created');
+    expect(result).toMatchObject({ order_cancelled: false, order_requires_refund: true });
+    expect(result.order_warning).toMatch(/devolución/);
+  });
+
+  it('A2: a credit sale whose ar_payments exist counts as paid even with paid_amount 0', async () => {
+    const { service, bookings, orders, receivables, ordersService } = buildService();
+    bookings.push(booking({ order_id: 900 }));
+    orders.push(order());
+    receivables.push({ id: 6, source_type: 'credit_sale', source_id: 900, paid_amount: 0, ar_payments: [{ id: 2 }] });
+    const result = await service.cancel(1);
+    expect(ordersService.update).not.toHaveBeenCalled();
+    expect(result.order_requires_refund).toBe(true);
+  });
+
+  it('A2 regression: an open fiado without abonos still cancels the order', async () => {
+    const { service, bookings, orders, receivables } = buildService();
+    bookings.push(booking({ order_id: 900 }));
+    orders.push(order());
+    receivables.push({ id: 7, source_type: 'order', source_id: 900, paid_amount: 0, ar_payments: [] });
+    receivables.push({ id: 8, source_type: 'order', source_id: 901, paid_amount: 9000, ar_payments: [{ id: 3 }] });
+    const result = await service.cancel(1);
+    expect(orders[0].state).toBe('cancelled');
+    expect(result.order_cancelled).toBe(true);
+  });
+
+  it.each(['pending', 'authorized'])(
+    'A3: a payment in %s (gateway in flight) leaves the order untouched and warns it is in process',
+    async (state) => {
+      const { service, bookings, orders, payments, ordersService } = buildService();
+      bookings.push(booking({ order_id: 900 }));
+      orders.push(order({ state: 'pending_payment' }));
+      payments.push({ id: 1, order_id: 900, state });
+      const result = await service.cancel(1);
+      expect(result.status).toBe('cancelled');
+      expect(ordersService.update).not.toHaveBeenCalled();
+      expect(orders[0].state).toBe('pending_payment');
+      expect(result.order_cancelled).toBe(false);
+      expect(result.order_requires_refund).toBe(false);
+      expect(result.order_warning).toMatch(/pago en proceso/);
+    },
+  );
+
+  it('A3 regression: a failed payment does not block cancelling the order', async () => {
+    const { service, bookings, orders, payments } = buildService();
+    bookings.push(booking({ order_id: 900 }));
+    orders.push(order());
+    payments.push({ id: 1, order_id: 900, state: 'failed' });
+    const result = await service.cancel(1);
+    expect(orders[0].state).toBe('cancelled');
+    expect(result.order_cancelled).toBe(true);
+  });
+
+  it('A4: a concurrent confirm-hold that loses the claim compensates its own order and returns the winner', async () => {
+    const { service, bookings, ordersService } = buildService();
+    bookings.push(
+      booking({ status: 'pending', expires_at: new Date(NOW.getTime() + 10 * 60_000) }),
+    );
+    // The other request links order 900 while this one pre-creates 901.
+    ordersService.create.mockImplementationOnce(() => {
+      Object.assign(bookings[0], { order_id: 900, expires_at: null });
+      return Promise.resolve({ id: 901 });
+    });
+    const result = await service.confirmHold(1);
+    expect(result.order_id).toBe(900);
+    expect(result.expires_at).toBeNull();
+    expect(bookings[0].order_id).toBe(900);
+    expect(ordersService.update).toHaveBeenCalledTimes(1);
+    expect(ordersService.update).toHaveBeenCalledWith(
+      901,
+      expect.objectContaining({ state: 'cancelled' }),
+    );
   });
 });
 

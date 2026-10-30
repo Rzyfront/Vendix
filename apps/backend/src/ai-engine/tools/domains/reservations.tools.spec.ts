@@ -708,6 +708,62 @@ describe('reservations.tools · contrato T4', () => {
       ]);
     });
 
+    it('(b) cancel devuelve qué pasó con la orden (devolución / aviso)', async () => {
+      const { deps, tools } = buildTools();
+      deps.reservationsService.findOne.mockResolvedValue(BOOKING_ROW);
+      deps.reservationsService.cancel.mockResolvedValue({
+        ...BOOKING_ROW,
+        status: 'cancelled',
+        order_cancelled: false,
+        order_requires_refund: true,
+        order_warning: 'La orden ORD-1 ya tiene pagos registrados: no se canceló.',
+      });
+
+      const answer = await run(tools, 'transition_booking', {
+        booking_id: 81,
+        action: 'cancel',
+      });
+
+      expect(answer).toEqual({
+        transicion: {
+          booking_id: 81,
+          numero: 'RSV-081',
+          estado_anterior: 'pending',
+          estado: 'cancelled',
+        },
+        order_cancelled: false,
+        order_requires_refund: true,
+        order_warning: 'La orden ORD-1 ya tiene pagos registrados: no se canceló.',
+      });
+    });
+
+    it('(e) preview cancel avisa que la orden sin pagos se cancela', async () => {
+      const { deps, tools } = buildTools();
+      deps.reservationsService.findOne.mockResolvedValue(BOOKING_ROW);
+
+      const result = await preview(tools, 'transition_booking', {
+        booking_id: 81,
+        action: 'cancel',
+      });
+
+      expect(result.message).toContain('cierra la reserva');
+      expect(result.message).toContain('orden sin pagos');
+    });
+
+    it('(e) preview no_show no menciona la orden', async () => {
+      const { deps, tools } = buildTools();
+      deps.reservationsService.findOne.mockResolvedValue(BOOKING_ROW);
+
+      const result = await preview(tools, 'transition_booking', {
+        booking_id: 81,
+        action: 'no_show',
+      });
+
+      expect(result.message).toBe(
+        'Esta transición cierra la reserva: verifica con el usuario que es lo que quiere.',
+      );
+    });
+
     it('(e) preview cancel advierte el cierre', async () => {
       const { deps, tools } = buildTools();
       deps.reservationsService.findOne.mockResolvedValue(BOOKING_ROW);

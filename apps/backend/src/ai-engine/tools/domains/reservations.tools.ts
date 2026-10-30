@@ -996,7 +996,10 @@ export function createReservationsTools(
           ...(action === 'cancel' || action === 'no_show'
             ? {
                 message:
-                  'Esta transición cierra la reserva: verifica con el usuario que es lo que quiere.',
+                  'Esta transición cierra la reserva: verifica con el usuario que es lo que quiere.' +
+                  (action === 'cancel'
+                    ? ' Si tiene una orden sin pagos, también se cancela; si ya tiene pagos, la orden no se toca y hay que gestionar la devolución.'
+                    : ''),
               }
             : {}),
           domain: 'reservations',
@@ -1050,6 +1053,14 @@ export function createReservationsTools(
               estado_anterior: before?.status ?? null,
               estado: after?.status ?? null,
             },
+            // QUI-966 S7: lo que pasó con la orden, para avisar devoluciones.
+            ...(action === 'cancel'
+              ? {
+                  order_cancelled: after?.order_cancelled ?? false,
+                  order_requires_refund: after?.order_requires_refund ?? false,
+                  order_warning: after?.order_warning ?? null,
+                }
+              : {}),
           });
         } catch (error: any) {
           return JSON.stringify({
