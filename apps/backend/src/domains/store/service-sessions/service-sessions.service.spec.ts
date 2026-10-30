@@ -1,4 +1,5 @@
 import { RequestContextService } from '@common/context/request-context.service';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { ServiceSessionsService } from './service-sessions.service';
 import { rentalBlocksConsumed } from './utils/session-order-lines.util';
 
@@ -699,6 +700,50 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       expect(endAt.getTime() - startAt.getTime()).toBe(45 * 60_000);
       expect(prisma.service_stations.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: 4 }) }));
       expect(prisma.service_station_services.findFirst).toHaveBeenCalledWith({ where: { store_id: 1, station_id: 4, product_id: 10 } });
+    });
+
+    describe('carrera con otra atención por la estación elegida', () => {
+      const opened = { id: 50, order_id: 60, station_id: 0, booking_id: null, status: 'open', access_token: 't', access_token_id: 1, access_expires_at: new Date(), email_delivery_status: 'no_email', access_url: null };
+      beforeEach(() => {
+        prisma.service_stations.findFirst.mockImplementation(({ where }: any) => Promise.resolve({ id: where.id }));
+        prisma.service_station_services.findFirst.mockResolvedValue({ id: 1 });
+        jest.spyOn(service as any, 'prepareIntake').mockResolvedValue({ templateId: null, values: [] });
+        jest.spyOn(service as any, 'buildAccessUrl').mockResolvedValue(null);
+        jest.spyOn(service as any, 'emit').mockImplementation(() => undefined);
+      });
+
+      it('si otra atención le gana la estación, toma la siguiente libre', async () => {
+        pickStation.mockResolvedValueOnce(4).mockResolvedValueOnce(6);
+        prisma.$transaction
+          .mockRejectedValueOnce(new VendixHttpException(ErrorCodes.STATION_008))
+          .mockResolvedValueOnce({ ...opened, station_id: 6 });
+
+        await expect(service.open({ product_id: 10 } as any)).resolves.toMatchObject({ id: 50, station_id: 6 });
+        expect(pickStation).toHaveBeenCalledTimes(2);
+        expect(pickStation.mock.calls[0][1]).toMatchObject({ requireIdle: true });
+        expect(pickStation.mock.calls[0][1].excludeStationIds).toBeUndefined();
+        expect(pickStation.mock.calls[1][1]).toMatchObject({ requireIdle: true, excludeStationIds: [4] });
+      });
+
+      it('sin otra estación libre tras la carrera responde que no hay estación elegible', async () => {
+        pickStation.mockResolvedValueOnce(4).mockResolvedValueOnce(null);
+        prisma.$transaction.mockRejectedValueOnce(new VendixHttpException(ErrorCodes.STATION_008));
+
+        await expect(service.open({ product_id: 10 } as any)).rejects.toMatchObject({
+          response: expect.objectContaining({ error_code: 'STATION_009' }),
+        });
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      });
+
+      it('con estación indicada no reintenta y conserva el conflicto', async () => {
+        prisma.$transaction.mockRejectedValueOnce(new VendixHttpException(ErrorCodes.STATION_008));
+
+        await expect(service.open({ station_id: 3, product_id: 10 } as any)).rejects.toMatchObject({
+          response: expect.objectContaining({ error_code: 'STATION_008' }),
+        });
+        expect(pickStation).not.toHaveBeenCalled();
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('sin estación elegible mantiene el error de siempre', async () => {

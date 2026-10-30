@@ -30,6 +30,8 @@ import { SellableStockAllocator } from '../inventory/shared/services/sellable-st
 const ACTIVE_ALLOCATIONS = ['held', 'payment_pending', 'confirmed', 'in_service'];
 const ACTIVE_SESSION_STATUSES = ['open', 'paused'];
 const ITEM_SESSION_STATUSES = ['open', 'in_progress', 'paused'];
+/** Reintentos de un walk-in sin estación cuando otra atención le gana la estación elegida. */
+const MAX_WALK_IN_PICK_RETRIES = 3;
 
 export type IntakeField = {
   id: number;
@@ -91,6 +93,14 @@ export class ServiceSessionsService {
   ) {}
 
   async open(dto: OpenServiceSessionDto) {
+    return this.openAttempt(dto, []);
+  }
+
+  /**
+   * `excludedStationIds`: estaciones elegidas automáticamente que otra atención ganó entre
+   * la elección (fuera de la transacción) y la escritura; el walk-in toma la siguiente libre.
+   */
+  private async openAttempt(dto: OpenServiceSessionDto, excludedStationIds: number[]) {
     const { storeId, userId } = this.requireContext();
     // Walk-in sin estación: se asigna una elegible más abajo (necesita el servicio).
     if (dto.booking_id ? Boolean(dto.station_id) : !dto.station_id && !dto.product_id) {
@@ -125,7 +135,8 @@ export class ServiceSessionsService {
     const providerId = bookingAllocation?.provider_id ?? dto.provider_id ?? null;
     const productId = booking?.product_id ?? dto.product_id;
     if (!productId) throw new VendixHttpException(ErrorCodes.STATION_001, 'El walk-in requiere un servicio.');
-    const stationId = bookingAllocation?.station_id ?? dto.station_id ?? await this.pickWalkInStation(storeId, productId, providerId, dto.planned_end_at, now);
+    const autoPicked = !bookingAllocation && !dto.station_id;
+    const stationId = bookingAllocation?.station_id ?? dto.station_id ?? await this.pickWalkInStation(storeId, productId, providerId, dto.planned_end_at, now, excludedStationIds);
     const station = await this.prisma.service_stations.findFirst({
       where: { id: stationId, store_id: storeId, status: 'active', capacity: 1 },
       select: { id: true },
@@ -316,6 +327,9 @@ export class ServiceSessionsService {
         return { id: session.id, order_id: orderId, station_id: stationId, booking_id: booking?.id ?? null, status: 'open', access_token: access.token, access_token_id: access.token_id, access_expires_at: access.expires_at, email_delivery_status: contactEmail ? 'pending' : 'no_email', access_url: null };
       });
     } catch (error) {
+      if (autoPicked && excludedStationIds.length < MAX_WALK_IN_PICK_RETRIES && this.isStationTaken(error)) {
+        return this.openAttempt(dto, [...excludedStationIds, stationId]);
+      }
       if (this.isUniqueConflict(error)) throw new VendixHttpException(ErrorCodes.STATION_005);
       throw error;
     }
@@ -332,7 +346,7 @@ export class ServiceSessionsService {
    * Walk-in sin estación: elige una estación elegible para [ahora, fin previsto). Sin
    * ninguna, mantiene el error de siempre (falta indicar la estación).
    */
-  private async pickWalkInStation(storeId: number, productId: number, providerId: number | null, plannedEndAt: string | undefined, now: Date) {
+  private async pickWalkInStation(storeId: number, productId: number, providerId: number | null, plannedEndAt: string | undefined, now: Date, excludedStationIds: number[] = []) {
     const product = await this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { service_duration_minutes: true } });
     const stationId = await this.allocationCoordinator.pickStation(this.prisma, {
       storeId,
@@ -340,6 +354,8 @@ export class ServiceSessionsService {
       providerId,
       startAt: now,
       endAt: walkInPlannedEnd(plannedEndAt, product?.service_duration_minutes, now),
+      requireIdle: true,
+      ...(excludedStationIds.length ? { excludeStationIds: excludedStationIds } : {}),
     });
     if (!stationId) throw new VendixHttpException(ErrorCodes.STATION_009, 'Indica una reserva o una estación para walk-in.');
     return stationId;
@@ -1404,6 +1420,12 @@ export class ServiceSessionsService {
     if (!error || typeof error !== 'object') return false;
     const value = error as { code?: string; meta?: { code?: string; driverAdapterError?: { cause?: { code?: string } } }; cause?: { code?: string } };
     return value.code === '23P01' || value.meta?.code === '23P01' || value.meta?.driverAdapterError?.cause?.code === '23P01' || value.cause?.code === '23P01';
+  }
+
+  /** La estación quedó ocupada por otra atención concurrente (doble ocupación impedida por la base). */
+  private isStationTaken(error: unknown) {
+    if (this.isUniqueConflict(error)) return true;
+    return error instanceof VendixHttpException && ['STATION_002', 'STATION_008'].includes(error.errorCode);
   }
 
   private isUniqueConflict(error: unknown) {
