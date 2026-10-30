@@ -773,6 +773,15 @@ export class FooterSettingsDto {
   @ValidateNested()
   @Type(() => FooterSocialDto)
   social?: FooterSocialDto;
+
+  @ApiPropertyOptional({
+    description:
+      'Mostrar el crédito «Tienda creada con Vendix» en el pie (por defecto true; el comerciante puede ocultarlo)',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean()
+  show_powered_by?: boolean;
 }
 
 /**

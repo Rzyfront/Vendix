@@ -14,6 +14,7 @@ import {
   InputComponent,
   IconComponent,
   TextareaComponent,
+  ToggleComponent,
 } from '../../../../../../shared/components';
 import {
   FooterSettings,
@@ -32,6 +33,7 @@ import {
     InputComponent,
     IconComponent,
     TextareaComponent,
+    ToggleComponent,
   ],
   templateUrl: './footer-settings-form.component.html',
 })
@@ -117,6 +119,7 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
           url: [''],
         }),
       }),
+      show_powered_by: [true],
     });
   }
 
@@ -152,6 +155,11 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
     if (data.social) {
       this.footerForm.get('social')?.patchValue(data.social);
     }
+
+    // Crédito de Vendix: ausente equivale a visible (SEO-TECH-21).
+    this.footerForm
+      .get('show_powered_by')
+      ?.setValue(data.show_powered_by !== false, { emitEvent: false });
   }
 
   // Getters for FormArrays
@@ -224,6 +232,7 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
         returns_info: value.help.returns_info,
       } as FooterHelp,
       social: value.social as FooterSocial,
+      show_powered_by: value.show_powered_by !== false,
     };
   }
 }
