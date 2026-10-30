@@ -151,6 +151,10 @@ const REQUIRED_COLUMNS = [
   'recipes.status',
   'production_orders.order_number',
   'production_orders.unit_cost',
+  // Alquiler por bloque (migración 20261104120000): cerrar o cobrar una atención
+  // lee la tarifa de la estación; toda lectura de estaciones selecciona estas columnas.
+  'service_stations.rental_block_minutes',
+  'service_stations.rental_block_price',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */
