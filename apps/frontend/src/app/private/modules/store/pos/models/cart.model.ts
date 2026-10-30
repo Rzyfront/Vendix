@@ -2,6 +2,7 @@ import { Product, PosProductVariant } from '../services/pos-product.service';
 import { PosCustomer } from '../models/customer.model';
 import type { PosShippingMethod } from './shipping.model';
 import { WithholdingLine } from '../../withholding-tax/interfaces/withholding.interface';
+import type { OptionDeltaParts } from '../../../../../shared/utils/option-pricing.util';
 
 export interface CartItem {
   id: string;
@@ -104,7 +105,10 @@ export interface CartItem {
   // de visualización. Participan en la identidad de la línea.
   option_ids?: number[];
   option_labels?: string[];
+  /** Delta por unidad aplicado HOY a la línea (depende de la cantidad). */
   option_delta?: number;
+  /** Partes per_unit/per_line: el delta se recalcula al cambiar la cantidad. */
+  option_delta_parts?: OptionDeltaParts;
 }
 
 export interface CartItemBooking {
@@ -322,6 +326,7 @@ export interface AddToCartRequest {
   option_ids?: number[];
   option_labels?: string[];
   option_delta?: number;
+  option_delta_parts?: OptionDeltaParts;
   notes?: string;
   variant?: PosProductVariant;
   // Weight product fields (camino legado; ver `CartItem.weight`).

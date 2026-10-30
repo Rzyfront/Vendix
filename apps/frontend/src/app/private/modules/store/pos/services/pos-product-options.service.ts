@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import type { OptionDeltaParts } from '../../../../../shared/utils/option-pricing.util';
 
 export interface PosProductOption {
   id: number;
@@ -28,6 +29,8 @@ export interface PosOptionSelection {
   labels: string[];
   /** Σ price_delta for quantity 1 (preview only). */
   delta: number;
+  /** per_unit/per_line sums: the cart re-derives the unit delta per quantity. */
+  delta_parts: OptionDeltaParts;
 }
 
 /**

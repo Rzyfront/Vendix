@@ -8,6 +8,7 @@ import {
 } from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import { sumOptionDeltaParts } from '../../../../../../shared/utils/option-pricing.util';
 import {
   PosOptionSelection,
   PosProductOption,
@@ -216,10 +217,18 @@ export class PosOptionSelectorComponent {
     const chosen = this.groups().flatMap((g) =>
       g.options.filter((o) => ids.has(o.id)),
     );
+    const delta_parts = sumOptionDeltaParts(
+      this.groups().flatMap((g) =>
+        g.options
+          .filter((o) => ids.has(o.id))
+          .map((o) => ({ scope: g.scope, price_delta: this.delta(o) })),
+      ),
+    );
     this.confirmed.emit({
       option_ids: chosen.map((o) => o.id),
       labels: chosen.map((o) => o.name),
       delta: this.totalDelta(),
+      delta_parts,
     });
   }
 

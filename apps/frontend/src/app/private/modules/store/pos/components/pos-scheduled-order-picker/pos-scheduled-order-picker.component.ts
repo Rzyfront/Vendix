@@ -37,11 +37,17 @@ const FULFILLMENT_LABELS: Record<ScheduledFulfillmentType, string> = {
                 type="checkbox"
                 class="h-4 w-4 accent-primary"
                 [checked]="service.active()"
+                [disabled]="service.required()"
                 (change)="toggle($any($event.target).checked)"
               />
               <app-icon name="calendar-clock" [size]="16"></app-icon>
               <span class="text-sm font-semibold text-text-primary">Pedido programado</span>
             </label>
+            @if (service.required()) {
+              <p class="mt-2 text-xs text-text-secondary">
+                Este pedido tiene adiciones: se entrega como pedido programado.
+              </p>
+            }
             @if (service.active()) {
               <p class="mt-2 text-xs text-text-secondary">
                 El método de entrega se elige más adelante.
@@ -199,6 +205,7 @@ export class PosScheduledOrderPickerComponent {
   }
 
   protected toggle(checked: boolean): void {
+    if (this.service.required()) return;
     if (checked) this.service.activate();
     else this.service.reset();
   }

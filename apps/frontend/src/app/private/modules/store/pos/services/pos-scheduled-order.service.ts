@@ -100,6 +100,11 @@ export class PosScheduledOrderService {
   readonly fulfillmentType = signal<ScheduledFulfillmentType | null>(null);
   /** Set by the checkout when it refuses to advance; shows the missing field. */
   readonly showValidation = signal(false);
+  /**
+   * Set by the checkout when the cart has add-ons: they are only sold in a
+   * scheduled order, so the toggle stays on and cannot be turned off.
+   */
+  readonly required = signal(false);
 
   readonly selectedDay = computed(
     () => this.days().find((d) => d.date === this.selectedDate()) ?? null,
@@ -144,6 +149,7 @@ export class PosScheduledOrderService {
   /** Drops the whole choice (toggle off, sale completed or checkout closed). */
   reset(): void {
     this.active.set(false);
+    this.required.set(false);
     this.days.set([]);
     this.selectedDate.set(null);
     this.selectedStart.set(null);

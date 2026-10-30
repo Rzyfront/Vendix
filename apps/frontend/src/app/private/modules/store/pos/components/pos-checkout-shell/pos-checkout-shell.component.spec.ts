@@ -234,8 +234,10 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     hasSlot: WritableSignal<boolean>;
     fulfillmentType: WritableSignal<'pickup' | 'delivery' | null>;
     showValidation: WritableSignal<boolean>;
+    required: WritableSignal<boolean>;
     clear: () => void;
     reset: () => void;
+    activate: () => void;
   };
 
   const payStub = (): PaymentStub =>
@@ -339,8 +341,13 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       hasSlot: signal(false),
       fulfillmentType: signal(null),
       showValidation: signal(false),
+      required: signal(false),
       clear: () => {},
-      reset: () => scheduledMock.active.set(false),
+      reset: () => {
+        scheduledMock.active.set(false);
+        scheduledMock.required.set(false);
+      },
+      activate: () => scheduledMock.active.set(true),
     };
 
     TestBed.configureTestingModule({
@@ -1062,6 +1069,43 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     stub.needsTableFlag = false;
     advance.advanceEntrega();
     expect(component.currentStep()).toBe(1);
+  });
+
+  describe('adiciones exigen pedido programado al cobrar (H2 PR #1003)', () => {
+    const cartWithOptions = () =>
+      checkoutCart(new Date(), {
+        items: [{ product: { id: '7', name: 'Torta' }, quantity: 1, unitPrice: 6000,
+          finalPrice: 6000, totalPrice: 6000, taxAmount: 0, option_ids: [11],
+          option_labels: ['Fresas'], option_delta: 5000 }],
+      });
+
+    it('al cobrar, un carrito con adiciones activa y fija el pedido programado', () => {
+      scheduledMock.enabled.set(true);
+      fixture.componentRef.setInput('mode', 'create-payment');
+      fixture.componentRef.setInput('cartState', cartWithOptions());
+      fixture.detectChanges();
+      expect(scheduledMock.required()).toBe(true);
+      expect(scheduledMock.active()).toBe(true);
+      expect(component.scheduledActive()).toBe(true);
+    });
+
+    it('el borrador con adiciones no exige agendamiento (se agenda al cobrarlo)', () => {
+      scheduledMock.enabled.set(true);
+      fixture.componentRef.setInput('mode', 'create-draft');
+      fixture.componentRef.setInput('cartState', cartWithOptions());
+      fixture.detectChanges();
+      expect(scheduledMock.required()).toBe(false);
+      expect(scheduledMock.active()).toBe(false);
+    });
+
+    it('sin adiciones el pedido programado sigue siendo opcional', () => {
+      scheduledMock.enabled.set(true);
+      fixture.componentRef.setInput('mode', 'create-payment');
+      fixture.componentRef.setInput('cartState', checkoutCart(new Date()));
+      fixture.detectChanges();
+      expect(scheduledMock.required()).toBe(false);
+      expect(scheduledMock.active()).toBe(false);
+    });
   });
 
   describe('pedido programado (corrección de UX: fuera de Cobro)', () => {

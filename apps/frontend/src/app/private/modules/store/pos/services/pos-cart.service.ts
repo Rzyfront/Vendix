@@ -40,6 +40,11 @@ import { PosCustomer } from '../models/customer.model';
 import { PosProductService, Product, PosProductVariant } from './pos-product.service';
 import { PriceResolverService } from '../../../../../shared/services/pricing';
 import {
+  OptionDeltaParts,
+  optionUnitDelta,
+  sumOptionDeltaParts,
+} from '../../../../../shared/utils/option-pricing.util';
+import {
   PriceTier,
   ProductPriceTierOverride,
 } from '../../price-tiers/interfaces';
@@ -1221,7 +1226,25 @@ export class PosCartService {
       originalFinalPrice: Number(
         item.catalog_final_price ?? item.final_unit_price ?? finalUnitPrice,
       ),
+      ...this.mapOrderItemOptions(item, quantity),
     } as CartItem;
+  }
+
+  /**
+   * Adiciones guardadas en la línea (borrador): se reponen para que el cobro
+   * exija el pedido programado. El precio persistido ya incluye el delta.
+   */
+  private mapOrderItemOptions(item: any, quantity: number): Partial<CartItem> {
+    const rows: any[] = Array.isArray(item.order_item_options) ? item.order_item_options : [];
+    if (rows.length === 0) return {};
+    const parts: OptionDeltaParts = sumOptionDeltaParts(rows);
+    const delta = optionUnitDelta(parts, quantity);
+    return {
+      option_ids: rows.map((r) => Number(r.option_id)).filter((id) => Number.isFinite(id) && id > 0),
+      option_labels: rows.map((r) => String(r.option_name ?? '')),
+      option_delta: delta > 0 ? delta : undefined,
+      option_delta_parts: parts,
+    };
   }
 
   /**
@@ -2560,10 +2583,13 @@ export class PosCartService {
           );
 
     // Variant-aware pricing (+ adiciones: vista previa del delta por unidad;
-    // el servidor recalcula el precio real a partir de `option_ids`).
-    const optionDelta = request.option_delta ?? 0;
-    const basePrice =
-      this.resolveUnitPrice(request.product, request.variant) + optionDelta;
+    // el servidor recalcula el precio real a partir de `option_ids`). Con las
+    // partes per_unit/per_line el delta depende de la cantidad de la línea,
+    // igual que en el servidor (per_line ÷ cantidad, al centavo hacia arriba).
+    const optionParts = request.option_delta_parts;
+    const optionDeltaFor = (qty: number): number =>
+      optionParts ? optionUnitDelta(optionParts, qty) : (request.option_delta ?? 0);
+    const catalogUnitPrice = this.resolveUnitPrice(request.product, request.variant);
     // QUI-648: cómo se mide el producto. Sin unidad de stock declarada esto es
     // la configuración por pieza y toda la aritmética de abajo colapsa a la
     // histórica (`precio × cantidad`).
@@ -2576,11 +2602,13 @@ export class PosCartService {
       // Update existing item
       const existingItem = currentState.items[existingItemIndex];
       const newQuantity = existingItem.quantity + request.quantity;
+      const optionDelta = optionDeltaFor(newQuantity);
+      const basePrice = catalogUnitPrice + optionDelta;
       const finalUnitPrice =
         this.resolveCatalogFinalUnitPrice(
           request.product,
           request.variant,
-          basePrice - optionDelta,
+          catalogUnitPrice,
         ) + optionDelta;
       const mergedUnits = resolveLineUnits({
         ...existingItem,
@@ -2595,19 +2623,23 @@ export class PosCartService {
         finalPrice: finalUnitPrice,
         totalPrice: mergedUnits * finalUnitPrice,
         notes: request.notes || existingItem.notes,
+        ...(existingItem.option_ids?.length
+          ? { unitPrice: basePrice, option_delta: optionDelta > 0 ? optionDelta : undefined }
+          : {}),
       };
     } else {
       // Add new item
+      // Calculate total price for weight products
+      const weight = request.weight || 1;
+      const quantity = isWeightProduct ? 1 : request.quantity;
+      const optionDelta = optionDeltaFor(quantity);
+      const basePrice = catalogUnitPrice + optionDelta;
       const finalUnitPrice =
         this.resolveCatalogFinalUnitPrice(
           request.product,
           request.variant,
-          basePrice - optionDelta,
+          catalogUnitPrice,
         ) + optionDelta;
-
-      // Calculate total price for weight products
-      const weight = request.weight || 1;
-      const quantity = isWeightProduct ? 1 : request.quantity;
       // Multiplicador monetario único: peso capturado (legado), o cantidad
       // dividida por la escala del precio cuando el producto publica "$X por N
       // unidades". Con escala 1 es la cantidad, como siempre.
@@ -2689,6 +2721,7 @@ export class PosCartService {
           ? request.option_labels
           : undefined,
         option_delta: optionDelta > 0 ? optionDelta : undefined,
+        option_delta_parts: request.option_ids?.length ? optionParts : undefined,
       };
       updatedItems = [newItem, ...currentState.items];
     }
@@ -2749,7 +2782,14 @@ export class PosCartService {
     }
 
     const updatedItems = [...currentState.items];
-    const finalUnitPrice = item.finalPrice;
+    // Adiciones por línea: el delta por unidad cambia con la cantidad (mismo
+    // reparto que el servidor), así que precio unitario y final se ajustan.
+    const oldOptionDelta = item.option_delta ?? 0;
+    const newOptionDelta = item.option_delta_parts
+      ? optionUnitDelta(item.option_delta_parts, request.quantity)
+      : oldOptionDelta;
+    const finalUnitPrice = item.finalPrice - oldOptionDelta + newOptionDelta;
+    const unitPrice = item.unitPrice - oldOptionDelta + newOptionDelta;
 
     // Peso legado, presentación o escala de precio: un solo multiplicador.
     const lineUnits = resolveLineUnits({ ...item, quantity: request.quantity });
@@ -2759,7 +2799,11 @@ export class PosCartService {
     updatedItems[itemIndex] = {
       ...item,
       quantity: request.quantity,
-      taxAmount: this.calculateItemTaxWithBase(item.product, item.unitPrice, taxMultiplier),
+      unitPrice,
+      ...(item.option_delta_parts
+        ? { option_delta: newOptionDelta > 0 ? newOptionDelta : undefined }
+        : {}),
+      taxAmount: this.calculateItemTaxWithBase(item.product, unitPrice, taxMultiplier),
       finalPrice: finalUnitPrice,
       totalPrice: newTotalPrice,
       // PSVERSION0001 paso 5 — `request.notes || item.notes` hacía imposible

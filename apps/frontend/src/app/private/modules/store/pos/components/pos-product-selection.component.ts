@@ -2161,12 +2161,15 @@ export class PosProductSelectionComponent {
    * selector and returns true (the line is added from `onOptionsConfirmed`).
    * Returns false — and changes nothing — when there are no groups or the
    * setting is off, so the regular flow continues exactly as before.
+   * Add-ons are only sold in scheduled orders, and a table never schedules:
+   * with an open table session the product is added plain.
    */
   private async openOptionSelectorIfNeeded(
     product: any,
     variant: PosProductVariant | null,
   ): Promise<boolean> {
     if (!this.productOptionsEnabled()) return false;
+    if (this.restaurantIntegration.currentTableSession() != null) return false;
     if (product.pricing_type === 'weight' || this.requiresSerials(product)) {
       return false;
     }
@@ -2209,6 +2212,7 @@ export class PosProductSelectionComponent {
         option_ids: selection.option_ids,
         option_labels: selection.labels,
         option_delta: selection.delta,
+        option_delta_parts: selection.delta_parts,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
