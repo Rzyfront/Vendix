@@ -14,6 +14,7 @@ export interface DateRangeFilter {
   preset?:
     | 'today'
     | 'yesterday'
+    | 'day'
     | 'thisWeek'
     | 'lastWeek'
     | 'thisMonth'

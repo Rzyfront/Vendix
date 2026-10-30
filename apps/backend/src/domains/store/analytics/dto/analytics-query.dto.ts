@@ -14,6 +14,7 @@ import { BaseReportQueryDto } from '@common/reports/base-report-query.dto';
 export enum DatePreset {
   TODAY = 'today',
   YESTERDAY = 'yesterday',
+  DAY = 'day',
   THIS_WEEK = 'thisWeek',
   LAST_WEEK = 'lastWeek',
   THIS_MONTH = 'thisMonth',

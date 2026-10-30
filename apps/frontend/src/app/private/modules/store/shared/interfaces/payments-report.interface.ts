@@ -24,6 +24,7 @@ export type PaymentsSortOrder = 'asc' | 'desc';
 export type PaymentsDatePreset =
   | 'today'
   | 'yesterday'
+  | 'day'
   | 'thisWeek'
   | 'lastWeek'
   | 'thisMonth'

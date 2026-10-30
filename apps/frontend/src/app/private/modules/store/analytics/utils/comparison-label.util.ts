@@ -13,6 +13,7 @@
 export type DatePresetLike =
   | 'today'
   | 'yesterday'
+  | 'day'
   | 'thisWeek'
   | 'lastWeek'
   | 'thisMonth'
@@ -26,6 +27,7 @@ export function comparisonLabelFor(preset: DatePresetLike | null | undefined): s
     case 'today':
       return 'ayer';
     case 'yesterday':
+    case 'day':
       return 'día ant.';
     case 'thisWeek':
     case 'lastWeek':

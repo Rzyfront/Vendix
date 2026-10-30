@@ -479,14 +479,15 @@ export class AnalyticsService {
           const dateRange = value as DateRangeFilter;
           // QUI-609: the backend is the source of truth for "today" — it resolves
           // `date_preset` against `stores.timezone` via `localCalendarRange`.
-          // Always forward the preset when present. Forward explicit dates only
-          // for `custom` (or when no preset was picked): for any other preset the
-          // dates are leftovers from the device clock, and forwarding them would
-          // defeat the whole point of letting the backend resolve the range.
+          // Always forward the preset when present. Forward explicit dates for
+          // `custom` and `day` (or when no preset was picked): a specific day
+          // only exists as explicit dates; for any other preset the dates are
+          // leftovers from the device clock, and forwarding them would defeat
+          // the whole point of letting the backend resolve the range.
           if (dateRange.preset) {
             params = params.set('date_preset', dateRange.preset);
           }
-          if (!dateRange.preset || dateRange.preset === 'custom') {
+          if (!dateRange.preset || dateRange.preset === 'custom' || dateRange.preset === 'day') {
             if (dateRange.start_date && dateRange.end_date) {
               params = params.set('date_from', dateRange.start_date);
               params = params.set('date_to', dateRange.end_date);

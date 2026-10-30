@@ -755,6 +755,10 @@ function localCalendarRange(
       const y = addCivilDays(today, -1);
       return { start: y, end: y, openEnd: false };
     }
+    // Día específico: los llamadores siempre lo acompañan con date_from/date_to
+    // explícitos (rama de arriba); este fallback solo cubre un 'day' huérfano.
+    case 'day':
+      return { start: today, end: today, openEnd: false };
     case 'thisWeek':
       return { start: mondayOfCivil(today), end: today, openEnd: true };
     case 'lastWeek': {

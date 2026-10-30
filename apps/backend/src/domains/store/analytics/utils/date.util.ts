@@ -65,6 +65,7 @@ export function parseDateRange(
 
   switch (query.date_preset) {
     case DatePreset.TODAY:
+    case DatePreset.DAY:
       return { startDate: today, endDate: now };
     case DatePreset.YESTERDAY: {
       const yesterday = new Date(today);
