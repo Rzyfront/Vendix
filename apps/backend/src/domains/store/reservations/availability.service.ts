@@ -237,13 +237,7 @@ export class AvailabilityService {
     // "Ahora" en horario local del store. Se usa SOLO para descartar slots
     // cuyo start_time ya pasó cuando la fecha es hoy — mantiene coherente
     // el calendario de reservas (admin y ecommerce) y el grid de slots.
-    const timezone = await resolveStoreTimezone(
-      this.prisma,
-      product.store_id,
-    );
-    const nowLocal = localCivil(new Date(), timezone);
-    const todayLocal = `${nowLocal.year}-${pad2(nowLocal.month)}-${pad2(nowLocal.day)}`;
-    const nowHHMM = `${pad2(nowLocal.hour)}:${pad2(nowLocal.minute)}`;
+    const { todayLocal, nowHHMM } = await this.storeNow(product.store_id);
 
     // Agrupar datos para acceso rapido
     const schedulesByProvider = new Map<number, typeof schedules>();
@@ -277,6 +271,8 @@ export class AvailabilityService {
     for (const currentDate of dates) {
       const dayOfWeek = currentDate.getUTCDay();
       const dateStr = this.formatDate(currentDate);
+      // QUI-966: nunca se ofrecen fechas pasadas (día de la tienda).
+      if (dateStr < todayLocal) continue;
       // Si la fecha es HOY en horario local del store, descartamos los
       // slots cuyo start_time ya pasó. El grid del admin y el del ecommerce
       // muestran solo horarios disponibles REALMENTE.
@@ -800,6 +796,18 @@ export class AvailabilityService {
     return [...DEFAULT_WORKING_DAYS];
   }
 
+  /** Today (`YYYY-MM-DD`) and `HH:mm` now, in the store timezone. */
+  private async storeNow(
+    store_id: number,
+  ): Promise<{ todayLocal: string; nowHHMM: string }> {
+    const timezone = await resolveStoreTimezone(this.prisma, store_id);
+    const nowLocal = localCivil(new Date(), timezone);
+    return {
+      todayLocal: `${nowLocal.year}-${pad2(nowLocal.month)}-${pad2(nowLocal.day)}`,
+      nowHHMM: `${pad2(nowLocal.hour)}:${pad2(nowLocal.minute)}`,
+    };
+  }
+
   private async generateGenericSlots(
     product_id: number,
     date_from: string,
@@ -840,12 +848,19 @@ export class AvailabilityService {
     const storeHoursMap = product
       ? await this.businessHoursService.loadStoreHours(product.store_id)
       : new Map<number, { start_time: string; end_time: string }>();
+    // QUI-966: "now" in the store timezone. Past dates and today's slots
+    // that already ENDED (end <= now) are never offered; a slot in
+    // progress still is (same notion of "past" as the booking gate,
+    // `isSlotEndInPast`).
+    const now = product ? await this.storeNow(product.store_id) : null;
 
     for (const currentDate of dates) {
       const dateStr = this.formatDate(currentDate);
       const dayOfWeek = currentDate.getUTCDay();
 
       if (!workingDays.includes(dayOfWeek)) continue;
+      if (now && dateStr < now.todayLocal) continue;
+      const isToday = now !== null && dateStr === now.todayLocal;
 
       // Use the store's business-hours window when configured; legacy
       // 08:00–18:00 fallback otherwise.
@@ -863,6 +878,7 @@ export class AvailabilityService {
       const timeSlots = this.generateTimeSlots(dayStart, dayEnd, duration, buffer);
 
       for (const slot of timeSlots) {
+        if (isToday && slot.end_time <= now!.nowHHMM) continue;
         // QUI-966 S5: every overlapping booking consumes a seat, not only
         // the ones with identical start/end.
         const bookedCount = existingBookings.filter(

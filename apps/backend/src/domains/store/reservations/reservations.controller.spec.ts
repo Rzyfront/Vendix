@@ -2,6 +2,8 @@ import { ReservationsController } from './reservations.controller';
 import { BookingConfirmationService } from './booking-confirmation.service';
 import { AppointmentQueueService } from './appointment-queue/appointment-queue.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { RequestMethod } from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 
 describe('ReservationsController — appointment redesign endpoints (smoke)', () => {
   function buildController() {
@@ -119,5 +121,61 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
     } finally {
       storeIdSpy.mockRestore();
     }
+  });
+
+  it('getQueue without a day lets the service resolve the store day', async () => {
+    const { controller, appointmentQueueService } = buildController();
+    const storeIdSpy = jest
+      .spyOn(RequestContextService, 'getStoreId')
+      .mockReturnValue(1);
+    try {
+      await controller.getQueue(undefined);
+      expect(appointmentQueueService.computeQueueForStore).toHaveBeenCalledWith(
+        1,
+        undefined,
+      );
+    } finally {
+      storeIdSpy.mockRestore();
+    }
+  });
+
+  it('GET /:id still delegates to findOne', async () => {
+    const { controller, reservationsService, responseService } = buildController();
+    await controller.findOne(7);
+    expect(reservationsService.findOne).toHaveBeenCalledWith(7);
+    expect(responseService.success).toHaveBeenCalledWith(
+      { id: 1 },
+      expect.any(String),
+    );
+  });
+});
+
+describe('ReservationsController — route order (QUI-966 S10)', () => {
+  // Nest registers routes in method declaration order: a static GET path
+  // declared after `@Get(':id')` (ParseIntPipe) is shadowed and answers 400.
+  function getRoutesInOrder(): string[] {
+    const proto = ReservationsController.prototype as any;
+    return Object.getOwnPropertyNames(proto)
+      .filter((name) => name !== 'constructor')
+      .filter(
+        (name) =>
+          Reflect.getMetadata(METHOD_METADATA, proto[name]) ===
+          RequestMethod.GET,
+      )
+      .map((name) => Reflect.getMetadata(PATH_METADATA, proto[name]));
+  }
+
+  it('declares GET queue before GET :id', () => {
+    const routes = getRoutesInOrder();
+    expect(routes).toContain('queue');
+    expect(routes.indexOf('queue')).toBeLessThan(routes.indexOf(':id'));
+  });
+
+  it('declares no single-segment static GET path after GET :id', () => {
+    const routes = getRoutesInOrder();
+    const after = routes.slice(routes.indexOf(':id') + 1);
+    expect(after.filter((p) => !p.includes('/') && !p.startsWith(':'))).toEqual(
+      [],
+    );
   });
 });

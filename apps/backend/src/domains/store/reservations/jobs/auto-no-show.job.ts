@@ -1,15 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { booking_status_enum, Prisma } from '@prisma/client';
+import { booking_status_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { ReservationsService } from '../reservations.service';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
 import {
+  dateOnlyString,
+  localDateString,
   resolveStoreTimezone,
-  localCivil,
+  zonedWallClockToUtc,
 } from '@common/utils/store-timezone.util';
-
-const pad2 = (n: number) => String(n).padStart(2, '0');
 
 /**
  * Auto-archiva bookings pre-servicio que ya pasaron su `end_time` sin
@@ -25,9 +25,10 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
  *   - Cada 5 minutos busca bookings `pending` o `confirmed` cuyo
  *     `end_time + grace` ya pasó (grace = 2h, alineado con el umbral
  *     frontend de `isBookingExpired` para VENCIDA).
- *   - Mueve cada uno a `no_show` usando `ReservationsService.transition`
- *     (que valida `VALID_TRANSITIONS` → `pending → no_show` está
- *     permitido).
+ *   - Mueve cada uno a `no_show` con `ReservationsService.archiveToNoShow`
+ *     (única vía que permite `pending → no_show`; el endpoint manual no).
+ *     Un hold del ecommerce vencido (`pending` + `expires_at` pasado) se
+ *     cierra como `cancelled` (`archiveExpiredHold`).
  *   - Idempotente: si otro worker ya movió la booking, `transition`
  *     no-op sobre el mismo estado.
  *
@@ -43,6 +44,10 @@ export class AutoNoShowJob {
 
   /** Grace period en minutos entre `end_time` y el archivado. */
   private static readonly GRACE_MINUTES = 120;
+  /** Página de candidatas por consulta. */
+  private static readonly PAGE_SIZE = 100;
+  /** Tope de páginas por store y tick (≤ 1000 reservas revisadas). */
+  private static readonly MAX_PAGES_PER_TICK = 10;
 
   constructor(
     private readonly prisma: StorePrismaService,
@@ -89,99 +94,107 @@ export class AutoNoShowJob {
   }
 
   /**
-   * Archiva las reservas vencidas de UN store. Calculamos el cutoff
-   * "ahora - grace" en la zona horaria del store para que la
-   * comparación sea consistente con el frontend.
+   * Archiva las reservas vencidas de UN store (QUI-966 S11).
+   *
+   * Vencida = `date + end_time + grace` ya pasó, con `date`/`end_time`
+   * interpretados en la zona horaria del store (incluye las de HOY). Se
+   * pagina por `id` ascendente con cursor, así las reservas que no se pueden
+   * archivar (o las de hoy aún dentro de la gracia) no vuelven a copar el
+   * cupo y todas las vencidas se procesan; el total por tick está acotado.
    */
   private async archiveStore(storeId: number): Promise<number> {
     const timezone = await resolveStoreTimezone(this.prisma, storeId);
-    const nowLocal = localCivil(new Date(), timezone);
-    const cutoff = new Date(
-      Date.UTC(
-        nowLocal.year,
-        nowLocal.month - 1,
-        nowLocal.day,
-        nowLocal.hour,
-        nowLocal.minute,
-      ),
-    );
-    cutoff.setMinutes(
-      cutoff.getMinutes() - AutoNoShowJob.GRACE_MINUTES,
-    );
-
-    // Booking "vencida" = `end_time` < cutoff. Comparamos por `end_time`
-    // directamente (es una columna TIME, e.g. "14:30") concatenado con
-    // `date` (DATE, e.g. "2026-07-29"). Para que el WHERE use índice
-    // hacemos el join en la app (los bookings son pocos por store).
-    const candidates = await this.prisma.bookings.findMany({
-      where: {
-        store_id: storeId,
-        status: {
-          in: [booking_status_enum.pending, booking_status_enum.confirmed],
-        },
-        // Solo fechas pasadas — `date < cutoff_date` (sin time para
-        // evitar perder bookings del día actual que ya vencieron).
-        date: {
-          lt: new Date(
-            Date.UTC(nowLocal.year, nowLocal.month - 1, nowLocal.day),
-          ),
-        },
-      },
-      select: {
-        id: true,
-        date: true,
-        end_time: true,
-        status: true,
-      },
-      take: 100, // safety cap por tick
-    });
+    const now = new Date();
+    const today = localDateString(now, timezone);
 
     let archived = 0;
-    for (const b of candidates) {
-      // Construimos Date completo: date + end_time, en horario local del
-      // store, y le sumamos el grace. Si `now > date+end+grace`,
-      // archivamos.
-      const bookingEnd = this.composeBookingEnd(b.date, b.end_time);
-      if (!bookingEnd) continue;
-      const graceEnd = new Date(
-        bookingEnd.getTime() + AutoNoShowJob.GRACE_MINUTES * 60_000,
-      );
-      if (new Date() <= graceEnd) continue; // todavía dentro del grace
+    let cursor = 0;
+    for (let page = 0; page < AutoNoShowJob.MAX_PAGES_PER_TICK; page++) {
+      const candidates = await this.prisma.bookings.findMany({
+        where: {
+          store_id: storeId,
+          status: {
+            in: [booking_status_enum.pending, booking_status_enum.confirmed],
+          },
+          // Hasta HOY inclusive (día del store); la hora se filtra abajo.
+          // `bookings.date` es @db.Date guardado como medianoche UTC.
+          date: { lte: new Date(`${today}T00:00:00.000Z`) },
+          id: { gt: cursor },
+        },
+        select: {
+          id: true,
+          date: true,
+          end_time: true,
+          status: true,
+          expires_at: true,
+        },
+        orderBy: { id: 'asc' },
+        take: AutoNoShowJob.PAGE_SIZE,
+      });
+      if (candidates.length === 0) break;
+      cursor = candidates[candidates.length - 1].id;
 
-      try {
-        // `archiveToNoShow` es la versión silenciosa de `noShow` — no
-        // emite `booking.no_show` (que dispara una notificación al
-        // operador). Para un job de background que puede archivar
-        // decenas de bookings por tick, emitir N notificaciones sería
-        // peor que el problema de stats que estamos arreglando.
-        await this.reservationsService.archiveToNoShow(b.id);
-        archived += 1;
-      } catch (err: any) {
-        // Si la transición falla (p.ej. booking ya no está pending), lo
-        // logueamos pero seguimos con el resto.
-        this.logger.warn(
-          `AutoNoShowJob could not archive booking ${b.id}: ${err?.message ?? err}`,
+      for (const b of candidates) {
+        const bookingEnd = this.composeBookingEnd(b.date, b.end_time, timezone);
+        if (!bookingEnd) continue;
+        const graceEnd = new Date(
+          bookingEnd.getTime() + AutoNoShowJob.GRACE_MINUTES * 60_000,
         );
+        if (now <= graceEnd) continue; // todavía dentro del grace
+
+        try {
+          if (
+            b.status === booking_status_enum.pending &&
+            b.expires_at &&
+            new Date(b.expires_at) < now
+          ) {
+            // Hold del ecommerce que nunca se confirmó: no fue una cita,
+            // se cierra como cancelada (no cuenta como ausencia).
+            await this.reservationsService.archiveExpiredHold(b.id);
+          } else {
+            // `archiveToNoShow` es la versión silenciosa de `noShow` — no
+            // emite `booking.no_show` (notificación al operador por cada
+            // booking archivada).
+            await this.reservationsService.archiveToNoShow(b.id);
+          }
+          archived += 1;
+        } catch (err: any) {
+          // Si la transición falla (p.ej. ya cambió de estado), seguimos.
+          this.logger.warn(
+            `AutoNoShowJob could not archive booking ${b.id}: ${err?.message ?? err}`,
+          );
+        }
       }
+      if (candidates.length < AutoNoShowJob.PAGE_SIZE) break;
     }
     return archived;
   }
 
   /**
-   * Compone un Date a partir de `date` (DATE) + `end_time` (string HH:mm
-   * o HH:mm:ss). Devuelve null si el formato es inválido.
+   * Instante UTC de `date` (DATE, medianoche UTC) + `end_time` (HH:mm o
+   * HH:mm:ss) como hora de pared del store. Devuelve null si el formato es
+   * inválido.
    */
   private composeBookingEnd(
     date: Date | string,
     endTime: string,
+    timezone: string,
   ): Date | null {
     const d =
-      typeof date === 'string'
-        ? date.split('T')[0]
-        : date.toISOString().slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+      typeof date === 'string' ? date.split('T')[0] : dateOnlyString(date);
+    const dm = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!dm) return null;
     const m = endTime.match(/^(\d{2}):(\d{2})/);
     if (!m) return null;
-    return new Date(`${d}T${m[1]}:${m[2]}:00`);
+    return zonedWallClockToUtc(
+      Number(dm[1]),
+      Number(dm[2]),
+      Number(dm[3]),
+      Number(m[1]),
+      Number(m[2]),
+      0,
+      0,
+      timezone,
+    );
   }
 }

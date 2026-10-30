@@ -1,5 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import {
+  dateOnlyString,
+  localDateString,
+  resolveStoreTimezone,
+  zonedWallClockToUtc,
+} from '@common/utils/store-timezone.util';
+import { isValidCivilDate } from '../booking-time.util';
 import { NotificationsService } from '../../notifications/notifications.service';
 
 /**
@@ -37,16 +44,18 @@ export class AppointmentQueueService {
   ) {}
 
   /**
-   * Compute and return the live ranking for the given store on the
-   * given calendar day. The function is pure SQL: the score is
-   * `ABS(target_time - arrival_at)` (ascending) and the tie-breaker is
-   * `priority` (ascending, lower = sooner) and then `created_at`
-   * (ascending, FIFO). Only bookings in `arriving` or `attending`
-   * status participate.
+   * Compute and return the live ranking for the given store on the given
+   * calendar day of the STORE (QUI-966 S10; defaults to the store's today).
+   * `bookings` has no `starts_at` column: the appointment start is
+   * `date` + `start_time` read as wall-clock in the store timezone. The
+   * score is `ABS(starts_at - arrival_at)` (ascending); `priority`
+   * (ascending, lower = sooner) breaks ties, then `created_at` and `id`
+   * (FIFO, stable). Only bookings in `arriving` or `attending` status that
+   * already have an `arrival_at` participate.
    */
   async computeQueueForStore(
     storeId: number,
-    isoDay: string,
+    isoDay?: string,
   ): Promise<Array<{
     booking_id: number;
     booking_number: string;
@@ -58,18 +67,19 @@ export class AppointmentQueueService {
     score: number;
     priority: number;
   }>> {
-    const startOfDay = new Date(`${isoDay}T00:00:00.000`);
-    const endOfDay = new Date(`${isoDay}T23:59:59.999`);
+    if (isoDay !== undefined && !isValidCivilDate(isoDay)) {
+      throw new BadRequestException(
+        'El día de la cola no es válido; usa el formato AAAA-MM-DD',
+      );
+    }
+    const timezone = await resolveStoreTimezone(this.prisma, storeId);
+    const day = isoDay ?? localDateString(new Date(), timezone);
 
-    // Pull every candidate in window in one round-trip; sort in app to
-    // avoid a Postgres `ABS(timestamp - timestamp)` expression that the
-    // Prisma typed builder doesn't support cleanly. Booking rows without
-    // an `arrival_at` are excluded — they haven't arrived yet and don't
-    // belong to the live queue.
+    // `bookings.date` is `@db.Date` stored as UTC midnight of the civil day.
     const candidates = await this.prisma.bookings.findMany({
       where: {
         store_id: storeId,
-        starts_at: { gte: startOfDay, lte: endOfDay },
+        date: new Date(`${day}T00:00:00.000Z`),
         status: { in: ['arriving', 'attending'] as any },
         arrival_at: { not: null },
       },
@@ -78,29 +88,52 @@ export class AppointmentQueueService {
         booking_number: true,
         customer_id: true,
         provider_id: true,
-        starts_at: true,
+        date: true,
+        start_time: true,
         arrival_at: true,
         priority: true,
+        created_at: true,
       },
-      orderBy: [{ arrival_at: 'asc' }, { priority: 'asc' }, { created_at: 'asc' }],
     });
 
     if (candidates.length === 0) return [];
 
-    return candidates.map((c, idx) => ({
-      booking_id: c.id,
-      booking_number: c.booking_number,
-      customer_id: c.customer_id,
-      provider_id: c.provider_id ?? null,
-      starts_at: c.starts_at,
-      target_time: c.starts_at,
-      arrival_at: c.arrival_at!,
-      score:
-        c.arrival_at && c.starts_at
-          ? Math.abs(c.starts_at.getTime() - c.arrival_at.getTime())
-          : Number.POSITIVE_INFINITY,
-      priority: c.priority,
-    }));
+    const ranked = candidates.map((c) => {
+      const starts_at = this.appointmentStart(c.date, c.start_time, timezone);
+      return {
+        booking_id: c.id,
+        booking_number: c.booking_number,
+        customer_id: c.customer_id,
+        provider_id: c.provider_id ?? null,
+        starts_at,
+        target_time: starts_at,
+        arrival_at: c.arrival_at!,
+        score: Math.abs(starts_at.getTime() - c.arrival_at!.getTime()),
+        priority: c.priority ?? 0,
+        created_ms: c.created_at ? new Date(c.created_at).getTime() : 0,
+      };
+    });
+
+    ranked.sort(
+      (x, y) =>
+        x.score - y.score ||
+        x.priority - y.priority ||
+        x.created_ms - y.created_ms ||
+        x.booking_id - y.booking_id,
+    );
+
+    return ranked.map(({ created_ms: _created_ms, ...entry }) => entry);
+  }
+
+  /** `date` (UTC-midnight civil day) + `HH:mm` as a store wall-clock instant. */
+  private appointmentStart(
+    date: Date,
+    start_time: string,
+    timezone: string,
+  ): Date {
+    const [y, mo, d] = dateOnlyString(date).split('-').map(Number);
+    const [h, mi] = start_time.split(':').map(Number);
+    return zonedWallClockToUtc(y, mo, d, h, mi, 0, 0, timezone);
   }
 
   /**
@@ -110,7 +143,7 @@ export class AppointmentQueueService {
    */
   async refreshAndBroadcastQueue(
     storeId: number,
-    isoDay: string,
+    isoDay?: string,
   ): Promise<{ updated: number; promoted: number | null }> {
     const ranked = await this.computeQueueForStore(storeId, isoDay);
     if (ranked.length === 0) return { updated: 0, promoted: null };

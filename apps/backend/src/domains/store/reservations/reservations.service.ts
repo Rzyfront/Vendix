@@ -37,6 +37,7 @@ import { TableSessionsService } from '../tables/table-sessions.service';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 import { BusinessHoursService } from './business-hours/business-hours.service';
 import {
+  DEFAULT_STORE_TIMEZONE,
   dateOnlyString,
   localDateString,
   resolveStoreTimezone,
@@ -1502,7 +1503,23 @@ export class ReservationsService {
    * listener agrupe las notificaciones.
    */
   async archiveToNoShow(id: number): Promise<void> {
-    await this.transition(id, 'no_show');
+    // QUI-966 S11: an overdue PENDING booking (never confirmed and never
+    // attended) is archived by the job too. `pending → no_show` is allowed
+    // ONLY here; the manual `noShow` endpoint keeps the state machine
+    // (confirmed/arriving/attending only).
+    await this.transition(id, 'no_show', ['pending']);
+  }
+
+  /**
+   * Silent archive of an ecommerce hold whose `expires_at` passed without
+   * `confirmHold` (QUI-966 S11). An expired hold never became an
+   * appointment (it already stops holding the slot, see
+   * `slotHoldingBookingWhere`, and `confirmHold` rejects it), so it is
+   * closed as `cancelled`, not `no_show`, and does not count as an absence.
+   * Its order is not touched: a hold is created before any order.
+   */
+  async archiveExpiredHold(id: number): Promise<void> {
+    await this.transition(id, 'cancelled');
   }
 
   /**
@@ -2039,22 +2056,34 @@ export class ReservationsService {
   }
 
   /**
-   * Obtiene estadisticas de reservas
+   * "Today" of the current store (QUI-966 S12) as a `bookings.date` window.
    *
-   * Date comparisons use UTC midnight (not local midnight) because
-   * the `bookings.date` column is `@db.Date` and is stored as UTC
-   * midnight (e.g. 2026-07-02 00:00:00Z). Using `new Date(year, month,
-   * day)` in a non-UTC tz (e.g. Colombia = UTC-5) yields a value 5h
-   * ahead of the stored value, so the gte compare fails. Both this
-   * method and `getToday` use `Date.UTC(...)` for consistency.
+   * The civil day is the STORE's calendar day (store timezone), so from
+   * 19:00 Bogota (00:00Z) "today" does not jump to tomorrow. `bookings.date`
+   * is `@db.Date` stored as UTC midnight, so the bounds are that civil day
+   * at UTC midnight (never local midnight, which would miss the row).
    */
-  async getStats() {
-    const now = new Date();
-    const todayStart = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-    );
+  private async storeTodayWindow(): Promise<{
+    todayStart: Date;
+    todayEnd: Date;
+  }> {
+    const store_id = RequestContextService.getContext()?.store_id;
+    const timezone = store_id
+      ? await resolveStoreTimezone(this.prisma, store_id)
+      : DEFAULT_STORE_TIMEZONE;
+    const today = localDateString(new Date(), timezone);
+    const todayStart = new Date(`${today}T00:00:00.000Z`);
     const todayEnd = new Date(todayStart);
     todayEnd.setUTCDate(todayEnd.getUTCDate() + 1);
+    return { todayStart, todayEnd };
+  }
+
+  /**
+   * Obtiene estadisticas de reservas. "Hoy" es el día de la tienda
+   * (`storeTodayWindow`).
+   */
+  async getStats() {
+    const { todayStart, todayEnd } = await this.storeTodayWindow();
 
     const thirtyDaysAgo = new Date(todayStart);
     thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
@@ -2113,20 +2142,11 @@ export class ReservationsService {
   }
 
   /**
-   * Obtiene las reservas de hoy ordenadas por hora de inicio
-   *
-   * Uses UTC midnight for the date range. See getStats() comment
-   * for the rationale (bookings.date is @db.Date stored as UTC
-   * midnight; local midnight would miss the record in non-UTC
-   * timezones).
+   * Obtiene las reservas de hoy (día de la tienda) ordenadas por hora de
+   * inicio. Ver `storeTodayWindow`.
    */
   async getToday() {
-    const now = new Date();
-    const todayStart = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-    );
-    const todayEnd = new Date(todayStart);
-    todayEnd.setUTCDate(todayEnd.getUTCDate() + 1);
+    const { todayStart, todayEnd } = await this.storeTodayWindow();
 
     const bookings = await this.prisma.bookings.findMany({
       where: {
@@ -2279,11 +2299,18 @@ export class ReservationsService {
   /**
    * Ejecuta una transicion de estado validando la maquina de estados
    */
-  private async transition(id: number, targetStatus: string) {
+  private async transition(
+    id: number,
+    targetStatus: string,
+    extraAllowedFrom: string[] = [],
+  ) {
     const booking = await this.findOne(id);
     const allowed = this.VALID_TRANSITIONS[booking.status] || [];
 
-    if (!allowed.includes(targetStatus)) {
+    if (
+      !allowed.includes(targetStatus) &&
+      !extraAllowedFrom.includes(booking.status)
+    ) {
       throw new BadRequestException(
         `No se puede cambiar de "${booking.status}" a "${targetStatus}"`,
       );

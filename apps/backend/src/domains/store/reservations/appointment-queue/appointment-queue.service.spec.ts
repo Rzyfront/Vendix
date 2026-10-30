@@ -16,6 +16,12 @@ describe('AppointmentQueueService', () => {
         findMany,
         update,
       },
+      // Store in UTC so the fixtures' `start_time` equals the UTC instant.
+      store_settings: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ settings: {}, stores: { timezone: 'UTC' } }),
+      },
       $transaction: options.transactions === false ? jest.fn() : transaction,
     } as any;
     const notifications = {
@@ -52,7 +58,8 @@ describe('AppointmentQueueService', () => {
         booking_number: 'BKG-1',
         customer_id: 100,
         provider_id: 1,
-        starts_at: new Date('2026-07-18T10:00:00Z'),
+        date: new Date('2026-07-18T00:00:00Z'),
+        start_time: '10:00',
         arrival_at: new Date('2026-07-18T09:55:00Z'),
         priority: 0,
       },
@@ -61,7 +68,8 @@ describe('AppointmentQueueService', () => {
         booking_number: 'BKG-2',
         customer_id: 101,
         provider_id: 1,
-        starts_at: new Date('2026-07-18T10:00:00Z'),
+        date: new Date('2026-07-18T00:00:00Z'),
+        start_time: '10:00',
         arrival_at: new Date('2026-07-18T09:30:00Z'),
         priority: 0,
       },
@@ -82,7 +90,8 @@ describe('AppointmentQueueService', () => {
         booking_number: 'BKG-1',
         customer_id: 100,
         provider_id: null,
-        starts_at: new Date('2026-07-18T10:00:00Z'),
+        date: new Date('2026-07-18T00:00:00Z'),
+        start_time: '10:00',
         arrival_at: new Date('2026-07-18T09:55:00Z'),
         priority: 0,
       },
@@ -91,7 +100,8 @@ describe('AppointmentQueueService', () => {
         booking_number: 'BKG-2',
         customer_id: 101,
         provider_id: null,
-        starts_at: new Date('2026-07-18T10:00:00Z'),
+        date: new Date('2026-07-18T00:00:00Z'),
+        start_time: '10:00',
         arrival_at: new Date('2026-07-18T09:30:00Z'),
         priority: 0,
       },
@@ -136,7 +146,8 @@ describe('AppointmentQueueService', () => {
         booking_number: 'BKG-1',
         customer_id: 100,
         provider_id: null,
-        starts_at: new Date('2026-07-18T10:00:00Z'),
+        date: new Date('2026-07-18T00:00:00Z'),
+        start_time: '10:00',
         arrival_at: new Date('2026-07-18T09:55:00Z'),
         priority: 0,
       },

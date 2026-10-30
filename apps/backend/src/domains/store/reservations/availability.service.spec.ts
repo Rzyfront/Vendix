@@ -228,4 +228,46 @@ describe('AvailabilityService — business hours integration', () => {
       await expect(service.isSlotAvailable(10, '2026-02-30', '11:00', '12:00', 5)).resolves.toBe(false);
     });
   });
+
+  describe('QUI-966 (T6) grid never offers the past', () => {
+    const at = (iso: string) => {
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      jest.setSystemTime(new Date(iso));
+    };
+    const freeBooking = () =>
+      buildService({
+        storeHours: [{ day_of_week: 2, start_time: '09:00', end_time: '12:00' }],
+        products: [{ id: 10, store_id: 1, booking_mode: 'free_booking', service_duration_minutes: 60, buffer_minutes: 0 }],
+      });
+
+    it('free_booking: hides today slots that already ended, keeps the one in progress', async () => {
+      at('2026-08-18T15:02:00.000Z'); // Tuesday 10:02 America/Bogota
+      const { service } = freeBooking();
+      const slots = await service.getAvailableSlots(10, '2026-08-18', '2026-08-18');
+      expect(slots.map((x) => x.start_time)).toEqual(['10:00', '11:00']);
+    });
+
+    it('free_booking: a future day keeps every slot (regression)', async () => {
+      at('2026-08-17T15:00:00.000Z');
+      const { service } = freeBooking();
+      const slots = await service.getAvailableSlots(10, '2026-08-18', '2026-08-18');
+      expect(slots.map((x) => x.start_time)).toEqual(['09:00', '10:00', '11:00']);
+    });
+
+    it('never offers a past date (provider and generic paths)', async () => {
+      at('2026-08-19T15:00:00.000Z'); // Wednesday
+      const provider = buildService({
+        storeHours: [{ day_of_week: 2, start_time: '09:00', end_time: '12:00' }],
+        products: [{ id: 10, store_id: 1, booking_mode: 'provider_specific', service_duration_minutes: 60, buffer_minutes: 0 }],
+        providers: [{ id: 5, display_name: 'Ana', avatar_url: null }],
+        schedules: [{ provider_id: 5, day_of_week: 2, start_time: '09:00', end_time: '12:00', is_active: true }],
+      });
+      await expect(
+        provider.service.getAvailableSlots(10, '2026-08-18', '2026-08-18'),
+      ).resolves.toEqual([]);
+      await expect(
+        freeBooking().service.getAvailableSlots(10, '2026-08-18', '2026-08-18'),
+      ).resolves.toEqual([]);
+    });
+  });
 });
