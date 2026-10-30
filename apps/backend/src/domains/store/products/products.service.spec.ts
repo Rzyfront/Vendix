@@ -465,6 +465,53 @@ describe('ProductsService', () => {
       });
     });
 
+    it.each([
+      ['supply', true],
+      ['internal_use', false],
+    ])(
+      'naturaleza %s: se guarda sin precio de venta, nunca vendible ni publicada',
+      async (nature, expectedIngredient) => {
+        const created = {
+          id: 2,
+          name: 'Toalla',
+          slug: 'toalla',
+          store_id: 1,
+          state: ProductState.ACTIVE,
+          product_categories: [],
+          product_tax_assignments: [],
+          product_images: [],
+          product_variants: [],
+          reviews: [],
+          stock_levels: [],
+          _count: { product_variants: 0, product_images: 0, reviews: 0 },
+        };
+        mockPrismaService.products.create.mockResolvedValue(created);
+        mockPrismaService.products.findUnique.mockResolvedValue(created);
+        mockPrismaService.$transaction.mockImplementation((callback) =>
+          callback(mockPrismaService),
+        );
+
+        await service.create({
+          name: 'Toalla',
+          base_price: 0,
+          usage_nature: nature,
+          is_sellable: true,
+          available_for_ecommerce: true,
+          is_featured: true,
+        } as CreateProductDto);
+
+        expect(mockPrismaService.products.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            usage_nature: nature,
+            is_sellable: false,
+            is_ingredient: expectedIngredient,
+            available_for_ecommerce: false,
+            is_featured: false,
+          }),
+        });
+      },
+    );
+
     it('should default state to active when caller does not pass one', async () => {
       // FIX — el schema Prisma tiene `@default(active)` (cambiado desde
       // `@default(inactive)` en la migración 20260910200000), pero además el
@@ -1731,6 +1778,8 @@ describe('ProductsService', () => {
         brands_count: 1,
         archived_stock_value: 200,
         archived_stock_units: 10,
+        // Pestañas: el insumo puro heredado cuenta como Insumo; el archivado no cuenta.
+        usage_nature_counts: { sale: 1, supply: 1, internal_use: 1 },
       };
 
       mockPrismaService.products.findMany.mockResolvedValue([
@@ -1745,12 +1794,16 @@ describe('ProductsService', () => {
           stock_quantity: 0,
           base_price: 100,
           product_images: [{ id: 1 }],
+          usage_nature: 'sale',
+          is_ingredient: true,
+          is_sellable: false,
         },
         {
           state: ProductState.INACTIVE,
           stock_quantity: 5,
           base_price: 20,
           product_images: [],
+          usage_nature: 'internal_use',
         },
         {
           state: ProductState.ARCHIVED,
@@ -2152,6 +2205,52 @@ describe('ProductsService', () => {
       const where = await run({ is_ingredient: false });
       expect(where).not.toHaveProperty('lodging_unit_type');
       expect(where.is_ingredient).toBe(false);
+    });
+  });
+
+  describe('naturaleza de uso — pestañas y POS (findAll)', () => {
+    const run = async (extra: Partial<ProductQueryDto>) => {
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+      mockPrismaService.products.findMany.mockClear();
+      await service.findAll({ page: 1, limit: 10, ...extra } as ProductQueryDto);
+      return mockPrismaService.products.findMany.mock.calls[0][0].where;
+    };
+    const legacyPure = { usage_nature: 'sale', is_ingredient: true, is_sellable: false };
+
+    it('sin pestaña no filtra por naturaleza (comportamiento previo)', async () => {
+      const where = await run({});
+      expect(where).not.toHaveProperty('AND');
+      expect(where).not.toHaveProperty('NOT');
+    });
+
+    it('Venta excluye el insumo puro heredado', async () => {
+      const where = await run({ usage_nature: 'sale' } as any);
+      expect(where.AND[1]).toEqual({
+        usage_nature: 'sale',
+        NOT: { is_ingredient: true, is_sellable: false },
+      });
+    });
+
+    it('Insumos incluye el insumo puro heredado', async () => {
+      const where = await run({ usage_nature: 'supply' } as any);
+      expect(where.AND[1]).toEqual({ OR: [{ usage_nature: 'supply' }, legacyPure] });
+    });
+
+    it('Uso interno filtra por su naturaleza', async () => {
+      const where = await run({ usage_nature: 'internal_use' } as any);
+      expect(where.AND[1]).toEqual({ usage_nature: 'internal_use' });
+    });
+
+    it('el POS fuerza Venta en el servidor aunque el cliente pida Insumos', async () => {
+      const where = await run({ pos_optimized: true, usage_nature: 'supply' } as any);
+      expect(where).not.toHaveProperty('AND');
+      expect(where.NOT).toEqual({
+        OR: [
+          { usage_nature: { not: 'sale' } },
+          { is_ingredient: true, is_sellable: false },
+        ],
+      });
     });
   });
 

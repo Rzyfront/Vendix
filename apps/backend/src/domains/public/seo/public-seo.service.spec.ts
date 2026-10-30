@@ -98,6 +98,8 @@ describe('PublicSeoService (VENDIX_LANDING)', () => {
         store_id: 42,
         state: 'active',
         available_for_ecommerce: true,
+        // Insumo / Uso interno nunca se indexan.
+        usage_nature: 'sale',
         // Hotelería (R5): las noches de hotel no se indexan.
         lodging_unit_type: { is: null },
       },

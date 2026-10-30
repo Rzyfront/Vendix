@@ -33,6 +33,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { OrderSseService } from './services/order-sse.service';
 import { resolveCostPrice } from './utils/resolve-cost-price';
 import { assertVariantRequiredForPrepared } from './utils/variant-required.validator';
+import { assertSaleNatureLines } from '../products/services/product-usage-nature.util';
 import { serviceBudgetBlocks, serviceOrderTxOptions } from './utils/service-budget-cap.util';
 import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
@@ -666,6 +667,10 @@ export class OrdersService {
     // Resuelve los productos una sola vez (batch) y aplica el check. El
     // mapa devuelto se reutiliza abajo para snapshots de `name` /
     // `product_type` sin una segunda consulta por línea.
+    // Insumo y Uso interno nunca se venden: rechazo legible (422) antes de
+    // tocar stock, precios o la orden.
+    await assertSaleNatureLines(this.prisma, createOrderDto.items);
+
     const variantCheckProductById = await assertVariantRequiredForPrepared(
       this.prisma,
       createOrderDto.items,

@@ -147,6 +147,8 @@ describe('PaymentsService', () => {
 
   beforeEach(async () => {
     const mockPrismaService = {
+      // Guard de naturaleza de uso (assertSaleNatureLines): sin ofensores.
+      products: { findMany: jest.fn().mockResolvedValue([]) },
       payments: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
@@ -1243,6 +1245,20 @@ describe('PaymentsService', () => {
 
     afterEach(() => {
       contextSpy?.mockRestore();
+    });
+
+    it('rechaza con 422 un Insumo (Leche Entera) antes de abrir la venta', async () => {
+      arrange({ checkout: { require_customer_data: false } });
+      (prisma as any).products.findMany.mockResolvedValueOnce([
+        { id: 1, name: 'Leche Entera 1L', usage_nature: 'sale', is_ingredient: true, is_sellable: false },
+      ]);
+      const error = await service.processPosPayment(buildDto(), posUser).catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.getStatus()).toBe(422);
+      expect(error.errorCode).toBe(ErrorCodes.PROD_NATURE_NOT_SELLABLE.code);
+      expect(error.message).toBe('"Leche Entera 1L" es un producto de Insumo y no se puede vender.');
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
     });
 
     it.each([

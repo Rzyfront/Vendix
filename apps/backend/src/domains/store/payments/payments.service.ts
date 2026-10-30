@@ -1,3 +1,4 @@
+import { assertSaleNatureLines } from '../products/services/product-usage-nature.util';
 import {
   Injectable,
   BadRequestException,
@@ -937,6 +938,10 @@ export class PaymentsService {
       createPosPaymentDto.store_id = ctxStoreId;
 
       await this.validateUserAccess(user, createPosPaymentDto.store_id);
+
+      // Insumo y Uso interno nunca se cobran, aunque el cliente los mande
+      // (app vieja, llamada directa): 422 legible antes de abrir la venta.
+      await assertSaleNatureLines(this.prisma, createPosPaymentDto.items);
 
       // The replay fingerprint includes currency; resolve the same server
       // default before checking a prior attempt and before the transaction.

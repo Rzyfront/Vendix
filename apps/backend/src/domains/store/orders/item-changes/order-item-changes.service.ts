@@ -1,3 +1,4 @@
+import { assertSaleNatureProducts } from '../../products/services/product-usage-nature.util';
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -1220,6 +1221,7 @@ export class OrderItemChangesService {
           is_on_sale: true,
           sale_price: true,
           is_sellable: true,
+          usage_nature: true,
           state: true,
           product_type: true,
           track_inventory: true,
@@ -1265,6 +1267,7 @@ export class OrderItemChangesService {
             `Producto #${a.product_id} no existe o no pertenece a la tienda`,
           );
         }
+        assertSaleNatureProducts([p]);
         if (!p.is_sellable) {
           throw this.invalid(`Producto "${p.name}" no es vendible`);
         }

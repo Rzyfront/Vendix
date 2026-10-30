@@ -45,3 +45,14 @@ export enum BookingMode {
   PROVIDER_REQUIRED = 'provider_required',
   FREE_BOOKING = 'free_booking',
 }
+
+/**
+ * Naturaleza de uso: para qué existe el producto en el negocio.
+ * Espejo de `product_usage_nature_enum`. `supply` (insumo) e `internal_use`
+ * nunca se venden en ningún canal.
+ */
+export enum ProductUsageNature {
+  SALE = 'sale',
+  SUPPLY = 'supply',
+  INTERNAL_USE = 'internal_use',
+}

@@ -1,3 +1,4 @@
+import { assertSaleNatureLines } from '../products/services/product-usage-nature.util';
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -36,6 +37,9 @@ export class LayawayService {
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
+
+    // Un separado es una venta: Insumo / Uso interno no entran.
+    await assertSaleNatureLines(this.prisma, dto.items);
 
     return this.prisma.$transaction(async (tx: any) => {
       // 1. Generar plan_number
