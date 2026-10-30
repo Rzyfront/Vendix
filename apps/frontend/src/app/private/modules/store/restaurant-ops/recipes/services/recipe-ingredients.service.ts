@@ -65,11 +65,20 @@ export class RecipeIngredientsService {
               id: p.id,
               name: p.name,
               sku: p.sku ?? null,
+              description: p.description ?? null,
               stock_unit: p.stock_unit ?? null,
               base_price: p.base_price ?? null,
               cost_price: p.cost_price ?? null,
               is_ingredient: p.is_ingredient === true,
               is_sellable: p.is_sellable === true,
+              // Miniatura del insumo: el selector searchable la pinta como
+              // avatar (`SelectorOption.imageUrl`). El endpoint de productos
+              // ya resuelve `image_url` con la foto principal.
+              image_url:
+                p.image_url ??
+                p.product_images?.find((img: any) => img?.is_main)?.image_url ??
+                p.product_images?.[0]?.image_url ??
+                null,
             }));
         }),
         catchError(() => of([] as RecipeIngredientOption[])),

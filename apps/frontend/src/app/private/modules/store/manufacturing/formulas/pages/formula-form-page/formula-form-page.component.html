@@ -44,16 +44,28 @@
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <app-selector
-          formControlName="product_id"
-          label="Producto"
-          placeholder="Selecciona el producto a fabricar"
-          [options]="productOptions()"
-          [searchable]="true"
-          [required]="true"
-          [disabled]="isEditMode() || isLoadingProducts()"
-          tooltipText="No se puede cambiar el producto de una fórmula ya creada."
-        />
+        <div class="flex flex-col gap-1">
+          <app-selector
+            formControlName="product_id"
+            label="Producto"
+            placeholder="Selecciona el producto a fabricar"
+            [options]="productOptions()"
+            [searchable]="true"
+            [required]="true"
+            [disabled]="isEditMode() || isLoadingProducts()"
+            tooltipText="No se puede cambiar el producto de una fórmula ya creada."
+          />
+          @if (profileProduct()) {
+            <app-button
+              variant="ghost"
+              size="xsm"
+              (clicked)="isProfileOpen.set(true)"
+            >
+              <app-icon slot="icon" name="chef-hat" [size]="12" />
+              Ver ficha del producto
+            </app-button>
+          }
+        </div>
         <app-selector
           formControlName="status"
           label="Estado"
@@ -301,3 +313,9 @@
     </div>
   </app-card>
 </form>
+
+<app-product-profile-modal
+  [(isOpen)]="isProfileOpen"
+  [product]="profileProduct()"
+  [recipe]="profileRecipe()"
+/>

@@ -27,7 +27,19 @@ export interface KitchenTicketProductRef {
   id: number;
   name: string;
   sku?: string | null;
+  /** Descripción del catálogo: la ficha del plato la muestra al cocinero. */
+  description?: string | null;
   stock_unit?: string | null;
+  /**
+   * Foto principal del plato (una sola, `is_main` primero). El KDS la usa en
+   * la card y en la ficha para reconocer el plato sin leer el nombre.
+   */
+  product_images?: Array<{
+    id?: number;
+    image_url: string;
+    is_main?: boolean | null;
+    alt_text?: string | null;
+  }> | null;
   /**
    * Restaurant Suite — Fase K Gap 5: preparation time in minutes
    * (sourced from `products.preparation_time_minutes` via the

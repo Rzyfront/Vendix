@@ -5,7 +5,9 @@ import {
   IsInt,
   IsNumber,
   IsOptional,
+  IsString,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
@@ -62,4 +64,17 @@ export class CreateRecipeItemDto {
     typeof value === 'string' ? value === 'true' : value,
   )
   is_optional?: boolean;
+
+  /**
+   * Anotación libre del insumo dentro de la receta ("picar fino", "sin
+   * cáscara"). Se muestra tal cual a quien ejecuta la receta. Vacío o
+   * ausente = sin anotación.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || null : value,
+  )
+  notes?: string | null;
 }

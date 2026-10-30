@@ -44,6 +44,11 @@ import {
   ManufacturingProductOption,
 } from '../../../interfaces';
 import { ManufacturingFormulasService } from '../../../services';
+import {
+  ProductProfileModalComponent,
+  ProductProfileProduct,
+  ProductProfileRecipe,
+} from '../../../../../../../shared/components/product-profile/index';
 import { ReplaceRecipeItemDto } from '../../../../restaurant-ops/recipes/interfaces';
 
 interface FormulaFormShape {
@@ -97,6 +102,7 @@ const LIST_ROUTE = '/admin/manufacturing/formulas';
     IconComponent,
     CurrencyPipe,
     DecimalPipe,
+    ProductProfileModalComponent,
   ],
   templateUrl: './formula-form-page.component.html',
 })
@@ -118,6 +124,61 @@ export class FormulaFormPageComponent implements OnInit {
 
   /** Productos activos no-servicio (terminados e insumos). */
   readonly products = signal<ManufacturingProductOption[]>([]);
+  /** Ficha del producto fabricado: mismo componente que recetas y KDS. */
+  readonly isProfileOpen = signal(false);
+
+  /**
+   * Anotación por insumo de la fórmula cargada (`id` de línea → nota). El
+   * formulario no tiene control para `notes`, así que la ficha las toma de
+   * aquí para no perder lo que ya está guardado.
+   */
+  private readonly loadedItemNotes = signal<Record<number, string | null>>({});
+
+  readonly profileProduct = computed<ProductProfileProduct | null>(() => {
+    const id = Number(this.formValue().product_id);
+    if (!id) return null;
+    const product = this.products().find((p) => p.id === id);
+    if (!product) return null;
+    return {
+      id: product.id,
+      name: product.name,
+      sku: product.sku ?? null,
+      description: product.description ?? null,
+      stock_unit: product.stock_unit ?? null,
+      image_url: product.image_url ?? null,
+      product_images: product.product_images ?? [],
+    };
+  });
+
+  readonly profileRecipe = computed<ProductProfileRecipe | null>(() => {
+    const rows = this.itemsValue();
+    if (!rows.length) return null;
+    const values = this.formValue();
+    return {
+      yield_quantity: values.yield_quantity ?? 0,
+      yield_unit: values.yield_unit ?? '',
+      waste_percent: values.waste_percent ?? 0,
+      preparation_notes: values.preparation_notes ?? null,
+      items: rows.map((row) => {
+        const componentId = Number(row.component_product_id);
+        const component = this.products().find((p) => p.id === componentId);
+        return {
+          component_product_id: componentId,
+          name: component?.name ?? `Producto #${componentId}`,
+          quantity: row.quantity ?? 0,
+          waste_percent: row.waste_percent ?? 0,
+          stock_unit: component?.stock_unit ?? null,
+          notes: row.id != null ? (this.loadedItemNotes()[row.id] ?? null) : null,
+          product_images: component?.product_images ?? [],
+        };
+      }),
+    };
+  });
+
+  private productName(id: number): string {
+    return this.products().find((p) => p.id === id)?.name ?? `Producto #${id}`;
+  }
+
   /** Costo guardado en servidor (solo fórmulas ya creadas). */
   readonly serverCost = signal<FormulaCost | null>(null);
 
@@ -188,6 +249,7 @@ export class FormulaFormPageComponent implements OnInit {
       value: p.id,
       label: p.name + (p.sku ? ` (${p.sku})` : ''),
       description: p.stock_unit ? `Unidad: ${p.stock_unit}` : undefined,
+      imageUrl: p.image_url ?? p.product_images?.[0]?.image_url ?? undefined,
     })),
   );
 
@@ -317,7 +379,9 @@ export class FormulaFormPageComponent implements OnInit {
             preparation_notes: formula.preparation_notes ?? '',
           });
           this.itemsArray.clear({ emitEvent: false });
+          const notesById: Record<number, string | null> = {};
           for (const item of formula.items ?? []) {
+            if (item.id != null) notesById[item.id] = item.notes ?? null;
             this.itemsArray.push(
               this.buildItemGroup({
                 id: item.id,
@@ -327,6 +391,7 @@ export class FormulaFormPageComponent implements OnInit {
               }),
             );
           }
+          this.loadedItemNotes.set(notesById);
           this.isLoadingFormula.set(false);
           this.loadServerCost(id);
         },

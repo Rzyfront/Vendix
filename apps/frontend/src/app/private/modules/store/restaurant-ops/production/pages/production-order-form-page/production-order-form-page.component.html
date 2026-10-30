@@ -136,5 +136,24 @@
         </div>
       </form>
     </app-card>
+
+    @if (profileProduct()) {
+      <div class="flex justify-end">
+        <app-button
+          variant="ghost"
+          size="sm"
+          (clicked)="isProfileOpen.set(true)"
+        >
+          <app-icon slot="icon" name="chef-hat" [size]="14" />
+          Ver ficha del producto y su receta
+        </app-button>
+      </div>
+    }
   </div>
 </div>
+
+<app-product-profile-modal
+  [(isOpen)]="isProfileOpen"
+  [product]="profileProduct()"
+  [recipe]="profileRecipe()"
+/>

@@ -102,6 +102,9 @@ export class RecipeItemsEditorComponent implements OnInit {
       value: i.id,
       label: i.name + (i.sku ? ` (${i.sku})` : ''),
       description: i.stock_unit ? `Unidad: ${i.stock_unit}` : undefined,
+      // Foto del insumo cuando el catálogo la tiene: el cocinero reconoce el
+      // ingrediente por imagen antes que por nombre.
+      imageUrl: i.image_url ?? undefined,
     })),
   );
 
@@ -172,6 +175,7 @@ export class RecipeItemsEditorComponent implements OnInit {
         validators: [Validators.min(0)],
       }),
       is_optional: this.fb.nonNullable.control(false),
+      notes: this.fb.nonNullable.control<string>(''),
     });
     // Insert at the TOP so the new row is visible immediately, then trigger
     // a halo animation to draw the eye (handled in template + scss).

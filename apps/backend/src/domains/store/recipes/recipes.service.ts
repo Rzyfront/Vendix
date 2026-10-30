@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
+import { S3Service } from '@common/services/s3.service';
+import { signProductImageUrls } from '@common/helpers/sign-product-images.helper';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -58,7 +60,10 @@ export interface BomExplosionLine {
  */
 @Injectable()
 export class RecipesService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private readonly s3Service: S3Service,
+  ) {}
 
   // ------------------------------------------------------------------ Helpers
 
@@ -273,8 +278,21 @@ export class RecipesService {
               id: true,
               name: true,
               sku: true,
+              description: true,
               base_price: true,
               stock_unit: true,
+              preparation_time_minutes: true,
+              product_images: {
+                select: {
+                  id: true,
+                  image_url: true,
+                  is_main: true,
+                  alt_text: true,
+                  sort_order: true,
+                },
+                orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+                take: 1,
+              },
             },
           },
           // Yield variant as its own object — never concatenated into the
@@ -294,6 +312,9 @@ export class RecipesService {
       }),
       this.prisma.recipes.count({ where }),
     ]);
+
+    // `product_images.image_url` is the S3 key: sign before it leaves the API.
+    await signProductImageUrls(this.s3Service, data);
 
     return {
       data: this.isKitchenRole() ? data.map((d) => this.stripCocinaRecipeMoney(d)) : data,
@@ -315,12 +336,25 @@ export class RecipesService {
             id: true,
             name: true,
             sku: true,
+            description: true,
             base_price: true,
             stock_unit: true,
             is_ingredient: true,
             is_sellable: true,
             is_combo: true,
             is_batch_produced: true,
+            preparation_time_minutes: true,
+            product_images: {
+              select: {
+                id: true,
+                image_url: true,
+                is_main: true,
+                alt_text: true,
+                sort_order: true,
+              },
+              orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+              take: 6,
+            },
           },
         },
         // Yield variant as its own object (recetas-por-variante, paso 4);
@@ -331,6 +365,7 @@ export class RecipesService {
             id: true,
             name: true,
             sku: true,
+            product_images: { select: { image_url: true } },
           },
         },
         items: {
@@ -341,11 +376,23 @@ export class RecipesService {
                 id: true,
                 name: true,
                 sku: true,
+                description: true,
                 stock_unit: true,
                 is_ingredient: true,
                 is_sellable: true,
                 base_price: true,
                 cost_price: true,
+                product_images: {
+                  select: {
+                    id: true,
+                    image_url: true,
+                    is_main: true,
+                    alt_text: true,
+                    sort_order: true,
+                  },
+                  orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+                  take: 3,
+                },
               },
             },
           },
@@ -355,6 +402,7 @@ export class RecipesService {
     if (!recipe) {
       throw new VendixHttpException(ErrorCodes.RECIPE_NOT_FOUND);
     }
+    await signProductImageUrls(this.s3Service, recipe);
     return this.stripCocinaRecipeMoney(recipe);
   }
 
@@ -392,8 +440,20 @@ export class RecipesService {
               id: true,
               name: true,
               sku: true,
+              description: true,
               stock_unit: true,
               is_ingredient: true,
+              product_images: {
+                select: {
+                  id: true,
+                  image_url: true,
+                  is_main: true,
+                  alt_text: true,
+                  sort_order: true,
+                },
+                orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+                take: 3,
+              },
             },
           },
         },
@@ -413,7 +473,7 @@ export class RecipesService {
         include,
       });
       if (exact) {
-        return exact;
+        return signProductImageUrls(this.s3Service, exact);
       }
       const base = await this.prisma.recipes.findFirst({
         where: {
@@ -426,7 +486,7 @@ export class RecipesService {
       if (!base) {
         throw new VendixHttpException(ErrorCodes.RECIPE_NOT_FOUND);
       }
-      return base;
+      return signProductImageUrls(this.s3Service, base);
     }
     const recipe = await this.prisma.recipes.findFirst({
       where: { product_id: productId, is_active: true },
@@ -441,7 +501,7 @@ export class RecipesService {
     if (!recipe) {
       throw new VendixHttpException(ErrorCodes.RECIPE_NOT_FOUND);
     }
-    return recipe;
+    return signProductImageUrls(this.s3Service, recipe);
   }
 
   async update(id: number, dto: UpdateRecipeDto) {
@@ -727,6 +787,10 @@ export class RecipesService {
                     ? new Prisma.Decimal(item.waste_absolute)
                     : new Prisma.Decimal(0),
                 is_optional: item.is_optional ?? false,
+                // Solo se toca la anotación cuando el payload la trae: el
+                // formulario de fórmulas reenvía las líneas sin `notes` y un
+                // `?? null` borraría las anotaciones de cocina de la receta.
+                ...(item.notes !== undefined && { notes: item.notes }),
                 updated_at: new Date(),
               },
             });
@@ -746,6 +810,10 @@ export class RecipesService {
                     ? new Prisma.Decimal(item.waste_absolute)
                     : new Prisma.Decimal(0),
                 is_optional: item.is_optional ?? false,
+                // Solo se toca la anotación cuando el payload la trae: el
+                // formulario de fórmulas reenvía las líneas sin `notes` y un
+                // `?? null` borraría las anotaciones de cocina de la receta.
+                ...(item.notes !== undefined && { notes: item.notes }),
                 updated_at: new Date(),
               },
             });
@@ -847,7 +915,7 @@ export class RecipesService {
     );
 
     try {
-      return await this.prisma.recipe_items.create({
+      const created = await this.prisma.recipe_items.create({
         data: {
           recipe_id: recipeId,
           component_product_id: dto.component_product_id,
@@ -862,6 +930,7 @@ export class RecipesService {
               ? new Prisma.Decimal(dto.waste_absolute)
               : new Prisma.Decimal(0),
           is_optional: dto.is_optional ?? false,
+          notes: dto.notes ?? null,
           updated_at: new Date(),
         },
         include: {
@@ -871,10 +940,17 @@ export class RecipesService {
               name: true,
               sku: true,
               stock_unit: true,
+              description: true,
+              product_images: {
+                select: { id: true, image_url: true, is_main: true, sort_order: true },
+                orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+                take: 3,
+              },
             },
           },
         },
       });
+      return await signProductImageUrls(this.s3Service, created);
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -915,6 +991,7 @@ export class RecipesService {
         waste_absolute: new Prisma.Decimal(dto.waste_absolute),
       }),
       ...(dto.is_optional !== undefined && { is_optional: dto.is_optional }),
+      ...(dto.notes !== undefined && { notes: dto.notes }),
       updated_at: new Date(),
     };
 

@@ -19,6 +19,8 @@ export interface RecipeProductVariant {
   id: number;
   name?: string | null;
   sku?: string | null;
+  /** Imagen del catálogo asociada a la variante (`product_images`). */
+  product_images?: { image_url: string } | null;
   attributes?:
     | Array<{ attribute_name: string; attribute_value: string }>
     | Record<string, unknown>
@@ -44,12 +46,17 @@ export interface Recipe {
     id: number;
     name: string;
     sku?: string | null;
+    description?: string | null;
     base_price?: number | string | null;
     stock_unit?: string | null;
+    preparation_time_minutes?: number | null;
     is_ingredient?: boolean;
     is_sellable?: boolean;
     is_combo?: boolean;
     is_batch_produced?: boolean;
+    product_images?: ProductProfileImageLike[] | null;
+    /** Foto principal ya resuelta por el endpoint (cuando aplica). */
+    image_url?: string | null;
   };
   items?: RecipeItem[];
   _count?: { items: number };
@@ -68,18 +75,31 @@ export interface RecipeItem {
   /// Only used when `waste_mode='absolute'`.
   waste_absolute?: number | string;
   is_optional: boolean;
+  /** Anotación libre del insumo ("picar fino", "sin cáscara"). */
+  notes?: string | null;
   created_at: string | Date;
   updated_at: string | Date;
   component_product?: {
     id: number;
     name: string;
     sku?: string | null;
+    description?: string | null;
     stock_unit?: string | null;
     is_ingredient?: boolean;
     is_sellable?: boolean;
     base_price?: number | string | null;
     cost_price?: number | string | null;
+    product_images?: ProductProfileImageLike[] | null;
   };
+}
+
+/** Foto de producto tal como la devuelve el catálogo. */
+export interface ProductProfileImageLike {
+  id?: number;
+  image_url: string;
+  is_main?: boolean | null;
+  alt_text?: string | null;
+  sort_order?: number | null;
 }
 
 export interface CreateRecipeDto {
@@ -109,6 +129,7 @@ export interface CreateRecipeItemDto {
   waste_mode?: 'percent' | 'absolute';
   waste_absolute?: number;
   is_optional?: boolean;
+  notes?: string | null;
 }
 
 // component_product_id is the immutable FK to the component product: the backend
@@ -126,6 +147,7 @@ export interface ReplaceRecipeItemDto {
   waste_mode?: 'percent' | 'absolute';
   waste_absolute?: number;
   is_optional?: boolean;
+  notes?: string | null;
 }
 
 export interface RecipeQuery {
@@ -150,11 +172,14 @@ export interface RecipeIngredientOption {
   id: number;
   name: string;
   sku?: string | null;
+  description?: string | null;
   stock_unit?: string | null;
   base_price?: number | string | null;
   cost_price?: number | string | null;
   is_ingredient?: boolean;
   is_sellable?: boolean;
+  /** Foto principal resuelta por el endpoint de productos. */
+  image_url?: string | null;
 }
 
 /**
@@ -178,4 +203,6 @@ export interface RecipeItemFormControls {
   /// Absolute waste, in the component's minimum stock unit.
   waste_absolute: FormControl<number | null>;
   is_optional: FormControl<boolean>;
+  /// Anotación libre del insumo. Vacío = sin anotación (se envía `null`).
+  notes: FormControl<string>;
 }
