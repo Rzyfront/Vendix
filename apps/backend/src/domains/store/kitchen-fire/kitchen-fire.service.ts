@@ -11,6 +11,8 @@ import {
   type InsufficientStockItem,
 } from '../inventory/shared/services/stock-validator.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
+import { S3Service } from '../../../common/services/s3.service';
+import { signProductImageUrls } from '../../../common/helpers/sign-product-images.helper';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import { FireOrderItemsDto, KitchenTicketQueryDto, ResendOrderItemsDto } from './dto';
@@ -353,6 +355,10 @@ export class KitchenFireService {
     @Optional() private readonly autoEntryService?: AutoEntryService,
     // Resolución perezosa de OrderFlowService (ver `KitchenOrderSyncPort`).
     @Optional() private readonly moduleRef?: ModuleRef,
+    // Firma `product_images.image_url` (key de S3) de cada ticket que sale por
+    // REST o SSE. Opcional solo para que los specs posicionales no cambien; en
+    // runtime lo provee S3Module (importado en KitchenFireModule).
+    @Optional() private readonly s3Service?: S3Service,
   ) {}
 
   /**
@@ -863,6 +869,7 @@ export class KitchenFireService {
         include: KITCHEN_TICKET_INCLUDE,
       });
       if (fullTicket) {
+        await signProductImageUrls(this.s3Service, fullTicket);
         this.pushKitchenEvent(store_id, {
           type: 'ticket.created',
           ticket: fullTicket,
@@ -882,6 +889,7 @@ export class KitchenFireService {
           where: { id: { in: secondaryTicketIds }, store_id },
           include: KITCHEN_TICKET_INCLUDE,
         });
+        await signProductImageUrls(this.s3Service, others);
         for (const other of others) {
           this.pushKitchenEvent(store_id, {
             type: 'ticket.created',
@@ -2060,6 +2068,7 @@ export class KitchenFireService {
         where: { id: { in: ticketIds }, store_id },
         include: KITCHEN_TICKET_INCLUDE,
       });
+      await signProductImageUrls(this.s3Service, tickets);
       for (const ticket of tickets) {
         this.pushKitchenEvent(store_id, {
           type: 'ticket.created',
@@ -2780,6 +2789,7 @@ export class KitchenFireService {
         where: { id: { in: result.ticketIds }, store_id },
         include: KITCHEN_TICKET_INCLUDE,
       });
+      await signProductImageUrls(this.s3Service, allTickets);
       for (const ticket of allTickets) {
         this.pushKitchenEvent(store_id, {
           type: 'ticket.created',
@@ -2844,6 +2854,7 @@ export class KitchenFireService {
     if (!ticket) {
       throw new VendixHttpException(ErrorCodes.KITCHEN_TICKET_NOT_FOUND);
     }
+    await signProductImageUrls(this.s3Service, ticket);
     return { ticket, store_id };
   }
 
@@ -4190,6 +4201,7 @@ export class KitchenFireService {
       orderBy: { fired_at: 'asc' },
       include: KITCHEN_TICKET_INCLUDE,
     });
+    await signProductImageUrls(this.s3Service, data);
 
     return { data, total: data.length, server_ts: now.getTime() };
   }
@@ -4218,6 +4230,7 @@ export class KitchenFireService {
       }),
       this.prisma.kitchen_tickets.count({ where }),
     ]);
+    await signProductImageUrls(this.s3Service, data);
 
     return { data, total };
   }

@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
+import { S3Service } from '@common/services/s3.service';
+import { signProductImageUrls } from '@common/helpers/sign-product-images.helper';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -58,7 +60,10 @@ export interface BomExplosionLine {
  */
 @Injectable()
 export class RecipesService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private readonly s3Service: S3Service,
+  ) {}
 
   // ------------------------------------------------------------------ Helpers
 
@@ -308,6 +313,9 @@ export class RecipesService {
       this.prisma.recipes.count({ where }),
     ]);
 
+    // `product_images.image_url` is the S3 key: sign before it leaves the API.
+    await signProductImageUrls(this.s3Service, data);
+
     return {
       data: this.isKitchenRole() ? data.map((d) => this.stripCocinaRecipeMoney(d)) : data,
       meta: {
@@ -394,6 +402,7 @@ export class RecipesService {
     if (!recipe) {
       throw new VendixHttpException(ErrorCodes.RECIPE_NOT_FOUND);
     }
+    await signProductImageUrls(this.s3Service, recipe);
     return this.stripCocinaRecipeMoney(recipe);
   }
 
@@ -464,7 +473,7 @@ export class RecipesService {
         include,
       });
       if (exact) {
-        return exact;
+        return signProductImageUrls(this.s3Service, exact);
       }
       const base = await this.prisma.recipes.findFirst({
         where: {
@@ -477,7 +486,7 @@ export class RecipesService {
       if (!base) {
         throw new VendixHttpException(ErrorCodes.RECIPE_NOT_FOUND);
       }
-      return base;
+      return signProductImageUrls(this.s3Service, base);
     }
     const recipe = await this.prisma.recipes.findFirst({
       where: { product_id: productId, is_active: true },
@@ -492,7 +501,7 @@ export class RecipesService {
     if (!recipe) {
       throw new VendixHttpException(ErrorCodes.RECIPE_NOT_FOUND);
     }
-    return recipe;
+    return signProductImageUrls(this.s3Service, recipe);
   }
 
   async update(id: number, dto: UpdateRecipeDto) {
@@ -906,7 +915,7 @@ export class RecipesService {
     );
 
     try {
-      return await this.prisma.recipe_items.create({
+      const created = await this.prisma.recipe_items.create({
         data: {
           recipe_id: recipeId,
           component_product_id: dto.component_product_id,
@@ -941,6 +950,7 @@ export class RecipesService {
           },
         },
       });
+      return await signProductImageUrls(this.s3Service, created);
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&

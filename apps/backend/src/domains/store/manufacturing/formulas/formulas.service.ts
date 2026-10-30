@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
+import { S3Service } from '@common/services/s3.service';
+import { signProductImageUrls } from '@common/helpers/sign-product-images.helper';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { RecipesService } from '../../recipes/recipes.service';
@@ -44,6 +46,7 @@ export class FormulasService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly recipesService: RecipesService,
+    private readonly s3Service: S3Service,
   ) {}
 
   private requireStoreId(): number {
@@ -103,6 +106,8 @@ export class FormulasService {
       }),
       this.prisma.recipes.count({ where }),
     ]);
+    // `image_url` is the S3 key: sign the thumbnail before it leaves the API.
+    await signProductImageUrls(this.s3Service, data);
     return { data, total, page, limit };
   }
 
