@@ -4077,6 +4077,19 @@ export const ErrorCodes = {
       'More than one active numbering resolution declares the same number and range; deactivate the duplicate before emitting',
   },
   /**
+   * El NIT con el que se armaría el XML del emisor (fiscal_data de la tienda u
+   * organización, que gana sobre `dian_configurations.nit`) no coincide con el NIT
+   * de la configuración DIAN. La DIAN registra el set de pruebas contra el NIT de
+   * la habilitación, así que enviar con otro emisor gasta el envío y la numeración
+   * en documentos que no puede aceptar. Se detecta antes de reservar consecutivos.
+   */
+  DIAN_TEST_SET_009: {
+    code: 'DIAN_TEST_SET_009',
+    httpStatus: 422,
+    devMessage:
+      'Issuer NIT resolved for the test set differs from the DIAN configuration NIT; aborted before reserving numbering or calling DIAN',
+  },
+  /**
    * A RADIAN event references a document that DIAN never accepted. Events attach
    * to an existing electronic document by CUFE, so registering one against a
    * draft, rejected or not-yet-transmitted invoice would reference a key that does
