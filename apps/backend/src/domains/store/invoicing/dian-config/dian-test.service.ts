@@ -41,6 +41,7 @@ import {
   localTimeString,
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
+import { normalizeNit } from '../../../../common/utils/nit.util';
 import { resolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
 import {
   buildDianXmlFileName,
@@ -1040,26 +1041,6 @@ export class DianTestService {
       );
     }
 
-    // Reserve the block BEFORE building and signing the documents. Advancing
-    // `current_number` afterwards would leave a window where the batch is
-    // already in DIAN's hands but the numbers still look available, so a crash
-    // or a retry would re-send numbering DIAN has — and DIAN rejects duplicated
-    // numbering. Reserving first can only leave an unused gap in the range,
-    // which is harmless; the reverse mistake is not recoverable.
-    // `updateMany` (not `update`) so the guard on `current_number` makes the
-    // reservation atomic: two concurrent runs cannot claim the same block.
-    const reserved = await this.prisma.invoice_resolutions.updateMany({
-      where: { id: resolution_id, current_number: resolution.current_number },
-      data: { current_number: next_number + TEST_SET_SIZE - 1 },
-    });
-    if (reserved.count === 0) {
-      throw new VendixHttpException(
-        ErrorCodes.DIAN_TEST_SET_002,
-        'Otro proceso está consumiendo la numeración de esta resolución. Espera a que termine y vuelve a intentarlo.',
-        { dian_configuration_id: config_id, resolution_id },
-      );
-    }
-
     // 3. Resolve tenant context and the issuer's timezone up front: every date
     //    rendered into the XML below is a CIVIL date of the issuer, so it must be
     //    derived in their zone, never by serializing a UTC instant.
@@ -1177,6 +1158,50 @@ export class DianTestService {
       address: scoped_address ?? null,
       email: organization?.email,
     });
+
+    // GUARDA DE NIT DEL EMISOR — antes de reservar numeración o hablar con la DIAN.
+    //
+    // `fiscal_data.nit` gana sobre `config.nit` al resolver el emisor, así que un
+    // número mal escrito en Identidad legal (p. ej. `90012345` vs `900123456`)
+    // firma los 30 documentos con otro emisor y la DIAN responde que el set «no se
+    // encuentra registrado». Se compara sin DV ni separadores. Un `config.nit` vacío
+    // no bloquea (comportamiento previo).
+    const config_nit = normalizeNit(config.nit).number;
+    const issuer_nit = normalizeNit(issuer.nit).number;
+    if (config_nit && config_nit !== issuer_nit) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_009,
+        `El NIT del emisor (${issuer_nit}) no coincide con el NIT de la configuración DIAN (${config_nit}). ` +
+          'Corrige el número en Operación fiscal → Identidad legal antes de enviar el set de pruebas. ' +
+          'No se reservó numeración.',
+        {
+          dian_configuration_id: config_id,
+          issuer_nit,
+          config_nit,
+        },
+      );
+    }
+
+    // Reserve the block BEFORE building and signing the documents (and after the
+    // issuer NIT guard above, so a rejected issuer never burns numbering). Advancing
+    // `current_number` afterwards would leave a window where the batch is
+    // already in DIAN's hands but the numbers still look available, so a crash
+    // or a retry would re-send numbering DIAN has — and DIAN rejects duplicated
+    // numbering. Reserving first can only leave an unused gap in the range,
+    // which is harmless; the reverse mistake is not recoverable.
+    // `updateMany` (not `update`) so the guard on `current_number` makes the
+    // reservation atomic: two concurrent runs cannot claim the same block.
+    const reserved = await this.prisma.invoice_resolutions.updateMany({
+      where: { id: resolution_id, current_number: resolution.current_number },
+      data: { current_number: next_number + TEST_SET_SIZE - 1 },
+    });
+    if (reserved.count === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_TEST_SET_002,
+        'Otro proceso está consumiendo la numeración de esta resolución. Espera a que termine y vuelve a intentarlo.',
+        { dian_configuration_id: config_id, resolution_id },
+      );
+    }
 
     const customer: DianCustomerData = {
       document_type: 'CC',
