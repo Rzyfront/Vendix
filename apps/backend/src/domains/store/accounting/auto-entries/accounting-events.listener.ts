@@ -842,6 +842,27 @@ export class AccountingEventsListener {
     }
   }
 
+  @OnEvent('scheduled_order.produced')
+  async handleScheduledOrderProduced(event: {
+    schedule_id: number;
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    total_cost: number;
+    consumed_line_count: number;
+    user_id?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'inventory', event.organization_id))) return;
+      await this.auto_entry_service.onScheduledOrderProduced(event);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for scheduled_order.produced #${event.schedule_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   @OnEvent('refund.completed')
   async handleRefundCompleted(event: {
     refund_id: number;

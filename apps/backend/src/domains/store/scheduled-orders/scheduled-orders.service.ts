@@ -50,11 +50,14 @@ const SCHEDULE_LOCK_NAMESPACE = 734_210;
 /** Cliente de transacción: el `tx` del cliente base (sin scoping automático). */
 type Tx = Prisma.TransactionClient;
 
-/** Gancho que S4 registra para consumir inventario al iniciar producción. */
+/**
+ * Gancho que S4 registra para consumir inventario al iniciar producción.
+ * Puede devolver una acción a ejecutar tras el commit (asiento contable).
+ */
 export type ProductionStartHook = (
   tx: Tx,
   schedule: { id: number; store_id: number; order_id: number },
-) => Promise<void>;
+) => Promise<void | (() => void)>;
 
 function toDate(value: string | Date): Date {
   const date = value instanceof Date ? value : new Date(value);
@@ -206,11 +209,13 @@ export class ScheduledOrdersService {
     to: FulfillmentStatus,
     user_id: number | null,
     note?: string,
+    afterCommit: Array<() => void> = [],
   ) {
     const now = new Date();
     if (to === 'in_production' && this.productionStartHook) {
       // Consumo de inventario (S4) en la misma transacción que el cambio de estado.
-      await this.productionStartHook(tx, schedule);
+      const after = await this.productionStartHook(tx, schedule);
+      if (after) afterCommit.push(after);
     }
 
     const stamp: Prisma.order_fulfillment_schedulesUpdateInput = {
@@ -264,9 +269,20 @@ export class ScheduledOrdersService {
       );
     }
 
-    return this.prisma.$transaction((tx: Tx) =>
-      this.applyTransition(tx, schedule, to, user_id, note),
+    const afterCommit: Array<() => void> = [];
+    // Holgura de tiempo: iniciar producción puede escribir varios movimientos.
+    const result = await this.prisma.$transaction(
+      (tx: Tx) => this.applyTransition(tx, schedule, to, user_id, note, afterCommit),
+      { timeout: 30000 },
     );
+    for (const run of afterCommit) {
+      try {
+        run();
+      } catch (err) {
+        this.logger.error(`Post-commit de producción falló (agendamiento #${id}): ${(err as Error).message}`);
+      }
+    }
+    return result;
   }
 
   /**

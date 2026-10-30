@@ -49,6 +49,12 @@ export class AgendaQueryDto {
   status?: string;
 }
 
+export class ProductionListQueryDto {
+  @ApiProperty({ example: '2026-11-03' })
+  @Matches(DATE_ONLY, { message: 'La fecha debe tener el formato YYYY-MM-DD.' })
+  date: string;
+}
+
 export class TransitionScheduleDto {
   @ApiProperty({ enum: ['in_production', 'ready', 'delivered', 'no_show', 'cancelled'] })
   @IsIn(['in_production', 'ready', 'delivered', 'no_show', 'cancelled'])

@@ -12,7 +12,13 @@ import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
 import { ScheduledOrdersService } from './scheduled-orders.service';
-import { AgendaQueryDto, RescheduleDto, TransitionScheduleDto } from './dto/scheduled-orders.dto';
+import { ScheduledOrderProductionService } from './scheduled-order-production.service';
+import {
+  AgendaQueryDto,
+  ProductionListQueryDto,
+  RescheduleDto,
+  TransitionScheduleDto,
+} from './dto/scheduled-orders.dto';
 
 /**
  * Agenda, transiciones y reprogramación. Se registra DESPUÉS de
@@ -24,6 +30,7 @@ import { AgendaQueryDto, RescheduleDto, TransitionScheduleDto } from './dto/sche
 export class ScheduledOrdersController {
   constructor(
     private readonly scheduledOrders: ScheduledOrdersService,
+    private readonly production: ScheduledOrderProductionService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -32,6 +39,14 @@ export class ScheduledOrdersController {
   async agenda(@Query() query: AgendaQueryDto) {
     const rows = await this.scheduledOrders.getAgenda(query);
     return this.responseService.success(rows, 'Agenda obtenida');
+  }
+
+  /** Lista imprimible de producción del día (antes de `:id`). */
+  @Get('production-list')
+  @Permissions('store:scheduled_orders:read')
+  async productionList(@Query() query: ProductionListQueryDto) {
+    const list = await this.production.productionList(query.date);
+    return this.responseService.success(list, 'Lista de producción obtenida');
   }
 
   @Get(':id')
