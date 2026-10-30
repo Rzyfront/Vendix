@@ -477,6 +477,41 @@ describe('ServiceBudgetsService', () => {
       expect(result).toMatchObject({ status: 'approved' });
     });
 
+    it('revierte la decisión si el stock no alcanza al aprobar', async () => {
+      prisma.service_change_proposals.findFirst.mockResolvedValue({
+        ...proposal,
+        lines: {
+          items: [
+            {
+              product_id: 2,
+              product_variant_id: null,
+              product_name: 'Aceite',
+              description: null,
+              quantity: 2,
+              unit_price: 10000,
+              tax_rate: 0.19,
+              tax_amount_item: 1900,
+              total_price: 20000,
+              item_type: 'physical',
+              total: 23800,
+              tax_breakdown: [],
+            },
+          ],
+          budget_snapshot: { version: 2 },
+        },
+      });
+      tx.products.findFirst.mockResolvedValue({ id: 2, track_inventory: true, product_type: 'physical' });
+      stockLevelManager.reserveStock.mockRejectedValueOnce(new Error('INV_STOCK_INSUFFICIENT_LINES'));
+
+      await expect(run(() => service.decideWithToken(token, decideDto))).rejects.toThrow(
+        'INV_STOCK_INSUFFICIENT_LINES',
+      );
+      // La transacción no debe dejar rastro: ni evento, ni presupuesto aprobado, ni aviso.
+      expect(tx.service_progress_events.create).not.toHaveBeenCalled();
+      expect(tx.service_budgets.create).not.toHaveBeenCalled();
+      expect(notifications.push).not.toHaveBeenCalled();
+    });
+
     it('aprueba con descuento: el total y el presupuesto cobran el monto descontado', async () => {
       prisma.service_change_proposals.findFirst.mockResolvedValue({
         ...proposal,

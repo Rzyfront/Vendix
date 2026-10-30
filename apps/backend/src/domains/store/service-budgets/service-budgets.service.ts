@@ -45,6 +45,30 @@ export function staffChangeNeedsCustomerProposal(
 const toMoney = (value: Prisma.Decimal | number | string | null | undefined) =>
   new Prisma.Decimal(value ?? 0).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 
+/** Línea guardada en el snapshot de una propuesta de cambio de servicio. */
+export interface StoredProposalItem {
+  product_id?: number | null;
+  product_variant_id?: number | null;
+  product_name?: string;
+  name?: string;
+  description?: string | null;
+  quantity?: number;
+  unit_price?: number;
+  total_price?: number;
+  total?: number;
+  tax_rate?: number | null;
+  tax_amount_item?: number;
+  item_type?: string;
+  tax_breakdown?: Array<{
+    tax_rate_id?: number | null;
+    tax_name?: string;
+    tax_rate?: number;
+    tax_amount?: number;
+    tax_type?: string | null;
+    is_inclusive?: boolean;
+  }>;
+}
+
 @Injectable()
 export class ServiceBudgetsService {
   private eventId = 0;
@@ -544,7 +568,9 @@ export class ServiceBudgetsService {
           },
         });
         if (dto.decision === 'approved') {
-          const storedLinesPayload = proposal.lines as { items?: any[] } | any[];
+          const storedLinesPayload = proposal.lines as
+            | { items?: StoredProposalItem[] }
+            | StoredProposalItem[];
           const items = Array.isArray(storedLinesPayload)
             ? storedLinesPayload
             : Array.isArray(storedLinesPayload?.items)
@@ -586,7 +612,7 @@ export class ServiceBudgetsService {
                 ...(breakdown.length > 0
                   ? {
                       order_item_taxes: {
-                        create: breakdown.map((row: any) => ({
+                        create: breakdown.map((row) => ({
                           tax_rate_id: row.tax_rate_id ?? null,
                           tax_name: String(row.tax_name ?? ''),
                           tax_rate: row.tax_rate ?? 0,
