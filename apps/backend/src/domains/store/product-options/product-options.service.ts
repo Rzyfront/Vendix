@@ -104,6 +104,28 @@ export class ProductOptionsService {
       throw new VendixHttpException(ErrorCodes.OPT_COMPONENT_REQUIRED);
     }
 
+    // La variante debe ser de ESE componente y de la tienda (el cliente
+    // scoped filtra `product_variants` por `products.store_id`).
+    const variantIds = [
+      ...new Set(dto.options.map((o) => o.component_variant_id).filter((v): v is number => v != null)),
+    ];
+    if (variantIds.length) {
+      const variants = await this.prisma.product_variants.findMany({
+        where: { id: { in: variantIds } },
+        select: { id: true, product_id: true },
+      });
+      const productOf = new Map(variants.map((v) => [v.id, v.product_id]));
+      for (const option of dto.options) {
+        if (option.component_variant_id == null) continue;
+        if (productOf.get(option.component_variant_id) !== option.component_product_id) {
+          throw new VendixHttpException(
+            ErrorCodes.OPT_COMPONENT_REQUIRED,
+            'La variante elegida no pertenece al componente de la adición.',
+          );
+        }
+      }
+    }
+
     const recipeIds = [
       ...new Set(dto.options.filter((o) => o.component_type === 'recipe').map((o) => o.component_product_id!)),
     ];
