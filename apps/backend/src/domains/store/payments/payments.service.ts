@@ -322,6 +322,15 @@ export class PaymentsService {
     try {
       await this.validateUserAccess(user, createOrderPaymentDto.storeId);
 
+      // Insumo y Uso interno nunca se cobran: mismo guard que el cobro POS,
+      // antes de crear la orden. Este DTO usa `productId` (camelCase).
+      await assertSaleNatureLines(
+        this.prisma,
+        (createOrderPaymentDto.items ?? []).map((item) => ({
+          product_id: item.productId,
+        })),
+      );
+
       const result = await this.paymentGateway.processPaymentWithNewOrder({
         orderId: createOrderPaymentDto.orderId,
         customerId: createOrderPaymentDto.customerId,
