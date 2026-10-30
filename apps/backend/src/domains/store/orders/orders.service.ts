@@ -4,6 +4,7 @@ import { resolveKitchenMode } from '../kitchen-fire/kitchen-mode.util';
 import { Injectable, ConflictException, Logger, Optional, Inject, forwardRef, BadRequestException, NotFoundException } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { assertOrderNotInvoiceLocked } from './utils/invoice-lock.util';
+import type { OrderItemOptionSnapshot } from '../product-options/option-pricing.service';
 import {
   CreateOrderDto,
   CreateOrderItemDto,
@@ -182,6 +183,20 @@ type PersistedOrderLineSnapshot = {
     tax_type?: string | null;
     is_compound?: boolean | null;
     is_inclusive?: boolean | null;
+  }> | null;
+  /** Adiciones vendidas en la línea (snapshot de `order_item_options`). */
+  order_item_options?: Array<{
+    store_id: number;
+    option_id: number | null;
+    group_name: string;
+    option_name: string;
+    scope: OrderItemOptionSnapshot['scope'];
+    price_delta: Prisma.Decimal | string | number;
+    component_type: OrderItemOptionSnapshot['component_type'];
+    component_product_id: number;
+    component_variant_id: number | null;
+    quantity: Prisma.Decimal | string | number;
+    uom: string | null;
   }> | null;
 };
 
@@ -3212,6 +3227,7 @@ export class OrdersService {
             include: {
               products: { select: { id: true, track_inventory: true } },
               order_item_taxes: true,
+              order_item_options: true,
             },
           },
         },
@@ -3236,12 +3252,18 @@ export class OrdersService {
       const persistedCandidates = [
         ...((existingOrder?.order_items ?? []) as unknown as PersistedOrderLineSnapshot[]),
       ];
+      // N1 (PR #1003): `PUT /items` no trae adiciones y las líneas se
+      // recrean. La línea que vuelve sin cambios hereda las de su fila previa;
+      // sin eso su precio (que ya incluye el delta) se cobraba sin pedido
+      // programado ni descuento del insumo.
+      const keptByIndex = new Map<number, PersistedOrderLineSnapshot>();
       const plannedLines: PlannedOrderLine[] = dto.items.map(
         (item, index) =>
           this.preservePersistedOrderLine(
             item,
             priceUnits.priceUnitByIndex[index],
             persistedCandidates,
+            (prev) => keptByIndex.set(index, prev),
           ) ??
           this.planServerOrderLine(
             item,
@@ -3251,6 +3273,11 @@ export class OrdersService {
             updateItemsShelfByIndex.get(index),
             'orders.updateOrderItems',
           ),
+      );
+
+      this.assertDraftOptionLinesUnchanged(
+        persistedCandidates,
+        dto.items.filter((_, index) => !keptByIndex.has(index)),
       );
 
       // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta,
@@ -3391,6 +3418,9 @@ export class OrdersService {
             applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
             stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
             price_unit_quantity: priceUnits.priceUnitByIndex[index] ?? null,
+            order_item_options: this.toKeptOrderItemOptionsCreate(
+              keptByIndex.get(index),
+            ),
             updated_at: new Date(),
           },
         });
@@ -6457,6 +6487,7 @@ export class OrdersService {
     },
     priceUnitQuantity: number | null | undefined,
     candidates: PersistedOrderLineSnapshot[],
+    onMatch?: (prev: PersistedOrderLineSnapshot) => void,
   ): PlannedOrderLine | null {
     const productId = item.product_id ?? null;
     const variantId = productId != null ? item.product_variant_id ?? null : null;
@@ -6492,6 +6523,7 @@ export class OrdersService {
     });
     if (idx < 0) return null;
     const [prev] = candidates.splice(idx, 1);
+    onMatch?.(prev);
     const rows = prev.order_item_taxes ?? [];
     const unitPrice = Number(prev.unit_price ?? 0);
     return {
@@ -6523,6 +6555,59 @@ export class OrdersService {
         is_inclusive: row.is_inclusive ?? false,
       })),
       source: 'preserved_snapshot',
+    };
+  }
+
+  /**
+   * N1 (PR #1003): una fila previa con adiciones que no volvió igual y cuyo
+   * producto/variante sigue en la lista fue CAMBIADA (cantidad, precio…), no
+   * quitada. `PUT /items` no puede reconstruir sus adiciones (su cantidad
+   * escala con la línea y el precio ya trae el delta), así que se rechaza
+   * antes de borrar nada. Quitar la línea sí se permite: se va con sus
+   * adiciones y su precio.
+   */
+  private assertDraftOptionLinesUnchanged(
+    unmatchedPrevious: PersistedOrderLineSnapshot[],
+    unmatchedItems: Array<{
+      product_id?: number | null;
+      product_variant_id?: number | null;
+    }>,
+  ): void {
+    const lineKey = (productId?: number | null, variantId?: number | null) =>
+      `${productId ?? 'x'}:${productId != null ? variantId ?? 'x' : 'x'}`;
+    const changedKeys = new Set(
+      unmatchedItems
+        .filter((item) => item.product_id != null)
+        .map((item) => lineKey(item.product_id, item.product_variant_id)),
+    );
+    const changedWithOptions = unmatchedPrevious.some(
+      (prev) =>
+        (prev.order_item_options?.length ?? 0) > 0 &&
+        changedKeys.has(lineKey(prev.product_id, prev.product_variant_id)),
+    );
+    if (changedWithOptions) {
+      throw new VendixHttpException(ErrorCodes.OPT_DRAFT_LINE_LOCKED);
+    }
+  }
+
+  /** Copia las adiciones de la fila previa que se conserva sin cambios. */
+  private toKeptOrderItemOptionsCreate(prev?: PersistedOrderLineSnapshot) {
+    const options = prev?.order_item_options ?? [];
+    if (!options.length) return undefined;
+    return {
+      create: options.map((option) => ({
+        store_id: option.store_id,
+        option_id: option.option_id,
+        group_name: option.group_name,
+        option_name: option.option_name,
+        scope: option.scope,
+        price_delta: option.price_delta,
+        component_type: option.component_type,
+        component_product_id: option.component_product_id,
+        component_variant_id: option.component_variant_id,
+        quantity: option.quantity,
+        uom: option.uom,
+      })),
     };
   }
 

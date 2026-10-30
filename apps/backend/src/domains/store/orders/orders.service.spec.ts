@@ -127,6 +127,9 @@ describe('OrdersService', () => {
       // vigente, y solo sin ella preguntan por historial de mesa.
       findFirst: jest.fn(),
     },
+    // `updateOrderItems` lee las reservas de estación de la orden dentro de
+    // la tx; sin servicios con estación devuelve `[]`.
+    bookings: { findMany: jest.fn().mockResolvedValue([]) },
     audit_logs: {
       findMany: jest.fn(),
       // Round 3.5 · idempotency spec. The editor's idempotency
@@ -4508,6 +4511,123 @@ describe('OrdersService', () => {
       } finally {
         contextSpy.mockRestore();
       }
+    });
+
+    /**
+     * N1 (PR #1003): el POS reenvía la lista completa del borrador al agregar o
+     * quitar un producto y `PUT /items` no trae adiciones. Recrear las líneas
+     * sin ellas dejaba su precio cobrado sin pedido programado ni descuento
+     * del insumo.
+     */
+    describe('N1: adiciones del borrador', () => {
+      const optionRow = {
+        id: 501,
+        store_id: 1,
+        order_item_id: 900,
+        option_id: 77,
+        group_name: 'Relleno',
+        option_name: 'Arequipe',
+        scope: 'per_unit',
+        price_delta: '2000.00',
+        component_type: 'ingredient',
+        component_product_id: 40,
+        component_variant_id: null,
+        quantity: '0.0500',
+        uom: 'kg',
+        created_at: new Date('2026-10-29T10:00:00Z'),
+      };
+      const arrangeWithOptions = () => {
+        arrange();
+        mockPrismaService.orders.findUnique.mockResolvedValue({
+          id: 700,
+          order_items: [
+            {
+              product_id: 1,
+              product_variant_id: null,
+              quantity: 3,
+              weight: null,
+              price_unit_quantity: null,
+              applied_price_tier_id: null,
+              unit_price: '10000.00',
+              total_price: '30000.00',
+              tax_rate: '0.19',
+              tax_amount_item: '1900.00',
+              final_unit_price: '11900.00',
+              order_item_taxes: [],
+              order_item_options: [optionRow],
+              products: { id: 1, track_inventory: false },
+            },
+          ],
+        } as any);
+      };
+      const keptLine = {
+        product_id: 1,
+        product_name: 'Test product',
+        quantity: 3,
+        unit_price: 10000,
+        total_price: 30000,
+        final_unit_price: 11900,
+      };
+
+      it('agregar otro producto conserva las adiciones de la línea que sigue igual', async () => {
+        arrangeWithOptions();
+        await service.updateOrderItems(700, {
+          items: [
+            keptLine,
+            { product_name: 'Bolsa', item_type: 'custom', quantity: 1, unit_price: 500, total_price: 500 },
+          ],
+        } as any);
+
+        const [kept, added] = mockPrismaService.order_items.create.mock.calls.map(
+          (call: any[]) => call[0].data,
+        );
+        expect(kept.order_item_options).toEqual({
+          create: [
+            {
+              store_id: 1,
+              option_id: 77,
+              group_name: 'Relleno',
+              option_name: 'Arequipe',
+              scope: 'per_unit',
+              price_delta: '2000.00',
+              component_type: 'ingredient',
+              component_product_id: 40,
+              component_variant_id: null,
+              quantity: '0.0500',
+              uom: 'kg',
+            },
+          ],
+        });
+        expect(Number(kept.unit_price)).toBe(10000);
+        expect(added.order_item_options).toBeUndefined();
+      });
+
+      it('quitar la línea con adiciones la borra junto con sus adiciones', async () => {
+        arrangeWithOptions();
+        await service.updateOrderItems(700, {
+          items: [
+            { product_name: 'Bolsa', item_type: 'custom', quantity: 1, unit_price: 500, total_price: 500 },
+          ],
+        } as any);
+
+        const lines = mockPrismaService.order_items.create.mock.calls.map(
+          (call: any[]) => call[0].data,
+        );
+        expect(lines).toHaveLength(1);
+        expect(lines[0].order_item_options).toBeUndefined();
+      });
+
+      it('cambiar la línea con adiciones se rechaza antes de borrar nada', async () => {
+        arrangeWithOptions();
+        await expect(
+          service.updateOrderItems(700, {
+            items: [{ ...keptLine, quantity: 4, total_price: 40000 }],
+          } as any),
+        ).rejects.toMatchObject({ errorCode: ErrorCodes.OPT_DRAFT_LINE_LOCKED.code });
+        expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+        expect(mockPrismaService.order_items.create).not.toHaveBeenCalled();
+        expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+      });
     });
   });
 
