@@ -5,6 +5,7 @@ import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { resolveFullTaxRowsByProductId } from '../orders/utils/catalog-line-pricing.util';
 import {
   buildSessionTaxedLine,
+  ensureSessionRentalLine,
   reserveSessionLineStock,
   writeSessionOrderTotals,
 } from './utils/session-order-lines.util';
@@ -63,6 +64,13 @@ function catalogUnitPrice(
   return sale > 0 ? sale : Number(product.base_price ?? 0);
 }
 
+/** Fin previsto de un walk-in: el indicado si es futuro; si no, ahora + duración del servicio (o 60 min). */
+function walkInPlannedEnd(plannedEndAt: string | undefined, durationMinutes: number | null | undefined, now: Date): Date {
+  const parsedEnd = plannedEndAt ? new Date(plannedEndAt) : null;
+  if (parsedEnd && !isNaN(parsedEnd.getTime()) && parsedEnd > now) return parsedEnd;
+  return new Date(now.getTime() + (durationMinutes ?? 60) * 60_000);
+}
+
 @Injectable()
 export class ServiceSessionsService {
   private readonly logger = new Logger(ServiceSessionsService.name);
@@ -84,7 +92,8 @@ export class ServiceSessionsService {
 
   async open(dto: OpenServiceSessionDto) {
     const { storeId, userId } = this.requireContext();
-    if (Boolean(dto.booking_id) === Boolean(dto.station_id)) {
+    // Walk-in sin estación: se asigna una elegible más abajo (necesita el servicio).
+    if (dto.booking_id ? Boolean(dto.station_id) : !dto.station_id && !dto.product_id) {
       throw new VendixHttpException(ErrorCodes.STATION_009, 'Indica una reserva o una estación para walk-in.');
     }
 
@@ -112,11 +121,11 @@ export class ServiceSessionsService {
       throw new VendixHttpException(ErrorCodes.STATION_001, 'La reserva no tiene una asignación confirmada.');
     }
 
-    const stationId = bookingAllocation?.station_id ?? dto.station_id!;
     const contactEmail = (booking?.customer?.email ?? dto.contact_email)?.trim().toLowerCase() || null;
     const providerId = bookingAllocation?.provider_id ?? dto.provider_id ?? null;
     const productId = booking?.product_id ?? dto.product_id;
     if (!productId) throw new VendixHttpException(ErrorCodes.STATION_001, 'El walk-in requiere un servicio.');
+    const stationId = bookingAllocation?.station_id ?? dto.station_id ?? await this.pickWalkInStation(storeId, productId, providerId, dto.planned_end_at, now);
     const station = await this.prisma.service_stations.findFirst({
       where: { id: stationId, store_id: storeId, status: 'active', capacity: 1 },
       select: { id: true },
@@ -144,7 +153,7 @@ export class ServiceSessionsService {
     }
     // Required intake items are enforced on walk-in reception (the reservation flow may
     // have collected them earlier through a data-collection submission).
-    const intake = await this.prepareIntake(productId, stationId, dto.intake_values, { enforceRequired: Boolean(dto.station_id), customerId, bookingId: booking?.id ?? null });
+    const intake = await this.prepareIntake(productId, stationId, dto.intake_values, { enforceRequired: !booking, customerId, bookingId: booking?.id ?? null });
     if (providerId) {
       if (bookingAllocation) {
         const [stationProvider, providerService, provider] = await Promise.all([
@@ -181,13 +190,7 @@ export class ServiceSessionsService {
         throw new VendixHttpException(ErrorCodes.STATION_009);
       }
     } else {
-      const parsedEnd = dto.planned_end_at ? new Date(dto.planned_end_at) : null;
-      if (parsedEnd && !isNaN(parsedEnd.getTime()) && parsedEnd > now) {
-        plannedEnd = parsedEnd;
-      } else {
-        const durationMinutes = product.service_duration_minutes ?? 60;
-        plannedEnd = new Date(now.getTime() + durationMinutes * 60_000);
-      }
+      plannedEnd = walkInPlannedEnd(dto.planned_end_at, product.service_duration_minutes, now);
       if (plannedEnd <= now) {
         throw new VendixHttpException(ErrorCodes.STATION_009);
       }
@@ -323,6 +326,23 @@ export class ServiceSessionsService {
     this.emit(storeId, result.id, 'opened', { status: 'open' });
     delete (result as Partial<typeof result>).access_token_id;
     return result;
+  }
+
+  /**
+   * Walk-in sin estación: elige una estación elegible para [ahora, fin previsto). Sin
+   * ninguna, mantiene el error de siempre (falta indicar la estación).
+   */
+  private async pickWalkInStation(storeId: number, productId: number, providerId: number | null, plannedEndAt: string | undefined, now: Date) {
+    const product = await this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { service_duration_minutes: true } });
+    const stationId = await this.allocationCoordinator.pickStation(this.prisma, {
+      storeId,
+      productId,
+      providerId,
+      startAt: now,
+      endAt: walkInPlannedEnd(plannedEndAt, product?.service_duration_minutes, now),
+    });
+    if (!stationId) throw new VendixHttpException(ErrorCodes.STATION_009, 'Indica una reserva o una estación para walk-in.');
+    return stationId;
   }
 
   /**
@@ -759,6 +779,15 @@ export class ServiceSessionsService {
       : terminal && ACTIVE_SESSION_STATUSES.includes(existing.status);
     if (!allowed) throw new VendixHttpException(ErrorCodes.STATION_006);
 
+    // Alquiler por bloque de la estación: se carga en su propia transacción antes de validar
+    // el saldo, para que sobreviva al 409 y el pago que se registre después lo incluya.
+    if (dto.action === 'close' && existing.order_id) {
+      await this.prisma.$transaction(async (tx) => {
+        const order = await lockOrderLifecycle(tx, existing.order_id!, storeId);
+        if (order.state === 'draft') await this.addRentalLine(tx, storeId, existing, existing.order_id!);
+      });
+    }
+
     const updated = await this.prisma.$transaction(async (tx) => {
       // Regla de negocio: la estación no se libera hasta cobrar la cuenta.
       // Cerrar con saldo pendiente se rechaza (409); el cobro vive en la orden.
@@ -838,12 +867,34 @@ export class ServiceSessionsService {
     return { covered: budget.currency === order.currency && !authorized.greaterThan(budget.amount) };
   }
 
+  /** Agrega (una sola vez) la línea de alquiler por bloque de la estación y recalcula la cuenta. */
+  private async addRentalLine(
+    tx: Prisma.TransactionClient,
+    storeId: number,
+    session: { id: number; station_id: number; opened_at: Date },
+    orderId: number,
+  ) {
+    const now = new Date();
+    const added = await ensureSessionRentalLine(tx, {
+      storeId,
+      sessionId: session.id,
+      orderId,
+      stationId: session.station_id,
+      openedAt: session.opened_at,
+      now,
+    });
+    if (added) await this.recalcOrderTotals(tx, orderId, now);
+  }
+
   /** Deja la cuenta lista para "Registrar pago" sin cerrar la atención. */
   async prepareCharge(id: number) {
     const { storeId } = this.requireContext();
     const session = await this.findOne(id);
     if (!session.order_id) throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención aún no tiene cuenta para cobrar.');
     const { covered } = await this.prisma.$transaction(async (tx) => {
+      // El alquiler por bloque entra en el cobro, para que el cierre no quede con saldo.
+      const order = await lockOrderLifecycle(tx, session.order_id!, storeId);
+      if (order.state === 'draft') await this.addRentalLine(tx, storeId, session, session.order_id!);
       // El cobro parte del total recalculado (base + order_item_taxes), no del último
       // total persistido: una propuesta aprobada suma líneas a la orden.
       await this.recalcOrderTotals(tx, session.order_id!, new Date());

@@ -35,33 +35,9 @@ export class ServiceAllocationCoordinator {
       select: { id: true, product_type: true, requires_station: true, booking_mode: true, buffer_minutes: true, service_duration_minutes: true },
     });
     if (!product?.requires_station) return null;
-    if (product.product_type !== 'service' || !input.stationId) {
-      throw new VendixHttpException(product.product_type === 'service' ? ErrorCodes.STATION_012 : ErrorCodes.STATION_001);
-    }
+    if (product.product_type !== 'service') throw new VendixHttpException(ErrorCodes.STATION_001);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date) || !this.isTime(input.startTime) || !this.isTime(input.endTime) || input.endTime <= input.startTime) {
       throw new VendixHttpException(ErrorCodes.STATION_009);
-    }
-
-    const station = await tx.service_stations.findFirst({
-      where: { id: input.stationId, store_id: input.storeId, status: 'active', capacity: 1 },
-      select: { id: true },
-    });
-    const stationService = station && await tx.service_station_services.findFirst({
-      where: { store_id: input.storeId, station_id: input.stationId, product_id: input.productId },
-      select: { id: true },
-    });
-    if (!station) throw new VendixHttpException(ErrorCodes.STATION_004);
-    if (!stationService) throw new VendixHttpException(ErrorCodes.STATION_001);
-
-    if (input.providerId) {
-      const [stationProvider, providerService, provider] = await Promise.all([
-        tx.service_station_providers.findFirst({ where: { store_id: input.storeId, station_id: input.stationId, provider_id: input.providerId }, select: { id: true } }),
-        tx.provider_services.findFirst({ where: { provider_id: input.providerId, product_id: input.productId }, select: { id: true } }),
-        tx.service_providers.findFirst({ where: { id: input.providerId, store_id: input.storeId, is_active: true }, select: { id: true } }),
-      ]);
-      if (!stationProvider || !providerService || !provider) throw new VendixHttpException(ErrorCodes.STATION_001);
-    } else if (product.booking_mode === 'provider_required') {
-      throw new VendixHttpException(ErrorCodes.STATION_001, 'Selecciona un proveedor compatible para este servicio.');
     }
 
     const variant = input.productVariantId
@@ -85,10 +61,36 @@ export class ServiceAllocationCoordinator {
     const now = new Date();
     if (startAt <= now || endAt <= startAt) throw new VendixHttpException(ErrorCodes.STATION_009);
 
+    // Sin estación elegida: se asigna una elegible; si no hay, el error de siempre.
+    const stationId = input.stationId ?? await this.pickStation(tx, { storeId: input.storeId, productId: input.productId, providerId: input.providerId, startAt, endAt });
+    if (!stationId) throw new VendixHttpException(ErrorCodes.STATION_012);
+
+    const station = await tx.service_stations.findFirst({
+      where: { id: stationId, store_id: input.storeId, status: 'active', capacity: 1 },
+      select: { id: true },
+    });
+    const stationService = station && await tx.service_station_services.findFirst({
+      where: { store_id: input.storeId, station_id: stationId, product_id: input.productId },
+      select: { id: true },
+    });
+    if (!station) throw new VendixHttpException(ErrorCodes.STATION_004);
+    if (!stationService) throw new VendixHttpException(ErrorCodes.STATION_001);
+
+    if (input.providerId) {
+      const [stationProvider, providerService, provider] = await Promise.all([
+        tx.service_station_providers.findFirst({ where: { store_id: input.storeId, station_id: stationId, provider_id: input.providerId }, select: { id: true } }),
+        tx.provider_services.findFirst({ where: { provider_id: input.providerId, product_id: input.productId }, select: { id: true } }),
+        tx.service_providers.findFirst({ where: { id: input.providerId, store_id: input.storeId, is_active: true }, select: { id: true } }),
+      ]);
+      if (!stationProvider || !providerService || !provider) throw new VendixHttpException(ErrorCodes.STATION_001);
+    } else if (product.booking_mode === 'provider_required') {
+      throw new VendixHttpException(ErrorCodes.STATION_001, 'Selecciona un proveedor compatible para este servicio.');
+    }
+
     const weekday = new Date(`${input.date}T00:00:00.000Z`).getUTCDay();
     const [stationSchedules, stationExceptions, storeWindows] = await Promise.all([
-      tx.service_station_schedules.findMany({ where: { store_id: input.storeId, station_id: input.stationId, weekday, is_active: true }, select: { start_time: true, end_time: true } }),
-      tx.service_station_exceptions.findMany({ where: { store_id: input.storeId, station_id: input.stationId, start_at: { lt: endAt }, end_at: { gt: startAt } }, select: { id: true } }),
+      tx.service_station_schedules.findMany({ where: { store_id: input.storeId, station_id: stationId, weekday, is_active: true }, select: { start_time: true, end_time: true } }),
+      tx.service_station_exceptions.findMany({ where: { store_id: input.storeId, station_id: stationId, start_at: { lt: endAt }, end_at: { gt: startAt } }, select: { id: true } }),
       this.businessHours.loadStoreWindows(input.storeId, tx as unknown as StorePrismaService),
     ]);
     const startMinutes = this.minutes(input.startTime);
@@ -134,12 +136,12 @@ export class ServiceAllocationCoordinator {
         AND: [
           { start_at: { lt: endAt } },
           { end_at: { gt: startAt } },
-          { OR: [{ station_id: input.stationId }, ...(input.providerId ? [{ provider_id: input.providerId }] : [])] },
+          { OR: [{ station_id: stationId }, ...(input.providerId ? [{ provider_id: input.providerId }] : [])] },
         ],
       },
       select: { station_id: true, provider_id: true },
     });
-    if (overlaps.some((allocation) => allocation.station_id === input.stationId)) {
+    if (overlaps.some((allocation) => allocation.station_id === stationId)) {
       throw new VendixHttpException(ErrorCodes.STATION_002);
     }
     if (input.providerId && overlaps.some((allocation) => allocation.provider_id === input.providerId)) {
@@ -171,7 +173,7 @@ export class ServiceAllocationCoordinator {
       allocation = await tx.service_allocations.create({
         data: {
           store_id: input.storeId,
-          station_id: input.stationId,
+          station_id: stationId,
           provider_id: input.providerId ?? null,
           booking_id: input.bookingId,
           session_id: null,
@@ -198,7 +200,45 @@ export class ServiceAllocationCoordinator {
       throw error;
     }
     if (linked.count !== 1) throw new VendixHttpException(ErrorCodes.STATION_001);
-    return { id: allocation.id, station_id: input.stationId, provider_id: input.providerId ?? null, start_at: startAt, end_at: endAt };
+    return { id: allocation.id, station_id: stationId, provider_id: input.providerId ?? null, start_at: startAt, end_at: endAt };
+  }
+
+  /**
+   * Estación elegible cuando la reserva o el walk-in no indica una: activa, de la tienda,
+   * con el servicio asignado (y el proveedor, si viene) y sin asignación vigente que se
+   * cruce con [startAt, endAt). Desempate determinista: menos atenciones abiertas y luego
+   * el id más bajo. `null` si no hay ninguna; el llamador mantiene su error de siempre.
+   */
+  async pickStation(
+    db: Pick<Prisma.TransactionClient, 'service_stations'>,
+    input: { storeId: number; productId: number; providerId?: number | null; startAt: Date; endAt: Date },
+  ): Promise<number | null> {
+    const now = new Date();
+    const candidates = await db.service_stations.findMany({
+      where: {
+        store_id: input.storeId,
+        status: 'active',
+        capacity: 1,
+        service_station_services_station_fkey: { some: { product_id: input.productId } },
+        ...(input.providerId ? { service_station_providers_station_fkey: { some: { provider_id: input.providerId } } } : {}),
+        service_allocations_station_fkey: {
+          none: {
+            state: { in: ACTIVE_STATES },
+            start_at: { lt: input.endAt },
+            end_at: { gt: input.startAt },
+            OR: [{ expires_at: null }, { expires_at: { gt: now } }],
+          },
+        },
+      },
+      select: {
+        id: true,
+        _count: { select: { service_sessions_station_fkey: { where: { status: { in: ['open', 'paused'] } } } } },
+      },
+    });
+    candidates.sort((a, b) =>
+      a._count.service_sessions_station_fkey - b._count.service_sessions_station_fkey || a.id - b.id,
+    );
+    return candidates[0]?.id ?? null;
   }
 
   async transferBookingToSession(
