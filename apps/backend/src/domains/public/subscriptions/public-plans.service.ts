@@ -66,7 +66,7 @@ export interface PublicPlanDto {
 }
 
 const FEATURE_HUMAN_LABELS: Record<string, string> = {
-  pos: 'Punto de Venta POS (Online/Offline)',
+  pos: 'Punto de Venta POS en la nube',
   ecommerce: 'Tienda Online & Pedidos WhatsApp',
   accounting: 'Facturación Electrónica DIAN',
   inventory: 'Gestión de Inventario en Tiempo Real',
