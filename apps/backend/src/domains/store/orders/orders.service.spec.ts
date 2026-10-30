@@ -2355,9 +2355,11 @@ describe('OrdersService', () => {
           ...editableOrder,
           state: 'processing',
         };
-        mockPrismaService.orders.findFirst
-          .mockResolvedValueOnce(editableOrder) // first: pre-claim lookup
-          .mockResolvedValueOnce(lockedOrder); // second: post-claim state lookup
+        // The post-claim lookup is the only read that selects `state`; the
+        // pre-claim and service-budget reads get the editable order.
+        mockPrismaService.orders.findFirst.mockImplementation((args: any) =>
+          Promise.resolve(args?.select?.state ? lockedOrder : editableOrder),
+        );
         mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
         mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
         // F-164 — mismo mock que el test anterior: sin `findUnique` el
@@ -2395,9 +2397,9 @@ describe('OrdersService', () => {
       try {
         // El catch-all del Round 1 MAJOR #6: estado missing / null tras
         // un claim fallido. El código genérico sirve de red de seguridad.
-        mockPrismaService.orders.findFirst
-          .mockResolvedValueOnce(editableOrder)
-          .mockResolvedValueOnce(null);
+        mockPrismaService.orders.findFirst.mockImplementation((args: any) =>
+          Promise.resolve(args?.select?.state ? null : editableOrder),
+        );
         mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
         mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
         // F-164 — idem: el validator de variantes corre antes del claim y
