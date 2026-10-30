@@ -3,7 +3,7 @@
 -- Tables affected: none mutated (schema-only, additive).
 -- Expected row changes: 0. Only new enums, new enum values and new tables.
 -- Destructive operations: none (no DROP, no TRUNCATE, no DELETE/UPDATE).
--- FK/cascade risk: only order_item_options -> order_items ON DELETE CASCADE
+-- FK/cascade risk: order_item_options -> order_items usa ON DELETE RESTRICT (decision de Rafael, 2026-10-30)
 --   (snapshot child of a line, same pattern as order_item_exclusions); every
 --   FK to business parents (stores, orders, products, categories) is RESTRICT.
 -- Idempotency: IF NOT EXISTS / pg_type / pg_constraint guards on every statement.
@@ -368,7 +368,7 @@ END $$;
 -- AddForeignKey
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'order_item_options_order_item_id_fkey') THEN
-    ALTER TABLE "order_item_options" ADD CONSTRAINT "order_item_options_order_item_id_fkey" FOREIGN KEY ("order_item_id") REFERENCES "order_items"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+    ALTER TABLE "order_item_options" ADD CONSTRAINT "order_item_options_order_item_id_fkey" FOREIGN KEY ("order_item_id") REFERENCES "order_items"("id") ON DELETE RESTRICT ON UPDATE NO ACTION;
   END IF;
 END $$;
 
