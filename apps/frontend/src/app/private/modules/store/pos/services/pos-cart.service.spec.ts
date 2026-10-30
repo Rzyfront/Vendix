@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { of, throwError } from 'rxjs';
 
-import { PosCartService } from './pos-cart.service';
+import { OPTIONS_ON_SAVED_ORDER_MESSAGE, PosCartService } from './pos-cart.service';
 import { PosProductService } from './pos-product.service';
 import { PosApiService } from './pos-api.service';
 import { PosSaleUnitService } from './pos-sale-unit.service';
@@ -431,6 +431,22 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
       expect(posApi.cancelOrder).not.toHaveBeenCalled();
       done();
     });
+  });
+
+  it('N2: con pedido guardado rechaza una línea con adiciones sin tocar el backend', (done) => {
+    seedCart(500);
+
+    service
+      .addToCart({ product: embeddedProduct(3), quantity: 1, option_ids: [77] } as any)
+      .subscribe({
+        next: () => fail('no debía agregar la línea'),
+        error: (err: Error) => {
+          expect(err.message).toBe(OPTIONS_ON_SAVED_ORDER_MESSAGE);
+          expect(posApi.updateOrderItems).not.toHaveBeenCalled();
+          expect(service.cartState().items.map((i) => i.id)).toEqual(['a', 'b']);
+          done();
+        },
+      });
   });
 
   it('en modo local no toca el backend', (done) => {

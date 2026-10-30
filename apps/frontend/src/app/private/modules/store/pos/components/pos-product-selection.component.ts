@@ -36,7 +36,10 @@ import {
 import { extractApiError } from '../../../../../shared/utils/http-error.util';
 import { Router } from '@angular/router';
 
-import { PosCartService } from '../services/pos-cart.service';
+import {
+  OPTIONS_ON_SAVED_ORDER_MESSAGE,
+  PosCartService,
+} from '../services/pos-cart.service';
 import {
   PosProductService,
   PosProductVariant,
@@ -2180,6 +2183,19 @@ export class PosProductSelectionComponent {
       this.productOptionsService.getGroupsForProduct(productId),
     );
     if (groups.length === 0) return false;
+
+    // N2 (PR #1003): un pedido ya guardado no puede llevar adiciones nuevas
+    // (PUT /items y el editor no las persisten). Con grupos opcionales el
+    // producto entra solo, igual que en mesa; con un grupo obligatorio no se
+    // puede vender sin adiciones y se avisa sin agregar nada.
+    if (this.cartService.cartState().linkedOrderId != null) {
+      const required = groups.some(
+        (group) => group.is_required || Number(group.min_select ?? 0) > 0,
+      );
+      if (!required) return false;
+      this.toastService.error(OPTIONS_ON_SAVED_ORDER_MESSAGE);
+      return true;
+    }
 
     const basePrice = Number(
       variant?.final_price ?? product.final_price ?? product.price ?? 0,

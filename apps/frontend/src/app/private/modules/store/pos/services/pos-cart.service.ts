@@ -73,6 +73,14 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
  * quantity_tiered promotion. Derived from cart state + active promotions;
  * carries no money/discount calculation.
  */
+/**
+ * N2 (PR #1003): un pedido ya guardado (borrador adoptado o editor) se
+ * persiste con `PUT /items` / `PUT /editor`, que no venden adiciones. Mismo
+ * texto que `OPT_DRAFT_ADD_LOCKED` del servidor.
+ */
+export const OPTIONS_ON_SAVED_ORDER_MESSAGE =
+  'Este pedido ya está guardado: no se le pueden agregar productos con adiciones. Cóbralo o cancélalo y registra las adiciones en un pedido nuevo.';
+
 export interface PromotionTierProgress {
   promotion_id: number;
   name: string;
@@ -369,6 +377,15 @@ export class PosCartService {
    *     vino de un escaneo con tarifa.
    */
   addToCart(request: AddToCartRequest): Observable<CartState> {
+    // N2 (PR #1003): el pedido guardado no puede llevar adiciones nuevas; sin
+    // este corte la línea se guardaba sin ellas, a precio de catálogo.
+    if (
+      this.cartState().linkedOrderId != null &&
+      (request.option_ids?.length ?? 0) > 0
+    ) {
+      return throwError(() => new Error(OPTIONS_ON_SAVED_ORDER_MESSAGE));
+    }
+
     // Validate request FIRST. Hotfix post-PR-576: el carrito adoptado se
     // saltaba la validación por un early-return mal puesto, así que un
     // cajero podía meter líneas con SKU inválido o stock insuficiente en
