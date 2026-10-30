@@ -206,12 +206,14 @@ export class ServiceAllocationCoordinator {
   /**
    * Estación elegible cuando la reserva o el walk-in no indica una: activa, de la tienda,
    * con el servicio asignado (y el proveedor, si viene) y sin asignación vigente que se
-   * cruce con [startAt, endAt). Desempate determinista: menos atenciones abiertas y luego
-   * el id más bajo. `null` si no hay ninguna; el llamador mantiene su error de siempre.
+   * cruce con [startAt, endAt). `requireIdle` (walk-in que empieza ya) descarta además las
+   * estaciones con una atención abierta o pausada; `excludeStationIds`, las ya intentadas.
+   * Desempate determinista: menos atenciones abiertas y luego el id más bajo. `null` si no
+   * hay ninguna; el llamador mantiene su error de siempre.
    */
   async pickStation(
     db: Pick<Prisma.TransactionClient, 'service_stations'>,
-    input: { storeId: number; productId: number; providerId?: number | null; startAt: Date; endAt: Date },
+    input: { storeId: number; productId: number; providerId?: number | null; startAt: Date; endAt: Date; requireIdle?: boolean; excludeStationIds?: number[] },
   ): Promise<number | null> {
     const now = new Date();
     const candidates = await db.service_stations.findMany({
@@ -219,8 +221,10 @@ export class ServiceAllocationCoordinator {
         store_id: input.storeId,
         status: 'active',
         capacity: 1,
+        ...(input.excludeStationIds?.length ? { id: { notIn: input.excludeStationIds } } : {}),
         service_station_services_station_fkey: { some: { product_id: input.productId } },
         ...(input.providerId ? { service_station_providers_station_fkey: { some: { provider_id: input.providerId } } } : {}),
+        ...(input.requireIdle ? { service_sessions_station_fkey: { none: { status: { in: ['open', 'paused'] } } } } : {}),
         service_allocations_station_fkey: {
           none: {
             state: { in: ACTIVE_STATES },

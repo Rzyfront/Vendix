@@ -154,6 +154,26 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
       expect(tx.service_stations.findMany.mock.calls[0][0].where.service_station_providers_station_fkey).toBeUndefined();
     });
 
+    it('pickStation de un walk-in descarta estaciones con atención abierta o pausada y las ya intentadas', async () => {
+      const { coordinator, tx } = build();
+      tx.service_stations.findMany.mockResolvedValue([station(6, 0)]);
+      await coordinator.pickStation(tx, {
+        storeId: STORE_ID, productId: 5, startAt: new Date(), endAt: new Date(Date.now() + 3600_000), requireIdle: true, excludeStationIds: [4],
+      });
+
+      const where = tx.service_stations.findMany.mock.calls[0][0].where;
+      expect(where.service_sessions_station_fkey).toEqual({ none: { status: { in: ['open', 'paused'] } } });
+      expect(where.id).toEqual({ notIn: [4] });
+    });
+
+    it('pickStation de una reserva no descarta estaciones ocupadas ahora', async () => {
+      const { coordinator, tx } = build();
+      await expect(coordinator.allocateBooking(tx, { ...baseInput, stationId: undefined })).rejects.toMatchObject({ errorCode: 'STATION_012' });
+      const where = tx.service_stations.findMany.mock.calls[0][0].where;
+      expect(where.service_sessions_station_fkey).toBeUndefined();
+      expect(where.id).toBeUndefined();
+    });
+
     it('una reserva sin estación usa la estación asignada automáticamente', async () => {
       const { coordinator, tx } = build();
       tx.service_stations.findMany.mockResolvedValue([station(8, 0)]);
