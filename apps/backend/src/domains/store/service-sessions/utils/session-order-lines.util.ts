@@ -112,6 +112,13 @@ export async function writeSessionOrderTotals(
   return { ...totals, store_id: updatedOrder?.store_id ?? null, service_session_id: updatedOrder?.service_session_id ?? null };
 }
 
+/**
+ * Prefijo estable de la línea de alquiler. Es lo que identifica la línea ya cobrada:
+ * NO se compara contra el nombre completo porque la estación se puede renombrar entre
+ * "Registrar pago" y el cierre, y el nombre de la línea es un snapshot del momento.
+ */
+export const RENTAL_LINE_PREFIX = 'Alquiler ';
+
 /** Bloques de alquiler consumidos: ceil(minutos transcurridos / minutos del bloque), mínimo 1. */
 export function rentalBlocksConsumed(openedAt: Date, now: Date, blockMinutes: number): number {
   const elapsedMinutes = Math.max(0, (now.getTime() - openedAt.getTime()) / 60_000);
@@ -137,9 +144,14 @@ export async function ensureSessionRentalLine(
   const blockMinutes = station?.rental_block_minutes ?? 0;
   const blockPrice = Number(station?.rental_block_price ?? 0);
   if (!station || blockMinutes <= 0 || !(blockPrice > 0)) return false;
-  const productName = `Alquiler ${station.name}`;
+  const productName = `${RENTAL_LINE_PREFIX}${station.name}`;
   const existing = await tx.order_items.findFirst({
-    where: { order_id: orderId, service_session_id: sessionId, product_id: null, product_name: productName },
+    where: {
+      order_id: orderId,
+      service_session_id: sessionId,
+      product_id: null,
+      product_name: { startsWith: RENTAL_LINE_PREFIX },
+    },
     select: { id: true },
   });
   if (existing) return false;

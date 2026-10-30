@@ -623,8 +623,24 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
         );
         await expect(service.transition(21, { action: 'close' } as any)).resolves.toMatchObject({ status: 'closed' });
         expect(tx.order_items.findFirst).toHaveBeenCalledWith(
-          expect.objectContaining({ where: { order_id: 149, service_session_id: 21, product_id: null, product_name: 'Alquiler Sala 1' } }),
+          expect.objectContaining({ where: { order_id: 149, service_session_id: 21, product_id: null, product_name: { startsWith: 'Alquiler ' } } }),
         );
+        expect(tx.order_items.create).not.toHaveBeenCalled();
+      });
+
+      it('no duplica la línea si renombraron la estación después de cobrar', async () => {
+        withTariff();
+        // La estación cambió de nombre: la línea creada en "Registrar pago" conserva el viejo.
+        tx.service_stations.findFirst.mockResolvedValue({ name: 'Sala A', rental_block_minutes: 30, rental_block_price: 20000 });
+        const saved = [{ id: 500, product_name: 'Alquiler Sala 1' }];
+        tx.order_items.findFirst.mockImplementation((args: any) => {
+          const prefix: string | undefined = args?.where?.product_name?.startsWith;
+          return Promise.resolve(saved.find((line) => prefix !== undefined && line.product_name.startsWith(prefix)) ?? null);
+        });
+        tx.orders.findFirst.mockImplementation((args: any) =>
+          Promise.resolve(args?.select?.remaining_balance !== undefined ? { remaining_balance: 0 } : { grand_total: 60000, tip_amount: 0, currency: 'COP' }),
+        );
+        await expect(service.transition(21, { action: 'close' } as any)).resolves.toMatchObject({ status: 'closed' });
         expect(tx.order_items.create).not.toHaveBeenCalled();
       });
 
