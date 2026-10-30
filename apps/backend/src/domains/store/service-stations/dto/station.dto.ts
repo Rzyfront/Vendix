@@ -5,6 +5,7 @@ import {
   IsArray,
   IsDateString,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   ValidateNested,
@@ -15,7 +16,41 @@ import {
   MaxLength,
   Matches,
   Min,
+  registerDecorator,
+  ValidationArguments,
+  ValidationOptions,
 } from 'class-validator';
+
+/** Tope de `rental_block_price`: columna Decimal(12, 2). */
+export const RENTAL_BLOCK_PRICE_MAX = 9_999_999_999.99;
+
+/**
+ * El alquiler por bloque se configura o se quita completo: si llega `rental_block_minutes`
+ * o `rental_block_price`, el otro tiene que venir también, ambos con valor o ambos null.
+ * Va en los dos campos porque `@IsOptional` omite el validador del que llega vacío.
+ */
+function IsRentalBlockPair(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'IsRentalBlockPair',
+      target: object.constructor,
+      propertyName,
+      options: {
+        message: 'rental_block_minutes y rental_block_price deben enviarse juntos (ambos con valor o ambos null)',
+        ...validationOptions,
+      },
+      validator: {
+        validate(_value: unknown, args: ValidationArguments) {
+          const dto = args.object as { rental_block_minutes?: number | null; rental_block_price?: number | null };
+          const minutes = dto.rental_block_minutes;
+          const price = dto.rental_block_price;
+          if (minutes === undefined && price === undefined) return true;
+          return minutes !== undefined && price !== undefined && (minutes === null) === (price === null);
+        },
+      },
+    });
+  };
+}
 
 export class CreateServiceStationDto {
   @IsString()
@@ -48,6 +83,24 @@ export class CreateServiceStationDto {
   @Min(1)
   @Max(1440)
   target_minutes?: number | null;
+
+  /** Alquiler por bloque: minutos de cada bloque (null = sin alquiler). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  @IsRentalBlockPair()
+  rental_block_minutes?: number | null;
+
+  /** Alquiler por bloque: precio de cada bloque (null = sin alquiler). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(RENTAL_BLOCK_PRICE_MAX)
+  @IsRentalBlockPair()
+  rental_block_price?: number | null;
 
   /** Formulario de Recolección de datos que se diligencia al ingresar a esta estación (null = el del servicio). */
   @IsOptional()
@@ -89,6 +142,24 @@ export class UpdateServiceStationDto {
   @Min(1)
   @Max(1440)
   target_minutes?: number | null;
+
+  /** Alquiler por bloque: minutos de cada bloque (null = sin alquiler). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  @IsRentalBlockPair()
+  rental_block_minutes?: number | null;
+
+  /** Alquiler por bloque: precio de cada bloque (null = sin alquiler). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(RENTAL_BLOCK_PRICE_MAX)
+  @IsRentalBlockPair()
+  rental_block_price?: number | null;
 
   /** Formulario de Recolección de datos que se diligencia al ingresar a esta estación (null = el del servicio). */
   @IsOptional()

@@ -165,6 +165,8 @@ export class ServiceStationsService {
           status: dto.status ?? 'active',
           track_time: dto.track_time ?? false,
           target_minutes: dto.target_minutes ?? null,
+          rental_block_minutes: dto.rental_block_minutes ?? null,
+          rental_block_price: dto.rental_block_price ?? null,
           intake_template_id: dto.intake_template_id ?? null,
         },
       });
@@ -190,6 +192,8 @@ export class ServiceStationsService {
           ...(dto.status !== undefined && { status: dto.status }),
           ...(dto.track_time !== undefined && { track_time: dto.track_time }),
           ...(dto.target_minutes !== undefined && { target_minutes: dto.target_minutes }),
+          ...(dto.rental_block_minutes !== undefined && { rental_block_minutes: dto.rental_block_minutes }),
+          ...(dto.rental_block_price !== undefined && { rental_block_price: dto.rental_block_price }),
           ...(dto.intake_template_id !== undefined && { intake_template_id: dto.intake_template_id }),
           updated_at: new Date(),
         },
