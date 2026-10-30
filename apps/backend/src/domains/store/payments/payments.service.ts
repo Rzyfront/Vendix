@@ -3832,12 +3832,15 @@ export class PaymentsService {
 
   /**
    * Adiciones de una línea POS. Sin `OptionPricingService` (sólo en specs) o
-   * sin `option_ids` y sin grupos obligatorios → sin efecto.
+   * sin `option_ids` y sin grupos obligatorios → sin efecto. Solo se aceptan
+   * en una venta con pedido programado (`scheduled`), que es quien las
+   * descuenta del inventario al pasar a producción.
    */
   private async resolvePosLineOptions(
     tx: any,
     item: any,
     storeId: number,
+    scheduled: boolean,
   ): Promise<ResolvedOptions> {
     const optionIds: number[] | undefined = item.option_ids;
     if (!this.optionPricingService) {
@@ -3849,7 +3852,7 @@ export class PaymentsService {
       item.product_id,
       optionIds,
       Number(item.quantity) || 1,
-      tx,
+      { scheduled, client: tx },
     );
   }
 
@@ -3866,6 +3869,9 @@ export class PaymentsService {
     // `session.order_id` (cierre de mesa, orden ya existe) u `orderNumber`
     // (venta nueva, recién generado antes de mapear los ítems).
     orderRef?: string | number | null,
+    // Venta con pedido programado: única que acepta adiciones (ver
+    // `resolvePosLineOptions`). El cierre de mesa nunca agenda.
+    scheduled = false,
   ): Promise<any> {
     const isCustomItem = item.item_type === 'custom' || !item.product_id;
     const lineUnits = this.getPosLineUnits(item);
@@ -4171,7 +4177,7 @@ export class PaymentsService {
     // Adiciones (S3): el servidor valida las reglas y calcula el delta FINAL
     // por unidad; el cliente solo manda `option_ids`. Sin adiciones el delta
     // es 0 y nada de este bloque cambia el cálculo de hoy.
-    const lineOptions = await this.resolvePosLineOptions(tx, item, dtoStoreId);
+    const lineOptions = await this.resolvePosLineOptions(tx, item, dtoStoreId, scheduled);
     const optionUnitDelta = Number(lineOptions.unit_price_delta);
     const catalogFinalWithOptions = this.roundMoney(catalogFinalPrice + optionUnitDelta);
 
@@ -6021,6 +6027,7 @@ export class PaymentsService {
               user,
               tierSnapshots[index],
               orderNumber,
+              !!dto.schedule,
             ),
           ),
         );

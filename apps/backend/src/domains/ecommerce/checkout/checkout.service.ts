@@ -280,11 +280,14 @@ export class CheckoutService {
    * Adiciones de una línea del checkout. La línea armada desde `dto.items`
    * (invitado) trae sus `option_ids`; la del carrito de backend las toma del
    * `dto.items` que coincida por producto + variante + presentación (mismo
-   * emparejamiento que `notes`). Sin servicio (specs) → sin efecto.
+   * emparejamiento que `notes`). Sin servicio (specs) → sin efecto. Solo se
+   * aceptan con pedido programado (`scheduled`), que las descuenta al
+   * pasar a producción.
    */
   private async resolveCheckoutLineOptions(
     item: { product_id: number; product_variant_id?: number | null; applied_price_tier_id?: number | null; quantity: number; option_ids?: number[] },
-    dto_items?: Array<{ product_id: number; product_variant_id?: number | null; price_tier_id?: number | null; option_ids?: number[] }>,
+    dto_items: Array<{ product_id: number; product_variant_id?: number | null; price_tier_id?: number | null; option_ids?: number[] }> | undefined,
+    scheduled: boolean,
   ): Promise<ResolvedOptions> {
     const option_ids =
       item.option_ids ??
@@ -300,7 +303,9 @@ export class CheckoutService {
       if (option_ids?.length) throw new VendixHttpException(ErrorCodes.OPT_DISABLED);
       return { unit_price_delta: new Prisma.Decimal(0), snapshots: [] };
     }
-    return this.optionPricingService.resolve(store_id, item.product_id, option_ids, Number(item.quantity) || 1);
+    return this.optionPricingService.resolve(store_id, item.product_id, option_ids, Number(item.quantity) || 1, {
+      scheduled,
+    });
   }
 
   /**
@@ -2172,7 +2177,7 @@ export class CheckoutService {
         // Adiciones (S3): delta FINAL (con impuestos) por unidad calculado en
         // el servidor sobre los `option_ids` de la línea, igual que en POS.
         // Sin adiciones → 0 y nada de este bloque cambia el cálculo de hoy.
-        const lineOptions = await this.resolveCheckoutLineOptions(item, dto.items);
+        const lineOptions = await this.resolveCheckoutLineOptions(item, dto.items, !!dto.schedule);
         const optionDelta = Number(lineOptions.unit_price_delta);
 
         const stockUnitsConsumed = line.stock_units_consumed;

@@ -125,15 +125,22 @@ export class OptionPricingService {
    * Resuelve la selección de una línea. Sin ids y sin grupos obligatorios →
    * sin cambios (flujo de hoy). Con el ajuste apagado e ids enviados →
    * OPT_DISABLED.
+   *
+   * Las adiciones solo se venden en pedidos programados (`scheduled`): su
+   * insumo y su costo se registran al pasar a producción, y una venta
+   * normal no tiene ese paso. Sin agendamiento, ids enviados →
+   * OPT_REQUIRES_SCHEDULE; sin ids el producto se vende solo, aunque tenga
+   * grupos obligatorios.
    */
   async resolve(
     store_id: number,
     product_id: number | null | undefined,
     option_ids: number[] | undefined,
     line_quantity: number,
-    client?: Prisma.TransactionClient,
+    options: { scheduled: boolean; client?: Prisma.TransactionClient },
   ): Promise<ResolvedOptions> {
     const ids = option_ids ?? [];
+    const { scheduled, client } = options;
     if (!product_id) {
       if (ids.length) throw new VendixHttpException(ErrorCodes.OPT_SELECTION_INVALID);
       return EMPTY;
@@ -141,6 +148,10 @@ export class OptionPricingService {
     const enabled = await this.productOptions.isEnabled(store_id);
     if (!enabled) {
       if (ids.length) throw new VendixHttpException(ErrorCodes.OPT_DISABLED);
+      return EMPTY;
+    }
+    if (!scheduled) {
+      if (ids.length) throw new VendixHttpException(ErrorCodes.OPT_REQUIRES_SCHEDULE);
       return EMPTY;
     }
     const groups = (await this.productOptions.applicableForProduct(store_id, product_id, {

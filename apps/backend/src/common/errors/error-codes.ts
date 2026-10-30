@@ -36,6 +36,7 @@ export const ErrorCodes = {
   OPT_NOT_FOUND: { code: 'OPT_NOT_FOUND', httpStatus: 404, devMessage: 'Adición no encontrada.' },
   OPT_GROUP_RULES: { code: 'OPT_GROUP_RULES', httpStatus: 400, devMessage: 'Las reglas del grupo no son válidas (mínimo, máximo u obligatorio).' },
   OPT_ASSIGNMENT_TARGET: { code: 'OPT_ASSIGNMENT_TARGET', httpStatus: 400, devMessage: 'El grupo se engancha a un producto o a una categoría, no a ambos.' },
+  OPT_REQUIRES_SCHEDULE: { code: 'OPT_REQUIRES_SCHEDULE', httpStatus: 400, devMessage: 'Las adiciones solo se venden en pedidos programados: agenda el pedido o quita las adiciones.' },
   OPT_SELECTION_INVALID: { code: 'OPT_SELECTION_INVALID', httpStatus: 400, devMessage: 'Las adiciones elegidas no cumplen las reglas del producto.' },
   // System
   SYS_INTERNAL_001: {

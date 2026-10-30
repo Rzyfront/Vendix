@@ -104,18 +104,30 @@ describe('OptionPricingService.resolve', () => {
   }
 
   it('sin ids y sin grupos deja la línea como hoy', async () => {
-    const result = await build(true, []).resolve(1, 5, undefined, 1);
+    const result = await build(true, []).resolve(1, 5, undefined, 1, { scheduled: true });
     expect(result.unit_price_delta.toNumber()).toBe(0);
     expect(result.snapshots).toEqual([]);
   });
 
   it('con el ajuste apagado ignora la línea sin ids y rechaza ids enviados', async () => {
     const service = build(false, [cubierta]);
-    expect((await service.resolve(1, 5, undefined, 1)).snapshots).toEqual([]);
-    await expect(service.resolve(1, 5, [21], 1)).rejects.toThrow();
+    expect((await service.resolve(1, 5, undefined, 1, { scheduled: true })).snapshots).toEqual([]);
+    await expect(service.resolve(1, 5, [21], 1, { scheduled: true })).rejects.toThrow();
+  });
+
+  it('en una venta sin pedido programado rechaza adiciones: no habría quién las descuente', async () => {
+    await expect(build(true, [frutas]).resolve(1, 5, [11], 1, { scheduled: false })).rejects.toMatchObject({
+      errorCode: 'OPT_REQUIRES_SCHEDULE',
+    });
+  });
+
+  it('en una venta sin pedido programado y sin ids vende el producto solo, aun con grupo obligatorio', async () => {
+    const result = await build(true, [cubierta]).resolve(1, 5, [], 1, { scheduled: false });
+    expect(result.unit_price_delta.toNumber()).toBe(0);
+    expect(result.snapshots).toEqual([]);
   });
 
   it('con grupo obligatorio y sin ids rechaza la venta', async () => {
-    await expect(build(true, [cubierta]).resolve(1, 5, [], 1)).rejects.toThrow('Elige 1 opción en Cubierta');
+    await expect(build(true, [cubierta]).resolve(1, 5, [], 1, { scheduled: true })).rejects.toThrow('Elige 1 opción en Cubierta');
   });
 });
