@@ -5,6 +5,7 @@ import {
   IsArray,
   IsDateString,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   ValidateNested,
@@ -49,6 +50,21 @@ export class CreateServiceStationDto {
   @Max(1440)
   target_minutes?: number | null;
 
+  /** Alquiler por bloque: minutos de cada bloque (null = sin alquiler). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  rental_block_minutes?: number | null;
+
+  /** Alquiler por bloque: precio de cada bloque (null = sin alquiler). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  rental_block_price?: number | null;
+
   /** Formulario de Recolección de datos que se diligencia al ingresar a esta estación (null = el del servicio). */
   @IsOptional()
   @Type(() => Number)
@@ -89,6 +105,21 @@ export class UpdateServiceStationDto {
   @Min(1)
   @Max(1440)
   target_minutes?: number | null;
+
+  /** Alquiler por bloque: minutos de cada bloque (null = sin alquiler). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1440)
+  rental_block_minutes?: number | null;
+
+  /** Alquiler por bloque: precio de cada bloque (null = sin alquiler). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  rental_block_price?: number | null;
 
   /** Formulario de Recolección de datos que se diligencia al ingresar a esta estación (null = el del servicio). */
   @IsOptional()

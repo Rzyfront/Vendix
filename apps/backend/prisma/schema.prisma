@@ -14032,6 +14032,9 @@ model service_stations {
   capacity   Int      @default(1)
   track_time Boolean  @default(false)
   target_minutes Int?
+  /// Alquiler por bloque: al cerrar la atención se cobra ceil(minutos / bloque) × precio. NULL = sin alquiler.
+  rental_block_minutes Int?
+  rental_block_price Decimal? @db.Decimal(12, 2)
   intake_template_id Int?
   intake_template data_collection_templates? @relation("station_intake_template", fields: [intake_template_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
   public_id  String   @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
