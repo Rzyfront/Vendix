@@ -33,9 +33,9 @@
         <!-- Navigation -->
         <nav class="main-nav desktop-only">
           <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Inicio</a>
-          <a routerLink="/products" routerLinkActive="active">Productos</a>
-          <a routerLink="/new" routerLinkActive="active">Novedades</a>
-          <a routerLink="/sale" routerLinkActive="active">Ofertas</a>
+          <a routerLink="/catalog" routerLinkActive="active">Productos</a>
+          <a routerLink="/novedades" routerLinkActive="active">Novedades</a>
+          <a routerLink="/ofertas" routerLinkActive="active">Ofertas</a>
           @if (is_hotel()) {
             <a routerLink="/hotel" routerLinkActive="active">Reservar habitación</a>
           }
@@ -608,9 +608,9 @@
       <h5 class="nav-subtitle">Menú Principal</h5>
       <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
         (click)="toggleMobileMenu()">Inicio</a>
-      <a routerLink="/products" routerLinkActive="active" (click)="toggleMobileMenu()">Productos</a>
-      <a routerLink="/new" routerLinkActive="active" (click)="toggleMobileMenu()">Novedades</a>
-      <a routerLink="/sale" routerLinkActive="active" (click)="toggleMobileMenu()">Ofertas</a>
+      <a routerLink="/catalog" routerLinkActive="active" (click)="toggleMobileMenu()">Productos</a>
+      <a routerLink="/novedades" routerLinkActive="active" (click)="toggleMobileMenu()">Novedades</a>
+      <a routerLink="/ofertas" routerLinkActive="active" (click)="toggleMobileMenu()">Ofertas</a>
       @if (is_hotel()) {
         <a routerLink="/hotel" routerLinkActive="active" (click)="toggleMobileMenu()">Reservar habitación</a>
       }
