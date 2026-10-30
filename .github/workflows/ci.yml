@@ -331,6 +331,7 @@ jobs:
           --include='**/customer-holder-completion-modal/holder-issue.model.spec.ts'
           --include='**/orders/bulk/orders-bulk-invoice.util.spec.ts'
           --include='**/credit-invoice-modal/credit-invoice-modal.component.spec.ts'
+          --include='**/core/services/fiscal-activation-wizard.service.spec.ts'
 
   mobile:
     name: Mobile
