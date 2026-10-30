@@ -203,6 +203,10 @@ async function bootstrapApi(role: VendixProcessRole) {
     `Trust proxy: ${trustProxyHops} salto(s) — req.ip se resuelve desde X-Forwarded-For`,
   );
 
+  // Sin `X-Powered-By: Express` (SEO-TECH-22): revela el framework a quien
+  // escanee la API y no aporta nada al cliente.
+  app.getHttpAdapter().getInstance().disable('x-powered-by');
+
   // Increase payload limit for base64 images
   // Public reception webhooks authenticate the exact raw byte sequence before
   // JSON parsing/normalization. This narrow parser runs only for the canonical
@@ -604,8 +608,9 @@ async function bootstrapApi(role: VendixProcessRole) {
       status: 'ok',
       service: 'Vendix API',
       version: process.env.npm_package_version || '1.0.0',
-      node: process.version,
-      uptime: Math.floor(process.uptime()),
+      // Sin `node` ni `uptime` (SEO-TECH-22): la versión exacta de Node y el
+      // tiempo desde el último reinicio son datos útiles para un atacante. Los
+      // health checks de despliegue leen `/api/health`, no esta raíz.
       timestamp: new Date().toISOString(),
     });
   });

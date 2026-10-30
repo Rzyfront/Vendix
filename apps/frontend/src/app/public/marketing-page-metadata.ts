@@ -14,6 +14,16 @@ export interface MarketingPageMetadata {
   canonicalPath: string | null;
 }
 
+interface MetaTagValue {
+  attr: 'name' | 'property';
+  key: string;
+  content: string;
+}
+
+function selectorOf(tag: MetaTagValue): string {
+  return `${tag.attr}="${tag.key}"`;
+}
+
 const MARKETING_HOSTS = new Set(['vendix.online', 'www.vendix.online', 'vendix.com', 'www.vendix.com']);
 
 /**
@@ -35,35 +45,45 @@ export function applyMarketingPageMetadata(
   if (!MARKETING_HOSTS.has(url.hostname)) return () => {};
 
   const previousTitle = title.getTitle();
-  const names = ['description', 'robots'] as const;
-  const previous = names.map((name) => ({
-    name,
-    node: meta.getTag(`name="${name}"`),
-    content: meta.getTag(`name="${name}"`)?.getAttribute('content') ?? null,
-  }));
-  const applied = new Map<string, string>([
-    ['description', page.description],
-    ['robots', page.robots],
-  ]);
+  const origin = url.hostname.endsWith('.com') ? 'https://vendix.com' : 'https://vendix.online';
+  const appliedHref = page.canonicalPath === null ? null : origin + page.canonicalPath;
+
+  // Una página con URL propia también se comparte: sin esto og:* y twitter:*
+  // siguen diciendo los de la portada (og:url = `/`) en la tarjeta de /pricing.
+  const tags: MetaTagValue[] = [
+    { attr: 'name', key: 'description', content: page.description },
+    { attr: 'name', key: 'robots', content: page.robots },
+  ];
+  if (appliedHref !== null) {
+    tags.push(
+      { attr: 'property', key: 'og:title', content: page.title },
+      { attr: 'property', key: 'og:description', content: page.description },
+      { attr: 'property', key: 'og:url', content: appliedHref },
+      { attr: 'name', key: 'twitter:title', content: page.title },
+      { attr: 'name', key: 'twitter:description', content: page.description },
+    );
+  }
+  const previous = tags.map((tag) => {
+    const node = meta.getTag(selectorOf(tag));
+    return { tag, node, content: node?.getAttribute('content') ?? null };
+  });
 
   const originalCanonical = document.querySelector<HTMLLinkElement>('link[rel="canonical"]');
   const previousHref = originalCanonical?.getAttribute('href') ?? null;
   const canonical = originalCanonical ?? document.createElement('link');
   canonical.rel = 'canonical';
   if (!originalCanonical) document.head.appendChild(canonical);
-  const origin = url.hostname.endsWith('.com') ? 'https://vendix.com' : 'https://vendix.online';
-  const appliedHref = page.canonicalPath === null ? null : origin + page.canonicalPath;
 
   title.setTitle(page.title);
-  for (const [name, content] of applied) meta.updateTag({ name, content });
+  for (const tag of tags) meta.updateTag({ [tag.attr]: tag.key, content: tag.content });
   if (appliedHref === null) canonical.removeAttribute('href');
   else canonical.setAttribute('href', appliedHref);
 
   return () => {
     if (title.getTitle() === page.title) title.setTitle(previousTitle);
-    for (const { name, node, content } of previous) {
-      const current = meta.getTag(`name="${name}"`);
-      if (current?.content !== applied.get(name)) continue;
+    for (const { tag, node, content } of previous) {
+      const current = meta.getTag(selectorOf(tag));
+      if (current?.content !== tag.content) continue;
       if (!node) current?.remove();
       else if (content === null) current?.removeAttribute('content');
       else current?.setAttribute('content', content);
@@ -99,6 +119,36 @@ export const MARKETING_PAGES = {
   register: {
     title: 'Crea tu cuenta | Vendix',
     description: 'Crea tu cuenta de Vendix y empieza la prueba gratis de 14 días.',
+    robots: 'noindex, follow',
+    canonicalPath: null,
+  },
+  forgotPassword: {
+    title: 'Recuperar contraseña | Vendix',
+    description: 'Solicita el enlace para recuperar la contraseña de tu cuenta de Vendix.',
+    robots: 'noindex, follow',
+    canonicalPath: null,
+  },
+  resetPassword: {
+    title: 'Restablecer contraseña | Vendix',
+    description: 'Define una nueva contraseña para tu cuenta de Vendix.',
+    robots: 'noindex, follow',
+    canonicalPath: null,
+  },
+  verifyEmail: {
+    title: 'Verificar correo | Vendix',
+    description: 'Confirma el correo electrónico de tu cuenta de Vendix.',
+    robots: 'noindex, follow',
+    canonicalPath: null,
+  },
+  pqr: {
+    title: 'Peticiones, quejas y reclamos | Vendix',
+    description: 'Radica una petición, queja o reclamo ante Vendix.',
+    robots: 'noindex, follow',
+    canonicalPath: null,
+  },
+  pqrTrack: {
+    title: 'Consultar PQR | Vendix',
+    description: 'Consulta el estado de tu petición, queja o reclamo con su número de radicado.',
     robots: 'noindex, follow',
     canonicalPath: null,
   },

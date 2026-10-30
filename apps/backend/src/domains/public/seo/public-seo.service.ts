@@ -4,7 +4,8 @@ import { Cache } from 'cache-manager';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { PublicDomainsService } from '../domains/public-domains.service';
 import { DomainConfigService } from '@common/config/domain.config';
-import { normalizeHostname } from '@common/utils/tenant-hostname.util';
+import { API_HOSTS, normalizeHostname } from '@common/utils/tenant-hostname.util';
+import { isValidSlug } from '@common/utils/slug.util';
 import { MARKETING_SITEMAP_PAGES, marketingSitemapVersion } from './marketing-sitemap.registry';
 
 interface DomainContext {
@@ -71,6 +72,16 @@ export class PublicSeoService {
     hostname =
       normalizeHostname(hostname) || DomainConfigService.getBaseDomain();
 
+    // El host propio de la API (api.vendix.online / api.vendix.com) no es un
+    // sitio: no se indexa (SEO-TECH-22). Solo llega aquí cuando la petición va
+    // dirigida a la API — `resolveTenantHostname` entrega el host de la API
+    // únicamente si no hay un `X-Forwarded-Host` de tenant —, así que marketing
+    // y tiendas no cambian. Va antes del caché para no servir un `Allow: /`
+    // viejo de `seo:robots:<api host>`.
+    if (API_HOSTS.has(hostname)) {
+      return 'User-agent: *\nDisallow: /\n';
+    }
+
     const cacheKey = `seo:robots:${hostname}`;
     const cached = await this.cache.get<string>(cacheKey);
     if (cached) return cached;
@@ -96,17 +107,37 @@ Sitemap: ${context.base_url}/sitemap.xml
         break;
 
       case 'STORE_ECOMMERCE':
+        // Listados, productos y categorías (`?category_ids=`, `?brand_ids=`) siguen
+        // rastreables. Se bloquean la búsqueda libre y los rangos de precio (espacio
+        // de URL infinito), los parámetros de orden y las páginas privadas o con
+        // token (pedido, factura, reserva, cuenta). `Allow: /cartas` es necesario
+        // porque `Disallow: /cart` también casa por prefijo con `/cartas`.
         content = `User-agent: *
 Allow: /
 Allow: /catalog
 Allow: /products
 Allow: /novedades
 Allow: /ofertas
+Allow: /cartas
 Disallow: /cart
 Disallow: /wishlist
 Disallow: /checkout
 Disallow: /account
 Disallow: /api/
+Disallow: /*?*search=
+Disallow: /*?*min_price=
+Disallow: /*?*max_price=
+Disallow: /*?*sort=
+Disallow: /*?*sort_by=
+Disallow: /*?*order_by=
+Disallow: /pedido/
+Disallow: /order/
+Disallow: /factura/
+Disallow: /preconsulta/
+Disallow: /book/
+Disallow: /hotel/reserva/
+Disallow: /fila
+Disallow: /reset-password
 
 Sitemap: ${context.base_url}/sitemap.xml
 `;
@@ -163,7 +194,7 @@ Disallow: /
     ];
 
     // Fetch active ecommerce products
-    const products = context.store_id
+    const store_products = context.store_id
       ? await this.globalPrisma.products.findMany({
           where: {
             store_id: context.store_id,
@@ -177,6 +208,16 @@ Disallow: /
           orderBy: { updated_at: 'desc' },
         })
       : [];
+
+    // Un slug vacío publicaría `/products/` (el listado) como producto, y uno con
+    // caracteres fuera de `isValidSlug` no es una URL limpia: se omiten del sitemap.
+    const products = store_products.filter((p) => isValidSlug(p.slug));
+    const skipped = store_products.length - products.length;
+    if (skipped > 0) {
+      this.logger.warn(
+        `Ecommerce sitemap: ${skipped} products of store ${context.store_id} skipped for empty/invalid slug`,
+      );
+    }
 
     // Los listados cambian cuando cambia un producto: su lastmod es el del producto
     // modificado más reciente. La hora de generación del sitemap no es una fecha de

@@ -30,9 +30,10 @@
             Vexi
             <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">IA</span>
           </button>
-          <button (click)="scrollToSection('precios-section')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
+          <!-- Enlace rastreable a /pricing (SEO-TECH-09): antes era un botón de scroll a #precios-section. -->
+          <a routerLink="/pricing" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
             Planes y Precios
-          </button>
+          </a>
           <button (click)="scrollToSection('faq')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
             FAQ
           </button>
@@ -75,9 +76,9 @@
           <span>Vexi IA Copilot</span>
           <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">NUEVO</span>
         </button>
-        <button (click)="scrollToSection('precios-section')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
+        <a routerLink="/pricing" (click)="closeMobileMenu()" class="block w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
           Planes y Precios
-        </button>
+        </a>
         <button (click)="scrollToSection('faq')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
           Preguntas Frecuentes (FAQ)
         </button>
@@ -1241,7 +1242,7 @@
             <div class="space-y-2 -mt-3">
               <div class="flex justify-between items-center text-xs sm:text-sm font-semibold">
                 <span id="roi-invoices-label" class="text-slate-800">¿Cuántas ventas o facturas emites al mes aprox?</span>
-                <span class="font-bold text-emerald-700 text-sm sm:text-base">{{ invoicesCount() | number:'1.0-0' }} ventas</span>
+                <span class="font-bold text-emerald-700 text-sm sm:text-base">{{ invoicesCount() | number: '1.0-0' : 'es-CO' }} ventas</span>
               </div>
               <input
                 [value]="invoicesCount()"
@@ -1257,7 +1258,7 @@
 
             <div class="text-xs text-slate-500 flex items-center gap-1.5">
               <app-icon name="info" [size]="14"></app-icon>
-              <span>Estimación con supuestos: POS tradicional ${{ roiAssumptions.legacyPosMonthlyPerStore | number:'1.0-0' }}/mes por tienda, folios DIAN a ${{ roiAssumptions.dianFolioCost | number:'1.0-0' }} c/u y plugin web ${{ roiAssumptions.webPluginMonthly | number:'1.0-0' }}/mes@if (roiVendixAnnualPrice(); as vendixPrice) {, frente a Empresarial Pro anual (${{ vendixPrice | number:'1.0-0' }}, según los planes vigentes)}. No es un ahorro garantizado.</span>
+              <span>Estimación con supuestos: POS tradicional ${{ roiAssumptions.legacyPosMonthlyPerStore | number: '1.0-0' : 'es-CO' }}/mes por tienda, folios DIAN a ${{ roiAssumptions.dianFolioCost | number: '1.0-0' : 'es-CO' }} c/u y plugin web ${{ roiAssumptions.webPluginMonthly | number: '1.0-0' : 'es-CO' }}/mes@if (roiVendixAnnualPrice(); as vendixPrice) {, frente a Empresarial Pro anual (${{ vendixPrice | number: '1.0-0' : 'es-CO' }}, según los planes vigentes)}. No es un ahorro garantizado.</span>
             </div>
           </div>
 
@@ -1267,7 +1268,7 @@
               <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Ahorro anual estimado directo</span>
               <div class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 mt-2 tracking-tight">
                 @if (annualSavings(); as savings) {
-                  $ {{ savings | number:'1.0-0' }} COP
+                  $ {{ savings | number: '1.0-0' : 'es-CO' }} COP
                 } @else if (annualSavings() === 0) {
                   $ 0 COP
                 } @else {
@@ -1449,7 +1450,7 @@
             </button>
             @if (openFaqId() === 3) {
               <div class="text-xs sm:text-sm text-slate-600 pt-3 mt-2 border-t border-slate-200/60 leading-relaxed animate-in fade-in duration-150">
-                Nosotros te guiamos paso a paso sin costo adicional. Solo necesitas tu RUT y usuario en el portal DIAN. Vendix te asocia como software propio o tecnológico y en menos de 24 horas quedas emitiendo facturas electrónicas válidas con su respectivo CUFE y código QR.
+                Te guiamos paso a paso en la habilitación ante la DIAN, sin costo adicional. Solo necesitas tu RUT y usuario en el portal DIAN. Vendix te asocia como software propio o tecnológico y, cuando la DIAN completa la habilitación, emites facturas electrónicas válidas con su respectivo CUFE y código QR. Los tiempos dependen de la DIAN.
               </div>
             }
           </div>

@@ -34,8 +34,6 @@ export class AppService {
       status: 'ok',
       service: 'Vendix API',
       version,
-      node: process.version,
-      uptime: Math.floor(process.uptime()),
       timestamp: new Date().toISOString(),
     };
   }

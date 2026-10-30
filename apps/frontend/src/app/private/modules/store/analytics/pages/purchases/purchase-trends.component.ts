@@ -382,6 +382,7 @@ export class PurchaseTrendsComponent implements OnInit, Refreshable {
       return presetLabels[range.preset];
     }
     if (range.start_date && range.end_date) {
+      if (range.start_date === range.end_date) return range.start_date;
       return `${range.start_date} - ${range.end_date}`;
     }
     return 'Personalizado';

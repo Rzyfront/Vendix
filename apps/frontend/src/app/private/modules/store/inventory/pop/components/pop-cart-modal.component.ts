@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   input,
   output,
   effect,
@@ -13,6 +14,12 @@ import { QuantityControlComponent } from '../../../../../../shared/components/qu
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { PopCartService, PopCartState, PopCartItem } from '../services/pop-cart.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import {
+  popLineAvailableStock,
+  popLineHasStockData,
+  resolvePopLowStockThreshold,
+} from '../utils/low-stock-threshold.util';
 
 @Component({
   selector: 'app-pop-cart-modal',
@@ -129,6 +136,18 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
                     <div class="item-meta">
                       @if (item.product.code) {
                         <span class="item-sku">{{ item.product.code }}</span>
+                      }
+                      <!-- QUI-861: actual vs mínimo para guiar la reposición. -->
+                      @if (hasLineStockData(item)) {
+                        <span
+                          class="item-stock"
+                          [class.item-stock-low]="isLineLowStock(item)"
+                        >
+                          Stock: {{ lineStock(item) }} / Mín: {{ lineLowStockThreshold(item) }}
+                          @if (isLineLowStock(item)) {
+                            <span>· Stock bajo</span>
+                          }
+                        </span>
                       }
                       <!-- Editable Unit Cost -->
                       <div class="cost-input">
@@ -578,6 +597,17 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
         font-family: monospace;
       }
 
+      /* QUI-861: actual vs mínimo en la línea. */
+      .item-stock {
+        font-size: 11px;
+        color: var(--color-text-secondary);
+      }
+
+      .item-stock-low {
+        color: var(--color-warning, #b45309);
+        font-weight: 600;
+      }
+
       /* Cost input (POP-specific - editable) */
       .cost-input {
         display: flex;
@@ -884,6 +914,38 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
 export class PopCartModalComponent {
   private currencyService = inject(CurrencyFormatService);
   private cartService = inject(PopCartService);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
+
+  /** Default de tienda para el mínimo (QUI-861). */
+  readonly lowStockStoreDefault = computed(() => {
+    const threshold = Number(
+      this.storeSettingsFacade.settings()?.inventory?.low_stock_threshold,
+    );
+    return Number.isFinite(threshold) && threshold >= 0 ? threshold : 10;
+  });
+
+  /** `false` si la línea no trae stock real (sin tracking o restaurada). */
+  hasLineStockData(item: PopCartItem): boolean {
+    return popLineHasStockData(item);
+  }
+
+  /** Stock actual de la línea (variante o base) para "actual / mínimo". */
+  lineStock(item: PopCartItem): number {
+    return popLineAvailableStock(item);
+  }
+
+  /** Umbral resuelto de la línea con la cascada QUI-861. */
+  lineLowStockThreshold(item: PopCartItem): number {
+    return resolvePopLowStockThreshold(
+      item.product,
+      this.lowStockStoreDefault(),
+    ).threshold;
+  }
+
+  /** `true` si el stock actual ya alcanzó o cayó bajo el mínimo. */
+  isLineLowStock(item: PopCartItem): boolean {
+    return this.lineStock(item) <= this.lineLowStockThreshold(item);
+  }
   readonly isOpen = input(false);
   readonly cartState = input<PopCartState | null>(null);
   readonly supplierName = input('');

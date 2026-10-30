@@ -80,6 +80,7 @@ const GRANULARITY_OPTIONS: { value: PaymentsGranularity; label: string }[] = [
 const DATE_PRESETS: readonly PaymentsDatePreset[] = [
   'today',
   'yesterday',
+  'day',
   'thisWeek',
   'lastWeek',
   'thisMonth',
@@ -121,15 +122,18 @@ export function defaultPaymentsFilterState(
 
 export function buildPaymentsFilterConfigs(
   methods: StorePaymentMethodOption[],
-  opts: { withGranularity: boolean },
+  opts: { withGranularity: boolean; withDateRange?: boolean },
 ): FilterConfig[] {
-  const configs: FilterConfig[] = [
-    {
+  const configs: FilterConfig[] = [];
+  if (opts.withDateRange !== false) {
+    configs.push({
       key: 'date_range',
       label: 'Período',
       type: 'date-range',
       showPresets: true,
-    },
+    });
+  }
+  configs.push(
     {
       key: 'state',
       label: 'Estado',
@@ -147,7 +151,7 @@ export function buildPaymentsFilterConfigs(
       placeholder: 'Todos los métodos',
       options: methods.map((m) => ({ value: String(m.id), label: m.label })),
     },
-  ];
+  );
   if (opts.withGranularity) {
     configs.push({
       key: 'granularity',
@@ -267,9 +271,10 @@ export function stateToQuery(
 
   if (preset) query.date_preset = preset;
   // El backend resuelve los presets en la TZ de la tienda; las fechas solo
-  // viajan con `custom` (o sin preset).
-  if (!preset || preset === 'custom') {
-    query.date_preset = 'custom';
+  // viajan con `custom`/`day` (o sin preset): un día específico solo existe
+  // como fechas explícitas — sin ellas el backend resolvería "hoy".
+  if (!preset || preset === 'custom' || preset === 'day') {
+    if (!preset || preset === 'custom') query.date_preset = 'custom';
     query.date_from = range.start_date;
     query.date_to = range.end_date;
   }

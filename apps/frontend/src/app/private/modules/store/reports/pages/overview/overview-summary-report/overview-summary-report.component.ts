@@ -10,12 +10,7 @@ import {
 
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
-import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import {
-  DropdownAction,
-  FilterConfig,
-  FilterValues,
-} from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { DateRangeFilterComponent } from '../../../../../../../shared/components/date-range-filter/date-range-filter.component';
 
 import {
   OverviewStatCardComponent,
@@ -73,9 +68,8 @@ const PLACEHOLDER_VALUE = '—';
  * Replaces the previous `<app-report-viewer>` shell with a custom layout
  * composed of:
  *
- *   1. A date-range filter exposed via `<app-options-dropdown>` (Fase B1
- *      migration — period used to live in a standalone `<vendix-date-range-filter>`
- *      and now travels inside the unified Filtros trigger).
+ *   1. A standalone `<vendix-date-range-filter>` (period visible outside,
+ *      preset + calendar side by side) projected in the catalog filters slot.
  *   2. A 4×2 grid of color-coded stat cards driven by `OverviewSummary`.
  *   3. The full reports catalog (chips + search + grouped grid).
  *
@@ -100,7 +94,7 @@ const PLACEHOLDER_VALUE = '—';
   imports: [
     OverviewStatCardComponent,
     ReportsCatalogComponent,
-    OptionsDropdownComponent,
+    DateRangeFilterComponent,
     IconComponent,
   ],
   styleUrls: ['./overview-summary-report.component.scss'],
@@ -125,17 +119,10 @@ const PLACEHOLDER_VALUE = '—';
         }
 
         <app-reports-catalog>
-          <app-options-dropdown
+          <vendix-date-range-filter
             slot="filters"
-            [filters]="filterConfigs()"
-            [filterValues]="dropdownFilterValues()"
-            [actions]="[]"
-            [showActions]="false"
-            triggerLabel="Filtros"
-            triggerIcon="filter"
-            [debounceMs]="350"
-            (filterChange)="onFiltersDropdownChange($event)"
-            (clearAllFilters)="onFiltersDropdownClearAll()"
+            [value]="dateRange() ?? undefined"
+            (valueChange)="onDateRangeChange($event)"
           />
         </app-reports-catalog>
 
@@ -175,56 +162,6 @@ export class OverviewSummaryReportComponent {
   );
 
   // ---------------------------------------------------------------------------
-  // Dropdown filter shape (`app-options-dropdown` integration)
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Filter shape consumed by `<app-options-dropdown>` for the "Filtros"
-   * trigger in the toolbar. The page has only the date-range filter; the
-   * action side stays empty because `overview-summary` does NOT expose
-   * an `exportEndpoint` in the report registry, so no XLSX action is
-   * declared.
-   *
-   * Mirrors the three-key decomposition done by `OptionsDropdownComponent`:
-   * the dropdown manages `date_range_start`/`date_range_end`/`date_range_preset`
-   * internally and we receive them all together on `(filterChange)`.
-   */
-  readonly filterConfigs = computed<FilterConfig[]>(() => [
-    {
-      key: 'date_range',
-      label: 'Período',
-      type: 'date-range',
-    },
-  ]);
-
-  /**
-   * Snapshot of the date-range filter that the dropdown displays.
-   * The parent owns the truth (`dateRange` signal); this computed just
-   * aplanates the three fields for the dropdown's flat `FilterValues` map.
-   *
-   * Returns an empty `FilterValues` when no range is set yet so the
-   * dropdown renders the preset default (Este Mes). The literal
-   * `as FilterValues` cast is needed because TS otherwise narrows the
-   * empty object to `{ k?: undefined }` which isn't assignable.
-   */
-  readonly dropdownFilterValues = computed<FilterValues>(() => {
-    const range = this.dateRange();
-    if (!range) return {} as FilterValues;
-    return {
-      date_range_start: range.start_date,
-      date_range_end: range.end_date,
-      date_range_preset: range.preset ?? null,
-    };
-  });
-
-  /**
-   * No actions for the overview summary — the report registry does not
-   * declare `exportEndpoint` for `overview-summary`. Returning `[]` keeps
-   * the action trigger hidden (`[showActions]="false"` in the template).
-   */
-  readonly dropdownActions = computed<DropdownAction[]>(() => []);
-
-  // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 
@@ -243,40 +180,14 @@ export class OverviewSummaryReportComponent {
   // ---------------------------------------------------------------------------
 
   /**
-   * `(filterChange)` from `<app-options-dropdown>`. The dropdown debounces
-   * three keys (`date_range_start/_end/_preset`); we recompose them into the
-   * `DateRangeFilter` that `ReportsDataService.fetchReportData` consumes.
-   *
-   * A partial range (start XOR end, both required) is ignored — the same
-   * guard the `ReportViewerComponent` uses, so the two surfaces stay
-   * consistent.
+   * `(valueChange)` from the standalone `<vendix-date-range-filter>`.
+   * The loading effect refetches on every `dateRange` change.
    */
-  onFiltersDropdownChange(values: FilterValues): void {
-    const start = values['date_range_start'];
-    const end = values['date_range_end'];
-    const preset = values['date_range_preset'];
-
-    if (typeof start !== 'string' || typeof end !== 'string' || !start || !end) {
+  onDateRangeChange(range: DateRangeFilter): void {
+    if (!range?.start_date || !range?.end_date) {
       return;
     }
-
-    this.dateRange.set({
-      start_date: start,
-      end_date: end,
-      preset: (typeof preset === 'string' && preset
-        ? preset
-        : 'custom') as DateRangeFilter['preset'],
-    });
-  }
-
-  /**
-   * `(clearAllFilters)` from `<app-options-dropdown>`. The page does not
-   * pin a default period the way the NgRx reports do, so we simply drop
-   * the range: the loading effect refetches with `dateRange === null`,
-   * which `ReportsDataService` interprets as "no range constraint".
-   */
-  onFiltersDropdownClearAll(): void {
-    this.dateRange.set(null);
+    this.dateRange.set(range);
   }
 
   // ---------------------------------------------------------------------------

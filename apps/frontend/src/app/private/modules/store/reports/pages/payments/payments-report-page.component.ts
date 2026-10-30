@@ -30,6 +30,8 @@ import type {
   HeaderPinConfig,
 } from '../../../../../../shared/components';
 import { PaginationComponent } from '../../../../../../shared/components/pagination/pagination.component';
+import { DateRangeFilterComponent } from '../../../../../../shared/components/date-range-filter/date-range-filter.component';
+import { DateRangeFilter } from '../../../../../../shared/interfaces/date-range-filter.interface';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { formatStoreDateTime, storeToday } from '../../../../../../shared/utils/date.util';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
@@ -104,6 +106,7 @@ interface PaymentViewRow {
   imports: [
     FormsModule,
     CardComponent,
+    DateRangeFilterComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     PaginationComponent,
@@ -152,7 +155,11 @@ export class PaymentsReportPageComponent {
   };
 
   readonly filterConfigs = computed<FilterConfig[]>(() =>
-    buildPaymentsFilterConfigs(this.methods(), { withGranularity: false }),
+    // Período fuera del dropdown como control suelto del header.
+    buildPaymentsFilterConfigs(this.methods(), {
+      withGranularity: false,
+      withDateRange: false,
+    }),
   );
 
   readonly dropdownActions = computed<DropdownAction[]>(() => [
@@ -423,6 +430,20 @@ export class PaymentsReportPageComponent {
   onFilterChange(values: FilterValues): void {
     this.pinned.set(values[PAYMENTS_PIN_FILTER_KEY] === 'true');
     this.applyState(filterValuesToState(values, this.state()));
+  }
+
+  /** Período del control suelto del header (fuera del dropdown). */
+  onDateRangeChange(range: DateRangeFilter): void {
+    if (!range?.start_date || !range?.end_date) return;
+    const cur = this.state().date_range;
+    if (
+      cur.start_date === range.start_date &&
+      cur.end_date === range.end_date &&
+      cur.preset === range.preset
+    ) {
+      return;
+    }
+    this.applyState({ ...this.state(), date_range: range });
   }
 
   onClearAll(): void {
