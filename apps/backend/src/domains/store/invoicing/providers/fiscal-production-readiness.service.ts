@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { certificateNitMatches } from '../dian-config/certificates/nit-match.util';
-import { resolveTestSetProof } from '../dian-config/test-set-wait.util';
+import {
+  resolveTestSetProof,
+  resolveTestSetWait,
+} from '../dian-config/test-set-wait.util';
 import { EncryptionService } from '@common/services/encryption.service';
 import { isHabilitacionResolution } from '@common/interfaces/fiscal-status.interface';
 import { resolveTenantFiscalIdentity } from '@common/helpers/fiscal-identity.helper';
@@ -719,6 +722,15 @@ export class FiscalProductionReadinessService {
     // fallando en abierto.
     const shared_cltec = config.shared_technical_key;
 
+    // Un lote que la DIAN YA rechazó no es una espera: la pelota está del lado del
+    // comerciante (corregir y reenviar). Rotularlo `blocked_by: 'dian'` lo
+    // mostraba como «Esperando a la DIAN … no hay nada que reenviar», que es falso.
+    // Solo aplica si el set NO está aprobado (la prueba durable manda) y el lote es
+    // un veredicto terminal; `pending`, sin lote o descartado conservan la espera.
+    const testSetPassed = this.hasPassedTestSetForConfig(config);
+    const testSetWait = testSetPassed ? null : resolveTestSetWait(config);
+    const testSetRejected = testSetWait?.state === 'rejected';
+
     const checks: ProductionReadinessCheck[] = [
       {
         key: 'operation_mode',
@@ -736,10 +748,12 @@ export class FiscalProductionReadinessService {
         // Sobre la prueba DURABLE, no sobre el último lote: un reenvío posterior
         // sobrescribe `last_test_result` y borraría un hecho ya ocurrido. Ver
         // `resolveTestSetProof`.
-        satisfied: this.hasPassedTestSetForConfig(config),
-        action: 'Ejecuta el set de pruebas y espera el visto bueno de la DIAN.',
+        satisfied: testSetPassed,
+        action: testSetRejected
+          ? `La DIAN rechazó el último set de pruebas: ${testSetWait?.reason}. Corrige el problema y vuelve a ejecutarlo.`
+          : 'Ejecuta el set de pruebas y espera el visto bueno de la DIAN.',
         owner: 'tenant',
-        blocked_by: 'dian',
+        ...(testSetRejected ? {} : { blocked_by: 'dian' as const }),
       },
       {
         key: 'enablement_evidence',
@@ -751,7 +765,8 @@ export class FiscalProductionReadinessService {
         action:
           'Se guarda automáticamente cuando la DIAN aprueba el set de pruebas.',
         owner: 'tenant',
-        blocked_by: 'dian',
+        // Con el set rechazado tampoco es una espera: depende de reenviarlo.
+        ...(testSetRejected ? {} : { blocked_by: 'dian' as const }),
       },
       {
         key: 'enablement_status',

@@ -139,6 +139,76 @@ describe('FiscalProductionReadinessService', () => {
     expect(report.missing).not.toContain('test_set_evidence');
   });
 
+  describe('set de pruebas rechazado vs. en espera de la DIAN', () => {
+    const MSG =
+      'Set de prueba con identificador 00000000-test-set no se encuentra registrado para realizar proceso de habilitación.';
+    const batch = (extra: Record<string, unknown>) => ({
+      zip_key: 'zip-1',
+      executed_at: new Date().toISOString(),
+      ...extra,
+    });
+    const testing = (last_test_result: unknown, overrides: any = {}) =>
+      readyConfig({
+        enablement_status: 'testing',
+        enablement_evidence: null,
+        last_test_result,
+        ...overrides,
+      });
+    const checkOf = (config: any, key: string) =>
+      createService()
+        .service.evaluateProductionReadiness(config)
+        .checks.find((c) => c.key === key);
+
+    it('un lote rechazado y no pendiente es acción del comerciante con el mensaje de la DIAN', () => {
+      const config = testing(
+        batch({
+          rejected: true,
+          pending: false,
+          dian_response: { success: false, status_message: MSG },
+        }),
+      );
+      const check = checkOf(config, 'test_set_evidence');
+      expect(check?.satisfied).toBe(false);
+      expect(check?.blocked_by).toBeUndefined();
+      expect(check?.owner).toBe('tenant');
+      expect(check?.action).toContain(MSG);
+      expect(check?.action).toContain('rechazó');
+      const evidence = checkOf(config, 'enablement_evidence');
+      expect(evidence?.blocked_by).toBeUndefined();
+    });
+
+    it('un lote pendiente conserva «esperando a la DIAN» tal cual', () => {
+      const config = testing(batch({ pending: true }));
+      const check = checkOf(config, 'test_set_evidence');
+      expect(check?.satisfied).toBe(false);
+      expect(check?.blocked_by).toBe('dian');
+      expect(check?.action).toBe(
+        'Ejecuta el set de pruebas y espera el visto bueno de la DIAN.',
+      );
+      expect(checkOf(config, 'enablement_evidence')?.blocked_by).toBe('dian');
+    });
+
+    it('sin lote conserva «esperando a la DIAN» tal cual', () => {
+      const check = checkOf(testing(null), 'test_set_evidence');
+      expect(check?.blocked_by).toBe('dian');
+    });
+
+    it('la prueba durable aprobada sigue satisfecha aunque el último lote fuera rechazado', () => {
+      const config = readyConfig({
+        enablement_status: 'enabled',
+        enablement_evidence: { success: true, dian_response: { success: true } },
+        last_test_result: batch({
+          rejected: true,
+          pending: false,
+          dian_response: { success: false, status_message: MSG },
+        }),
+      });
+      const check = checkOf(config, 'test_set_evidence');
+      expect(check?.satisfied).toBe(true);
+      expect(check?.action).not.toContain('rechazó');
+    });
+  });
+
   it('blocks production when enablement evidence or secrets are missing', () => {
     const { service } = createService();
     delete process.env.DIAN_ENCRYPTION_KEY;
