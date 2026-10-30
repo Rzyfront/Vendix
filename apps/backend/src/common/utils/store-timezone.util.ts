@@ -77,7 +77,7 @@ export function assertSafeTimezone(tz?: string | null): string {
  * the settings read/UI serve column-first) is authoritative over the
  * `store_settings.settings.general.timezone` JSON mirror.
  */
-function resolveTimezoneCascade(
+export function resolveTimezoneCascade(
   ...candidates: Array<string | null | undefined>
 ): string {
   for (const candidate of candidates) {

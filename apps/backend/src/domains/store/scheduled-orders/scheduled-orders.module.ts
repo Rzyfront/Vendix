@@ -11,6 +11,9 @@ import { EcommerceScheduledOrdersController } from './ecommerce-scheduled-orders
 import { ScheduledOrderProductionService } from './scheduled-order-production.service';
 import { InventoryModule } from '../inventory/inventory.module';
 import { RecipesModule } from '../recipes/recipes.module';
+import { EmailModule } from '../../../email/email.module';
+import { ScheduledOrderRemindersJob } from './jobs/scheduled-order-reminders.job';
+import { ScheduledOrderReminderEmailListener } from './listeners/reminder-email.listener';
 
 /**
  * Pedidos programados (venta por encargo): agenda de cumplimiento,
@@ -20,7 +23,8 @@ import { RecipesModule } from '../recipes/recipes.module';
 @Module({
   // Inventario y recetas para el consumo al iniciar producción (S4). Sin
   // ciclo: ninguno de los dos importa pagos, checkout ni este módulo.
-  imports: [ResponseModule, PrismaModule, InventoryModule, RecipesModule],
+  // EmailModule: recordatorio al cliente por email (S5).
+  imports: [ResponseModule, PrismaModule, InventoryModule, RecipesModule, EmailModule],
   // Orden importa: las rutas fijas (availability, exceptions, agenda) antes de `:id`.
   controllers: [
     FulfillmentExceptionsController,
@@ -33,6 +37,8 @@ import { RecipesModule } from '../recipes/recipes.module';
     ScheduledOrdersService,
     ScheduledOrderCancelledListener,
     ScheduledOrderProductionService,
+    ScheduledOrderRemindersJob,
+    ScheduledOrderReminderEmailListener,
   ],
   exports: [FulfillmentAvailabilityService, ScheduledOrdersService],
 })
