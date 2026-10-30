@@ -103,6 +103,25 @@ export function storeIsRestaurant(
 }
 
 /**
+ * Industrias con estaciones de servicio (bahías, sillas, mesas de reparación):
+ * espejo del frontend, donde `orders_service_stations` solo queda visible si la
+ * tienda incluye `service`.
+ */
+export const INDUSTRIES_SUPPORTING_SERVICE_STATIONS: industry_enum[] = ['service'];
+
+/** OR: una tienda multi-industria que incluye `service` puede usar estaciones. */
+export function storeSupportsServiceStations(
+  industries: industry_enum[] | string[] | null | undefined,
+): boolean {
+  if (!industries || industries.length === 0) {
+    return false;
+  }
+  return industries.some((industry) =>
+    (INDUSTRIES_SUPPORTING_SERVICE_STATIONS as readonly string[]).includes(industry as string),
+  );
+}
+
+/**
  * List of `industry_enum` values that support the lodging flow (rooms,
  * reservations, front desk, folio). Mirrors the frontend
  * `INDUSTRY_HIDDEN_MODULES` rule for the `hospitality` module keys in

@@ -49,6 +49,7 @@ export interface EcommerceCheckoutSettings {
 export interface BookingSelection {
   product_id: number;
   product_variant_id?: number;
+  station_id?: number;
   date: string;
   start_time: string;
   end_time: string;

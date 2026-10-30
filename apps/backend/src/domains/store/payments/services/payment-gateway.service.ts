@@ -21,6 +21,7 @@ import { BasePaymentProcessor } from '../interfaces/base-processor.interface';
 import { ErrorCodes, VendixHttpException, findErrorCodeEntry } from 'src/common/errors';
 import { OrderHistoryService } from '../../orders/order-history/order-history.service';
 import { lockOrderLifecycle } from '../../orders/order-flow/order-lifecycle-lock.util';
+import { serviceBudgetBlocks, serviceOrderTxOptions } from '../../orders/utils/service-budget-cap.util';
 import { ProcessReservedPosPaymentDto } from '../dto/create-payment.dto';
 
 @Injectable()
@@ -715,21 +716,94 @@ export class PaymentGatewayService {
     paymentData: PaymentData,
     processorType: string,
   ) {
-    return await this.prisma.payments.create({
-      data: {
-        order_id: paymentData.orderId,
-        customer_id: paymentData.customerId,
-        store_payment_method_id: paymentData.storePaymentMethodId,
-        // QUI-728 — cuenta bancaria de destino (bank_transfer). Nullable para
-        // no romper los métodos sin cuenta (cash, card, wompi, wallet).
-        bank_account_id: paymentData.bankAccountId ?? null,
-        amount: paymentData.amount,
-        currency: paymentData.currency,
-        state: 'pending',
-        transaction_id: `${processorType}_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
-        gateway_response: paymentData.metadata,
-      },
-    });
+    let serviceSessionId: number | null | undefined;
+    try {
+      // Serializable only for service-station orders: minimal pre-read.
+      const preOrder = await this.prisma.orders.findFirst({
+        where: { id: paymentData.orderId, store_id: paymentData.storeId },
+        select: { service_session_id: true },
+      });
+      serviceSessionId = preOrder?.service_session_id ?? null;
+      const txOptions = serviceOrderTxOptions(serviceSessionId);
+      return await this.prisma.$transaction(async (tx) => {
+        await lockOrderLifecycle(tx, paymentData.orderId, paymentData.storeId);
+        const order = await tx.orders.findFirst({
+          where: { id: paymentData.orderId, store_id: paymentData.storeId },
+          select: {
+            service_session_id: true,
+            currency: true,
+            grand_total: true,
+            tip_amount: true,
+          },
+        });
+        if (!order) throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+        serviceSessionId = order.service_session_id;
+        if (serviceSessionId != null) {
+          const budget = await tx.service_budgets.findFirst({
+            where: {
+              store_id: paymentData.storeId,
+              session_id: serviceSessionId,
+            },
+            orderBy: { version: 'desc' },
+            select: { amount: true, currency: true, is_system: true },
+          });
+          // A service-session payment requires its initialized budget and
+          // must still agree immediately before a pending provider payment is recorded.
+          const authorizedTotal = new Prisma.Decimal(order.grand_total).minus(
+            order.tip_amount ?? 0,
+          );
+          if (serviceBudgetBlocks(budget, order.currency, authorizedTotal)) {
+            throw new VendixHttpException(
+              ErrorCodes.SERVICE_BUDGET_001,
+              'No se puede iniciar el pago: el total de la orden no coincide con el presupuesto vigente.',
+              {
+                order_id: paymentData.orderId,
+                service_session_id: serviceSessionId,
+              },
+            );
+          }
+        }
+
+        return tx.payments.create({
+          data: {
+            order_id: paymentData.orderId,
+            customer_id: paymentData.customerId,
+            store_payment_method_id: paymentData.storePaymentMethodId,
+            // QUI-728 — cuenta bancaria de destino (bank_transfer). Nullable para
+            // no romper los métodos sin cuenta (cash, card, wompi, wallet).
+            bank_account_id: paymentData.bankAccountId ?? null,
+            amount: paymentData.amount,
+            currency: paymentData.currency,
+            state: 'pending',
+            transaction_id: `${processorType}_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+            gateway_response: paymentData.metadata,
+          },
+        });
+      }, txOptions);
+    } catch (error) {
+      if ((error as { code?: string })?.code === 'P2034') {
+        if (serviceSessionId === undefined) {
+          const order = await this.prisma.orders.findFirst({
+            where: { id: paymentData.orderId, store_id: paymentData.storeId },
+            select: { service_session_id: true },
+          });
+          serviceSessionId = order?.service_session_id ?? null;
+        }
+        if (serviceSessionId == null) {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_CONFLICT_001,
+            'La orden o el pago cambió durante el inicio del pago. Recarga e inténtalo nuevamente.',
+            { order_id: paymentData.orderId },
+          );
+        }
+        throw new VendixHttpException(
+          ErrorCodes.SERVICE_BUDGET_002,
+          'La orden o su presupuesto cambió durante el inicio del pago. Recarga e inténtalo nuevamente.',
+          { order_id: paymentData.orderId },
+        );
+      }
+      throw error;
+    }
   }
 
   private async updatePaymentRecord(paymentId: number, result: PaymentResult) {

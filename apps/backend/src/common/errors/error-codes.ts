@@ -5294,6 +5294,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Cannot delete template with existing submissions',
   },
+  DCOL_PRODUCT_001: {
+    code: 'DCOL_PRODUCT_001',
+    httpStatus: 400,
+    devMessage: 'Product not found in this store or is not a service',
+  },
 
   // Customer History
   CUST_HISTORY_001: {
@@ -5310,6 +5315,128 @@ export const ErrorCodes = {
     code: 'CUST_HISTORY_003',
     httpStatus: 404,
     devMessage: 'Note not found',
+  },
+
+  // Service station reservation allocation (CP estaciones / B.2)
+  STATION_001: {
+    code: 'STATION_001',
+    httpStatus: 400,
+    devMessage: 'Service, provider, and station are not compatible',
+  },
+  STATION_002: {
+    code: 'STATION_002',
+    httpStatus: 409,
+    devMessage: 'The station interval is already allocated',
+  },
+  STATION_003: {
+    code: 'STATION_003',
+    httpStatus: 409,
+    devMessage: 'The provider interval is already allocated',
+  },
+  STATION_005: {
+    code: 'STATION_005',
+    httpStatus: 409,
+    devMessage: 'An active service session already exists for this station',
+  },
+  STATION_006: {
+    code: 'STATION_006',
+    httpStatus: 409,
+    devMessage: 'The service session lifecycle transition is invalid or stale',
+  },
+  STATION_007: {
+    code: 'STATION_007',
+    httpStatus: 422,
+    devMessage: 'Required customer or service subject information is missing',
+  },
+  STATION_004: {
+    code: 'STATION_004',
+    httpStatus: 404,
+    devMessage: 'Service station not found in this store',
+  },
+  STATION_008: {
+    code: 'STATION_008',
+    httpStatus: 409,
+    devMessage: 'A PostgreSQL allocation exclusion constraint was violated',
+  },
+  STATION_009: {
+    code: 'STATION_009',
+    httpStatus: 400,
+    devMessage: 'The service allocation interval is invalid or in the past',
+  },
+  STATION_011: {
+    code: 'STATION_011',
+    httpStatus: 409,
+    devMessage: 'The service booking hold has expired',
+  },
+  STATION_012: {
+    code: 'STATION_012',
+    httpStatus: 400,
+    devMessage: 'A station is required for this service',
+  },
+  STATION_INDUSTRY_001: {
+    code: 'STATION_INDUSTRY_001',
+    httpStatus: 403,
+    devMessage: 'Store industry does not support service stations (service required)',
+  },
+  STATION_013: {
+    code: 'STATION_013',
+    httpStatus: 400,
+    devMessage: 'Service session intake values include fields outside the linked data collection template',
+  },
+  STATION_014: {
+    code: 'STATION_014',
+    httpStatus: 404,
+    devMessage: 'No active store domain to build the station public URL',
+  },
+  SERVICE_BOOKING_001: {
+    code: 'SERVICE_BOOKING_001',
+    httpStatus: 409,
+    devMessage: 'A required service booking could not be allocated during checkout',
+  },
+  SERVICE_BUDGET_001: {
+    code: 'SERVICE_BUDGET_001',
+    httpStatus: 409,
+    devMessage: 'The service order total exceeds its current approved customer budget',
+  },
+  SERVICE_BUDGET_002: {
+    code: 'SERVICE_BUDGET_002',
+    httpStatus: 409,
+    devMessage: 'The service proposal or its order/budget snapshot is stale',
+  },
+  SERVICE_BUDGET_003: {
+    code: 'SERVICE_BUDGET_003',
+    httpStatus: 410,
+    devMessage: 'The service proposal approval link is expired or revoked',
+  },
+  SERVICE_BUDGET_004: {
+    code: 'SERVICE_BUDGET_004',
+    httpStatus: 403,
+    devMessage: 'The service proposal approval proof is invalid',
+  },
+  STATION_010: {
+    code: 'STATION_010',
+    httpStatus: 403,
+    devMessage: 'Missing staff permission for service station action',
+  },
+  SERVICE_QR_001: {
+    code: 'SERVICE_QR_001',
+    httpStatus: 410,
+    devMessage: 'The service session access link is invalid or expired',
+  },
+  SERVICE_CONTACT_001: {
+    code: 'SERVICE_CONTACT_001',
+    httpStatus: 422,
+    devMessage: 'No usable contact channel available for the service customer',
+  },
+  SERVICE_CONTACT_002: {
+    code: 'SERVICE_CONTACT_002',
+    httpStatus: 503,
+    devMessage: 'Service session notification delivery failed',
+  },
+  SERVICE_QR_002: {
+    code: 'SERVICE_QR_002',
+    httpStatus: 429,
+    devMessage: 'Too many concurrent progress connections on service session',
   },
 
   // Booking Confirmation

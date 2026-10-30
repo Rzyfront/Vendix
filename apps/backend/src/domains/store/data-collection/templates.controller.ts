@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Put,
   Delete,
   Param,
   Body,
@@ -10,9 +11,11 @@ import {
   ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
+import { ServiceIndustryGuard } from '../../../common/guards/service-industry.guard';
 import { TemplatesService } from './templates.service';
 import { CreateTemplateDto } from './dto/create-template.dto';
 import { UpdateTemplateDto } from './dto/update-template.dto';
+import { SetProductTemplateDto } from './dto/set-product-template.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
@@ -30,6 +33,33 @@ export class TemplatesController {
   async findAll(@Query('status') status?: string) {
     const result = await this.service.findAll(status);
     return this.responseService.success(result);
+  }
+
+  @Get('product/:productId')
+  @UseGuards(ServiceIndustryGuard)
+  @Permissions('store:products:read')
+  async getProductTemplate(
+    @Param('productId', ParseIntPipe) productId: number,
+  ) {
+    const result = await this.service.getProductTemplateLink(productId);
+    return this.responseService.success(result);
+  }
+
+  @Put('product/:productId')
+  @UseGuards(ServiceIndustryGuard)
+  @Permissions('store:products:update')
+  async setProductTemplate(
+    @Param('productId', ParseIntPipe) productId: number,
+    @Body() dto: SetProductTemplateDto,
+  ) {
+    const result = await this.service.setProductTemplateLink(
+      productId,
+      dto.template_id ?? null,
+    );
+    return this.responseService.success(
+      result,
+      'Plantilla del servicio actualizada correctamente',
+    );
   }
 
   @Get(':id')

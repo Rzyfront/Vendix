@@ -45,6 +45,11 @@ export class UpdateOrderEditorItemBookingDto {
   @IsOptional()
   @IsInt()
   @Min(1)
+  station_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
   provider_id?: number | null;
 
   /** ISO date YYYY-MM-DD. Required for new bookings. */

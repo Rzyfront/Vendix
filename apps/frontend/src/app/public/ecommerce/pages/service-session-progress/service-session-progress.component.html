@@ -1,0 +1,125 @@
+<main class="progress-page" aria-labelledby="page-title">
+  <header class="page-header">
+    <p class="eyebrow">Seguimiento de tu servicio</p>
+    <h1 id="page-title">Estado de atención</h1>
+    <div class="connection" aria-live="polite">
+      <span class="connection-dot" [class.online]="connected()"></span>
+      <span>{{ finished() ? 'Servicio finalizado' : connected() ? 'Actualización en vivo' : 'Última información recibida' }}</span>
+      <app-button variant="ghost" size="xsm" [disabled]="refreshing()" (clicked)="refresh()">
+        <app-icon name="refresh-cw" [size]="12" slot="icon" />
+        Actualizar
+      </app-button>
+    </div>
+  </header>
+
+  @if (state() === 'loading') {
+    <section class="notice" role="status">Cargando el estado de tu servicio…</section>
+  } @else if (state() === 'unavailable') {
+    <section class="notice notice-error" role="alert">
+      <h2>Este enlace ya no está disponible</h2>
+      <p>Puede haber vencido o haber sido desactivado. Solicita al establecimiento un enlace actualizado.</p>
+    </section>
+  } @else if (state() === 'error') {
+    <section class="notice notice-error" role="alert">
+      <h2>No pudimos cargar el seguimiento</h2>
+      <p>Revisa tu conexión e intenta actualizar la información.</p>
+      <app-button variant="secondary" size="sm" (clicked)="refresh()">
+        Intentar de nuevo
+      </app-button>
+    </section>
+  } @else {
+    @if (staleNotice(); as notice) {
+      <p class="notice notice-error" role="status">{{ notice }}</p>
+    }
+    <app-guest-order-summary [embedded]="true" [summaryInput]="orderSummary()" [physicalProgressAllowed]="false">
+      <app-service-session-details
+        data-slot="after-products"
+        [data]="serviceDetails()"
+        [finished]="finished()"
+      />
+    @if (progress()?.proposal; as proposal) {
+      <section data-slot="after-products" class="proposal-card" aria-labelledby="proposal-title">
+        <div class="proposal-heading">
+          <div>
+            <p class="eyebrow">Autorización</p>
+            <h2 id="proposal-title">Propuesta de trabajo adicional</h2>
+          </div>
+          <span class="proposal-state">{{ proposalStatusLabel(proposal.status) }}</span>
+        </div>
+        <p class="proposal-intro">
+          Revisa el detalle y el total antes de responder. Tu respuesta se registra para esta versión de la propuesta.
+        </p>
+        @if (proposalLines().length) {
+          <ul class="line-list">
+            @for (line of proposalLines(); track $index) {
+              <li>
+                <span>{{ line['name'] || line['description'] || 'Servicio adicional' }} <small>× {{ line['quantity'] || 1 }}</small></span>
+                <strong>{{ money(line['total'] ?? line['unit_price'], proposal.currency) }}</strong>
+              </li>
+            }
+          </ul>
+        }
+        <dl class="totals">
+          <div><dt>Subtotal</dt><dd>{{ money(proposal.subtotal, proposal.currency) }}</dd></div>
+          <div><dt>Impuestos</dt><dd>{{ money(proposal.tax, proposal.currency) }}</dd></div>
+          <div><dt>Descuentos</dt><dd>−{{ money(proposal.discount, proposal.currency) }}</dd></div>
+          <div class="grand-total"><dt>Total propuesto</dt><dd>{{ money(proposal.total, proposal.currency) }}</dd></div>
+        </dl>
+        <p class="expires">Válida hasta {{ dateTime(proposal.expires_at) }}</p>
+        @if (proposal.status === 'pending') {
+          <div class="decision-actions flex flex-wrap gap-2 pt-2">
+            <app-button variant="primary" (clicked)="askDecision('approved')">
+              Aprobar {{ money(proposal.total, proposal.currency) }}
+            </app-button>
+            <app-button variant="outline-danger" (clicked)="askDecision('rejected')">
+              Rechazar propuesta
+            </app-button>
+          </div>
+        }
+      </section>
+    }
+
+    @if (decisionMessage()) {
+      <p data-slot="after-products" class="notice notice-success" role="status">{{ decisionMessage() }}</p>
+    }
+
+    @if (decisionPrompt(); as decision) {
+      <section data-slot="after-products" class="confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h2 id="confirm-title">
+          {{ decision === 'approved' ? '¿Confirmas esta aprobación?' : '¿Confirmas que rechazas esta propuesta?' }}
+        </h2>
+        @if (decision === 'approved' && progress()?.proposal; as proposal) {
+          <p>Autorizas el total adicional de <strong>{{ money(proposal.total, proposal.currency) }}</strong>.</p>
+        }
+        <div class="decision-actions flex flex-wrap gap-2 pt-2">
+          <app-button variant="primary" [loading]="busy()" (clicked)="decide()">
+            Confirmar decisión
+          </app-button>
+          <app-button variant="secondary" [disabled]="busy()" (clicked)="cancelDecision()">
+            Volver
+          </app-button>
+        </div>
+      </section>
+    }
+
+    <section data-slot="after-products" class="timeline" aria-labelledby="timeline-title">
+      <h2 id="timeline-title">Actualizaciones</h2>
+      @if (progress()?.events?.length) {
+        <ol>
+          @for (event of progress()?.events; track event.created_at + event.type) {
+            <li>
+              <span class="timeline-dot" aria-hidden="true"></span>
+              <div>
+                <p>{{ event.text }}</p>
+                <time>{{ dateTime(event.created_at) }}</time>
+              </div>
+            </li>
+          }
+        </ol>
+      } @else {
+        <p>Aún no hay actualizaciones.</p>
+      }
+    </section>
+    </app-guest-order-summary>
+  }
+</main>

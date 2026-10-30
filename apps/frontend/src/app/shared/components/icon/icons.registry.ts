@@ -336,6 +336,9 @@ import {
   // local" uses a two-wheeler icon; Lucide has no dedicated
   // motorcycle/scooter glyph, so Bike is used as the closest available fallback).
   Bike,
+  Car,
+  Scissors,
+  QrCode,
   // Vexi dock icons. The sidebar toggle needs BOTH glyphs, not one rotated:
   // the arrow inside the panel is what tells the user which way the click
   // goes, and a CSS flip would point it the wrong way half the time.
@@ -786,6 +789,10 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Shipping method icons (POS checkout mobile redesign)
   'bike': Bike,
+  car: Car,
+  scissors: Scissors,
+  'qr-code': QrCode,
+  'qrcode': QrCode,
 
   // Vexi dock: conversation sidebar toggle + new conversation.
   'panel-left-open': PanelLeftOpen,

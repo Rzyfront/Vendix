@@ -690,6 +690,11 @@ export class StoreAdminLayoutComponent {
           icon: 'calendar-clock',
           route: '/admin/reservations',
         },
+        {
+          label: 'Estaciones de Servicio',
+          icon: 'warehouse',
+          route: '/admin/services/stations',
+        },
       ],
     },
     {

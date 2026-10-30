@@ -16,6 +16,7 @@ import {
 import { ToastService } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
 import { AvailabilitySlot, Booking, CreateBookingDto } from '../../interfaces/reservation.interface';
+import { ServiceStationsService, ServiceStation } from '../service-stations/service-stations.service';
 import { CalendarDayViewComponent, FreeSlot } from '../calendar/calendar-day-view/calendar-day-view.component';
 import { environment } from '../../../../../../../environments/environment';
 import { debounceTime, Subject, switchMap, of, forkJoin, finalize, map, catchError } from 'rxjs';
@@ -43,6 +44,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 export class ReservationFormModalComponent {
   private http = inject(HttpClient);
   private reservationsService = inject(ReservationsService);
+  private serviceStationsService = inject(ServiceStationsService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
 
@@ -66,6 +68,9 @@ export class ReservationFormModalComponent {
   serviceSearch = signal('');
   selectedService = signal<any>(null);
   loadingServices = signal(false);
+  stations = signal<ServiceStation[]>([]);
+  selectedStation = signal<ServiceStation | null>(null);
+  loadingStations = signal(false);
 
   // Date & Channel
   selectedDate = signal('');
@@ -140,6 +145,33 @@ export class ReservationFormModalComponent {
     if (!query) return all.slice(0, 5);
     return all.filter(s => s.name?.toLowerCase().includes(query));
   });
+
+  readonly requiresStation = computed(() => this.selectedService()?.requires_station === true);
+  readonly compatibleStations = computed(() => {
+    const serviceId = this.selectedService()?.id;
+    const providerId = this.selectedProvider()?.id;
+    return this.stations().filter((station) =>
+      station.status === 'active' &&
+      station.services?.some((entry) => entry.product_id === serviceId) &&
+      (!providerId || station.providers?.some((entry) => entry.provider_id === providerId)),
+    );
+  });
+  /**
+   * Servicio que se presta en estación: solo los proveedores asignados a alguna
+   * estación activa que ofrece ese servicio (Configurar estación → Proveedores).
+   */
+  readonly visibleProviders = computed(() => {
+    const all = this.providers();
+    if (!this.requiresStation()) return all;
+    const serviceId = this.selectedService()?.id;
+    const allowed = new Set(
+      this.stations()
+        .filter((station) => station.status === 'active' && station.services?.some((entry) => entry.product_id === serviceId))
+        .flatMap((station) => station.providers?.map((entry) => entry.provider_id) ?? []),
+    );
+    return all.filter((provider) => allowed.has(provider.id));
+  });
+  readonly stationOptions = computed(() => this.compatibleStations().map((station) => ({ value: station.id, label: station.name })));
 
   readonly hasMoreServices = computed(() => {
     return !this.serviceSearch() && this.services().length > 5;
@@ -421,10 +453,13 @@ export class ReservationFormModalComponent {
     // and avoids Date-parsing timezone surprises.
     if (step === 0) {
       if (!this.selectedService() || !this.selectedDate()) return false;
+      if (this.requiresStation() && !this.selectedStation()) return false;
       return this.selectedDate() >= this.todayString;
     }
     // Provider step (only in provider mode)
-    if (step === this.providerStep()) return true; // "any" is valid
+    if (step === this.providerStep()) {
+      return !this.requiresStation() || !!this.selectedStation();
+    }
     // Slot step
     if (step === this.slotStep()) return !!this.startTime() && !!this.endTime();
     // Customer step
@@ -460,6 +495,9 @@ export class ReservationFormModalComponent {
     this.services.set([]);
     this.serviceSearch.set('');
     this.selectedService.set(null);
+    this.stations.set([]);
+    this.selectedStation.set(null);
+    this.loadingStations.set(false);
     this.selectedDate.set('');
     this.selectedChannel.set('pos');
     this.providers.set([]);
@@ -481,6 +519,7 @@ export class ReservationFormModalComponent {
       const product = this.initialProduct();
       this.selectedService.set(product);
       this.isFreeBooking.set(product.booking_mode === 'free_booking');
+      if (product.requires_station) this.loadStations();
       // Auto-set today's date para el flujo desde POS
       const today = new Date();
       const yyyy = today.getFullYear();
@@ -522,6 +561,27 @@ export class ReservationFormModalComponent {
   selectService(service: any): void {
     this.selectedService.set(service);
     this.isFreeBooking.set(service.booking_mode === 'free_booking');
+    this.selectedStation.set(null);
+    this.stations.set([]);
+    if (service.requires_station) this.loadStations();
+  }
+
+  private loadStations(): void {
+    this.loadingStations.set(true);
+    this.serviceStationsService.list(1, 100).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (result) => this.stations.set(result?.data ?? []),
+      error: () => this.stations.set([]),
+    }).add(() => this.loadingStations.set(false));
+  }
+
+  selectStation(stationId: number | string | null): void {
+    const station = this.compatibleStations().find((item) => item.id === Number(stationId)) ?? null;
+    this.selectedStation.set(station);
+    this.availableSlots.set([]);
+    this.freeSlotsByDate.set({});
+    this.selectedSlot.set(null);
+    this.startTime.set('');
+    this.endTime.set('');
   }
 
   nextStep(): void {
@@ -739,6 +799,9 @@ export class ReservationFormModalComponent {
 
   selectProvider(provider: any | null): void {
     this.selectedProvider.set(provider);
+    if (this.selectedStation() && !this.compatibleStations().some((station) => station.id === this.selectedStation()?.id)) {
+      this.selectStation(null);
+    }
     // Load provider schedule for time validation
     if (provider?.id) {
       this.reservationsService.getProviderSchedule(provider.id).subscribe({
@@ -768,11 +831,18 @@ export class ReservationFormModalComponent {
     // spinner reliably (success OR failure) without the brittle `setTimeout`.
     // Both observables are scoped to the component's DestroyRef so they
     // auto-unsubscribe if the modal closes mid-request.
+    const availability = this.requiresStation()
+      ? this.serviceStationsService.getAvailability(productId, date, date, providerId, variantId, this.selectedStation()?.id)
+      : this.reservationsService.getAvailability(productId, date, date, providerId, variantId);
+
     forkJoin({
-      availability: this.reservationsService.getAvailability(
-        productId, date, date, providerId, variantId,
-      ),
-      calendar: this.reservationsService.getCalendar(date, date, productId),
+      availability,
+      // The legacy calendar is product-wide and would paint bookings from
+      // other stations as busy. Station availability already returns the
+      // correct free slots, so omit that overlay for station-bound services.
+      calendar: this.requiresStation()
+        ? of({} as Record<string, Booking[]>)
+        : this.reservationsService.getCalendar(date, date, productId),
     })
       .pipe(
         takeUntilDestroyed(this.destroyRef),
@@ -1022,6 +1092,7 @@ export class ReservationFormModalComponent {
       channel: this.selectedChannel(),
       notes: this.notes() || undefined,
       provider_id: this.selectedProvider()?.id || undefined,
+      station_id: this.requiresStation() ? this.selectedStation()?.id : undefined,
       skip_availability_check: this.skipAvailabilityCheck() || undefined,
     };
 

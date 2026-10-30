@@ -29,7 +29,9 @@ import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 import { canReassignOrderToTable } from '../orders/shared/order-table-reassignment-policy.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
+import { serviceBudgetBlocks, serviceOrderTxOptions } from '../orders/utils/service-budget-cap.util';
 import {
+  FullTaxRow,
   resolveCatalogLine,
   resolveCatalogUnitPrice,
   resolveFullTaxRowsByProductId,
@@ -38,6 +40,10 @@ import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 import type { CancellationType } from './dto';
 import { ReassignTableSessionDto } from './dto/table-session.dto';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
+
+// `FullTaxRow` y su resolver viven en orders/utils/catalog-line-pricing.util
+// (compartidos con las cuentas de estaciones de servicio y con
+// `OrderItemChangesService`, QUI-650).
 
 /**
  * Public shape returned by `openSession` and `findOne`.
@@ -839,8 +845,11 @@ export class TableSessionsService {
         id: number;
         state: string;
         active_financial_split_id: number | null;
+        service_session_id: number | null;
+        currency: string | null;
+        tip_amount: Prisma.Decimal | number | null;
       }> = await tx.$queryRaw`
-        SELECT id, state, active_financial_split_id FROM orders
+        SELECT id, state, active_financial_split_id, service_session_id, currency, tip_amount FROM orders
         WHERE id = ${session.order_id} AND store_id = ${storeId}
         FOR UPDATE
       `;
@@ -956,6 +965,7 @@ export class TableSessionsService {
         const createdItem = await tx.order_items.create({
           data: {
             order_id: session.order_id,
+            service_session_id: lockedOrders[0].service_session_id,
             product_id: item.product_id,
             product_variant_id: item.product_variant_id ?? null,
             product_name: product.name,
@@ -1163,12 +1173,37 @@ export class TableSessionsService {
         return acc + Number(it.tax_amount_item ?? 0) * multiplier;
       }, 0);
 
+      const nextGrandTotal = subtotal + tax;
+      const serviceSessionId = lockedOrders[0].service_session_id;
+      if (serviceSessionId != null) {
+        const budget = await tx.service_budgets.findFirst({
+          where: { store_id: storeId, session_id: serviceSessionId },
+          orderBy: { version: 'desc' },
+          select: { amount: true, currency: true, is_system: true },
+        });
+        // A service session must have its initialized baseline budget before
+        // any table/QR writer can raise the order total. This table writer's
+        // grand_total deliberately excludes tips, so compare it as-is.
+        if (
+          serviceBudgetBlocks(budget, lockedOrders[0].currency, nextGrandTotal)
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.SERVICE_BUDGET_001,
+            'El total supera el límite vigente o no hay un presupuesto válido para esta sesión de servicio.',
+            { order_id: session.order_id, service_session_id: serviceSessionId },
+          );
+        }
+      }
+
       await tx.orders.update({
         where: { id: session.order_id },
         data: {
           subtotal_amount: new Prisma.Decimal(subtotal),
           tax_amount: new Prisma.Decimal(tax),
-          grand_total: new Prisma.Decimal(subtotal + tax),
+          grand_total: new Prisma.Decimal(nextGrandTotal),
+          ...(serviceSessionId != null
+            ? { service_version: { increment: 1 } }
+            : {}),
           updated_at: new Date(),
         },
       });
@@ -2803,7 +2838,12 @@ export class TableSessionsService {
     }
 
     // 2. Resolve + authorize the payment row INSIDE the transaction so
-    //    the CAS + balance update are atomic.
+    //    the CAS + balance update are atomic. Serializable only for
+    //    service-station orders (decided from a minimal pre-read).
+    const serviceOrder = await this.prisma.orders.findFirst({
+      where: { id: session.order_id, store_id: storeId },
+      select: { service_session_id: true },
+    });
     const result = await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payments.findFirst({
         where: { id: paymentId, order_id: session.order_id },
@@ -2816,6 +2856,8 @@ export class TableSessionsService {
               id: true,
               order_number: true,
               store_id: true,
+              service_session_id: true,
+              currency: true,
               subtotal_amount: true,
               tax_amount: true,
               discount_amount: true,
@@ -2876,6 +2918,30 @@ export class TableSessionsService {
         };
       }
 
+      if (payment.orders.service_session_id != null) {
+        const budget = await tx.service_budgets.findFirst({
+          where: {
+            store_id: storeId,
+            session_id: payment.orders.service_session_id,
+          },
+          orderBy: { version: 'desc' },
+          select: { amount: true, currency: true, is_system: true },
+        });
+        const authorizedTotal = new Prisma.Decimal(payment.orders.grand_total)
+          .minus(payment.orders.tip_amount ?? 0);
+        if (
+          serviceBudgetBlocks(budget, payment.orders.currency, authorizedTotal)
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.SERVICE_BUDGET_001,
+            'No se puede confirmar el pago: el total supera el presupuesto vigente o no hay un presupuesto válido.',
+            {
+              order_id: payment.orders.id,
+              service_session_id: payment.orders.service_session_id,
+            },
+          );
+        }
+      }
       // Adquirir el lock de caja antes de mutar pagos/saldos mantiene el
       // orden sesión → pago/orden que usa el cierre.
       await this.recordStaffCashMovement({
@@ -2958,6 +3024,14 @@ export class TableSessionsService {
         newTotalPaid: orderTotalPaid,
         shouldProject: orderTotalPaid >= Number(order.grand_total || 0),
       };
+    }, serviceOrderTxOptions(serviceOrder?.service_session_id)).catch((error: unknown) => {
+      if ((error as { code?: string })?.code === 'P2034') {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'Conflicto de escritura al confirmar el pago; reintenta la operación',
+        );
+      }
+      throw error;
     });
 
     // The payment and order balance are committed before B.1 opens its own
@@ -3173,11 +3247,14 @@ export class TableSessionsService {
   }
 
   /**
-   * Delegado fino: la lógica vive en `catalog-line-pricing.util` (compartida
-   * con `OrderItemChangesService`, QUI-650). Se conserva el método para que
-   * los specs y llamadores existentes no cambien.
+   * Delegado fino: la lógica vive en `orders/utils/catalog-line-pricing.util`
+   * (compartida con estaciones de servicio y con `OrderItemChangesService`,
+   * QUI-650). Se conserva el método para que los specs y llamadores
+   * existentes no cambien.
    */
-  private resolveFullTaxRowsByProductId(productIds: number[]) {
+  private async resolveFullTaxRowsByProductId(
+    productIds: number[],
+  ): Promise<Map<number, FullTaxRow[]>> {
     return resolveFullTaxRowsByProductId(this.prisma, productIds);
   }
 }

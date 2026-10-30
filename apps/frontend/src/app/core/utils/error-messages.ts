@@ -343,6 +343,11 @@ export const ERROR_MESSAGES: Record<string, string> = {
   QUOTE_CONVERT_CUSTOMER_001:
     'Asigna un cliente a esta cotización antes de convertirla en orden.',
 
+  // Estaciones de servicio: el backend responde 403 cuando la tienda no tiene
+  // la industria `service` (el menú ya lo oculta; esto cubre llamadas directas).
+  STATION_INDUSTRY_001:
+    'No disponible en tu industria. Estaciones de servicio aplica solo a tiendas de servicios.',
+
   // Contratos de obra (A.2, ADR-02, ERR-03): el backend responde 403 cuando
   // la tienda no tiene la industria `construction`. Mensaje estructural, no
   // accionable por el usuario (no es un permiso pedible al admin).
@@ -548,6 +553,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DCOL_CREATE_001: 'Error al crear el formulario.',
   DCOL_DELETE_001:
     'No se puede eliminar una plantilla que tiene formularios enviados.',
+  DCOL_PRODUCT_001: 'El formulario de recepción solo se puede vincular a servicios de esta tienda.',
+  STATION_013: 'La atención incluye campos que no pertenecen al formulario de recepción del servicio.',
+  STATION_014: 'Para usar el QR público, configura y activa un dominio en Configuración > Dominios.',
 
   // Customer History
   CUST_HISTORY_001: 'Historial del cliente no encontrado.',

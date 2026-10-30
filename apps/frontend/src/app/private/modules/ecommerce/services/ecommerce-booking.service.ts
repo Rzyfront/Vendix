@@ -10,6 +10,8 @@ export interface AvailabilitySlot {
   start_time: string;
   end_time: string;
   available: number;
+  station_id?: number;
+  station_name?: string;
 }
 
 export interface CreateBookingDto {

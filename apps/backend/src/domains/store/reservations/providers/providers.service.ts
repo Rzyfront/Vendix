@@ -215,4 +215,106 @@ export class ProvidersService {
       orderBy: { first_name: 'asc' },
     });
   }
+
+  // --- Stations ---
+
+  async getStations(providerId: number): Promise<number[]> {
+    await this.findOne(providerId);
+
+    const assignments = await this.prisma.service_station_providers.findMany({
+      where: {
+        store_id: this.storeId,
+        provider_id: providerId,
+      },
+      select: { station_id: true },
+    });
+
+    return assignments.map((a) => a.station_id);
+  }
+
+  async setStations(providerId: number, stationIds: number[]): Promise<number[]> {
+    await this.findOne(providerId);
+
+    if (stationIds.length > 0) {
+      const stations = await this.prisma.service_stations.findMany({
+        where: {
+          store_id: this.storeId,
+          id: { in: stationIds },
+        },
+        select: { id: true },
+      });
+
+      if (stations.length !== stationIds.length) {
+        throw new NotFoundException('Una o más estaciones no pertenecen a esta tienda');
+      }
+    }
+
+    await this.prisma.$transaction(async (tx: any) => {
+      await tx.service_station_providers.deleteMany({
+        where: {
+          store_id: this.storeId,
+          provider_id: providerId,
+        },
+      });
+
+      if (stationIds.length > 0) {
+        await tx.service_station_providers.createMany({
+          data: stationIds.map((stationId) => ({
+            store_id: this.storeId,
+            station_id: stationId,
+            provider_id: providerId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    });
+
+    return stationIds;
+  }
+
+  async assignStation(providerId: number, stationId: number) {
+    await this.findOne(providerId);
+
+    const station = await this.prisma.service_stations.findFirst({
+      where: { id: stationId, store_id: this.storeId },
+      select: { id: true },
+    });
+
+    if (!station) {
+      throw new NotFoundException(`Estación #${stationId} no encontrada`);
+    }
+
+    const existing = await this.prisma.service_station_providers.findFirst({
+      where: {
+        store_id: this.storeId,
+        provider_id: providerId,
+        station_id: stationId,
+      },
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    return this.prisma.service_station_providers.create({
+      data: {
+        store_id: this.storeId,
+        provider_id: providerId,
+        station_id: stationId,
+      },
+    });
+  }
+
+  async removeStation(providerId: number, stationId: number): Promise<void> {
+    await this.findOne(providerId);
+
+    await this.prisma.service_station_providers.deleteMany({
+      where: {
+        store_id: this.storeId,
+        provider_id: providerId,
+        station_id: stationId,
+      },
+    });
+  }
 }
+

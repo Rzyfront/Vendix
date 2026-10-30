@@ -572,6 +572,62 @@
           </app-card>
 
           <!-- 1.4. MESA Y NOTAS DE LA ORDEN (Sección compacta y unificada) -->
+          <!-- 1.3b. ESTACIÓN DE SERVICIO (órdenes SVC-*, mismo patrón que la mesa) -->
+          @if (serviceSession(); as svc) {
+            <app-card shadow="sm" [responsivePadding]="true">
+              <div class="flex flex-col gap-3">
+                <div class="flex flex-wrap items-center justify-between gap-2.5">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 flex items-center justify-center shrink-0">
+                      <app-icon name="warehouse" [size]="14"></app-icon>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="font-bold text-xs sm:text-sm text-[var(--color-text-primary)]">
+                        {{ svc.station?.name || 'Estación' }} · Atención #{{ svc.id }}
+                      </div>
+                      <div class="text-[11px] text-text-secondary">
+                        {{ svc.service_name || 'Servicio' }}@if (svc.subject_label) { · {{ svc.subject_label }} }
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <span
+                      class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                      [ngClass]="svc.status === 'open' || svc.status === 'paused' ? 'bg-amber-50 text-amber-700 border border-amber-200/80' : 'bg-gray-100 text-gray-600'"
+                    >
+                      Atención {{ serviceSessionStatusLabel(svc.status) }}
+                    </span>
+                    <span
+                      class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                      [ngClass]="serviceSessionBalance() > 0 ? 'bg-red-50 text-red-700 border border-red-200/80' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/80'"
+                    >
+                      {{ serviceSessionBalance() > 0 ? 'Pago pendiente' : 'Pagada' }}
+                    </span>
+                  </div>
+                </div>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                  <div><span class="text-text-secondary block">Ingreso</span><span class="font-semibold">{{ svc.opened_at | date: 'short' }}</span></div>
+                  <div><span class="text-text-secondary block">Cierre</span><span class="font-semibold">{{ svc.closed_at ? (svc.closed_at | date: 'short') : 'En curso' }}</span></div>
+                  <div><span class="text-text-secondary block">Técnico</span><span class="font-semibold">{{ svc.provider_name || 'Sin asignar' }}</span></div>
+                  <div><span class="text-text-secondary block">Saldo por pagar</span><span class="font-semibold" [class.text-red-600]="serviceSessionBalance() > 0">{{ serviceSessionBalance() | currency }}</span></div>
+                  @if (svc.customer_name) {
+                    <div><span class="text-text-secondary block">Recibido de</span><span class="font-semibold">{{ svc.customer_name }}</span></div>
+                  }
+                </div>
+                @if (svc.intake?.length) {
+                  <div class="pt-2 border-t border-border">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-text-secondary">Datos de la recepción</span>
+                    <div class="mt-1.5 grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                      @for (answer of svc.intake; track answer.label) {
+                        <div><span class="text-text-secondary block">{{ answer.label }}</span><span class="font-semibold break-words">{{ answer.value }}</span></div>
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
+            </app-card>
+          }
+
           @if (tableSession() || cleanOrderNotes() || (cleanInternalNotes() && !flowMetadata().internal_notes_as_json)) {
             <app-card shadow="sm" [responsivePadding]="true">
               <div class="flex flex-col gap-2.5">

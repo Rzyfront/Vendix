@@ -1152,6 +1152,15 @@ export class ProductsService {
         // Si brand_id es nulo pero la tabla lo requiere, poner un valor por defecto o error
       }
 
+      if (
+        sanitizedDto.requires_station &&
+        sanitizedDto.product_type !== ProductType.SERVICE
+      ) {
+        throw new BadRequestException(
+          'Solo los productos de tipo servicio pueden requerir una estación',
+        );
+      }
+
       // Consultation validation
       if (sanitizedDto.is_consultation) {
         if (sanitizedDto.product_type !== ProductType.SERVICE) {
@@ -1209,6 +1218,11 @@ export class ProductsService {
         enabled_price_tier_ids,
         ...productData
       } = createProductDto;
+
+      if (!productData.is_recurring) {
+        productData.recurrence_interval_days = null;
+      }
+
       const onlinePurchaseData = await this.buildOnlinePurchaseData(
         store_id,
         slug,
@@ -3215,9 +3229,11 @@ export class ProductsService {
             allow_pos_price_override: product.allow_pos_price_override,
             requires_batch_tracking: product.requires_batch_tracking,
             requires_booking: product.requires_booking,
+            requires_station: product.requires_station,
             booking_mode: product.booking_mode,
             buffer_minutes: product.buffer_minutes,
             is_recurring: product.is_recurring,
+            recurrence_interval_days: product.recurrence_interval_days,
             service_duration_minutes: product.service_duration_minutes,
             service_modality: product.service_modality,
             service_pricing_type: product.service_pricing_type,
@@ -3433,9 +3449,11 @@ export class ProductsService {
           allow_pos_price_override: product.allow_pos_price_override,
           requires_batch_tracking: product.requires_batch_tracking,
           requires_booking: product.requires_booking,
+          requires_station: product.requires_station,
           booking_mode: product.booking_mode,
           buffer_minutes: product.buffer_minutes,
           is_recurring: product.is_recurring,
+          recurrence_interval_days: product.recurrence_interval_days,
           service_duration_minutes: product.service_duration_minutes,
           service_modality: product.service_modality,
           service_pricing_type: product.service_pricing_type,
@@ -3744,7 +3762,9 @@ export class ProductsService {
       service_modality: product.service_modality,
       service_pricing_type: product.service_pricing_type,
       requires_booking: product.requires_booking,
+      requires_station: product.requires_station,
       is_recurring: product.is_recurring,
+      recurrence_interval_days: product.recurrence_interval_days,
       service_instructions: product.service_instructions,
       booking_mode: product.booking_mode,
       buffer_minutes: product.buffer_minutes,
@@ -3973,6 +3993,15 @@ export class ProductsService {
         throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
       }
 
+      const effectiveProductType =
+        sanitizedDto.product_type ?? existingProduct.product_type;
+      const effectiveRequiresStation =
+        sanitizedDto.requires_station ?? existingProduct.requires_station;
+      if (effectiveRequiresStation && effectiveProductType !== ProductType.SERVICE) {
+        throw new BadRequestException(
+          'Solo los productos de tipo servicio pueden requerir una estación',
+        );
+      }
       if (
         !options?.from_lodging &&
         ((sanitizedDto.name !== undefined &&
@@ -4240,6 +4269,10 @@ export class ProductsService {
         price, // Exclude as it's not in DB
         ...productData
       } = sanitizedDto as UpdateProductDto & { price?: number };
+
+      if (productData.is_recurring === false) {
+        productData.recurrence_interval_days = null;
+      }
       const onlinePurchaseData = await this.buildOnlinePurchaseData(
         existingProduct.store_id,
         sanitizedDto.slug || existingProduct.slug,

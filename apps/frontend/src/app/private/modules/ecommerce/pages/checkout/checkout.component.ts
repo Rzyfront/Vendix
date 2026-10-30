@@ -905,6 +905,7 @@ export class CheckoutComponent implements OnInit {
         newSelections.set(this.getBookingKey(cartItem), {
           product_id: booking['product_id'],
           product_variant_id: booking['product_variant_id'],
+          station_id: booking['station_id'],
           date: booking['date'],
           start_time: booking['start_time'],
           end_time: booking['end_time'],
@@ -3557,52 +3558,6 @@ export class CheckoutComponent implements OnInit {
 
     this.is_submitting.set(true);
     this.error_message.set('');
-
-    // LAST-RESORT FALLBACK: also peek at sessionStorage in case the
-    // cart$ subscription + restorePendingBooking() race-condition still
-    // hasn't populated bookingSelections by the time the user hits "Pagar".
-    // We merge any pending_booking found there into the payload so the
-    // booking always travels with the order. Cleanup happens at the end
-    // of placeOrder() (success or failure).
-    const pendingBookings: Array<{
-      product_id: number;
-      product_variant_id?: number;
-      date: string;
-      start_time: string;
-      end_time: string;
-    }> = [...this.bookingSelections().values()];
-    try {
-      const stored = sessionStorage.getItem('pending_booking');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (
-          parsed?.product_id &&
-          parsed?.date &&
-          parsed?.start_time &&
-          parsed?.end_time
-        ) {
-          // Only add if not already represented in bookingSelections
-          const alreadyIn =
-            pendingBookings.find(
-              (b) =>
-                b.product_id === parsed.product_id &&
-                b.date === parsed.date &&
-                b.start_time === parsed.start_time,
-            );
-          if (!alreadyIn) {
-            pendingBookings.push({
-              product_id: parsed.product_id,
-              product_variant_id: parsed.product_variant_id,
-              date: parsed.date,
-              start_time: parsed.start_time,
-              end_time: parsed.end_time,
-            });
-          }
-        }
-      }
-    } catch {
-      // Ignore parse errors; the bookingSelections path still works.
-    }
 
     const request: CheckoutRequest = {
       payment_method_id: this.selected_payment_method_id()!,

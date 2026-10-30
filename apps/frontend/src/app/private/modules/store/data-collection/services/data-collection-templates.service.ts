@@ -39,4 +39,17 @@ export class DataCollectionTemplatesService {
   assignProducts(id: number, productIds: number[]): Observable<DataCollectionTemplate> {
     return this.http.post<any>(`${this.apiUrl}/${id}/products`, { product_ids: productIds }).pipe(map(r => r.data));
   }
+
+  /** Plantilla de recepción vinculada explícitamente a un producto (servicio). */
+  getProductTemplate(productId: number): Observable<number | null> {
+    return this.http
+      .get<any>(`${this.apiUrl}/product/${productId}`)
+      .pipe(map(r => (r?.data?.template_id ?? null) as number | null));
+  }
+
+  setProductTemplate(productId: number, templateId: number | null): Observable<number | null> {
+    return this.http
+      .put<any>(`${this.apiUrl}/product/${productId}`, { template_id: templateId })
+      .pipe(map(r => (r?.data?.template_id ?? templateId) as number | null));
+  }
 }

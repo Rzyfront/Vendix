@@ -299,3 +299,4 @@ export {
   type IncentiveProgressData,
 } from './gamified-incentive-bar/gamified-incentive-bar.component';
 
+export { CustomerSelectComponent, type CustomerSelectOption } from './customer-select/customer-select.component';

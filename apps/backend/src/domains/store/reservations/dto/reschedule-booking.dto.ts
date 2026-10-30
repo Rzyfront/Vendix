@@ -1,6 +1,12 @@
-import { IsDateString, IsString, IsOptional, IsBoolean, Matches } from 'class-validator';
+import { IsDateString, IsString, IsOptional, IsBoolean, IsInt, Matches } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class RescheduleBookingDto {
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  station_id?: number;
+
   @IsDateString()
   date: string;
 

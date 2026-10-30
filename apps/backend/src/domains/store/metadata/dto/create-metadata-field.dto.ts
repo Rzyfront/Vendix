@@ -9,7 +9,7 @@ import {
 } from 'class-validator';
 
 export class CreateMetadataFieldDto {
-  @IsIn(['customer', 'booking', 'order'])
+  @IsIn(['customer', 'booking', 'order', 'service_session'])
   entity_type: string;
 
   @IsString()

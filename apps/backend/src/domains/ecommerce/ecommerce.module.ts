@@ -14,6 +14,7 @@ import { EcommerceTablesModule } from './tables/ecommerce-tables.module';
 import { EcommercePromotionsModule } from './promotions/ecommerce-promotions.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
 import { RoutingModule } from './routing/routing.module';
+import { ServiceSessionAccessModule } from './service-sessions/service-session-access.module';
 import { EcommerceHospitalityModule } from './hospitality/ecommerce-hospitality.module';
 
 /**
@@ -45,6 +46,7 @@ import { EcommerceHospitalityModule } from './hospitality/ecommerce-hospitality.
     EcommercePromotionsModule,
     GeocodingModule,
     RoutingModule,
+    ServiceSessionAccessModule,
     EcommerceHospitalityModule,
   ],
 })

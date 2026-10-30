@@ -155,6 +155,7 @@ export interface EcommerceProduct {
   preparation_time_minutes?: number | null;
   service_modality?: 'in_person' | 'virtual' | 'hybrid' | null;
   requires_booking?: boolean;
+  requires_station?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   brand: { id: number; name: string } | null;
   categories: { id: number; name: string; slug: string }[];

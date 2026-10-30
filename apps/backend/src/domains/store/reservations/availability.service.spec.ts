@@ -13,6 +13,7 @@ describe('AvailabilityService — business hours integration', () => {
     providers?: any[];
     schedules?: any[];
     bookings?: any[];
+    variants?: any[];
     exception?: any;
   }) {
     const storeHours = opts.storeHours ?? [];
@@ -53,6 +54,13 @@ describe('AvailabilityService — business hours integration', () => {
         findFirst: jest.fn(({ where }: any) =>
           Promise.resolve(
             opts.products?.find((p) => p.id === where.id) ?? null,
+          ),
+        ),
+      },
+      product_variants: {
+        findFirst: jest.fn(({ where }: any) =>
+          Promise.resolve(
+            opts.variants?.find((v) => v.id === where.id && v.product_id === where.product_id) ?? null,
           ),
         ),
       },
@@ -174,5 +182,37 @@ describe('AvailabilityService — business hours integration', () => {
       5,
     );
     expect(available).toBe(false);
+  });
+
+  it('un producto sin estación acepta un rango de 90 días', async () => {
+    const { service } = buildService({
+      products: [{ id: 10, store_id: 1, booking_mode: 'provider_specific', requires_station: false }],
+    });
+    await expect(service.getAvailableSlots(10, '2026-08-01', '2026-10-30')).resolves.toBeDefined();
+  });
+
+  it('un producto con estación rechaza un rango mayor a 62 días', async () => {
+    const { service } = buildService({
+      products: [{ id: 10, store_id: 1, booking_mode: 'provider_specific', requires_station: true }],
+    });
+    await expect(service.getAvailableSlots(10, '2026-08-01', '2026-10-30')).rejects.toThrow(/62/);
+  });
+
+  it('variante inválida: 400 solo con estación; sin estación se ignora (contrato anterior)', async () => {
+    const station = buildService({
+      products: [{ id: 10, store_id: 1, booking_mode: 'provider_specific', requires_station: true }],
+      variants: [],
+    });
+    await expect(
+      station.service.getAvailableSlots(10, '2026-08-01', '2026-08-10', { product_variant_id: 99 }),
+    ).rejects.toThrow(/variante/);
+
+    const open = buildService({
+      products: [{ id: 10, store_id: 1, booking_mode: 'provider_specific', requires_station: false }],
+      variants: [],
+    });
+    await expect(
+      open.service.getAvailableSlots(10, '2026-08-01', '2026-08-10', { product_variant_id: 99 }),
+    ).resolves.toBeDefined();
   });
 });

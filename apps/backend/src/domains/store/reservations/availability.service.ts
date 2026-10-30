@@ -5,6 +5,7 @@ import { BusinessHoursService } from './business-hours/business-hours.service';
 import {
   resolveStoreTimezone,
   localCivil,
+  zonedWallClockToUtc,
 } from '@common/utils/store-timezone.util';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -26,6 +27,9 @@ export interface AvailabilitySlot {
   /** Bookings overlapping this slot that are NOT in cancelled status. */
   booked_count?: number;
   is_booked?: boolean;
+  /** Station is present only for services that require an assigned station. */
+  station_id?: number;
+  station_name?: string;
 }
 
 @Injectable()
@@ -43,11 +47,12 @@ export class AvailabilityService {
     product_id: number,
     date_from: string,
     date_to: string,
-    options: { provider_id?: number; product_variant_id?: number; include_booked?: boolean } = {},
+    options: { provider_id?: number; product_variant_id?: number; station_id?: number; include_booked?: boolean; prisma?: StorePrismaService } = {},
   ): Promise<AvailabilitySlot[]> {
-    const { provider_id, product_variant_id, include_booked } = options;
+    const { provider_id, product_variant_id, station_id, include_booked } = options;
+    const queryPrisma = options.prisma ?? this.prisma;
     // 1. Obtener producto con duracion y booking_mode
-    const product = await this.prisma.products.findFirst({
+    const product = await queryPrisma.products.findFirst({
       where: { id: product_id },
       select: {
         id: true,
@@ -55,16 +60,24 @@ export class AvailabilityService {
         service_duration_minutes: true,
         buffer_minutes: true,
         booking_mode: true,
+        requires_station: true,
       },
     });
 
     if (!product) return [];
 
+    // Solo los productos con estaciones exigen formato estricto y maximo 62 dias.
+    if (product.requires_station) this.assertAvailabilityRange(date_from, date_to);
+
     // Resolve the store's business-hours master calendar once per call.
     // Empty Map = store never configured their hours (legacy fallback).
     const storeHoursMap = await this.businessHoursService.loadStoreHours(
       product.store_id,
+      queryPrisma,
     );
+    const stationWorkingDays = product.requires_station
+      ? await this.getStoreWorkingDays(product_id, queryPrisma)
+      : undefined;
 
     // Resolve variant-specific duration/buffer if applicable
     let variant: {
@@ -72,10 +85,16 @@ export class AvailabilityService {
       buffer_minutes: number | null;
     } | null = null;
     if (product_variant_id) {
-      variant = await this.prisma.product_variants.findFirst({
+      variant = await queryPrisma.product_variants.findFirst({
         where: { id: product_variant_id, product_id },
         select: { service_duration_minutes: true, buffer_minutes: true },
       });
+      // Solo los servicios con estación exigen variante válida; fuera de
+      // estación se mantiene el contrato anterior (se ignora y se usa la
+      // duración del producto).
+      if (!variant && product.requires_station) {
+        throw new BadRequestException('La variante no pertenece al servicio solicitado');
+      }
     }
 
     const duration =
@@ -85,6 +104,16 @@ export class AvailabilityService {
     const buffer = variant?.buffer_minutes ?? product.buffer_minutes ?? 0;
     const isFreeBooking =
       product.booking_mode === booking_mode_enum.free_booking;
+
+    if (product.requires_station) {
+      return this.getStationAvailableSlots(product, date_from, date_to, duration, buffer, {
+        provider_id,
+        station_id,
+        include_booked,
+      }, queryPrisma, stationWorkingDays ?? [1, 2, 3, 4, 5]);
+    }
+
+    if (station_id) return [];
 
     if (provider_id && isFreeBooking) {
       return [];
@@ -353,6 +382,186 @@ export class AvailabilityService {
     }
 
     return slots;
+  }
+
+  /**
+   * Station-required services use the intersection of store, station and
+   * provider calendars. Occupancy is read from allocations (the durable
+   * resource contract); legacy bookings remain a provider-side fallback
+   * while existing reservations are reconciled by the reservation writer.
+   */
+  private async getStationAvailableSlots(
+    product: { id: number; store_id: number },
+    dateFrom: string,
+    dateTo: string,
+    duration: number,
+    buffer: number,
+    options: { provider_id?: number; station_id?: number; include_booked?: boolean },
+    prisma: StorePrismaService = this.prisma,
+    workingDays: number[] = [1, 2, 3, 4, 5],
+  ): Promise<AvailabilitySlot[]> {
+    const { provider_id, station_id, include_booked } = options;
+    const stationServices = await prisma.service_station_services.findMany({
+      where: { store_id: product.store_id, product_id: product.id },
+      select: { station_id: true },
+    });
+    const stations = await prisma.service_stations.findMany({
+      where: {
+        store_id: product.store_id,
+        status: 'active',
+        id: {
+          in: stationServices
+            .map((relation) => relation.station_id)
+            .filter((id) => !station_id || id === station_id),
+        },
+      },
+      select: { id: true, name: true, capacity: true },
+      orderBy: { id: 'asc' },
+    });
+    if (!stations.length) return [];
+    const stationIds = stations.map((station) => station.id);
+    const stationProviders = await prisma.service_station_providers.findMany({
+      where: { store_id: product.store_id, station_id: { in: stationIds } },
+      select: { station_id: true, provider_id: true },
+    });
+    const providers = await prisma.service_providers.findMany({
+      where: {
+        is_active: true,
+        services: { some: { product_id: product.id } },
+        id: {
+          in: stationProviders
+            .map((row) => row.provider_id)
+            .filter((id) => !provider_id || id === provider_id),
+        },
+      },
+      select: { id: true, display_name: true, avatar_url: true },
+    });
+    if (!providers.length) return [];
+
+    const compatibleProviders = new Map<number, typeof providers>();
+    for (const station of stations) {
+      const stationProviderIds = new Set(
+        stationProviders.filter((row) => row.station_id === station.id).map((row) => row.provider_id),
+      );
+      compatibleProviders.set(station.id, providers.filter((provider) => stationProviderIds.has(provider.id)));
+    }
+    const providerIds = providers.map((provider) => provider.id);
+    const schedules = await prisma.provider_schedules.findMany({
+      where: { provider_id: { in: providerIds }, is_active: true },
+    });
+    const providerExceptions = await prisma.provider_exceptions.findMany({
+      where: { provider_id: { in: providerIds }, date: { gte: new Date(dateFrom), lte: new Date(dateTo) } },
+    });
+    const stationSchedules = await prisma.service_station_schedules.findMany({
+      where: { store_id: product.store_id, station_id: { in: stationIds }, is_active: true },
+    });
+    const stationExceptions = await prisma.service_station_exceptions.findMany({
+      where: {
+        store_id: product.store_id,
+        station_id: { in: stationIds },
+        // The date range is store-local while these columns are UTC instants;
+        // the two-day pad safely covers every supported IANA offset/DST edge.
+        start_at: { lt: new Date(new Date(`${dateTo}T23:59:59.999Z`).getTime() + 2 * 86_400_000) },
+        end_at: { gt: new Date(new Date(`${dateFrom}T00:00:00.000Z`).getTime() - 2 * 86_400_000) },
+      },
+    });
+    const now = new Date();
+    const allocations = await prisma.service_allocations.findMany({
+      where: {
+        store_id: product.store_id,
+        state: { in: ['held', 'payment_pending', 'confirmed', 'in_service'] },
+        AND: [
+          { OR: [{ station_id: { in: stationIds } }, { provider_id: { in: providerIds } }] },
+          { OR: [{ expires_at: null }, { expires_at: { gt: now } }] },
+        ],
+      },
+      select: { station_id: true, provider_id: true, start_at: true, end_at: true },
+    });
+    const existingBookings = await prisma.bookings.findMany({
+      where: {
+        store_id: product.store_id,
+        provider_id: { in: providerIds },
+        date: { gte: new Date(dateFrom), lte: new Date(dateTo) },
+        status: { notIn: [booking_status_enum.cancelled] },
+      },
+      select: { date: true, start_time: true, end_time: true, provider_id: true, expires_at: true },
+    });
+    const storeHours = await this.businessHoursService.loadStoreHours(product.store_id, prisma);
+    const timezone = await resolveStoreTimezone(prisma, product.store_id);
+    const nowLocal = localCivil(now, timezone);
+    const today = `${nowLocal.year}-${pad2(nowLocal.month)}-${pad2(nowLocal.day)}`;
+    const nowHHMM = `${pad2(nowLocal.hour)}:${pad2(nowLocal.minute)}`;
+    const dates = this.getDatesInRange(dateFrom, dateTo);
+    const slotMap = new Map<string, AvailabilitySlot>();
+
+    for (const date of dates) {
+      const dateStr = this.formatDate(date);
+      const weekday = date.getUTCDay();
+      if (!workingDays.includes(weekday)) continue;
+      const storeWindow = storeHours.get(weekday) ??
+        (storeHours.size === 0 ? { start_time: '08:00', end_time: '18:00' } : undefined);
+      if (!storeWindow) continue;
+      for (const station of stations) {
+        const stationBlocks = stationSchedules.filter((row) => row.station_id === station.id && row.weekday === weekday);
+        if (!stationBlocks.length) continue;
+        const stationDayExceptions = stationExceptions.filter((exception) => {
+          const localStart = localCivil(new Date(exception.start_at), timezone);
+          const localEnd = localCivil(new Date(exception.end_at), timezone);
+          const startDate = `${localStart.year}-${pad2(localStart.month)}-${pad2(localStart.day)}`;
+          const endDate = `${localEnd.year}-${pad2(localEnd.month)}-${pad2(localEnd.day)}`;
+          return exception.station_id === station.id && startDate <= dateStr && endDate >= dateStr;
+        });
+        for (const provider of compatibleProviders.get(station.id) ?? []) {
+          const providerBlocks = schedules.filter((row) => row.provider_id === provider.id && row.day_of_week === weekday);
+          const providerException = providerExceptions.find((row) => row.provider_id === provider.id && this.formatDate(new Date(row.date)) === dateStr);
+          if (!providerBlocks.length || providerException?.is_unavailable) continue;
+          for (const stationBlock of stationBlocks) {
+            const stationWindow = this.clampToStoreHours(stationBlock.start_time, stationBlock.end_time, storeWindow);
+            if (!stationWindow) continue;
+            for (const providerBlock of providerBlocks) {
+              const effectiveStart = providerException?.custom_start_time ?? providerBlock.start_time;
+              const effectiveEnd = providerException?.custom_end_time ?? providerBlock.end_time;
+              const providerWindow = this.clampToStoreHours(effectiveStart, effectiveEnd, storeWindow);
+              if (!providerWindow) continue;
+              const windowStart = this.timeToMinutes(stationWindow.start) > this.timeToMinutes(providerWindow.start) ? stationWindow.start : providerWindow.start;
+              const windowEnd = this.timeToMinutes(stationWindow.end) < this.timeToMinutes(providerWindow.end) ? stationWindow.end : providerWindow.end;
+              if (this.timeToMinutes(windowEnd) <= this.timeToMinutes(windowStart)) continue;
+              let daySlots = this.generateTimeSlots(windowStart, windowEnd, duration, buffer);
+              if (dateStr === today) daySlots = daySlots.filter((slot) => slot.start_time >= nowHHMM);
+              for (const slot of daySlots) {
+                const [startHour, startMinute] = slot.start_time.split(':').map(Number);
+                const [endHour, endMinute] = slot.end_time.split(':').map(Number);
+                const year = Number(dateStr.slice(0, 4));
+                const month = Number(dateStr.slice(5, 7));
+                const day = Number(dateStr.slice(8, 10));
+                const slotStart = zonedWallClockToUtc(year, month, day, startHour, startMinute, 0, 0, timezone);
+                const slotEnd = zonedWallClockToUtc(year, month, day, endHour, endMinute, 0, 0, timezone);
+                const exceptionBlocked = stationDayExceptions.some((exception) => new Date(exception.start_at) < slotEnd && new Date(exception.end_at) > slotStart);
+                if (exceptionBlocked) continue;
+                const stationBusy = allocations.some((allocation) => allocation.station_id === station.id && allocation.start_at < slotEnd && allocation.end_at > slotStart);
+                const providerBusy = allocations.some((allocation) => allocation.provider_id === provider.id && allocation.start_at < slotEnd && allocation.end_at > slotStart) || existingBookings.some((booking) => booking.provider_id === provider.id && this.formatDate(new Date(booking.date)) === dateStr && (!booking.expires_at || booking.expires_at > now) && booking.start_time < slot.end_time && booking.end_time > slot.start_time);
+                const busy = stationBusy || providerBusy;
+                if (busy && include_booked === false) continue;
+                const key = `${station.id}|${dateStr}|${slot.start_time}|${slot.end_time}`;
+                let result = slotMap.get(key);
+                if (!result) {
+                  result = { station_id: station.id, station_name: station.name, date: dateStr, start_time: slot.start_time, end_time: slot.end_time, available_providers: [], total_available: 0, total_capacity: compatibleProviders.get(station.id)?.length ?? 0, is_booked: busy };
+                  slotMap.set(key, result);
+                }
+                if (!busy && !result.available_providers.some((item) => item.id === provider.id)) {
+                  result.available_providers.push({ id: provider.id, display_name: provider.display_name || '', avatar_url: provider.avatar_url });
+                  result.total_available = result.available_providers.length;
+                }
+                if (busy) result.is_booked = true;
+              }
+            }
+          }
+        }
+      }
+    }
+    return [...slotMap.values()]
+      .map((slot) => ({ ...slot, is_booked: slot.total_available === 0 }))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time) || (a.station_id ?? 0) - (b.station_id ?? 0));
   }
 
   /**
@@ -673,6 +882,28 @@ export class AvailabilityService {
     return dates;
   }
 
+  private assertAvailabilityRange(from: string, to: string): void {
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateOnly.test(from) || !dateOnly.test(to)) {
+      throw new BadRequestException('date_from y date_to deben usar YYYY-MM-DD');
+    }
+    const start = new Date(`${from}T00:00:00.000Z`);
+    const end = new Date(`${to}T00:00:00.000Z`);
+    if (
+      Number.isNaN(start.getTime()) ||
+      Number.isNaN(end.getTime()) ||
+      this.formatDate(start) !== from ||
+      this.formatDate(end) !== to ||
+      start > end
+    ) {
+      throw new BadRequestException('El rango de disponibilidad no es válido');
+    }
+    const days = Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1;
+    if (days > 62) {
+      throw new BadRequestException('El rango de disponibilidad no puede exceder 62 días');
+    }
+  }
+
   private formatDate(date: Date): string {
     const y = date.getUTCFullYear();
     const m = (date.getUTCMonth() + 1).toString().padStart(2, '0');
@@ -689,10 +920,13 @@ export class AvailabilityService {
    * matching the historic hardcoded skip-weekend behavior so existing
    * stores are unaffected.
    */
-  private async getStoreWorkingDays(product_id: number): Promise<number[]> {
+  private async getStoreWorkingDays(
+    product_id: number,
+    prisma: StorePrismaService = this.prisma,
+  ): Promise<number[]> {
     const DEFAULT_WORKING_DAYS = [1, 2, 3, 4, 5] as const;
 
-    const product = await this.prisma.products.findFirst({
+    const product = await prisma.products.findFirst({
       where: { id: product_id },
       select: { store_id: true },
     });
@@ -700,7 +934,7 @@ export class AvailabilityService {
       return [...DEFAULT_WORKING_DAYS];
     }
 
-    const storeSettings = await this.prisma.store_settings.findUnique({
+    const storeSettings = await prisma.store_settings.findUnique({
       where: { store_id: product.store_id },
       select: { settings: true },
     });
@@ -997,6 +1231,8 @@ export class AvailabilityService {
     date_from: string,
     date_to: string,
     provider_id?: number,
+    station_id?: number,
+    product_variant_id?: number,
   ): Promise<Array<{ date: string; has_slots: boolean; slots_count: number }>> {
     // Use withoutScope() — this method is called from a @Public endpoint
     // and there is no store_id in the request context.
@@ -1004,9 +1240,24 @@ export class AvailabilityService {
 
     const product = await db.products.findFirst({
       where: { id: product_id },
-      select: { id: true, store_id: true },
+      select: { id: true, store_id: true, requires_station: true },
     });
     if (!product) return [];
+
+    if (product.requires_station) {
+      this.assertAvailabilityRange(date_from, date_to);
+      const slots = await this.getAvailableSlots(product_id, date_from, date_to, {
+        provider_id,
+        station_id,
+        product_variant_id,
+        prisma: db as unknown as StorePrismaService,
+      });
+      return this.getDatesInRange(date_from, date_to).map((date) => {
+        const dateKey = this.formatDate(date);
+        const count = new Set(slots.filter((slot) => slot.date === dateKey).map((slot) => `${slot.station_id}|${slot.start_time}`)).size;
+        return { date: dateKey, has_slots: count > 0, slots_count: count };
+      });
+    }
 
     const dates = this.getDatesInRange(date_from, date_to);
     const result: Array<{ date: string; has_slots: boolean; slots_count: number }> = [];
@@ -1031,6 +1282,7 @@ export class AvailabilityService {
       // Skip days the store is closed (master calendar).
       const storeHoursMap = await this.businessHoursService.loadStoreHours(
         product.store_id,
+        db as unknown as StorePrismaService,
       );
       const storeWindow = storeHoursMap.get(dayOfWeek);
       if (!storeWindow) {

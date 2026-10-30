@@ -8,6 +8,7 @@ import {
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { AuditService, AuditAction, AuditResource } from './audit.service';
+import { redactSensitiveRoute } from '../utils/sensitive-route.util';
 
 @Injectable()
 export class AuditInterceptor implements NestInterceptor {
@@ -42,7 +43,7 @@ export class AuditInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
     const method = request.method;
-    const url = request.url;
+    const url = redactSensitiveRoute(request.url);
     const body = request.body;
     const query = request.query;
     const user = request.user;
@@ -143,9 +144,9 @@ export class AuditInterceptor implements NestInterceptor {
           // evidencia.
           this.logger.error(
             `Fallo al auditar ${method} ${url} (user=${userId}): ${
-              error?.message || error
+              redactSensitiveRoute(error?.message || error, request.url)
             }`,
-            error?.stack,
+            redactSensitiveRoute(error?.stack, request.url),
           );
         }
       }),

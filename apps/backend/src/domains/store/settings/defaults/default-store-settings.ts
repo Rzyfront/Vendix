@@ -244,6 +244,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         orders_quotations: true,
         orders_layaway: true,
         orders_reservations: true,
+        orders_service_stations: true,
         orders_dispatch_notes: true,
         orders_dispatch_routes: true,
 

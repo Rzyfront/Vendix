@@ -11,9 +11,18 @@ import {
   TemplateSection,
   TemplateItem,
 } from '../../interfaces/data-collection-template.interface';
-import { MetadataField } from '../../interfaces/metadata-field.interface';
+import { EntityType, FIELD_TYPE_LABELS, MetadataField } from '../../interfaces/metadata-field.interface';
+import {
+  SERVICE_FIELD_GROUPS,
+  SERVICE_FIELD_PRESETS,
+  STATION_TEMPLATE_TYPES,
+  presetEntityType,
+} from '../../utils/service-field-presets';
 import { DataCollectionTemplatesService } from '../../services/data-collection-templates.service';
 import { MetadataFieldsService } from '../../services/metadata-fields.service';
+import { FieldModalComponent } from '../../fields/field-modal/field-modal.component';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
+import { forkJoin, of } from 'rxjs';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { IconPickerComponent } from '../../../../../../shared/components/icon-picker/icon-picker.component';
 import {
@@ -95,6 +104,8 @@ interface Selection {
     SelectorComponent,
     SettingToggleComponent,
     ScrollableTabsComponent,
+    FieldModalComponent,
+    ModalComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -108,7 +119,8 @@ interface Selection {
         subtitle="Editor de plantilla"
         icon="layout-template"
         [showBackButton]="true"
-        backRoute="/admin/data-collection/templates"
+        [backRoute]="returnPath()"
+        [backQueryParams]="returnQuery()"
         [actions]="headerActions()"
         (actionClicked)="onHeaderAction($event)"
       />
@@ -140,7 +152,38 @@ interface Selection {
                     </h2>
                   </div>
                 }
-                @for (section of step.sections; track section.title) {
+                @for (section of step.sections; track section.title; let i = $index) {
+                  @if (showCustomerFinderBefore(step, i)) {
+                    <div
+                      class="mb-4 rounded-xl p-4"
+                      style="background: var(--color-surface); border: 1px dashed var(--color-primary)"
+                    >
+                      <span
+                        class="block text-xs font-semibold mb-2"
+                        style="color: var(--color-text)"
+                        >Cliente registrado (opcional)</span
+                      >
+                      <div
+                        class="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm"
+                        style="border: 1px solid var(--color-border); background: var(--color-surface-secondary); color: var(--color-text-muted)"
+                      >
+                        <app-icon name="search" [size]="14"></app-icon>
+                        <span>Buscar cliente (opcional)...</span>
+                      </div>
+                      <p
+                        class="text-xs mt-2"
+                        style="color: var(--color-text-muted)"
+                      >
+                        Busca o crea el cliente para vincular la atención a su perfil. Puedes continuar sin cliente.
+                      </p>
+                      <p
+                        class="text-[11px] mt-1"
+                        style="color: var(--color-primary)"
+                      >
+                        Vista previa: en Asignar estación este buscador aparece una sola vez, arriba de los campos de cliente.
+                      </p>
+                    </div>
+                  }
                   <div
                     class="mb-6 rounded-xl p-4"
                     style="background: var(--color-surface); border: 1px solid var(--color-border)"
@@ -253,6 +296,125 @@ interface Selection {
                     [showActionButton]="false"
                   />
                 }
+              } @else {
+                <!-- Plantilla aún sin campos (p. ej. recién creada desde una estación) -->
+                <app-empty-state
+                  icon="clipboard-list"
+                  title="Esta plantilla aún no tiene campos"
+                  description="Agrega los datos que quieres pedir (placa, documento, correo…) con Campos sugeridos o Crear campo, y vuelve a la vista previa."
+                  [showActionButton]="true"
+                  actionButtonText="Campos sugeridos"
+                  actionButtonIcon="sparkles"
+                  (actionClick)="showPreview.set(false); openSuggested()"
+                />
+              }
+              @if (showFixedCheckinBlocks()) {
+                <div
+                  class="mb-6 rounded-xl p-4"
+                  style="background: var(--color-surface); border: 1px dashed var(--color-border)"
+                >
+                  <div class="flex items-center gap-2 mb-1">
+                    <app-icon name="list-checks" [size]="16" color="var(--color-primary)"></app-icon>
+                    <h3
+                      class="text-sm font-semibold"
+                      style="color: var(--color-text)"
+                    >
+                      En Asignar estación también se pide
+                    </h3>
+                  </div>
+                  <p
+                    class="text-xs mb-3"
+                    style="color: var(--color-text-muted)"
+                  >
+                    Bloques fijos de la recepción, en el mismo orden: se activan o quitan en el editor, bloque "Bloques fijos de Asignar".
+                  </p>
+                  <div class="space-y-2">
+                    @if (formData().checkin_show_budget) {
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
+                      style="background: var(--color-surface-secondary); border: 1px solid var(--color-border)"
+                    >
+                      <div>
+                        <p class="text-sm font-medium" style="color: var(--color-text)">Presupuesto del cliente</p>
+                        <p class="text-xs" style="color: var(--color-text-muted)">Monto máximo que autoriza gastar</p>
+                      </div>
+                      <span
+                        class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                        style="color: var(--color-text-muted); border: 1px solid var(--color-border)"
+                        >Opcional</span
+                      >
+                    </div>
+                    }
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
+                      style="background: var(--color-surface-secondary); border: 1px solid var(--color-border)"
+                    >
+                      <div>
+                        <p class="text-sm font-medium" style="color: var(--color-text)">Servicio</p>
+                        <p class="text-xs" style="color: var(--color-text-muted)">Servicio inicial de la atención</p>
+                      </div>
+                      <span
+                        class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                        style="color: var(--color-primary); border: 1px solid var(--color-primary)"
+                        >Requerido</span
+                      >
+                    </div>
+                    @if (formData().checkin_show_products) {
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
+                      style="background: var(--color-surface-secondary); border: 1px solid var(--color-border)"
+                    >
+                      <div>
+                        <p class="text-sm font-medium" style="color: var(--color-text)">Productos de la cuenta</p>
+                        <p class="text-xs" style="color: var(--color-text-muted)">Insumos que entran a la cuenta</p>
+                      </div>
+                      <span
+                        class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                        style="color: var(--color-text-muted); border: 1px solid var(--color-border)"
+                        >Opcional</span
+                      >
+                    </div>
+                    }
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
+                      style="background: var(--color-surface-secondary); border: 1px solid var(--color-border)"
+                    >
+                      <div>
+                        <p class="text-sm font-medium" style="color: var(--color-text)">Técnico / Especialista asignado</p>
+                        <p class="text-xs" style="color: var(--color-text-muted)">Personal de servicio que atiende</p>
+                      </div>
+                      <span
+                        class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                        style="color: var(--color-primary); border: 1px solid var(--color-primary)"
+                        >Requerido</span
+                      >
+                    </div>
+                    @if (formData().checkin_show_notes) {
+                    <div
+                      class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg"
+                      style="background: var(--color-surface-secondary); border: 1px solid var(--color-border)"
+                    >
+                      <div>
+                        <p class="text-sm font-medium" style="color: var(--color-text)">Notas</p>
+                        <p class="text-xs" style="color: var(--color-text-muted)">Instrucciones y estado inicial</p>
+                      </div>
+                      <span
+                        class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                        style="color: var(--color-text-muted); border: 1px solid var(--color-border)"
+                        >Opcional</span
+                      >
+                    </div>
+                    }
+                    @if (hiddenCheckinBlocks().length) {
+                      <p
+                        class="text-[11px]"
+                        style="color: var(--color-text-muted)"
+                      >
+                        Ocultos en Asignar: {{ hiddenCheckinBlocks().join(', ') }}.
+                      </p>
+                    }
+                  </div>
+                </div>
               }
             </div>
           </div>
@@ -311,11 +473,83 @@ interface Selection {
               ></ng-container>
             }
 
+            <!-- Bloques fijos predefinidos (fuera de secciones y pestañas) -->
+            @if (formData().entity_type === 'service_session') {
+              <div
+                class="rounded-xl p-4"
+                style="background: var(--color-surface); border: 1px dashed var(--color-primary)"
+              >
+                <div class="flex items-center gap-2 mb-1">
+                  <app-icon name="list-checks" [size]="16" color="var(--color-primary)"></app-icon>
+                  <h3
+                    class="text-sm font-semibold"
+                    style="color: var(--color-text)"
+                  >
+                    Bloques fijos de Asignar
+                  </h3>
+                </div>
+                <p
+                  class="text-xs mb-3"
+                  style="color: var(--color-text-muted)"
+                >
+                  Predefinidos de la recepción: aparecen en Asignar en este orden, fuera de las pestañas. Servicio y técnico siempre obligatorios.
+                </p>
+                <div class="space-y-2">
+                  <app-setting-toggle
+                    label="Presupuesto del cliente"
+                    description="Monto máximo que autoriza gastar"
+                    [ngModel]="formData().checkin_show_budget"
+                    (ngModelChange)="updateFormData('checkin_show_budget', $event)"
+                  />
+                  <div class="flex items-center justify-between gap-2">
+                    <div>
+                      <p class="text-xs font-semibold" style="color: var(--color-text)">Servicio</p>
+                      <p class="text-[11px]" style="color: var(--color-text-muted)">Servicio inicial de la atención</p>
+                    </div>
+                    <span
+                      class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                      style="color: var(--color-primary); border: 1px solid var(--color-primary)"
+                      >Requerido</span
+                    >
+                  </div>
+                  <app-setting-toggle
+                    label="Productos de la cuenta"
+                    description="Insumos que entran a la cuenta"
+                    [ngModel]="formData().checkin_show_products"
+                    (ngModelChange)="updateFormData('checkin_show_products', $event)"
+                  />
+                  <div class="flex items-center justify-between gap-2">
+                    <div>
+                      <p class="text-xs font-semibold" style="color: var(--color-text)">Técnico / Especialista asignado</p>
+                      <p class="text-[11px]" style="color: var(--color-text-muted)">Personal de servicio que atiende</p>
+                    </div>
+                    <span
+                      class="text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0"
+                      style="color: var(--color-primary); border: 1px solid var(--color-primary)"
+                      >Requerido</span
+                    >
+                  </div>
+                  <app-setting-toggle
+                    label="Notas"
+                    description="Instrucciones y estado inicial"
+                    [ngModel]="formData().checkin_show_notes"
+                    (ngModelChange)="updateFormData('checkin_show_notes', $event)"
+                  />
+                </div>
+              </div>
+            }
+
             <!-- Add Section Button -->
-            <app-button variant="outline" [fullWidth]="true" (clicked)="addSection()">
-              <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
-              Agregar Sección
-            </app-button>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <app-button variant="outline" [fullWidth]="true" (clicked)="addSection()">
+                <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
+                Agregar Sección
+              </app-button>
+              <app-button variant="primary" [fullWidth]="true" (clicked)="openSuggested()">
+                <app-icon name="sparkles" [size]="16" slot="icon" ></app-icon>
+                Campos sugeridos
+              </app-button>
+            </div>
           </div>
 
           <!-- Right Properties Panel (35%) -->
@@ -375,6 +609,14 @@ interface Selection {
                       [options]="statusOptions"
                     />
                   </div>
+                  @if (formData().entity_type === 'service_session') {
+                    <app-selector
+                      label="Tipo de estación"
+                      [ngModel]="formData().station_type || ''"
+                      (ngModelChange)="updateFormData('station_type', $event || null)"
+                      [options]="stationTypeOptions"
+                    />
+                  }
                   <app-setting-toggle
                     label="Plantilla por defecto"
                     [ngModel]="formData().is_default"
@@ -695,20 +937,26 @@ interface Selection {
                 </p>
               }
 
-              <!-- Add field dropdown -->
-              @if (
-                getAvailableFieldsForSection(si, isChild, parentIndex).length >
-                0
-              ) {
-                <div>
-                  <app-selector
-                    [ngModel]="''"
-                    (ngModelChange)="isChild ? onFieldSelectByValue(parentIndex, si, $event) : onFieldSelectByValue(-1, si, $event)"
-                    [options]="getFieldOptionsForSection(si, isChild, parentIndex)"
-                    placeholder="+ Agregar campo..."
-                  />
-                </div>
-              }
+              <!-- Add field dropdown + crear campo nuevo sin salir del editor -->
+              <div class="flex flex-col sm:flex-row sm:items-start gap-2">
+                @if (
+                  getAvailableFieldsForSection(si, isChild, parentIndex).length >
+                  0
+                ) {
+                  <div class="flex-1 min-w-0">
+                    <app-selector
+                      [ngModel]="''"
+                      (ngModelChange)="isChild ? onFieldSelectByValue(parentIndex, si, $event) : onFieldSelectByValue(-1, si, $event)"
+                      [options]="getFieldOptionsForSection(si, isChild, parentIndex)"
+                      placeholder="+ Agregar campo existente..."
+                    />
+                  </div>
+                }
+                <app-button variant="outline" size="sm" (clicked)="openCreateField(isChild ? parentIndex : -1, si)">
+                  <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+                  Crear campo
+                </app-button>
+              </div>
 
               <!-- Child Sections -->
               @if (!isChild) {
@@ -740,6 +988,42 @@ interface Selection {
         </div>
       </ng-template>
     }
+    @if (fieldModalTarget()) {
+      <app-field-modal
+        [defaultEntityType]="formData().entity_type"
+        (save)="onCreateField($event)"
+        (close)="fieldModalTarget.set(null)"
+      />
+    }
+
+    @if (showSuggested()) {
+      <app-modal [isOpen]="true" (isOpenChange)="!$event && showSuggested.set(false)" title="Campos sugeridos" subtitle="Marca los que quieres pedir; se crean si no existen y se agregan a la primera sección" size="lg">
+        <div class="space-y-4">
+          @for (group of suggestedGroups; track group.title) {
+            <div>
+              <h4 class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] mb-2">{{ group.title }}</h4>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                @for (f of group.fields; track f.field_key) {
+                  <label class="flex items-start gap-2 p-2 rounded-lg border border-[var(--color-border)] cursor-pointer text-sm">
+                    <input type="checkbox" class="mt-1" [checked]="suggestedPicked().has(f.field_key)" (change)="toggleSuggested(f.field_key)" />
+                    <span>
+                      <span class="font-semibold text-[var(--color-text-primary)]">{{ f.label }}</span>
+                      <span class="block text-xs text-[var(--color-text-secondary)]">{{ f.hint }}</span>
+                    </span>
+                  </label>
+                }
+              </div>
+            </div>
+          }
+        </div>
+        <div slot="footer" class="flex justify-end gap-2">
+          <app-button variant="outline" (clicked)="showSuggested.set(false)">Cancelar</app-button>
+          <app-button variant="primary" [disabled]="!suggestedPicked().size" [loading]="addingSuggested()" (clicked)="applySuggested()">
+            Agregar {{ suggestedPicked().size }} campo(s)
+          </app-button>
+        </div>
+      </app-modal>
+    }
   `,
 })
 export class TemplateEditorComponent implements OnInit {
@@ -768,6 +1052,7 @@ export class TemplateEditorComponent implements OnInit {
     { value: 'customer', label: 'Cliente' },
     { value: 'booking', label: 'Reserva' },
     { value: 'order', label: 'Orden' },
+    { value: 'service_session', label: 'Atención de servicio' },
   ];
 
   statusOptions = [
@@ -789,8 +1074,12 @@ export class TemplateEditorComponent implements OnInit {
     description: string;
     icon: string;
     entity_type: string;
+    station_type: string | null;
     status: string;
     is_default: boolean;
+    checkin_show_budget: boolean;
+    checkin_show_products: boolean;
+    checkin_show_notes: boolean;
     use_tabs: boolean;
     tabs: TabForm[];
     sections: SectionForm[];
@@ -799,14 +1088,31 @@ export class TemplateEditorComponent implements OnInit {
     description: '',
     icon: '',
     entity_type: 'booking',
+    station_type: null,
     status: 'active',
     is_default: false,
+    checkin_show_budget: true,
+    checkin_show_products: true,
+    checkin_show_notes: true,
     use_tabs: false,
     tabs: [],
     sections: [],
   });
 
   templateName = computed(() => this.formData().name || 'Nueva Plantilla');
+
+  /**
+   * Pantalla que abrió el editor (p. ej. Estaciones de servicio al diseñar la
+   * plantilla de una estación): Volver y Guardar regresan ahí. Solo rutas internas
+   * del panel, para no convertir el parámetro en una redirección abierta.
+   */
+  readonly returnTo = signal<string | null>(null);
+  /** returnTo partido en ruta + query: routerLink codificaría el "?" dentro de la ruta. */
+  readonly returnPath = computed(() => (this.returnTo() ?? '/admin/data-collection/templates').split('?')[0]);
+  readonly returnQuery = computed<Record<string, string> | undefined>(() => {
+    const query = this.returnTo()?.split('?')[1];
+    return query ? Object.fromEntries(new URLSearchParams(query)) : undefined;
+  });
 
   previewSteps = computed(() => {
     const fd = this.formData();
@@ -892,6 +1198,8 @@ export class TemplateEditorComponent implements OnInit {
   readonly activeTabId = computed(() => String(this.activeTabIndex()));
 
   ngOnInit() {
+    const returnTo = this.route.snapshot.queryParamMap.get('returnTo');
+    if (returnTo && /^\/admin\/[\w\-/?=&]*$/.test(returnTo)) this.returnTo.set(returnTo);
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (!id) {
       this.toastService.error('ID de plantilla no valido');
@@ -903,6 +1211,11 @@ export class TemplateEditorComponent implements OnInit {
       next: (t) => {
         this.template.set(t);
         this.initFormData(t);
+        // Plantilla guía de estación (borrador) abierta desde Estaciones: al guardarla
+        // queda activa y ya se puede elegir al crear estaciones.
+        if (this.returnTo() && t.status === 'inactive' && t.entity_type === 'service_session') {
+          this.updateFormData('status', 'active');
+        }
         this.loading.set(false);
       },
       error: (err) => {
@@ -923,8 +1236,12 @@ export class TemplateEditorComponent implements OnInit {
         description: t.description || '',
         icon: t.icon || '',
         entity_type: t.entity_type,
+        station_type: t.station_type ?? null,
         status: t.status,
         is_default: t.is_default,
+        checkin_show_budget: t.checkin_show_budget ?? true,
+        checkin_show_products: t.checkin_show_products ?? true,
+        checkin_show_notes: t.checkin_show_notes ?? true,
         use_tabs: true,
         tabs: t.tabs.map((tab) => ({
           id: tab.id,
@@ -941,8 +1258,12 @@ export class TemplateEditorComponent implements OnInit {
         description: t.description || '',
         icon: t.icon || '',
         entity_type: t.entity_type,
+        station_type: t.station_type ?? null,
         status: t.status,
         is_default: t.is_default,
+        checkin_show_budget: t.checkin_show_budget ?? true,
+        checkin_show_products: t.checkin_show_products ?? true,
+        checkin_show_notes: t.checkin_show_notes ?? true,
         use_tabs: false,
         tabs: [],
         sections: (t.sections || []).map((s) => this.mapSectionForm(s)),
@@ -1025,6 +1346,11 @@ export class TemplateEditorComponent implements OnInit {
     if (id === 'preview') this.togglePreview();
   }
 
+  private goBackIfRequested(): void {
+    const target = this.returnTo();
+    if (target) this.router.navigateByUrl(target);
+  }
+
   save() {
     const fd = this.formData();
     if (!fd.name) return;
@@ -1036,8 +1362,12 @@ export class TemplateEditorComponent implements OnInit {
       description: fd.description,
       icon: fd.icon || undefined,
       entity_type: fd.entity_type,
+      station_type: fd.entity_type === 'service_session' ? fd.station_type || null : undefined,
       status: fd.status,
       is_default: fd.is_default,
+      checkin_show_budget: fd.entity_type === 'service_session' ? fd.checkin_show_budget : undefined,
+      checkin_show_products: fd.entity_type === 'service_session' ? fd.checkin_show_products : undefined,
+      checkin_show_notes: fd.entity_type === 'service_session' ? fd.checkin_show_notes : undefined,
     };
 
     if (fd.use_tabs && fd.tabs.length) {
@@ -1058,6 +1388,7 @@ export class TemplateEditorComponent implements OnInit {
             next: () => {
               this.saving.set(false);
               this.toastService.success('Plantilla actualizada');
+              this.goBackIfRequested();
             },
             error: () => {
               this.saving.set(false);
@@ -1113,12 +1444,7 @@ export class TemplateEditorComponent implements OnInit {
     if (this.showPreview()) {
       this.showPreview.set(false);
     } else {
-      if (this.previewSteps().length === 0) {
-        this.toastService.info(
-          'La plantilla no tiene campos para previsualizar',
-        );
-        return;
-      }
+      // Sin campos también se abre: la vista previa explica qué agregar.
       this.previewStep.set(0);
       this.showPreview.set(true);
     }
@@ -1143,6 +1469,51 @@ export class TemplateEditorComponent implements OnInit {
   resolveField(fieldId: number): MetadataField | null {
     return this.availableFields().find((f) => f.id === fieldId) || null;
   }
+
+  /** ¿Esta sección (o sus hijas) trae campos que se guardan en el perfil del cliente? */
+  private sectionHasCustomerField(section: SectionForm): boolean {
+    for (const item of section.items ?? []) {
+      if (this.resolveField(item.metadata_field_id)?.entity_type === 'customer') return true;
+    }
+    for (const child of section.child_sections ?? []) {
+      if (this.sectionHasCustomerField(child)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * En plantillas de estación, la recepción (Asignar) muestra el buscador de
+   * cliente registrado una sola vez, arriba de los campos de cliente. La vista
+   * previa lo refleja para que diseñar sea WYSIWYG.
+   */
+  showCustomerFinderBefore(step: { sections: SectionForm[] }, index: number): boolean {
+    if (this.formData().entity_type !== 'service_session') return false;
+    const sections = step.sections ?? [];
+    if (!sections[index] || !this.sectionHasCustomerField(sections[index])) return false;
+    return !sections.slice(0, index).some((s) => this.sectionHasCustomerField(s));
+  }
+
+  /**
+   * Bloques fijos de la recepción (Asignar): en plantillas de estación la
+   * vista previa los muestra una sola vez, al final del último paso, con su
+   * marca de requerido/opcional para que diseñar sea WYSIWYG.
+   */
+  showFixedCheckinBlocks(): boolean {
+    if (this.formData().entity_type !== 'service_session') return false;
+    const steps = this.previewSteps();
+    if (steps.length === 0) return true;
+    return this.previewStep() >= steps.length - 1;
+  }
+
+  /** Nombres de los bloques fijos ocultos en Asignar según los toggles (previa). */
+  hiddenCheckinBlocks = computed(() => {
+    const fd = this.formData();
+    const hidden: string[] = [];
+    if (!fd.checkin_show_budget) hidden.push('presupuesto');
+    if (!fd.checkin_show_products) hidden.push('productos');
+    if (!fd.checkin_show_notes) hidden.push('notas');
+    return hidden;
+  });
 
   // --- Form Data Updates ---
 
@@ -1357,7 +1728,7 @@ export class TemplateEditorComponent implements OnInit {
   getFieldOptionsForSection(si: number, isChild: boolean, parentIndex: number) {
     return this.getAvailableFieldsForSection(si, isChild, parentIndex).map((f) => ({
       value: String(f.id),
-      label: `${f.label} (${f.field_type})`,
+      label: `${f.label} (${FIELD_TYPE_LABELS[f.field_type] ?? f.field_type})`,
     }));
   }
 
@@ -1586,9 +1957,8 @@ export class TemplateEditorComponent implements OnInit {
   }
 
   getFieldType(fieldId: number): string {
-    return (
-      this.availableFields().find((f) => f.id === fieldId)?.field_type || ''
-    );
+    const type = this.availableFields().find((f) => f.id === fieldId)?.field_type;
+    return type ? FIELD_TYPE_LABELS[type] ?? type : '';
   }
 
   // --- Product Helpers ---
@@ -1634,6 +2004,114 @@ export class TemplateEditorComponent implements OnInit {
   }
 
   // --- Data Loading ---
+
+  // --- Crear campos sin salir del editor ---
+
+  /** Sección donde se agregará el campo recién creado. */
+  readonly fieldModalTarget = signal<{ parentIndex: number; sectionIndex: number } | null>(null);
+
+  openCreateField(parentIndex: number, sectionIndex: number) {
+    this.fieldModalTarget.set({ parentIndex, sectionIndex });
+  }
+
+  onCreateField(data: Partial<MetadataField>) {
+    const target = this.fieldModalTarget();
+    this.fieldsService.createField(data).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (field) => {
+        this.availableFields.update((fields) => [...fields, field]);
+        if (target) this.onFieldSelectByValue(target.parentIndex, target.sectionIndex, field.id);
+        this.fieldModalTarget.set(null);
+        this.toastService.success(`Campo "${field.label}" creado y agregado`);
+      },
+      error: (err) => this.toastService.error(extractApiErrorMessage(err)),
+    });
+  }
+
+  // --- Campos sugeridos (atención de servicio) ---
+
+  /**
+   * Campos típicos para recibir un servicio. Los de "Cliente" se guardan en el
+   * perfil del cliente (se prellenan la próxima vez); el resto queda en la
+   * atención. Placa y marca van primero: con ellas se arma el nombre de lo
+   * atendido ("ABC123 · Yamaha NMAX").
+   */
+  /** Grupos de "Campos sugeridos" (lista compartida con Estaciones de servicio). */
+  readonly suggestedGroups = SERVICE_FIELD_GROUPS.map((group) => ({
+    title: group.title,
+    fields: group.keys.map((key) => SERVICE_FIELD_PRESETS[key]),
+  }));
+
+  /** Tipos de estación para plantillas de atención: la estación creada con ella lo hereda. */
+  readonly stationTypeOptions = [
+    { value: '', label: 'Sin tipo (general)' },
+    ...STATION_TEMPLATE_TYPES.map((t) => ({ value: t.value, label: t.label })),
+  ];
+
+  readonly showSuggested = signal(false);
+  readonly suggestedPicked = signal<Set<string>>(new Set());
+  readonly addingSuggested = signal(false);
+
+  openSuggested() {
+    this.suggestedPicked.set(new Set());
+    this.showSuggested.set(true);
+  }
+
+  toggleSuggested(key: string) {
+    this.suggestedPicked.update((set) => {
+      const next = new Set(set);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  /** Reutiliza los campos que ya existen (misma clave y entidad) y crea los que falten. */
+  applySuggested() {
+    const picked = this.suggestedPicked();
+    const templateEntity = (this.formData().entity_type || 'service_session') as EntityType;
+    const wanted = this.suggestedGroups.flatMap((group) =>
+      group.fields
+        .filter((f) => picked.has(f.field_key))
+        .map((f) => ({ ...f, entity_type: presetEntityType(f, templateEntity) })),
+    );
+    if (!wanted.length) return;
+    this.addingSuggested.set(true);
+    const requests = wanted.map((f) => {
+      const existing = this.availableFields().find((af) => af.field_key === f.field_key && af.entity_type === f.entity_type);
+      return existing
+        ? of(existing)
+        : this.fieldsService.createField({
+            label: f.label,
+            field_key: f.field_key,
+            entity_type: f.entity_type as MetadataField['entity_type'],
+            field_type: f.field_type as MetadataField['field_type'],
+            display_mode: 'detail',
+            is_required: false,
+            ...(f.options ? { options: f.options } : {}),
+          } as Partial<MetadataField>);
+    });
+    forkJoin(requests).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (fields) => {
+        this.availableFields.update((current) => [
+          ...current,
+          ...fields.filter((f) => !current.some((c) => c.id === f.id)),
+        ]);
+        if (!this.activeSections().length) {
+          this.addSection();
+          this.mutateActiveSections((sections) => {
+            sections[0] = { ...sections[0], title: 'Datos de ingreso' };
+          });
+        }
+        for (const field of fields) this.addFieldToSection(0, field.id);
+        this.addingSuggested.set(false);
+        this.showSuggested.set(false);
+        this.toastService.success(`${fields.length} campo(s) agregados. Guarda la plantilla para conservarlos.`);
+      },
+      error: (err) => {
+        this.addingSuggested.set(false);
+        this.toastService.error(extractApiErrorMessage(err));
+      },
+    });
+  }
 
   private loadAvailableFields() {
     this.fieldsService.getFields().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({

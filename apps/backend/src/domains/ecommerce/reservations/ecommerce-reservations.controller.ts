@@ -51,6 +51,7 @@ export class EcommerceReservationsController {
       {
         provider_id: providerId ? parseInt(providerId, 10) : undefined,
         product_variant_id: query.product_variant_id,
+        station_id: query.station_id,
       },
     );
     return { success: true, data: slots };
@@ -87,6 +88,8 @@ export class EcommerceReservationsController {
     @Query('date_from') dateFrom: string,
     @Query('date_to') dateTo: string,
     @Query('provider_id') providerId?: string,
+    @Query('station_id') stationId?: string,
+    @Query('product_variant_id') productVariantId?: string,
   ) {
     if (!dateFrom || !dateTo) {
       throw new BadRequestException('date_from y date_to son obligatorios');
@@ -97,6 +100,8 @@ export class EcommerceReservationsController {
       dateFrom,
       dateTo,
       pid,
+      stationId ? parseInt(stationId, 10) : undefined,
+      productVariantId ? parseInt(productVariantId, 10) : undefined,
     );
     return { success: true, data: days };
   }
@@ -416,6 +421,8 @@ export class EcommerceReservationsController {
       notes: dto.notes,
       service_location_type: dto.service_location_type ?? ('shop' as any),
       service_address_id: dto.service_address_id,
+      station_id: dto.station_id,
+      provider_id: dto.provider_id,
     });
 
     return { success: true, data: booking };
@@ -436,6 +443,8 @@ export class EcommerceReservationsController {
       start_time: dto.start_time,
       end_time: dto.end_time,
       notes: dto.notes,
+      station_id: dto.station_id,
+      provider_id: dto.provider_id,
     });
 
     return { success: true, data: hold };

@@ -169,6 +169,7 @@ export class MenuFilterService {
     Contratos: 'orders_contracts',
     'Plan Separe': 'orders_layaway',
     Reservas: 'orders_reservations',
+    'Estaciones de Servicio': 'orders_service_stations',
 
     // STORE_ADMIN - Despacho (padre + submódulos)
     Despacho: 'dispatch',

@@ -427,6 +427,10 @@ export class BookingComponent implements OnInit {
       if (!slot) return;
       startTime = slot.start_time;
       endTime = slot.end_time;
+      if (this.product()?.requires_station && !slot.station_id) {
+        this.toast.error('Selecciona un horario con estación disponible');
+        return;
+      }
     }
 
     const variantId = this.selectedVariantId();
@@ -439,6 +443,8 @@ export class BookingComponent implements OnInit {
     if (variantId) {
       bookingSelection['product_variant_id'] = variantId;
     }
+    const stationId = this.selectedSlot()?.station_id;
+    if (stationId) bookingSelection['station_id'] = stationId;
     // Persistimos también el proveedor seleccionado (cuando aplica) para
     // que el resumen del checkout pueda mostrarlo al lado de la fecha
     // y el horario, sin obligar al cliente a re-picar.

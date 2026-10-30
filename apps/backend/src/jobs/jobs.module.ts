@@ -43,6 +43,7 @@ import { SaasMetricsSnapshotJob } from './saas-metrics-snapshot.job';
 import { FiscalObligationDetectorJob } from './fiscal-obligation-detector.job';
 import { FiscalStatusListener } from './fiscal-status.listener';
 import { WeeklyReportGenerateJob } from './weekly-report-generate.job';
+import { ServiceSessionEmailReconciliationJob } from './service-session-email-reconciliation.job';
 import { WeeklyReportModule } from '../domains/store/weekly-report/weekly-report.module';
 import { NotificationsModule } from '../domains/store/notifications/notifications.module';
 import { FiscalStatusService } from '../common/services/fiscal-status.service';
@@ -132,6 +133,7 @@ import { OrderHistoryModule } from '../domains/store/orders/order-history/order-
     FiscalObligationDetectorJob,
     FiscalStatusListener,
     WeeklyReportGenerateJob,
+    ServiceSessionEmailReconciliationJob,
     EmailNotificationsProcessor,
     BillingWarningProcessor,
   ],

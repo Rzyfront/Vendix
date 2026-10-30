@@ -152,6 +152,7 @@ jobs:
         run: npm run buildcheck:types
       - name: nest build
         working-directory: apps/backend
+
         env:
           NODE_OPTIONS: --max-old-space-size=6144
         run: npm run build

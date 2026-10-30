@@ -63,6 +63,28 @@
           </a>
         </app-tooltip>
 
+        @if (isServiceIndustry()) {
+        <!-- Service Stations Management Button -->
+        <app-tooltip
+          content="Gestionar estaciones y bahías de atención"
+          position="bottom"
+          size="sm"
+        >
+          <a
+            routerLink="/admin/services/stations"
+            class="flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold text-xs md:text-sm shadow-sm active:scale-95 transition-all min-h-[36px] border border-[var(--color-border)] bg-surface hover:bg-[var(--color-background)]"
+            style="color: var(--color-text-primary);"
+          >
+            <app-icon name="warehouse" [size]="14"></app-icon>
+            <span class="hidden sm:inline">Estaciones</span>
+          </a>
+        </app-tooltip>
+
+        <a routerLink="/admin/reservations/reminders" class="flex items-center gap-1.5 px-3 py-2 rounded-lg font-bold text-xs md:text-sm border border-[var(--color-border)] bg-surface hover:bg-[var(--color-background)]" style="color: var(--color-text-primary);">
+          <app-icon name="bell" [size]="14"></app-icon><span class="hidden sm:inline">Recordatorios</span>
+        </a>
+        }
+
         <!-- Appointment redesign phase 2 — solicitudes de reagenda.
              Badge con el count de pending. Click → navega a la página
              dedicada /admin/reservations/reschedule-requests. -->
@@ -103,18 +125,15 @@
           position="bottom"
           size="sm"
         >
-          <button
-            type="button"
-            (click)="onCreateNew()"
-            class="flex items-center gap-1.5 px-3 md:px-4 py-2 rounded-lg font-bold text-xs md:text-sm shadow-sm active:scale-95 transition-all min-h-[36px]"
-            style="
-              background: var(--color-primary);
-              color: var(--color-text-on-primary);
-            "
+          <app-button
+            variant="primary"
+            size="sm"
+            (clicked)="onCreateNew()"
           >
-            <app-icon name="plus" [size]="14"></app-icon>
+            <app-icon name="plus" [size]="14" slot="icon" />
             <span class="hidden sm:inline">Nueva Reserva</span>
-          </button>
+            <span class="sm:hidden">Nueva</span>
+          </app-button>
         </app-tooltip>
       </div>
     </div>

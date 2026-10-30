@@ -69,9 +69,11 @@ export interface Product {
     | 'package'
     | 'subscription';
   requires_booking?: boolean;
+  requires_station?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
   is_recurring?: boolean;
+  recurrence_interval_days?: number | null;
   service_instructions?: string;
   is_consultation?: boolean;
   send_preconsultation?: boolean;
@@ -389,9 +391,11 @@ export interface CreateProductDto {
     | 'package'
     | 'subscription';
   requires_booking?: boolean;
+  requires_station?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
   is_recurring?: boolean;
+  recurrence_interval_days?: number | null;
   service_instructions?: string;
   is_consultation?: boolean;
   send_preconsultation?: boolean;
@@ -493,6 +497,7 @@ export interface UpdateProductDto {
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
   is_recurring?: boolean;
+  recurrence_interval_days?: number | null;
   service_instructions?: string;
   is_consultation?: boolean;
   send_preconsultation?: boolean;

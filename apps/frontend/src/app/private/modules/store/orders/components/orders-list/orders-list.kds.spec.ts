@@ -54,7 +54,7 @@ describe('OrdersListComponent semantic mobile actions', () => {
         { provide: CurrencyFormatService, useValue: { format: (value: number) => `$ ${value}` } },
         { provide: HttpClient, useValue: { get: () => of({ data: [] }) } },
         { provide: TablesService, useValue: { getFloorMap: () => of([]) } },
-        { provide: AuthFacade, useValue: { isRestaurant: restaurant, isModuleVisible: () => moduleVisible() } },
+        { provide: AuthFacade, useValue: { isRestaurant: restaurant, isServiceIndustry: signal(false), isModuleVisible: () => moduleVisible() } },
         { provide: ActivatedRoute, useValue: { queryParamMap: NEVER } },
         { provide: Router, useValue: { navigate: jasmine.createSpy('navigate') } },
         { provide: OrdersListSseService, useValue: sse },

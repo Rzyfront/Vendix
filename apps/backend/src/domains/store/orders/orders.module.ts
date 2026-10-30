@@ -55,6 +55,7 @@ import { PriceResolverService } from '../products/services/price-resolver.servic
 import { KitchenFireModule } from '../kitchen-fire/kitchen-fire.module'; // QUI-650: fire en la misma tx (sin ciclo: KitchenFireModule no importa OrdersModule)
 import { OrderLeaseModule } from '../../../common/locks/order-lease.module';
 import { OrderHistoryModule } from './order-history/order-history.module'; // Plan order-truth-and-invoice-tz — OrdersService inyecta OrderHistoryService directo (customer_changed / shipping_assigned)
+import { ServiceAllocationModule } from '../reservations/service-allocation.module';
 
 @Module({
   imports: [
@@ -82,6 +83,7 @@ import { OrderHistoryModule } from './order-history/order-history.module'; // Pl
     // Release-853 paso 10: propagación del titular al borrador de factura.
     forwardRef(() => InvoicingModule),
     OrderHistoryModule,
+    ServiceAllocationModule,
     KitchenFireModule,
   ],
   controllers: [OrdersController, OrdersBulkController, OrderItemChangesController],

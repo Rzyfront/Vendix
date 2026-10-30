@@ -62,6 +62,11 @@ import {
   deliveryTypeToEntregaChoice,
 } from './models/cart.model';
 import { PosSplitBillModalComponent } from './components/pos-split-bill-modal.component';
+import {
+  PosChargeStationModalComponent,
+  StationChargedEvent,
+} from './components/pos-charge-station-modal.component';
+import { PosServiceStationIntegrationService } from './services/pos-service-station-integration.service';
 import type { SplitResult, SplitSourceItem } from '../restaurant-ops/tables/interfaces';
 import { PosCustomItemModalComponent } from './components/pos-custom-item-modal/pos-custom-item-modal.component';
 import { resolveSaleQuantity } from './utils/line-units.util';
@@ -181,6 +186,7 @@ export function resolvePosPaymentCustomerName(
     IconComponent,
     PosCustomItemModalComponent,
     PosSplitBillModalComponent,
+    PosChargeStationModalComponent,
     PosCustomerTierModalComponent,
     SpinnerComponent,
     CardComponent,
@@ -224,6 +230,12 @@ export function resolvePosPaymentCustomerName(
           <app-button variant="outline" size="sm" (clicked)="showSplitAccounts.set(true)">Dividir / cobrar cuentas</app-button>
         </div>
       }
+      <app-pos-charge-station-modal
+        [isOpen]="showChargeStationModal()"
+        [cartItems]="cartItems()"
+        (isOpenChange)="showChargeStationModal.set($event)"
+        (charged)="onStationCharged($event)"
+      />
       <app-pos-customer-tier-modal
         [prompt]="customerTierPromptState()"
         (confirmed)="onCustomerTierConfirmed($event)"
@@ -390,6 +402,8 @@ export function resolvePosPaymentCustomerName(
             (checkout)="onCheckout()"
             (charge)="onCharge()"
             (chargeAccounts)="showSplitAccounts.set(true)"
+            [showChargeToStation]="showChargeToStation()"
+            (chargeToStation)="onOpenChargeStation()"
             (quote)="onQuote()"
             (layaway)="onLayaway()"
             (customerSelected)="onCustomerSelected($event)"
@@ -494,6 +508,8 @@ export function resolvePosPaymentCustomerName(
         [isLayawayMode]="isLayawayMode()"
         [readyToPayOrder]="readyToPayOrder()"
         [isCharging]="isCharging()"
+        [showChargeToStation]="showChargeToStation()"
+        (chargeToStation)="onOpenChargeStation()"
         (closed)="onCloseCartModal()"
         (customItemRequested)="openCustomItemModal()"
         (itemPriceEditRequested)="editItemPriceFromMobile($event)"
@@ -1047,6 +1063,61 @@ export class PosComponent {
   // Edit mode
   isEditMode = signal(false);
   readonly showSplitAccounts = signal(false);
+
+  // ── Estaciones de servicio: "Cargar a estación" (gemelo de mesas) ──────
+  protected readonly stationIntegration = inject(
+    PosServiceStationIntegrationService,
+  );
+  readonly showChargeStationModal = signal(false);
+  /** Visible cuando la industria de la tienda usa estaciones de servicio. */
+  readonly showChargeToStation = computed(
+    () =>
+      this.stationIntegration.isServiceStationsMode() &&
+      !this.isQuotationMode() &&
+      !this.isLayawayMode(),
+  );
+
+  onOpenChargeStation(): void {
+    if (this.cartItems().length === 0) {
+      this.toastService.warning('Agrega productos al carrito antes de cargarlos a una estación');
+      return;
+    }
+    if (this.cartState()?.linkedOrderId != null) {
+      this.toastService.warning(
+        'Esta venta ya está vinculada a una orden; guárdala o cóbrala en lugar de cargarla a una estación',
+      );
+      return;
+    }
+    // La cuenta de la estación no hereda cupones ni promociones: el carrito se
+    // enviaría a precio de lista y se vaciaría perdiendo el descuento.
+    const state = this.cartState();
+    const hasDiscounts =
+      !!state?.appliedCoupon ||
+      (state?.appliedDiscounts?.length ?? 0) > 0 ||
+      Number(state?.summary?.discountAmount ?? 0) > 0 ||
+      this.cartItems().some((it) => (it.discounts?.length ?? 0) > 0);
+    if (hasDiscounts) {
+      this.toastService.warning(
+        'El carrito tiene cupón, promoción o descuentos aplicados y no se pueden enviar a la estación. Quítalos y aplica los descuentos al cobrar la cuenta en la estación.',
+      );
+      return;
+    }
+    this.showCartModal.set(false);
+    this.showChargeStationModal.set(true);
+  }
+
+  onStationCharged(event: StationChargedEvent): void {
+    const total = this.currencyService.format(Number(event.result?.grand_total ?? 0));
+    this.toastService.success(
+      `Cargado a ${event.session.station_name}. Nuevo total: ${total}`,
+    );
+    // Igual que el envío a mesa: el carrito quedó cargado en la cuenta de la
+    // estación, se vacía localmente (no hay orden adoptada que liberar).
+    this.cartService
+      .clearCart()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({ next: () => undefined, error: () => undefined });
+  }
   readonly splitSourceOrderId = computed(() => Number(
     this.restaurantIntegration.currentTableSession()?.order_id ?? this.editingOrderId() ?? this.readyToPayOrder()?.id ?? 0,
   ) || null);

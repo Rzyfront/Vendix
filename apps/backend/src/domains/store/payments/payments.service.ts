@@ -54,6 +54,7 @@ import { resolvePackSize } from '../products/services/packaging.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
 import { pickCostPrice } from '../orders/utils/resolve-cost-price';
+import { serviceBudgetBlocks } from '../orders/utils/service-budget-cap.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
@@ -5847,6 +5848,7 @@ export class PaymentsService {
           select: {
             id: true, order_number: true, state: true,
             subtotal_amount: true, tax_amount: true,
+            service_session_id: true, currency: true,
             shipping_address_id: true,
             active_financial_split_id: true,
             stores: { select: { organization_id: true } },
@@ -6098,6 +6100,23 @@ export class PaymentsService {
               tip,
           ),
         );
+        if (existingOrder?.service_session_id) {
+          const budget = await tx.service_budgets.findFirst({
+            where: { store_id: dtoStoreId, session_id: existingOrder.service_session_id },
+            orderBy: { version: 'desc' },
+            select: { amount: true, currency: true, is_system: true },
+          });
+          // Budget policy excludes optional tips; the order grand total still
+          // includes them for payment and receipt purposes.
+          const budgetComparableTotal = this.roundMoney(grandTotal - tip);
+          if (serviceBudgetBlocks(budget, existingOrder.currency, budgetComparableTotal)) {
+            throw new VendixHttpException(
+              ErrorCodes.SERVICE_BUDGET_001,
+              'El total supera el límite vigente. Registra una propuesta y espera la autorización del cliente.',
+              { order_id: existingOrder.id, service_session_id: existingOrder.service_session_id },
+            );
+          }
+        }
 
         const sellerUserId = dto.seller_user_id
           ? (Number(dto.seller_user_id) || null)
@@ -6212,6 +6231,9 @@ export class PaymentsService {
         delete adoptedOrderData.created_by_user_id;
         delete adoptedOrderData.store_id;
         delete adoptedOrderData.channel;
+        if (existingOrder?.service_session_id) {
+          adoptedOrderData.service_version = { increment: 1 };
+        }
         const aliasDeliveryAddress = dto.customer_alias?.trim() &&
           dto.delivery_type === 'home_delivery'
           ? this.aliasShippingAddressData(
@@ -6303,8 +6325,40 @@ export class PaymentsService {
         }
 
         // Link pending bookings to this order
-        if (dto.booking_ids?.length) {
-          await tx.bookings.updateMany({
+        if (dto.booking_ids?.length || (order.order_items ?? []).length) {
+          const suppliedBookingIds = dto.booking_ids ?? [];
+          const orderProductIds = [...new Set((order.order_items ?? []).map((item: any) => item.product_id).filter((id: unknown): id is number => typeof id === 'number'))];
+          const stationProducts = await tx.products.findMany({
+            where: { store_id: dtoStoreId, id: { in: orderProductIds }, requires_station: true },
+            select: { id: true },
+          });
+          if (stationProducts.length > 0) {
+            const requiredIds = new Set(stationProducts.map((product) => product.id));
+            const requiredItems = (order.order_items ?? []).filter((item: any) => requiredIds.has(item.product_id));
+            const bookings = await tx.bookings.findMany({
+              where: { id: { in: suppliedBookingIds }, store_id: dtoStoreId, product_id: { in: [...requiredIds] }, status: { in: ['pending', 'confirmed'] } },
+              select: { id: true, product_id: true, product_variant_id: true },
+            });
+            const requiredUnits = new Map<string, number>();
+            for (const item of requiredItems) {
+              const key = `${item.product_id}:${item.product_variant_id ?? ''}`;
+              requiredUnits.set(key, (requiredUnits.get(key) ?? 0) + Number(item.quantity));
+            }
+            const bookingUnits = new Map<string, number>();
+            for (const booking of bookings) {
+              const key = `${booking.product_id}:${booking.product_variant_id ?? ''}`;
+              bookingUnits.set(key, (bookingUnits.get(key) ?? 0) + 1);
+            }
+            const hasUnitCoverage = [...requiredUnits].every(([key, units]) => (bookingUnits.get(key) ?? 0) >= units);
+            const allocations = bookings.length ? await tx.service_allocations.findMany({
+              where: { store_id: dtoStoreId, booking_id: { in: bookings.map((booking) => booking.id) }, state: { in: ['held', 'payment_pending', 'confirmed'] }, OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }] },
+              select: { booking_id: true },
+            }) : [];
+            if (!hasUnitCoverage || allocations.length !== bookings.length) {
+              throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001, 'La orden requiere reservas de estación activas antes de registrar el pago.');
+            }
+          }
+          if (dto.booking_ids?.length) await tx.bookings.updateMany({
             where: {
               id: { in: dto.booking_ids },
               store_id: dto.store_id,
@@ -6635,6 +6689,27 @@ export class PaymentsService {
     const payableAmount = this.roundMoney(
       Number(order?.grand_total ?? order?.total_amount ?? dto.total_amount ?? 0),
     );
+    if (order?.id != null) {
+      const serviceOrder = await tx.orders.findFirst({
+        where: { id: order.id, store_id: dtoStoreId },
+        select: { service_session_id: true, currency: true, tip_amount: true },
+      });
+      if (serviceOrder?.service_session_id) {
+        const budget = await tx.service_budgets.findFirst({
+          where: { store_id: dtoStoreId, session_id: serviceOrder.service_session_id },
+          orderBy: { version: 'desc' },
+          select: { amount: true, currency: true, is_system: true },
+        });
+        const authorizedTotal = this.roundMoney(payableAmount - Number(serviceOrder.tip_amount ?? 0));
+        if (serviceBudgetBlocks(budget, serviceOrder.currency, authorizedTotal)) {
+          throw new VendixHttpException(
+            ErrorCodes.SERVICE_BUDGET_001,
+            'No se puede cobrar: el total autorizado supera el límite vigente.',
+            { order_id: order.id, service_session_id: serviceOrder.service_session_id },
+          );
+        }
+      }
+    }
 
     // Cobro multimétodo de contado: `payments[]` gana sobre el contrato
     // escalar. Cada tramo crea su fila `succeeded` en esta misma transacción
