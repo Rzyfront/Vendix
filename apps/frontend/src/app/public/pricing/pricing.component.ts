@@ -1,6 +1,6 @@
 import { Component, computed, effect, inject, signal, DestroyRef } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { CommonModule, DOCUMENT } from '@angular/common';
 import { PublicPlansService, PublicPlan } from './services/public-plans.service';
 import { PricingCardComponent } from '../../shared/components';
@@ -18,7 +18,7 @@ const VIEW_MODE_STORAGE_KEY = 'pricingViewMode';
 @Component({
   selector: 'app-pricing',
   standalone: true,
-  imports: [CommonModule, PricingCardComponent, PlanComparisonTableComponent],
+  imports: [CommonModule, RouterLink, PricingCardComponent, PlanComparisonTableComponent],
   templateUrl: './pricing.component.html',
   styleUrls: ['./pricing.component.scss'],
 })
