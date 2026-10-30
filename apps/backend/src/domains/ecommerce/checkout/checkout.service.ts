@@ -2169,18 +2169,38 @@ export class CheckoutService {
           quantity: item.quantity,
         });
 
-        // Adiciones (S3): delta FINAL por unidad calculado en el servidor
-        // sobre los `option_ids` de la línea. Sin adiciones → 0, como hoy.
+        // Adiciones (S3): delta FINAL (con impuestos) por unidad calculado en
+        // el servidor sobre los `option_ids` de la línea, igual que en POS.
+        // Sin adiciones → 0 y nada de este bloque cambia el cálculo de hoy.
         const lineOptions = await this.resolveCheckoutLineOptions(item, dto.items);
-        const netPrice = line.net_unit_price + Number(lineOptions.unit_price_delta);
+        const optionDelta = Number(lineOptions.unit_price_delta);
 
         const stockUnitsConsumed = line.stock_units_consumed;
         stockUnitsByIndex[index] = stockUnitsConsumed;
 
-        const taxInfo = await this.taxes_service.calculateProductTaxes(
+        const baseTaxInfo = await this.taxes_service.calculateProductTaxes(
           item.product_id,
-          netPrice,
+          line.net_unit_price,
         );
+        // Con impuestos NO incluidos el precio del catálogo es neto: al neto
+        // se suma solo la base del delta, para que el impuesto que se agrega
+        // después no se cobre dos veces sobre la adición (POS = tienda en línea).
+        const allInclusive = baseTaxInfo.taxes.every((t: any) => t.is_inclusive);
+        const optionNet =
+          optionDelta === 0 || allInclusive
+            ? optionDelta
+            : resolveLineTotals(
+                optionDelta,
+                // Solo las tasas NO incluidas: las incluidas ya van dentro del delta.
+                baseTaxInfo.taxes
+                  .filter((t: any) => !t.is_inclusive)
+                  .map((t: any) => ({ rate: t.rate, is_inclusive: true, rate_basis: t.rate_basis })),
+              ).base;
+        const netPrice = line.net_unit_price + optionNet;
+        const taxInfo =
+          optionDelta === 0
+            ? baseTaxInfo
+            : await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
 
         const cost_price =
           item.product_variant?.cost_price != null
@@ -2679,6 +2699,12 @@ export class CheckoutService {
           data: { state: 'cancelled', updated_at: new Date() },
         });
         await this.cancelCheckoutBookings(createdBookingIds);
+        // Pedido programado: la orden cancelada libera su franja.
+        if (dto.schedule) {
+          await this.scheduledOrdersService
+            ?.cancelForOrder(order.id, 'Pago no registrado')
+            .catch(() => undefined);
+        }
         throw error;
       });
     }
