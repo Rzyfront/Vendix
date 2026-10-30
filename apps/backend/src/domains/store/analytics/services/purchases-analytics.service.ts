@@ -16,6 +16,7 @@ import {
 } from '../utils/date.util';
 import {
   assertSafeTimezone,
+  localBucketSql,
   localPeriodSql,
   resolveLocalDateRange,
   resolveStoreTimezone,
@@ -66,6 +67,25 @@ interface PurchaseWindowAggregate {
   /** Order count per status, including the states left out of the spend. */
   ordersByStatus: Record<string, number>;
 }
+
+/** Una fila del detalle por orden de {@link PurchasesAnalyticsService.listWindowOrders}. */
+export interface PurchaseOrderRow {
+  order_number: string;
+  supplier_name: string;
+  created_by_name: string | null;
+  /** Día de negocio `YYYY-MM-DD` en la TZ de la tienda (texto desde SQL). */
+  order_day: string;
+  status: string;
+  /** Neto sin IVA (`subtotal_amount`): suma al card `total_spent`. */
+  net_amount: number;
+  /** IVA cobrado por el proveedor, SUMADO DE LAS LÍNEAS (0 si no lleva). */
+  iva_amount: number;
+  /** Neto + IVA de la orden. */
+  total_with_iva: number;
+}
+
+/** Tope explícito del detalle por orden (el visor pagina en cliente). */
+const WINDOW_ORDERS_LIMIT = 500;
 
 @Injectable()
 export class PurchasesAnalyticsService {
@@ -184,6 +204,72 @@ export class PurchasesAnalyticsService {
     };
   }
 
+  /**
+   * Detalle por orden de compra de la ventana ACTUAL, para la tabla del Resumen
+   * de Compras (QUI-696: quién la creó y qué día; el IVA y total con IVA por
+   * fila). Mismo universo que `aggregatePurchaseWindow` (`location.store_id` +
+   * estados committed + ventana por `order_date`) para que la columna Total
+   * sume al card `total_spent`: por eso cada fila trae el NETO sin IVA
+   * (`subtotal_amount`).
+   *
+   * El día sale como TEXTO calculado en SQL con la TZ de la tienda
+   * (`localBucketSql`), igual que los labels de período: re-derivarlo en JS
+   * desde el `timestamp` caería en el día UTC. El IVA se suma DE LAS LÍNEAS
+   * (misma razón que `aggregatePurchaseWindow`: el header sub-reporta en
+   * modo include-tax) y es 0 cuando la orden no lleva.
+   */
+  private async listWindowOrders(
+    organizationId: number,
+    storeId: number,
+    startDate: Date,
+    endDate: Date,
+    tz: string,
+  ): Promise<{ orders: PurchaseOrderRow[]; total: number; truncated: boolean }> {
+    const rawClient = this.prisma.withoutScope() as any;
+    const committed = sqlStateList(PURCHASE_COMMITTED_STATES);
+    const localDay = Prisma.sql`to_char(${localBucketSql('po.order_date', tz)}, 'YYYY-MM-DD')`;
+    const [rows, counted] = await Promise.all([
+      rawClient.$queryRaw<PurchaseOrderRow[]>`
+        SELECT po.order_number,
+               s.name AS supplier_name,
+               NULLIF(TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')), '') AS created_by_name,
+               ${localDay} AS order_day,
+               po.status::text AS status,
+               po.subtotal_amount::float8 AS net_amount,
+               t.iva AS iva_amount,
+               (po.subtotal_amount + t.iva)::float8 AS total_with_iva
+        FROM purchase_orders po
+        JOIN inventory_locations l ON l.id = po.location_id
+        JOIN suppliers s ON s.id = po.supplier_id
+        LEFT JOIN users u ON u.id = po.created_by_user_id
+        LEFT JOIN LATERAL (
+          SELECT COALESCE(sum(i.tax_amount), 0)::float8 AS iva
+          FROM purchase_order_items i
+          WHERE i.purchase_order_id = po.id
+        ) t ON true
+        WHERE po.organization_id = ${organizationId}
+          AND l.store_id = ${storeId}
+          AND po.status::text IN (${committed})
+          AND po.order_date >= ${startDate}
+          AND po.order_date <= ${endDate}
+        ORDER BY po.order_date DESC, po.id DESC
+        LIMIT ${WINDOW_ORDERS_LIMIT + 1}
+      `,
+      rawClient.$queryRaw<Array<{ total: bigint }>>`
+        SELECT count(*)::bigint AS total
+        FROM purchase_orders po
+        JOIN inventory_locations l ON l.id = po.location_id
+        WHERE po.organization_id = ${organizationId}
+          AND l.store_id = ${storeId}
+          AND po.status::text IN (${committed})
+          AND po.order_date >= ${startDate}
+          AND po.order_date <= ${endDate}
+      `,
+    ]);
+    const truncated = rows.length > WINDOW_ORDERS_LIMIT;
+    return { orders: truncated ? rows.slice(0, WINDOW_ORDERS_LIMIT) : rows, total: Number(counted[0]?.total ?? 0), truncated };
+  }
+
   async getPurchasesSummary(query: AnalyticsQueryDto) {
     const context = RequestContextService.getContext();
     if (!context?.store_id || !context.organization_id) {
@@ -217,6 +303,13 @@ export class PurchasesAnalyticsService {
         previousEndDate,
       ),
     ]);
+    const detail = await this.listWindowOrders(
+      organizationId,
+      storeId,
+      startDate,
+      endDate,
+      tz,
+    );
 
     const pendingOrders = this.PENDING_STATES.reduce(
       (sum, state) => sum + (current.ordersByStatus[state] ?? 0),
@@ -269,6 +362,11 @@ export class PurchasesAnalyticsService {
       committed_states: [...PURCHASE_COMMITTED_STATES],
       /** The universe this view aggregates over — see aggregatePurchaseWindow. */
       store_scope: 'location',
+      // Detalle por orden para la tabla del reporte (mismo universo que el
+      // agregado, ventana actual). Tope 500: ver listWindowOrders.
+      orders: detail.orders,
+      orders_total: detail.total,
+      orders_truncated: detail.truncated,
     };
   }
 
@@ -661,10 +759,20 @@ export class PurchasesAnalyticsService {
 
     const tz = await resolveStoreTimezone(this.prisma, storeId);
     let asOfDate: Date;
+    // Single-day window (from = to): `resolveLocalDateRange` only honours
+    // the explicit branch when BOTH dates travel — a lone `date_to` falls
+    // through to the default preset (today) and silently re-dates every
+    // aging bucket.
     if (query.as_of) {
-      asOfDate = resolveLocalDateRange({ date_to: query.as_of }, tz).endDate;
+      asOfDate = resolveLocalDateRange(
+        { date_from: query.as_of, date_to: query.as_of },
+        tz,
+      ).endDate;
     } else if (query.date_to) {
-      asOfDate = resolveLocalDateRange({ date_to: query.date_to }, tz).endDate;
+      asOfDate = resolveLocalDateRange(
+        { date_from: query.date_to, date_to: query.date_to },
+        tz,
+      ).endDate;
     } else {
       asOfDate = new Date();
     }
