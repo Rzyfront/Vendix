@@ -188,9 +188,12 @@ class AddressStub {
   readonly validChange = output<boolean>();
 }
 
-/** Hijo de pedidos programados: el shell solo lo proyecta, sin bindings. */
+/** Hijo de pedidos programados: el shell lo proyecta por secciones. */
 @Component({ selector: 'app-pos-scheduled-order-picker', standalone: true, template: `` })
-class ScheduledOrderPickerStub {}
+class ScheduledOrderPickerStub {
+  readonly section = input<string>('toggle');
+  readonly deliveryDisabled = input(false);
+}
 
 /** CP-pos-checkout-enter-focus — stubs para montar el collector real aislado. */
 @Directive({ selector: '[appCurrencyInput]', standalone: true })
@@ -224,6 +227,16 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   let settingsMock: { pos: () => any; checkout: () => null };
   let posSettings: WritableSignal<any>;
   let restaurantMode: WritableSignal<boolean>;
+  let scheduledMock: {
+    enabled: WritableSignal<boolean>;
+    schedule: WritableSignal<unknown>;
+    active: WritableSignal<boolean>;
+    hasSlot: WritableSignal<boolean>;
+    fulfillmentType: WritableSignal<'pickup' | 'delivery' | null>;
+    showValidation: WritableSignal<boolean>;
+    clear: () => void;
+    reset: () => void;
+  };
 
   const payStub = (): PaymentStub =>
     fixture.debugElement.query(By.directive(PaymentStub)).componentInstance as PaymentStub;
@@ -319,6 +332,16 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     };
     posSettings = signal(null);
     settingsMock = { pos: () => posSettings(), checkout: () => null };
+    scheduledMock = {
+      enabled: signal(false),
+      schedule: signal(null),
+      active: signal(false),
+      hasSlot: signal(false),
+      fulfillmentType: signal(null),
+      showValidation: signal(false),
+      clear: () => {},
+      reset: () => scheduledMock.active.set(false),
+    };
 
     TestBed.configureTestingModule({
       imports: [PosCheckoutShellComponent],
@@ -336,12 +359,9 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         { provide: CurrencyFormatService, useValue: { loadCurrency: () => {} } },
         { provide: KitchenTicketPrintService, useValue: { printAfterFire: () => {} } },
         { provide: LodgingReservationsService, useValue: {} },
-        // El shell solo limpia la elección de pedido programado al cerrarse;
-        // el servicio real inyecta HttpClient y este spec no lo provee.
-        {
-          provide: PosScheduledOrderService,
-          useValue: { enabled: signal(false), schedule: signal(null), clear: () => {} },
-        },
+        // El servicio real inyecta HttpClient y este spec no lo provee; el
+        // shell solo lee el estado compartido del pedido programado.
+        { provide: PosScheduledOrderService, useValue: scheduledMock },
       ],
     });
 
@@ -1042,6 +1062,100 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     stub.needsTableFlag = false;
     advance.advanceEntrega();
     expect(component.currentStep()).toBe(1);
+  });
+
+  describe('pedido programado (corrección de UX: fuera de Cobro)', () => {
+    const pickerSections = (): string[] =>
+      fixture.debugElement
+        .queryAll(By.directive(ScheduledOrderPickerStub))
+        .map((d) => (d.componentInstance as ScheduledOrderPickerStub).section());
+
+    const activate = (): void => {
+      scheduledMock.enabled.set(true);
+      scheduledMock.active.set(true);
+      fixture.detectChanges();
+    };
+
+    it('el toggle vive en Pedido y Cobro no muestra nada de entrega programada', () => {
+      fixture.detectChanges();
+      expect(pickerSections()).toEqual(['toggle']);
+      const cobroPanel = fixture.debugElement
+        .query(By.directive(PaymentStub))
+        .nativeElement.closest('.step-panel') as HTMLElement;
+      expect(cobroPanel.querySelector('app-pos-scheduled-order-picker')).toBeNull();
+
+      activate();
+      const cobro = fixture.debugElement
+        .query(By.directive(PaymentStub))
+        .nativeElement.closest('.step-panel') as HTMLElement;
+      expect(cobro.querySelector('app-pos-scheduled-order-picker')).toBeNull();
+      expect(pickerSections()).toEqual(['toggle', 'slot', 'fulfillment']);
+    });
+
+    it('activo, el paso Entrega aparece aunque sea recogida y oculta mesa/llevar/domicilio', () => {
+      component.entregaChoice.set('mesa');
+      activate();
+      expect(component.stepKeys()).toEqual(['entrega', 'cliente', 'envio', 'cobro']);
+      expect(component.steps().map((st) => st.label)).toEqual(['Pedido', 'Cliente', 'Entrega', 'Cobro']);
+      // Sin tipo elegido el carril queda en recogida (nunca mesa).
+      expect(component.entregaChoice()).toBe('llevar');
+      const entregaHost = fixture.debugElement.query(By.directive(EntregaStub))
+        .nativeElement.parentElement as HTMLElement;
+      expect(entregaHost.hidden).toBeTrue();
+    });
+
+    it('el tipo elegido en Entrega gobierna el carril: domicilio → enviar, recogida → llevar', () => {
+      activate();
+      scheduledMock.fulfillmentType.set('delivery');
+      fixture.detectChanges();
+      expect(component.entregaChoice()).toBe('enviar');
+      expect(fixture.debugElement.query(By.directive(ShippingStub))).not.toBeNull();
+
+      scheduledMock.fulfillmentType.set('pickup');
+      fixture.detectChanges();
+      expect(component.entregaChoice()).toBe('llevar');
+      expect(fixture.debugElement.query(By.directive(ShippingStub))).toBeNull();
+    });
+
+    it('no pasa de Cliente sin día y franja, y muestra el motivo', () => {
+      activate();
+      component.currentStep.set(1);
+      component.saleMode.set('anonymous');
+      fixture.detectChanges();
+      component.attemptNextStep();
+      expect(component.currentStepKey()).toBe('cliente');
+      expect(scheduledMock.showValidation()).toBeTrue();
+
+      scheduledMock.hasSlot.set(true);
+      component.attemptNextStep();
+      expect(component.currentStepKey()).toBe('envio');
+    });
+
+    it('no pasa de Entrega sin tipo elegido', () => {
+      activate();
+      scheduledMock.hasSlot.set(true);
+      component.currentStep.set(2);
+      fixture.detectChanges();
+      component.attemptNextStep();
+      expect(component.currentStepKey()).toBe('envio');
+      expect(scheduledMock.showValidation()).toBeTrue();
+
+      scheduledMock.fulfillmentType.set('pickup');
+      fixture.detectChanges();
+      component.attemptNextStep();
+      expect(component.currentStepKey()).toBe('cobro');
+    });
+
+    it('inactivo, el orden de pasos de siempre no cambia', () => {
+      scheduledMock.enabled.set(true);
+      component.entregaChoice.set('llevar');
+      fixture.detectChanges();
+      expect(component.stepKeys()).toEqual(['entrega', 'cliente', 'cobro']);
+      component.currentStep.set(1);
+      component.saleMode.set('anonymous');
+      component.attemptNextStep();
+      expect(component.currentStepKey()).toBe('cobro');
+    });
   });
 
   it('flip enviar agrega paso envio y volver a llevar lo remueve', () => {

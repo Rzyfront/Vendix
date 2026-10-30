@@ -1,35 +1,22 @@
+import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
 import {
-  ChangeDetectionStrategy,
-  Component,
-  DestroyRef,
-  computed,
-  effect,
-  inject,
-  signal,
-  untracked,
-} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import {
-  FulfillmentDay,
   FulfillmentSlot,
   PosScheduledOrderService,
   ScheduledFulfillmentType,
 } from '../../services/pos-scheduled-order.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 
-const MAX_RANGE_DAYS = 62;
+/**
+ * Which part of the scheduled-order picker this instance renders. The checkout
+ * splits it across steps: `toggle` (Pedido), `slot` (Cliente: day + slot) and
+ * `fulfillment` (Envío: delivery vs pickup). State lives in the service.
+ */
+export type ScheduledPickerSection = 'toggle' | 'slot' | 'fulfillment';
 
 const FULFILLMENT_LABELS: Record<ScheduledFulfillmentType, string> = {
   pickup: 'Recogida en tienda',
   delivery: 'Domicilio',
 };
-
-/** YYYY-MM-DD en hora local (sin pasar por UTC). */
-function toLocalDateString(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
-}
 
 /**
  * Selector de "Pedido programado" para el checkout del POS. Solo se renderiza
@@ -42,136 +29,153 @@ function toLocalDateString(d: Date): string {
   imports: [IconComponent],
   template: `
     @if (service.enabled()) {
-      <section class="rounded-xl border border-border bg-surface p-3 mb-3">
-        <label class="flex items-center gap-2 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            class="h-4 w-4 accent-primary"
-            [checked]="active()"
-            (change)="toggle($any($event.target).checked)"
-          />
-          <app-icon name="calendar-clock" [size]="16"></app-icon>
-          <span class="text-sm font-semibold text-text-primary">Pedido programado</span>
-        </label>
+      @switch (section()) {
+        @case ('toggle') {
+          <section class="rounded-xl border border-border bg-surface p-3 mb-3">
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                class="h-4 w-4 accent-primary"
+                [checked]="service.active()"
+                (change)="toggle($any($event.target).checked)"
+              />
+              <app-icon name="calendar-clock" [size]="16"></app-icon>
+              <span class="text-sm font-semibold text-text-primary">Pedido programado</span>
+            </label>
+            @if (service.active()) {
+              <p class="mt-2 text-xs text-text-secondary">
+                El método de entrega se elige más adelante.
+              </p>
+            }
+          </section>
+        }
 
-        @if (active()) {
-          <div class="mt-3 space-y-3">
-            <div>
-              <p class="text-xs font-semibold text-text-secondary mb-1">Tipo de entrega</p>
+        @case ('slot') {
+          @if (service.active()) {
+            <section class="rounded-xl border border-border bg-surface p-3 mt-3 space-y-3">
+              <p class="flex items-center gap-2 text-sm font-semibold text-text-primary">
+                <app-icon name="calendar-clock" [size]="16"></app-icon>
+                Fecha y hora de entrega
+              </p>
+
+              <div>
+                <p class="text-xs font-semibold text-text-secondary mb-1">Día</p>
+                @if (service.loading()) {
+                  <p class="text-xs text-text-secondary">Cargando disponibilidad...</p>
+                } @else if (!service.days().length) {
+                  <p class="text-xs text-text-secondary">Sin días disponibles.</p>
+                } @else {
+                  <div class="flex gap-2 overflow-x-auto pb-1">
+                    @for (d of service.days(); track d.date) {
+                      <button
+                        type="button"
+                        class="shrink-0 px-3 py-1.5 rounded-lg border text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                        [class.bg-primary]="service.selectedDate() === d.date"
+                        [class.text-white]="service.selectedDate() === d.date"
+                        [class.border-border]="service.selectedDate() !== d.date"
+                        [disabled]="d.blocked_reason === 'day_blocked'"
+                        [attr.title]="d.blocked_reason === 'day_blocked' ? dayBlockedMessage : null"
+                        (click)="service.selectDay(d.date)"
+                      >
+                        {{ dayLabel(d.date) }}
+                      </button>
+                    }
+                  </div>
+                }
+              </div>
+
+              @if (service.selectedDay(); as day) {
+                @if (day.blocked_reason === 'day_blocked') {
+                  <p class="text-xs text-text-secondary">{{ dayBlockedMessage }}</p>
+                } @else {
+                  <div>
+                    <p class="text-xs font-semibold text-text-secondary mb-1">Franja</p>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      @for (s of day.slots; track s.start) {
+                        <button
+                          type="button"
+                          class="px-2 py-1.5 rounded-lg border text-xs text-left disabled:opacity-40 disabled:cursor-not-allowed"
+                          [class.bg-primary]="service.selectedStart() === s.start"
+                          [class.text-white]="service.selectedStart() === s.start"
+                          [class.border-border]="service.selectedStart() !== s.start"
+                          [disabled]="!isSlotSelectable(s)"
+                          [attr.aria-pressed]="service.selectedStart() === s.start"
+                          (click)="service.selectSlot(s)"
+                        >
+                          <span class="block font-semibold">
+                            {{ s.local_start }}–{{ s.local_end }}
+                          </span>
+                          <span class="block text-[11px] opacity-80">
+                            @if (isFull(s)) {
+                              Sin cupo
+                            } @else {
+                              {{ s.taken }}/{{ s.capacity }}
+                            }
+                          </span>
+                        </button>
+                      }
+                    </div>
+                  </div>
+                }
+              }
+
+              @if (service.loadError()) {
+                <p class="text-xs text-red-600">{{ service.loadError() }}</p>
+              }
+              @if (service.showValidation() && !service.hasSlot()) {
+                <p class="text-xs text-red-600" role="alert">
+                  Elige el día y la franja de entrega para continuar.
+                </p>
+              }
+            </section>
+          }
+        }
+
+        @case ('fulfillment') {
+          @if (service.active()) {
+            <section class="rounded-xl border border-border bg-surface p-3 mb-3">
+              <p class="text-sm font-semibold text-text-primary mb-2">¿Cómo lo recibirá?</p>
               <div class="flex gap-2 flex-wrap">
                 @for (t of service.fulfillmentTypes(); track t) {
                   <button
                     type="button"
-                    class="px-3 py-1.5 rounded-lg border text-xs font-semibold"
-                    [class.bg-primary]="fulfillmentType() === t"
-                    [class.text-white]="fulfillmentType() === t"
-                    [class.border-border]="fulfillmentType() !== t"
-                    [attr.aria-pressed]="fulfillmentType() === t"
-                    (click)="selectFulfillment(t)"
+                    class="px-3 py-1.5 rounded-lg border text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                    [class.bg-primary]="service.fulfillmentType() === t"
+                    [class.text-white]="service.fulfillmentType() === t"
+                    [class.border-border]="service.fulfillmentType() !== t"
+                    [attr.aria-pressed]="service.fulfillmentType() === t"
+                    [disabled]="t === 'delivery' && deliveryDisabled()"
+                    (click)="service.selectFulfillment(t)"
                   >
                     {{ labelFor(t) }}
                   </button>
                 }
               </div>
-            </div>
-
-            <div>
-              <p class="text-xs font-semibold text-text-secondary mb-1">Día</p>
-              @if (loading()) {
-                <p class="text-xs text-text-secondary">Cargando disponibilidad...</p>
-              } @else if (!days().length) {
-                <p class="text-xs text-text-secondary">Sin días disponibles.</p>
-              } @else {
-                <div class="flex gap-2 overflow-x-auto pb-1">
-                  @for (d of days(); track d.date) {
-                    <button
-                      type="button"
-                      class="shrink-0 px-3 py-1.5 rounded-lg border text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
-                      [class.bg-primary]="selectedDate() === d.date"
-                      [class.text-white]="selectedDate() === d.date"
-                      [class.border-border]="selectedDate() !== d.date"
-                      [disabled]="d.blocked_reason === 'day_blocked'"
-                      [attr.title]="d.blocked_reason === 'day_blocked' ? dayBlockedMessage : null"
-                      (click)="selectDay(d.date)"
-                    >
-                      {{ dayLabel(d.date) }}
-                    </button>
-                  }
-                </div>
+              @if (deliveryDisabled() && service.fulfillmentTypes().includes('delivery')) {
+                <p class="mt-2 text-xs text-text-secondary">
+                  El domicilio necesita un cliente o un nombre de referencia.
+                </p>
               }
-            </div>
-
-            @if (selectedDay(); as day) {
-              @if (day.blocked_reason === 'day_blocked') {
-                <p class="text-xs text-text-secondary">{{ dayBlockedMessage }}</p>
-              } @else {
-                <div>
-                  <p class="text-xs font-semibold text-text-secondary mb-1">Franja</p>
-                  <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    @for (s of day.slots; track s.start) {
-                      <button
-                        type="button"
-                        class="px-2 py-1.5 rounded-lg border text-xs text-left disabled:opacity-40 disabled:cursor-not-allowed"
-                        [class.bg-primary]="selectedStart() === s.start"
-                        [class.text-white]="selectedStart() === s.start"
-                        [class.border-border]="selectedStart() !== s.start"
-                        [disabled]="!isSlotSelectable(s)"
-                        [attr.aria-pressed]="selectedStart() === s.start"
-                        (click)="selectSlot(s)"
-                      >
-                        <span class="block font-semibold">
-                          {{ s.local_start }}–{{ s.local_end }}
-                        </span>
-                        <span class="block text-[11px] opacity-80">
-                          @if (isFull(s)) {
-                            Sin cupo
-                          } @else {
-                            {{ s.taken }}/{{ s.capacity }}
-                          }
-                        </span>
-                      </button>
-                    }
-                  </div>
-                </div>
+              @if (service.showValidation() && !service.fulfillmentType()) {
+                <p class="mt-2 text-xs text-red-600" role="alert">
+                  Elige cómo recibirá el pedido para continuar.
+                </p>
               }
-            }
-
-            @if (loadError()) {
-              <p class="text-xs text-red-600">{{ loadError() }}</p>
-            }
-          </div>
+            </section>
+          }
         }
-      </section>
+      }
     }
   `,
 })
 export class PosScheduledOrderPickerComponent {
   protected readonly service = inject(PosScheduledOrderService);
-  private readonly destroyRef = inject(DestroyRef);
+
+  readonly section = input<ScheduledPickerSection>('toggle');
+  /** Venta anónima: el domicilio no aplica (requiere identidad). */
+  readonly deliveryDisabled = input(false);
 
   protected readonly dayBlockedMessage = 'La tienda no recibe pedidos para ese día.';
-
-  protected readonly active = signal(false);
-  protected readonly loading = signal(false);
-  protected readonly loadError = signal<string | null>(null);
-  protected readonly days = signal<FulfillmentDay[]>([]);
-  protected readonly selectedDate = signal<string | null>(null);
-  protected readonly selectedStart = signal<string | null>(null);
-  protected readonly fulfillmentType = signal<ScheduledFulfillmentType | null>(null);
-
-  protected readonly selectedDay = computed(
-    () => this.days().find((d) => d.date === this.selectedDate()) ?? null,
-  );
-
-  constructor() {
-    // Si el servicio limpia la elección (venta completada/cancelada), se reinicia el UI.
-    effect(() => {
-      const schedule = this.service.schedule();
-      untracked(() => {
-        if (!schedule && this.active()) this.resetLocal();
-      });
-    });
-  }
 
   protected labelFor(t: ScheduledFulfillmentType): string {
     return FULFILLMENT_LABELS[t];
@@ -195,71 +199,7 @@ export class PosScheduledOrderPickerComponent {
   }
 
   protected toggle(checked: boolean): void {
-    this.active.set(checked);
-    if (!checked) {
-      this.resetLocal();
-      this.service.clear();
-      return;
-    }
-    this.fulfillmentType.set(this.service.fulfillmentTypes()[0] ?? 'pickup');
-    this.loadAvailability();
-  }
-
-  protected selectFulfillment(t: ScheduledFulfillmentType): void {
-    this.fulfillmentType.set(t);
-    this.syncSchedule();
-  }
-
-  protected selectDay(date: string): void {
-    this.selectedDate.set(date);
-    this.selectedStart.set(null);
-    this.service.clear();
-  }
-
-  protected selectSlot(s: FulfillmentSlot): void {
-    if (!this.isSlotSelectable(s)) return;
-    this.selectedStart.set(s.start);
-    this.syncSchedule();
-  }
-
-  private syncSchedule(): void {
-    const slot = this.selectedDay()?.slots.find((s) => s.start === this.selectedStart());
-    const type = this.fulfillmentType();
-    if (!slot || !type) {
-      this.service.clear();
-      return;
-    }
-    this.service.setSchedule({ start: slot.start, end: slot.end, fulfillment_type: type });
-  }
-
-  private resetLocal(): void {
-    this.active.set(false);
-    this.days.set([]);
-    this.selectedDate.set(null);
-    this.selectedStart.set(null);
-    this.fulfillmentType.set(null);
-    this.loadError.set(null);
-  }
-
-  private loadAvailability(): void {
-    const ahead = Math.min(this.service.maxDaysAhead(), MAX_RANGE_DAYS - 1);
-    const from = new Date();
-    const to = new Date();
-    to.setDate(to.getDate() + ahead);
-    this.loading.set(true);
-    this.loadError.set(null);
-    this.service
-      .getAvailability(toLocalDateString(from), toLocalDateString(to))
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (days) => {
-          this.days.set(days);
-          this.loading.set(false);
-        },
-        error: () => {
-          this.loading.set(false);
-          this.loadError.set('No se pudo cargar la disponibilidad. Intenta de nuevo.');
-        },
-      });
+    if (checked) this.service.activate();
+    else this.service.reset();
   }
 }

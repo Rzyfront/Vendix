@@ -712,7 +712,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al procesar la venta');
         }
       }),
-      tap(() => this.scheduledOrders?.clear()),
+      tap(() => this.scheduledOrders?.reset()),
       catchError((error) => this.rethrowChargeError(error)),
     );
   }
@@ -903,7 +903,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al procesar el envío');
         }
       }),
-      tap(() => this.scheduledOrders?.clear()),
+      tap(() => this.scheduledOrders?.reset()),
       catchError((error) => this.rethrowChargeError(error)),
     );
   }

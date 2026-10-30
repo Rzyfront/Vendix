@@ -243,6 +243,24 @@ export class PosCheckoutShellComponent {
   );
 
   /**
+   * Pedido programado activo (paso Pedido). Con él, la entrega se decide en el
+   * paso Envío (domicilio o recogida), la fecha/franja en Cliente, y el paso
+   * Envío aparece siempre. Nunca en borradores: el agendamiento viaja en el pago.
+   */
+  readonly scheduledActive = computed<boolean>(
+    () => this.effectiveMode() !== 'create-draft' && this.scheduledOrders.active(),
+  );
+
+  /**
+   * La dirección del domicilio se captura junto al cliente (paso Cliente),
+   * salvo en pedido programado: ahí el domicilio se elige un paso después y el
+   * paso Envío captura Método → Dirección → Costo por sí mismo.
+   */
+  readonly addressInCliente = computed<boolean>(
+    () => this.requiresAddress() && !this.scheduledActive(),
+  );
+
+  /**
    * Phase D.2 / ADR-1 — "toda venta lleva cliente": el ajuste canónico es
    * `settings.checkout.require_customer_data`, NO `pos.allow_anonymous_sales`.
    * El primero es la política de checkout (alta en la jerarquía de settings);
@@ -378,6 +396,14 @@ export class PosCheckoutShellComponent {
    * Si entregaChoice es 'enviar', se inserta dinámicamente el paso 'Envío'.
    */
   readonly steps = computed<StepsLineItem[]>(() => {
+    if (this.scheduledActive()) {
+      return [
+        { label: 'Pedido' },
+        { label: 'Cliente' },
+        { label: 'Entrega' },
+        { label: 'Cobro' },
+      ];
+    }
     if (this.effectiveMode() === 'create-draft') {
       if (this.entregaChoice() === 'enviar') {
         return [{ label: 'Pedido' }, { label: 'Cliente' }, { label: 'Envío' }];
@@ -398,6 +424,7 @@ export class PosCheckoutShellComponent {
   /** Parallel key array (same order/length as {@link steps}) used to render the
    *  active body and gate which step components mount. */
   readonly stepKeys = computed<string[]>(() => {
+    if (this.scheduledActive()) return ['entrega', 'cliente', 'envio', 'cobro'];
     if (this.effectiveMode() === 'create-draft') {
       if (this.entregaChoice() === 'enviar') {
         return ['entrega', 'cliente', 'envio'];
@@ -448,6 +475,9 @@ export class PosCheckoutShellComponent {
         return `Cliente · ${sub}`;
       }
       case 'envio': {
+        if (this.scheduledActive() && this.effectiveIntent() !== 'delivery') {
+          return 'Entrega · Cómo lo recibirá';
+        }
         const ship = this.shippingStep();
         const subIndex = ship?.shipSubStep() ?? 0;
         const subSteps = ship?.shipSubSteps() ?? [];
@@ -879,7 +909,19 @@ export class PosCheckoutShellComponent {
 
     // Pedido programado: al cerrar el checkout se descarta la elección.
     effect(() => {
-      if (!this.isOpen()) untracked(() => this.scheduledOrders.clear());
+      if (!this.isOpen()) untracked(() => this.scheduledOrders.reset());
+    });
+
+    // Pedido programado: el tipo elegido en el paso Envío gobierna el carril de
+    // entrega (domicilio → 'enviar'; recogida o aún sin elegir → 'llevar'), así
+    // pago, envío y dirección siguen la misma lógica que una venta normal.
+    effect(() => {
+      if (!this.scheduledActive()) return;
+      const choice: EntregaChoice =
+        this.scheduledOrders.fulfillmentType() === 'delivery' ? 'enviar' : 'llevar';
+      untracked(() => {
+        if (this.entregaChoice() !== choice) this.entregaChoice.set(choice);
+      });
     });
 
     // Separa el foco por apertura del inicio de checkout: cerrar el modal no
@@ -1088,7 +1130,27 @@ export class PosCheckoutShellComponent {
   // ── Stepper navigation (non-blocking) ────────────────────────────────────
   goToStep(index: number): void {
     if (index < 0 || index >= this.stepKeys().length) return;
+    const block = this.scheduledBlockIndex();
+    if (block >= 0 && index > block) {
+      // Pedido programado incompleto: no se pasa del paso que falta; se lleva
+      // allí al cajero y se muestra qué falta.
+      this.scheduledOrders.showValidation.set(true);
+      if (this.currentStep() < block) this.currentStep.set(block);
+      return;
+    }
     this.currentStep.set(index);
+  }
+
+  /**
+   * Índice del primer paso que el pedido programado no deja abandonar: Cliente
+   * sin día/franja, o Envío sin tipo de entrega. -1 cuando no bloquea.
+   */
+  private scheduledBlockIndex(): number {
+    if (!this.scheduledActive()) return -1;
+    const keys = this.stepKeys();
+    if (!this.scheduledOrders.hasSlot()) return keys.indexOf('cliente');
+    if (!this.scheduledOrders.fulfillmentType()) return keys.indexOf('envio');
+    return -1;
   }
 
   /** Wizard: advance one top-level step (no-op past the last; state is preserved). */
@@ -1167,7 +1229,7 @@ export class PosCheckoutShellComponent {
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe((resolved) => {
               if (!resolved) return; // toast ya emitido por el selector.
-              if (!this.requiresAddress()) this.nextStep();
+              if (!this.addressInCliente()) this.nextStep();
             });
           return;
         }
@@ -1182,6 +1244,12 @@ export class PosCheckoutShellComponent {
 
     // ── Envío: sub-wizard de envío (Método → [Dirección] → Costo) ───────────
     if (key === 'envio') {
+      // Pedido programado con recogida (o sin tipo aún): no hay envío que
+      // configurar; goToStep() bloquea si falta el tipo de entrega.
+      if (this.scheduledActive() && this.effectiveIntent() !== 'delivery') {
+        this.nextStep();
+        return;
+      }
       const ship = this.shippingStep();
       if (!ship) {
         this.nextStep();
@@ -1235,7 +1303,7 @@ export class PosCheckoutShellComponent {
 
   /** Delivery details are captured beside the selected customer, not a step later. */
   private advanceAfterCliente(): void {
-    if (this.requiresAddress() && !this.shippingStep()?.validateDetailsForCliente()) return;
+    if (this.addressInCliente() && !this.shippingStep()?.validateDetailsForCliente()) return;
     this.nextStep();
   }
 
@@ -1971,7 +2039,7 @@ export class PosCheckoutShellComponent {
   onSelectCustomerAndAdvance(customer: PosCustomer): void {
     this.customerPickerOpen.set(false);
     this.selectCustomer(customer);
-    if (!this.requiresAddress()) this.nextStep();
+    if (!this.addressInCliente()) this.nextStep();
   }
 
   // ── Cliente step handlers ───────────────────────────────────────────────

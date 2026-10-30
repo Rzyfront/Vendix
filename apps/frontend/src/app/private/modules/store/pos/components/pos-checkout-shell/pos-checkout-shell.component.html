@@ -65,12 +65,21 @@
              para que el shell lea checkoutTableId()/needsTable(). -->
         @if (stepKeys().includes('entrega')) {
           <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'entrega'">
-            <app-pos-entrega-step
-              [cartState]="cartState()"
-              [tableId]="tableId()"
-              [(choice)]="entregaChoice"
-              (advanceRequested)="attemptNextStep()"
-            ></app-pos-entrega-step>
+            <!-- Pedido programado: no aplica a borradores ni a cobros de mesa.
+                 Activo, el método de entrega se elige en el paso Envío, así que
+                 mesa / para llevar / domicilio se ocultan (siguen montados para
+                 que el shell lea checkoutTableId()/needsTable()). -->
+            @if (effectiveMode() !== 'create-draft' && tableId() == null) {
+              <app-pos-scheduled-order-picker section="toggle"></app-pos-scheduled-order-picker>
+            }
+            <div [hidden]="scheduledActive()">
+              <app-pos-entrega-step
+                [cartState]="cartState()"
+                [tableId]="tableId()"
+                [(choice)]="entregaChoice"
+                (advanceRequested)="attemptNextStep()"
+              ></app-pos-entrega-step>
+            </div>
           </div>
         }
 
@@ -84,11 +93,6 @@
                 [inline]="true"
                 [customerId]="cartCustomerId()"
               ></app-pos-holder-warning>
-            }
-            <!-- Pedido programado: solo aplica a ventas que se entregan
-                 (recoger o domicilio). En consumo en mesa no se agenda nada. -->
-            @if (entregaChoice() !== 'mesa') {
-              <app-pos-scheduled-order-picker></app-pos-scheduled-order-picker>
             }
             <app-pos-payment-step
               [cartState]="cartState()"
@@ -354,11 +358,15 @@
                   }
                 }
               }
-              @if (requiresAddress() && clienteSubStep() === 1 &&
+              @if (addressInCliente() && clienteSubStep() === 1 &&
                 (saleMode() === 'alias' || cartState()?.customer)) {
                 @if (shippingStep()?.clientDeliveryDetails(); as deliveryDetails) {
                   <ng-container [ngTemplateOutlet]="deliveryDetails"></ng-container>
                 }
+              }
+              <!-- Pedido programado: fecha y franja de entrega junto al cliente. -->
+              @if (scheduledActive()) {
+                <app-pos-scheduled-order-picker section="slot"></app-pos-scheduled-order-picker>
               }
             </div>
 
@@ -389,13 +397,24 @@
              para que el footer lea shippingCost/canConfirm/isProcessing. -->
         @if (stepKeys().includes('envio')) {
           <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'envio'">
-            <app-pos-shipping-step
-              [cartState]="cartState()"
-              [customerAlias]="saleMode() === 'alias' ? customerAlias().trim() : ''"
-              [editingOrderId]="editingOrderId()"
-              [detailsInCliente]="true"
-              (shippingCompleted)="onShippingCompleted($event)"
-            ></app-pos-shipping-step>
+            <!-- Pedido programado: domicilio o recogida en tienda (solo los
+                 tipos habilitados). Con domicilio, el envío se configura debajo
+                 con su propio Método → Dirección → Costo. -->
+            @if (scheduledActive()) {
+              <app-pos-scheduled-order-picker
+                section="fulfillment"
+                [deliveryDisabled]="isAnonymousSale()"
+              ></app-pos-scheduled-order-picker>
+            }
+            @if (!scheduledActive() || effectiveIntent() === 'delivery') {
+              <app-pos-shipping-step
+                [cartState]="cartState()"
+                [customerAlias]="saleMode() === 'alias' ? customerAlias().trim() : ''"
+                [editingOrderId]="editingOrderId()"
+                [detailsInCliente]="!scheduledActive()"
+                (shippingCompleted)="onShippingCompleted($event)"
+              ></app-pos-shipping-step>
+            }
           </div>
         }
       </div>
