@@ -147,4 +147,15 @@ describe('DianTestService — guarda de NIT del emisor', () => {
     });
     expect(prisma.invoice_resolutions.updateMany).toHaveBeenCalledTimes(1);
   });
+
+  it('con config.nit vacío no bloquea: reserva numeración como antes', async () => {
+    const { service, prisma } = build('', '900123456');
+
+    await expect(
+      service.executeTestSet(27, 9, { smoke: true }),
+    ).rejects.toMatchObject({
+      errorCode: 'DIAN_CERT_001',
+    });
+    expect(prisma.invoice_resolutions.updateMany).toHaveBeenCalledTimes(1);
+  });
 });
