@@ -120,7 +120,7 @@ function makeHarness(storeSettings: unknown = settings) {
   const events = { emit: jest.fn() };
   const availability = new FulfillmentAvailabilityService(prisma);
   const service = new ScheduledOrdersService(prisma, availability, events as any);
-  return { service, rows, changes, events, runInTx };
+  return { service, rows, changes, events, runInTx, schedulesDelegate };
 }
 
 describe('ScheduledOrdersService', () => {
@@ -275,6 +275,20 @@ describe('ScheduledOrdersService', () => {
       await runInTx((tx) => service.createForOrder(tx, { store_id: 1, order_id: 51, schedule: other, now: NOW }));
       await expect(service.reschedule(1, other, NOW)).rejects.toMatchObject({ errorCode: 'SCHED_SLOT_FULL' });
       expect(rows[0].scheduled_start.toISOString()).toBe(SLOT.start);
+    });
+
+    it('si otro usuario cambió el estado mientras tanto, no reprograma y devuelve SCHED_INVALID_TRANSITION', async () => {
+      const { service, rows, changes, schedulesDelegate, runInTx } = makeHarness();
+      await runInTx((tx) => service.createForOrder(tx, { store_id: 1, order_id: 50, schedule: SLOT, now: NOW }));
+      // Lectura previa con el estado viejo; en base ya se entregó.
+      schedulesDelegate.findFirst.mockResolvedValueOnce({ ...rows[0] });
+      rows[0].status = 'delivered';
+      const before = changes.length;
+      await expect(
+        service.reschedule(1, { start: '2026-11-03T17:00:00.000Z', end: '2026-11-03T19:00:00.000Z' }, NOW),
+      ).rejects.toMatchObject({ errorCode: 'SCHED_INVALID_TRANSITION' });
+      expect(rows[0].scheduled_start.toISOString()).toBe(SLOT.start);
+      expect(changes.length).toBe(before);
     });
 
     it('reprogramar a la misma franja no choca consigo mismo', async () => {

@@ -309,10 +309,19 @@ export class ScheduledOrdersService {
         exclude_schedule_id: id,
         client: tx as unknown as SchedulingReader,
       });
-      const moved = await tx.order_fulfillment_schedules.update({
-        where: { id },
+      // Compare-and-set: si otro usuario movió el estado entre la lectura y
+      // aquí (p. ej. lo entregó o canceló), no se reprograma.
+      const updated = await tx.order_fulfillment_schedules.updateMany({
+        where: { id, status: schedule.status as FulfillmentStatus },
         data: { scheduled_start: start, scheduled_end: end },
       });
+      if (updated.count === 0) {
+        throw new VendixHttpException(
+          ErrorCodes.SCHED_INVALID_TRANSITION,
+          'El pedido cambió de estado mientras lo reprogramabas. Recarga e intenta de nuevo.',
+        );
+      }
+      const moved = await tx.order_fulfillment_schedules.findUnique({ where: { id } });
       await tx.order_fulfillment_changes.create({
         data: {
           store_id,
