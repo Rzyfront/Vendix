@@ -1680,6 +1680,46 @@ describe('OrdersService', () => {
 
     afterEach(() => contextSpy.mockRestore());
 
+    // QUI-966 S6: order_number is max+1 NUMERIC (10000 sorts before 9999 as
+    // text) and a concurrent P2002 in the Prisma 7 driver-adapter shape (no
+    // `meta.target`) retries with a fresh number instead of answering 500.
+    it('generates the next numeric order_number after 9999 and retries a driver-adapter P2002', async () => {
+      const taken: string[] = [];
+      mockPrismaService.orders.create.mockImplementationOnce(async ({ data }: any) => {
+        taken.push(data.order_number.slice(-5));
+        throw Object.assign(new Error('Unique constraint failed'), {
+          code: 'P2002',
+          meta: {
+            driverAdapterError: {
+              cause: { constraint: { fields: ['store_id', 'order_number'] } },
+            },
+          },
+        });
+      });
+      mockPrismaService.orders.findMany.mockImplementation(async ({ where }: any) => {
+        const prefix = where.order_number.startsWith as string;
+        return [`9999`, `10000`, ...taken].map((n) => ({ order_number: `${prefix}${n}` }));
+      });
+
+      const pending = service.create(makeDto({ order_number: undefined }), { id: 99 });
+      await jest.runAllTimersAsync();
+      const order: any = await pending;
+
+      const numbers = mockPrismaService.orders.create.mock.calls.map(
+        ([args]: any) => args.data.order_number as string,
+      );
+      expect(numbers).toHaveLength(2);
+      expect(numbers[0]).toMatch(/^ORD\d{6}10001$/);
+      expect(numbers[1]).toMatch(/^ORD\d{6}10002$/);
+      expect(order.order_number).toBe(numbers[1]);
+    });
+
+    it('keeps an explicit order_number and creates the order once', async () => {
+      const order: any = await service.create(makeDto(), { id: 99 });
+      expect(order.order_number).toBe('ORD-E3-1');
+      expect(mockPrismaService.orders.create).toHaveBeenCalledTimes(1);
+    });
+
     it('rejects an insufficient tracked line before creating the order', async () => {
       mockPrismaService.products.findMany.mockResolvedValue([{ id: 51, price_unit_quantity: null, product_tax_assignments: [] }] as any);
       mockPrismaService.products.findUnique.mockResolvedValue({

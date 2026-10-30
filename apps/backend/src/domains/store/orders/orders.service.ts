@@ -106,6 +106,11 @@ import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 import { InvoicingService } from '../invoicing/invoicing.service';
 import { OrderHistoryService } from './order-history/order-history.service';
 import {
+  isUniqueViolationOn,
+  nextSequenceNumber,
+  retryBackoff,
+} from '@common/utils/sequence-number.util';
+import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
 } from '../shipping/utils/shipping-tax.util';
@@ -240,6 +245,12 @@ export const SORTABLE_COLUMNS = [
 export type SortableOrderColumn = (typeof SORTABLE_COLUMNS)[number];
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Attempts to create an order when a concurrent create takes the same
+ * `order_number` (QUI-966 S6: 15 simultaneous bookings each create an order).
+ */
+const ORDER_NUMBER_ATTEMPTS = 8;
 
 @Injectable()
 export class OrdersService {
@@ -845,7 +856,7 @@ export class OrdersService {
       );
     }
 
-    let retries = 3;
+    let retries = ORDER_NUMBER_ATTEMPTS;
     while (retries > 0) {
       try {
         if (!createOrderDto.order_number) {
@@ -1050,23 +1061,21 @@ export class OrdersService {
           ? { ...order, stock_warnings: stockWarnings }
           : order;
       } catch (error) {
-        if (
-          error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === 'P2002'
-        ) {
-          // Check if the unique constraint failure is indeed on order_number
-          const target = error.meta?.target as string[];
-          if (Array.isArray(target) && target.includes('order_number')) {
-            retries--;
-            if (retries === 0) {
-              throw new ConflictException(
-                'Failed to generate unique order number after multiple attempts',
-              );
-            }
-            // Reset order_number to null so it gets regenerated in the next iteration
-            createOrderDto.order_number = undefined;
-            continue;
+        // Unique failure on order_number: a concurrent create took the same
+        // number. QUI-966 S6: `isUniqueViolationOn` also reads the Prisma 7
+        // driver-adapter shape (no `meta.target`), which used to skip this
+        // retry and answer 500.
+        if (isUniqueViolationOn(error, 'order_number')) {
+          retries--;
+          if (retries === 0) {
+            throw new ConflictException(
+              'Failed to generate unique order number after multiple attempts',
+            );
           }
+          // Reset order_number to null so it gets regenerated in the next iteration
+          createOrderDto.order_number = undefined;
+          await retryBackoff(ORDER_NUMBER_ATTEMPTS - retries);
+          continue;
         }
         throw error;
       }
@@ -5572,21 +5581,20 @@ export class OrdersService {
     const day = now.getDate().toString().padStart(2, '0');
     const prefix = `ORD${year}${month}${day}`;
 
-    // Filter by store_id for per-store unique order numbers
-    const lastOrder = await this.prisma.orders.findFirst({
+    // Filter by store_id for per-store unique order numbers.
+    // QUI-966 S6: numeric max — after 9999 comes 10000, which sorts BEFORE
+    // 9999 as text, so `orderBy desc` + `slice(-4)` repeated numbers.
+    const sameDay = await this.prisma.orders.findMany({
       where: {
         store_id: storeId,
         order_number: { startsWith: prefix },
       },
-      orderBy: { order_number: 'desc' },
+      select: { order_number: true },
     });
-
-    let sequence = 1;
-    if (lastOrder) {
-      const lastSequence = parseInt(lastOrder.order_number.slice(-4));
-      sequence = lastSequence + 1;
-    }
-    return `${prefix}${sequence.toString().padStart(4, '0')}`;
+    return nextSequenceNumber(
+      (sameDay ?? []).map((o) => o.order_number),
+      prefix,
+    );
   }
 
   async getStats(): Promise<OrderStatsDto> {

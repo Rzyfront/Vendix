@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { booking_status_enum, booking_mode_enum } from '@prisma/client';
+import { booking_status_enum, booking_mode_enum, Prisma } from '@prisma/client';
 import { BusinessHoursService } from './business-hours/business-hours.service';
 import {
   resolveStoreTimezone,
@@ -13,6 +13,45 @@ import {
 } from './booking-time.util';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * Fixed number of simultaneous bookings a `free_booking` service accepts per
+ * time range (QUI-966 L2: "Mantener 10 fijo"). Every non-cancelled booking
+ * that OVERLAPS the range consumes one seat.
+ */
+export const FREE_BOOKING_CAPACITY = 10;
+
+/**
+ * Prisma `where` for the non-cancelled bookings of a `free_booking` product
+ * that overlap [start_time, end_time) on `date` (QUI-966 S5). Shared by the
+ * availability pre-check and the in-transaction re-check of create.
+ */
+export function freeBookingOverlapWhere(
+  product_id: number,
+  date: string,
+  start_time: string,
+  end_time: string,
+  exclude_booking_id?: number,
+): Prisma.bookingsWhereInput {
+  return {
+    product_id,
+    date: new Date(date),
+    start_time: { lt: end_time },
+    end_time: { gt: start_time },
+    status: { notIn: [booking_status_enum.cancelled] },
+    ...(exclude_booking_id ? { id: { not: exclude_booking_id } } : {}),
+  };
+}
+
+/** True when [aStart, aEnd) and [bStart, bEnd) overlap (`HH:mm` strings). */
+export function timeRangesOverlap(
+  aStart: string,
+  aEnd: string,
+  bStart: string,
+  bEnd: string,
+): boolean {
+  return aStart < bEnd && aEnd > bStart;
+}
 
 export interface AvailableProvider {
   id: number;
@@ -388,9 +427,18 @@ export class AvailabilityService {
     const timezone = await resolveStoreTimezone(this.prisma, product.store_id);
     if (isSlotStartInPast({ date, start_time }, timezone)) return false;
 
-    // free_booking siempre esta disponible
+    // free_booking: hasta FREE_BOOKING_CAPACITY reservas solapadas (QUI-966 S5).
     if (product.booking_mode === booking_mode_enum.free_booking) {
-      return true;
+      const overlapping = await this.prisma.bookings.count({
+        where: freeBookingOverlapWhere(
+          product_id,
+          date,
+          start_time,
+          end_time,
+          exclude_booking_id,
+        ),
+      });
+      return overlapping < FREE_BOOKING_CAPACITY;
     }
 
     if (provider_id) {
@@ -794,11 +842,17 @@ export class AvailabilityService {
       const timeSlots = this.generateTimeSlots(dayStart, dayEnd, duration, buffer);
 
       for (const slot of timeSlots) {
+        // QUI-966 S5: every overlapping booking consumes a seat, not only
+        // the ones with identical start/end.
         const bookedCount = existingBookings.filter(
           (b) =>
             this.formatDate(new Date(b.date)) === dateStr &&
-            b.start_time === slot.start_time &&
-            b.end_time === slot.end_time,
+            timeRangesOverlap(
+              b.start_time,
+              b.end_time,
+              slot.start_time,
+              slot.end_time,
+            ),
         ).length;
 
         slots.push({
@@ -806,7 +860,7 @@ export class AvailabilityService {
           start_time: slot.start_time,
           end_time: slot.end_time,
           available_providers: [],
-          total_available: Math.max(10 - bookedCount, 0),
+          total_available: Math.max(FREE_BOOKING_CAPACITY - bookedCount, 0),
         });
       }
     }

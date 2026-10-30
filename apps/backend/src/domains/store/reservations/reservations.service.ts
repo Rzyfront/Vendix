@@ -16,7 +16,11 @@ import {
   BookingQueryDto,
   CalendarQueryDto,
 } from './dto';
-import { AvailabilityService } from './availability.service';
+import {
+  AvailabilityService,
+  FREE_BOOKING_CAPACITY,
+  freeBookingOverlapWhere,
+} from './availability.service';
 import { OrdersService } from '../orders/orders.service';
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../products/services/price-resolver.service';
@@ -25,6 +29,12 @@ import { TableSessionsService } from '../tables/table-sessions.service';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 import { BusinessHoursService } from './business-hours/business-hours.service';
 import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
+import {
+  isSerializationFailure,
+  isUniqueViolationOn,
+  nextSequenceNumber,
+  retryBackoff,
+} from '@common/utils/sequence-number.util';
 import {
   BookingSlotInput,
   assertBookingSlotOpen,
@@ -341,20 +351,27 @@ export class ReservationsService {
             dto.end_time,
           );
 
-        if (availableProviders.length > 0) {
-          resolvedProviderId = availableProviders[0].id;
+        if (availableProviders.length === 0) {
+          // QUI-966 S5: providers exist but all are busy → never book
+          // without a provider (that was overbooking the slot).
+          throw new ConflictException(
+            'El horario solicitado no esta disponible',
+          );
         }
-        // If no available providers for this slot but providers exist, we'll validate below
+        resolvedProviderId = availableProviders[0].id;
       }
-      // If NO providers configured at all, skip provider validation (fallback)
+      // If NO active providers configured at all, skip provider validation (legacy fallback)
     }
 
     // 3. Validar disponibilidad del slot (a menos que se indique lo contrario)
     const isFreeBooking =
       product.booking_mode === booking_mode_enum.free_booking;
-    const noProvidersConfigured = !resolvedProviderId && !dto.provider_id;
+    // Only reachable without a provider when the product has zero active
+    // providers (legacy fallback) or the staff forced the booking.
+    const noProvidersConfigured =
+      !isFreeBooking && !resolvedProviderId && !dto.provider_id;
     const shouldSkipAvailability =
-      dto.skip_availability_check || isFreeBooking || noProvidersConfigured;
+      dto.skip_availability_check || noProvidersConfigured;
 
     if (!shouldSkipAvailability) {
       const isAvailable = await this.availabilityService.isSlotAvailable(
@@ -380,8 +397,9 @@ export class ReservationsService {
       );
     }
 
-    // 5. Generar numero de reserva
-    const booking_number = await this.generateBookingNumber(store_id, dto.date);
+    // 5. Generar numero de reserva (se regenera dentro del tx si colisiona)
+    let booking_number = await this.generateBookingNumber(store_id, dto.date);
+    const initialBookingNumber = booking_number;
 
     // 6. Atomicidad (QUI-649) + fix de regresión post-PR-576:
     //
@@ -455,21 +473,46 @@ export class ReservationsService {
 
     let booking: Awaited<ReturnType<typeof this.mapBooking>> | null = null;
     try {
-      booking = await this.prisma.$transaction(
-        async (tx) => {
-          // Re-verificar disponibilidad dentro de la transaccion (si aplica)
-          if (!shouldSkipAvailability && resolvedProviderId) {
+      booking = await this.runBookingWrite(
+        async (tx, attempt) => {
+          if (attempt > 0) {
+            booking_number = await this.generateBookingNumber(
+              store_id,
+              dto.date,
+              tx,
+            );
+          }
+
+          // Re-verificar disponibilidad dentro de la transaccion (si aplica).
+          // QUI-966 S5: por solapamiento, no por hora exacta.
+          if (!shouldSkipAvailability && !isFreeBooking && resolvedProviderId) {
             const providerBooked = await tx.bookings.count({
               where: {
                 provider_id: resolvedProviderId,
                 date: new Date(dto.date),
-                start_time: dto.start_time,
-                end_time: dto.end_time,
+                start_time: { lt: dto.end_time },
+                end_time: { gt: dto.start_time },
                 status: { notIn: [booking_status_enum.cancelled] },
               },
             });
 
             if (providerBooked > 0) {
+              throw new ConflictException(
+                'El horario ya no esta disponible (reservado por otro usuario)',
+              );
+            }
+          }
+
+          if (!shouldSkipAvailability && isFreeBooking) {
+            const seatsTaken = await tx.bookings.count({
+              where: freeBookingOverlapWhere(
+                dto.product_id,
+                dto.date,
+                dto.start_time,
+                dto.end_time,
+              ),
+            });
+            if (seatsTaken >= FREE_BOOKING_CAPACITY) {
               throw new ConflictException(
                 'El horario ya no esta disponible (reservado por otro usuario)',
               );
@@ -515,7 +558,6 @@ export class ReservationsService {
 
           return await this.mapBooking(created);
         },
-        { isolationLevel: 'Serializable' },
       );
     } catch (err) {
       // Compensar la orden pre-creada para preservar el invariante de
@@ -540,6 +582,23 @@ export class ReservationsService {
         }
       }
       throw err;
+    }
+
+    // La orden se creó con el número tentativo; si hubo que reasignarlo por
+    // concurrencia, se corrige la nota (best effort, no rompe la reserva).
+    if (preCreatedOrder && booking_number !== initialBookingNumber) {
+      try {
+        await this.prisma.orders.update({
+          where: { id: preCreatedOrder.id },
+          data: {
+            internal_notes: `Reserva ${booking_number} (orden creada antes de la reserva)`,
+          },
+        });
+      } catch (noteErr) {
+        this.logger.warn(
+          `Could not update order ${preCreatedOrder.id} note to ${booking_number}: ${noteErr.message}`,
+        );
+      }
     }
 
     // 7. Marcar la mesa como reservada si se asignó una tabla
@@ -629,50 +688,51 @@ export class ReservationsService {
       }
     }
 
-    const isFreeBooking =
-      product.booking_mode === booking_mode_enum.free_booking;
-
-    if (!isFreeBooking) {
-      const isAvailable = await this.availabilityService.isSlotAvailable(
-        dto.product_id,
-        dto.date,
-        dto.start_time,
-        dto.end_time,
-      );
-      if (!isAvailable) {
-        throw new ConflictException('El horario solicitado no esta disponible');
-      }
+    // QUI-966 S5: free_booking also checks its fixed capacity here.
+    const isAvailable = await this.availabilityService.isSlotAvailable(
+      dto.product_id,
+      dto.date,
+      dto.start_time,
+      dto.end_time,
+    );
+    if (!isAvailable) {
+      throw new ConflictException('El horario solicitado no esta disponible');
     }
 
     const HOLD_DURATION_MINUTES = 15;
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + HOLD_DURATION_MINUTES);
 
-    const booking_number = await this.generateBookingNumber(store_id, dto.date);
-
-    const booking = await this.prisma.bookings.create({
-      data: {
+    const booking = await this.runBookingWrite(async (tx) => {
+      const booking_number = await this.generateBookingNumber(
         store_id,
-        customer_id: dto.customer_id,
-        product_id: dto.product_id,
-        product_variant_id: dto.product_variant_id ?? null,
-        booking_number,
-        date: new Date(dto.date),
-        start_time: dto.start_time,
-        end_time: dto.end_time,
-        status: booking_status_enum.pending,
-        channel: 'ecommerce',
-        // CP-POS-SVC-PERF-001 — cart-line anchor surfaced by the POS
-        // scheduler so future re-orders can reattach the same booking
-        // to its original cart row. Optional and persisted verbatim.
-        cart_item_id: dto.cart_item_id ?? null,
-        order_id: dto.order_id ?? null,
-        notes: dto.notes,
-        expires_at: expiresAt,
-        created_by_user_id: context?.user_id,
-        updated_at: new Date(),
-      },
-      include: this.BOOKING_INCLUDE,
+        dto.date,
+        tx,
+      );
+      return tx.bookings.create({
+        data: {
+          store_id,
+          customer_id: dto.customer_id,
+          product_id: dto.product_id,
+          product_variant_id: dto.product_variant_id ?? null,
+          booking_number,
+          date: new Date(dto.date),
+          start_time: dto.start_time,
+          end_time: dto.end_time,
+          status: booking_status_enum.pending,
+          channel: 'ecommerce',
+          // CP-POS-SVC-PERF-001 — cart-line anchor surfaced by the POS
+          // scheduler so future re-orders can reattach the same booking
+          // to its original cart row. Optional and persisted verbatim.
+          cart_item_id: dto.cart_item_id ?? null,
+          order_id: dto.order_id ?? null,
+          notes: dto.notes,
+          expires_at: expiresAt,
+          created_by_user_id: context?.user_id,
+          updated_at: new Date(),
+        },
+        include: this.BOOKING_INCLUDE,
+      });
     });
 
     return await this.mapBooking(booking);
@@ -1779,11 +1839,17 @@ export class ReservationsService {
   }
 
   /**
-   * Genera un numero de reserva unico: BKG-YYYYMMDD-XXXX
+   * Genera un numero de reserva: BKG-YYYYMMDD-XXXX (QUI-966 S6).
+   *
+   * El máximo es numérico (después de 9999 viene 10000, que como texto ordena
+   * antes). Dos escrituras concurrentes pueden leer el mismo máximo: el
+   * índice único `(store_id, booking_number)` lo detecta y `runBookingWrite`
+   * reintenta regenerando el número dentro de la transacción (`db`).
    */
   private async generateBookingNumber(
     store_id: number,
     date: string,
+    db: Pick<Prisma.TransactionClient, 'bookings'> = this.prisma,
   ): Promise<string> {
     const targetDate = new Date(date);
     const year = targetDate.getUTCFullYear().toString();
@@ -1791,20 +1857,50 @@ export class ReservationsService {
     const day = targetDate.getUTCDate().toString().padStart(2, '0');
     const prefix = `BKG-${year}${month}${day}-`;
 
-    const lastBooking = await this.prisma.bookings.findFirst({
+    const sameDay = await db.bookings.findMany({
       where: {
         store_id,
         booking_number: { startsWith: prefix },
       },
-      orderBy: { booking_number: 'desc' },
+      select: { booking_number: true },
     });
 
-    let sequence = 1;
-    if (lastBooking) {
-      const lastSequence = parseInt(lastBooking.booking_number.slice(-4));
-      sequence = lastSequence + 1;
-    }
-
-    return `${prefix}${sequence.toString().padStart(4, '0')}`;
+    return nextSequenceNumber(
+      (sameDay ?? []).map((b) => b.booking_number),
+      prefix,
+    );
   }
+
+  /**
+   * QUI-966 S5/S6 — runs a booking write inside a Serializable transaction.
+   * A serialization failure (P2034/40001: a concurrent booking touched the
+   * same slot) or a `booking_number` collision (P2002) is retried with a
+   * short jittered pause; `work` receives the attempt so it can regenerate
+   * the number. When retries run out the caller gets a 409, never a 500.
+   */
+  private async runBookingWrite<T>(
+    work: (tx: Prisma.TransactionClient, attempt: number) => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.prisma.$transaction(
+          (tx: Prisma.TransactionClient) => work(tx, attempt),
+          { isolationLevel: 'Serializable' },
+        );
+      } catch (err) {
+        const numberTaken = isUniqueViolationOn(err, 'booking_number');
+        if (!numberTaken && !isSerializationFailure(err)) throw err;
+        if (attempt + 1 >= ReservationsService.BOOKING_WRITE_ATTEMPTS) {
+          throw new ConflictException(
+            numberTaken
+              ? 'No se pudo asignar el numero de reserva, intenta de nuevo'
+              : 'El horario ya no esta disponible (reservado por otro usuario)',
+          );
+        }
+        await retryBackoff(attempt);
+      }
+    }
+  }
+
+  private static readonly BOOKING_WRITE_ATTEMPTS = 5;
 }

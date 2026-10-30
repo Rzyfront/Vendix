@@ -232,6 +232,8 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
         }),
         findFirst: jest.fn(() => Promise.resolve(null)),
         findUnique: jest.fn(() => Promise.resolve(null)),
+        // QUI-966 S6: booking numbering reads the day's numbers (numeric max).
+        findMany: jest.fn(() => Promise.resolve([])),
       },
       products: {
         findFirst: jest.fn(({ where }: any) => {

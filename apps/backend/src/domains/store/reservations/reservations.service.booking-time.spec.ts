@@ -65,6 +65,8 @@ function build(
         ),
       ),
       count: jest.fn().mockResolvedValue(0),
+      // QUI-966 S6: booking numbering reads the day's numbers (numeric max).
+      findMany: jest.fn().mockResolvedValue([]),
       create: jest.fn(({ data }: any) => {
         const row = {
           id: 100 + bookings.length,
