@@ -273,6 +273,64 @@ describe('ProductsBulkEditService', () => {
       ]);
     });
 
+    describe('naturaleza de uso', () => {
+      const supply = () =>
+        makeProduct({
+          id: 1,
+          usage_nature: 'supply',
+          is_ingredient: true,
+          is_sellable: false,
+          base_price: 0,
+          sale_price: 0,
+          available_for_ecommerce: false,
+        });
+
+      it('un Insumo no se publica ni se destaca aunque el lote lo pida, y lo advierte', async () => {
+        prisma.products.findMany.mockResolvedValue([supply()]);
+
+        const result = await service.preview(
+          makeDto([1], { available_for_ecommerce: true, is_featured: true }),
+        );
+
+        expect(result.items[0].changes).toEqual([]);
+        expect(result.items[0].status).toBe('warning');
+        expect(result.items[0].message).toContain(
+          'Es un producto de Insumo: nunca se vende, así que los campos de venta del lote no se aplican.',
+        );
+      });
+
+      it('Uso interno no se vuelve vendible ni ingrediente con el lote', async () => {
+        prisma.products.findMany.mockResolvedValue([
+          makeProduct({
+            id: 1,
+            usage_nature: 'internal_use',
+            is_sellable: false,
+            available_for_ecommerce: false,
+          }),
+        ]);
+
+        const result = await service.preview(
+          makeDto([1], { is_sellable: true, is_on_sale: true }),
+        );
+
+        expect(result.items[0].changes).toEqual([]);
+        expect(result.items[0].message).toContain('Es un producto de Uso interno');
+      });
+
+      it('un producto de Venta sigue recibiendo los campos de venta del lote', async () => {
+        prisma.products.findMany.mockResolvedValue([
+          makeProduct({ id: 1, usage_nature: 'sale', is_featured: false }),
+        ]);
+
+        const result = await service.preview(makeDto([1], { is_featured: true }));
+
+        expect(result.items[0].status).toBe('ok');
+        expect(result.items[0].changes).toEqual([
+          { field: 'is_featured', current: false, next: true },
+        ]);
+      });
+    });
+
     it('no consulta las industrias de la tienda cuando el payload no pide is_ingredient', async () => {
       prisma.products.findMany.mockResolvedValue([makeProduct({ id: 1 })]);
 

@@ -32,6 +32,12 @@ import {
 // módulo compilado. Ver la cabecera de `dto/product-enums.ts`.
 import { ProductState, ProductType } from './dto/product-enums';
 import {
+  applyUsageNatureRules,
+  isSaleNature,
+  USAGE_NATURE_LABELS,
+  UsageNature,
+} from './services/product-usage-nature.util';
+import {
   findProductTaxComboViolation,
   PROD_TAX_COMBO_001,
   type ProductTaxComboCategory,
@@ -48,6 +54,17 @@ const TRACK_INVENTORY_WITH_VARIANTS_MESSAGE =
 
 /** Fila de `products` leída para el preview. Genérica a propósito: el diff
  *  recorre `BULK_EDITABLE_FIELDS` contra las columnas homónimas de la fila. */
+/** Campos de venta que la naturaleza Insumo / Uso interno anula. */
+const BULK_SALE_FIELDS = [
+  'is_sellable',
+  'is_on_sale',
+  'allow_pos_price_override',
+  'has_multiple_price_tiers',
+  'available_for_ecommerce',
+  'is_featured',
+  'online_purchase_url',
+] as const;
+
 type ProductRow = Record<string, any> & {
   id: number;
   name: string;
@@ -1400,12 +1417,19 @@ export class ProductsBulkEditService {
       ingredientCapableStores,
     );
     const resanitized = this.sanitizeIngredientPayload(gated);
+    // Naturaleza de uso, mismo orden que `update()`: las reglas de la
+    // naturaleza del producto (Insumo / Uso interno nunca se venden) y otro
+    // re-sanitize. Sin esto el preview anunciaría cambios que el apply no hace.
+    const natured = this.sanitizeIngredientPayload(
+      applyUsageNatureRules(resanitized.payload, product.usage_nature),
+    );
     // El sanitizer de lote ya pudo haber neutralizado precios ANTES del gate, y
     // el gate no revierte esa neutralización: se persiste igual. Se propaga el
     // flag para no perder el warning en ese caso.
     return {
-      payload: resanitized.payload,
-      neutralized: batch.neutralized || resanitized.neutralized,
+      payload: natured.payload,
+      neutralized:
+        batch.neutralized || resanitized.neutralized || natured.neutralized,
     };
   }
 
@@ -1544,6 +1568,22 @@ export class ProductsBulkEditService {
     activeRecipeProductIds: Set<number>,
   ): string[] {
     const warnings: string[] = [];
+
+    // `applyUsageNatureRules()` descarta en silencio los campos de venta.
+    if (
+      !isSaleNature(product.usage_nature) &&
+      BULK_SALE_FIELDS.some((field) => {
+        const value = batch.payload[field];
+        return value === true || (typeof value === 'string' && value !== '');
+      })
+    ) {
+      const label =
+        USAGE_NATURE_LABELS[product.usage_nature as UsageNature] ??
+        product.usage_nature;
+      warnings.push(
+        `Es un producto de ${label}: nunca se vende, así que los campos de venta del lote no se aplican.`,
+      );
+    }
 
     // `enforceIngredientCapability()` apagará el flag en silencio.
     if (
