@@ -29,6 +29,12 @@ import { QuantityControlComponent } from '../../../../../../shared/components/qu
 import type { QuantityClampEvent } from '../../../../../../shared/components/quantity-control/quantity-control.component';
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import {
+  popLineAvailableStock,
+  popLineHasStockData,
+  resolvePopLowStockThreshold,
+} from '../utils/low-stock-threshold.util';
 
 @Component({
   selector: 'app-pop-cart',
@@ -351,6 +357,23 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                     <div class="text-[10px] text-text-secondary mb-2">
                       SKU: {{ item.variant?.sku || item.product.code }}
                     </div>
+                    <!-- QUI-861: actual vs mínimo para guiar la reposición. -->
+                    @if (hasLineStockData(item)) {
+                      <div
+                        class="text-[10px] mb-2 flex items-center gap-1 flex-wrap"
+                        [class.text-amber-600]="isLineLowStock(item)"
+                        [class.font-semibold]="isLineLowStock(item)"
+                        [class.text-text-secondary]="!isLineLowStock(item)"
+                      >
+                        <app-icon name="package" [size]="10"></app-icon>
+                        <span>
+                          Stock: {{ lineStock(item) }} / Mín: {{ lineLowStockThreshold(item) }}
+                          @if (isLineLowStock(item)) {
+                            <span>· Stock bajo</span>
+                          }
+                        </span>
+                      </div>
+                    }
                     <div class="flex justify-between items-end">
                       <!-- Unit Cost Input (Editable for POP) -->
                       <div class="flex flex-col">
@@ -623,6 +646,38 @@ export class PopCartComponent {
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
   private destroyRef = inject(DestroyRef);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
+
+  /** Default de tienda para el mínimo (QUI-861, misma fuente que selección). */
+  readonly lowStockStoreDefault = computed(() => {
+    const threshold = Number(
+      this.storeSettingsFacade.settings()?.inventory?.low_stock_threshold,
+    );
+    return Number.isFinite(threshold) && threshold >= 0 ? threshold : 10;
+  });
+
+  /** `false` si la línea no trae stock real (sin tracking o restaurada). */
+  hasLineStockData(item: PopCartItem): boolean {
+    return popLineHasStockData(item);
+  }
+
+  /** Stock actual de la línea (variante o base) para "actual / mínimo". */
+  lineStock(item: PopCartItem): number {
+    return popLineAvailableStock(item);
+  }
+
+  /** Umbral resuelto de la línea con la cascada QUI-861. */
+  lineLowStockThreshold(item: PopCartItem): number {
+    return resolvePopLowStockThreshold(
+      item.product,
+      this.lowStockStoreDefault(),
+    ).threshold;
+  }
+
+  /** `true` si el stock actual ya alcanzó o cayó bajo el mínimo. */
+  isLineLowStock(item: PopCartItem): boolean {
+    return this.lineStock(item) <= this.lineLowStockThreshold(item);
+  }
   private disabledActionsTooltipTimeout: ReturnType<typeof setTimeout> | null =
     null;
 
