@@ -1,3 +1,4 @@
+import { assertSaleNatureLines } from '../products/services/product-usage-nature.util';
 import {
   Injectable,
   NotFoundException,
@@ -184,6 +185,8 @@ export class QuotationsService {
       return this.createContractQuotation(createQuotationDto, context, store_id);
     }
     this.assertNoContractEconomicsFields(createQuotationDto);
+    // Una cotización es una oferta de venta: Insumo / Uso interno no entran.
+    await assertSaleNatureLines(this.prisma, createQuotationDto.items);
 
     const quotation_number = await this.generateQuotationNumber(store_id);
 
@@ -579,6 +582,7 @@ export class QuotationsService {
 
     // If items are provided, delete and recreate
     if (updateQuotationDto.items) {
+      await assertSaleNatureLines(this.prisma, updateQuotationDto.items);
       const ctx = RequestContextService.getContext();
       const tierSnapshots = await resolveTierSnapshotsForItems(
         this.prisma,

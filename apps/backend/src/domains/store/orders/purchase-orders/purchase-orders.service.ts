@@ -1744,6 +1744,9 @@ export class PurchaseOrdersService {
         ? {
             is_ingredient: true,
             is_sellable: false,
+            // Un insumo creado desde la compra nace con naturaleza Insumo:
+            // nunca aparece en canales de venta.
+            usage_nature: 'supply' as const,
             purchase_uom_id: item.purchase_uom_id ?? null,
             stock_uom_id: item.stock_uom_id ?? null,
             purchase_to_stock_factor: purchaseToStockFactor ?? null,

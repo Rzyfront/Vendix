@@ -316,6 +316,26 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
     const add = (tx: any, dto: any) =>
       (service as any).addItemTx(tx, 1, 9, { id: 77, order_id: 88 }, { product_id: 5, quantity: 1, ...dto }, new Date());
 
+    it.each([
+      [{ usage_nature: 'supply' }, 'Insumo'],
+      [{ usage_nature: 'internal_use' }, 'Uso interno'],
+      [{ usage_nature: 'sale', is_ingredient: true, is_sellable: false }, 'Insumo'],
+    ])('rechaza con 422 un producto que no se vende (%j) sin reservar ni crear la línea', async (nature, label) => {
+      const tx = buildTx(nature);
+      await expect(add(tx, {})).rejects.toMatchObject({
+        message: `"Aceite" es un producto de ${label} y no se puede vender.`,
+        response: expect.objectContaining({ error_code: 'PROD_NATURE_NOT_SELLABLE' }),
+      });
+      expect(stockLevelManager.reserveStock).not.toHaveBeenCalled();
+      expect(tx.order_items.create).not.toHaveBeenCalled();
+    });
+
+    it('un producto de Venta que además es ingrediente se carga normal', async () => {
+      const tx = buildTx({ usage_nature: 'sale', is_ingredient: true, is_sellable: true });
+      await add(tx, {});
+      expect(tx.order_items.create).toHaveBeenCalled();
+    });
+
     it('reserva por StockLevelManager en la ubicación vendible, con claim estricto', async () => {
       const tx = buildTx({});
       await add(tx, {});

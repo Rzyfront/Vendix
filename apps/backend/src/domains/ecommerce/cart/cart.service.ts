@@ -250,6 +250,8 @@ export class CartService {
         is_sellable: true,
         // Un insumo nunca se compra por ecommerce.
         is_ingredient: false,
+        // Insumo / Uso interno: nunca en la tienda en línea.
+        usage_nature: 'sale',
         // Hotelería (R5): las noches "Noche – {tipo}" se cobran desde la cuenta
         // del huésped, nunca se venden en la tienda en línea.
         lodging_unit_type: { is: null },

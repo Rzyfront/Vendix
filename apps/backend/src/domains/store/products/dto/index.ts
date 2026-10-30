@@ -35,6 +35,7 @@ import {
   PricingType,
   ProductState,
   ProductType,
+  ProductUsageNature,
   ServiceModality,
   ServicePricingType,
 } from './product-enums';
@@ -385,6 +386,16 @@ export class CreateProductDto {
   @IsBoolean()
   @Type(() => Boolean)
   is_sellable?: boolean;
+
+  @ApiPropertyOptional({
+    enum: ProductUsageNature,
+    description:
+      'Naturaleza de uso: sale (venta), supply (insumo) o internal_use (uso interno). Insumo y uso interno nunca se venden.',
+  })
+  @IsOptional()
+  @IsEnum(ProductUsageNature)
+  usage_nature?: ProductUsageNature;
+
 
   @ApiPropertyOptional({
     description:
@@ -944,6 +955,16 @@ export class UpdateProductDto {
   is_sellable?: boolean;
 
   @ApiPropertyOptional({
+    enum: ProductUsageNature,
+    description:
+      'Naturaleza de uso: sale (venta), supply (insumo) o internal_use (uso interno). Insumo y uso interno nunca se venden.',
+  })
+  @IsOptional()
+  @IsEnum(ProductUsageNature)
+  usage_nature?: ProductUsageNature;
+
+
+  @ApiPropertyOptional({
     description:
       'Si se usa como insumo en la receta de otro producto.',
   })
@@ -1459,6 +1480,15 @@ export class ProductQueryDto {
   @IsBoolean()
   @Type(() => Boolean)
   is_batch_produced?: boolean;
+
+  /**
+   * Pestañas del listado (Venta · Insumos · Uso interno): filtra por
+   * naturaleza de uso. Ausente → sin filtro. Con `pos_optimized` el servidor
+   * fuerza `sale` sin importar lo que mande el cliente.
+   */
+  @IsOptional()
+  @IsEnum(ProductUsageNature)
+  usage_nature?: ProductUsageNature;
 
   /**
    * Restaurant Suite — filtra el listado por la bandera `is_ingredient`

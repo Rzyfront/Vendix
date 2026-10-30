@@ -92,6 +92,11 @@ const REQUIRED_COLUMNS = [
   // falla CUALQUIER lectura de producto — catálogo público, POS y editor.
   'products.offer_loose_unit',
 
+  // --- Naturaleza de uso (migración 20261104120000) -----------------------
+  // Igual que offer_loose_unit: Prisma la selecciona en toda lectura de
+  // producto; sin ella se cae el catálogo, el POS y el editor.
+  'products.usage_nature',
+
   // --- Alcance fiscal (lo que cubría el guard anterior, ahora del lado DB) -
   'organizations.fiscal_scope',
   'accounting_entities.fiscal_scope',

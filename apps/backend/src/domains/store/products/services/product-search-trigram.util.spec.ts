@@ -329,6 +329,31 @@ describe('product-search-trigram (C.3)', () => {
       expect(counted).toContain(`NOT ${lodgingSubquery}`);
     });
 
+    it('usageNature: pestañas por naturaleza efectiva (insumo heredado = Insumo)', () => {
+      const run = (usageNature: string | null) => {
+        const q = buildTrigramRankedQuery(1, ['harina'], { usageNature }, 'harina', 20, 0);
+        return { where: extractWhereClause(q.sql), params: q.params };
+      };
+      const legacyPure =
+        "(p.usage_nature = 'sale' AND p.is_ingredient = true AND p.is_sellable = false)";
+
+      const sale = run('sale');
+      expect(sale.where).toMatch(/\(p\.usage_nature = \$\d+::product_usage_nature_enum AND NOT /);
+      expect(sale.where).toContain(legacyPure);
+      expect(sale.params).toContain('sale');
+
+      const supply = run('supply');
+      expect(supply.where).toMatch(/\(p\.usage_nature = \$\d+::product_usage_nature_enum OR /);
+      expect(supply.where).toContain(legacyPure);
+
+      const internal = run('internal_use');
+      expect(internal.where).toMatch(/p\.usage_nature = \$\d+::product_usage_nature_enum/);
+      expect(internal.where).not.toContain(legacyPure);
+
+      expect(run(null).where).not.toContain('usage_nature');
+      expect(() => run('regalo')).toThrow(TrigramFilterError);
+    });
+
     it('isIngredient tri-estado: undefined = sin filtro', () => {
       const where = extractWhereClause(
         buildTrigramRankedQuery(

@@ -134,6 +134,13 @@ import { ProductSerialsManagerModalComponent } from '../../../serial-numbers/com
 import { SaveRequirementsModalComponent } from '../../../../../../shared/components/save-requirements-modal/save-requirements-modal.component';
 import { SaveRequirement } from '../../../../../../shared/components/save-requirements-modal/save-requirements.interface';
 import { mapBackendErrorToRequirements } from '../../utils/product-save-requirements';
+import {
+  effectiveUsageNature,
+  ProductUsageNature,
+  USAGE_NATURE_HELP,
+  USAGE_NATURE_LABELS,
+  USAGE_NATURE_ORDER,
+} from '../../utils/usage-nature.util';
 
 interface VariantAttribute {
   name: string;
@@ -799,8 +806,51 @@ export class ProductCreatePageComponent {
    * Fase 1 of the insumos-vs-retail consolidation plan.
    */
   readonly isPureIngredient = computed(
-    () => this.isIngredient() && !this.isSellable(),
+    () =>
+      (this.isIngredient() && !this.isSellable()) || this.isNonSaleNature(),
   );
+
+  /**
+   * Naturaleza de uso (Venta · Insumo · Uso interno). Insumo y Uso interno
+   * reutilizan el modo "insumo puro" de arriba: se ocultan precio de venta,
+   * ofertas, tarifas y publicación en canales en vez de dejarlos en cero.
+   */
+  readonly usageNature = computed<ProductUsageNature>(() => {
+    this.formUpdateTrigger();
+    return (this.productForm?.get('usage_nature')?.value ?? 'sale') as ProductUsageNature;
+  });
+  readonly isNonSaleNature = computed(() => this.usageNature() !== 'sale');
+  readonly usageNatureHelp = computed(() => USAGE_NATURE_HELP[this.usageNature()]);
+  /** Badge de la ficha: siempre visible para no confundir naturalezas. */
+  readonly usageNatureLabel = computed(() => USAGE_NATURE_LABELS[this.usageNature()]);
+  readonly usageNatureBadgeColor = computed<'green' | 'yellow' | 'gray'>(() => {
+    const nature = this.usageNature();
+    return nature === 'supply' ? 'yellow' : nature === 'internal_use' ? 'gray' : 'green';
+  });
+  readonly usageNatureOptions = USAGE_NATURE_ORDER.map((value) => ({
+    value,
+    label: USAGE_NATURE_LABELS[value],
+  }));
+
+  /**
+   * Alinea los flags heredados con la naturaleza elegida (el backend aplica
+   * la misma regla): Insumo ⇒ ingrediente y no vendible; Uso interno ⇒ ni
+   * ingrediente ni vendible; volver a Venta ⇒ vendible.
+   */
+  onUsageNatureChange(value: string): void {
+    const nature = value as ProductUsageNature;
+    const patch =
+      nature === 'supply'
+        ? { is_ingredient: true, is_sellable: false, is_combo: false, product_type: 'physical' }
+        : nature === 'internal_use'
+          ? { is_ingredient: false, is_sellable: false, is_combo: false }
+          : { is_ingredient: false, is_sellable: true };
+    this.lastIngredientFlag = patch.is_ingredient;
+    this.lastSellableFlag = patch.is_sellable;
+    this.productForm.patchValue(patch, { emitEvent: false });
+    if (!patch.is_ingredient) this.resetUomControls();
+    this.formUpdateTrigger.update((v) => v + 1);
+  }
 
 
   /**
@@ -1484,15 +1534,19 @@ export class ProductCreatePageComponent {
     this.lastIngredientFlag = isIngredient;
     this.lastSellableFlag = isSellable;
     // Only react to the field that actually flipped.
+    // Con la naturaleza de uso, "Es insumo" en un producto de Venta significa
+    // "También se usa como ingrediente" (la salsa): sigue siendo vendible.
+    const isSaleNature =
+      (this.productForm?.get('usage_nature')?.value ?? 'sale') === 'sale';
     if (isIngredient !== prevIng) {
-      if (isIngredient && sellCtrl.value !== false) {
+      if (isIngredient && !isSaleNature && sellCtrl.value !== false) {
         sellCtrl.patchValue(false, { emitEvent: false });
         this.lastSellableFlag = false;
       }
       // Al activar "Es insumo": un insumo siempre es Producto Físico
       // (nunca servicio ni plato preparado) y nunca un combo/menú fijo.
       // Forzamos esos valores y ocultamos sus controles en el template.
-      if (isIngredient) {
+      if (isIngredient && !isSaleNature) {
         this.productForm
           .get('product_type')
           ?.patchValue('physical', { emitEvent: false });
@@ -1561,7 +1615,8 @@ export class ProductCreatePageComponent {
     this.formUpdateTrigger();
     const pure = this.isPureIngredient();
     // Un insumo (puro o no) nunca se publica ni se destaca en la tienda.
-    const anyIngredient = !!form.get('is_ingredient')?.value;
+    const anyIngredient =
+      !!form.get('is_ingredient')?.value || this.isNonSaleNature();
     const ingredientBlocked = new Set([
       'available_for_ecommerce',
       'is_featured',
@@ -2371,6 +2426,8 @@ export class ProductCreatePageComponent {
         // Si la tienda en línea ofrece TAMBIÉN la unidad suelta junto a las
         // presentaciones. Encendido por defecto: es como se comporta el POS.
         offer_loose_unit: [true],
+        // Naturaleza de uso: venta (default), insumo o uso interno.
+        usage_nature: ['sale'],
         // ===== Restaurant Suite toggles (Fase B) =====
         is_sellable: [true],
         is_ingredient: [false],
@@ -2716,6 +2773,9 @@ export class ProductCreatePageComponent {
       has_multiple_price_tiers: !!product.has_multiple_price_tiers,
       // `undefined` en un producto anterior a la columna ⇒ true (se ofrece).
       offer_loose_unit: product.offer_loose_unit !== false,
+      // Naturaleza efectiva: el insumo puro anterior a la columna se muestra
+      // como Insumo (igual que el badge del listado).
+      usage_nature: effectiveUsageNature(product),
       // Restaurant Suite toggles (Fase B)
       is_sellable: product.is_sellable !== false,
       is_ingredient: !!product.is_ingredient,
@@ -4581,10 +4641,13 @@ export class ProductCreatePageComponent {
     // value for retail-sale constructs; we force them to neutral values
     // and let the backend ignore them. This keeps the persisted DTO
     // coherent regardless of UI state.
-    const isPureIngredient = !!formValue.is_ingredient && !formValue.is_sellable;
+    const usageNature: ProductUsageNature = formValue.usage_nature ?? 'sale';
+    const isNonSale = usageNature !== 'sale';
+    const isPureIngredient =
+      (!!formValue.is_ingredient && !formValue.is_sellable) || isNonSale;
     const neutral = (v: any, fallback: any) => (isPureIngredient ? fallback : v);
     // Un insumo nunca se publica ni se destaca, sea o no vendible.
-    const isIngredientAny = !!formValue.is_ingredient;
+    const isIngredientAny = !!formValue.is_ingredient || isNonSale;
 
     // F-008: ids efectivos (F4 ya aplicado) para filtrar el mapa inclusivo.
     const effectiveTaxIds = this.sanitizeTaxCategoryIds(
@@ -4711,8 +4774,9 @@ export class ProductCreatePageComponent {
         ? formValue.offer_loose_unit !== false
         : true,
       // Restaurant Suite toggles (Fase B)
-      is_sellable: formValue.is_sellable !== false,
-      is_ingredient: !!formValue.is_ingredient,
+      usage_nature: usageNature,
+      is_sellable: !isNonSale && formValue.is_sellable !== false,
+      is_ingredient: usageNature === 'supply' || (!isNonSale && !!formValue.is_ingredient),
       // Un insumo no puede ser combo / menú fijo: se neutraliza por robustez.
       is_combo: formValue.is_ingredient ? false : !!formValue.is_combo,
       is_batch_produced: !!formValue.is_batch_produced,

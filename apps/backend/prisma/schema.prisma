@@ -2123,6 +2123,11 @@ model products {
   is_ingredient                  Boolean                          @default(false)
   is_combo                       Boolean                          @default(false)
   is_batch_produced              Boolean                          @default(false)
+  /// Naturaleza de uso: para qué existe el producto. `sale` se vende; `supply`
+  /// (insumo) solo entra en recetas/producción/fórmulas; `internal_use` lo
+  /// consume la operación. `supply` e `internal_use` NUNCA son vendibles en
+  /// ningún canal (lo garantiza el backend, no solo la interfaz).
+  usage_nature                   product_usage_nature_enum        @default(sale)
   /// Appointment redesign phase 2 — whether this product/service is
   /// eligible to be performed at the customer's home
   /// (when `bookings.service_location_type = 'home'`). When false, the
@@ -2283,6 +2288,7 @@ model products {
   @@index([store_id, barcode])
   @@index([store_id, product_type])
   @@index([store_id, is_ingredient])
+  @@index([store_id, usage_nature, state])
   @@index([kds_id])
   @@index([stock_uom_id])
   @@index([purchase_uom_id])
@@ -5178,6 +5184,12 @@ enum price_tier_amount_scope_enum {
 enum pricing_type_enum {
   unit
   weight
+}
+
+enum product_usage_nature_enum {
+  sale
+  supply
+  internal_use
 }
 
 enum product_type_enum {

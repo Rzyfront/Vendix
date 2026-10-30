@@ -1,3 +1,4 @@
+import { assertSaleNatureLines } from '../products/services/product-usage-nature.util';
 import {
   Injectable,
   BadRequestException,
@@ -320,6 +321,15 @@ export class PaymentsService {
   ) {
     try {
       await this.validateUserAccess(user, createOrderPaymentDto.storeId);
+
+      // Insumo y Uso interno nunca se cobran: mismo guard que el cobro POS,
+      // antes de crear la orden. Este DTO usa `productId` (camelCase).
+      await assertSaleNatureLines(
+        this.prisma,
+        (createOrderPaymentDto.items ?? []).map((item) => ({
+          product_id: item.productId,
+        })),
+      );
 
       const result = await this.paymentGateway.processPaymentWithNewOrder({
         orderId: createOrderPaymentDto.orderId,
@@ -937,6 +947,10 @@ export class PaymentsService {
       createPosPaymentDto.store_id = ctxStoreId;
 
       await this.validateUserAccess(user, createPosPaymentDto.store_id);
+
+      // Insumo y Uso interno nunca se cobran, aunque el cliente los mande
+      // (app vieja, llamada directa): 422 legible antes de abrir la venta.
+      await assertSaleNatureLines(this.prisma, createPosPaymentDto.items);
 
       // The replay fingerprint includes currency; resolve the same server
       // default before checking a prior attempt and before the transaction.

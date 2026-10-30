@@ -962,6 +962,18 @@ export const ErrorCodes = {
     devMessage:
       'sale_price inválido: debe ser > 0 y < base_price cuando is_on_sale=true',
   },
+  PROD_NATURE_NOT_SELLABLE: {
+    code: 'PROD_NATURE_NOT_SELLABLE',
+    httpStatus: 422,
+    devMessage:
+      'El producto es Insumo o Uso interno (usage_nature != sale) y no puede venderse en ningún canal',
+  },
+  MENU_ITEM_NOT_SALE_NATURE: {
+    code: 'MENU_ITEM_NOT_SALE_NATURE',
+    httpStatus: 422,
+    devMessage:
+      'Solo los productos de Venta pueden ir en una carta (usage_nature != sale)',
+  },
   PROD_VAR_SALE_PRICE_001: {
     code: 'PROD_VAR_SALE_PRICE_001',
     httpStatus: 400,

@@ -16,6 +16,8 @@
         : 'Registra un nuevo producto en tu catálogo digital'
   "
   [icon]="isEditMode() ? 'package' : 'plus-circle'"
+  [badgeText]="usageNatureLabel()"
+  [badgeColor]="usageNatureBadgeColor()"
   [showBackButton]="true"
   backRoute="/admin/products"
   [backQueryParams]="listBackQueryParams"
@@ -57,6 +59,24 @@
     (submit)="preventNativeFormSubmit($event)"
     (keydown.enter)="preventImplicitEnterSubmit($event)"
   >
+    <!-- Naturaleza de uso: Venta · Insumo · Uso interno (todas las industrias). -->
+    <section
+      class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm"
+    >
+      <div class="flex items-center gap-2 mb-4">
+        <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
+        <h2 class="text-base font-bold text-gray-900">¿Para qué es este producto?</h2>
+      </div>
+      <app-input-buttons
+        [options]="usageNatureOptions"
+        formControlName="usage_nature"
+        (valueChange)="onUsageNatureChange($event)"
+        customWrapperClass="!mt-0"
+      >
+      </app-input-buttons>
+      <p class="mt-2 text-sm text-text-secondary">{{ usageNatureHelp() }}</p>
+    </section>
+
     <!-- Tipo de Producto — oculto en insumos (siempre Producto Físico) -->
     @if (!isIngredient()) {
       <section
@@ -1011,19 +1031,16 @@
 
             <!-- Restaurant Suite toggles (Fase B) — solo industria restaurant -->
             @if (isRestaurant()) {
-              <app-setting-toggle
-                formControlName="is_sellable"
-                label="Vendible"
-                description="Visible y vendible en carta, POS y ecommerce"
-              >
-              </app-setting-toggle>
-
-              <app-setting-toggle
-                formControlName="is_ingredient"
-                label="Es insumo"
-                description="Apto para usarse como componente de recetas (BOM)"
-              >
-              </app-setting-toggle>
+              <!-- "Vendible" y "Es insumo" los decide la naturaleza de uso.
+                   En Venta queda solo el uso dual (la salsa). -->
+              @if (!isNonSaleNature()) {
+                <app-setting-toggle
+                  formControlName="is_ingredient"
+                  label="También se usa como ingrediente"
+                  description="Sigue a la venta y además aparece como componente de recetas"
+                >
+                </app-setting-toggle>
+              }
 
               <!-- Combo / menú fijo — oculto en insumos (un insumo no es combo) -->
               @if (!isIngredient()) {

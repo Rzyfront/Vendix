@@ -1,3 +1,4 @@
+import { isSaleNature } from '../products/services/product-usage-nature.util';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -162,13 +163,33 @@ export class MenuSectionsService {
       },
       select: {
         id: true,
+        name: true,
         is_sellable: true,
+        is_ingredient: true,
+        usage_nature: true,
         available_for_ecommerce: true,
         state: true,
       },
     });
     if (!product) {
       throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
+    }
+
+    // Una carta es una superficie de venta: solo productos de Venta. Un insumo
+    // (por naturaleza, o el insumo puro heredado `is_ingredient && !is_sellable`)
+    // se rechaza en vez de promoverlo a vendible y publicado como antes.
+    const isLegacyPureIngredient =
+      product.is_ingredient === true && product.is_sellable === false;
+    if (!isSaleNature(product.usage_nature) || isLegacyPureIngredient) {
+      const label =
+        product.usage_nature === 'internal_use'
+          ? 'un producto de Uso interno'
+          : 'un Insumo';
+      throw new VendixHttpException(
+        ErrorCodes.MENU_ITEM_NOT_SALE_NATURE,
+        `${product.name} es ${label} y no puede ir en la carta.`,
+        { product_id: product.id, usage_nature: product.usage_nature },
+      );
     }
 
     const dup = await this.prisma.menu_section_items.findFirst({

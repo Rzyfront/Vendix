@@ -9,6 +9,7 @@ import {
   reserveSessionLineStock,
   writeSessionOrderTotals,
 } from './utils/session-order-lines.util';
+import { assertSaleNatureProducts } from '../products/services/product-usage-nature.util';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { resolveStoreTimezone } from '../../../common/utils/store-timezone.util';
@@ -1200,6 +1201,8 @@ export class ServiceSessionsService {
     if (!product) {
       throw new VendixHttpException(ErrorCodes.PROD_FIND_001, 'Producto no encontrado.');
     }
+    // Insumo y Uso interno nunca se cargan a la cuenta: mismo guard que el POS.
+    assertSaleNatureProducts([product]);
     const qty = Math.max(1, Number(dto.quantity || 1));
     // Variante: debe ser del producto, y un producto con variantes exige elegir una.
     const variant = dto.product_variant_id

@@ -9,6 +9,8 @@ import type { industry_enum } from '@prisma/client';
  */
 export const INDUSTRIES_SUPPORTING_INGREDIENTS: industry_enum[] = [
   'restaurant',
+  // Manufactura: los insumos (madera, tornillos, barniz) entran en fórmulas.
+  'manufacturing',
 ];
 
 /**

@@ -1,3 +1,4 @@
+import { assertSaleNatureProducts } from '../products/services/product-usage-nature.util';
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { Prisma, table_status_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -765,6 +766,7 @@ export class TableSessionsService {
         is_on_sale: true,
         sale_price: true,
         is_sellable: true,
+        usage_nature: true,
         state: true,
         product_type: true,
         track_inventory: true,
@@ -800,6 +802,7 @@ export class TableSessionsService {
           `Producto #${item.product_id} no existe o no pertenece a la tienda`,
         );
       }
+      assertSaleNatureProducts([p]);
       if (!p.is_sellable) {
         throw new VendixHttpException(
           ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,

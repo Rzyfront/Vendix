@@ -14,27 +14,21 @@
  */
 
 /**
- * Estado inicial de `filterValues` en el dropdown del listado.
- * El dropdown trabaja con la representacion string `'products' | 'ingredients' | 'all'`,
- * que `emitQuery` traduce al booleano de la query.
+ * Estado inicial de `filterValues` en el dropdown del listado. Las pestañas
+ * Venta · Insumos · Uso interno reemplazaron el filtro tri-estado
+ * Productos / Insumos / Todos, así que el dropdown arranca vacío.
  */
-export const PRODUCT_LIST_DEFAULT_FILTER_VALUES = {
-  is_ingredient: 'products',
-} as const;
+export const PRODUCT_LIST_DEFAULT_FILTER_VALUES = {} as const;
+
+/** Id de la pestaña "Todos": no filtra por naturaleza. */
+export const ALL_NATURES_TAB = 'all' as const;
 
 /**
  * Query inicial que el padre (ProductsComponent) usa para que la primera
- * peticion ya llegue filtrada. Esto evita la carrera contra
- * `afterNextRender(() => this.emitQuery())` del hijo, que era la causa
- * del bug QUI-729: dos peticiones concurrentes, la del padre sin filtro
- * y la del hijo filtrada, compiten por escribir `this.products`. Como
- * cada `loadProducts()` abre su propio `subscribe` y escribe
- * `this.products`, se queda el que responde ultimo -- sin garantia de
- * orden.
- *
- * El padre inicializa `currentFilters` con ESTE valor antes de la
- * primera consulta y el hijo ya no necesita reemitir despues del render.
+ * peticion ya llegue filtrada (evita la carrera de QUI-729 contra
+ * `afterNextRender(() => this.emitQuery())` del hijo). La pestaña por
+ * defecto es Venta.
  */
 export const PRODUCT_LIST_DEFAULT_QUERY = {
-  is_ingredient: false,
+  usage_nature: 'sale',
 } as const;

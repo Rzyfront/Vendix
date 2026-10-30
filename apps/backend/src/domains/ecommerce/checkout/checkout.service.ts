@@ -1,3 +1,4 @@
+import { isSaleNature } from '../../store/products/services/product-usage-nature.util';
 import { Injectable, Optional } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -1384,7 +1385,9 @@ export class CheckoutService {
       if (
         !product ||
         product.is_sellable !== true ||
-        product.is_ingredient === true
+        product.is_ingredient === true ||
+        // Insumo / Uso interno: nunca se venden en línea.
+        !isSaleNature(product.usage_nature)
       ) {
         throw new VendixHttpException(ErrorCodes.ECOM_PRODUCT_002);
       }
@@ -1852,7 +1855,8 @@ export class CheckoutService {
       if (
         !item.product ||
         item.product.is_sellable !== true ||
-        item.product.is_ingredient === true
+        item.product.is_ingredient === true ||
+        !isSaleNature(item.product.usage_nature)
       ) {
         throw new VendixHttpException(
           ErrorCodes.ECOM_PRODUCT_002,
@@ -3003,7 +3007,8 @@ export class CheckoutService {
       if (
         !item.product ||
         item.product.is_sellable !== true ||
-        item.product.is_ingredient === true
+        item.product.is_ingredient === true ||
+        !isSaleNature(item.product.usage_nature)
       ) {
         throw new VendixHttpException(
           ErrorCodes.ECOM_PRODUCT_002,

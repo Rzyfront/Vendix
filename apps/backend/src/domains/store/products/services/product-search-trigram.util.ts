@@ -54,6 +54,7 @@ export const TRIGRAM_SLOW_LOG_MS = 250;
 /** Estados/familias admitidos: allowlist cerrada, lo demás → throw. */
 const PRODUCT_STATES = new Set(['active', 'inactive', 'archived']);
 const PRODUCT_TYPES = new Set(['physical', 'service', 'prepared']);
+const USAGE_NATURES = new Set(['sale', 'supply', 'internal_use']);
 
 export class TrigramFilterError extends Error {
   constructor(message: string) {
@@ -96,6 +97,11 @@ export interface TrigramFilterSet {
    * habitación), false = sin ellas. El caller ya resolvió el default del POS.
    */
   readonly isLodging?: boolean | null;
+  /**
+   * Naturaleza de uso. El caller ya la resolvió: con `posOptimized` siempre
+   * llega `sale` (espejo de buildProductWhere).
+   */
+  readonly usageNature?: string | null;
   readonly ids?: readonly number[] | null;
 }
 
@@ -237,6 +243,24 @@ export function buildTrigramFilterClauses(
   if (f.isIngredient !== undefined && f.isIngredient !== null) {
     assertBoolean(f.isIngredient, 'isIngredient');
     clauses.push(`p.is_ingredient = ${acc.push(f.isIngredient)}::boolean`);
+  }
+  if (f.usageNature !== undefined && f.usageNature !== null) {
+    if (!USAGE_NATURES.has(f.usageNature)) {
+      throw new TrigramFilterError(
+        `usageNature inválido: ${String(f.usageNature)}`,
+      );
+    }
+    // Naturaleza efectiva (espejo de usageNatureListWhere): el insumo puro
+    // heredado cuenta como Insumo, no como Venta.
+    const legacyPure = `(p.usage_nature = 'sale' AND p.is_ingredient = true AND p.is_sellable = false)`;
+    const nature = `p.usage_nature = ${acc.push(f.usageNature)}::product_usage_nature_enum`;
+    if (f.usageNature === 'sale') {
+      clauses.push(`(${nature} AND NOT ${legacyPure})`);
+    } else if (f.usageNature === 'supply') {
+      clauses.push(`(${nature} OR ${legacyPure})`);
+    } else {
+      clauses.push(nature);
+    }
   }
   if (f.isLodging !== undefined && f.isLodging !== null) {
     assertBoolean(f.isLodging, 'isLodging');
