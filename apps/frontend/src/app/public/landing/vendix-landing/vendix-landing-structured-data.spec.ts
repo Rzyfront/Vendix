@@ -15,6 +15,16 @@ describe('buildVendixStructuredData', () => {
     expect(org['sameAs'].length).toBeGreaterThan(0);
   });
 
+  it('identifica a Vendix como software colombiano y enlaza su Perfil de Negocio', () => {
+    const org = byType(graph(), 'Organization');
+    expect(org['sameAs']).toContain('https://maps.google.com/?cid=2119636985592340036');
+    expect(org['description']).toContain('Software colombiano');
+    expect(org['address']['addressLocality']).toBe('Riohacha');
+    expect(org['address']['addressCountry']).toBe('CO');
+    expect(org['address']['streetAddress']).toBeUndefined();
+    expect(org['areaServed']).toBe('CO');
+  });
+
   it('usa AggregateOffer con el rango de los planes mensuales', () => {
     const offers = byType(graph([69900, 49900, 190000, 89900]), 'SoftwareApplication')['offers'];
     expect(offers['@type']).toBe('AggregateOffer');
