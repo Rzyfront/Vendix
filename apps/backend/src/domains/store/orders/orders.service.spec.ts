@@ -49,6 +49,21 @@ const productTaxRow = (
 });
 
 describe('OrdersService', () => {
+  /**
+   * PR #1003 — FK `order_item_options -> order_items` con RESTRICT: reemplazar
+   * las líneas de un borrador con adiciones borra primero sus adiciones (acotado
+   * a la orden, misma tx); si no, el `deleteMany` de líneas da P2003 -> 409.
+   */
+  const expectOptionsDeletedBeforeLines = (orderId: number) => {
+    expect(mockPrismaService.order_item_options.deleteMany).toHaveBeenCalledWith({
+      where: { order_item: { order_id: orderId } },
+    });
+    expect(
+      mockPrismaService.order_item_options.deleteMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mockPrismaService.order_items.deleteMany.mock.invocationCallOrder[0],
+    );
+  };
   let service: OrdersService;
 
   const mockPrismaService = {
@@ -80,6 +95,9 @@ describe('OrdersService', () => {
     // P0-4: el editor y `updateOrderItems` borran el desglose previo
     // (`deleteMany`) en la misma tx antes de recrearlo anidado por línea.
     order_item_taxes: { findFirst: jest.fn(), deleteMany: jest.fn() },
+    // PR #1003: la FK `order_item_options -> order_items` es RESTRICT; las
+    // adiciones se borran explícitamente antes de reemplazar las líneas.
+    order_item_options: { deleteMany: jest.fn() },
     order_promotions: {
       createMany: jest.fn(),
       deleteMany: jest.fn(),
@@ -311,6 +329,9 @@ describe('OrdersService', () => {
     mockPrismaService.invoices.findMany.mockResolvedValue([]);
     mockPrismaService.order_financial_accounts.findMany.mockResolvedValue([]);
     mockPrismaService.order_item_taxes.deleteMany.mockResolvedValue({
+      count: 0,
+    } as any);
+    mockPrismaService.order_item_options.deleteMany.mockResolvedValue({
       count: 0,
     } as any);
     mockPrismaService.order_items.create.mockResolvedValue({} as any);
@@ -2730,6 +2751,7 @@ describe('OrdersService', () => {
           const lines = createdLines();
           expect(lines).toHaveLength(1);
           expect(lines[0].order_item_options).toBeUndefined();
+          expectOptionsDeletedBeforeLines(500);
         } finally {
           contextSpy.mockRestore();
         }
@@ -2787,6 +2809,7 @@ describe('OrdersService', () => {
           findFirst: jest.fn().mockResolvedValue({ id: 1 }),
           deleteMany: jest.fn(),
         },
+        order_item_options: { deleteMany: jest.fn() },
       };
       await expect((service as any).assertOrderLinesNotLockedInTx(tx, 9)).rejects.toMatchObject({
         errorCode: 'ORD_EDIT_LINES_LOCKED_001',
@@ -4789,6 +4812,7 @@ describe('OrdersService', () => {
         );
         expect(lines).toHaveLength(1);
         expect(lines[0].order_item_options).toBeUndefined();
+        expectOptionsDeletedBeforeLines(700);
       });
 
       it('cambiar la línea con adiciones se rechaza antes de borrar nada', async () => {

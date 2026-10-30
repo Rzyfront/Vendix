@@ -2087,12 +2087,22 @@ export class OrdersService {
     }
   }
 
-  /** `order_items.deleteMany` con red de seguridad: P2003 -> ORD_EDIT_LINES_LOCKED_001. */
+  /**
+   * `order_items.deleteMany` con red de seguridad: P2003 -> ORD_EDIT_LINES_LOCKED_001.
+   *
+   * PR #1003: la FK `order_item_options -> order_items` es RESTRICT (sin
+   * cascada). Las adiciones de ESTA orden se borran primero, en la misma tx;
+   * las líneas que vuelven sin cambios las recrean anidadas
+   * (`toKeptOrderItemOptionsCreate`).
+   */
   private async deleteOrderItemsMappingLockInTx(
     tx: Prisma.TransactionClient,
     orderId: number,
   ): Promise<void> {
     try {
+      await tx.order_item_options.deleteMany({
+        where: { order_item: { order_id: orderId } },
+      });
       await tx.order_items.deleteMany({ where: { order_id: orderId } });
     } catch (error) {
       if (
