@@ -20,6 +20,9 @@
  */
 export const PRODUCT_LIST_DEFAULT_FILTER_VALUES = {} as const;
 
+/** Id de la pestaña "Todos": no filtra por naturaleza. */
+export const ALL_NATURES_TAB = 'all' as const;
+
 /**
  * Query inicial que el padre (ProductsComponent) usa para que la primera
  * peticion ya llegue filtrada (evita la carrera de QUI-729 contra

@@ -17,7 +17,10 @@ import {
   ProductCategory,
   Brand,
 } from '../../interfaces';
-import { PRODUCT_LIST_DEFAULT_FILTER_VALUES } from './product-list.constants';
+import {
+  ALL_NATURES_TAB,
+  PRODUCT_LIST_DEFAULT_FILTER_VALUES,
+} from './product-list.constants';
 
 // Import shared components
 import {
@@ -101,19 +104,37 @@ export class ProductListComponent {
   /** Contadores de las pestañas (stats del backend). */
   readonly natureCounts = input<Partial<Record<ProductUsageNature, number>> | null>(null);
 
-  /** Pestaña activa: Venta · Insumos · Uso interno. Filtra en el backend. */
-  readonly activeNature = signal<ProductUsageNature>('sale');
+  /**
+   * Pestaña activa: Todos · Venta · Insumos · Uso interno. Filtra en el
+   * backend; `all` no manda `usage_nature` (lista todo, como antes).
+   */
+  readonly activeNature = signal<ProductUsageNature | typeof ALL_NATURES_TAB>('sale');
 
   readonly natureTabs = computed<ScrollableTab[]>(() => {
     const counts = this.natureCounts();
-    return USAGE_NATURE_ORDER.map((nature) => ({
-      id: nature,
-      label:
-        counts && counts[nature] !== undefined
-          ? `${USAGE_NATURE_TAB_LABELS[nature]} (${counts[nature]})`
-          : USAGE_NATURE_TAB_LABELS[nature],
-    }));
+    const total = counts
+      ? USAGE_NATURE_ORDER.reduce((sum, nature) => sum + (counts[nature] ?? 0), 0)
+      : undefined;
+    return [
+      {
+        id: ALL_NATURES_TAB,
+        label: total !== undefined ? `Todos (${total})` : 'Todos',
+      },
+      ...USAGE_NATURE_ORDER.map((nature) => ({
+        id: nature,
+        label:
+          counts && counts[nature] !== undefined
+            ? `${USAGE_NATURE_TAB_LABELS[nature]} (${counts[nature]})`
+            : USAGE_NATURE_TAB_LABELS[nature],
+      })),
+    ];
   });
+
+  /** `usage_nature` del query para la pestaña activa (`undefined` en Todos). */
+  private natureQuery(): ProductUsageNature | undefined {
+    const nature = this.activeNature();
+    return nature === ALL_NATURES_TAB ? undefined : nature;
+  }
 
   /** Filas con la naturaleza efectiva para el badge (insumo heredado = Insumo). */
   readonly rows = computed(() =>
@@ -527,7 +548,10 @@ export class ProductListComponent {
       query.product_type = this.selectedProductType as 'physical' | 'service';
     }
 
-    query.usage_nature = this.activeNature();
+    const nature = this.natureQuery();
+    if (nature) {
+      query.usage_nature = nature;
+    }
 
     const lodging = this.filterValues['is_lodging'];
     if (lodging === 'only') {
@@ -548,11 +572,12 @@ export class ProductListComponent {
     // "Limpiar todo" limpia el dropdown pero conserva la pestaña activa.
     this.filterValues = { ...PRODUCT_LIST_DEFAULT_FILTER_VALUES };
     this.search.emit('');
-    this.filter.emit({ usage_nature: this.activeNature() });
+    const nature = this.natureQuery();
+    this.filter.emit(nature ? { usage_nature: nature } : {});
   }
 
   onNatureTabChange(tabId: string): void {
-    this.activeNature.set(tabId as ProductUsageNature);
+    this.activeNature.set(tabId as ProductUsageNature | typeof ALL_NATURES_TAB);
     this.emitQuery();
   }
 
