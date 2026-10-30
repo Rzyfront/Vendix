@@ -44,6 +44,7 @@ import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { organizations } from '@prisma/client';
 import { mergeStoreSettingsWithDefaults } from '../store/settings/defaults/default-store-settings';
+import { toPublicAuthUser } from './utils/public-auth-user.util';
 
 /**
  * Result of organization lookup with smart fallback logic
@@ -1017,7 +1018,7 @@ export class AuthService {
     };
 
     // Remover password del response
-    const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
+    const userWithRolesAndPassword = toPublicAuthUser(userWithRolesArray);
 
     // Obtener user_settings del usuario creado
     const userSettings = await this.prismaService.user_settings.findUnique({
@@ -1337,7 +1338,7 @@ export class AuthService {
     };
 
     // Remover password del response
-    const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
+    const userWithRolesAndPassword = toPublicAuthUser(userWithRolesArray);
 
     const defaultsForCustomerRegister =
       await this.defaultPanelUIService.generatePanelUI('');
@@ -1640,7 +1641,7 @@ export class AuthService {
     }
 
     // Remover password del response (no es necesario ya que no se incluye en la query)
-    const userWithoutPassword = userWithRoles;
+    const userWithoutPassword = toPublicAuthUser(userWithRoles);
 
     return {
       message: `Usuario ${role} creado exitosamente`,
@@ -2199,11 +2200,11 @@ export class AuthService {
       .map((ur: any) => ur.roles?.name)
       .filter(Boolean);
 
-    const { password: _, ...userWithRolesAndPassword } = {
+    const userWithRolesAndPassword = toPublicAuthUser({
       ...userWithRolesArray,
       roles: effective_roles,
       store: cleanStore,
-    };
+    });
 
     const userSettingsForResponse = {
       id: userSettings.id,
@@ -2326,8 +2327,8 @@ export class AuthService {
         app_type: payload.app_type,
       });
 
-      // El password no está incluido en esta consulta por seguridad
-      const userWithoutPassword = user;
+      // QUI-966 (S16): el include trae la fila completa de `users`.
+      const userWithoutPassword = toPublicAuthUser(user);
 
       // Actualizar el refresh token en la base de datos
       const refreshTokenExpiry =
@@ -2404,7 +2405,7 @@ export class AuthService {
     }
 
     // Remover password del response
-    const { password, ...userWithoutPassword } = user;
+    const userWithoutPassword = toPublicAuthUser(user);
 
     // Firmar el avatar_url si existe (convertir key de S3 a URL firmada)
     const signedAvatarUrl = await this.s3Service.signUrl(user.avatar_url);
@@ -3296,7 +3297,7 @@ export class AuthService {
     );
 
     // Remover password del response
-    const { password, ...userWithoutPassword } = updatedUser;
+    const userWithoutPassword = toPublicAuthUser(updatedUser);
 
     return {
       message: 'Email verificado exitosamente por super administrador',
@@ -3564,7 +3565,7 @@ export class AuthService {
       return null;
     }
 
-    const { password, ...userWithoutPassword } = user;
+    const userWithoutPassword = toPublicAuthUser(user);
     return userWithoutPassword;
   }
 
@@ -3601,7 +3602,7 @@ export class AuthService {
       return null;
     }
 
-    const { password, ...userWithoutPassword } = user as any;
+    const userWithoutPassword = toPublicAuthUser(user as any);
     const roles = userRoles.map((ur) => ur.roles?.name).filter(Boolean);
 
     return {
@@ -4289,7 +4290,7 @@ export class AuthService {
     const permissions = this.getPermissionsFromRoles(userRolesWithPermissions);
 
     return {
-      user: user,
+      user: toPublicAuthUser(user),
       user_settings: user.user_settings,
       permissions,
       access_token: tokens.access_token,

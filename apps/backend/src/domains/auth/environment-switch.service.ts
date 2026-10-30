@@ -22,6 +22,7 @@ import {
   hmacSha256,
 } from './constants/token.constants';
 import { buildActiveUserRolesWhere } from '@common/utils/role-scope.util';
+import { toPublicAuthUser } from './utils/public-auth-user.util';
 
 @Injectable()
 export class EnvironmentSwitchService {
@@ -403,8 +404,8 @@ export class EnvironmentSwitchService {
       },
     });
 
-    // Remover password del response
-    const { password, ...user_with_roles_and_password } = user_with_roles_array;
+    // Remover password y two_factor_secret del response (QUI-966 S16)
+    const user_with_roles_and_password = toPublicAuthUser(user_with_roles_array);
 
     const signedLogoUrl = await this.s3Service.signUrl(active_store?.logo_url);
     const cleanStore = active_store
