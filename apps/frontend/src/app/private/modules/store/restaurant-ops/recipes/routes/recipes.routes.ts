@@ -33,6 +33,17 @@ export const recipesRoutes: Routes = [
     data: { permission: 'store:recipes:create' },
   },
   {
+    // Vista de LECTURA de la receta (ficha compacta): exige solo `read`, así
+    // que un rol de consulta puede abrirla. La edición sigue viviendo en
+    // `:id/edit` con `update`.
+    path: ':id',
+    loadComponent: () =>
+      import(
+        '../pages/recipe-form-page/recipe-form-page.component'
+      ).then((c) => c.RecipeFormPageComponent),
+    data: { permission: 'store:recipes:read' },
+  },
+  {
     path: ':id/edit',
     loadComponent: () =>
       import(

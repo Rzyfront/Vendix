@@ -651,8 +651,22 @@ export class RecipeFormPageComponent implements OnInit {
     } else if (actionId === 'save') {
       this.submit();
     } else if (actionId === 'edit') {
-      this.isViewing.set(false);
+      this.enterEditMode();
     }
+  }
+
+  /**
+   * Pasa de lectura a edición dejando la intención en la URL (`?mode=edit`):
+   * un F5 o un enlace compartido vuelven al formulario, no a la ficha.
+   */
+  private enterEditMode(): void {
+    this.isViewing.set(false);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { mode: 'edit' },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   /**

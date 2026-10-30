@@ -436,7 +436,7 @@ export class RecipesListPageComponent implements OnInit {
    * vista, que es el default pedido (S3).
    */
   viewRecipe(recipe: Recipe): void {
-    this.router.navigate(['/admin/restaurant-ops/recipes', recipe.id, 'edit']);
+    this.router.navigate(['/admin/restaurant-ops/recipes', recipe.id]);
   }
 
   /** "Editar" explícito: entra directo al formulario con los inputs abiertos. */

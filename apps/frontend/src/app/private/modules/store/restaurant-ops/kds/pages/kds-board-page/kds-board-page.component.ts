@@ -344,11 +344,13 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     this.stashPendingRecipeReturn(item);
     const inactiveId = itemInactiveRecipeId(item);
     if (inactiveId != null) {
-      void this.router.navigate([
-        '/admin/restaurant-ops/recipes',
-        inactiveId,
-        'edit',
-      ]);
+      // `?mode=edit`: el default de una receta existente es la ficha de
+      // lectura; aquí el operador viene a REACTIVAR, así que entra directo al
+      // formulario con el banner "Reactivar existente" visible.
+      void this.router.navigate(
+        ['/admin/restaurant-ops/recipes', inactiveId, 'edit'],
+        { queryParams: { mode: 'edit' } },
+      );
       return;
     }
     void this.router.navigate(['/admin/restaurant-ops/recipes']);

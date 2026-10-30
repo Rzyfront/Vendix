@@ -357,7 +357,6 @@ export class RecipesService {
             id: true,
             name: true,
             sku: true,
-            variant_image_url: true,
             product_images: { select: { image_url: true } },
           },
         },
@@ -779,7 +778,10 @@ export class RecipesService {
                     ? new Prisma.Decimal(item.waste_absolute)
                     : new Prisma.Decimal(0),
                 is_optional: item.is_optional ?? false,
-                notes: item.notes ?? null,
+                // Solo se toca la anotación cuando el payload la trae: el
+                // formulario de fórmulas reenvía las líneas sin `notes` y un
+                // `?? null` borraría las anotaciones de cocina de la receta.
+                ...(item.notes !== undefined && { notes: item.notes }),
                 updated_at: new Date(),
               },
             });
@@ -799,7 +801,10 @@ export class RecipesService {
                     ? new Prisma.Decimal(item.waste_absolute)
                     : new Prisma.Decimal(0),
                 is_optional: item.is_optional ?? false,
-                notes: item.notes ?? null,
+                // Solo se toca la anotación cuando el payload la trae: el
+                // formulario de fórmulas reenvía las líneas sin `notes` y un
+                // `?? null` borraría las anotaciones de cocina de la receta.
+                ...(item.notes !== undefined && { notes: item.notes }),
                 updated_at: new Date(),
               },
             });

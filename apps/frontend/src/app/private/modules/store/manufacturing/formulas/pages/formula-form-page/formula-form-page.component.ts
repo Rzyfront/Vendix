@@ -127,6 +127,13 @@ export class FormulaFormPageComponent implements OnInit {
   /** Ficha del producto fabricado: mismo componente que recetas y KDS. */
   readonly isProfileOpen = signal(false);
 
+  /**
+   * Anotación por insumo de la fórmula cargada (`id` de línea → nota). El
+   * formulario no tiene control para `notes`, así que la ficha las toma de
+   * aquí para no perder lo que ya está guardado.
+   */
+  private readonly loadedItemNotes = signal<Record<number, string | null>>({});
+
   readonly profileProduct = computed<ProductProfileProduct | null>(() => {
     const id = Number(this.formValue().product_id);
     if (!id) return null;
@@ -152,15 +159,19 @@ export class FormulaFormPageComponent implements OnInit {
       yield_unit: values.yield_unit ?? '',
       waste_percent: values.waste_percent ?? 0,
       preparation_notes: values.preparation_notes ?? null,
-      items: rows.map((row) => ({
-        component_product_id: Number(row.component_product_id),
-        name: this.productName(Number(row.component_product_id)),
-        quantity: row.quantity ?? 0,
-        waste_percent: row.waste_percent ?? 0,
-        stock_unit:
-          this.products().find((p) => p.id === Number(row.component_product_id))
-            ?.stock_unit ?? null,
-      })),
+      items: rows.map((row) => {
+        const componentId = Number(row.component_product_id);
+        const component = this.products().find((p) => p.id === componentId);
+        return {
+          component_product_id: componentId,
+          name: component?.name ?? `Producto #${componentId}`,
+          quantity: row.quantity ?? 0,
+          waste_percent: row.waste_percent ?? 0,
+          stock_unit: component?.stock_unit ?? null,
+          notes: row.id != null ? (this.loadedItemNotes()[row.id] ?? null) : null,
+          product_images: component?.product_images ?? [],
+        };
+      }),
     };
   });
 
@@ -368,7 +379,9 @@ export class FormulaFormPageComponent implements OnInit {
             preparation_notes: formula.preparation_notes ?? '',
           });
           this.itemsArray.clear({ emitEvent: false });
+          const notesById: Record<number, string | null> = {};
           for (const item of formula.items ?? []) {
+            if (item.id != null) notesById[item.id] = item.notes ?? null;
             this.itemsArray.push(
               this.buildItemGroup({
                 id: item.id,

@@ -15,7 +15,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { Router } from '@angular/router';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 
 import {
   ButtonComponent,
@@ -102,9 +102,9 @@ export class ProductionOrderFormPageComponent implements OnInit {
   readonly isProfileOpen = signal(false);
 
   readonly profileProduct = computed<ProductProfileProduct | null>(() => {
-    const id = Number(this.form.controls.product_id.value);
+    const id = Number(this.productIdValue() ?? 0);
     if (!id) return null;
-    const product = this.preparedProducts.find((p) => p.id === id);
+    const product = this.preparedProducts().find((p) => p.id === id);
     if (!product) return null;
     return {
       id: product.id,
@@ -207,7 +207,18 @@ export class ProductionOrderFormPageComponent implements OnInit {
   }
 
   /** Productos producibles por lote cargados, para resolver stock_unit al seleccionar. */
-  private preparedProducts: Product[] = [];
+  /**
+   * Productos producibles por lote como signal: `profileProduct` es un
+   * `computed` y necesita dependencias reactivas de verdad (un array plano se
+   * memoizaba con `null` para siempre).
+   */
+  private readonly preparedProducts = signal<Product[]>([]);
+
+  /** Producto elegido como signal (el control no es signal). */
+  private readonly productIdValue = toSignal(
+    this.form.controls.product_id.valueChanges,
+    { initialValue: this.form.controls.product_id.value },
+  );
 
   ngOnInit(): void {
     this.loadPreparedProducts();
@@ -250,7 +261,7 @@ export class ProductionOrderFormPageComponent implements OnInit {
       .subscribe({
         next: (response) => {
           const rows = response.data ?? [];
-          this.preparedProducts = rows;
+          this.preparedProducts.set(rows);
           this.productOptions.set(
             rows.map((p: Product) => {
               const base = p.sku
@@ -299,7 +310,7 @@ export class ProductionOrderFormPageComponent implements OnInit {
       return;
     }
 
-    const product = this.preparedProducts.find((p) => p.id === id);
+    const product = this.preparedProducts().find((p) => p.id === id);
     this.selectedProductUnit.set(product?.stock_unit ?? null);
 
     this.isLoadingRecipes.set(true);
