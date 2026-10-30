@@ -2236,7 +2236,10 @@ export function createReservationsTools(
               next_step: 'Pasa el id de la excepción a eliminar.',
             });
           }
-          await providerScheduleService.deleteException(exceptionId);
+          await providerScheduleService.deleteException(
+            providerId,
+            exceptionId,
+          );
           return JSON.stringify({
             excepcion_eliminada: { exception_id: exceptionId },
             nota: 'El día vuelve a regirse por el horario semanal normal.',

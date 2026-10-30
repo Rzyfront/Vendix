@@ -29,7 +29,10 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
             bookings.find((b) => b.id === where.id) ?? null,
           ),
         ),
-        findFirst: jest.fn(),
+        // The service reads bookings with the scoped `findFirst`.
+        findFirst: jest.fn(({ where }: any) =>
+          Promise.resolve(bookings.find((b) => b.id === where.id) ?? null),
+        ),
         findMany: jest.fn(),
         update: jest.fn(({ where, data }: any) => {
           const target = bookings.find((b) => b.id === where.id);
@@ -183,7 +186,12 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
         const txProxy = {
           bookings: {
             create: jest.fn(({ data }: any) => {
-              const created = { id: 999, ...data, status: 'confirmed' };
+              const created = {
+                id: 999,
+                product: { name: 'Corte' },
+                ...data,
+                status: 'confirmed',
+              };
               txBookings.push(created);
               // Mirror the behaviour of Prisma.create: the in-memory
               // `bookings` array is only mutated when the surrounding
@@ -205,7 +213,12 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
       }),
       bookings: {
         create: jest.fn(({ data }: any) => {
-          const created = { id: 999, ...data, status: 'confirmed' };
+          const created = {
+                id: 999,
+                product: { name: 'Corte' },
+                ...data,
+                status: 'confirmed',
+              };
           bookings.push(created);
           return Promise.resolve(created);
         }),
@@ -257,6 +270,9 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
       tables: {
         updateMany: jest.fn(() => Promise.resolve({ count: 0 })),
       },
+      // QUI-966 (S3): store-scoped reference checks — rows mean "own store".
+      store_users: { findFirst: jest.fn(() => Promise.resolve({ id: 1 })) },
+      orders: { findFirst: jest.fn(() => Promise.resolve({ id: 555 })) },
     };
 
     const emits: any[] = [];
@@ -280,6 +296,7 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
 
     const availabilityService = {
       isSlotAvailable: jest.fn(() => Promise.resolve(true)),
+      validateNoOverlapForCustomer: jest.fn(() => Promise.resolve()),
     } as any;
 
     const s3Service = {

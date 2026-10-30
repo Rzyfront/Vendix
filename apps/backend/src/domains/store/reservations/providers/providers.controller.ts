@@ -213,8 +213,11 @@ export class ProvidersController {
 
   @Delete(':id/exceptions/:exId')
   @Permissions('store:reservations:update')
-  async deleteException(@Param('exId', ParseIntPipe) exId: number) {
-    await this.providerScheduleService.deleteException(exId);
+  async deleteException(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('exId', ParseIntPipe) exId: number,
+  ) {
+    await this.providerScheduleService.deleteException(id, exId);
     return this.responseService.success(
       null,
       'Excepcion eliminada exitosamente',

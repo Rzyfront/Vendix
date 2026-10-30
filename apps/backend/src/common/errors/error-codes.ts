@@ -1501,6 +1501,13 @@ export const ErrorCodes = {
   // CP-POS-CREAR-EDITAR-COBRAR-001 — el customer_id que manda el frontend no
   // pertenece a la tienda del contexto. 403 (no es problema de autenticación, es
   // de scope/tenant).
+  // QUI-966 (S1) — un token de cliente emitido para una tienda no puede operar
+  // en otra cambiando `x-store-id` o el dominio. 403: es de tenant, no de auth.
+  ECOM_STORE_MISMATCH_001: {
+    code: 'ECOM_STORE_MISMATCH_001',
+    httpStatus: 403,
+    devMessage: 'The token store does not match the store resolved for this request',
+  },
   ORD_EDIT_CUSTOMER_STORE_MISMATCH_001: {
     code: 'ORD_EDIT_CUSTOMER_STORE_MISMATCH_001',
     httpStatus: 403,

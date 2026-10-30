@@ -7,15 +7,12 @@ import { CreateProviderExceptionDto } from './dto/create-provider-exception.dto'
 export class ProviderScheduleService {
   constructor(private readonly prisma: StorePrismaService) {}
 
-  async getSchedule(providerId: number) {
-    return this.prisma.provider_schedules.findMany({
-      where: { provider_id: providerId },
-      orderBy: [{ day_of_week: 'asc' }, { block_order: 'asc' }],
-    });
-  }
-
-  async upsertSchedule(providerId: number, items: ProviderScheduleItemDto[]) {
-    // Validate provider exists
+  /**
+   * QUI-966 (S2): `provider_schedules` / `provider_exceptions` are not in the
+   * store scope, so ownership is proven through the scoped `service_providers`
+   * delegate before touching them.
+   */
+  private async assertProviderInStore(providerId: number) {
     const provider = await this.prisma.service_providers.findFirst({
       where: { id: providerId },
     });
@@ -23,6 +20,20 @@ export class ProviderScheduleService {
     if (!provider) {
       throw new NotFoundException(`Proveedor #${providerId} no encontrado`);
     }
+
+    return provider;
+  }
+
+  async getSchedule(providerId: number) {
+    await this.assertProviderInStore(providerId);
+    return this.prisma.provider_schedules.findMany({
+      where: { provider_id: providerId },
+      orderBy: [{ day_of_week: 'asc' }, { block_order: 'asc' }],
+    });
+  }
+
+  async upsertSchedule(providerId: number, items: ProviderScheduleItemDto[]) {
+    await this.assertProviderInStore(providerId);
 
     return this.prisma.$transaction(async (tx: any) => {
       // Delete existing schedules
@@ -64,6 +75,7 @@ export class ProviderScheduleService {
   }
 
   async getExceptions(providerId: number, dateFrom?: string, dateTo?: string) {
+    await this.assertProviderInStore(providerId);
     const where: any = { provider_id: providerId };
 
     if (dateFrom || dateTo) {
@@ -79,13 +91,7 @@ export class ProviderScheduleService {
   }
 
   async createException(providerId: number, dto: CreateProviderExceptionDto) {
-    const provider = await this.prisma.service_providers.findFirst({
-      where: { id: providerId },
-    });
-
-    if (!provider) {
-      throw new NotFoundException(`Proveedor #${providerId} no encontrado`);
-    }
+    await this.assertProviderInStore(providerId);
 
     return this.prisma.provider_exceptions.create({
       data: {
@@ -99,9 +105,10 @@ export class ProviderScheduleService {
     });
   }
 
-  async deleteException(exceptionId: number) {
+  async deleteException(providerId: number, exceptionId: number) {
+    await this.assertProviderInStore(providerId);
     const exception = await this.prisma.provider_exceptions.findFirst({
-      where: { id: exceptionId },
+      where: { id: exceptionId, provider_id: providerId },
     });
 
     if (!exception) {

@@ -12,9 +12,11 @@ import {
   BadRequestException,
   HttpStatus,
   Delete,
+  UseGuards,
 } from '@nestjs/common';
 import { order_channel_enum } from '@prisma/client';
 import { Public } from '@common/decorators/public.decorator';
+import { EcommerceStoreMatchGuard } from '@common/guards/ecommerce-store-match.guard';
 import { AvailabilityService } from '../../store/reservations/availability.service';
 import { ReservationsService } from '../../store/reservations/reservations.service';
 import { ProvidersService } from '../../store/reservations/providers/providers.service';
@@ -27,6 +29,8 @@ import {
 import { CreateEcommerceBookingDto } from './dto/create-ecommerce-booking.dto';
 import { HoldBookingDto } from './dto/hold-booking.dto';
 
+// QUI-966 (S1): authenticated actions only run on the store of the token.
+@UseGuards(EcommerceStoreMatchGuard)
 @Controller('ecommerce/reservations')
 export class EcommerceReservationsController {
   constructor(

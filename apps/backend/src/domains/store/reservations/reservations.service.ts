@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { booking_status_enum, booking_mode_enum, Prisma } from '@prisma/client';
 import {
@@ -148,6 +149,61 @@ export class ReservationsService {
   /**
    * Crea una nueva reserva
    */
+  /**
+   * QUI-966 (S3): FKs sent by the caller must belong to the current store.
+   * `store_users`, `orders`, `tables` and `addresses` are store-scoped, so a
+   * miss on the scoped delegate means "another tenant" (or nonexistent).
+   * Without this a booking could point at a customer, order or table of a
+   * different organization.
+   */
+  private async assertReferencesInStore(
+    store_id: number,
+    refs: {
+      customer_id?: number | null;
+      order_id?: number | null;
+      table_id?: number | null;
+      service_address_id?: number | null;
+    },
+  ) {
+    if (refs.customer_id) {
+      const membership = await this.prisma.store_users.findFirst({
+        where: { store_id, user_id: refs.customer_id },
+        select: { id: true },
+      });
+      if (!membership) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_CUSTOMER_STORE_MISMATCH_001,
+        );
+      }
+    }
+
+    if (refs.order_id) {
+      const order = await this.prisma.orders.findFirst({
+        where: { id: refs.order_id },
+        select: { id: true },
+      });
+      if (!order) throw new NotFoundException('Orden no encontrada');
+    }
+
+    if (refs.table_id) {
+      const table = await this.prisma.tables.findFirst({
+        where: { id: refs.table_id },
+        select: { id: true },
+      });
+      if (!table) throw new NotFoundException('Mesa no encontrada');
+    }
+
+    if (refs.service_address_id) {
+      const address = await this.prisma.addresses.findFirst({
+        where: { id: refs.service_address_id, user_id: refs.customer_id ?? -1 },
+        select: { id: true },
+      });
+      if (!address) {
+        throw new NotFoundException('Dirección del servicio no encontrada');
+      }
+    }
+  }
+
   async create(dto: CreateBookingDto) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -204,6 +260,14 @@ export class ReservationsService {
         'Este producto/servicio no requiere reserva',
       );
     }
+
+    await this.assertReferencesInStore(store_id, {
+      customer_id: dto.customer_id,
+      order_id: dto.order_id,
+      table_id: dto.table_id,
+      service_address_id:
+        dto.service_location_type === 'home' ? dto.service_address_id : null,
+    });
 
     // 2. Resolver provider_id
     let resolvedProviderId: number | null = dto.provider_id ?? null;
@@ -513,6 +577,11 @@ export class ReservationsService {
         'Este producto/servicio no requiere reserva',
       );
     }
+
+    await this.assertReferencesInStore(store_id, {
+      customer_id: dto.customer_id,
+      order_id: dto.order_id,
+    });
 
     if (dto.product_variant_id) {
       const variantOk = await this.prisma.product_variants.findFirst({
