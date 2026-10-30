@@ -10,6 +10,7 @@ import {
   SaleUnitOption,
 } from './catalog.service';
 import { cartLineKey } from '../utils/cart-line-key.util';
+import { CartOptionSelection } from './ecommerce-product-options.service';
 import { TableContextService } from './table-context.service';
 import { environment } from '../../../../../environments/environment';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
@@ -41,6 +42,11 @@ export interface CartItem {
   line_key?: string;
   /** Nota del cliente para esta línea (máx. 200). NO forma parte de `line_key`. */
   notes?: string | null;
+  /**
+   * Adiciones elegidas (solo visual + `option_ids` del checkout). El precio
+   * unitario ya incluye el delta; el servidor lo recalcula al cobrar.
+   */
+  options?: CartOptionSelection | null;
   // Bug 8: presentación comercial (Caja 12und, Bulto 50kg). Presente
   // cuando el producto tiene has_multiple_price_tiers y el cliente eligió
   // una tier de tipo 'sale_unit'. El render del cart muestra label +
@@ -282,6 +288,8 @@ export interface AddProductOptions {
     units_per_package: number | null;
     price: number;
   };
+  /** Adiciones elegidas en el selector (vacío/ausente = sin adiciones). */
+  optionSelection?: CartOptionSelection;
 }
 
 @Injectable({
@@ -290,6 +298,10 @@ export interface AddProductOptions {
 export class CartService {
   private api_url = `${environment.apiUrl}/ecommerce/cart`;
   private local_storage_key = 'vendix_cart';
+  // Adiciones por línea (clave `producto:variante:tarifa`). El carrito del
+  // backend no las guarda, así que viven aquí tanto para invitado como
+  // autenticado; el checkout las envía como `items[].option_ids`.
+  private options_storage_key = 'vendix_cart_options';
 
   // Estado del carrito como signal (zoneless-friendly).
   readonly cart = signal<Cart | null>(null);
@@ -509,18 +521,110 @@ export class CartService {
    * del backend, donde la tarifa llega en `price_tier.id`.
    */
   private normalizeCart(cart: Cart): Cart {
-    if (!cart?.items?.length) return cart;
+    if (!cart?.items?.length) {
+      // Sin líneas no quedan adiciones que recordar.
+      if (cart && Object.keys(this.readOptionsMap()).length > 0) {
+        this.writeOptionsMap({});
+      }
+      return cart;
+    }
+    const optionsMap = this.readOptionsMap();
+    const hasOptions = Object.keys(optionsMap).length > 0;
+    const liveKeys = new Set<string>();
+    let extraSubtotal = 0;
+    const items = cart.items.map((item) => {
+      const base = cartLineKey(
+        item.product_id,
+        item.product_variant_id,
+        item.price_tier?.id ?? null,
+      );
+      liveKeys.add(base);
+      const selection = hasOptions ? optionsMap[base] : undefined;
+      if (!selection) return { ...item, line_key: base };
+      // El delta se suma una sola vez: aquí es el único punto que lo hace.
+      const delta = Number(selection.delta_unit) || 0;
+      extraSubtotal += delta * item.quantity;
+      return {
+        ...item,
+        line_key: base,
+        options: selection,
+        unit_price: Number(item.unit_price) + delta,
+        total_price: Number(item.total_price) + delta * item.quantity,
+      };
+    });
+    // Poda entradas de líneas que ya no existen en el carrito.
+    if (hasOptions) {
+      const pruned = Object.fromEntries(
+        Object.entries(optionsMap).filter(([k]) => liveKeys.has(k)),
+      );
+      if (Object.keys(pruned).length !== Object.keys(optionsMap).length) {
+        this.writeOptionsMap(pruned);
+      }
+    }
     return {
       ...cart,
-      items: cart.items.map((item) => ({
-        ...item,
-        line_key: cartLineKey(
-          item.product_id,
-          item.product_variant_id,
-          item.price_tier?.id ?? null,
-        ),
-      })),
+      // Sin adiciones el subtotal queda intacto (mismo valor y tipo que hoy).
+      ...(extraSubtotal ? { subtotal: Number(cart.subtotal) + extraSubtotal } : {}),
+      items,
     };
+  }
+
+  private readOptionsMap(): Record<string, CartOptionSelection> {
+    try {
+      const raw = localStorage.getItem(this.options_storage_key);
+      return raw ? (JSON.parse(raw) as Record<string, CartOptionSelection>) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private writeOptionsMap(map: Record<string, CartOptionSelection>): void {
+    if (Object.keys(map).length === 0) {
+      localStorage.removeItem(this.options_storage_key);
+    } else {
+      localStorage.setItem(this.options_storage_key, JSON.stringify(map));
+    }
+  }
+
+  /** Firma estable de un conjunto de adiciones ('' = sin adiciones). */
+  private optionsSignature(ids?: number[] | null): string {
+    return [...(ids ?? [])].sort((a, b) => a - b).join(',');
+  }
+
+  /**
+   * Registra las adiciones de la línea que se va a agregar.
+   * Devuelve false si la línea ya existe con OTRAS adiciones: el carrito del
+   * backend fusiona por producto+variante+tarifa, así que no se mezclan.
+   */
+  private registerLineOptions(
+    product_id: number,
+    options: AddProductOptions,
+  ): boolean {
+    const map = this.readOptionsMap();
+    const base = cartLineKey(
+      product_id,
+      options.variantId,
+      options.priceTierId,
+    );
+    const incoming = this.optionsSignature(options.optionSelection?.option_ids);
+    const existing = map[base];
+    // Camino sin adiciones: no toca nada (comportamiento de siempre).
+    if (!incoming && !existing) return true;
+
+    const lineExists = !!this.cart()?.items?.some((i) => i.line_key === base);
+    if (lineExists && this.optionsSignature(existing?.option_ids) !== incoming) {
+      this.toastService.warning(
+        'Ya tienes este producto en el carrito con otras adiciones. Quítalo para agregarlo con una selección distinta.',
+      );
+      return false;
+    }
+    if (options.optionSelection && incoming) {
+      map[base] = options.optionSelection;
+    } else {
+      delete map[base];
+    }
+    this.writeOptionsMap(map);
+    return true;
   }
 
   /**
@@ -598,6 +702,7 @@ export class CartService {
   }
 
   private emitEmptyCart() {
+    this.writeOptionsMap({});
     const cart: Cart = {
       id: 0,
       currency: this.currencyFormatService.currencyCode() || 'USD',
@@ -1135,6 +1240,11 @@ export class CartService {
     // checkout; this reinforces the UX at the earliest customer action.
     if (this.store_availability.unavailable()) {
       this.store_availability.reopen();
+    }
+
+    // Adiciones: si chocan con las de una línea existente no se agrega.
+    if (!this.registerLineOptions(product_id, options)) {
+      return;
     }
 
     if (this.is_authenticated) {

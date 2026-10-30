@@ -99,6 +99,12 @@ export interface CartItem {
   serial_numbers?: string[];
   // CP-POS-SVC-BOOKING-001 — Scheduled appointment details for service lines.
   booking?: CartItemBooking;
+  // Adiciones (product_options). `option_ids` viaja al servidor, que valida las
+  // reglas y recalcula el precio; los nombres y el delta (por unidad) son solo
+  // de visualización. Participan en la identidad de la línea.
+  option_ids?: number[];
+  option_labels?: string[];
+  option_delta?: number;
 }
 
 export interface CartItemBooking {
@@ -312,6 +318,10 @@ export interface CartState {
 export interface AddToCartRequest {
   product: Product;
   quantity: number;
+  /** Adiciones elegidas (ver `CartItem.option_ids`). */
+  option_ids?: number[];
+  option_labels?: string[];
+  option_delta?: number;
   notes?: string;
   variant?: PosProductVariant;
   // Weight product fields (camino legado; ver `CartItem.weight`).

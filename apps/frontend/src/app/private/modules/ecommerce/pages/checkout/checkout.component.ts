@@ -66,6 +66,10 @@ import {
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
 import { BookingSlotPickerComponent } from '../../components/booking-slot-picker/booking-slot-picker.component';
+import {
+  FulfillmentSlotPickerComponent,
+  FulfillmentSlotValue,
+} from '../../components/fulfillment-slot-picker/fulfillment-slot-picker.component';
 import { CartPromotionsComponent } from '../../components/cart-promotions/cart-promotions.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import {
@@ -112,6 +116,7 @@ const UNLOCATED_ADDRESS_WARNING =
     IconComponent,
     SelectorComponent,
     BookingSlotPickerComponent,
+    FulfillmentSlotPickerComponent,
     GuestCheckoutDataModalComponent,
     PaymentInstructionsModalComponent,
     CustomerAddressPickerComponent,
@@ -564,6 +569,9 @@ export class CheckoutComponent implements OnInit {
       this.bookingSelections().has(this.getBookingKey(item)),
     );
   }
+
+  /** Franja de pedido programado elegida (null = pedido normal). */
+  readonly scheduled_slot = signal<FulfillmentSlotValue | null>(null);
 
   /** True when all cart items are services (no physical products) */
   get cartHasOnlyServices(): boolean {
@@ -3588,7 +3596,23 @@ export class CheckoutComponent implements OnInit {
         // y el comprador paga otra cosa de la que eligió.
         price_tier_id: item.price_tier?.id ?? undefined,
         notes: item.notes?.trim() || undefined,
+        // Adiciones: solo los ids; el servidor recalcula el precio.
+        ...(item.options?.option_ids?.length
+          ? { option_ids: item.options.option_ids }
+          : {}),
       })),
+      // Pedido programado: solo si el cliente eligió una franja.
+      ...(this.scheduled_slot()
+        ? {
+            schedule: {
+              ...this.scheduled_slot()!,
+              fulfillment_type:
+                this.selected_delivery() === 'home'
+                  ? ('delivery' as const)
+                  : ('pickup' as const),
+            },
+          }
+        : {}),
       guest_customer: this.toGuestCustomer(this.guest_checkout_data),
       // Send coupon code as raw string; backend validates and recomputes
       // the total. Frontend never sends a precomputed grand_total.
@@ -3805,7 +3829,14 @@ export class CheckoutComponent implements OnInit {
         quantity: item.quantity,
         price_tier_id: item.price_tier?.id ?? undefined,
         notes: item.notes?.trim() || undefined,
+        // Adiciones: solo los ids; el servidor recalcula el precio.
+        ...(item.options?.option_ids?.length
+          ? { option_ids: item.options.option_ids }
+          : {}),
       })),
+      ...(this.scheduled_slot()
+        ? { schedule: { ...this.scheduled_slot()! } }
+        : {}),
       guest_customer: this.toGuestCustomer(this.guest_checkout_data),
       coupon_code: this.coupon_code().trim() || undefined,
       ...(shippingAddress.shipping_address

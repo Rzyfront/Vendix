@@ -258,6 +258,11 @@ import {
                               {{ item.variant_display_name }}
                             </span>
                           }
+                          @if (item.option_labels?.length) {
+                            <span class="text-[10px] text-text-secondary leading-tight">
+                              {{ item.option_labels!.join(', ') }}
+                            </span>
+                          }
                           @if (item.itemType === 'custom') {
                             <span
                               class="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded shrink-0 leading-tight"

@@ -2553,12 +2553,17 @@ export class PosCartService {
               (item.variant_id || null) === (request.variant?.id || null) &&
               (item.skipKds ?? false) === (request.skipKds === true) &&
               (item.isTakeaway ?? false) === (request.isTakeaway === true) &&
+              // Adiciones: otro conjunto de opciones es otra línea.
+              this.optionKey(item.option_ids) === this.optionKey(request.option_ids) &&
               !(item.serial_ids?.length || item.serial_numbers?.length) &&
               !item.booking,
           );
 
-    // Variant-aware pricing
-    const basePrice = this.resolveUnitPrice(request.product, request.variant);
+    // Variant-aware pricing (+ adiciones: vista previa del delta por unidad;
+    // el servidor recalcula el precio real a partir de `option_ids`).
+    const optionDelta = request.option_delta ?? 0;
+    const basePrice =
+      this.resolveUnitPrice(request.product, request.variant) + optionDelta;
     // QUI-648: cómo se mide el producto. Sin unidad de stock declarada esto es
     // la configuración por pieza y toda la aritmética de abajo colapsa a la
     // histórica (`precio × cantidad`).
@@ -2571,11 +2576,12 @@ export class PosCartService {
       // Update existing item
       const existingItem = currentState.items[existingItemIndex];
       const newQuantity = existingItem.quantity + request.quantity;
-      const finalUnitPrice = this.resolveCatalogFinalUnitPrice(
-        request.product,
-        request.variant,
-        basePrice,
-      );
+      const finalUnitPrice =
+        this.resolveCatalogFinalUnitPrice(
+          request.product,
+          request.variant,
+          basePrice - optionDelta,
+        ) + optionDelta;
       const mergedUnits = resolveLineUnits({
         ...existingItem,
         quantity: newQuantity,
@@ -2592,11 +2598,12 @@ export class PosCartService {
       };
     } else {
       // Add new item
-      const finalUnitPrice = this.resolveCatalogFinalUnitPrice(
-        request.product,
-        request.variant,
-        basePrice,
-      );
+      const finalUnitPrice =
+        this.resolveCatalogFinalUnitPrice(
+          request.product,
+          request.variant,
+          basePrice - optionDelta,
+        ) + optionDelta;
 
       // Calculate total price for weight products
       const weight = request.weight || 1;
@@ -2677,6 +2684,11 @@ export class PosCartService {
           : undefined,
         // CP-POS-SVC-BOOKING-001 — Scheduled appointment details for service lines.
         booking: request.booking,
+        option_ids: request.option_ids?.length ? request.option_ids : undefined,
+        option_labels: request.option_labels?.length
+          ? request.option_labels
+          : undefined,
+        option_delta: optionDelta > 0 ? optionDelta : undefined,
       };
       updatedItems = [newItem, ...currentState.items];
     }
@@ -3334,6 +3346,11 @@ export class PosCartService {
   /**
    * Generate unique item ID
    */
+  /** Clave estable (ids ordenados) del conjunto de adiciones de una línea. */
+  private optionKey(ids: number[] | undefined): string {
+    return ids?.length ? [...ids].sort((a, b) => a - b).join(',') : '';
+  }
+
   private generateItemId(): string {
     return 'ITEM_' + this.randomId();
   }

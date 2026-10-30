@@ -78,6 +78,9 @@ export type { EntregaChoice };
  *
  * Los 3 modales viejos siguen vivos; este shell no borra nada.
  */
+import { PosScheduledOrderPickerComponent } from '../pos-scheduled-order-picker/pos-scheduled-order-picker.component';
+import { PosScheduledOrderService } from '../../services/pos-scheduled-order.service';
+
 @Component({
   selector: 'app-pos-checkout-shell',
   standalone: true,
@@ -94,6 +97,7 @@ export type { EntregaChoice };
     NgTemplateOutlet,
     RoomChargeModalComponent,
     PosHolderWarningComponent,
+    PosScheduledOrderPickerComponent,
   ],
   templateUrl: './pos-checkout-shell.component.html',
   styleUrl: './pos-checkout-shell.component.scss',
@@ -164,6 +168,7 @@ export class PosCheckoutShellComponent {
   private readonly authFacade = inject(AuthFacade);
   private readonly cartService = inject(PosCartService);
   private readonly paymentService = inject(PosPaymentService);
+  private readonly scheduledOrders = inject(PosScheduledOrderService);
   private readonly integration = inject(PosRestaurantIntegrationService);
   private readonly kitchenTicketPrint = inject(KitchenTicketPrintService);
   // CP-POS-MODAL-SCOPE-001 / Phase A.2 — orderService for PUT /editor
@@ -870,6 +875,11 @@ export class PosCheckoutShellComponent {
         this.suppressAutoExecute.set(false);
         this.postEditPaymentMode.set(false);
       });
+    });
+
+    // Pedido programado: al cerrar el checkout se descarta la elección.
+    effect(() => {
+      if (!this.isOpen()) untracked(() => this.scheduledOrders.clear());
     });
 
     // Separa el foco por apertura del inicio de checkout: cerrar el modal no

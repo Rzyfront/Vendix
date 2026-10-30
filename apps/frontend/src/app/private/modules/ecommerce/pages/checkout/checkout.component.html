@@ -932,6 +932,13 @@
         <!-- Payment Step -->
         @if (step() === paymentStep) {
           <div class="checkout-section">
+            <!-- Pedido programado: no se pinta si la tienda no lo usa -->
+            @if (!cartHasOnlyServices) {
+              <app-fulfillment-slot-picker
+                [value]="scheduled_slot()?.start ?? null"
+                (slotChange)="scheduled_slot.set($event)"
+              />
+            }
             <!-- La tarifa se elige AQUÍ junto al total; la cobertura se
                  detectó en el paso 1. Con tarifa única ya viene elegida;
                  con varias el comprador elige y el total se recalcula. -->

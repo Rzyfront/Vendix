@@ -28,6 +28,11 @@ import {
   formatMenuNextAvailable,
 } from '../../services/catalog.service';
 import { SaleUnitSelectorComponent } from '../../components/sale-unit-selector/sale-unit-selector.component';
+import {
+  EMPTY_OPTION_STATE,
+  ProductOptionSelectorComponent,
+  ProductOptionSelectorState,
+} from '../../components/product-option-selector/product-option-selector.component';
 import { formatNextAvailableDetailed } from '../../services/next-available.util';
 import { NextAvailableNoticeComponent } from '../../components/next-available-notice';
 import { AddProductOptions, CartService } from '../../services/cart.service';
@@ -86,6 +91,7 @@ import { StoreSeoService, productPageSeo } from '../../services/store-seo';
     NextAvailableNoticeComponent,
     SaleUnitSelectorComponent,
     PromotionStackComponent,
+    ProductOptionSelectorComponent,
   ],
   template: `
     <div class="product-detail-page" [attr.data-currency]="currencyCode()">
@@ -466,6 +472,13 @@ import { StoreSeoService, productPageSeo } from '../../services/store-seo';
                   </div>
                 </div>
               }
+
+              <!-- Adiciones (no pinta nada si el producto no tiene grupos) -->
+              <app-product-option-selector
+                [productId]="p.id"
+                [quantity]="quantity()"
+                (stateChange)="optionState.set($event)"
+              />
 
               <!-- Purchase Section -->
               @if (!hideDineInPurchase()) {
@@ -2489,8 +2502,13 @@ export class ProductDetailComponent implements OnInit {
     (): boolean => this.product()?.is_available_now === false,
   );
 
+  /** Estado del selector de adiciones (sin grupos = no afecta nada). */
+  readonly optionState = signal<ProductOptionSelectorState>(EMPTY_OPTION_STATE);
+
   readonly purchaseDisabled = computed((): boolean => {
     if (this.isOffSchedule()) return true;
+    // Adiciones obligatorias pendientes.
+    if (this.optionState().hasGroups && !this.optionState().valid) return true;
     if (this.hasMissingVariantAttributes()) return true;
     // Multitarifa: sin presentación elegida no hay precio ni escala que
     // cobrar. La preselección normalmente evita este estado; queda como red
@@ -3036,6 +3054,7 @@ export class ProductDetailComponent implements OnInit {
             price: unit.price,
           }
         : undefined,
+      optionSelection: this.optionState().selection ?? undefined,
     };
   }
 
