@@ -66,6 +66,8 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
       tablesService,
       tableSessionsService,
       orderHistory,
+      // QUI-966 T2: store hours for the S4 gate (empty = not configured).
+      { loadStoreHours: jest.fn().mockResolvedValue(new Map()) } as any,
     );
 
     return { service, prisma, bookings, eventEmitter, emits, orderHistory };
@@ -270,6 +272,8 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
       tables: {
         updateMany: jest.fn(() => Promise.resolve({ count: 0 })),
       },
+      // QUI-966 (S4): resolveStoreTimezone → null = default America/Bogota.
+      store_settings: { findFirst: jest.fn(() => Promise.resolve(null)) },
       // QUI-966 (S3): store-scoped reference checks — rows mean "own store".
       store_users: { findFirst: jest.fn(() => Promise.resolve({ id: 1 })) },
       orders: { findFirst: jest.fn(() => Promise.resolve({ id: 555 })) },
@@ -325,6 +329,8 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
       tablesService,
       tableSessionsService,
       orderHistory,
+      // QUI-966 T2: store hours for the S4 gate (empty = not configured).
+      { loadStoreHours: jest.fn().mockResolvedValue(new Map()) } as any,
     );
 
     return {
@@ -352,7 +358,8 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
   const baseDto: any = {
     customer_id: 1,
     product_id: 100,
-    date: '2026-09-01',
+    // QUI-966 (S4): past dates are rejected now; keep the fixture future.
+    date: '2099-09-01',
     start_time: '10:00',
     end_time: '11:00',
     channel: 'pos' as const,

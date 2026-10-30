@@ -1,23 +1,34 @@
 import {
   IsInt,
-  IsDateString,
+  IsPositive,
+  Max,
+  MaxLength,
   IsString,
   IsOptional,
   Matches,
   IsIn,
   IsEnum,
 } from 'class-validator';
+import {
+  IsAfterStartTime,
+  IsCivilDate,
+  MAX_INT4,
+} from '../../../store/reservations/dto/booking-time.validators';
 import { booking_service_location_enum } from '@prisma/client';
 
 export class CreateEcommerceBookingDto {
   @IsInt()
+  @IsPositive()
+  @Max(MAX_INT4)
   product_id: number;
 
   @IsOptional()
   @IsInt()
+  @IsPositive()
+  @Max(MAX_INT4)
   product_variant_id?: number;
 
-  @IsDateString()
+  @IsCivilDate()
   date: string;
 
   @IsString()
@@ -30,10 +41,12 @@ export class CreateEcommerceBookingDto {
   @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/, {
     message: 'end_time debe tener formato HH:mm',
   })
+  @IsAfterStartTime()
   end_time: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   notes?: string;
 
   /**
@@ -52,5 +65,7 @@ export class CreateEcommerceBookingDto {
    */
   @IsOptional()
   @IsInt()
+  @IsPositive()
+  @Max(MAX_INT4)
   service_address_id?: number;
 }

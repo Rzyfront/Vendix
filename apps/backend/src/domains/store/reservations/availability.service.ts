@@ -6,6 +6,11 @@ import {
   resolveStoreTimezone,
   localCivil,
 } from '@common/utils/store-timezone.util';
+import {
+  isSlotStartInPast,
+  isValidCivilDate,
+  isValidTimeRange,
+} from './booking-time.util';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
@@ -366,13 +371,22 @@ export class AvailabilityService {
     provider_id?: number,
     exclude_booking_id?: number,
   ): Promise<boolean> {
+    // QUI-966 (S4): a malformed date, an empty/inverted range or a slot
+    // already elapsed in the store timezone is never bookable.
+    if (!isValidCivilDate(date) || !isValidTimeRange(start_time, end_time)) {
+      return false;
+    }
+
     // Obtener booking_mode del producto
     const product = await this.prisma.products.findFirst({
       where: { id: product_id },
-      select: { booking_mode: true },
+      select: { booking_mode: true, store_id: true },
     });
 
     if (!product) return false;
+
+    const timezone = await resolveStoreTimezone(this.prisma, product.store_id);
+    if (isSlotStartInPast({ date, start_time }, timezone)) return false;
 
     // free_booking siempre esta disponible
     if (product.booking_mode === booking_mode_enum.free_booking) {

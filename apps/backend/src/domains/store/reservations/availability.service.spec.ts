@@ -92,6 +92,8 @@ describe('AvailabilityService — business hours integration', () => {
       },
       store_settings: {
         findUnique: jest.fn().mockResolvedValue(null),
+        // resolveStoreTimezone → null = default America/Bogota.
+        findFirst: jest.fn().mockResolvedValue(null),
       },
     };
 
@@ -101,6 +103,14 @@ describe('AvailabilityService — business hours integration', () => {
       businessHoursService,
     };
   }
+
+  // QUI-966 (S4): elapsed slots are never available, so pin "now" before the
+  // 2026-08-18 fixtures (2026-08-17 10:00 America/Bogota).
+  beforeEach(() => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    jest.setSystemTime(new Date('2026-08-17T15:00:00.000Z'));
+  });
+  afterEach(() => jest.useRealTimers());
 
   it('isSlotAvailable returns false when the store has no business hours row for the day', async () => {
     // Store configured hours only on Monday; Tuesday is closed.
@@ -174,5 +184,35 @@ describe('AvailabilityService — business hours integration', () => {
       5,
     );
     expect(available).toBe(false);
+  });
+
+  describe('QUI-966 (S4) time validity', () => {
+    const open = () =>
+      buildService({
+        storeHours: [{ day_of_week: 2, start_time: '09:00', end_time: '18:00' }],
+        products: [{ id: 10, store_id: 1, booking_mode: 'provider_specific' }],
+        providers: [{ id: 5, display_name: 'Ana' }],
+        schedules: [
+          { provider_id: 5, day_of_week: 2, start_time: '09:00', end_time: '18:00', is_active: true },
+        ],
+      });
+
+    it.each([
+      ['inverted', '12:00', '11:00'],
+      ['zero duration', '11:00', '11:00'],
+    ])('a %s range is not available', async (_l, start, end) => {
+      const { service } = open();
+      await expect(service.isSlotAvailable(10, '2026-08-18', start, end, 5)).resolves.toBe(false);
+    });
+
+    it('a slot already elapsed in the store timezone is not available', async () => {
+      const { service } = open();
+      await expect(service.isSlotAvailable(10, '2026-08-11', '11:00', '12:00', 5)).resolves.toBe(false);
+    });
+
+    it('an impossible calendar date is not available', async () => {
+      const { service } = open();
+      await expect(service.isSlotAvailable(10, '2026-02-30', '11:00', '12:00', 5)).resolves.toBe(false);
+    });
   });
 });

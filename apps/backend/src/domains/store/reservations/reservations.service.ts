@@ -23,6 +23,13 @@ import { PriceResolverService } from '../products/services/price-resolver.servic
 import { TablesService } from '../tables/tables.service';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
+import { BusinessHoursService } from './business-hours/business-hours.service';
+import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
+import {
+  BookingSlotInput,
+  assertBookingSlotOpen,
+  assertBookingSlotShape,
+} from './booking-time.util';
 
 @Injectable()
 export class ReservationsService {
@@ -39,6 +46,7 @@ export class ReservationsService {
     private readonly tableSessionsService: TableSessionsService,
     // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
     private readonly orderHistory: OrderHistoryService,
+    private readonly businessHoursService: BusinessHoursService,
   ) {}
 
   // Estado maquina de transiciones validas
@@ -204,12 +212,37 @@ export class ReservationsService {
     }
   }
 
+  /**
+   * QUI-966 (S4): the one date/time gate every booking entry point runs.
+   * Inverted/zero/midnight-crossing ranges and invalid dates are always
+   * rejected. Past slots (store timezone) and slots outside the store
+   * business hours are rejected unless staff explicitly forces them with
+   * `skip_availability_check` (`allowOverride`); ecommerce never can.
+   */
+  private async assertBookableSlot(
+    store_id: number,
+    slot: BookingSlotInput,
+    opts: { allowOverride?: boolean } = {},
+  ): Promise<void> {
+    assertBookingSlotShape(slot);
+    if (opts.allowOverride === true) return;
+    const [timezone, storeHours] = await Promise.all([
+      resolveStoreTimezone(this.prisma, store_id),
+      this.businessHoursService.loadStoreHours(store_id),
+    ]);
+    assertBookingSlotOpen(slot, { timezone, storeHours });
+  }
+
   async create(dto: CreateBookingDto) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) {
       throw new BadRequestException('No se encontro contexto de tienda');
     }
+
+    await this.assertBookableSlot(store_id, dto, {
+      allowOverride: dto.skip_availability_check === true,
+    });
 
     // 1. Validar que el producto existe y requiere reserva
     const product = await this.prisma.products.findFirst({
@@ -557,6 +590,9 @@ export class ReservationsService {
     if (!store_id) {
       throw new BadRequestException('No se encontro contexto de tienda');
     }
+
+    // Ecommerce hold: past / closed-hours can never be forced.
+    await this.assertBookableSlot(store_id, dto);
 
     const product = await this.prisma.products.findFirst({
       where: { id: dto.product_id },
@@ -1013,6 +1049,8 @@ export class ReservationsService {
     booking: Awaited<ReturnType<ReservationsService['findOne']>>,
     dto: RescheduleBookingDto,
   ) {
+    await this.assertBookableSlot(booking.store_id, dto);
+
     // Validar disponibilidad del nuevo slot (excluyendo la reserva actual)
     const isAvailable = await this.availabilityService.isSlotAvailable(
       booking.product_id,
@@ -1121,6 +1159,8 @@ export class ReservationsService {
       requestedByCustomerId?: number;
     },
   ) {
+    await this.assertBookableSlot(booking.store_id, dto);
+
     // Si ya existe una solicitud PENDING para esta reserva, no dejamos
     // crear otra — el cliente debe cancelar la anterior primero.
     const existing = await this.prisma.booking_reschedule_requests.findFirst({

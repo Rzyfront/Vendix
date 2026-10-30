@@ -1,16 +1,22 @@
 import {
   IsInt,
-  IsDateString,
   IsString,
   IsOptional,
   IsEnum,
   IsIn,
   IsBoolean,
+  IsPositive,
   Matches,
+  Max,
   MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { order_channel_enum } from '@prisma/client';
+import {
+  IsAfterStartTime,
+  IsCivilDate,
+  MAX_INT4,
+} from './booking-time.validators';
 
 export class CreateBookingDto {
   /**
@@ -22,14 +28,18 @@ export class CreateBookingDto {
    */
   @IsOptional()
   @IsInt()
+  @IsPositive()
+  @Max(MAX_INT4)
   @Type(() => Number)
   customer_id?: number;
 
   @IsInt()
+  @IsPositive()
+  @Max(MAX_INT4)
   @Type(() => Number)
   product_id: number;
 
-  @IsDateString()
+  @IsCivilDate()
   date: string;
 
   @IsString()
@@ -42,6 +52,7 @@ export class CreateBookingDto {
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
     message: 'end_time debe tener formato HH:mm',
   })
+  @IsAfterStartTime()
   end_time: string;
 
   @IsOptional()
@@ -50,15 +61,20 @@ export class CreateBookingDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   notes?: string;
 
   @IsOptional()
   @IsInt()
+  @IsPositive()
+  @Max(MAX_INT4)
   @Type(() => Number)
   product_variant_id?: number;
 
   @IsOptional()
   @IsInt()
+  @IsPositive()
+  @Max(MAX_INT4)
   @Type(() => Number)
   order_id?: number;
 
@@ -68,11 +84,15 @@ export class CreateBookingDto {
    */
   @IsOptional()
   @IsInt()
+  @IsPositive()
+  @Max(MAX_INT4)
   @Type(() => Number)
   table_id?: number;
 
   @IsOptional()
   @IsInt()
+  @IsPositive()
+  @Max(MAX_INT4)
   @Type(() => Number)
   provider_id?: number;
 
@@ -100,6 +120,8 @@ export class CreateBookingDto {
    */
   @IsOptional()
   @IsInt()
+  @IsPositive()
+  @Max(MAX_INT4)
   @Type(() => Number)
   service_address_id?: number;
 

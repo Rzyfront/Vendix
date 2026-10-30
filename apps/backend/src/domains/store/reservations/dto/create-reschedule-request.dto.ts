@@ -1,4 +1,5 @@
-import { IsDateString, IsString, IsOptional, Matches, MaxLength } from 'class-validator';
+import { IsString, IsOptional, Matches, MaxLength } from 'class-validator';
+import { IsAfterStartTime, IsCivilDate } from './booking-time.validators';
 
 /**
  * Payload para crear una solicitud de reagendamiento PENDIENTE.
@@ -18,7 +19,7 @@ import { IsDateString, IsString, IsOptional, Matches, MaxLength } from 'class-va
  *     devuelven 202 con el `request_id` en el body.
  */
 export class CreateRescheduleRequestDto {
-  @IsDateString()
+  @IsCivilDate()
   date: string;
 
   @IsString()
@@ -31,6 +32,7 @@ export class CreateRescheduleRequestDto {
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
     message: 'end_time debe tener formato HH:mm',
   })
+  @IsAfterStartTime()
   end_time: string;
 
   /**

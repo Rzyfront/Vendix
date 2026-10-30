@@ -1,7 +1,8 @@
-import { IsDateString, IsString, IsOptional, IsBoolean, Matches } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, Matches } from 'class-validator';
+import { IsAfterStartTime, IsCivilDate } from './booking-time.validators';
 
 export class RescheduleBookingDto {
-  @IsDateString()
+  @IsCivilDate()
   date: string;
 
   @IsString()
@@ -14,6 +15,7 @@ export class RescheduleBookingDto {
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
     message: 'end_time debe tener formato HH:mm',
   })
+  @IsAfterStartTime()
   end_time: string;
 
   /**
