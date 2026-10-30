@@ -22,6 +22,7 @@ import { shouldAutoPrintDispatchTicket } from '../../../../../../shared/services
 import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { LodgingReservationsService } from '../../../hospitality/reservations/services/lodging-reservations.service';
+import { PosScheduledOrderService } from '../../services/pos-scheduled-order.service';
 
 /**
  * CP-POS-CHECKOUT-KEYBOARD — matriz teclado × paso del modal de pago.
@@ -187,6 +188,10 @@ class AddressStub {
   readonly validChange = output<boolean>();
 }
 
+/** Hijo de pedidos programados: el shell solo lo proyecta, sin bindings. */
+@Component({ selector: 'app-pos-scheduled-order-picker', standalone: true, template: `` })
+class ScheduledOrderPickerStub {}
+
 /** CP-pos-checkout-enter-focus — stubs para montar el collector real aislado. */
 @Directive({ selector: '[appCurrencyInput]', standalone: true })
 class CurrencyInputStub {
@@ -331,6 +336,12 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         { provide: CurrencyFormatService, useValue: { loadCurrency: () => {} } },
         { provide: KitchenTicketPrintService, useValue: { printAfterFire: () => {} } },
         { provide: LodgingReservationsService, useValue: {} },
+        // El shell solo limpia la elección de pedido programado al cerrarse;
+        // el servicio real inyecta HttpClient y este spec no lo provee.
+        {
+          provide: PosScheduledOrderService,
+          useValue: { enabled: signal(false), schedule: signal(null), clear: () => {} },
+        },
       ],
     });
 
@@ -345,6 +356,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
           ShippingStub,
           CustomerSelectorStub,
           AddressStub,
+          ScheduledOrderPickerStub,
           NgTemplateOutlet,
           CurrencyStubPipe,
         ],
