@@ -74,7 +74,7 @@ export class CreateRecipeItemDto {
   @IsString()
   @MaxLength(500)
   @Transform(({ value }) =>
-    typeof value === 'string' ? value.trim().slice(0, 500) || null : value,
+    typeof value === 'string' ? value.trim() || null : value,
   )
   notes?: string | null;
 }
