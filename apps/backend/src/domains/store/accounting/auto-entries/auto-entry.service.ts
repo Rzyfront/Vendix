@@ -5041,6 +5041,51 @@ export class AutoEntryService {
     });
   }
 
+  /**
+   * Pedidos programados (S4): costo de venta al iniciar producción. Mismo
+   * asiento que el disparo a cocina (DR costo / CR inventario), con su propio
+   * `source_type` para no chocar con los ids de tickets de cocina.
+   */
+  async onScheduledOrderProduced(data: {
+    schedule_id: number;
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    total_cost: number;
+    consumed_line_count: number;
+    user_id?: number;
+  }) {
+    const totalValue = Number(data.total_cost || 0);
+    if (totalValue <= 0) return null;
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'kitchen.fired.cogs',
+        `Costo producción pedido programado (orden #${data.order_id}, ${data.consumed_line_count} líneas)`,
+        totalValue,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'kitchen.fired.inventory',
+        `Inventario consumido en producción (orden #${data.order_id})`,
+        0,
+        totalValue,
+        data.store_id,
+      ),
+    ]);
+    return this.createAutoEntry({
+      source_type: 'scheduled_order.produced',
+      source_id: data.schedule_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Producción pedido programado #${data.schedule_id} – orden #${data.order_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
   /** Reclassifies a fired dish's already-booked COGS inside the order claim. */
   async onPreparedDishDisposition(data: {
     order_id: number;

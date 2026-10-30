@@ -14,6 +14,32 @@ export const ErrorCodes = {
   EMAIL_RECEPTION_NOT_FOUND: { code: 'EMAIL_RECEPTION_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la configuración de recepción por correo.' },
   EMAIL_RECEPTION_VERSION_CONFLICT: { code: 'EMAIL_RECEPTION_VERSION_CONFLICT', httpStatus: 409, devMessage: 'La configuración cambió. Vuelve a cargarla antes de guardar.' },
 
+
+  // Pedidos programados (venta por encargo)
+  SCHED_DISABLED: { code: 'SCHED_DISABLED', httpStatus: 400, devMessage: 'Los pedidos programados no están activos en esta tienda.' },
+  SCHED_SLOT_FULL: { code: 'SCHED_SLOT_FULL', httpStatus: 409, devMessage: 'No hay cupo en esa franja. Elige otra hora.' },
+  SCHED_LEAD_TIME: { code: 'SCHED_LEAD_TIME', httpStatus: 400, devMessage: 'Este pedido requiere más anticipación.' },
+  SCHED_DAY_BLOCKED: { code: 'SCHED_DAY_BLOCKED', httpStatus: 400, devMessage: 'La tienda no recibe pedidos para ese día.' },
+  SCHED_OUT_OF_HOURS: { code: 'SCHED_OUT_OF_HOURS', httpStatus: 400, devMessage: 'Esa franja no existe en el horario de pedidos programados.' },
+  SCHED_TOO_FAR: { code: 'SCHED_TOO_FAR', httpStatus: 400, devMessage: 'Esa fecha está demasiado lejos para programar un pedido.' },
+  SCHED_INVALID_RANGE: { code: 'SCHED_INVALID_RANGE', httpStatus: 400, devMessage: 'El rango de fechas no es válido.' },
+  SCHED_FULFILLMENT_TYPE: { code: 'SCHED_FULFILLMENT_TYPE', httpStatus: 400, devMessage: 'La tienda no ofrece ese tipo de entrega para pedidos programados.' },
+  SCHED_NOT_FOUND: { code: 'SCHED_NOT_FOUND', httpStatus: 404, devMessage: 'Pedido programado no encontrado.' },
+  SCHED_ALREADY_SCHEDULED: { code: 'SCHED_ALREADY_SCHEDULED', httpStatus: 409, devMessage: 'Esta orden ya tiene un agendamiento.' },
+  SCHED_INVALID_TRANSITION: { code: 'SCHED_INVALID_TRANSITION', httpStatus: 409, devMessage: 'Ese cambio de estado no está permitido para el pedido.' },
+  SCHED_EXCEPTION_NOT_FOUND: { code: 'SCHED_EXCEPTION_NOT_FOUND', httpStatus: 404, devMessage: 'Excepción de agenda no encontrada.' },
+
+  // Adiciones de producto
+  OPT_DISABLED: { code: 'OPT_DISABLED', httpStatus: 400, devMessage: 'Las adiciones no están activas en esta tienda.' },
+  OPT_COMPONENT_REQUIRED: { code: 'OPT_COMPONENT_REQUIRED', httpStatus: 400, devMessage: 'Cada adición debe tener un insumo, una preparación o un producto asociado.' },
+  OPT_GROUP_NOT_FOUND: { code: 'OPT_GROUP_NOT_FOUND', httpStatus: 404, devMessage: 'Grupo de adiciones no encontrado.' },
+  OPT_NOT_FOUND: { code: 'OPT_NOT_FOUND', httpStatus: 404, devMessage: 'Adición no encontrada.' },
+  OPT_GROUP_RULES: { code: 'OPT_GROUP_RULES', httpStatus: 400, devMessage: 'Las reglas del grupo no son válidas (mínimo, máximo u obligatorio).' },
+  OPT_ASSIGNMENT_TARGET: { code: 'OPT_ASSIGNMENT_TARGET', httpStatus: 400, devMessage: 'El grupo se engancha a un producto o a una categoría, no a ambos.' },
+  OPT_REQUIRES_SCHEDULE: { code: 'OPT_REQUIRES_SCHEDULE', httpStatus: 400, devMessage: 'Las adiciones solo se venden en pedidos programados: agenda el pedido o quita las adiciones.' },
+  OPT_SELECTION_INVALID: { code: 'OPT_SELECTION_INVALID', httpStatus: 400, devMessage: 'Las adiciones elegidas no cumplen las reglas del producto.' },
+  OPT_DRAFT_LINE_LOCKED: { code: 'OPT_DRAFT_LINE_LOCKED', httpStatus: 409, devMessage: 'Esta línea del borrador tiene adiciones y no se puede cambiar aquí: quítala y vuelve a agregarla con sus adiciones.' },
+  OPT_DRAFT_ADD_LOCKED: { code: 'OPT_DRAFT_ADD_LOCKED', httpStatus: 409, devMessage: 'Este pedido ya está guardado: no se le pueden agregar productos con adiciones. Cóbralo o cancélalo y registra las adiciones en un pedido nuevo.' },
   // System
   SYS_INTERNAL_001: {
     code: 'SYS_INTERNAL_001',

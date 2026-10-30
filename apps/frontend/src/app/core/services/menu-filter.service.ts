@@ -89,6 +89,9 @@ export class MenuFilterService {
    */
   readonly storeHasPqrs = signal<boolean | null>(null);
 
+  /** Ajuste `scheduled_orders.enabled` de la tienda; oculta la entrada si no es `true`. */
+  readonly scheduledOrdersEnabled = signal<boolean>(false);
+
   /**
    * Árbol de menú del store-admin. Por defecto se reconstruye del catálogo
    * (`STORE_MODULE_CATALOG`) para que el guard y el redirect de B.1 funcionen
@@ -114,7 +117,7 @@ export class MenuFilterService {
   private readonly authorizationGates$ = toObservable(
     computed(
       () =>
-        `${this.canManageUsers()}|${this.storeHasPqrs()}|${this.canConfigureAiAgents()}|${this.canAccessDashboard()}`,
+        `${this.canManageUsers()}|${this.storeHasPqrs()}|${this.scheduledOrdersEnabled()}|${this.canConfigureAiAgents()}|${this.canAccessDashboard()}`,
     ),
   );
 
@@ -169,6 +172,7 @@ export class MenuFilterService {
     Contratos: 'orders_contracts',
     'Plan Separe': 'orders_layaway',
     Reservas: 'orders_reservations',
+    'Pedidos programados': 'orders_scheduled',
     'Estaciones de Servicio': 'orders_service_stations',
 
     // STORE_ADMIN - Despacho (padre + submódulos)
@@ -1127,6 +1131,9 @@ export class MenuFilterService {
     // default: better a late-appearing entry than an empty mailbox flashing at
     // a brand-new store.
     if (item.route === '/admin/pqrs' && this.storeHasPqrs() !== true) {
+      return false;
+    }
+    if (item.route === '/admin/scheduled-orders' && !this.scheduledOrdersEnabled()) {
       return false;
     }
     if (item.route === '/admin/settings/ai-agents' && !this.canConfigureAiAgents()) {

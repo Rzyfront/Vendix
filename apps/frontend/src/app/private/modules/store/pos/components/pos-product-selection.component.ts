@@ -12,7 +12,7 @@ import {
   viewChild,
   untracked,
 } from '@angular/core';
-import { Subject, distinctUntilChanged, of } from 'rxjs';
+import { Subject, distinctUntilChanged, firstValueFrom, of } from 'rxjs';
 import { map, switchMap, catchError } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
@@ -36,7 +36,10 @@ import {
 import { extractApiError } from '../../../../../shared/utils/http-error.util';
 import { Router } from '@angular/router';
 
-import { PosCartService } from '../services/pos-cart.service';
+import {
+  OPTIONS_ON_SAVED_ORDER_MESSAGE,
+  PosCartService,
+} from '../services/pos-cart.service';
 import {
   PosProductService,
   PosProductVariant,
@@ -54,6 +57,12 @@ import {
 } from '../services/pos-sale-unit.service';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
+import { PosOptionSelectorComponent } from './pos-option-selector/pos-option-selector.component';
+import {
+  PosOptionSelection,
+  PosProductOptionGroup,
+  PosProductOptionsService,
+} from '../services/pos-product-options.service';
 import { PosStockSourcingModalComponent } from './pos-stock-sourcing-modal.component';
 import {
   PosPreparedChoiceModalComponent,
@@ -165,6 +174,7 @@ function isMultiTokenQuery(query: string): boolean {
     OptionsDropdownComponent,
     CurrencyPipe,
     PosVariantSelectorComponent,
+    PosOptionSelectorComponent,
     PosStockSourcingModalComponent,
     PosPreparedChoiceModalComponent,
     PosSerialSelectionModalComponent,
@@ -905,6 +915,17 @@ function isMultiTokenQuery(query: string): boolean {
       ></app-pos-variant-selector>
     }
 
+    <!-- Add-ons (adiciones) Modal -->
+    @if (optionSelector(); as pending) {
+      <app-pos-option-selector
+        [productName]="pending.product.name"
+        [groups]="pending.groups"
+        [basePrice]="pending.basePrice"
+        (confirmed)="onOptionsConfirmed($event)"
+        (closed)="onOptionSelectorClosed()"
+      ></app-pos-option-selector>
+    }
+
     <!-- Stock Sourcing Suggestion Modal -->
     <app-pos-stock-sourcing-modal
       [(isOpen)]="showSourcingModal"
@@ -1189,6 +1210,16 @@ export class PosProductSelectionComponent {
   // Variant selection state
   readonly showVariantSelector = signal(false);
   readonly selectedProductForVariant = signal<any>(null);
+
+  // Add-ons (adiciones): only active when `product_options.enabled` is on.
+  private readonly productOptionsEnabled = signal(false);
+  private readonly productOptionsService = inject(PosProductOptionsService);
+  readonly optionSelector = signal<{
+    product: any;
+    variant: PosProductVariant | null;
+    groups: PosProductOptionGroup[];
+    basePrice: number;
+  } | null>(null);
 
   // Stock sourcing modal state — surfaced when in-scope stock is insufficient
   // and `pos_stock_scope === 'main_location'`.
@@ -2123,7 +2154,95 @@ export class PosProductSelectionComponent {
       return;
     }
 
+    if (await this.openOptionSelectorIfNeeded(product, null)) return;
+
     await this.addToCartNormal(product);
+  }
+
+  /**
+   * Add-ons: when the setting is on and the product has option groups, opens the
+   * selector and returns true (the line is added from `onOptionsConfirmed`).
+   * Returns false — and changes nothing — when there are no groups or the
+   * setting is off, so the regular flow continues exactly as before.
+   * Add-ons are only sold in scheduled orders, and a table never schedules:
+   * with an open table session the product is added plain.
+   */
+  private async openOptionSelectorIfNeeded(
+    product: any,
+    variant: PosProductVariant | null,
+  ): Promise<boolean> {
+    if (!this.productOptionsEnabled()) return false;
+    if (this.restaurantIntegration.currentTableSession() != null) return false;
+    if (product.pricing_type === 'weight' || this.requiresSerials(product)) {
+      return false;
+    }
+    const productId = Number(product.id);
+    if (!Number.isFinite(productId)) return false;
+
+    const groups = await firstValueFrom(
+      this.productOptionsService.getGroupsForProduct(productId),
+    );
+    if (groups.length === 0) return false;
+
+    // N2 (PR #1003): un pedido ya guardado no puede llevar adiciones nuevas
+    // (PUT /items y el editor no las persisten). Con grupos opcionales el
+    // producto entra solo, igual que en mesa; con un grupo obligatorio no se
+    // puede vender sin adiciones y se avisa sin agregar nada.
+    if (this.cartService.cartState().linkedOrderId != null) {
+      const required = groups.some(
+        (group) => group.is_required || Number(group.min_select ?? 0) > 0,
+      );
+      if (!required) return false;
+      this.toastService.error(OPTIONS_ON_SAVED_ORDER_MESSAGE);
+      return true;
+    }
+
+    const basePrice = Number(
+      variant?.final_price ?? product.final_price ?? product.price ?? 0,
+    );
+    this.optionSelector.set({
+      product,
+      variant,
+      groups,
+      basePrice: Number.isFinite(basePrice) ? basePrice : 0,
+    });
+    return true;
+  }
+
+  onOptionSelectorClosed(): void {
+    this.optionSelector.set(null);
+  }
+
+  onOptionsConfirmed(selection: PosOptionSelection): void {
+    const pending = this.optionSelector();
+    this.optionSelector.set(null);
+    if (!pending) return;
+    const { product, variant } = pending;
+
+    this.addingToCart.add(product.id);
+    this.cartService
+      .addToCart({
+        product,
+        quantity: 1,
+        ...(variant ? { variant } : {}),
+        option_ids: selection.option_ids,
+        option_labels: selection.labels,
+        option_delta: selection.delta,
+        option_delta_parts: selection.delta_parts,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.addingToCart.delete(product.id);
+          this.toastService.success(`${product.name} agregado al carrito`);
+          this.warnIfOversold(product, variant ?? undefined);
+          this.productAddedToCart.emit({ product, quantity: 1 });
+        },
+        error: (error) => {
+          this.addingToCart.delete(product.id);
+          this.handleAddToCartError(error, product, variant ?? undefined, 1);
+        },
+      });
   }
 
   async onVariantSelected(variant: PosProductVariant): Promise<void> {
@@ -2137,6 +2256,8 @@ export class PosProductSelectionComponent {
       this.bookingRequired.emit({ product, variant });
       return;
     }
+
+    if (await this.openOptionSelectorIfNeeded(product, variant)) return;
 
     // If product is weight-based and scale is enabled, prompt for weight
     const isWeightProduct =
@@ -2971,6 +3092,9 @@ export class PosProductSelectionComponent {
       .select(selectStoreSettings)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((storeSettings: any) => {
+        this.productOptionsEnabled.set(
+          storeSettings?.product_options?.enabled === true,
+        );
         const threshold = Number(storeSettings?.inventory?.low_stock_threshold);
         this.lowStockThreshold.set(
           Number.isFinite(threshold) && threshold >= 0 ? threshold : 10,

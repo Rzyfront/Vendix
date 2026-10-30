@@ -1011,6 +1011,32 @@ export class NotificationsEventsListener {
     );
   }
 
+  /** Pedidos programados: recordatorio al equipo (campana), una vez por regla. */
+  @OnEvent('scheduled_order.reminder')
+  async handleScheduledOrderReminder(event: {
+    store_id: number;
+    schedule_id: number;
+    order_id: number;
+    order_number: string;
+    channel: 'staff' | 'customer';
+    minutes_before: number;
+    customer_name: string | null;
+    local_date: string;
+    local_start: string;
+    local_end: string;
+  }) {
+    if (event.channel !== 'staff') return;
+    const hours = event.minutes_before / 60;
+    const anticipation = Number.isInteger(hours) ? `${hours} h` : `${event.minutes_before} min`;
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'scheduled_order_reminder',
+      'Pedido programado próximo',
+      `Pedido ${event.order_number}${event.customer_name ? ` de ${event.customer_name}` : ''} para el ${event.local_date} ${event.local_start}–${event.local_end} (en ${anticipation})`,
+      { schedule_id: event.schedule_id, order_id: event.order_id, order_number: event.order_number },
+    );
+  }
+
   @OnEvent('booking.rescheduled')
   async handleBookingRescheduled(event: {
     store_id: number;

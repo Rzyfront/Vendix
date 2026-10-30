@@ -122,7 +122,8 @@ type CartWithTierLadder = Cart & {
             isService() ||
             item().variant?.name ||
             attributeChips().length > 0 ||
-            serviceDuration()
+            serviceDuration() ||
+            item().options?.labels?.length
           ) {
             <div class="ci-meta">
               @if (isService()) {
@@ -140,6 +141,9 @@ type CartWithTierLadder = Cart & {
               }
               @for (chip of attributeChips(); track chip) {
                 <app-badge variant="neutral" size="xs">{{ chip }}</app-badge>
+              }
+              @for (label of item().options?.labels ?? []; track label) {
+                <app-badge variant="neutral" size="xs">{{ label }}</app-badge>
               }
             </div>
           }

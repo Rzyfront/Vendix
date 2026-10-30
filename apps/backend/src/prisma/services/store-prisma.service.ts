@@ -225,6 +225,16 @@ export class StorePrismaService extends BasePrismaService {
     // ===== CRM Landing (QUI-719) =====
     // 1:1 con la tienda (store_id @unique) → scoping directo por tienda.
     'crm_landing_pages',
+    // ===== Pedidos programados + adiciones =====
+    // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
+    'fulfillment_schedule_exceptions',
+    'order_fulfillment_schedules',
+    'order_fulfillment_changes',
+    'scheduled_order_reminder_logs',
+    'product_option_groups',
+    'product_options',
+    'product_option_group_assignments',
+    'order_item_options',
   ];
 
   private readonly fiscal_entity_scoped_models = [
@@ -2031,6 +2041,39 @@ export class StorePrismaService extends BasePrismaService {
 
   get store_sequences() {
     return this.scoped_client.store_sequences;
+  }
+
+  // ===== Pedidos programados + adiciones =====
+  get fulfillment_schedule_exceptions() {
+    return this.scoped_client.fulfillment_schedule_exceptions;
+  }
+
+  get order_fulfillment_schedules() {
+    return this.scoped_client.order_fulfillment_schedules;
+  }
+
+  get order_fulfillment_changes() {
+    return this.scoped_client.order_fulfillment_changes;
+  }
+
+  get scheduled_order_reminder_logs() {
+    return this.scoped_client.scheduled_order_reminder_logs;
+  }
+
+  get product_option_groups() {
+    return this.scoped_client.product_option_groups;
+  }
+
+  get product_options() {
+    return this.scoped_client.product_options;
+  }
+
+  get product_option_group_assignments() {
+    return this.scoped_client.product_option_group_assignments;
+  }
+
+  get order_item_options() {
+    return this.scoped_client.order_item_options;
   }
 
   get tables() {

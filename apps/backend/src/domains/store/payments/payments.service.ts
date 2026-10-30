@@ -9,6 +9,11 @@ import {
 import * as crypto from 'crypto';
 import { assertNotLodgingFolioOrder } from '../orders/shared/lodging-folio-policy';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { ScheduledOrdersService } from '../scheduled-orders/scheduled-orders.service';
+import {
+  OptionPricingService,
+  ResolvedOptions,
+} from '../product-options/option-pricing.service';
 import { Prisma, payment_processing_mode_enum, table_status_enum, order_state_enum } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
@@ -141,6 +146,8 @@ import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-p
  * el alias local porque el resto del servicio lo referencia por este nombre.
  */
 type PosTierSnapshot = TierSnapshot;
+/** Venta con pedido programado o borrador: los únicos que aceptan adiciones. */
+type PosLineOptionsMode = { scheduled: boolean; draft: boolean };
 
 /**
  * ADR-03 (P1, CP-pos-exclusive-tax-double-charge) — discriminante de
@@ -217,6 +224,12 @@ export class PaymentsService {
     // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
     @Optional() private readonly orderHistory?: OrderHistoryService,
     @Optional() private readonly walletBalanceService?: WalletBalanceService,
+    // Pedidos programados: agendamiento en la misma transacción de la venta.
+    // `@Optional()` por la misma razón que arriba; sin él (sólo en specs) un
+    // `schedule` en el payload se rechaza con SCHED_DISABLED.
+    @Optional() private readonly scheduledOrdersService?: ScheduledOrdersService,
+    // Adiciones de producto (precio y snapshot por línea). Mismo `@Optional()`.
+    @Optional() private readonly optionPricingService?: OptionPricingService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -934,6 +947,19 @@ export class PaymentsService {
         throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
       }
 
+      // Pedido programado: la entrega es en la franja, nunca en el acto. Una
+      // venta inmediata (`direct_delivery`/`dine_in`) pasa a `pickup`, así la
+      // ruta existente aparta el stock al cobrar y lo descuenta al entregar.
+      if (createPosPaymentDto.schedule && !createPosPaymentDto.is_draft) {
+        if (!this.scheduledOrdersService) {
+          throw new VendixHttpException(ErrorCodes.SCHED_DISABLED);
+        }
+        const deliveryType = createPosPaymentDto.delivery_type;
+        if (!deliveryType || deliveryType === 'direct_delivery' || deliveryType === 'dine_in') {
+          createPosPaymentDto.delivery_type = 'pickup';
+        }
+      }
+
       if (
         createPosPaymentDto.store_id !== undefined &&
         createPosPaymentDto.store_id !== null &&
@@ -1114,6 +1140,16 @@ export class PaymentsService {
           user,
         ))!;
         const order = orderCreation.order;
+        // Pedido programado: toma el cupo bajo el bloqueo de la tienda en la
+        // misma transacción; franja llena o sin anticipación revierte la venta.
+        if (createPosPaymentDto.schedule && !createPosPaymentDto.is_draft) {
+          await this.scheduledOrdersService!.createForOrder(tx, {
+            store_id: order.store_id,
+            order_id: order.id,
+            schedule: createPosPaymentDto.schedule,
+            user_id: user?.id ?? null,
+          });
+        }
         // PR #840: dine_in (table consumption) keeps direct_delivery handover
         // semantics — goods leave our hands at charge (stock commit + COGS).
         // Only the label changed; every predicate below must treat both alike.
@@ -3810,6 +3846,52 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * Adiciones de una línea POS. Sin `OptionPricingService` (sólo en specs) o
+   * sin `option_ids` y sin grupos obligatorios → sin efecto. Solo se cobran
+   * en una venta con pedido programado (`scheduled`), que es quien las
+   * descuenta del inventario al pasar a producción. Un borrador (`draft`) las
+   * guarda sin agendamiento: no cobra, no aparta cupo ni descuenta; el
+   * agendamiento se exige al cobrarlo (`assertAdoptedOptionsScheduled`).
+   */
+  private async resolvePosLineOptions(
+    tx: any,
+    item: any,
+    storeId: number,
+    mode: PosLineOptionsMode,
+  ): Promise<ResolvedOptions> {
+    const optionIds: number[] | undefined = item.option_ids;
+    if (!this.optionPricingService) {
+      if (optionIds?.length) throw new VendixHttpException(ErrorCodes.OPT_DISABLED);
+      return { unit_price_delta: new Prisma.Decimal(0), snapshots: [] };
+    }
+    return this.optionPricingService.resolve(
+      storeId,
+      item.product_id,
+      optionIds,
+      Number(item.quantity) || 1,
+      { scheduled: mode.scheduled, draft: mode.draft, client: tx },
+    );
+  }
+
+  /**
+   * Cobro de un borrador con adiciones: sus líneas persistidas mandan (las del
+   * DTO no se guardan), así que el agendamiento se valida contra ellas. Sin
+   * `schedule` nadie descontaría esas adiciones → OPT_REQUIRES_SCHEDULE.
+   */
+  private async assertAdoptedOptionsScheduled(
+    tx: any,
+    orderId: number,
+    storeId: number,
+  ): Promise<void> {
+    const withOptions = await tx.order_item_options.count({
+      where: { store_id: storeId, order_item: { order_id: orderId } },
+    });
+    if (withOptions > 0) {
+      throw new VendixHttpException(ErrorCodes.OPT_REQUIRES_SCHEDULE);
+    }
+  }
+
   private async buildPosOrderItem(
     tx: any,
     item: any,
@@ -3823,6 +3905,9 @@ export class PaymentsService {
     // `session.order_id` (cierre de mesa, orden ya existe) u `orderNumber`
     // (venta nueva, recién generado antes de mapear los ítems).
     orderRef?: string | number | null,
+    // Venta con pedido programado o borrador: únicos que aceptan adiciones
+    // (ver `resolvePosLineOptions`). El cierre de mesa nunca agenda.
+    optionsMode: PosLineOptionsMode = { scheduled: false, draft: false },
   ): Promise<any> {
     const isCustomItem = item.item_type === 'custom' || !item.product_id;
     const lineUnits = this.getPosLineUnits(item);
@@ -4125,13 +4210,20 @@ export class PaymentsService {
         : resolvePriceUnitScale(product.price_unit_quantity);
     const priceUnits = resolvePriceUnits(lineUnits, priceUnitQuantity);
 
+    // Adiciones (S3): el servidor valida las reglas y calcula el delta FINAL
+    // por unidad; el cliente solo manda `option_ids`. Sin adiciones el delta
+    // es 0 y nada de este bloque cambia el cálculo de hoy.
+    const lineOptions = await this.resolvePosLineOptions(tx, item, dtoStoreId, optionsMode);
+    const optionUnitDelta = Number(lineOptions.unit_price_delta);
+    const catalogFinalWithOptions = this.roundMoney(catalogFinalPrice + optionUnitDelta);
+
     const declaredGross = this.resolveDeclaredGrossUnitPrice(item);
-    const finalUnitPrice = declaredGross ?? catalogFinalPrice;
+    const finalUnitPrice = declaredGross ?? catalogFinalWithOptions;
     // F-222: en centavos enteros — `Math.abs` en floats decide el mismo centavo
     // según la magnitud (13603.13/13603.12 no disparaba, 2425.00/2424.99 sí).
     const isPriceOverridden =
       declaredGross !== null &&
-      differsByAtLeastCents(declaredGross, catalogFinalPrice);
+      differsByAtLeastCents(declaredGross, catalogFinalWithOptions);
 
     if (isPriceOverridden) {
       if (!product.allow_pos_price_override) {
@@ -4153,7 +4245,7 @@ export class PaymentsService {
     // correcto de `catalogFinalPrice`, y volver a pasarlo por el kernel con
     // las tasas exclusivas tal como son (`is_inclusive: false`) sumaría ese
     // impuesto una segunda vez sobre el mismo total.
-    const taxInfo = isPriceOverridden
+    const taxInfo = isPriceOverridden || optionUnitDelta !== 0
       ? this.invertDeclaredGross(catalogTaxInfo, finalUnitPrice, {
           product_id: product.id,
           quantity: priceUnits,
@@ -4168,7 +4260,7 @@ export class PaymentsService {
     // que esta función ya cargó, así que no cuesta ninguna consulta.
     const costPrice = pickCostPrice(variant?.cost_price, product.cost_price);
 
-    return this.buildOrderItemSnapshot({
+    const snapshot = await this.buildOrderItemSnapshot({
       item,
       productName: item.product_name || product.name,
       sku: item.product_sku || variant?.sku || product.sku,
@@ -4194,6 +4286,14 @@ export class PaymentsService {
       storeId: dtoStoreId,
       userId: user?.id ?? null,
     });
+    // Snapshot congelado de las adiciones en la línea (nested create). Solo
+    // se agrega con adiciones: las líneas de hoy no cambian de forma.
+    if (lineOptions.snapshots.length) {
+      (snapshot as Record<string, unknown>).order_item_options = {
+        create: lineOptions.snapshots.map((option) => ({ store_id: dtoStoreId, ...option })),
+      };
+    }
+    return snapshot;
   }
 
   /**
@@ -5917,6 +6017,9 @@ export class PaymentsService {
           `La orden ${orderLabel} ya tiene un pago registrado. Actualiza la lista de órdenes antes de intentarlo de nuevo.`,
         );
       }
+      if (!dto.schedule) {
+        await this.assertAdoptedOptionsScheduled(tx, existingOrder.id, dtoStoreId);
+      }
     }
 
     // Venta normal (sin sesión de mesa): los ítems son obligatorios para
@@ -5963,6 +6066,7 @@ export class PaymentsService {
               user,
               tierSnapshots[index],
               orderNumber,
+              { scheduled: !!dto.schedule, draft: dto.is_draft === true },
             ),
           ),
         );

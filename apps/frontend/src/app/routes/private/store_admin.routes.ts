@@ -152,6 +152,13 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.BrandsPageComponent,
               ),
           },
+          {
+            path: 'option-groups',
+            loadComponent: () =>
+              import('../../private/modules/store/products/pages/option-groups/option-groups-page.component').then(
+                (c) => c.OptionGroupsPageComponent,
+              ),
+          },
           // MUST stay BEFORE ':id': otherwise the param route swallows the
           // literal segment 'bulk-edit' and renders the product detail page
           // for a non-existent id.
@@ -502,6 +509,14 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.RescheduleRequestsPageComponent),
           },
         ],
+      },
+      // Scheduled Orders Routes
+      {
+        path: 'scheduled-orders',
+        loadChildren: () =>
+          import('../../private/modules/store/scheduled-orders/scheduled-orders.routes').then(
+            (r) => r.SCHEDULED_ORDERS_ROUTES,
+          ),
       },
       {
         path: 'services',

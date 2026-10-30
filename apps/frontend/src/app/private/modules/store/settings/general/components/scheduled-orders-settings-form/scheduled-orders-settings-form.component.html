@@ -1,0 +1,248 @@
+<div class="space-y-4">
+  <app-setting-toggle
+    [ngModel]="value().enabled"
+    (ngModelChange)="onEnabledChange($event)"
+    label="Pedidos programados"
+    description="El cliente elige día y hora de entrega o recogida al comprar. Apagado: la venta funciona como siempre."
+  />
+
+  @if (value().enabled) {
+    <!-- Horario semanal -->
+    <div class="space-y-2">
+      <h4 class="text-xs font-semibold text-text-primary uppercase">Horario semanal</h4>
+      <p class="text-xs text-text-secondary">
+        Activa los días en que recibes encargos y define desde y hasta qué hora.
+      </p>
+      @for (d of days; track d.day) {
+        @let block = dayBlock(d.day);
+        <div class="grid grid-cols-12 gap-2 items-center">
+          <label class="col-span-12 sm:col-span-4 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              class="h-4 w-4"
+              [checked]="!!block"
+              (change)="onDayToggle(d.day, $any($event.target).checked)"
+            />
+            {{ d.label }}
+          </label>
+          @if (block) {
+            <div class="col-span-6 sm:col-span-4">
+              <app-input
+                label="Desde"
+                type="time"
+                size="sm"
+                [ngModel]="block.start_time"
+                (ngModelChange)="onDayTimeChange(d.day, 'start_time', $event)"
+              />
+            </div>
+            <div class="col-span-6 sm:col-span-4">
+              <app-input
+                label="Hasta"
+                type="time"
+                size="sm"
+                [ngModel]="block.end_time"
+                (ngModelChange)="onDayTimeChange(d.day, 'end_time', $event)"
+              />
+            </div>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- Franjas y cupos -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <app-input
+        label="Duración de la franja (minutos)"
+        type="number"
+        [min]="5"
+        [ngModel]="value().slot_duration_minutes"
+        (ngModelChange)="onNumberChange('slot_duration_minutes', $event)"
+      />
+      <app-input
+        label="Pedidos por franja"
+        type="number"
+        [min]="1"
+        [ngModel]="value().slot_capacity"
+        (ngModelChange)="onNumberChange('slot_capacity', $event)"
+      />
+      <app-input
+        label="Pedidos por día (opcional)"
+        type="number"
+        [min]="1"
+        placeholder="Sin límite"
+        helperText="Déjalo vacío para no limitar el total del día."
+        [ngModel]="value().day_capacity"
+        (ngModelChange)="onDayCapacityChange($event)"
+      />
+      <app-input
+        label="Anticipación mínima (horas)"
+        type="number"
+        [min]="0"
+        [ngModel]="value().min_lead_time_hours"
+        (ngModelChange)="onNumberChange('min_lead_time_hours', $event)"
+      />
+      <app-input
+        label="Días máximos hacia adelante"
+        type="number"
+        [min]="1"
+        [ngModel]="value().max_days_ahead"
+        (ngModelChange)="onNumberChange('max_days_ahead', $event)"
+      />
+    </div>
+
+    <!-- Tipos de cumplimiento -->
+    <div class="space-y-2">
+      <h4 class="text-xs font-semibold text-text-primary uppercase">Tipos de entrega</h4>
+      <div class="flex flex-wrap gap-4">
+        @for (f of fulfillmentOptions; track f.value) {
+          <label class="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              class="h-4 w-4"
+              [checked]="hasFulfillment(f.value)"
+              (change)="onFulfillmentToggle(f.value, $any($event.target).checked)"
+            />
+            {{ f.label }}
+          </label>
+        }
+      </div>
+    </div>
+
+    <!-- Recordatorios -->
+    <div class="space-y-2">
+      <h4 class="text-xs font-semibold text-text-primary uppercase">Recordatorios</h4>
+      @for (r of value().reminders; track r.minutes_before; let i = $index) {
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+          <label class="flex items-center gap-2 font-medium">
+            <input
+              type="checkbox"
+              class="h-4 w-4"
+              [checked]="r.enabled"
+              (change)="onReminderChange(i, 'enabled', $any($event.target).checked)"
+            />
+            {{ reminderLabel(r.minutes_before) }}
+          </label>
+          <label class="flex items-center gap-2">
+            <input
+              type="checkbox"
+              class="h-4 w-4"
+              [checked]="r.notify_staff"
+              [disabled]="!r.enabled"
+              (change)="onReminderChange(i, 'notify_staff', $any($event.target).checked)"
+            />
+            Avisar al equipo
+          </label>
+          <label class="flex items-center gap-2">
+            <input
+              type="checkbox"
+              class="h-4 w-4"
+              [checked]="r.notify_customer"
+              [disabled]="!r.enabled"
+              (change)="onReminderChange(i, 'notify_customer', $any($event.target).checked)"
+            />
+            Avisar al cliente (correo)
+          </label>
+        </div>
+      } @empty {
+        <p class="text-xs text-text-secondary">Sin recordatorios configurados.</p>
+      }
+    </div>
+
+    <!-- Excepciones por fecha -->
+    <div class="space-y-3">
+      <h4 class="text-xs font-semibold text-text-primary uppercase">Fechas especiales</h4>
+      <p class="text-xs text-text-secondary">
+        Bloquea un día (por ejemplo un festivo) o define un horario o cupo especial. Se guardan al instante.
+      </p>
+
+      @for (e of exceptions(); track e.id) {
+        <div class="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2">
+          <div class="min-w-0">
+            <p class="text-sm font-medium">{{ dateOnly(e.date) }} · {{ exceptionSummary(e) }}</p>
+            @if (e.reason) {
+              <p class="text-xs text-text-secondary truncate">{{ e.reason }}</p>
+            }
+          </div>
+          <app-button
+            variant="outline-danger"
+            size="sm"
+            aria-label="Eliminar fecha especial"
+            (clicked)="removeException(e)"
+          >
+            <app-icon slot="icon" name="trash-2" [size]="14" />
+          </app-button>
+        </div>
+      } @empty {
+        <p class="text-xs text-text-secondary">No hay fechas especiales.</p>
+      }
+
+      <div class="rounded-lg border border-dashed border-border p-3 space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <app-input
+            label="Fecha"
+            type="date"
+            [ngModel]="newDate()"
+            (ngModelChange)="newDate.set($event)"
+          />
+          <app-input
+            label="Motivo (opcional)"
+            placeholder="Ej: Navidad"
+            [ngModel]="newReason()"
+            (ngModelChange)="newReason.set($event)"
+          />
+        </div>
+        <label class="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            class="h-4 w-4"
+            [checked]="newClosed()"
+            (change)="newClosed.set($any($event.target).checked)"
+          />
+          Día cerrado (no se reciben pedidos)
+        </label>
+        @if (!newClosed()) {
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <app-input
+              label="Desde"
+              type="time"
+              [ngModel]="newStart()"
+              (ngModelChange)="newStart.set($event)"
+            />
+            <app-input
+              label="Hasta"
+              type="time"
+              [ngModel]="newEnd()"
+              (ngModelChange)="newEnd.set($event)"
+            />
+            <app-input
+              label="Pedidos por franja"
+              type="number"
+              [min]="1"
+              placeholder="Igual que el ajuste general"
+              [ngModel]="newSlotCapacity()"
+              (ngModelChange)="newSlotCapacity.set($event)"
+            />
+          </div>
+        }
+        <app-button
+          variant="outline"
+          size="sm"
+          [loading]="savingException()"
+          [disabled]="savingException()"
+          (clicked)="addException()"
+        >
+          <app-icon slot="icon" name="plus" [size]="14" />
+          Agregar fecha especial
+        </app-button>
+      </div>
+    </div>
+  }
+
+  <!-- Adiciones -->
+  <app-setting-toggle
+    [ngModel]="optionsEnabled()"
+    (ngModelChange)="onOptionsEnabledChange($event)"
+    label="Adiciones"
+    description="Permite ofrecer adiciones a los productos (fresas, chantilly, velas). Se administran en Productos > Adiciones."
+  />
+</div>

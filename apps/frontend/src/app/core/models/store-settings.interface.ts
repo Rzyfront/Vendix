@@ -58,6 +58,10 @@ export interface StoreSettings {
    * `DEFAULT_ALLOW_DIRECT_RESCHEDULE` constant.
    */
   reservations?: ReservationsSettings;
+  /** Pedidos programados (venta por encargo). Ausente = apagado. */
+  scheduled_orders?: ScheduledOrdersSettings;
+  /** Adiciones de producto. Ausente = apagado. */
+  product_options?: ProductOptionsSettings;
   /**
    * Master switch for the Vexi assistant. Mirrors backend `VexiSettings`.
    *
@@ -246,6 +250,40 @@ export const AIU_SETTINGS_DEFAULTS: Required<AiuSettings> = {
  * Reservations policy. Mirrors backend `ReservationsSettings` in
  * `store-settings.interface.ts`.
  */
+export interface ScheduledOrderWeeklyBlock {
+  /** 0 = domingo ... 6 = sábado. */
+  day_of_week: number;
+  /** `HH:mm` */
+  start_time: string;
+  /** `HH:mm` */
+  end_time: string;
+}
+
+export interface ScheduledOrderReminderRule {
+  minutes_before: number;
+  enabled: boolean;
+  notify_staff: boolean;
+  notify_customer: boolean;
+}
+
+/** Mirrors backend `store_settings.settings.scheduled_orders`. */
+export interface ScheduledOrdersSettings {
+  enabled: boolean;
+  weekly_schedule: ScheduledOrderWeeklyBlock[];
+  slot_duration_minutes: number;
+  slot_capacity: number;
+  day_capacity: number | null;
+  min_lead_time_hours: number;
+  max_days_ahead: number;
+  fulfillment_types: Array<'pickup' | 'delivery'>;
+  reminders: ScheduledOrderReminderRule[];
+}
+
+/** Mirrors backend `store_settings.settings.product_options`. */
+export interface ProductOptionsSettings {
+  enabled: boolean;
+}
+
 export interface ReservationsSettings {
   /** When true (default), customers reschedule with 1 click. When false,
    *  the reschedule becomes a pending request routed through the

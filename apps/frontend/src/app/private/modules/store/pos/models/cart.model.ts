@@ -2,6 +2,7 @@ import { Product, PosProductVariant } from '../services/pos-product.service';
 import { PosCustomer } from '../models/customer.model';
 import type { PosShippingMethod } from './shipping.model';
 import { WithholdingLine } from '../../withholding-tax/interfaces/withholding.interface';
+import type { OptionDeltaParts } from '../../../../../shared/utils/option-pricing.util';
 
 export interface CartItem {
   id: string;
@@ -99,6 +100,15 @@ export interface CartItem {
   serial_numbers?: string[];
   // CP-POS-SVC-BOOKING-001 — Scheduled appointment details for service lines.
   booking?: CartItemBooking;
+  // Adiciones (product_options). `option_ids` viaja al servidor, que valida las
+  // reglas y recalcula el precio; los nombres y el delta (por unidad) son solo
+  // de visualización. Participan en la identidad de la línea.
+  option_ids?: number[];
+  option_labels?: string[];
+  /** Delta por unidad aplicado HOY a la línea (depende de la cantidad). */
+  option_delta?: number;
+  /** Partes per_unit/per_line: el delta se recalcula al cambiar la cantidad. */
+  option_delta_parts?: OptionDeltaParts;
 }
 
 export interface CartItemBooking {
@@ -312,6 +322,11 @@ export interface CartState {
 export interface AddToCartRequest {
   product: Product;
   quantity: number;
+  /** Adiciones elegidas (ver `CartItem.option_ids`). */
+  option_ids?: number[];
+  option_labels?: string[];
+  option_delta?: number;
+  option_delta_parts?: OptionDeltaParts;
   notes?: string;
   variant?: PosProductVariant;
   // Weight product fields (camino legado; ver `CartItem.weight`).

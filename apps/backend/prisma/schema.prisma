@@ -293,6 +293,9 @@ model users {
   @@index([state])
   @@index([document_number])
   @@index([requires_terms_update])
+  // Pedidos programados
+  order_fulfillment_schedules_created order_fulfillment_schedules[] @relation("order_fulfillment_schedules_created_by")
+  order_fulfillment_changes_made      order_fulfillment_changes[]   @relation("order_fulfillment_changes_changed_by")
 }
 
 model user_settings {
@@ -1135,6 +1138,15 @@ model stores {
 
   @@unique([organization_id, slug])
   @@index([onboarding])
+  // Pedidos programados + adiciones
+  fulfillment_schedule_exceptions  fulfillment_schedule_exceptions[]
+  order_fulfillment_schedules      order_fulfillment_schedules[]
+  order_fulfillment_changes        order_fulfillment_changes[]
+  scheduled_order_reminder_logs    scheduled_order_reminder_logs[]
+  product_option_groups            product_option_groups[]
+  product_options                  product_options[]
+  product_option_group_assignments product_option_group_assignments[]
+  order_item_options               order_item_options[]
 }
 
 model store_settings {
@@ -1341,6 +1353,8 @@ model categories {
 
   @@unique([store_id, slug])
   @@index([store_id, is_featured])
+  // Adiciones
+  product_option_group_assignments product_option_group_assignments[]
 }
 
 model currencies {
@@ -1664,6 +1678,8 @@ model order_items {
 
   // Restaurant Suite Foundation (Fase A) — back-relation
   kitchen_ticket_items kitchen_ticket_items[]
+  // Adiciones vendidas (snapshot)
+  order_item_options order_item_options[]
 }
 
 model orders {
@@ -1837,6 +1853,8 @@ model orders {
   @@index([store_id, created_by_user_id])
   @@index([shipping_tax_rate_id])
   @@index([store_id, origin_cash_session_id, state])
+  // Pedidos programados
+  fulfillment_schedule order_fulfillment_schedules?
 }
 
 model order_installments {
@@ -2051,6 +2069,8 @@ model product_variants {
 
   @@unique([product_id, sku])
   @@index([barcode])
+  // Adiciones
+  product_option_components product_options[] @relation("product_option_component_variant")
 }
 
 model products {
@@ -2304,6 +2324,9 @@ model products {
   @@index([state, id])
   @@index([store_id, state])
   @@unique([store_id, id])
+  // Adiciones
+  product_option_components  product_options[]                  @relation("product_option_component")
+  product_option_assignments product_option_group_assignments[] @relation("product_option_group_assignment_product")
 }
 
 /// CP-pos-smart-search E.4 (F-069) — log append-only de selecciones del
@@ -4858,6 +4881,8 @@ enum notification_type_enum {
   booking_cancelled
   booking_no_show
   booking_reminder
+  scheduled_order_reminder
+  scheduled_order_rescheduled
   booking_rescheduled
   /// Appointment redesign phase 2 — fired when a customer requests a
   /// reschedule that requires admin approval (settings.reservations.
@@ -14435,4 +14460,227 @@ model ai_agent_recipe_events {
   created_at DateTime @default(now()) @db.Timestamptz(6)
   @@index([store_id,organization_id,user_id,objective_id],map:"ai_agent_recipe_events_owner_idx")
   @@index([recipe_id,created_at],map:"ai_agent_recipe_events_recipe_idx")
+}
+
+// ===== Pedidos programados + adiciones (venta por encargo) =====
+// Todo es aditivo: ninguna tienda cambia de comportamiento hasta activar
+// `store_settings.scheduled_orders.enabled` o `store_settings.product_options.enabled`.
+
+/// Ciclo de cumplimiento del pedido programado. Vive en el agendamiento, NO en
+/// `order_state_enum` (que gobierna pago, stock y contabilidad).
+enum order_fulfillment_status_enum {
+  scheduled
+  in_production
+  ready
+  delivered
+  no_show
+  cancelled
+}
+
+enum order_fulfillment_type_enum {
+  pickup
+  delivery
+}
+
+/// Destino de una adición: insumo directo, mini-receta (producto con receta) o
+/// producto vendible. Nunca texto libre.
+enum product_option_component_type_enum {
+  ingredient
+  recipe
+  product
+}
+
+/// `per_unit` se repite por cada unidad de la línea; `per_line` va una vez.
+enum product_option_scope_enum {
+  per_unit
+  per_line
+}
+
+/// Excepción de la agenda de cumplimiento para una fecha (hora local de tienda).
+model fulfillment_schedule_exceptions {
+  id            Int       @id @default(autoincrement())
+  store_id      Int
+  date          DateTime  @db.Date
+  is_closed     Boolean   @default(false)
+  /// "HH:mm" en hora de tienda; null = usa el horario semanal.
+  start_time    String?   @db.VarChar(5)
+  end_time      String?   @db.VarChar(5)
+  slot_capacity Int?
+  day_capacity  Int?
+  reason        String?   @db.VarChar(255)
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  updated_at    DateTime? @default(now()) @updatedAt @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, date])
+  @@index([store_id, date])
+}
+
+/// Agendamiento 1:1 de una orden programada (POS o tienda en línea).
+model order_fulfillment_schedules {
+  id                 Int                           @id @default(autoincrement())
+  store_id           Int
+  order_id           Int                           @unique
+  scheduled_start    DateTime                      @db.Timestamp(6)
+  scheduled_end      DateTime                      @db.Timestamp(6)
+  fulfillment_type   order_fulfillment_type_enum   @default(pickup)
+  status             order_fulfillment_status_enum @default(scheduled)
+  /// Tienda en línea: el cupo se sostiene hasta esta hora mientras la orden
+  /// espera pago; vencido, el agendamiento se cancela y libera la franja.
+  hold_expires_at    DateTime?                     @db.Timestamp(6)
+  produced_at        DateTime?                     @db.Timestamp(6)
+  ready_at           DateTime?                     @db.Timestamp(6)
+  delivered_at       DateTime?                     @db.Timestamp(6)
+  cancelled_at       DateTime?                     @db.Timestamp(6)
+  notes              String?
+  created_by_user_id Int?
+  created_at         DateTime?                     @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?                     @default(now()) @updatedAt @db.Timestamp(6)
+
+  store         stores                          @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order         orders                          @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by    users?                          @relation("order_fulfillment_schedules_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  changes       order_fulfillment_changes[]
+  reminder_logs scheduled_order_reminder_logs[]
+
+  @@index([store_id, scheduled_start])
+  @@index([store_id, status])
+}
+
+/// Historial de estados y reprogramaciones del agendamiento.
+model order_fulfillment_changes {
+  id                 Int                            @id @default(autoincrement())
+  store_id           Int
+  schedule_id        Int
+  /// 'status' | 'reschedule' | 'created'
+  change_type        String                         @db.VarChar(20)
+  from_status        order_fulfillment_status_enum?
+  to_status          order_fulfillment_status_enum?
+  from_start         DateTime?                      @db.Timestamp(6)
+  to_start           DateTime?                      @db.Timestamp(6)
+  from_end           DateTime?                      @db.Timestamp(6)
+  to_end             DateTime?                      @db.Timestamp(6)
+  note               String?                        @db.VarChar(500)
+  changed_by_user_id Int?
+  created_at         DateTime?                      @default(now()) @db.Timestamp(6)
+
+  store      stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  schedule   order_fulfillment_schedules @relation(fields: [schedule_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  changed_by users?                      @relation("order_fulfillment_changes_changed_by", fields: [changed_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([schedule_id])
+  @@index([store_id, created_at])
+}
+
+/// Dedupe de recordatorios: una fila por (agendamiento, regla, canal).
+model scheduled_order_reminder_logs {
+  id          Int       @id @default(autoincrement())
+  store_id    Int
+  schedule_id Int
+  /// Clave de la regla, ej. "1440m" para 24 h.
+  rule_key    String    @db.VarChar(30)
+  channel     String    @db.VarChar(20)
+  sent_at     DateTime? @default(now()) @db.Timestamp(6)
+
+  store    stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  schedule order_fulfillment_schedules @relation(fields: [schedule_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([schedule_id, rule_key, channel])
+  @@index([store_id])
+}
+
+/// Grupo reutilizable de adiciones ("Frutas", "Cubierta", "Velas").
+model product_option_groups {
+  id          Int                       @id @default(autoincrement())
+  store_id    Int
+  name        String                    @db.VarChar(120)
+  description String?                   @db.VarChar(500)
+  min_select  Int                       @default(0)
+  max_select  Int                       @default(1)
+  is_required Boolean                   @default(false)
+  scope       product_option_scope_enum @default(per_unit)
+  sort_order  Int                       @default(0)
+  is_active   Boolean                   @default(true)
+  created_at  DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at  DateTime?                 @default(now()) @updatedAt @db.Timestamp(6)
+
+  store       stores                             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  options     product_options[]
+  assignments product_option_group_assignments[]
+
+  @@index([store_id, is_active])
+}
+
+/// Opción de un grupo. Siempre apunta a un componente (insumo, mini-receta o
+/// producto vendible); su costo sale de ese componente, nunca se digita.
+model product_options {
+  id                   Int                                @id @default(autoincrement())
+  store_id             Int
+  group_id             Int
+  name                 String                             @db.VarChar(120)
+  price_delta          Decimal                            @default(0) @db.Decimal(12, 2)
+  component_type       product_option_component_type_enum
+  component_product_id Int
+  component_variant_id Int?
+  quantity             Decimal                            @default(1) @db.Decimal(12, 4)
+  uom                  String?                            @db.VarChar(20)
+  sort_order           Int                                @default(0)
+  is_active            Boolean                            @default(true)
+  created_at           DateTime?                          @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                          @default(now()) @updatedAt @db.Timestamp(6)
+
+  store              stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  group              product_option_groups @relation(fields: [group_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  component_product  products              @relation("product_option_component", fields: [component_product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  component_variant  product_variants?     @relation("product_option_component_variant", fields: [component_variant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  order_item_options order_item_options[]
+
+  @@index([group_id])
+  @@index([store_id])
+}
+
+/// Enganche de un grupo a un producto o a una categoría (exactamente uno).
+model product_option_group_assignments {
+  id          Int       @id @default(autoincrement())
+  store_id    Int
+  group_id    Int
+  product_id  Int?
+  category_id Int?
+  sort_order  Int       @default(0)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  store    stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  group    product_option_groups @relation(fields: [group_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  product  products?             @relation("product_option_group_assignment_product", fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  category categories?           @relation(fields: [category_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([group_id])
+  @@index([product_id])
+  @@index([category_id])
+}
+
+/// Snapshot congelado de cada adición vendida en una línea.
+model order_item_options {
+  id                   Int                                @id @default(autoincrement())
+  store_id             Int
+  order_item_id        Int
+  option_id            Int?
+  group_name           String                             @db.VarChar(120)
+  option_name          String                             @db.VarChar(120)
+  scope                product_option_scope_enum
+  price_delta          Decimal                            @db.Decimal(12, 2)
+  component_type       product_option_component_type_enum
+  component_product_id Int
+  component_variant_id Int?
+  quantity             Decimal                            @db.Decimal(12, 4)
+  uom                  String?                            @db.VarChar(20)
+  created_at           DateTime?                          @default(now()) @db.Timestamp(6)
+
+  store      stores           @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order_item order_items      @relation(fields: [order_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  option     product_options? @relation(fields: [option_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([order_item_id])
+  @@index([store_id])
 }

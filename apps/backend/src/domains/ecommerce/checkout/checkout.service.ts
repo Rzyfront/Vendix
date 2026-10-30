@@ -18,6 +18,11 @@ import {
 import { CheckoutDto, CouponPreviewDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { ScheduledOrdersService } from '../../store/scheduled-orders/scheduled-orders.service';
+import {
+  OptionPricingService,
+  ResolvedOptions,
+} from '../../store/product-options/option-pricing.service';
 import {
   Prisma,
   payment_processing_mode_enum,
@@ -192,6 +197,13 @@ export class CheckoutService {
     // motivo; sin él devuelve "sin alcance fijo".
     @Optional()
     private readonly shippingCalculator?: ShippingCalculatorService,
+    // Pedidos programados. `@Optional()` por el mismo motivo; sin él un
+    // `schedule` en el payload se rechaza con SCHED_DISABLED.
+    @Optional()
+    private readonly scheduledOrdersService?: ScheduledOrdersService,
+    // Adiciones de producto. `@Optional()` por el mismo motivo.
+    @Optional()
+    private readonly optionPricingService?: OptionPricingService,
   ) {}
 
   /**
@@ -263,6 +275,38 @@ export class CheckoutService {
     const limit = Number(threshold);
     if (!Number.isFinite(limit) || limit < 0) return price;
     return products_gross >= limit ? 0 : price;
+  }
+
+  /**
+   * Adiciones de una línea del checkout. La línea armada desde `dto.items`
+   * (invitado) trae sus `option_ids`; la del carrito de backend las toma del
+   * `dto.items` que coincida por producto + variante + presentación (mismo
+   * emparejamiento que `notes`). Sin servicio (specs) → sin efecto. Solo se
+   * aceptan con pedido programado (`scheduled`), que las descuenta al
+   * pasar a producción.
+   */
+  private async resolveCheckoutLineOptions(
+    item: { product_id: number; product_variant_id?: number | null; applied_price_tier_id?: number | null; quantity: number; option_ids?: number[] },
+    dto_items: Array<{ product_id: number; product_variant_id?: number | null; price_tier_id?: number | null; option_ids?: number[] }> | undefined,
+    scheduled: boolean,
+  ): Promise<ResolvedOptions> {
+    const option_ids =
+      item.option_ids ??
+      dto_items?.find(
+        (d) =>
+          d.option_ids !== undefined &&
+          d.product_id === item.product_id &&
+          (d.product_variant_id ?? null) === (item.product_variant_id ?? null) &&
+          (d.price_tier_id ?? null) === (item.applied_price_tier_id ?? null),
+      )?.option_ids;
+    const store_id = RequestContextService.getStoreId();
+    if (!this.optionPricingService || !store_id) {
+      if (option_ids?.length) throw new VendixHttpException(ErrorCodes.OPT_DISABLED);
+      return { unit_price_delta: new Prisma.Decimal(0), snapshots: [] };
+    }
+    return this.optionPricingService.resolve(store_id, item.product_id, option_ids, Number(item.quantity) || 1, {
+      scheduled,
+    });
   }
 
   /**
@@ -1658,6 +1702,14 @@ export class CheckoutService {
     }
 
     const store_id_ctx = RequestContextService.getStoreId();
+    // Pedido programado: falla temprano (antes de crear la orden) si la
+    // franja no existe, no cumple anticipación o no tiene cupo.
+    if (dto.schedule) {
+      if (!this.scheduledOrdersService || !store_id_ctx) {
+        throw new VendixHttpException(ErrorCodes.SCHED_DISABLED);
+      }
+      await this.scheduledOrdersService.preValidate(store_id_ctx, dto.schedule);
+    }
     let resolved_customer_id: number | null = user_id ?? null;
     if (is_guest && guest_customer && store_id_ctx) {
       const resolved =
@@ -1736,6 +1788,8 @@ export class CheckoutService {
             // no tenga que saber de qué origen viene el carrito.
             applied_price_tier_id: item.price_tier_id ?? null,
             notes: item.notes?.trim() || null,
+            // Adiciones de esta línea (invitado: una línea por selección).
+            option_ids: item.option_ids,
             product,
             product_variant,
           } as any;
@@ -2124,15 +2178,38 @@ export class CheckoutService {
           quantity: item.quantity,
         });
 
-        const netPrice = line.net_unit_price;
+        // Adiciones (S3): delta FINAL (con impuestos) por unidad calculado en
+        // el servidor sobre los `option_ids` de la línea, igual que en POS.
+        // Sin adiciones → 0 y nada de este bloque cambia el cálculo de hoy.
+        const lineOptions = await this.resolveCheckoutLineOptions(item, dto.items, !!dto.schedule);
+        const optionDelta = Number(lineOptions.unit_price_delta);
 
         const stockUnitsConsumed = line.stock_units_consumed;
         stockUnitsByIndex[index] = stockUnitsConsumed;
 
-        const taxInfo = await this.taxes_service.calculateProductTaxes(
+        const baseTaxInfo = await this.taxes_service.calculateProductTaxes(
           item.product_id,
-          netPrice,
+          line.net_unit_price,
         );
+        // Con impuestos NO incluidos el precio del catálogo es neto: al neto
+        // se suma solo la base del delta, para que el impuesto que se agrega
+        // después no se cobre dos veces sobre la adición (POS = tienda en línea).
+        const allInclusive = baseTaxInfo.taxes.every((t: any) => t.is_inclusive);
+        const optionNet =
+          optionDelta === 0 || allInclusive
+            ? optionDelta
+            : resolveLineTotals(
+                optionDelta,
+                // Solo las tasas NO incluidas: las incluidas ya van dentro del delta.
+                baseTaxInfo.taxes
+                  .filter((t: any) => !t.is_inclusive)
+                  .map((t: any) => ({ rate: t.rate, is_inclusive: true, rate_basis: t.rate_basis })),
+              ).base;
+        const netPrice = line.net_unit_price + optionNet;
+        const taxInfo =
+          optionDelta === 0
+            ? baseTaxInfo
+            : await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
 
         const cost_price =
           item.product_variant?.cost_price != null
@@ -2195,6 +2272,7 @@ export class CheckoutService {
 
         return {
           ...item,
+          option_snapshots: lineOptions.snapshots,
           net_price: netPrice,
           base_unit_price: unitTotals.base,
           cost_price,
@@ -2430,6 +2508,17 @@ export class CheckoutService {
         placed_at: new Date(),
         order_items: {
           create: itemsWithTaxes.map((item) => ({
+            // Snapshot congelado de adiciones (solo si la línea las tiene).
+            ...(item.option_snapshots.length
+              ? {
+                  order_item_options: {
+                    create: item.option_snapshots.map((option) => ({
+                      store_id: store_id_ctx!,
+                      ...option,
+                    })),
+                  },
+                }
+              : {}),
             // Online/whatsapp para enviar: el plato KDS se empaca.
             is_takeaway:
               markTakeawayForDelivery &&
@@ -2496,6 +2585,29 @@ export class CheckoutService {
             if (linked.count !== 1) throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001);
           }
         });
+      } catch (error) {
+        await this.prisma.orders.updateMany({
+          where: { id: order.id, store_id: order.store_id },
+          data: { state: 'cancelled', updated_at: new Date() },
+        });
+        await this.cancelCheckoutBookings(createdBookingIds);
+        throw error;
+      }
+    }
+
+    // Pedido programado: toma el cupo bajo el bloqueo de la tienda. Si otro
+    // cliente ganó el último cupo entre la validación previa y aquí, la orden
+    // se cancela igual que con una reserva de servicio que no se pudo enlazar.
+    if (dto.schedule) {
+      try {
+        await this.prisma.$transaction((tx) =>
+          this.scheduledOrdersService!.createForOrder(tx, {
+            store_id: order.store_id,
+            order_id: order.id,
+            schedule: dto.schedule!,
+            user_id: user_id ?? null,
+          }),
+        );
       } catch (error) {
         await this.prisma.orders.updateMany({
           where: { id: order.id, store_id: order.store_id },
@@ -2596,6 +2708,12 @@ export class CheckoutService {
           data: { state: 'cancelled', updated_at: new Date() },
         });
         await this.cancelCheckoutBookings(createdBookingIds);
+        // Pedido programado: la orden cancelada libera su franja.
+        if (dto.schedule) {
+          await this.scheduledOrdersService
+            ?.cancelForOrder(order.id, 'Pago no registrado')
+            .catch(() => undefined);
+        }
         throw error;
       });
     }
