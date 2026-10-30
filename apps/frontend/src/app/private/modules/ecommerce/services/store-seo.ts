@@ -163,6 +163,12 @@ export class StoreSeoService {
     this.applyStoreDefaults();
   }
 
+  /**
+   * Metadatos de cualquier página de la tienda que no se declare dueña (carrito, checkout,
+   * cuenta, pedidos y facturas por token, PQR, reservas, fila…). SEO-TECH-18: lista blanca;
+   * solo portada, catálogo, productos y cartas se declaran indexables con `apply`. El resto
+   * queda `noindex, follow` para que Google no indexe rutas privadas ni con token.
+   */
   private applyStoreDefaults(): void {
     const name = this.storeNameSignal();
     if (!name) return;
@@ -170,7 +176,7 @@ export class StoreSeoService {
       title: name,
       description: plainDescription(this.storeDescription, `Compra en línea en ${name}.`),
       canonicalPath: null,
-      robots: 'index, follow',
+      robots: 'noindex, follow',
       image: null,
       jsonLd: null,
     });

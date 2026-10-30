@@ -125,6 +125,20 @@ describe('Store SEO (tienda en línea)', () => {
       expect(metaContent('property="og:url"')).toBeNull();
     });
 
+    it('una página de la tienda sin dueño (carrito, cuenta, pedido por token) queda noindex', () => {
+      service.setStore('Pit and Grill', null);
+      expect(metaContent('name="robots"')).toBe('noindex, follow');
+    });
+
+    it('portada, catálogo y producto se declaran indexables y al salir vuelve el noindex', () => {
+      service.setStore('Pit and Grill');
+      const owner = {};
+      service.apply(owner, service.listingPage('/', null)!);
+      expect(metaContent('name="robots"')).toBe('index, follow');
+      service.release(owner);
+      expect(metaContent('name="robots"')).toBe('noindex, follow');
+    });
+
     it('usa la descripción SEO de la tienda si existe', () => {
       service.setStore('Pit and Grill', 'Parrilla y licores a domicilio en Cali.');
       expect(metaContent('name="description"')).toBe('Parrilla y licores a domicilio en Cali.');
