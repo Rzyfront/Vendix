@@ -368,6 +368,6 @@ export function industriesSupportIngredients(
 
 /**
  * List of store industries that support the `is_ingredient` product capacity.
- * Today only `restaurant`; designed to grow as the suite expands.
+ * `restaurant` and `manufacturing`; designed to grow as the suite expands.
  */
-export const INDUSTRIES_SUPPORTING_INGREDIENTS = ['restaurant'] as const;
+export const INDUSTRIES_SUPPORTING_INGREDIENTS = ['restaurant', 'manufacturing'] as const;
