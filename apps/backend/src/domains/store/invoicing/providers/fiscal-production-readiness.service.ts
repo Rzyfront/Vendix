@@ -730,6 +730,15 @@ export class FiscalProductionReadinessService {
     const testSetPassed = this.hasPassedTestSetForConfig(config);
     const testSetWait = testSetPassed ? null : resolveTestSetWait(config);
     const testSetRejected = testSetWait?.state === 'rejected';
+    // El motivo es el `status_message` de la DIAN, que ya trae su punto final, o
+    // el respaldo genérico del util («La DIAN rechazó el set de pruebas.»). Se le
+    // quita el punto para no imprimir «..» y el respaldo se descarta para no
+    // repetir «rechazó» dos veces en la misma frase.
+    const rejectionReason = testSetWait?.reason?.trim().replace(/\.+$/, '');
+    const dianRejectionReason =
+      rejectionReason && !rejectionReason.startsWith('La DIAN rechazó')
+        ? rejectionReason
+        : null;
 
     const checks: ProductionReadinessCheck[] = [
       {
@@ -750,7 +759,9 @@ export class FiscalProductionReadinessService {
         // `resolveTestSetProof`.
         satisfied: testSetPassed,
         action: testSetRejected
-          ? `La DIAN rechazó el último set de pruebas: ${testSetWait?.reason}. Corrige el problema y vuelve a ejecutarlo.`
+          ? dianRejectionReason
+            ? `La DIAN rechazó el último set de pruebas: ${dianRejectionReason}. Corrige el problema y vuelve a ejecutarlo.`
+            : 'La DIAN rechazó el último set de pruebas. Corrige el problema y vuelve a ejecutarlo.'
           : 'Ejecuta el set de pruebas y espera el visto bueno de la DIAN.',
         owner: 'tenant',
         ...(testSetRejected ? {} : { blocked_by: 'dian' as const }),
@@ -762,8 +773,9 @@ export class FiscalProductionReadinessService {
             ? 'Evidencia de habilitación almacenada (heredada del mismo software y NIT)'
             : 'Evidencia de habilitación almacenada',
         satisfied: !!config.enablement_evidence,
-        action:
-          'Se guarda automáticamente cuando la DIAN aprueba el set de pruebas.',
+        action: testSetRejected
+          ? 'Se guardará cuando reenvíes el set y la DIAN lo apruebe.'
+          : 'Se guarda automáticamente cuando la DIAN aprueba el set de pruebas.',
         owner: 'tenant',
         // Con el set rechazado tampoco es una espera: depende de reenviarlo.
         ...(testSetRejected ? {} : { blocked_by: 'dian' as const }),

@@ -173,8 +173,26 @@ describe('FiscalProductionReadinessService', () => {
       expect(check?.owner).toBe('tenant');
       expect(check?.action).toContain(MSG);
       expect(check?.action).toContain('rechazó');
+      expect(check?.action).not.toContain('..');
       const evidence = checkOf(config, 'enablement_evidence');
       expect(evidence?.blocked_by).toBeUndefined();
+      expect(evidence?.action).toBe(
+        'Se guardará cuando reenvíes el set y la DIAN lo apruebe.',
+      );
+    });
+
+    it('un rechazo sin mensaje de la DIAN no repite «rechazó» ni deja doble punto', () => {
+      const config = testing(
+        batch({
+          rejected: true,
+          pending: false,
+          dian_response: { success: false },
+        }),
+      );
+      const check = checkOf(config, 'test_set_evidence');
+      expect(check?.action).toBe(
+        'La DIAN rechazó el último set de pruebas. Corrige el problema y vuelve a ejecutarlo.',
+      );
     });
 
     it('un lote pendiente conserva «esperando a la DIAN» tal cual', () => {
