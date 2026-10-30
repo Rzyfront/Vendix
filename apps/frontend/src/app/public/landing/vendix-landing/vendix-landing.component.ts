@@ -534,7 +534,7 @@ export class VendixLandingComponent implements OnInit {
       feature1: {
         icon: 'calendar-check',
         title: 'Agenda por Profesional',
-        desc: 'Citas según el horario de cada profesional, con duración y descanso entre citas por servicio o variante.',
+        desc: 'Citas según el horario de cada profesional, con la duración y el descanso entre citas que configures en cada servicio.',
       },
       feature2: {
         icon: 'clock',
