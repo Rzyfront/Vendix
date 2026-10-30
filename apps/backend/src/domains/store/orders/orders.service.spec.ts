@@ -2355,8 +2355,10 @@ describe('OrdersService', () => {
           ...editableOrder,
           state: 'processing',
         };
-        // The post-claim lookup is the only read that selects `state`; the
-        // pre-claim and service-budget reads get the editable order.
+        // `assertServiceBudgetLimit` también lee `orders.findFirst` dentro
+        // de la transacción ANTES del claim, así que un `mockResolvedValueOnce`
+        // encadenado ya no llega a la lectura posterior al claim. Esa lectura
+        // es la única que selecciona `state`: se enruta por argumentos.
         mockPrismaService.orders.findFirst.mockImplementation((args: any) =>
           Promise.resolve(args?.select?.state ? lockedOrder : editableOrder),
         );
@@ -2397,6 +2399,7 @@ describe('OrdersService', () => {
       try {
         // El catch-all del Round 1 MAJOR #6: estado missing / null tras
         // un claim fallido. El código genérico sirve de red de seguridad.
+        // Idem: solo la lectura posterior al claim (`select.state`) ve null.
         mockPrismaService.orders.findFirst.mockImplementation((args: any) =>
           Promise.resolve(args?.select?.state ? null : editableOrder),
         );
