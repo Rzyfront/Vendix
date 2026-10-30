@@ -50,7 +50,8 @@ export interface SessionOrderTotals {
 /**
  * Totales de la cuenta SVC con el mismo criterio que la cuenta de mesa:
  * subtotal = suma de bases, IVA = suma de `order_item_taxes` (o `tax_amount_item`
- * por unidad si la línea no tiene desglose), total = subtotal + IVA.
+ * por unidad si la línea no tiene desglose), total = subtotal + IVA - descuento
+ * (misma convención que `orders.service`: `subtotal + tax - discount`).
  */
 export async function computeSessionOrderTotals(
   tx: Prisma.TransactionClient,
@@ -68,7 +69,7 @@ export async function computeSessionOrderTotals(
         order_item_taxes: { select: { tax_amount: true } },
       },
     }),
-    tx.orders.findUnique({ where: { id: orderId }, select: { total_paid: true } }),
+    tx.orders.findUnique({ where: { id: orderId }, select: { total_paid: true, discount_amount: true } }),
   ]);
   const subtotal = roundMoney2(items.reduce((acc, it) => acc + Number(it.total_price), 0));
   const tax = roundMoney2(
@@ -84,7 +85,8 @@ export async function computeSessionOrderTotals(
       return acc + Number(it.tax_amount_item ?? 0) * units;
     }, 0),
   );
-  const grandTotal = roundMoney2(subtotal + tax);
+  const discount = roundMoney2(Math.max(0, Number(order?.discount_amount ?? 0)));
+  const grandTotal = roundMoney2(Math.max(0, subtotal + tax - discount));
   const remaining = roundMoney2(Math.max(0, grandTotal - Number(order?.total_paid ?? 0)));
   return { subtotal, tax, grandTotal, remaining };
 }

@@ -629,9 +629,10 @@ export class ServiceBudgetsService {
           }
 
           // La propuesta SUMA a la cuenta: los totales se recalculan sobre todas las
-          // líneas (base + order_item_taxes, remaining incluido) en vez de copiar los
-          // de la propuesta; el descuento de la propuesta se acumula al de la orden.
-          const totals = await writeSessionOrderTotals(tx, session.order_id!, now);
+          // líneas (base + order_item_taxes, descuento y remaining incluidos) en vez de
+          // copiar los de la propuesta. El descuento de la propuesta se acumula al de la
+          // orden y se escribe ANTES del recálculo, porque `grand_total` lo resta: si se
+          // escribiera después, el cliente aprobaría un monto y se le cobraría otro.
           await tx.orders.update({
             where: { id: session.order_id! },
             data: {
@@ -642,6 +643,7 @@ export class ServiceBudgetsService {
               updated_at: now,
             },
           });
+          const totals = await writeSessionOrderTotals(tx, session.order_id!, now);
           await tx.service_budgets.create({
             data: {
               store_id: this.storeId,

@@ -477,6 +477,86 @@ describe('ServiceBudgetsService', () => {
       expect(result).toMatchObject({ status: 'approved' });
     });
 
+    it('aprueba con descuento: el total y el presupuesto cobran el monto descontado', async () => {
+      prisma.service_change_proposals.findFirst.mockResolvedValue({
+        ...proposal,
+        discount: new Prisma.Decimal(20000),
+        lines: {
+          items: [
+            {
+              product_id: 2,
+              product_variant_id: null,
+              product_name: 'Aceite',
+              description: null,
+              quantity: 2,
+              unit_price: 10000,
+              tax_rate: 0.19,
+              tax_amount_item: 1900,
+              total_price: 20000,
+              item_type: 'physical',
+              total: 23800,
+              tax_breakdown: [
+                {
+                  tax_rate_id: 1,
+                  tax_name: 'IVA',
+                  tax_rate: 0.19,
+                  tax_amount: 3800,
+                  tax_type: 'IVA',
+                  is_inclusive: false,
+                },
+              ],
+            },
+          ],
+          budget_snapshot: { version: 2 },
+        },
+      });
+      tx.orders.findFirst.mockResolvedValue({ service_version: 4, currency: 'COP', discount_amount: 0 });
+      tx.products.findFirst.mockResolvedValue({ id: 2, track_inventory: true, product_type: 'physical' });
+      // El recálculo ya lee el descuento acumulado de la orden (se escribe antes del recalc).
+      tx.orders.findUnique.mockResolvedValue({ total_paid: 0, discount_amount: new Prisma.Decimal(20000) });
+      tx.order_items.findMany.mockResolvedValue([
+        {
+          total_price: 100000,
+          tax_amount_item: 0,
+          quantity: 1,
+          weight: null,
+          price_unit_quantity: null,
+          order_item_taxes: [{ tax_amount: 19000 }],
+        },
+        {
+          total_price: 20000,
+          tax_amount_item: 1900,
+          quantity: 2,
+          weight: null,
+          price_unit_quantity: null,
+          order_item_taxes: [{ tax_amount: 3800 }],
+        },
+      ]);
+
+      const result = await run(() => service.decideWithToken(token, decideDto));
+
+      // Base 120.000 + IVA 22.800 = 142.800; menos 20.000 de descuento = 122.800.
+      expect(tx.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 33 },
+          data: expect.objectContaining({
+            subtotal_amount: 120000,
+            tax_amount: 22800,
+            grand_total: 122800,
+            remaining_balance: 122800,
+          }),
+        }),
+      );
+      // El descuento se acumula en la orden y el presupuesto aprobado cobra el neto.
+      expect(tx.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ discount_amount: new Prisma.Decimal(20000) }),
+        }),
+      );
+      expect(Number(tx.service_budgets.create.mock.calls[0][0].data.amount)).toBe(122800);
+      expect(result).toMatchObject({ status: 'approved' });
+    });
+
     it('rechaza token inválido, propuesta ausente, hash distinto o vencida (003/004)', async () => {
       await expect(run(() => service.decideWithToken('corto', decideDto))).rejects.toMatchObject({
         response: expect.objectContaining({ error_code: 'SERVICE_BUDGET_003' }),
