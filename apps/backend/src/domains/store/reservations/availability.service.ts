@@ -1139,9 +1139,10 @@ export class AvailabilityService {
     const result: Array<{ date: string; has_slots: boolean; slots_count: number }> = [];
 
     // Resolve "today" + current HH:mm in the store's local timezone once per
-    // call. We use it only for the day that matches `todayLocal` so past-time
-    // slots on HOY get excluded from the count, painting HOY as red on the
-    // calendar when the business has already closed.
+    // call. We use it only for the day that matches `todayLocal` so the slots
+    // of HOY that already ENDED get excluded from the count (a slot in
+    // progress still counts, same "past" rule as the grid and the booking
+    // gate, QUI-966 T8), painting HOY as red once the business closed.
     const timezone = await resolveStoreTimezone(
       db as unknown as StorePrismaService,
       product.store_id,
@@ -1158,7 +1159,7 @@ export class AvailabilityService {
     for (const currentDate of dates) {
       const dateStr = this.formatDate(currentDate);
       const dayOfWeek = currentDate.getUTCDay();
-      const minStartTime = dateStr === todayLocal ? nowHHMM : undefined;
+      const endedBy = dateStr === todayLocal ? nowHHMM : undefined;
 
       // Skip days the store is closed (master calendar).
       const storeWindows = storeWindowsMap.get(dayOfWeek);
@@ -1178,7 +1179,7 @@ export class AvailabilityService {
           dayOfWeek,
           storeWindows,
           provider_id,
-          minStartTime,
+          endedBy,
         );
         result.push({
           date: dateStr,
@@ -1199,7 +1200,7 @@ export class AvailabilityService {
    * relevant subset (no provider-exception filter — we approximate by
    * intersecting the provider schedule with the store window).
    *
-   * Today-only behavior (`minStartTime` provided): también consulta
+   * Today-only behavior (`endedBy` provided): también consulta
    * reservas existentes para descontar slots ya ocupados. Si después de
    * restar reservas previas y slots pasados no queda ningún slot
    * realmente disponible, devuelve 0 → el día se pinta rojo en el
@@ -1220,7 +1221,7 @@ export class AvailabilityService {
     dayOfWeek: number,
     storeWindows: StoreWindow[],
     provider_id?: number,
-    minStartTime?: string,
+    endedBy?: string,
   ): Promise<number> {
     const productFull = await db.products.findFirst({
       where: { id: product.id },
@@ -1233,7 +1234,7 @@ export class AvailabilityService {
     if (!productFull) return 0;
     const duration = productFull.service_duration_minutes ?? 60;
     const buffer = productFull.buffer_minutes ?? 0;
-    const isToday = !!minStartTime;
+    const isToday = !!endedBy;
 
     // free_booking
     if (productFull.booking_mode === 'free_booking') {
@@ -1245,7 +1246,7 @@ export class AvailabilityService {
           w.end_time,
           duration,
           buffer,
-          minStartTime,
+          endedBy,
         );
         if (total === 0) continue;
         count += isToday
@@ -1304,7 +1305,7 @@ export class AvailabilityService {
         clamped.end,
         duration,
         buffer,
-        minStartTime,
+        endedBy,
       );
       if (total === 0) continue;
       if (!isToday) return total;
@@ -1428,27 +1429,25 @@ export class AvailabilityService {
     return false;
   }
 
-  /** Count how many slots of `duration`+`buffer` fit between start..end.
-   *  When `minStart` is provided, the cursor starts at
-   *  `max(timeToMinutes(start), timeToMinutes(minStart))` so slots whose
-   *  start_time is already in the past (today, post-clock) are excluded. */
+  /** Count how many slots of `duration`+`buffer` fit between start..end,
+   *  on the block's own grid (starting at `start`). When `endedBy` (HH:mm,
+   *  store-local "now" for today) is provided, slots that already ENDED
+   *  (`end <= endedBy`) are not counted; a slot in progress still is
+   *  (QUI-966 T8 — same rule as the grid and `isSlotEndInPast`). */
   private countTimeSlots(
     start: string,
     end: string,
     duration: number,
     buffer: number,
-    minStart?: string,
+    endedBy?: string,
   ): number {
     let cur = this.timeToMinutes(start);
     const endMin = this.timeToMinutes(end);
-    if (minStart) {
-      const floor = this.timeToMinutes(minStart);
-      if (floor > cur) cur = floor;
-    }
+    const nowMin = endedBy ? this.timeToMinutes(endedBy) : null;
     if (duration <= 0 || endMin <= cur) return 0;
     let count = 0;
     while (cur + duration <= endMin) {
-      count++;
+      if (nowMin === null || cur + duration > nowMin) count++;
       cur += duration + buffer;
     }
     return count;

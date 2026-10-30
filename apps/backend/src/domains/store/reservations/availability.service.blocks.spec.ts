@@ -365,3 +365,52 @@ describe('QUI-966 L20 — one "past" rule for both grid routes', () => {
     expect(starts(slots)[0]).toBe('10:00');
   });
 });
+
+// QUI-966 T8 (L21 open item 3): the ecommerce day calendar uses the same
+// "past" rule as both grid routes — only slots that already ENDED are gone,
+// a slot in progress still counts; slots stay on the block's own grid.
+describe('QUI-966 T8 — day overview hides only ended slots', () => {
+  const overview = async (
+    opts: Parameters<typeof build>[0],
+    nowIso: string,
+  ) => {
+    jest.setSystemTime(new Date(nowIso));
+    const { service, prisma } = build(opts);
+    prisma.withoutScope = () => prisma;
+    const [day] = await service.getDayAvailabilityOverview(
+      10,
+      '2026-10-29',
+      '2026-10-29',
+    );
+    return day;
+  };
+
+  it('provider route counts the slot in progress (10:02 → 10:00..17:00)', async () => {
+    const day = await overview({}, '2026-10-29T15:02:00.000Z'); // 10:02 Bogota
+    expect(day).toEqual({ date: '2026-10-29', has_slots: true, slots_count: 8 });
+  });
+
+  it('free_booking route applies the same rule', async () => {
+    const day = await overview(
+      { bookingMode: 'free_booking' },
+      '2026-10-29T15:02:00.000Z',
+    );
+    expect(day.has_slots).toBe(true);
+    expect(day.slots_count).toBe(8);
+  });
+
+  it('the last slot in progress keeps today green; once it ends the day is red', async () => {
+    const inProgress = await overview({}, '2026-10-29T22:30:00.000Z'); // 17:30
+    expect(inProgress).toEqual({ date: '2026-10-29', has_slots: true, slots_count: 1 });
+    const ended = await overview({}, '2026-10-29T23:00:00.000Z'); // 18:00
+    expect(ended).toEqual({ date: '2026-10-29', has_slots: false, slots_count: 0 });
+  });
+
+  it('a future day is unaffected (all 10 slots)', async () => {
+    jest.setSystemTime(new Date('2026-10-29T15:02:00.000Z'));
+    const { service, prisma } = build();
+    prisma.withoutScope = () => prisma;
+    const [day] = await service.getDayAvailabilityOverview(10, DAY, DAY);
+    expect(day).toEqual({ date: DAY, has_slots: true, slots_count: 10 });
+  });
+});

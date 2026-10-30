@@ -12,6 +12,8 @@ import { SubscriptionAccessService } from '../services/subscription-access.servi
 import { SubscriptionGateConfig } from '../config/subscription-gate.config';
 import { SKIP_SUBSCRIPTION_GATE } from '../decorators/skip-subscription-gate.decorator';
 
+const STORE_NO_SUBSCRIPTION_MESSAGE = 'La tienda no tiene una suscripción activa';
+
 const WRITE_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 const STORE_PATH_PREFIX = '/api/store/';
 const SUBSCRIPTIONS_PATH_PREFIX = '/api/store/subscriptions/';
@@ -111,7 +113,15 @@ export class StoreOperationsGuard implements CanActivate {
           plan_id: result.plan_id ?? null,
           has_record: result.has_record,
         };
-        throw new VendixHttpException(entry, undefined, details);
+        // QUI-966 (S16): SUBSCRIPTION_004's catalogue wording mentions "AI
+        // features" (it is shared with the AI gate). This guard covers every
+        // store write, so it states the generic reason; code and status
+        // stay identical.
+        const detail =
+          entry.code === 'SUBSCRIPTION_004'
+            ? STORE_NO_SUBSCRIPTION_MESSAGE
+            : undefined;
+        throw new VendixHttpException(entry, detail, details);
       }
     }
 

@@ -20,7 +20,6 @@ import { EcommerceStoreMatchGuard } from '@common/guards/ecommerce-store-match.g
 import { AvailabilityService } from '../../store/reservations/availability.service';
 import { ReservationsService } from '../../store/reservations/reservations.service';
 import { ProvidersService } from '../../store/reservations/providers/providers.service';
-import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import {
   AvailabilityQueryDto,
   RescheduleBookingDto,
@@ -37,7 +36,6 @@ export class EcommerceReservationsController {
     private readonly availabilityService: AvailabilityService,
     private readonly reservationsService: ReservationsService,
     private readonly providersService: ProvidersService,
-    private readonly globalPrisma: GlobalPrismaService,
   ) {}
 
   @Public()
@@ -209,49 +207,32 @@ export class EcommerceReservationsController {
     // normalise the JSON shape into the same field names the addresses
     // table uses, so the frontend can render either source uniformly.
     //
-    // We search across ALL store_settings in the database with a
-    // non-empty `services.local_address`. The operator may have
-    // configured the address while logged into a sibling store under
-    // a different organisation (e.g. admin of "Nike" while browsing
-    // "Nike Shop" — both belonging to the same user but separate
-    // organisations in the multi-tenant model), and the JWT carries
-    // the *current* org_id, not the one the data was actually saved
-    // against. A cross-org cross-store lookup lets a single address
-    // configure cover all sibling stores the user can see.
-    //
-    // We use the unscoped `GlobalPrismaService` here, NOT the scoped
-    // `availabilityService['prisma']` — the latter would silently
-    // inject `where: { organization_id: <current org> }` and filter
-    // out addresses saved under a different org (e.g. Nike's data
-    // when the active org is Test Org).
-    //
-    // NOTE: this is intentionally permissive for the demo. A
-    // production system would resolve the user's accessible
-    // organisation_ids via a membership table and filter on those.
-    const settingsRows = await this.globalPrisma.store_settings.findMany({
+    // QUI-966 (S16): only the resolved store's own settings are read.
+    // The previous cross-tenant scan over every `store_settings` row could
+    // leak another store's address; a store without an address gets null.
+    const settingsRow = await prisma.store_settings.findFirst({
+      where: { store_id: storeId },
       orderBy: { id: 'desc' },
     });
-    for (const settingsRow of settingsRows) {
-      const localAddress = ((settingsRow.settings as any)?.services as any)
-        ?.local_address;
-      if (localAddress && (localAddress.address_line1 || localAddress.city)) {
-        return {
-          success: true,
-          data: {
-            id: 0,
-            address_line1: localAddress.address_line1 ?? '',
-            address_line2: localAddress.address_line2 ?? null,
-            city: localAddress.city ?? '',
-            state_province: localAddress.state_province ?? null,
-            country_code: localAddress.country_code ?? 'CO',
-            postal_code: localAddress.postal_code ?? null,
-            is_primary: true,
-            type: 'store_physical',
-            store_id: storeId,
-            organization_id: req.organization_id ?? null,
-          },
-        };
-      }
+    const localAddress = ((settingsRow?.settings as any)?.services as any)
+      ?.local_address;
+    if (localAddress && (localAddress.address_line1 || localAddress.city)) {
+      return {
+        success: true,
+        data: {
+          id: 0,
+          address_line1: localAddress.address_line1 ?? '',
+          address_line2: localAddress.address_line2 ?? null,
+          city: localAddress.city ?? '',
+          state_province: localAddress.state_province ?? null,
+          country_code: localAddress.country_code ?? 'CO',
+          postal_code: localAddress.postal_code ?? null,
+          is_primary: true,
+          type: 'store_physical',
+          store_id: storeId,
+          organization_id: req.organization_id ?? null,
+        },
+      };
     }
 
     return { success: true, data: null };

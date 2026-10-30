@@ -2316,16 +2316,29 @@ export class ReservationsService {
       );
     }
 
-    return await this.mapBooking(
-      await this.prisma.bookings.update({
-        where: { id },
+    // QUI-966 (T5 advisory A2): the write is conditional on the status just
+    // read. If another request moved the booking meanwhile (a staff cancel
+    // racing the email cancel link) the row no longer matches, Prisma
+    // reports P2025 and this caller gets a 409 instead of running the
+    // transition's side effects (e.g. `afterBookingCancelled`) a second time.
+    const updated = await this.prisma.bookings
+      .update({
+        where: { id, status: booking.status as booking_status_enum },
         data: {
           status: targetStatus as booking_status_enum,
           updated_at: new Date(),
         },
         include: this.BOOKING_INCLUDE,
-      }),
-    );
+      })
+      .catch((err: unknown): never => {
+        if ((err as { code?: string })?.code === 'P2025') {
+          throw new ConflictException(
+            'La reserva cambió de estado mientras se procesaba, recarga e intenta de nuevo',
+          );
+        }
+        throw err;
+      });
+    return await this.mapBooking(updated);
   }
 
   /**

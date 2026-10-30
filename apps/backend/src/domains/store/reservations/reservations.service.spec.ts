@@ -1,6 +1,10 @@
 import { ReservationsService } from './reservations.service';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  localDateString,
+} from '@common/utils/store-timezone.util';
 
 /**
  * Smoke tests covering the appointment-design state-machine additions:
@@ -24,11 +28,12 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
     const bookings: any[] = [];
     const prisma: any = {
       bookings: {
-        findUnique: jest.fn(({ where, include }: any) =>
-          Promise.resolve(
-            bookings.find((b) => b.id === where.id) ?? null,
-          ),
-        ),
+        // Returns a snapshot (like Prisma) so a later `update` does not
+        // mutate the row the service already read.
+        findUnique: jest.fn(({ where }: any) => {
+          const row = bookings.find((b) => b.id === where.id);
+          return Promise.resolve(row ? { ...row } : null);
+        }),
         // The service reads bookings with the scoped `findFirst`.
         findFirst: jest.fn(({ where }: any) =>
           Promise.resolve(bookings.find((b) => b.id === where.id) ?? null),
@@ -42,6 +47,8 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
         }),
         create: jest.fn(),
       },
+      // QUI-966 S8: checkIn resolves the store timezone (null = default).
+      store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     const emits: any[] = [];
     const eventEmitter: any = {
@@ -108,7 +115,10 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
       customer: { first_name: 'Juan', last_name: 'Pérez' },
       product: { name: 'Corte' },
       provider: { id: 7 },
-      date: new Date('2026-07-18T00:00:00Z'),
+      // QUI-966 S8: check-in only on the appointment's day (store TZ).
+      date: new Date(
+        `${localDateString(new Date(), DEFAULT_STORE_TIMEZONE)}T00:00:00Z`,
+      ),
     });
     const result = await service.checkIn(1, 'customer');
     expect(result.arrival_at).toBeInstanceOf(Date);
@@ -135,6 +145,37 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
     await service.checkIn(1, 'customer');
     // arrival_recorded must NOT be re-emitted on idempotent calls.
     expect(emits.find((e) => e.name === 'booking.arrival_recorded')).toBeUndefined();
+  });
+
+  // QUI-966 T8 (T5 advisory A2): the status write is conditional on the
+  // status that was read, so two concurrent cancels (staff + email link)
+  // cannot both run the cancellation side effects.
+  it('transition writes conditionally on the status it read', async () => {
+    const { service, prisma, bookings } = buildService();
+    bookings.push({ id: 1, status: 'confirmed' });
+    await service.markArriving(1);
+    expect(prisma.bookings.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 1, status: 'confirmed' } }),
+    );
+  });
+
+  it('transition answers 409 when the status changed meanwhile and runs no cancel side effects', async () => {
+    const { service, prisma, bookings, emits } = buildService();
+    bookings.push({ id: 1, status: 'confirmed' });
+    // Another request (e.g. the email cancel link) won the race: the row no
+    // longer matches `{ id, status: 'confirmed' }`.
+    prisma.bookings.update.mockRejectedValueOnce(
+      Object.assign(new Error('Record to update not found.'), { code: 'P2025' }),
+    );
+    await expect(service.cancel(1)).rejects.toBeInstanceOf(ConflictException);
+    expect(emits.map((e) => e.name)).not.toContain('booking.cancelled');
+  });
+
+  it('transition does not mask unrelated write errors as 409', async () => {
+    const { service, prisma, bookings } = buildService();
+    bookings.push({ id: 1, status: 'confirmed' });
+    prisma.bookings.update.mockRejectedValueOnce(new Error('connection lost'));
+    await expect(service.markArriving(1)).rejects.toThrow('connection lost');
   });
 
   it('checkIn rejects when status is pending', async () => {
@@ -402,7 +443,8 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
 
     expect(ctx.bookings.length).toBe(1);
     expect(ctx.ordersService.create).not.toHaveBeenCalled();
-    expect(ctx.bookings[0].order_id).toBeUndefined();
+    // No auto-link: the booking is persisted without an order (null column).
+    expect(ctx.bookings[0].order_id).toBeNull();
   });
 
   it('QUI-649: a passed order_id attaches the reservation to that order, not a new one', async () => {
@@ -428,13 +470,13 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
       ctx.service.create(baseDto),
     ).rejects.toThrow(/inventory short/);
 
-    // The reservation was rolled back: nothing in the in-memory store.
+    // The reservation was never persisted: nothing in the in-memory store.
     expect(ctx.bookings.length).toBe(0);
-    // The transaction itself was entered (we know because ordersService
-    // was called), but its callback threw and the whole $transaction was
-    // abandoned.
-    expect(ctx.prisma.$transaction).toHaveBeenCalled();
+    // Since hotfix 576 the order is created BEFORE the booking transaction
+    // (autocommit), so a failing order creation aborts the flow before the
+    // booking write is even attempted.
     expect(ctx.ordersService.create).toHaveBeenCalledTimes(1);
+    expect(ctx.prisma.$transaction).not.toHaveBeenCalled();
   });
 
   /**
@@ -451,10 +493,11 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
       Promise.reject(new ConflictException('slot no longer available')),
     );
 
-    // Spy on ordersService.cancel — needs to exist for the compensation
-    // path to invoke it. Add it after buildServiceForCreate() returns it.
+    // OrdersService has no `cancel()`: the compensation goes through
+    // `compensateOrderForFailedBooking` → `ordersService.update` with
+    // `state: 'cancelled'` and the note as the audited `reason`.
     const cancelSpy = jest.fn(() => Promise.resolve({ id: 555, state: 'cancelled' }));
-    ctx.ordersService.cancel = cancelSpy;
+    ctx.ordersService.update = cancelSpy;
 
     await expect(ctx.service.create(baseDto)).rejects.toThrow(/slot no longer/);
 
@@ -462,7 +505,10 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
     expect(ctx.ordersService.create).toHaveBeenCalledTimes(1);
     // The compensation cancelled the order.
     expect(cancelSpy).toHaveBeenCalledTimes(1);
-    expect(cancelSpy).toHaveBeenCalledWith(555, 1);
+    expect(cancelSpy).toHaveBeenCalledWith(555, {
+      state: 'cancelled',
+      reason: expect.stringContaining('Compensación por fallo de reserva'),
+    });
     // No booking persisted.
     expect(ctx.bookings.length).toBe(0);
   });

@@ -196,4 +196,58 @@ describe('StoreOperationsGuard', () => {
     expect(ok).toBe(true);
     expect(access.canUseModule).not.toHaveBeenCalled();
   });
+
+  // QUI-966 T8 (S16): a store without subscription hitting a non-AI write
+  // (e.g. PATCH /store/reservations/:id/confirm) is still blocked with the
+  // same code/status, but the message no longer talks about "AI features".
+  it('blocks store writes without subscription with a non-AI message (SUBSCRIPTION_004)', async () => {
+    access.canUseModule.mockResolvedValue({
+      allowed: false,
+      mode: 'block',
+      severity: 'blocker',
+      reason: 'SUBSCRIPTION_004',
+      subscription_state: 'no_plan',
+      plan_id: null,
+      has_record: false,
+    } as any);
+
+    let caught: any;
+    try {
+      await guard.canActivate(
+        buildCtx({ method: 'PATCH', path: '/api/store/reservations/5/confirm' }),
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(VendixHttpException);
+    expect(caught.getStatus()).toBe(403);
+    const body = caught.getResponse();
+    expect(body.error_code).toBe('SUBSCRIPTION_004');
+    expect(body.message).toBe('La tienda no tiene una suscripción activa');
+    expect(body.message).not.toMatch(/AI/);
+    expect(body.details).toEqual({
+      subscription_state: 'no_plan',
+      plan_id: null,
+      has_record: false,
+    });
+  });
+
+  it('keeps the code message for other block reasons', async () => {
+    access.canUseModule.mockResolvedValue({
+      allowed: false,
+      mode: 'block',
+      severity: 'critical',
+      reason: 'SUBSCRIPTION_008',
+      subscription_state: 'suspended',
+    } as any);
+    let caught: any;
+    try {
+      await guard.canActivate(buildCtx({}));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught.getResponse().message).toBe(
+      'Subscription suspended due to unpaid balance',
+    );
+  });
 });

@@ -327,6 +327,42 @@ describe('BookingConfirmationService email links (QUI-966 S9)', () => {
     expect(emits).toEqual([]);
   });
 
+  // QUI-966 T8 (T5 advisory A1): confirm + cancel links of the same booking
+  // clicked at once can deadlock (each claims its token and burns the other).
+  // The loser gets the "link already used" 400, never a 500.
+  it.each([
+    ['Prisma P2034', { code: 'P2034', message: 'Transaction failed due to a write conflict or a deadlock' }],
+    ['Postgres 40P01', { meta: { driverAdapterError: { cause: { originalCode: '40P01' } } }, message: 'deadlock detected' }],
+    ['Postgres 40001', { meta: { code: '40001' }, message: 'could not serialize access' }],
+  ])(
+    'a deadlocked/serialization-failed link transaction (%s) maps to BOOK_CONFIRM_002 with no effects',
+    async (_label, dbError) => {
+      const { service, unscoped, emits, reservationsService } = build();
+      unscoped.$transaction = jest.fn(() => Promise.reject(dbError));
+      for (const tkn of ['confirm-tkn', 'cancel-tkn']) {
+        await expect(service.processToken(tkn)).rejects.toMatchObject({
+          errorCode: 'BOOK_CONFIRM_002',
+        });
+      }
+      expect(emits).toEqual([]);
+      expect(reservationsService.completeLinkCancellation).not.toHaveBeenCalled();
+    },
+  );
+
+  it('a deadlock while consuming an already-confirmed link maps to BOOK_CONFIRM_002', async () => {
+    const { service, unscoped } = build({ bookingStatus: 'confirmed' });
+    unscoped.$transaction = jest.fn(() => Promise.reject({ code: 'P2034' }));
+    await expect(service.processToken('confirm-tkn')).rejects.toMatchObject({
+      errorCode: 'BOOK_CONFIRM_002',
+    });
+  });
+
+  it('a non-concurrency transaction error is not masked as BOOK_CONFIRM_002', async () => {
+    const { service, unscoped } = build();
+    unscoped.$transaction = jest.fn(() => Promise.reject(new Error('connection lost')));
+    await expect(service.processToken('confirm-tkn')).rejects.toThrow('connection lost');
+  });
+
   it('sendConfirmationRequest still issues the confirm/cancel pair for a pending booking', async () => {
     const { service, prisma } = build();
     const result = await service.sendConfirmationRequest(42);

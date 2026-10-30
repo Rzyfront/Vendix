@@ -59,22 +59,28 @@ export function isUniqueViolationOn(error: unknown, field: string): boolean {
   return haystack.includes(field);
 }
 
+/** SQLSTATEs of class 40 that mean "retry the transaction". */
+const RETRYABLE_SQLSTATES = new Set(['40001', '40P01']);
+
 /**
  * True when `error` is a Postgres serialization failure / write conflict
- * (Prisma P2034, SQLSTATE 40001) — the transaction can be retried.
+ * (Prisma P2034, SQLSTATE 40001) or a deadlock victim (SQLSTATE 40P01, which
+ * Prisma also reports as P2034) — the transaction can be retried.
  */
 export function isSerializationFailure(error: unknown): boolean {
   const err = error as any;
-  if (err?.code === 'P2034' || err?.code === '40001') return true;
-  if (err?.meta?.code === '40001') return true;
-  if (err?.meta?.driverAdapterError?.cause?.originalCode === '40001') {
+  if (err?.code === 'P2034' || RETRYABLE_SQLSTATES.has(err?.code)) return true;
+  if (RETRYABLE_SQLSTATES.has(err?.meta?.code)) return true;
+  if (
+    RETRYABLE_SQLSTATES.has(err?.meta?.driverAdapterError?.cause?.originalCode)
+  ) {
     return true;
   }
-  // Only the Postgres serialization text or the SQLSTATE as its own code
-  // token ("code: 40001", "SQLSTATE 40001") — never any "40001" substring
-  // (an id, an amount or an order number in an unrelated error message).
+  // Only the Postgres serialization/deadlock text or the SQLSTATE as its own
+  // code token ("code: 40001", "SQLSTATE 40P01") — never any "40001"
+  // substring (an id, an amount or an order number in an unrelated message).
   const message = typeof err?.message === 'string' ? err.message : '';
-  return /could not serialize access|\b(?:sqlstate|code)\W{0,3}40001\b/i.test(
+  return /could not serialize access|deadlock detected|\b(?:sqlstate|code)\W{0,3}40(?:001|P01)\b/i.test(
     message,
   );
 }

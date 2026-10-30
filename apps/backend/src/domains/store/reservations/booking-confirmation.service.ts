@@ -7,6 +7,7 @@ import * as crypto from 'crypto';
 import { AvailabilityService } from './availability.service';
 import { ReservationsService } from './reservations.service';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
+import { isSerializationFailure } from '@common/utils/sequence-number.util';
 
 /**
  * QUI-966 S9 — statuses an email link may change: confirm only a pending
@@ -145,11 +146,9 @@ export class BookingConfirmationService {
     // success. The link is still consumed (with its sibling) so it can't be
     // replayed, but the booking and its events are left alone.
     if (action === 'confirm' && status === booking_status_enum.confirmed) {
-      await this.prisma
-        .withoutScope()
-        .$transaction((tx: Prisma.TransactionClient) =>
-          this.consumeLinkTokens(tx, tokenRecord),
-        );
+      await this.runLinkTransaction((tx) =>
+        this.consumeLinkTokens(tx, tokenRecord),
+      );
       return {
         action,
         booking_id: booking.id,
@@ -272,18 +271,38 @@ export class BookingConfirmationService {
     allowedFrom: readonly booking_status_enum[],
     target: booking_status_enum,
   ): Promise<void> {
-    await this.prisma
-      .withoutScope()
-      .$transaction(async (tx: Prisma.TransactionClient) => {
-        await this.consumeLinkTokens(tx, tokenRecord);
-        const changed = await tx.bookings.updateMany({
-          where: { id: tokenRecord.booking_id, status: { in: [...allowedFrom] } },
-          data: { status: target, updated_at: new Date() },
-        });
-        if (changed.count !== 1) {
-          throw this.bookingNotChangeable(tokenRecord.action);
-        }
+    await this.runLinkTransaction(async (tx) => {
+      await this.consumeLinkTokens(tx, tokenRecord);
+      const changed = await tx.bookings.updateMany({
+        where: { id: tokenRecord.booking_id, status: { in: [...allowedFrom] } },
+        data: { status: target, updated_at: new Date() },
       });
+      if (changed.count !== 1) {
+        throw this.bookingNotChangeable(tokenRecord.action);
+      }
+    });
+  }
+
+  /**
+   * Runs a link transaction. The confirm and cancel links of one booking
+   * clicked at once lock the same token rows in opposite order and Postgres
+   * may abort one as a deadlock victim (40P01 / Prisma P2034) or a
+   * serialization failure: that click lost the race, so it gets the same
+   * "link already used" answer as a losing claim, never a 500 (QUI-966 T5 A1).
+   */
+  private async runLinkTransaction(
+    work: (tx: Prisma.TransactionClient) => Promise<void>,
+  ): Promise<void> {
+    try {
+      await this.prisma
+        .withoutScope()
+        .$transaction((tx: Prisma.TransactionClient) => work(tx));
+    } catch (err) {
+      if (isSerializationFailure(err)) {
+        throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_002);
+      }
+      throw err;
+    }
   }
 
   /**

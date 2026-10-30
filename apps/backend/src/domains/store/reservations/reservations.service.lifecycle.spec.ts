@@ -710,6 +710,16 @@ describe('T3 advisory D — isSerializationFailure', () => {
     ).toBe(true);
     expect(isSerializationFailure({ message: 'Error occurred: code: `40001`' })).toBe(true);
     expect(isSerializationFailure({ message: 'ERROR: SQLSTATE 40001' })).toBe(true);
+    // QUI-966 T8: deadlock_detected (40P01) is the same retryable class.
+    expect(isSerializationFailure({ code: '40P01' })).toBe(true);
+    expect(isSerializationFailure({ meta: { code: '40P01' } })).toBe(true);
+    expect(
+      isSerializationFailure({
+        meta: { driverAdapterError: { cause: { originalCode: '40P01' } } },
+      }),
+    ).toBe(true);
+    expect(isSerializationFailure({ message: 'ERROR: deadlock detected' })).toBe(true);
+    expect(isSerializationFailure({ message: 'Order 40P01 not found' })).toBe(false);
   });
 
   it('does not match "40001" appearing anywhere else in a message', () => {
