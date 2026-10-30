@@ -125,11 +125,6 @@ export class StoreEcommerceLayoutComponent {
   readonly store_display_name = computed(() =>
     this.capitalizeFirst(this.store_name()),
   );
-  readonly vendix_whatsapp_url =
-    'https://wa.me/573234668500?text=' +
-    encodeURIComponent(
-      'Hola equipo Vendix, vi una tienda en línea hecha con Vendix y quiero más información.',
-    );
   readonly store_logo = signal<string | null>(null);
   readonly show_user_menu = signal(false);
   readonly show_mobile_menu = signal(false);
@@ -141,6 +136,18 @@ export class StoreEcommerceLayoutComponent {
 
   // Footer settings
   readonly footer_settings = signal<FooterSettings | null>(null);
+  /** SEO-TECH-21: crédito visible salvo que el comerciante lo apague en los ajustes del pie. */
+  readonly show_powered_by = computed(
+    () => this.footer_settings()?.show_powered_by !== false,
+  );
+  /** Enlace del crédito con UTM por tienda (el host es público; sin datos personales). */
+  readonly powered_by_url = computed(
+    () =>
+      'https://vendix.online/?utm_source=tienda&utm_medium=powered_by&utm_campaign=storefront&utm_content=' +
+      encodeURIComponent(
+        typeof location !== 'undefined' ? location.hostname : this.store_name(),
+      ),
+  );
   readonly show_about_modal = signal(false);
   readonly show_faq_modal = signal(false);
   readonly show_shipping_modal = signal(false);

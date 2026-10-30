@@ -489,10 +489,6 @@
           {{ footer_settings()!.store_info!.support_email }}
         </a>
         }
-        <p class="footer-vendix-credit">
-          <a [href]="vendix_whatsapp_url" target="_blank" rel="noopener">Software construido y proveído por&nbsp;</a>
-          <a href="https://vendix.online" target="_blank" rel="noopener" class="vendix-name vendix-link">Vendix</a><a [href]="vendix_whatsapp_url" target="_blank" rel="noopener">. Para más información, comunícate con nosotros haciendo&nbsp;</a><a [href]="vendix_whatsapp_url" target="_blank" rel="noopener" class="vendix-link">clic aquí</a><a [href]="vendix_whatsapp_url" target="_blank" rel="noopener">.</a>
-        </p>
       </div>
 
       <!-- Sección 2: Enlaces -->
@@ -559,7 +555,10 @@
     </div>
     <div class="footer-bottom">
       <p>&copy; {{ store_display_name() }} {{ current_year }}. Todos los derechos reservados.</p>
-      <p class="footer-powered">Powered by <a href="https://vendix.online" target="_blank" rel="noopener" class="vendix-link">Vendix</a></p>
+      <!-- SEO-TECH-21: un solo crédito, nofollow, con UTM y ocultable por el comerciante -->
+      @if (show_powered_by()) {
+      <p class="footer-powered"><a [href]="powered_by_url()" target="_blank" rel="nofollow noopener" class="vendix-link">Tienda creada con Vendix</a></p>
+      }
     </div>
   </footer>
 

@@ -175,6 +175,8 @@ export interface FooterSettings {
   links?: FooterLink[];
   help?: FooterHelp;
   social?: FooterSocial;
+  /** Crédito «Tienda creada con Vendix» en el pie. Ausente = visible (SEO-TECH-21). */
+  show_powered_by?: boolean;
 }
 
 /**
