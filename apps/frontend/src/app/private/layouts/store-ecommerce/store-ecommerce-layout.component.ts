@@ -93,6 +93,8 @@ interface FooterSettings {
   links?: FooterLink[];
   help?: FooterHelp;
   social?: FooterSocial;
+  /** Crédito «Tienda creada con Vendix». Ausente = visible (SEO-TECH-21). */
+  show_powered_by?: boolean;
 }
 
 @Component({
