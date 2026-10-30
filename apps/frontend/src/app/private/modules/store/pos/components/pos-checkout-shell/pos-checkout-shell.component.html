@@ -85,7 +85,11 @@
                 [customerId]="cartCustomerId()"
               ></app-pos-holder-warning>
             }
-            <app-pos-scheduled-order-picker></app-pos-scheduled-order-picker>
+            <!-- Pedido programado: solo aplica a ventas que se entregan
+                 (recoger o domicilio). En consumo en mesa no se agenda nada. -->
+            @if (entregaChoice() !== 'mesa') {
+              <app-pos-scheduled-order-picker></app-pos-scheduled-order-picker>
+            }
             <app-pos-payment-step
               [cartState]="cartState()"
               [checkoutIntent]="effectiveIntent()"
