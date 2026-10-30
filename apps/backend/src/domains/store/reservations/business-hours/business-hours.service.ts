@@ -9,12 +9,13 @@ import { UpsertBusinessHoursDto } from './dto';
  * slot availability. Overrides / supplements per-provider provider_schedules
  * (provider availability still wins when stricter).
  *
- * Provides three consumers:
- *   - HTTP CRUD via BusinessHoursController
- *   - AvailabilityService.loadStoreHours(storeId) for slot generation
- *   - AvailabilityService.isWithinStoreHours(storeId, day_of_week, hhmm) for
- *     "is the venue even open at this moment" checks used by reschedule and
- *     double-validation.
+ * Consumers:
+ *   - HTTP CRUD via BusinessHoursController (one row per day, unchanged)
+ *   - `loadStoreWindows(storeId)`: every open block per day, used by the
+ *     slot grid, `isSlotAvailable` and the booking gate. QUI-966 S15: a slot
+ *     must fit entirely inside ONE block, so a lunch gap stays closed.
+ *   - `loadStoreHours(storeId)`: legacy outer envelope per day, kept for
+ *     backward compatibility; the booking flow no longer uses it.
  */
 @Injectable()
 export class BusinessHoursService {
@@ -118,10 +119,9 @@ export class BusinessHoursService {
    * haven't migrated yet) but is no longer the primary source.
    *
    * Collapses each day's blocks to a single (earliest_open, latest_close)
-   * envelope — the slot generator has long assumed a single window per
-   * day. Callers that need to honor lunch breaks / split-shifts should
-   * use `loadStoreWindows` instead, which returns the per-day array of
-   * windows.
+   * envelope. Legacy shape: booking availability and the booking gate use
+   * `loadStoreWindows` (per-day blocks) since QUI-966 S15, because the
+   * envelope reopened the lunch gap.
    */
   async loadStoreHours(
     storeId: number,

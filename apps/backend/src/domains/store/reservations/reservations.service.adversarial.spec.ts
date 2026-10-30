@@ -190,7 +190,7 @@ function buildService(
     {} as any,
     { record: jest.fn() } as any,
     // QUI-966 T2: store hours for the S4 gate (empty = not configured).
-    { loadStoreHours: jest.fn().mockResolvedValue(new Map()) } as any,
+    { loadStoreWindows: jest.fn().mockResolvedValue(new Map()) } as any,
   );
   return {
     service,

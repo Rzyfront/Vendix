@@ -291,7 +291,7 @@ export class ReservationsService {
     if (opts.allowOverride === true) return;
     const [timezone, storeHours] = await Promise.all([
       resolveStoreTimezone(this.prisma, store_id),
-      this.businessHoursService.loadStoreHours(store_id),
+      this.businessHoursService.loadStoreWindows(store_id),
     ]);
     assertBookingSlotOpen(slot, { timezone, storeHours });
   }

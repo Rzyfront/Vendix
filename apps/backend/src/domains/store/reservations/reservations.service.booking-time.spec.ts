@@ -100,7 +100,12 @@ function build(
     validateNoOverlapForCustomer: jest.fn().mockResolvedValue(undefined),
   };
   const businessHoursService: any = {
-    loadStoreHours: jest.fn().mockResolvedValue(new Map(opts.hours ?? STORE_HOURS)),
+    // QUI-966 S15: the gate reads every open block per day.
+    loadStoreWindows: jest
+      .fn()
+      .mockResolvedValue(
+        new Map((opts.hours ?? STORE_HOURS).map(([d, w]) => [d, [w]])),
+      ),
   };
   const service = new ReservationsService(
     prisma,

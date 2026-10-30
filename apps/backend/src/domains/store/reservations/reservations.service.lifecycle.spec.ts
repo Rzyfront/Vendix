@@ -181,7 +181,7 @@ function buildService(opts: { product?: Row; isSlotAvailable?: boolean } = {}) {
     {} as any,
     {} as any,
     { record: jest.fn() } as any,
-    { loadStoreHours: jest.fn().mockResolvedValue(new Map()) } as any,
+    { loadStoreWindows: jest.fn().mockResolvedValue(new Map()) } as any,
   );
   return {
     service,

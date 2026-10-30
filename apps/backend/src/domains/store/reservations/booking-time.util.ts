@@ -24,6 +24,38 @@ export type StoreHoursMap = Map<
   { start_time: string; end_time: string }
 >;
 
+/** One open block of the store master calendar (`HH:mm`, half-open). */
+export interface StoreWindow {
+  start_time: string;
+  end_time: string;
+}
+
+/**
+ * Store master calendar by day of week (0 = Sunday): every open block of the
+ * day, sorted by start. Two blocks (08–12 / 14–18) mean the lunch gap is
+ * closed (QUI-966 S15). Shape of `BusinessHoursService.loadStoreWindows`.
+ */
+export type StoreWindowsMap = Map<number, StoreWindow[]>;
+
+/**
+ * True when [start_time, end_time) fits entirely inside ONE of `windows`
+ * (QUI-966 S15): a slot that straddles the gap between two blocks is not
+ * bookable even if both ends are inside some block. Ending exactly at the
+ * block end is allowed.
+ */
+export function slotFitsOneWindow(
+  start_time: string,
+  end_time: string,
+  windows: ReadonlyArray<StoreWindow>,
+): boolean {
+  const start = timeToMinutes(start_time);
+  const end = timeToMinutes(end_time);
+  return windows.some(
+    (w) =>
+      start >= timeToMinutes(w.start_time) && end <= timeToMinutes(w.end_time),
+  );
+}
+
 const DAY_NAMES = [
   'domingo',
   'lunes',
@@ -121,13 +153,14 @@ export function assertBookingSlotShape(slot: BookingSlotInput): void {
 
 /**
  * Rules staff may override with `skip_availability_check`: the slot has not
- * already ended (store timezone) and falls inside the store business hours.
+ * already ended (store timezone) and fits entirely inside ONE block of the
+ * store business hours (QUI-966 S15: the gap between blocks is closed).
  * An empty `storeHours` map means the store never configured its hours, so
  * the window is not enforced (legacy fallback shared with availability).
  */
 export function assertBookingSlotOpen(
   slot: BookingSlotInput,
-  ctx: { timezone: string; storeHours: StoreHoursMap; now?: Date },
+  ctx: { timezone: string; storeHours: StoreWindowsMap; now?: Date },
 ): void {
   if (isSlotEndInPast(slot, ctx.timezone, ctx.now)) {
     throw new BadRequestException(
@@ -137,20 +170,18 @@ export function assertBookingSlotOpen(
   if (ctx.storeHours.size === 0) return;
 
   const dayOfWeek = civilDayOfWeek(slot.date);
-  const window = ctx.storeHours.get(dayOfWeek);
-  if (!window) {
+  const windows = ctx.storeHours.get(dayOfWeek) ?? [];
+  if (windows.length === 0) {
     throw new BadRequestException(
       `La tienda no atiende el día ${DAY_NAMES[dayOfWeek]}`,
     );
   }
-  const start = timeToMinutes(slot.start_time);
-  const end = timeToMinutes(slot.end_time);
-  if (
-    start < timeToMinutes(window.start_time) ||
-    end > timeToMinutes(window.end_time)
-  ) {
+  if (!slotFitsOneWindow(slot.start_time, slot.end_time, windows)) {
+    const label = windows
+      .map((w) => `${w.start_time} - ${w.end_time}`)
+      .join(', ');
     throw new BadRequestException(
-      `El horario solicitado está fuera del horario de atención (${window.start_time} - ${window.end_time})`,
+      `El horario solicitado está fuera del horario de atención (${label})`,
     );
   }
 }

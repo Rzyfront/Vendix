@@ -10,6 +10,9 @@ import {
   isSlotEndInPast,
   isValidCivilDate,
   isValidTimeRange,
+  slotFitsOneWindow,
+  StoreWindow,
+  StoreWindowsMap,
 } from './booking-time.util';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -125,9 +128,10 @@ export class AvailabilityService {
 
     if (!product) return [];
 
-    // Resolve the store's business-hours master calendar once per call.
+    // Resolve the store's business-hours master calendar once per call:
+    // every open block per day (QUI-966 S15, the lunch gap stays closed).
     // Empty Map = store never configured their hours (legacy fallback).
-    const storeHoursMap = await this.businessHoursService.loadStoreHours(
+    const storeWindowsMap = await this.businessHoursService.loadStoreWindows(
       product.store_id,
     );
 
@@ -155,39 +159,50 @@ export class AvailabilityService {
       return [];
     }
 
-    let providers: {
-      id: number;
-      display_name: string;
-      avatar_url: string | null;
-    }[] = [];
-
-    if (!isFreeBooking) {
-      const providerWhere: any = {
-        is_active: true,
-        services: { some: { product_id } },
-      };
-
-      if (provider_id) {
-        providerWhere.id = provider_id;
-      }
-
-      providers = await this.prisma.service_providers.findMany({
-        where: providerWhere,
-        select: {
-          id: true,
-          display_name: true,
-          avatar_url: true,
-        },
-      });
-    }
-
-    if (isFreeBooking || providers.length === 0) {
+    if (isFreeBooking) {
       return this.generateGenericSlots(
         product_id,
         date_from,
         date_to,
         duration,
         buffer,
+        storeWindowsMap,
+      );
+    }
+
+    const activeProvidersWhere: Prisma.service_providersWhereInput = {
+      is_active: true,
+      services: { some: { product_id } },
+    };
+    const providers = await this.prisma.service_providers.findMany({
+      where: provider_id
+        ? { ...activeProvidersWhere, id: provider_id }
+        : activeProvidersWhere,
+      select: {
+        id: true,
+        display_name: true,
+        avatar_url: true,
+      },
+    });
+
+    if (providers.length === 0) {
+      // QUI-966 (L20): generic provider-less slots are only the legacy
+      // fallback of a service with ZERO active providers (same rule as
+      // `create`'s `countActiveProviders`). When the service has providers
+      // (and only the requested one is missing) there is nothing to offer.
+      const activeProviders = provider_id
+        ? await this.prisma.service_providers.count({
+            where: activeProvidersWhere,
+          })
+        : 0;
+      if (activeProviders > 0) return [];
+      return this.generateGenericSlots(
+        product_id,
+        date_from,
+        date_to,
+        duration,
+        buffer,
+        storeWindowsMap,
       );
     }
 
@@ -212,10 +227,12 @@ export class AvailabilityService {
       },
     });
 
-    // 6. Obtener bookings existentes (no canceladas) en el rango
+    // 6. Bookings that keep these providers busy in the range, for ANY
+    // service (QUI-966 S15): a provider attending another service is not
+    // free, same rule as `isSlotAvailable`.
     const existingBookings = await this.prisma.bookings.findMany({
       where: {
-        product_id,
+        provider_id: { in: providerIds },
         date: {
           gte: new Date(date_from),
           lte: new Date(date_to),
@@ -234,9 +251,10 @@ export class AvailabilityService {
     const slots: AvailabilitySlot[] = [];
     const dates = this.getDatesInRange(date_from, date_to);
 
-    // "Ahora" en horario local del store. Se usa SOLO para descartar slots
-    // cuyo start_time ya pasó cuando la fecha es hoy — mantiene coherente
-    // el calendario de reservas (admin y ecommerce) y el grid de slots.
+    // "Ahora" en horario local del store. Se usa SOLO para descartar los
+    // slots de HOY que ya TERMINARON (misma noción de "pasado" que el gate
+    // de reservas, `isSlotEndInPast`, y que la ruta free_booking): un slot
+    // en curso se sigue ofreciendo para que el POS pueda reservarlo.
     const { todayLocal, nowHHMM } = await this.storeNow(product.store_id);
 
     // Agrupar datos para acceso rapido
@@ -274,9 +292,9 @@ export class AvailabilityService {
       // QUI-966: nunca se ofrecen fechas pasadas (día de la tienda).
       if (dateStr < todayLocal) continue;
       // Si la fecha es HOY en horario local del store, descartamos los
-      // slots cuyo start_time ya pasó. El grid del admin y el del ecommerce
-      // muestran solo horarios disponibles REALMENTE.
+      // slots que ya terminaron (QUI-966 L20: misma regla en ambas rutas).
       const isToday = dateStr === todayLocal;
+      const storeWindows = storeWindowsMap.get(dayOfWeek);
 
       for (const provider of providers) {
         const provSchedules = schedulesByProvider.get(provider.id) || [];
@@ -300,26 +318,20 @@ export class AvailabilityService {
             exception?.custom_start_time || schedule.start_time;
           const effectiveEnd = exception?.custom_end_time || schedule.end_time;
 
-          // Intersectar con horario maestro de la tienda
-          const storeWindow = storeHoursMap.get(dayOfWeek);
-          const clamped = this.clampToStoreHours(
+          // Intersectar con CADA bloque del horario maestro de la tienda:
+          // un slot cabe completo en un bloque del profesional y en uno de
+          // la tienda (QUI-966 S15, el hueco del almuerzo queda cerrado).
+          let timeSlots = this.intersectWithStoreWindows(
             effectiveStart,
             effectiveEnd,
-            storeWindow,
-          );
-          if (!clamped) continue;
-
-          // Generar time slots
-          let timeSlots = this.generateTimeSlots(
-            clamped.start,
-            clamped.end,
-            duration,
-            buffer,
+            storeWindows,
+          ).flatMap((w) =>
+            this.generateTimeSlots(w.start, w.end, duration, buffer),
           );
           if (isToday) {
-            // Filtra los slots cuyo start_time ya pasó. Comparación
-            // lexicográfica válida porque `HH:mm` está zero-padded.
-            timeSlots = timeSlots.filter((s) => s.start_time >= nowHHMM);
+            // Oculta los slots que ya terminaron. Comparación lexicográfica
+            // válida porque `HH:mm` está zero-padded.
+            timeSlots = timeSlots.filter((s) => s.end_time > nowHHMM);
           }
 
           for (const slot of timeSlots) {
@@ -384,14 +396,17 @@ export class AvailabilityService {
       // (ej. el modal de reagendar del admin) solo ve huecos libres.
       // Por defecto (`true`), conservamos todos para que el frontend
       // pueda mostrar la franja completa con OCUPADO标记.
-      if (include_booked === false && entry.is_booked) continue;
+      // A slot is booked only when NO provider is free for it: another
+      // provider free at the same time keeps it selectable.
+      const isBooked = entry.providers.length === 0;
+      if (include_booked === false && isBooked) continue;
       slots.push({
         date: entry.date,
         start_time: entry.start_time,
         end_time: entry.end_time,
         available_providers: entry.providers,
         total_available: entry.providers.length,
-        is_booked: entry.is_booked,
+        is_booked: isBooked,
       });
     }
 
@@ -402,17 +417,10 @@ export class AvailabilityService {
       return a.start_time.localeCompare(b.start_time);
     });
 
-    // Fallback a slots genéricos si proveedores no tienen schedules configurados
-    if (slots.length === 0) {
-      return this.generateGenericSlots(
-        product_id,
-        date_from,
-        date_to,
-        duration,
-        buffer,
-      );
-    }
-
+    // QUI-966 (L20): no generic provider-less fallback here. The service
+    // has active providers, so an empty grid means none of them works in
+    // the range (or it is already past) — offering slots without a provider
+    // would let a provider_required service be booked unattended.
     return slots;
   }
 
@@ -503,12 +511,12 @@ export class AvailabilityService {
       select: { store_id: true },
     });
     if (!product) return [];
-    const storeHoursMap = await this.businessHoursService.loadStoreHours(
+    const storeWindowsMap = await this.businessHoursService.loadStoreWindows(
       product.store_id,
     );
-    const storeWindow = storeHoursMap.get(dayOfWeek);
-    // No business-hours row for this day → store closed → no providers available.
-    if (!storeWindow) return [];
+    const storeWindows = storeWindowsMap.get(dayOfWeek);
+    // No business-hours block for this day → store closed → no providers available.
+    if (!storeWindows?.length) return [];
 
     // Obtener providers activos que ofrecen este servicio
     const providers = await this.prisma.service_providers.findMany({
@@ -550,16 +558,14 @@ export class AvailabilityService {
           exception?.custom_start_time || schedule.start_time;
         const providerEnd =
           exception?.custom_end_time || schedule.end_time;
-        const effective = this.clampToStoreHours(
-          providerStart,
-          providerEnd,
-          storeWindow,
-        );
-        if (!effective) continue;
-
         if (
-          this.timeToMinutes(start_time) >= this.timeToMinutes(effective.start) &&
-          this.timeToMinutes(end_time) <= this.timeToMinutes(effective.end)
+          this.slotFitsProviderBlock(
+            start_time,
+            end_time,
+            providerStart,
+            providerEnd,
+            storeWindows,
+          )
         ) {
           slotIsWithinBlock = true;
           break;
@@ -665,25 +671,23 @@ export class AvailabilityService {
       select: { store_id: true },
     });
     if (!product) return false;
-    const storeHoursMap = await this.businessHoursService.loadStoreHours(
+    const storeWindowsMap = await this.businessHoursService.loadStoreWindows(
       product.store_id,
     );
-    const storeWindow = storeHoursMap.get(dayOfWeek);
+    const storeWindows = storeWindowsMap.get(dayOfWeek);
 
     let slotIsWithinBlock = false;
     for (const schedule of dayBlocks) {
       const effectiveStart = exception?.custom_start_time || schedule.start_time;
       const effectiveEnd = exception?.custom_end_time || schedule.end_time;
-      const effective = this.clampToStoreHours(
-        effectiveStart,
-        effectiveEnd,
-        storeWindow,
-      );
-      if (!effective) continue;
-
       if (
-        this.timeToMinutes(start_time) >= this.timeToMinutes(effective.start) &&
-        this.timeToMinutes(end_time) <= this.timeToMinutes(effective.end)
+        this.slotFitsProviderBlock(
+          start_time,
+          end_time,
+          effectiveStart,
+          effectiveEnd,
+          storeWindows,
+        )
       ) {
         slotIsWithinBlock = true;
         break;
@@ -814,6 +818,7 @@ export class AvailabilityService {
     date_to: string,
     duration: number,
     buffer: number,
+    storeWindowsMap: StoreWindowsMap,
   ): Promise<AvailabilitySlot[]> {
     const slots: AvailabilitySlot[] = [];
     const dates = this.getDatesInRange(date_from, date_to);
@@ -836,18 +841,14 @@ export class AvailabilityService {
     // `store_settings.settings.availability.working_days`.
     const workingDays = await this.getStoreWorkingDays(product_id);
 
-    // Resolve the store's business-hours master calendar. When the store
-    // has configured `store_business_hours`, we use those HH:mm windows
-    // instead of the legacy hardcoded 08:00–18:00 default. If the store
-    // has no rows at all, fall back to 08:00–18:00 so old stores without
-    // a configured calendar keep working unchanged.
+    // The store's business-hours master calendar (every block per day)
+    // comes from the caller. When the store configured its hours we use
+    // those blocks instead of the legacy hardcoded 08:00–18:00 default; a
+    // store with no hours at all keeps the 08:00–18:00 fallback.
     const product = await this.prisma.products.findFirst({
       where: { id: product_id },
       select: { store_id: true },
     });
-    const storeHoursMap = product
-      ? await this.businessHoursService.loadStoreHours(product.store_id)
-      : new Map<number, { start_time: string; end_time: string }>();
     // QUI-966: "now" in the store timezone. Past dates and today's slots
     // that already ENDED (end <= now) are never offered; a slot in
     // progress still is (same notion of "past" as the booking gate,
@@ -862,20 +863,18 @@ export class AvailabilityService {
       if (now && dateStr < now.todayLocal) continue;
       const isToday = now !== null && dateStr === now.todayLocal;
 
-      // Use the store's business-hours window when configured; legacy
-      // 08:00–18:00 fallback otherwise.
-      const storeWindow = storeHoursMap.get(dayOfWeek);
-      const dayStart = storeWindow?.start_time ?? '08:00';
-      const dayEnd = storeWindow?.end_time ?? '18:00';
-      // If the store explicitly closed this day (no row), skip entirely.
-      if (!storeWindow) {
-        // No business-hours row + day is in workingDays → use fallback.
-        // If workingDays includes this DOW but the store didn't configure
-        // business hours, we still emit slots in 08:00–18:00 to preserve
-        // legacy behavior.
-      }
+      // One run of slots per open block (QUI-966 S15: no slot straddles
+      // the lunch gap). A configured store with no block this day is
+      // closed (same as the booking gate); a store that never configured
+      // its hours keeps the legacy 08:00–18:00 window.
+      const dayWindows: StoreWindow[] =
+        storeWindowsMap.size === 0
+          ? [{ start_time: '08:00', end_time: '18:00' }]
+          : (storeWindowsMap.get(dayOfWeek) ?? []);
 
-      const timeSlots = this.generateTimeSlots(dayStart, dayEnd, duration, buffer);
+      const timeSlots = dayWindows.flatMap((w) =>
+        this.generateTimeSlots(w.start_time, w.end_time, duration, buffer),
+      );
 
       for (const slot of timeSlots) {
         if (isToday && slot.end_time <= now!.nowHHMM) continue;
@@ -906,27 +905,52 @@ export class AvailabilityService {
   }
 
   /**
-   * Intersects an effective provider window with the store's master
-   * business-hours window. Returns null when the intersection is empty
-   * (provider schedule outside store hours, or store closed that day).
-   *
-   * Used by getAvailableSlots, getAvailableProvidersForSlot and
-   * isProviderAvailableForSlot to enforce the upper bound.
+   * Intersects an effective provider block with EACH block of the store's
+   * master calendar for the day. Returns one interval per non-empty
+   * intersection (empty when the store is closed that day or the provider
+   * works outside store hours). QUI-966 S15: the gap between store blocks
+   * is never part of any interval.
    */
-  private clampToStoreHours(
+  private intersectWithStoreWindows(
     providerStart: string,
     providerEnd: string,
-    storeWindow: { start_time: string; end_time: string } | undefined,
-  ): { start: string; end: string } | null {
-    if (!storeWindow) return null;
+    storeWindows: ReadonlyArray<StoreWindow> | undefined,
+  ): Array<{ start: string; end: string }> {
+    if (!storeWindows?.length) return [];
     const ps = this.timeToMinutes(providerStart);
     const pe = this.timeToMinutes(providerEnd);
-    const ss = this.timeToMinutes(storeWindow.start_time);
-    const se = this.timeToMinutes(storeWindow.end_time);
-    const start = Math.max(ps, ss);
-    const end = Math.min(pe, se);
-    if (end <= start) return null;
-    return { start: this.minutesToTime(start), end: this.minutesToTime(end) };
+    const out: Array<{ start: string; end: string }> = [];
+    for (const w of storeWindows) {
+      const start = Math.max(ps, this.timeToMinutes(w.start_time));
+      const end = Math.min(pe, this.timeToMinutes(w.end_time));
+      if (end > start) {
+        out.push({
+          start: this.minutesToTime(start),
+          end: this.minutesToTime(end),
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * True when the slot fits entirely inside the provider block AND inside
+   * ONE store block (QUI-966 S15). Used by getAvailableProvidersForSlot
+   * and isProviderAvailableForSlot.
+   */
+  private slotFitsProviderBlock(
+    start_time: string,
+    end_time: string,
+    providerStart: string,
+    providerEnd: string,
+    storeWindows: ReadonlyArray<StoreWindow> | undefined,
+  ): boolean {
+    const intervals = this.intersectWithStoreWindows(
+      providerStart,
+      providerEnd,
+      storeWindows,
+    ).map((i) => ({ start_time: i.start, end_time: i.end }));
+    return slotFitsOneWindow(start_time, end_time, intervals);
   }
 
   /**
@@ -1126,17 +1150,19 @@ export class AvailabilityService {
     const todayLocal = `${nowLocal.year}-${pad2(nowLocal.month)}-${pad2(nowLocal.day)}`;
     const nowHHMM = `${pad2(nowLocal.hour)}:${pad2(nowLocal.minute)}`;
 
+    // Every open block per day of the master calendar (QUI-966 S15).
+    const storeWindowsMap = await this.businessHoursService.loadStoreWindows(
+      product.store_id,
+    );
+
     for (const currentDate of dates) {
       const dateStr = this.formatDate(currentDate);
       const dayOfWeek = currentDate.getUTCDay();
       const minStartTime = dateStr === todayLocal ? nowHHMM : undefined;
 
       // Skip days the store is closed (master calendar).
-      const storeHoursMap = await this.businessHoursService.loadStoreHours(
-        product.store_id,
-      );
-      const storeWindow = storeHoursMap.get(dayOfWeek);
-      if (!storeWindow) {
+      const storeWindows = storeWindowsMap.get(dayOfWeek);
+      if (!storeWindows?.length) {
         result.push({ date: dateStr, has_slots: false, slots_count: 0 });
         continue;
       }
@@ -1150,7 +1176,7 @@ export class AvailabilityService {
           product,
           dateStr,
           dayOfWeek,
-          storeWindow,
+          storeWindows,
           provider_id,
           minStartTime,
         );
@@ -1192,7 +1218,7 @@ export class AvailabilityService {
     product: { id: number; store_id: number },
     dateStr: string,
     dayOfWeek: number,
-    storeWindow: { start_time: string; end_time: string },
+    storeWindows: StoreWindow[],
     provider_id?: number,
     minStartTime?: string,
   ): Promise<number> {
@@ -1211,23 +1237,29 @@ export class AvailabilityService {
 
     // free_booking
     if (productFull.booking_mode === 'free_booking') {
-      const total = this.countTimeSlots(
-        storeWindow.start_time,
-        storeWindow.end_time,
-        duration,
-        buffer,
-        minStartTime,
-      );
-      if (total === 0) return 0;
-      if (!isToday) return total;
-      return await this.countFreeBookingToday(
-        db,
-        product,
-        dateStr,
-        storeWindow.start_time,
-        storeWindow.end_time,
-        total,
-      );
+      // One run of slots per store block (the lunch gap offers nothing).
+      let count = 0;
+      for (const w of storeWindows) {
+        const total = this.countTimeSlots(
+          w.start_time,
+          w.end_time,
+          duration,
+          buffer,
+          minStartTime,
+        );
+        if (total === 0) continue;
+        count += isToday
+          ? await this.countFreeBookingToday(
+              db,
+              product,
+              dateStr,
+              w.start_time,
+              w.end_time,
+              total,
+            )
+          : total;
+      }
+      return count;
     }
 
     // Provider-based
@@ -1263,13 +1295,10 @@ export class AvailabilityService {
     // Devolver el conteo exacto aquí daría más precisión pero dispararía
     // el costo para future days (que dominan el render del calendario
     // mensual); el calendario solo necesita saber "hay / no hay" slots.
-    for (const s of schedules) {
-      const clamped = this.clampToStoreHours(
-        s.start_time,
-        s.end_time,
-        storeWindow,
-      );
-      if (!clamped) continue;
+    const blocks = schedules.flatMap((s) =>
+      this.intersectWithStoreWindows(s.start_time, s.end_time, storeWindows),
+    );
+    for (const clamped of blocks) {
       const total = this.countTimeSlots(
         clamped.start,
         clamped.end,
@@ -1348,9 +1377,10 @@ export class AvailabilityService {
   ): Promise<boolean> {
     const ws = this.timeToMinutes(windowStart);
     const we = this.timeToMinutes(windowEnd);
+    // Bookings of these providers for ANY service keep them busy
+    // (QUI-966 S15, same rule as the slot grid and `isSlotAvailable`).
     const bookings = await db.bookings.findMany({
       where: {
-        product_id: product.id,
         provider_id: { in: providerIds },
         date: new Date(`${dateStr}T00:00:00.000Z`),
         ...slotHoldingBookingWhere(),
@@ -1392,6 +1422,9 @@ export class AvailabilityService {
     // (Guardamos `totalSlots` solo para legibilidad; no se usa en el bucle
     // porque la granularidad del escaneo no necesita igualarlo.)
     void totalSlots;
+    // `product` no longer filters the bookings (a provider is busy for any
+    // service); kept in the signature for the call site.
+    void product;
     return false;
   }
 
