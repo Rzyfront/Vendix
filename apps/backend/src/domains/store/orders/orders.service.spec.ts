@@ -2607,6 +2607,151 @@ describe('OrdersService', () => {
       }
     });
 
+    /**
+     * N1 (PR #1003): `PUT /orders/:id/editor` recrea las líneas igual que
+     * `PUT /items`; mismo contrato para las adiciones de la línea.
+     */
+    describe('N1: adiciones del borrador en el editor', () => {
+      const optionRow = {
+        id: 501,
+        store_id: 1,
+        order_item_id: 900,
+        option_id: 77,
+        group_name: 'Relleno',
+        option_name: 'Arequipe',
+        scope: 'per_unit',
+        price_delta: '20.00',
+        component_type: 'ingredient',
+        component_product_id: 40,
+        component_variant_id: null,
+        quantity: '0.0500',
+        uom: 'kg',
+        created_at: new Date('2026-10-29T10:00:00Z'),
+      };
+      const previousLine = {
+        product_id: 1,
+        product_variant_id: null,
+        quantity: 1,
+        weight: null,
+        price_unit_quantity: null,
+        applied_price_tier_id: null,
+        unit_price: '100.00',
+        total_price: '100.00',
+        tax_rate: '0.19',
+        tax_amount_item: '19.00',
+        final_unit_price: '119.00',
+        order_item_taxes: [],
+        order_item_options: [optionRow],
+      };
+      const customLine = {
+        product_name: 'Bolsa',
+        item_type: 'custom',
+        quantity: 1,
+        unit_price: 5,
+        total_price: 5,
+      };
+      /** La fila recargada declara los totales que el editor debe persistir. */
+      const arrangeWithOptions = (subtotal: number, tax: number) => {
+        arrangeEditableDraft();
+        mockPrismaService.orders.findFirst.mockReset();
+        mockPrismaService.orders.findFirst
+          .mockResolvedValueOnce(draftOrder as any)
+          .mockResolvedValue({
+            ...persistedOrder,
+            subtotal_amount: subtotal,
+            tax_amount: tax,
+            grand_total: subtotal + tax + 10,
+          } as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1, name: 'Test product', product_type: 'simple', product_variants: [],
+        } as any);
+        mockPrismaService.order_items.findMany.mockResolvedValue([previousLine] as any);
+      };
+      const createdLines = () =>
+        mockPrismaService.order_items.create.mock.calls.map(
+          (call: any[]) => call[0].data,
+        );
+
+      it('agregar otro producto conserva las adiciones de la línea que sigue igual', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeWithOptions(105, 19);
+          await service.updateOrderFromEditor(500, {
+            ...fullDto,
+            items: [fullDto.items[0], customLine],
+          });
+
+          const [kept, added] = createdLines();
+          expect(kept.order_item_options).toEqual({
+            create: [
+              {
+                store_id: 1,
+                option_id: 77,
+                group_name: 'Relleno',
+                option_name: 'Arequipe',
+                scope: 'per_unit',
+                price_delta: '20.00',
+                component_type: 'ingredient',
+                component_product_id: 40,
+                component_variant_id: null,
+                quantity: '0.0500',
+                uom: 'kg',
+              },
+            ],
+          });
+          expect(Number(kept.unit_price)).toBe(100);
+          expect(added.order_item_options).toBeUndefined();
+          expect(mockPrismaService.order_items.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+              include: expect.objectContaining({ order_item_options: true }),
+            }),
+          );
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it('quitar la línea con adiciones la borra junto con sus adiciones', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeWithOptions(5, 0);
+          await service.updateOrderFromEditor(500, {
+            ...fullDto,
+            items: [customLine],
+          });
+
+          const lines = createdLines();
+          expect(lines).toHaveLength(1);
+          expect(lines[0].order_item_options).toBeUndefined();
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it('cambiar la línea con adiciones se rechaza con 409 antes de borrar nada', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeWithOptions(200, 38);
+          await expect(
+            service.updateOrderFromEditor(500, {
+              ...fullDto,
+              items: [{ ...fullDto.items[0], quantity: 2, total_price: 200 }],
+            }),
+          ).rejects.toMatchObject({
+            errorCode: ErrorCodes.OPT_DRAFT_LINE_LOCKED.code,
+          });
+          expect(ErrorCodes.OPT_DRAFT_LINE_LOCKED.httpStatus).toBe(409);
+          expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+          expect(mockPrismaService.order_items.create).not.toHaveBeenCalled();
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+    });
+
     it('QUI-650 — helpers de updateOrderItems/editor: pre-check y P2003 -> ORD_EDIT_LINES_LOCKED_001', async () => {
       const tx: any = {
         order_items: {

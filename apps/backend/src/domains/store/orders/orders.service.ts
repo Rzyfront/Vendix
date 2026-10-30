@@ -4220,6 +4220,7 @@ export class OrdersService {
     );
     const planEditorLines = (
       candidates: PersistedOrderLineSnapshot[] | null,
+      keptByIndex?: Map<number, PersistedOrderLineSnapshot>,
     ): PlannedOrderLine[] =>
       dto.items.map(
         (item, index) =>
@@ -4228,6 +4229,7 @@ export class OrdersService {
                 item,
                 priceUnits.priceUnitByIndex[index],
                 candidates,
+                (prev) => keptByIndex?.set(index, prev),
               )
             : null) ??
           this.planServerOrderLine(
@@ -4559,15 +4561,24 @@ export class OrdersService {
       //      Round 1 BLOCKER #5.
       const previousItems = await tx.order_items.findMany({
         where: { order_id: orderId },
-        include: { order_item_taxes: true },
+        include: { order_item_taxes: true, order_item_options: true },
       });
 
       // P0-4 / ADR-10 — plan definitivo: la línea persistida que vuelve sin
       // cambios conserva su snapshot fiscal; la nueva o cambiada se resuelve
       // contra el catálogo. La cabecera es Σ de ESTE plan.
-      plannedEditorLines = planEditorLines([
+      // N1 (PR #1003): mismo contrato que `PUT /items` — la línea que vuelve
+      // sin cambios hereda sus adiciones y cambiar una con adiciones se
+      // rechaza (OPT_DRAFT_LINE_LOCKED) antes de borrar nada.
+      const editorCandidates = [
         ...(previousItems as unknown as PersistedOrderLineSnapshot[]),
-      ]);
+      ];
+      const keptByIndex = new Map<number, PersistedOrderLineSnapshot>();
+      plannedEditorLines = planEditorLines(editorCandidates, keptByIndex);
+      this.assertDraftOptionLinesUnchanged(
+        editorCandidates,
+        dto.items.filter((_, index) => !keptByIndex.has(index)),
+      );
       ({ subtotal: recalculatedSubtotal, tax: recalculatedTax } =
         this.sumPlannedOrderLines(plannedEditorLines));
       applyEditorDiscount();
@@ -4750,6 +4761,9 @@ export class OrdersService {
             applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
             stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
             price_unit_quantity: priceUnits.priceUnitByIndex[index] ?? null,
+            order_item_options: this.toKeptOrderItemOptionsCreate(
+              keptByIndex.get(index),
+            ),
             updated_at: new Date(),
           };
         })();
