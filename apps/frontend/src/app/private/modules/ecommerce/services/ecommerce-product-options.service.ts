@@ -4,6 +4,7 @@ import { Observable, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
+import type { OptionDeltaParts } from '../../../../shared/utils/option-pricing.util';
 
 /** Opción de un grupo de adiciones (tienda en línea). */
 export interface EcommerceProductOption {
@@ -31,6 +32,12 @@ export interface CartOptionSelection {
   labels: string[];
   /** Delta de precio por unidad (solo visual). */
   delta_unit: number;
+  /**
+   * Partes per_unit/per_line: el carrito recalcula el delta por unidad con la
+   * cantidad real de la línea (mismo reparto que el servidor). Opcional para
+   * selecciones guardadas antes de este campo.
+   */
+  delta_parts?: OptionDeltaParts;
 }
 
 @Injectable({ providedIn: 'root' })

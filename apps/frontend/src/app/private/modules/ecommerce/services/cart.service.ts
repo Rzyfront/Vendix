@@ -11,6 +11,7 @@ import {
 } from './catalog.service';
 import { cartLineKey } from '../utils/cart-line-key.util';
 import { CartOptionSelection } from './ecommerce-product-options.service';
+import { optionUnitDelta } from '../../../../shared/utils/option-pricing.util';
 import { TableContextService } from './table-context.service';
 import { environment } from '../../../../../environments/environment';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
@@ -541,8 +542,11 @@ export class CartService {
       liveKeys.add(base);
       const selection = hasOptions ? optionsMap[base] : undefined;
       if (!selection) return { ...item, line_key: base };
-      // El delta se suma una sola vez: aquí es el único punto que lo hace.
-      const delta = Number(selection.delta_unit) || 0;
+      // El delta se suma una sola vez: aquí es el único punto que lo hace. Con
+      // las partes se reparte con la cantidad real de la línea, como el servidor.
+      const delta = selection.delta_parts
+        ? optionUnitDelta(selection.delta_parts, item.quantity)
+        : Number(selection.delta_unit) || 0;
       extraSubtotal += delta * item.quantity;
       return {
         ...item,

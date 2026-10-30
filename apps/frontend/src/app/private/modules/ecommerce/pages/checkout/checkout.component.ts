@@ -578,6 +578,22 @@ export class CheckoutComponent implements OnInit {
     return this.cart_service.hasOnlyServices();
   }
 
+  /**
+   * Adiciones en el carrito: solo se venden en pedido programado, así que la
+   * franja de entrega pasa a ser obligatoria antes de pagar.
+   */
+  get cartHasOptions(): boolean {
+    return (this.cart()?.items ?? []).some(
+      (item: CartItem) => (item.options?.option_ids?.length ?? 0) > 0,
+    );
+  }
+
+  /** Mensaje cuando hay adiciones sin franja; null si se puede pagar. */
+  private missingScheduleForOptions(): string | null {
+    if (!this.cartHasOptions || this.scheduled_slot()) return null;
+    return 'Tu pedido tiene adiciones: elige el día y la hora de entrega para continuar.';
+  }
+
   /** True when the cart has at least one physical product */
   get cartHasPhysicalItems(): boolean {
     return this.cart_service.hasPhysicalItems();
@@ -3524,6 +3540,13 @@ export class CheckoutComponent implements OnInit {
       return;
     }
 
+    const missingSchedule = this.missingScheduleForOptions();
+    if (missingSchedule) {
+      this.error_message.set(missingSchedule);
+      this.toast.warning(missingSchedule, 'Pedido programado');
+      return;
+    }
+
     // Soporte obligatorio: sin comprobante no se finaliza la compra (defensa
     // en profundidad junto al gate de nextStep y al bloqueo del modal).
     if (this.requiresPaymentReceipt() && !this.payment_receipt_file()) {
@@ -3811,6 +3834,11 @@ export class CheckoutComponent implements OnInit {
    * uses, so the two flows never drift apart.
    */
   private submitWhatsappFallbackOrder(): void {
+    const missingSchedule = this.missingScheduleForOptions();
+    if (missingSchedule) {
+      this.toast.warning(missingSchedule, 'Pedido programado');
+      return;
+    }
     const shippingAddress = this.resolveShippingAddressForRequest();
     if (shippingAddress.unresolvedCityError) {
       this.toast.error(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);

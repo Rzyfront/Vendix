@@ -936,6 +936,7 @@
             @if (!cartHasOnlyServices) {
               <app-fulfillment-slot-picker
                 [value]="scheduled_slot()?.start ?? null"
+                [title]="cartHasOptions ? 'Día y hora de entrega (obligatorio: tu pedido tiene adiciones)' : 'Día y hora de entrega'"
                 (slotChange)="scheduled_slot.set($event)"
               />
             }

@@ -13,6 +13,12 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import {
+  OptionDeltaParts,
+  optionUnitDelta,
+  sumOptionDeltaParts,
+} from '../../../../../shared/utils/option-pricing.util';
+import { TableContextService } from '../../services/table-context.service';
+import {
   CartOptionSelection,
   EcommerceProductOptionGroup,
   EcommerceProductOptionsService,
@@ -40,7 +46,8 @@ export const EMPTY_OPTION_STATE: ProductOptionSelectorState = {
 /**
  * Selector de adiciones (grupos de opciones) de un producto en la tienda en
  * línea. Si el endpoint no devuelve grupos no pinta nada, así el detalle y la
- * vista rápida quedan exactamente como antes.
+ * vista rápida quedan exactamente como antes. Las adiciones solo se venden en
+ * pedidos programados: en mesa (QR) no se cargan y el checkout exige la franja.
  */
 @Component({
   selector: 'app-product-option-selector',
@@ -49,6 +56,10 @@ export const EMPTY_OPTION_STATE: ProductOptionSelectorState = {
   template: `
     @if (groups().length > 0) {
       <section class="pos-options" aria-label="Adiciones">
+        <p class="pos-options__note">
+          Las adiciones son para pedidos programados: al pagar eliges el día y
+          la hora de entrega.
+        </p>
         @for (group of groups(); track group.id) {
           <fieldset class="pos-group">
             <legend class="pos-group__title">
@@ -163,6 +174,11 @@ export const EMPTY_OPTION_STATE: ProductOptionSelectorState = {
         font-size: var(--fs-sm);
         color: var(--color-warning, var(--color-text-secondary));
       }
+      .pos-options__note {
+        margin: 0;
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
+      }
       .pos-options__total {
         margin: 0;
         font-size: var(--fs-sm);
@@ -176,6 +192,7 @@ export class ProductOptionSelectorComponent {
   private readonly optionsService = inject(EcommerceProductOptionsService);
   private readonly currency = inject(CurrencyFormatService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly tableContext = inject(TableContextService);
 
   readonly productId = input.required<number>();
   /** Cantidad de la línea: reparte el precio de los grupos "por línea". */
@@ -195,22 +212,22 @@ export class ProductOptionSelectorComponent {
     return g.options.filter((o) => selected.includes(o.id)).map((o) => o.id);
   }
 
-  readonly totalDelta = computed(() => {
-    const qty = Math.max(1, this.quantity() || 1);
+  /** Sumas per_unit/per_line de lo elegido. */
+  private readonly deltaParts = computed<OptionDeltaParts>(() => {
     const selected = this.selectedIds();
-    let total = 0;
-    let perLine = 0;
-    for (const g of this.groups()) {
-      for (const o of g.options) {
-        if (!selected.includes(o.id)) continue;
-        const d = this.delta(o.price_delta);
-        if (g.scope === 'per_line') perLine += d;
-        else total += d;
-      }
-    }
-    // Mismo redondeo que el servidor: por línea ÷ cantidad, al centavo hacia arriba.
-    return total + Math.ceil(Math.round((perLine / qty) * 1e6) / 1e4) / 100;
+    return sumOptionDeltaParts(
+      this.groups().flatMap((g) =>
+        g.options
+          .filter((o) => selected.includes(o.id))
+          .map((o) => ({ scope: g.scope, price_delta: o.price_delta })),
+      ),
+    );
   });
+
+  /** Delta por unidad: mismo reparto que el servidor (por línea ÷ cantidad, al centavo hacia arriba). */
+  readonly totalDelta = computed(() =>
+    optionUnitDelta(this.deltaParts(), this.quantity()),
+  );
 
   readonly state = computed<ProductOptionSelectorState>(() => {
     const groups = this.groups();
@@ -239,7 +256,12 @@ export class ProductOptionSelectorComponent {
       hint,
       selection:
         ids.length > 0
-          ? { option_ids: ids, labels, delta_unit: this.totalDelta() }
+          ? {
+              option_ids: ids,
+              labels,
+              delta_unit: this.totalDelta(),
+              delta_parts: this.deltaParts(),
+            }
           : null,
     };
   });
@@ -251,6 +273,8 @@ export class ProductOptionSelectorComponent {
       untracked(() => {
         this.groups.set([]);
         this.selectedIds.set([]);
+        // En mesa no hay pedido programado: el producto se pide sin adiciones.
+        if (this.tableContext.isActive()) return;
         this.optionsService
           .getForProduct(id)
           .pipe(takeUntilDestroyed(this.destroyRef))
