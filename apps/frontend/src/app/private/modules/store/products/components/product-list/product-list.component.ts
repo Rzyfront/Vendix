@@ -7,7 +7,7 @@ import {
   signal,
   computed,
 } from '@angular/core';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 
 import {
@@ -73,6 +73,7 @@ import './product-list.component.css';
 export class ProductListComponent {
   private currencyService = inject(CurrencyFormatService);
   private readonly authFacade = inject(AuthFacade);
+  private readonly router = inject(Router);
 
   readonly products = input<Product[]>([]);
   readonly isLoading = input(false);
@@ -240,6 +241,7 @@ export class ProductListComponent {
       { label: 'Carga Masiva', icon: 'upload-cloud', action: 'bulk-upload' },
       { label: 'Carga de Imágenes', icon: 'image', action: 'bulk-image-upload' },
       { label: 'Edición masiva', icon: 'list-checks', action: 'bulk-edit' },
+      { label: 'Adiciones', icon: 'layers', action: 'option-groups' },
       {
         label: 'Descargar Plantilla con Productos Actuales',
         icon: 'file-spreadsheet',
@@ -553,6 +555,9 @@ export class ProductListComponent {
         break;
       case 'bulk-edit':
         this.bulkEdit.emit();
+        break;
+      case 'option-groups':
+        this.router.navigate(['/admin/products/option-groups']);
         break;
       case 'download-current-products':
         this.downloadCurrentProducts.emit();

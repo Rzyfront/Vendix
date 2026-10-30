@@ -581,6 +581,8 @@ export class GeneralSettingsStore {
         'panel_ui',
         'reservations',
         'promotions',
+        'scheduled_orders',
+        'product_options',
       ];
       const currentSettings = this.settings();
       const sanitizedSettings = knownSections.reduce((acc, key) => {
