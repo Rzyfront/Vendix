@@ -1241,7 +1241,7 @@
             <div class="space-y-2 -mt-3">
               <div class="flex justify-between items-center text-xs sm:text-sm font-semibold">
                 <span id="roi-invoices-label" class="text-slate-800">¿Cuántas ventas o facturas emites al mes aprox?</span>
-                <span class="font-bold text-emerald-700 text-sm sm:text-base">{{ invoicesCount() | number:'1.0-0' }} ventas</span>
+                <span class="font-bold text-emerald-700 text-sm sm:text-base">{{ invoicesCount() | number: '1.0-0' : 'es-CO' }} ventas</span>
               </div>
               <input
                 [value]="invoicesCount()"
@@ -1257,7 +1257,7 @@
 
             <div class="text-xs text-slate-500 flex items-center gap-1.5">
               <app-icon name="info" [size]="14"></app-icon>
-              <span>Estimación con supuestos: POS tradicional ${{ roiAssumptions.legacyPosMonthlyPerStore | number:'1.0-0' }}/mes por tienda, folios DIAN a ${{ roiAssumptions.dianFolioCost | number:'1.0-0' }} c/u y plugin web ${{ roiAssumptions.webPluginMonthly | number:'1.0-0' }}/mes@if (roiVendixAnnualPrice(); as vendixPrice) {, frente a Empresarial Pro anual (${{ vendixPrice | number:'1.0-0' }}, según los planes vigentes)}. No es un ahorro garantizado.</span>
+              <span>Estimación con supuestos: POS tradicional ${{ roiAssumptions.legacyPosMonthlyPerStore | number: '1.0-0' : 'es-CO' }}/mes por tienda, folios DIAN a ${{ roiAssumptions.dianFolioCost | number: '1.0-0' : 'es-CO' }} c/u y plugin web ${{ roiAssumptions.webPluginMonthly | number: '1.0-0' : 'es-CO' }}/mes@if (roiVendixAnnualPrice(); as vendixPrice) {, frente a Empresarial Pro anual (${{ vendixPrice | number: '1.0-0' : 'es-CO' }}, según los planes vigentes)}. No es un ahorro garantizado.</span>
             </div>
           </div>
 
@@ -1267,7 +1267,7 @@
               <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Ahorro anual estimado directo</span>
               <div class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 mt-2 tracking-tight">
                 @if (annualSavings(); as savings) {
-                  $ {{ savings | number:'1.0-0' }} COP
+                  $ {{ savings | number: '1.0-0' : 'es-CO' }} COP
                 } @else if (annualSavings() === 0) {
                   $ 0 COP
                 } @else {
