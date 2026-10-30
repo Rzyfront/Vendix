@@ -84,6 +84,25 @@ export function isSlotStartInPast(
 }
 
 /**
+ * True when the slot already ENDED in the store timezone (`date end_time`
+ * is behind "now"). This is the booking gate's notion of "in the past": a
+ * slot in progress is still bookable, because POS charges first and creates
+ * the booking right after (a 10:00 slot charged at 10:02 must be accepted).
+ * The availability grid keeps using `isSlotStartInPast` for its listing.
+ */
+export function isSlotEndInPast(
+  slot: Pick<BookingSlotInput, 'date' | 'end_time'>,
+  timezone: string,
+  now: Date = new Date(),
+): boolean {
+  return isSlotStartInPast(
+    { date: slot.date, start_time: slot.end_time },
+    timezone,
+    now,
+  );
+}
+
+/**
  * Rules that can NEVER be overridden: real civil date and end > start.
  * Throws 400 with a Spanish message.
  */
@@ -101,8 +120,8 @@ export function assertBookingSlotShape(slot: BookingSlotInput): void {
 }
 
 /**
- * Rules staff may override with `skip_availability_check`: the slot is not
- * in the past (store timezone) and falls inside the store business hours.
+ * Rules staff may override with `skip_availability_check`: the slot has not
+ * already ended (store timezone) and falls inside the store business hours.
  * An empty `storeHours` map means the store never configured its hours, so
  * the window is not enforced (legacy fallback shared with availability).
  */
@@ -110,7 +129,7 @@ export function assertBookingSlotOpen(
   slot: BookingSlotInput,
   ctx: { timezone: string; storeHours: StoreHoursMap; now?: Date },
 ): void {
-  if (isSlotStartInPast(slot, ctx.timezone, ctx.now)) {
+  if (isSlotEndInPast(slot, ctx.timezone, ctx.now)) {
     throw new BadRequestException(
       'No se puede reservar en una fecha u hora que ya pasó',
     );

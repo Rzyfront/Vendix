@@ -160,6 +160,13 @@
                 <app-icon name="clock" [size]="16" />
                 Horarios disponibles
               </h3>
+              @if (freeBookingLoading()) {
+                <p class="selected-date-label">Cargando horarios…</p>
+              } @else if (visibleFreeBookingSlots().length === 0) {
+                <p class="selected-date-label">
+                  Sin horarios disponibles para esta fecha
+                </p>
+              }
               <div class="slot-list">
                 @for (slot of visibleFreeBookingSlots(); track slot.time) {
                   <button

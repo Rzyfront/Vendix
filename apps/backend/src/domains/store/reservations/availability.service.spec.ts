@@ -210,6 +210,19 @@ describe('AvailabilityService — business hours integration', () => {
       await expect(service.isSlotAvailable(10, '2026-08-11', '11:00', '12:00', 5)).resolves.toBe(false);
     });
 
+    it('a slot in progress (not yet ended) in the store timezone is still bookable', async () => {
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      // 2026-08-18 (Tuesday) 10:02 America/Bogota.
+      jest.setSystemTime(new Date('2026-08-18T15:02:00.000Z'));
+      try {
+        const { service } = open();
+        await expect(service.isSlotAvailable(10, '2026-08-18', '10:00', '11:00', 5)).resolves.toBe(true);
+        await expect(service.isSlotAvailable(10, '2026-08-18', '09:00', '10:00', 5)).resolves.toBe(false);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('an impossible calendar date is not available', async () => {
       const { service } = open();
       await expect(service.isSlotAvailable(10, '2026-02-30', '11:00', '12:00', 5)).resolves.toBe(false);

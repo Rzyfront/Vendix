@@ -35,7 +35,7 @@
     @if (selectedDate()) {
       <div class="time-selector">
         <p class="section-label">Horarios disponibles</p>
-        @if (bookingMode() === "free_booking") {
+        @if (bookingMode() === "free_booking" && visibleFreeSlots().length > 0) {
           <div class="time-grid">
             @for (slot of visibleFreeSlots(); track slot.time) {
               <button
@@ -50,7 +50,7 @@
               </button>
             }
           </div>
-        } @else if (visibleSlots().length > 0) {
+        } @else if (bookingMode() !== "free_booking" && visibleSlots().length > 0) {
           <div class="time-grid">
             @for (slot of visibleSlots(); track slot.start_time) {
               <button
@@ -77,7 +77,7 @@
       </div>
     }
 
-    @if (bookingMode() !== "free_booking" && availableSlots().length === 0) {
+    @if (availableSlots().length === 0) {
       <div class="no-slots">
         <p>No hay horarios disponibles en los proximos 14 dias</p>
       </div>

@@ -10,14 +10,19 @@ import {
   Min,
   Max,
   IsNumber,
-  IsDateString,
   Matches,
   IsEmail,
   IsPositive,
+  MaxLength,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ItemNotes } from '@common/decorators/item-notes.decorator';
+import {
+  IsAfterStartTime,
+  IsCivilDate,
+  MAX_INT4,
+} from '../../../store/reservations/dto/booking-time.validators';
 
 class CheckoutCartItemDto {
   @IsInt()
@@ -278,7 +283,9 @@ class CheckoutBookingDto {
   @Min(1)
   product_variant_id?: number;
 
-  @IsDateString()
+  // QUI-966 (S4): same rules as the booking endpoints (real civil date,
+  // end strictly after start the same day).
+  @IsCivilDate()
   date: string;
 
   @IsString()
@@ -291,5 +298,38 @@ class CheckoutBookingDto {
   @Matches(/^([01]\d|2[0-3]):([0-5]\d)$/, {
     message: 'end_time debe tener formato HH:mm',
   })
+  @IsAfterStartTime()
   end_time: string;
+
+  // QUI-966 (S14): fields the storefront already sends in `bookings[]`.
+  // Declared so the global `forbidNonWhitelisted` pipe does not 400 them;
+  // `provider_id`, `service_location_type` and `service_address_id` are
+  // passed to the booking, the labels are display-only and ignored.
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  @Max(MAX_INT4)
+  @Type(() => Number)
+  provider_id?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  provider_name?: string;
+
+  @IsOptional()
+  @IsIn(['home', 'shop'])
+  service_location_type?: 'home' | 'shop';
+
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  @Max(MAX_INT4)
+  @Type(() => Number)
+  service_address_id?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  service_address_label?: string;
 }

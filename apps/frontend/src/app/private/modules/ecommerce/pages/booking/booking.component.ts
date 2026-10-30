@@ -103,27 +103,27 @@ export class BookingComponent implements OnInit {
   isFreeBooking = signal(false);
   freeBookingTime = signal<string | null>(null);
   freeBookingEndTime = signal<string | null>(null);
-  readonly freeBookingSlots = computed(() => {
-    const duration = this.product()?.service_duration_minutes || 60;
-    const slots: { time: string; endTime: string }[] = [];
-    for (let mins = 480; mins + duration <= 1080; mins += duration) {
-      const h = Math.floor(mins / 60);
-      const m = mins % 60;
-      const eh = Math.floor((mins + duration) / 60);
-      const em = (mins + duration) % 60;
-      slots.push({
-        time: `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`,
-        endTime: `${eh.toString().padStart(2, '0')}:${em.toString().padStart(2, '0')}`,
-      });
-    }
-    return slots;
-  });
+  /**
+   * QUI-966: real free_booking slots for the selected day, as returned by
+   * `GET /ecommerce/reservations/availability/:productId` (store business
+   * hours, working days and the per-slot capacity). Replaces the old fixed
+   * 08:00–18:00 grid, which offered times the backend then rejected.
+   */
+  readonly freeBookingAvailability = signal<AvailabilitySlot[]>([]);
+  readonly freeBookingLoading = signal(false);
+  readonly freeBookingSlots = computed(() =>
+    this.freeBookingAvailability()
+      .filter((s) => s.available > 0)
+      .map((s) => ({
+        time: s.start_time.slice(0, 5),
+        endTime: s.end_time.slice(0, 5),
+      })),
+  );
 
   /**
    * `freeBookingSlots` filtered to hide past start times when the
-   * selected day is today. Without this, the synthetic slot list
-   * (which starts at 08:00 and walks forward) would still let the
-   * customer pick 10:00 AM at 4 PM. We normalize `selectedDate` to
+   * selected day is today (defensive: the backend already drops today's
+   * elapsed starts in the store timezone). We normalize `selectedDate` to
    * YYYY-MM-DD because some call sites forward Prisma's ISO-timestamp
    * shape, others a date-only string.
    */
@@ -371,8 +371,39 @@ export class BookingComponent implements OnInit {
     this.selectedSlot.set(null);
     this.freeBookingTime.set(null);
     this.freeBookingEndTime.set(null);
+    if (this.isFreeBooking()) this.loadFreeBookingAvailability(date);
     // Skip Profesional step when free_booking (no provider scheduling).
     this.currentStep.set(1);
+  }
+
+  private loadFreeBookingAvailability(date: string): void {
+    this.freeBookingAvailability.set([]);
+    this.freeBookingLoading.set(true);
+    this.bookingService
+      .getAvailability(
+        this.productId(),
+        date,
+        date,
+        this.selectedVariantId() ?? undefined,
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          // Ignore a late response for a day the customer already left.
+          if (this.selectedDate() !== date) return;
+          this.freeBookingAvailability.set(
+            (response?.data ?? []).filter(
+              (s) => (s.date ?? '').slice(0, 10) === date,
+            ),
+          );
+          this.freeBookingLoading.set(false);
+        },
+        error: () => {
+          if (this.selectedDate() !== date) return;
+          this.freeBookingLoading.set(false);
+          this.toast.error('No se pudieron cargar los horarios', 'Error');
+        },
+      });
   }
 
   // --- Step 2: Provider selection ---

@@ -7,7 +7,7 @@ import {
   localCivil,
 } from '@common/utils/store-timezone.util';
 import {
-  isSlotStartInPast,
+  isSlotEndInPast,
   isValidCivilDate,
   isValidTimeRange,
 } from './booking-time.util';
@@ -425,7 +425,7 @@ export class AvailabilityService {
     if (!product) return false;
 
     const timezone = await resolveStoreTimezone(this.prisma, product.store_id);
-    if (isSlotStartInPast({ date, start_time }, timezone)) return false;
+    if (isSlotEndInPast({ date, end_time }, timezone)) return false;
 
     // free_booking: hasta FREE_BOOKING_CAPACITY reservas solapadas (QUI-966 S5).
     if (product.booking_mode === booking_mode_enum.free_booking) {

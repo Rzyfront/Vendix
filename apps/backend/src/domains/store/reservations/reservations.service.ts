@@ -243,6 +243,79 @@ export class ReservationsService {
     assertBookingSlotOpen(slot, { timezone, storeHours });
   }
 
+  /**
+   * QUI-966 (S14): ecommerce checkout pre-check, run BEFORE the order exists
+   * so an invalid or taken slot answers 400/409 and no order is created.
+   * Same gate as `create` (never forced) plus the same slot availability
+   * check `create` runs afterwards.
+   */
+  async assertCheckoutBookingBookable(
+    store_id: number,
+    booking: BookingSlotInput & { product_id: number; provider_id?: number },
+  ): Promise<void> {
+    await this.assertBookableSlot(store_id, booking);
+    if (!booking.provider_id) {
+      const product = await this.prisma.products.findFirst({
+        where: { id: booking.product_id },
+        select: { booking_mode: true },
+      });
+      if (!product) {
+        throw new NotFoundException('Producto/servicio no encontrado');
+      }
+      // Same legacy fallback as `create`: a provider_required service with
+      // zero active providers is booked without an availability check.
+      if (
+        product.booking_mode === booking_mode_enum.provider_required &&
+        (await this.countActiveProviders(booking.product_id)) === 0
+      ) {
+        return;
+      }
+    }
+    const isAvailable = await this.availabilityService.isSlotAvailable(
+      booking.product_id,
+      booking.date,
+      booking.start_time,
+      booking.end_time,
+      booking.provider_id,
+    );
+    if (!isAvailable) {
+      throw new ConflictException('El horario solicitado no esta disponible');
+    }
+  }
+
+  private async countActiveProviders(product_id: number): Promise<number> {
+    const serviceProviders = await this.prisma.provider_services.findMany({
+      where: { product_id },
+      include: { provider: { select: { id: true, is_active: true } } },
+    });
+    return serviceProviders.filter((sp) => sp.provider.is_active).length;
+  }
+
+  /**
+   * Cancels an order whose booking could not be created, keeping the
+   * QUI-649 invariant "booking and order are born together or not at all".
+   * Goes through `OrdersService.update` (the `forceOrderState` seam releases
+   * stock reservations, emits `order.cancelled` and audits the transition).
+   * Best effort: a failure is logged and the order stays orphaned.
+   */
+  async compensateOrderForFailedBooking(
+    order_id: number,
+    note: string,
+  ): Promise<boolean> {
+    try {
+      await this.ordersService.update(order_id, {
+        state: 'cancelled',
+        internal_notes: note,
+      } as any);
+      return true;
+    } catch (cancelErr) {
+      this.logger.error(
+        `Failed to compensate order ${order_id} after booking failed: ${cancelErr.message}`,
+      );
+      return false;
+    }
+  }
+
   async create(dto: CreateBookingDto) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -332,16 +405,7 @@ export class ReservationsService {
       !dto.skip_availability_check
     ) {
       // Check if there are ANY providers for this service
-      const serviceProviders = await this.prisma.provider_services.findMany({
-        where: { product_id: dto.product_id },
-        include: { provider: { select: { id: true, is_active: true } } },
-      });
-
-      const activeProviders = serviceProviders.filter(
-        (sp) => sp.provider.is_active,
-      );
-
-      if (activeProviders.length > 0) {
+      if ((await this.countActiveProviders(dto.product_id)) > 0) {
         // Auto-asignar el primer provider disponible
         const availableProviders =
           await this.availabilityService.getAvailableProvidersForSlot(
@@ -566,20 +630,12 @@ export class ReservationsService {
       // 'created' huérfana — aceptable, mejor que el bug de "reserva
       // caída y orden persistida" que el plan repara.
       if (preCreatedOrder) {
-        try {
-          // OrdersService no expone `cancel()`. La cancelación es una
-          // transición de estado que pasa por `update()` — el seam
-          // `forceOrderState` interno libera las reservas de stock,
-          // emite `order.cancelled` y deja la transición auditada.
-          await this.ordersService.update(preCreatedOrder.id, {
-            state: 'cancelled',
-            internal_notes: `Compensación por fallo de reserva (booking_id=${preCreatedOrder.id}).`,
-          } as any);
-        } catch (cancelErr) {
-          this.logger.error(
-            `Failed to compensate order ${preCreatedOrder.id} after booking failed: ${cancelErr.message}`,
-          );
-        }
+        // OrdersService no expone `cancel()`; ver
+        // `compensateOrderForFailedBooking`.
+        await this.compensateOrderForFailedBooking(
+          preCreatedOrder.id,
+          `Compensación por fallo de reserva (booking_id=${preCreatedOrder.id}).`,
+        );
       }
       throw err;
     }

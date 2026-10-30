@@ -3,7 +3,7 @@
  * Run with TZ=UTC (backend container). "Now" is pinned to
  * 2026-10-29 10:00 America/Bogota (15:00Z, a Thursday).
  */
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ReservationsService } from './reservations.service';
 
@@ -164,10 +164,31 @@ describe('ReservationsService.create — S4 date/time gate', () => {
     expect(bookings[0].order_id).toBe(900);
   });
 
-  it('rejects a slot earlier today in the store timezone', async () => {
+  it('rejects a slot that already ended earlier today in the store timezone', async () => {
     const { service, prisma } = build();
     await expect(
-      service.create({ ...base, date: '2026-10-29', start_time: '09:00', end_time: '10:00' } as any),
+      service.create({ ...base, date: '2026-10-29', start_time: '08:00', end_time: '09:00' } as any),
+    ).rejects.toThrow('No se puede reservar en una fecha u hora que ya pasó');
+    expect(prisma.bookings.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts a slot in progress (POS charges first, books right after)', async () => {
+    const { service, bookings } = build();
+    await service.create({
+      ...base,
+      channel: 'pos',
+      date: '2026-10-29',
+      start_time: '09:58',
+      end_time: '10:58',
+    } as any);
+    expect(bookings).toHaveLength(1);
+    expect(bookings[0].start_time).toBe('09:58');
+  });
+
+  it('rejects a past date even inside business hours', async () => {
+    const { service, prisma } = build();
+    await expect(
+      service.create({ ...base, date: '2026-10-28', start_time: '16:00', end_time: '17:00' } as any),
     ).rejects.toThrow('No se puede reservar en una fecha u hora que ya pasó');
     expect(prisma.bookings.create).not.toHaveBeenCalled();
   });
@@ -330,5 +351,50 @@ describe('ReservationsService.reschedule / requestReschedule — S4', () => {
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(requests).toHaveLength(0);
+  });
+});
+
+describe('ReservationsService.assertCheckoutBookingBookable — S14 checkout pre-check', () => {
+  it('passes a valid, available slot and checks availability with the provider', async () => {
+    const { service, availabilityService } = build();
+    await expect(
+      service.assertCheckoutBookingBookable(1, { ...base, provider_id: 5 }),
+    ).resolves.toBeUndefined();
+    expect(availabilityService.isSlotAvailable).toHaveBeenCalledWith(
+      10,
+      FUTURE,
+      '10:00',
+      '11:00',
+      5,
+    );
+  });
+
+  it.each([
+    ['past date', { date: '2026-10-01' }],
+    ['outside hours', { start_time: '18:00', end_time: '19:00' }],
+    ['inverted range', { start_time: '11:00', end_time: '10:00' }],
+    ['invalid date', { date: '2026-02-30' }],
+  ])('rejects a %s with 400', async (_l, patch) => {
+    const { service, availabilityService } = build();
+    await expect(
+      service.assertCheckoutBookingBookable(1, { ...base, ...patch }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(availabilityService.isSlotAvailable).not.toHaveBeenCalled();
+  });
+
+  it('rejects a taken slot with 409', async () => {
+    const { service, availabilityService } = build();
+    availabilityService.isSlotAvailable.mockResolvedValue(false);
+    await expect(
+      service.assertCheckoutBookingBookable(1, { ...base }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('keeps the legacy fallback: provider_required with no active providers is not availability-checked', async () => {
+    const { service, availabilityService } = build({ providers: [] });
+    await expect(
+      service.assertCheckoutBookingBookable(1, { ...base }),
+    ).resolves.toBeUndefined();
+    expect(availabilityService.isSlotAvailable).not.toHaveBeenCalled();
   });
 });

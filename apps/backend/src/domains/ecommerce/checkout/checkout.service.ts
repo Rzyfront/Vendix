@@ -1,4 +1,9 @@
-import { Injectable, Optional } from '@nestjs/common';
+import {
+  ConflictException,
+  HttpException,
+  Injectable,
+  Optional,
+} from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { CartService } from '../cart/cart.service';
@@ -1662,6 +1667,24 @@ export class CheckoutService {
       );
     }
 
+    // QUI-966 (S14): validate every booking BEFORE the order exists. An
+    // invalid date/range, a past or out-of-hours slot, or a taken slot
+    // answers 400/409 and no order, payment or stock reservation is created.
+    if (dto.bookings?.length) {
+      if (!store_id_ctx) {
+        throw new VendixHttpException(
+          ErrorCodes.ECOM_CHECKOUT_001,
+          'No se encontró el contexto de la tienda para reservar',
+        );
+      }
+      for (const booking of dto.bookings) {
+        await this.reservationsService.assertCheckoutBookingBookable(
+          store_id_ctx,
+          booking,
+        );
+      }
+    }
+
     // Guest checkout must never read store-scoped backend carts because there
     // is no customer_id filter without auth. Guests use DTO items from localStorage.
     const cart = is_guest
@@ -2530,28 +2553,55 @@ export class CheckoutService {
     // Create bookings for bookable services
     if (dto.bookings && dto.bookings.length > 0) {
       const user_id = RequestContextService.getUserId();
+      const createdBookingIds: number[] = [];
       for (const booking of dto.bookings) {
         try {
-          await this.reservationsService.create({
+          const created = await this.reservationsService.create({
             customer_id: user_id!,
             product_id: booking.product_id,
             product_variant_id: booking.product_variant_id,
             date: booking.date,
             start_time: booking.start_time,
             end_time: booking.end_time,
+            provider_id: booking.provider_id,
+            service_location_type: booking.service_location_type,
+            service_address_id: booking.service_address_id,
             channel: order_channel_enum.ecommerce,
             order_id: order.id,
             skip_availability_check: false,
           });
+          if (created?.id) createdBookingIds.push(created.id);
           this.logger.log(
             `Booking created for product ${booking.product_id} linked to order ${order.id}`,
           );
         } catch (error) {
-          this.logger.warn(
-            `Failed to create booking for product ${booking.product_id}: ${error.message}`,
+          // QUI-966 (S14): the pre-check above already validated the slot,
+          // so this is a race (slot taken meanwhile) or an infra failure.
+          // Never leave an order without its booking: the order was
+          // autocommitted (no transaction to roll back), so compensate it
+          // with the existing order-cancel flow (releases stock, emits
+          // `order.cancelled`), cancel bookings already created for it,
+          // and fail the checkout.
+          this.logger.error(
+            `Failed to create booking for product ${booking.product_id} on order ${order.id}; cancelling the order: ${error.message}`,
           );
-          // Don't fail the entire checkout if a booking fails
-          // The order is already created; booking can be retried manually
+          for (const booking_id of createdBookingIds) {
+            try {
+              await this.reservationsService.cancel(booking_id);
+            } catch (cancelErr) {
+              this.logger.error(
+                `Failed to cancel booking ${booking_id} of compensated order ${order.id}: ${cancelErr.message}`,
+              );
+            }
+          }
+          await this.reservationsService.compensateOrderForFailedBooking(
+            order.id,
+            `Compensación: no se pudo crear la reserva del checkout (producto ${booking.product_id}).`,
+          );
+          if (error instanceof HttpException) throw error;
+          throw new ConflictException(
+            'No se pudo confirmar la reserva; la orden fue cancelada. Intenta con otro horario.',
+          );
         }
       }
     }

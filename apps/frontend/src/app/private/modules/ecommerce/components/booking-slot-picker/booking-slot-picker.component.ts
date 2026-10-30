@@ -7,6 +7,7 @@ import {
   input,
   output,
   signal,
+  untracked,
   DestroyRef,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -74,7 +75,24 @@ export class BookingSlotPickerComponent {
 
   readonly availableDates = signal<string[]>([]);
   readonly slotsForSelectedDate = signal<AvailabilitySlot[]>([]);
-  readonly freeBookingSlots = signal<{ time: string; endTime: string }[]>([]);
+  /**
+   * QUI-966: free_booking slots of the selected day come from the real
+   * backend availability (store business hours, working days and per-slot
+   * capacity), same endpoint as provider mode. Replaces the old fixed
+   * 08:00–18:00 grid, which offered times the backend then rejected.
+   */
+  readonly freeBookingSlots = computed<{ time: string; endTime: string }[]>(
+    () => {
+      const date = this.selectedDate().slice(0, 10);
+      if (!date) return [];
+      return this.availableSlots()
+        .filter((s) => (s.date ?? '').slice(0, 10) === date && s.available > 0)
+        .map((s) => ({
+          time: s.start_time.slice(0, 5),
+          endTime: s.end_time.slice(0, 5),
+        }));
+    },
+  );
   readonly selectedFreeSlot = signal<{ time: string; endTime: string } | null>(
     null,
   );
@@ -110,9 +128,8 @@ export class BookingSlotPickerComponent {
   });
 
   /**
-   * Same treatment for `free_booking` mode: the synthetic slot list
-   * starts at 08:00 and walks forward, so today's early slots would
-   * otherwise stay clickable after their start time has passed.
+   * Same treatment for `free_booking` mode, so today's early slots never
+   * stay clickable after their start time has passed.
    */
   readonly visibleFreeSlots = computed<
     { time: string; endTime: string }[]
@@ -133,7 +150,13 @@ export class BookingSlotPickerComponent {
 
   constructor() {
     this.generateDates();
-    this.loadAvailability();
+    // Load once the inputs are bound (signal inputs are not readable in the
+    // constructor) and again if the product or variant changes.
+    effect(() => {
+      this.productId();
+      this.productVariantId();
+      untracked(() => this.loadAvailability());
+    });
 
     // Re-aplicar la selección inicial cada vez que los inputs cambian
     // DESPUÉS de cargar availability. Cubre el caso real:
@@ -178,14 +201,23 @@ export class BookingSlotPickerComponent {
     const normDate = initDate.slice(0, 10);
 
     if (this.bookingMode() === 'free_booking' && normStart) {
-      const freeSlot = this.freeBookingSlots().find((s) => s.time === normStart);
-      if (!freeSlot) return false;
+      const match = availableSlots.find(
+        (s) =>
+          (s.date ?? '').slice(0, 10) === normDate &&
+          (s.start_time ?? '').slice(0, 5) === normStart &&
+          s.available > 0,
+      );
+      if (!match) return false;
+      const freeSlot = {
+        time: normStart,
+        endTime: (match.end_time ?? '').slice(0, 5),
+      };
       this.selectedDate.set(normDate);
       this.selectedFreeSlot.set(freeSlot);
       this.slotSelected.emit({
         date: normDate,
         start_time: normStart,
-        end_time: normEnd,
+        end_time: normEnd || freeSlot.endTime,
       });
       return true;
     }
@@ -237,32 +269,6 @@ export class BookingSlotPickerComponent {
     this.loading.set(true);
     this.errorLoading.set(false);
 
-    if (this.bookingMode() === 'free_booking') {
-      const duration = this.serviceDuration() || 60;
-      const slots: { time: string; endTime: string }[] = [];
-      for (let mins = 480; mins + duration <= 1080; mins += duration) {
-        const h = Math.floor(mins / 60);
-        const m = mins % 60;
-        const eh = Math.floor((mins + duration) / 60);
-        const em = (mins + duration) % 60;
-        slots.push({
-          time: `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`,
-          endTime: `${eh.toString().padStart(2, '0')}:${em.toString().padStart(2, '0')}`,
-        });
-      }
-      this.freeBookingSlots.set(slots);
-      this.loading.set(false);
-      const dates = this.availableDates();
-      if (dates.length > 0) {
-        this.selectDate(dates[0]);
-      }
-      // Si el padre ya tiene fecha + horario pre-cargados (caso típico:
-      // veníamos del BookingComponent), los dejamos pre-seleccionados
-      // en lugar de forzar al cliente a re-elegir todo.
-      this.applyInitialSelection();
-      return;
-    }
-
     const dates = this.availableDates();
     const dateFrom = dates[0];
     const dateTo = dates[dates.length - 1];
@@ -310,6 +316,7 @@ export class BookingSlotPickerComponent {
   selectDate(date: string) {
     this.selectedDate.set(date);
     this.selectedSlot.set(null);
+    this.selectedFreeSlot.set(null);
     this.slotsForSelectedDate.set(
       this.availableSlots().filter((s) => s.date === date && s.available > 0),
     );
