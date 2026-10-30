@@ -27,6 +27,15 @@ export class PosOrderItemDto {
   @IsIn(['product', 'custom'])
   item_type?: 'product' | 'custom';
 
+  // Adiciones elegidas (ids de `product_options`). El servidor valida las
+  // reglas del grupo y calcula el precio; el cliente nunca manda el delta.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsInt({ each: true })
+  @Type(() => Number)
+  option_ids?: number[];
+
   @IsOptional()
   @IsInt()
   @Min(1)

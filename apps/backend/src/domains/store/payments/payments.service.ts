@@ -9,6 +9,10 @@ import * as crypto from 'crypto';
 import { assertNotLodgingFolioOrder } from '../orders/shared/lodging-folio-policy';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { ScheduledOrdersService } from '../scheduled-orders/scheduled-orders.service';
+import {
+  OptionPricingService,
+  ResolvedOptions,
+} from '../product-options/option-pricing.service';
 import { Prisma, payment_processing_mode_enum, table_status_enum, order_state_enum } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
@@ -221,6 +225,8 @@ export class PaymentsService {
     // `@Optional()` por la misma razón que arriba; sin él (sólo en specs) un
     // `schedule` en el payload se rechaza con SCHED_DISABLED.
     @Optional() private readonly scheduledOrdersService?: ScheduledOrdersService,
+    // Adiciones de producto (precio y snapshot por línea). Mismo `@Optional()`.
+    @Optional() private readonly optionPricingService?: OptionPricingService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -3824,6 +3830,29 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * Adiciones de una línea POS. Sin `OptionPricingService` (sólo en specs) o
+   * sin `option_ids` y sin grupos obligatorios → sin efecto.
+   */
+  private async resolvePosLineOptions(
+    tx: any,
+    item: any,
+    storeId: number,
+  ): Promise<ResolvedOptions> {
+    const optionIds: number[] | undefined = item.option_ids;
+    if (!this.optionPricingService) {
+      if (optionIds?.length) throw new VendixHttpException(ErrorCodes.OPT_DISABLED);
+      return { unit_price_delta: new Prisma.Decimal(0), snapshots: [] };
+    }
+    return this.optionPricingService.resolve(
+      storeId,
+      item.product_id,
+      optionIds,
+      Number(item.quantity) || 1,
+      tx,
+    );
+  }
+
   private async buildPosOrderItem(
     tx: any,
     item: any,
@@ -4139,13 +4168,20 @@ export class PaymentsService {
         : resolvePriceUnitScale(product.price_unit_quantity);
     const priceUnits = resolvePriceUnits(lineUnits, priceUnitQuantity);
 
+    // Adiciones (S3): el servidor valida las reglas y calcula el delta FINAL
+    // por unidad; el cliente solo manda `option_ids`. Sin adiciones el delta
+    // es 0 y nada de este bloque cambia el cálculo de hoy.
+    const lineOptions = await this.resolvePosLineOptions(tx, item, dtoStoreId);
+    const optionUnitDelta = Number(lineOptions.unit_price_delta);
+    const catalogFinalWithOptions = this.roundMoney(catalogFinalPrice + optionUnitDelta);
+
     const declaredGross = this.resolveDeclaredGrossUnitPrice(item);
-    const finalUnitPrice = declaredGross ?? catalogFinalPrice;
+    const finalUnitPrice = declaredGross ?? catalogFinalWithOptions;
     // F-222: en centavos enteros — `Math.abs` en floats decide el mismo centavo
     // según la magnitud (13603.13/13603.12 no disparaba, 2425.00/2424.99 sí).
     const isPriceOverridden =
       declaredGross !== null &&
-      differsByAtLeastCents(declaredGross, catalogFinalPrice);
+      differsByAtLeastCents(declaredGross, catalogFinalWithOptions);
 
     if (isPriceOverridden) {
       if (!product.allow_pos_price_override) {
@@ -4167,7 +4203,7 @@ export class PaymentsService {
     // correcto de `catalogFinalPrice`, y volver a pasarlo por el kernel con
     // las tasas exclusivas tal como son (`is_inclusive: false`) sumaría ese
     // impuesto una segunda vez sobre el mismo total.
-    const taxInfo = isPriceOverridden
+    const taxInfo = isPriceOverridden || optionUnitDelta !== 0
       ? this.invertDeclaredGross(catalogTaxInfo, finalUnitPrice, {
           product_id: product.id,
           quantity: priceUnits,
@@ -4182,7 +4218,7 @@ export class PaymentsService {
     // que esta función ya cargó, así que no cuesta ninguna consulta.
     const costPrice = pickCostPrice(variant?.cost_price, product.cost_price);
 
-    return this.buildOrderItemSnapshot({
+    const snapshot = await this.buildOrderItemSnapshot({
       item,
       productName: item.product_name || product.name,
       sku: item.product_sku || variant?.sku || product.sku,
@@ -4208,6 +4244,14 @@ export class PaymentsService {
       storeId: dtoStoreId,
       userId: user?.id ?? null,
     });
+    // Snapshot congelado de las adiciones en la línea (nested create). Solo
+    // se agrega con adiciones: las líneas de hoy no cambian de forma.
+    if (lineOptions.snapshots.length) {
+      (snapshot as Record<string, unknown>).order_item_options = {
+        create: lineOptions.snapshots.map((option) => ({ store_id: dtoStoreId, ...option })),
+      };
+    }
+    return snapshot;
   }
 
   /**

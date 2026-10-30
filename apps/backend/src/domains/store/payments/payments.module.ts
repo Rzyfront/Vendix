@@ -62,6 +62,7 @@ import { ShippingModule } from '../shipping/shipping.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 
 import { ScheduledOrdersModule } from '../scheduled-orders/scheduled-orders.module';
+import { ProductOptionsModule } from '../product-options/product-options.module';
 @Module({
   imports: [
     ResponseModule,
@@ -70,6 +71,8 @@ import { ScheduledOrdersModule } from '../scheduled-orders/scheduled-orders.modu
     // Pedidos programados: agendamiento dentro de la venta POS. Sin ciclo:
     // ScheduledOrdersModule no importa payments.
     ScheduledOrdersModule,
+    // Adiciones: precio y snapshot por línea. Sin ciclo.
+    ProductOptionsModule,
     CashPaymentModule,
     CashOnDeliveryPaymentModule,
     StripeModule,

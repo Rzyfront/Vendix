@@ -14,6 +14,7 @@ import {
   Matches,
   IsEmail,
   IsPositive,
+  ArrayMaxSize,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
@@ -24,6 +25,13 @@ class CheckoutCartItemDto {
   @IsInt()
   @Min(1)
   product_id: number;
+
+  // Adiciones elegidas (ids de `product_options`); el precio lo calcula el servidor.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsInt({ each: true })
+  option_ids?: number[];
 
   @IsOptional()
   @IsInt()

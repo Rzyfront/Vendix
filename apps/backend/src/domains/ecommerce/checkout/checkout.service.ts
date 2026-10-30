@@ -19,6 +19,10 @@ import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ScheduledOrdersService } from '../../store/scheduled-orders/scheduled-orders.service';
 import {
+  OptionPricingService,
+  ResolvedOptions,
+} from '../../store/product-options/option-pricing.service';
+import {
   Prisma,
   payment_processing_mode_enum,
   shipping_rate_type_enum,
@@ -196,6 +200,9 @@ export class CheckoutService {
     // `schedule` en el payload se rechaza con SCHED_DISABLED.
     @Optional()
     private readonly scheduledOrdersService?: ScheduledOrdersService,
+    // Adiciones de producto. `@Optional()` por el mismo motivo.
+    @Optional()
+    private readonly optionPricingService?: OptionPricingService,
   ) {}
 
   /**
@@ -267,6 +274,33 @@ export class CheckoutService {
     const limit = Number(threshold);
     if (!Number.isFinite(limit) || limit < 0) return price;
     return products_gross >= limit ? 0 : price;
+  }
+
+  /**
+   * Adiciones de una línea del checkout. La línea armada desde `dto.items`
+   * (invitado) trae sus `option_ids`; la del carrito de backend las toma del
+   * `dto.items` que coincida por producto + variante + presentación (mismo
+   * emparejamiento que `notes`). Sin servicio (specs) → sin efecto.
+   */
+  private async resolveCheckoutLineOptions(
+    item: { product_id: number; product_variant_id?: number | null; applied_price_tier_id?: number | null; quantity: number; option_ids?: number[] },
+    dto_items?: Array<{ product_id: number; product_variant_id?: number | null; price_tier_id?: number | null; option_ids?: number[] }>,
+  ): Promise<ResolvedOptions> {
+    const option_ids =
+      item.option_ids ??
+      dto_items?.find(
+        (d) =>
+          d.option_ids !== undefined &&
+          d.product_id === item.product_id &&
+          (d.product_variant_id ?? null) === (item.product_variant_id ?? null) &&
+          (d.price_tier_id ?? null) === (item.applied_price_tier_id ?? null),
+      )?.option_ids;
+    const store_id = RequestContextService.getStoreId();
+    if (!this.optionPricingService || !store_id) {
+      if (option_ids?.length) throw new VendixHttpException(ErrorCodes.OPT_DISABLED);
+      return { unit_price_delta: new Prisma.Decimal(0), snapshots: [] };
+    }
+    return this.optionPricingService.resolve(store_id, item.product_id, option_ids, Number(item.quantity) || 1);
   }
 
   /**
@@ -1746,6 +1780,8 @@ export class CheckoutService {
             // no tenga que saber de qué origen viene el carrito.
             applied_price_tier_id: item.price_tier_id ?? null,
             notes: item.notes?.trim() || null,
+            // Adiciones de esta línea (invitado: una línea por selección).
+            option_ids: item.option_ids,
             product,
             product_variant,
           } as any;
@@ -2133,7 +2169,10 @@ export class CheckoutService {
           quantity: item.quantity,
         });
 
-        const netPrice = line.net_unit_price;
+        // Adiciones (S3): delta FINAL por unidad calculado en el servidor
+        // sobre los `option_ids` de la línea. Sin adiciones → 0, como hoy.
+        const lineOptions = await this.resolveCheckoutLineOptions(item, dto.items);
+        const netPrice = line.net_unit_price + Number(lineOptions.unit_price_delta);
 
         const stockUnitsConsumed = line.stock_units_consumed;
         stockUnitsByIndex[index] = stockUnitsConsumed;
@@ -2204,6 +2243,7 @@ export class CheckoutService {
 
         return {
           ...item,
+          option_snapshots: lineOptions.snapshots,
           net_price: netPrice,
           base_unit_price: unitTotals.base,
           cost_price,
@@ -2439,6 +2479,17 @@ export class CheckoutService {
         placed_at: new Date(),
         order_items: {
           create: itemsWithTaxes.map((item) => ({
+            // Snapshot congelado de adiciones (solo si la línea las tiene).
+            ...(item.option_snapshots.length
+              ? {
+                  order_item_options: {
+                    create: item.option_snapshots.map((option) => ({
+                      store_id: store_id_ctx!,
+                      ...option,
+                    })),
+                  },
+                }
+              : {}),
             // Online/whatsapp para enviar: el plato KDS se empaca.
             is_takeaway:
               markTakeawayForDelivery &&
