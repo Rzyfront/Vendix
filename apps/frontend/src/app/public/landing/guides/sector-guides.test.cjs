@@ -18,10 +18,11 @@ test('preview gate is off in production and on in local development', () => {
   assert.match(prod, /sectorGuidesEnabled:\s*false/);
   assert.match(dev, /sectorGuidesEnabled:\s*true/);
 });
-test('the three route fixtures resolve to complete editorial content', () => {
+const GUIDE_KEYS = ['comandas-restaurantes', 'ventas-mayoristas-al-detal', 'preparar-demostracion', 'cierre-de-caja', 'control-de-inventario'];
+test('every route fixture resolves to complete editorial content', () => {
   const guides = load();
-  assert.equal(Object.keys(guides).length, 3);
-  for (const key of ['comandas-restaurantes', 'ventas-mayoristas-al-detal', 'preparar-demostracion']) {
+  assert.deepEqual(Object.keys(guides).sort(), [...GUIDE_KEYS].sort());
+  for (const key of GUIDE_KEYS) {
     assert.ok(guides[key].title && guides[key].description);
     assert.ok(guides[key].sections.length >= 4);
     assert.ok(guides[key].checklist.length >= 6);
@@ -45,6 +46,7 @@ test('Angular parses both templates with no syntax errors', async () => {
 test('guide routes are gated and absent from other public app route files', () => {
   const routes = path.resolve(front, 'app/routes/public');
   const marketing = fs.readFileSync(path.join(routes, 'vendix_landing.public.routes.ts'), 'utf8');
+  for (const key of GUIDE_KEYS) assert.match(marketing, new RegExp("'" + key + "'"));
   assert.match(marketing, /sectorGuideRoutes:\s*Routes\s*=\s*SECTOR_GUIDES_ENABLED\s*\?/);
   for (const file of fs.readdirSync(routes).filter(f => f.endsWith('.ts') && f !== 'vendix_landing.public.routes.ts')) {
     assert.doesNotMatch(fs.readFileSync(path.join(routes, file), 'utf8'), /sectorGuideRoutes|sector-guide\.component/);
