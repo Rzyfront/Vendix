@@ -2138,8 +2138,7 @@ export class PromotionsSettingsDto {
   enable_high_conversion_ui?: boolean;
 }
 
-const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
-
+// Reutiliza `HH_MM` declarado arriba en este archivo.
 export class ScheduledOrdersWeeklyBlockDto {
   @ApiProperty({ example: 2, description: '0 = domingo … 6 = sábado' })
   @IsInt()
@@ -2231,13 +2230,6 @@ export class ScheduledOrdersSettingsDto {
   @ArrayMinSize(1)
   @IsIn(['pickup', 'delivery'], { each: true })
   fulfillment_types?: Array<'pickup' | 'delivery'>;
-
-  @ApiProperty({ example: 15, required: false })
-  @IsOptional()
-  @IsInt()
-  @Min(5)
-  @Max(240)
-  hold_minutes?: number;
 
   @ApiProperty({ type: [ScheduledOrderReminderRuleDto], required: false })
   @IsOptional()

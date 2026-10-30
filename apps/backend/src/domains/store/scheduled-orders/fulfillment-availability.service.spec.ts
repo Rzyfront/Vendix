@@ -22,7 +22,6 @@ function config(overrides: Partial<ScheduledOrdersSettings> = {}): ScheduledOrde
     min_lead_time_hours: 24,
     max_days_ahead: 30,
     fulfillment_types: ['pickup'],
-    hold_minutes: 15,
     reminders: [],
     ...overrides,
   };

@@ -1311,8 +1311,6 @@ export interface ScheduledOrdersSettings {
   min_lead_time_hours: number;
   max_days_ahead: number;
   fulfillment_types: Array<'pickup' | 'delivery'>;
-  /** Minutos que la tienda en línea sostiene la franja mientras el cliente paga. */
-  hold_minutes: number;
   reminders: ScheduledOrderReminderRule[];
 }
 

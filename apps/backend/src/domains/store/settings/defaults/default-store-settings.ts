@@ -550,7 +550,6 @@ export function getDefaultStoreSettings(): StoreSettings {
       min_lead_time_hours: 24,
       max_days_ahead: 30,
       fulfillment_types: ['pickup'],
-      hold_minutes: 15,
       reminders: [
         { minutes_before: 1440, enabled: true, notify_staff: true, notify_customer: true },
         { minutes_before: 120, enabled: true, notify_staff: true, notify_customer: false },

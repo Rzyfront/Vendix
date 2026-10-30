@@ -18,6 +18,7 @@ import {
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ItemNotes } from '@common/decorators/item-notes.decorator';
+import { ScheduleInputDto } from '../../../store/scheduled-orders/dto/scheduled-orders.dto';
 
 class CheckoutCartItemDto {
   @IsInt()
@@ -127,6 +128,13 @@ export class CheckoutShippingAddressDto {
  * apagado el archivo es opcional y se ignora en métodos no elegibles.
  */
 export class CheckoutDto {
+  // Pedido programado: día y franja de entrega/recogida. Solo con
+  // `store_settings.scheduled_orders.enabled`; el servidor valida cupo.
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ScheduleInputDto)
+  schedule?: ScheduleInputDto;
+
   // Booking selections for bookable services
   @IsOptional()
   @IsArray()

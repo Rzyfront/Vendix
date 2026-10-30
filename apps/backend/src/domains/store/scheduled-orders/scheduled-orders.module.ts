@@ -4,6 +4,9 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { FulfillmentAvailabilityService } from './fulfillment-availability.service';
 import { FulfillmentExceptionsService } from './fulfillment-exceptions.service';
 import { FulfillmentExceptionsController } from './fulfillment-exceptions.controller';
+import { ScheduledOrdersService } from './scheduled-orders.service';
+import { ScheduledOrdersController } from './scheduled-orders.controller';
+import { ScheduledOrderCancelledListener } from './listeners/order-cancelled.listener';
 
 /**
  * Pedidos programados (venta por encargo): agenda de cumplimiento,
@@ -12,8 +15,14 @@ import { FulfillmentExceptionsController } from './fulfillment-exceptions.contro
  */
 @Module({
   imports: [ResponseModule, PrismaModule],
-  controllers: [FulfillmentExceptionsController],
-  providers: [FulfillmentAvailabilityService, FulfillmentExceptionsService],
-  exports: [FulfillmentAvailabilityService],
+  // Orden importa: las rutas fijas (availability, exceptions, agenda) antes de `:id`.
+  controllers: [FulfillmentExceptionsController, ScheduledOrdersController],
+  providers: [
+    FulfillmentAvailabilityService,
+    FulfillmentExceptionsService,
+    ScheduledOrdersService,
+    ScheduledOrderCancelledListener,
+  ],
+  exports: [FulfillmentAvailabilityService, ScheduledOrdersService],
 })
 export class ScheduledOrdersModule {}

@@ -8,6 +8,7 @@ import {
 import * as crypto from 'crypto';
 import { assertNotLodgingFolioOrder } from '../orders/shared/lodging-folio-policy';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { ScheduledOrdersService } from '../scheduled-orders/scheduled-orders.service';
 import { Prisma, payment_processing_mode_enum, table_status_enum, order_state_enum } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
@@ -216,6 +217,10 @@ export class PaymentsService {
     // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
     @Optional() private readonly orderHistory?: OrderHistoryService,
     @Optional() private readonly walletBalanceService?: WalletBalanceService,
+    // Pedidos programados: agendamiento en la misma transacción de la venta.
+    // `@Optional()` por la misma razón que arriba; sin él (sólo en specs) un
+    // `schedule` en el payload se rechaza con SCHED_DISABLED.
+    @Optional() private readonly scheduledOrdersService?: ScheduledOrdersService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -924,6 +929,19 @@ export class PaymentsService {
         throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
       }
 
+      // Pedido programado: la entrega es en la franja, nunca en el acto. Una
+      // venta inmediata (`direct_delivery`/`dine_in`) pasa a `pickup`, así la
+      // ruta existente aparta el stock al cobrar y lo descuenta al entregar.
+      if (createPosPaymentDto.schedule && !createPosPaymentDto.is_draft) {
+        if (!this.scheduledOrdersService) {
+          throw new VendixHttpException(ErrorCodes.SCHED_DISABLED);
+        }
+        const deliveryType = createPosPaymentDto.delivery_type;
+        if (!deliveryType || deliveryType === 'direct_delivery' || deliveryType === 'dine_in') {
+          createPosPaymentDto.delivery_type = 'pickup';
+        }
+      }
+
       if (
         createPosPaymentDto.store_id !== undefined &&
         createPosPaymentDto.store_id !== null &&
@@ -1100,6 +1118,16 @@ export class PaymentsService {
           user,
         ))!;
         const order = orderCreation.order;
+        // Pedido programado: toma el cupo bajo el bloqueo de la tienda en la
+        // misma transacción; franja llena o sin anticipación revierte la venta.
+        if (createPosPaymentDto.schedule && !createPosPaymentDto.is_draft) {
+          await this.scheduledOrdersService!.createForOrder(tx, {
+            store_id: order.store_id,
+            order_id: order.id,
+            schedule: createPosPaymentDto.schedule,
+            user_id: user?.id ?? null,
+          });
+        }
         // PR #840: dine_in (table consumption) keeps direct_delivery handover
         // semantics — goods leave our hands at charge (stock commit + COGS).
         // Only the label changed; every predicate below must treat both alike.

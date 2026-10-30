@@ -17,6 +17,7 @@ import {
 import { CheckoutDto, CouponPreviewDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { ScheduledOrdersService } from '../../store/scheduled-orders/scheduled-orders.service';
 import {
   Prisma,
   payment_processing_mode_enum,
@@ -191,6 +192,10 @@ export class CheckoutService {
     // motivo; sin él devuelve "sin alcance fijo".
     @Optional()
     private readonly shippingCalculator?: ShippingCalculatorService,
+    // Pedidos programados. `@Optional()` por el mismo motivo; sin él un
+    // `schedule` en el payload se rechaza con SCHED_DISABLED.
+    @Optional()
+    private readonly scheduledOrdersService?: ScheduledOrdersService,
   ) {}
 
   /**
@@ -1655,6 +1660,14 @@ export class CheckoutService {
     }
 
     const store_id_ctx = RequestContextService.getStoreId();
+    // Pedido programado: falla temprano (antes de crear la orden) si la
+    // franja no existe, no cumple anticipación o no tiene cupo.
+    if (dto.schedule) {
+      if (!this.scheduledOrdersService || !store_id_ctx) {
+        throw new VendixHttpException(ErrorCodes.SCHED_DISABLED);
+      }
+      await this.scheduledOrdersService.preValidate(store_id_ctx, dto.schedule);
+    }
     let resolved_customer_id: number | null = user_id ?? null;
     if (is_guest && guest_customer && store_id_ctx) {
       const resolved =
@@ -2492,6 +2505,29 @@ export class CheckoutService {
             if (linked.count !== 1) throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001);
           }
         });
+      } catch (error) {
+        await this.prisma.orders.updateMany({
+          where: { id: order.id, store_id: order.store_id },
+          data: { state: 'cancelled', updated_at: new Date() },
+        });
+        await this.cancelCheckoutBookings(createdBookingIds);
+        throw error;
+      }
+    }
+
+    // Pedido programado: toma el cupo bajo el bloqueo de la tienda. Si otro
+    // cliente ganó el último cupo entre la validación previa y aquí, la orden
+    // se cancela igual que con una reserva de servicio que no se pudo enlazar.
+    if (dto.schedule) {
+      try {
+        await this.prisma.$transaction((tx) =>
+          this.scheduledOrdersService!.createForOrder(tx, {
+            store_id: order.store_id,
+            order_id: order.id,
+            schedule: dto.schedule!,
+            user_id: user_id ?? null,
+          }),
+        );
       } catch (error) {
         await this.prisma.orders.updateMany({
           where: { id: order.id, store_id: order.store_id },

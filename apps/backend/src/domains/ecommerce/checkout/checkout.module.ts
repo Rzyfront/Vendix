@@ -27,9 +27,12 @@ import { CouponsModule } from '../../store/coupons/coupons.module';
 import { MenusModule } from '../../store/menus/menus.module';
 import { StorefrontSharedModule } from '../shared/storefront-shared.module';
 
+import { ScheduledOrdersModule } from '../../store/scheduled-orders/scheduled-orders.module';
 @Module({
   imports: [
     PrismaModule,
+    // Pedidos programados: agendamiento del checkout. Sin ciclo.
+    ScheduledOrdersModule,
     CartModule,
     // MenuAvailabilityCheckerService enforces strict carta schedule at checkout.
     MenusModule,

@@ -19,6 +19,7 @@ import {
 import { Type, Transform } from 'class-transformer';
 import { table_status_enum } from '@prisma/client';
 import { PaymentLegDto } from './payment-leg.dto';
+import { ScheduleInputDto } from '../../scheduled-orders/dto/scheduled-orders.dto';
 
 export class PosOrderItemDto {
   @IsOptional()
@@ -523,6 +524,13 @@ export class CreatePosPaymentDto {
   @IsString()
   @MaxLength(50)
   delivery_type?: string;
+
+  // Pedido programado (venta por encargo). Solo con
+  // `store_settings.scheduled_orders.enabled`; el servidor valida cupo.
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ScheduleInputDto)
+  schedule?: ScheduleInputDto;
 
   @IsOptional()
   @IsInt()
