@@ -31,6 +31,7 @@ import {
   KitchenTicket,
   KitchenTicketItem,
 } from '../../interfaces';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { RecipesService } from '../../../recipes/services/recipes.service';
 import type {
   FireConfirmPayload,
@@ -128,6 +129,7 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   private readonly destroyRef = inject(DestroyRef);
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly router = inject(Router);
+  private readonly authFacade = inject(AuthFacade);
   private readonly route = inject(ActivatedRoute);
 
   /**
@@ -344,13 +346,17 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     this.stashPendingRecipeReturn(item);
     const inactiveId = itemInactiveRecipeId(item);
     if (inactiveId != null) {
-      // `?mode=edit`: el default de una receta existente es la ficha de
-      // lectura; aquí el operador viene a REACTIVAR, así que entra directo al
-      // formulario con el banner "Reactivar existente" visible.
-      void this.router.navigate(
-        ['/admin/restaurant-ops/recipes', inactiveId, 'edit'],
-        { queryParams: { mode: 'edit' } },
-      );
+      // Con permiso de edición entra directo al formulario (`?mode=edit`) para
+      // reactivar; sin él, abre la ficha de lectura: mandar a cocina/mesero a
+      // `:id/edit` solo les daría un 403 al guardar.
+      if (this.authFacade.hasPermission('store:recipes:update')) {
+        void this.router.navigate(
+          ['/admin/restaurant-ops/recipes', inactiveId, 'edit'],
+          { queryParams: { mode: 'edit' } },
+        );
+        return;
+      }
+      void this.router.navigate(['/admin/restaurant-ops/recipes', inactiveId]);
       return;
     }
     void this.router.navigate(['/admin/restaurant-ops/recipes']);

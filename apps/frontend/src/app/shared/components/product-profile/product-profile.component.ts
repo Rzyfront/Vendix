@@ -140,7 +140,7 @@ export class ProductProfileComponent {
   private variantImageUrl(): string | null {
     const variant = this.variant();
     if (!variant) return null;
-    return variant.variant_image_url || variant.product_images?.image_url || null;
+    return variant.product_images?.image_url ?? null;
   }
 
   private sortedImages(

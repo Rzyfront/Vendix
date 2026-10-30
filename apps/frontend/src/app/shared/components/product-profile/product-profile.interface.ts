@@ -37,7 +37,6 @@ export interface ProductProfileVariant {
   id?: number;
   name?: string | null;
   sku?: string | null;
-  variant_image_url?: string | null;
   product_images?: { image_url: string } | null;
 }
 

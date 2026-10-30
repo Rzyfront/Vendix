@@ -38,6 +38,7 @@ import {
 } from '../../../../../../../shared/components/index';
 
 import { RecipeItemsEditorComponent } from '../../components/recipe-items-editor/recipe-items-editor.component';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 
 import {
   ProductProfileComponent,
@@ -113,6 +114,16 @@ export class RecipeFormPageComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
+
+  /**
+   * ¿Puede este usuario editar recetas? La ficha de lectura vive en una ruta
+   * con permiso `read`, así que un rol de consulta (cocina, mesero) no debe
+   * recibir el botón "Editar": el backend le respondería 403 al guardar.
+   */
+  readonly canEditRecipe = computed(() =>
+    this.authFacade.hasPermission('store:recipes:update'),
+  );
 
   readonly isEditMode = signal(false);
   readonly recipeId = signal<number | null>(null);
@@ -172,7 +183,6 @@ export class RecipeFormPageComponent implements OnInit {
       id: variant.id,
       name: variant.name ?? null,
       sku: variant.sku ?? null,
-      variant_image_url: variant.variant_image_url ?? null,
       product_images: variant.product_images ?? null,
     };
   });
@@ -279,12 +289,16 @@ export class RecipeFormPageComponent implements OnInit {
           label: 'Volver',
           variant: 'outline',
         },
-        {
-          id: 'edit',
-          label: 'Editar',
-          icon: 'pencil',
-          variant: 'primary',
-        },
+        ...(this.canEditRecipe()
+          ? [
+              {
+                id: 'edit',
+                label: 'Editar',
+                icon: 'pencil',
+                variant: 'primary' as const,
+              },
+            ]
+          : []),
       ];
     }
     const invalid = this.formStatus() !== 'VALID' || this.isLoadingRecipe();
@@ -362,9 +376,14 @@ export class RecipeFormPageComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.loadYieldOptions();
-
     const id = this.route.snapshot.paramMap.get('id');
+    // La ficha de lectura no usa el catálogo: pedirlo solo cuando se va a
+    // crear o editar evita una llamada inútil y un toast de error para roles
+    // sin permiso de productos.
+    if (!id || this.isEditRequested()) {
+      this.loadYieldOptions();
+    }
+
     if (id) {
       this.isEditMode.set(true);
       this.recipeId.set(Number(id));
@@ -661,6 +680,9 @@ export class RecipeFormPageComponent implements OnInit {
    */
   private enterEditMode(): void {
     this.isViewing.set(false);
+    if (this.yieldOptions().length === 0) {
+      this.loadYieldOptions();
+    }
     void this.router.navigate([], {
       relativeTo: this.route,
       queryParams: { mode: 'edit' },
@@ -674,7 +696,10 @@ export class RecipeFormPageComponent implements OnInit {
    * agrega `?mode=edit`; el default de una receta existente es lectura (S3).
    */
   private isEditRequested(): boolean {
-    return this.route.snapshot.queryParamMap.get('mode') === 'edit';
+    if (this.route.snapshot.queryParamMap.get('mode') === 'edit') return true;
+    // Compatibilidad: enlaces viejos a `/recipes/:id/edit` (sin query) siguen
+    // abriendo el formulario, que es lo que su URL promete.
+    return this.router.url.split('?')[0].endsWith('/edit');
   }
 
   private cancel(): void {

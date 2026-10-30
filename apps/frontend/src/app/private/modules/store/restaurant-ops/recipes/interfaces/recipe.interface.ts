@@ -19,8 +19,7 @@ export interface RecipeProductVariant {
   id: number;
   name?: string | null;
   sku?: string | null;
-  /** Foto propia de la variante (columna directa o imagen del catálogo). */
-  variant_image_url?: string | null;
+  /** Imagen del catálogo asociada a la variante (`product_images`). */
   product_images?: { image_url: string } | null;
   attributes?:
     | Array<{ attribute_name: string; attribute_value: string }>

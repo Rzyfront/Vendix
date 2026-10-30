@@ -391,6 +391,7 @@ export class FormulaFormPageComponent implements OnInit {
               }),
             );
           }
+          this.loadedItemNotes.set(notesById);
           this.isLoadingFormula.set(false);
           this.loadServerCost(id);
         },
