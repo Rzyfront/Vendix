@@ -47,7 +47,7 @@ const PAYMENT_STATE_LABELS: Record<string, string> = {
 };
 
 /** Methods the desk registers by hand; gateways settle themselves. */
-const MANUAL_METHODS = ['cash', 'card', 'bank_transfer'];
+const MANUAL_METHODS = ['cash', 'card', 'bank_transfer', 'voucher'];
 
 /** Random key of one payment attempt (a double click registers it once). */
 function newRequestId(): string {

@@ -90,6 +90,7 @@ describe('SplitAccountPaymentService', () => {
       'wompi',
       'wallet',
       'cash_on_delivery',
+      'voucher',
     ].map((type, index) => ({
       id: index + 1,
       store_id: 10,
@@ -371,6 +372,28 @@ describe('SplitAccountPaymentService', () => {
       session_id: 50,
       payment_method: 'bank_transfer',
     });
+  });
+
+  it('acepta datáfono (voucher) como cobro manual aunque su processing_mode sea ONLINE', async () => {
+    settings.getSettings.mockResolvedValue({
+      pos: {
+        cash_register: {
+          enabled: false,
+          require_session_for_sales: false,
+          track_non_cash_payments: false,
+        },
+      },
+    });
+    await service.pay(
+      100,
+      11,
+      makeRequest({
+        store_payment_method_id: 7,
+        payment_reference: 'DAT-1',
+        idempotency_key: 'payment-key-voucher',
+      }),
+    );
+    expect(payments.some((p) => p.store_payment_method_id === 7)).toBe(true);
   });
 
   it('rejects same idempotency key with changed amount or reference', async () => {
