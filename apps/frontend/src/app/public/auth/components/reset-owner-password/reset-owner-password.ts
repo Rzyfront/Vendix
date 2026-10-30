@@ -1,5 +1,8 @@
 import {Component, OnInit, OnDestroy, inject, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DOCUMENT } from '@angular/common';
+import { Meta, Title } from '@angular/platform-browser';
+import { applyMarketingPageMetadata, MARKETING_PAGES } from '../../../marketing-page-metadata';
 
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import {
@@ -182,6 +185,17 @@ export function passwordsMatchValidator(
   styleUrls: [],
 })
 export class ResetOwnerPasswordComponent implements OnInit, OnDestroy {
+  // SEO-TECH-04: noindex y sin canonical a la portada en el host comercial (en tiendas no toca nada).
+  private readonly restoreMarketingMetadata = applyMarketingPageMetadata(
+    inject(DOCUMENT),
+    inject(Title),
+    inject(Meta),
+    MARKETING_PAGES.resetPassword,
+  );
+  private readonly marketingMetadataCleanup = inject(DestroyRef).onDestroy(
+    this.restoreMarketingMetadata,
+  );
+
   private destroyRef = inject(DestroyRef);
   resetPasswordForm: FormGroup;
   readonly isLoading = signal(false);
