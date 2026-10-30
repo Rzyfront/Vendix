@@ -80,6 +80,14 @@ describe('resolveOptionSelection', () => {
     expect(result.snapshots.find((s) => s.option_id === 31)?.scope).toBe('per_line');
   });
 
+  it('per_line que no divide exacto redondea al centavo hacia arriba: la línea nunca cobra menos', () => {
+    const torta: Group = { ...velas, options: [option(31, 'Topper', 10000)] };
+    const result = resolveOptionSelection([torta], [31], 3);
+    // 10000 / 3 = 3333.33… → 3333.34; × 3 = 10000.02, nunca 9999.99.
+    expect(result.unit_price_delta.toFixed(2)).toBe('3333.34');
+    expect(result.unit_price_delta.mul(3).gte(10000)).toBe(true);
+  });
+
   it('el delta sale del servidor: el precio de la opción en base manda, no el cliente', () => {
     const caro: Group = { ...cubierta, options: [option(22, 'Ganache', 9000, 150)] };
     expect(resolveOptionSelection([caro], [22], 1).unit_price_delta.toFixed(2)).toBe('9000.00');

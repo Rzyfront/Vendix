@@ -199,14 +199,17 @@ export class ProductOptionSelectorComponent {
     const qty = Math.max(1, this.quantity() || 1);
     const selected = this.selectedIds();
     let total = 0;
+    let perLine = 0;
     for (const g of this.groups()) {
       for (const o of g.options) {
         if (!selected.includes(o.id)) continue;
         const d = this.delta(o.price_delta);
-        total += g.scope === 'per_line' ? d / qty : d;
+        if (g.scope === 'per_line') perLine += d;
+        else total += d;
       }
     }
-    return total;
+    // Mismo redondeo que el servidor: por línea ÷ cantidad, al centavo hacia arriba.
+    return total + Math.ceil(Math.round((perLine / qty) * 1e6) / 1e4) / 100;
   });
 
   readonly state = computed<ProductOptionSelectorState>(() => {

@@ -52,7 +52,9 @@ function minMessage(group: GroupRules, min: number): string {
 /**
  * Núcleo puro: valida la selección contra las reglas de los grupos y calcula
  * el delta. El cliente solo envía ids; el precio lo calcula el servidor.
- * `per_line` reparte su precio en el unitario (exacto con cantidad 1).
+ * `per_line` reparte su precio en el unitario: la suma de las opciones por
+ * línea ÷ cantidad, redondeada al centavo hacia arriba para que la línea
+ * nunca cobre menos que el precio configurado (exacto con cantidad 1).
  */
 export function resolveOptionSelection(
   groups: GroupRules[],
@@ -76,6 +78,7 @@ export function resolveOptionSelection(
   }
 
   let unit = new Prisma.Decimal(0);
+  let per_line_total = new Prisma.Decimal(0);
   const quantity = Math.max(1, line_quantity);
   const snapshots: OrderItemOptionSnapshot[] = [];
 
@@ -93,7 +96,8 @@ export function resolveOptionSelection(
     }
     for (const option of chosen) {
       const delta = new Prisma.Decimal(option.price_delta);
-      unit = unit.add(group.scope === 'per_line' ? delta.div(quantity) : delta);
+      if (group.scope === 'per_line') per_line_total = per_line_total.add(delta);
+      else unit = unit.add(delta);
       snapshots.push({
         option_id: option.id,
         group_name: group.name,
@@ -109,7 +113,8 @@ export function resolveOptionSelection(
     }
   }
 
-  return { unit_price_delta: unit.toDecimalPlaces(2), snapshots };
+  const per_line_unit = per_line_total.div(quantity).toDecimalPlaces(2, Prisma.Decimal.ROUND_CEIL);
+  return { unit_price_delta: unit.add(per_line_unit).toDecimalPlaces(2), snapshots };
 }
 
 @Injectable()
