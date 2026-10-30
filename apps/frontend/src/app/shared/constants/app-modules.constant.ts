@@ -211,6 +211,11 @@ export const APP_MODULES: {
           description: 'Gesti\u00f3n de reservas y agendamiento de servicios',
         },
         {
+          key: 'orders_scheduled',
+          label: 'Pedidos programados',
+          description: 'Agenda de pedidos con fecha de entrega y lista de producci\u00f3n',
+        },
+        {
           key: 'orders_service_stations',
           label: 'Estaciones de Servicio',
           description: 'Gesti\u00f3n de bah\u00edas, puestos f\u00edsicos y horarios de servicio',

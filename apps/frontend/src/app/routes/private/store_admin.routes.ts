@@ -510,6 +510,14 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // Scheduled Orders Routes
+      {
+        path: 'scheduled-orders',
+        loadChildren: () =>
+          import('../../private/modules/store/scheduled-orders/scheduled-orders.routes').then(
+            (r) => r.SCHEDULED_ORDERS_ROUTES,
+          ),
+      },
       {
         path: 'services',
         children: [
