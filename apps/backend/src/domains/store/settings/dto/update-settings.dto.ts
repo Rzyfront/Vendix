@@ -31,6 +31,8 @@ import {
   ServicesSettingsDto,
   ReservationsSettingsDto,
   PromotionsSettingsDto,
+  ScheduledOrdersSettingsDto,
+  ProductOptionsSettingsDto,
 } from './settings-schemas.dto';
 import { EcommerceSettingsDto } from '../../ecommerce/dto/ecommerce-settings.dto';
 
@@ -222,6 +224,18 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => ReservationsSettingsDto)
   reservations?: ReservationsSettingsDto;
+
+  @ApiProperty({ type: ScheduledOrdersSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ScheduledOrdersSettingsDto)
+  scheduled_orders?: ScheduledOrdersSettingsDto;
+
+  @ApiProperty({ type: ProductOptionsSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ProductOptionsSettingsDto)
+  product_options?: ProductOptionsSettingsDto;
 
   @ApiProperty({ required: false, description: 'Semantic fiscal status block' })
   @IsOptional()

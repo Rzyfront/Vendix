@@ -535,6 +535,33 @@ export function getDefaultStoreSettings(): StoreSettings {
       kitchen_mode: 'virtual',
     },
 
+    // Pedidos programados - apagado por defecto: ninguna tienda cambia hasta
+    // activarlo. Cupo contado en pedidos.
+    scheduled_orders: {
+      enabled: false,
+      weekly_schedule: [1, 2, 3, 4, 5, 6].map((day_of_week) => ({
+        day_of_week,
+        start_time: '08:00',
+        end_time: '18:00',
+      })),
+      slot_duration_minutes: 120,
+      slot_capacity: 3,
+      day_capacity: null,
+      min_lead_time_hours: 24,
+      max_days_ahead: 30,
+      fulfillment_types: ['pickup'],
+      hold_minutes: 15,
+      reminders: [
+        { minutes_before: 1440, enabled: true, notify_staff: true, notify_customer: true },
+        { minutes_before: 120, enabled: true, notify_staff: true, notify_customer: false },
+      ],
+    },
+
+    // Adiciones de producto - apagadas por defecto.
+    product_options: {
+      enabled: false,
+    },
+
     // Membership - gym/membership suite behavior toggles. Ambient access
     // validation is opt-in (false by default) and only surfaced for `gym`.
     // Capacity (aforo) control and its auto-leveling are also opt-in.

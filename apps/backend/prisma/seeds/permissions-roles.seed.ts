@@ -1101,6 +1101,46 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/reservations/:id',
       method: 'DELETE',
     },
+
+    // Pedidos programados (venta por encargo). owner/admin/manager los heredan
+    // por el prefijo `store:`.
+    {
+      name: 'store:scheduled_orders:read',
+      description: 'Ver agenda de pedidos programados',
+      path: '/api/store/scheduled-orders',
+      method: 'GET',
+    },
+    {
+      name: 'store:scheduled_orders:create',
+      description: 'Programar pedidos',
+      path: '/api/store/scheduled-orders',
+      method: 'POST',
+    },
+    {
+      name: 'store:scheduled_orders:update',
+      description: 'Cambiar estado de pedidos programados y excepciones de agenda',
+      path: '/api/store/scheduled-orders/:id/status',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:scheduled_orders:reschedule',
+      description: 'Reprogramar pedidos programados',
+      path: '/api/store/scheduled-orders/:id/reschedule',
+      method: 'PATCH',
+    },
+    // Adiciones de producto
+    {
+      name: 'store:product_options:read',
+      description: 'Ver grupos de adiciones',
+      path: '/api/store/product-option-groups',
+      method: 'GET',
+    },
+    {
+      name: 'store:product_options:manage',
+      description: 'Crear y editar grupos de adiciones',
+      path: '/api/store/product-option-groups',
+      method: 'POST',
+    },
     {
       name: 'store:reservations:schedules:manage',
       description: 'Gestionar horarios de servicio',

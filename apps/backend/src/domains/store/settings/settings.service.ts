@@ -102,6 +102,9 @@ export const KNOWN_SECTIONS = [
   'vex',
   // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & UI
   'promotions',
+  // Pedidos programados y adiciones (venta por encargo). Sección + DTO, ver `invoicing`.
+  'scheduled_orders',
+  'product_options',
   // `app` is intentionally accepted here because the service maps it to
   // branding via updateStoreBranding(); the migrator strips persisted `app`
   // afterwards. The legacy alias should not break update calls.

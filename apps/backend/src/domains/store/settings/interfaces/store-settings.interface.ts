@@ -595,6 +595,12 @@ export interface StoreSettings {
   // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & display settings
   promotions?: PromotionsSettings;
 
+  // Pedidos programados (venta por encargo) - agenda de cumplimiento
+  scheduled_orders?: ScheduledOrdersSettings;
+
+  // Adiciones de producto (grupos de opciones con destino de componente)
+  product_options?: ProductOptionsSettings;
+
   // Secciones existentes
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -1273,6 +1279,46 @@ export interface FingerprintDeviceConfig {
   timeout_ms?: number;
   /** Per-verification timeout in milliseconds (latency cap per check). */
   verify_timeout_ms?: number;
+}
+
+/** Bloque horario de un día de la semana (0 = domingo … 6 = sábado), "HH:mm" en hora de tienda. */
+export interface ScheduledOrdersWeeklyBlock {
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+}
+
+/** Regla de recordatorio: minutos antes del inicio de la franja. */
+export interface ScheduledOrderReminderRule {
+  minutes_before: number;
+  enabled: boolean;
+  notify_staff: boolean;
+  notify_customer: boolean;
+}
+
+/**
+ * Agenda de cumplimiento de pedidos programados. Apagada por defecto: con
+ * `enabled: false` ningún flujo (POS, checkout, producción) cambia.
+ * El cupo se cuenta en PEDIDOS, no en unidades de producto.
+ */
+export interface ScheduledOrdersSettings {
+  enabled: boolean;
+  weekly_schedule: ScheduledOrdersWeeklyBlock[];
+  slot_duration_minutes: number;
+  slot_capacity: number;
+  /** `null` = sin tope diario. */
+  day_capacity: number | null;
+  min_lead_time_hours: number;
+  max_days_ahead: number;
+  fulfillment_types: Array<'pickup' | 'delivery'>;
+  /** Minutos que la tienda en línea sostiene la franja mientras el cliente paga. */
+  hold_minutes: number;
+  reminders: ScheduledOrderReminderRule[];
+}
+
+/** Adiciones de producto. Apagadas por defecto. */
+export interface ProductOptionsSettings {
+  enabled: boolean;
 }
 
 export interface MembershipSettings {

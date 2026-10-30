@@ -2138,3 +2138,119 @@ export class PromotionsSettingsDto {
   enable_high_conversion_ui?: boolean;
 }
 
+const HH_MM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export class ScheduledOrdersWeeklyBlockDto {
+  @ApiProperty({ example: 2, description: '0 = domingo … 6 = sábado' })
+  @IsInt()
+  @Min(0)
+  @Max(6)
+  day_of_week: number;
+
+  @ApiProperty({ example: '08:00' })
+  @Matches(HH_MM, { message: 'La hora debe tener el formato HH:mm.' })
+  start_time: string;
+
+  @ApiProperty({ example: '18:00' })
+  @Matches(HH_MM, { message: 'La hora debe tener el formato HH:mm.' })
+  end_time: string;
+}
+
+export class ScheduledOrderReminderRuleDto {
+  @ApiProperty({ example: 1440, description: 'Minutos antes del inicio de la franja' })
+  @IsInt()
+  @Min(5)
+  @Max(10080)
+  minutes_before: number;
+
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  enabled: boolean;
+
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  notify_staff: boolean;
+
+  @ApiProperty({ example: false })
+  @IsBoolean()
+  notify_customer: boolean;
+}
+
+/** Espejo de `store_settings.settings.scheduled_orders`. Se edita como un todo. */
+export class ScheduledOrdersSettingsDto {
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @ApiProperty({ type: [ScheduledOrdersWeeklyBlockDto], required: false })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ScheduledOrdersWeeklyBlockDto)
+  weekly_schedule?: ScheduledOrdersWeeklyBlockDto[];
+
+  @ApiProperty({ example: 120, required: false })
+  @IsOptional()
+  @IsInt()
+  @Min(15)
+  @Max(1440)
+  slot_duration_minutes?: number;
+
+  @ApiProperty({ example: 3, required: false })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  slot_capacity?: number;
+
+  @ApiProperty({ example: 15, required: false, nullable: true })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(10000)
+  day_capacity?: number | null;
+
+  @ApiProperty({ example: 24, required: false })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(720)
+  min_lead_time_hours?: number;
+
+  @ApiProperty({ example: 30, required: false })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  max_days_ahead?: number;
+
+  @ApiProperty({ example: ['pickup'], required: false })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsIn(['pickup', 'delivery'], { each: true })
+  fulfillment_types?: Array<'pickup' | 'delivery'>;
+
+  @ApiProperty({ example: 15, required: false })
+  @IsOptional()
+  @IsInt()
+  @Min(5)
+  @Max(240)
+  hold_minutes?: number;
+
+  @ApiProperty({ type: [ScheduledOrderReminderRuleDto], required: false })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ScheduledOrderReminderRuleDto)
+  reminders?: ScheduledOrderReminderRuleDto[];
+}
+
+/** Espejo de `store_settings.settings.product_options`. */
+export class ProductOptionsSettingsDto {
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+}

@@ -38,6 +38,7 @@ import { LayawayModule } from './layaway/layaway.module';
 import { WithholdingTaxModule } from './withholding-tax/withholding-tax.module';
 import { ExogenousModule } from './exogenous/exogenous.module';
 import { ReservationsModule } from './reservations/reservations.module';
+import { ScheduledOrdersModule } from './scheduled-orders/scheduled-orders.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { AIChatModule } from './ai-chat/ai-chat.module';
 import { VexiModule } from './vexi/vexi.module';
@@ -125,6 +126,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     WithholdingTaxModule,
     ExogenousModule,
     ReservationsModule,
+    ScheduledOrdersModule,
     ReviewsModule,
     AIChatModule,
     VexiModule,
