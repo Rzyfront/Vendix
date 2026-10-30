@@ -20,6 +20,7 @@ import {
   EmptyStateComponent,
   FilterConfig,
   FilterValues,
+  IconComponent,
   InputsearchComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
@@ -55,6 +56,7 @@ interface RecipesStats {
     ResponsiveDataViewComponent,
     PaginationComponent,
     EmptyStateComponent,
+    IconComponent,
   ],
   templateUrl: './recipes-list-page.component.html',
   styleUrl: './recipes-list-page.component.scss',
@@ -67,6 +69,21 @@ export class RecipesListPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly recipes = signal<Recipe[]>([]);
+
+  /**
+   * Filas de la lista = receta + `image_url` resuelta. La foto se calcula una
+   * vez por carga y no en cada celda: la tabla y la card móvil comparten el
+   * mismo valor, y así el avatar (`avatarKey`) no necesita dot notation sobre
+   * el array de imágenes.
+   *
+   * Orden de preferencia: foto marcada `is_main` → `sort_order` → primera.
+   */
+  readonly rows = computed<(Recipe & { image_url: string | null })[]>(() =>
+    this.recipes().map((recipe) => ({
+      ...recipe,
+      image_url: this.productImage(recipe),
+    })),
+  );
   readonly stats = signal<RecipesStats>({
     total: 0,
     active: 0,
@@ -208,6 +225,13 @@ export class RecipesListPageComponent implements OnInit {
    */
   readonly tableActions = computed<TableAction[]>(() => [
     {
+      label: 'Ver receta',
+      icon: 'eye',
+      variant: 'ghost',
+      tooltip: 'Abre la ficha compacta de la receta',
+      action: (item: Recipe) => this.viewRecipe(item),
+    },
+    {
       label: 'Editar',
       icon: 'edit',
       variant: 'info',
@@ -244,6 +268,8 @@ export class RecipesListPageComponent implements OnInit {
     titleTransform: (row: Recipe) =>
       row.product?.name ? row.product.name : `Receta #${row.id}`,
     subtitleKey: 'yield_quantity',
+    // Miniatura del plato en la card móvil; sin foto cae al icono `chef-hat`.
+    avatarKey: 'image_url',
     subtitleTransform: (row: Recipe) =>
       `${Number(row.yield_quantity ?? 0)} ${row.yield_unit || ''}`.trim(),
     avatarFallbackIcon: 'chef-hat',
@@ -404,12 +430,38 @@ export class RecipesListPageComponent implements OnInit {
     this.router.navigate(['/admin/restaurant-ops/recipes/new']);
   }
 
-  editRecipe(recipe: Recipe): void {
+  /**
+   * Abre la receta en modo LECTURA (ficha compacta). La ruta es la misma de
+   * siempre; `recipe-form-page` decide el modo: sin `?mode=edit` entra en
+   * vista, que es el default pedido (S3).
+   */
+  viewRecipe(recipe: Recipe): void {
     this.router.navigate(['/admin/restaurant-ops/recipes', recipe.id, 'edit']);
   }
 
+  /** "Editar" explícito: entra directo al formulario con los inputs abiertos. */
+  editRecipe(recipe: Recipe): void {
+    this.router.navigate(['/admin/restaurant-ops/recipes', recipe.id, 'edit'], {
+      queryParams: { mode: 'edit' },
+    });
+  }
+
   onRowClick(recipe: Recipe): void {
-    this.editRecipe(recipe);
+    this.viewRecipe(recipe);
+  }
+
+  /**
+   * Foto del plato para la fila: `is_main` primero, después `sort_order`, y si
+   * no hay galería usa `image_url` plana (endpoints que la resuelven).
+   * `null` = sin foto; el componente pinta el placeholder, nunca un hueco.
+   */
+  productImage(recipe: Recipe): string | null {
+    const images = recipe.product?.product_images ?? [];
+    if (images.length > 0) {
+      const main = images.find((img) => img?.is_main) ?? images[0];
+      return main?.image_url ?? null;
+    }
+    return recipe.product?.image_url ?? null;
   }
 
   confirmDelete(recipe: Recipe): void {

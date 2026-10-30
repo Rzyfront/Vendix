@@ -273,8 +273,21 @@ export class RecipesService {
               id: true,
               name: true,
               sku: true,
+              description: true,
               base_price: true,
               stock_unit: true,
+              preparation_time_minutes: true,
+              product_images: {
+                select: {
+                  id: true,
+                  image_url: true,
+                  is_main: true,
+                  alt_text: true,
+                  sort_order: true,
+                },
+                orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+                take: 1,
+              },
             },
           },
           // Yield variant as its own object — never concatenated into the
@@ -315,12 +328,25 @@ export class RecipesService {
             id: true,
             name: true,
             sku: true,
+            description: true,
             base_price: true,
             stock_unit: true,
             is_ingredient: true,
             is_sellable: true,
             is_combo: true,
             is_batch_produced: true,
+            preparation_time_minutes: true,
+            product_images: {
+              select: {
+                id: true,
+                image_url: true,
+                is_main: true,
+                alt_text: true,
+                sort_order: true,
+              },
+              orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+              take: 6,
+            },
           },
         },
         // Yield variant as its own object (recetas-por-variante, paso 4);
@@ -331,6 +357,8 @@ export class RecipesService {
             id: true,
             name: true,
             sku: true,
+            variant_image_url: true,
+            product_images: { select: { image_url: true } },
           },
         },
         items: {
@@ -341,11 +369,23 @@ export class RecipesService {
                 id: true,
                 name: true,
                 sku: true,
+                description: true,
                 stock_unit: true,
                 is_ingredient: true,
                 is_sellable: true,
                 base_price: true,
                 cost_price: true,
+                product_images: {
+                  select: {
+                    id: true,
+                    image_url: true,
+                    is_main: true,
+                    alt_text: true,
+                    sort_order: true,
+                  },
+                  orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+                  take: 3,
+                },
               },
             },
           },
@@ -392,8 +432,20 @@ export class RecipesService {
               id: true,
               name: true,
               sku: true,
+              description: true,
               stock_unit: true,
               is_ingredient: true,
+              product_images: {
+                select: {
+                  id: true,
+                  image_url: true,
+                  is_main: true,
+                  alt_text: true,
+                  sort_order: true,
+                },
+                orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+                take: 3,
+              },
             },
           },
         },
@@ -727,6 +779,7 @@ export class RecipesService {
                     ? new Prisma.Decimal(item.waste_absolute)
                     : new Prisma.Decimal(0),
                 is_optional: item.is_optional ?? false,
+                notes: item.notes ?? null,
                 updated_at: new Date(),
               },
             });
@@ -746,6 +799,7 @@ export class RecipesService {
                     ? new Prisma.Decimal(item.waste_absolute)
                     : new Prisma.Decimal(0),
                 is_optional: item.is_optional ?? false,
+                notes: item.notes ?? null,
                 updated_at: new Date(),
               },
             });
@@ -862,6 +916,7 @@ export class RecipesService {
               ? new Prisma.Decimal(dto.waste_absolute)
               : new Prisma.Decimal(0),
           is_optional: dto.is_optional ?? false,
+          notes: dto.notes ?? null,
           updated_at: new Date(),
         },
         include: {
@@ -871,6 +926,12 @@ export class RecipesService {
               name: true,
               sku: true,
               stock_unit: true,
+              description: true,
+              product_images: {
+                select: { id: true, image_url: true, is_main: true, sort_order: true },
+                orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+                take: 3,
+              },
             },
           },
         },
@@ -915,6 +976,7 @@ export class RecipesService {
         waste_absolute: new Prisma.Decimal(dto.waste_absolute),
       }),
       ...(dto.is_optional !== undefined && { is_optional: dto.is_optional }),
+      ...(dto.notes !== undefined && { notes: dto.notes }),
       updated_at: new Date(),
     };
 

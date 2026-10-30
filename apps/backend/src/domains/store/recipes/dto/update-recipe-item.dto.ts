@@ -3,7 +3,9 @@ import {
   IsIn,
   IsNumber,
   IsOptional,
+  IsString,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
@@ -44,4 +46,16 @@ export class UpdateRecipeItemDto {
     typeof value === 'string' ? value === 'true' : value,
   )
   is_optional?: boolean;
+
+  /**
+   * Anotación libre del insumo. `null` explícito borra la anotación previa;
+   * omitir el campo la deja como está.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().slice(0, 500) || null : value,
+  )
+  notes?: string | null;
 }

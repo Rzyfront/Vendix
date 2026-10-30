@@ -75,7 +75,27 @@ export class FormulasService {
         orderBy: { id: 'desc' },
         include: {
           product: {
-            select: { id: true, name: true, sku: true, stock_unit: true },
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              stock_unit: true,
+              description: true,
+              preparation_time_minutes: true,
+              // Miniatura para la lista de fórmulas: misma forma que recetas
+              // (`recipe-profile-ui` S6), una sola foto para no inflar el payload.
+              product_images: {
+                select: {
+                  id: true,
+                  image_url: true,
+                  is_main: true,
+                  alt_text: true,
+                  sort_order: true,
+                },
+                orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+                take: 1,
+              },
+            },
           },
           product_variant: { select: { id: true, name: true, sku: true } },
           _count: { select: { items: true } },

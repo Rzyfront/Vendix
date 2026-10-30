@@ -2,9 +2,12 @@ import {
   Component,
   computed,
   DestroyRef,
+  effect,
   inject,
   OnInit,
   signal,
+  TemplateRef,
+  viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -18,6 +21,7 @@ import {
   EmptyStateComponent,
   FilterConfig,
   FilterValues,
+  IconComponent,
   InputsearchComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
@@ -29,6 +33,11 @@ import {
   ToastService,
 } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
+import {
+  ProductProfileModalComponent,
+  ProductProfileProduct,
+  ProductProfileRecipe,
+} from '../../../../../../../shared/components/product-profile/index';
 
 import {
   FORMULA_STATUS_COLORS,
@@ -40,9 +49,11 @@ import { ManufacturingFormulasService } from '../../../services';
 
 type StatusFilter = 'all' | FormulaStatus;
 
-/** Fila de la tabla: fórmula + costo teórico unitario resuelto. */
+/** Fila de la tabla: fórmula + costo teórico unitario + miniatura resuelta. */
 interface FormulaRow extends Formula {
   theoretical_cost: number | null;
+  /** Foto principal del producto (o `null` → placeholder). */
+  image_url: string | null;
 }
 
 @Component({
@@ -52,13 +63,50 @@ interface FormulaRow extends Formula {
     FormsModule,
     StickyHeaderComponent,
     CardComponent,
+    IconComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
     EmptyStateComponent,
+    ProductProfileModalComponent,
   ],
   templateUrl: './formulas-list-page.component.html',
+  styles: [
+    `
+      /* Miniatura del producto en la tabla: no agranda la fila. */
+      .formula-product-cell {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        line-height: 1.3;
+      }
+
+      .formula-product-thumb {
+        width: 2rem;
+        height: 2rem;
+        flex: 0 0 auto;
+        border-radius: 0.5rem;
+        object-fit: cover;
+        border: 1px solid var(--color-border, #e5e7eb);
+        background: var(--color-surface-secondary, #f3f4f6);
+      }
+
+      .formula-product-thumb--empty {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--color-text-secondary, #4b5563);
+      }
+
+      .formula-product-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    `,
+  ],
 })
 export class FormulasListPageComponent implements OnInit {
   private readonly formulasService = inject(ManufacturingFormulasService);
@@ -69,6 +117,22 @@ export class FormulasListPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly formulas = signal<Formula[]>([]);
+
+  /**
+   * Ficha del producto que se está costeando (S1/S6). Se abre desde la lista
+   * con el detalle completo de la fórmula: producto + insumos con foto y nota,
+   * el mismo componente que usan recetas, producción y KDS.
+   */
+  readonly isProfileOpen = signal(false);
+  readonly isProfileLoading = signal(false);
+  readonly profileProduct = signal<ProductProfileProduct | null>(null);
+  readonly profileRecipe = signal<ProductProfileRecipe | null>(null);
+
+  /** Miniatura de la columna Producto (mismo patrón que `recipes-list-page`). */
+  readonly productCellTemplate = viewChild<TemplateRef<any>>(
+    'productCellTemplate',
+  );
+
   /** Costo teórico unitario por id de fórmula (resuelto con `/:id/cost`). */
   private readonly costs = signal<Record<number, number>>({});
   readonly rows = computed<FormulaRow[]>(() => {
@@ -76,6 +140,7 @@ export class FormulasListPageComponent implements OnInit {
     return this.formulas().map((f) => ({
       ...f,
       theoretical_cost: costs[f.id] ?? this.toNumber(f.unit_cost),
+      image_url: this.productImage(f),
     }));
   });
 
@@ -167,6 +232,12 @@ export class FormulasListPageComponent implements OnInit {
 
   readonly tableActions: TableAction[] = [
     {
+      label: 'Ver ficha',
+      icon: 'eye',
+      variant: 'ghost',
+      action: (item: Formula) => this.openProfile(item),
+    },
+    {
       label: 'Editar',
       icon: 'edit',
       variant: 'primary',
@@ -186,6 +257,8 @@ export class FormulasListPageComponent implements OnInit {
     titleTransform: (row: Formula) =>
       row.product?.name ?? `Producto #${row.product_id}`,
     subtitleKey: 'code',
+    // Miniatura del producto en la card móvil; sin foto cae a `flask-conical`.
+    avatarKey: 'image_url',
     subtitleTransform: (row: Formula) =>
       `${row.code || `F-${row.id}`}${row.version != null && row.version !== '' ? ` · v${row.version}` : ''}`,
     avatarFallbackIcon: 'flask-conical',
@@ -217,6 +290,87 @@ export class FormulasListPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadFormulas();
+  }
+
+  constructor() {
+    // Enchufa la celda custom de Producto cuando el template resuelve.
+    // Mismo patrón que `recipes-list-page`: solo muta `template`, sin signals.
+    effect(() => {
+      const tpl = this.productCellTemplate();
+      if (!tpl) return;
+      const productCol = this.tableColumns.find((col) => col.key === 'product');
+      if (productCol) productCol.template = tpl;
+    });
+  }
+
+  /** Foto principal del producto: `is_main` → primera de la galería. */
+  productImage(formula: Formula): string | null {
+    const images = formula.product?.product_images ?? [];
+    if (images.length > 0) {
+      const main = images.find((img) => img?.is_main) ?? images[0];
+      return main?.image_url ?? null;
+    }
+    return formula.product?.image_url ?? null;
+  }
+
+  /**
+   * Abre la ficha (S1) de la fórmula. El listado no trae insumos, así que se
+   * pide el detalle una vez y se mapea al contrato de la ficha; el modal se
+   * abre ya con el producto para que no parpadee.
+   */
+  openProfile(formula: Formula): void {
+    this.profileProduct.set({
+      id: formula.product?.id ?? formula.product_id,
+      name: formula.product?.name ?? `Producto #${formula.product_id}`,
+      sku: formula.product?.sku ?? null,
+      description: formula.product?.description ?? null,
+      stock_unit: formula.product?.stock_unit ?? null,
+      preparation_time_minutes:
+        formula.product?.preparation_time_minutes ?? null,
+      image_url: this.productImage(formula),
+      product_images: formula.product?.product_images ?? [],
+    });
+    this.profileRecipe.set(null);
+    this.isProfileOpen.set(true);
+    this.isProfileLoading.set(true);
+
+    this.formulasService
+      .getById(formula.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (detail) => {
+          this.profileRecipe.set(this.toProfileRecipe(detail));
+          this.isProfileLoading.set(false);
+        },
+        error: () => {
+          this.toastService.error(
+            'No se pudieron cargar los insumos de la fórmula',
+          );
+          this.isProfileLoading.set(false);
+        },
+      });
+  }
+
+  private toProfileRecipe(formula: Formula): ProductProfileRecipe {
+    return {
+      id: formula.id,
+      yield_quantity: formula.yield_quantity,
+      yield_unit: formula.yield_unit,
+      waste_percent: formula.waste_percent,
+      preparation_notes: formula.preparation_notes ?? null,
+      is_active: formula.is_active,
+      items: (formula.items ?? []).map((item) => ({
+        id: item.id,
+        name:
+          item.component_product?.name ?? `Producto #${item.component_product_id}`,
+        sku: item.component_product?.sku ?? null,
+        quantity: item.quantity,
+        stock_unit: item.component_product?.stock_unit ?? null,
+        waste_percent: item.waste_percent,
+        notes: item.notes ?? null,
+        product_images: item.component_product?.product_images ?? [],
+      })),
+    };
   }
 
   loadFormulas(): void {

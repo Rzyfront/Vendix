@@ -114,8 +114,17 @@ const KITCHEN_TICKET_INCLUDE = {
           id: true,
           name: true,
           sku: true,
+          description: true,
           stock_unit: true,
           preparation_time_minutes: true,
+          // Ficha del plato en el KDS: la cocina reconoce el plato por su foto
+          // mas rapido que por el nombre. `take: 1` con `is_main` primero
+          // mantiene el payload SSE acotado (una sola URL por linea).
+          product_images: {
+            select: { id: true, image_url: true, is_main: true, alt_text: true },
+            orderBy: [{ is_main: 'desc' }, { sort_order: 'asc' }],
+            take: 1,
+          },
           // Restaurant Suite — KDS recipe-readiness: nest the recipes so every
           // ticket read path (snapshot + all `ticket.*` SSE events use this
           // single include) carries whether the dish has an ACTIVE recipe.

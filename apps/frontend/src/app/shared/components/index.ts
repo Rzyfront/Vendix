@@ -28,6 +28,17 @@ export type {
   ScannedHabilitationEnvironment,
 } from './dian-habilitation-scanner/interfaces/habilitation-scan-result.interface';
 export { PromptModalComponent } from './prompt-modal/prompt-modal.component';
+export {
+  ProductProfileComponent,
+  ProductProfileModalComponent,
+} from './product-profile/index';
+export type {
+  ProductProfileImage,
+  ProductProfileIngredient,
+  ProductProfileProduct,
+  ProductProfileRecipe,
+  ProductProfileVariant,
+} from './product-profile/index';
 export { ButtonComponent } from './button/button.component';
 export { CardComponent } from './card/card.component';
 export { StatsComponent } from './stats/stats.component';

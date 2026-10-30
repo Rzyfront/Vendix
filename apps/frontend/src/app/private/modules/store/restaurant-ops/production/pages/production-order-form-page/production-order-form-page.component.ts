@@ -28,6 +28,11 @@ import {
   TextareaComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
+import {
+  ProductProfileModalComponent,
+  ProductProfileProduct,
+  ProductProfileRecipe,
+} from '../../../../../../../shared/components/product-profile/index';
 
 import { ProductionOrdersService } from '../../services';
 import { CreateProductionOrderDto } from '../../interfaces';
@@ -59,6 +64,7 @@ interface ProductionFormControls {
     SelectorComponent,
     TextareaComponent,
     ButtonComponent,
+    ProductProfileModalComponent,
   ],
   templateUrl: './production-order-form-page.component.html',
   styleUrl: './production-order-form-page.component.scss',
@@ -87,6 +93,53 @@ export class ProductionOrderFormPageComponent implements OnInit {
   /** Recipes loaded for the selected product, to resolve the chosen one's yield. */
   private readonly loadedRecipes = signal<Recipe[]>([]);
   readonly selectedRecipe = signal<Recipe | null>(null);
+
+  /**
+   * Ficha del producto a producir (pedido de Rafael, 2026-10-29): antes de
+   * confirmar el lote se ve la foto, la descripción y la receta completa con
+   * los insumos, igual que en el KDS.
+   */
+  readonly isProfileOpen = signal(false);
+
+  readonly profileProduct = computed<ProductProfileProduct | null>(() => {
+    const id = Number(this.form.controls.product_id.value);
+    if (!id) return null;
+    const product = this.preparedProducts.find((p) => p.id === id);
+    if (!product) return null;
+    return {
+      id: product.id,
+      name: product.name,
+      sku: product.sku ?? null,
+      description: product.description ?? null,
+      stock_unit: product.stock_unit ?? null,
+      image_url: product.image_url ?? null,
+      product_images: product.product_images ?? [],
+    };
+  });
+
+  readonly profileRecipe = computed<ProductProfileRecipe | null>(() => {
+    const recipe = this.selectedRecipe();
+    if (!recipe) return null;
+    return {
+      id: recipe.id,
+      yield_quantity: recipe.yield_quantity,
+      yield_unit: recipe.yield_unit,
+      waste_percent: recipe.waste_percent,
+      preparation_notes: recipe.preparation_notes ?? null,
+      is_active: recipe.is_active,
+      items: (recipe.items ?? []).map((item) => ({
+        id: item.id,
+        name:
+          item.component_product?.name ?? `Producto #${item.component_product_id}`,
+        sku: item.component_product?.sku ?? null,
+        quantity: item.quantity,
+        stock_unit: item.component_product?.stock_unit ?? null,
+        waste_percent: item.waste_percent,
+        notes: item.notes ?? null,
+        product_images: item.component_product?.product_images ?? [],
+      })),
+    };
+  });
   /** Whole recipe batches typed by the user (the form's planned_qty control). */
   readonly batches = signal<number | null>(null);
   /**
@@ -207,6 +260,12 @@ export class ProductionOrderFormPageComponent implements OnInit {
                 value: p.id,
                 label: p.name,
                 description: base || undefined,
+                // Foto del producto producible: mismo lenguaje que recetas y KDS.
+                imageUrl:
+                  p.image_url ??
+                  p.product_images?.find((img) => img?.is_main)?.image_url ??
+                  p.product_images?.[0]?.image_url ??
+                  undefined,
               } as SelectorOption;
             }),
           );

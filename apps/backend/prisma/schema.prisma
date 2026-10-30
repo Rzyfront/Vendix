@@ -12491,6 +12491,10 @@ model recipe_items {
   /// (e.g. ml, g, unit). Only honoured when `waste_mode='absolute'`.
   waste_absolute       Decimal         @default(0) @db.Decimal(12, 4)
   is_optional          Boolean         @default(false)
+  /// Anotación libre del insumo dentro de esta receta ("picar fino", "sin
+  /// cáscara"). Texto para quien ejecuta la receta, no reemplaza
+  /// `recipes.preparation_notes` (que son las del plato completo).
+  notes                String?         @db.Text
   created_at           DateTime?       @default(now()) @db.Timestamp(6)
   updated_at           DateTime?       @default(now()) @db.Timestamp(6)
 
