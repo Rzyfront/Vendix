@@ -3110,6 +3110,9 @@ export class OrdersService {
 
   async updateOrderItems(id: number, dto: UpdateOrderItemsDto) {
     this.assertNoNewDraftOptions(dto.items);
+    // PR #1004: Insumo y Uso interno nunca se venden; mismo guard que el
+    // create. Cubre también la herramienta de Vexi, que edita por aquí.
+    await assertSaleNatureLines(this.prisma, dto.items);
     const order = await this.findOne(id);
     assertNoActiveFinancialSplit(order);
 
@@ -3572,6 +3575,8 @@ export class OrdersService {
    */
   async updateOrderFromEditor(orderId: number, dto: UpdateOrderEditorDto) {
     this.assertNoNewDraftOptions(dto.items);
+    // PR #1004: Insumo y Uso interno nunca se venden (mismo guard que el create).
+    await assertSaleNatureLines(this.prisma, dto.items);
     const context = RequestContextService.getContext();
     const storeId = context?.store_id;
     const userId: number = context?.user_id ?? 0;

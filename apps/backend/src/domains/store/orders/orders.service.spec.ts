@@ -2229,6 +2229,61 @@ describe('OrdersService', () => {
    * `flow/pay`/`flow/cancel` y con `npm run test:path` para no
    * arrastrar mocks pesados.
    */
+  /**
+   * PR #1004 — Insumo y Uso interno nunca se venden. El guard corría solo al
+   * crear la orden; editar el borrador (`PUT /items`, que también usa la
+   * herramienta de Vexi, y `PUT /editor`) permitía colar la línea.
+   */
+  describe('naturaleza de venta al editar la orden', () => {
+    const supply = {
+      id: 31,
+      name: 'Harina',
+      usage_nature: 'supply',
+      is_ingredient: true,
+      is_sellable: false,
+    };
+    const supplyLine = {
+      product_id: 31,
+      product_name: 'Harina',
+      quantity: 1,
+      unit_price: 100,
+      total_price: 100,
+    };
+
+    const expectRejectedBeforeTouchingOrder = () => {
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: [31] } }),
+        }),
+      );
+      expect(mockPrismaService.orders.findFirst).not.toHaveBeenCalled();
+      expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrismaService.order_items.create).not.toHaveBeenCalled();
+    };
+
+    it('updateOrderItems (PUT /items y Vexi) rechaza un insumo con 422 antes de tocar la orden', async () => {
+      mockPrismaService.products.findMany.mockResolvedValueOnce([supply] as any);
+      await expect(
+        service.updateOrderItems(700, { items: [supplyLine] } as any),
+      ).rejects.toMatchObject({
+        errorCode: ErrorCodes.PROD_NATURE_NOT_SELLABLE.code,
+      });
+      expectRejectedBeforeTouchingOrder();
+    });
+
+    it('updateOrderFromEditor (PUT /editor) rechaza uso interno con 422 antes de tocar la orden', async () => {
+      mockPrismaService.products.findMany.mockResolvedValueOnce([
+        { ...supply, usage_nature: 'internal_use', is_ingredient: false },
+      ] as any);
+      await expect(
+        service.updateOrderFromEditor(500, { items: [supplyLine] } as any),
+      ).rejects.toMatchObject({
+        errorCode: ErrorCodes.PROD_NATURE_NOT_SELLABLE.code,
+      });
+      expectRejectedBeforeTouchingOrder();
+    });
+  });
+
   describe('updateOrderFromEditor — gates previos al commit', () => {
     const editableOrder = {
       id: 500,
