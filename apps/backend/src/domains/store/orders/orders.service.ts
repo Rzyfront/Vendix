@@ -3094,6 +3094,7 @@ export class OrdersService {
   }
 
   async updateOrderItems(id: number, dto: UpdateOrderItemsDto) {
+    this.assertNoNewDraftOptions(dto.items);
     const order = await this.findOne(id);
     assertNoActiveFinancialSplit(order);
 
@@ -3555,6 +3556,7 @@ export class OrdersService {
    *     se emiten con snapshot seguro (sin secrets ni datos sensibles).
    */
   async updateOrderFromEditor(orderId: number, dto: UpdateOrderEditorDto) {
+    this.assertNoNewDraftOptions(dto.items);
     const context = RequestContextService.getContext();
     const storeId = context?.store_id;
     const userId: number = context?.user_id ?? 0;
@@ -6601,6 +6603,21 @@ export class OrdersService {
     );
     if (changedWithOptions) {
       throw new VendixHttpException(ErrorCodes.OPT_DRAFT_LINE_LOCKED);
+    }
+  }
+
+  /**
+   * N2 (PR #1003): `PUT /items` y `PUT /editor` no resuelven adiciones
+   * (`OptionPricingService`): no suman su delta, no guardan el snapshot que
+   * descuenta el insumo ni exigen pedido programado. Una línea que llega con
+   * `option_ids` se rechaza antes de leer o escribir nada; sin esto se
+   * guardaba a precio de catálogo sin sus adiciones y en silencio.
+   */
+  private assertNoNewDraftOptions(
+    items: Array<{ option_ids?: number[] | null }> | null | undefined,
+  ): void {
+    if ((items ?? []).some((item) => (item.option_ids?.length ?? 0) > 0)) {
+      throw new VendixHttpException(ErrorCodes.OPT_DRAFT_ADD_LOCKED);
     }
   }
 

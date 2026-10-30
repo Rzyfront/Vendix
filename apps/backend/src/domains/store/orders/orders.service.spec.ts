@@ -2750,6 +2750,30 @@ describe('OrdersService', () => {
           contextSpy.mockRestore();
         }
       });
+
+      it('N2: una línea nueva con adiciones se rechaza con 409 antes de escribir', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeWithOptions(205, 38);
+          await expect(
+            service.updateOrderFromEditor(500, {
+              ...fullDto,
+              items: [fullDto.items[0], { ...fullDto.items[0], option_ids: [77] }],
+            } as any),
+          ).rejects.toMatchObject({
+            errorCode: ErrorCodes.OPT_DRAFT_ADD_LOCKED.code,
+          });
+          expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+          expect(mockPrismaService.order_items.create).not.toHaveBeenCalled();
+          expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+        } finally {
+          // El rechazo ocurre antes de leer la orden: los `Once` sin consumir
+          // no deben filtrarse a las pruebas siguientes.
+          mockPrismaService.orders.findFirst.mockReset();
+          contextSpy.mockRestore();
+        }
+      });
     });
 
     it('QUI-650 — helpers de updateOrderItems/editor: pre-check y P2003 -> ORD_EDIT_LINES_LOCKED_001', async () => {
@@ -4772,6 +4796,32 @@ describe('OrdersService', () => {
         expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
         expect(mockPrismaService.order_items.create).not.toHaveBeenCalled();
         expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+      });
+
+      /**
+       * N2 (PR #1003): `PUT /items` no resuelve adiciones (precio, insumo ni
+       * pedido programado). Una línea nueva con `option_ids` se rechaza con
+       * error claro en vez de guardarse a precio de catálogo sin sus adiciones.
+       */
+      it('N2: una línea nueva con adiciones se rechaza con 409 antes de escribir', async () => {
+        arrangeWithOptions();
+        await expect(
+          service.updateOrderItems(700, {
+            items: [keptLine, { ...keptLine, quantity: 1, total_price: 10000, option_ids: [77] }],
+          } as any),
+        ).rejects.toMatchObject({ errorCode: ErrorCodes.OPT_DRAFT_ADD_LOCKED.code });
+        expect(ErrorCodes.OPT_DRAFT_ADD_LOCKED.httpStatus).toBe(409);
+        expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+        expect(mockPrismaService.order_items.create).not.toHaveBeenCalled();
+        expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+      });
+
+      it('N2: option_ids vacío sigue el flujo normal', async () => {
+        arrangeWithOptions();
+        await service.updateOrderItems(700, {
+          items: [{ ...keptLine, option_ids: [] }],
+        } as any);
+        expect(mockPrismaService.order_items.create).toHaveBeenCalledTimes(1);
       });
     });
   });
