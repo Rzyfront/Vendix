@@ -72,7 +72,7 @@ const LABELS: Record<VexiExpression, string> = {
         <img
           class="vexi-avatar__layer"
           [class.vexi-avatar__layer--active]="pose === expression()"
-          [src]="'assets/vexi/vexi-' + pose + '.png'"
+          [src]="'assets/vexi/vexi-' + pose + '.webp'"
           alt=""
           aria-hidden="true"
           draggable="false"
