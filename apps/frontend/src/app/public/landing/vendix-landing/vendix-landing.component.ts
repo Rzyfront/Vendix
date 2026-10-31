@@ -440,7 +440,7 @@ export class VendixLandingComponent implements OnInit {
   readonly socialLinks = {
     instagram: 'https://www.instagram.com/vendix.online/',
     tiktok: 'https://www.tiktok.com/@vendix.online',
-    facebook: 'https://www.facebook.com/share/1B1fq8BbXD/',
+    facebook: 'https://www.facebook.com/people/Vendix-App-Multitienda/61587350788405/',
     whatsapp: 'https://wa.me/573234668500',
     email: 'soporte@vendix.online',
     domain: 'vendix.online',
