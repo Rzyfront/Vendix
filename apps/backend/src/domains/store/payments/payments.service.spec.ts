@@ -762,6 +762,48 @@ describe('PaymentsService', () => {
       });
     });
 
+    it.each(['cash', 'bank_transfer', 'card'])(
+      'B05: rejects direct refund of a %s counter payment with PAY_REFUND_USE_ORDER_FLOW',
+      async (type) => {
+        jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue({
+          transaction_id: 'txn_c',
+          orders: mockOrder,
+          store_payment_method: { system_payment_method: { type } },
+        } as any);
+        jest
+          .spyOn(prisma.store_users, 'findMany')
+          .mockResolvedValue([{ store_id: 1 }] as any);
+        const spy = jest.spyOn(paymentGateway, 'refundPayment');
+
+        await expect(
+          service.refundPayment('txn_c', { paymentId: 'txn_c', amount: 5 }, mockUser),
+        ).rejects.toMatchObject({
+          errorCode: 'PAY_REFUND_USE_ORDER_FLOW',
+        });
+        expect(spy).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['wompi', 'wallet'])(
+      'B05: gateway %s payments keep the direct refund path',
+      async (type) => {
+        jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue({
+          transaction_id: 'txn_g',
+          orders: mockOrder,
+          store_payment_method: { system_payment_method: { type } },
+        } as any);
+        jest
+          .spyOn(prisma.store_users, 'findMany')
+          .mockResolvedValue([{ store_id: 1 }] as any);
+        const spy = jest
+          .spyOn(paymentGateway, 'refundPayment')
+          .mockResolvedValue({ success: true } as any);
+
+        await service.refundPayment('txn_g', { paymentId: 'txn_g', amount: 5 }, mockUser);
+        expect(spy).toHaveBeenCalledTimes(1);
+      },
+    );
+
     it('should throw error if payment not found', async () => {
       const refundDto = {
         paymentId: 'nonexistent_payment',

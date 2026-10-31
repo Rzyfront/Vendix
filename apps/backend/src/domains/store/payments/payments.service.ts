@@ -168,6 +168,9 @@ type DeclaredGrossTaxInfo = CalculatedTaxInfo & {
   resolved_from: 'declared_gross';
 };
 
+/** Métodos cuyo reembolso viaja por el proveedor y no por la caja. */
+const GATEWAY_REFUND_METHOD_TYPES = ['wompi', 'wallet', 'stripe', 'paypal'];
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -393,6 +396,9 @@ export class PaymentsService {
           orders: {
             include: { stores: true },
           },
+          store_payment_method: {
+            select: { system_payment_method: { select: { type: true } } },
+          },
         },
       });
 
@@ -401,6 +407,20 @@ export class PaymentsService {
       }
 
       await this.validateUserAccess(user, payment.orders.stores.id);
+
+      // B05: un pago de mostrador (efectivo, transferencia, tarjeta manual)
+      // solo se reembolsa por `flow/refund`, que descuenta la caja, escribe el
+      // ledger y respeta el tope. Este endpoint conserva únicamente las
+      // pasarelas (el dinero vuelve por el proveedor, no por el cajón).
+      const methodType = (payment as any).store_payment_method
+        ?.system_payment_method?.type as string | undefined;
+      if (methodType && !GATEWAY_REFUND_METHOD_TYPES.includes(methodType)) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_REFUND_USE_ORDER_FLOW,
+          'Este pago es de mostrador: reembólsalo desde la orden (POST /store/orders/:id/flow/refund).',
+          { payment_id: payment.id, order_id: payment.order_id },
+        );
+      }
 
       // ERR-16 · PAYMENT_NOT_OWNED — verificación de propiedad del recurso.
       // `validateUserAccess` solo comprueba pertenencia a la tienda, nunca la

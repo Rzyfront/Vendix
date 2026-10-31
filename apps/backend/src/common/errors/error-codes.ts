@@ -413,6 +413,13 @@ export const ErrorCodes = {
       'Payment method has no system_payment_method.type; it cannot be classified for cash register movements',
   },
 
+  PAY_REFUND_USE_ORDER_FLOW: {
+    code: 'PAY_REFUND_USE_ORDER_FLOW',
+    httpStatus: 409,
+    devMessage:
+      'Counter payments (cash, bank transfer, manual card) cannot be refunded directly; use POST /store/orders/:id/flow/refund so the cash register, ledger and refund cap are updated',
+  },
+
   // Multi-tender cash payments (pago multimétodo de contado)
   PAY_MULTI_TENDER_SUM_MISMATCH: {
     code: 'PAY_MULTI_TENDER_SUM_MISMATCH',

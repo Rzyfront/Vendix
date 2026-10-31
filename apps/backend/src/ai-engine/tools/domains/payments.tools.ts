@@ -650,7 +650,9 @@ export function createPaymentTools(deps: PaymentToolDeps): RegisteredTool[] {
           const info = describeError(error);
           return toolError(
             info.message,
-            'Lee el pago con get_payment_status para ver su estado actual antes de reintentar.',
+            info.code === 'PAY_REFUND_USE_ORDER_FLOW'
+              ? 'Este pago es de mostrador (caja): usa refund_order para devolverlo con su movimiento de caja.'
+              : 'Lee el pago con get_payment_status para ver su estado actual antes de reintentar.',
             info.code,
           );
         }
