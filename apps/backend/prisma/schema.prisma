@@ -4988,6 +4988,9 @@ enum notification_type_enum {
   qr_table_scan
   /// QUI-719 — contacto desde la landing pública del módulo CRM.
   crm_contact_request
+  /// CRM PR 9 — tarea del CRM asignada a alguien / tarea pendiente vencida.
+  crm_task_assigned
+  crm_task_due
   order_awaiting_carrier
   appointment_upcoming
   appointment_checked_in
