@@ -3,6 +3,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { S3Service } from '@common/services/s3.service';
 import {
   ReviewQueryDto,
   CreateReviewResponseDto,
@@ -15,12 +16,40 @@ import {
   DEFAULT_STORE_TIMEZONE,
 } from '@common/utils/store-timezone.util';
 
+// `products` no tiene columna `image_url`: la foto es la principal de
+// `product_images` (key S3), firmada al leer (QUI-697).
+const REVIEW_PRODUCT_SELECT = {
+  id: true,
+  name: true,
+  product_images: {
+    select: { image_url: true },
+    orderBy: [{ is_main: 'desc' as const }, { sort_order: 'asc' as const }],
+    take: 1,
+  },
+};
+
 @Injectable()
 export class ReviewsService {
   constructor(
     private prisma: StorePrismaService,
     private event_emitter: EventEmitter2,
+    private readonly s3Service: S3Service,
   ) {}
+
+  /** Aplana `product_images` al `products.image_url` firmado que consume el admin. */
+  private async toReviewProduct(
+    product: {
+      id: number;
+      name: string;
+      product_images: Array<{ image_url: string }>;
+    } | null,
+  ) {
+    if (!product) return null;
+    const { product_images, ...rest } = product;
+    const image_url =
+      (await this.s3Service.signUrl(product_images[0]?.image_url)) ?? null;
+    return { ...rest, image_url };
+  }
 
   async findAll(query: ReviewQueryDto) {
     const {
@@ -68,9 +97,7 @@ export class ReviewsService {
               email: true,
             },
           },
-          products: {
-            select: { id: true, name: true, image_url: true },
-          },
+          products: { select: REVIEW_PRODUCT_SELECT },
           review_responses: {
             include: {
               users: {
@@ -84,7 +111,12 @@ export class ReviewsService {
     ]);
 
     return {
-      data,
+      data: await Promise.all(
+        data.map(async (r) => ({
+          ...r,
+          products: await this.toReviewProduct(r.products),
+        })),
+      ),
       meta: {
         total,
         page,
@@ -203,9 +235,7 @@ export class ReviewsService {
         users: {
           select: { id: true, first_name: true, last_name: true, email: true },
         },
-        products: {
-          select: { id: true, name: true, image_url: true },
-        },
+        products: { select: REVIEW_PRODUCT_SELECT },
         review_responses: {
           include: {
             users: {
@@ -234,7 +264,10 @@ export class ReviewsService {
       throw new VendixHttpException(ErrorCodes.REV_FIND_001);
     }
 
-    return review;
+    return {
+      ...review,
+      products: await this.toReviewProduct(review.products),
+    };
   }
 
   async approve(id: number) {
