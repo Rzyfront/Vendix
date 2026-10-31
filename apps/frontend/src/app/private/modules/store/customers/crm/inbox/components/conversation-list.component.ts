@@ -1,4 +1,5 @@
 import { Component, computed, input, model, output } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import {
   BadgeComponent,
   EmptyStateComponent,
@@ -32,6 +33,7 @@ const FILTER_TABS: ScrollableTab[] = [
   selector: 'app-crm-conversation-list',
   standalone: true,
   imports: [
+    FormsModule,
     BadgeComponent,
     EmptyStateComponent,
     IconComponent,
@@ -45,6 +47,7 @@ const FILTER_TABS: ScrollableTab[] = [
           placeholder="Buscar por nombre o teléfono"
           ariaLabel="Buscar conversaciones"
           [debounceTime]="350"
+          [ngModel]="searchText()"
           (searchChange)="search.emit($event)"
         ></app-inputsearch>
         <app-scrollable-tabs

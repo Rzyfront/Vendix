@@ -1324,11 +1324,6 @@ export class MenuFilterService {
     return Array.isArray(mapped) ? mapped : [mapped];
   }
 
-  /**
-   * Authorization of the logged-in user over the users module. Mirrors
-   * `manageUsersGuard`; derived here from AuthFacade so `diagnose()` can
-   * explain the "Usuarios" entry without the layout having to pass it in.
-   */
   /** CRM inbox: same permission as its API (`store:crm_inbox:read`). */
   private canReadCrmInbox(): boolean {
     return (
@@ -1337,6 +1332,11 @@ export class MenuFilterService {
     );
   }
 
+  /**
+   * Authorization of the logged-in user over the users module. Mirrors
+   * `manageUsersGuard`; derived here from AuthFacade so `diagnose()` can
+   * explain the "Usuarios" entry without the layout having to pass it in.
+   */
   private canManageUsers(): boolean {
     return (
       this.authFacade.hasPermission('store:users:update') ||

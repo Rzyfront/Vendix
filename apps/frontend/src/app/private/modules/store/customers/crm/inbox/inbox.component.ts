@@ -301,7 +301,16 @@ export class InboxComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((signal) => this.onStream(signal));
     this.stream.connect();
+    // Messages that arrived while the tab was hidden are marked read on return.
+    const onVisible = () => {
+      const current = this.selected();
+      if (document.visibilityState === 'visible' && current?.unread_count) {
+        void this.markRead(current.id, true);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
     this.destroyRef.onDestroy(() => {
+      document.removeEventListener('visibilitychange', onVisible);
       if (this.refreshTimer) clearTimeout(this.refreshTimer);
     });
   }
@@ -327,20 +336,28 @@ export class InboxComponent {
       this.listLoading.set(true);
       this.listError.set(null);
     }
-    // A silent refresh keeps every row already loaded.
+    // A silent refresh re-reads the pages already loaded (up to the API max)
+    // and keeps `page`, so "Cargar más" continues where it was.
     const limit = silent
-      ? Math.min(MAX_PAGE_SIZE, Math.max(PAGE_SIZE, this.conversations().length))
+      ? Math.min(MAX_PAGE_SIZE, this.page() * PAGE_SIZE)
       : PAGE_SIZE;
     try {
       const result = await firstValueFrom(
         this.inbox.list({ ...this.query(), page: 1, limit }),
       );
       if (seq !== this.listSeq) return;
-      this.conversations.set(result.data);
-      this.page.set(silent ? Math.ceil(result.data.length / PAGE_SIZE) || 1 : 1);
-      this.totalPages.set(
-        silent ? Math.ceil(result.total / PAGE_SIZE) || 1 : result.totalPages,
-      );
+      if (silent) {
+        const fresh = new Set(result.data.map((c) => c.id));
+        const beyond = this.conversations()
+          .slice(limit)
+          .filter((c) => !fresh.has(c.id));
+        this.conversations.set([...result.data, ...beyond]);
+        this.totalPages.set(Math.ceil(result.total / PAGE_SIZE) || 1);
+      } else {
+        this.conversations.set(result.data);
+        this.page.set(1);
+        this.totalPages.set(result.totalPages);
+      }
       this.listError.set(null);
     } catch (error) {
       if (seq !== this.listSeq) return;

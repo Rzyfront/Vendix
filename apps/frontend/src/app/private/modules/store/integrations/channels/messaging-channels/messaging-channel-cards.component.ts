@@ -326,7 +326,9 @@ export class MessagingChannelCardsComponent {
     if (!channel) return { label: 'Sin configurar', variant: 'neutral' };
     if (!channel.enabled) return { label: 'Desactivado', variant: 'neutral' };
     const { limit, remaining } = channel.spend;
-    if (limit === 0) return { label: 'Pendiente: tope en 0', variant: 'warning' };
+    if (limit === null || limit === 0) {
+      return { label: 'Pendiente: define un tope', variant: 'warning' };
+    }
     if (remaining !== null && remaining <= 0) {
       return { label: 'Tope alcanzado', variant: 'error' };
     }

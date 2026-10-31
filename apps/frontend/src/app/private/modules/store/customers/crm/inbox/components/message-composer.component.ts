@@ -152,6 +152,9 @@ export class MessageComposerComponent {
   /** Separate from the text draft: a template is a different send. */
   private templateRequestId = newClientRequestId();
 
+  /** Only the id: a refreshed copy of the same conversation keeps the draft. */
+  private readonly conversationId = computed(() => this.conversation().id);
+
   protected readonly windowClosed = computed(() => {
     const conversation = this.conversation();
     return conversation.channel === 'whatsapp' && !conversation.window_open;
@@ -181,7 +184,7 @@ export class MessageComposerComponent {
   constructor() {
     // A different conversation starts a fresh draft.
     effect(() => {
-      void this.conversation().id;
+      void this.conversationId();
       untracked(() => {
         this.resetDraft();
         this.templateRequestId = newClientRequestId();
