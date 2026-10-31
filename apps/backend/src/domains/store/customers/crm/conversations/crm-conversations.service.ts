@@ -22,6 +22,7 @@ import {
 
 /** Seeing every conversation of the store comes with being able to assign them. */
 export const CRM_INBOX_SEE_ALL_PERMISSION = 'store:crm_inbox:assign';
+export const CRM_INBOX_READ_PERMISSION = 'store:crm_inbox:read';
 
 const WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000;
 const SEND_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
@@ -182,10 +183,10 @@ export class CrmConversationsService {
     const duplicate = await this.claimSend(key);
     if (duplicate) return { ...duplicate, duplicate: true };
 
-    let message: MessageRow;
+    let message: MessageRow | null = null;
     try {
       const now = new Date();
-      message = await this.prisma.crm_messages.create({
+      const created = await this.prisma.crm_messages.create({
         data: {
           store_id: viewer.store_id,
           conversation_id: id,
@@ -204,6 +205,7 @@ export class CrmConversationsService {
         },
         include: { sent_by: { select: PERSON_SELECT } },
       });
+      message = created;
       // Answering a closed conversation reopens it.
       await this.prisma.crm_conversations.updateMany({
         where: { id },
@@ -216,36 +218,43 @@ export class CrmConversationsService {
       });
       await this.redis.set(
         key,
-        String(message.id),
+        String(created.id),
         'EX',
         SEND_IDEMPOTENCY_TTL_SECONDS,
       );
-    } catch (error) {
-      await this.releaseSend(key);
-      throw error;
-    }
-
-    try {
-      await this.outbound.enqueue(message.id);
+      await this.outbound.enqueue(created.id);
     } catch (error) {
       this.logger.error(
-        `Could not enqueue crm message ${message.id}: ${(error as Error)?.message}`,
+        `Could not queue crm message ${message?.id ?? '(not created)'} of conversation ${id}: ${(error as Error)?.message}`,
       );
-      await this.prisma.crm_messages.updateMany({
-        where: { id: message.id, status: 'queued' },
+      // A row that never reached the queue must not sit as `queued` forever.
+      if (message) await this.markNotQueued(message.id);
+      await this.releaseSend(key);
+      if (error instanceof VendixHttpException) throw error;
+      throw new VendixHttpException(ErrorCodes.CRM_INBOX_004);
+    }
+
+    const queued = message as MessageRow;
+    await this.publishMessage(conversation, queued.id, 'queued');
+    return this.toMessage(queued);
+  }
+
+  private async markNotQueued(messageId: number): Promise<void> {
+    await this.prisma.crm_messages
+      .updateMany({
+        where: { id: messageId, status: 'queued' },
         data: {
           status: 'failed',
           error_code: 'ENQUEUE_FAILED',
           error_message: 'The outbound queue did not accept the message',
           failed_at: new Date(),
         },
-      });
-      await this.releaseSend(key);
-      throw new VendixHttpException(ErrorCodes.CRM_INBOX_004);
-    }
-
-    await this.publishMessage(conversation, message.id, 'queued');
-    return this.toMessage(message);
+      })
+      .catch((error: Error) =>
+        this.logger.error(
+          `Could not mark crm message ${messageId} as failed: ${error.message}`,
+        ),
+      );
   }
 
   /** Internal note: stored in the thread, never sent to the customer. */
@@ -432,14 +441,30 @@ export class CrmConversationsService {
     return this.toConversation(updated);
   }
 
-  /** Staff of this store: an active user with a role other than `customer`. */
+  /**
+   * Active member of this store whose role can open the inbox, so an assigned
+   * conversation is never invisible to its assignee (and never a customer).
+   */
   private async isActiveStaff(userId: number): Promise<boolean> {
     const row = await this.prisma.store_users.findFirst({
       where: {
         user_id: userId,
         user: {
           state: 'active',
-          user_roles: { some: { roles: { name: { not: 'customer' } } } },
+          user_roles: {
+            some: {
+              roles: {
+                role_permissions: {
+                  some: {
+                    permissions: {
+                      name: CRM_INBOX_READ_PERMISSION,
+                      status: 'active',
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
       select: { id: true },

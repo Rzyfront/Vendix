@@ -18,6 +18,7 @@ const SELLER_A = 2;
 const OTHER_SELLER_A = 3;
 const CUSTOMER_A = 4;
 const OWNER_B = 9;
+const WAITER_A = 6;
 
 const HOUR = 60 * 60 * 1000;
 
@@ -95,13 +96,29 @@ function scopedTable(rows: Row[], people: Map<number, Row>) {
   };
 }
 
+/** Roles as the seed leaves them: who can open the inbox. */
+const ROLE_PERMISSIONS: Record<string, string[]> = {
+  owner: ['store:crm_inbox:read', 'store:crm_inbox:manage', 'store:crm_inbox:assign'],
+  employee: ['store:crm_inbox:read', 'store:crm_inbox:manage'],
+  cashier: ['store:crm_inbox:read', 'store:crm_inbox:manage'],
+  waiter: ['store:orders:read'],
+  customer: [],
+};
+
 function person(id: number, roles: string[] = ['employee']) {
   return {
     id,
     first_name: `User${id}`,
     last_name: 'Test',
     state: 'active',
-    user_roles: roles.map((name) => ({ roles: { name } })),
+    user_roles: roles.map((name) => ({
+      roles: {
+        name,
+        role_permissions: (ROLE_PERMISSIONS[name] ?? []).map((permission) => ({
+          permissions: { name: permission, status: 'active' },
+        })),
+      },
+    })),
   };
 }
 
@@ -130,6 +147,7 @@ function setup() {
       person(SELLER_A),
       person(OTHER_SELLER_A, ['cashier']),
       person(CUSTOMER_A, ['customer']),
+      person(WAITER_A, ['waiter']),
       person(OWNER_B, ['owner']),
     ].map((p) => [p.id, p]),
   );
@@ -163,6 +181,7 @@ function setup() {
     { id: 2, store_id: STORE_A, user_id: SELLER_A },
     { id: 3, store_id: STORE_A, user_id: OTHER_SELLER_A },
     { id: 4, store_id: STORE_A, user_id: CUSTOMER_A },
+    { id: 6, store_id: STORE_A, user_id: WAITER_A },
     { id: 5, store_id: STORE_B, user_id: OWNER_B },
   ];
   const storeUsers = scopedTable(
@@ -493,6 +512,23 @@ describe('CrmConversationsService', () => {
     });
   });
 
+  describe('envío a medias', () => {
+    it('si falla actualizar la conversación, el mensaje creado queda failed y no se encola', async () => {
+      const { service, prisma, outbound, redisStore } = setup();
+      as('ownerA');
+      prisma.crm_conversations.updateMany.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(
+        service.send(1, { body: 'hola', client_request_id: 'req-00000009' }),
+      ).rejects.toMatchObject({ errorCode: 'CRM_INBOX_004' });
+
+      expect(prisma.crm_messages.rows.at(-1)).toMatchObject({ status: 'failed', error_code: 'ENQUEUE_FAILED' });
+      expect(prisma.crm_messages.rows.filter((r) => r.status === 'queued')).toHaveLength(0);
+      expect(outbound.enqueue).not.toHaveBeenCalled();
+      expect(redisStore.size).toBe(0);
+    });
+  });
+
   describe('notas, leída, cerrar, reabrir y asignar', () => {
     it('la nota interna se guarda y nunca se encola', async () => {
       const { service, prisma, outbound } = setup();
@@ -546,6 +582,7 @@ describe('CrmConversationsService', () => {
 
     it.each([
       ['un cliente', CUSTOMER_A],
+      ['personal sin acceso a la bandeja (mesero)', WAITER_A],
       ['personal de otra tienda', OWNER_B],
       ['un usuario inexistente', 999],
     ])('no asigna a %s: CRM_INBOX_002', async (_label, userId) => {
