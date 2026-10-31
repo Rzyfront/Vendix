@@ -2176,6 +2176,69 @@ describe('PaymentsService', () => {
       expect(write.data.remaining_balance.equals('1500.01')).toBe(true);
     });
 
+    describe('B09: pago inicial a crédito y su sale dentro de la tx de la venta', () => {
+      const terms = (method?: number) => ({
+        credit_type: 'installments',
+        installment_terms: {
+          num_installments: 2, frequency: 'monthly',
+          first_installment_date: '2026-10-23', interest_rate: 0,
+          initial_payment: 500, initial_payment_method_id: method,
+        },
+      });
+      const buildDb = (type: string | null) => ({
+        orders: { update: jest.fn().mockResolvedValue({}) },
+        order_installments: { create: jest.fn().mockResolvedValue({}) },
+        payments: { create: jest.fn().mockResolvedValue({ id: 901 }) },
+        store_payment_methods: {
+          findFirst: jest.fn().mockResolvedValue(
+            type ? { id: 3, system_payment_method: { type, processing_mode: 'DIRECT' } } : null,
+          ),
+        },
+      });
+      const run = (db: any, enabled: boolean, method?: number) =>
+        (service as any).createOrderInstallments(
+          terms(method) as any,
+          { id: 42, total_amount: new Prisma.Decimal(1500) },
+          { db, user_id: 77, store_id: 1, cash_register_enabled: enabled },
+        );
+
+      it('efectivo: crea el pago y un sale igual a la inicial en la misma tx', async () => {
+        const db = buildDb('cash');
+        (sessionsService.getActiveSession as jest.Mock).mockResolvedValue({ id: 5 });
+
+        await run(db, true, 3);
+
+        expect(db.payments.create).toHaveBeenCalledTimes(1);
+        expect(movementsService.recordSaleMovement).toHaveBeenCalledWith(
+          5,
+          expect.objectContaining({
+            store_id: 1, user_id: 77, amount: 500,
+            payment_method: 'cash', order_id: 42, payment_id: 901,
+          }),
+          db,
+        );
+        expect(db.orders.update).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ total_paid: 500 }) }),
+        );
+      });
+
+      it('sin caja abierta rechaza (la venta entera hace rollback)', async () => {
+        const db = buildDb('cash');
+        (sessionsService.getActiveSession as jest.Mock).mockResolvedValue(null);
+
+        await expect(run(db, true, 3)).rejects.toMatchObject({
+          errorCode: 'CASH_SESSION_REQUIRED_001',
+        });
+        expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+      });
+
+      it('método wompi o switch apagado: no crea sale', async () => {
+        await run(buildDb('wompi'), true, 3);
+        await run(buildDb('cash'), false, 3);
+        expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+      });
+    });
+
     it('finances installments from projected result.order.total_amount', async () => {
       const update = jest.fn().mockResolvedValue({});
       const create = jest.fn().mockResolvedValue({});
