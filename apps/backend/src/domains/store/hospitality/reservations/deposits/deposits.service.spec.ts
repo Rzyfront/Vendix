@@ -90,7 +90,11 @@ function build(options: { status?: string; walletBalance?: number } = {}) {
     assertSessionForSales: jest.fn(async () => undefined),
     getActiveSession: jest.fn(async () => ({ id: 30 })),
   };
-  const settings = { getSettings: jest.fn(async () => ({ pos: { cash_register: { enabled: true } } })) };
+  const recordModuleCashMovement = jest.fn(async (_tx: unknown, data: any) => {
+    movements.push({ session_id: 30, type: 'cash_in', amount: new Prisma.Decimal(data.amount), payment_method: data.payment_method, source_type: data.source_type, source_id: data.source_id });
+    return { id: 1 };
+  });
+  const movementsService = { recordModuleCashMovement };
   const paymentLinks = {
     create: jest.fn(async () => ({ success: true, data: { id: 77, checkout_url: 'https://checkout.wompi.co/l/abc' } })),
     deactivate: jest.fn(async () => ({})),
@@ -103,12 +107,12 @@ function build(options: { status?: string; walletBalance?: number } = {}) {
     wallets as any,
     walletBalance as any,
     cashSessions as any,
-    settings as any,
+    movementsService as any,
     paymentLinks as any,
     eventEmitter as any,
     storeContextRunner as any,
   );
-  return { service, rows, reservation, wallet, movements, walletBalance, paymentLinks, eventEmitter, tx, prisma };
+  return { service, rows, reservation, wallet, movements, walletBalance, paymentLinks, eventEmitter, tx, prisma, recordModuleCashMovement, cashSessions };
 }
 
 async function errorOf(promise: Promise<unknown>): Promise<VendixHttpException> {
@@ -154,6 +158,36 @@ describe('LodgingDepositsService (H3.5)', () => {
       expect(eventEmitter.emit.mock.invocationCallOrder[0]).toBeGreaterThan(
         prisma.$transaction.mock.invocationCallOrder.at(-1)!,
       );
+    });
+
+    it('B12: the cash movement is recorded inside the deposit tx, not from a session read outside', async () => {
+      const { service, rows, tx, recordModuleCashMovement, cashSessions } = build();
+
+      await service.collect(1, { amount: 225000, store_payment_method_id: 4, request_id });
+
+      expect(recordModuleCashMovement).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          store_id: 3,
+          user_id: 42,
+          direction: 'in',
+          amount: 225000,
+          payment_method: 'cash',
+          source_type: 'lodging_deposit',
+          source_id: rows[0].id,
+        }),
+      );
+      expect(cashSessions.getActiveSession).not.toHaveBeenCalled();
+    });
+
+    it('B12: a register closed meanwhile rejects the movement and no deposit event goes out', async () => {
+      const { service, eventEmitter, recordModuleCashMovement } = build();
+      recordModuleCashMovement.mockRejectedValueOnce(new Error('La sesión de caja ya no está abierta'));
+
+      await expect(service.collect(1, { amount: 225000, store_payment_method_id: 4, request_id })).rejects.toThrow(
+        'ya no está abierta',
+      );
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
     });
 
     it('a double click registers the deposit once', async () => {
