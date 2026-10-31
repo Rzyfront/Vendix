@@ -352,8 +352,8 @@ export const APP_MODULES: {
         },
         {
           key: 'marketing_social_sales',
-          label: 'Social Sales',
-          description: 'WhatsApp, inbox social y automatización de ventas',
+          label: 'Canales (Integraciones)',
+          description: 'Conexión de WhatsApp y otros canales de mensajería',
         },
       ],
     },

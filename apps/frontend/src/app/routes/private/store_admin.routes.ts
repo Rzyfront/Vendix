@@ -629,10 +629,27 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            // Legacy URL: WhatsApp connection moved to Integraciones → Canales.
             path: 'social-sales',
+            redirectTo: '/admin/integrations/channels',
+            pathMatch: 'full',
+          },
+        ],
+      },
+      // Integrations Routes (channel connections and credentials)
+      {
+        path: 'integrations',
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'channels',
+          },
+          {
+            path: 'channels',
             loadComponent: () =>
-              import('../../private/modules/store/marketing/social-sales/social-sales.component').then(
-                (c) => c.SocialSalesComponent,
+              import('../../private/modules/store/integrations/channels/channels.component').then(
+                (c) => c.ChannelsComponent,
               ),
           },
         ],
