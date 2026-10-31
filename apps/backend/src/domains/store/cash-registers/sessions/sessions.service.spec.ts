@@ -217,6 +217,25 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
     });
   });
 
+  describe('suspendSession — B27', () => {
+    it('busca la sesión acotada por store_id', async () => {
+      prismaMock.cash_register_sessions.findFirst
+        .mockResolvedValueOnce(OPEN_SESSION)
+        .mockResolvedValueOnce({ ...OPEN_SESSION, status: 'suspended' });
+
+      await service.suspendSession(SESSION_ID);
+
+      expect(prismaMock.cash_register_sessions.findFirst).toHaveBeenNthCalledWith(
+        1,
+        { where: { id: SESSION_ID, store_id: STORE_ID } },
+      );
+      expect(prismaMock.cash_register_sessions.findFirst).toHaveBeenNthCalledWith(
+        2,
+        { where: { id: SESSION_ID, store_id: STORE_ID } },
+      );
+    });
+  });
+
   describe('getPendingOrders — QUI-920', () => {
     const updated_at = new Date('2026-10-06T14:30:00.000Z');
 

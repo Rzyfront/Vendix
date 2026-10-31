@@ -685,7 +685,7 @@ export class SessionsService {
   async suspendSession(session_id: number) {
     const context = RequestContextService.getContext()!;
     const session = await this.prisma.cash_register_sessions.findFirst({
-      where: { id: session_id },
+      where: { id: session_id, store_id: context.store_id },
     });
     if (!session) {
       throw new NotFoundException('Sesión de caja abierta no encontrada');
@@ -704,7 +704,7 @@ export class SessionsService {
 
     const suspended_session =
       await this.prisma.cash_register_sessions.findFirst({
-        where: { id: session_id },
+        where: { id: session_id, store_id: context.store_id },
       });
     if (!suspended_session) {
       throw new NotFoundException('Sesión de caja no encontrada');
