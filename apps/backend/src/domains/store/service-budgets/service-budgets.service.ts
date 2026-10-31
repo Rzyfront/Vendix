@@ -20,6 +20,7 @@ import {
 import { CreateServiceProposalDto, DecideServiceProposalDto, SetServiceBudgetDto } from './dto';
 import { buildProposalSnapshotHash } from './utils/service-proposal-snapshot.util';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
+import { assertSaleNatureLines } from '../products/services/product-usage-nature.util';
 import {
   FullTaxRow,
   resolveCatalogLine,
@@ -222,6 +223,9 @@ export class ServiceBudgetsService {
    * verifica `verifyProposalSnapshot`: cualquier deriva lo vuelve invisible.
    */
   async createProposal(sessionId: number, dto: CreateServiceProposalDto) {
+    // Insumo y Uso interno nunca se venden: si entraran a la cuenta, el cobro del
+    // POS los rechazaría (422) y la sesión quedaría trabada.
+    await assertSaleNatureLines(this.prisma, dto.items);
     const session = await this.requireSession(sessionId);
     if (session.status !== 'open' && session.status !== 'paused') {
       throw new VendixHttpException(
@@ -576,6 +580,13 @@ export class ServiceBudgetsService {
             : Array.isArray(storedLinesPayload?.items)
               ? storedLinesPayload.items
               : [];
+          // Revalida al aprobar: cubre propuestas guardadas antes del guard de
+          // createProposal y productos que cambiaron de naturaleza mientras la
+          // propuesta esperaba. Lanzar aquí revierte la decisión completa.
+          await assertSaleNatureLines(
+            tx,
+            items.map((item) => ({ product_id: item.product_id ? Number(item.product_id) : null })),
+          );
 
           for (const item of items) {
             const qty = Math.max(1, Number(item.quantity || 1));

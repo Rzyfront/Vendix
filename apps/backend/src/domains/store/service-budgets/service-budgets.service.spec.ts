@@ -48,7 +48,7 @@ describe('ServiceBudgetsService', () => {
         update: jest.fn().mockResolvedValue({ store_id: 1, service_session_id: 7 }),
       },
       payments: { findFirst: jest.fn() },
-      products: { findFirst: jest.fn() },
+      products: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
       service_budgets: { findFirst: jest.fn(), create: jest.fn() },
       service_change_proposals: { findFirst: jest.fn(), create: jest.fn(), updateMany: jest.fn() },
       service_proposal_decisions: { create: jest.fn(), findFirst: jest.fn() },
@@ -196,6 +196,27 @@ describe('ServiceBudgetsService', () => {
       expect(result).toMatchObject({ id: 11, version: 2 });
     });
 
+    it('rechaza una línea de Insumo con el error de naturaleza antes de escribir (PROD_NATURE_NOT_SELLABLE)', async () => {
+      prisma.products.findMany.mockResolvedValueOnce([
+        { id: 5, name: 'Harina', usage_nature: 'supply', is_ingredient: false, is_sellable: false },
+      ]);
+      await expect(
+        run(() => service.createProposal(7, { items: [{ quantity: 1, unit_price: 5000, product_id: 5 }] })),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error_code: 'PROD_NATURE_NOT_SELLABLE',
+          message: '"Harina" es un producto de Insumo y no se puede vender.',
+        }),
+      });
+      expect(prisma.products.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: [5] }, OR: expect.any(Array) }),
+        }),
+      );
+      expect(tx.service_change_proposals.create).not.toHaveBeenCalled();
+      expect(notifications.push).not.toHaveBeenCalled();
+    });
+
     it('rechaza sesión cerrada, sin orden, con pendiente o con producto ajeno', async () => {
       prisma.service_sessions.findFirst.mockResolvedValueOnce({ ...session, status: 'closed' });
       await expect(run(() => service.createProposal(7, dto))).rejects.toMatchObject({
@@ -294,6 +315,20 @@ describe('ServiceBudgetsService', () => {
             is_inclusive: false,
           }),
         ]);
+      });
+
+      it('deja pasar una línea de Venta: el guard de naturaleza no halla ofensores y la propuesta se crea', async () => {
+        // La consulta del guard filtra ofensores (OR de naturaleza); la de catálogo no.
+        prisma.products.findMany.mockImplementation((args: any) =>
+          Promise.resolve(args?.where?.OR ? [] : [product]),
+        );
+        await run(() =>
+          service.createProposal(7, { items: [{ quantity: 1, unit_price: 10000, product_id: 2 }] }),
+        );
+        expect(prisma.products.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ id: { in: [2] }, OR: expect.any(Array) }) }),
+        );
+        expect(tx.service_change_proposals.create).toHaveBeenCalledTimes(1);
       });
 
       it('rechaza precio distinto si el producto no permite override (POS_PRICE_OVERRIDE_NOT_ALLOWED_001)', async () => {
@@ -508,6 +543,29 @@ describe('ServiceBudgetsService', () => {
       );
       // La transacción no debe dejar rastro: ni evento, ni presupuesto aprobado, ni aviso.
       expect(tx.service_progress_events.create).not.toHaveBeenCalled();
+      expect(tx.service_budgets.create).not.toHaveBeenCalled();
+      expect(notifications.push).not.toHaveBeenCalled();
+    });
+
+    it('no aprueba una propuesta guardada con una línea de Uso interno y revierte la decisión', async () => {
+      prisma.service_change_proposals.findFirst.mockResolvedValue({
+        ...proposal,
+        lines: {
+          items: [{ product_id: 9, product_name: 'Toalla', quantity: 1, unit_price: 3000, total_price: 3000 }],
+          budget_snapshot: { version: 2 },
+        },
+      });
+      tx.products.findMany.mockResolvedValueOnce([
+        { id: 9, name: 'Toalla', usage_nature: 'internal_use', is_ingredient: false, is_sellable: false },
+      ]);
+
+      await expect(run(() => service.decideWithToken(token, decideDto))).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error_code: 'PROD_NATURE_NOT_SELLABLE',
+          message: '"Toalla" es un producto de Uso interno y no se puede vender.',
+        }),
+      });
+      expect(tx.order_items.create).not.toHaveBeenCalled();
       expect(tx.service_budgets.create).not.toHaveBeenCalled();
       expect(notifications.push).not.toHaveBeenCalled();
     });
