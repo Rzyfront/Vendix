@@ -37,11 +37,8 @@ export type ShippingTaxDbClient = Pick<
   'shipping_rates' | 'stores'
 >;
 
-/** Cliente mínimo para resolver el impuesto de una categoría configurada. */
-export type CategoryTaxDbClient = Pick<
-  Prisma.TransactionClient,
-  'tax_categories' | 'stores'
->;
+/** Cliente para leer el emisor al resolver una categoría configurada (acepta el `tx`). */
+export type CategoryTaxDbClient = Pick<Prisma.TransactionClient, 'stores'>;
 
 /** Dónde vive la categoría configurada (mismo mecanismo, distinto texto). */
 export type ConfiguredTaxContext = 'shipping' | 'station_rental';
@@ -394,22 +391,25 @@ export class ShippingTaxService {
   ): Promise<FullTaxRow[]> {
     const { tax_category_id, tax_is_inclusive, store_id } = args;
     if (!tax_category_id || !store_id) return [];
-    const db: CategoryTaxDbClient = client ?? this.prisma.withoutScope();
-
-    const category = (await db.tax_categories.findFirst({
-      where: { id: tax_category_id },
-      select: SHIPPING_TAX_CATEGORY_SELECT,
-    })) as CategoryRow | null;
-    if (!category) return [];
-
-    const issuer = await this.readIssuerContext(db, store_id);
+    const issuer = await this.readIssuerContext(
+      client ?? this.prisma.withoutScope(),
+      store_id,
+    );
     const skip = (reason: string): FullTaxRow[] => {
       this.logger.warn(
-        `[configured-tax] store=${store_id} category=${category.id} sin impuesto (${reason})`,
+        `[configured-tax] store=${store_id} category=${tax_category_id} sin impuesto (${reason})`,
       );
       return [];
     };
-    if (!this.categoryInScope(category, store_id, issuer)) {
+    // La categoría se lee SIN scoping de tienda y con el alcance fiscal
+    // explícito (igual que `assertCategoryAssignable`): el `tx` de una
+    // transacción del StorePrismaService filtra `tax_categories` por
+    // `store_id` y ocultaría las categorías de la org (fiscal_scope=ORGANIZATION).
+    const category = (await this.prisma.withoutScope().tax_categories.findFirst({
+      where: { id: tax_category_id, ...this.categoryScopeWhere(store_id, issuer) },
+      select: SHIPPING_TAX_CATEGORY_SELECT,
+    })) as CategoryRow | null;
+    if (!category || !this.categoryInScope(category, store_id, issuer)) {
       return skip('out_of_scope');
     }
     const evaluation = evaluateShippingTaxCategory(category);

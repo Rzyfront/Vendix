@@ -472,18 +472,42 @@ describe('ShippingTaxService', () => {
       await expect(service.taxRowsForCategory(null, { ...args, tax_is_inclusive: false })).resolves.toEqual([
         { tax_rate_id: 30, name: 'IVA 19%', rate: 0.19, tax_type: 'iva', is_inclusive: false },
       ]);
-      expect(base.tax_categories.findFirst.mock.calls[0][0].where).toEqual({ id: 3 });
+      expect(base.tax_categories.findFirst.mock.calls[0][0].where).toEqual({ id: 3, store_id: 1 });
     });
 
-    it('usa el client recibido (tx) en vez del baseClient', async () => {
+    it('lee el emisor con el tx y la categoría sin scoping de tienda', async () => {
       const tx: any = {
-        tax_categories: { findFirst: jest.fn().mockResolvedValue(inc8) },
+        tax_categories: { findFirst: jest.fn() },
         stores: { findFirst: jest.fn().mockResolvedValue(storeRow({ responsibilities: ['O-33'] })) },
       };
+      base.tax_categories.findFirst.mockResolvedValue(inc8);
       await expect(service.taxRowsForCategory(tx, { ...args, tax_category_id: 7 })).resolves.toEqual([
         { tax_rate_id: 70, name: 'INC 8%', rate: 0.08, tax_type: 'inc', is_inclusive: true },
       ]);
-      expect(base.tax_categories.findFirst).not.toHaveBeenCalled();
+      expect(tx.stores.findFirst).toHaveBeenCalled();
+      expect(tx.tax_categories.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('bajo ORGANIZATION toma la categoría de la org (el tx de tienda la ocultaría)', async () => {
+      base.stores.findFirst.mockResolvedValue(
+        storeRow({ fiscal_scope: 'ORGANIZATION', responsibilities: ['O-48'] }),
+      );
+      base.tax_categories.findFirst.mockResolvedValue({ ...iva19, store_id: null, organization_id: 10 });
+      await expect(service.taxRowsForCategory(null, args)).resolves.toEqual([
+        { tax_rate_id: 30, name: 'IVA 19%', rate: 0.19, tax_type: 'iva', is_inclusive: true },
+      ]);
+      expect(base.tax_categories.findFirst.mock.calls[0][0].where).toEqual({
+        id: 3,
+        organization_id: 10,
+        store_id: null,
+      });
+    });
+
+    it('categoría inexistente o fuera de alcance ⇒ sin filas + warn', async () => {
+      base.stores.findFirst.mockResolvedValue(storeRow({ responsibilities: ['O-48'] }));
+      base.tax_categories.findFirst.mockResolvedValue(null);
+      await expect(service.taxRowsForCategory(null, args)).resolves.toEqual([]);
+      expect((service as any).logger.warn).toHaveBeenCalledWith(expect.stringContaining('out_of_scope'));
     });
 
     it.each([
