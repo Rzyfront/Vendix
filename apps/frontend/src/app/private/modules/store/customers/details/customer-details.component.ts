@@ -27,7 +27,10 @@ import {
   InputComponent,
   SelectorComponent,
   PaginationComponent,
+  ScrollableTabsComponent,
 } from '../../../../../../app/shared/components';
+import type { ScrollableTab } from '../../../../../../app/shared/components';
+import { CustomerCrmPanelComponent } from '../crm/profile/customer-crm-panel.component';
 import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
@@ -48,7 +51,9 @@ import {
     InputComponent,
     SelectorComponent,
     PaginationComponent,
-    StickyHeaderComponent
+    StickyHeaderComponent,
+    ScrollableTabsComponent,
+    CustomerCrmPanelComponent,
 ],
   template: `
     <div class="w-full">
@@ -65,8 +70,24 @@ import {
         (actionClicked)="onHeaderAction($event)"
       ></app-sticky-header>
     
+      @if (showCrmTab()) {
+        <div class="mb-4">
+          <app-scrollable-tabs
+            [tabs]="profileTabs"
+            [activeTab]="activeTab()"
+            size="sm"
+            ariaLabel="Secciones de la ficha del cliente"
+            (tabChange)="selectTab($event)"
+          ></app-scrollable-tabs>
+        </div>
+      }
+
+      @if (activeTab() === 'crm' && customerId()) {
+        <app-customer-crm-panel [customerId]="customerId()!"></app-customer-crm-panel>
+      }
+
       <!-- Content -->
-      <div class="flex flex-col gap-4 md:gap-6">
+      <div class="flex flex-col gap-4 md:gap-6" [class.hidden]="activeTab() !== 'info'">
         <!-- Loading -->
         @if (loadingCustomer()) {
           <div class="flex justify-center py-12">
@@ -807,6 +828,29 @@ export class CustomerDetailsComponent {
   detailFields = computed(() => this.customerMetadata().filter((f: any) => f.field?.display_mode === 'detail'));
 
   customerId = signal<number | null>(null);
+
+  // CRM tab (PLAN-CRM §7, H2). `?tab=crm` opens it directly.
+  readonly profileTabs: ScrollableTab[] = [
+    { id: 'info', label: 'Información', icon: 'user' },
+    { id: 'crm', label: 'CRM', icon: 'trending-up' },
+  ];
+  readonly activeTab = signal<'info' | 'crm'>('info');
+  readonly showCrmTab = computed(
+    () =>
+      this.authFacade.isOwner() ||
+      this.authFacade.hasPermission('store:customers:read'),
+  );
+
+  selectTab(tab: string): void {
+    const next = tab === 'crm' ? 'crm' : 'info';
+    this.activeTab.set(next);
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { tab: next === 'crm' ? 'crm' : null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
   customer = signal<any>(null);
   wallet = signal<any>(null);
   walletHistory = signal<any[]>([]);
@@ -894,6 +938,12 @@ export class CustomerDetailsComponent {
       reason: ['', [Validators.required]],
       reference: [''],
     });
+
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => {
+        this.activeTab.set(params.get('tab') === 'crm' ? 'crm' : 'info');
+      });
 
     this.route.paramMap
       .pipe(takeUntilDestroyed(this.destroyRef))

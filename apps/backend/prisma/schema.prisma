@@ -4988,6 +4988,9 @@ enum notification_type_enum {
   qr_table_scan
   /// QUI-719 — contacto desde la landing pública del módulo CRM.
   crm_contact_request
+  /// CRM PR 9 — tarea del CRM asignada a alguien / tarea pendiente vencida.
+  crm_task_assigned
+  crm_task_due
   order_awaiting_carrier
   appointment_upcoming
   appointment_checked_in
@@ -4999,6 +5002,9 @@ enum notification_type_enum {
   /// report and mislead the person who is looking for it.
   vexi_task_completed
   vexi_task_failed
+  /// CRM PR 6 — the store reached its monthly SMS spend limit; SMS stop until
+  /// the owner raises it or the month changes.
+  crm_sms_spend_limit_reached
   auto_renew_disabled_no_credential
   auto_renew_charge_failed
   /// T9 — listo de cocina (KDS → mesero). El puente de entrega
@@ -11793,6 +11799,12 @@ model social_channels {
   last_error             String?   @db.Text
   connected_at           DateTime? @db.Timestamp(6)
   disconnected_at        DateTime? @db.Timestamp(6)
+  /// SMS only (PLAN-CRM §5.2): hard monthly cap in USD. Null blocks every SMS.
+  monthly_spend_limit    Decimal?  @db.Decimal(12, 2)
+  /// Reserved spend of `spend_period_start`'s month, in USD.
+  monthly_spend_used     Decimal   @default(0) @db.Decimal(12, 4)
+  /// First day (UTC) of the month `monthly_spend_used` belongs to.
+  spend_period_start     DateTime? @db.Date
   created_at             DateTime  @default(now()) @db.Timestamp(6)
   updated_at             DateTime  @default(now()) @updatedAt @db.Timestamp(6)
 
@@ -14771,6 +14783,8 @@ enum crm_message_direction_enum {
 
 enum crm_message_status_enum {
   queued
+  /// Reclamado por el worker; el proveedor puede haberlo aceptado.
+  sending
   sent
   delivered
   read
@@ -14855,6 +14869,8 @@ model crm_messages {
   channel             crm_message_channel_enum
   status              crm_message_status_enum
   body                String?                    @db.Text
+  /// Asunto del correo (campañas por correo).
+  subject             String?                    @db.VarChar(200)
   template_name       String?                    @db.VarChar(120)
   template_language   String?                    @db.VarChar(10)
   template_variables  Json?
@@ -15073,6 +15089,9 @@ model crm_campaigns {
   segment_id         Int?
   template_name      String?                  @db.VarChar(120)
   template_language  String?                  @db.VarChar(10)
+  /// Variables posicionales de la plantilla (`{{1}}`…): texto fijo o un marcador
+  /// del catálogo cerrado (`{first_name}`, `{last_name}`, `{store_name}`).
+  template_variables Json?
   body               String?                  @db.Text
   /// Solo correo.
   subject            String?                  @db.VarChar(200)

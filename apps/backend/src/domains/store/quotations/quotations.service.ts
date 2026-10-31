@@ -843,7 +843,16 @@ export class QuotationsService {
   }
 
   async accept(id: number) {
-    return this.transition(id, 'accepted', { accepted_at: new Date() });
+    const accepted = await this.transition(id, 'accepted', {
+      accepted_at: new Date(),
+    });
+    // CRM (PLAN-CRM §2.5): wins the open opportunities that link it.
+    this.eventEmitter.emit('quotation.accepted', {
+      store_id: accepted.store_id,
+      quotation_id: id,
+      quotation_number: accepted.quotation_number,
+    });
+    return accepted;
   }
 
   async reject(id: number) {
@@ -1021,6 +1030,7 @@ export class QuotationsService {
     });
 
     this.eventEmitter.emit('quotation.converted', {
+      store_id: updated.store_id,
       quotation_id: id,
       order_id: order.id,
       quotation_number: quotation.quotation_number,

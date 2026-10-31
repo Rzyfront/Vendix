@@ -322,7 +322,7 @@ export const APP_MODULES: {
         },
         {
           key: 'customers_crm',
-          label: 'CRM',
+          label: 'Landing de captación',
           description: 'Landing page generada con IA y captura de contactos',
         },
       ],

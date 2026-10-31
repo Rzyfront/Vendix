@@ -25,6 +25,7 @@ function row(overrides: Record<string, unknown> = {}) {
       id: 3,
       contact_address: '+573001234567',
       last_inbound_at: LAST_INBOUND,
+      assigned_user_id: 5,
     },
     ...overrides,
   };
@@ -54,11 +55,43 @@ function setup(message: ReturnType<typeof row> | null = row()) {
       retryable: false,
     }),
   } as unknown as MessagingService;
-  const processor = new CrmOutboundProcessor(prisma as never, messaging);
-  return { processor, prisma, messaging };
+  const events = { publish: jest.fn().mockResolvedValue(undefined) };
+  const processor = new CrmOutboundProcessor(
+    prisma as never,
+    messaging,
+    events as never,
+  );
+  return { processor, prisma, messaging, events };
 }
 
 describe('CrmOutboundProcessor', () => {
+  it('publishes the sent status to the inbox stream with the assignee', async () => {
+    const { processor, events } = setup();
+
+    await processor.process(job());
+
+    expect(events.publish).toHaveBeenCalledWith({
+      type: 'crm.message',
+      store_id: 10,
+      conversation_id: 3,
+      assigned_user_id: 5,
+      message_id: 77,
+      status: 'sent',
+      direction: 'outbound',
+    });
+  });
+
+  it('publishes nothing when the guarded update changed no row', async () => {
+    const { processor, prisma, events } = setup();
+    prisma.crm_messages.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+
+    await processor.process(job());
+
+    expect(events.publish).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
@@ -82,7 +115,7 @@ describe('CrmOutboundProcessor', () => {
       idempotency_key: '77',
     });
     expect(prisma.crm_messages.updateMany).toHaveBeenCalledWith({
-      where: { id: 77, status: 'queued' },
+      where: { id: 77, status: 'sending' },
       data: expect.objectContaining({
         status: 'sent',
         provider: 'meta_cloud',
@@ -90,6 +123,71 @@ describe('CrmOutboundProcessor', () => {
         sent_at: expect.any(Date),
         error_code: null,
         error_message: null,
+      }),
+    });
+  });
+
+  it('SMS: passes the customer for the consent check and stores the cost', async () => {
+    const { processor, prisma, messaging } = setup(
+      row({
+        channel: 'sms',
+        provider: 'sns_sms',
+        conversation: {
+          id: 3,
+          contact_address: '+573001234567',
+          last_inbound_at: null,
+          assigned_user_id: 5,
+          customer_id: 33,
+        },
+      }),
+    );
+    (messaging.send as jest.Mock).mockResolvedValue({
+      status: 'sent',
+      provider: 'sns_sms',
+      provider_message_id: 'sns-msg-1',
+      retryable: false,
+      cost_amount: 0.0075,
+    });
+
+    await processor.process(job());
+
+    expect(messaging.send).toHaveBeenCalledWith({
+      store_id: 10,
+      channel: 'sms',
+      to: '+573001234567',
+      body: 'Hola',
+      customer_id: 33,
+      idempotency_key: '77',
+    });
+    expect(prisma.crm_messages.updateMany).toHaveBeenCalledWith({
+      where: { id: 77, status: 'sending' },
+      data: expect.objectContaining({
+        status: 'sent',
+        provider: 'sns_sms',
+        provider_message_id: 'sns-msg-1',
+        cost_amount: 0.0075,
+      }),
+    });
+  });
+
+  it('SMS over the spend cap ends failed with SPEND_LIMIT, without retries', async () => {
+    const { processor, prisma, messaging } = setup(row({ channel: 'sms', provider: 'sns_sms' }));
+    (messaging.send as jest.Mock).mockResolvedValue({
+      status: 'failed',
+      provider: 'sns_sms',
+      error_code: 'SPEND_LIMIT',
+      error_message: 'Monthly SMS spend limit reached',
+      retryable: false,
+    });
+
+    await expect(processor.process(job())).resolves.toBeUndefined();
+
+    expect(prisma.crm_messages.updateMany).toHaveBeenCalledWith({
+      where: { id: 77, status: 'sending' },
+      data: expect.objectContaining({
+        status: 'failed',
+        error_code: 'SPEND_LIMIT',
+        error_message: 'Monthly SMS spend limit reached',
       }),
     });
   });
@@ -144,7 +242,7 @@ describe('CrmOutboundProcessor', () => {
     await processor.process(job());
 
     expect(prisma.crm_messages.updateMany).toHaveBeenCalledWith({
-      where: { id: 77, status: 'queued' },
+      where: { id: 77, status: 'sending' },
       data: expect.objectContaining({
         status: 'failed',
         error_code: 'WINDOW_CLOSED',
@@ -154,7 +252,7 @@ describe('CrmOutboundProcessor', () => {
     });
   });
 
-  it('throws on a retryable failure so BullMQ backs off, keeping the row queued', async () => {
+  it('throws on a retryable failure so BullMQ backs off, putting the row back to queued', async () => {
     const { processor, prisma, messaging } = setup();
     (messaging.send as jest.Mock).mockResolvedValue({
       status: 'failed',
@@ -168,8 +266,9 @@ describe('CrmOutboundProcessor', () => {
     await expect(processor.process(job(1, 5))).rejects.toThrow('RATE_LIMITED');
 
     expect(prisma.crm_messages.updateMany).toHaveBeenCalledWith({
-      where: { id: 77, status: 'queued' },
+      where: { id: 77, status: 'sending' },
       data: {
+        status: 'queued',
         error_code: 'RATE_LIMITED',
         error_message: '[130429] Rate limit hit',
       },
@@ -189,11 +288,158 @@ describe('CrmOutboundProcessor', () => {
     await processor.process(job(4, 5));
 
     expect(prisma.crm_messages.updateMany).toHaveBeenCalledWith({
-      where: { id: 77, status: 'queued' },
+      where: { id: 77, status: 'sending' },
       data: expect.objectContaining({
         status: 'failed',
         error_code: 'RATE_LIMITED',
       }),
+    });
+  });
+
+  it('sends campaign messages as marketing, with their email subject', async () => {
+    const { processor, messaging } = setup(
+      row({
+        channel: 'email',
+        body: 'Promo de octubre',
+        subject: 'Hola Ana',
+        campaign_id: 12,
+        provider: 'ses_email',
+        conversation: {
+          id: 3,
+          contact_address: 'ana@shop.co',
+          last_inbound_at: null,
+          assigned_user_id: null,
+          customer_id: 41,
+        },
+      }),
+    );
+
+    await processor.process(job());
+
+    expect(messaging.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'email',
+        to: 'ana@shop.co',
+        subject: 'Hola Ana',
+        customer_id: 41,
+        marketing: true,
+      }),
+    );
+  });
+
+  it('keeps inbox replies conversational (not marketing)', async () => {
+    const { processor, messaging } = setup();
+    await processor.process(job());
+    expect((messaging.send as jest.Mock).mock.calls[0][0].marketing).toBeUndefined();
+  });
+
+  it('never sends a message of a cancelled campaign', async () => {
+    const { processor, prisma, messaging } = setup(
+      row({ campaign_id: 12, campaign: { status: 'cancelled' } }),
+    );
+    await processor.process(job());
+    expect(messaging.send).not.toHaveBeenCalled();
+    expect(prisma.crm_messages.updateMany).toHaveBeenCalledWith({
+      where: { id: 77, status: 'queued' },
+      data: expect.objectContaining({ status: 'failed', error_code: 'CAMPAIGN_CANCELLED' }),
+    });
+  });
+
+  describe('claim before sending (no double send or charge)', () => {
+    /** Prisma fake that keeps the row status, so a retry sees what the last attempt left. */
+    function statefulSetup(initial: ReturnType<typeof row>) {
+      const ctx = setup(initial);
+      const state = { ...initial };
+      ctx.prisma.crm_messages.findUnique.mockImplementation(async () => ({ ...state }));
+      ctx.prisma.crm_messages.updateMany.mockImplementation(
+        async ({ where, data }: { where: { status: string }; data: Record<string, unknown> }) => {
+          if (state.status !== where.status) return { count: 0 };
+          Object.assign(state, data);
+          return { count: 1 };
+        },
+      );
+      return { ...ctx, state };
+    }
+
+    it('claims the row (queued → sending) before calling the provider', async () => {
+      const { processor, prisma, messaging } = setup();
+
+      await processor.process(job());
+
+      expect(prisma.crm_messages.updateMany.mock.calls[0][0]).toEqual({
+        where: { id: 77, status: 'queued' },
+        data: { status: 'sending' },
+      });
+      expect(prisma.crm_messages.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+        (messaging.send as jest.Mock).mock.invocationCallOrder[0],
+      );
+    });
+
+    it('does not send when another attempt already claimed the row', async () => {
+      const { processor, prisma, messaging, events } = setup();
+      prisma.crm_messages.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await processor.process(job());
+
+      expect(messaging.send).not.toHaveBeenCalled();
+      expect(prisma.crm_messages.updateMany).toHaveBeenCalledTimes(1);
+      expect(events.publish).not.toHaveBeenCalled();
+    });
+
+    it('worker dies between the SMS publish and the update: the retry marks it failed/UNKNOWN without resending', async () => {
+      const { processor, prisma, messaging, events, state } = statefulSetup(
+        row({ channel: 'sms', provider: 'sns_sms' }),
+      );
+      (messaging.send as jest.Mock).mockResolvedValue({
+        status: 'sent',
+        provider: 'sns_sms',
+        provider_message_id: 'sns-msg-1',
+        retryable: false,
+        cost_amount: 0.0075,
+      });
+      const realUpdate = prisma.crm_messages.updateMany.getMockImplementation()!;
+      // The DB connection drops right after SNS accepted (and charged) the SMS.
+      prisma.crm_messages.updateMany
+        .mockImplementationOnce(realUpdate)
+        .mockRejectedValueOnce(new Error('Connection terminated unexpectedly'));
+
+      await expect(processor.process(job(0))).rejects.toThrow('Connection terminated');
+      expect(state.status).toBe('sending');
+
+      // BullMQ retries (or recovers the stalled job).
+      await processor.process(job(1));
+
+      expect(messaging.send).toHaveBeenCalledTimes(1);
+      expect(state).toMatchObject({ status: 'failed', error_code: 'UNKNOWN' });
+      expect(events.publish).toHaveBeenCalledWith(
+        expect.objectContaining({ message_id: 77, status: 'failed' }),
+      );
+    });
+
+    it('a retryable failure leaves the row queued so the next attempt can claim it again', async () => {
+      const { processor, messaging, state } = statefulSetup(row());
+      (messaging.send as jest.Mock)
+        .mockResolvedValueOnce({
+          status: 'failed',
+          provider: 'meta_cloud',
+          error_code: 'RATE_LIMITED',
+          error_message: 'Rate limit hit',
+          retryable: true,
+        })
+        .mockResolvedValueOnce({
+          status: 'sent',
+          provider: 'meta_cloud',
+          provider_message_id: 'wamid.2',
+          retryable: false,
+        });
+
+      await expect(processor.process(job(0))).rejects.toThrow('RATE_LIMITED');
+      expect(state.status).toBe('queued');
+
+      await processor.process(job(1));
+
+      expect(messaging.send).toHaveBeenCalledTimes(2);
+      expect(state).toMatchObject({ status: 'sent', provider_message_id: 'wamid.2' });
     });
   });
 });

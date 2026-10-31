@@ -940,7 +940,7 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/customers/crm',
-      title: 'CRM / Landing Inteligente',
+      title: 'Landing de captación',
       parent: 'Clientes',
       icon: 'sparkles',
     },

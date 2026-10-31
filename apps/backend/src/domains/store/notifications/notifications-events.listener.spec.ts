@@ -419,3 +419,35 @@ describe('NotificationsEventsListener.handleInvoicePdfGenerated (E.10)', () => {
     expect(invoicesUpdate).not.toHaveBeenCalled();
   });
 });
+
+describe('NotificationsEventsListener — CRM SMS spend cap', () => {
+  it('notifies the store that SMS were paused, with the spend data', async () => {
+    const notificationsService = { createAndBroadcast: jest.fn().mockResolvedValue({}) } as any;
+    const listener = new NotificationsEventsListener(
+      notificationsService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+    );
+
+    await listener.handleSmsSpendLimitReached({
+      store_id: 10,
+      channel_id: 7,
+      period_start: '2026-10-01',
+      limit: 20,
+      used: 19.995,
+      attempted_cost: 0.0075,
+    });
+
+    expect(notificationsService.createAndBroadcast).toHaveBeenCalledWith(
+      10,
+      'crm_sms_spend_limit_reached',
+      'Tope de SMS alcanzado',
+      'Los SMS de este mes se pausaron: se usaron 19.995 USD (20 USD). Sube el tope en Integraciones → Canales para seguir enviando.',
+      { channel_id: 7, period_start: '2026-10-01', limit: 20, used: 19.995 },
+    );
+  });
+});
