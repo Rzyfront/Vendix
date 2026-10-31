@@ -2,10 +2,12 @@ import type { BadgeVariant } from '../../../../../../shared/components';
 import {
   CrmChannel,
   CrmConversation,
+  CrmConversationsQuery,
   CrmConversationStatus,
   CrmMessage,
   CrmMessageStatus,
   CrmPerson,
+  InboxFilter,
 } from './crm-inbox.interface';
 
 export const CHANNEL_META: Record<CrmChannel, { label: string; icon: string }> = {
@@ -128,4 +130,24 @@ export function newClientRequestId(): string {
     return crypto.randomUUID();
   }
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/** List query for a tab and the search box; a blank search sends no `q`. */
+export function inboxQuery(
+  filter: InboxFilter,
+  search: string,
+): CrmConversationsQuery {
+  const q = search.trim() || undefined;
+  switch (filter) {
+    case 'unassigned':
+      return { assigned: 'unassigned', q };
+    case 'mine':
+      return { assigned: 'me', q };
+    case 'open':
+      return { status: 'open', q };
+    case 'closed':
+      return { status: 'closed', q };
+    default:
+      return { q };
+  }
 }

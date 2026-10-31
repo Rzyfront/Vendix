@@ -14783,6 +14783,8 @@ enum crm_message_direction_enum {
 
 enum crm_message_status_enum {
   queued
+  /// Reclamado por el worker; el proveedor puede haberlo aceptado.
+  sending
   sent
   delivered
   read

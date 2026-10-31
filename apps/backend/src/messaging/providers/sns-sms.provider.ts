@@ -23,6 +23,8 @@ import {
 } from '../utils/sms.util';
 
 const DEFAULT_MAX_PRICE_USD = '0.50';
+/** `MaxPrice` = reserved cost × margin; 1 means SNS never charges more than reserved. */
+const DEFAULT_MAX_PRICE_MARGIN = 1;
 /** Used when `SNS_SMS_PRICE_TABLE` has no entry: deliberately high. */
 const FALLBACK_PRICE_PER_SEGMENT_USD = 0.1;
 const OPT_OUT_CACHE_TTL_SECONDS = 24 * 60 * 60;
@@ -197,7 +199,7 @@ export class SnsSmsMessagingProvider implements MessagingProvider {
       },
       'AWS.SNS.SMS.MaxPrice': {
         DataType: 'Number',
-        StringValue: this.maxPrice(),
+        StringValue: this.messageMaxPrice(quote.cost),
       },
     };
     const senderId = channel?.settings?.sender_id;
@@ -240,6 +242,26 @@ export class SnsSmsMessagingProvider implements MessagingProvider {
         retryable: mapped.retryable,
       };
     }
+  }
+
+  /**
+   * Per-message `MaxPrice`: the cost reserved against the store cap (times
+   * the margin), never above `SNS_SMS_MAX_PRICE_USD`. SNS refuses an SMS that
+   * would cost more, so the real charge cannot exceed the reservation even
+   * when `SNS_SMS_PRICE_TABLE` lags behind the AWS price. Rounded down to the
+   * reservation's 4 decimals.
+   */
+  private messageMaxPrice(reservedCost: number): string {
+    const cap = Math.min(
+      Number(this.maxPrice()),
+      reservedCost * this.maxPriceMargin(),
+    );
+    return (Math.floor(Number((cap * 10_000).toFixed(6))) / 10_000).toFixed(4);
+  }
+
+  private maxPriceMargin(): number {
+    const value = Number(this.config.get<string>('SNS_SMS_MAX_PRICE_MARGIN'));
+    return Number.isFinite(value) && value >= 1 ? value : DEFAULT_MAX_PRICE_MARGIN;
   }
 
   private maxPrice(): string {

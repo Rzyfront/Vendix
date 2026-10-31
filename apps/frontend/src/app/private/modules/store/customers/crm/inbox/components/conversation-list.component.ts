@@ -8,7 +8,7 @@ import {
   ScrollableTabsComponent,
 } from '../../../../../../../shared/components';
 import type { ScrollableTab } from '../../../../../../../shared/components';
-import { CrmConversation } from '../crm-inbox.interface';
+import { CrmConversation, InboxFilter } from '../crm-inbox.interface';
 import {
   CHANNEL_META,
   CONVERSATION_STATUS_META,
@@ -18,7 +18,7 @@ import {
   personName,
 } from '../crm-inbox.utils';
 
-export type InboxFilter = 'all' | 'unassigned' | 'mine' | 'open' | 'closed';
+export type { InboxFilter };
 
 const FILTER_TABS: ScrollableTab[] = [
   { id: 'all', label: 'Todas' },

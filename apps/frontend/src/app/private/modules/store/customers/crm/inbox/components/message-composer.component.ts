@@ -193,6 +193,8 @@ export class MessageComposerComponent {
   }
 
   protected onDraft(value: string): void {
+    // An edited body is a new send: never let the API dedupe it onto the old one.
+    if (value.trim() !== this.draft().trim()) this.requestId = newClientRequestId();
     this.draft.set(value);
   }
 
