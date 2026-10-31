@@ -14514,7 +14514,6 @@ model fulfillment_schedule_exceptions {
   store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([store_id, date])
-  @@index([store_id, date])
 }
 
 /// Agendamiento 1:1 de una orden programada (POS o tienda en línea).

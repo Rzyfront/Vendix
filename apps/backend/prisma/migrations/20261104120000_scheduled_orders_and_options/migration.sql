@@ -36,7 +36,7 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- AlterEnum (ADD VALUE corre fuera de la transacción; IF NOT EXISTS lo hace re-ejecutable)
+-- AlterEnum (ADD VALUE corre dentro de la transacción y es válido en PG 12+; IF NOT EXISTS lo hace re-ejecutable)
 ALTER TYPE "notification_type_enum" ADD VALUE IF NOT EXISTS 'scheduled_order_reminder';
 ALTER TYPE "notification_type_enum" ADD VALUE IF NOT EXISTS 'scheduled_order_rescheduled';
 
