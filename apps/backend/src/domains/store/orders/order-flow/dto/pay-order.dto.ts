@@ -8,6 +8,7 @@ import {
   IsNumber,
   Min,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -55,6 +56,16 @@ export class PayOrderDto {
   @IsOptional()
   @IsString()
   payment_reference?: string;
+
+  /**
+   * B23 — clave de idempotencia opcional (hasta 64 caracteres). Se guarda en
+   * `payments.financial_idempotency_key`; un reintento con la misma clave sobre
+   * una orden ya cobrada devuelve el estado actual sin crear otro pago.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  idempotency_key?: string;
 
   @IsOptional()
   @IsInt()

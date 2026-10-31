@@ -3850,6 +3850,47 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
     expect(prismaMock.payments.create).toHaveBeenCalledTimes(1);
   });
 
+  it('B23: clave ya usada con pago succeeded → devuelve el estado actual y no crea otro pago', async () => {
+    const { service, prismaMock } = buildService();
+    prismaMock.payments.findFirst = jest.fn().mockResolvedValue({
+      id: 999,
+      transaction_id: 'TXN-1',
+      gateway_response: { change: 500 },
+    });
+    const update = jest.spyOn(service as any, 'updateOrderState');
+
+    const result: any = await service.payOrder(1, { ...DTO, idempotency_key: 'abc' });
+
+    expect(prismaMock.payments.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          financial_idempotency_key: 'flow_pay:1:abc',
+          order_id: 1,
+          state: 'succeeded',
+        }),
+      }),
+    );
+    expect(result.idempotent_replay).toBe(true);
+    expect(result.payment).toEqual({ transaction_id: 'TXN-1', change: 500 });
+    expect(prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('B23: clave nueva → el primer tramo guarda financial_idempotency_key', async () => {
+    const { service, prismaMock } = buildService();
+    prismaMock.payments.findFirst = jest.fn().mockResolvedValue(null);
+    jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: 1, state: 'finished' });
+
+    await service.payOrder(1, { ...DTO, idempotency_key: ' k1 ' });
+
+    expect(prismaMock.payments.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ financial_idempotency_key: 'flow_pay:1:k1' }),
+    });
+  });
+
   it('finish OK: NO restaura (el claim es el único updateMany)', async () => {
     const { service, prismaMock } = buildService();
     jest

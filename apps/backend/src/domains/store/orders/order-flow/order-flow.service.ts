@@ -1862,6 +1862,31 @@ export class OrderFlowService {
     dto: PayOrderDto,
     options?: { strictKitchenPending?: boolean; deferFinish?: boolean },
   ) {
+    // B23 — reintento con una clave ya usada por un pago `succeeded` de ESTA
+    // orden: se devuelve el estado actual, sin tocar caja ni crear otro pago.
+    const idempotencyKey = this.buildPayIdempotencyKey(orderId, dto.idempotency_key);
+    if (idempotencyKey) {
+      const prior = await this.prisma.payments.findFirst({
+        where: {
+          financial_idempotency_key: idempotencyKey,
+          order_id: orderId,
+          state: 'succeeded',
+        },
+        select: { id: true, transaction_id: true, gateway_response: true },
+      });
+      if (prior) {
+        const gatewayResponse = (prior.gateway_response ?? {}) as Record<string, any>;
+        return {
+          order: await this.getOrder(orderId),
+          payment: {
+            transaction_id: prior.transaction_id as string,
+            change: Number(gatewayResponse.change ?? 0),
+          },
+          idempotent_replay: true,
+        };
+      }
+    }
+
     // Gate único de caja: con el switch activo, quien cobra debe tener SU
     // sesión abierta. Primero que todo — antes del claim de estado — para no
     // dejar la orden varada en `processing` cuando se rechaza.
@@ -2447,6 +2472,7 @@ export class OrderFlowService {
       deferredCashCompensationState: preClaimState,
       paymentMethodTypes: {} as Record<number, string>,
       paymentMethodModes: {} as Record<number, string | null>,
+      financialIdempotencyKey: this.buildPayIdempotencyKey(orderId, dto.idempotency_key),
     };
     // Fase 2 paso 5 — carril "registrar pago": SÓLO aquí `dto.amount` define lo
     // cobrado. Cubre el marcador manual y los parciales siguientes (el primer
@@ -9327,6 +9353,8 @@ export class OrderFlowService {
       deferredCashSignalId?: number | null;
       deferredCashReadyState?: 'finished' | 'delivered' | null;
       deferredCashCompensationState?: OrderState | null;
+      /** B23 — clave de idempotencia de `flow/pay` (solo la guarda el primer tramo). */
+      financialIdempotencyKey?: string | null;
       /**
        * Pago online manual `pending` (fila completa de `getOrder`) que el
        * PRIMER tramo confirma en sitio: pasa a `succeeded` con el monto, el
@@ -9496,6 +9524,9 @@ export class OrderFlowService {
               amount: leg.amount,
               state: 'succeeded',
               transaction_id: transactionId,
+              ...(historyCtx?.financialIdempotencyKey
+                ? { financial_idempotency_key: historyCtx.financialIdempotencyKey }
+                : {}),
               gateway_reference:
                 leg.payment_reference ?? inPlace.gateway_reference ?? null,
               paid_at: new Date(),
@@ -9547,6 +9578,9 @@ export class OrderFlowService {
               currency,
               state: 'succeeded',
               transaction_id: transactionId,
+              ...(legIndex === 0 && historyCtx?.financialIdempotencyKey
+                ? { financial_idempotency_key: historyCtx.financialIdempotencyKey }
+                : {}),
               gateway_reference: leg.payment_reference ?? null,
               paid_at: new Date(),
               gateway_response: {
@@ -10942,6 +10976,15 @@ export class OrderFlowService {
         (err as Error)?.stack,
       );
     }
+  }
+
+  /** Clave de `flow/pay` con alcance de orden (`payments.financial_idempotency_key` es única global). */
+  private buildPayIdempotencyKey(
+    orderId: number,
+    key?: string | null,
+  ): string | null {
+    const trimmed = key?.trim();
+    return trimmed ? `flow_pay:${orderId}:${trimmed}` : null;
   }
 
   private wrapPaymentFailure(
