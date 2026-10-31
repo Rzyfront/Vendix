@@ -79,7 +79,7 @@ function customerScope(storeId: number, includeArchived: boolean) {
  * Degrades gracefully when the population is tiny (everyone lands mid-scale
  * instead of the function inventing spread that does not exist).
  */
-function quintileScore(sortedAsc: number[], value: number): number {
+export function quintileScore(sortedAsc: number[], value: number): number {
   if (sortedAsc.length < 5) return 3;
   let low = 0;
   let high = sortedAsc.length;
@@ -92,7 +92,7 @@ function quintileScore(sortedAsc: number[], value: number): number {
   return Math.min(5, Math.floor(percentile * 5) + 1);
 }
 
-const RFM_DEFINITIONS: Record<string, string> = {
+export const RFM_DEFINITIONS: Record<string, string> = {
   Campeones: 'Compraron hace poco, compran seguido y son los que más gastan.',
   Leales: 'Compran con regularidad y siguen activos.',
   'Prometedores / nuevos':
@@ -106,7 +106,7 @@ const RFM_DEFINITIONS: Record<string, string> = {
   Perdidos: 'Sin compras en el tramo más antiguo del período analizado.',
 };
 
-function rfmSegment(r: number, f: number, m: number): string {
+export function rfmSegment(r: number, f: number, m: number): string {
   if (r >= 4 && f >= 4) return 'Campeones';
   if (r >= 3 && f >= 3) return 'Leales';
   if (r >= 4 && f <= 2) return 'Prometedores / nuevos';
@@ -115,6 +115,31 @@ function rfmSegment(r: number, f: number, m: number): string {
   if (r <= 2 && f <= 2 && m >= 4) return 'No podemos perderlos';
   if (r === 1) return 'Perdidos';
   return 'Hibernando';
+}
+
+/** Ascending populations the RFM quintiles are measured against. */
+export interface RfmPopulation {
+  recency: number[];
+  frequency: number[];
+  monetary: number[];
+}
+
+/**
+ * R, F and M scores (1..5) of one customer. Recency is inverted on purpose:
+ * fewer days since the last purchase must score higher. Shared by the agent
+ * tool and the CRM profile so both always classify a customer the same way.
+ */
+export function rfmScores(
+  sorted: RfmPopulation,
+  recencyDays: number,
+  orders: number,
+  spent: number,
+): { r: number; f: number; m: number } {
+  return {
+    r: 6 - quintileScore(sorted.recency, recencyDays),
+    f: quintileScore(sorted.frequency, orders),
+    m: quintileScore(sorted.monetary, spent),
+  };
 }
 
 function frequencyBucket(orders: number): string {
@@ -668,12 +693,17 @@ export function createCustomerTools(deps: CustomerToolDeps): RegisteredTool[] {
             return;
           }
 
-          // Recency is inverted on purpose: fewer days since the last purchase
-          // must score higher.
-          const recencyScore =
-            6 - quintileScore(sortedRecency, recencyDays[index]);
-          const frequencyScore = quintileScore(sortedFrequency, row.orders);
-          push(rfmSegment(recencyScore, frequencyScore, monetaryScore), row);
+          const scores = rfmScores(
+            {
+              recency: sortedRecency,
+              frequency: sortedFrequency,
+              monetary: sortedMonetary,
+            },
+            recencyDays[index],
+            row.orders,
+            row.spent,
+          );
+          push(rfmSegment(scores.r, scores.f, scores.m), row);
         });
 
         const exampleIds = includeExamples

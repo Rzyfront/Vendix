@@ -63,7 +63,7 @@ export class CrmMainPageComponent {
         label: 'Estado y Configuración',
         shortLabel: 'Estado',
         icon: 'activity',
-        description: 'Supervisa el estado del CRM, versión del borrador y regeneración inteligente.',
+        description: 'Supervisa el estado de la landing, versión del borrador y regeneración inteligente.',
       },
       {
         id: 'diseno',
@@ -86,7 +86,7 @@ export class CrmMainPageComponent {
         return [
           {
             id: 'activate',
-            label: 'Activar CRM',
+            label: 'Activar landing',
             variant: 'primary',
             icon: 'sparkles',
             loading: isBusy,
@@ -205,7 +205,7 @@ export class CrmMainPageComponent {
         this.loading.set(false);
       },
       error: () => {
-        this.toast.error('No pudimos cargar el estado del CRM');
+        this.toast.error('No pudimos cargar el estado de la landing de captación');
         this.loading.set(false);
       },
     });
@@ -284,12 +284,12 @@ export class CrmMainPageComponent {
       next: (res) => {
         this.landing.set(res.data);
         this.busy.set(false);
-        this.toast.success('CRM activado: generando tu landing…');
+        this.toast.success('Landing de captación activada: generando tu landing…');
         this.pollGeneration(res.data.last_job_id);
       },
       error: () => {
         this.busy.set(false);
-        this.toast.error('No pudimos activar el CRM');
+        this.toast.error('No pudimos activar la landing de captación');
       },
     });
   }
@@ -300,11 +300,11 @@ export class CrmMainPageComponent {
       next: (res) => {
         this.landing.set(res.data);
         this.busy.set(false);
-        this.toast.success('CRM desactivado');
+        this.toast.success('Landing de captación desactivada');
       },
       error: () => {
         this.busy.set(false);
-        this.toast.error('No pudimos desactivar el CRM');
+        this.toast.error('No pudimos desactivar la landing de captación');
       },
     });
   }
