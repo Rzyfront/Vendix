@@ -95,6 +95,9 @@ export interface CrmConversationsPage {
   totalPages: number;
 }
 
+/** Tabs of the inbox list. */
+export type InboxFilter = 'all' | 'unassigned' | 'mine' | 'open' | 'closed';
+
 export interface CrmConversationsQuery {
   status?: CrmConversationStatus;
   channel?: CrmChannel;

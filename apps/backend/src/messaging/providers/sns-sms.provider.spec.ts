@@ -64,7 +64,7 @@ describe('SnsSmsMessagingProvider', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
-  it('publishes a transactional SMS with MaxPrice to the E.164 number', async () => {
+  it('publishes a transactional SMS capped at the reserved cost to the E.164 number', async () => {
     const { provider, send } = setup();
 
     const result = await provider.send(message(), channel());
@@ -77,7 +77,7 @@ describe('SnsSmsMessagingProvider', () => {
       Message: 'Tu pedido está listo',
       MessageAttributes: {
         'AWS.SNS.SMS.SMSType': { DataType: 'String', StringValue: 'Transactional' },
-        'AWS.SNS.SMS.MaxPrice': { DataType: 'Number', StringValue: '0.25' },
+        'AWS.SNS.SMS.MaxPrice': { DataType: 'Number', StringValue: '0.0075' },
       },
     });
     expect(result).toEqual({
@@ -102,11 +102,59 @@ describe('SnsSmsMessagingProvider', () => {
     expect(invalid['AWS.SNS.SMS.SenderID']).toBeUndefined();
   });
 
-  it('falls back to a 0.50 USD MaxPrice when the setting is missing or invalid', async () => {
-    const { provider, send } = setup({ SNS_SMS_MAX_PRICE_USD: 'abc' });
-    await provider.send(message(), channel());
+  it.each([
+    ['one segment to Colombia', message()],
+    ['three UCS-2 segments to Colombia', message({ body: 'ñandú 😀 '.repeat(20) })],
+    ['an unlisted country at the fallback price', message({ to: '+1 305 555 1234' })],
+  ])('never lets SNS charge more than the reserved cost: %s', async (_label, sms) => {
+    const { provider, send } = setup();
+    const quote = provider.quote(sms);
+    if (!('cost' in quote)) throw new Error('expected a quote');
+
+    const result = await provider.send(sms, channel());
+
     const input = (send.mock.calls[0][0] as PublishCommand).input;
-    expect(input.MessageAttributes!['AWS.SNS.SMS.MaxPrice'].StringValue).toBe('0.50');
+    const maxPrice = Number(input.MessageAttributes!['AWS.SNS.SMS.MaxPrice'].StringValue);
+    expect(maxPrice).toBeGreaterThan(0);
+    expect(maxPrice).toBeLessThanOrEqual(quote.cost);
+    expect(result.cost_amount).toBe(quote.cost);
+  });
+
+  it('applies SNS_SMS_MAX_PRICE_MARGIN and ignores a margin below 1', async () => {
+    const withMargin = setup({ SNS_SMS_MAX_PRICE_MARGIN: '1.2' });
+    await withMargin.provider.send(message(), channel());
+    expect(
+      (withMargin.send.mock.calls[0][0] as PublishCommand).input.MessageAttributes![
+        'AWS.SNS.SMS.MaxPrice'
+      ].StringValue,
+    ).toBe('0.0090');
+    jest.restoreAllMocks();
+
+    const belowOne = setup({ SNS_SMS_MAX_PRICE_MARGIN: '0.5' });
+    await belowOne.provider.send(message(), channel());
+    expect(
+      (belowOne.send.mock.calls[0][0] as PublishCommand).input.MessageAttributes![
+        'AWS.SNS.SMS.MaxPrice'
+      ].StringValue,
+    ).toBe('0.0075');
+  });
+
+  it('never exceeds SNS_SMS_MAX_PRICE_USD, falling back to 0.50 when it is missing or invalid', async () => {
+    // 7 GSM-7 segments to an unlisted country: 0.70 USD reserved.
+    const long = message({ to: '+1 305 555 1234', body: 'a'.repeat(153 * 7) });
+    const capped = setup();
+    await capped.provider.send(long, channel());
+    expect(
+      (capped.send.mock.calls[0][0] as PublishCommand).input.MessageAttributes![
+        'AWS.SNS.SMS.MaxPrice'
+      ].StringValue,
+    ).toBe('0.2500');
+    jest.restoreAllMocks();
+
+    const invalid = setup({ SNS_SMS_MAX_PRICE_USD: 'abc' });
+    await invalid.provider.send(long, channel());
+    const input = (invalid.send.mock.calls[0][0] as PublishCommand).input;
+    expect(input.MessageAttributes!['AWS.SNS.SMS.MaxPrice'].StringValue).toBe('0.5000');
   });
 
   it.each([

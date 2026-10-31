@@ -16,7 +16,6 @@ import {
   ToastService,
   ToggleComponent,
 } from '../../../../../../shared/components';
-import type { BadgeVariant } from '../../../../../../shared/components';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { MessagingChannelsService } from './messaging-channels.service';
@@ -25,11 +24,12 @@ import {
   MessagingChannels,
   SmsChannel,
 } from './messaging-channels.interface';
-
-interface ChannelState {
-  label: string;
-  variant: BadgeVariant;
-}
+import {
+  emailChannelState,
+  formatUsd,
+  smsChannelState,
+  smsSpendPercent,
+} from './messaging-channels.utils';
 
 /** Mirrors `MAX_MONTHLY_SMS_SPEND_USD` of the backend DTO. */
 const MAX_MONTHLY_SMS_SPEND_USD = 10_000;
@@ -176,7 +176,7 @@ const MAX_MONTHLY_SMS_SPEND_USD = 10_000;
                   variant="primary"
                   size="md"
                   [loading]="savingSms()"
-                  [disabled]="!canManage()"
+                  [disabled]="!canSave()"
                 >
                   <app-icon slot="icon" name="save" [size]="16"></app-icon>
                   Guardar SMS
@@ -254,7 +254,7 @@ const MAX_MONTHLY_SMS_SPEND_USD = 10_000;
                   variant="primary"
                   size="md"
                   [loading]="savingEmail()"
-                  [disabled]="!canManage()"
+                  [disabled]="!canSave()"
                 >
                   <app-icon slot="icon" name="save" [size]="16"></app-icon>
                   Guardar correo
@@ -282,6 +282,8 @@ export class MessagingChannelCardsComponent {
   protected readonly maxSpend = MAX_MONTHLY_SMS_SPEND_USD;
   protected readonly loading = signal(false);
   protected readonly loadError = signal<string | null>(null);
+  /** True only after a successful load: saving blank forms would wipe the stored config. */
+  private readonly loaded = signal(false);
   protected readonly savingSms = signal(false);
   protected readonly savingEmail = signal(false);
   protected readonly sms = signal<SmsChannel | null>(null);
@@ -293,6 +295,10 @@ export class MessagingChannelCardsComponent {
     () =>
       this.auth.hasPermission('store:social_sales:manage') ||
       this.auth.isOwner(),
+  );
+
+  protected readonly canSave = computed(
+    () => this.canManage() && this.loaded() && !this.loading(),
   );
 
   protected readonly smsForm = new FormGroup({
@@ -320,35 +326,17 @@ export class MessagingChannelCardsComponent {
     }),
   });
 
-  protected readonly smsState = computed<ChannelState>(() => {
-    const channel = this.sms();
-    if (this.loadError()) return { label: 'Error', variant: 'error' };
-    if (!channel) return { label: 'Sin configurar', variant: 'neutral' };
-    if (!channel.enabled) return { label: 'Desactivado', variant: 'neutral' };
-    const { limit, remaining } = channel.spend;
-    if (limit === null || limit === 0) {
-      return { label: 'Pendiente: define un tope', variant: 'warning' };
-    }
-    if (remaining !== null && remaining <= 0) {
-      return { label: 'Tope alcanzado', variant: 'error' };
-    }
-    return { label: 'Conectado', variant: 'success' };
-  });
+  protected readonly smsState = computed(() =>
+    smsChannelState(this.sms(), this.loadError() !== null),
+  );
 
-  protected readonly emailState = computed<ChannelState>(() => {
-    const channel = this.email();
-    if (this.loadError()) return { label: 'Error', variant: 'error' };
-    if (!channel) return { label: 'Sin configurar', variant: 'neutral' };
-    return channel.enabled
-      ? { label: 'Conectado', variant: 'success' }
-      : { label: 'Desactivado', variant: 'neutral' };
-  });
+  protected readonly emailState = computed(() =>
+    emailChannelState(this.email(), this.loadError() !== null),
+  );
 
-  protected readonly spendPercent = computed(() => {
-    const spend = this.sms()?.spend;
-    if (!spend?.limit) return spend && spend.limit === 0 ? 100 : 0;
-    return Math.min(100, Math.round((spend.used / spend.limit) * 100));
-  });
+  protected readonly spendPercent = computed(() =>
+    smsSpendPercent(this.sms()?.spend),
+  );
 
   constructor() {
     void this.load();
@@ -357,8 +345,10 @@ export class MessagingChannelCardsComponent {
   async load(): Promise<void> {
     this.loading.set(true);
     this.loadError.set(null);
+    this.loaded.set(false);
     try {
       this.apply(await firstValueFrom(this.service.list()));
+      this.loaded.set(true);
     } catch (error) {
       this.loadError.set(parseApiError(error).userMessage);
     } finally {
@@ -367,6 +357,7 @@ export class MessagingChannelCardsComponent {
   }
 
   protected async saveSms(): Promise<void> {
+    if (!this.canSave()) return;
     this.submitted.update((n) => n + 1);
     if (this.smsForm.invalid) {
       this.smsForm.markAllAsTouched();
@@ -392,6 +383,7 @@ export class MessagingChannelCardsComponent {
   }
 
   protected async saveEmail(): Promise<void> {
+    if (!this.canSave()) return;
     this.submitted.update((n) => n + 1);
     if (this.emailForm.invalid) {
       this.emailForm.markAllAsTouched();
@@ -423,7 +415,7 @@ export class MessagingChannelCardsComponent {
   }
 
   protected usd(value: number): string {
-    return `US$ ${value.toFixed(2)}`;
+    return formatUsd(value);
   }
 
   private apply(channels: MessagingChannels): void {
