@@ -245,6 +245,27 @@ describe('CrmTasksService', () => {
     });
   });
 
+  it('a seller cannot leave a task without assignee', async () => {
+    as('seller');
+    const { service, prisma } = setup();
+    expect(await codeOf(service.update(50, { assigned_user_id: null }))).toBe(
+      'CRM_ASSIGN_001',
+    );
+    expect(prisma.crm_tasks.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('a seller only links opportunities they own', async () => {
+    as('seller');
+    const { service, prisma } = setup();
+    prisma.crm_opportunities.count.mockResolvedValueOnce(0);
+    expect(await codeOf(service.create({ title: 'X', opportunity_id: 9 }))).toBe(
+      'CRM_OPPORTUNITY_001',
+    );
+    expect(prisma.crm_opportunities.count).toHaveBeenCalledWith({
+      where: { id: 9, owner_user_id: SELLER },
+    });
+  });
+
   it('reassigning notifies the new assignee only', async () => {
     as('owner');
     const { service, notifications } = setup();

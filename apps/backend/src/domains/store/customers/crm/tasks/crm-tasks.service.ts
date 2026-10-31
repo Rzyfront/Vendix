@@ -167,7 +167,7 @@ export class CrmTasksService {
     const assignee =
       dto.assigned_user_id === undefined ? viewer.user_id : dto.assigned_user_id;
     await this.assertAssignee(viewer, assignee);
-    await this.assertLinks(dto);
+    await this.assertLinks(viewer, dto);
 
     const created = await this.prisma.crm_tasks.create({
       data: {
@@ -287,23 +287,32 @@ export class CrmTasksService {
     viewer: CrmViewer,
     assigneeId: number | null,
   ): Promise<void> {
-    if (assigneeId === null || assigneeId === viewer.user_id) return;
+    if (assigneeId === viewer.user_id) return;
+    // Without see-all a seller cannot hand a task off, not even to nobody.
     if (!viewer.can_see_all) {
       throw new VendixHttpException(ErrorCodes.CRM_ASSIGN_001);
     }
+    if (assigneeId === null) return;
     if (!(await isActiveStoreStaff(this.prisma, assigneeId, CRM_TASKS_PERMISSION))) {
       throw new VendixHttpException(ErrorCodes.CRM_STAFF_001);
     }
   }
 
   /** Linked customer, opportunity and conversation must be of this store. */
-  private async assertLinks(dto: CreateCrmTaskDto): Promise<void> {
+  private async assertLinks(
+    viewer: CrmViewer,
+    dto: CreateCrmTaskDto,
+  ): Promise<void> {
     if (dto.customer_id && !(await isStoreCustomer(this.prisma, dto.customer_id))) {
       throw new VendixHttpException(ErrorCodes.CRM_CUSTOMER_001);
     }
     if (dto.opportunity_id) {
+      // Same visibility as the pipeline: a seller links only their own.
       const found = await this.prisma.crm_opportunities.count({
-        where: { id: dto.opportunity_id },
+        where: {
+          id: dto.opportunity_id,
+          ...(viewer.can_see_all ? {} : { owner_user_id: viewer.user_id }),
+        },
       });
       if (!found) throw new VendixHttpException(ErrorCodes.CRM_OPPORTUNITY_001);
     }

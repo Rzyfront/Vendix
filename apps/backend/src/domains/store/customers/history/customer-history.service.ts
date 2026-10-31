@@ -214,9 +214,11 @@ export class CustomerHistoryService {
       options.types?.length ? options.types : CRM_TIMELINE_TYPES,
     );
     const take = options.limit;
+    // No filter on the first page: `{ not: null }` is rejected by Prisma on
+    // the non-nullable `created_at` of the CRM tables.
     const createdBefore = options.before
       ? { created_at: { lt: options.before } }
-      : { created_at: { not: null } };
+      : {};
     const ownOnly = !options.viewer.can_see_all;
     const me = options.viewer.user_id;
     const none = Promise.resolve([] as CrmTimelineItem[]);

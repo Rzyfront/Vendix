@@ -576,8 +576,12 @@ export class CustomerCrmPanelComponent {
     void this.loadTimeline(true);
   }
 
+  /** Latest request wins: a reset (new filter, new note) supersedes a load in flight. */
+  private timelineRequest = 0;
+
   async loadTimeline(reset: boolean): Promise<void> {
-    if (this.timelineLoading()) return;
+    if (!reset && this.timelineLoading()) return;
+    const request = ++this.timelineRequest;
     this.timelineLoading.set(true);
     this.timelineError.set(null);
     try {
@@ -588,12 +592,15 @@ export class CustomerCrmPanelComponent {
           limit: TIMELINE_PAGE,
         }),
       );
+      if (request !== this.timelineRequest) return;
       this.timeline.update((rows) => (reset ? page.data : [...rows, ...page.data]));
       this.nextBefore.set(page.meta.has_more ? page.meta.next_before : null);
     } catch (error) {
-      this.timelineError.set(parseApiError(error).userMessage);
+      if (request === this.timelineRequest) {
+        this.timelineError.set(parseApiError(error).userMessage);
+      }
     } finally {
-      this.timelineLoading.set(false);
+      if (request === this.timelineRequest) this.timelineLoading.set(false);
     }
   }
 

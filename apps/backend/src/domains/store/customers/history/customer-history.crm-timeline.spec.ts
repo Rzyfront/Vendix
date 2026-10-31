@@ -130,6 +130,15 @@ describe('CustomerHistoryService.getCrmTimeline', () => {
     expect(result.meta).toEqual({ has_more: false, next_before: null });
   });
 
+  it('the first page puts no created_at filter on any source', async () => {
+    const { service, prisma } = setup();
+    await service.getCrmTimeline(CUSTOMER, { limit: 20, viewer: owner });
+    for (const table of Object.values(prisma)) {
+      const where = (table.findMany as jest.Mock).mock.calls[0][0].where;
+      expect(where).not.toHaveProperty('created_at');
+    }
+  });
+
   it('reads only the requested sources', async () => {
     const { service, prisma } = setup();
     const result = await service.getCrmTimeline(CUSTOMER, {
@@ -177,12 +186,10 @@ describe('CustomerHistoryService.getCrmTimeline', () => {
     await service.getCrmTimeline(CUSTOMER, { limit: 20, viewer: seller });
 
     expect(prisma.crm_messages.findMany.mock.calls[0][0].where).toEqual({
-      created_at: { not: null },
       conversation: { customer_id: CUSTOMER, assigned_user_id: SELLER },
     });
     expect(prisma.crm_tasks.findMany.mock.calls[0][0].where).toEqual({
       customer_id: CUSTOMER,
-      created_at: { not: null },
       OR: [{ assigned_user_id: SELLER }, { created_by_user_id: SELLER }],
     });
   });
