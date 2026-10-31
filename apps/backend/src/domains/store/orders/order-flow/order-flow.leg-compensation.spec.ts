@@ -64,7 +64,9 @@ describe('OrderFlowService.cancelLegPayments — compensación de caja (B02)', (
           ledger.filter(
             (m) =>
               m.type === where.type &&
-              (where.payment_id?.in ? where.payment_id.in.includes(m.payment_id) : true),
+              (where.payment_id?.in ? where.payment_id.in.includes(m.payment_id) : true) &&
+              (where.payment_id === null ? m.payment_id === null : true) &&
+              (where.order_id != null ? m.order_id === where.order_id : true),
           ),
         ),
       },
@@ -175,6 +177,32 @@ describe('OrderFlowService.cancelLegPayments — compensación de caja (B02)', (
       'payment_compensated:501:50',
     ]);
     expect(sales.every((s) => s.payment_id === null)).toBe(true);
+    expect(net()).toBe(0);
+  });
+
+  it('BL-1: sale compensado y desvinculado no se vuelve a compensar en el barrido de huérfanos de cancelPayment (neto 0, un refund)', async () => {
+    const original = {
+      store_payment_method_id: 1, bank_account_id: null, amount: 23500,
+      transaction_id: 'T', gateway_reference: null, paid_at: null, gateway_response: {},
+    };
+    ledger = [
+      { id: 1, type: 'sale', payment_id: 501, order_id: 9, store_id: 100, amount: 23500, payment_method: 'cash', user_id: 3 },
+    ];
+    await (service as any).cancelLegPayments(
+      [{ payment: { id: 501, gateway_response: {} }, leg: {}, confirmedInPlaceOriginal: original }],
+      'finish_blocked',
+    );
+    expect(net()).toBe(0);
+
+    await (service as any).recordPaymentCompensationInTx(tx, [501], {
+      referenceFor: (p: number, s: number) => `payment_cancelled:${p}:${s}`,
+      dedupeFor: (p: number, s: number) => `payment_cancelled:${p}:${s}`,
+      notesFor: () => 'cancel',
+      orphanScanOrderId: 9,
+    });
+
+    expect(ledger.filter((m) => m.type === 'refund')).toHaveLength(1);
+    expect(ledger.filter((m) => m.reference?.includes('sale:'))).toHaveLength(0);
     expect(net()).toBe(0);
   });
 });

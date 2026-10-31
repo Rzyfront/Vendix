@@ -394,6 +394,9 @@ type ReservationGroup = {
   product_name: string;
 };
 
+/** Marcador de un `sale` ya compensado y desvinculado de su pago (BL-1). */
+const UNLINKED_SALE_NOTES_PREFIX = 'Desvinculado del pago #';
+
 @Injectable()
 export class OrderFlowService {
   private readonly logger = new Logger(OrderFlowService.name);
@@ -10082,7 +10085,7 @@ export class OrderFlowService {
           where: { id: sale.id },
           data: {
             payment_id: null,
-            notes: `Desvinculado del pago #${paymentId} tras compensación (${opts.unlinkSale.reason})`,
+            notes: `${UNLINKED_SALE_NOTES_PREFIX}${paymentId} tras compensación (${opts.unlinkSale.reason})`,
           },
         });
       }
@@ -10101,9 +10104,14 @@ export class OrderFlowService {
           amount: true,
           payment_method: true,
           user_id: true,
+          notes: true,
         },
       });
-      for (const sale of orphans) {
+      for (const sale of orphans.filter(
+        // BL-1: un sale ya compensado y desvinculado (unlinkSale) tiene su
+        // refund `payment_compensated:*`; el barrido no debe compensarlo otra vez.
+        (o) => !o.notes?.startsWith(UNLINKED_SALE_NOTES_PREFIX),
+      )) {
         this.logger.warn(
           `recordPaymentCompensationInTx: orden #${opts.orphanScanOrderId}, sale #${sale.id} sin payment_id; se compensa por orden`,
         );
