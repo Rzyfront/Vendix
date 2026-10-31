@@ -9723,15 +9723,29 @@ export class OrderFlowService {
       // B02 — cada tramo anulado (o devuelto a `pending` en sitio) que dejó un
       // `sale` recibe su contramovimiento en la MISMA tx; los diferidos nunca
       // crearon `sale`, así que no tienen nada que compensar.
+      const compensationOpts = {
+        referenceFor: (paymentId: number, saleId: number) =>
+          `payment_compensated:${paymentId}:${saleId}`,
+        dedupeFor: (paymentId: number, saleId: number) =>
+          `payment_compensated:${paymentId}:${saleId}`,
+        notesFor: (paymentId: number, orderId: number) =>
+          `Compensación del pago #${paymentId} de la orden #${orderId}: ${cancellationReason}`,
+      };
       await this.recordPaymentCompensationInTx(
         tx,
-        legPayments.map(({ payment }) => payment.id),
-        {
-          referenceFor: (paymentId) => `payment_compensated:${paymentId}`,
-          dedupeFor: (paymentId) => `payment_compensated:${paymentId}`,
-          notesFor: (paymentId, orderId) =>
-            `Compensación del pago #${paymentId} de la orden #${orderId}: ${cancellationReason}`,
-        },
+        legPayments
+          .filter(({ confirmedInPlaceOriginal }) => !confirmedInPlaceOriginal)
+          .map(({ payment }) => payment.id),
+        compensationOpts,
+      );
+      // Confirmado en sitio: el pago vuelve a `pending` y puede confirmarse de
+      // nuevo, así que su `sale` compensado se desvincula del pago.
+      await this.recordPaymentCompensationInTx(
+        tx,
+        legPayments
+          .filter(({ confirmedInPlaceOriginal }) => !!confirmedInPlaceOriginal)
+          .map(({ payment }) => payment.id),
+        { ...compensationOpts, unlinkSale: { reason: cancellationReason } },
       );
       for (const { payment, confirmedInPlaceOriginal: original } of legPayments) {
         if (original) {
@@ -9944,8 +9958,10 @@ export class OrderFlowService {
     tx: Prisma.TransactionClient,
     paymentIds: number[],
     opts: {
-      referenceFor: (paymentId: number) => string;
-      dedupeFor: (paymentId: number) => string;
+      referenceFor: (paymentId: number, saleId: number) => string;
+      dedupeFor: (paymentId: number, saleId: number) => string;
+      /** Tras compensar, desvincula el `sale` del pago (`payment_id: null`). */
+      unlinkSale?: { reason: string };
       notesFor: (paymentId: number, orderId: number) => string;
       /** Si se informa, además cubre `sale` de la orden sin `payment_id`. */
       orphanScanOrderId?: number;
@@ -10005,14 +10021,25 @@ export class OrderFlowService {
             order_id: orderId,
             payment_id: paymentId,
             amount: Number(sale.amount),
-            reference: opts.referenceFor(paymentId),
-            dedupe_key: opts.dedupeFor(paymentId),
+            reference: opts.referenceFor(paymentId, sale.id),
+            dedupe_key: opts.dedupeFor(paymentId, sale.id),
             notes: opts.notesFor(paymentId, orderId),
             payment_method: sale.payment_method ?? 'cash',
           },
           tx,
         );
       await enqueueOrWarn(outcome, orderId, paymentId);
+      if (opts.unlinkSale) {
+        // El pago vuelve a `pending` y se podrá confirmar otra vez: el `sale`
+        // compensado deja de ocupar el índice único de un `sale` por pago.
+        await tx.cash_register_movements.update({
+          where: { id: sale.id },
+          data: {
+            payment_id: null,
+            notes: `Desvinculado del pago #${paymentId} tras compensación (${opts.unlinkSale.reason})`,
+          },
+        });
+      }
     }
 
     if (opts.orphanScanOrderId != null) {

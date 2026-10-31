@@ -55,6 +55,11 @@ describe('OrderFlowService.cancelLegPayments — compensación de caja (B02)', (
     tx = {
       payments: { update: jest.fn(async () => ({})) },
       cash_register_movements: {
+        update: jest.fn(async ({ where, data }: any) => {
+          const row = ledger.find((m) => m.id === where.id)!;
+          Object.assign(row, data);
+          return row;
+        }),
         findMany: jest.fn(async ({ where }: any) =>
           ledger.filter(
             (m) =>
@@ -95,8 +100,8 @@ describe('OrderFlowService.cancelLegPayments — compensación de caja (B02)', (
     expect(net()).toBe(0);
     const refunds = ledger.filter((m) => m.type === 'refund');
     expect(refunds.map((r) => [r.payment_id, r.amount, r.payment_method, r.reference])).toEqual([
-      [501, 23500, 'cash', 'payment_compensated:501'],
-      [502, 18500, 'card', 'payment_compensated:502'],
+      [501, 23500, 'cash', 'payment_compensated:501:1'],
+      [502, 18500, 'card', 'payment_compensated:502:2'],
     ]);
     expect(refunds[0].notes).toContain(reason);
     // Misma tx que el cancel de los pagos.
@@ -130,5 +135,44 @@ describe('OrderFlowService.cancelLegPayments — compensación de caja (B02)', (
     );
     expect(ledger.filter((m) => m.type === 'refund')).toHaveLength(1);
     expect(net()).toBe(18500);
+  });
+
+  it('in-place confirmado → compensado → reconfirmado → compensado: 2 sales, 2 refunds distintos, sin P2002', async () => {
+    const original = {
+      store_payment_method_id: 1, bank_account_id: null, amount: 23500,
+      transaction_id: 'T', gateway_reference: null, paid_at: null, gateway_response: {},
+    };
+    const inPlace = () => [
+      { payment: { id: 501, gateway_response: {} }, leg: {}, confirmedInPlaceOriginal: original },
+    ];
+    ledger = [];
+    // Simula el índice único `one_sale_per_payment`.
+    const addSale = (id: number) => {
+      if (ledger.some((m) => m.type === 'sale' && m.payment_id === 501)) {
+        throw new Error('P2002 one_sale_per_payment');
+      }
+      ledger.push({ id, type: 'sale', payment_id: 501, order_id: 9, store_id: 100, amount: 23500, payment_method: 'cash', user_id: 3 });
+    };
+
+    addSale(1);
+    await (service as any).cancelLegPayments(inPlace(), 'finish_blocked');
+    expect(ledger.find((m) => m.id === 1)!.payment_id).toBeNull();
+    expect(ledger.find((m) => m.id === 1)!.notes).toBe(
+      'Desvinculado del pago #501 tras compensación (finish_blocked)',
+    );
+    expect(ledger.find((m) => m.id === 1)!.order_id).toBe(9);
+
+    expect(() => addSale(50)).not.toThrow();
+    await (service as any).cancelLegPayments(inPlace(), 'finish_blocked');
+
+    const sales = ledger.filter((m) => m.type === 'sale');
+    const refunds = ledger.filter((m) => m.type === 'refund');
+    expect(sales).toHaveLength(2);
+    expect(refunds.map((r) => r.reference)).toEqual([
+      'payment_compensated:501:1',
+      'payment_compensated:501:50',
+    ]);
+    expect(sales.every((s) => s.payment_id === null)).toBe(true);
+    expect(net()).toBe(0);
   });
 });
