@@ -2,7 +2,7 @@ import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
-import { SocialChannelEncryptionService } from '../../store/social-sales/social-channel-encryption.service';
+import { ChannelEncryptionService } from '../../store/integrations/channels/channel-encryption.service';
 
 const PLATFORM_SETTINGS_KEY = 'social_sales:meta_whatsapp';
 
@@ -13,7 +13,7 @@ export class MetaWhatsappWebhookService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly configService: ConfigService,
-    private readonly encryption: SocialChannelEncryptionService,
+    private readonly encryption: ChannelEncryptionService,
   ) {}
 
   async verify(

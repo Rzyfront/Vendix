@@ -94,7 +94,8 @@ export const MODULE_ROUTES: Record<string, string> = {
   marketing_promotions: '/admin/marketing/promotions',
   marketing_coupons: '/admin/marketing/coupons',
   marketing_anuncios: '/admin/marketing/anuncios',
-  marketing_social_sales: '/admin/marketing/social-sales',
+  // Integraciones → Canales (key kept from the former Social Sales module)
+  marketing_social_sales: '/admin/integrations/channels',
 
   // Analíticas
   analytics: '/admin/analytics/overview',

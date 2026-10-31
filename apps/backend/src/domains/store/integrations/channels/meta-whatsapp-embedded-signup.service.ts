@@ -6,10 +6,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RequestContextService } from '@common/context/request-context.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { CompleteWhatsappEmbeddedSignupDto } from './dto';
-import { SocialChannelEncryptionService } from './social-channel-encryption.service';
+import { ChannelEncryptionService } from './channel-encryption.service';
 
 type MetaReadinessStatus =
   | 'missing_env'
@@ -65,7 +65,7 @@ export class MetaWhatsappEmbeddedSignupService {
     private readonly prisma: StorePrismaService,
     private readonly globalPrisma: GlobalPrismaService,
     private readonly configService: ConfigService,
-    private readonly encryption: SocialChannelEncryptionService,
+    private readonly encryption: ChannelEncryptionService,
   ) {}
 
   async getReadiness() {

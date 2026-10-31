@@ -8,8 +8,8 @@ import {
 } from 'crypto';
 
 @Injectable()
-export class SocialChannelEncryptionService {
-  private readonly logger = new Logger(SocialChannelEncryptionService.name);
+export class ChannelEncryptionService {
+  private readonly logger = new Logger(ChannelEncryptionService.name);
   private readonly algorithm = 'aes-256-gcm';
   private readonly key: Buffer | null;
 
@@ -20,12 +20,14 @@ export class SocialChannelEncryptionService {
 
     if (!encryptionKey) {
       this.logger.warn(
-        'SOCIAL_CHANNEL_ENCRYPTION_KEY not set — social channel tokens will NOT be encrypted',
+        'SOCIAL_CHANNEL_ENCRYPTION_KEY not set — channel tokens will NOT be encrypted',
       );
       this.key = null;
       return;
     }
 
+    // The salt is part of the persisted format: tokens already stored in
+    // social_channels and platform_settings were derived with it. Never rename.
     this.key = scryptSync(encryptionKey, 'vendix-social-sales-salt', 32);
   }
 

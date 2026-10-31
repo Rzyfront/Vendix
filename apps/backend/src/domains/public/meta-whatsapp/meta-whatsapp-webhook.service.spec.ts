@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { ForbiddenException } from '@nestjs/common';
 import { MetaWhatsappWebhookService } from './meta-whatsapp-webhook.service';
-import { SocialChannelEncryptionService } from '../../store/social-sales/social-channel-encryption.service';
+import { ChannelEncryptionService } from '../../store/integrations/channels/channel-encryption.service';
 
 function createService() {
   const config = {
@@ -25,7 +25,7 @@ function createService() {
       create: jest.fn().mockResolvedValue({ id: 99 }),
     },
   } as any;
-  const encryption = new SocialChannelEncryptionService(config);
+  const encryption = new ChannelEncryptionService(config);
 
   return {
     service: new MetaWhatsappWebhookService(prisma, config, encryption),

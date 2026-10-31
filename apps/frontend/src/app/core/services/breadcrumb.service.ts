@@ -983,6 +983,20 @@ export class BreadcrumbService {
       icon: 'image',
     },
 
+    // Integraciones
+    {
+      path: '/admin/integrations',
+      title: 'Integraciones',
+      parent: 'Tienda',
+      icon: 'plug',
+    },
+    {
+      path: '/admin/integrations/channels',
+      title: 'Canales',
+      parent: 'Integraciones',
+      icon: 'message-circle',
+    },
+
     // Analytics
     {
       path: '/admin/analytics',

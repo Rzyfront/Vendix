@@ -845,11 +845,6 @@ export class StoreAdminLayoutComponent {
           icon: 'image',
           route: '/admin/marketing/anuncios',
         },
-        {
-          label: 'Social Sales',
-          icon: 'message-circle',
-          route: '/admin/marketing/social-sales',
-        },
       ],
     },
     {
@@ -1089,6 +1084,20 @@ export class StoreAdminLayoutComponent {
           route: '/admin/help/videos',
           alwaysVisible: true,
           panelUiKey: 'help_videos',
+        },
+      ],
+    },
+    {
+      label: 'Integraciones',
+      icon: 'plug',
+      children: [
+        {
+          label: 'Canales',
+          icon: 'message-circle',
+          route: '/admin/integrations/channels',
+          // Reuses the persisted panel_ui key of the former "Social Sales"
+          // entry so stores keep their visibility without a data migration.
+          panelUiKey: 'marketing_social_sales',
         },
       ],
     },
