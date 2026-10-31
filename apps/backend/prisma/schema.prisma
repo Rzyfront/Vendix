@@ -9573,6 +9573,12 @@ model cash_register_movements {
   order_id       Int?
   payment_id     Int?
   notes          String?
+  /// B04: origen del movimiento de un módulo fuera del POS (layaway_payment,
+  /// ar_payment, lodging_deposit, dispatch_route...). Índice único parcial
+  /// cash_register_movements_source_uq (store_id, source_type, source_id, type)
+  /// WHERE source_id IS NOT NULL: solo existe en SQL (Prisma no modela índices parciales).
+  source_type    String?                          @db.VarChar(40)
+  source_id      Int?
   created_at     DateTime?                        @default(now()) @db.Timestamp(6)
 
   session cash_register_sessions @relation(fields: [session_id], references: [id], onUpdate: NoAction)

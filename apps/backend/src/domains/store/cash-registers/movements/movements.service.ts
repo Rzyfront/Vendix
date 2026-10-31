@@ -340,6 +340,89 @@ export class MovementsService {
   }
 
   /**
+   * B04/B12 — dinero en efectivo de módulos fuera del POS (separados, CxC,
+   * anticipos de reserva, cierre de ruta): un `cash_in`/`cash_out` en la sesión
+   * abierta del usuario, DENTRO de la tx del módulo.
+   *
+   * - Solo efectivo (`cash`). Cualquier otro método, o ausente, no mueve el
+   *   cajón: devuelve `null` (nunca se asume efectivo por defecto).
+   * - Con `pos.cash_register.enabled` apagado devuelve `null`; encendido y sin
+   *   sesión abierta del usuario lanza `CASH_SESSION_REQUIRED_001`.
+   * - Bloquea la sesión con `assertOpenSessionLocked` y es idempotente por
+   *   `(store_id, source_type, source_id, type)`. Un P2002 del índice único
+   *   parcial dentro de la tx aborta la tx completa (Postgres): el lock de la
+   *   sesión serializa los reintentos, así que el índice es solo respaldo.
+   */
+  async recordModuleCashMovement(
+    tx: Prisma.TransactionClient,
+    data: {
+      store_id: number;
+      user_id: number;
+      direction: 'in' | 'out';
+      amount: number;
+      payment_method: string | null | undefined;
+      source_type: string;
+      source_id: number;
+      reference?: string;
+      notes?: string;
+    },
+  ) {
+    if (data.payment_method !== 'cash') return null;
+
+    const settings = await tx.store_settings.findUnique({
+      where: { store_id: data.store_id },
+      select: { settings: true },
+    });
+    const enabled = (
+      settings?.settings as {
+        pos?: { cash_register?: { enabled?: boolean } };
+      } | null
+    )?.pos?.cash_register?.enabled;
+    if (!enabled) return null;
+
+    const session = await tx.cash_register_sessions.findFirst({
+      where: {
+        store_id: data.store_id,
+        status: 'open',
+        opened_by: data.user_id,
+      },
+      orderBy: [{ opened_at: 'desc' }, { id: 'desc' }],
+      select: { id: true },
+    });
+    if (!session) {
+      throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    }
+    await this.assertOpenSessionLocked(tx, session.id, data.store_id);
+
+    const type = data.direction === 'in' ? 'cash_in' : 'cash_out';
+    const existing = await tx.cash_register_movements.findFirst({
+      where: {
+        store_id: data.store_id,
+        source_type: data.source_type,
+        source_id: data.source_id,
+        type,
+      } as Prisma.cash_register_movementsWhereInput,
+      select: { id: true },
+    });
+    if (existing) return existing;
+
+    return tx.cash_register_movements.create({
+      data: {
+        session_id: session.id,
+        store_id: data.store_id,
+        user_id: data.user_id,
+        type,
+        amount: data.amount,
+        payment_method: 'cash',
+        reference: data.reference,
+        notes: data.notes,
+        source_type: data.source_type,
+        source_id: data.source_id,
+      } as Prisma.cash_register_movementsUncheckedCreateInput,
+    });
+  }
+
+  /**
    * Reserve a durable close guard before an in-place payment confirmation whose
    * cash movement must wait for the order finish. The caller owns the payment
    * transaction so the signal and payment state commit or roll back together.
