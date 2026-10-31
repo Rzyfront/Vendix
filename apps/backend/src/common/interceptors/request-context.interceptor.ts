@@ -93,14 +93,23 @@ export class RequestContextInterceptor implements NestInterceptor {
     }
 
     // In ecommerce routes, the DomainResolverMiddleware might have found a store_id
-    // This has priority or fills the gap for non-authenticated users
-    if (domain_context) {
+    // (hostname, `x-store-id` or `?store_id=`). It only fills the context for
+    // anonymous visitors: an authenticated user always keeps the tenant of the
+    // JWT, otherwise any client could switch store with a query param.
+    if (domain_context && !user) {
       if (domain_context.store_id) {
         contextObj.store_id = domain_context.store_id;
       }
       if (domain_context.organization_id && !contextObj.organization_id) {
         contextObj.organization_id = domain_context.organization_id;
       }
+    } else if (
+      domain_context?.store_id &&
+      Number(domain_context.store_id) !== Number(contextObj.store_id)
+    ) {
+      this.logger.warn(
+        `domain_context ignored: user ${contextObj.user_id} of store ${contextObj.store_id}, domain store ${domain_context.store_id}`,
+      );
     }
 
     this.logger.debug(

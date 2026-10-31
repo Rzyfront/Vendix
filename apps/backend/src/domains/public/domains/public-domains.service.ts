@@ -374,8 +374,9 @@ export class PublicDomainsService {
   async resolveByStoreId(
     storeId: number,
   ): Promise<{ store_id: number; organization_id: number }> {
-    const store = await this.globalPrisma.stores.findUnique({
-      where: { id: storeId },
+    // Only active stores can be selected through `x-store-id` / `?store_id=`.
+    const store = await this.globalPrisma.stores.findFirst({
+      where: { id: storeId, is_active: true },
       select: { id: true, organization_id: true },
     });
 
