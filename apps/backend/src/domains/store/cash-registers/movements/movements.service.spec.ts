@@ -238,6 +238,82 @@ describe('MovementsService — compensación de caja', () => {
     });
   });
 
+  describe('recordRefundMovement — idempotencia por reference (B15)', () => {
+    const input = {
+      store_id: STORE_ID,
+      user_id: OPERATOR,
+      amount: 1250,
+      payment_method: 'cash',
+      order_id: 91,
+      payment_id: 92,
+      reference: 'refund:55',
+    };
+    const open = [
+      { id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR },
+    ];
+
+    it('doble llamada con el mismo reference produce un solo movimiento', async () => {
+      const db = makeDb(open, []);
+      const stored: any[] = [];
+      db.cash_register_movements.findFirst.mockImplementation(async ({ where }: any) =>
+        stored.find(
+          (m) =>
+            m.store_id === where.store_id &&
+            m.type === where.type &&
+            m.reference === where.reference &&
+            m.order_id === where.order_id &&
+            m.payment_id === where.payment_id &&
+            m.payment_method === where.payment_method,
+        ) ?? null,
+      );
+      db.cash_register_movements.create.mockImplementation(async ({ data }: any) => {
+        const row = { id: 900 + stored.length, ...data };
+        stored.push(row);
+        return row;
+      });
+      const { service } = makeService(db);
+
+      const first = await service.recordRefundMovement(200, input);
+      const second = await service.recordRefundMovement(200, input);
+
+      expect(db.cash_register_movements.create).toHaveBeenCalledTimes(1);
+      expect(second.id).toBe(first.id);
+    });
+
+    it('P2002 al crear se trata como "ya existe" y devuelve el movimiento previo', async () => {
+      const db = makeDb(open, []);
+      db.cash_register_movements.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 777 });
+      db.cash_register_movements.create.mockRejectedValueOnce(
+        Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }),
+      );
+      const { service } = makeService(db);
+
+      const result = await service.recordRefundMovement(200, input);
+
+      expect(result).toEqual({ id: 777 });
+    });
+
+    it('sin reference no busca duplicados', async () => {
+      const db = makeDb(open, []);
+      const { service } = makeService(db);
+
+      await service.recordRefundMovement(200, { ...input, reference: undefined });
+
+      expect(db.cash_register_movements.findFirst).not.toHaveBeenCalled();
+      expect(db.cash_register_movements.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('un error distinto de P2002 se propaga', async () => {
+      const db = makeDb(open, []);
+      db.cash_register_movements.create.mockRejectedValueOnce(new Error('boom'));
+      const { service } = makeService(db);
+
+      await expect(service.recordRefundMovement(200, input)).rejects.toThrow('boom');
+    });
+  });
+
   it('exporta la constante de referencia de cancelación de orden', () => {
     expect(ORDER_CANCELLED_MOVEMENT_REFERENCE).toBe('order_cancelled');
   });

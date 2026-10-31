@@ -277,8 +277,26 @@ export class MovementsService {
     },
     tx?: Prisma.TransactionClient,
   ) {
+    // Idempotente por (tienda, tipo, reference, orden, pago, método). Sin reference
+    // no hay clave de deduplicación y se crea siempre.
+    const findExisting = (db: Prisma.TransactionClient) =>
+      db.cash_register_movements.findFirst({
+        where: {
+          store_id: data.store_id,
+          type: 'refund',
+          reference: data.reference,
+          order_id: data.order_id ?? null,
+          payment_id: data.payment_id ?? null,
+          payment_method: data.payment_method,
+        },
+        select: { id: true },
+      });
     const create = async (db: Prisma.TransactionClient) => {
       await this.assertOpenSessionLocked(db, session_id, data.store_id);
+      if (data.reference) {
+        const existing = await findExisting(db);
+        if (existing) return existing;
+      }
       return db.cash_register_movements.create({
         data: {
           session_id,
@@ -295,7 +313,22 @@ export class MovementsService {
       });
     };
     if (tx) return create(tx);
-    return this.prisma.$transaction((db) => create(db));
+    try {
+      return await this.prisma.$transaction((db) => create(db));
+    } catch (error) {
+      // P2002 (índice único parcial por reference) = otro intento ya lo creó.
+      // La tx abortada no se puede reutilizar: se relee fuera de ella.
+      if (
+        data.reference &&
+        (error as { code?: string } | null)?.code === 'P2002'
+      ) {
+        const existing = await findExisting(
+          this.prisma.withoutScope() as unknown as Prisma.TransactionClient,
+        );
+        if (existing) return existing;
+      }
+      throw error;
+    }
   }
 
   /**
