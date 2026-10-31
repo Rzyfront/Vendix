@@ -142,7 +142,7 @@ export class SmsSpendService {
    * month: a reservation of a closed month is already gone with the reset.
    */
   async release(
-    channelId: number,
+    channel: { id: number; store_id: number },
     amount: number,
     periodStart: string,
   ): Promise<void> {
@@ -152,14 +152,15 @@ export class SmsSpendService {
         SET "monthly_spend_used" =
               GREATEST("monthly_spend_used" - ${toAmount(amount)}::numeric, 0),
             "updated_at" = NOW()
-        WHERE "id" = ${channelId}
+        WHERE "id" = ${channel.id}
+          AND "store_id" = ${channel.store_id}
           AND "spend_period_start" = ${periodStart}::date
         RETURNING "id"
       `);
     } catch (error) {
       // Keeping the reservation only makes the cap stricter; never fail the send flow.
       this.logger.error(
-        `Could not release ${amount} USD of SMS spend on channel ${channelId}: ${(error as Error)?.message}`,
+        `Could not release ${amount} USD of SMS spend on channel ${channel.id}: ${(error as Error)?.message}`,
       );
     }
   }
@@ -178,6 +179,7 @@ export class SmsSpendService {
         status: 'connected',
       },
       select: {
+        id: true,
         monthly_spend_limit: true,
         monthly_spend_used: true,
         spend_period_start: true,
@@ -186,6 +188,16 @@ export class SmsSpendService {
     if (!row) return; // The worker reports CHANNEL_NOT_CONFIGURED.
     const snapshot = this.snapshot(row, now);
     if (snapshot.remaining === null || snapshot.remaining <= 0) {
+      // Spend can land exactly on the cap, so the worker never sees a failed
+      // reservation: alert the owner from here too (same monthly dedupe).
+      await this.onLimitReached({
+        store_id: storeId,
+        channel_id: row.id,
+        period_start: snapshot.period_start,
+        limit: snapshot.limit,
+        used: snapshot.used,
+        attempted_cost: 0,
+      });
       throw new VendixHttpException(ErrorCodes.CRM_SMS_SPEND_LIMIT);
     }
   }

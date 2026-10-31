@@ -402,7 +402,11 @@ describe('MessagingService', () => {
 
       await service.send(sms());
 
-      expect(smsSpend.release).toHaveBeenCalledWith(7, 0.0075, '2026-10-01');
+      expect(smsSpend.release).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 7, store_id: 10 }),
+        0.0075,
+        '2026-10-01',
+      );
     });
 
     it('keeps the reservation on a timeout, when SNS may have sent it', async () => {

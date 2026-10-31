@@ -129,14 +129,15 @@ describe('SmsSpendService', () => {
   it('release subtracts only within the same month and never fails the send', async () => {
     const { service, prisma } = setup();
 
-    await service.release(7, 0.0075, '2026-10-01');
+    await service.release({ id: 7, store_id: 10 }, 0.0075, '2026-10-01');
     const sql = prisma.$queryRaw.mock.calls[0][0] as Prisma.Sql;
     expect(sql.sql.replace(/\s+/g, ' ')).toContain('GREATEST("monthly_spend_used" - ?::numeric, 0)');
+    expect(sql.sql).toContain('"store_id" = ?');
     expect(sql.sql).toContain('"spend_period_start" = ?::date');
-    expect(sql.values).toEqual(['0.0075', 7, '2026-10-01']);
+    expect(sql.values).toEqual(['0.0075', 7, 10, '2026-10-01']);
 
     prisma.$queryRaw.mockRejectedValueOnce(new Error('db down'));
-    await expect(service.release(7, 0.0075, '2026-10-01')).resolves.toBeUndefined();
+    await expect(service.release({ id: 7, store_id: 10 }, 0.0075, '2026-10-01')).resolves.toBeUndefined();
   });
 
   describe('snapshot', () => {
@@ -168,6 +169,28 @@ describe('SmsSpendService', () => {
         expect.objectContaining({
           where: { store_id: 10, channel_type: 'sms', provider: 'sns_sms', status: 'connected' },
         }),
+      );
+    });
+
+    it('spend exactly at the cap: rejects and alerts the owner once per month (B1)', async () => {
+      const { service, prisma, audit, events } = setup();
+      prisma.social_channels.findFirst.mockResolvedValue({ id: 7, ...row('3', '3.0000', '2026-10-01') });
+
+      await expect(service.assertAvailable(10, OCT)).rejects.toMatchObject({ errorCode: 'CRM_SMS_SPEND_LIMIT' });
+      await expect(service.assertAvailable(10, OCT)).rejects.toMatchObject({ errorCode: 'CRM_SMS_SPEND_LIMIT' });
+
+      expect(events.emit).toHaveBeenCalledTimes(1);
+      expect(events.emit).toHaveBeenCalledWith(SMS_SPEND_LIMIT_REACHED_EVENT, {
+        store_id: 10,
+        channel_id: 7,
+        period_start: '2026-10-01',
+        limit: 3,
+        used: 3,
+        attempted_cost: 0,
+      });
+      expect(audit.log).toHaveBeenCalledTimes(1);
+      expect(audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({ storeId: 10, resource: 'social_channels', resourceId: 7 }),
       );
     });
 

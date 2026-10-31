@@ -140,12 +140,16 @@ describeDb('SmsSpendService · concurrency on Postgres', () => {
   it('release gives the reservation back within the month, never below 0', async () => {
     await channel(6, '1.00', '0.0075');
 
-    await service.release(6, 0.0075, '2026-10-01');
+    await service.release({ id: 6, store_id: 10 }, 0.0075, '2026-10-01');
     expect(await used(6)).toBe('0.0000');
-    await service.release(6, 0.0075, '2026-10-01');
+    await service.release({ id: 6, store_id: 10 }, 0.0075, '2026-10-01');
     expect(await used(6)).toBe('0.0000');
     await channel(7, '1.00', '0.5000', '2026-11-01');
-    await service.release(7, 0.0075, '2026-10-01');
+    await service.release({ id: 7, store_id: 10 }, 0.0075, '2026-10-01');
     expect(await used(7)).toBe('0.5000');
+    await service.release({ id: 6, store_id: 99 }, 0.0075, '2026-10-01');
+    await admin.query(`UPDATE "${SCHEMA}"."social_channels" SET monthly_spend_used = 0.5 WHERE id = 6`);
+    await service.release({ id: 6, store_id: 99 }, 0.0075, '2026-10-01');
+    expect(await used(6)).toBe('0.5000');
   });
 });

@@ -237,7 +237,7 @@ export class MessagingService {
       !SPEND_KEPT_ON.has(result.error_code ?? 'UNKNOWN')
     ) {
       await this.smsSpend.release(
-        channel.id,
+        channel,
         quote.cost,
         reservation.period_start,
       );
