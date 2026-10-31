@@ -701,6 +701,25 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.social_webhook_events;
   }
 
+  // CRM: los workers de mensajería (webhook entrante, envío, campañas y
+  // sincronización de plantillas) corren sin contexto de tienda y fijan el
+  // `store_id` desde el canal resuelto. Sin scope: cada escritura lo nombra.
+  get crm_conversations() {
+    return this.baseClient.crm_conversations;
+  }
+
+  get crm_messages() {
+    return this.baseClient.crm_messages;
+  }
+
+  get crm_campaigns() {
+    return this.baseClient.crm_campaigns;
+  }
+
+  get crm_message_templates() {
+    return this.baseClient.crm_message_templates;
+  }
+
   // Subscription / SaaS billing models — global access (no tenant scope)
   // because SaaS billing operations cross stores (cron jobs, listeners,
   // platform-level webhook reconciliation, etc.).

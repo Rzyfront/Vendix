@@ -7529,6 +7529,54 @@ export const ErrorCodes = {
       'El contenido de la landing no cumple la estructura esperada. Revisa las secciones e intenta de nuevo.',
   },
 
+  // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra
+  // tienda como si no está asignada a quien no puede ver todas: no se revela
+  // que existe.
+  CRM_INBOX_001: {
+    code: 'CRM_INBOX_001',
+    httpStatus: 404,
+    devMessage: 'La conversación no existe o no tienes acceso a ella.',
+  },
+  // Solo se asigna a personal activo de la tienda, nunca a un cliente.
+  CRM_INBOX_002: {
+    code: 'CRM_INBOX_002',
+    httpStatus: 422,
+    devMessage: 'El usuario no pertenece al personal activo de esta tienda.',
+  },
+  // Mismo `client_request_id` mientras el primer envío aún se registra.
+  CRM_INBOX_003: {
+    code: 'CRM_INBOX_003',
+    httpStatus: 409,
+    devMessage: 'Este mensaje ya se está enviando. Espera un momento.',
+  },
+  // El mensaje quedó registrado como fallido: la cola no lo aceptó.
+  CRM_INBOX_004: {
+    code: 'CRM_INBOX_004',
+    httpStatus: 503,
+    devMessage: 'No pudimos poner el mensaje en cola. Intenta de nuevo.',
+  },
+  // Cuerpo vacío sin plantilla, o canal sin envío (p. ej. nota interna).
+  CRM_INBOX_005: {
+    code: 'CRM_INBOX_005',
+    httpStatus: 400,
+    devMessage: 'Escribe un mensaje o elige una plantilla.',
+  },
+  // WhatsApp solo admite texto libre dentro de las 24 h desde el último
+  // mensaje del cliente; fuera de ella solo plantillas aprobadas.
+  CRM_WINDOW_CLOSED: {
+    code: 'CRM_WINDOW_CLOSED',
+    httpStatus: 409,
+    devMessage:
+      'Pasaron más de 24 horas desde el último mensaje del cliente. Solo puedes enviarle una plantilla aprobada.',
+  },
+  // SMS: la tienda agotó su tope mensual de gasto (o no tiene tope definido).
+  CRM_SMS_SPEND_LIMIT: {
+    code: 'CRM_SMS_SPEND_LIMIT',
+    httpStatus: 409,
+    devMessage:
+      'La tienda alcanzó su tope mensual de SMS. Sube el tope en Integraciones → Canales o espera al próximo mes.',
+  },
+
   // CRM Landing (QUI-719): fallo al encolar el job en BullMQ.
   // 500: Redis/caída del queue — la fila queda `failed` con mensaje y el
   // usuario puede reintentar desde el panel.

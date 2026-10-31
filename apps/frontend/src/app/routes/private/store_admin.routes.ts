@@ -569,6 +569,14 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.ReviewsComponent,
               ),
           },
+          // CRM inbox (PLAN-CRM §7); the API is gated by store:crm_inbox:read.
+          {
+            path: 'inbox',
+            loadComponent: () =>
+              import('../../private/modules/store/customers/crm/inbox/inbox.component').then(
+                (c) => c.InboxComponent,
+              ),
+          },
           // CRM Landing (QUI-719)
           {
             path: 'crm',

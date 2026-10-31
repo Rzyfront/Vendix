@@ -1139,6 +1139,9 @@ export class MenuFilterService {
     if (item.route === '/admin/settings/ai-agents' && !this.canConfigureAiAgents()) {
       return false;
     }
+    if (item.route === '/admin/customers/inbox' && !this.canReadCrmInbox()) {
+      return false;
+    }
     return true;
   }
 
@@ -1319,6 +1322,14 @@ export class MenuFilterService {
     const mapped = this.moduleKeyMap[item.label];
     if (!mapped) return [];
     return Array.isArray(mapped) ? mapped : [mapped];
+  }
+
+  /** CRM inbox: same permission as its API (`store:crm_inbox:read`). */
+  private canReadCrmInbox(): boolean {
+    return (
+      this.authFacade.hasPermission('store:crm_inbox:read') ||
+      this.authFacade.isOwner()
+    );
   }
 
   /**

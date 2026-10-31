@@ -1508,6 +1508,27 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // Bandeja CRM (PLAN-CRM §4.3). Quien tiene `assign` ve todas las
+    // conversaciones de la tienda; sin él, solo las asignadas a uno mismo.
+    {
+      name: 'store:crm_inbox:read',
+      description: 'Ver la bandeja de conversaciones (solo las asignadas sin crm_inbox:assign)',
+      path: '/api/store/customers/crm/conversations',
+      method: 'GET',
+    },
+    {
+      name: 'store:crm_inbox:manage',
+      description: 'Responder, dejar notas internas, cerrar y reabrir conversaciones',
+      path: '/api/store/customers/crm/conversations/*',
+      method: 'POST',
+    },
+    {
+      name: 'store:crm_inbox:assign',
+      description: 'Asignar conversaciones y ver todas las de la tienda',
+      path: '/api/store/customers/crm/conversations/*/assign',
+      method: 'PATCH',
+    },
+
     // Reseñas
     {
       name: 'store:reviews:read',
@@ -5278,7 +5299,10 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:reviews:read') ||
       p.name.includes('store:data_collection:submissions:read') ||
       p.name.includes('store:customers:history:read') ||
-      p.name.includes('store:reservations:write'),
+      p.name.includes('store:reservations:write') ||
+      // Bandeja CRM: el vendedor atiende solo lo asignado (sin `assign`).
+      p.name === 'store:crm_inbox:read' ||
+      p.name === 'store:crm_inbox:manage',
   );
 
   const employeeSync = await syncRolePermissions(
@@ -5433,6 +5457,9 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:data_collection:submissions:read') ||
       // Hotelería (H3.6, D10) — "Cargo a habitación" desde el POS.
       p.name === 'store:lodging:folio:charge' ||
+      // Bandeja CRM: el cajero atiende solo lo asignado (sin `assign`).
+      p.name === 'store:crm_inbox:read' ||
+      p.name === 'store:crm_inbox:manage' ||
       // Dominios públicos
       p.name.includes('domains.resolve') ||
       p.name.includes('domains.check') ||

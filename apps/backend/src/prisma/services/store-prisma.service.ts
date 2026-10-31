@@ -225,6 +225,20 @@ export class StorePrismaService extends BasePrismaService {
     // ===== CRM Landing (QUI-719) =====
     // 1:1 con la tienda (store_id @unique) → scoping directo por tienda.
     'crm_landing_pages',
+    // ===== CRM (PLAN-CRM §2.3) =====
+    // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
+    'crm_conversations',
+    'crm_messages',
+    'crm_tags',
+    'crm_customer_tags',
+    'crm_segments',
+    'crm_pipelines',
+    'crm_pipeline_stages',
+    'crm_opportunities',
+    'crm_tasks',
+    'crm_notes',
+    'crm_campaigns',
+    'crm_message_templates',
     // ===== Pedidos programados + adiciones =====
     // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
     'fulfillment_schedule_exceptions',
@@ -1866,6 +1880,55 @@ export class StorePrismaService extends BasePrismaService {
 
   get social_webhook_events() {
     return this.scoped_client.social_webhook_events;
+  }
+
+  // CRM (PLAN-CRM §2.3)
+  get crm_conversations() {
+    return this.scoped_client.crm_conversations;
+  }
+
+  get crm_messages() {
+    return this.scoped_client.crm_messages;
+  }
+
+  get crm_tags() {
+    return this.scoped_client.crm_tags;
+  }
+
+  get crm_customer_tags() {
+    return this.scoped_client.crm_customer_tags;
+  }
+
+  get crm_segments() {
+    return this.scoped_client.crm_segments;
+  }
+
+  get crm_pipelines() {
+    return this.scoped_client.crm_pipelines;
+  }
+
+  get crm_pipeline_stages() {
+    return this.scoped_client.crm_pipeline_stages;
+  }
+
+  get crm_opportunities() {
+    return this.scoped_client.crm_opportunities;
+  }
+
+  get crm_tasks() {
+    return this.scoped_client.crm_tasks;
+  }
+
+  get crm_notes() {
+    return this.scoped_client.crm_notes;
+  }
+
+  get crm_campaigns() {
+    return this.scoped_client.crm_campaigns;
+  }
+
+  get crm_message_templates() {
+    return this.scoped_client.crm_message_templates;
   }
 
   // Subscription models
