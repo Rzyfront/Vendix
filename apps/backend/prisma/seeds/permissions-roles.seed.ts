@@ -1529,6 +1529,33 @@ export async function seedPermissionsAndRoles(
       method: 'PATCH',
     },
 
+    // CRM 360, tareas y pipeline (PLAN-CRM §4.5-§4.6). Igual que la bandeja,
+    // sin `crm_inbox:assign` cada quien ve solo sus tareas y oportunidades.
+    {
+      name: 'store:crm_tasks:manage',
+      description: 'Crear, asignarse y completar tareas del CRM',
+      path: '/api/store/customers/crm/tasks',
+      method: 'POST',
+    },
+    {
+      name: 'store:crm_pipeline:read',
+      description: 'Ver el pipeline de oportunidades',
+      path: '/api/store/customers/crm/opportunities',
+      method: 'GET',
+    },
+    {
+      name: 'store:crm_pipeline:manage',
+      description: 'Crear, mover, ganar y perder oportunidades',
+      path: '/api/store/customers/crm/opportunities/*',
+      method: 'POST',
+    },
+    {
+      name: 'store:crm_segments:manage',
+      description: 'Crear, renombrar y borrar etiquetas (y segmentos) del CRM',
+      path: '/api/store/customers/crm/tags',
+      method: 'POST',
+    },
+
     // Reseñas
     {
       name: 'store:reviews:read',
@@ -5302,7 +5329,11 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:reservations:write') ||
       // Bandeja CRM: el vendedor atiende solo lo asignado (sin `assign`).
       p.name === 'store:crm_inbox:read' ||
-      p.name === 'store:crm_inbox:manage',
+      p.name === 'store:crm_inbox:manage' ||
+      // Tareas y pipeline: solo las suyas (sin `crm_inbox:assign`).
+      p.name === 'store:crm_tasks:manage' ||
+      p.name === 'store:crm_pipeline:read' ||
+      p.name === 'store:crm_pipeline:manage',
   );
 
   const employeeSync = await syncRolePermissions(
@@ -5460,6 +5491,9 @@ export async function seedPermissionsAndRoles(
       // Bandeja CRM: el cajero atiende solo lo asignado (sin `assign`).
       p.name === 'store:crm_inbox:read' ||
       p.name === 'store:crm_inbox:manage' ||
+      // Tareas propias y pipeline en lectura (solo sus oportunidades).
+      p.name === 'store:crm_tasks:manage' ||
+      p.name === 'store:crm_pipeline:read' ||
       // Dominios públicos
       p.name.includes('domains.resolve') ||
       p.name.includes('domains.check') ||

@@ -720,6 +720,11 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.crm_message_templates;
   }
 
+  // Aviso de tareas vencidas (cron sin contexto de tienda).
+  get crm_tasks() {
+    return this.baseClient.crm_tasks;
+  }
+
   // Subscription / SaaS billing models — global access (no tenant scope)
   // because SaaS billing operations cross stores (cron jobs, listeners,
   // platform-level webhook reconciliation, etc.).

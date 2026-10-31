@@ -20,6 +20,7 @@ import {
   CrmMessagesQueryDto,
   SendCrmMessageDto,
 } from './dto/crm-conversations.dto';
+import { isActiveStoreStaff } from '../shared/crm-access';
 
 /** Seeing every conversation of the store comes with being able to assign them. */
 export const CRM_INBOX_SEE_ALL_PERMISSION = 'store:crm_inbox:assign';
@@ -451,31 +452,8 @@ export class CrmConversationsService {
    * Active member of this store whose role can open the inbox, so an assigned
    * conversation is never invisible to its assignee (and never a customer).
    */
-  private async isActiveStaff(userId: number): Promise<boolean> {
-    const row = await this.prisma.store_users.findFirst({
-      where: {
-        user_id: userId,
-        user: {
-          state: 'active',
-          user_roles: {
-            some: {
-              roles: {
-                role_permissions: {
-                  some: {
-                    permissions: {
-                      name: CRM_INBOX_READ_PERMISSION,
-                      status: 'active',
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-      select: { id: true },
-    });
-    return !!row;
+  private isActiveStaff(userId: number): Promise<boolean> {
+    return isActiveStoreStaff(this.prisma, userId, CRM_INBOX_READ_PERMISSION);
   }
 
   /**
