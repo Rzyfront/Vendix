@@ -132,12 +132,17 @@ export class MetaWhatsappInboundService {
     for (const value of values) {
       const phoneNumberId = value?.metadata?.phone_number_id;
       if (!phoneNumberId) continue;
+      // `phone_number_id` is not unique and a disconnected row keeps it, so
+      // only the store that currently holds the number may receive it. A
+      // channel in `error` (token rejected) still owns its number.
       const channel = await this.prisma.social_channels.findFirst({
         where: {
           provider: PROVIDER,
           channel_type: 'whatsapp',
           phone_number_id: String(phoneNumberId),
+          status: { in: ['connected', 'error'] },
         },
+        orderBy: [{ connected_at: 'desc' }, { id: 'desc' }],
       });
       if (!channel) continue;
       matchedChannel = true;

@@ -131,7 +131,9 @@ describe('MetaWhatsappInboundService', () => {
           provider: 'meta_cloud',
           channel_type: 'whatsapp',
           phone_number_id: PHONE_NUMBER_ID,
+          status: { in: ['connected', 'error'] },
         },
+        orderBy: [{ connected_at: 'desc' }, { id: 'desc' }],
       });
       expect(prisma.crm_conversations.create).toHaveBeenCalledWith({
         data: {
@@ -468,6 +470,38 @@ describe('MetaWhatsappInboundService', () => {
         status: 'skipped',
       });
       expect(prisma.social_channels.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('never routes to a store that disconnected the number', async () => {
+      const { service, prisma } = setup('message-text');
+      const disconnected = {
+        ...channelRow,
+        id: 4,
+        store_id: 9,
+        status: 'disconnected',
+      };
+      const current = {
+        ...channelRow,
+        id: 5,
+        store_id: 10,
+        status: 'connected',
+      };
+      prisma.social_channels.findFirst.mockImplementation(({ where }) =>
+        Promise.resolve(
+          [disconnected, current].find((row) =>
+            where.status.in.includes(row.status),
+          ) ?? null,
+        ),
+      );
+
+      await service.processEvent(99, defaults);
+
+      expect(
+        prisma.crm_conversations.create.mock.calls[0][0].data,
+      ).toMatchObject({
+        store_id: 10,
+        social_channel_id: 5,
+      });
     });
 
     it('ignores an event for a phone number no store owns', async () => {
