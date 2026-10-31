@@ -270,3 +270,32 @@ describe('CashSettlementService — cierre de planilla contra caja', () => {
     await expect(service.isCashRegisterRequired()).rejects.toThrow('boom');
   });
 });
+
+describe('CashSettlementService.listOpenSessions — B20 sesiones de quien liquida', () => {
+  const build = () => {
+    const prisma = {
+      cash_register_sessions: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const service = new CashSettlementService(prisma as any, { emit: jest.fn() } as any, {} as any);
+    return { service, prisma };
+  };
+
+  it('con opened_by filtra por el usuario que liquida', async () => {
+    const { service, prisma } = build();
+    await service.listOpenSessions(12, 7);
+    expect(prisma.cash_register_sessions.findMany.mock.calls[0][0].where).toEqual({
+      store_id: 12,
+      status: 'open',
+      opened_by: 7,
+    });
+  });
+
+  it('sin opened_by conserva el listado de la tienda', async () => {
+    const { service, prisma } = build();
+    await service.listOpenSessions(12);
+    expect(prisma.cash_register_sessions.findMany.mock.calls[0][0].where).toEqual({
+      store_id: 12,
+      status: 'open',
+    });
+  });
+});

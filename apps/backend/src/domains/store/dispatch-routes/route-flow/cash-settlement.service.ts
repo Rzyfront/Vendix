@@ -147,9 +147,10 @@ export class CashSettlementService {
   }
 
   /** Sesiones de caja abiertas de la tienda (picker del cierre de planilla). */
-  async listOpenSessions(store_id: number) {
+  /** B20: con `opened_by`, solo las sesiones de quien liquida (el cierre rechaza las ajenas). */
+  async listOpenSessions(store_id: number, opened_by?: number) {
     const rows = await this.prisma.cash_register_sessions.findMany({
-      where: { store_id, status: 'open' },
+      where: { store_id, status: 'open', ...(opened_by != null ? { opened_by } : {}) },
       orderBy: { opened_at: 'desc' },
       select: {
         id: true,

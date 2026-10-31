@@ -1427,13 +1427,14 @@ export class RouteFlowService {
     return this.withDerivedStopPrepaid(updated);
   }
 
-  /** D12: opciones del cierre — ¿caja obligatoria? + sesiones abiertas de la tienda. */
+  /** D12: opciones del cierre — ¿caja obligatoria? + sesiones abiertas de quien liquida (B20). */
   async getCloseOptions(id: number) {
     const store_id = this.getStoreId();
     await this.getRoute(id, store_id); // 404 si no es de la tienda
+    const user_id = RequestContextService.getContext()?.user_id;
     const [cash_required, sessions] = await Promise.all([
       this.cashSettlement.isCashRegisterRequired(),
-      this.cashSettlement.listOpenSessions(store_id),
+      this.cashSettlement.listOpenSessions(store_id, user_id),
     ]);
     return { cash_required, sessions };
   }
