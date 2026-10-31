@@ -5855,10 +5855,10 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     // del pago se enlaza al movimiento antes del commit.
     expect(h.cashMovement).toHaveBeenCalledTimes(2);
     expect(h.cashMovement).toHaveBeenNthCalledWith(
-      1, 4, 1, 20000, 'cash', undefined, h.prismaMock,
+      1, 4, 1, 20000, 'cash', undefined, h.prismaMock, undefined, 'DIRECT',
     );
     expect(h.cashMovement).toHaveBeenNthCalledWith(
-      2, 4, 1, 80000, 'bank_transfer', undefined, h.prismaMock,
+      2, 4, 1, 80000, 'bank_transfer', undefined, h.prismaMock, undefined, 'DIRECT',
     );
 
     // Orden saldada: Σ = total ⇒ finished con saldo 0.
@@ -6046,7 +6046,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       h.prismaMock.store_payment_methods.findMany,
     ).not.toHaveBeenCalled();
     expect(h.cashMovement).toHaveBeenCalledTimes(1);
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 100000, 'bank_transfer', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 100000, 'bank_transfer', undefined, h.prismaMock, undefined, 'DIRECT');
     expect(result.payment).toEqual({ transaction_id: 'TXN-1', change: 0 });
     expect(result).not.toHaveProperty('payments');
 
@@ -7373,7 +7373,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       expect.anything(),
     );
     expect(h.cashMovement).toHaveBeenCalledTimes(1);
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'bank_transfer', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'bank_transfer', undefined, h.prismaMock, undefined, 'DIRECT');
     expect(h.emitter.emitAsync).toHaveBeenCalledTimes(1);
     expect(h.emitter.emitAsync).toHaveBeenCalledWith(
       'payment.received',
@@ -7398,7 +7398,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       bank_account_id: null,
     });
     expectNoVoidOf51(h);
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock, undefined, 'DIRECT');
     expect(h.emitter.emitAsync).toHaveBeenCalledWith(
       'payment.received',
       expect.objectContaining({ payment_id: 51 }),
@@ -7450,7 +7450,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
         data: expect.objectContaining({ state: 'pending_payment' }),
       }),
     );
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 60000, 'bank_transfer', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 60000, 'bank_transfer', undefined, h.prismaMock, undefined, 'DIRECT');
     expect(h.emitter.emitAsync).toHaveBeenCalledWith(
       'payment.received',
       expect.objectContaining({ payment_id: 51 }),
@@ -7494,8 +7494,8 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
     expect(result.payments).toHaveLength(2);
     expect(result.payments[0]).toEqual(expect.objectContaining({ id: 51 }));
     expect(h.cashMovement).toHaveBeenCalledTimes(2);
-    expect(h.cashMovement).toHaveBeenNthCalledWith(1, 4, 1, 40000, 'bank_transfer', undefined, h.prismaMock);
-    expect(h.cashMovement).toHaveBeenNthCalledWith(2, 4, 1, 20000, 'cash', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenNthCalledWith(1, 4, 1, 40000, 'bank_transfer', undefined, h.prismaMock, undefined, 'DIRECT');
+    expect(h.cashMovement).toHaveBeenNthCalledWith(2, 4, 1, 20000, 'cash', undefined, h.prismaMock, undefined, 'DIRECT');
     const received = h.emitter.emitAsync.mock.calls
       .filter(([name]: any[]) => name === 'payment.received')
       .map(([, payload]: any[]) => payload.payment_id);
@@ -7568,7 +7568,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       data: expect.objectContaining({ state: 'cancelled' }),
     });
     expect(h.prismaMock.payments.findFirst).not.toHaveBeenCalled();
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock, undefined, 'DIRECT');
   });
 
   it('WhatsApp/contra entrega en pending_payment con remaining_balance > 0 → el parcial se respeta', async () => {
@@ -7606,7 +7606,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       data: expect.objectContaining({ total_paid: 30000, remaining_balance: 70000 }),
     });
     expect(h.updateOrderState).not.toHaveBeenCalled();
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 30000, 'cash', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 30000, 'cash', undefined, h.prismaMock, undefined, 'DIRECT');
   });
 
   it('finish bloqueado tras confirmar en sitio → la fila 51 vuelve a pending intacta (no se anula)', async () => {
@@ -7693,7 +7693,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       }),
     });
     // En caja entra lo cobrado (100000), no lo recibido (120000).
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock, undefined, 'DIRECT');
     expect(h.updateOrderState).toHaveBeenCalledWith(
       1,
       'processing',
@@ -8422,5 +8422,48 @@ describe('OrderFlowService.commitCouponUseForOrder — cupón desactivado (QUI-6
       errorCode: 'ORD_EDIT_COUPON_COMMIT_001',
     });
     expect(tx.coupon_uses.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrderFlowService.recordPayOrderCashMovement — shared cash movement policy (B08/B26)', () => {
+  const build = () => {
+    mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
+    const movementsService = {
+      recordSaleMovement: jest.fn().mockResolvedValue({ id: 1 }),
+    };
+    const service = new OrderFlowService(
+      {} as any, { emit: jest.fn() } as any, {} as any,
+      {} as any, movementsService as any,
+      {} as any, {} as any, {} as any, {} as any,
+      undefined, undefined, undefined, undefined,
+    );
+    jest.spyOn(service as any, 'resolveCashSessionForSale').mockResolvedValue({ id: 5 });
+    const record = (type: string | undefined, mode?: string | null) =>
+      (service as any).recordPayOrderCashMovement(
+        100, 9, 5000, type, undefined, {} as any, undefined, mode,
+      );
+    return { movementsService, record };
+  };
+
+  it.each([
+    ['cash', 'DIRECT', true],
+    ['card', 'DIRECT', true],
+    ['bank_transfer', 'DIRECT', true],
+    ['cash_on_delivery', 'DIRECT', false],
+    ['cash', 'ON_DELIVERY', false],
+    ['wompi', 'ONLINE', false],
+    ['wallet', 'DIRECT', false],
+  ])('%s / %s records a sale: %s (same table as the POS)', async (type, mode, records) => {
+    const { movementsService, record } = build();
+    await record(type, mode);
+    expect(movementsService.recordSaleMovement).toHaveBeenCalledTimes(records ? 1 : 0);
+  });
+
+  it.each([[undefined], ['']])('rejects a method without type (%p) with PAY_METHOD_MISCONFIGURED', async (type) => {
+    const { movementsService, record } = build();
+    await expect(record(type as any, 'DIRECT')).rejects.toMatchObject({
+      response: expect.objectContaining({ error_code: 'PAY_METHOD_MISCONFIGURED' }),
+    });
+    expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
   });
 });

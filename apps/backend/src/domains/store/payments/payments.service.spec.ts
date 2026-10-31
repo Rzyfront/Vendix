@@ -4887,6 +4887,7 @@ describe('PaymentsService', () => {
       cash: 9,
       wompi: 12,
       wallet: 11,
+      untyped: 13,
     };
 
     const arrangeCashRegister = (
@@ -4909,7 +4910,7 @@ describe('PaymentsService', () => {
         display_name: methodType,
         custom_config: {},
         system_payment_method: {
-          type: methodType,
+          type: methodType === 'untyped' ? undefined : methodType,
           processing_mode: payment_processing_mode_enum.DIRECT,
         },
       };
@@ -5092,6 +5093,15 @@ describe('PaymentsService', () => {
       expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
         tx.cash_register_movements.create.mock.invocationCallOrder[0],
       );
+    });
+
+    it('B26: método sin type se rechaza con PAY_METHOD_MISCONFIGURED, no cuenta como efectivo', async () => {
+      const { tx, methodId } = arrangeCashRegister('untyped');
+
+      await expect(processSinglePayment(methodId)).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'PAY_METHOD_MISCONFIGURED' }),
+      });
+      expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
     });
 
     it('caja deshabilitada y sin sesión permite el cobro sin movimiento', async () => {

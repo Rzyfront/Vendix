@@ -93,6 +93,7 @@ import {
   ORDER_CANCELLED_MOVEMENT_REFERENCE,
 } from '../../cash-registers/movements/movements.service';
 import { CASH_PAYMENT_TYPES } from './services/refund-channel.util';
+import { shouldRecordCashMovement } from '../../cash-registers/movements/cash-movement-policy.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { AutoEntryService } from '../../accounting/auto-entries/auto-entry.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
@@ -2445,6 +2446,7 @@ export class OrderFlowService {
       deferredCashReadyState: null as 'finished' | 'delivered' | null,
       deferredCashCompensationState: preClaimState,
       paymentMethodTypes: {} as Record<number, string>,
+      paymentMethodModes: {} as Record<number, string | null>,
     };
     // Fase 2 paso 5 — carril "registrar pago": SÓLO aquí `dto.amount` define lo
     // cobrado. Cubre el marcador manual y los parciales siguientes (el primer
@@ -2546,6 +2548,7 @@ export class OrderFlowService {
     let legs: NormalizedLeg[] = [];
     let change = 0;
     let legMethodTypes: Record<number, string> = {};
+    const legMethodModes: Record<number, string | null> = {};
     if (isImmediateCharge) {
       const requestedLegs = Array.isArray(dto.payments) ? dto.payments : [];
       let methodsById: Record<number, PaymentLegMethodInfo>;
@@ -2608,6 +2611,7 @@ export class OrderFlowService {
       }
       for (const [id, info] of Object.entries(methodsById)) {
         legMethodTypes[Number(id)] = info.type;
+        legMethodModes[Number(id)] = info.processing_mode ?? null;
       }
       try {
         const normalized = normalizePaymentLegs(
@@ -2641,6 +2645,7 @@ export class OrderFlowService {
     // sin ETA, sin proyección a mesa; el cupón se consume al saldar). La acción
     // "Registrar pago" sigue disponible para el saldo (paso 6).
     Object.assign(paymentHistoryCtx.paymentMethodTypes, legMethodTypes);
+    Object.assign(paymentHistoryCtx.paymentMethodModes, legMethodModes);
 
     if (isPartialCharge) {
       const legPayments = await this.createLegPayments(
@@ -8621,6 +8626,7 @@ export class OrderFlowService {
             undefined,
             tx,
             cashSession.id,
+            paymentMethod.system_payment_method.processing_mode,
           )
         : null;
       const payment = await tx.payments.create({
@@ -9257,6 +9263,7 @@ export class OrderFlowService {
         bank_account_id: number | null;
       } | null;
       paymentMethodTypes?: Record<number, string>;
+      paymentMethodModes?: Record<number, string | null>;
       deferCashMovementUntilFinish?: boolean;
       deferCashSignalRequired?: boolean;
       deferredCashSessionId?: number | null;
@@ -9389,6 +9396,8 @@ export class OrderFlowService {
                   (leg.is_cash ? 'cash' : ''),
                 undefined,
                 tx,
+                undefined,
+                historyCtx.paymentMethodModes?.[leg.store_payment_method_id],
               )
             : null,
         );
@@ -9517,6 +9526,8 @@ export class OrderFlowService {
               (leg.is_cash ? 'cash' : ''),
             undefined,
             tx,
+            undefined,
+            historyCtx.paymentMethodModes?.[leg.store_payment_method_id],
           );
         }
         const movement = cashMovements[legIndex];
@@ -9718,6 +9729,7 @@ export class OrderFlowService {
     paymentId: number | undefined,
     tx: Prisma.TransactionClient,
     sessionId?: number,
+    processingMode?: string | null,
   ): Promise<any | null> {
     // Cupón 100 %: sin dinero no hay movimiento que insertar.
     if (!(Number(amount) > 0)) return null;
@@ -9725,6 +9737,9 @@ export class OrderFlowService {
       ? { id: sessionId }
       : await this.resolveCashSessionForSale();
     if (!session) return null;
+    // Same policy as the POS (B08/B26): gateway / on-delivery methods leave no
+    // movement and a method without a type is rejected.
+    if (!shouldRecordCashMovement(paymentMethodType, processingMode)) return null;
     const userId = RequestContextService.getUserId();
     if (!userId) throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
     return this.movementsService.recordSaleMovement(session.id, {
@@ -9765,11 +9780,13 @@ export class OrderFlowService {
         payment_ids: legPayments.filter(({ leg }) => Number(leg.amount) > 0).map(({ payment }) => payment.id),
         movements: legPayments
           .filter(({ leg }) => Number(leg.amount) > 0)
-          .map(({ payment, leg }) => ({
-            amount: leg.amount,
-            payment_method: payment.store_payment_method?.system_payment_method?.type ?? 'cash',
-            payment_id: payment.id,
-          })),
+          .map(({ payment, leg }) => {
+            const type = payment.store_payment_method?.system_payment_method?.type;
+            // B26: never default a missing type to cash. The signal's payment_ids
+            // must match, so legs are validated here rather than filtered out.
+            if (!type) throw new VendixHttpException(ErrorCodes.PAY_METHOD_MISCONFIGURED);
+            return { amount: leg.amount, payment_method: type, payment_id: payment.id };
+          }),
       });
     });
   }

@@ -406,6 +406,13 @@ export const ErrorCodes = {
     devMessage: 'Payment does not belong to the requesting user',
   },
 
+  PAY_METHOD_MISCONFIGURED: {
+    code: 'PAY_METHOD_MISCONFIGURED',
+    httpStatus: 400,
+    devMessage:
+      'Payment method has no system_payment_method.type; it cannot be classified for cash register movements',
+  },
+
   // Multi-tender cash payments (pago multimétodo de contado)
   PAY_MULTI_TENDER_SUM_MISMATCH: {
     code: 'PAY_MULTI_TENDER_SUM_MISMATCH',
