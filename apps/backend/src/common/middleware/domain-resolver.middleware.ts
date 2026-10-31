@@ -26,8 +26,11 @@ export class DomainResolverMiddleware implements NestMiddleware {
   ) {}
 
   async use(req: Request, res: Response, next: NextFunction) {
-    // Usar originalUrl para asegurar que detectamos /ecommerce/ incluso con prefijos
-    if (!req.originalUrl.includes('/ecommerce/')) {
+    // Only the real route counts: `originalUrl` carries the query string, so
+    // `/api/store/customers?x=/ecommerce/` would turn a store/* route into an
+    // ecommerce one. `baseUrl + path` is the pathname whatever the mount point.
+    const route_path = `${req.baseUrl || ''}${req.path || ''}`;
+    if (!route_path.includes('/ecommerce/')) {
       return next();
     }
 
