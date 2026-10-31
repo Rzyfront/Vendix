@@ -812,6 +812,19 @@ export class StoreAdminLayoutComponent {
           alwaysVisible: true,
         },
         {
+          // No panel_ui key: shown by permission (MenuFilterService gate).
+          label: 'Pipeline',
+          icon: 'trending-up',
+          route: '/admin/customers/pipeline',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Tareas',
+          icon: 'check-square',
+          route: '/admin/customers/tasks',
+          alwaysVisible: true,
+        },
+        {
           label: 'Reseñas',
           icon: 'star',
           route: '/admin/customers/reviews',
@@ -822,9 +835,12 @@ export class StoreAdminLayoutComponent {
           route: '/admin/data-collection',
         },
         {
-          label: 'CRM',
+          // Internal module `crm` (QUI-719); visible name frees "CRM" for the
+          // customer CRM. Same panel_ui key as before.
+          label: 'Landing de captación',
           icon: 'sparkles',
           route: '/admin/customers/crm',
+          panelUiKey: 'customers_crm',
         },
       ],
     },
