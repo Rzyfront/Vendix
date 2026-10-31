@@ -464,6 +464,27 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
     // No booking persisted.
     expect(ctx.bookings.length).toBe(0);
   });
+
+  it('rechaza reservar un Insumo: 422 PROD_NATURE_NOT_SELLABLE, sin orden ni reserva', async () => {
+    const ctx = buildServiceForCreate();
+    ctx.products[0].usage_nature = 'supply';
+
+    await expect(ctx.service.create(baseDto)).rejects.toMatchObject({
+      errorCode: 'PROD_NATURE_NOT_SELLABLE',
+    });
+    expect(ctx.ordersService.create).not.toHaveBeenCalled();
+    expect(ctx.bookings.length).toBe(0);
+  });
+
+  it('acepta reservar un producto de Venta', async () => {
+    const ctx = buildServiceForCreate();
+    ctx.products[0].usage_nature = 'sale';
+
+    await ctx.service.create(baseDto);
+
+    expect(ctx.bookings.length).toBe(1);
+    expect(ctx.bookings[0].product_id).toBe(100);
+  });
 });
 describe('ReservationsService.confirmHold — hold expirado', () => {
   function build(requires_station: boolean) {

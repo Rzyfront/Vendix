@@ -25,6 +25,7 @@ import { TableSessionsService } from '../tables/table-sessions.service';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 import { ServiceAllocationCoordinator } from './service-allocation-coordinator.service';
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
+import { assertSaleNatureProducts } from '../products/services/product-usage-nature.util';
 
 @Injectable()
 export class ReservationsService {
@@ -174,12 +175,18 @@ export class ReservationsService {
         is_on_sale: true,
         sale_price: true,
         track_inventory: true,
+        usage_nature: true,
+        is_ingredient: true,
+        is_sellable: true,
       },
     });
 
     if (!product) {
       throw new NotFoundException('Producto/servicio no encontrado');
     }
+    // Insumo y Uso interno nunca se venden: el cobro los rechazaría (422) y la
+    // reserva quedaría trabada. Se valida aquí, antes de crear orden o reserva.
+    assertSaleNatureProducts([product]);
 
     // Validate product_variant_id if provided
     let selectedVariant: {
