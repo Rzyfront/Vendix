@@ -162,6 +162,11 @@ export class RefundCalculationService {
    * B19/H1 — lo cobrado = pagos vivos de la orden + abonos de su CxC. El abono
    * de una venta a crédito solo crea `ar_payments` (no fila en `payments`);
    * si el abono apunta a un pago ya contado, no se suma dos veces.
+   *
+   * Retención de un cobro de ruta a crédito: el pago guarda solo el efectivo
+   * y su abono enlazado baja la CxC por efectivo + retención. La retención
+   * cuenta como cobrada, así que de ese abono se suma solo el excedente sobre
+   * su pago (0 cuando no hubo retención).
    */
   private async paidTotal(
     order: {
@@ -172,7 +177,9 @@ export class RefundCalculationService {
     client: Prisma.TransactionClient | StorePrismaService,
   ): Promise<number> {
     const payments = order.payments ?? [];
-    const counted_payment_ids = new Set(payments.map((p) => p.id));
+    const counted_payments = new Map(
+      payments.map((p) => [p.id, new Prisma.Decimal(p.amount)]),
+    );
     let paid = payments.reduce(
       (sum, p) => sum.plus(p.amount),
       new Prisma.Decimal(0),
@@ -188,7 +195,13 @@ export class RefundCalculationService {
     });
     for (const ar of receivables) {
       for (const abono of ar.ar_payments) {
-        if (abono.payment_id != null && counted_payment_ids.has(abono.payment_id)) {
+        const counted =
+          abono.payment_id != null
+            ? counted_payments.get(abono.payment_id)
+            : undefined;
+        if (counted !== undefined) {
+          const withheld = new Prisma.Decimal(abono.amount).minus(counted);
+          if (withheld.greaterThan(0)) paid = paid.plus(withheld);
           continue;
         }
         paid = paid.plus(abono.amount);

@@ -347,6 +347,98 @@ describe('RefundCalculationService — CxC collections count as paid (H1)', () =
     });
     expect(result.max_refundable).toBe(1000);
   });
+
+  describe('route collection with customer withholding', () => {
+    // Venta a crédito de 1000 (10 x 100): cuota inicial 200 (pago #50) y un
+    // cobro de ruta de 100 = 70 en efectivo (pago #60) + 30 de retención. La
+    // CxC baja por 100 con un solo abono enlazado al pago #60.
+    function routeCreditSale(
+      payments: { id: number; amount: Prisma.Decimal }[],
+    ) {
+      return buildOrder({
+        id: 9001,
+        state: 'finished',
+        subtotal_amount: new Prisma.Decimal(1000),
+        grand_total: new Prisma.Decimal(1000),
+        tax_amount: new Prisma.Decimal(0),
+        payments,
+        refunds: [],
+        order_items: [
+          buildOrderItem({
+            id: 1,
+            quantity: 10,
+            unit_price: new Prisma.Decimal(100),
+            total_price: new Prisma.Decimal(1000),
+            tax_rate: new Prisma.Decimal(0),
+            tax_amount_item: new Prisma.Decimal(0),
+          }),
+        ],
+      });
+    }
+    const line = (quantity: number) => ({
+      order_item_id: 1,
+      quantity,
+      inventory_action: 'no_return' as const,
+    });
+
+    beforeEach(() => {
+      prisma.orders.findFirst.mockResolvedValue(
+        routeCreditSale([
+          { id: 50, amount: new Prisma.Decimal(200) },
+          { id: 60, amount: new Prisma.Decimal(70) },
+        ]),
+      );
+      prisma.accounts_receivable.findMany.mockResolvedValue([
+        { ar_payments: [abono('100.00', 60)] },
+      ]);
+    });
+
+    it('counts the withheld amount as collected and lets a refund up to it through', async () => {
+      const result = await service.calculate({
+        order_id: 9001,
+        items: [line(3)],
+        include_shipping: false,
+      });
+      expect(result.max_refundable).toBe(300);
+      expect(result.total_refund).toBe(300);
+    });
+
+    it('rejects a refund above cash + withholding with 400', async () => {
+      await expect(
+        service.calculate({ order_id: 9001, items: [line(4)], include_shipping: false }),
+      ).rejects.toThrow('exceeds max refundable amount (300.00)');
+    });
+
+    it('counts a stop settled only by withholding (cash payment of 0)', async () => {
+      prisma.orders.findFirst.mockResolvedValue(
+        routeCreditSale([
+          { id: 50, amount: new Prisma.Decimal(200) },
+          { id: 61, amount: new Prisma.Decimal(0) },
+        ]),
+      );
+      prisma.accounts_receivable.findMany.mockResolvedValue([
+        { ar_payments: [abono('30.00', 61)] },
+      ]);
+      const result = await service.calculate({
+        order_id: 9001,
+        items: [],
+        include_shipping: false,
+      });
+      expect(result.max_refundable).toBe(230);
+    });
+
+    it('without withholding the linked collection still counts once', async () => {
+      prisma.accounts_receivable.findMany.mockResolvedValue([
+        { ar_payments: [abono('70.00', 60)] },
+      ]);
+      const result = await service.calculate({
+        order_id: 9001,
+        items: [],
+        include_shipping: false,
+      });
+      expect(result.max_refundable).toBe(270);
+    });
+  });
 });
 
 describe('RefundCalculationService — cash cancellation ceiling', () => {
