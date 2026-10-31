@@ -629,6 +629,40 @@ describe('RecipesService — cycle detection & explosion', () => {
       expect(result).toMatchObject({ id: 10 });
       expect(Array.isArray(result.items)).toBe(true);
     });
+
+    it('PUT sin `notes` conserva la anotación existente (cliente viejo)', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2] },
+      });
+      items.update.mockClear();
+
+      await service.replaceItems(10, [
+        { id: 1, component_product_id: 2, quantity: 1 },
+      ]);
+
+      expect(items.update).toHaveBeenCalledTimes(1);
+      expect(items.update.mock.calls[0][0].data).not.toHaveProperty('notes');
+    });
+
+    it('PUT con `notes: null` explícito borra la anotación', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2] },
+      });
+      items.update.mockClear();
+
+      await service.replaceItems(10, [
+        { id: 1, component_product_id: 2, quantity: 1, notes: null },
+      ]);
+
+      expect(items.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 1 },
+          data: expect.objectContaining({ notes: null }),
+        }),
+      );
+    });
   });
 });
 
