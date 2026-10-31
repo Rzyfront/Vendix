@@ -163,6 +163,20 @@ const REQUIRED_COLUMNS = [
   // Impuesto del alquiler (migración 20261105120000): mismas lecturas de estación.
   'service_stations.rental_tax_category_id',
   'service_stations.rental_tax_is_inclusive',
+  // CRM M2 (migración 20261106100100): Prisma selecciona estas columnas en toda
+  // lectura de store_users (login, clientes, POS); sin ellas revientan con
+  // ColumnNotFound aunque nadie use el CRM todavía.
+  'store_users.crm_owner_user_id',
+  'store_users.crm_source',
+  'store_users.crm_stage_id',
+  'store_users.crm_last_contact_at',
+  'store_users.whatsapp_consent',
+  'store_users.sms_consent',
+  'store_users.email_consent',
+  'store_users.consent_updated_at',
+  // CRM PR 10 (migración 20261106100500): toda lectura de crm_campaigns/crm_messages las selecciona.
+  'crm_campaigns.template_variables',
+  'crm_messages.subject',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

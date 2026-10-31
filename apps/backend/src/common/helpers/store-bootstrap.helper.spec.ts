@@ -3,6 +3,7 @@ import {
   StoreBootstrapHelper,
   DEFAULT_CASH_REGISTER,
   DEFAULT_KDS,
+  DEFAULT_CRM_PIPELINE,
 } from './store-bootstrap.helper';
 import { OrganizationPrismaService } from '../../prisma/services/organization-prisma.service';
 
@@ -57,6 +58,20 @@ describe('StoreBootstrapHelper — default cash register (QUI-654)', () => {
         create: jest.fn().mockImplementation(({ data }: any) => ({
           id: 700,
           ...data,
+        })),
+      },
+      crm_pipelines: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockImplementation(({ data }: any) => ({
+          id: 500,
+          store_id: data.store_id,
+          name: data.name,
+          is_default: data.is_default,
+          stages: data.stages.create.map((st: any, i: number) => ({
+            id: 600 + i,
+            pipeline_id: 500,
+            ...st,
+          })),
         })),
       },
     };
@@ -271,5 +286,140 @@ describe('StoreBootstrapHelper — default cash register (QUI-654)', () => {
     });
 
     expect(station?.id).toBe(88);
+  });
+});
+
+/**
+ * PLAN-CRM PR 2 — every store is born with the default sales pipeline.
+ *
+ * The migration `20261106100300_crm_seed_default_pipeline` seeds existing
+ * stores; this helper seeds new ones. Both converge on the same guard ("does
+ * the store own ANY pipeline"), so creating a store twice — or running the
+ * migration after the bootstrap — never duplicates the pipeline.
+ */
+describe('StoreBootstrapHelper — default CRM pipeline (PLAN-CRM PR 2)', () => {
+  const STORE_ID = 321;
+  let txMock: any;
+
+  const buildHelper = async (): Promise<StoreBootstrapHelper> => {
+    txMock = {
+      stores: {
+        create: jest.fn().mockImplementation(({ data }: any) => ({
+          id: STORE_ID,
+          slug: 'crm-tienda',
+          name: 'CRM Tienda',
+          industries: data?.industries ?? ['retail'],
+        })),
+        update: jest.fn().mockResolvedValue({ id: STORE_ID }),
+      },
+      addresses: { create: jest.fn() },
+      inventory_locations: {
+        create: jest.fn().mockResolvedValue({ id: 1, store_id: STORE_ID }),
+      },
+      cash_registers: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockImplementation(({ data }: any) => ({ id: 2, ...data })),
+      },
+      kds: { findFirst: jest.fn(), create: jest.fn() },
+      crm_pipelines: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockImplementation(({ data }: any) => ({
+          id: 10,
+          ...data,
+          stages: data.stages.create,
+        })),
+      },
+    };
+    const prismaMock = {
+      $transaction: jest.fn().mockImplementation((cb: any) => cb(txMock)),
+    };
+    const mod: TestingModule = await Test.createTestingModule({
+      providers: [
+        StoreBootstrapHelper,
+        { provide: OrganizationPrismaService, useValue: prismaMock },
+      ],
+    }).compile();
+    return mod.get(StoreBootstrapHelper);
+  };
+
+  it('seeds "Ventas" with the five plan stages in order', async () => {
+    const helper = await buildHelper();
+
+    await helper.ensureDefaultCrmPipeline({ store_id: STORE_ID });
+
+    expect(txMock.crm_pipelines.create).toHaveBeenCalledTimes(1);
+    const { data } = txMock.crm_pipelines.create.mock.calls[0][0];
+    expect(data).toMatchObject({
+      store_id: STORE_ID,
+      name: 'Ventas',
+      is_default: true,
+    });
+    expect(
+      data.stages.create.map((st: any) => [st.name, st.sort_order, st.kind]),
+    ).toEqual([
+      ['Nuevo', 0, 'open'],
+      ['Contactado', 1, 'open'],
+      ['Cotizado', 2, 'open'],
+      ['Ganado', 3, 'won'],
+      ['Perdido', 4, 'lost'],
+    ]);
+    // Every stage carries the store explicitly: the tx client is unscoped.
+    expect(
+      data.stages.create.every((st: any) => st.store_id === STORE_ID),
+    ).toBe(true);
+    expect(DEFAULT_CRM_PIPELINE.name).toBe('Ventas');
+  });
+
+  it('is idempotent — calling it twice never adds a second pipeline', async () => {
+    const helper = await buildHelper();
+    txMock.crm_pipelines.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ id: 10, store_id: STORE_ID, name: 'Ventas' });
+
+    await helper.ensureDefaultCrmPipeline({ store_id: STORE_ID });
+    const second = await helper.ensureDefaultCrmPipeline({ store_id: STORE_ID });
+
+    expect(txMock.crm_pipelines.create).toHaveBeenCalledTimes(1);
+    expect(second.id).toBe(10);
+  });
+
+  it('respects a pipeline the store already owns, whatever its name', async () => {
+    const helper = await buildHelper();
+    txMock.crm_pipelines.findFirst.mockResolvedValue({
+      id: 4,
+      store_id: STORE_ID,
+      name: 'Mayoristas',
+    });
+
+    const pipeline = await helper.ensureDefaultCrmPipeline({ store_id: STORE_ID });
+
+    expect(txMock.crm_pipelines.create).not.toHaveBeenCalled();
+    expect(pipeline.name).toBe('Mayoristas');
+  });
+
+  it('resolves a concurrent P2002 by reading the winner', async () => {
+    const helper = await buildHelper();
+    txMock.crm_pipelines.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 77, store_id: STORE_ID, name: 'Ventas' });
+    txMock.crm_pipelines.create.mockRejectedValueOnce({ code: 'P2002' });
+
+    const pipeline = await helper.ensureDefaultCrmPipeline({ store_id: STORE_ID });
+
+    expect(pipeline.id).toBe(77);
+  });
+
+  it('the bootstrap transaction creates the pipeline for a new store', async () => {
+    const helper = await buildHelper();
+
+    await helper.createStoreWithDefaultLocation({
+      organization_id: 9,
+      store_data: { name: 'CRM Tienda', slug: 'crm-tienda' },
+    });
+
+    expect(txMock.crm_pipelines.create).toHaveBeenCalledTimes(1);
+    expect(txMock.crm_pipelines.create.mock.calls[0][0].data.store_id).toBe(
+      STORE_ID,
+    );
   });
 });

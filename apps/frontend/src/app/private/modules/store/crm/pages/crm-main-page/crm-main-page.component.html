@@ -33,14 +33,14 @@
     @if (loading()) {
       <div class="flex items-center justify-center gap-3 py-16 text-text-secondary">
         <app-icon name="loader" [size]="24" class="animate-spin text-primary" />
-        <span class="text-sm font-medium">Cargando estado del CRM…</span>
+        <span class="text-sm font-medium">Cargando estado de la landing de captación…</span>
       </div>
     } @else if (landing(); as state) {
       @switch (tab()) {
         @case ('estado') {
           <!-- Bloque de Estado & KPIs -->
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <!-- Card 1: Estado del CRM -->
+            <!-- Card 1: Estado de la landing de captación -->
             <div class="rounded-xl border border-border bg-surface p-4 shadow-sm flex flex-col justify-between">
               <div class="flex items-center justify-between">
                 <span class="text-xs font-semibold text-text-secondary uppercase tracking-wider">Estado del Módulo</span>
@@ -117,7 +117,7 @@
           <div class="rounded-2xl border border-border bg-surface p-6 shadow-sm flex flex-col gap-6">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-5">
               <div>
-                <h2 class="text-base font-semibold text-text-primary">¿Cómo funciona la Landing Page CRM?</h2>
+                <h2 class="text-base font-semibold text-text-primary">¿Cómo funciona la landing de captación?</h2>
                 <p class="text-sm text-text-secondary mt-1">
                   Generamos automáticamente una página de captura de clientes optimizada utilizando tus datos de catálogo, logotipo y configuración comercial.
                 </p>
@@ -131,7 +131,7 @@
                   (click)="deactivate()"
                 >
                   <app-icon slot="icon" name="power" [size]="16" />
-                  Desactivar CRM
+                  Desactivar landing
                 </app-button>
               }
             </div>
@@ -166,7 +166,7 @@
               <div class="bg-primary/5 rounded-xl border border-primary/20 p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div class="flex items-center gap-3">
                   <app-icon name="sparkles" [size]="24" class="text-primary shrink-0" />
-                  <p class="text-sm text-text-primary font-medium">Activa tu módulo CRM ahora para crear tu primera landing page asistida por Inteligencia Artificial.</p>
+                  <p class="text-sm text-text-primary font-medium">Activa la landing de captación para crear tu primera landing page asistida por Inteligencia Artificial.</p>
                 </div>
                 <app-button
                   variant="primary"
@@ -174,7 +174,7 @@
                   [loading]="busy()"
                   (click)="activate()"
                 >
-                  Activar CRM Ahora
+                  Activar landing ahora
                 </app-button>
               </div>
             }
