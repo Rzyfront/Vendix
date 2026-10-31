@@ -903,7 +903,7 @@ export class MovementsService {
      * se encola siempre, con el actor del `sale`, hasta que ese actor tenga caja.
      */
     force_outbox?: boolean;
-  }): Promise<RefundCashMovementOutcome> {
+  }, tx?: Prisma.TransactionClient): Promise<RefundCashMovementOutcome> {
     const payload: RefundCashMovementPayload = {
       version: 1,
       refund_id: input.refund_id,
@@ -919,18 +919,22 @@ export class MovementsService {
     // ahora → outbox (el barrido usa la misma cascada).
     const session_id = input.force_outbox
       ? null
-      : await this.resolveCompensationSessionId({
-          store_id: input.store_id,
-          user_id: input.user_id,
-          payment_id: input.payment_id,
-          order_id: input.order_id,
-        });
+      : await this.resolveCompensationSessionId(
+          {
+            store_id: input.store_id,
+            user_id: input.user_id,
+            payment_id: input.payment_id,
+            order_id: input.order_id,
+          },
+          tx,
+        );
     if (session_id == null) {
       const failure_id = await this.enqueueRefundCashMovement(
         payload,
         input.force_outbox
           ? 'PENDING_DELIVERY: refund without acting user, cash movement queued for the sale actor'
           : 'PENDING_DELIVERY: no open cash session for refund cash movement',
+        tx,
       );
       this.logger.error(
         `Refund #${input.refund_id} (order #${input.order_id}): cash movement ` +
@@ -963,6 +967,7 @@ export class MovementsService {
       const failure_id = await this.enqueueRefundCashMovement(
         payload,
         `PENDING_DELIVERY: cash movement insert failed — ${error instanceof Error ? error.message : String(error)}`,
+        tx,
       );
       this.logger.error(
         `Refund #${input.refund_id} (order #${input.order_id}): cash movement ` +
@@ -1064,6 +1069,7 @@ export class MovementsService {
       const failure_id = await this.enqueueCompensationCashMovement(
         payload,
         'PENDING_DELIVERY: no open cash session for compensation cash movement',
+        tx,
       );
       this.logger.error(
         `Compensation ${input.dedupe_key} (order #${input.order_id}): cash ` +
@@ -1092,6 +1098,7 @@ export class MovementsService {
       const failure_id = await this.enqueueCompensationCashMovement(
         payload,
         `PENDING_DELIVERY: cash movement insert failed — ${error instanceof Error ? error.message : String(error)}`,
+        tx,
       );
       this.logger.error(
         `Compensation ${input.dedupe_key} (order #${input.order_id}): cash ` +
@@ -1129,8 +1136,12 @@ export class MovementsService {
   private async enqueueCompensationCashMovement(
     payload: RefundCashMovementPayload,
     message: string,
+    tx?: Prisma.TransactionClient,
   ): Promise<number> {
-    const db = this.prisma.withoutScope();
+    // A4: dentro de una tx del llamador la fila del outbox se escribe con ella,
+    // para que un rollback no deje una salida fantasma en el outbox.
+    const db = (tx ??
+      this.prisma.withoutScope()) as unknown as Prisma.TransactionClient;
     const existing = await db.accounting_entry_failures.findFirst({
       where: {
         handler_key: REFUND_CASH_MOVEMENT_KEY,
@@ -1177,8 +1188,12 @@ export class MovementsService {
   private async enqueueRefundCashMovement(
     payload: RefundCashMovementPayload,
     message: string,
+    tx?: Prisma.TransactionClient,
   ): Promise<number> {
-    const db = this.prisma.withoutScope();
+    // A4: dentro de una tx del llamador la fila del outbox se escribe con ella,
+    // para que un rollback no deje una salida fantasma en el outbox.
+    const db = (tx ??
+      this.prisma.withoutScope()) as unknown as Prisma.TransactionClient;
     const existing = await db.accounting_entry_failures.findFirst({
       where: {
         handler_key: REFUND_CASH_MOVEMENT_KEY,

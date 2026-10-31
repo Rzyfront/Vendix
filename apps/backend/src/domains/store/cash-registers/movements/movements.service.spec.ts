@@ -869,6 +869,31 @@ describe('MovementsService — compensación de caja', () => {
       expect(db.cash_register_movements.create).not.toHaveBeenCalled();
     });
 
+    it('A4: con tx, el encolado al outbox usa el cliente de la tx y no this.prisma', async () => {
+      const mk = () => ({
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 79 }),
+        update: jest.fn(),
+      });
+      const txFailures = mk();
+      const baseFailures = mk();
+      const txDb = { ...makeDb([], []), stores, accounting_entry_failures: txFailures };
+      const { service } = makeService(makeDb([], []), {
+        stores,
+        accounting_entry_failures: baseFailures,
+      });
+
+      const out = await service.recordCompensationCashMovementDurable(
+        input,
+        txDb as any,
+      );
+
+      expect(out).toEqual({ status: 'pending', failure_id: 79, reason: 'no_open_cash_session' });
+      expect(txFailures.create).toHaveBeenCalledTimes(1);
+      expect(baseFailures.create).not.toHaveBeenCalled();
+      expect(baseFailures.findFirst).not.toHaveBeenCalled();
+    });
+
     it('sin ninguna sesión: encola en el outbox con dedupe_key y payload completo', async () => {
       const db = makeDb([], []);
       const failures = {
