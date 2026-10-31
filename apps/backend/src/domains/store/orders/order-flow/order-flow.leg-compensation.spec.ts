@@ -205,4 +205,22 @@ describe('OrderFlowService.cancelLegPayments — compensación de caja (B02)', (
     expect(ledger.filter((m) => m.reference?.includes('sale:'))).toHaveLength(0);
     expect(net()).toBe(0);
   });
+
+  it('A3 (B23): anulado y devuelto a pending liberan financial_idempotency_key (set null) en la misma tx', async () => {
+    const original = {
+      store_payment_method_id: 1, bank_account_id: null, amount: 18500,
+      transaction_id: 'T', gateway_reference: null, paid_at: null, gateway_response: {},
+    };
+    await (service as any).cancelLegPayments(
+      [
+        { payment: { id: 501, gateway_response: {} }, leg: {} },
+        { payment: { id: 502, gateway_response: {} }, leg: {}, confirmedInPlaceOriginal: original },
+      ],
+      'finish_blocked',
+    );
+    const byId = (id: number) =>
+      tx.payments.update.mock.calls.find(([a]: any) => a.where.id === id)[0].data;
+    expect(byId(501)).toEqual(expect.objectContaining({ state: 'cancelled', financial_idempotency_key: null }));
+    expect(byId(502)).toEqual(expect.objectContaining({ state: 'pending', financial_idempotency_key: null }));
+  });
 });

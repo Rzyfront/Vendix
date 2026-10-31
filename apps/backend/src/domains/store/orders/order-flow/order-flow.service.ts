@@ -9801,6 +9801,8 @@ export class OrderFlowService {
             where: { id: payment.id },
             data: {
               state: 'pending',
+              // B23: libera la clave de idempotencia única global para el reintento.
+              financial_idempotency_key: null,
               store_payment_method_id: original.store_payment_method_id ?? null,
               bank_account_id: original.bank_account_id ?? null,
               amount: original.amount,
@@ -9817,6 +9819,8 @@ export class OrderFlowService {
           where: { id: payment.id },
           data: {
             state: 'cancelled',
+            // B23: libera la clave de idempotencia única global para el reintento.
+            financial_idempotency_key: null,
             updated_at: new Date(),
             gateway_response: {
               ...((payment.gateway_response as object) ?? {}),
