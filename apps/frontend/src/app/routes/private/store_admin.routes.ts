@@ -593,6 +593,16 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.TasksComponent,
               ),
           },
+          // CRM segments and campaigns (PLAN-CRM §4.5, §4.7); the APIs are
+          // gated by store:customers:read, store:crm_segments:manage and
+          // store:crm_campaigns:send.
+          {
+            path: 'segments',
+            loadComponent: () =>
+              import('../../private/modules/store/customers/crm/segments/segments.component').then(
+                (c) => c.SegmentsComponent,
+              ),
+          },
           // Landing de captación (QUI-719; módulo interno `crm`)
           {
             path: 'crm',

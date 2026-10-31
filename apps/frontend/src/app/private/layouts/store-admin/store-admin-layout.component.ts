@@ -825,6 +825,13 @@ export class StoreAdminLayoutComponent {
           alwaysVisible: true,
         },
         {
+          // No panel_ui key: shown by permission (MenuFilterService gate).
+          label: 'Segmentos',
+          icon: 'users',
+          route: '/admin/customers/segments',
+          alwaysVisible: true,
+        },
+        {
           label: 'Reseñas',
           icon: 'star',
           route: '/admin/customers/reviews',

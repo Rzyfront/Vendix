@@ -1149,6 +1149,9 @@ export class MenuFilterService {
     if (item.route === '/admin/customers/tasks' && !this.canUseCrm('store:crm_tasks:manage')) {
       return false;
     }
+    if (item.route === '/admin/customers/segments' && !this.canUseCrm('store:customers:read')) {
+      return false;
+    }
     return true;
   }
 
