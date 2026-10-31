@@ -5380,6 +5380,7 @@ describe('OrderFlowService.registerCreditPayment — table projection (B.2/T5)',
         findMany: jest.fn(async () => []),
         update: jest.fn(async () => ({})),
       },
+      $queryRaw: jest.fn(async () => [{ id: 1 }]),
     };
     prismaMock.$transaction = jest.fn((callback: (tx: any) => unknown) => callback(prismaMock));
     const eventEmitter: any = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
@@ -5407,6 +5408,57 @@ describe('OrderFlowService.registerCreditPayment — table projection (B.2/T5)',
       .mockResolvedValue(undefined);
     return { service, prismaMock, eventEmitter, updateOrderState, cashMovement, project };
   };
+
+  it('B29: el saldo se lee dentro de la tx tras bloquear la orden (FOR UPDATE)', async () => {
+    const h = harness(60, 40);
+    const calls: string[] = [];
+    h.prismaMock.$queryRaw.mockImplementation(async () => {
+      calls.push('lock');
+      return [{ id: 1 }];
+    });
+    // Lectura previa (fuera de la tx) con saldo viejo 60; la bloqueada, 100/0 → otro abono ya entró
+    h.prismaMock.orders.findFirst.mockImplementation(async (args: any) => {
+      if (args?.select?.total_paid) {
+        calls.push('locked-read');
+        return { total_paid: 70, remaining_balance: 30 };
+      }
+      return {
+        id: 1, order_number: 'CR-1', state: 'processing', store_id: 4,
+        organization_id: 1, customer_id: 44, currency: 'COP', payment_form: '2',
+        credit_type: 'libre', grand_total: 100, total_paid: 40,
+        remaining_balance: 60, payments: [], order_installments: [],
+      };
+    });
+
+    const error = await h.service
+      .registerCreditPayment(1, CREDIT_DTO)
+      .catch((failure) => failure);
+
+    expect(calls).toEqual(['lock', 'locked-read']);
+    expect(String(error.message)).toContain('exceeds remaining balance');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+  });
+
+  it('B29: total_paid y saldo salen de la lectura bloqueada', async () => {
+    const h = harness(60, 40);
+    h.prismaMock.orders.findFirst.mockImplementation(async (args: any) =>
+      args?.select?.total_paid
+        ? { total_paid: 70, remaining_balance: 90 }
+        : {
+            id: 1, order_number: 'CR-1', state: 'processing', store_id: 4,
+            organization_id: 1, customer_id: 44, currency: 'COP', payment_form: '2',
+            credit_type: 'libre', grand_total: 100, total_paid: 40,
+            remaining_balance: 90, payments: [], order_installments: [],
+          },
+    );
+
+    await h.service.registerCreditPayment(1, { ...CREDIT_DTO, amount: 20 });
+
+    expect(h.prismaMock.orders.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { total_paid: 90, remaining_balance: 70 },
+    });
+  });
 
   it('rechaza el abono con SPLIT_ACCOUNT_LOCKED si la orden tiene cuentas independientes', async () => {
     const h = harness(60, 40);
@@ -5606,6 +5658,7 @@ describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_0
         findMany: jest.fn(async () => []),
         update: jest.fn(async () => ({})),
       },
+      $queryRaw: jest.fn(async () => [{ id: 1 }]),
     };
     const settingsService = {
       getSettings: jest.fn(async () => ({

@@ -8728,6 +8728,30 @@ export class OrderFlowService {
             paymentMethod.system_payment_method.processing_mode,
           )
         : null;
+      // B29: bloquear la orden y leer el saldo dentro de la tx. Orden de locks
+      // igual al cierre de sesión (sesión → orden). La lectura de arriba solo
+      // sirvió para validar; el saldo que manda es el bloqueado.
+      await tx.$queryRaw`
+        SELECT id FROM orders
+        WHERE id = ${orderId} AND store_id = ${order.store_id}
+        FOR UPDATE
+      `;
+      const locked = await tx.orders.findFirst({
+        where: { id: orderId, store_id: order.store_id },
+        select: { total_paid: true, remaining_balance: true },
+      });
+      if (!locked) {
+        throw new NotFoundException('Order not found');
+      }
+      const lockedRemaining = Number(locked.remaining_balance);
+      if (lockedRemaining <= 0) {
+        throw new BadRequestException('This order has no remaining balance');
+      }
+      if (paymentAmount > lockedRemaining + 0.01) {
+        throw new BadRequestException(
+          `Payment amount (${paymentAmount}) exceeds remaining balance (${lockedRemaining})`,
+        );
+      }
       const payment = await tx.payments.create({
         data: {
           order_id: orderId,
@@ -8753,8 +8777,8 @@ export class OrderFlowService {
         });
       }
 
-      const newTotalPaid = Number(order.total_paid) + paymentAmount;
-      const newRemainingBalance = Math.max(remainingBalance - paymentAmount, 0);
+      const newTotalPaid = Number(locked.total_paid) + paymentAmount;
+      const newRemainingBalance = Math.max(lockedRemaining - paymentAmount, 0);
       await tx.orders.update({
         where: { id: orderId },
         data: {
