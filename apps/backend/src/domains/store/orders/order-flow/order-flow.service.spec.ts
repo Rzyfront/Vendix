@@ -3937,6 +3937,126 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
   });
 });
 
+describe('OrderFlowService.resumeFinishPendingAfterPayment — R3 #1 saldo vivo', () => {
+  const MARKER = {
+    kind: 'pay_finish',
+    at: '2026-10-31T12:00:00.000Z',
+    payment_ids: [999],
+    user_id: null,
+    settled_balance: { total_paid: 4000, remaining_balance: 0 },
+    void_marker_ids: [],
+    deferred_cash_signal_id: null,
+    from_state: 'created',
+    error: 'deadlock detected',
+  };
+
+  const buildService = (
+    order: { grand_total: number; payments: Array<{ state: string; amount: number }> },
+    refunds: Array<{ amount: number }> = [],
+  ) => {
+    const prismaMock: any = {
+      refunds: { findMany: jest.fn().mockResolvedValue(refunds) },
+      orders: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+      id: 1,
+      state: 'processing',
+      store_id: 4,
+      grand_total: order.grand_total,
+      payments: order.payments,
+      internal_notes: JSON.stringify({
+        _flow_metadata: { finish_pending_after_payment: MARKER },
+        notes: '',
+      }),
+    });
+    const update = jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: 1, state: 'finished' });
+    const metadata = jest
+      .spyOn(service as any, 'appendFlowMetadata')
+      .mockResolvedValue(undefined);
+    for (const name of [
+      'voidSettlementPendingMarkers',
+      'computeAndPersistEta',
+      'emitPosSaleCompletedIfFullyPaid',
+      'projectPaidOrderToTable',
+    ]) {
+      jest.spyOn(service as any, name).mockResolvedValue(undefined);
+    }
+    return { service, prismaMock, update, metadata };
+  };
+
+  it('el total subió en la ventana (B22): NO finaliza con el saldo congelado; deja processing con el saldo real', async () => {
+    const { service, prismaMock, update, metadata } = buildService({
+      grand_total: 5000,
+      payments: [{ state: 'succeeded', amount: 4000 }],
+    });
+
+    await expect(service.resumeFinishPendingAfterPayment(1)).resolves.toBe('resolved');
+
+    expect(update).not.toHaveBeenCalled();
+    expect(prismaMock.orders.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: expect.objectContaining({ total_paid: 4000, remaining_balance: 1000 }),
+    });
+    expect(metadata).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        finish_pending_after_payment: null,
+        finish_pending_resolved: expect.objectContaining({
+          outcome: 'balance_due',
+          remaining_balance: 1000,
+        }),
+      }),
+    );
+  });
+
+  it('reembolso completado en la ventana: el neto (pagos − reembolsos) deja saldo y la orden no se finaliza', async () => {
+    const { service, prismaMock, update } = buildService(
+      { grand_total: 4000, payments: [{ state: 'partially_refunded', amount: 4000 }] },
+      [{ amount: 500 }],
+    );
+
+    await service.resumeFinishPendingAfterPayment(1);
+
+    expect(prismaMock.refunds.findMany).toHaveBeenCalledWith({
+      where: { order_id: 1, state: 'completed' },
+      select: { amount: true },
+    });
+    expect(update).not.toHaveBeenCalled();
+    expect(prismaMock.orders.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: expect.objectContaining({ total_paid: 3500, remaining_balance: 500 }),
+    });
+  });
+
+  it('sin cambios en la ventana: finaliza con el saldo recalculado de los pagos vivos', async () => {
+    const { service, prismaMock, update } = buildService({
+      grand_total: 4000,
+      payments: [
+        { state: 'succeeded', amount: 4000 },
+        { state: 'cancelled', amount: 4000 },
+      ],
+    });
+
+    await service.resumeFinishPendingAfterPayment(1);
+
+    expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith(
+      1,
+      'finished',
+      expect.objectContaining({ total_paid: 4000, remaining_balance: 0 }),
+      { historyFromState: 'created' },
+    );
+  });
+});
+
 /**
  * 1060 paso 2 (RBAC) — el endpoint de reversa exige el permiso propio
  * `store:orders:order_flow:cancel_delivered` (no hereda `order_flow:create`
@@ -8688,8 +8808,12 @@ describe('OrderFlowService.resumeFinishPendingAfterPayment (B07/B11)', () => {
 
   const build = (order: Record<string, unknown>) => {
     const movements = { deliverDeferredSaleCashMovement: jest.fn().mockResolvedValue(undefined) };
+    const prisma = {
+      refunds: { findMany: jest.fn().mockResolvedValue([]) },
+      orders: { update: jest.fn().mockResolvedValue({}) },
+    };
     const service = new OrderFlowService(
-      {} as unknown as StorePrismaService,
+      prisma as unknown as StorePrismaService,
       { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
       {} as any,
       {} as any,
@@ -8699,7 +8823,13 @@ describe('OrderFlowService.resumeFinishPendingAfterPayment (B07/B11)', () => {
       {} as any,
       { logCustom: jest.fn() } as any,
     );
-    jest.spyOn(service, 'getOrder').mockResolvedValue({ id: 7, store_id: 4, ...order } as any);
+    jest.spyOn(service, 'getOrder').mockResolvedValue({
+      id: 7,
+      store_id: 4,
+      grand_total: 4000,
+      payments: [{ state: 'succeeded', amount: 4000 }],
+      ...order,
+    } as any);
     const spies = {
       update: jest.spyOn(service as any, 'updateOrderState').mockResolvedValue({}),
       voidMarkers: jest.spyOn(service as any, 'voidSettlementPendingMarkers').mockResolvedValue(undefined),

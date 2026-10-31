@@ -3429,26 +3429,30 @@ export class OrderFlowService {
     state: string,
     marker: FinishPendingAfterPaymentMarker,
   ): Promise<'resolved'> {
+    let outcome: 'finished' | 'balance_due' | undefined;
+    let liveBalance: { total_paid: number; remaining_balance: number } | undefined;
     if (marker.kind === 'table_settlement') {
       await this.settlePaidTableOrder(orderId, marker.user_id ?? undefined);
     } else if (state === 'processing') {
-      this.validateTransition('processing', 'finished');
-      const finishedAt = new Date();
-      await this.updateOrderState(
-        orderId,
-        'finished',
-        {
-          paid_at: finishedAt,
-          finished_at: finishedAt,
-          ...(marker.settled_balance ?? {}),
-        },
-        { historyFromState: (marker.from_state as OrderState | null) ?? null },
-      );
-      await this.voidSettlementPendingMarkers(marker.void_marker_ids ?? []);
-      await this.computeAndPersistEta(orderId, finishedAt);
-      await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.finish_resumed');
-      if (marker.payment_ids[0] != null) {
-        await this.projectPaidOrderToTable(orderId, marker.payment_ids[0]);
+      // R3 #1 — the balance frozen in the marker may be stale: within the
+      // window the order can be edited up (B22) or refunded. The finish is
+      // judged with the live payments, never with `marker.settled_balance`.
+      liveBalance = await this.computeLiveSettledBalance(orderId);
+      if (liveBalance.remaining_balance > 0.01) {
+        // Money still owed: the order stays `processing` with its real
+        // balance so the cashier sees "cobrar". The deferred `sale` stays in
+        // its outbox until that later finish (it waits for `ready_state`).
+        await this.prisma.orders.update({
+          where: { id: orderId },
+          data: { ...liveBalance, updated_at: new Date() },
+        });
+        outcome = 'balance_due';
+        this.logger.warn(
+          `[finish_pending] order=${orderId} not finished: live balance ${liveBalance.remaining_balance} due (marker froze ${marker.settled_balance?.remaining_balance ?? 'n/a'})`,
+        );
+      } else {
+        await this.finishResumedPayOrder(orderId, marker, liveBalance);
+        outcome = 'finished';
       }
     }
 
@@ -3472,10 +3476,57 @@ export class OrderFlowService {
         at: new Date().toISOString(),
         kind: marker.kind,
         state: (await this.getOrder(orderId)).state,
+        ...(outcome ? { outcome } : {}),
+        ...(outcome === 'balance_due' ? { remaining_balance: liveBalance!.remaining_balance } : {}),
       },
     });
     this.logger.log(`[finish_pending] order=${orderId} ${marker.kind} resolved`);
     return 'resolved';
+  }
+
+  /** `pay_finish` closing step: `processing → finished` with the live balance. */
+  private async finishResumedPayOrder(
+    orderId: number,
+    marker: FinishPendingAfterPaymentMarker,
+    liveBalance: { total_paid: number; remaining_balance: number },
+  ): Promise<void> {
+    this.validateTransition('processing', 'finished');
+    const finishedAt = new Date();
+    await this.updateOrderState(
+      orderId,
+      'finished',
+      { paid_at: finishedAt, finished_at: finishedAt, ...liveBalance },
+      { historyFromState: (marker.from_state as OrderState | null) ?? null },
+    );
+    await this.voidSettlementPendingMarkers(marker.void_marker_ids ?? []);
+    await this.computeAndPersistEta(orderId, finishedAt);
+    await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.finish_resumed');
+    if (marker.payment_ids[0] != null) {
+      await this.projectPaidOrderToTable(orderId, marker.payment_ids[0]);
+    }
+  }
+
+  /** R3 #1 — balance from the live rows: Σ settled payments − Σ completed
+   * refunds (same net as B22's `assertTotalNotBelowPaid`) against the current
+   * `grand_total`. */
+  private async computeLiveSettledBalance(
+    orderId: number,
+  ): Promise<{ total_paid: number; remaining_balance: number }> {
+    const order = await this.getOrder(orderId);
+    const gross = (order.payments ?? [])
+      .filter((p) => SETTLED_PAYMENT_STATES.has(p.state))
+      .reduce((sum, p) => sum.plus(new Prisma.Decimal(p.amount ?? 0)), new Prisma.Decimal(0));
+    const refunds = await this.prisma.refunds.findMany({
+      where: { order_id: orderId, state: 'completed' },
+      select: { amount: true },
+    });
+    const refunded = refunds.reduce(
+      (sum, r) => sum.plus(new Prisma.Decimal(r.amount ?? 0)),
+      new Prisma.Decimal(0),
+    );
+    const net = Prisma.Decimal.max(gross.minus(refunded), 0);
+    const remaining = Prisma.Decimal.max(new Prisma.Decimal(order.grand_total ?? 0).minus(net), 0);
+    return { total_paid: net.toNumber(), remaining_balance: remaining.toNumber() };
   }
 
   /** B11 — leaves the B07 marker on an order whose money is firm but whose
