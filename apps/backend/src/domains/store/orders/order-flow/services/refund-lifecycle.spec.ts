@@ -433,7 +433,10 @@ describe('RefundCalculationService — techo pendiente-aware + cancelled_at (pas
   });
 
   const makeService = (row: any) => {
-    const prisma = { orders: { findFirst: jest.fn().mockResolvedValue(row) } };
+    const prisma = {
+      orders: { findFirst: jest.fn().mockResolvedValue(row) },
+      accounts_receivable: { findMany: jest.fn().mockResolvedValue([]) },
+    };
     return { service: new RefundCalculationService(prisma as any), prisma };
   };
 

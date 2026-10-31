@@ -158,6 +158,45 @@ export interface CalculateRefundParams {
 export class RefundCalculationService {
   constructor(private readonly prisma: StorePrismaService) {}
 
+  /**
+   * B19/H1 — lo cobrado = pagos vivos de la orden + abonos de su CxC. El abono
+   * de una venta a crédito solo crea `ar_payments` (no fila en `payments`);
+   * si el abono apunta a un pago ya contado, no se suma dos veces.
+   */
+  private async paidTotal(
+    order: {
+      id: number;
+      store_id: number;
+      payments?: { id: number; amount: Prisma.Decimal | number }[];
+    },
+    client: Prisma.TransactionClient | StorePrismaService,
+  ): Promise<number> {
+    const payments = order.payments ?? [];
+    const counted_payment_ids = new Set(payments.map((p) => p.id));
+    let paid = payments.reduce(
+      (sum, p) => sum.plus(p.amount),
+      new Prisma.Decimal(0),
+    );
+
+    const receivables = await client.accounts_receivable.findMany({
+      where: {
+        store_id: order.store_id,
+        source_type: { in: ['credit_sale', 'order'] },
+        source_id: order.id,
+      },
+      select: { ar_payments: { select: { payment_id: true, amount: true } } },
+    });
+    for (const ar of receivables) {
+      for (const abono of ar.ar_payments) {
+        if (abono.payment_id != null && counted_payment_ids.has(abono.payment_id)) {
+          continue;
+        }
+        paid = paid.plus(abono.amount);
+      }
+    }
+    return paid.toNumber();
+  }
+
   async calculate(
     params: CalculateRefundParams,
     client: Prisma.TransactionClient | StorePrismaService = this.prisma,
@@ -196,7 +235,7 @@ export class RefundCalculationService {
               in: ['succeeded', 'captured', 'partially_refunded', 'refunded'],
             },
           },
-          select: { amount: true },
+          select: { id: true, amount: true },
         },
         refunds: {
           where: include_pending_states
@@ -240,13 +279,9 @@ export class RefundCalculationService {
     const grand_total = Number(order.grand_total);
     // B19 — no se puede devolver más de lo que entró: en órdenes con saldo
     // parcial o a crédito `grand_total` es mayor que lo cobrado.
-    const paid_total = (order.payments ?? []).reduce(
-      (sum, p) => sum + Number(p.amount),
-      0,
-    );
     const refund_base = skip_paid_cap
       ? grand_total
-      : Math.min(grand_total, paid_total);
+      : Math.min(grand_total, await this.paidTotal(order, client));
     const max_refundable = refund_base - already_refunded;
     const subtotal_amount = Number(order.subtotal_amount) || 0;
     const discount_amount = Number(order.discount_amount) || 0;

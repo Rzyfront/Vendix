@@ -9,7 +9,10 @@ import { RefundCalculationService } from './refund-calculation.service';
  * devuelto del envío bruto. No cambia `total_refund` ni `tax_refund`.
  */
 describe('RefundCalculationService — impuesto del envío', () => {
-  const prisma = { orders: { findFirst: jest.fn() } };
+  const prisma = {
+    orders: { findFirst: jest.fn() },
+    accounts_receivable: { findMany: jest.fn().mockResolvedValue([]) },
+  };
   const service = new RefundCalculationService(prisma as unknown as StorePrismaService);
 
   function order(overrides: Record<string, unknown> = {}) {
@@ -30,7 +33,10 @@ describe('RefundCalculationService — impuesto del envío', () => {
   }
   const item = (id: number) => ({ order_item_id: id, quantity: 1, inventory_action: 'no_return' as const });
 
-  beforeEach(() => jest.resetAllMocks());
+  beforeEach(() => {
+    jest.resetAllMocks();
+    prisma.accounts_receivable.findMany.mockResolvedValue([]);
+  });
 
   it('devolución total con envío: todo el impuesto del envío', async () => {
     prisma.orders.findFirst.mockResolvedValue(order({
