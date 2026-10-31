@@ -1554,55 +1554,52 @@ export class RefundFlowService {
         let cash_movement: RefundCashMovementNotice | undefined;
         if (refundCompleted) {
           const tramos = movementTramos;
-          // B18 — sin usuario (job, integración) el movimiento no se omite: se
-          // encola a nombre del actor del `sale` del pago.
+          // B18 — sin usuario (job, webhook) el movimiento no se omite: se
+          // encola a nombre del actor del `sale` del pago (o del creador de la
+          // orden). Sin ninguno, se encola igual para revisión (NO_ACTOR):
+          // nunca queda fuera de la caja y de la cola a la vez.
           const movementUserId =
             userId ??
             (await this.resolveSaleActorId(
+              order.store_id,
               orderId,
               tramos.map((t) => t.payment_id),
             ));
           const cashTramos = tramos.filter((t) => t.method === 'cash');
-          if (movementUserId == null) {
+          if (movementUserId == null && cashTramos.length > 0) {
             this.logger.error(
-              `Refund #${completedRefund.id} (order #${orderId}): no acting user and no sale actor — cash movement cannot be queued`,
+              `Refund #${completedRefund.id} (order #${orderId}): no acting user and no sale actor — cash movement queued for manual review`,
             );
-            if (cashTramos.length > 0) {
-              cash_movement = {
-                status: 'pending',
-                failure_id: null,
-                reason: 'no_actor',
-              };
-            }
-          } else {
-            // B25 — un movimiento por pago en efectivo, cada uno con su
-            // `payment_id`. Paso 4: entrega durable y awaited; el aviso de la
-            // respuesta resume los tramos (el primero no registrado manda).
-            for (const tramo of cashTramos) {
-              const notice = await this.recordRefundCashRegisterMovement({
-                organization_id: order.stores?.organization_id,
-                store_id: order.store_id,
-                user_id: movementUserId,
-                refund_id: completedRefund.id,
-                order_id: orderId,
-                payment_id: tramo.payment_id,
-                amount: tramo.amount,
-                channel: 'cash',
-                force_outbox: userId == null,
-              });
-              if (cash_movement === undefined || cash_movement.status === 'recorded') {
-                cash_movement = notice;
-              }
-            }
-            await this.recordNonCashRefundMovements({
-              organization_id: order.stores?.organization_id ?? null,
+          }
+          // B25 — un movimiento por pago en efectivo, cada uno con su
+          // `payment_id`. Paso 4: entrega durable y awaited; el aviso de la
+          // respuesta resume los tramos (el primero no registrado manda).
+          for (const tramo of cashTramos) {
+            const notice = await this.recordRefundCashRegisterMovement({
+              organization_id: order.stores?.organization_id,
               store_id: order.store_id,
               user_id: movementUserId,
               refund_id: completedRefund.id,
               order_id: orderId,
-              tramos: tramos.filter((t) => t.method !== 'cash'),
+              payment_id: tramo.payment_id,
+              amount: tramo.amount,
+              channel: 'cash',
+              force_outbox: userId == null,
             });
+            if (cash_movement === undefined || cash_movement.status === 'recorded') {
+              cash_movement = notice;
+            }
           }
+          // Non-cash tramos never touch the drawer total; without an actor
+          // there is no session to note them in.
+          if (movementUserId != null) await this.recordNonCashRefundMovements({
+            organization_id: order.stores?.organization_id ?? null,
+            store_id: order.store_id,
+            user_id: movementUserId,
+            refund_id: completedRefund.id,
+            order_id: orderId,
+            tramos: tramos.filter((t) => t.method !== 'cash'),
+          });
         }
 
         return cash_movement === undefined
@@ -2147,32 +2144,22 @@ export class RefundFlowService {
   }
 
   /**
-   * B18 — actor al que se atribuye el movimiento de caja de un refund sin usuario:
-   * el `user_id` del `sale` de alguno de sus pagos (o, si no, de la orden).
+   * B18 — actor al que se atribuye el movimiento de caja de un refund sin
+   * usuario (ver `MovementsService.resolveSaleActorId`: sin scope, filtrado por
+   * tienda). Un fallo de lectura no tumba el refund ya committed: `null` y el
+   * movimiento se encola para revisión.
    */
   private async resolveSaleActorId(
+    storeId: number,
     orderId: number,
     paymentIds: (number | null)[],
   ): Promise<number | null> {
-    const ids = paymentIds.filter((id): id is number => id != null);
     try {
-      const sale = await this.prisma.cash_register_movements.findFirst({
-        where: {
-          type: 'sale',
-          order_id: orderId,
-          ...(ids.length > 0 ? { payment_id: { in: ids } } : {}),
-        },
-        orderBy: { id: 'asc' },
-        select: { user_id: true },
+      return await this.movementsService.resolveSaleActorId({
+        store_id: storeId,
+        order_id: orderId,
+        payment_ids: paymentIds,
       });
-      if (sale?.user_id) return sale.user_id;
-      if (ids.length === 0) return null;
-      const any_sale = await this.prisma.cash_register_movements.findFirst({
-        where: { type: 'sale', order_id: orderId },
-        orderBy: { id: 'asc' },
-        select: { user_id: true },
-      });
-      return any_sale?.user_id ?? null;
     } catch (error) {
       this.logger.error(
         `Order #${orderId}: sale actor lookup failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -2363,7 +2350,8 @@ export class RefundFlowService {
   private async recordRefundCashRegisterMovement(input: {
     organization_id: number | null | undefined;
     store_id: number;
-    user_id: number;
+    /** `null` (B18): no actor at all; the durable queues it for review. */
+    user_id: number | null;
     refund_id: number;
     order_id: number;
     payment_id: number | null;

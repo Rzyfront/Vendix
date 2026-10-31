@@ -32,6 +32,8 @@ import { MAX_MANUAL_MOVEMENT_AMOUNT } from '../dto/create-movement.dto';
  */
 export const REFUND_CASH_MOVEMENT_KEY = 'refund_cash_movement_v1';
 export const REFUND_CASH_MOVEMENT_SOURCE = 'refund.cash_movement';
+/** B18: outbox refund row with no actor to book it to. */
+export const REFUND_NO_ACTOR_PREFIX = 'PENDING_REVIEW_NO_ACTOR';
 export const DEFERRED_SALE_CASH_MOVEMENT_KEY = 'deferred_sale_cash_movement_v1';
 export const DEFERRED_SALE_CASH_MOVEMENT_SOURCE = 'order.deferred_cash_movement';
 
@@ -63,7 +65,8 @@ export interface RefundCashMovementPayload {
   order_id: number;
   store_id: number;
   organization_id: number;
-  user_id: number;
+  /** `null` (B18): nobody to book it to; the row stays queued for review. */
+  user_id: number | null;
   payment_id: number | null;
   amount: number;
   /** Canal efectivo real (`cash`), no un literal hardcodeado. */
@@ -891,10 +894,41 @@ export class MovementsService {
    * (este servicio no puede inyectar `SessionsService`: ciclo). Sin sesión
    * destino → outbox directo.
    */
+  /**
+   * B17/B18 — who a cash refund/cancellation without a request user is booked
+   * to: the cashier of the `sale` of one of its payments, else the order's
+   * creator. Webhooks and jobs run without store context, so this reads
+   * unscoped and filters by `store_id` explicitly. `null` = nobody.
+   */
+  async resolveSaleActorId(input: {
+    store_id: number;
+    order_id: number;
+    payment_ids?: (number | null)[];
+  }): Promise<number | null> {
+    const db = this.prisma.withoutScope();
+    const ids = (input.payment_ids ?? []).filter((id): id is number => id != null);
+    const sale_of = (where: Prisma.cash_register_movementsWhereInput) =>
+      db.cash_register_movements.findFirst({
+        where: { store_id: input.store_id, type: 'sale', order_id: input.order_id, ...where },
+        orderBy: { id: 'asc' },
+        select: { user_id: true },
+      });
+    const sale =
+      (ids.length > 0 ? await sale_of({ payment_id: { in: ids } }) : null) ??
+      (await sale_of({}));
+    if (sale?.user_id) return sale.user_id;
+    const order = await db.orders.findFirst({
+      where: { id: input.order_id, store_id: input.store_id },
+      select: { created_by_user_id: true },
+    });
+    return order?.created_by_user_id ?? null;
+  }
+
   async recordRefundCashMovementDurable(input: {
     organization_id: number;
     store_id: number;
-    user_id: number;
+    /** `null` only with `force_outbox` (B18: no request user and no actor). */
+    user_id: number | null;
     refund_id: number;
     order_id: number;
     payment_id: number | null;
@@ -919,12 +953,13 @@ export class MovementsService {
     };
     // Cascada B03: sesión abierta del operador. `null` = nadie puede recibirlo
     // ahora → outbox (el barrido usa la misma cascada).
-    const session_id = input.force_outbox
+    const actor_id = input.user_id;
+    const session_id = input.force_outbox || actor_id == null
       ? null
       : await this.resolveCompensationSessionId(
           {
             store_id: input.store_id,
-            user_id: input.user_id,
+            user_id: actor_id,
             payment_id: input.payment_id,
             order_id: input.order_id,
           },
@@ -933,9 +968,11 @@ export class MovementsService {
     if (session_id == null) {
       const failure_id = await this.enqueueRefundCashMovement(
         payload,
-        input.force_outbox
-          ? 'PENDING_DELIVERY: refund without acting user, cash movement queued for the sale actor'
-          : 'PENDING_DELIVERY: no open cash session for refund cash movement',
+        actor_id == null
+          ? `${REFUND_NO_ACTOR_PREFIX}: refund without acting user nor sale actor, cash movement queued for manual review`
+          : input.force_outbox
+            ? 'PENDING_DELIVERY: refund without acting user, cash movement queued for the sale actor'
+            : 'PENDING_DELIVERY: no open cash session for refund cash movement',
         tx,
       );
       this.logger.error(
@@ -952,7 +989,7 @@ export class MovementsService {
     try {
       const movement = await this.recordRefundMovement(session_id, {
         store_id: input.store_id,
-        user_id: input.user_id,
+        user_id: actor_id!,
         amount: input.amount,
         payment_method: input.channel,
         order_id: input.order_id,
@@ -1260,6 +1297,13 @@ export class MovementsService {
           candidate_payload.delivery_scope === CASH_MOVEMENT_DELIVERY_SCOPE;
         let session_id: number | null = null;
         if (is_candidate_delivery) {
+          // B18: no actor to book it to; it stays queued (attempts counted)
+          // until someone reviews it. Never a drawer picked at random.
+          if (candidate_payload.user_id == null) {
+            throw new Error(
+              `${REFUND_NO_ACTOR_PREFIX}: refund #${candidate_payload.refund_id} (order #${candidate_payload.order_id}) has no actor; manual review`,
+            );
+          }
           session_id = await this.resolveCompensationSessionId(
             {
               store_id: candidate_payload.store_id,
@@ -1362,7 +1406,9 @@ export class MovementsService {
           data: {
             session_id: session.id,
             store_id: payload.store_id,
-            user_id: payload.user_id,
+            // Non-null: the candidate guard above rejects a payload without
+            // actor and the reread payload must equal the candidate.
+            user_id: payload.user_id!,
             type: 'refund',
             amount: payload.amount,
             payment_method,

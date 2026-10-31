@@ -36,7 +36,11 @@ describe('RefundFlowService — caja del reembolso (B18, B25)', () => {
   let mockCalculationService: any;
   let mockCoverageService: { recomputeLineCache: jest.Mock };
   let mockGateway: { reversePaymentWithProcessor: jest.Mock };
-  let movements: { recordRefundCashMovementDurable: jest.Mock; recordNonCashRefundMovement: jest.Mock };
+  let movements: {
+    recordRefundCashMovementDurable: jest.Mock;
+    recordNonCashRefundMovement: jest.Mock;
+    resolveSaleActorId: jest.Mock;
+  };
 
   const baseCalculation = {
     items: [],
@@ -77,6 +81,7 @@ describe('RefundFlowService — caja del reembolso (B18, B25)', () => {
     movements = {
       recordRefundCashMovementDurable: jest.fn().mockResolvedValue({ status: 'recorded', movement_id: 9 }),
       recordNonCashRefundMovement: jest.fn().mockResolvedValue({ status: 'recorded', movement_id: 10 }),
+      resolveSaleActorId: jest.fn().mockResolvedValue(null),
     };
     mockPrisma = {
       orders: { findFirst: jest.fn(), update: jest.fn() },
@@ -171,10 +176,16 @@ describe('RefundFlowService — caja del reembolso (B18, B25)', () => {
   it('B18: sin usuario encola en el outbox con el actor del sale (force_outbox), no omite', async () => {
     jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined as any);
     withOrder([cashPayment(100, 5000)]);
-    mockPrisma.cash_register_movements.findFirst.mockResolvedValue({ user_id: 42 });
+    movements.resolveSaleActorId.mockResolvedValue(42);
 
     await service.createRefund(1, dto() as any);
 
+    // Webhook/job: the lookup is store-filtered (no store context to lean on).
+    expect(movements.resolveSaleActorId).toHaveBeenCalledWith({
+      store_id: 10,
+      order_id: 1,
+      payment_ids: [100],
+    });
     expect(movements.recordRefundCashMovementDurable).toHaveBeenCalledWith(
       expect.objectContaining({
         user_id: 42,
@@ -183,6 +194,36 @@ describe('RefundFlowService — caja del reembolso (B18, B25)', () => {
         channel: 'cash',
         force_outbox: true,
       }),
+    );
+  });
+
+  it('B18: sin usuario ni actor el efectivo igual se encola (user_id null), nunca failure_id null', async () => {
+    jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined as any);
+    withOrder([cashPayment(100, 5000)]);
+    movements.resolveSaleActorId.mockResolvedValue(null);
+    movements.recordRefundCashMovementDurable.mockResolvedValue({
+      status: 'pending', failure_id: 77, reason: 'no_open_cash_session',
+    });
+
+    const result: any = await service.createRefund(1, dto() as any);
+
+    expect(movements.recordRefundCashMovementDurable).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: null, payment_id: 100, force_outbox: true }),
+    );
+    expect(result.cash_movement).toEqual(
+      expect.objectContaining({ status: 'pending', failure_id: 77 }),
+    );
+  });
+
+  it('B18: si el lookup del actor falla, el refund committed no cae y el efectivo se encola', async () => {
+    jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined as any);
+    withOrder([cashPayment(100, 5000)]);
+    movements.resolveSaleActorId.mockRejectedValue(new Error('Store context required'));
+
+    await service.createRefund(1, dto() as any);
+
+    expect(movements.recordRefundCashMovementDurable).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: null, force_outbox: true }),
     );
   });
 

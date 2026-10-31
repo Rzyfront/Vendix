@@ -618,6 +618,34 @@ describe('MovementsService — compensación de caja', () => {
       });
     });
 
+    it('B18: sin actor (user_id null) igual encola, marcado para revisión, sin tocar ninguna caja', async () => {
+      const db = makeDb(
+        [{ id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      const failures = {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 63 }),
+        update: jest.fn(),
+      };
+      const { service } = makeService(db, { accounting_entry_failures: failures });
+
+      const out = await service.recordRefundCashMovementDurable({
+        ...input,
+        user_id: null,
+        force_outbox: true,
+      });
+
+      expect(out).toMatchObject({ status: 'pending', failure_id: 63 });
+      expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+      expect(failures.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          error_message: expect.stringContaining('PENDING_REVIEW_NO_ACTOR'),
+          event_payload: expect.objectContaining({ user_id: null, payment_id: 55 }),
+        }),
+      });
+    });
+
     it('B25: dos pagos en efectivo del mismo refund → dos filas de outbox (dedupe por pago)', async () => {
       const db = makeDb([], []);
       const failures = {
@@ -1236,5 +1264,53 @@ describe('MovementsService — señal durable de venta diferida F-006', () => {
       where: { id: input.failure_id },
       data: expect.objectContaining({ resolved_at: expect.any(Date) }),
     });
+  });
+});
+
+describe('MovementsService.resolveSaleActorId (B17/B18)', () => {
+  const build = (sales: Array<{ user_id: number } | null>, order: { created_by_user_id: number | null } | null) => {
+    const unscoped = {
+      cash_register_movements: { findFirst: jest.fn() },
+      orders: { findFirst: jest.fn().mockResolvedValue(order) },
+    };
+    for (const sale of sales) unscoped.cash_register_movements.findFirst.mockResolvedValueOnce(sale);
+    const prisma = { withoutScope: jest.fn().mockReturnValue(unscoped) };
+    return { service: new MovementsService(prisma as any, { emit: jest.fn() } as any), unscoped };
+  };
+
+  it('lee sin scope y filtra por tienda: el cajero del sale del pago', async () => {
+    const { service, unscoped } = build([{ user_id: 42 }], null);
+
+    await expect(
+      service.resolveSaleActorId({ store_id: 7, order_id: 9, payment_ids: [55, null] }),
+    ).resolves.toBe(42);
+
+    expect(unscoped.cash_register_movements.findFirst).toHaveBeenCalledWith({
+      where: { store_id: 7, type: 'sale', order_id: 9, payment_id: { in: [55] } },
+      orderBy: { id: 'asc' },
+      select: { user_id: true },
+    });
+    expect(unscoped.orders.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('sin sale del pago cae al sale de la orden y luego al creador de la orden (misma tienda)', async () => {
+    const { service, unscoped } = build([null, null], { created_by_user_id: 13 });
+
+    await expect(
+      service.resolveSaleActorId({ store_id: 7, order_id: 9, payment_ids: [55] }),
+    ).resolves.toBe(13);
+
+    expect(unscoped.cash_register_movements.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: { store_id: 7, type: 'sale', order_id: 9 } }),
+    );
+    expect(unscoped.orders.findFirst).toHaveBeenCalledWith({
+      where: { id: 9, store_id: 7 },
+      select: { created_by_user_id: true },
+    });
+  });
+
+  it('sin sale ni creador devuelve null', async () => {
+    const { service } = build([null], null);
+    await expect(service.resolveSaleActorId({ store_id: 7, order_id: 9 })).resolves.toBeNull();
   });
 });

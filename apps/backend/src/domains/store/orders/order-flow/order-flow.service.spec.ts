@@ -3989,7 +3989,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
   let prismaMock: PrismaMock;
   let settings: { getSettings: jest.Mock };
   let sessions: { getActiveSession: jest.Mock };
-  let movements: { recordCompensationCashMovementDurable: jest.Mock };
+  let movements: { recordCompensationCashMovementDurable: jest.Mock; resolveSaleActorId: jest.Mock };
   let audit: { log: jest.Mock; logCustom: jest.Mock };
   let stock: { releaseReservationsByReference: jest.Mock };
   let emitter: { emit: jest.Mock; emitAsync: jest.Mock };
@@ -4057,6 +4057,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       recordCompensationCashMovementDurable: jest
         .fn()
         .mockResolvedValue({ status: 'recorded', movement_id: 31 }),
+      resolveSaleActorId: jest.fn().mockResolvedValue(null),
     };
     audit = {
       log: jest.fn().mockResolvedValue(undefined),
@@ -4375,7 +4376,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
 
     it('sin usuario: el egreso va a nombre del actor del sale y el refund se completa (no queda processing)', async () => {
       mockRequestContext({ store_id: 100, organization_id: 1, user_id: undefined as any });
-      (prismaMock as any).cash_register_movements.findFirst.mockResolvedValue({ user_id: 42 });
+      movements.resolveSaleActorId.mockResolvedValue(42);
       jest.spyOn(service as any, 'getOrder').mockResolvedValue(cashOrder());
       prismaMock.payments.findMany.mockResolvedValue([
         { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
@@ -4383,6 +4384,12 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
 
       await service.cancelOrder(ORDER_ID, DTO);
 
+      // Store-filtered lookup: a webhook carries no store context to scope by.
+      expect(movements.resolveSaleActorId).toHaveBeenCalledWith({
+        store_id: cashOrder().store_id,
+        order_id: ORDER_ID,
+        payment_ids: [CASH_PAYMENT_ID],
+      });
       expect(movements.recordCompensationCashMovementDurable).toHaveBeenCalledWith(
         expect.objectContaining({ user_id: 42, payment_id: CASH_PAYMENT_ID }),
       );
@@ -4394,7 +4401,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
 
     it('sin usuario y sin sale del pago: se escala, nunca se omite en silencio', async () => {
       mockRequestContext({ store_id: 100, organization_id: 1, user_id: undefined as any });
-      (prismaMock as any).cash_register_movements.findFirst.mockResolvedValue(null);
+      movements.resolveSaleActorId.mockResolvedValue(null);
       jest.spyOn(service as any, 'getOrder').mockResolvedValue(cashOrder());
       prismaMock.payments.findMany.mockResolvedValue([
         { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },

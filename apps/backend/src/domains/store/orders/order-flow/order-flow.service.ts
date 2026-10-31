@@ -8328,18 +8328,18 @@ export class OrderFlowService {
 
       // B17 — cancelación sin usuario (webhook/job): el egreso no se omite ni deja
       // el refund `processing` huérfano; se asienta/encola a nombre del actor
-      // del `sale` de cada pago (como B16). Sin `sale` ni usuario no hay actor.
+      // del `sale` de cada pago (o del creador de la orden). La lectura va sin
+      // scope y filtrada por `storeId`: un webhook no trae contexto de tienda.
+      // Sin actor se escala (falla visible), nunca se omite en silencio.
       const actorByPayment = new Map<number, number>();
       for (const pay of reversal.payments) {
-        let actor = userId;
-        if (!actor) {
-          const sale = await this.prisma.cash_register_movements.findFirst({
-            where: { type: 'sale', payment_id: pay.id },
-            orderBy: { id: 'asc' },
-            select: { user_id: true },
-          });
-          actor = sale?.user_id;
-        }
+        const actor =
+          userId ??
+          (await this.movementsService.resolveSaleActorId({
+            store_id: storeId,
+            order_id: orderId,
+            payment_ids: [pay.id],
+          }));
         if (!actor) {
           await this.escalateCancelCashOutFailure(
             orderId,
