@@ -3110,7 +3110,8 @@ export class OrdersService {
 
   /**
    * B22: una edición de líneas no puede dejar el total por debajo de lo ya
-   * cobrado (Σ pagos liquidados). Subir o mantener el total sí se permite.
+   * cobrado NETO (Σ pagos liquidados − Σ reembolsos completados). Subir o
+   * mantener el total sí se permite.
    */
   private async assertTotalNotBelowPaid(
     tx: Prisma.TransactionClient,
@@ -3125,10 +3126,22 @@ export class OrdersService {
       },
       select: { amount: true },
     });
-    const paid = settled.reduce(
+    const gross = settled.reduce(
       (sum, p) => sum.plus(new Prisma.Decimal(p.amount ?? 0)),
       new Prisma.Decimal(0),
     );
+    if (gross.lte(0)) return;
+    // A7: `refunded`/`partially_refunded` siguen contando su monto bruto, así
+    // que el neto resta los reembolsos completados de la orden.
+    const refunds = await tx.refunds.findMany({
+      where: { order_id: orderId, state: 'completed' },
+      select: { amount: true },
+    });
+    const refunded = refunds.reduce(
+      (sum, r) => sum.plus(new Prisma.Decimal(r.amount ?? 0)),
+      new Prisma.Decimal(0),
+    );
+    const paid = Prisma.Decimal.max(gross.minus(refunded), 0);
     if (new Prisma.Decimal(nextGrandTotal).lt(paid)) {
       throw new VendixHttpException(
         ErrorCodes.ORD_EDIT_BELOW_PAID_001,

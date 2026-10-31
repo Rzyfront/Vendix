@@ -134,6 +134,7 @@ describe('OrdersService', () => {
     users: { findUnique: jest.fn() },
     stores: { findFirst: jest.fn() },
     payments: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+    refunds: { findMany: jest.fn().mockResolvedValue([]) },
     // Release-854 follow-up — `findOne` expone `active_sales_invoice` vía
     // `findActiveSalesInvoice` (helper compartido con la guarda de `update`).
     // Default `null` en el beforeEach: ninguna orden de prueba tiene factura
@@ -2285,11 +2286,19 @@ describe('OrdersService', () => {
   });
 
   describe('assertTotalNotBelowPaid — B22', () => {
-    const tx = (amounts: Array<string | number>) => ({
+    const tx = (
+      amounts: Array<string | number>,
+      refunded: Array<string | number> = [],
+    ) => ({
       payments: {
         findMany: jest
           .fn()
           .mockResolvedValue(amounts.map((amount) => ({ amount }))),
+      },
+      refunds: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue(refunded.map((amount) => ({ amount }))),
       },
     });
     const call = (t: any, total: number) =>
@@ -2307,6 +2316,19 @@ describe('OrdersService', () => {
             in: ['succeeded', 'captured', 'partially_refunded', 'refunded'],
           },
         },
+        select: { amount: true },
+      });
+    });
+
+    it('A7: con reembolso, compara contra el neto cobrado (100 − 40): 70 permitido, 50 rechazado', async () => {
+      const t = tx(['100.00'], ['40.00']);
+      await expect(call(t, 70)).resolves.toBeUndefined();
+      await expect(call(t, 60)).resolves.toBeUndefined();
+      await expect(call(t, 50)).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_EDIT_BELOW_PAID_001.code,
+      });
+      expect(t.refunds.findMany).toHaveBeenCalledWith({
+        where: { order_id: 500, state: 'completed' },
         select: { amount: true },
       });
     });
