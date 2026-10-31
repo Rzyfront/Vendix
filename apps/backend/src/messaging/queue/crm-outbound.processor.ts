@@ -18,11 +18,14 @@ const SENDABLE_CHANNELS = ['whatsapp', 'sms', 'email'] as const;
 /**
  * Delivers outbound `crm_messages` rows (PLAN-CRM §5.0).
  *
- * Only rows still `queued` are sent and every update is guarded by
- * `status = 'queued'`, so a re-delivered job never sends twice nor overwrites
- * a status the webhook already advanced. Retryable failures re-throw so
- * BullMQ applies the exponential backoff; the last attempt marks the row
- * `failed`.
+ * The row is claimed (`queued → sending`, guarded) before the provider is
+ * called and every later update is guarded by `status = 'sending'`, so a
+ * re-delivered job never sends twice nor overwrites a status the webhook
+ * already advanced. A job that finds the row still `sending` means a previous
+ * attempt died after calling the provider (worker crash, lost DB update): the
+ * message may be out and charged, so it ends `failed/UNKNOWN` without being
+ * resent. Retryable failures put the row back to `queued` and re-throw so
+ * BullMQ applies the exponential backoff; the last attempt marks it `failed`.
  *
  * The limiter is global to the worker (BullMQ OSS has no per-group limits);
  * a per-store rate limit lands with campaigns (PR 10).
@@ -51,7 +54,7 @@ export class CrmOutboundProcessor extends WorkerHost {
 
     if (
       !message ||
-      message.status !== 'queued' ||
+      (message.status !== 'queued' && message.status !== 'sending') ||
       message.direction !== 'outbound' ||
       !SENDABLE_CHANNELS.includes(
         message.channel as (typeof SENDABLE_CHANNELS)[number],
@@ -59,6 +62,35 @@ export class CrmOutboundProcessor extends WorkerHost {
     ) {
       this.logger.warn(
         `Skipping crm-outbound job for message ${messageId}: ${message ? `${message.direction}/${message.channel}/${message.status}` : 'not found'}`,
+      );
+      return;
+    }
+
+    if (message.status === 'sending') {
+      this.logger.warn(
+        `crm-outbound message ${messageId} was left sending by an interrupted attempt; marking it failed without resending`,
+      );
+      const interrupted = await this.prisma.crm_messages.updateMany({
+        where: { id: messageId, status: 'sending' },
+        data: {
+          status: 'failed',
+          error_code: 'UNKNOWN',
+          error_message:
+            'The send was interrupted after reaching the provider; it may have been delivered and is not resent',
+          failed_at: new Date(),
+        },
+      });
+      if (interrupted.count > 0) await this.notify(message, 'failed');
+      return;
+    }
+
+    const claimed = await this.prisma.crm_messages.updateMany({
+      where: { id: messageId, status: 'queued' },
+      data: { status: 'sending' },
+    });
+    if (claimed.count === 0) {
+      this.logger.warn(
+        `Skipping crm-outbound job for message ${messageId}: already claimed`,
       );
       return;
     }
@@ -71,7 +103,7 @@ export class CrmOutboundProcessor extends WorkerHost {
 
     if (result.status === 'sent') {
       const sent = await this.prisma.crm_messages.updateMany({
-        where: { id: messageId, status: 'queued' },
+        where: { id: messageId, status: 'sending' },
         data: {
           status: 'sent',
           provider: result.provider,
@@ -94,8 +126,9 @@ export class CrmOutboundProcessor extends WorkerHost {
 
     if (result.retryable && !isLastAttempt) {
       await this.prisma.crm_messages.updateMany({
-        where: { id: messageId, status: 'queued' },
+        where: { id: messageId, status: 'sending' },
         data: {
+          status: 'queued',
           error_code: result.error_code ?? 'UNKNOWN',
           error_message: errorMessage,
         },
@@ -106,7 +139,7 @@ export class CrmOutboundProcessor extends WorkerHost {
     }
 
     const failed = await this.prisma.crm_messages.updateMany({
-      where: { id: messageId, status: 'queued' },
+      where: { id: messageId, status: 'sending' },
       data: {
         status: 'failed',
         error_code: result.error_code ?? 'UNKNOWN',
