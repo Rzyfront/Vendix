@@ -3,10 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
 import { GlobalPrismaService } from '../../../../../prisma/services/global-prisma.service';
-import {
-  FINISH_PENDING_MARKER_NEEDLE,
-  OrderFlowService,
-} from '../order-flow.service';
+import { OrderFlowService } from '../order-flow.service';
 
 /**
  * B07/B11 — retries the closing step of orders whose money is already firm but
@@ -35,17 +32,8 @@ export class FinishPendingSweepJob {
     if (this.running) return 0;
     this.running = true;
     try {
-      // One pod per tick: the advisory lock lives as long as this transaction.
-      return await this.globalPrisma.$transaction(
-        async (tx: Prisma.TransactionClient) => {
-          const rows = await tx.$queryRaw<{ locked: boolean }[]>(
-            Prisma.sql`SELECT pg_try_advisory_xact_lock(hashtext(${FinishPendingSweepJob.LOCK_KEY})) AS locked`,
-          );
-          if (!rows?.[0]?.locked) return 0;
-          return this.resumeStranded(tx, now);
-        },
-        { timeout: 280_000, maxWait: 5_000 },
-      );
+      const stranded = await this.claimStranded(now);
+      return await this.resumeStranded(stranded);
     } catch (error) {
       this.logger.error(
         `Finish pending sweep failed: ${(error as Error)?.message ?? error}`,
@@ -56,22 +44,46 @@ export class FinishPendingSweepJob {
     }
   }
 
-  private async resumeStranded(
-    tx: Prisma.TransactionClient,
+  /**
+   * R3 #6 — short claim: under the advisory lock (one pod per tick) picks the
+   * batch by the indexed `finish_pending_at` and leases it by moving that
+   * stamp to `now`, so no other pod/tick takes it within `MIN_AGE_MS`. The
+   * transaction ends here; the resumes run outside it.
+   */
+  private async claimStranded(
     now: Date,
-  ): Promise<number> {
-    const stranded = await tx.orders.findMany({
-      where: {
-        state: { in: ['draft', 'created', 'processing', 'finished', 'delivered'] },
-        internal_notes: { contains: FINISH_PENDING_MARKER_NEEDLE },
-        updated_at: {
-          lt: new Date(now.getTime() - FinishPendingSweepJob.MIN_AGE_MS),
-        },
+  ): Promise<{ id: number; store_id: number }[]> {
+    return this.globalPrisma.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        const rows = await tx.$queryRaw<{ locked: boolean }[]>(
+          Prisma.sql`SELECT pg_try_advisory_xact_lock(hashtext(${FinishPendingSweepJob.LOCK_KEY})) AS locked`,
+        );
+        if (!rows?.[0]?.locked) return [];
+        const stranded = await tx.orders.findMany({
+          where: {
+            finish_pending_at: {
+              lt: new Date(now.getTime() - FinishPendingSweepJob.MIN_AGE_MS),
+            },
+          } as Prisma.ordersWhereInput,
+          select: { id: true, store_id: true },
+          orderBy: { id: 'asc' },
+          take: FinishPendingSweepJob.BATCH_SIZE,
+        });
+        if (stranded.length) {
+          await tx.orders.updateMany({
+            where: { id: { in: stranded.map((o) => o.id) } },
+            data: { finish_pending_at: now } as Prisma.ordersUpdateManyMutationInput,
+          });
+        }
+        return stranded;
       },
-      select: { id: true, store_id: true },
-      orderBy: { id: 'asc' },
-      take: FinishPendingSweepJob.BATCH_SIZE,
-    });
+      { timeout: 10_000, maxWait: 5_000 },
+    );
+  }
+
+  private async resumeStranded(
+    stranded: { id: number; store_id: number }[],
+  ): Promise<number> {
     let resumed = 0;
     for (const order of stranded) {
       try {
@@ -80,6 +92,7 @@ export class FinishPendingSweepJob {
           () => this.orderFlow.resumeFinishPendingAfterPayment(order.id),
         );
         if (outcome === 'resolved') resumed++;
+        else await this.releaseOrphanStamp(order.id);
       } catch (error) {
         this.logger.error(
           `Finish pending retry failed order=${order.id} store=${order.store_id}: ${(error as Error)?.message ?? error}`,
@@ -88,5 +101,13 @@ export class FinishPendingSweepJob {
     }
     if (resumed) this.logger.log(`Resumed ${resumed} order(s) pending close after payment`);
     return resumed;
+  }
+
+  /** No open marker behind the stamp (`skipped`): clear it so it stops being leased. */
+  private async releaseOrphanStamp(orderId: number): Promise<void> {
+    await this.globalPrisma.orders.updateMany({
+      where: { id: orderId },
+      data: { finish_pending_at: null } as Prisma.ordersUpdateManyMutationInput,
+    });
   }
 }

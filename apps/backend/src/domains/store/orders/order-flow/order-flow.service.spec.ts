@@ -4057,6 +4057,39 @@ describe('OrderFlowService.resumeFinishPendingAfterPayment — R3 #1 saldo vivo'
   });
 });
 
+describe('OrderFlowService.appendFlowMetadata — R3 #6 finish_pending_at indexable', () => {
+  const build = () => {
+    const prismaMock: any = {
+      orders: {
+        findUnique: jest.fn().mockResolvedValue({ internal_notes: null }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      { logCustom: jest.fn() } as any,
+    );
+    return { service, prismaMock };
+  };
+
+  it('abrir el marcador sella finish_pending_at; resolverlo (null) lo limpia; otro metadato no lo toca', async () => {
+    const { service, prismaMock } = build();
+
+    await (service as any).appendFlowMetadata(7, {
+      finish_pending_after_payment: { kind: 'pay_finish', payment_ids: [1] },
+    });
+    await (service as any).appendFlowMetadata(7, { finish_pending_after_payment: null });
+    await (service as any).appendFlowMetadata(7, { other: true });
+
+    const data = prismaMock.orders.update.mock.calls.map((c: any[]) => c[0].data);
+    expect(data[0].finish_pending_at).toBeInstanceOf(Date);
+    expect(data[1].finish_pending_at).toBeNull();
+    expect(data[2]).not.toHaveProperty('finish_pending_at');
+  });
+});
+
 /**
  * 1060 paso 2 (RBAC) — el endpoint de reversa exige el permiso propio
  * `store:orders:order_flow:cancel_delivered` (no hereda `order_flow:create`

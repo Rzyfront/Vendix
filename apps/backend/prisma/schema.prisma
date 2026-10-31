@@ -1747,6 +1747,9 @@ model orders {
   // A.3 CP-facturacion-fixes: fiscal surfacing flag. Set when automatic emission
   // (webhook auto-send) fails; null = no known fiscal issue. Read by panel.
   fiscal_alert_code                               String?                   @db.VarChar(60)
+  // B07 (ronda 3 #6): instante del último intento de cierre de una orden con el
+  // marcador `finish_pending_after_payment` abierto; null = sin cierre pendiente.
+  finish_pending_at                               DateTime?                 @db.Timestamp(6)
   coupon_id                                       Int?
   coupon_code                                     String?                   @db.VarChar(50)
   placed_at                                       DateTime?                 @db.Timestamp(6)
@@ -1853,6 +1856,7 @@ model orders {
   @@index([store_id, created_by_user_id])
   @@index([shipping_tax_rate_id])
   @@index([store_id, origin_cash_session_id, state])
+  @@index([finish_pending_at])
   // Pedidos programados
   fulfillment_schedule order_fulfillment_schedules?
 }

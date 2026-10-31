@@ -176,9 +176,6 @@ export interface FinishPendingAfterPaymentMarker {
   error: string;
 }
 
-/** Exact text the marker leaves in `internal_notes` while it is open
- * (`JSON.stringify` writes no spaces; a resolved marker is `null`). */
-export const FINISH_PENDING_MARKER_NEEDLE = '"finish_pending_after_payment":{';
 type CashSessionFinishSelection = {
   id: number;
   version: string;
@@ -1170,7 +1167,12 @@ export class OrderFlowService {
           notes,
         }),
         updated_at: new Date(),
-      },
+        // R3 #6 — indexable twin of the open B07 marker: the sweep filters
+        // by this column instead of a LIKE over `internal_notes`.
+        ...('finish_pending_after_payment' in patch
+          ? { finish_pending_at: patch.finish_pending_after_payment ? new Date() : null }
+          : {}),
+      } as Prisma.ordersUpdateInput,
     });
   }
 
