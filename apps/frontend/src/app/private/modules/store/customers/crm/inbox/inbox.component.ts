@@ -28,7 +28,7 @@ import {
   CrmConversationsQuery,
   CrmMessage,
 } from './crm-inbox.interface';
-import { mergeMessages } from './crm-inbox.utils';
+import { inboxQuery, mergeMessages } from './crm-inbox.utils';
 import {
   ConversationListComponent,
   InboxFilter,
@@ -403,19 +403,7 @@ export class InboxComponent {
   }
 
   private query(): CrmConversationsQuery {
-    const q = this.search().trim() || undefined;
-    switch (this.filter()) {
-      case 'unassigned':
-        return { assigned: 'unassigned', q };
-      case 'mine':
-        return { assigned: 'me', q };
-      case 'open':
-        return { status: 'open', q };
-      case 'closed':
-        return { status: 'closed', q };
-      default:
-        return { q };
-    }
+    return inboxQuery(this.filter(), this.search());
   }
 
   // ─── Thread ────────────────────────────────────────────────────────────
