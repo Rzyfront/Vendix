@@ -41,7 +41,10 @@ import {
   localTimeString,
   resolveStoreTimezone,
 } from '../../../../common/utils/store-timezone.util';
-import { normalizeNit } from '../../../../common/utils/nit.util';
+import {
+  computeNitDv,
+  normalizeNit,
+} from '../../../../common/utils/nit.util';
 import { resolveInvoiceControl } from '../../../../common/helpers/invoice-control.helper';
 import {
   buildDianXmlFileName,
@@ -1164,11 +1167,14 @@ export class DianTestService {
     // `fiscal_data.nit` gana sobre `config.nit` al resolver el emisor, así que un
     // número mal escrito en Identidad legal (p. ej. `90012345` vs `900123456`)
     // firma los 30 documentos con otro emisor y la DIAN responde que el set «no se
-    // encuentra registrado». Se compara sin DV ni separadores. Un `config.nit` vacío
-    // no bloquea (comportamiento previo).
+    // encuentra registrado». Se compara sin separadores; también coincide si uno es
+    // el otro más su DV correcto pegado (`900123456` vs `9001234568`). Un
+    // `config.nit` vacío no bloquea (comportamiento previo).
     const config_nit = normalizeNit(config.nit).number;
     const issuer_nit = normalizeNit(issuer.nit).number;
-    if (config_nit && config_nit !== issuer_nit) {
+    const sameNit = (a: string, b: string) =>
+      a === b || a === b + computeNitDv(b) || b === a + computeNitDv(a);
+    if (config_nit && !sameNit(config_nit, issuer_nit)) {
       throw new VendixHttpException(
         ErrorCodes.DIAN_TEST_SET_009,
         `El NIT del emisor (${issuer_nit}) no coincide con el NIT de la configuración DIAN (${config_nit}). ` +
