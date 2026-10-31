@@ -211,15 +211,26 @@ describe('CashSettlementService — cierre de planilla contra caja', () => {
     expect(eventEmitter.emit).not.toHaveBeenCalled();
   });
 
-  it('B20: cobro sin método no se asume efectivo: PAY_METHOD_MISCONFIGURED y no crea nada', async () => {
+  it('A1/B20: cobro sin método en una parada se trata como cash solo en el cierre de ruta (no falla la planilla) y avisa', async () => {
     const { service, tx } = build();
-    await expect(
-      service.recordRouteCloseMovements(tx, {
-        ...base,
-        stops: [stop(1), stop(2, { payment_method: null, collected_amount: 50 })],
+    const warn = jest
+      .spyOn((service as any).logger, 'warn')
+      .mockImplementation(() => undefined);
+    const res = await service.recordRouteCloseMovements(tx, {
+      ...base,
+      stops: [stop(1), stop(2, { payment_method: null, collected_amount: 50 })],
+    });
+    expect(res).toHaveLength(1);
+    expect(tx.cash_register_movements.create).toHaveBeenCalledTimes(1);
+    expect(tx.cash_register_movements.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        amount: 150,
+        payment_method: 'cash',
+        reference: 'dispatch_route:3:close:cash',
       }),
-    ).rejects.toMatchObject({ errorCode: 'PAY_METHOD_MISCONFIGURED' });
-    expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('parada #2'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Ruta #3'));
   });
 
   it('B08: un método de pasarela (wompi) no mueve el cajón', async () => {

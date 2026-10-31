@@ -182,9 +182,12 @@ export class CashSettlementService {
    *
    * - Solo paradas delivered/partial, no prepagas, con `collected_amount` > 0.
    *   El anticipo NO se suma: es dinero que no recibió el conductor en ruta (B20).
-   * - El método es el real de la parada; si falta con cobro > 0 se lanza
-   *   `PAY_METHOD_MISCONFIGURED` (nunca se asume `'cash'`, B26), y los métodos
-   *   que no mueven el cajón (wompi, wallet, contra entrega) se omiten (B08).
+   * - El método es el real de la parada; si falta con cobro > 0 se trata como
+   *   `'cash'` SOLO aquí (A1/B20: es el comportamiento histórico de la UI, que
+   *   manda 'cash' por defecto, y no hay forma de corregir el método de una
+   *   parada; lanzar tumbaba el cierre de toda la planilla) y se loguea warn.
+   *   Los métodos que no mueven el cajón (wompi, wallet, contra entrega) se
+   *   omiten (B08).
    * - Excluye paradas con movimiento legado `dispatch_route:{id}:stop:{stopId}`
    *   (rutas en vuelo con código previo).
    * - Idempotente por `reference` (`dispatch_route:{id}:close:{method}`).
@@ -231,9 +234,15 @@ export class CashSettlementService {
       if (legacySet.has(`dispatch_route:${input.route_id}:stop:${s.id}`)) continue;
       const amount = Number(s.collected_amount || 0);
       if (!(amount > 0)) continue;
-      // Lanza PAY_METHOD_MISCONFIGURED si el método falta (política B26).
-      if (!shouldRecordCashMovement(s.payment_method)) continue;
-      const method = s.payment_method as string;
+      let method = s.payment_method;
+      if (!method) {
+        // A1/B20: método nulo con cobro > 0 = 'cash' únicamente en el cierre de ruta.
+        this.logger.warn(
+          `Ruta #${input.route_id} parada #${s.id}: cobro ${amount} sin payment_method; se asume 'cash' en el cierre`,
+        );
+        method = 'cash';
+      }
+      if (!shouldRecordCashMovement(method)) continue;
       const cur = byMethod.get(method) ?? { amount: 0, stops: 0 };
       cur.amount += amount;
       cur.stops += 1;
