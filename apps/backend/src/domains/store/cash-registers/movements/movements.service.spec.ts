@@ -668,6 +668,29 @@ describe('MovementsService — compensación de caja', () => {
       );
       expect(failures.create).toHaveBeenCalledTimes(2);
     });
+    it('R3 #4: fuera de tx, si falla sellar cash_session_id el movimiento queda y el sello se encola (PENDING_STAMP)', async () => {
+      const db = makeDb(
+        [{ id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      const refunds = { updateMany: jest.fn().mockRejectedValue(new Error('lock timeout')) };
+      const failures = {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 64 }),
+        update: jest.fn(),
+      };
+      const { service } = makeService(db, { refunds, accounting_entry_failures: failures });
+
+      const out = await service.recordRefundCashMovementDurable(input);
+
+      expect(out).toEqual({ status: 'recorded', movement_id: 901 });
+      expect(failures.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          source_id: 900,
+          error_message: expect.stringMatching(/^PENDING_STAMP: movement #901 .*lock timeout/),
+        }),
+      });
+    });
   });
 
   describe('deliverRefundCashMovement — cola pendiente', () => {
@@ -696,6 +719,7 @@ describe('MovementsService — compensación de caja', () => {
       const tx = {
         ...db,
         $queryRaw: jest.fn().mockResolvedValue([{ id: FAILURE_ID }]),
+        refunds: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
         accounting_entry_failures: {
           findFirst: jest.fn().mockResolvedValue({
             id: FAILURE_ID,
@@ -737,6 +761,73 @@ describe('MovementsService — compensación de caja', () => {
           reference: 'refund:900',
         }),
       });
+      expect(tx.accounting_entry_failures.update).toHaveBeenCalledWith({
+        where: { id: FAILURE_ID },
+        data: expect.objectContaining({ resolved_at: expect.any(Date) }),
+      });
+    });
+
+    const buildDelivery = (overrides: Record<string, any>) => {
+      const db = makeDb(
+        [{ id: 300, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      const row = {
+        id: FAILURE_ID,
+        handler_key: REFUND_CASH_MOVEMENT_KEY,
+        source_id: payload.refund_id,
+        organization_id: payload.organization_id,
+        store_id: STORE_ID,
+        resolved_at: null,
+        event_payload: payload,
+      };
+      const tx: any = {
+        ...db,
+        $queryRaw: jest.fn().mockResolvedValue([{ id: FAILURE_ID }]),
+        refunds: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        accounting_entry_failures: {
+          findFirst: jest.fn().mockResolvedValue(row),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        ...overrides,
+      };
+      const outer = { findFirst: jest.fn().mockResolvedValue(row), update: jest.fn() };
+      const { service } = makeService(db, {
+        $transaction: jest.fn((cb: any) => cb(tx)),
+        accounting_entry_failures: outer,
+      });
+      return { service, tx, outer };
+    };
+
+    it('R3 #4: dentro de la tx, un fallo al sellar se propaga con su error real (no se traga)', async () => {
+      const { service, tx, outer } = buildDelivery({
+        refunds: { updateMany: jest.fn().mockRejectedValue(new Error('lock timeout')) },
+      });
+
+      await expect(service.deliverRefundCashMovement(FAILURE_ID)).rejects.toThrow('lock timeout');
+
+      expect(tx.accounting_entry_failures.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ resolved_at: expect.any(Date) }) }),
+      );
+      expect(outer.update).toHaveBeenCalledWith({
+        where: { id: FAILURE_ID },
+        data: expect.objectContaining({ error_message: 'lock timeout' }),
+      });
+    });
+
+    it('R3 #4: fila PENDING_STAMP — el movimiento ya existe: sella su sesión y resuelve', async () => {
+      const { service, tx } = buildDelivery({});
+      tx.cash_register_movements.findFirst = jest.fn(async ({ where }: any) =>
+        where.type === 'refund' ? { id: 901, session_id: 300 } : null,
+      );
+
+      await service.deliverRefundCashMovement(FAILURE_ID);
+
+      expect(tx.refunds.updateMany).toHaveBeenCalledWith({
+        where: { id: 900, cash_session_id: null },
+        data: { cash_session_id: 300 },
+      });
+      expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
       expect(tx.accounting_entry_failures.update).toHaveBeenCalledWith({
         where: { id: FAILURE_ID },
         data: expect.objectContaining({ resolved_at: expect.any(Date) }),

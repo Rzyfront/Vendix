@@ -996,11 +996,25 @@ export class MovementsService {
         payment_id: input.payment_id ?? undefined,
         reference: buildRefundCashMovementReference(input.refund_id),
       });
-      await this.stampRefundCashSession(
-        this.prisma.withoutScope() as unknown as Prisma.TransactionClient,
-        input.refund_id,
-        session_id,
-      );
+      try {
+        await this.stampRefundCashSession(
+          this.prisma.withoutScope() as unknown as Prisma.TransactionClient,
+          input.refund_id,
+          session_id,
+        );
+      } catch (stampError) {
+        // R3 #4 — the movement is written; only its session stamp is missing.
+        // Queued (not just logged): the sweeper finds the movement by its
+        // reference and stamps the session it went to.
+        const failure_id = await this.enqueueRefundCashMovement(
+          payload,
+          `PENDING_STAMP: movement #${movement.id} recorded, refunds.cash_session_id not stamped — ${stampError instanceof Error ? stampError.message : String(stampError)}`,
+          tx,
+        );
+        this.logger.error(
+          `Refund #${input.refund_id}: cash_session_id #${session_id} not stamped, outbox row #${failure_id}: ${stampError instanceof Error ? stampError.message : String(stampError)}`,
+        );
+      }
       return { status: 'recorded', movement_id: movement.id };
     } catch (error) {
       const failure_id = await this.enqueueRefundCashMovement(
@@ -1150,8 +1164,9 @@ export class MovementsService {
   /**
    * B03 — deja en `refunds.cash_session_id` la sesión donde salió el efectivo, para
    * que el cierre no la deduzca por ventana de tiempo. Solo rellena si está vacío
-   * (un refund multi-pago conserva la primera sesión) y nunca lanza: es un
-   * dato derivado, el movimiento ya quedó escrito.
+   * (un refund multi-pago conserva la primera sesión). R3 #4: lanza. Dentro
+   * de la tx del outbox un fallo aborta la tx entera (tragarlo solo movía el
+   * error a la siguiente sentencia); fuera de tx el llamador lo encola.
    */
   async stampRefundCashSession(
     db: Prisma.TransactionClient,
@@ -1159,16 +1174,10 @@ export class MovementsService {
     session_id: number,
   ): Promise<void> {
     if (!(refund_id > 0)) return;
-    try {
-      await db.refunds.updateMany({
-        where: { id: refund_id, cash_session_id: null },
-        data: { cash_session_id: session_id },
-      } as unknown as Prisma.refundsUpdateManyArgs);
-    } catch (error) {
-      this.logger.error(
-        `Refund #${refund_id}: cash_session_id #${session_id} not stamped: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
+    await db.refunds.updateMany({
+      where: { id: refund_id, cash_session_id: null },
+      data: { cash_session_id: session_id },
+    } as unknown as Prisma.refundsUpdateManyArgs);
   }
 
   /** Outbox de compensaciones: una fila abierta como máximo por `dedupe_key`. */
@@ -1369,9 +1378,14 @@ export class MovementsService {
             payment_id: payload.payment_id,
             ...(is_compensation ? { order_id: payload.order_id } : {}),
           },
-          select: { id: true },
+          select: { id: true, session_id: true },
         });
         if (already) {
+          // R3 #4 — a PENDING_STAMP row: the movement exists, its session is
+          // stamped here (no-op when already stamped).
+          if (!is_compensation && already.session_id != null) {
+            await this.stampRefundCashSession(tx, payload.refund_id, already.session_id);
+          }
           await tx.accounting_entry_failures.update({
             where: { id: failureId },
             data: {
