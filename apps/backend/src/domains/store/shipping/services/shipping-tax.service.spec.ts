@@ -458,6 +458,70 @@ describe('ShippingTaxService', () => {
     });
   });
 
+  describe('taxRowsForCategory', () => {
+    const args = { tax_category_id: 3, tax_is_inclusive: true, store_id: 1 };
+
+    it('sin categoría ⇒ sin filas y sin leer la DB', async () => {
+      await expect(service.taxRowsForCategory(null, { ...args, tax_category_id: null })).resolves.toEqual([]);
+      expect(base.tax_categories.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('IVA con O-48 ⇒ una fila con el modo de la configuración', async () => {
+      base.tax_categories.findFirst.mockResolvedValue(iva19);
+      base.stores.findFirst.mockResolvedValue(storeRow({ responsibilities: ['O-48'] }));
+      await expect(service.taxRowsForCategory(null, { ...args, tax_is_inclusive: false })).resolves.toEqual([
+        { tax_rate_id: 30, name: 'IVA 19%', rate: 0.19, tax_type: 'iva', is_inclusive: false },
+      ]);
+      expect(base.tax_categories.findFirst.mock.calls[0][0].where).toEqual({ id: 3 });
+    });
+
+    it('usa el client recibido (tx) en vez del baseClient', async () => {
+      const tx: any = {
+        tax_categories: { findFirst: jest.fn().mockResolvedValue(inc8) },
+        stores: { findFirst: jest.fn().mockResolvedValue(storeRow({ responsibilities: ['O-33'] })) },
+      };
+      await expect(service.taxRowsForCategory(tx, { ...args, tax_category_id: 7 })).resolves.toEqual([
+        { tax_rate_id: 70, name: 'INC 8%', rate: 0.08, tax_type: 'inc', is_inclusive: true },
+      ]);
+      expect(base.tax_categories.findFirst).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['IVA sin O-48', iva19, storeRow({ responsibilities: ['O-49'] })],
+      ['INC sin O-33', inc8, storeRow({ responsibilities: ['O-48'] })],
+      ['categoría de otra tienda', { ...iva19, store_id: 2 }, storeRow({ responsibilities: ['O-48'] })],
+      ['categoría no elegible', { ...iva19, tax_type: 'ica' }, storeRow({ responsibilities: ['O-48'] })],
+    ])('%s ⇒ sin filas + warn (nunca lanza)', async (_label, category, store) => {
+      base.tax_categories.findFirst.mockResolvedValue(category);
+      base.stores.findFirst.mockResolvedValue(store);
+      await expect(service.taxRowsForCategory(null, args)).resolves.toEqual([]);
+      expect((service as any).logger.warn).toHaveBeenCalled();
+    });
+  });
+
+  describe('assertCategoryAssignable — alquiler de estación', () => {
+    it('IVA sin O-48 ⇒ 412 con context station_rental', async () => {
+      base.stores.findFirst.mockResolvedValue(storeRow({ responsibilities: ['O-49'] }));
+      base.tax_categories.findFirst.mockResolvedValue(iva19);
+      await expect(service.assertCategoryAssignable(3, 'station_rental')).rejects.toMatchObject({
+        status: 412,
+        response: expect.objectContaining({
+          error_code: 'FISCAL_VAT_NOT_RESPONSIBLE_001',
+          details: expect.objectContaining({ context: 'station_rental' }),
+        }),
+      });
+    });
+
+    it('no elegible ⇒ 400 que nombra el alquiler', async () => {
+      base.stores.findFirst.mockResolvedValue(storeRow({ responsibilities: ['O-48'] }));
+      base.tax_categories.findFirst.mockResolvedValue({ ...iva19, tax_type: 'ica' });
+      await expect(service.assertCategoryAssignable(3, 'station_rental')).rejects.toMatchObject({
+        status: 400,
+        message: expect.stringContaining('alquiler de la estación'),
+      });
+    });
+  });
+
   describe('toTaxCategoryView', () => {
     it('proyecta la forma del contrato', () => {
       expect(ShippingTaxService.toTaxCategoryView(inc8)).toEqual({
