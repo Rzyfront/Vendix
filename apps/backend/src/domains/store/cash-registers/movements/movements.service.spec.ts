@@ -1,4 +1,5 @@
 import {
+  actorFallbackNote,
   CASH_MOVEMENT_DELIVERY_SCOPE,
   DEFERRED_SALE_CASH_MOVEMENT_KEY,
   DEFERRED_SALE_CASH_MOVEMENT_SOURCE,
@@ -668,6 +669,35 @@ describe('MovementsService — compensación de caja', () => {
       );
       expect(failures.create).toHaveBeenCalledTimes(2);
     });
+    it('R3 #5: respaldo al creador de la orden → constancia en error_message y en las notas del movimiento', async () => {
+      const db = makeDb([], []);
+      const failures = {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 65 }),
+        update: jest.fn(),
+      };
+      const { service } = makeService(db, { accounting_entry_failures: failures });
+      const note = actorFallbackNote({ user_id: 13, source: 'order_creator' });
+
+      await service.recordRefundCashMovementDurable({
+        ...input,
+        user_id: 13,
+        force_outbox: true,
+        actor_note: note,
+      });
+
+      expect(note).toBe(
+        'ACTOR_FALLBACK: no sale movement found, attributed to the order creator (user #13)',
+      );
+      expect(actorFallbackNote({ user_id: 42, source: 'sale' })).toBeUndefined();
+      expect(failures.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          error_message: expect.stringContaining(`PENDING_DELIVERY: refund without acting user, cash movement queued for the sale actor | ${note}`),
+          event_payload: expect.objectContaining({ user_id: 13, notes: note }),
+        }),
+      });
+    });
+
     it('R3 #4: fuera de tx, si falla sellar cash_session_id el movimiento queda y el sello se encola (PENDING_STAMP)', async () => {
       const db = makeDb(
         [{ id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
@@ -1358,7 +1388,7 @@ describe('MovementsService — señal durable de venta diferida F-006', () => {
   });
 });
 
-describe('MovementsService.resolveSaleActorId (B17/B18)', () => {
+describe('MovementsService.resolveSaleActor (B17/B18, R3 #5)', () => {
   const build = (sales: Array<{ user_id: number } | null>, order: { created_by_user_id: number | null } | null) => {
     const unscoped = {
       cash_register_movements: { findFirst: jest.fn() },
@@ -1373,8 +1403,8 @@ describe('MovementsService.resolveSaleActorId (B17/B18)', () => {
     const { service, unscoped } = build([{ user_id: 42 }], null);
 
     await expect(
-      service.resolveSaleActorId({ store_id: 7, order_id: 9, payment_ids: [55, null] }),
-    ).resolves.toBe(42);
+      service.resolveSaleActor({ store_id: 7, order_id: 9, payment_ids: [55, null] }),
+    ).resolves.toEqual({ user_id: 42, source: 'sale' });
 
     expect(unscoped.cash_register_movements.findFirst).toHaveBeenCalledWith({
       where: { store_id: 7, type: 'sale', order_id: 9, payment_id: { in: [55] } },
@@ -1384,12 +1414,12 @@ describe('MovementsService.resolveSaleActorId (B17/B18)', () => {
     expect(unscoped.orders.findFirst).not.toHaveBeenCalled();
   });
 
-  it('sin sale del pago cae al sale de la orden y luego al creador de la orden (misma tienda)', async () => {
+  it('sin sale del pago cae al sale de la orden y luego al creador de la orden (misma tienda), marcado como respaldo', async () => {
     const { service, unscoped } = build([null, null], { created_by_user_id: 13 });
 
     await expect(
-      service.resolveSaleActorId({ store_id: 7, order_id: 9, payment_ids: [55] }),
-    ).resolves.toBe(13);
+      service.resolveSaleActor({ store_id: 7, order_id: 9, payment_ids: [55] }),
+    ).resolves.toEqual({ user_id: 13, source: 'order_creator' });
 
     expect(unscoped.cash_register_movements.findFirst).toHaveBeenLastCalledWith(
       expect.objectContaining({ where: { store_id: 7, type: 'sale', order_id: 9 } }),
@@ -1402,6 +1432,6 @@ describe('MovementsService.resolveSaleActorId (B17/B18)', () => {
 
   it('sin sale ni creador devuelve null', async () => {
     const { service } = build([null], null);
-    await expect(service.resolveSaleActorId({ store_id: 7, order_id: 9 })).resolves.toBeNull();
+    await expect(service.resolveSaleActor({ store_id: 7, order_id: 9 })).resolves.toBeNull();
   });
 });

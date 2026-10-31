@@ -91,6 +91,8 @@ import { SessionsService } from '../../cash-registers/sessions/sessions.service'
 import {
   MovementsService,
   ORDER_CANCELLED_MOVEMENT_REFERENCE,
+  actorFallbackNote,
+  type SaleActor,
 } from '../../cash-registers/movements/movements.service';
 import { CASH_PAYMENT_TYPES } from './services/refund-channel.util';
 import { shouldRecordCashMovement } from '../../cash-registers/movements/cash-movement-policy.util';
@@ -8490,15 +8492,15 @@ export class OrderFlowService {
       // del `sale` de cada pago (o del creador de la orden). La lectura va sin
       // scope y filtrada por `storeId`: un webhook no trae contexto de tienda.
       // Sin actor se escala (falla visible), nunca se omite en silencio.
-      const actorByPayment = new Map<number, number>();
+      const actorByPayment = new Map<number, SaleActor>();
       for (const pay of reversal.payments) {
-        const actor =
-          userId ??
-          (await this.movementsService.resolveSaleActorId({
-            store_id: storeId,
-            order_id: orderId,
-            payment_ids: [pay.id],
-          }));
+        const actor: SaleActor | null = userId
+          ? { user_id: userId, source: 'sale' }
+          : await this.movementsService.resolveSaleActor({
+              store_id: storeId,
+              order_id: orderId,
+              payment_ids: [pay.id],
+            });
         if (!actor) {
           await this.escalateCancelCashOutFailure(
             orderId,
@@ -8521,7 +8523,8 @@ export class OrderFlowService {
         const outcome =
           await this.movementsService.recordCompensationCashMovementDurable({
             store_id: storeId,
-            user_id: actorByPayment.get(pay.id)!,
+            user_id: actorByPayment.get(pay.id)!.user_id,
+            actor_note: actorFallbackNote(actorByPayment.get(pay.id)),
             order_id: orderId,
             payment_id: pay.id,
             amount: Number(pay.amount),

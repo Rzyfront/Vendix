@@ -33,7 +33,9 @@ import { SessionsService } from '../../../cash-registers/sessions/sessions.servi
 import {
   MovementsService,
   ORDER_CANCELLED_MOVEMENT_REFERENCE,
+  actorFallbackNote,
   type RefundCashMovementOutcome,
+  type SaleActor,
 } from '../../../cash-registers/movements/movements.service';
 import { SerialNumberEnforcementService } from '../../../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../../inventory/serial-numbers/inventory-serial-numbers.service';
@@ -1558,13 +1560,16 @@ export class RefundFlowService {
           // encola a nombre del actor del `sale` del pago (o del creador de la
           // orden). Sin ninguno, se encola igual para revisión (NO_ACTOR):
           // nunca queda fuera de la caja y de la cola a la vez.
-          const movementUserId =
-            userId ??
-            (await this.resolveSaleActorId(
-              order.store_id,
-              orderId,
-              tramos.map((t) => t.payment_id),
-            ));
+          const saleActor =
+            userId == null
+              ? await this.resolveSaleActor(
+                  order.store_id,
+                  orderId,
+                  tramos.map((t) => t.payment_id),
+                )
+              : null;
+          const movementUserId = userId ?? saleActor?.user_id ?? null;
+          const actor_note = actorFallbackNote(saleActor);
           const cashTramos = tramos.filter((t) => t.method === 'cash');
           if (movementUserId == null && cashTramos.length > 0) {
             this.logger.error(
@@ -1585,6 +1590,7 @@ export class RefundFlowService {
               amount: tramo.amount,
               channel: 'cash',
               force_outbox: userId == null,
+              actor_note,
             });
             if (cash_movement === undefined || cash_movement.status === 'recorded') {
               cash_movement = notice;
@@ -2145,17 +2151,17 @@ export class RefundFlowService {
 
   /**
    * B18 — actor al que se atribuye el movimiento de caja de un refund sin
-   * usuario (ver `MovementsService.resolveSaleActorId`: sin scope, filtrado por
+   * usuario (ver `MovementsService.resolveSaleActor`: sin scope, filtrado por
    * tienda). Un fallo de lectura no tumba el refund ya committed: `null` y el
    * movimiento se encola para revisión.
    */
-  private async resolveSaleActorId(
+  private async resolveSaleActor(
     storeId: number,
     orderId: number,
     paymentIds: (number | null)[],
-  ): Promise<number | null> {
+  ): Promise<SaleActor | null> {
     try {
-      return await this.movementsService.resolveSaleActorId({
+      return await this.movementsService.resolveSaleActor({
         store_id: storeId,
         order_id: orderId,
         payment_ids: paymentIds,
@@ -2359,6 +2365,8 @@ export class RefundFlowService {
     channel: string;
     /** B18: sin usuario real el movimiento va siempre al outbox. */
     force_outbox?: boolean;
+    /** R3 #5: constancia del actor de respaldo (creador de la orden). */
+    actor_note?: string;
   }): Promise<RefundCashMovementNotice> {
     try {
       const settings = await this.settingsService.getSettings();
@@ -2391,6 +2399,7 @@ export class RefundFlowService {
         amount: Number(input.amount),
         channel: input.channel,
         force_outbox: input.force_outbox,
+        actor_note: input.actor_note,
       });
     } catch (error) {
       // Non-critical: don't fail the refund if movement recording fails —

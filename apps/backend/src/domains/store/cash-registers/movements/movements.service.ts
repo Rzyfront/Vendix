@@ -52,6 +52,20 @@ export const ORDER_CANCELLED_MOVEMENT_REFERENCE = 'order_cancelled';
  */
 export const CASH_MOVEMENT_DELIVERY_SCOPE = 'register_v2';
 
+/** B17/B18 — who a userless cash refund/cancellation is booked to (R3 #5). */
+export type SaleActor = { user_id: number; source: 'sale' | 'order_creator' };
+
+/**
+ * R3 #5 — without a `sale` movement the actor falls back to the order's
+ * creator, who may never have touched the drawer. That attribution is left in
+ * the outbox `error_message` and the movement `notes`. `undefined` = no fallback.
+ */
+export function actorFallbackNote(actor: SaleActor | null | undefined): string | undefined {
+  return actor?.source === 'order_creator'
+    ? `ACTOR_FALLBACK: no sale movement found, attributed to the order creator (user #${actor.user_id})`
+    : undefined;
+}
+
 /** Prefijo de `error_message` de las filas legacy marcadas para revisión manual. */
 export const LEGACY_MANUAL_REVIEW_PREFIX = 'LEGACY_MANUAL_REVIEW';
 const LEGACY_MANUAL_REVIEW_MESSAGE =
@@ -898,13 +912,15 @@ export class MovementsService {
    * B17/B18 — who a cash refund/cancellation without a request user is booked
    * to: the cashier of the `sale` of one of its payments, else the order's
    * creator. Webhooks and jobs run without store context, so this reads
-   * unscoped and filters by `store_id` explicitly. `null` = nobody.
+   * unscoped and filters by `store_id` explicitly. `null` = nobody. R3 #5:
+   * `source` says which; the creator fallback is written down with
+   * `actorFallbackNote` so the attribution stays auditable.
    */
-  async resolveSaleActorId(input: {
+  async resolveSaleActor(input: {
     store_id: number;
     order_id: number;
     payment_ids?: (number | null)[];
-  }): Promise<number | null> {
+  }): Promise<SaleActor | null> {
     const db = this.prisma.withoutScope();
     const ids = (input.payment_ids ?? []).filter((id): id is number => id != null);
     const sale_of = (where: Prisma.cash_register_movementsWhereInput) =>
@@ -916,12 +932,14 @@ export class MovementsService {
     const sale =
       (ids.length > 0 ? await sale_of({ payment_id: { in: ids } }) : null) ??
       (await sale_of({}));
-    if (sale?.user_id) return sale.user_id;
+    if (sale?.user_id) return { user_id: sale.user_id, source: 'sale' };
     const order = await db.orders.findFirst({
       where: { id: input.order_id, store_id: input.store_id },
       select: { created_by_user_id: true },
     });
-    return order?.created_by_user_id ?? null;
+    return order?.created_by_user_id
+      ? { user_id: order.created_by_user_id, source: 'order_creator' }
+      : null;
   }
 
   async recordRefundCashMovementDurable(input: {
@@ -939,6 +957,8 @@ export class MovementsService {
      * se encola siempre, con el actor del `sale`, hasta que ese actor tenga caja.
      */
     force_outbox?: boolean;
+    /** R3 #5 — `actorFallbackNote` of the actor, when it is a fallback. */
+    actor_note?: string;
   }, tx?: Prisma.TransactionClient): Promise<RefundCashMovementOutcome> {
     const payload: RefundCashMovementPayload = {
       version: 1,
@@ -950,7 +970,10 @@ export class MovementsService {
       payment_id: input.payment_id,
       amount: input.amount,
       channel: input.channel,
+      ...(input.actor_note ? { notes: input.actor_note } : {}),
     };
+    const withActorNote = (message: string) =>
+      input.actor_note ? `${message} | ${input.actor_note}` : message;
     // Cascada B03: sesión abierta del operador. `null` = nadie puede recibirlo
     // ahora → outbox (el barrido usa la misma cascada).
     const actor_id = input.user_id;
@@ -968,11 +991,13 @@ export class MovementsService {
     if (session_id == null) {
       const failure_id = await this.enqueueRefundCashMovement(
         payload,
-        actor_id == null
-          ? `${REFUND_NO_ACTOR_PREFIX}: refund without acting user nor sale actor, cash movement queued for manual review`
-          : input.force_outbox
-            ? 'PENDING_DELIVERY: refund without acting user, cash movement queued for the sale actor'
-            : 'PENDING_DELIVERY: no open cash session for refund cash movement',
+        withActorNote(
+          actor_id == null
+            ? `${REFUND_NO_ACTOR_PREFIX}: refund without acting user nor sale actor, cash movement queued for manual review`
+            : input.force_outbox
+              ? 'PENDING_DELIVERY: refund without acting user, cash movement queued for the sale actor'
+              : 'PENDING_DELIVERY: no open cash session for refund cash movement',
+        ),
         tx,
       );
       this.logger.error(
@@ -995,6 +1020,7 @@ export class MovementsService {
         order_id: input.order_id,
         payment_id: input.payment_id ?? undefined,
         reference: buildRefundCashMovementReference(input.refund_id),
+        notes: input.actor_note,
       });
       try {
         await this.stampRefundCashSession(
@@ -1019,7 +1045,9 @@ export class MovementsService {
     } catch (error) {
       const failure_id = await this.enqueueRefundCashMovement(
         payload,
-        `PENDING_DELIVERY: cash movement insert failed — ${error instanceof Error ? error.message : String(error)}`,
+        withActorNote(
+          `PENDING_DELIVERY: cash movement insert failed — ${error instanceof Error ? error.message : String(error)}`,
+        ),
         tx,
       );
       this.logger.error(
@@ -1059,11 +1087,16 @@ export class MovementsService {
       organization_id?: number;
       /** Compensación B02 (mismo cobro): sesión del `sale` primero. */
       sale_session_first?: boolean;
+      /** R3 #5 — `actorFallbackNote` of the actor, when it is a fallback. */
+      actor_note?: string;
     },
     tx?: Prisma.TransactionClient,
   ): Promise<CompensationCashMovementOutcome> {
     const db = (tx ?? this.prisma.withoutScope()) as unknown as Prisma.TransactionClient;
     const payment_method = input.payment_method ?? 'cash';
+    const notes = [input.notes, input.actor_note].filter(Boolean).join(' | ') || undefined;
+    const withActorNote = (message: string) =>
+      input.actor_note ? `${message} | ${input.actor_note}` : message;
 
     const existing = await db.cash_register_movements.findFirst({
       where: {
@@ -1104,7 +1137,7 @@ export class MovementsService {
       payment_method,
       reference: input.reference,
       dedupe_key: input.dedupe_key,
-      notes: input.notes,
+      notes,
       ...(input.sale_session_first ? { sale_session_first: true } : {}),
     };
 
@@ -1121,7 +1154,7 @@ export class MovementsService {
     if (session_id == null) {
       const failure_id = await this.enqueueCompensationCashMovement(
         payload,
-        'PENDING_DELIVERY: no open cash session for compensation cash movement',
+        withActorNote('PENDING_DELIVERY: no open cash session for compensation cash movement'),
         tx,
       );
       this.logger.error(
@@ -1142,7 +1175,7 @@ export class MovementsService {
           order_id: input.order_id,
           payment_id: input.payment_id ?? undefined,
           reference: input.reference,
-          notes: input.notes,
+          notes,
         },
         tx,
       );
@@ -1150,7 +1183,9 @@ export class MovementsService {
     } catch (error) {
       const failure_id = await this.enqueueCompensationCashMovement(
         payload,
-        `PENDING_DELIVERY: cash movement insert failed — ${error instanceof Error ? error.message : String(error)}`,
+        withActorNote(
+          `PENDING_DELIVERY: cash movement insert failed — ${error instanceof Error ? error.message : String(error)}`,
+        ),
         tx,
       );
       this.logger.error(
