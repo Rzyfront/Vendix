@@ -155,6 +155,30 @@ import {
 } from '../../withholding-tax/withholding-flow.service';
 
 type OrderState = order_state_enum;
+
+/**
+ * B07/B11 — `_flow_metadata.finish_pending_after_payment`: the money is firm
+ * but the closing step after it failed on infrastructure. `pay_finish` is a
+ * `flow/pay` whose `processing → finished` write failed; `table_settlement` is
+ * a staff-confirmed table payment whose settlement failed. Consumed by
+ * `OrderFlowService.resumeFinishPendingAfterPayment` (immediately and from
+ * `FinishPendingSweepJob`); cleared to `null` once resolved.
+ */
+export interface FinishPendingAfterPaymentMarker {
+  kind: 'pay_finish' | 'table_settlement';
+  at: string;
+  payment_ids: number[];
+  user_id: number | null;
+  settled_balance?: { total_paid: number; remaining_balance: number };
+  void_marker_ids?: number[];
+  deferred_cash_signal_id?: number | null;
+  from_state?: string | null;
+  error: string;
+}
+
+/** Exact text the marker leaves in `internal_notes` while it is open
+ * (`JSON.stringify` writes no spaces; a resolved marker is `null`). */
+export const FINISH_PENDING_MARKER_NEEDLE = '"finish_pending_after_payment":{';
 type CashSessionFinishSelection = {
   id: number;
   version: string;
@@ -3135,7 +3159,11 @@ export class OrderFlowService {
         // invitaba a cobrar otra vez): la orden queda en `processing` con el
         // marcador `finish_pending_after_payment` y se responde "pago
         // registrado, cierre pendiente". El pago es real, así que se emiten
-        // sus eventos como en el camino de éxito.
+        // sus eventos como en el camino de éxito. El marcador lleva todo lo
+        // que el cierre necesita para repetirse sin el request:
+        // `resumeFinishPendingAfterPayment` lo consume (un intento inmediato
+        // acá abajo y `FinishPendingSweepJob` después) y, al cerrar, escribe
+        // el `sale` diferido de la confirmación en sitio.
         this.logger.error(
           `[flow/pay finish_blocked_infra] order=${orderId}: pago registrado, cierre pendiente: ${(e as Error)?.message ?? 'unknown'}`,
           (e as Error)?.stack,
@@ -3144,10 +3172,16 @@ export class OrderFlowService {
         try {
           await this.appendFlowMetadata(orderId, {
             finish_pending_after_payment: {
+              kind: 'pay_finish',
               at: new Date().toISOString(),
               payment_ids: legPayments.map(({ payment }) => payment.id),
+              user_id: RequestContextService.getUserId() ?? null,
+              settled_balance: settledBalanceMetadata,
+              void_marker_ids: markerIdsToVoid,
+              deferred_cash_signal_id: paymentHistoryCtx.deferredCashSignalId,
+              from_state: preClaimState,
               error: (e as Error)?.message ?? 'unknown',
-            },
+            } satisfies FinishPendingAfterPaymentMarker,
           });
         } catch (markerError) {
           this.logger.error(
@@ -3161,10 +3195,27 @@ export class OrderFlowService {
             `[flow/pay finish_pending events failed] order=${orderId}: ${(eventError as Error)?.message ?? eventError}`,
           );
         }
+        // Un intento inmediato: un deadlock o un corte de conexión suele ser
+        // transitorio. Si cierra, la venta queda completa (incluido el `sale`
+        // diferido) y la respuesta deja de decir "cierre pendiente".
+        try {
+          paymentFinishPending =
+            (await this.resumeFinishPendingAfterPayment(orderId)) !== 'resolved';
+        } catch (resumeError) {
+          this.logger.error(
+            `[flow/pay finish_pending immediate retry failed] order=${orderId}: ${(resumeError as Error)?.message ?? resumeError}`,
+          );
+        }
         try {
           updatedOrder = await this.getOrder(orderId);
         } catch {
           updatedOrder = { id: orderId, state: 'processing' };
+        }
+        if (!paymentFinishPending) {
+          return {
+            order: updatedOrder,
+            ...this.buildLeggedPaymentResponse(legPayments, change),
+          };
         }
       }
 
@@ -3345,6 +3396,101 @@ export class OrderFlowService {
    * fully paid and backed by a table session. */
   async settlePaidTableOrder(orderId: number, actorUserId?: number): Promise<void> {
     return this.settlePaidSource(orderId, actorUserId, false);
+  }
+
+  /**
+   * B07/B11 — consumer of `finish_pending_after_payment`. Repeats the closing
+   * step that failed after the money was taken, never the charge itself:
+   * - `pay_finish`: `processing → finished` with the settled balance, voids
+   *   the settlement markers, and writes the deferred `sale` of an in-place
+   *   confirmation (its close guard is already reserved).
+   * - `table_settlement`: the idempotent `settlePaidTableOrder`.
+   * Runs as the cashier who charged. Returns `skipped` when there is no open
+   * marker; a cancelled/refunded order resolves the marker without acting.
+   */
+  async resumeFinishPendingAfterPayment(
+    orderId: number,
+  ): Promise<'resolved' | 'skipped'> {
+    const order = await this.getOrder(orderId);
+    const marker = this.readFinishPendingMarker(order.internal_notes);
+    if (!marker) return 'skipped';
+    const context = RequestContextService.getContext();
+    if (marker.user_id && context?.user_id !== marker.user_id) {
+      return RequestContextService.runIsolated(
+        { is_super_admin: false, is_owner: false, ...context, user_id: marker.user_id },
+        () => this.applyFinishPendingAfterPayment(orderId, order.state, marker),
+      );
+    }
+    return this.applyFinishPendingAfterPayment(orderId, order.state, marker);
+  }
+
+  private async applyFinishPendingAfterPayment(
+    orderId: number,
+    state: string,
+    marker: FinishPendingAfterPaymentMarker,
+  ): Promise<'resolved'> {
+    if (marker.kind === 'table_settlement') {
+      await this.settlePaidTableOrder(orderId, marker.user_id ?? undefined);
+    } else if (state === 'processing') {
+      this.validateTransition('processing', 'finished');
+      const finishedAt = new Date();
+      await this.updateOrderState(
+        orderId,
+        'finished',
+        {
+          paid_at: finishedAt,
+          finished_at: finishedAt,
+          ...(marker.settled_balance ?? {}),
+        },
+        { historyFromState: (marker.from_state as OrderState | null) ?? null },
+      );
+      await this.voidSettlementPendingMarkers(marker.void_marker_ids ?? []);
+      await this.computeAndPersistEta(orderId, finishedAt);
+      await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.finish_resumed');
+      if (marker.payment_ids[0] != null) {
+        await this.projectPaidOrderToTable(orderId, marker.payment_ids[0]);
+      }
+    }
+
+    if (marker.kind === 'pay_finish' && marker.deferred_cash_signal_id != null) {
+      // The same delivery the 60 s outbox retries; doing it now keeps the
+      // drawer in step with the finish. A failure here stays queued there.
+      try {
+        await this.movementsService.deliverDeferredSaleCashMovement(
+          marker.deferred_cash_signal_id,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `[finish_pending] deferred sale movement #${marker.deferred_cash_signal_id} still queued for order=${orderId}: ${(error as Error)?.message ?? error}`,
+        );
+      }
+    }
+
+    await this.appendFlowMetadata(orderId, {
+      finish_pending_after_payment: null,
+      finish_pending_resolved: {
+        at: new Date().toISOString(),
+        kind: marker.kind,
+        state: (await this.getOrder(orderId)).state,
+      },
+    });
+    this.logger.log(`[finish_pending] order=${orderId} ${marker.kind} resolved`);
+    return 'resolved';
+  }
+
+  private readFinishPendingMarker(
+    internalNotes: string | null | undefined,
+  ): FinishPendingAfterPaymentMarker | null {
+    if (!internalNotes) return null;
+    try {
+      const marker = JSON.parse(internalNotes)?._flow_metadata
+        ?.finish_pending_after_payment;
+      return marker && typeof marker === 'object' && Array.isArray(marker.payment_ids)
+        ? { kind: 'pay_finish', ...marker }
+        : null;
+    } catch {
+      return null;
+    }
   }
 
   private async settlePaidSource(orderId: number, actorUserId: number | undefined, requireSplit: boolean): Promise<void> {

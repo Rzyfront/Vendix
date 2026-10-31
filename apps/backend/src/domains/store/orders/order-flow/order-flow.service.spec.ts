@@ -3850,6 +3850,39 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
     expect(prismaMock.payments.create).toHaveBeenCalledTimes(1);
   });
 
+  it('B07: el reintento inmediato cierra la venta → respuesta sin finish_pending y el marcador lleva lo necesario para repetir el cierre', async () => {
+    const { service } = buildService();
+    const marker = jest
+      .spyOn(service as any, 'appendFlowMetadata')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'emitLegPaymentReceivedEvents')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockRejectedValue(new Error('deadlock detected'));
+    const resume = jest
+      .spyOn(service, 'resumeFinishPendingAfterPayment')
+      .mockResolvedValue('resolved');
+
+    const result: any = await service.payOrder(1, DTO);
+
+    expect(resume).toHaveBeenCalledWith(1);
+    expect(result.finish_pending).toBeUndefined();
+    expect(result.payment.transaction_id).toBe('TXN-1');
+    expect(marker).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        finish_pending_after_payment: expect.objectContaining({
+          kind: 'pay_finish',
+          payment_ids: [999],
+          settled_balance: { total_paid: 4000, remaining_balance: 0 },
+          from_state: 'created',
+        }),
+      }),
+    );
+  });
+
   it('B23: clave ya usada con pago succeeded → devuelve el estado actual y no crea otro pago', async () => {
     const { service, prismaMock } = buildService();
     prismaMock.payments.findFirst = jest.fn().mockResolvedValue({
@@ -8639,5 +8672,114 @@ describe('OrderFlowService.recordPayOrderCashMovement — shared cash movement p
       response: expect.objectContaining({ error_code: 'PAY_METHOD_MISCONFIGURED' }),
     });
     expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrderFlowService.resumeFinishPendingAfterPayment (B07/B11)', () => {
+  const notesWith = (marker: Record<string, unknown> | null) =>
+    JSON.stringify({ _flow_metadata: { finish_pending_after_payment: marker }, notes: '' });
+
+  const build = (order: Record<string, unknown>) => {
+    const movements = { deliverDeferredSaleCashMovement: jest.fn().mockResolvedValue(undefined) };
+    const service = new OrderFlowService(
+      {} as unknown as StorePrismaService,
+      { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
+      {} as any,
+      {} as any,
+      movements as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn() } as any,
+    );
+    jest.spyOn(service, 'getOrder').mockResolvedValue({ id: 7, store_id: 4, ...order } as any);
+    const spies = {
+      update: jest.spyOn(service as any, 'updateOrderState').mockResolvedValue({}),
+      voidMarkers: jest.spyOn(service as any, 'voidSettlementPendingMarkers').mockResolvedValue(undefined),
+      eta: jest.spyOn(service as any, 'computeAndPersistEta').mockResolvedValue(undefined),
+      posCompleted: jest.spyOn(service as any, 'emitPosSaleCompletedIfFullyPaid').mockResolvedValue(undefined),
+      project: jest.spyOn(service as any, 'projectPaidOrderToTable').mockResolvedValue(undefined),
+      append: jest.spyOn(service as any, 'appendFlowMetadata').mockResolvedValue(undefined),
+      settleTable: jest.spyOn(service, 'settlePaidTableOrder').mockResolvedValue(undefined),
+    };
+    return { service, movements, spies };
+  };
+
+  it('pay_finish en processing: cierra con el saldo saldado, anula marcadores, escribe el sale diferido y limpia el marcador', async () => {
+    const { service, movements, spies } = build({
+      state: 'processing',
+      internal_notes: notesWith({
+        kind: 'pay_finish',
+        at: '2026-10-31T12:00:00.000Z',
+        payment_ids: [55],
+        user_id: 3,
+        settled_balance: { total_paid: 4000, remaining_balance: 0 },
+        void_marker_ids: [54],
+        deferred_cash_signal_id: 81,
+        from_state: 'created',
+        error: 'deadlock detected',
+      }),
+    });
+
+    await expect(service.resumeFinishPendingAfterPayment(7)).resolves.toBe('resolved');
+
+    expect(spies.update).toHaveBeenCalledWith(
+      7,
+      'finished',
+      expect.objectContaining({ total_paid: 4000, remaining_balance: 0 }),
+      { historyFromState: 'created' },
+    );
+    expect(spies.voidMarkers).toHaveBeenCalledWith([54]);
+    expect(spies.project).toHaveBeenCalledWith(7, 55);
+    expect(movements.deliverDeferredSaleCashMovement).toHaveBeenCalledWith(81);
+    expect(spies.append).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ finish_pending_after_payment: null }),
+    );
+    expect(spies.settleTable).not.toHaveBeenCalled();
+  });
+
+  it('table_settlement: repite la liquidación idempotente de la mesa como el cajero que cobró', async () => {
+    const { service, movements, spies } = build({
+      state: 'draft',
+      internal_notes: notesWith({
+        kind: 'table_settlement',
+        at: '2026-10-31T12:00:00.000Z',
+        payment_ids: [60],
+        user_id: 3,
+        error: 'connection reset',
+      }),
+    });
+
+    await expect(service.resumeFinishPendingAfterPayment(7)).resolves.toBe('resolved');
+
+    expect(spies.settleTable).toHaveBeenCalledWith(7, 3);
+    expect(spies.update).not.toHaveBeenCalled();
+    expect(movements.deliverDeferredSaleCashMovement).not.toHaveBeenCalled();
+    expect(spies.append).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ finish_pending_after_payment: null }),
+    );
+  });
+
+  it('sin marcador abierto (resuelto = null) no hace nada', async () => {
+    const { service, spies } = build({ state: 'processing', internal_notes: notesWith(null) });
+
+    await expect(service.resumeFinishPendingAfterPayment(7)).resolves.toBe('skipped');
+
+    expect(spies.update).not.toHaveBeenCalled();
+    expect(spies.append).not.toHaveBeenCalled();
+  });
+
+  it('si el cierre vuelve a fallar, el marcador sigue abierto para el próximo barrido', async () => {
+    const { service, spies } = build({
+      state: 'processing',
+      internal_notes: notesWith({ kind: 'pay_finish', at: 'x', payment_ids: [55], user_id: null, error: 'e' }),
+    });
+    spies.update.mockRejectedValueOnce(new Error('still down'));
+
+    await expect(service.resumeFinishPendingAfterPayment(7)).rejects.toThrow('still down');
+
+    expect(spies.append).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { OrderFlowService } from './order-flow.service';
+import { FinishPendingSweepJob } from './jobs/finish-pending-sweep.job';
 import {
   OrderFlowController,
   OrderRefundsController,
@@ -77,6 +78,8 @@ import { WithholdingTaxModule } from '../../withholding-tax/withholding-tax.modu
     KitchenOrderDeliveryRevertedListener,
     // COD: dispatch route settlement -> COD order balance bridge (paso 7).
     PaymentFromDispatchRouteListener,
+    // B07/B11: retries the close of orders paid but left pending close.
+    FinishPendingSweepJob,
   ],
   exports: [OrderFlowService, RefundFlowService, OrderEtaService],
 })
