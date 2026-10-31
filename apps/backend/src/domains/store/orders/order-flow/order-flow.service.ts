@@ -3178,21 +3178,24 @@ export class OrderFlowService {
           (e as Error)?.stack,
         );
         paymentFinishPending = true;
+        const finishPendingMarker: FinishPendingAfterPaymentMarker = {
+          kind: 'pay_finish',
+          at: new Date().toISOString(),
+          payment_ids: legPayments.map(({ payment }) => payment.id),
+          user_id: RequestContextService.getUserId() ?? null,
+          settled_balance: settledBalanceMetadata,
+          void_marker_ids: markerIdsToVoid,
+          deferred_cash_signal_id: paymentHistoryCtx.deferredCashSignalId,
+          from_state: preClaimState,
+          error: (e as Error)?.message ?? 'unknown',
+        };
+        let markerWritten = true;
         try {
           await this.appendFlowMetadata(orderId, {
-            finish_pending_after_payment: {
-              kind: 'pay_finish',
-              at: new Date().toISOString(),
-              payment_ids: legPayments.map(({ payment }) => payment.id),
-              user_id: RequestContextService.getUserId() ?? null,
-              settled_balance: settledBalanceMetadata,
-              void_marker_ids: markerIdsToVoid,
-              deferred_cash_signal_id: paymentHistoryCtx.deferredCashSignalId,
-              from_state: preClaimState,
-              error: (e as Error)?.message ?? 'unknown',
-            } satisfies FinishPendingAfterPaymentMarker,
+            finish_pending_after_payment: finishPendingMarker,
           });
         } catch (markerError) {
+          markerWritten = false;
           this.logger.error(
             `[flow/pay finish_pending marker failed] order=${orderId}: ${(markerError as Error)?.message ?? markerError}`,
           );
@@ -3207,13 +3210,22 @@ export class OrderFlowService {
         // Un intento inmediato: un deadlock o un corte de conexión suele ser
         // transitorio. Si cierra, la venta queda completa (incluido el `sale`
         // diferido) y la respuesta deja de decir "cierre pendiente".
+        // R3 #3 — sin marcador persistido el reintento usa el de memoria; si
+        // tampoco cierra, la escritura del marcador se reintenta diferida
+        // para que el barrido tenga qué consumir (nunca `processing` huérfana).
         try {
           paymentFinishPending =
-            (await this.resumeFinishPendingAfterPayment(orderId)) !== 'resolved';
+            (await (markerWritten
+              ? this.resumeFinishPendingAfterPayment(orderId)
+              : this.resumeFinishPendingAfterPayment(orderId, finishPendingMarker))) !==
+            'resolved';
         } catch (resumeError) {
           this.logger.error(
             `[flow/pay finish_pending immediate retry failed] order=${orderId}: ${(resumeError as Error)?.message ?? resumeError}`,
           );
+        }
+        if (paymentFinishPending && !markerWritten) {
+          this.scheduleFinishPendingMarkerRetry(orderId, finishPendingMarker);
         }
         try {
           updatedOrder = await this.getOrder(orderId);
@@ -3419,9 +3431,12 @@ export class OrderFlowService {
    */
   async resumeFinishPendingAfterPayment(
     orderId: number,
+    /** R3 #3 — the marker whose write failed; used only when none is persisted. */
+    unpersistedMarker?: FinishPendingAfterPaymentMarker,
   ): Promise<'resolved' | 'skipped'> {
     const order = await this.getOrder(orderId);
-    const marker = this.readFinishPendingMarker(order.internal_notes);
+    const marker =
+      this.readFinishPendingMarker(order.internal_notes) ?? unpersistedMarker ?? null;
     if (!marker) return 'skipped';
     const context = RequestContextService.getContext();
     if (marker.user_id && context?.user_id !== marker.user_id) {
@@ -3582,6 +3597,44 @@ export class OrderFlowService {
       );
     }
     return 'escalated';
+  }
+
+  /** R3 #3 — delays of the deferred marker write after the request's failed. */
+  static readonly FINISH_PENDING_MARKER_RETRY_DELAYS_MS = [5_000, 30_000, 120_000];
+
+  /**
+   * R3 #3 — the marker write failed and the immediate close did not resolve:
+   * retries the write off the request (same store/user context) so the sweep
+   * gets a consumer. Exhausted, logs the full marker as ORPHAN for manual
+   * recovery. Never throws.
+   */
+  private scheduleFinishPendingMarkerRetry(
+    orderId: number,
+    marker: FinishPendingAfterPaymentMarker,
+    attempt = 0,
+  ): void {
+    const delays = OrderFlowService.FINISH_PENDING_MARKER_RETRY_DELAYS_MS;
+    if (attempt >= delays.length) {
+      this.logger.error(
+        `[finish_pending ORPHAN] order=${orderId} stays processing without marker after ${delays.length} deferred writes; recover manually: ${JSON.stringify(marker)}`,
+      );
+      return;
+    }
+    const timer = setTimeout(() => {
+      void this.appendFlowMetadata(orderId, { finish_pending_after_payment: marker })
+        .then(() =>
+          this.logger.warn(
+            `[finish_pending] order=${orderId} marker written on deferred attempt ${attempt + 1}`,
+          ),
+        )
+        .catch((error) => {
+          this.logger.error(
+            `[finish_pending] order=${orderId} deferred marker write ${attempt + 1} failed: ${(error as Error)?.message ?? error}`,
+          );
+          this.scheduleFinishPendingMarkerRetry(orderId, marker, attempt + 1);
+        });
+    }, delays[attempt]);
+    timer.unref?.();
   }
 
   /** B11 — leaves the B07 marker on an order whose money is firm but whose

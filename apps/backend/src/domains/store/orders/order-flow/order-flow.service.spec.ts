@@ -3888,6 +3888,67 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
     );
   });
 
+  it('R3 #3: si falla escribir el marcador, el reintento inmediato usa el marcador en memoria', async () => {
+    const { service } = buildService();
+    jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockRejectedValue(new Error('deadlock detected'));
+    jest
+      .spyOn(service as any, 'appendFlowMetadata')
+      .mockRejectedValueOnce(new Error('connection lost'));
+    jest
+      .spyOn(service as any, 'emitLegPaymentReceivedEvents')
+      .mockResolvedValue(undefined);
+    const resume = jest
+      .spyOn(service, 'resumeFinishPendingAfterPayment')
+      .mockResolvedValue('resolved');
+    const schedule = jest.spyOn(service as any, 'scheduleFinishPendingMarkerRetry');
+
+    const result: any = await service.payOrder(1, DTO);
+
+    expect(resume).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ kind: 'pay_finish', payment_ids: [999] }),
+    );
+    expect(result.finish_pending).toBeUndefined();
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it('R3 #3: marcador sin escribir y cierre sin resolver → reintento diferido de la escritura (la orden no queda huérfana)', async () => {
+    jest.useFakeTimers();
+    try {
+      const { service } = buildService();
+      jest
+        .spyOn(service as any, 'updateOrderState')
+        .mockRejectedValue(new Error('deadlock detected'));
+      const append = jest
+        .spyOn(service as any, 'appendFlowMetadata')
+        .mockRejectedValueOnce(new Error('connection lost'))
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(service as any, 'emitLegPaymentReceivedEvents')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(service, 'resumeFinishPendingAfterPayment')
+        .mockRejectedValue(new Error('still down'));
+
+      const result: any = await service.payOrder(1, DTO);
+
+      expect(result.finish_pending).toBe(true);
+      expect(append).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(5_000);
+      expect(append).toHaveBeenCalledTimes(2);
+      expect(append).toHaveBeenLastCalledWith(1, {
+        finish_pending_after_payment: expect.objectContaining({
+          kind: 'pay_finish',
+          payment_ids: [999],
+        }),
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('B23: clave ya usada con pago succeeded → devuelve el estado actual y no crea otro pago', async () => {
     const { service, prismaMock } = buildService();
     prismaMock.payments.findFirst = jest.fn().mockResolvedValue({
