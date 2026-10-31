@@ -14,6 +14,7 @@ import { PurchaseOrdersModule } from './orders/purchase-orders/purchase-orders.m
 import { StoreUsersModule } from './store-users/store-users.module';
 import { SettingsModule } from './settings/settings.module';
 import { CustomersModule } from './customers/customers.module';
+import { CrmInboxModule } from './customers/crm/conversations/crm-inbox.module';
 import { StoreDomainsModule } from './domains/domains.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { ExpensesModule } from './expenses/expenses.module';
@@ -103,6 +104,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     StoreUsersModule,
     SettingsModule,
     CustomersModule,
+    CrmInboxModule,
     StoreDomainsModule,
     ShippingModule,
     ExpensesModule,

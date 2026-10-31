@@ -1,15 +1,18 @@
 import { ConfigService } from '@nestjs/config';
 import { ForbiddenException } from '@nestjs/common';
 import { MetaWhatsappWebhookService } from './meta-whatsapp-webhook.service';
+import { createHmac } from 'crypto';
 import { SocialChannelEncryptionService } from '../../store/social-sales/social-channel-encryption.service';
+import { CrmInboundQueue } from './inbound/crm-inbound.queue';
 
-function createService() {
+function createService(env: Record<string, string> = {}) {
+  const values: Record<string, string> = {
+    META_WHATSAPP_VERIFY_TOKEN: 'verify-token',
+    SOCIAL_CHANNEL_ENCRYPTION_KEY: 'test-key',
+    ...env,
+  };
   const config = {
-    get: jest.fn((key: string) => {
-      if (key === 'META_WHATSAPP_VERIFY_TOKEN') return 'verify-token';
-      if (key === 'SOCIAL_CHANNEL_ENCRYPTION_KEY') return 'test-key';
-      return undefined;
-    }),
+    get: jest.fn((key: string) => values[key]),
   } as any as ConfigService;
   const prisma = {
     platform_settings: {
@@ -26,12 +29,26 @@ function createService() {
     },
   } as any;
   const encryption = new SocialChannelEncryptionService(config);
+  const inboundQueue = {
+    enqueue: jest.fn().mockResolvedValue(undefined),
+  } as unknown as CrmInboundQueue;
 
   return {
-    service: new MetaWhatsappWebhookService(prisma, config, encryption),
+    service: new MetaWhatsappWebhookService(
+      prisma,
+      config,
+      encryption,
+      inboundQueue,
+    ),
     prisma,
+    inboundQueue,
   };
 }
+
+const SIGNED_PAYLOAD = {
+  object: 'whatsapp_business_account',
+  entry: [{ id: 'waba-1', changes: [{ field: 'messages', value: {} }] }],
+};
 
 describe('MetaWhatsappWebhookService', () => {
   it('returns hub challenge only when verify token matches', async () => {
@@ -70,6 +87,7 @@ describe('MetaWhatsappWebhookService', () => {
       received: true,
       event_id: 99,
       matched_channel: true,
+      queued: true,
     });
     expect(prisma.social_webhook_events.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -82,6 +100,45 @@ describe('MetaWhatsappWebhookService', () => {
           processing_status: 'received',
         }),
       }),
+    );
+  });
+
+  it('enqueues the stored event in crm-inbound', async () => {
+    const { service, inboundQueue } = createService();
+
+    await service.ingest({ entry: [] });
+
+    expect(inboundQueue.enqueue).toHaveBeenCalledWith(99);
+  });
+
+  it('rejects unsigned events in production when no app secret is configured', async () => {
+    const { service, prisma, inboundQueue } = createService({
+      NODE_ENV: 'production',
+    });
+
+    await expect(service.ingest(SIGNED_PAYLOAD)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.social_webhook_events.create).not.toHaveBeenCalled();
+    expect(inboundQueue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('accepts a valid signature and rejects a forged one in production', async () => {
+    const { service } = createService({
+      NODE_ENV: 'production',
+      META_APP_SECRET: 'app-secret',
+    });
+    const raw = JSON.stringify(SIGNED_PAYLOAD);
+    const signature = `sha256=${createHmac('sha256', 'app-secret').update(raw).digest('hex')}`;
+
+    await expect(
+      service.ingest(SIGNED_PAYLOAD, raw, signature),
+    ).resolves.toMatchObject({ received: true });
+    await expect(
+      service.ingest(SIGNED_PAYLOAD, raw, `sha256=${'0'.repeat(64)}`),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.ingest(SIGNED_PAYLOAD, raw)).rejects.toBeInstanceOf(
+      ForbiddenException,
     );
   });
 });
