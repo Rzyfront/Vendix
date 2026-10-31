@@ -106,6 +106,8 @@ describe('OrderFlowService.cancelLegPayments — compensación de caja (B02)', (
     expect(refunds[0].notes).toContain(reason);
     // Misma tx que el cancel de los pagos.
     expect(durable.mock.calls.every(([, passedTx]) => passedTx === tx)).toBe(true);
+    // S03 (excepción): la compensación del mismo cobro va a la sesión del `sale`.
+    expect(durable.mock.calls.every(([input]) => input.sale_session_first === true)).toBe(true);
     expect(tx.payments.update).toHaveBeenCalledTimes(2);
   });
 

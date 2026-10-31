@@ -3991,6 +3991,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       invoices: ['findMany', 'findFirst'],
       accounts_receivable: ['findMany', 'update'],
       order_installments: ['updateMany'],
+      cash_register_movements: ['findFirst'],
     });
     prismaMock.invoices.findMany.mockResolvedValue([]);
     prismaMock.accounts_receivable.findMany.mockResolvedValue([]);
@@ -4326,6 +4327,56 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     );
     expect(refundFlow.completeCancellationCashRefund).toHaveBeenCalledWith(81);
     expect(refundFlow.emitCancellationCashRefund).toHaveBeenCalledTimes(1);
+  });
+
+  describe('B17 — cancelación sin usuario (webhook/job)', () => {
+    const cashOrder = () =>
+      cancelableOrder([
+        buildPayment({
+          id: CASH_PAYMENT_ID,
+          state: 'succeeded',
+          store_payment_method_id: CASH_METHOD_ID,
+          amount: new Prisma.Decimal('59.50'),
+        }),
+      ]);
+
+    it('sin usuario: el egreso va a nombre del actor del sale y el refund se completa (no queda processing)', async () => {
+      mockRequestContext({ store_id: 100, organization_id: 1, user_id: undefined as any });
+      (prismaMock as any).cash_register_movements.findFirst.mockResolvedValue({ user_id: 42 });
+      jest.spyOn(service as any, 'getOrder').mockResolvedValue(cashOrder());
+      prismaMock.payments.findMany.mockResolvedValue([
+        { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
+      ]);
+
+      await service.cancelOrder(ORDER_ID, DTO);
+
+      expect(movements.recordCompensationCashMovementDurable).toHaveBeenCalledWith(
+        expect.objectContaining({ user_id: 42, payment_id: CASH_PAYMENT_ID }),
+      );
+      expect(audit.log).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'order.cancel.cash_out_unrecorded' }),
+      );
+      expect(refundFlow.completeCancellationCashRefund).toHaveBeenCalledWith(81);
+    });
+
+    it('sin usuario y sin sale del pago: se escala, nunca se omite en silencio', async () => {
+      mockRequestContext({ store_id: 100, organization_id: 1, user_id: undefined as any });
+      (prismaMock as any).cash_register_movements.findFirst.mockResolvedValue(null);
+      jest.spyOn(service as any, 'getOrder').mockResolvedValue(cashOrder());
+      prismaMock.payments.findMany.mockResolvedValue([
+        { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
+      ]);
+
+      await service.cancelOrder(ORDER_ID, DTO);
+
+      expect(movements.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
+      expect(audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'order.cancel.cash_out_unrecorded',
+          metadata: expect.objectContaining({ cause: 'no_user_context' }),
+        }),
+      );
+    });
   });
 
   it('módulo de caja apagado: ni movimiento ni escalamiento', async () => {

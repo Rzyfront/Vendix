@@ -1293,8 +1293,9 @@ export class SessionsService {
     }
 
     // --- Reembolsos ---
-    // Vínculo exacto por `refund:<id>` + heurística por ventana y cajero (no hay
-    // FK refunds→sesión; gap conocido). Dedupe por id.
+    // Vínculo exacto por `refunds.cash_session_id` (B03) o `refund:<id>`; solo los
+    // refunds sin sesión registrada (legacy) caen en la heurística por ventana y
+    // cajero. Dedupe por id.
     const linked_ids = movements
       .filter((m) => m.type === 'refund' && m.reference?.startsWith('refund:'))
       .map((m) => Number(m.reference!.slice('refund:'.length)))
@@ -1310,7 +1311,9 @@ export class SessionsService {
         state: { in: ['approved', 'processing', 'completed'] },
         OR: [
           ...(linked_ids.length ? [{ id: { in: linked_ids } }] : []),
+          { cash_session_id: session.id },
           {
+            cash_session_id: null,
             processed_at: { gte: session.opened_at, lte: window_end },
             processed_by_user_id: { in: cashier_ids },
           },

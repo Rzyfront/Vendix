@@ -321,7 +321,7 @@ describe('MovementsService — compensación de caja', () => {
   describe('resolveCompensationSessionId', () => {
     const sale = { session_id: 100, payment_id: 55, order_id: 9 };
 
-    it('a) devuelve la sesión de la venta original si sigue abierta', async () => {
+    it('B03: el actor con sesión propia gana sobre la sesión abierta de la venta de otro cajero', async () => {
       const db = makeDb(
         [
           { id: 100, status: 'open', cash_register_id: REGISTER_ID, opened_by: OTHER_USER },
@@ -334,12 +334,28 @@ describe('MovementsService — compensación de caja', () => {
         service.resolveCompensationSessionId({
           store_id: STORE_ID, user_id: OPERATOR, payment_id: 55, order_id: 9,
         }),
-      ).resolves.toBe(100);
+      ).resolves.toBe(200);
     });
 
-    it('sin payment_id resuelve la venta original por order_id', async () => {
+    it('B03: el actor sin sesión NO cae en la venta abierta de otro cajero ni en otra de la misma caja (null → outbox)', async () => {
       const db = makeDb(
-        [{ id: 100, status: 'open', cash_register_id: REGISTER_ID, opened_by: OTHER_USER }],
+        [
+          { id: 100, status: 'open', cash_register_id: REGISTER_ID, opened_by: OTHER_USER },
+          { id: 300, status: 'open', cash_register_id: REGISTER_ID, opened_by: 12 },
+        ],
+        [sale],
+      );
+      const { service } = makeService(db);
+      await expect(
+        service.resolveCompensationSessionId({
+          store_id: STORE_ID, user_id: OPERATOR, payment_id: 55, order_id: 9,
+        }),
+      ).resolves.toBeNull();
+    });
+
+    it('B03: si la sesión original es del mismo actor, es la del actor', async () => {
+      const db = makeDb(
+        [{ id: 100, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
         [sale],
       );
       const { service } = makeService(db);
@@ -350,7 +366,38 @@ describe('MovementsService — compensación de caja', () => {
       ).resolves.toBe(100);
     });
 
-    it('b) si la original está cerrada, usa la sesión abierta del operador', async () => {
+    it('B02 (excepción S03): sale_session_first usa la sesión del sale aunque sea de otro usuario', async () => {
+      const db = makeDb(
+        [
+          { id: 100, status: 'open', cash_register_id: REGISTER_ID, opened_by: OTHER_USER },
+          { id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR },
+        ],
+        [sale],
+      );
+      const { service } = makeService(db);
+      await expect(
+        service.resolveCompensationSessionId({
+          store_id: STORE_ID, user_id: OPERATOR, payment_id: 55, order_id: 9,
+          sale_session_first: true,
+        }),
+      ).resolves.toBe(100);
+    });
+
+    it('B02: sale_session_first sin payment_id resuelve el sale por order_id', async () => {
+      const db = makeDb(
+        [{ id: 100, status: 'open', cash_register_id: REGISTER_ID, opened_by: OTHER_USER }],
+        [sale],
+      );
+      const { service } = makeService(db);
+      await expect(
+        service.resolveCompensationSessionId({
+          store_id: STORE_ID, user_id: OPERATOR, order_id: 9,
+          sale_session_first: true,
+        }),
+      ).resolves.toBe(100);
+    });
+
+    it('b) si la original está cerrada, usa la sesión abierta del operador (con o sin sale_session_first)', async () => {
       const db = makeDb(
         [
           { id: 100, status: 'closed', cash_register_id: REGISTER_ID, opened_by: OTHER_USER },
@@ -360,28 +407,14 @@ describe('MovementsService — compensación de caja', () => {
         [sale],
       );
       const { service } = makeService(db);
-      await expect(
-        service.resolveCompensationSessionId({
-          store_id: STORE_ID, user_id: OPERATOR, payment_id: 55, order_id: 9,
-        }),
-      ).resolves.toBe(200);
-    });
-
-    it('c) sin sesión del operador, usa otra abierta del mismo cash_register_id', async () => {
-      const db = makeDb(
-        [
-          { id: 100, status: 'closed', cash_register_id: REGISTER_ID, opened_by: OTHER_USER },
-          { id: 400, status: 'open', cash_register_id: 99, opened_by: 12 },
-          { id: 300, status: 'open', cash_register_id: REGISTER_ID, opened_by: 12 },
-        ],
-        [sale],
-      );
-      const { service } = makeService(db);
-      await expect(
-        service.resolveCompensationSessionId({
-          store_id: STORE_ID, user_id: OPERATOR, payment_id: 55, order_id: 9,
-        }),
-      ).resolves.toBe(300);
+      for (const sale_session_first of [false, true]) {
+        await expect(
+          service.resolveCompensationSessionId({
+            store_id: STORE_ID, user_id: OPERATOR, payment_id: 55, order_id: 9,
+            sale_session_first,
+          }),
+        ).resolves.toBe(200);
+      }
     });
 
     it('d) sin ninguna candidata devuelve null (el llamador encola)', async () => {
@@ -431,6 +464,107 @@ describe('MovementsService — compensación de caja', () => {
     });
   });
 
+  describe('recordRefundCashMovementDurable — B03/B18', () => {
+    const input = {
+      organization_id: 3,
+      store_id: STORE_ID,
+      user_id: OPERATOR,
+      refund_id: 900,
+      order_id: 9,
+      payment_id: 55,
+      amount: 15000,
+      channel: 'cash',
+    };
+
+    it('B03: asienta en la sesión del actor y deja refunds.cash_session_id', async () => {
+      const db = makeDb(
+        [
+          { id: 100, status: 'open', cash_register_id: REGISTER_ID, opened_by: OTHER_USER },
+          { id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR },
+        ],
+        [{ session_id: 100, payment_id: 55, order_id: 9 }],
+      );
+      const refunds = { updateMany: jest.fn().mockResolvedValue({ count: 1 }) };
+      const { service } = makeService(db, { refunds });
+
+      const out = await service.recordRefundCashMovementDurable(input);
+
+      expect(out).toEqual({ status: 'recorded', movement_id: 901 });
+      expect(db.cash_register_movements.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ session_id: 200, payment_id: 55 }),
+      });
+      expect(refunds.updateMany).toHaveBeenCalledWith({
+        where: { id: 900, cash_session_id: null },
+        data: { cash_session_id: 200 },
+      });
+    });
+
+    it('B03: actor sin sesión → outbox, nunca la caja de un tercero', async () => {
+      const db = makeDb(
+        [{ id: 100, status: 'open', cash_register_id: REGISTER_ID, opened_by: OTHER_USER }],
+        [{ session_id: 100, payment_id: 55, order_id: 9 }],
+      );
+      const failures = {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 61 }),
+        update: jest.fn(),
+      };
+      const { service } = makeService(db, { accounting_entry_failures: failures });
+
+      const out = await service.recordRefundCashMovementDurable(input);
+
+      expect(out).toEqual({ status: 'pending', failure_id: 61, reason: 'no_open_cash_session' });
+      expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+
+    it('B18: force_outbox encola aunque el actor del sale tenga sesión abierta', async () => {
+      const db = makeDb(
+        [{ id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
+        [],
+      );
+      const failures = {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 62 }),
+        update: jest.fn(),
+      };
+      const { service } = makeService(db, { accounting_entry_failures: failures });
+
+      const out = await service.recordRefundCashMovementDurable({ ...input, force_outbox: true });
+
+      expect(out).toMatchObject({ status: 'pending', failure_id: 62 });
+      expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+      expect(failures.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          source_id: 900,
+          event_payload: expect.objectContaining({ user_id: OPERATOR, payment_id: 55 }),
+        }),
+      });
+    });
+
+    it('B25: dos pagos en efectivo del mismo refund → dos filas de outbox (dedupe por pago)', async () => {
+      const db = makeDb([], []);
+      const failures = {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValueOnce({ id: 70 }).mockResolvedValueOnce({ id: 71 }),
+        update: jest.fn(),
+      };
+      const { service } = makeService(db, { accounting_entry_failures: failures });
+
+      await service.recordRefundCashMovementDurable({ ...input, payment_id: 55 });
+      await service.recordRefundCashMovementDurable({ ...input, payment_id: 56 });
+
+      expect(failures.findFirst).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          where: expect.objectContaining({
+            event_payload: { path: ['payment_id'], equals: 56 },
+          }),
+        }),
+      );
+      expect(failures.create).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('deliverRefundCashMovement — cola pendiente', () => {
     const FAILURE_ID = 555;
     const payload: RefundCashMovementPayload = {
@@ -446,11 +580,11 @@ describe('MovementsService — compensación de caja', () => {
       delivery_scope: CASH_MOVEMENT_DELIVERY_SCOPE,
     };
 
-    it('entrega a una sesión abierta del mismo registro aunque sea de OTRO usuario', async () => {
+    it('B03: la entrega usa la sesión abierta del operador del payload', async () => {
       const db = makeDb(
         [
           { id: 100, status: 'closed', cash_register_id: REGISTER_ID, opened_by: OTHER_USER },
-          { id: 300, status: 'open', cash_register_id: REGISTER_ID, opened_by: 12 },
+          { id: 300, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR },
         ],
         [{ session_id: 100, payment_id: 55, order_id: 9 }],
       );
@@ -610,14 +744,35 @@ describe('MovementsService — compensación de caja', () => {
       expect(emit).not.toHaveBeenCalled();
     });
 
-    it('sin sesión del operador pero con la sesión original abierta: cae en la original', async () => {
+    it('B03: sin sesión del operador y con la original abierta de otro: NO cae en la original (outbox)', async () => {
+      const db = makeDb(
+        [{ id: 100, status: 'open', cash_register_id: REGISTER_ID, opened_by: OTHER_USER }],
+        [{ session_id: 100, payment_id: 55, order_id: 9 }],
+      );
+      const failures = {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 78 }),
+        update: jest.fn(),
+      };
+      const { service } = makeService(db, { stores, accounting_entry_failures: failures });
+
+      const out = await service.recordCompensationCashMovementDurable(input);
+
+      expect(out).toEqual({ status: 'pending', failure_id: 78, reason: 'no_open_cash_session' });
+      expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+
+    it('B02: con sale_session_first cae en la sesión del sale y el outbox conserva el flag', async () => {
       const db = makeDb(
         [{ id: 100, status: 'open', cash_register_id: REGISTER_ID, opened_by: OTHER_USER }],
         [{ session_id: 100, payment_id: 55, order_id: 9 }],
       );
       const { service } = makeService(db, { stores });
 
-      await service.recordCompensationCashMovementDurable(input);
+      await service.recordCompensationCashMovementDurable({
+        ...input,
+        sale_session_first: true,
+      });
 
       expect(db.cash_register_movements.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ session_id: 100 }),

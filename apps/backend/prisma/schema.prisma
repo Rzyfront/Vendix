@@ -3357,6 +3357,8 @@ model refunds {
   // a refunds cerrados por el flujo automático del gateway.
   resolved_by_user_id   Int?
   resolution_notes      String?            @db.Text
+  /// B03 — sesión de caja donde salió el efectivo del reembolso (NULL = legacy o sin efectivo).
+  cash_session_id       Int?
   refund_items          refund_items[]
   /// CP-REFUND-FLOW-REDESIGN paso 7 — NCs vinculadas a este refund
   /// (`invoices.refund_id`). Back-relation, sin columna propia.
@@ -3366,8 +3368,10 @@ model refunds {
   ar_payments           ar_payments?       @relation(fields: [ar_payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users                 users?             @relation(fields: [processed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   resolvedByUser        users?             @relation("refunds_resolved_by", fields: [resolved_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  cash_session          cash_register_sessions? @relation(fields: [cash_session_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([order_id])
+  @@index([cash_session_id])
 }
 
 model reviews {
@@ -9547,6 +9551,7 @@ model cash_register_sessions {
   opened_by_user users                     @relation("cash_register_sessions_opened_by", fields: [opened_by], references: [id], onUpdate: NoAction)
   closed_by_user users?                    @relation("cash_register_sessions_closed_by", fields: [closed_by], references: [id], onUpdate: NoAction)
   movements      cash_register_movements[]
+  refunds        refunds[]
   origin_orders  orders[]                          @relation("orders_origin_cash_session")
   settled_dispatch_routes dispatch_routes[]        @relation("dispatch_routes_settlement_cash_session")
 

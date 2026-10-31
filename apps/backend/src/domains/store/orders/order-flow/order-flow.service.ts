@@ -8165,27 +8165,43 @@ export class OrderFlowService {
         return true;
       }
 
-      if (!userId) {
-        await this.escalateCancelCashOutFailure(
-          orderId,
-          reversal,
-          'no_user_context',
-          userId,
-        );
-        return false;
+      // B17 — cancelación sin usuario (webhook/job): el egreso no se omite ni deja
+      // el refund `processing` huérfano; se asienta/encola a nombre del actor
+      // del `sale` de cada pago (como B16). Sin `sale` ni usuario no hay actor.
+      const actorByPayment = new Map<number, number>();
+      for (const pay of reversal.payments) {
+        let actor = userId;
+        if (!actor) {
+          const sale = await this.prisma.cash_register_movements.findFirst({
+            where: { type: 'sale', payment_id: pay.id },
+            orderBy: { id: 'asc' },
+            select: { user_id: true },
+          });
+          actor = sale?.user_id;
+        }
+        if (!actor) {
+          await this.escalateCancelCashOutFailure(
+            orderId,
+            reversal,
+            'no_user_context',
+            userId,
+          );
+          return false;
+        }
+        actorByPayment.set(pay.id, actor);
       }
 
       // Un movimiento `refund` / `order_cancelled` por pago en efectivo, con su
       // `payment_id`. NO emite `cash_register.movement`: el asiento de la salida
       // de caja lo genera `refund.completed` (emitCancellationCashRefund) —
-      // exactamente uno por cancelación. Sesión destino: original abierta →
-      // operador → mismo registro; sin ninguna, outbox durable.
+      // exactamente uno por cancelación. Sesión destino: la abierta del
+      // operador (B03); sin ella, outbox durable.
       let pending = 0;
       for (const pay of reversal.payments) {
         const outcome =
           await this.movementsService.recordCompensationCashMovementDurable({
             store_id: storeId,
-            user_id: userId,
+            user_id: actorByPayment.get(pay.id)!,
             order_id: orderId,
             payment_id: pay.id,
             amount: Number(pay.amount),
@@ -8205,7 +8221,7 @@ export class OrderFlowService {
       if (pending > 0) {
         // Encolado durable: no se pierde, pero el operador debe saberlo.
         await this.auditService.log({
-          userId,
+          userId: userId ?? undefined,
           action: 'order.cancel.cash_out_queued',
           resource: AuditResource.ORDERS,
           resourceId: orderId,
@@ -9724,6 +9740,8 @@ export class OrderFlowService {
       // `sale` recibe su contramovimiento en la MISMA tx; los diferidos nunca
       // crearon `sale`, así que no tienen nada que compensar.
       const compensationOpts = {
+        // S03 (excepción): mismo cajón y mismo instante que el `sale`.
+        saleSessionFirst: true,
         referenceFor: (paymentId: number, saleId: number) =>
           `payment_compensated:${paymentId}:${saleId}`,
         dedupeFor: (paymentId: number, saleId: number) =>
@@ -9948,8 +9966,9 @@ export class OrderFlowService {
    * anulados, escrito DENTRO de la transacción del llamador (misma tx que anula
    * el pago: o quedan los dos o ninguno).
    *
-   * Solo compensa pagos que SÍ dejaron un movimiento `sale`. Misma sesión de la
-   * venta si sigue abierta (cascada de `recordCompensationCashMovementDurable`);
+   * Solo compensa pagos que SÍ dejaron un movimiento `sale`. Con `saleSessionFirst`
+   * (compensación B02) misma sesión de la venta si sigue abierta; sin él (anular
+   * pago, B16) manda la sesión del operador (cascada B03);
    * sin sesión receptora se encola en el outbox durable, nunca se pierde.
    * Actor: el usuario del contexto o, si no hay, el `user_id` del `sale` original.
    * Idempotente por `reference` + pago + orden + método.
@@ -9965,6 +9984,8 @@ export class OrderFlowService {
       notesFor: (paymentId: number, orderId: number) => string;
       /** Si se informa, además cubre `sale` de la orden sin `payment_id`. */
       orphanScanOrderId?: number;
+      /** Compensación B02: el contra-movimiento va a la sesión del `sale` primero. */
+      saleSessionFirst?: boolean;
     },
   ): Promise<void> {
     const contextUserId = RequestContextService.getUserId();
@@ -10025,6 +10046,7 @@ export class OrderFlowService {
             dedupe_key: opts.dedupeFor(paymentId, sale.id),
             notes: opts.notesFor(paymentId, orderId),
             payment_method: sale.payment_method ?? 'cash',
+            sale_session_first: opts.saleSessionFirst,
           },
           tx,
         );
