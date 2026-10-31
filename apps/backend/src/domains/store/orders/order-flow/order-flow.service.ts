@@ -3271,17 +3271,30 @@ export class OrderFlowService {
    * existing reservation + idempotent stock-commit services exactly once.
    */
   async settleFinancialSplitSource(orderId: number, actorUserId?: number): Promise<void> {
+    return this.settlePaidSource(orderId, actorUserId, true);
+  }
+
+  /** B11: the same settlement for a table order paid through staff
+   * confirmation (no financial split). Idempotent; a no-op unless the order is
+   * fully paid and backed by a table session. */
+  async settlePaidTableOrder(orderId: number, actorUserId?: number): Promise<void> {
+    return this.settlePaidSource(orderId, actorUserId, false);
+  }
+
+  private async settlePaidSource(orderId: number, actorUserId: number | undefined, requireSplit: boolean): Promise<void> {
     const context = RequestContextService.getContext();
     if (actorUserId && context?.user_id !== actorUserId) {
       return RequestContextService.runIsolated({ ...context!, user_id: actorUserId },
-        () => this.settleFinancialSplitSource(orderId, actorUserId));
+        () => this.settlePaidSource(orderId, actorUserId, requireSplit));
     }
     const order = await this.getOrder(orderId);
-    if (!order.active_financial_split_id || ['cancelled', 'refunded'].includes(order.state)) return;
+    if (['cancelled', 'refunded'].includes(order.state)) return;
+    if (requireSplit && !order.active_financial_split_id) return;
     const paid = order.payments.filter((p) => ['succeeded', 'captured'].includes(p.state))
       .reduce((sum, p) => sum.plus(p.amount), new Prisma.Decimal(0));
     if (paid.lt(order.grand_total)) return;
     const table = await this.prisma.table_sessions.findFirst({ where: { order_id: orderId, store_id: order.store_id }, select: { id: true } });
+    if (!requireSplit && !table) return;
     if (order.state === 'draft') {
       if (table) {
         // Mesa: la promocion draft->created reserva solo lineas NO consumidas

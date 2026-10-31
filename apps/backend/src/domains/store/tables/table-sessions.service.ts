@@ -288,7 +288,7 @@ export class TableSessionsService {
     @Inject(forwardRef(() => require('../orders/order-flow/order-flow.service').OrderFlowService))
     private readonly orderFlowService: Pick<
       OrderFlowService,
-      'cancelOrderItem' | 'deliverOrderItem'
+      'cancelOrderItem' | 'deliverOrderItem' | 'settlePaidTableOrder'
     >,
     // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
     // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
@@ -1912,6 +1912,15 @@ export class TableSessionsService {
           select: { id: true },
         });
         if (closedSession) {
+          // The table was already closed and THIS payment is the one that
+          // settles the order: there is nothing left to mark paid, and
+          // failing here would block the order promotion (B01).
+          if (await this.paymentSettlesOrder(client, orderId, paymentId)) {
+            this.logger.warn(
+              `[projectOrderPaymentToTableSession] order ${orderId} payment ${paymentId} settles the order but its table session is already closed; skipping projection`,
+            );
+            return null;
+          }
           throw new VendixHttpException(
             ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001,
           );
@@ -1935,6 +1944,30 @@ export class TableSessionsService {
     const projection = tx ? await run(tx) : await this.prisma.$transaction(run);
     if (!tx) projection?.emitAfterCommit();
     return projection;
+  }
+
+  /** True when `paymentId` is received and the order's received payments cover its total. */
+  private async paymentSettlesOrder(
+    client: Prisma.TransactionClient,
+    orderId: number,
+    paymentId: number,
+  ): Promise<boolean> {
+    const [order, received] = await Promise.all([
+      client.orders.findUnique({
+        where: { id: orderId },
+        select: { grand_total: true },
+      }),
+      client.payments.findMany({
+        where: { order_id: orderId, state: { in: ['succeeded', 'captured'] } },
+        select: { id: true, amount: true },
+      }),
+    ]);
+    if (!order || !received?.some((p) => p.id === paymentId)) return false;
+    const paid = received.reduce(
+      (sum, p) => sum.plus(p.amount ?? 0),
+      new Prisma.Decimal(0),
+    );
+    return paid.gte(order.grand_total ?? 0);
   }
 
   /**
@@ -2827,7 +2860,11 @@ export class TableSessionsService {
   async confirmPayment(
     sessionId: number,
     paymentId: number,
-  ): Promise<{ state: 'succeeded'; payment_id: number }> {
+  ): Promise<{
+    state: 'succeeded';
+    payment_id: number;
+    effects_pending?: true;
+  }> {
     const { storeId, userId } = this.requireContext();
 
     // Gate único de caja: con caja activa, quien cobra necesita SU sesión
@@ -2945,8 +2982,30 @@ export class TableSessionsService {
           );
         }
       }
-      // Adquirir el lock de caja antes de mutar pagos/saldos mantiene el
-      // orden sesión → pago/orden que usa el cierre.
+      // 5. Transition (compare-and-set) + movement + balance update. Two
+      //    simultaneous confirmations both read `pending` above; only the one
+      //    whose conditional update matches may create the movement and bump
+      //    the balance (B10).
+      const claimed = await tx.payments.updateMany({
+        where: { id: payment.id, state: 'pending' },
+        data: {
+          state: 'succeeded',
+          paid_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+      if (claimed.count !== 1) {
+        this.logger.log(
+          `[confirmPayment] payment ${paymentId} was confirmed concurrently; idempotent skip.`,
+        );
+        return {
+          state: 'succeeded' as const,
+          payment_id: payment.id,
+          noop: true,
+          orderId: payment.orders.id,
+          shouldProject: false,
+        };
+      }
       await this.recordStaffCashMovement({
         storeId,
         userId,
@@ -2955,16 +3014,6 @@ export class TableSessionsService {
         amount: Number(payment.amount),
         paymentMethod: methodType,
       }, tx);
-
-      // 5. Transition + balance update.
-      await tx.payments.update({
-        where: { id: payment.id },
-        data: {
-          state: 'succeeded',
-          paid_at: new Date(),
-          updated_at: new Date(),
-        },
-      });
 
       const order = payment.orders;
       const orderTotalPaid = await this.bumpOrderBalanceInTx(
@@ -3058,6 +3107,26 @@ export class TableSessionsService {
       }
     }
 
+    // B11: the confirmation that covers the grand total promotes the draft
+    // order with the same settlement the financial split uses. It runs after
+    // the money transaction; a failure is logged and flagged, never rolled
+    // into the payment, and a retry of this confirmation repairs it.
+    let effectsPending = false;
+    if (result.shouldProject) {
+      try {
+        await this.orderFlowService.settlePaidTableOrder(
+          result.orderId,
+          userId,
+        );
+      } catch (error) {
+        effectsPending = true;
+        this.logger.error(
+          `[confirmPayment] order settlement failed for order ${result.orderId} payment ${result.payment_id}: ${(error as Error)?.message ?? String(error)}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
+
     // 7. Post-commit side effects — fire-and-await because the SSE push
     //    + notification broadcast are the only consumer-facing signal that
     //    the confirmation happened. They are safe to retry on idempotent
@@ -3109,7 +3178,11 @@ export class TableSessionsService {
       );
     }
 
-    return { state: 'succeeded', payment_id: result.payment_id };
+    return {
+      state: 'succeeded',
+      payment_id: result.payment_id,
+      ...(effectsPending ? { effects_pending: true } : {}),
+    };
   }
 
   /**
