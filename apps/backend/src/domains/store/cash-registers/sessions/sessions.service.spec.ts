@@ -846,6 +846,27 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(summary.non_cash_total).toBe(30000);
     });
 
+    it('suma en Decimal exacto, sin error de punto flotante (B21)', async () => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue({
+        ...OPEN_SESSION,
+        opening_amount: 0,
+      });
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        { type: 'sale', amount: 0.1, payment_method: 'cash' },
+        { type: 'sale', amount: 0.2, payment_method: 'cash' },
+        { type: 'cash_in', amount: 0.1, payment_method: 'cash' },
+        { type: 'cash_in', amount: 0.2, payment_method: 'cash' },
+      ]);
+
+      const summary = await service.getCashSummary(SESSION_ID);
+
+      expect(summary.cash_sales).toBe(0.3);
+      expect(summary.sales_total).toBe(0.3);
+      expect(summary.cash_in).toBe(0.3);
+      expect(summary.expected_cash_total).toBe(0.6);
+      expect(summary.sales_by_method[0].total).toBe(0.3);
+    });
+
     it('ordena sales_by_method con cash primero y el resto alfabético', async () => {
       prismaMock.cash_register_sessions.findFirst.mockResolvedValue(
         OPEN_SESSION,
