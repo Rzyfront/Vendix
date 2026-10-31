@@ -90,8 +90,8 @@
           </span>
           <!-- El rótulo de empaque respeta el plato individual en mesa y la orden en mostrador/envío. -->
           @if (itemDeliveryBadge(item); as label) {
-            <app-badge variant="info" size="xs" [title]="label === 'ENVÍO' ? 'Pedido para envío a domicilio' : 'Pedido para llevar'">
-              <app-icon name="shopping-bag" [size]="10" /> {{ label }}
+            <app-badge variant="info" size="xs" [title]="label === 'DOMICILIO' ? 'Pedido para envío a domicilio' : 'Pedido para llevar'">
+              <app-icon [name]="label === 'DOMICILIO' ? 'bike' : 'shopping-bag'" [size]="10" /> {{ label }}
             </app-badge>
           }
           <!-- Per-dish status: recipe-readiness takes priority over the
