@@ -88,13 +88,15 @@ function setup(payloadName: string, overrides: { eventStatus?: string } = {}) {
       .fn()
       .mockImplementation((_buf, key) => Promise.resolve(key)),
   } as unknown as S3Service;
+  const events = { publish: jest.fn().mockResolvedValue(undefined) };
   const service = new MetaWhatsappInboundService(
     prisma as never,
     messaging,
     s3,
     new S3PathHelper(),
+    events as never,
   );
-  return { service, prisma, messaging, s3 };
+  return { service, prisma, messaging, s3, events };
 }
 
 const defaults = { isLastAttempt: false, allowStatusRetry: true };
@@ -189,6 +191,31 @@ describe('MetaWhatsappInboundService', () => {
           error: null,
         },
       });
+    });
+
+    it('publishes the new inbound message to the inbox stream', async () => {
+      const { service, events } = setup('message-text');
+
+      await service.processEvent(99, defaults);
+
+      expect(events.publish).toHaveBeenCalledWith({
+        type: 'crm.message',
+        store_id: 10,
+        conversation_id: 3,
+        assigned_user_id: null,
+        message_id: 500,
+        status: 'received',
+        direction: 'inbound',
+      });
+    });
+
+    it('does not publish a re-delivered message', async () => {
+      const { service, prisma, events } = setup('message-text');
+      prisma.crm_messages.findUnique.mockResolvedValue({ id: 500 });
+
+      await service.processEvent(99, defaults);
+
+      expect(events.publish).not.toHaveBeenCalled();
     });
 
     it('links by E.164 digits and by national number without guessing', async () => {
@@ -375,6 +402,48 @@ describe('MetaWhatsappInboundService', () => {
         data: { status: 'read', read_at: new Date(1761900120 * 1000) },
       });
       expect(outcome).toMatchObject({ statuses_applied: 1 });
+    });
+
+    it('publishes the applied status with the conversation assignee', async () => {
+      const { service, prisma, events } = setup('status-read');
+      prisma.crm_messages.findUnique.mockResolvedValue({
+        id: 700,
+        store_id: 10,
+        conversation_id: 3,
+        status: 'sent',
+      });
+      prisma.crm_conversations.findUnique.mockResolvedValue({
+        assigned_user_id: 8,
+      });
+
+      await service.processEvent(99, defaults);
+
+      expect(events.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'crm.message',
+          store_id: 10,
+          conversation_id: 3,
+          assigned_user_id: 8,
+          message_id: 700,
+          status: 'read',
+        }),
+      );
+    });
+
+    it('still applies the status when the stream lookup fails', async () => {
+      const { service, prisma, events } = setup('status-read');
+      prisma.crm_messages.findUnique.mockResolvedValue({
+        id: 700,
+        store_id: 10,
+        conversation_id: 3,
+        status: 'sent',
+      });
+      prisma.crm_conversations.findUnique.mockRejectedValue(new Error('db down'));
+
+      const outcome = await service.processEvent(99, defaults);
+
+      expect(outcome).toMatchObject({ statuses_applied: 1 });
+      expect(events.publish).not.toHaveBeenCalled();
     });
 
     it.each([

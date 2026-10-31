@@ -8,6 +8,7 @@ import { MetaCloudMessagingProvider } from './providers/meta-cloud.provider';
 import { CRM_OUTBOUND_QUEUE } from './queue/crm-outbound.constants';
 import { CrmOutboundQueue } from './queue/crm-outbound.queue';
 import { CrmOutboundProcessor } from './queue/crm-outbound.processor';
+import { CrmInboxEventsService } from './events/crm-inbox-events.service';
 
 @Global()
 @Module({
@@ -22,7 +23,8 @@ import { CrmOutboundProcessor } from './queue/crm-outbound.processor';
     MetaCloudMessagingProvider,
     CrmOutboundQueue,
     CrmOutboundProcessor,
+    CrmInboxEventsService,
   ],
-  exports: [MessagingService, CrmOutboundQueue],
+  exports: [MessagingService, CrmOutboundQueue, CrmInboxEventsService],
 })
 export class MessagingModule {}

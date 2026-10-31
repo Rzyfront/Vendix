@@ -11,6 +11,7 @@ import {
   SendResult,
 } from '../interfaces/messaging.interface';
 import { CRM_OUTBOUND_QUEUE, CrmOutboundJob } from './crm-outbound.constants';
+import { CrmInboxEventsService } from '../events/crm-inbox-events.service';
 
 const SENDABLE_CHANNELS = ['whatsapp', 'sms', 'email'] as const;
 
@@ -36,6 +37,7 @@ export class CrmOutboundProcessor extends WorkerHost {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly messaging: MessagingService,
+    private readonly events: CrmInboxEventsService,
   ) {
     super();
   }
@@ -68,7 +70,7 @@ export class CrmOutboundProcessor extends WorkerHost {
     );
 
     if (result.status === 'sent') {
-      await this.prisma.crm_messages.updateMany({
+      const sent = await this.prisma.crm_messages.updateMany({
         where: { id: messageId, status: 'queued' },
         data: {
           status: 'sent',
@@ -79,6 +81,7 @@ export class CrmOutboundProcessor extends WorkerHost {
           error_message: null,
         },
       });
+      if (sent.count > 0) await this.notify(message, 'sent');
       return;
     }
 
@@ -99,7 +102,7 @@ export class CrmOutboundProcessor extends WorkerHost {
       );
     }
 
-    await this.prisma.crm_messages.updateMany({
+    const failed = await this.prisma.crm_messages.updateMany({
       where: { id: messageId, status: 'queued' },
       data: {
         status: 'failed',
@@ -107,6 +110,27 @@ export class CrmOutboundProcessor extends WorkerHost {
         error_message: errorMessage,
         failed_at: new Date(),
       },
+    });
+    if (failed.count > 0) await this.notify(message, 'failed');
+  }
+
+  private notify(
+    message: {
+      id: number;
+      store_id: number;
+      conversation_id: number;
+      conversation: { assigned_user_id: number | null };
+    },
+    status: 'sent' | 'failed',
+  ): Promise<void> {
+    return this.events.publish({
+      type: 'crm.message',
+      store_id: message.store_id,
+      conversation_id: message.conversation_id,
+      assigned_user_id: message.conversation.assigned_user_id,
+      message_id: message.id,
+      status,
+      direction: 'outbound',
     });
   }
 

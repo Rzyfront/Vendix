@@ -11,6 +11,7 @@ import {
 } from '../../../../messaging/utils/mask-address.util';
 import { S3Service } from '../../../../common/services/s3.service';
 import { S3PathHelper } from '../../../../common/helpers/s3-path.helper';
+import { CrmInboxEventsService } from '../../../../messaging/events/crm-inbox-events.service';
 
 const PROVIDER = 'meta_cloud';
 const MEDIA_TYPES = ['image', 'video', 'audio', 'document', 'sticker'] as const;
@@ -102,6 +103,7 @@ export class MetaWhatsappInboundService {
     private readonly messaging: MessagingService,
     private readonly s3: S3Service,
     private readonly s3Path: S3PathHelper,
+    private readonly events: CrmInboxEventsService,
   ) {}
 
   async processEvent(
@@ -225,8 +227,9 @@ export class MetaWhatsappInboundService {
     const media = await this.collectMedia(channel, message, options);
     const conversation = await this.findOrCreateConversation(channel, contact);
 
+    let createdId: number;
     try {
-      await this.prisma.crm_messages.create({
+      const created = await this.prisma.crm_messages.create({
         data: {
           store_id: channel.store_id,
           conversation_id: conversation.id,
@@ -244,6 +247,7 @@ export class MetaWhatsappInboundService {
           created_at: sentAt,
         },
       });
+      createdId = created.id;
     } catch (error) {
       if ((error as { code?: string })?.code === 'P2002') return false;
       throw error;
@@ -272,6 +276,16 @@ export class MetaWhatsappInboundService {
         data: { crm_last_contact_at: sentAt },
       });
     }
+
+    await this.events.publish({
+      type: 'crm.message',
+      store_id: channel.store_id,
+      conversation_id: conversation.id,
+      assigned_user_id: conversation.assigned_user_id ?? null,
+      message_id: createdId,
+      status: 'received',
+      direction: 'inbound',
+    });
     return true;
   }
 
@@ -420,7 +434,36 @@ export class MetaWhatsappInboundService {
       where: { id: message.id, status: { in: predecessors as never } },
       data,
     });
-    return result.count > 0 ? 'applied' : 'unchanged';
+    if (result.count === 0) return 'unchanged';
+
+    await this.publishStatus(message, target);
+    return 'applied';
+  }
+
+  /** Best effort: a lookup failure never fails the status update. */
+  private async publishStatus(
+    message: { id: number; store_id: number; conversation_id: number },
+    status: string,
+  ): Promise<void> {
+    try {
+      const conversation = await this.prisma.crm_conversations.findUnique({
+        where: { id: message.conversation_id },
+        select: { assigned_user_id: true },
+      });
+      await this.events.publish({
+        type: 'crm.message',
+        store_id: message.store_id,
+        conversation_id: message.conversation_id,
+        assigned_user_id: conversation?.assigned_user_id ?? null,
+        message_id: message.id,
+        status,
+        direction: 'outbound',
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Could not publish status ${status} of message ${message.id}: ${(error as Error)?.message}`,
+      );
+    }
   }
 
   private async collectMedia(

@@ -25,6 +25,7 @@ function row(overrides: Record<string, unknown> = {}) {
       id: 3,
       contact_address: '+573001234567',
       last_inbound_at: LAST_INBOUND,
+      assigned_user_id: 5,
     },
     ...overrides,
   };
@@ -54,11 +55,41 @@ function setup(message: ReturnType<typeof row> | null = row()) {
       retryable: false,
     }),
   } as unknown as MessagingService;
-  const processor = new CrmOutboundProcessor(prisma as never, messaging);
-  return { processor, prisma, messaging };
+  const events = { publish: jest.fn().mockResolvedValue(undefined) };
+  const processor = new CrmOutboundProcessor(
+    prisma as never,
+    messaging,
+    events as never,
+  );
+  return { processor, prisma, messaging, events };
 }
 
 describe('CrmOutboundProcessor', () => {
+  it('publishes the sent status to the inbox stream with the assignee', async () => {
+    const { processor, events } = setup();
+
+    await processor.process(job());
+
+    expect(events.publish).toHaveBeenCalledWith({
+      type: 'crm.message',
+      store_id: 10,
+      conversation_id: 3,
+      assigned_user_id: 5,
+      message_id: 77,
+      status: 'sent',
+      direction: 'outbound',
+    });
+  });
+
+  it('publishes nothing when the guarded update changed no row', async () => {
+    const { processor, prisma, events } = setup();
+    prisma.crm_messages.updateMany.mockResolvedValue({ count: 0 });
+
+    await processor.process(job());
+
+    expect(events.publish).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
