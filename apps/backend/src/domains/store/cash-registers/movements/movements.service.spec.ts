@@ -183,15 +183,26 @@ describe('MovementsService — compensación de caja', () => {
         expect(db.cash_register_movements.create).not.toHaveBeenCalled();
       });
 
-      it('allows a foreign session with close_session permission', async () => {
+      it('rejects a foreign session for a cashier holding close_session', async () => {
         const { db, result } = await run(
-          { permissions: ['store:cash_registers:close_session'] },
+          { permissions: ['store:cash_registers:close_session'], roles: ['cashier'] },
           { type: 'cash_in', amount: 100 },
           OTHER_USER,
         );
-        await result;
-        expect(db.cash_register_movements.create).toHaveBeenCalled();
+        await expect(result).rejects.toMatchObject({
+          errorCode: 'CASH_MOVEMENT_FOREIGN_SESSION_001',
+        });
+        expect(db.cash_register_movements.create).not.toHaveBeenCalled();
       });
+
+      it.each([{ is_owner: true }, { roles: ['admin'] }])(
+        'allows a foreign session for owner/admin %p',
+        async (ctx) => {
+          const { db, result } = await run(ctx, { type: 'cash_in', amount: 100 }, OTHER_USER);
+          await result;
+          expect(db.cash_register_movements.create).toHaveBeenCalled();
+        },
+      );
 
       it('rejects cash_out without notes', async () => {
         const { db, result } = await run({}, { type: 'cash_out', amount: 100 });

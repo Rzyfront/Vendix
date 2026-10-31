@@ -211,17 +211,19 @@ export class MovementsService {
 
     const movement = await this.prisma.$transaction(async (tx) => {
       await this.assertOpenSessionLocked(tx, session_id, store_id);
-      // B13: la sesión debe ser del usuario, salvo quien puede cerrar cajas
-      // ajenas (no existe `close_any`; el permiso de cierre es el vigente).
+      // B13: la sesión debe ser del usuario. Solo dueño/admin operan cajas
+      // ajenas: `close_session` lo tienen cajero, empleado y repartidor, así
+      // que no sirve de compuerta (no existe `close_any`).
       const session = await tx.cash_register_sessions.findFirst({
         where: { id: session_id, store_id },
         select: { opened_by: true },
       });
+      const roles = context.roles ?? [];
       const can_use_foreign =
         context.is_owner ||
-        (context.permissions ?? []).includes(
-          'store:cash_registers:close_session',
-        );
+        context.is_super_admin ||
+        roles.includes('owner') ||
+        roles.includes('admin');
       if (session?.opened_by !== context.user_id && !can_use_foreign) {
         throw new VendixHttpException(
           ErrorCodes.CASH_MOVEMENT_FOREIGN_SESSION_001,
