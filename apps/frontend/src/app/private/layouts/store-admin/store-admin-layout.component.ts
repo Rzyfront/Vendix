@@ -805,6 +805,13 @@ export class StoreAdminLayoutComponent {
           route: '/admin/customers/all',
         },
         {
+          // No panel_ui key: shown by permission (MenuFilterService gate).
+          label: 'Bandeja',
+          icon: 'inbox',
+          route: '/admin/customers/inbox',
+          alwaysVisible: true,
+        },
+        {
           label: 'Reseñas',
           icon: 'star',
           route: '/admin/customers/reviews',
