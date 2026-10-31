@@ -886,7 +886,7 @@ export class ServiceSessionsService {
     return { covered: budget.currency === order.currency && !authorized.greaterThan(budget.amount) };
   }
 
-  /** Agrega (una sola vez) la línea de alquiler por bloque de la estación y recalcula la cuenta. */
+  /** Agrega o recalcula (si no hay pago) la línea de alquiler por bloque y recalcula la cuenta. */
   private async addRentalLine(
     tx: Prisma.TransactionClient,
     storeId: number,
@@ -894,7 +894,7 @@ export class ServiceSessionsService {
     orderId: number,
   ) {
     const now = new Date();
-    const added = await ensureSessionRentalLine(tx, {
+    const changed = await ensureSessionRentalLine(tx, {
       storeId,
       sessionId: session.id,
       orderId,
@@ -902,7 +902,7 @@ export class ServiceSessionsService {
       openedAt: session.opened_at,
       now,
     }, this.shippingTax);
-    if (added) await this.recalcOrderTotals(tx, orderId, now);
+    if (changed) await this.recalcOrderTotals(tx, orderId, now);
   }
 
   /** Deja la cuenta lista para "Registrar pago" sin cerrar la atención. */

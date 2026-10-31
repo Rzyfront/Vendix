@@ -555,7 +555,8 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
         service_budgets: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn() },
         service_progress_events: { create: jest.fn() },
         service_stations: { findFirst: jest.fn().mockResolvedValue(null) },
-        order_items: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]), create: jest.fn() },
+        order_items: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]), create: jest.fn(), update: jest.fn() },
+        order_item_taxes: { deleteMany: jest.fn() },
       };
       prisma.$transaction.mockImplementation((fn: any) => fn(tx));
     });
@@ -605,6 +606,10 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
         tx.orders.update = jest.fn().mockResolvedValue({ store_id: 1, service_session_id: 21 });
         tx.orders.findUnique = jest.fn().mockResolvedValue({ total_paid: 0, discount_amount: 0 });
       };
+      // Línea de alquiler ya creada: 3 bloques de $20.000 sin impuesto (lo que vale a los 70 min).
+      const rentalLine = (overrides: Record<string, unknown> = {}) => ({
+        id: 500, quantity: 3, unit_price: 20000, tax_rate: 0, tax_amount_item: 0, final_unit_price: 20000, cancelled_at: null, ...overrides,
+      });
 
       it('al cerrar agrega "Alquiler <estación>" por bloques consumidos y exige cobrarlo', async () => {
         withTariff();
@@ -688,7 +693,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
 
       it('no duplica la línea si la sesión ya tiene el alquiler de esa estación', async () => {
         withTariff();
-        tx.order_items.findFirst.mockResolvedValue({ id: 500 });
+        tx.order_items.findFirst.mockResolvedValue(rentalLine());
         tx.orders.findFirst.mockImplementation((args: any) =>
           Promise.resolve(args?.select?.remaining_balance !== undefined ? { remaining_balance: 0 } : { grand_total: 60000, tip_amount: 0, currency: 'COP' }),
         );
@@ -697,13 +702,78 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
           expect.objectContaining({ where: { order_id: 149, service_session_id: 21, product_id: null, product_name: { startsWith: 'Alquiler ' } } }),
         );
         expect(tx.order_items.create).not.toHaveBeenCalled();
+        expect(tx.order_items.update).not.toHaveBeenCalled();
+      });
+
+      it('recalcula la línea abierta si la sesión se extendió un bloque más', async () => {
+        withTariff();
+        // Creada en "Registrar pago" con 2 bloques; al cerrar van 70 min → 3 bloques.
+        tx.order_items.findFirst.mockResolvedValue(rentalLine({ quantity: 2 }));
+        tx.orders.findFirst.mockImplementation((args: any) =>
+          Promise.resolve(args?.select?.remaining_balance !== undefined ? { remaining_balance: 20000 } : { grand_total: 60000, tip_amount: 0, currency: 'COP' }),
+        );
+        await expect(service.transition(21, { action: 'close' } as any)).rejects.toMatchObject({
+          response: expect.objectContaining({ error_code: 'STATION_006' }),
+        });
+        expect(tx.order_items.create).not.toHaveBeenCalled();
+        expect(tx.order_item_taxes.deleteMany).toHaveBeenCalledWith({ where: { order_item_id: 500 } });
+        const { where, data } = tx.order_items.update.mock.calls[0][0];
+        expect(where).toEqual({ id: 500 });
+        expect(data.quantity).toBe(3);
+        expect(Number(data.total_price)).toBe(60000);
+        expect(data.product_name).toBeUndefined();
+        expect(tx.orders.update).toHaveBeenCalled();
+      });
+
+      it('el recálculo usa el precio de bloque vigente y reaplica el impuesto de la estación', async () => {
+        withTariff();
+        tx.service_stations.findFirst.mockResolvedValue({
+          name: 'Sala 1',
+          rental_block_minutes: 30,
+          rental_block_price: 20000,
+          rental_tax_category_id: 3,
+          rental_tax_is_inclusive: false,
+        });
+        shippingTax.taxRowsForCategory.mockResolvedValue([
+          { tax_rate_id: 30, name: 'IVA 19%', rate: 0.19, tax_type: 'iva', is_inclusive: false },
+        ]);
+        // La línea se creó cuando el bloque costaba $15.000.
+        tx.order_items.findFirst.mockResolvedValue(rentalLine({ unit_price: 15000, final_unit_price: 15000 }));
+        tx.orders.findFirst.mockImplementation((args: any) =>
+          Promise.resolve(args?.select?.remaining_balance !== undefined ? { remaining_balance: 71400 } : { grand_total: 71400, tip_amount: 0, currency: 'COP' }),
+        );
+        await expect(service.transition(21, { action: 'close' } as any)).rejects.toMatchObject({
+          response: expect.objectContaining({ error_code: 'STATION_006' }),
+        });
+        expect(shippingTax.taxRowsForCategory).toHaveBeenCalledWith(tx, { tax_category_id: 3, tax_is_inclusive: false, store_id: 1 });
+        const { data } = tx.order_items.update.mock.calls[0][0];
+        expect(Number(data.unit_price)).toBe(20000);
+        expect(Number(data.total_price)).toBe(60000);
+        expect(Number(data.final_unit_price)).toBe(23800);
+        expect(data.order_item_taxes).toEqual({
+          create: [
+            { tax_rate_id: 30, tax_name: 'IVA 19%', tax_rate: 0.19, tax_amount: 11400, tax_type: 'iva', is_compound: false, is_inclusive: false },
+          ],
+        });
+      });
+
+      it('no recalcula la línea si la cuenta ya tiene un pago registrado', async () => {
+        withTariff();
+        tx.orders.findUnique.mockResolvedValue({ total_paid: 40000, discount_amount: 0 });
+        tx.order_items.findFirst.mockResolvedValue(rentalLine({ quantity: 2 }));
+        tx.orders.findFirst.mockImplementation((args: any) =>
+          Promise.resolve(args?.select?.remaining_balance !== undefined ? { remaining_balance: 0 } : { grand_total: 40000, tip_amount: 0, currency: 'COP' }),
+        );
+        await expect(service.transition(21, { action: 'close' } as any)).resolves.toMatchObject({ status: 'closed' });
+        expect(tx.order_items.update).not.toHaveBeenCalled();
+        expect(tx.order_item_taxes.deleteMany).not.toHaveBeenCalled();
       });
 
       it('no duplica la línea si renombraron la estación después de cobrar', async () => {
         withTariff();
         // La estación cambió de nombre: la línea creada en "Registrar pago" conserva el viejo.
         tx.service_stations.findFirst.mockResolvedValue({ name: 'Sala A', rental_block_minutes: 30, rental_block_price: 20000 });
-        const saved = [{ id: 500, product_name: 'Alquiler Sala 1' }];
+        const saved = [{ ...rentalLine(), product_name: 'Alquiler Sala 1' }];
         tx.order_items.findFirst.mockImplementation((args: any) => {
           const prefix: string | undefined = args?.where?.product_name?.startsWith;
           return Promise.resolve(saved.find((line) => prefix !== undefined && line.product_name.startsWith(prefix)) ?? null);
@@ -713,6 +783,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
         );
         await expect(service.transition(21, { action: 'close' } as any)).resolves.toMatchObject({ status: 'closed' });
         expect(tx.order_items.create).not.toHaveBeenCalled();
+        expect(tx.order_items.update).not.toHaveBeenCalled();
       });
 
       it('una estación sin tarifa (gratis) no agrega línea', async () => {

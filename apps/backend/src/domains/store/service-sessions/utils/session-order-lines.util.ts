@@ -128,11 +128,14 @@ export function rentalBlocksConsumed(openedAt: Date, now: Date, blockMinutes: nu
 
 /**
  * Línea "Alquiler <estación>" de la cuenta SVC cuando la estación tiene tarifa por bloque.
- * Sin tarifa (NULL o cero) no hace nada. Se cobra una sola vez: si la sesión ya tiene la
- * línea de alquiler de esa estación, no se duplica. Sin producto ni inventario. El impuesto
- * es el configurado en la estación (`rental_tax_category_id` + `rental_tax_is_inclusive`),
- * resuelto con la misma regla que la tarifa de envío; sin configuración la línea sale sin
- * impuesto. Devuelve si creó la línea; el llamador recalcula los totales.
+ * Sin tarifa (NULL o cero) no hace nada. Hay una sola línea por sesión: si ya existe, se
+ * recalcula con los bloques consumidos hasta `now` y el precio de bloque vigente, salvo que
+ * la cuenta ya tenga un pago registrado (lo cobrado no se reescribe) o la línea esté
+ * anulada. Sin producto ni inventario. El impuesto es el configurado en la estación
+ * (`rental_tax_category_id` + `rental_tax_is_inclusive`), resuelto con la misma regla que
+ * la tarifa de envío y reaplicado en cada recálculo; sin configuración la línea sale sin
+ * impuesto. El llamador garantiza la orden en borrador. Devuelve si creó o cambió la
+ * línea; el llamador recalcula los totales.
  */
 export async function ensureSessionRentalLine(
   tx: Prisma.TransactionClient,
@@ -161,15 +164,44 @@ export async function ensureSessionRentalLine(
       product_id: null,
       product_name: { startsWith: RENTAL_LINE_PREFIX },
     },
-    select: { id: true },
+    select: {
+      id: true,
+      quantity: true,
+      unit_price: true,
+      tax_rate: true,
+      tax_amount_item: true,
+      final_unit_price: true,
+      cancelled_at: true,
+    },
   });
-  if (existing) return false;
+  if (existing) {
+    if (existing.cancelled_at) return false;
+    const order = await tx.orders.findUnique({ where: { id: orderId }, select: { total_paid: true } });
+    if (Number(order?.total_paid ?? 0) > 0) return false;
+  }
   const quantity = rentalBlocksConsumed(openedAt, now, blockMinutes);
   const taxRows = await taxes.taxRowsForCategory(tx, {
     tax_category_id: station.rental_tax_category_id ?? null,
     tax_is_inclusive: station.rental_tax_is_inclusive ?? true,
     store_id: storeId,
   });
+  const line = buildSessionTaxedLine(blockPrice, quantity, taxRows);
+  if (existing) {
+    const unchanged =
+      existing.quantity === quantity &&
+      line.unit_price.equals(existing.unit_price ?? 0) &&
+      line.tax_rate.equals(existing.tax_rate ?? 0) &&
+      line.tax_amount_item.equals(existing.tax_amount_item ?? 0) &&
+      line.final_unit_price.equals(existing.final_unit_price ?? 0);
+    if (unchanged) return false;
+    // El nombre es un snapshot: se conserva aunque la estación se haya renombrado.
+    await tx.order_item_taxes.deleteMany({ where: { order_item_id: existing.id } });
+    await tx.order_items.update({
+      where: { id: existing.id },
+      data: { quantity, updated_at: now, ...line },
+    });
+    return true;
+  }
   await tx.order_items.create({
     data: {
       order_id: orderId,
@@ -179,7 +211,7 @@ export async function ensureSessionRentalLine(
       quantity,
       item_type: 'service',
       updated_at: now,
-      ...buildSessionTaxedLine(blockPrice, quantity, taxRows),
+      ...line,
     },
   });
   return true;
