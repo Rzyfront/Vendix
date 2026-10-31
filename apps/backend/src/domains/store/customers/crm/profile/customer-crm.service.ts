@@ -5,11 +5,13 @@ import { AuditService } from '../../../../../common/audit/audit.service';
 import { ErrorCodes, VendixHttpException } from '../../../../../common/errors';
 import { CustomersService } from '../../customers.service';
 import { CustomerHistoryService } from '../../history/customer-history.service';
+import { RFM_DEFINITIONS } from '../../../../../ai-engine/tools/domains/customers.tools';
 import {
-  RFM_DEFINITIONS,
-  rfmScores,
-  rfmSegment,
-} from '../../../../../ai-engine/tools/domains/customers.tools';
+  CRM_RFM_PERIOD_DAYS,
+  RfmGroupRow,
+  rfmPeriodStart,
+  scoreRfmPopulation,
+} from '../shared/crm-rfm';
 import {
   CrmViewer,
   isActiveStoreStaff,
@@ -24,12 +26,10 @@ import {
   UpdateCustomerCrmProfileDto,
 } from './dto/customer-crm.dto';
 
-/** Window the RFM scores are measured over, same default as the agent tool. */
-export const CRM_RFM_PERIOD_DAYS = 365;
+export { CRM_RFM_PERIOD_DAYS } from '../shared/crm-rfm';
 /** A customer owner must be able to read customers. */
 const CUSTOMER_OWNER_PERMISSION = 'store:customers:read';
 const PERSON_SELECT = { id: true, first_name: true, last_name: true } as const;
-const DAY_MS = 86_400_000;
 
 /**
  * Customer 360 (PLAN-CRM §4.4): CRM attributes stored on `store_users` (the
@@ -332,31 +332,10 @@ export class CustomerCrmService {
    * Without finished orders in the window there is no segment.
    */
   private async rfm(customerId: number, now: Date) {
-    const since = new Date(now.getTime() - CRM_RFM_PERIOD_DAYS * DAY_MS);
     const grouped = (await this.customers.getSegmentPopulationForAgent(
-      since,
-    )) as Array<{
-      customer_id: number | null;
-      _count?: { _all?: number };
-      _sum?: { grand_total?: unknown };
-      _max?: { created_at?: Date | null };
-    }>;
-    const population = grouped
-      .filter((row) => row.customer_id != null)
-      .map((row) => {
-        const last = row._max?.created_at ?? null;
-        const spent = Number(row._sum?.grand_total ?? 0);
-        return {
-          customer_id: row.customer_id as number,
-          orders: row._count?._all ?? 0,
-          spent: Number.isFinite(spent) ? spent : 0,
-          last_purchase_at: last,
-          recency_days: last
-            ? Math.max(0, Math.floor((now.getTime() - last.getTime()) / DAY_MS))
-            : CRM_RFM_PERIOD_DAYS,
-        };
-      });
-    const own = population.find((row) => row.customer_id === customerId);
+      rfmPeriodStart(now),
+    )) as RfmGroupRow[];
+    const own = scoreRfmPopulation(grouped, now).get(customerId);
     if (!own) {
       return {
         period_days: CRM_RFM_PERIOD_DAYS,
@@ -369,26 +348,15 @@ export class CustomerCrmService {
         description: null,
       };
     }
-    const scores = rfmScores(
-      {
-        recency: population.map((row) => row.recency_days).sort((a, b) => a - b),
-        frequency: population.map((row) => row.orders).sort((a, b) => a - b),
-        monetary: population.map((row) => row.spent).sort((a, b) => a - b),
-      },
-      own.recency_days,
-      own.orders,
-      own.spent,
-    );
-    const segment = rfmSegment(scores.r, scores.f, scores.m);
     return {
       period_days: CRM_RFM_PERIOD_DAYS,
       recency_days: own.recency_days,
       frequency: own.orders,
       monetary: own.spent.toFixed(2),
       last_purchase_at: own.last_purchase_at,
-      scores,
-      segment,
-      description: RFM_DEFINITIONS[segment] ?? null,
+      scores: own.scores,
+      segment: own.segment,
+      description: RFM_DEFINITIONS[own.segment] ?? null,
     };
   }
 }

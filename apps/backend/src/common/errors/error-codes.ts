@@ -7672,6 +7672,61 @@ export const ErrorCodes = {
     devMessage: 'La cotización no existe o es de otro cliente.',
   },
 
+  // Segmentos y campañas (PLAN-CRM §4.5, §4.7). El filtro es un catálogo
+  // cerrado: un campo, operador o valor fuera de él es 400, nunca se ignora.
+  CRM_SEGMENT_001: {
+    code: 'CRM_SEGMENT_001',
+    httpStatus: 400,
+    devMessage: 'El filtro del segmento no es válido.',
+  },
+  CRM_SEGMENT_002: {
+    code: 'CRM_SEGMENT_002',
+    httpStatus: 404,
+    devMessage: 'El segmento no existe.',
+  },
+  CRM_SEGMENT_003: {
+    code: 'CRM_SEGMENT_003',
+    httpStatus: 409,
+    devMessage: 'Ya existe un segmento con ese nombre.',
+  },
+  CRM_CAMPAIGN_001: {
+    code: 'CRM_CAMPAIGN_001',
+    httpStatus: 404,
+    devMessage: 'La campaña no existe.',
+  },
+  // Editar o enviar solo en borrador; cancelar solo programada o en envío.
+  CRM_CAMPAIGN_002: {
+    code: 'CRM_CAMPAIGN_002',
+    httpStatus: 409,
+    devMessage: 'La campaña no está en un estado que permita esta acción.',
+  },
+  // `confirm_estimated_cost` no coincide con la estimación vigente.
+  CRM_CAMPAIGN_003: {
+    code: 'CRM_CAMPAIGN_003',
+    httpStatus: 409,
+    devMessage: 'El costo estimado cambió. Revisa la nueva estimación y confírmala.',
+  },
+  CRM_CAMPAIGN_004: {
+    code: 'CRM_CAMPAIGN_004',
+    httpStatus: 422,
+    devMessage: 'El contenido de la campaña no es válido para el canal elegido.',
+  },
+  CRM_CAMPAIGN_005: {
+    code: 'CRM_CAMPAIGN_005',
+    httpStatus: 422,
+    devMessage: 'La campaña no tiene destinatarios válidos o supera el máximo permitido.',
+  },
+  CRM_CAMPAIGN_006: {
+    code: 'CRM_CAMPAIGN_006',
+    httpStatus: 422,
+    devMessage: 'La tienda no tiene conectado el canal de la campaña.',
+  },
+  CRM_CAMPAIGN_007: {
+    code: 'CRM_CAMPAIGN_007',
+    httpStatus: 400,
+    devMessage: 'La fecha de programación debe ser futura.',
+  },
+
   // CRM Landing (QUI-719): fallo al encolar el job en BullMQ.
   // 500: Redis/caída del queue — la fila queda `failed` con mensaje y el
   // usuario puede reintentar desde el panel.
