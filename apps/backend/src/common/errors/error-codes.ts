@@ -1233,6 +1233,12 @@ export const ErrorCodes = {
     devMessage:
       'Esta orden tiene productos ya enviados a cocina o con movimientos de inventario. Modifícalos desde el detalle de la orden (Modificar productos), que conserva su historial.',
   },
+  ORD_EDIT_BELOW_PAID_001: {
+    code: 'ORD_EDIT_BELOW_PAID_001',
+    httpStatus: 409,
+    devMessage:
+      'El nuevo total de la orden queda por debajo de lo ya cobrado. Registra una devolución antes de reducir la orden.',
+  },
   ORD_CANCEL_STOCK_COMMITTED_001: {
     code: 'ORD_CANCEL_STOCK_COMMITTED_001',
     httpStatus: 409,

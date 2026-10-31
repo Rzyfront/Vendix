@@ -3108,6 +3108,41 @@ export class OrdersService {
     }
   }
 
+  /**
+   * B22: una edición de líneas no puede dejar el total por debajo de lo ya
+   * cobrado (Σ pagos liquidados). Subir o mantener el total sí se permite.
+   */
+  private async assertTotalNotBelowPaid(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    storeId: number,
+    nextGrandTotal: number,
+  ): Promise<void> {
+    const settled = await tx.payments.findMany({
+      where: {
+        order_id: orderId,
+        state: { in: [...SETTLED_PAYMENT_STATES] as payments_state_enum[] },
+      },
+      select: { amount: true },
+    });
+    const paid = settled.reduce(
+      (sum, p) => sum.plus(new Prisma.Decimal(p.amount ?? 0)),
+      new Prisma.Decimal(0),
+    );
+    if (new Prisma.Decimal(nextGrandTotal).lt(paid)) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_EDIT_BELOW_PAID_001,
+        undefined,
+        {
+          order_id: orderId,
+          store_id: storeId,
+          paid: paid.toNumber(),
+          next_grand_total: nextGrandTotal,
+        },
+      );
+    }
+  }
+
   async updateOrderItems(id: number, dto: UpdateOrderItemsDto) {
     this.assertNoNewDraftOptions(dto.items);
     // PR #1004: Insumo y Uso interno nunca se venden; mismo guard que el
@@ -3316,6 +3351,7 @@ export class OrdersService {
         roundMoney(subtotal + taxAmount - discountAmount + persistedShipping),
       );
       await this.assertServiceBudgetLimit(tx, id, order.store_id, grandTotal);
+      await this.assertTotalNotBelowPaid(tx, id, order.store_id, grandTotal);
       if (
         (dto.tax_amount != null &&
           differsByAtLeastCents(Number(dto.tax_amount), taxAmount, 1)) ||
@@ -4485,6 +4521,7 @@ export class OrdersService {
         storeId,
         roundMoney(grandTotal - Number(existingOrder.tip_amount ?? 0)),
       );
+      await this.assertTotalNotBelowPaid(tx, orderId, storeId, grandTotal);
 
       // 13a) Claim atómico del estado. Si otro operador cambió la orden
       //      entre el findFirst y acá, count=0 → 409.
