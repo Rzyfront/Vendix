@@ -1551,9 +1551,24 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'store:crm_segments:manage',
-      description: 'Crear, renombrar y borrar etiquetas (y segmentos) del CRM',
+      description: 'Crear, renombrar y borrar etiquetas y segmentos del CRM',
       path: '/api/store/customers/crm/tags',
       method: 'POST',
+    },
+    // Campañas (PLAN-CRM §4.7): gastan dinero y escriben a clientes; aparte
+    // de los segmentos para poder dar uno sin el otro.
+    {
+      name: 'store:crm_campaigns:send',
+      description: 'Crear, estimar, enviar y cancelar campañas masivas del CRM',
+      path: '/api/store/customers/crm/campaigns',
+      method: 'POST',
+    },
+    // Sin él, teléfono y correo salen enmascarados en segmentos y campañas.
+    {
+      name: 'store:customers:contact:read',
+      description: 'Ver teléfono y correo completos de los clientes en el CRM',
+      path: '/api/store/customers/crm/segments/*/customers',
+      method: 'GET',
     },
 
     // Reseñas
@@ -5141,6 +5156,9 @@ export async function seedPermissionsAndRoles(
       // Gestión de usuarios de tienda (incl. su panel_ui) es exclusiva de
       // owner/admin por decisión de negocio: manager NO administra usuarios.
       !p.name.startsWith('store:users:') &&
+      // Campañas masivas gastan dinero (SMS/WhatsApp): solo owner/admin
+      // (PLAN-CRM §4.1).
+      p.name !== 'store:crm_campaigns:send' &&
       // Documentos recibidos en el espacio de organización requieren un rol
       // ORG_ADMIN; el gerente conserva únicamente los tres permisos de tienda.
       !p.name.startsWith('organization:invoicing:received:') &&

@@ -25,7 +25,9 @@ const SENDABLE_CHANNELS = ['whatsapp', 'sms', 'email'] as const;
  * `failed`.
  *
  * The limiter is global to the worker (BullMQ OSS has no per-group limits);
- * a per-store rate limit lands with campaigns (PR 10).
+ * campaigns pace each store by delaying their jobs (`CrmCampaignDispatcher`).
+ * Campaign messages travel as marketing, so `MessagingService` re-checks the
+ * customer's consent right before sending.
  */
 @Processor(CRM_OUTBOUND_QUEUE, {
   concurrency: 5,
@@ -142,6 +144,8 @@ export class CrmOutboundProcessor extends WorkerHost {
     store_id: number;
     channel: string;
     body: string | null;
+    subject?: string | null;
+    campaign_id?: number | null;
     template_name: string | null;
     template_language: string | null;
     template_variables: unknown;
@@ -160,6 +164,8 @@ export class CrmOutboundProcessor extends WorkerHost {
       idempotency_key: String(message.id),
     };
     if (message.body) outbound.body = message.body;
+    if (message.subject) outbound.subject = message.subject;
+    if (message.campaign_id) outbound.marketing = true;
     if (message.channel === 'whatsapp') {
       outbound.last_inbound_at = message.conversation.last_inbound_at;
     }

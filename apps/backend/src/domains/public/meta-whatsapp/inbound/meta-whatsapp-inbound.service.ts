@@ -9,6 +9,7 @@ import {
   maskAddress,
   toE164,
 } from '../../../../messaging/utils/mask-address.util';
+import { isOptOutKeyword } from '../../../../messaging/utils/opt-out-keywords.util';
 import { S3Service } from '../../../../common/services/s3.service';
 import { S3PathHelper } from '../../../../common/helpers/s3-path.helper';
 import { CrmInboxEventsService } from '../../../../messaging/events/crm-inbox-events.service';
@@ -277,6 +278,15 @@ export class MetaWhatsappInboundService {
       });
     }
 
+    if (isOptOutKeyword(this.extractBody(message))) {
+      await this.optOutOfWhatsappMarketing(
+        channel.store_id,
+        contact,
+        conversation.customer_id ?? null,
+        sentAt,
+      );
+    }
+
     await this.events.publish({
       type: 'crm.message',
       store_id: channel.store_id,
@@ -339,6 +349,37 @@ export class MetaWhatsappInboundService {
   }
 
   /**
+   * "BAJA"/"STOP" stops WhatsApp marketing from this store (PLAN-CRM §6). An
+   * unlinked conversation opts out every customer of the store with that
+   * phone: opting out too many is safe, messaging the wrong one is not.
+   * Conversational replies from the inbox are not affected.
+   */
+  private async optOutOfWhatsappMarketing(
+    storeId: number,
+    contact: string,
+    customerId: number | null,
+    at: Date,
+  ): Promise<void> {
+    const ids = customerId
+      ? [customerId]
+      : await this.customersByPhone(storeId, contact, 20);
+    if (!ids.length) return;
+    const updated = await this.prisma.store_users.updateMany({
+      where: {
+        store_id: storeId,
+        user_id: { in: ids },
+        whatsapp_consent: { not: 'opted_out' },
+      },
+      data: { whatsapp_consent: 'opted_out', consent_updated_at: at },
+    });
+    if (updated.count > 0) {
+      this.logger.log(
+        `WhatsApp marketing opt-out from ${maskAddress(contact)} in store ${storeId} (${updated.count} customer(s))`,
+      );
+    }
+  }
+
+  /**
    * Customer of this store whose phone matches the sender. Compares digits
    * only, and accepts a stored national number (`3001234567`) when the
    * sender adds a 1-3 digit country code (`57`). Returns null unless exactly
@@ -351,6 +392,24 @@ export class MetaWhatsappInboundService {
     storeId: number,
     contact: string,
   ): Promise<number | null> {
+    const rows = await this.customersByPhone(storeId, contact, 2);
+    if (rows.length !== 1) {
+      if (rows.length > 1) {
+        this.logger.warn(
+          `Several customers of store ${storeId} share ${maskAddress(contact)}; conversation left unlinked`,
+        );
+      }
+      return null;
+    }
+    return rows[0];
+  }
+
+  /** Up to `limit` customers of the store whose phone matches the sender. */
+  private async customersByPhone(
+    storeId: number,
+    contact: string,
+    limit: number,
+  ): Promise<number[]> {
     const digits = contact.replace(/\D/g, '');
     const rows = await this.prisma.$queryRaw<Array<{ user_id: number }>>(
       Prisma.sql`
@@ -370,18 +429,10 @@ export class MetaWhatsappInboundService {
               AND right(${digits}::text, length(p.phone_digits)) = p.phone_digits
             )
           )
-        LIMIT 2
+        LIMIT ${limit}
       `,
     );
-    if (rows.length !== 1) {
-      if (rows.length > 1) {
-        this.logger.warn(
-          `Several customers of store ${storeId} share ${maskAddress(contact)}; conversation left unlinked`,
-        );
-      }
-      return null;
-    }
-    return Number(rows[0].user_id);
+    return rows.map((row) => Number(row.user_id));
   }
 
   private async handleStatus(

@@ -128,6 +128,15 @@ export class MessagingService {
         );
       }
 
+      if (message.marketing && !(await this.allowsMarketing(message))) {
+        return this.failure(
+          'OPTED_OUT',
+          message.channel === 'whatsapp'
+            ? 'The customer did not opt in to WhatsApp marketing from this store'
+            : `The customer opted out of ${message.channel} from this store`,
+        );
+      }
+
       if (this.isDryRun()) {
         return this.consoleProvider.send(message);
       }
@@ -266,6 +275,24 @@ export class MessagingService {
       );
     }
     return this.sesEmail.send(message, channel);
+  }
+
+  /**
+   * Consent read at send time (PLAN-CRM §6): an opt-out after the campaign
+   * was built still stops the message. WhatsApp marketing needs `opted_in`;
+   * SMS and email only need the customer not to have opted out. A campaign
+   * message without a store customer is never marketing-eligible.
+   */
+  private async allowsMarketing(message: OutboundMessage): Promise<boolean> {
+    if (!message.customer_id) return false;
+    const link = await this.prisma.store_users.findFirst({
+      where: { store_id: message.store_id, user_id: message.customer_id },
+      select: { whatsapp_consent: true, sms_consent: true, email_consent: true },
+    });
+    if (!link) return false;
+    if (message.channel === 'whatsapp') return link.whatsapp_consent === 'opted_in';
+    const consent = message.channel === 'sms' ? link.sms_consent : link.email_consent;
+    return consent !== 'opted_out';
   }
 
   private async customerOptedOut(

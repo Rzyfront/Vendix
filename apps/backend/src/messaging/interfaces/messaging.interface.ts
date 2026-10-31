@@ -51,6 +51,12 @@ export interface OutboundMessage {
    * when this customer opted out of the channel in this store.
    */
   customer_id?: number | null;
+  /**
+   * Marketing message (a campaign). It is only sent when the customer's
+   * consent for the channel allows marketing: never after an opt-out, and on
+   * WhatsApp only with an explicit opt-in. Checked even in dry-run.
+   */
+  marketing?: boolean;
   /** `crm_messages.id` of the row being delivered. */
   idempotency_key: string;
 }

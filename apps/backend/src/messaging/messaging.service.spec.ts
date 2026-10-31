@@ -569,4 +569,106 @@ describe('MessagingService', () => {
       retryable: true,
     });
   });
+
+  describe('marketing (campaign messages)', () => {
+    const campaign = (channel: 'whatsapp' | 'sms' | 'email', to: string) => ({
+      store_id: 10,
+      channel,
+      to,
+      body: channel === 'whatsapp' ? undefined : 'Promo',
+      template:
+        channel === 'whatsapp'
+          ? { name: 'promo', language: 'es', variables: [] }
+          : undefined,
+      customer_id: 77,
+      marketing: true,
+      idempotency_key: '900',
+    });
+    const consents = (value: Record<string, string>) => ({
+      whatsapp_consent: 'unknown',
+      sms_consent: 'unknown',
+      email_consent: 'unknown',
+      ...value,
+    });
+
+    it.each([
+      ['whatsapp', '+573001234567', { whatsapp_consent: 'opted_out' }],
+      ['whatsapp', '+573001234567', { whatsapp_consent: 'unknown' }],
+      ['sms', '+573001234567', { sms_consent: 'opted_out' }],
+      ['email', 'ana@shop.co', { email_consent: 'opted_out' }],
+    ] as const)(
+      'never sends %s marketing without consent (%o), even in dry-run',
+      async (channel, to, consent) => {
+        const { service, prisma, metaCloud, snsSms, sesEmail, smsSpend } =
+          createService({ MESSAGING_DRY_RUN: 'true' });
+        prisma.store_users.findFirst.mockResolvedValue(consents(consent));
+        const consoleSend = jest.spyOn(ConsoleMessagingProvider.prototype, 'send');
+
+        const result = await service.send(campaign(channel, to));
+
+        expect(result).toMatchObject({
+          status: 'failed',
+          error_code: 'OPTED_OUT',
+          retryable: false,
+        });
+        expect(prisma.store_users.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { store_id: 10, user_id: 77 } }),
+        );
+        expect(consoleSend).not.toHaveBeenCalled();
+        expect(metaCloud.send).not.toHaveBeenCalled();
+        expect(snsSms.send).not.toHaveBeenCalled();
+        expect(sesEmail.send).not.toHaveBeenCalled();
+        expect(smsSpend.reserve).not.toHaveBeenCalled();
+      },
+    );
+
+    it('sends WhatsApp marketing to a customer who opted in', async () => {
+      const { service, prisma, metaCloud } = createService();
+      prisma.store_users.findFirst.mockResolvedValue(
+        consents({ whatsapp_consent: 'opted_in' }),
+      );
+      const result = await service.send(campaign('whatsapp', '+573001234567'));
+      expect(result.status).toBe('sent');
+      expect(metaCloud.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('still goes through the SMS spend cap', async () => {
+      const { service, prisma, smsSpend, snsSms } = createService();
+      prisma.store_users.findFirst.mockResolvedValue(consents({}));
+      prisma.social_channels.findFirst.mockResolvedValue({
+        id: 8,
+        store_id: 10,
+        channel_type: 'sms',
+        provider: 'sns_sms',
+        status: 'connected',
+        metadata: {},
+      });
+      smsSpend.reserve.mockResolvedValue({
+        reserved: false,
+        period_start: '2026-10-01',
+        used: 10,
+        limit: 10,
+      });
+
+      const result = await service.send(campaign('sms', '+573001234567'));
+
+      expect(result).toMatchObject({ status: 'failed', error_code: 'SPEND_LIMIT' });
+      expect(snsSms.send).not.toHaveBeenCalled();
+    });
+
+    it('does not apply to conversational inbox replies', async () => {
+      const { service, prisma, metaCloud } = createService();
+      prisma.store_users.findFirst.mockResolvedValue(
+        consents({ whatsapp_consent: 'opted_out' }),
+      );
+      const result = await service.sendTemplate({
+        store_id: 10,
+        to: '+573001234567',
+        template: { name: 't', language: 'es', variables: [] },
+        idempotency_key: '901',
+      });
+      expect(result.status).toBe('sent');
+      expect(metaCloud.send).toHaveBeenCalledTimes(1);
+    });
+  });
 });

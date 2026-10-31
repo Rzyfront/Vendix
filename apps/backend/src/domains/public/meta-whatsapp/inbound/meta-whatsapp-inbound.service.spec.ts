@@ -605,4 +605,61 @@ describe('MetaWhatsappInboundService', () => {
       });
     });
   });
+
+  describe('marketing opt-out keywords', () => {
+    const withBody = (prisma: ReturnType<typeof setup>['prisma'], body: string) => {
+      const payload = fixture('message-text');
+      payload.entry[0].changes[0].value.messages[0].text.body = body;
+      prisma.social_webhook_events.findUnique.mockResolvedValue({
+        id: 99,
+        provider: 'meta_cloud',
+        processing_status: 'received',
+        payload,
+      });
+    };
+
+    it('"BAJA" opts the linked customer out of WhatsApp marketing in that store', async () => {
+      const { service, prisma } = setup('message-text');
+      withBody(prisma, 'Baja');
+
+      await service.processEvent(99, defaults);
+
+      expect(prisma.store_users.updateMany).toHaveBeenCalledWith({
+        where: {
+          store_id: 10,
+          user_id: { in: [42] },
+          whatsapp_consent: { not: 'opted_out' },
+        },
+        data: { whatsapp_consent: 'opted_out', consent_updated_at: new Date(1761900000 * 1000) },
+      });
+    });
+
+    it('opts out every store customer with that phone when the conversation is unlinked', async () => {
+      const { service, prisma } = setup('message-text');
+      withBody(prisma, 'STOP');
+      // Linking finds two customers (never guessed); the opt-out takes both.
+      prisma.$queryRaw.mockResolvedValue([{ user_id: 42 }, { user_id: 43 }]);
+
+      await service.processEvent(99, defaults);
+
+      expect(prisma.crm_conversations.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ customer_id: null }),
+      });
+      expect(prisma.store_users.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ store_id: 10, user_id: { in: [42, 43] } }),
+          data: expect.objectContaining({ whatsapp_consent: 'opted_out' }),
+        }),
+      );
+    });
+
+    it('a normal message never changes consent', async () => {
+      const { service, prisma } = setup('message-text');
+      await service.processEvent(99, defaults);
+      for (const call of prisma.store_users.updateMany.mock.calls) {
+        expect(call[0].data).not.toHaveProperty('whatsapp_consent');
+      }
+    });
+  });
 });
+

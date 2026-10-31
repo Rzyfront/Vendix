@@ -292,4 +292,41 @@ describe('CrmOutboundProcessor', () => {
       }),
     });
   });
+
+  it('sends campaign messages as marketing, with their email subject', async () => {
+    const { processor, messaging } = setup(
+      row({
+        channel: 'email',
+        body: 'Promo de octubre',
+        subject: 'Hola Ana',
+        campaign_id: 12,
+        provider: 'ses_email',
+        conversation: {
+          id: 3,
+          contact_address: 'ana@shop.co',
+          last_inbound_at: null,
+          assigned_user_id: null,
+          customer_id: 41,
+        },
+      }),
+    );
+
+    await processor.process(job());
+
+    expect(messaging.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'email',
+        to: 'ana@shop.co',
+        subject: 'Hola Ana',
+        customer_id: 41,
+        marketing: true,
+      }),
+    );
+  });
+
+  it('keeps inbox replies conversational (not marketing)', async () => {
+    const { processor, messaging } = setup();
+    await processor.process(job());
+    expect((messaging.send as jest.Mock).mock.calls[0][0].marketing).toBeUndefined();
+  });
 });

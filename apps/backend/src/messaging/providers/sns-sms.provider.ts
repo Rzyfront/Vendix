@@ -24,7 +24,7 @@ import {
 
 const DEFAULT_MAX_PRICE_USD = '0.50';
 /** Used when `SNS_SMS_PRICE_TABLE` has no entry: deliberately high. */
-const FALLBACK_PRICE_PER_SEGMENT_USD = 0.1;
+export const FALLBACK_PRICE_PER_SEGMENT_USD = 0.1;
 const OPT_OUT_CACHE_TTL_SECONDS = 24 * 60 * 60;
 const SENDER_ID_PATTERN = /^(?=.*[A-Za-z])[A-Za-z0-9]{1,11}$/;
 const REQUEST_TIMEOUT_MS = 10_000;
