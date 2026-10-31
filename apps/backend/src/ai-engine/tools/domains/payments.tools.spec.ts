@@ -356,6 +356,25 @@ describe('payments.tools · O-30 create_pos_payment / O-31 get_payment_status / 
       data: { status: 'succeeded', transactionId: 'TX-100', amount: 85000 },
     };
 
+    it('B05: un pago de mostrador se rechaza con PAY_REFUND_USE_ORDER_FLOW (no mueve caja por esta vía)', async () => {
+      const { tools } = buildTools({
+        paymentsService: {
+          getPaymentStatus: jest.fn().mockResolvedValue(STATUS),
+          refundPayment: jest
+            .fn()
+            .mockRejectedValue(
+              new VendixHttpException(ErrorCodes.PAY_REFUND_USE_ORDER_FLOW),
+            ),
+        },
+      });
+      const tool = getTool(tools, 'refund_payment');
+      const answer = JSON.parse(
+        await tool.handler!({ payment_id: 'TX-100' }, CONTEXT),
+      );
+
+      expect(answer.error_code ?? answer.code).toBe('PAY_REFUND_USE_ORDER_FLOW');
+    });
+
     it('preview cita cobertura y destino (total vs parcial)', async () => {
       const { tools } = buildTools({
         paymentsService: {

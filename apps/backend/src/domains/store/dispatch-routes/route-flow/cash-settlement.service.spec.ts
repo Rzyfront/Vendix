@@ -167,14 +167,16 @@ describe('CashSettlementService — cierre de planilla contra caja', () => {
     responsible_user_id: 33,
   };
 
-  it('crea un movimiento sale por método (null => cash) con user_id responsable y reference de cierre', async () => {
+  it('crea un movimiento sale por método real, solo con collected_amount (sin anticipo) y con origen dispatch_route', async () => {
     const { service, tx, eventEmitter } = build();
     const res = await service.recordRouteCloseMovements(tx, {
       ...base,
       stops: [
         stop(1),
-        stop(2, { payment_method: null, collected_amount: 50 }),
+        stop(2, { collected_amount: 50 }),
         stop(3, { payment_method: 'transfer', collected_amount: 70, anticipo_amount: 5 }),
+        // Anticipo con tarjeta y nada cobrado en ruta: no entra al cajón.
+        stop(7, { payment_method: 'card', collected_amount: 0, anticipo_amount: 200 }),
         stop(4, { is_prepaid: true }),
         stop(5, { result: 'rejected' }),
         stop(6, { collected_amount: 0 }),
@@ -191,17 +193,54 @@ describe('CashSettlementService — cierre de planilla contra caja', () => {
         payment_method: 'cash',
         reference: 'dispatch_route:3:close:cash',
         notes: 'Recaudo ruta PLN1 (2 paradas)',
+        source_type: 'dispatch_route',
+        source_id: 3,
       }),
     });
     expect(tx.cash_register_movements.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        amount: 75,
+        amount: 70,
         payment_method: 'transfer',
         reference: 'dispatch_route:3:close:transfer',
+        source_type: 'dispatch_route_transfer',
+        source_id: 3,
       }),
     });
+    expect(tx.cash_register_movements.create).toHaveBeenCalledTimes(2);
     // No `cash_register.movement` (el listener trataria un `sale` como retiro).
     expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('A1/B20: cobro sin método en una parada se trata como cash solo en el cierre de ruta (no falla la planilla) y avisa', async () => {
+    const { service, tx } = build();
+    const warn = jest
+      .spyOn((service as any).logger, 'warn')
+      .mockImplementation(() => undefined);
+    const res = await service.recordRouteCloseMovements(tx, {
+      ...base,
+      stops: [stop(1), stop(2, { payment_method: null, collected_amount: 50 })],
+    });
+    expect(res).toHaveLength(1);
+    expect(tx.cash_register_movements.create).toHaveBeenCalledTimes(1);
+    expect(tx.cash_register_movements.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        amount: 150,
+        payment_method: 'cash',
+        reference: 'dispatch_route:3:close:cash',
+      }),
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('parada #2'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Ruta #3'));
+  });
+
+  it('B08: un método de pasarela (wompi) no mueve el cajón', async () => {
+    const { service, tx } = build();
+    const res = await service.recordRouteCloseMovements(tx, {
+      ...base,
+      stops: [stop(1, { payment_method: 'wompi', collected_amount: 80 })],
+    });
+    expect(res).toEqual([]);
+    expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
   });
 
   it('excluye paradas con movimiento legado por parada', async () => {
@@ -240,5 +279,34 @@ describe('CashSettlementService — cierre de planilla contra caja', () => {
     expect(await service.isCashRegisterRequired()).toBe(true);
     sessions.assertSessionForSales.mockRejectedValue(new Error('boom'));
     await expect(service.isCashRegisterRequired()).rejects.toThrow('boom');
+  });
+});
+
+describe('CashSettlementService.listOpenSessions — B20 sesiones de quien liquida', () => {
+  const build = () => {
+    const prisma = {
+      cash_register_sessions: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const service = new CashSettlementService(prisma as any, { emit: jest.fn() } as any, {} as any);
+    return { service, prisma };
+  };
+
+  it('con opened_by filtra por el usuario que liquida', async () => {
+    const { service, prisma } = build();
+    await service.listOpenSessions(12, 7);
+    expect(prisma.cash_register_sessions.findMany.mock.calls[0][0].where).toEqual({
+      store_id: 12,
+      status: 'open',
+      opened_by: 7,
+    });
+  });
+
+  it('sin opened_by conserva el listado de la tienda', async () => {
+    const { service, prisma } = build();
+    await service.listOpenSessions(12);
+    expect(prisma.cash_register_sessions.findMany.mock.calls[0][0].where).toEqual({
+      store_id: 12,
+      status: 'open',
+    });
   });
 });

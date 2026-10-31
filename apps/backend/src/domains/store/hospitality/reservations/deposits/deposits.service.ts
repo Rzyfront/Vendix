@@ -8,7 +8,7 @@ import { StorePrismaService } from '../../../../../prisma/services/store-prisma.
 import { WalletService } from '../../../wallet/wallet.service';
 import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
 import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
-import { SettingsService } from '../../../settings/settings.service';
+import { MovementsService } from '../../../cash-registers/movements/movements.service';
 import { PaymentLinksService } from '../../../payment-links/payment-links.service';
 import { depositRequired } from '../../rates/lodging-cancellation-penalty';
 import { CollectDepositDto, DepositLinkDto } from './deposits.dto';
@@ -100,7 +100,7 @@ export class LodgingDepositsService {
     private readonly wallets: WalletService,
     private readonly walletBalance: WalletBalanceService,
     private readonly cashSessions: SessionsService,
-    private readonly settings: SettingsService,
+    private readonly movements: MovementsService,
     private readonly paymentLinks: PaymentLinksService,
     private readonly eventEmitter: EventEmitter2,
     private readonly storeContextRunner: StoreContextRunner,
@@ -255,7 +255,6 @@ export class LodgingDepositsService {
     // Same cash gate as every sale: with the register on, the cashier needs
     // an open session before taking money.
     await this.cashSessions.assertSessionForSales(user_id);
-    const cashSessionId = methodType === 'cash' ? await this.cashSessionId(user_id) : null;
     const wallet = await this.wallets.getOrCreateWallet(reservation.customer_id);
 
     const emitted = await this.prisma.$transaction(
@@ -279,22 +278,20 @@ export class LodgingDepositsService {
           request_id: dto.request_id,
           user_id,
         });
-        if (cashSessionId) {
-          // A deposit has no order yet: it enters the register as a cash_in
-          // (not a sale), and its accounting is the deposit's own entry.
-          await tx.cash_register_movements.create({
-            data: {
-              session_id: cashSessionId,
-              store_id,
-              user_id,
-              type: 'cash_in',
-              amount,
-              payment_method: 'cash',
-              reference: `Depósito reserva ${reservation.reservation_number}`,
-              notes: 'Depósito de reserva (anticipo)',
-            },
-          });
-        }
+        // A deposit has no order yet: it enters the register as a cash_in (not
+        // a sale), inside this tx with the session row locked (B12), so a
+        // register closed meanwhile aborts the deposit instead of orphaning it.
+        await this.movements.recordModuleCashMovement(tx, {
+          store_id,
+          user_id,
+          direction: 'in',
+          amount: Number(amount),
+          payment_method: methodType,
+          source_type: 'lodging_deposit',
+          source_id: deposit.id,
+          reference: `Depósito reserva ${reservation.reservation_number}`,
+          notes: 'Depósito de reserva (anticipo)',
+        });
         return {
           store_id,
           deposit_id: deposit.id,
@@ -722,17 +719,6 @@ export class LodgingDepositsService {
       SELECT id FROM lodging_reservations WHERE id = ${reservation_id} AND store_id = ${store_id} FOR UPDATE
     `;
     if (!locked.length) throw new VendixHttpException(ErrorCodes.LODGING_RESERVATION_FIND_001);
-  }
-
-  /** Open register session of the cashier when the store uses the register. */
-  private async cashSessionId(user_id: number): Promise<number | null> {
-    const settings = await this.settings.getSettings();
-    if (!(settings as { pos?: { cash_register?: { enabled?: boolean } } })?.pos?.cash_register?.enabled) {
-      return null;
-    }
-    const session = await this.cashSessions.getActiveSession(user_id);
-    if (!session) throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
-    return session.id;
   }
 
   private requireStoreId(): number {

@@ -18,6 +18,11 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
   let prismaMock: any;
   let context: any;
   let orderHistory: { record: jest.Mock };
+  let orderFlowService: {
+    markItemDelivered: jest.Mock;
+    settlePaidTableOrder: jest.Mock;
+    markFinishPendingAfterPayment: jest.Mock;
+  };
 
   const STORE_ID = 100;
   const USER_ID = 42;
@@ -55,6 +60,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       },
       payments: {
         findFirst: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         // Otros pagos liquidados de la orden (reparto de cuenta dividida).
         findMany: jest.fn().mockResolvedValue([]),
         update: jest.fn(),
@@ -141,6 +147,11 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
     };
     // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
     orderHistory = { record: jest.fn().mockResolvedValue(null) };
+    orderFlowService = {
+      markItemDelivered: jest.fn(),
+      settlePaidTableOrder: jest.fn().mockResolvedValue(undefined),
+      markFinishPendingAfterPayment: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new TableSessionsService(
       prismaMock as any,
@@ -153,7 +164,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       cashRegisterMovementsService as any,
       kitchenFireService as any,
       stockLevelManager as any,
-      { markItemDelivered: jest.fn() } as any,
+      orderFlowService as any,
       orderHistory as any,
       stockValidator as any,
       sellableStockAllocator as any,
@@ -229,6 +240,38 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       });
       expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
       expect((service as any).notificationsSseService.push).not.toHaveBeenCalled();
+    });
+
+    it('S01.4: closed table session and this payment settles the order: returns null instead of throwing', async () => {
+      prismaMock.table_sessions.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 76 });
+      prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100 });
+      prismaMock.payments.findMany.mockResolvedValue([
+        { id: 400, amount: 40 },
+        { id: paymentId, amount: 60 },
+      ]);
+
+      await expect(
+        service.projectOrderPaymentToTableSession(orderId, paymentId),
+      ).resolves.toBeNull();
+
+      expect(prismaMock.table_sessions.updateMany).not.toHaveBeenCalled();
+      expect((service as any).notificationsSseService.push).not.toHaveBeenCalled();
+    });
+
+    it('S01.4: closed table session but the order is not settled: keeps the typed rejection', async () => {
+      prismaMock.table_sessions.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 76 });
+      prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100 });
+      prismaMock.payments.findMany.mockResolvedValue([{ id: paymentId, amount: 60 }]);
+
+      await expect(
+        service.projectOrderPaymentToTableSession(orderId, paymentId),
+      ).rejects.toMatchObject({
+        errorCode: 'POS_TABLE_SESSION_PROJECTION_FAILED_001',
+      });
     });
 
     it('is idempotent on a second projection: no new paid_at or event', async () => {
@@ -324,7 +367,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       } as any);
     });
 
-    it('does not confirm payment or balance when the cash-session lock fails', async () => {
+    it('does not bump the balance when the cash movement fails (same transaction)', async () => {
       prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 0));
       settingsService.getSettings.mockResolvedValue({
         pos: { cash_register: { enabled: true } },
@@ -345,7 +388,8 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         expect.objectContaining({ order_id: orderId, payment_id: paymentId }),
         prismaMock,
       );
-      expect(prismaMock.payments.update).not.toHaveBeenCalled();
+      // The conditional transition ran inside the same transaction that the
+      // failed movement aborts; the balance is never bumped.
       expect(prismaMock.orders.update).not.toHaveBeenCalled();
     });
 
@@ -353,13 +397,13 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       const locked = payment('pending', 0);
       (locked.orders as any).active_financial_split_id = 4;
       prismaMock.payments.findFirst.mockResolvedValue(locked);
-      prismaMock.payments.update.mockClear();
+      prismaMock.payments.updateMany.mockClear();
 
       const error: any = await service.confirmPayment(sessionId, paymentId).catch((failure) => failure);
 
       expect(error).toBeInstanceOf(VendixHttpException);
       expect(error.errorCode).toBe('SPLIT_ACCOUNT_LOCKED');
-      expect(prismaMock.payments.update).not.toHaveBeenCalled();
+      expect(prismaMock.payments.updateMany).not.toHaveBeenCalled();
     });
 
     it('projects a settled check only after the payment transaction commits', async () => {
@@ -405,6 +449,125 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           amount: 60,
         }),
       );
+    });
+
+    it('B10: two simultaneous confirmations create one movement and bump the balance once', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 40));
+      prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100, total_paid: 40 });
+      prismaMock.payments.updateMany
+        .mockResolvedValueOnce({ count: 1 })
+        .mockResolvedValueOnce({ count: 0 });
+      const cashSpy = jest
+        .spyOn(service as any, 'recordStaffCashMovement')
+        .mockResolvedValue(undefined);
+
+      const results = await Promise.all([
+        service.confirmPayment(sessionId, paymentId),
+        service.confirmPayment(sessionId, paymentId),
+      ]);
+
+      expect(results).toEqual([
+        { state: 'succeeded', payment_id: paymentId },
+        { state: 'succeeded', payment_id: paymentId },
+      ]);
+      expect(prismaMock.payments.updateMany).toHaveBeenCalledWith({
+        where: { id: paymentId, state: 'pending' },
+        data: expect.objectContaining({ state: 'succeeded' }),
+      });
+      expect(cashSpy).toHaveBeenCalledTimes(1);
+      expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
+      expect(orderHistory.record).toHaveBeenCalledTimes(1);
+      expect((service as any).eventEmitter.emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('B10: the conditional transition runs before the cash movement', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 0));
+      const order: string[] = [];
+      prismaMock.payments.updateMany.mockImplementationOnce(async () => {
+        order.push('cas');
+        return { count: 0 };
+      });
+      jest.spyOn(service as any, 'recordStaffCashMovement').mockImplementation(async () => {
+        order.push('movement');
+      });
+
+      await service.confirmPayment(sessionId, paymentId);
+
+      expect(order).toEqual(['cas']);
+    });
+
+    it('B11: the payment that covers the grand total promotes the order after the money transaction', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 40));
+      prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100, total_paid: 40 });
+      prismaMock.table_sessions.findFirst.mockResolvedValue({ id: sessionId, paid_at: null });
+      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: new Date(), order_id: orderId });
+      let committed = false;
+      prismaMock.$transaction.mockImplementationOnce(async (run: any) => {
+        const result = await run(prismaMock);
+        committed = true;
+        return result;
+      });
+      orderFlowService.settlePaidTableOrder.mockImplementation(async () => {
+        expect(committed).toBe(true);
+      });
+
+      await expect(service.confirmPayment(sessionId, paymentId)).resolves.toEqual({
+        state: 'succeeded', payment_id: paymentId,
+      });
+
+      expect(orderFlowService.settlePaidTableOrder).toHaveBeenCalledWith(orderId, USER_ID);
+    });
+
+    it('B11: a partial payment does not promote the order', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 20));
+      prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100, total_paid: 20 });
+
+      await service.confirmPayment(sessionId, paymentId);
+
+      expect(orderFlowService.settlePaidTableOrder).not.toHaveBeenCalled();
+    });
+
+    it('B11: a failing promotion never reverts the payment; it is flagged effects_pending and a retry repairs it', async () => {
+      prismaMock.payments.findFirst
+        .mockResolvedValueOnce(payment('pending', 40))
+        .mockResolvedValueOnce(payment('succeeded', 100));
+      prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100, total_paid: 40 });
+      prismaMock.table_sessions.findFirst.mockResolvedValue({ id: sessionId, paid_at: null });
+      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: new Date(), order_id: orderId });
+      orderFlowService.settlePaidTableOrder.mockRejectedValueOnce(new Error('stock unavailable'));
+      jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
+
+      await expect(service.confirmPayment(sessionId, paymentId)).resolves.toEqual({
+        state: 'succeeded', payment_id: paymentId, effects_pending: true,
+      });
+      expect(prismaMock.payments.updateMany).toHaveBeenCalledTimes(1);
+      // The sweep can settle it unattended (B07 marker, kind table_settlement).
+      expect(orderFlowService.markFinishPendingAfterPayment).toHaveBeenCalledWith(orderId, {
+        kind: 'table_settlement',
+        payment_ids: [paymentId],
+        user_id: USER_ID,
+        error: 'stock unavailable',
+      });
+
+      await expect(service.confirmPayment(sessionId, paymentId)).resolves.toEqual({
+        state: 'succeeded', payment_id: paymentId,
+      });
+      expect(orderFlowService.settlePaidTableOrder).toHaveBeenCalledTimes(2);
+      // The retry never charges again: no second CAS, movement or balance bump.
+      expect(prismaMock.payments.updateMany).toHaveBeenCalledTimes(1);
+      expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('B11: a concurrent loser of the CAS neither settles nor flags (the winner owns the settlement)', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 100));
+      prismaMock.payments.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(service.confirmPayment(sessionId, paymentId)).resolves.toEqual({
+        state: 'succeeded', payment_id: paymentId,
+      });
+
+      expect(orderFlowService.settlePaidTableOrder).not.toHaveBeenCalled();
+      expect(orderFlowService.markFinishPendingAfterPayment).not.toHaveBeenCalled();
     });
 
     it('does not project a partial payment', async () => {
@@ -478,7 +641,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       await service.confirmPayment(sessionId, paymentId);
       await service.confirmPayment(sessionId, paymentId);
 
-      expect(prismaMock.payments.update).not.toHaveBeenCalled();
+      expect(prismaMock.payments.updateMany).not.toHaveBeenCalled();
       expect(prismaMock.orders.update).not.toHaveBeenCalled();
       expect(prismaMock.table_sessions.updateMany).toHaveBeenCalledTimes(2);
       expect((service as any).notificationsSseService.push).toHaveBeenCalledTimes(1);
@@ -500,7 +663,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       expect(error).toBeInstanceOf(VendixHttpException);
       expect(error.errorCode).toBe('POS_TABLE_SESSION_PROJECTION_FAILED_001');
       // Payment kept succeeded; balances committed.
-      expect(prismaMock.payments.update).toHaveBeenCalledTimes(1);
+      expect(prismaMock.payments.updateMany).toHaveBeenCalledTimes(1);
       expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
       // Side effects NOT skipped: comensal SSE, staff notification, cash.
       expect((service as any).notificationsSseService.push).toHaveBeenCalledWith(
@@ -537,7 +700,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         state: 'succeeded', payment_id: paymentId,
       });
 
-      expect(prismaMock.payments.update).toHaveBeenCalledTimes(1);
+      expect(prismaMock.payments.updateMany).toHaveBeenCalledTimes(1);
       expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
       expect(prismaMock.table_sessions.updateMany).toHaveBeenCalledTimes(2);
       // First call still pushed `payment.confirmed`; the retry emits `session_paid`.

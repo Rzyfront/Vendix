@@ -21,8 +21,12 @@ function makeRes() {
 }
 
 function makeReq(over: Record<string, any> = {}): Request {
+  const originalUrl: string =
+    over.originalUrl ?? '/api/ecommerce/catalog?search=cafe';
   return {
-    originalUrl: '/api/ecommerce/catalog?search=cafe',
+    originalUrl,
+    baseUrl: '',
+    path: originalUrl.split('?')[0],
     headers: {},
     query: {},
     ...over,
@@ -43,7 +47,10 @@ describe('DomainResolverMiddleware tenant validation (D.3 / F-042)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    middleware = new DomainResolverMiddleware(publicDomains as any, cache as any);
+    middleware = new DomainResolverMiddleware(
+      publicDomains as any,
+      cache as any,
+    );
     next = jest.fn();
   });
 
@@ -119,8 +126,76 @@ describe('DomainResolverMiddleware tenant validation (D.3 / F-042)', () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
+  it('/ecommerce/ solo en la query no convierte una ruta store/* en ecommerce', async () => {
+    const req = makeReq({
+      originalUrl: '/api/store/customers?store_id=2&x=/ecommerce/',
+      query: { store_id: '2', x: '/ecommerce/' },
+      headers: { host: 'tienda.com' },
+    });
+    const res = makeRes();
+
+    await middleware.use(req, res, next as unknown as NextFunction);
+
+    expect(res.statusCode).toBe(0);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect((req as any).domain_context).toBeUndefined();
+    expect(publicDomains.resolveByStoreId).not.toHaveBeenCalled();
+    expect(publicDomains.resolveDomain).not.toHaveBeenCalled();
+  });
+
+  it('ruta pública /ecommerce/ con ?store_id=9 sigue resolviendo la tienda 9', async () => {
+    const req = makeReq({
+      originalUrl: '/api/ecommerce/catalog?store_id=9',
+      query: { store_id: '9' },
+      headers: { host: 'tienda.com' },
+    });
+
+    await middleware.use(req, makeRes(), next as unknown as NextFunction);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(publicDomains.resolveByStoreId).toHaveBeenCalledWith(9);
+    expect((req as any).domain_context).toEqual({
+      store_id: 9,
+      organization_id: 1,
+    });
+  });
+
+  it('detecta /ecommerce/ cuando el montaje deja la ruta en baseUrl', async () => {
+    const req = makeReq({
+      originalUrl: '/api/ecommerce/catalog?store_id=9',
+      baseUrl: '/api/ecommerce/catalog',
+      path: '/',
+      query: { store_id: '9' },
+    });
+
+    await middleware.use(req, makeRes(), next as unknown as NextFunction);
+
+    expect(publicDomains.resolveByStoreId).toHaveBeenCalledWith(9);
+    expect((req as any).domain_context).toEqual({
+      store_id: 9,
+      organization_id: 1,
+    });
+  });
+
+  it('?store_id de una tienda inexistente o inactiva no deja domain_context', async () => {
+    publicDomains.resolveByStoreId.mockRejectedValueOnce(
+      new Error('Store 77 not found'),
+    );
+    const req = makeReq({
+      originalUrl: '/api/ecommerce/catalog?store_id=77',
+      query: { store_id: '77' },
+    });
+
+    await middleware.use(req, makeRes(), next as unknown as NextFunction);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect((req as any).domain_context).toBeUndefined();
+    expect(cache.set).not.toHaveBeenCalled();
+  });
+
   it('isValidTenantId: solo dígitos, > 0, entero seguro', () => {
-    for (const good of ['1', '10', '007']) expect(isValidTenantId(good)).toBe(true);
+    for (const good of ['1', '10', '007'])
+      expect(isValidTenantId(good)).toBe(true);
     for (const bad of ['', '0', '-1', '3.5', 'abc', '1e3', '0x10', '1 ']) {
       expect(isValidTenantId(bad)).toBe(false);
     }

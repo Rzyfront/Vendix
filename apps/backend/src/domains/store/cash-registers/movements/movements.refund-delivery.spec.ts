@@ -54,6 +54,7 @@ describe('MovementsService.deliverRefundCashMovement', () => {
   const createService = () => {
     const tx = {
       $queryRaw: jest.fn().mockResolvedValue([{ id: FAILURE_ID }]),
+      refunds: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       accounting_entry_failures: {
         findFirst: jest.fn().mockResolvedValue({ ...outboxRow }),
         update: jest.fn().mockResolvedValue({}),

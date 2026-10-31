@@ -406,6 +406,28 @@ export const ErrorCodes = {
     devMessage: 'Payment does not belong to the requesting user',
   },
 
+  PAY_METHOD_MISCONFIGURED: {
+    code: 'PAY_METHOD_MISCONFIGURED',
+    httpStatus: 400,
+    devMessage:
+      'Payment method has no system_payment_method.type; it cannot be classified for cash register movements',
+  },
+
+  // B09/BL-2: venta POS a crédito con cuota inicial y caja habilitada sin medio
+  // de pago: sin él no se puede asentar el `sale` de la cuota en la caja.
+  PAY_CREDIT_INITIAL_METHOD_REQUIRED_001: {
+    code: 'PAY_CREDIT_INITIAL_METHOD_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'Elige el medio de pago de la cuota inicial',
+  },
+
+  PAY_REFUND_USE_ORDER_FLOW: {
+    code: 'PAY_REFUND_USE_ORDER_FLOW',
+    httpStatus: 409,
+    devMessage:
+      'Counter payments (cash, bank transfer, manual card) cannot be refunded directly; use POST /store/orders/:id/flow/refund so the cash register, ledger and refund cap are updated',
+  },
+
   // Multi-tender cash payments (pago multimétodo de contado)
   PAY_MULTI_TENDER_SUM_MISMATCH: {
     code: 'PAY_MULTI_TENDER_SUM_MISMATCH',
@@ -1218,6 +1240,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'Esta orden tiene productos ya enviados a cocina o con movimientos de inventario. Modifícalos desde el detalle de la orden (Modificar productos), que conserva su historial.',
+  },
+  ORD_EDIT_BELOW_PAID_001: {
+    code: 'ORD_EDIT_BELOW_PAID_001',
+    httpStatus: 409,
+    devMessage:
+      'El nuevo total de la orden queda por debajo de lo ya cobrado. Registra una devolución antes de reducir la orden.',
   },
   ORD_CANCEL_STOCK_COMMITTED_001: {
     code: 'ORD_CANCEL_STOCK_COMMITTED_001',
@@ -2032,6 +2060,12 @@ export const ErrorCodes = {
     code: 'REF_RESOLUTION_CONFLICT_001',
     httpStatus: 409,
     devMessage: 'Refund resolution conflicts with its current state or payout reference',
+  },
+  REFUND_ALLOCATION_MISMATCH: {
+    code: 'REFUND_ALLOCATION_MISMATCH',
+    httpStatus: 409,
+    devMessage:
+      'Refund amount cannot be fully allocated across the order payments (remaining capacity is lower than the refund)',
   },
   REF_TAX_BREAKDOWN_MISSING_001: {
     code: 'REF_TAX_BREAKDOWN_MISSING_001',
@@ -7383,6 +7417,25 @@ export const ErrorCodes = {
     devMessage: 'The cash session is already closed',
   },
 
+  // Caja registradora — movimientos manuales (B13).
+  CASH_MOVEMENT_FOREIGN_SESSION_001: {
+    code: 'CASH_MOVEMENT_FOREIGN_SESSION_001',
+    httpStatus: 403,
+    devMessage:
+      'Manual cash movements can only be recorded on your own cash session',
+  },
+  CASH_MOVEMENT_NOTES_REQUIRED_001: {
+    code: 'CASH_MOVEMENT_NOTES_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'A cash_out movement requires notes explaining the withdrawal',
+  },
+  CASH_MOVEMENT_AMOUNT_INVALID_001: {
+    code: 'CASH_MOVEMENT_AMOUNT_INVALID_001',
+    httpStatus: 400,
+    devMessage:
+      'Manual cash movement amount must be positive, up to 2 decimals and within the allowed maximum',
+  },
+
   // Caja registradora — cobro sin sesión del operador
   // (`assertSessionForSales`). 409 y no 403: el usuario SÍ tiene permiso para
   // cobrar; lo que falta es que tenga su caja abierta. No es "no puedes", es
@@ -7527,6 +7580,204 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'El contenido de la landing no cumple la estructura esperada. Revisa las secciones e intenta de nuevo.',
+  },
+
+  // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra
+  // tienda como si no está asignada a quien no puede ver todas: no se revela
+  // que existe.
+  CRM_INBOX_001: {
+    code: 'CRM_INBOX_001',
+    httpStatus: 404,
+    devMessage: 'La conversación no existe o no tienes acceso a ella.',
+  },
+  // Solo se asigna a personal activo de la tienda, nunca a un cliente.
+  CRM_INBOX_002: {
+    code: 'CRM_INBOX_002',
+    httpStatus: 422,
+    devMessage: 'El usuario no pertenece al personal activo de esta tienda.',
+  },
+  // Mismo `client_request_id` mientras el primer envío aún se registra.
+  CRM_INBOX_003: {
+    code: 'CRM_INBOX_003',
+    httpStatus: 409,
+    devMessage: 'Este mensaje ya se está enviando. Espera un momento.',
+  },
+  // El mensaje quedó registrado como fallido: la cola no lo aceptó.
+  CRM_INBOX_004: {
+    code: 'CRM_INBOX_004',
+    httpStatus: 503,
+    devMessage: 'No pudimos poner el mensaje en cola. Intenta de nuevo.',
+  },
+  // Cuerpo vacío sin plantilla, o canal sin envío (p. ej. nota interna).
+  CRM_INBOX_005: {
+    code: 'CRM_INBOX_005',
+    httpStatus: 400,
+    devMessage: 'Escribe un mensaje o elige una plantilla.',
+  },
+  // WhatsApp solo admite texto libre dentro de las 24 h desde el último
+  // mensaje del cliente; fuera de ella solo plantillas aprobadas.
+  CRM_WINDOW_CLOSED: {
+    code: 'CRM_WINDOW_CLOSED',
+    httpStatus: 409,
+    devMessage:
+      'Pasaron más de 24 horas desde el último mensaje del cliente. Solo puedes enviarle una plantilla aprobada.',
+  },
+  // SMS: la tienda agotó su tope mensual de gasto (o no tiene tope definido).
+  CRM_SMS_SPEND_LIMIT: {
+    code: 'CRM_SMS_SPEND_LIMIT',
+    httpStatus: 409,
+    devMessage:
+      'La tienda alcanzó su tope mensual de SMS. Sube el tope en Integraciones → Canales o espera al próximo mes.',
+  },
+
+  // CRM 360, tareas y pipeline (PLAN-CRM §4.4-§4.6). Igual que la bandeja,
+  // lo que es de otra tienda o no es visible para quien pregunta responde 404.
+  CRM_CUSTOMER_001: {
+    code: 'CRM_CUSTOMER_001',
+    httpStatus: 404,
+    devMessage: 'El cliente no existe en esta tienda.',
+  },
+  // Responsable de cliente, tarea u oportunidad: personal activo de la tienda.
+  CRM_STAFF_001: {
+    code: 'CRM_STAFF_001',
+    httpStatus: 422,
+    devMessage: 'El usuario no pertenece al personal activo de esta tienda.',
+  },
+  // Cambiar el responsable de un cliente exige `store:crm_inbox:assign`.
+  CRM_PROFILE_001: {
+    code: 'CRM_PROFILE_001',
+    httpStatus: 403,
+    devMessage: 'No tienes permiso para cambiar el responsable del cliente.',
+  },
+  CRM_TAG_001: {
+    code: 'CRM_TAG_001',
+    httpStatus: 404,
+    devMessage: 'La etiqueta no existe.',
+  },
+  CRM_TAG_002: {
+    code: 'CRM_TAG_002',
+    httpStatus: 409,
+    devMessage: 'Ya existe una etiqueta con ese nombre.',
+  },
+  CRM_NOTE_001: {
+    code: 'CRM_NOTE_001',
+    httpStatus: 404,
+    devMessage: 'La nota no existe.',
+  },
+  CRM_TASK_001: {
+    code: 'CRM_TASK_001',
+    httpStatus: 404,
+    devMessage: 'La tarea no existe o no tienes acceso a ella.',
+  },
+  CRM_PIPELINE_001: {
+    code: 'CRM_PIPELINE_001',
+    httpStatus: 404,
+    devMessage: 'El pipeline o la etapa no existe.',
+  },
+  // Etapa de otro pipeline, o etapa desactivada.
+  CRM_PIPELINE_002: {
+    code: 'CRM_PIPELINE_002',
+    httpStatus: 422,
+    devMessage: 'La etapa no pertenece al pipeline de la oportunidad o está desactivada.',
+  },
+  CRM_PIPELINE_003: {
+    code: 'CRM_PIPELINE_003',
+    httpStatus: 400,
+    devMessage: 'Indica el motivo por el que se perdió la oportunidad.',
+  },
+  // Ganar/perder necesita una etapa activa de tipo won/lost en el pipeline.
+  CRM_PIPELINE_004: {
+    code: 'CRM_PIPELINE_004',
+    httpStatus: 409,
+    devMessage: 'El pipeline no tiene una etapa activa de ganado o perdido.',
+  },
+  CRM_PIPELINE_005: {
+    code: 'CRM_PIPELINE_005',
+    httpStatus: 409,
+    devMessage: 'Ya existe una etapa con ese nombre en el pipeline.',
+  },
+  CRM_PIPELINE_006: {
+    code: 'CRM_PIPELINE_006',
+    httpStatus: 409,
+    devMessage: 'La etapa tiene oportunidades abiertas. Muévelas antes de desactivarla.',
+  },
+  // Editar etapas es configuración de la tienda: dueño o administrador.
+  CRM_PIPELINE_007: {
+    code: 'CRM_PIPELINE_007',
+    httpStatus: 403,
+    devMessage: 'Solo el dueño o un administrador puede editar las etapas.',
+  },
+  // Sin `store:crm_inbox:assign` solo te asignas tareas u oportunidades a ti.
+  CRM_ASSIGN_001: {
+    code: 'CRM_ASSIGN_001',
+    httpStatus: 403,
+    devMessage: 'Solo puedes asignarte tareas u oportunidades a ti mismo.',
+  },
+  CRM_OPPORTUNITY_001: {
+    code: 'CRM_OPPORTUNITY_001',
+    httpStatus: 404,
+    devMessage: 'La oportunidad no existe o no tienes acceso a ella.',
+  },
+  // Cotización de otra tienda o de otro cliente.
+  CRM_OPPORTUNITY_002: {
+    code: 'CRM_OPPORTUNITY_002',
+    httpStatus: 422,
+    devMessage: 'La cotización no existe o es de otro cliente.',
+  },
+
+  // Segmentos y campañas (PLAN-CRM §4.5, §4.7). El filtro es un catálogo
+  // cerrado: un campo, operador o valor fuera de él es 400, nunca se ignora.
+  CRM_SEGMENT_001: {
+    code: 'CRM_SEGMENT_001',
+    httpStatus: 400,
+    devMessage: 'El filtro del segmento no es válido.',
+  },
+  CRM_SEGMENT_002: {
+    code: 'CRM_SEGMENT_002',
+    httpStatus: 404,
+    devMessage: 'El segmento no existe.',
+  },
+  CRM_SEGMENT_003: {
+    code: 'CRM_SEGMENT_003',
+    httpStatus: 409,
+    devMessage: 'Ya existe un segmento con ese nombre.',
+  },
+  CRM_CAMPAIGN_001: {
+    code: 'CRM_CAMPAIGN_001',
+    httpStatus: 404,
+    devMessage: 'La campaña no existe.',
+  },
+  // Editar o enviar solo en borrador; cancelar solo programada o en envío.
+  CRM_CAMPAIGN_002: {
+    code: 'CRM_CAMPAIGN_002',
+    httpStatus: 409,
+    devMessage: 'La campaña no está en un estado que permita esta acción.',
+  },
+  // `confirm_estimated_cost` no coincide con la estimación vigente.
+  CRM_CAMPAIGN_003: {
+    code: 'CRM_CAMPAIGN_003',
+    httpStatus: 409,
+    devMessage: 'El costo estimado cambió. Revisa la nueva estimación y confírmala.',
+  },
+  CRM_CAMPAIGN_004: {
+    code: 'CRM_CAMPAIGN_004',
+    httpStatus: 422,
+    devMessage: 'El contenido de la campaña no es válido para el canal elegido.',
+  },
+  CRM_CAMPAIGN_005: {
+    code: 'CRM_CAMPAIGN_005',
+    httpStatus: 422,
+    devMessage: 'La campaña no tiene destinatarios válidos o supera el máximo permitido.',
+  },
+  CRM_CAMPAIGN_006: {
+    code: 'CRM_CAMPAIGN_006',
+    httpStatus: 422,
+    devMessage: 'La tienda no tiene conectado el canal de la campaña.',
+  },
+  CRM_CAMPAIGN_007: {
+    code: 'CRM_CAMPAIGN_007',
+    httpStatus: 400,
+    devMessage: 'La fecha de programación debe ser futura.',
   },
 
   // CRM Landing (QUI-719): fallo al encolar el job en BullMQ.

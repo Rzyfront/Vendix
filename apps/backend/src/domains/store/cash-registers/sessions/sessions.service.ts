@@ -7,7 +7,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { order_state_enum } from '@prisma/client';
+import { order_state_enum, Prisma } from '@prisma/client';
 import { Observable } from 'rxjs';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -208,6 +208,7 @@ export class SessionsService {
 
     return this.prisma.cash_register_sessions.findFirst({
       where,
+      orderBy: [{ opened_at: 'desc' }, { id: 'desc' }],
       include: {
         register: true,
         opened_by_user: {
@@ -281,6 +282,21 @@ export class SessionsService {
     };
   }
 
+  /** Traduce un P2002 de los índices únicos parciales de sesión abierta. */
+  private translateOpenSessionConflict(error: unknown): unknown {
+    const e = error as { code?: string; meta?: unknown };
+    if (e?.code !== 'P2002') return error;
+    // `meta.target` trae el nombre del índice (o campos, según el adaptador).
+    const text = JSON.stringify(e.meta ?? {});
+    if (text.includes('cash_register_sessions_one_open_per_user')) {
+      return new BadRequestException('Ya tienes una sesión abierta en otra caja');
+    }
+    if (text.includes('cash_register_sessions_one_open_per_register')) {
+      return new BadRequestException('Esta caja ya tiene una sesión abierta');
+    }
+    return error;
+  }
+
   async openSession(dto: OpenSessionDto) {
     const context = RequestContextService.getContext()!;
 
@@ -292,34 +308,30 @@ export class SessionsService {
       throw new NotFoundException('Caja registradora no encontrada o inactiva');
     }
 
-    // Validate no open session on this register
-    const existing_session = await this.prisma.cash_register_sessions.findFirst(
-      {
-        where: {
-          cash_register_id: dto.cash_register_id,
-          status: 'open',
-        },
-      },
-    );
-    if (existing_session) {
-      throw new BadRequestException('Esta caja ya tiene una sesión abierta');
-    }
-
-    // Check if user already has an open session (configurable)
-    const user_session = await this.prisma.cash_register_sessions.findFirst({
-      where: {
-        opened_by: context.user_id,
-        status: 'open',
-      },
-    });
-    if (user_session) {
-      throw new BadRequestException(
-        'Ya tienes una sesión abierta en otra caja',
-      );
-    }
-
-    // Create session + opening_balance movement in transaction
+    // Create session + opening_balance movement in transaction. Las validaciones
+    // viven dentro de la tx; los índices únicos parciales (por caja y por usuario)
+    // son la garantía final ante aperturas concurrentes.
     const session = await this.prisma.$transaction(async (tx: any) => {
+      const existing_session = await tx.cash_register_sessions.findFirst({
+        where: { cash_register_id: dto.cash_register_id, status: 'open' },
+      });
+      if (existing_session) {
+        throw new BadRequestException('Esta caja ya tiene una sesión abierta');
+      }
+
+      // Una sola sesión abierta o suspendida por usuario
+      const user_session = await tx.cash_register_sessions.findFirst({
+        where: {
+          opened_by: context.user_id,
+          status: { in: ['open', 'suspended'] },
+        },
+      });
+      if (user_session) {
+        throw new BadRequestException(
+          'Ya tienes una sesión abierta en otra caja',
+        );
+      }
+
       const created_session = await tx.cash_register_sessions.create({
         data: {
           cash_register_id: dto.cash_register_id,
@@ -350,6 +362,8 @@ export class SessionsService {
       });
 
       return created_session;
+    }).catch((error: unknown) => {
+      throw this.translateOpenSessionConflict(error);
     });
 
     // Emit accounting event
@@ -569,7 +583,9 @@ export class SessionsService {
         decided_at: closed_at.toISOString(),
         override_reason: decision === 'override' ? override_reason : null,
       };
-      const difference = actual_closing_amount - expected;
+      const difference = new Prisma.Decimal(actual_closing_amount)
+        .minus(expected)
+        .toNumber();
       const closing_view = {
         ...session,
         status: 'closed',
@@ -669,7 +685,7 @@ export class SessionsService {
   async suspendSession(session_id: number) {
     const context = RequestContextService.getContext()!;
     const session = await this.prisma.cash_register_sessions.findFirst({
-      where: { id: session_id },
+      where: { id: session_id, store_id: context.store_id },
     });
     if (!session) {
       throw new NotFoundException('Sesión de caja abierta no encontrada');
@@ -688,7 +704,7 @@ export class SessionsService {
 
     const suspended_session =
       await this.prisma.cash_register_sessions.findFirst({
-        where: { id: session_id },
+        where: { id: session_id, store_id: context.store_id },
       });
     if (!suspended_session) {
       throw new NotFoundException('Sesión de caja no encontrada');
@@ -1279,8 +1295,9 @@ export class SessionsService {
     }
 
     // --- Reembolsos ---
-    // Vínculo exacto por `refund:<id>` + heurística por ventana y cajero (no hay
-    // FK refunds→sesión; gap conocido). Dedupe por id.
+    // Vínculo exacto por `refunds.cash_session_id` (B03) o `refund:<id>`; solo los
+    // refunds sin sesión registrada (legacy) caen en la heurística por ventana y
+    // cajero. Dedupe por id.
     const linked_ids = movements
       .filter((m) => m.type === 'refund' && m.reference?.startsWith('refund:'))
       .map((m) => Number(m.reference!.slice('refund:'.length)))
@@ -1296,7 +1313,9 @@ export class SessionsService {
         state: { in: ['approved', 'processing', 'completed'] },
         OR: [
           ...(linked_ids.length ? [{ id: { in: linked_ids } }] : []),
+          { cash_session_id: session.id },
           {
+            cash_session_id: null,
             processed_at: { gte: session.opened_at, lte: window_end },
             processed_by_user_id: { in: cashier_ids },
           },
@@ -1746,42 +1765,44 @@ export class SessionsService {
    * por `session.opening_amount` y contarla otra vez la duplicaría.
    */
   private computeCashSummary(session: any, movements: any[]): CashSummary {
-    const opening = Number(session.opening_amount);
+    const D = (v: unknown) => new Prisma.Decimal((v as any) ?? 0);
+    const opening_d = D(session.opening_amount);
+    const opening = opening_d.toNumber();
 
-    let sales_total = 0;
+    let sales_total_d = new Prisma.Decimal(0);
     let sales_count = 0;
-    let cash_sales = 0;
-    let cash_in = 0;
-    let cash_out = 0;
-    let cash_refunds = 0;
+    let cash_sales_d = new Prisma.Decimal(0);
+    let cash_in_d = new Prisma.Decimal(0);
+    let cash_out_d = new Prisma.Decimal(0);
+    let cash_refunds_d = new Prisma.Decimal(0);
 
-    const by_method = new Map<string, { count: number; total: number }>();
+    const by_method = new Map<string, { count: number; total: Prisma.Decimal }>();
 
     for (const m of movements) {
-      const amount = Number(m.amount);
+      const amount = D(m.amount);
       const is_cash = m.payment_method === 'cash';
 
       switch (m.type) {
         case 'sale': {
           const method = m.payment_method || 'unknown';
-          const bucket = by_method.get(method) ?? { count: 0, total: 0 };
+          const bucket = by_method.get(method) ?? { count: 0, total: new Prisma.Decimal(0) };
           bucket.count++;
-          bucket.total += amount;
+          bucket.total = bucket.total.plus(amount);
           by_method.set(method, bucket);
 
-          sales_total += amount;
+          sales_total_d = sales_total_d.plus(amount);
           sales_count++;
-          if (is_cash) cash_sales += amount;
+          if (is_cash) cash_sales_d = cash_sales_d.plus(amount);
           break;
         }
         case 'cash_in':
-          cash_in += amount;
+          cash_in_d = cash_in_d.plus(amount);
           break;
         case 'refund':
-          if (is_cash) cash_refunds += amount;
+          if (is_cash) cash_refunds_d = cash_refunds_d.plus(amount);
           break;
         case 'cash_out':
-          cash_out += amount;
+          cash_out_d = cash_out_d.plus(amount);
           break;
       }
     }
@@ -1789,7 +1810,7 @@ export class SessionsService {
     // `cash` primero y el resto alfabético: la UI hace poll de este endpoint y
     // un orden inestable haría saltar las filas entre refrescos.
     const sales_by_method = [...by_method.entries()]
-      .map(([method, val]) => ({ method, count: val.count, total: val.total }))
+      .map(([method, val]) => ({ method, count: val.count, total: val.total.toNumber() }))
       .sort((a, b) => {
         if (a.method === b.method) return 0;
         if (a.method === 'cash') return -1;
@@ -1797,8 +1818,18 @@ export class SessionsService {
         return a.method.localeCompare(b.method);
       });
 
-    const expected_cash_total =
-      opening + cash_sales + cash_in - cash_refunds - cash_out;
+    const sales_total = sales_total_d.toNumber();
+    const cash_sales = cash_sales_d.toNumber();
+    const cash_in = cash_in_d.toNumber();
+    const cash_out = cash_out_d.toNumber();
+    const cash_refunds = cash_refunds_d.toNumber();
+    const expected_cash_total = opening_d
+      .plus(cash_sales_d)
+      .plus(cash_in_d)
+      .minus(cash_refunds_d)
+      .minus(cash_out_d)
+      .toNumber();
+    const non_cash_total = sales_total_d.minus(cash_sales_d).toNumber();
 
     const { consolidated, cash_breakdown } = this.buildConsolidated(
       session,
@@ -1815,7 +1846,7 @@ export class SessionsService {
       cash_out,
       cash_refunds,
       expected_cash_total,
-      non_cash_total: sales_total - cash_sales,
+      non_cash_total,
       consolidated,
       cash_breakdown,
     };

@@ -72,6 +72,7 @@ import type {
 import { CouponsService } from '../coupons/coupons.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
+import { shouldRecordCashMovement } from '../cash-registers/movements/cash-movement-policy.util';
 import { PaymentEncryptionService } from './services/payment-encryption.service';
 import { InvoiceDataRequestsService } from '../invoicing/invoice-data-requests/invoice-data-requests.service';
 // Sólo el CONTRATO del evento fiscal del POS: un tipo y una constante, sin
@@ -166,6 +167,9 @@ type CatalogTaxInfo = CalculatedTaxInfo & { resolved_from: 'catalog' };
 type DeclaredGrossTaxInfo = CalculatedTaxInfo & {
   resolved_from: 'declared_gross';
 };
+
+/** Métodos cuyo reembolso viaja por el proveedor y no por la caja. */
+const GATEWAY_REFUND_METHOD_TYPES = ['wompi', 'wallet', 'stripe', 'paypal'];
 
 @Injectable()
 export class PaymentsService {
@@ -270,7 +274,7 @@ export class PaymentsService {
         metadata: createPaymentDto.metadata,
         returnUrl: createPaymentDto.returnUrl,
         cancelUrl: createPaymentDto.cancelUrl,
-      });
+      }, this.counterSaleOptions());
 
       return {
         success: true,
@@ -284,6 +288,53 @@ export class PaymentsService {
       }
       throw error;
     }
+  }
+
+  /**
+   * B06: un cobro de mostrador confirmado por `POST /store/payments` (o IA)
+   * deja su `sale` en la caja de quien cobra, en la misma tx que el pago.
+   * Misma política que el POS y `flow/pay` (`shouldRecordCashMovement`); las
+   * pasarelas y el contra entrega no mueven el cajón.
+   */
+  private counterSaleOptions() {
+    return {
+      onSucceeded: async (ctx: {
+        tx: Prisma.TransactionClient;
+        paymentId: number;
+        methodType: string | null;
+        processingMode: string | null;
+        amount: number;
+        orderId: number;
+        storeId: number;
+      }) => {
+        if (!(ctx.amount > 0)) return;
+        if (!shouldRecordCashMovement(ctx.methodType, ctx.processingMode)) {
+          return;
+        }
+        // Mismo gate que el POS: sin el switch de caja no hay movimiento.
+        const settings: any = await this.settingsService.getSettings();
+        if (!settings?.pos?.cash_register?.enabled) return;
+        const userId = RequestContextService.getUserId();
+        const session = userId
+          ? await this.sessionsService.getActiveSession(userId)
+          : null;
+        if (!session) {
+          throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+        }
+        await this.movementsService.recordSaleMovement(
+          session.id,
+          {
+            store_id: ctx.storeId,
+            user_id: userId as number,
+            amount: ctx.amount,
+            payment_method: ctx.methodType as string,
+            order_id: ctx.orderId,
+            payment_id: ctx.paymentId,
+          },
+          ctx.tx,
+        );
+      },
+    };
   }
 
   async processReservedPosPayment(
@@ -364,7 +415,7 @@ export class PaymentsService {
         items: createOrderPaymentDto.items || [],
         billingAddressId: createOrderPaymentDto.billingAddressId,
         shippingAddressId: createOrderPaymentDto.shippingAddressId,
-      });
+      }, this.counterSaleOptions());
 
       return {
         success: true,
@@ -392,6 +443,9 @@ export class PaymentsService {
           orders: {
             include: { stores: true },
           },
+          store_payment_method: {
+            select: { system_payment_method: { select: { type: true } } },
+          },
         },
       });
 
@@ -400,6 +454,20 @@ export class PaymentsService {
       }
 
       await this.validateUserAccess(user, payment.orders.stores.id);
+
+      // B05: un pago de mostrador (efectivo, transferencia, tarjeta manual)
+      // solo se reembolsa por `flow/refund`, que descuenta la caja, escribe el
+      // ledger y respeta el tope. Este endpoint conserva únicamente las
+      // pasarelas (el dinero vuelve por el proveedor, no por el cajón).
+      const methodType = (payment as any).store_payment_method
+        ?.system_payment_method?.type as string | undefined;
+      if (methodType && !GATEWAY_REFUND_METHOD_TYPES.includes(methodType)) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_REFUND_USE_ORDER_FLOW,
+          'Este pago es de mostrador: reembólsalo desde la orden (POST /store/orders/:id/flow/refund).',
+          { payment_id: payment.id, order_id: payment.order_id },
+        );
+      }
 
       // ERR-16 · PAYMENT_NOT_OWNED — verificación de propiedad del recurso.
       // `validateUserAccess` solo comprueba pertenencia a la tienda, nunca la
@@ -2158,6 +2226,20 @@ export class PaymentsService {
           // siempre, pero la emisión ocurre fuera del `$transaction` para
           // que los listeners vean la orden ya persistida.
           if (!createPosPaymentDto.requires_payment) {
+            // B09: cuotas, saldo y pago inicial (con su `sale`) en la tx de la
+            // venta, con `await`: un rollback de la venta se lleva el pago y
+            // el movimiento, y el listener de CxC ya ve las cuotas.
+            await this.createOrderInstallments(
+              createPosPaymentDto,
+              { id: order.id, total_amount: order.grand_total },
+              {
+                db: tx,
+                user_id: user.id,
+                store_id: order.store_id,
+                cash_register_enabled: !!(settings as any)?.pos?.cash_register
+                  ?.enabled,
+              },
+            );
             const creditSaleOrderId = order.id;
             const creditSaleOrderNumber = order.order_number;
             // QUI-540: `createOrderInstallments` corre post-commit sin `await`,
@@ -2379,19 +2461,14 @@ export class PaymentsService {
             const methodType = method?.system_payment_method?.type;
             const processingMode =
               method?.system_payment_method?.processing_mode;
-            // La contra entrega la recauda el repartidor; wallet/Wompi
-            // quedan en la pasarela. Mantiene la política del helper previo.
-            if (
-              processingMode === 'ON_DELIVERY' ||
-              methodType === 'cash_on_delivery' ||
-              methodType === 'wompi' ||
-              methodType === 'wallet'
-            ) {
+            // Shared policy with `flow/pay` (B08); a method without a type is
+            // rejected instead of being counted as cash (B26).
+            if (!shouldRecordCashMovement(methodType, processingMode)) {
               continue;
             }
             movementLegs.push({
               payment: paymentLeg,
-              paymentMethod: methodType || 'cash',
+              paymentMethod: methodType as string,
             });
           }
 
@@ -2858,18 +2935,6 @@ export class PaymentsService {
       }
 
       if (result.success) {
-        // Create order installments for credit sales
-        if (!createPosPaymentDto.requires_payment && result.order?.id) {
-          this.createOrderInstallments(createPosPaymentDto, result.order).catch(
-            (err) => {
-              this.logger.error(
-                `Failed to create order installments: ${err.message}`,
-                err.stack,
-              );
-            },
-          );
-        }
-
         // Create invoice data request for anonymous/CF sales
         if (!createPosPaymentDto.customer_id && result.order?.id) {
           try {
@@ -2945,12 +3010,22 @@ export class PaymentsService {
   }
 
   /**
-   * Create order installments for credit sales (post-transaction)
+   * Create order installments for credit sales. Runs inside the sale
+   * transaction (`ctx.db`); without `ctx` it falls back to `this.prisma` and
+   * records no cash movement (legacy/spec call shape).
    */
   private async createOrderInstallments(
     dto: CreatePosPaymentDto,
     order: { id: number | bigint; total_amount: Prisma.Decimal | number | string },
+    ctx?: {
+      db: Prisma.TransactionClient;
+      user_id: number;
+      store_id: number;
+      cash_register_enabled: boolean;
+    },
   ) {
+    const db: Prisma.TransactionClient | StorePrismaService =
+      ctx?.db ?? this.prisma;
     const creditType = dto.credit_type || 'installments';
     const orderId =
       typeof order.id === 'object' ? Number(order.id) : Number(order.id);
@@ -2979,6 +3054,18 @@ export class PaymentsService {
 
       if (creditType === 'installments') {
         const initialPayment = terms.initial_payment || 0;
+        // BL-2: con caja habilitada la cuota inicial deja un `sale`; sin medio
+        // de pago no se puede clasificar. Se rechaza antes de crear nada.
+        if (
+          initialPayment > 0 &&
+          ctx?.cash_register_enabled &&
+          !terms.initial_payment_method_id
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.PAY_CREDIT_INITIAL_METHOD_REQUIRED_001,
+            'Elige el medio de pago de la cuota inicial',
+          );
+        }
         // Subtract initial payment from total BEFORE calculating installments
         const amountToFinance =
           Math.round((orderTotal - initialPayment) * 100) / 100;
@@ -3004,7 +3091,7 @@ export class PaymentsService {
 
         // Create installments (calculated on amount AFTER initial payment)
         for (const item of schedule) {
-          await this.prisma.order_installments.create({
+          await db.order_installments.create({
             data: {
               order_id: orderId,
               installment_number: item.installment_number,
@@ -3022,7 +3109,7 @@ export class PaymentsService {
         // Register initial payment record if provided
         if (initialPayment > 0) {
           const transactionId = `pos_credit_init_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-          await this.prisma.payments.create({
+          const initialPaymentRow = await db.payments.create({
             data: {
               order_id: orderId,
               amount: initialPayment,
@@ -3037,6 +3124,18 @@ export class PaymentsService {
               },
             },
           });
+
+          // B09: el pago inicial en mostrador deja su `sale` en la caja de
+          // quien vende, con la misma política que el POS y `flow/pay`.
+          if (ctx?.cash_register_enabled) {
+            await this.recordInitialPaymentSale(
+              ctx,
+              orderId,
+              initialPaymentRow.id,
+              initialPayment,
+              terms.initial_payment_method_id,
+            );
+          }
 
           updateData.total_paid = initialPayment;
           // remaining_balance already set to totalInstallments (excludes initial payment)
@@ -3054,10 +3153,61 @@ export class PaymentsService {
     }
 
     // Update the order with credit fields
-    await this.prisma.orders.update({
+    await db.orders.update({
       where: { id: orderId },
       data: updateData,
     });
+  }
+
+  private async recordInitialPaymentSale(
+    ctx: {
+      db: Prisma.TransactionClient;
+      user_id: number;
+      store_id: number;
+    },
+    orderId: number,
+    paymentId: number,
+    amount: number,
+    storePaymentMethodId?: number | null,
+  ) {
+    const method = storePaymentMethodId
+      ? await ctx.db.store_payment_methods.findFirst({
+          where: { id: storePaymentMethodId, store_id: ctx.store_id },
+          include: {
+            system_payment_method: {
+              select: { type: true, processing_mode: true },
+            },
+          },
+        })
+      : null;
+    const methodType = method?.system_payment_method?.type;
+    if (
+      !shouldRecordCashMovement(
+        methodType,
+        method?.system_payment_method?.processing_mode,
+      )
+    ) {
+      return;
+    }
+    const session = await this.sessionsService.getActiveSession(ctx.user_id);
+    if (!session) {
+      throw new VendixHttpException(
+        ErrorCodes.CASH_SESSION_REQUIRED_001,
+        'No hay una caja abierta para registrar el pago inicial.',
+      );
+    }
+    await this.movementsService.recordSaleMovement(
+      session.id,
+      {
+        store_id: ctx.store_id,
+        user_id: ctx.user_id,
+        amount,
+        payment_method: methodType as string,
+        order_id: orderId,
+        payment_id: paymentId,
+      },
+      ctx.db,
+    );
   }
 
   private hasActivePermission(user: any, permissionName: string): boolean {

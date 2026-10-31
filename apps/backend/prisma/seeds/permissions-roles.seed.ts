@@ -1508,6 +1508,69 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // Bandeja CRM (PLAN-CRM §4.3). Quien tiene `assign` ve todas las
+    // conversaciones de la tienda; sin él, solo las asignadas a uno mismo.
+    {
+      name: 'store:crm_inbox:read',
+      description: 'Ver la bandeja de conversaciones (solo las asignadas sin crm_inbox:assign)',
+      path: '/api/store/customers/crm/conversations',
+      method: 'GET',
+    },
+    {
+      name: 'store:crm_inbox:manage',
+      description: 'Responder, dejar notas internas, cerrar y reabrir conversaciones',
+      path: '/api/store/customers/crm/conversations/*',
+      method: 'POST',
+    },
+    {
+      name: 'store:crm_inbox:assign',
+      description: 'Asignar conversaciones y ver todas las de la tienda',
+      path: '/api/store/customers/crm/conversations/*/assign',
+      method: 'PATCH',
+    },
+
+    // CRM 360, tareas y pipeline (PLAN-CRM §4.5-§4.6). Igual que la bandeja,
+    // sin `crm_inbox:assign` cada quien ve solo sus tareas y oportunidades.
+    {
+      name: 'store:crm_tasks:manage',
+      description: 'Crear, asignarse y completar tareas del CRM',
+      path: '/api/store/customers/crm/tasks',
+      method: 'POST',
+    },
+    {
+      name: 'store:crm_pipeline:read',
+      description: 'Ver el pipeline de oportunidades',
+      path: '/api/store/customers/crm/opportunities',
+      method: 'GET',
+    },
+    {
+      name: 'store:crm_pipeline:manage',
+      description: 'Crear, mover, ganar y perder oportunidades',
+      path: '/api/store/customers/crm/opportunities/*',
+      method: 'POST',
+    },
+    {
+      name: 'store:crm_segments:manage',
+      description: 'Crear, renombrar y borrar etiquetas y segmentos del CRM',
+      path: '/api/store/customers/crm/tags',
+      method: 'POST',
+    },
+    // Campañas (PLAN-CRM §4.7): gastan dinero y escriben a clientes; aparte
+    // de los segmentos para poder dar uno sin el otro.
+    {
+      name: 'store:crm_campaigns:send',
+      description: 'Crear, estimar, enviar y cancelar campañas masivas del CRM',
+      path: '/api/store/customers/crm/campaigns',
+      method: 'POST',
+    },
+    // Sin él, teléfono y correo salen enmascarados en segmentos y campañas.
+    {
+      name: 'store:customers:contact:read',
+      description: 'Ver teléfono y correo completos de los clientes en el CRM',
+      path: '/api/store/customers/crm/segments/*/customers',
+      method: 'GET',
+    },
+
     // Reseñas
     {
       name: 'store:reviews:read',
@@ -5093,6 +5156,9 @@ export async function seedPermissionsAndRoles(
       // Gestión de usuarios de tienda (incl. su panel_ui) es exclusiva de
       // owner/admin por decisión de negocio: manager NO administra usuarios.
       !p.name.startsWith('store:users:') &&
+      // Campañas masivas gastan dinero (SMS/WhatsApp): solo owner/admin
+      // (PLAN-CRM §4.1).
+      p.name !== 'store:crm_campaigns:send' &&
       // Documentos recibidos en el espacio de organización requieren un rol
       // ORG_ADMIN; el gerente conserva únicamente los tres permisos de tienda.
       !p.name.startsWith('organization:invoicing:received:') &&
@@ -5278,7 +5344,14 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:reviews:read') ||
       p.name.includes('store:data_collection:submissions:read') ||
       p.name.includes('store:customers:history:read') ||
-      p.name.includes('store:reservations:write'),
+      p.name.includes('store:reservations:write') ||
+      // Bandeja CRM: el vendedor atiende solo lo asignado (sin `assign`).
+      p.name === 'store:crm_inbox:read' ||
+      p.name === 'store:crm_inbox:manage' ||
+      // Tareas y pipeline: solo las suyas (sin `crm_inbox:assign`).
+      p.name === 'store:crm_tasks:manage' ||
+      p.name === 'store:crm_pipeline:read' ||
+      p.name === 'store:crm_pipeline:manage',
   );
 
   const employeeSync = await syncRolePermissions(
@@ -5433,6 +5506,12 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:data_collection:submissions:read') ||
       // Hotelería (H3.6, D10) — "Cargo a habitación" desde el POS.
       p.name === 'store:lodging:folio:charge' ||
+      // Bandeja CRM: el cajero atiende solo lo asignado (sin `assign`).
+      p.name === 'store:crm_inbox:read' ||
+      p.name === 'store:crm_inbox:manage' ||
+      // Tareas propias y pipeline en lectura (solo sus oportunidades).
+      p.name === 'store:crm_tasks:manage' ||
+      p.name === 'store:crm_pipeline:read' ||
       // Dominios públicos
       p.name.includes('domains.resolve') ||
       p.name.includes('domains.check') ||

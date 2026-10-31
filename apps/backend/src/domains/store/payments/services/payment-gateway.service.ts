@@ -61,7 +61,25 @@ export class PaymentGatewayService {
     this.processors.set(name, processor);
   }
 
-  async processPayment(paymentData: PaymentData): Promise<PaymentResult> {
+  /**
+   * `options.onSucceeded` corre en la MISMA transacción que deja el pago en
+   * `succeeded`/`captured` (B06): el caller registra ahí su movimiento de caja,
+   * de modo que un pago confirmado nunca queda sin su `sale` ni al revés.
+   */
+  async processPayment(
+    paymentData: PaymentData,
+    options?: {
+      onSucceeded?: (ctx: {
+        tx: Prisma.TransactionClient;
+        paymentId: number;
+        methodType: string | null;
+        processingMode: string | null;
+        amount: number;
+        orderId: number;
+        storeId: number;
+      }) => Promise<void>;
+    },
+  ): Promise<PaymentResult> {
     try {
       // The store/POS/eCommerce path through this service requires a
       // resolved store_payment_methods.id. SaaS subscription billing has
@@ -129,7 +147,27 @@ export class PaymentGatewayService {
         },
       });
 
-      await this.updatePaymentRecord(payment.id, result);
+      const settled =
+        result.success &&
+        (result.status === 'succeeded' || result.status === 'captured');
+      if (settled && options?.onSucceeded) {
+        const onSucceeded = options.onSucceeded;
+        await this.prisma.$transaction(async (tx) => {
+          await this.updatePaymentRecord(payment.id, result, tx);
+          await onSucceeded({
+            tx,
+            paymentId: payment.id,
+            methodType: paymentMethod.system_payment_method?.type ?? null,
+            processingMode:
+              paymentMethod.system_payment_method?.processing_mode ?? null,
+            amount: Number(paymentData.amount),
+            orderId: paymentData.orderId,
+            storeId: paymentData.storeId,
+          });
+        });
+      } else {
+        await this.updatePaymentRecord(payment.id, result);
+      }
 
       if (result.success) {
         await this.updateOrderStatus(paymentData.orderId);
@@ -372,14 +410,18 @@ export class PaymentGatewayService {
       billingAddressId?: number;
       shippingAddressId?: number;
     },
+    options?: Parameters<PaymentGatewayService['processPayment']>[1],
   ): Promise<PaymentResult> {
     try {
       const order = await this.createOrderFromPaymentData(paymentData);
 
-      return this.processPayment({
-        ...paymentData,
-        orderId: order.id,
-      });
+      return this.processPayment(
+        {
+          ...paymentData,
+          orderId: order.id,
+        },
+        options,
+      );
     } catch (error) {
       if (error instanceof PaymentError || error instanceof VendixHttpException) {
         throw error;
@@ -806,7 +848,11 @@ export class PaymentGatewayService {
     }
   }
 
-  private async updatePaymentRecord(paymentId: number, result: PaymentResult) {
+  private async updatePaymentRecord(
+    paymentId: number,
+    result: PaymentResult,
+    db: Prisma.TransactionClient | StorePrismaService = this.prisma,
+  ) {
     const updateData: any = {
       state: result.status,
       gateway_response: result.gatewayResponse,
@@ -831,7 +877,7 @@ export class PaymentGatewayService {
       updateData.gateway_reference = result.gatewayReference;
     }
 
-    await this.prisma.payments.update({
+    await db.payments.update({
       where: { id: paymentId },
       data: updateData,
     });

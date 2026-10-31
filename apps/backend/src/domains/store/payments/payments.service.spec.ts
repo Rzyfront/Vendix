@@ -583,6 +583,81 @@ describe('PaymentsService', () => {
       });
     });
 
+    describe('B06: cobro de mostrador deja su sale en la tx del pago', () => {
+      const dto = {
+        orderId: 9, customerId: 1, amount: 30000, currency: 'COP',
+        storePaymentMethodId: 1, storeId: 1,
+      };
+      const tx = { marker: 'tx' } as any;
+
+      // El gateway real invoca `onSucceeded` dentro de la tx que confirma el pago.
+      const arrange = (methodType: string | null, processingMode: string | null = null) => {
+        jest.spyOn(prisma.store_users, 'findMany').mockResolvedValue([{ store_id: 1 }]);
+        jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(77);
+        (settingsService.getSettings as jest.Mock).mockResolvedValue({
+          pos: { cash_register: { enabled: true } },
+        });
+        (sessionsService.getActiveSession as jest.Mock).mockResolvedValue({ id: 5 });
+        jest.spyOn(paymentGateway, 'processPayment').mockImplementation(
+          async (_data: any, options?: any) => {
+            await options?.onSucceeded?.({
+              tx, paymentId: 321, methodType, processingMode,
+              amount: 30000, orderId: 9, storeId: 1,
+            });
+            return mockPaymentResult;
+          },
+        );
+      };
+
+      it('efectivo: crea el sale con payment_id y la tx del pago', async () => {
+        arrange('cash');
+        await service.processPayment(dto as any, mockUser);
+        expect(movementsService.recordSaleMovement).toHaveBeenCalledWith(
+          5,
+          expect.objectContaining({
+            store_id: 1, user_id: 77, amount: 30000,
+            payment_method: 'cash', order_id: 9, payment_id: 321,
+          }),
+          tx,
+        );
+      });
+
+      it('wompi: no crea sale', async () => {
+        arrange('wompi');
+        await service.processPayment(dto as any, mockUser);
+        expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+      });
+
+      it('efectivo sin caja abierta con el switch encendido: CASH_SESSION_REQUIRED_001', async () => {
+        arrange('cash');
+        (sessionsService.getActiveSession as jest.Mock).mockResolvedValue(null);
+        await expect(service.processPayment(dto as any, mockUser)).rejects.toMatchObject({
+          errorCode: 'CASH_SESSION_REQUIRED_001',
+        });
+        expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+      });
+
+      it('processPaymentWithOrder usa la misma política', async () => {
+        arrange('cash');
+        jest.spyOn(paymentGateway, 'processPaymentWithNewOrder').mockImplementation(
+          async (_data: any, options?: any) => {
+            await options?.onSucceeded?.({
+              tx, paymentId: 322, methodType: 'cash', processingMode: null,
+              amount: 30000, orderId: 10, storeId: 1,
+            });
+            return mockPaymentResult;
+          },
+        );
+        await service.processPaymentWithOrder(
+          { ...dto, customerEmail: 'a@b.co', customerName: 'A', items: [] } as any,
+          mockUser,
+        );
+        expect(movementsService.recordSaleMovement).toHaveBeenCalledWith(
+          5, expect.objectContaining({ payment_id: 322, order_id: 10 }), tx,
+        );
+      });
+    });
+
     it('rejects paying the order of a hotel folio (only Hotelería charges it)', async () => {
       jest
         .spyOn(prisma.store_users, 'findMany')
@@ -761,6 +836,48 @@ describe('PaymentsService', () => {
         message: 'Payment refunded successfully',
       });
     });
+
+    it.each(['cash', 'bank_transfer', 'card'])(
+      'B05: rejects direct refund of a %s counter payment with PAY_REFUND_USE_ORDER_FLOW',
+      async (type) => {
+        jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue({
+          transaction_id: 'txn_c',
+          orders: mockOrder,
+          store_payment_method: { system_payment_method: { type } },
+        } as any);
+        jest
+          .spyOn(prisma.store_users, 'findMany')
+          .mockResolvedValue([{ store_id: 1 }] as any);
+        const spy = jest.spyOn(paymentGateway, 'refundPayment');
+
+        await expect(
+          service.refundPayment('txn_c', { paymentId: 'txn_c', amount: 5 }, mockUser),
+        ).rejects.toMatchObject({
+          errorCode: 'PAY_REFUND_USE_ORDER_FLOW',
+        });
+        expect(spy).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['wompi', 'wallet'])(
+      'B05: gateway %s payments keep the direct refund path',
+      async (type) => {
+        jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue({
+          transaction_id: 'txn_g',
+          orders: mockOrder,
+          store_payment_method: { system_payment_method: { type } },
+        } as any);
+        jest
+          .spyOn(prisma.store_users, 'findMany')
+          .mockResolvedValue([{ store_id: 1 }] as any);
+        const spy = jest
+          .spyOn(paymentGateway, 'refundPayment')
+          .mockResolvedValue({ success: true } as any);
+
+        await service.refundPayment('txn_g', { paymentId: 'txn_g', amount: 5 }, mockUser);
+        expect(spy).toHaveBeenCalledTimes(1);
+      },
+    );
 
     it('should throw error if payment not found', async () => {
       const refundDto = {
@@ -2057,6 +2174,91 @@ describe('PaymentsService', () => {
       }));
       expect(write.data.remaining_balance).toBeInstanceOf(Prisma.Decimal);
       expect(write.data.remaining_balance.equals('1500.01')).toBe(true);
+    });
+
+    describe('B09: pago inicial a crédito y su sale dentro de la tx de la venta', () => {
+      const terms = (method?: number) => ({
+        credit_type: 'installments',
+        installment_terms: {
+          num_installments: 2, frequency: 'monthly',
+          first_installment_date: '2026-10-23', interest_rate: 0,
+          initial_payment: 500, initial_payment_method_id: method,
+        },
+      });
+      const buildDb = (type: string | null) => ({
+        orders: { update: jest.fn().mockResolvedValue({}) },
+        order_installments: { create: jest.fn().mockResolvedValue({}) },
+        payments: { create: jest.fn().mockResolvedValue({ id: 901 }) },
+        store_payment_methods: {
+          findFirst: jest.fn().mockResolvedValue(
+            type ? { id: 3, system_payment_method: { type, processing_mode: 'DIRECT' } } : null,
+          ),
+        },
+      });
+      const run = (db: any, enabled: boolean, method?: number) =>
+        (service as any).createOrderInstallments(
+          terms(method) as any,
+          { id: 42, total_amount: new Prisma.Decimal(1500) },
+          { db, user_id: 77, store_id: 1, cash_register_enabled: enabled },
+        );
+
+      it('efectivo: crea el pago y un sale igual a la inicial en la misma tx', async () => {
+        const db = buildDb('cash');
+        (sessionsService.getActiveSession as jest.Mock).mockResolvedValue({ id: 5 });
+
+        await run(db, true, 3);
+
+        expect(db.payments.create).toHaveBeenCalledTimes(1);
+        expect(movementsService.recordSaleMovement).toHaveBeenCalledWith(
+          5,
+          expect.objectContaining({
+            store_id: 1, user_id: 77, amount: 500,
+            payment_method: 'cash', order_id: 42, payment_id: 901,
+          }),
+          db,
+        );
+        expect(db.orders.update).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ total_paid: 500 }) }),
+        );
+      });
+
+      it('sin caja abierta rechaza (la venta entera hace rollback)', async () => {
+        const db = buildDb('cash');
+        (sessionsService.getActiveSession as jest.Mock).mockResolvedValue(null);
+
+        await expect(run(db, true, 3)).rejects.toMatchObject({
+          errorCode: 'CASH_SESSION_REQUIRED_001',
+        });
+        expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+      });
+
+      it('BL-2: cuota inicial sin medio con caja habilitada: error claro antes de crear nada', async () => {
+        const db = buildDb('cash');
+
+        await expect(run(db, true, undefined)).rejects.toMatchObject({
+          errorCode: 'PAY_CREDIT_INITIAL_METHOD_REQUIRED_001',
+          message: 'Elige el medio de pago de la cuota inicial',
+        });
+        expect(db.order_installments.create).not.toHaveBeenCalled();
+        expect(db.payments.create).not.toHaveBeenCalled();
+        expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+      });
+
+      it('BL-2: caja no habilitada y sin medio: conserva la base (pago inicial sin sale ni error)', async () => {
+        const db = buildDb('cash');
+
+        await run(db, false, undefined);
+
+        expect(db.payments.create).toHaveBeenCalledTimes(1);
+        expect(db.payments.create.mock.calls[0][0].data.store_payment_method_id).toBeNull();
+        expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+      });
+
+      it('método wompi o switch apagado: no crea sale', async () => {
+        await run(buildDb('wompi'), true, 3);
+        await run(buildDb('cash'), false, 3);
+        expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+      });
     });
 
     it('finances installments from projected result.order.total_amount', async () => {
@@ -4887,6 +5089,7 @@ describe('PaymentsService', () => {
       cash: 9,
       wompi: 12,
       wallet: 11,
+      untyped: 13,
     };
 
     const arrangeCashRegister = (
@@ -4909,7 +5112,7 @@ describe('PaymentsService', () => {
         display_name: methodType,
         custom_config: {},
         system_payment_method: {
-          type: methodType,
+          type: methodType === 'untyped' ? undefined : methodType,
           processing_mode: payment_processing_mode_enum.DIRECT,
         },
       };
@@ -5092,6 +5295,15 @@ describe('PaymentsService', () => {
       expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
         tx.cash_register_movements.create.mock.invocationCallOrder[0],
       );
+    });
+
+    it('B26: método sin type se rechaza con PAY_METHOD_MISCONFIGURED, no cuenta como efectivo', async () => {
+      const { tx, methodId } = arrangeCashRegister('untyped');
+
+      await expect(processSinglePayment(methodId)).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'PAY_METHOD_MISCONFIGURED' }),
+      });
+      expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
     });
 
     it('caja deshabilitada y sin sesión permite el cobro sin movimiento', async () => {

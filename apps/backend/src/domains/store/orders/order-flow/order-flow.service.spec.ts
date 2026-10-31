@@ -3,7 +3,12 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { OrderFlowService, isActualCodTender, isManualConfirmationPending } from './order-flow.service';
+import {
+  FINISH_PENDING_MAX_ATTEMPTS,
+  OrderFlowService,
+  isActualCodTender,
+  isManualConfirmationPending,
+} from './order-flow.service';
 import { OrderFlowController } from './order-flow.controller';
 import { PERMISSIONS_KEY } from '../../../auth/decorators/permissions.decorator';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -53,6 +58,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
       count: jest.fn(async () => events.filter((e) => e === 'payment').length),
     };
     const tx: any = {
+      cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) },
       $queryRaw: jest.fn(async () => [{ id: 1, state }]),
       orders: {
         findFirst: jest.fn(async () => ({
@@ -963,6 +969,7 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
     projectTablePayment = jest.fn().mockResolvedValue(null);
     prismaMock = {
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) },
       store_payment_methods: {
         findFirst: jest
           .fn()
@@ -3715,6 +3722,7 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
 
   const buildService = () => {
     const prismaMock: any = {
+      cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       store_payment_methods: {
         findFirst: jest
@@ -3818,6 +3826,170 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
     ).toHaveLength(0);
   });
 
+  it('B07: error de infraestructura al finalizar → pago firme, marcador finish_pending_after_payment y sin fallo que invite a re-cobrar', async () => {
+    const { service, prismaMock } = buildService();
+    jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockRejectedValue(new Error('deadlock detected'));
+    const marker = jest
+      .spyOn(service as any, 'appendFlowMetadata')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'emitLegPaymentReceivedEvents')
+      .mockResolvedValue(undefined);
+
+    const result: any = await service.payOrder(1, DTO);
+
+    expect(result.finish_pending).toBe(true);
+    expect(result.payment.transaction_id).toBe('TXN-1');
+    expect(marker).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        finish_pending_after_payment: expect.objectContaining({ payment_ids: [999] }),
+      }),
+    );
+    // El pago NO se anula y la orden NO se restaura: el único updateMany es el claim.
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledTimes(1);
+    // Ningún segundo pago.
+    expect(prismaMock.payments.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('B07: el reintento inmediato cierra la venta → respuesta sin finish_pending y el marcador lleva lo necesario para repetir el cierre', async () => {
+    const { service } = buildService();
+    const marker = jest
+      .spyOn(service as any, 'appendFlowMetadata')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'emitLegPaymentReceivedEvents')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockRejectedValue(new Error('deadlock detected'));
+    const resume = jest
+      .spyOn(service, 'resumeFinishPendingAfterPayment')
+      .mockResolvedValue('resolved');
+
+    const result: any = await service.payOrder(1, DTO);
+
+    expect(resume).toHaveBeenCalledWith(1);
+    expect(result.finish_pending).toBeUndefined();
+    expect(result.payment.transaction_id).toBe('TXN-1');
+    expect(marker).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        finish_pending_after_payment: expect.objectContaining({
+          kind: 'pay_finish',
+          payment_ids: [999],
+          settled_balance: { total_paid: 4000, remaining_balance: 0 },
+          from_state: 'created',
+        }),
+      }),
+    );
+  });
+
+  it('R3 #3: si falla escribir el marcador, el reintento inmediato usa el marcador en memoria', async () => {
+    const { service } = buildService();
+    jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockRejectedValue(new Error('deadlock detected'));
+    jest
+      .spyOn(service as any, 'appendFlowMetadata')
+      .mockRejectedValueOnce(new Error('connection lost'));
+    jest
+      .spyOn(service as any, 'emitLegPaymentReceivedEvents')
+      .mockResolvedValue(undefined);
+    const resume = jest
+      .spyOn(service, 'resumeFinishPendingAfterPayment')
+      .mockResolvedValue('resolved');
+    const schedule = jest.spyOn(service as any, 'scheduleFinishPendingMarkerRetry');
+
+    const result: any = await service.payOrder(1, DTO);
+
+    expect(resume).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ kind: 'pay_finish', payment_ids: [999] }),
+    );
+    expect(result.finish_pending).toBeUndefined();
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it('R3 #3: marcador sin escribir y cierre sin resolver → reintento diferido de la escritura (la orden no queda huérfana)', async () => {
+    jest.useFakeTimers();
+    try {
+      const { service } = buildService();
+      jest
+        .spyOn(service as any, 'updateOrderState')
+        .mockRejectedValue(new Error('deadlock detected'));
+      const append = jest
+        .spyOn(service as any, 'appendFlowMetadata')
+        .mockRejectedValueOnce(new Error('connection lost'))
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(service as any, 'emitLegPaymentReceivedEvents')
+        .mockResolvedValue(undefined);
+      jest
+        .spyOn(service, 'resumeFinishPendingAfterPayment')
+        .mockRejectedValue(new Error('still down'));
+
+      const result: any = await service.payOrder(1, DTO);
+
+      expect(result.finish_pending).toBe(true);
+      expect(append).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(5_000);
+      expect(append).toHaveBeenCalledTimes(2);
+      expect(append).toHaveBeenLastCalledWith(1, {
+        finish_pending_after_payment: expect.objectContaining({
+          kind: 'pay_finish',
+          payment_ids: [999],
+        }),
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('B23: clave ya usada con pago succeeded → devuelve el estado actual y no crea otro pago', async () => {
+    const { service, prismaMock } = buildService();
+    prismaMock.payments.findFirst = jest.fn().mockResolvedValue({
+      id: 999,
+      transaction_id: 'TXN-1',
+      gateway_response: { change: 500 },
+    });
+    const update = jest.spyOn(service as any, 'updateOrderState');
+
+    const result: any = await service.payOrder(1, { ...DTO, idempotency_key: 'abc' });
+
+    expect(prismaMock.payments.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          financial_idempotency_key: 'flow_pay:1:abc',
+          order_id: 1,
+          state: 'succeeded',
+        }),
+      }),
+    );
+    expect(result.idempotent_replay).toBe(true);
+    expect(result.payment).toEqual({ transaction_id: 'TXN-1', change: 500 });
+    expect(prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('B23: clave nueva → el primer tramo guarda financial_idempotency_key', async () => {
+    const { service, prismaMock } = buildService();
+    prismaMock.payments.findFirst = jest.fn().mockResolvedValue(null);
+    jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: 1, state: 'finished' });
+
+    await service.payOrder(1, { ...DTO, idempotency_key: ' k1 ' });
+
+    expect(prismaMock.payments.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ financial_idempotency_key: 'flow_pay:1:k1' }),
+    });
+  });
+
   it('finish OK: NO restaura (el claim es el único updateMany)', async () => {
     const { service, prismaMock } = buildService();
     jest
@@ -3828,6 +4000,214 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
 
     expect(prismaMock.payments.update).not.toHaveBeenCalled();
     expect(prismaMock.orders.updateMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('OrderFlowService.resumeFinishPendingAfterPayment — R3 #1 saldo vivo', () => {
+  const MARKER = {
+    kind: 'pay_finish',
+    at: '2026-10-31T12:00:00.000Z',
+    payment_ids: [999],
+    user_id: null,
+    settled_balance: { total_paid: 4000, remaining_balance: 0 },
+    void_marker_ids: [],
+    deferred_cash_signal_id: null,
+    from_state: 'created',
+    error: 'deadlock detected',
+  };
+
+  const buildService = (
+    order: { grand_total: number; payments: Array<{ state: string; amount: number }> },
+    refunds: Array<{ amount: number }> = [],
+  ) => {
+    const prismaMock: any = {
+      refunds: { findMany: jest.fn().mockResolvedValue(refunds) },
+      orders: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+      id: 1,
+      state: 'processing',
+      store_id: 4,
+      grand_total: order.grand_total,
+      payments: order.payments,
+      internal_notes: JSON.stringify({
+        _flow_metadata: { finish_pending_after_payment: MARKER },
+        notes: '',
+      }),
+    });
+    const update = jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: 1, state: 'finished' });
+    const metadata = jest
+      .spyOn(service as any, 'appendFlowMetadata')
+      .mockResolvedValue(undefined);
+    for (const name of [
+      'voidSettlementPendingMarkers',
+      'computeAndPersistEta',
+      'emitPosSaleCompletedIfFullyPaid',
+      'projectPaidOrderToTable',
+    ]) {
+      jest.spyOn(service as any, name).mockResolvedValue(undefined);
+    }
+    return { service, prismaMock, update, metadata };
+  };
+
+  it('el total subió en la ventana (B22): NO finaliza con el saldo congelado; deja processing con el saldo real', async () => {
+    const { service, prismaMock, update, metadata } = buildService({
+      grand_total: 5000,
+      payments: [{ state: 'succeeded', amount: 4000 }],
+    });
+
+    await expect(service.resumeFinishPendingAfterPayment(1)).resolves.toBe('resolved');
+
+    expect(update).not.toHaveBeenCalled();
+    expect(prismaMock.orders.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: expect.objectContaining({ total_paid: 4000, remaining_balance: 1000 }),
+    });
+    expect(metadata).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        finish_pending_after_payment: null,
+        finish_pending_resolved: expect.objectContaining({
+          outcome: 'balance_due',
+          remaining_balance: 1000,
+        }),
+      }),
+    );
+  });
+
+  it('reembolso completado en la ventana: el neto (pagos − reembolsos) deja saldo y la orden no se finaliza', async () => {
+    const { service, prismaMock, update } = buildService(
+      { grand_total: 4000, payments: [{ state: 'partially_refunded', amount: 4000 }] },
+      [{ amount: 500 }],
+    );
+
+    await service.resumeFinishPendingAfterPayment(1);
+
+    expect(prismaMock.refunds.findMany).toHaveBeenCalledWith({
+      where: { order_id: 1, state: 'completed' },
+      select: { amount: true },
+    });
+    expect(update).not.toHaveBeenCalled();
+    expect(prismaMock.orders.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: expect.objectContaining({ total_paid: 3500, remaining_balance: 500 }),
+    });
+  });
+
+  it('sin cambios en la ventana: finaliza con el saldo recalculado de los pagos vivos', async () => {
+    const { service, prismaMock, update } = buildService({
+      grand_total: 4000,
+      payments: [
+        { state: 'succeeded', amount: 4000 },
+        { state: 'cancelled', amount: 4000 },
+      ],
+    });
+
+    await service.resumeFinishPendingAfterPayment(1);
+
+    expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith(
+      1,
+      'finished',
+      expect.objectContaining({ total_paid: 4000, remaining_balance: 0 }),
+      { historyFromState: 'created' },
+    );
+  });
+});
+
+describe('OrderFlowService.recordFinishPendingFailure — R3 #2 tope de reintentos', () => {
+  const build = (attempts?: number) => {
+    const audit = { log: jest.fn().mockResolvedValue(undefined), logCustom: jest.fn() };
+    const service = new OrderFlowService(
+      {} as unknown as StorePrismaService,
+      { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      audit as any,
+    );
+    jest.spyOn(service, 'getOrder').mockResolvedValue({
+      id: 7,
+      internal_notes: JSON.stringify({
+        _flow_metadata: {
+          finish_pending_after_payment: {
+            kind: 'pay_finish', at: 'x', payment_ids: [55], user_id: 3, error: 'e',
+            ...(attempts != null ? { attempts } : {}),
+          },
+        },
+        notes: '',
+      }),
+    } as any);
+    const append = jest.spyOn(service as any, 'appendFlowMetadata').mockResolvedValue(undefined);
+    return { service, audit, append };
+  };
+
+  it('por debajo del tope: suma el intento en el marcador y sigue en el barrido', async () => {
+    const { service, audit, append } = build(3);
+
+    await expect(service.recordFinishPendingFailure(7, new Error('still down'))).resolves.toBe('retry');
+
+    expect(append).toHaveBeenCalledWith(7, {
+      finish_pending_after_payment: expect.objectContaining({ attempts: 4, last_error: 'still down' }),
+    });
+    expect(audit.log).not.toHaveBeenCalled();
+  });
+
+  it('al llegar al tope: cierra el marcador, deja finish_pending_review y lo audita', async () => {
+    const { service, audit, append } = build(FINISH_PENDING_MAX_ATTEMPTS - 1);
+
+    await expect(service.recordFinishPendingFailure(7, new Error('still down'))).resolves.toBe('escalated');
+
+    expect(append).toHaveBeenCalledWith(7, {
+      finish_pending_after_payment: null,
+      finish_pending_review: expect.objectContaining({
+        attempts: FINISH_PENDING_MAX_ATTEMPTS,
+        last_error: 'still down',
+        payment_ids: [55],
+      }),
+    });
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'order.finish_pending.escalated', resourceId: 7, userId: 3 }),
+    );
+  });
+});
+
+describe('OrderFlowService.appendFlowMetadata — R3 #6 finish_pending_at indexable', () => {
+  const build = () => {
+    const prismaMock: any = {
+      orders: {
+        findUnique: jest.fn().mockResolvedValue({ internal_notes: null }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      { logCustom: jest.fn() } as any,
+    );
+    return { service, prismaMock };
+  };
+
+  it('abrir el marcador sella finish_pending_at; resolverlo (null) lo limpia; otro metadato no lo toca', async () => {
+    const { service, prismaMock } = build();
+
+    await (service as any).appendFlowMetadata(7, {
+      finish_pending_after_payment: { kind: 'pay_finish', payment_ids: [1] },
+    });
+    await (service as any).appendFlowMetadata(7, { finish_pending_after_payment: null });
+    await (service as any).appendFlowMetadata(7, { other: true });
+
+    const data = prismaMock.orders.update.mock.calls.map((c: any[]) => c[0].data);
+    expect(data[0].finish_pending_at).toBeInstanceOf(Date);
+    expect(data[1].finish_pending_at).toBeNull();
+    expect(data[2]).not.toHaveProperty('finish_pending_at');
   });
 });
 
@@ -3883,7 +4263,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
   let prismaMock: PrismaMock;
   let settings: { getSettings: jest.Mock };
   let sessions: { getActiveSession: jest.Mock };
-  let movements: { recordCompensationCashMovementDurable: jest.Mock };
+  let movements: { recordCompensationCashMovementDurable: jest.Mock; resolveSaleActor: jest.Mock };
   let audit: { log: jest.Mock; logCustom: jest.Mock };
   let stock: { releaseReservationsByReference: jest.Mock };
   let emitter: { emit: jest.Mock; emitAsync: jest.Mock };
@@ -3918,6 +4298,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       invoices: ['findMany', 'findFirst'],
       accounts_receivable: ['findMany', 'update'],
       order_installments: ['updateMany'],
+      cash_register_movements: ['findFirst'],
     });
     prismaMock.invoices.findMany.mockResolvedValue([]);
     prismaMock.accounts_receivable.findMany.mockResolvedValue([]);
@@ -3950,6 +4331,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       recordCompensationCashMovementDurable: jest
         .fn()
         .mockResolvedValue({ status: 'recorded', movement_id: 31 }),
+      resolveSaleActor: jest.fn().mockResolvedValue(null),
     };
     audit = {
       log: jest.fn().mockResolvedValue(undefined),
@@ -4255,6 +4637,80 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     expect(refundFlow.emitCancellationCashRefund).toHaveBeenCalledTimes(1);
   });
 
+  describe('B17 — cancelación sin usuario (webhook/job)', () => {
+    const cashOrder = () =>
+      cancelableOrder([
+        buildPayment({
+          id: CASH_PAYMENT_ID,
+          state: 'succeeded',
+          store_payment_method_id: CASH_METHOD_ID,
+          amount: new Prisma.Decimal('59.50'),
+        }),
+      ]);
+
+    it('sin usuario: el egreso va a nombre del actor del sale y el refund se completa (no queda processing)', async () => {
+      mockRequestContext({ store_id: 100, organization_id: 1, user_id: undefined as any });
+      movements.resolveSaleActor.mockResolvedValue({ user_id: 42, source: 'sale' });
+      jest.spyOn(service as any, 'getOrder').mockResolvedValue(cashOrder());
+      prismaMock.payments.findMany.mockResolvedValue([
+        { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
+      ]);
+
+      await service.cancelOrder(ORDER_ID, DTO);
+
+      // Store-filtered lookup: a webhook carries no store context to scope by.
+      expect(movements.resolveSaleActor).toHaveBeenCalledWith({
+        store_id: cashOrder().store_id,
+        order_id: ORDER_ID,
+        payment_ids: [CASH_PAYMENT_ID],
+      });
+      expect(movements.recordCompensationCashMovementDurable).toHaveBeenCalledWith(
+        expect.objectContaining({ user_id: 42, payment_id: CASH_PAYMENT_ID }),
+      );
+      expect(audit.log).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'order.cancel.cash_out_unrecorded' }),
+      );
+      expect(refundFlow.completeCancellationCashRefund).toHaveBeenCalledWith(81);
+    });
+
+    it('R3 #5: sin sale, el egreso va al creador de la orden con constancia ACTOR_FALLBACK', async () => {
+      mockRequestContext({ store_id: 100, organization_id: 1, user_id: undefined as any });
+      movements.resolveSaleActor.mockResolvedValue({ user_id: 13, source: 'order_creator' });
+      jest.spyOn(service as any, 'getOrder').mockResolvedValue(cashOrder());
+      prismaMock.payments.findMany.mockResolvedValue([
+        { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
+      ]);
+
+      await service.cancelOrder(ORDER_ID, DTO);
+
+      expect(movements.recordCompensationCashMovementDurable).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_id: 13,
+          actor_note: 'ACTOR_FALLBACK: no sale movement found, attributed to the order creator (user #13)',
+        }),
+      );
+    });
+
+    it('sin usuario y sin sale del pago: se escala, nunca se omite en silencio', async () => {
+      mockRequestContext({ store_id: 100, organization_id: 1, user_id: undefined as any });
+      movements.resolveSaleActor.mockResolvedValue(null);
+      jest.spyOn(service as any, 'getOrder').mockResolvedValue(cashOrder());
+      prismaMock.payments.findMany.mockResolvedValue([
+        { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
+      ]);
+
+      await service.cancelOrder(ORDER_ID, DTO);
+
+      expect(movements.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
+      expect(audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'order.cancel.cash_out_unrecorded',
+          metadata: expect.objectContaining({ cause: 'no_user_context' }),
+        }),
+      );
+    });
+  });
+
   it('módulo de caja apagado: ni movimiento ni escalamiento', async () => {
     settings.getSettings.mockResolvedValue({
       pos: { cash_register: { enabled: false } },
@@ -4507,6 +4963,7 @@ describe('OrderFlowService.cancelPayment — B4 (release-855) delivered/finished
       orders: ['update', 'findFirst'],
       payments: ['update'],
       invoices: ['findFirst'],
+      cash_register_movements: ['findMany'],
     });
     // Lock: first $queryRaw call is the order row (must be non-empty or
     // `lockOrderLifecycle` throws NotFoundException); the second is the
@@ -4516,6 +4973,7 @@ describe('OrderFlowService.cancelPayment — B4 (release-855) delivered/finished
       .mockResolvedValueOnce([{ id: ORDER_ID, state: 'delivered' }])
       .mockResolvedValue([]);
     prismaMock.invoices.findFirst.mockResolvedValue(null);
+    prismaMock.cash_register_movements.findMany.mockResolvedValue([]);
     prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, state: 'delivered' });
     prismaMock.orders.findFirst.mockResolvedValue({ id: ORDER_ID, state: 'delivered', payments: [] });
 
@@ -4703,47 +5161,48 @@ describe('OrderFlowService.cancelPayment — B4 (release-855) delivered/finished
 });
 
 /**
- * B4/B8 follow-up — resolución de sesión de caja en la reversa de
- * `cancelPayment`. Antes SIEMPRE caía en `getActiveSession(userId)` del
- * operador que anula: si ese admin no tenía caja abierta, la reversa salía en
- * silencio y la venta original quedaba contada doble en el cuadre. Ahora
- * prioriza la sesión ORIGINAL del movimiento `sale` si sigue abierta.
+ * B16 — la reversa de caja de `cancelPayment` se escribe DENTRO de la tx que
+ * anula (`recordPaymentCompensationInTx`): misma sesión del `sale` si sigue
+ * abierta, outbox durable si no, actor = usuario del contexto o el del `sale`.
  */
-describe('OrderFlowService.reversePaymentCashMovements — resolución de sesión', () => {
+describe('OrderFlowService.recordPaymentCompensationInTx — contramovimiento en la tx', () => {
   let service: OrderFlowService;
-  let prismaMock: PrismaMock;
-  let sessionsService: { getActiveSession: jest.Mock };
-  let movementsService: {
-    recordRefundMovement: jest.Mock;
-    recordCompensationCashMovementDurable: jest.Mock;
-    resolveCompensationSessionId: jest.Mock;
+  let movementsService: { recordCompensationCashMovementDurable: jest.Mock };
+  let audit: { log: jest.Mock };
+  let tx: any;
+
+  const REFS = {
+    referenceFor: () => 'payment_cancelled',
+    dedupeFor: (id: number) => `payment_cancelled:${id}`,
+    notesFor: (id: number, oid: number) => `Anulación del pago #${id} de la orden #${oid}`,
   };
-  let audit: { log: jest.Mock; logCustom: jest.Mock };
+
+  const sale = (over: any = {}) => ({
+    id: 11,
+    store_id: 100,
+    order_id: 9001,
+    payment_id: 5001,
+    amount: new Prisma.Decimal('59.50'),
+    payment_method: 'cash',
+    user_id: 3,
+    ...over,
+  });
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
-
-    prismaMock = createPrismaMock({
-      cash_register_movements: ['findMany'],
-      cash_register_sessions: ['findMany'],
-    });
-
-    sessionsService = { getActiveSession: jest.fn() };
     movementsService = {
-      recordRefundMovement: jest.fn().mockResolvedValue({ id: 999 }),
       recordCompensationCashMovementDurable: jest
         .fn()
         .mockResolvedValue({ status: 'recorded', movement_id: 999 }),
-      resolveCompensationSessionId: jest.fn().mockResolvedValue(null),
     };
-    audit = { log: jest.fn().mockResolvedValue(undefined), logCustom: jest.fn() };
-
+    audit = { log: jest.fn().mockResolvedValue(undefined) };
+    tx = { cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) } };
     service = new OrderFlowService(
-      prismaMock as unknown as StorePrismaService,
+      {} as unknown as StorePrismaService,
       { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
       {} as any,
-      sessionsService as any,
+      {} as any,
       movementsService as any,
       {} as any, {} as any, {} as any,
       audit as any,
@@ -4751,14 +5210,10 @@ describe('OrderFlowService.reversePaymentCashMovements — resolución de sesió
     );
   });
 
-  const cashSale = (method = 'cash') => [
-    { session_id: 501, payment_id: 5001, amount: new Prisma.Decimal('59.50'), payment_method: method },
-  ];
+  it('escribe el contramovimiento con el MISMO tx, método y monto del sale', async () => {
+    tx.cash_register_movements.findMany.mockResolvedValue([sale({ payment_method: 'card' })]);
 
-  it('efectivo: delega en la cola durable con reference payment_cancelled y dedupe por pago', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale());
-
-    await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
+    await (service as any).recordPaymentCompensationInTx(tx, [5001], REFS);
 
     expect(movementsService.recordCompensationCashMovementDurable).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4767,78 +5222,74 @@ describe('OrderFlowService.reversePaymentCashMovements — resolución de sesió
         order_id: 9001,
         payment_id: 5001,
         amount: 59.5,
+        payment_method: 'card',
         reference: 'payment_cancelled',
         dedupe_key: 'payment_cancelled:5001',
       }),
+      tx,
     );
     expect(audit.log).not.toHaveBeenCalled();
   });
 
-  it('efectivo sin ninguna sesión: queda encolado, con warn y auditoría (nunca en silencio)', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale());
+  it('sin usuario en contexto usa el user_id del sale original como actor', async () => {
+    mockRequestContext({ store_id: 100, organization_id: 1, user_id: undefined as any });
+    tx.cash_register_movements.findMany.mockResolvedValue([sale()]);
+
+    await (service as any).recordPaymentCompensationInTx(tx, [5001], REFS);
+
+    expect(movementsService.recordCompensationCashMovementDurable).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: 3 }),
+      tx,
+    );
+  });
+
+  it('sesión cerrada: queda encolado, con warn y auditoría (nunca en silencio)', async () => {
+    tx.cash_register_movements.findMany.mockResolvedValue([sale()]);
     movementsService.recordCompensationCashMovementDurable.mockResolvedValue({
       status: 'pending', failure_id: 12, reason: 'no_open_cash_session',
     });
     const warnSpy = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
 
-    await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
+    await (service as any).recordPaymentCompensationInTx(tx, [5001], REFS);
 
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('9001'));
     expect(warnSpy.mock.calls[0][0]).toEqual(expect.stringContaining('5001'));
     expect(audit.log).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'payment.cancel.cash_reversal_issue',
-        resourceId: 9001,
         metadata: expect.objectContaining({ cause: 'queued_no_open_cash_session', payment_ids: [5001] }),
       }),
     );
   });
 
-  it('no efectivo con sesión destino: contra-movimiento directo en esa sesión', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale('card'));
-    movementsService.resolveCompensationSessionId.mockResolvedValue(501);
+  it('sale sin payment_id: avisa con warn y compensa por orden (no sale en silencio)', async () => {
+    tx.cash_register_movements.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([sale({ id: 21, payment_id: null })]);
+    const warnSpy = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
 
-    await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
+    await (service as any).recordPaymentCompensationInTx(tx, [5001], {
+      ...REFS,
+      orphanScanOrderId: 9001,
+    });
 
-    expect(movementsService.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
-    expect(movementsService.recordRefundMovement).toHaveBeenCalledWith(
-      501,
-      expect.objectContaining({ payment_method: 'card', payment_id: 5001, reference: 'payment_cancelled' }),
-    );
-  });
-
-  it('no efectivo sin sesión: se audita, NO se encola', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale('card'));
-    movementsService.resolveCompensationSessionId.mockResolvedValue(null);
-
-    await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
-
-    expect(movementsService.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
-    expect(movementsService.recordRefundMovement).not.toHaveBeenCalled();
-    expect(audit.log).toHaveBeenCalledWith(
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('sale #21'));
+    expect(movementsService.recordCompensationCashMovementDurable).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'payment.cancel.cash_reversal_issue',
-        metadata: expect.objectContaining({ cause: 'no_open_session_non_cash' }),
+        order_id: 9001,
+        payment_id: null,
+        reference: 'payment_cancelled:sale:21',
       }),
+      tx,
     );
   });
 
-  it('un fallo de escritura no rompe la anulación pero se loguea y audita (sin catch mudo)', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale());
+  it('un fallo de escritura se propaga para abortar la tx (pago anulado y sale vivo no pueden quedar)', async () => {
+    tx.cash_register_movements.findMany.mockResolvedValue([sale()]);
     movementsService.recordCompensationCashMovementDurable.mockRejectedValue(new Error('db caída'));
-    const errSpy = jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
 
     await expect(
-      (service as any).reversePaymentCashMovements(100, 9001, [5001]),
-    ).resolves.toBeUndefined();
-
-    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('db caída'), expect.anything());
-    expect(audit.log).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: 'payment.cancel.cash_reversal_issue',
-        metadata: expect.objectContaining({ cause: 'movement_write_failed', error: 'db caída' }),
-      }),
-    );
+      (service as any).recordPaymentCompensationInTx(tx, [5001], REFS),
+    ).rejects.toThrow('db caída');
   });
 });
 
@@ -5261,6 +5712,7 @@ describe('OrderFlowService.registerCreditPayment — table projection (B.2/T5)',
         findMany: jest.fn(async () => []),
         update: jest.fn(async () => ({})),
       },
+      $queryRaw: jest.fn(async () => [{ id: 1 }]),
     };
     prismaMock.$transaction = jest.fn((callback: (tx: any) => unknown) => callback(prismaMock));
     const eventEmitter: any = { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) };
@@ -5288,6 +5740,57 @@ describe('OrderFlowService.registerCreditPayment — table projection (B.2/T5)',
       .mockResolvedValue(undefined);
     return { service, prismaMock, eventEmitter, updateOrderState, cashMovement, project };
   };
+
+  it('B29: el saldo se lee dentro de la tx tras bloquear la orden (FOR UPDATE)', async () => {
+    const h = harness(60, 40);
+    const calls: string[] = [];
+    h.prismaMock.$queryRaw.mockImplementation(async () => {
+      calls.push('lock');
+      return [{ id: 1 }];
+    });
+    // Lectura previa (fuera de la tx) con saldo viejo 60; la bloqueada, 100/0 → otro abono ya entró
+    h.prismaMock.orders.findFirst.mockImplementation(async (args: any) => {
+      if (args?.select?.total_paid) {
+        calls.push('locked-read');
+        return { total_paid: 70, remaining_balance: 30 };
+      }
+      return {
+        id: 1, order_number: 'CR-1', state: 'processing', store_id: 4,
+        organization_id: 1, customer_id: 44, currency: 'COP', payment_form: '2',
+        credit_type: 'libre', grand_total: 100, total_paid: 40,
+        remaining_balance: 60, payments: [], order_installments: [],
+      };
+    });
+
+    const error = await h.service
+      .registerCreditPayment(1, CREDIT_DTO)
+      .catch((failure) => failure);
+
+    expect(calls).toEqual(['lock', 'locked-read']);
+    expect(String(error.message)).toContain('exceeds remaining balance');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+  });
+
+  it('B29: total_paid y saldo salen de la lectura bloqueada', async () => {
+    const h = harness(60, 40);
+    h.prismaMock.orders.findFirst.mockImplementation(async (args: any) =>
+      args?.select?.total_paid
+        ? { total_paid: 70, remaining_balance: 90 }
+        : {
+            id: 1, order_number: 'CR-1', state: 'processing', store_id: 4,
+            organization_id: 1, customer_id: 44, currency: 'COP', payment_form: '2',
+            credit_type: 'libre', grand_total: 100, total_paid: 40,
+            remaining_balance: 90, payments: [], order_installments: [],
+          },
+    );
+
+    await h.service.registerCreditPayment(1, { ...CREDIT_DTO, amount: 20 });
+
+    expect(h.prismaMock.orders.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { total_paid: 90, remaining_balance: 70 },
+    });
+  });
 
   it('rechaza el abono con SPLIT_ACCOUNT_LOCKED si la orden tiene cuentas independientes', async () => {
     const h = harness(60, 40);
@@ -5487,6 +5990,7 @@ describe('OrderFlowService — gate de caja para cobros (CASH_SESSION_REQUIRED_0
         findMany: jest.fn(async () => []),
         update: jest.fn(async () => ({})),
       },
+      $queryRaw: jest.fn(async () => [{ id: 1 }]),
     };
     const settingsService = {
       getSettings: jest.fn(async () => ({
@@ -5637,6 +6141,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     const stateUpdates: Array<{ state: string; metadata: unknown }> = [];
     const createdPayments: any[] = [];
     const prismaMock: any = {
+      cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       store_payment_methods: {
         findFirst: jest.fn().mockResolvedValue(LEG_METHODS[0]),
@@ -5855,10 +6360,10 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     // del pago se enlaza al movimiento antes del commit.
     expect(h.cashMovement).toHaveBeenCalledTimes(2);
     expect(h.cashMovement).toHaveBeenNthCalledWith(
-      1, 4, 1, 20000, 'cash', undefined, h.prismaMock,
+      1, 4, 1, 20000, 'cash', undefined, h.prismaMock, undefined, 'DIRECT',
     );
     expect(h.cashMovement).toHaveBeenNthCalledWith(
-      2, 4, 1, 80000, 'bank_transfer', undefined, h.prismaMock,
+      2, 4, 1, 80000, 'bank_transfer', undefined, h.prismaMock, undefined, 'DIRECT',
     );
 
     // Orden saldada: Σ = total ⇒ finished con saldo 0.
@@ -6046,7 +6551,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
       h.prismaMock.store_payment_methods.findMany,
     ).not.toHaveBeenCalled();
     expect(h.cashMovement).toHaveBeenCalledTimes(1);
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 100000, 'bank_transfer', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 100000, 'bank_transfer', undefined, h.prismaMock, undefined, 'DIRECT');
     expect(result.payment).toEqual({ transaction_id: 'TXN-1', change: 0 });
     expect(result).not.toHaveProperty('payments');
 
@@ -7175,6 +7680,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
     const confirmedInPlace: any[] = [];
     const stateUpdates: Array<{ state: string; metadata: unknown }> = [];
     const prismaMock: any = {
+      cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       store_payment_methods: {
         findFirst: jest.fn().mockImplementation(async ({ where }: any) =>
@@ -7373,7 +7879,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       expect.anything(),
     );
     expect(h.cashMovement).toHaveBeenCalledTimes(1);
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'bank_transfer', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'bank_transfer', undefined, h.prismaMock, undefined, 'DIRECT');
     expect(h.emitter.emitAsync).toHaveBeenCalledTimes(1);
     expect(h.emitter.emitAsync).toHaveBeenCalledWith(
       'payment.received',
@@ -7398,7 +7904,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       bank_account_id: null,
     });
     expectNoVoidOf51(h);
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock, undefined, 'DIRECT');
     expect(h.emitter.emitAsync).toHaveBeenCalledWith(
       'payment.received',
       expect.objectContaining({ payment_id: 51 }),
@@ -7450,7 +7956,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
         data: expect.objectContaining({ state: 'pending_payment' }),
       }),
     );
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 60000, 'bank_transfer', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 60000, 'bank_transfer', undefined, h.prismaMock, undefined, 'DIRECT');
     expect(h.emitter.emitAsync).toHaveBeenCalledWith(
       'payment.received',
       expect.objectContaining({ payment_id: 51 }),
@@ -7494,8 +8000,8 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
     expect(result.payments).toHaveLength(2);
     expect(result.payments[0]).toEqual(expect.objectContaining({ id: 51 }));
     expect(h.cashMovement).toHaveBeenCalledTimes(2);
-    expect(h.cashMovement).toHaveBeenNthCalledWith(1, 4, 1, 40000, 'bank_transfer', undefined, h.prismaMock);
-    expect(h.cashMovement).toHaveBeenNthCalledWith(2, 4, 1, 20000, 'cash', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenNthCalledWith(1, 4, 1, 40000, 'bank_transfer', undefined, h.prismaMock, undefined, 'DIRECT');
+    expect(h.cashMovement).toHaveBeenNthCalledWith(2, 4, 1, 20000, 'cash', undefined, h.prismaMock, undefined, 'DIRECT');
     const received = h.emitter.emitAsync.mock.calls
       .filter(([name]: any[]) => name === 'payment.received')
       .map(([, payload]: any[]) => payload.payment_id);
@@ -7568,7 +8074,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       data: expect.objectContaining({ state: 'cancelled' }),
     });
     expect(h.prismaMock.payments.findFirst).not.toHaveBeenCalled();
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock, undefined, 'DIRECT');
   });
 
   it('WhatsApp/contra entrega en pending_payment con remaining_balance > 0 → el parcial se respeta', async () => {
@@ -7606,7 +8112,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       data: expect.objectContaining({ total_paid: 30000, remaining_balance: 70000 }),
     });
     expect(h.updateOrderState).not.toHaveBeenCalled();
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 30000, 'cash', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, 30000, 'cash', undefined, h.prismaMock, undefined, 'DIRECT');
   });
 
   it('finish bloqueado tras confirmar en sitio → la fila 51 vuelve a pending intacta (no se anula)', async () => {
@@ -7693,7 +8199,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
       }),
     });
     // En caja entra lo cobrado (100000), no lo recibido (120000).
-    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock);
+    expect(h.cashMovement).toHaveBeenCalledWith(4, 1, GRAND, 'cash', undefined, h.prismaMock, undefined, 'DIRECT');
     expect(h.updateOrderState).toHaveBeenCalledWith(
       1,
       'processing',
@@ -8422,5 +8928,167 @@ describe('OrderFlowService.commitCouponUseForOrder — cupón desactivado (QUI-6
       errorCode: 'ORD_EDIT_COUPON_COMMIT_001',
     });
     expect(tx.coupon_uses.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrderFlowService.recordPayOrderCashMovement — shared cash movement policy (B08/B26)', () => {
+  const build = () => {
+    mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
+    const movementsService = {
+      recordSaleMovement: jest.fn().mockResolvedValue({ id: 1 }),
+    };
+    const service = new OrderFlowService(
+      {} as any, { emit: jest.fn() } as any, {} as any,
+      {} as any, movementsService as any,
+      {} as any, {} as any, {} as any, {} as any,
+      undefined, undefined, undefined, undefined,
+    );
+    jest.spyOn(service as any, 'resolveCashSessionForSale').mockResolvedValue({ id: 5 });
+    const record = (type: string | undefined, mode?: string | null) =>
+      (service as any).recordPayOrderCashMovement(
+        100, 9, 5000, type, undefined, {} as any, undefined, mode,
+      );
+    return { movementsService, record };
+  };
+
+  it.each([
+    ['cash', 'DIRECT', true],
+    ['card', 'DIRECT', true],
+    ['bank_transfer', 'DIRECT', true],
+    ['cash_on_delivery', 'DIRECT', false],
+    ['cash', 'ON_DELIVERY', false],
+    ['wompi', 'ONLINE', false],
+    ['wallet', 'DIRECT', false],
+  ])('%s / %s records a sale: %s (same table as the POS)', async (type, mode, records) => {
+    const { movementsService, record } = build();
+    await record(type, mode);
+    expect(movementsService.recordSaleMovement).toHaveBeenCalledTimes(records ? 1 : 0);
+  });
+
+  it.each([[undefined], ['']])('rejects a method without type (%p) with PAY_METHOD_MISCONFIGURED', async (type) => {
+    const { movementsService, record } = build();
+    await expect(record(type as any, 'DIRECT')).rejects.toMatchObject({
+      response: expect.objectContaining({ error_code: 'PAY_METHOD_MISCONFIGURED' }),
+    });
+    expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrderFlowService.resumeFinishPendingAfterPayment (B07/B11)', () => {
+  const notesWith = (marker: Record<string, unknown> | null) =>
+    JSON.stringify({ _flow_metadata: { finish_pending_after_payment: marker }, notes: '' });
+
+  const build = (order: Record<string, unknown>) => {
+    const movements = { deliverDeferredSaleCashMovement: jest.fn().mockResolvedValue(undefined) };
+    const prisma = {
+      refunds: { findMany: jest.fn().mockResolvedValue([]) },
+      orders: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const service = new OrderFlowService(
+      prisma as unknown as StorePrismaService,
+      { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
+      {} as any,
+      {} as any,
+      movements as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn() } as any,
+    );
+    jest.spyOn(service, 'getOrder').mockResolvedValue({
+      id: 7,
+      store_id: 4,
+      grand_total: 4000,
+      payments: [{ state: 'succeeded', amount: 4000 }],
+      ...order,
+    } as any);
+    const spies = {
+      update: jest.spyOn(service as any, 'updateOrderState').mockResolvedValue({}),
+      voidMarkers: jest.spyOn(service as any, 'voidSettlementPendingMarkers').mockResolvedValue(undefined),
+      eta: jest.spyOn(service as any, 'computeAndPersistEta').mockResolvedValue(undefined),
+      posCompleted: jest.spyOn(service as any, 'emitPosSaleCompletedIfFullyPaid').mockResolvedValue(undefined),
+      project: jest.spyOn(service as any, 'projectPaidOrderToTable').mockResolvedValue(undefined),
+      append: jest.spyOn(service as any, 'appendFlowMetadata').mockResolvedValue(undefined),
+      settleTable: jest.spyOn(service, 'settlePaidTableOrder').mockResolvedValue(undefined),
+    };
+    return { service, movements, spies };
+  };
+
+  it('pay_finish en processing: cierra con el saldo saldado, anula marcadores, escribe el sale diferido y limpia el marcador', async () => {
+    const { service, movements, spies } = build({
+      state: 'processing',
+      internal_notes: notesWith({
+        kind: 'pay_finish',
+        at: '2026-10-31T12:00:00.000Z',
+        payment_ids: [55],
+        user_id: 3,
+        settled_balance: { total_paid: 4000, remaining_balance: 0 },
+        void_marker_ids: [54],
+        deferred_cash_signal_id: 81,
+        from_state: 'created',
+        error: 'deadlock detected',
+      }),
+    });
+
+    await expect(service.resumeFinishPendingAfterPayment(7)).resolves.toBe('resolved');
+
+    expect(spies.update).toHaveBeenCalledWith(
+      7,
+      'finished',
+      expect.objectContaining({ total_paid: 4000, remaining_balance: 0 }),
+      { historyFromState: 'created' },
+    );
+    expect(spies.voidMarkers).toHaveBeenCalledWith([54]);
+    expect(spies.project).toHaveBeenCalledWith(7, 55);
+    expect(movements.deliverDeferredSaleCashMovement).toHaveBeenCalledWith(81);
+    expect(spies.append).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ finish_pending_after_payment: null }),
+    );
+    expect(spies.settleTable).not.toHaveBeenCalled();
+  });
+
+  it('table_settlement: repite la liquidación idempotente de la mesa como el cajero que cobró', async () => {
+    const { service, movements, spies } = build({
+      state: 'draft',
+      internal_notes: notesWith({
+        kind: 'table_settlement',
+        at: '2026-10-31T12:00:00.000Z',
+        payment_ids: [60],
+        user_id: 3,
+        error: 'connection reset',
+      }),
+    });
+
+    await expect(service.resumeFinishPendingAfterPayment(7)).resolves.toBe('resolved');
+
+    expect(spies.settleTable).toHaveBeenCalledWith(7, 3);
+    expect(spies.update).not.toHaveBeenCalled();
+    expect(movements.deliverDeferredSaleCashMovement).not.toHaveBeenCalled();
+    expect(spies.append).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ finish_pending_after_payment: null }),
+    );
+  });
+
+  it('sin marcador abierto (resuelto = null) no hace nada', async () => {
+    const { service, spies } = build({ state: 'processing', internal_notes: notesWith(null) });
+
+    await expect(service.resumeFinishPendingAfterPayment(7)).resolves.toBe('skipped');
+
+    expect(spies.update).not.toHaveBeenCalled();
+    expect(spies.append).not.toHaveBeenCalled();
+  });
+
+  it('si el cierre vuelve a fallar, el marcador sigue abierto para el próximo barrido', async () => {
+    const { service, spies } = build({
+      state: 'processing',
+      internal_notes: notesWith({ kind: 'pay_finish', at: 'x', payment_ids: [55], user_id: null, error: 'e' }),
+    });
+    spies.update.mockRejectedValueOnce(new Error('still down'));
+
+    await expect(service.resumeFinishPendingAfterPayment(7)).rejects.toThrow('still down');
+
+    expect(spies.append).not.toHaveBeenCalled();
   });
 });

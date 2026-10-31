@@ -96,6 +96,45 @@ describe('OrderFlowService — reparto financiero saldado (mesa)', () => {
     });
   });
 
+  describe('settlePaidTableOrder (B11)', () => {
+    it('mesa sin reparto pagada completa en draft: promueve a created y avanza a processing sin commit direct_delivery', async () => {
+      const h = build({ split: null, payments: [paid(138500)] });
+      await h.service.settlePaidTableOrder(9635);
+      expect(h.promote).toHaveBeenCalledWith(9635, 105);
+      expect(h.prisma.orders.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ state: 'processing' }) }),
+      );
+      expect(h.commit.commitOrderDelivery).not.toHaveBeenCalled();
+    });
+
+    it('pago incompleto: no promueve ni avanza', async () => {
+      const h = build({ split: null, payments: [paid(100000)] });
+      await h.service.settlePaidTableOrder(9635);
+      expect(h.promote).not.toHaveBeenCalled();
+      expect(h.prisma.orders.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('orden sin mesa: no la toca', async () => {
+      const h = build({ split: null, table: false, payments: [paid(138500)] });
+      await h.service.settlePaidTableOrder(9635);
+      expect(h.promote).not.toHaveBeenCalled();
+      expect(h.commit.commitOrderDelivery).not.toHaveBeenCalled();
+    });
+
+    it('idempotente: ya en processing no vuelve a promover', async () => {
+      const h = build({ split: null, state: 'processing', payments: [paid(138500)] });
+      await h.service.settlePaidTableOrder(9635);
+      expect(h.promote).not.toHaveBeenCalled();
+    });
+
+    it('settleFinancialSplitSource sigue ignorando una orden sin reparto activo', async () => {
+      const h = build({ split: null, payments: [paid(138500)] });
+      await h.service.settleFinancialSplitSource(9635);
+      expect(h.promote).not.toHaveBeenCalled();
+      expect(h.prisma.orders.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('fastTrackOrder', () => {
     it('recuperacion: draft con split saldado -> promote, processing, ship, deliver, finish SIN pagar', async () => {
       const h = build({});

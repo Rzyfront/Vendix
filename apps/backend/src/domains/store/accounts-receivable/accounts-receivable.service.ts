@@ -7,6 +7,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { MovementsService } from '../cash-registers/movements/movements.service';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 import { ArQueryDto } from './dto/ar-query.dto';
 import { RegisterArPaymentDto } from './dto/register-ar-payment.dto';
@@ -18,6 +19,7 @@ export class AccountsReceivableService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly event_emitter: EventEmitter2,
+    private readonly movements: MovementsService,
   ) {}
 
   // ─── LIST ──────────────────────────────────────────────────
@@ -276,6 +278,22 @@ export class AccountsReceivableService {
           created_by: user_id,
         },
       });
+
+      // B04: un abono en efectivo sin `payment_id` no pasó por el POS (que ya
+      // dejó su `sale`): entra al cajón de quien lo recibe, en esta misma tx.
+      if (!dto.payment_id) {
+        await this.movements.recordModuleCashMovement(tx, {
+          store_id: ar.store_id,
+          user_id,
+          direction: 'in',
+          amount: dto.amount,
+          payment_method: dto.payment_method,
+          source_type: 'ar_payment',
+          source_id: payment.id,
+          reference: `Abono CxC #${ar_id}`,
+          notes: dto.reference || undefined,
+        });
+      }
 
       // 2. Calculate new balance
       const new_paid = Number(currentAr.paid_amount) + dto.amount;

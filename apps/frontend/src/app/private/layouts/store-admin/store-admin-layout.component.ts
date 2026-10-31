@@ -805,6 +805,33 @@ export class StoreAdminLayoutComponent {
           route: '/admin/customers/all',
         },
         {
+          // No panel_ui key: shown by permission (MenuFilterService gate).
+          label: 'Bandeja',
+          icon: 'inbox',
+          route: '/admin/customers/inbox',
+          alwaysVisible: true,
+        },
+        {
+          // No panel_ui key: shown by permission (MenuFilterService gate).
+          label: 'Pipeline',
+          icon: 'trending-up',
+          route: '/admin/customers/pipeline',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Tareas',
+          icon: 'check-square',
+          route: '/admin/customers/tasks',
+          alwaysVisible: true,
+        },
+        {
+          // No panel_ui key: shown by permission (MenuFilterService gate).
+          label: 'Segmentos',
+          icon: 'users',
+          route: '/admin/customers/segments',
+          alwaysVisible: true,
+        },
+        {
           label: 'Reseñas',
           icon: 'star',
           route: '/admin/customers/reviews',
@@ -815,9 +842,12 @@ export class StoreAdminLayoutComponent {
           route: '/admin/data-collection',
         },
         {
-          label: 'CRM',
+          // Internal module `crm` (QUI-719); visible name frees "CRM" for the
+          // customer CRM. Same panel_ui key as before.
+          label: 'Landing de captación',
           icon: 'sparkles',
           route: '/admin/customers/crm',
+          panelUiKey: 'customers_crm',
         },
       ],
     },
@@ -844,11 +874,6 @@ export class StoreAdminLayoutComponent {
           label: 'Anuncios',
           icon: 'image',
           route: '/admin/marketing/anuncios',
-        },
-        {
-          label: 'Social Sales',
-          icon: 'message-circle',
-          route: '/admin/marketing/social-sales',
         },
       ],
     },
@@ -1089,6 +1114,20 @@ export class StoreAdminLayoutComponent {
           route: '/admin/help/videos',
           alwaysVisible: true,
           panelUiKey: 'help_videos',
+        },
+      ],
+    },
+    {
+      label: 'Integraciones',
+      icon: 'plug',
+      children: [
+        {
+          label: 'Canales',
+          icon: 'message-circle',
+          route: '/admin/integrations/channels',
+          // Reuses the persisted panel_ui key of the former "Social Sales"
+          // entry so stores keep their visibility without a data migration.
+          panelUiKey: 'marketing_social_sales',
         },
       ],
     },
