@@ -19,6 +19,15 @@ export class SocialChannelEncryptionService {
     );
 
     if (!encryptionKey) {
+      // Production must never store Meta tokens in clear: fail the boot
+      // instead of degrading silently (PLAN-CRM §6).
+      const nodeEnv =
+        this.configService.get<string>('NODE_ENV') ?? process.env.NODE_ENV;
+      if (nodeEnv === 'production') {
+        throw new Error(
+          'SOCIAL_CHANNEL_ENCRYPTION_KEY is required in production',
+        );
+      }
       this.logger.warn(
         'SOCIAL_CHANNEL_ENCRYPTION_KEY not set — social channel tokens will NOT be encrypted',
       );

@@ -185,8 +185,22 @@ export class MessagingService {
         status: 'connected',
       },
     });
-    if (!row) return null;
+    return row ? this.toResolvedChannel(row) : null;
+  }
 
+  /**
+   * Decrypts a `social_channels` row into provider credentials. Also used by
+   * the inbound worker to download media with the channel token.
+   */
+  async toResolvedChannel(row: {
+    id: number;
+    store_id: number;
+    channel_type: string;
+    provider: string;
+    phone_number_id: string | null;
+    waba_id: string | null;
+    access_token_encrypted: string | null;
+  }): Promise<ResolvedChannel> {
     return {
       id: row.id,
       store_id: row.store_id,
