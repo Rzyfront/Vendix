@@ -15,6 +15,8 @@ import {
 import { PaymentGatewayService } from '../payments/services/payment-gateway.service';
 import { SettingsService } from '../settings/settings.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
+import { MovementsService } from '../cash-registers/movements/movements.service';
+import { shouldRecordCashMovement } from '../cash-registers/movements/cash-movement-policy.util';
 import { TableSessionsService } from './table-sessions.service';
 import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import { SplitOrderService } from './split-order.service';
@@ -71,6 +73,7 @@ export class SplitAccountPaymentService {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(forwardRef(() => OrderFlowService))
     private readonly orderFlow: OrderFlowService,
+    private readonly movements: MovementsService,
   ) {}
 
   private context() {
@@ -464,18 +467,36 @@ export class SplitAccountPaymentService {
         }
       }
     }
-    await this.reconcileAfterRegistered(reserved.payment.id);
-    return this.response(orderId, reserved.payment.id);
+    const effectsPending = await this.reconcileAfterRegistered(
+      reserved.payment.id,
+    );
+    return this.response(orderId, reserved.payment.id, effectsPending);
   }
 
+  /**
+   * Staff acknowledgement of an off-platform collection. The `sale` cash
+   * movement is created in the SAME transaction that moves the payment to
+   * `succeeded`, so a payment the cashier sees as approved can never lack its
+   * movement (B01/B28). Lock order matches `closeSession`: cash session first,
+   * then the source order.
+   */
   async confirm(
     orderId: number,
     accountId: number,
     paymentId: number,
     dto: ConfirmSplitAccountPaymentDto,
   ) {
-    const { store_id } = this.context();
+    const { store_id, user_id } = this.context();
+    const cashSession = await this.resolveCashSessionForConfirm(
+      orderId,
+      accountId,
+      paymentId,
+      store_id,
+      user_id,
+    );
     await this.prisma.$transaction(async (tx: any) => {
+      if (cashSession)
+        await this.lockOpenCashSession(tx, cashSession.id, store_id);
       await this.lockedAccount(tx, orderId, accountId);
       const payment = await tx.payments.findFirst({
         where: {
@@ -505,7 +526,7 @@ export class SplitAccountPaymentService {
       if (RECEIVED.includes(payment.state)) return;
       if (payment.state !== 'pending')
         this.reject('El pago ya terminó y no puede confirmarse.');
-      await tx.payments.updateMany({
+      const claimed = await tx.payments.updateMany({
         where: { id: paymentId, state: 'pending' },
         data: {
           state: 'succeeded',
@@ -514,36 +535,106 @@ export class SplitAccountPaymentService {
           gateway_reference: dto.payment_reference ?? null,
         },
       });
+      // Lost the compare-and-set: another confirmation already owns the
+      // transition and the movement.
+      if (claimed.count !== 1) return;
+      if (cashSession) {
+        await this.movements.recordSaleMovement(
+          cashSession.id,
+          {
+            store_id,
+            user_id: user_id!,
+            amount: Number(payment.amount),
+            payment_method: method.system_payment_method.type,
+            order_id: orderId,
+            payment_id: paymentId,
+          },
+          tx,
+        );
+      }
     });
-    await this.reconcileAfterRegistered(paymentId);
-    return this.response(orderId, paymentId);
+    const effectsPending = await this.reconcileAfterRegistered(paymentId);
+    return this.response(orderId, paymentId, effectsPending);
+  }
+
+  /**
+   * The cash session that receives the `sale` is the operator's CURRENT open
+   * one, never the one frozen when the payment was reserved (it may be closed
+   * by now). With the register enabled and a counter method, no open session
+   * rejects BEFORE the payment changes state.
+   */
+  private async resolveCashSessionForConfirm(
+    orderId: number,
+    accountId: number,
+    paymentId: number,
+    storeId: number,
+    userId: number | undefined,
+  ): Promise<{ id: number } | null> {
+    const payment = await this.prisma.payments.findFirst({
+      where: {
+        id: paymentId,
+        order_id: orderId,
+        financial_account_id: accountId,
+        orders: { store_id: storeId },
+      },
+      include: {
+        store_payment_method: { include: { system_payment_method: true } },
+      },
+    });
+    const system = payment?.store_payment_method?.system_payment_method;
+    // Unknown, already settled or gateway payments: the transaction decides.
+    if (!payment || payment.state !== 'pending' || !system) return null;
+    if (!isManualMethod(system.type, system.provider)) return null;
+    const registerSettings = ((await this.settings.getSettings()) as any)?.pos
+      ?.cash_register;
+    if (!registerSettings?.enabled) return null;
+    if (!shouldRecordCashMovement(system.type, system.processing_mode))
+      return null;
+    if (!userId) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    const session = await this.sessions.getActiveSession(userId);
+    if (!session)
+      throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    return { id: session.id };
   }
 
   /**
    * The money is already registered: a failure closing the effects (e.g. the
    * settle stock promotion) must NOT surface as an HTTP error that invites a
-   * second charge. The payment keeps `financial_effects_recorded_at = null`
-   * and `/split/reconcile` retries.
+   * second charge. The payment keeps `financial_effects_recorded_at = null`,
+   * the response carries `effects_pending: true` and `/split/reconcile` (or the
+   * sweep job) retries. Resolves `true` when effects are still pending.
    */
-  private async reconcileAfterRegistered(paymentId: number): Promise<void> {
+  private async reconcileAfterRegistered(paymentId: number): Promise<boolean> {
     try {
-      await this.reconcilePayment(paymentId);
+      const closed = await this.reconcilePayment(paymentId);
+      if (!closed)
+        this.logger.error(
+          `[split pay] payment=${paymentId} registered but effects pending: another reconciliation holds the lock`,
+        );
+      return !closed;
     } catch (err) {
       this.logger.error(
         `[split pay] payment=${paymentId} registered but effects pending: ${(err as Error).message}`,
+        (err as Error).stack,
       );
+      return true;
     }
   }
 
-  /** Also called by the financial-account webhook bridge after provider commit. */
-  async reconcilePayment(paymentId: number): Promise<void> {
+  /**
+   * Also called by the financial-account webhook bridge after provider commit.
+   * The cash movement is NOT created here: `confirm` writes it atomically with
+   * the `succeeded` transition. Resolves `false` only when another worker holds
+   * the effects lock (effects still pending), `true` otherwise.
+   */
+  async reconcilePayment(paymentId: number): Promise<boolean> {
     const { store_id, organization_id } = this.context();
     const lockKey = `financial-payment-effects:${store_id}:${paymentId}`;
     const lockOwner = randomUUID();
     if (
       (await this.redis.set(lockKey, lockOwner, 'PX', 120_000, 'NX')) !== 'OK'
     )
-      return;
+      return false;
     try {
       const payment = await this.prisma.payments.findFirst({
         where: {
@@ -555,7 +646,7 @@ export class SplitAccountPaymentService {
           store_payment_method: { include: { system_payment_method: true } },
         },
       });
-      if (!payment || !RECEIVED.includes(payment.state)) return;
+      if (!payment || !RECEIVED.includes(payment.state)) return true;
       const method =
         payment.store_payment_method?.system_payment_method?.type ?? 'cash';
       const originalUser = (payment.gateway_response as any)?.financial_request
@@ -577,21 +668,7 @@ export class SplitAccountPaymentService {
           'El pago no conserva autorización del operador original para esta tienda.',
         );
       }
-      const cashSessionId = (payment.gateway_response as any)?.financial_request
-        ?.cash_session_id;
-      const cashSession = cashSessionId
-        ? await this.prisma.cash_register_sessions.findFirst({
-            where: { id: cashSessionId, store_id },
-            select: { id: true },
-          })
-        : null;
-      if (cashSessionId && !cashSession)
-        this.reject('No se encuentra la caja original del pago.');
       const result = await this.prisma.$transaction(async (tx: any) => {
-        // Webhook/retry reconciliation can create the cash movement. Acquire
-        // and validate the original session lock before locking the order.
-        if (cashSession)
-          await this.lockOpenCashSession(tx, cashSession.id, store_id);
         const { order, account } = await this.lockedAccount(
           tx,
           payment.order_id,
@@ -614,51 +691,45 @@ export class SplitAccountPaymentService {
             ),
           },
         });
-        if (cashSession) {
-          const existing = await tx.cash_register_movements.findFirst({
-            where: { payment_id: paymentId, type: 'sale', store_id },
-          });
-          if (!existing)
-            await tx.cash_register_movements.create({
-              data: {
-                store_id,
-                user_id: originalUser,
-                session_id: cashSession.id,
-                type: 'sale',
-                amount: payment.amount,
-                payment_method: method,
-                order_id: order.id,
-                payment_id: paymentId,
-              },
-            });
-        }
-        let paidSession: Awaited<
-          ReturnType<TableSessionsService['projectOrderPaymentToTableSession']>
-        > = null;
-        if (paid.gte(money(order.grand_total))) {
-          paidSession =
-            await this.tableSessions.projectOrderPaymentToTableSession(
-              order.id,
-              paymentId,
-              tx,
-            );
-        }
         const fresh = await tx.payments.findFirst({ where: { id: paymentId } });
         return {
           order,
           account,
-          paidSession,
           fullyPaid: paid.gte(money(order.grand_total)),
           recorded: !!fresh.financial_effects_recorded_at,
         };
       });
-      result.paidSession?.emitAfterCommit();
-      if (result.recorded) return;
-      if (result.fullyPaid)
-        await this.orderFlow.settleFinancialSplitSource(
-          payment.order_id,
-          originalUser,
-        );
+      if (result.recorded) return true;
+      if (result.fullyPaid) {
+        // Table projection and order promotion run OUTSIDE the money
+        // transaction: a failure must never roll back the cash movement. Both
+        // are attempted; the first error leaves the effects marker null so the
+        // sweep retries them.
+        let effectsError: unknown = null;
+        try {
+          await this.tableSessions.projectOrderPaymentToTableSession(
+            payment.order_id,
+            paymentId,
+          );
+        } catch (err) {
+          effectsError = err;
+          this.logger.error(
+            `[split reconcile] table projection failed payment=${paymentId}: ${(err as Error).message}`,
+          );
+        }
+        try {
+          await this.orderFlow.settleFinancialSplitSource(
+            payment.order_id,
+            originalUser,
+          );
+        } catch (err) {
+          effectsError ??= err;
+          this.logger.error(
+            `[split reconcile] order settle failed payment=${paymentId}: ${(err as Error).message}`,
+          );
+        }
+        if (effectsError) throw effectsError;
+      }
       // The financial accounting consumer loads this account's immutable
       // snapshot and allocates recognition under its own transaction/lock.
       // These are full account headers, NOT independently rounded payment shares.
@@ -704,6 +775,7 @@ export class SplitAccountPaymentService {
         where: { id: paymentId, financial_effects_recorded_at: null },
         data: { financial_effects_recorded_at: new Date() },
       });
+      return true;
     } finally {
       await this.redis.eval(
         "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
@@ -730,7 +802,11 @@ export class SplitAccountPaymentService {
     for (const payment of payments) await this.reconcilePayment(payment.id);
   }
 
-  private async response(orderId: number, paymentId: number) {
+  private async response(
+    orderId: number,
+    paymentId: number,
+    effectsPending = false,
+  ) {
     const payment = await this.prisma.payments.findFirst({
       where: {
         id: paymentId,
@@ -748,6 +824,7 @@ export class SplitAccountPaymentService {
         nextAction: gatewayResponse?.nextAction ?? null,
       },
       split: await this.splitOrders.getSplit(orderId),
+      ...(effectsPending ? { effects_pending: true } : {}),
     };
   }
 }

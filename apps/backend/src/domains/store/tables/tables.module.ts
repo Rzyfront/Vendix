@@ -18,6 +18,7 @@ import { TableSessionsService } from './table-sessions.service';
 import { SplitOrderController } from './split-order.controller';
 import { SplitOrderService } from './split-order.service';
 import { SplitAccountPaymentService } from './split-account-payment.service';
+import { SplitEffectsSweepJob } from './jobs/split-effects-sweep.job';
 import { PaymentsModule } from '../payments/payments.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 
@@ -65,6 +66,7 @@ import { OrderHistoryModule } from '../orders/order-history/order-history.module
     TableSessionsService,
     SplitOrderService,
     SplitAccountPaymentService,
+    SplitEffectsSweepJob,
     QrService,
   ],
   exports: [
