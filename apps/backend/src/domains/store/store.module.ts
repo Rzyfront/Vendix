@@ -61,6 +61,7 @@ import { DataCollectionModule } from './data-collection/data-collection.module';
 import { ConsultationsModule } from './consultations/consultations.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { SocialSalesModule } from './social-sales/social-sales.module';
+import { MessagingChannelsModule } from './integrations/channels/messaging-channels.module';
 import { MarketingAdCreativesModule } from './marketing-ad-creatives/marketing-ad-creatives.module';
 import { PriceTiersModule } from './price-tiers/price-tiers.module';
 import { UnitTypesModule } from './hospitality/unit-types/unit-types.module';
@@ -151,6 +152,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     ConsultationsModule,
     SubscriptionsModule,
     SocialSalesModule,
+    MessagingChannelsModule,
     MarketingAdCreativesModule,
     PriceTiersModule,
     UnitTypesModule,
