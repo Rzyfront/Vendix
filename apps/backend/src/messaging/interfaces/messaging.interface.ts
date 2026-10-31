@@ -8,7 +8,11 @@
 
 export type MessagingChannel = 'whatsapp' | 'sms' | 'email';
 
-export type MessagingProviderName = 'meta_cloud' | 'console';
+export type MessagingProviderName =
+  | 'meta_cloud'
+  | 'sns_sms'
+  | 'ses_email'
+  | 'console';
 
 export type MessagingMediaType = 'image' | 'document' | 'audio' | 'video';
 
@@ -42,6 +46,17 @@ export interface OutboundMessage {
    * text/media within 24 h of it; `null`/absent means the window is closed.
    */
   last_inbound_at?: Date | null;
+  /**
+   * Customer of the conversation, when linked. SMS and email are skipped
+   * when this customer opted out of the channel in this store.
+   */
+  customer_id?: number | null;
+  /**
+   * Marketing message (a campaign). It is only sent when the customer's
+   * consent for the channel allows marketing: never after an opt-out, and on
+   * WhatsApp only with an explicit opt-in. Checked even in dry-run.
+   */
+  marketing?: boolean;
   /** `crm_messages.id` of the row being delivered. */
   idempotency_key: string;
 }
@@ -87,6 +102,13 @@ export interface ResolvedChannel {
   /** Plain token. Never log or persist it. */
   access_token: string | null;
   graph_version: string;
+  /**
+   * Non-secret channel settings from `social_channels.metadata`
+   * (`sender_id` for SMS; `from_name`, `reply_to` for email).
+   */
+  settings?: Record<string, unknown>;
+  /** Store name, used as the email sender label when none is configured. */
+  store_name?: string;
 }
 
 export interface MessagingProvider {

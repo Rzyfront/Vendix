@@ -17,12 +17,22 @@ export class CrmOutboundQueue {
     private readonly queue: Queue<CrmOutboundJob>,
   ) {}
 
-  async enqueue(messageId: number): Promise<void> {
+  /**
+   * `delayMs` spaces campaign messages so one store's campaign does not
+   * monopolize the worker's global limiter (per-store pacing, PLAN-CRM §5.0).
+   */
+  async enqueue(
+    messageId: number,
+    options: { delayMs?: number } = {},
+  ): Promise<void> {
     await this.queue.add(
       'send',
       { message_id: messageId },
       {
         jobId: `crm-outbound-${messageId}`,
+        ...(options.delayMs && options.delayMs > 0
+          ? { delay: options.delayMs }
+          : {}),
         attempts: 5,
         backoff: { type: 'exponential', delay: 10_000 },
         removeOnComplete: { count: 1000 },

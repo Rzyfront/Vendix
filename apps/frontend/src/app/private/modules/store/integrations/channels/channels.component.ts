@@ -14,6 +14,7 @@ import type {
   StickyHeaderActionButton,
 } from '../../../../../shared/components';
 import { ChannelsService } from './channels.service';
+import { MessagingChannelCardsComponent } from './messaging-channels/messaging-channel-cards.component';
 import { MetaReadiness, WhatsappChannel } from './channels.interface';
 
 declare global {
@@ -40,6 +41,7 @@ interface EmbeddedSignupResult {
     ButtonComponent,
     CardComponent,
     IconComponent,
+    MessagingChannelCardsComponent,
     StickyHeaderComponent,
   ],
   template: `
@@ -236,6 +238,8 @@ interface EmbeddedSignupResult {
             }
           </div>
         </app-card>
+
+        <app-messaging-channel-cards></app-messaging-channel-cards>
       </div>
     </section>
   `,
@@ -276,12 +280,14 @@ export class ChannelsComponent {
     const channel = this.channel();
     if (channel?.connected) return 'Conectado';
     if (channel?.status === 'error') return 'Error';
+    if (this.readiness()?.status === 'pending_approval') return 'Pendiente';
     return 'No conectado';
   });
 
   protected readonly channelBadgeVariant = computed<BadgeVariant>(() => {
     if (this.channel()?.connected) return 'success';
     if (this.channel()?.status === 'error') return 'error';
+    if (this.readiness()?.status === 'pending_approval') return 'warning';
     return 'neutral';
   });
 

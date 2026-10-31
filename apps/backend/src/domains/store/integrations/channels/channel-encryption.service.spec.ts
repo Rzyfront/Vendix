@@ -16,4 +16,18 @@ describe('ChannelEncryptionService', () => {
     expect(service.isEncrypted(encrypted)).toBe(true);
     expect(service.decrypt(encrypted)).toBe('meta-token');
   });
+
+  it('refuses to start in production without SOCIAL_CHANNEL_ENCRYPTION_KEY', () => {
+    const config = (env: Record<string, string>) =>
+      ({ get: (key: string) => env[key] }) as ConfigService;
+
+    expect(
+      () =>
+        new ChannelEncryptionService(config({ NODE_ENV: 'production' })),
+    ).toThrow('SOCIAL_CHANNEL_ENCRYPTION_KEY is required in production');
+    expect(
+      new ChannelEncryptionService(config({ NODE_ENV: 'development' }))
+        .isEnabled,
+    ).toBe(false);
+  });
 });

@@ -569,7 +569,41 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.ReviewsComponent,
               ),
           },
-          // CRM Landing (QUI-719)
+          // CRM inbox (PLAN-CRM §7); the API is gated by store:crm_inbox:read.
+          {
+            path: 'inbox',
+            loadComponent: () =>
+              import('../../private/modules/store/customers/crm/inbox/inbox.component').then(
+                (c) => c.InboxComponent,
+              ),
+          },
+          // CRM pipeline and tasks (PLAN-CRM §7); APIs gated by
+          // store:crm_pipeline:read and store:crm_tasks:manage.
+          {
+            path: 'pipeline',
+            loadComponent: () =>
+              import('../../private/modules/store/customers/crm/pipeline/pipeline.component').then(
+                (c) => c.PipelineComponent,
+              ),
+          },
+          {
+            path: 'tasks',
+            loadComponent: () =>
+              import('../../private/modules/store/customers/crm/tasks/tasks.component').then(
+                (c) => c.TasksComponent,
+              ),
+          },
+          // CRM segments and campaigns (PLAN-CRM §4.5, §4.7); the APIs are
+          // gated by store:customers:read, store:crm_segments:manage and
+          // store:crm_campaigns:send.
+          {
+            path: 'segments',
+            loadComponent: () =>
+              import('../../private/modules/store/customers/crm/segments/segments.component').then(
+                (c) => c.SegmentsComponent,
+              ),
+          },
+          // Landing de captación (QUI-719; módulo interno `crm`)
           {
             path: 'crm',
             loadChildren: () =>
