@@ -208,6 +208,7 @@ export class SessionsService {
 
     return this.prisma.cash_register_sessions.findFirst({
       where,
+      orderBy: [{ opened_at: 'desc' }, { id: 'desc' }],
       include: {
         register: true,
         opened_by_user: {
@@ -281,6 +282,21 @@ export class SessionsService {
     };
   }
 
+  /** Traduce un P2002 de los índices únicos parciales de sesión abierta. */
+  private translateOpenSessionConflict(error: unknown): unknown {
+    const e = error as { code?: string; meta?: unknown };
+    if (e?.code !== 'P2002') return error;
+    // `meta.target` trae el nombre del índice (o campos, según el adaptador).
+    const text = JSON.stringify(e.meta ?? {});
+    if (text.includes('cash_register_sessions_one_open_per_user')) {
+      return new BadRequestException('Ya tienes una sesión abierta en otra caja');
+    }
+    if (text.includes('cash_register_sessions_one_open_per_register')) {
+      return new BadRequestException('Esta caja ya tiene una sesión abierta');
+    }
+    return error;
+  }
+
   async openSession(dto: OpenSessionDto) {
     const context = RequestContextService.getContext()!;
 
@@ -292,34 +308,30 @@ export class SessionsService {
       throw new NotFoundException('Caja registradora no encontrada o inactiva');
     }
 
-    // Validate no open session on this register
-    const existing_session = await this.prisma.cash_register_sessions.findFirst(
-      {
-        where: {
-          cash_register_id: dto.cash_register_id,
-          status: 'open',
-        },
-      },
-    );
-    if (existing_session) {
-      throw new BadRequestException('Esta caja ya tiene una sesión abierta');
-    }
-
-    // Check if user already has an open session (configurable)
-    const user_session = await this.prisma.cash_register_sessions.findFirst({
-      where: {
-        opened_by: context.user_id,
-        status: 'open',
-      },
-    });
-    if (user_session) {
-      throw new BadRequestException(
-        'Ya tienes una sesión abierta en otra caja',
-      );
-    }
-
-    // Create session + opening_balance movement in transaction
+    // Create session + opening_balance movement in transaction. Las validaciones
+    // viven dentro de la tx; los índices únicos parciales (por caja y por usuario)
+    // son la garantía final ante aperturas concurrentes.
     const session = await this.prisma.$transaction(async (tx: any) => {
+      const existing_session = await tx.cash_register_sessions.findFirst({
+        where: { cash_register_id: dto.cash_register_id, status: 'open' },
+      });
+      if (existing_session) {
+        throw new BadRequestException('Esta caja ya tiene una sesión abierta');
+      }
+
+      // Una sola sesión abierta o suspendida por usuario
+      const user_session = await tx.cash_register_sessions.findFirst({
+        where: {
+          opened_by: context.user_id,
+          status: { in: ['open', 'suspended'] },
+        },
+      });
+      if (user_session) {
+        throw new BadRequestException(
+          'Ya tienes una sesión abierta en otra caja',
+        );
+      }
+
       const created_session = await tx.cash_register_sessions.create({
         data: {
           cash_register_id: dto.cash_register_id,
@@ -350,6 +362,8 @@ export class SessionsService {
       });
 
       return created_session;
+    }).catch((error: unknown) => {
+      throw this.translateOpenSessionConflict(error);
     });
 
     // Emit accounting event
