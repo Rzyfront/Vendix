@@ -2040,6 +2040,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Refund resolution conflicts with its current state or payout reference',
   },
+  REFUND_ALLOCATION_MISMATCH: {
+    code: 'REFUND_ALLOCATION_MISMATCH',
+    httpStatus: 409,
+    devMessage:
+      'Refund amount cannot be fully allocated across the order payments (remaining capacity is lower than the refund)',
+  },
   REF_TAX_BREAKDOWN_MISSING_001: {
     code: 'REF_TAX_BREAKDOWN_MISSING_001',
     httpStatus: 409,
