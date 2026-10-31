@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
-import { SocialChannelEncryptionService } from '../../store/social-sales/social-channel-encryption.service';
+import { ChannelEncryptionService } from '../../store/integrations/channels/channel-encryption.service';
 import { UpdateMetaWhatsappPlatformConfigDto } from './dto/update-meta-whatsapp-platform-config.dto';
 
 const PLATFORM_SETTINGS_KEY = 'social_sales:meta_whatsapp';
@@ -21,7 +21,7 @@ interface StoredMetaWhatsappConfig {
 export class MetaWhatsappPlatformConfigService {
   constructor(
     private readonly prisma: GlobalPrismaService,
-    private readonly encryption: SocialChannelEncryptionService,
+    private readonly encryption: ChannelEncryptionService,
   ) {}
 
   async getMaskedConfig() {
