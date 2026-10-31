@@ -146,17 +146,62 @@ export interface CalculateRefundParams {
    * counting it again would double-book the ceiling. Defaults to false.
    */
   include_pending_states?: boolean;
+  /**
+   * B19: por defecto el techo es `min(grand_total, Σ pagos recibidos) − ya
+   * reembolsado`. La cancelación calcula su tramo desde el propio pago, así
+   * que desactiva el tope por pagos (los pagos pueden estar ya anulados).
+   */
+  skip_paid_cap?: boolean;
 }
 
 @Injectable()
 export class RefundCalculationService {
   constructor(private readonly prisma: StorePrismaService) {}
 
+  /**
+   * B19/H1 — lo cobrado = pagos vivos de la orden + abonos de su CxC. El abono
+   * de una venta a crédito solo crea `ar_payments` (no fila en `payments`);
+   * si el abono apunta a un pago ya contado, no se suma dos veces.
+   */
+  private async paidTotal(
+    order: {
+      id: number;
+      store_id: number;
+      payments?: { id: number; amount: Prisma.Decimal | number }[];
+    },
+    client: Prisma.TransactionClient | StorePrismaService,
+  ): Promise<number> {
+    const payments = order.payments ?? [];
+    const counted_payment_ids = new Set(payments.map((p) => p.id));
+    let paid = payments.reduce(
+      (sum, p) => sum.plus(p.amount),
+      new Prisma.Decimal(0),
+    );
+
+    const receivables = await client.accounts_receivable.findMany({
+      where: {
+        store_id: order.store_id,
+        source_type: { in: ['credit_sale', 'order'] },
+        source_id: order.id,
+      },
+      select: { ar_payments: { select: { payment_id: true, amount: true } } },
+    });
+    for (const ar of receivables) {
+      for (const abono of ar.ar_payments) {
+        if (abono.payment_id != null && counted_payment_ids.has(abono.payment_id)) {
+          continue;
+        }
+        paid = paid.plus(abono.amount);
+      }
+    }
+    return paid.toNumber();
+  }
+
   async calculate(
     params: CalculateRefundParams,
     client: Prisma.TransactionClient | StorePrismaService = this.prisma,
   ): Promise<RefundCalculationResult> {
-    const { order_id, items, include_shipping, include_pending_states } = params;
+    const { order_id, items, include_shipping, include_pending_states, skip_paid_cap } = params;
 
     // Load order with items, taxes, and previous refunds
     const order = await client.orders.findFirst({
@@ -181,6 +226,16 @@ export class RefundCalculationService {
               },
             },
           },
+        },
+        // B19: solo pagos que retuvieron dinero. `refunded` cuenta porque su
+        // devolución ya está dentro de `already_refunded`.
+        payments: {
+          where: {
+            state: {
+              in: ['succeeded', 'captured', 'partially_refunded', 'refunded'],
+            },
+          },
+          select: { id: true, amount: true },
         },
         refunds: {
           where: include_pending_states
@@ -222,7 +277,12 @@ export class RefundCalculationService {
     );
 
     const grand_total = Number(order.grand_total);
-    const max_refundable = grand_total - already_refunded;
+    // B19 — no se puede devolver más de lo que entró: en órdenes con saldo
+    // parcial o a crédito `grand_total` es mayor que lo cobrado.
+    const refund_base = skip_paid_cap
+      ? grand_total
+      : Math.min(grand_total, await this.paidTotal(order, client));
+    const max_refundable = refund_base - already_refunded;
     const subtotal_amount = Number(order.subtotal_amount) || 0;
     const discount_amount = Number(order.discount_amount) || 0;
     const discount_ratio =
@@ -444,7 +504,8 @@ export class RefundCalculationService {
     kindLabel = 'Cancellation refund',
   ) {
     const ceiling = await this.calculate(
-      { order_id: orderId, items: [], include_shipping: false }, client,
+      { order_id: orderId, items: [], include_shipping: false, skip_paid_cap: true },
+      client,
     );
     const amount = new Prisma.Decimal(paidAmount);
     if (amount.lessThanOrEqualTo(0) || amount.greaterThan(ceiling.max_refundable)) {

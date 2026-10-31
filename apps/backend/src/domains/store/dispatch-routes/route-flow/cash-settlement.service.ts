@@ -3,6 +3,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
+import { shouldRecordCashMovement } from '../../cash-registers/movements/cash-movement-policy.util';
+import type { Prisma } from '@prisma/client';
 
 export interface PaymentReceivedInput {
   store_id: number;
@@ -145,9 +147,10 @@ export class CashSettlementService {
   }
 
   /** Sesiones de caja abiertas de la tienda (picker del cierre de planilla). */
-  async listOpenSessions(store_id: number) {
+  /** B20: con `opened_by`, solo las sesiones de quien liquida (el cierre rechaza las ajenas). */
+  async listOpenSessions(store_id: number, opened_by?: number) {
     const rows = await this.prisma.cash_register_sessions.findMany({
-      where: { store_id, status: 'open' },
+      where: { store_id, status: 'open', ...(opened_by != null ? { opened_by } : {}) },
       orderBy: { opened_at: 'desc' },
       select: {
         id: true,
@@ -177,7 +180,14 @@ export class CashSettlementService {
    * `sale` por método de pago, dentro de la tx de cierre (la sesión ya viene
    * bloqueada FOR UPDATE por el llamador).
    *
-   * - Solo paradas delivered/partial, no prepagas, con collected+anticipo > 0.
+   * - Solo paradas delivered/partial, no prepagas, con `collected_amount` > 0.
+   *   El anticipo NO se suma: es dinero que no recibió el conductor en ruta (B20).
+   * - El método es el real de la parada; si falta con cobro > 0 se trata como
+   *   `'cash'` SOLO aquí (A1/B20: es el comportamiento histórico de la UI, que
+   *   manda 'cash' por defecto, y no hay forma de corregir el método de una
+   *   parada; lanzar tumbaba el cierre de toda la planilla) y se loguea warn.
+   *   Los métodos que no mueven el cajón (wompi, wallet, contra entrega) se
+   *   omiten (B08).
    * - Excluye paradas con movimiento legado `dispatch_route:{id}:stop:{stopId}`
    *   (rutas en vuelo con código previo).
    * - Idempotente por `reference` (`dispatch_route:{id}:close:{method}`).
@@ -222,10 +232,17 @@ export class CashSettlementService {
     const byMethod = new Map<string, { amount: number; stops: number }>();
     for (const s of eligible) {
       if (legacySet.has(`dispatch_route:${input.route_id}:stop:${s.id}`)) continue;
-      const amount =
-        Number(s.collected_amount || 0) + Number(s.anticipo_amount || 0);
+      const amount = Number(s.collected_amount || 0);
       if (!(amount > 0)) continue;
-      const method = s.payment_method || 'cash';
+      let method = s.payment_method;
+      if (!method) {
+        // A1/B20: método nulo con cobro > 0 = 'cash' únicamente en el cierre de ruta.
+        this.logger.warn(
+          `Ruta #${input.route_id} parada #${s.id}: cobro ${amount} sin payment_method; se asume 'cash' en el cierre`,
+        );
+        method = 'cash';
+      }
+      if (!shouldRecordCashMovement(method)) continue;
       const cur = byMethod.get(method) ?? { amount: 0, stops: 0 };
       cur.amount += amount;
       cur.stops += 1;
@@ -257,7 +274,16 @@ export class CashSettlementService {
           payment_method: method,
           reference,
           notes: `Recaudo ruta ${input.route_number} (${agg.stops} paradas)`,
-        },
+          // B04/B20: origen del movimiento. El índice único parcial es por
+          // (tienda, source_type, source_id, tipo): una fila `sale` por método
+          // exige un source_type distinto por método (el efectivo, el que
+          // cuenta en el arqueo, queda como `dispatch_route`).
+          source_type:
+            method === 'cash'
+              ? 'dispatch_route'
+              : `dispatch_route_${method}`.slice(0, 40),
+          source_id: input.route_id,
+        } as Prisma.cash_register_movementsUncheckedCreateInput,
       });
       created.push({ id: movement.id, payment_method: method, amount, reference });
     }

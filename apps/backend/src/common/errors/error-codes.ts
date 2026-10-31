@@ -406,6 +406,28 @@ export const ErrorCodes = {
     devMessage: 'Payment does not belong to the requesting user',
   },
 
+  PAY_METHOD_MISCONFIGURED: {
+    code: 'PAY_METHOD_MISCONFIGURED',
+    httpStatus: 400,
+    devMessage:
+      'Payment method has no system_payment_method.type; it cannot be classified for cash register movements',
+  },
+
+  // B09/BL-2: venta POS a crédito con cuota inicial y caja habilitada sin medio
+  // de pago: sin él no se puede asentar el `sale` de la cuota en la caja.
+  PAY_CREDIT_INITIAL_METHOD_REQUIRED_001: {
+    code: 'PAY_CREDIT_INITIAL_METHOD_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'Elige el medio de pago de la cuota inicial',
+  },
+
+  PAY_REFUND_USE_ORDER_FLOW: {
+    code: 'PAY_REFUND_USE_ORDER_FLOW',
+    httpStatus: 409,
+    devMessage:
+      'Counter payments (cash, bank transfer, manual card) cannot be refunded directly; use POST /store/orders/:id/flow/refund so the cash register, ledger and refund cap are updated',
+  },
+
   // Multi-tender cash payments (pago multimétodo de contado)
   PAY_MULTI_TENDER_SUM_MISMATCH: {
     code: 'PAY_MULTI_TENDER_SUM_MISMATCH',
@@ -1218,6 +1240,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'Esta orden tiene productos ya enviados a cocina o con movimientos de inventario. Modifícalos desde el detalle de la orden (Modificar productos), que conserva su historial.',
+  },
+  ORD_EDIT_BELOW_PAID_001: {
+    code: 'ORD_EDIT_BELOW_PAID_001',
+    httpStatus: 409,
+    devMessage:
+      'El nuevo total de la orden queda por debajo de lo ya cobrado. Registra una devolución antes de reducir la orden.',
   },
   ORD_CANCEL_STOCK_COMMITTED_001: {
     code: 'ORD_CANCEL_STOCK_COMMITTED_001',
@@ -2032,6 +2060,12 @@ export const ErrorCodes = {
     code: 'REF_RESOLUTION_CONFLICT_001',
     httpStatus: 409,
     devMessage: 'Refund resolution conflicts with its current state or payout reference',
+  },
+  REFUND_ALLOCATION_MISMATCH: {
+    code: 'REFUND_ALLOCATION_MISMATCH',
+    httpStatus: 409,
+    devMessage:
+      'Refund amount cannot be fully allocated across the order payments (remaining capacity is lower than the refund)',
   },
   REF_TAX_BREAKDOWN_MISSING_001: {
     code: 'REF_TAX_BREAKDOWN_MISSING_001',
@@ -7381,6 +7415,25 @@ export const ErrorCodes = {
     code: 'CASH_SESSION_PENDING_006',
     httpStatus: 409,
     devMessage: 'The cash session is already closed',
+  },
+
+  // Caja registradora — movimientos manuales (B13).
+  CASH_MOVEMENT_FOREIGN_SESSION_001: {
+    code: 'CASH_MOVEMENT_FOREIGN_SESSION_001',
+    httpStatus: 403,
+    devMessage:
+      'Manual cash movements can only be recorded on your own cash session',
+  },
+  CASH_MOVEMENT_NOTES_REQUIRED_001: {
+    code: 'CASH_MOVEMENT_NOTES_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'A cash_out movement requires notes explaining the withdrawal',
+  },
+  CASH_MOVEMENT_AMOUNT_INVALID_001: {
+    code: 'CASH_MOVEMENT_AMOUNT_INVALID_001',
+    httpStatus: 400,
+    devMessage:
+      'Manual cash movement amount must be positive, up to 2 decimals and within the allowed maximum',
   },
 
   // Caja registradora — cobro sin sesión del operador

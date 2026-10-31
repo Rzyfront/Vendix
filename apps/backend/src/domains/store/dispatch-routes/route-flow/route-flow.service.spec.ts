@@ -959,8 +959,8 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       expect(prismaMock.dispatch_routes.update).not.toHaveBeenCalled();
     });
 
-    it('cierre válido: movimientos con responsable = opened_by y persiste sesión/responsable', async () => {
-      prismaMock.lockedSessionRows = [{ id: 77, opened_by: 33 }];
+    it('cierre válido: movimientos con responsable = opened_by (el que liquida) y persiste sesión/responsable', async () => {
+      prismaMock.lockedSessionRows = [{ id: 77, opened_by: USER_ID }];
       await service.close(ROUTE_ID, {
         declared_cash: 200,
         cash_register_session_id: 77,
@@ -971,7 +971,7 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
           store_id: STORE_ID,
           route_id: ROUTE_ID,
           session_id: 77,
-          responsible_user_id: 33,
+          responsible_user_id: USER_ID,
         }),
       );
       expect(prismaMock.dispatch_routes.update).toHaveBeenCalledWith(
@@ -979,11 +979,22 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
           data: expect.objectContaining({
             status: 'closed',
             settlement_cash_session_id: 77,
-            settlement_cash_user_id: 33,
+            settlement_cash_user_id: USER_ID,
             cash_settled_at: expect.any(Date),
           }),
         }),
       );
+    });
+
+    it('B20: la sesión de otro usuario se rechaza con CASH_SESSION_REQUIRED_001 y no asienta nada', async () => {
+      prismaMock.lockedSessionRows = [{ id: 77, opened_by: USER_ID + 1 }];
+      const err: any = await service
+        .close(ROUTE_ID, { declared_cash: 200, cash_register_session_id: 77 } as any)
+        .catch((e) => e);
+      expect(err.errorCode).toBe('CASH_SESSION_REQUIRED_001');
+      expect(err.getStatus()).toBe(409);
+      expect(cashSettlementMock.recordRouteCloseMovements).not.toHaveBeenCalled();
+      expect(prismaMock.dispatch_routes.update).not.toHaveBeenCalled();
     });
 
     it('sin caja requerida y sin sesión: cierra sin movimientos', async () => {

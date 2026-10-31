@@ -80,6 +80,7 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
       // mock resuelve el callback con el MISMO `prismaMock` para que
       // `tx.payments`/`tx.orders` sigan siendo los mocks que este spec ya lee.
       $transaction: jest.fn(async (callback: any) => callback(prismaMock)),
+      cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) },
       store_payment_methods: {
         findFirst: jest
           .fn()

@@ -33,7 +33,9 @@ import { SessionsService } from '../../../cash-registers/sessions/sessions.servi
 import {
   MovementsService,
   ORDER_CANCELLED_MOVEMENT_REFERENCE,
+  actorFallbackNote,
   type RefundCashMovementOutcome,
+  type SaleActor,
 } from '../../../cash-registers/movements/movements.service';
 import { SerialNumberEnforcementService } from '../../../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../../inventory/serial-numbers/inventory-serial-numbers.service';
@@ -361,8 +363,10 @@ export class RefundFlowService {
     if (legs.length === 0) {
       return [];
     }
+    // B19: el tramo de cancelación sale del propio pago (que puede estar ya
+    // anulado en esta tx): el tope por pagos no aplica a este carril.
     const ceiling = await this.calculationService.calculate(
-      { order_id: order.id, items: [], include_shipping: false }, tx,
+      { order_id: order.id, items: [], include_shipping: false, skip_paid_cap: true }, tx,
     );
     const plannedTotal = legs.reduce(
       (acc, leg) => acc.plus(new Prisma.Decimal(leg.amount as any)),
@@ -904,6 +908,10 @@ export class RefundFlowService {
       reclassJobs: [],
     };
 
+    // B25 — tramos (pago + método + monto) calculados DENTRO de la tx: si el monto
+    // no se puede asignar a los pagos, el refund se aborta antes del commit.
+    let movementTramos: { payment_id: number | null; amount: number; method: string }[] = [];
+
     // Execute everything in a transaction
     return this.prisma
       .$transaction(async (tx) => {
@@ -1270,6 +1278,27 @@ export class RefundFlowService {
           },
         });
 
+        // B25 — reparto del monto entre los pagos (lanza REFUND_ALLOCATION_MISMATCH
+        // si queda monto sin asignar: rollback del refund completo).
+        movementTramos = await this.buildRefundMovementTramos(
+          {
+            refundMethod: dto.refund_method,
+            effectiveChannel,
+            channelPayments: channelPayments.map((p) => ({
+              id: p.id,
+              type: paymentTypeOf(p),
+              amount: Number((p as { amount?: unknown }).amount ?? 0),
+            })),
+            linkedPaymentId: completedRefund.payment_id ?? null,
+            typeByPaymentId: new Map(
+              (order.payments ?? []).map((p) => [p.id, paymentTypeOf(p)]),
+            ),
+            total: Number(calculation.total_refund),
+            refundId: completedRefund.id,
+          },
+          tx,
+        );
+
         return completedRefund;
       })
       .then(async (completedRefund) => {
@@ -1525,44 +1554,54 @@ export class RefundFlowService {
         // método real de su pago. Solo con el refund ya completado (un
         // pendiente de pasarela aún no movió dinero).
         let cash_movement: RefundCashMovementNotice | undefined;
-        if (userId && refundCompleted) {
-          const tramos = await this.buildRefundMovementTramos({
-            refundMethod: dto.refund_method,
-            effectiveChannel,
-            channelPayments: channelPayments.map((p) => ({
-              id: p.id,
-              type: paymentTypeOf(p),
-              amount: Number((p as { amount?: unknown }).amount ?? 0),
-            })),
-            linkedPaymentId: completedRefund.payment_id ?? null,
-            typeByPaymentId: new Map(
-              (order.payments ?? []).map((p) => [p.id, paymentTypeOf(p)]),
-            ),
-            total: Number(calculation.total_refund),
-            refundId: completedRefund.id,
-          });
+        if (refundCompleted) {
+          const tramos = movementTramos;
+          // B18 — sin usuario (job, webhook) el movimiento no se omite: se
+          // encola a nombre del actor del `sale` del pago (o del creador de la
+          // orden). Sin ninguno, se encola igual para revisión (NO_ACTOR):
+          // nunca queda fuera de la caja y de la cola a la vez.
+          const saleActor =
+            userId == null
+              ? await this.resolveSaleActor(
+                  order.store_id,
+                  orderId,
+                  tramos.map((t) => t.payment_id),
+                )
+              : null;
+          const movementUserId = userId ?? saleActor?.user_id ?? null;
+          const actor_note = actorFallbackNote(saleActor);
           const cashTramos = tramos.filter((t) => t.method === 'cash');
-          if (cashTramos.length > 0) {
-            // Paso 4: entrega durable y awaited — la respuesta lleva el aviso
-            // explícito (`recorded` / `pending` + fila del outbox). El outbox
-            // tiene una fila por refund: los tramos en efectivo se suman.
-            cash_movement = await this.recordRefundCashRegisterMovement({
+          if (movementUserId == null && cashTramos.length > 0) {
+            this.logger.error(
+              `Refund #${completedRefund.id} (order #${orderId}): no acting user and no sale actor — cash movement queued for manual review`,
+            );
+          }
+          // B25 — un movimiento por pago en efectivo, cada uno con su
+          // `payment_id`. Paso 4: entrega durable y awaited; el aviso de la
+          // respuesta resume los tramos (el primero no registrado manda).
+          for (const tramo of cashTramos) {
+            const notice = await this.recordRefundCashRegisterMovement({
               organization_id: order.stores?.organization_id,
               store_id: order.store_id,
-              user_id: userId,
+              user_id: movementUserId,
               refund_id: completedRefund.id,
               order_id: orderId,
-              payment_id: cashTramos[0].payment_id,
-              amount:
-                cashTramos.reduce((acc, t) => acc + Math.round(t.amount * 100), 0) /
-                100,
+              payment_id: tramo.payment_id,
+              amount: tramo.amount,
               channel: 'cash',
+              force_outbox: userId == null,
+              actor_note,
             });
+            if (cash_movement === undefined || cash_movement.status === 'recorded') {
+              cash_movement = notice;
+            }
           }
-          await this.recordNonCashRefundMovements({
+          // Non-cash tramos never touch the drawer total; without an actor
+          // there is no session to note them in.
+          if (movementUserId != null) await this.recordNonCashRefundMovements({
             organization_id: order.stores?.organization_id ?? null,
             store_id: order.store_id,
-            user_id: userId,
+            user_id: movementUserId,
             refund_id: completedRefund.id,
             order_id: orderId,
             tramos: tramos.filter((t) => t.method !== 'cash'),
@@ -2111,6 +2150,31 @@ export class RefundFlowService {
   }
 
   /**
+   * B18 — actor al que se atribuye el movimiento de caja de un refund sin
+   * usuario (ver `MovementsService.resolveSaleActor`: sin scope, filtrado por
+   * tienda). Un fallo de lectura no tumba el refund ya committed: `null` y el
+   * movimiento se encola para revisión.
+   */
+  private async resolveSaleActor(
+    storeId: number,
+    orderId: number,
+    paymentIds: (number | null)[],
+  ): Promise<SaleActor | null> {
+    try {
+      return await this.movementsService.resolveSaleActor({
+        store_id: storeId,
+        order_id: orderId,
+        payment_ids: paymentIds,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Order #${orderId}: sale actor lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Tramos (pago + método real + monto) en los que se asienta un refund
    * completado. Un solo pago (o un método explícito distinto de
    * `original_payment`): un tramo con el monto íntegro. Varios pagos con
@@ -2125,7 +2189,9 @@ export class RefundFlowService {
     typeByPaymentId: Map<number, string | null>;
     total: number;
     refundId: number;
-  }): Promise<{ payment_id: number | null; amount: number; method: string }[]> {
+  },
+  db?: Prisma.TransactionClient,
+  ): Promise<{ payment_id: number | null; amount: number; method: string }[]> {
     const methodFor = (channel: EffectiveRefundChannel, type: string | null) =>
       channel === 'cash' ? 'cash' : resolveNonCashMovementMethod(type, channel);
 
@@ -2135,7 +2201,7 @@ export class RefundFlowService {
     ) {
       let alreadyRefunded = new Map<number, number>();
       try {
-        const rows = await this.prisma.cash_register_movements.groupBy({
+        const rows = await (db ?? this.prisma).cash_register_movements.groupBy({
           by: ['payment_id'],
           where: {
             type: 'refund',
@@ -2162,8 +2228,13 @@ export class RefundFlowService {
         })),
       );
       if (unallocated > 0) {
-        this.logger.warn(
-          `Refund #${input.refundId}: ${unallocated} could not be allocated to any payment (capacity exhausted) — left out of the cash ledger.`,
+        // B25 — antes solo se logueaba y ese monto quedaba fuera del libro de caja.
+        this.logger.error(
+          `Refund #${input.refundId}: ${unallocated} could not be allocated to any payment (capacity exhausted) — aborting before commit.`,
+        );
+        throw new VendixHttpException(
+          ErrorCodes.REFUND_ALLOCATION_MISMATCH,
+          `Refund #${input.refundId}: ${unallocated} of ${input.total} cannot be allocated to the order payments`,
         );
       }
       return tramos.map((t) => ({
@@ -2285,12 +2356,17 @@ export class RefundFlowService {
   private async recordRefundCashRegisterMovement(input: {
     organization_id: number | null | undefined;
     store_id: number;
-    user_id: number;
+    /** `null` (B18): no actor at all; the durable queues it for review. */
+    user_id: number | null;
     refund_id: number;
     order_id: number;
     payment_id: number | null;
     amount: number | Prisma.Decimal;
     channel: string;
+    /** B18: sin usuario real el movimiento va siempre al outbox. */
+    force_outbox?: boolean;
+    /** R3 #5: constancia del actor de respaldo (creador de la orden). */
+    actor_note?: string;
   }): Promise<RefundCashMovementNotice> {
     try {
       const settings = await this.settingsService.getSettings();
@@ -2322,6 +2398,8 @@ export class RefundFlowService {
         payment_id: input.payment_id,
         amount: Number(input.amount),
         channel: input.channel,
+        force_outbox: input.force_outbox,
+        actor_note: input.actor_note,
       });
     } catch (error) {
       // Non-critical: don't fail the refund if movement recording fails —

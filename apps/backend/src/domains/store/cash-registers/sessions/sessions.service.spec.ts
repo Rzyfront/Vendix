@@ -138,6 +138,104 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
     );
   });
 
+  describe('openSession / getActiveSession — una sesión por usuario (B14)', () => {
+    const p2002 = (target: string) =>
+      Object.assign(new Error('Unique constraint failed'), {
+        code: 'P2002',
+        meta: { target },
+      });
+
+    beforeEach(() => {
+      prismaMock.cash_registers.findFirst.mockResolvedValue({ id: 3, is_active: true });
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue(null);
+    });
+
+    it('valida la sesión del usuario DENTRO de la transacción (open o suspended)', async () => {
+      const order: string[] = [];
+      prismaMock.$transaction.mockImplementation((cb: any) => {
+        order.push('tx:start');
+        return cb(prismaMock).finally(() => order.push('tx:end'));
+      });
+      prismaMock.cash_register_sessions.findFirst.mockImplementation(async () => {
+        order.push('findFirst');
+        return null;
+      });
+
+      await service.openSession({ cash_register_id: 3, opening_amount: 0 } as any);
+
+      expect(order[0]).toBe('tx:start');
+      expect(order.filter((e) => e === 'findFirst')).toHaveLength(2);
+      expect(prismaMock.cash_register_sessions.findFirst).toHaveBeenCalledWith({
+        where: { opened_by: USER_ID, status: { in: ['open', 'suspended'] } },
+      });
+    });
+
+    it('rechaza con el mensaje "ya abierta" cuando ya tiene una sesión', async () => {
+      prismaMock.cash_register_sessions.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 99 });
+      await expect(
+        service.openSession({ cash_register_id: 3, opening_amount: 0 } as any),
+      ).rejects.toThrow('Ya tienes una sesión abierta en otra caja');
+      expect(prismaMock.cash_register_sessions.create).not.toHaveBeenCalled();
+    });
+
+    it('apertura concurrente: P2002 del índice por usuario se traduce al mismo error', async () => {
+      prismaMock.cash_register_sessions.create.mockRejectedValueOnce(
+        p2002('cash_register_sessions_one_open_per_user'),
+      );
+      await expect(
+        service.openSession({ cash_register_id: 3, opening_amount: 0 } as any),
+      ).rejects.toThrow('Ya tienes una sesión abierta en otra caja');
+    });
+
+    it('apertura concurrente: P2002 del índice por caja se traduce al error de caja', async () => {
+      prismaMock.cash_register_sessions.create.mockRejectedValueOnce(
+        p2002('cash_register_sessions_one_open_per_register'),
+      );
+      await expect(
+        service.openSession({ cash_register_id: 3, opening_amount: 0 } as any),
+      ).rejects.toThrow('Esta caja ya tiene una sesión abierta');
+    });
+
+    it('un error distinto de P2002 se propaga sin traducir', async () => {
+      prismaMock.cash_register_sessions.create.mockRejectedValueOnce(new Error('boom'));
+      await expect(
+        service.openSession({ cash_register_id: 3, opening_amount: 0 } as any),
+      ).rejects.toThrow('boom');
+    });
+
+    it('getActiveSession ordena por opened_at desc, id desc', async () => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue({ id: 1 });
+      await service.getActiveSession(USER_ID);
+      expect(prismaMock.cash_register_sessions.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: 'open', opened_by: USER_ID }),
+          orderBy: [{ opened_at: 'desc' }, { id: 'desc' }],
+        }),
+      );
+    });
+  });
+
+  describe('suspendSession — B27', () => {
+    it('busca la sesión acotada por store_id', async () => {
+      prismaMock.cash_register_sessions.findFirst
+        .mockResolvedValueOnce(OPEN_SESSION)
+        .mockResolvedValueOnce({ ...OPEN_SESSION, status: 'suspended' });
+
+      await service.suspendSession(SESSION_ID);
+
+      expect(prismaMock.cash_register_sessions.findFirst).toHaveBeenNthCalledWith(
+        1,
+        { where: { id: SESSION_ID, store_id: STORE_ID } },
+      );
+      expect(prismaMock.cash_register_sessions.findFirst).toHaveBeenNthCalledWith(
+        2,
+        { where: { id: SESSION_ID, store_id: STORE_ID } },
+      );
+    });
+  });
+
   describe('getPendingOrders — QUI-920', () => {
     const updated_at = new Date('2026-10-06T14:30:00.000Z');
 
@@ -765,6 +863,27 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(summary.sales_total).toBe(80000);
       expect(summary.sales_count).toBe(2);
       expect(summary.non_cash_total).toBe(30000);
+    });
+
+    it('suma en Decimal exacto, sin error de punto flotante (B21)', async () => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue({
+        ...OPEN_SESSION,
+        opening_amount: 0,
+      });
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        { type: 'sale', amount: 0.1, payment_method: 'cash' },
+        { type: 'sale', amount: 0.2, payment_method: 'cash' },
+        { type: 'cash_in', amount: 0.1, payment_method: 'cash' },
+        { type: 'cash_in', amount: 0.2, payment_method: 'cash' },
+      ]);
+
+      const summary = await service.getCashSummary(SESSION_ID);
+
+      expect(summary.cash_sales).toBe(0.3);
+      expect(summary.sales_total).toBe(0.3);
+      expect(summary.cash_in).toBe(0.3);
+      expect(summary.expected_cash_total).toBe(0.6);
+      expect(summary.sales_by_method[0].total).toBe(0.3);
     });
 
     it('ordena sales_by_method con cash primero y el resto alfabético', async () => {

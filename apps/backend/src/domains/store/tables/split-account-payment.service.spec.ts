@@ -13,7 +13,7 @@ describe('SplitAccountPaymentService', () => {
   let settings: any;
   let sessions: any;
   let tableSessions: any;
-  let emitAfterCommit: jest.Mock;
+  let movementsService: any;
   let redis: any;
   let source: any;
   let accounts: any[];
@@ -217,19 +217,29 @@ describe('SplitAccountPaymentService', () => {
       getActiveSession: jest.fn(async () => null),
       assertSessionForSales: jest.fn(async () => undefined),
     };
-    emitAfterCommit = jest.fn(() => {
-      expect(transactionOpen).toBe(false);
-    });
+    // The real service creates the `sale` through `MovementsService` inside the
+    // caller's transaction; the fake keeps that contract observable.
+    movementsService = {
+      recordSaleMovement: jest.fn(async (sessionId, data, tx) => {
+        expect(transactionOpen).toBe(true);
+        expect(tx).toBe(db);
+        return tx.cash_register_movements.create({
+          data: { session_id: sessionId, type: 'sale', ...data },
+        });
+      }),
+    };
+    // Projection runs OUTSIDE the money transaction (it opens its own and
+    // emits its own SSE), so it must never receive the money tx.
     tableSessions = {
       projectOrderPaymentToTableSession: jest.fn(
         async (orderId, _paymentId, tx) => {
-          expect(transactionOpen).toBe(true);
-          expect(tx).toBe(db);
+          expect(transactionOpen).toBe(false);
+          expect(tx).toBeUndefined();
           expect(orderId).toBe(100);
-          const session = await tx.table_sessions.findFirst({
+          const session = await db.table_sessions.findFirst({
             where: { order_id: orderId, store_id: 10, closed_at: null },
           });
-          return session ? { sessionId: session.id, emitAfterCommit } : null;
+          return session ? { sessionId: session.id } : null;
         },
       ),
     };
@@ -250,6 +260,7 @@ describe('SplitAccountPaymentService', () => {
       tableSessions,
       redis,
       orderFlow,
+      movementsService,
     );
   });
   afterEach(() => jest.restoreAllMocks());
@@ -594,22 +605,20 @@ describe('SplitAccountPaymentService', () => {
     );
   });
 
-  it('reconciliation locks the original cash session before the source order', async () => {
+  it('reconciliation only locks the source order and never creates a second movement', async () => {
     settings.getSettings.mockResolvedValue({
       pos: { cash_register: { enabled: true, require_session_for_sales: true } },
     });
     sessions.getActiveSession.mockResolvedValue({ id: 50 });
     events.emitAsync.mockRejectedValueOnce(new Error('retry reconciliation'));
     await service.pay(100, 11, makeRequest());
+    expect(movements).toHaveLength(1);
 
     db.$queryRaw.mockClear();
     await service.reconcilePayment(2);
 
-    expect(db.$queryRaw).toHaveBeenCalledTimes(2);
-    expect(db.$queryRaw.mock.calls[0][0].join('')).toContain(
-      'cash_register_sessions',
-    );
-    expect(db.$queryRaw.mock.calls[1][0].join('')).toContain('FROM orders');
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(db.$queryRaw.mock.calls[0][0].join('')).toContain('FROM orders');
     expect(movements).toHaveLength(1);
   });
 
@@ -636,9 +645,7 @@ describe('SplitAccountPaymentService', () => {
     expect(tableSessions.projectOrderPaymentToTableSession).toHaveBeenCalledWith(
       100,
       3,
-      db,
     );
-    expect(emitAfterCommit).toHaveBeenCalledTimes(1);
     expect(orderFlow.settleFinancialSplitSource).toHaveBeenCalledWith(100, 15);
     expect(String(source.remaining_balance)).toBe('0');
     expect(source.state).toBe('processing');
@@ -667,23 +674,30 @@ describe('SplitAccountPaymentService', () => {
     expect(tableSessions.projectOrderPaymentToTableSession).toHaveBeenCalledWith(
       100,
       3,
-      db,
     );
-    expect(emitAfterCommit).toHaveBeenCalledTimes(1);
   });
 
-  it('no emite una sesión pagada si la proyección revierte', async () => {
+  it('S01.3: si la proyección a mesa falla, el movimiento persiste, la orden se intenta promover y la respuesta avisa effects_pending', async () => {
+    settings.getSettings.mockResolvedValue({
+      pos: { cash_register: { enabled: true } },
+    });
+    sessions.getActiveSession.mockResolvedValue({ id: 50 });
     await service.pay(100, 11, makeRequest());
     tableSessions.projectOrderPaymentToTableSession.mockRejectedValueOnce(
       new VendixHttpException(
         ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001,
       ),
     );
-    await expect(
-      service.pay(100, 12, makeRequest({ idempotency_key: 'payment-key-002' })),
-    ).resolves.toBeDefined();
-    expect(emitAfterCommit).not.toHaveBeenCalled();
+    const result: any = await service.pay(
+      100,
+      12,
+      makeRequest({ idempotency_key: 'payment-key-002' }),
+    );
+    expect(result.effects_pending).toBe(true);
     expect(payments[2].state).toBe('succeeded');
+    expect(payments[2].financial_effects_recorded_at).toBeNull();
+    expect(movements.filter((m) => m.payment_id === 3)).toHaveLength(1);
+    expect(orderFlow.settleFinancialSplitSource).toHaveBeenCalledWith(100, 15);
   });
 
   it('retries physical settlement failure without charging or duplicating the payment', async () => {
@@ -766,6 +780,184 @@ describe('SplitAccountPaymentService', () => {
       expect(payments[1].financial_effects_recorded_at).toBeNull();
       expect(events.emitAsync).not.toHaveBeenCalled();
       expect(redis.eval).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('B01/B28/S01.5: movimiento en la tx del pago y efectos fuera', () => {
+    const cashEnabled = () =>
+      settings.getSettings.mockResolvedValue({
+        pos: { cash_register: { enabled: true } },
+      });
+    const pendingCash = (frozenSession: number | null = 50) => {
+      payments.push({
+        id: 2,
+        order_id: 100,
+        financial_account_id: 11,
+        store_payment_method_id: 1,
+        amount: '100.00',
+        currency: 'COP',
+        state: 'pending',
+        gateway_response: {
+          financial_request: {
+            created_by_user_id: 15,
+            authorized_store_id: 10,
+            cash_session_id: frozenSession,
+          },
+        },
+        financial_effects_recorded_at: null,
+      });
+    };
+
+    it('crea el sale en la misma tx que pasa el pago a succeeded, con payment_id', async () => {
+      cashEnabled();
+      sessions.getActiveSession.mockResolvedValue({ id: 50 });
+      await service.pay(100, 11, makeRequest());
+      expect(movementsService.recordSaleMovement).toHaveBeenCalledTimes(1);
+      expect(movementsService.recordSaleMovement).toHaveBeenCalledWith(
+        50,
+        expect.objectContaining({
+          store_id: 10,
+          user_id: 15,
+          amount: 100,
+          payment_method: 'cash',
+          order_id: 100,
+          payment_id: 2,
+        }),
+        db,
+      );
+      expect(payments[1].state).toBe('succeeded');
+      expect(movements).toHaveLength(1);
+    });
+
+    it('bloquea la sesión de caja antes que la orden al confirmar', async () => {
+      cashEnabled();
+      pendingCash();
+      sessions.getActiveSession.mockResolvedValue({ id: 50 });
+      db.$queryRaw.mockClear();
+      await service.confirm(100, 11, 2, {});
+      expect(db.$queryRaw.mock.calls[0][0].join('')).toContain(
+        'cash_register_sessions',
+      );
+      expect(db.$queryRaw.mock.calls[1][0].join('')).toContain('FROM orders');
+    });
+
+    it('sesión original cerrada entre la reserva y la confirmación: usa la sesión abierta actual, no la congelada', async () => {
+      cashEnabled();
+      pendingCash(50);
+      sessions.getActiveSession.mockResolvedValue({ id: 60 });
+      await service.confirm(100, 11, 2, {});
+      expect(movements).toHaveLength(1);
+      expect(movements[0]).toMatchObject({
+        session_id: 60,
+        payment_id: 2,
+        type: 'sale',
+      });
+    });
+
+    it('sin sesión abierta y caja habilitada: rechaza con CASH_SESSION_REQUIRED_001 y el pago sigue pendiente', async () => {
+      cashEnabled();
+      pendingCash();
+      sessions.getActiveSession.mockResolvedValue(null);
+      await expect(service.confirm(100, 11, 2, {})).rejects.toMatchObject({
+        errorCode: 'CASH_SESSION_REQUIRED_001',
+      });
+      expect(payments[1].state).toBe('pending');
+      expect(movements).toHaveLength(0);
+    });
+
+    it('caja deshabilitada: confirma sin movimiento ni sesión', async () => {
+      pendingCash();
+      await service.confirm(100, 11, 2, {});
+      expect(payments[1].state).toBe('succeeded');
+      expect(sessions.getActiveSession).not.toHaveBeenCalled();
+      expect(movements).toHaveLength(0);
+    });
+
+    it('si el sale falla, el pago no queda succeeded (misma tx)', async () => {
+      cashEnabled();
+      pendingCash();
+      sessions.getActiveSession.mockResolvedValue({ id: 50 });
+      movementsService.recordSaleMovement.mockRejectedValueOnce(
+        new Error('session closed under lock'),
+      );
+      db.$transaction.mockImplementationOnce(async (cb: any) => {
+        const snapshot = payments.map((p) => ({ ...p }));
+        try {
+          return await cb(db);
+        } catch (error) {
+          payments.splice(0, payments.length, ...snapshot);
+          throw error;
+        }
+      });
+      await expect(service.confirm(100, 11, 2, {})).rejects.toThrow(
+        'session closed under lock',
+      );
+      expect(payments[1].state).toBe('pending');
+    });
+
+    it('doble confirm secuencial: un solo movimiento', async () => {
+      cashEnabled();
+      pendingCash();
+      sessions.getActiveSession.mockResolvedValue({ id: 50 });
+      await service.confirm(100, 11, 2, {});
+      await service.confirm(100, 11, 2, {});
+      expect(movements).toHaveLength(1);
+    });
+
+    it('doble confirm concurrente: pierde el compare-and-set y no crea otro movimiento', async () => {
+      cashEnabled();
+      pendingCash();
+      sessions.getActiveSession.mockResolvedValue({ id: 50 });
+      await Promise.all([
+        service.confirm(100, 11, 2, {}),
+        service.confirm(100, 11, 2, {}),
+      ]);
+      expect(movements).toHaveLength(1);
+    });
+
+    it('error en settleFinancialSplitSource: el movimiento persiste, effects_pending y marcador nulo', async () => {
+      cashEnabled();
+      sessions.getActiveSession.mockResolvedValue({ id: 50 });
+      payments[0].amount = '200.00';
+      orderFlow.settleFinancialSplitSource.mockRejectedValueOnce(
+        new Error('stock unavailable'),
+      );
+      const errorLog = jest
+        .spyOn((service as any).logger, 'error')
+        .mockImplementation(() => undefined);
+      const result: any = await service.pay(100, 11, makeRequest());
+      expect(result.effects_pending).toBe(true);
+      expect(errorLog).toHaveBeenCalled();
+      expect(movements).toHaveLength(1);
+      expect(payments[1].state).toBe('succeeded');
+      expect(payments[1].financial_effects_recorded_at).toBeNull();
+    });
+
+    it('tramo final con la mesa cerrada: proyección devuelve null y la orden se promueve igual', async () => {
+      cashEnabled();
+      sessions.getActiveSession.mockResolvedValue({ id: 50 });
+      payments[0].amount = '200.00';
+      db.table_sessions.findFirst.mockResolvedValue(null);
+      const result: any = await service.pay(100, 11, makeRequest());
+      expect(result.effects_pending).toBeUndefined();
+      expect(movements).toHaveLength(1);
+      expect(orderFlow.settleFinancialSplitSource).toHaveBeenCalledWith(
+        100,
+        15,
+      );
+      expect(payments[1].financial_effects_recorded_at).toBeInstanceOf(Date);
+    });
+
+    it('lock de efectos ocupado: no es silencioso, responde effects_pending', async () => {
+      redis.set.mockResolvedValue(null);
+      const result: any = await service.pay(100, 11, makeRequest());
+      expect(result.effects_pending).toBe(true);
+      expect(payments[1].state).toBe('succeeded');
+    });
+
+    it('respuesta normal no incluye effects_pending', async () => {
+      const result: any = await service.pay(100, 11, makeRequest());
+      expect(result).not.toHaveProperty('effects_pending');
     });
   });
 });

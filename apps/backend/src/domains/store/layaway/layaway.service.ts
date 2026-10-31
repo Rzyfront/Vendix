@@ -4,6 +4,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { MovementsService } from '../cash-registers/movements/movements.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { Prisma } from '@prisma/client';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
@@ -26,7 +27,42 @@ export class LayawayService {
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
     private eventEmitter: EventEmitter2,
+    private movementsService: MovementsService,
   ) {}
+
+  /**
+   * B04: el efectivo de la cuota inicial y de los abonos entra al cajón del
+   * usuario que lo recibe, dentro de la tx del pago. Sin método elegido no se
+   * puede saber si fue efectivo: no se asume.
+   */
+  private async recordCashIn(
+    tx: Prisma.TransactionClient,
+    input: {
+      store_id: number;
+      user_id: number | null | undefined;
+      store_payment_method_id: number | null | undefined;
+      amount: Prisma.Decimal;
+      layaway_payment_id: number;
+      plan_number: string;
+      notes: string;
+    },
+  ) {
+    if (!input.store_payment_method_id || !input.user_id) return;
+    const method = await tx.store_payment_methods.findFirst({
+      where: { id: input.store_payment_method_id },
+      select: { system_payment_method: { select: { type: true } } },
+    });
+    await this.movementsService.recordModuleCashMovement(tx, {
+      store_id: input.store_id,
+      user_id: input.user_id,
+      direction: 'in',
+      amount: input.amount.toNumber(),
+      payment_method: method?.system_payment_method?.type ?? null,
+      source_type: 'layaway_payment',
+      source_id: input.layaway_payment_id,
+      reference: `${input.notes} ${input.plan_number}`,
+    });
+  }
 
   // ===== CREATE =====
 
@@ -245,7 +281,7 @@ export class LayawayService {
 
       // 8. Si hay down_payment, crear registro de pago
       if (down_payment.greaterThan(0)) {
-        await tx.layaway_payments.create({
+        const down_row = await tx.layaway_payments.create({
           data: {
             layaway_plan_id: plan.id,
             amount: down_payment,
@@ -256,6 +292,15 @@ export class LayawayService {
             received_by_user_id: context?.user_id || null,
             notes: 'Cuota inicial (down payment)',
           },
+        });
+        await this.recordCashIn(tx, {
+          store_id,
+          user_id: context?.user_id,
+          store_payment_method_id: dto.down_payment_method_id,
+          amount: down_payment,
+          layaway_payment_id: down_row.id,
+          plan_number,
+          notes: 'Cuota inicial separado',
         });
       }
 
@@ -491,6 +536,15 @@ export class LayawayService {
           notes: dto.notes || null,
           received_by_user_id: context?.user_id || null,
         },
+      });
+      await this.recordCashIn(tx, {
+        store_id: plan.store_id,
+        user_id: context?.user_id,
+        store_payment_method_id: dto.store_payment_method_id,
+        amount,
+        layaway_payment_id: payment.id,
+        plan_number: plan.plan_number,
+        notes: 'Abono separado',
       });
 
       // 6. Marcar cuota como pagada si aplica.

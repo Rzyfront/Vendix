@@ -163,6 +163,9 @@ const REQUIRED_COLUMNS = [
   // Impuesto del alquiler (migración 20261105120000): mismas lecturas de estación.
   'service_stations.rental_tax_category_id',
   'service_stations.rental_tax_is_inclusive',
+  // Cierre pendiente tras cobro (migración 20261106100400): el pago y su
+  // barrido escriben y filtran esta columna.
+  'orders.finish_pending_at',
   // CRM M2 (migración 20261106100100): Prisma selecciona estas columnas en toda
   // lectura de store_users (login, clientes, POS); sin ellas revientan con
   // ColumnNotFound aunque nadie use el CRM todavía.

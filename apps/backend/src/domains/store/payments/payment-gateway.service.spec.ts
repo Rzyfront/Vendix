@@ -658,6 +658,72 @@ describe('PaymentGatewayService', () => {
     });
   });
 
+  describe('B06: onSucceeded corre en la tx que confirma el pago', () => {
+    const arrange = (methodType: string, status: payments_state_enum) => {
+      const tx = { payments: { update: jest.fn().mockResolvedValue({}) } };
+      (prisma as any).$transaction = jest.fn(async (fn: any) => fn(tx));
+      jest.spyOn(service as any, 'validatePaymentData').mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'getPaymentMethod').mockResolvedValue({
+        id: 1,
+        system_payment_method: { type: methodType, processing_mode: 'DIRECT' },
+      });
+      jest.spyOn(service as any, 'createPaymentRecord').mockResolvedValue({
+        id: 55,
+        transaction_id: 'txn_x',
+      });
+      jest.spyOn(service as any, 'updateOrderStatus').mockResolvedValue(undefined);
+      service.registerProcessor(methodType, {
+        isEnabled: jest.fn().mockReturnValue(true),
+        processPayment: jest.fn().mockResolvedValue({
+          success: status === 'succeeded',
+          status,
+          transactionId: 'txn_x',
+        }),
+      } as any);
+      return tx;
+    };
+
+    it('pago succeeded: actualiza el pago y llama onSucceeded con la misma tx', async () => {
+      const tx = arrange('cash', payments_state_enum.succeeded);
+      const onSucceeded = jest.fn().mockResolvedValue(undefined);
+
+      await service.processPayment(mockPaymentData, { onSucceeded });
+
+      expect(tx.payments.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 55 } }),
+      );
+      expect(onSucceeded).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tx,
+          paymentId: 55,
+          methodType: 'cash',
+          processingMode: 'DIRECT',
+          amount: 100,
+          orderId: 1,
+          storeId: 1,
+        }),
+      );
+    });
+
+    it('si onSucceeded falla, la tx entera falla (el pago no queda confirmado sin su sale)', async () => {
+      arrange('cash', payments_state_enum.succeeded);
+      const onSucceeded = jest.fn().mockRejectedValue(new Error('sin caja'));
+
+      await expect(
+        service.processPayment(mockPaymentData, { onSucceeded }),
+      ).rejects.toBeDefined();
+    });
+
+    it('pago pendiente (pasarela): no invoca onSucceeded', async () => {
+      arrange('wompi', payments_state_enum.pending);
+      const onSucceeded = jest.fn();
+
+      await service.processPayment(mockPaymentData, { onSucceeded });
+
+      expect(onSucceeded).not.toHaveBeenCalled();
+    });
+  });
+
   describe('registerProcessor', () => {
     it('should register payment processor', () => {
       const mockProcessor = {

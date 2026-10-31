@@ -91,8 +91,11 @@ import { SessionsService } from '../../cash-registers/sessions/sessions.service'
 import {
   MovementsService,
   ORDER_CANCELLED_MOVEMENT_REFERENCE,
+  actorFallbackNote,
+  type SaleActor,
 } from '../../cash-registers/movements/movements.service';
 import { CASH_PAYMENT_TYPES } from './services/refund-channel.util';
+import { shouldRecordCashMovement } from '../../cash-registers/movements/cash-movement-policy.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { AutoEntryService } from '../../accounting/auto-entries/auto-entry.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
@@ -154,6 +157,34 @@ import {
 } from '../../withholding-tax/withholding-flow.service';
 
 type OrderState = order_state_enum;
+
+/**
+ * B07/B11 — `_flow_metadata.finish_pending_after_payment`: the money is firm
+ * but the closing step after it failed on infrastructure. `pay_finish` is a
+ * `flow/pay` whose `processing → finished` write failed; `table_settlement` is
+ * a staff-confirmed table payment whose settlement failed. Consumed by
+ * `OrderFlowService.resumeFinishPendingAfterPayment` (immediately and from
+ * `FinishPendingSweepJob`); cleared to `null` once resolved.
+ */
+export interface FinishPendingAfterPaymentMarker {
+  kind: 'pay_finish' | 'table_settlement';
+  at: string;
+  payment_ids: number[];
+  user_id: number | null;
+  settled_balance?: { total_paid: number; remaining_balance: number };
+  void_marker_ids?: number[];
+  deferred_cash_signal_id?: number | null;
+  from_state?: string | null;
+  error: string;
+  /** R3 #2 — failed sweep retries so far; escalated at FINISH_PENDING_MAX_ATTEMPTS. */
+  attempts?: number;
+  last_error?: string;
+}
+
+/** R3 #2 — sweep retries (one per ≥5 min tick, ~1 h) before the order is
+ * taken off the sweep and left for manual review. */
+export const FINISH_PENDING_MAX_ATTEMPTS = 12;
+
 type CashSessionFinishSelection = {
   id: number;
   version: string;
@@ -392,6 +423,9 @@ type ReservationGroup = {
   demand: number; // total stock units this order needs reserved
   product_name: string;
 };
+
+/** Marcador de un `sale` ya compensado y desvinculado de su pago (BL-1). */
+const UNLINKED_SALE_NOTES_PREFIX = 'Desvinculado del pago #';
 
 @Injectable()
 export class OrderFlowService {
@@ -1142,7 +1176,12 @@ export class OrderFlowService {
           notes,
         }),
         updated_at: new Date(),
-      },
+        // R3 #6 — indexable twin of the open B07 marker: the sweep filters
+        // by this column instead of a LIKE over `internal_notes`.
+        ...('finish_pending_after_payment' in patch
+          ? { finish_pending_at: patch.finish_pending_after_payment ? new Date() : null }
+          : {}),
+      } as Prisma.ordersUpdateInput,
     });
   }
 
@@ -1861,6 +1900,31 @@ export class OrderFlowService {
     dto: PayOrderDto,
     options?: { strictKitchenPending?: boolean; deferFinish?: boolean },
   ) {
+    // B23 — reintento con una clave ya usada por un pago `succeeded` de ESTA
+    // orden: se devuelve el estado actual, sin tocar caja ni crear otro pago.
+    const idempotencyKey = this.buildPayIdempotencyKey(orderId, dto.idempotency_key);
+    if (idempotencyKey) {
+      const prior = await this.prisma.payments.findFirst({
+        where: {
+          financial_idempotency_key: idempotencyKey,
+          order_id: orderId,
+          state: 'succeeded',
+        },
+        select: { id: true, transaction_id: true, gateway_response: true },
+      });
+      if (prior) {
+        const gatewayResponse = (prior.gateway_response ?? {}) as Record<string, any>;
+        return {
+          order: await this.getOrder(orderId),
+          payment: {
+            transaction_id: prior.transaction_id as string,
+            change: Number(gatewayResponse.change ?? 0),
+          },
+          idempotent_replay: true,
+        };
+      }
+    }
+
     // Gate único de caja: con el switch activo, quien cobra debe tener SU
     // sesión abierta. Primero que todo — antes del claim de estado — para no
     // dejar la orden varada en `processing` cuando se rechaza.
@@ -2445,6 +2509,8 @@ export class OrderFlowService {
       deferredCashReadyState: null as 'finished' | 'delivered' | null,
       deferredCashCompensationState: preClaimState,
       paymentMethodTypes: {} as Record<number, string>,
+      paymentMethodModes: {} as Record<number, string | null>,
+      financialIdempotencyKey: this.buildPayIdempotencyKey(orderId, dto.idempotency_key),
     };
     // Fase 2 paso 5 — carril "registrar pago": SÓLO aquí `dto.amount` define lo
     // cobrado. Cubre el marcador manual y los parciales siguientes (el primer
@@ -2546,6 +2612,7 @@ export class OrderFlowService {
     let legs: NormalizedLeg[] = [];
     let change = 0;
     let legMethodTypes: Record<number, string> = {};
+    const legMethodModes: Record<number, string | null> = {};
     if (isImmediateCharge) {
       const requestedLegs = Array.isArray(dto.payments) ? dto.payments : [];
       let methodsById: Record<number, PaymentLegMethodInfo>;
@@ -2608,6 +2675,7 @@ export class OrderFlowService {
       }
       for (const [id, info] of Object.entries(methodsById)) {
         legMethodTypes[Number(id)] = info.type;
+        legMethodModes[Number(id)] = info.processing_mode ?? null;
       }
       try {
         const normalized = normalizePaymentLegs(
@@ -2641,6 +2709,7 @@ export class OrderFlowService {
     // sin ETA, sin proyección a mesa; el cupón se consume al saldar). La acción
     // "Registrar pago" sigue disponible para el saldo (paso 6).
     Object.assign(paymentHistoryCtx.paymentMethodTypes, legMethodTypes);
+    Object.assign(paymentHistoryCtx.paymentMethodModes, legMethodModes);
 
     if (isPartialCharge) {
       const legPayments = await this.createLegPayments(
@@ -2860,6 +2929,7 @@ export class OrderFlowService {
       await this.commitCouponUseForOrder(orderId);
 
       let updatedOrder;
+      let paymentFinishPending = false;
       try {
         updatedOrder = await this.updateOrderState(orderId, 'finished', {
           paid_at: new Date(),
@@ -3065,6 +3135,7 @@ export class OrderFlowService {
       // restores the pre-claim state before throwing; this block covers the
       // finish throw.
       let updatedOrder;
+      let paymentFinishPending = false;
       try {
         updatedOrder = await this.updateOrderState(orderId, 'finished', {
           paid_at: new Date(),
@@ -3094,16 +3165,90 @@ export class OrderFlowService {
           // `details.cause_code` para que la UI y soporte puedan pivotar.
           throw this.wrapPaymentFailure('finish_blocked', e);
         }
-        // Error de infra (no Vendix): envolvemos también, pero sin un
-        // cause_code tipado. La restauración aplica igual: el claim ya se
-        // tomó y el finish no comprometió nada.
-        if (preClaimState !== 'draft') {
-          await this.restorePreClaimState(orderId, preClaimState);
-        }
-        throw this.wrapPaymentFailure('finish_blocked_infra', {
-          order_id: orderId,
+        // B07 — error de infraestructura (no Vendix): el pago y su `sale` ya
+        // están firmes. NO se restaura el estado ni se relanza como fallo (eso
+        // invitaba a cobrar otra vez): la orden queda en `processing` con el
+        // marcador `finish_pending_after_payment` y se responde "pago
+        // registrado, cierre pendiente". El pago es real, así que se emiten
+        // sus eventos como en el camino de éxito. El marcador lleva todo lo
+        // que el cierre necesita para repetirse sin el request:
+        // `resumeFinishPendingAfterPayment` lo consume (un intento inmediato
+        // acá abajo y `FinishPendingSweepJob` después) y, al cerrar, escribe
+        // el `sale` diferido de la confirmación en sitio.
+        this.logger.error(
+          `[flow/pay finish_blocked_infra] order=${orderId}: pago registrado, cierre pendiente: ${(e as Error)?.message ?? 'unknown'}`,
+          (e as Error)?.stack,
+        );
+        paymentFinishPending = true;
+        const finishPendingMarker: FinishPendingAfterPaymentMarker = {
+          kind: 'pay_finish',
+          at: new Date().toISOString(),
+          payment_ids: legPayments.map(({ payment }) => payment.id),
+          user_id: RequestContextService.getUserId() ?? null,
+          settled_balance: settledBalanceMetadata,
+          void_marker_ids: markerIdsToVoid,
+          deferred_cash_signal_id: paymentHistoryCtx.deferredCashSignalId,
+          from_state: preClaimState,
           error: (e as Error)?.message ?? 'unknown',
-        });
+        };
+        let markerWritten = true;
+        try {
+          await this.appendFlowMetadata(orderId, {
+            finish_pending_after_payment: finishPendingMarker,
+          });
+        } catch (markerError) {
+          markerWritten = false;
+          this.logger.error(
+            `[flow/pay finish_pending marker failed] order=${orderId}: ${(markerError as Error)?.message ?? markerError}`,
+          );
+        }
+        try {
+          await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
+        } catch (eventError) {
+          this.logger.error(
+            `[flow/pay finish_pending events failed] order=${orderId}: ${(eventError as Error)?.message ?? eventError}`,
+          );
+        }
+        // Un intento inmediato: un deadlock o un corte de conexión suele ser
+        // transitorio. Si cierra, la venta queda completa (incluido el `sale`
+        // diferido) y la respuesta deja de decir "cierre pendiente".
+        // R3 #3 — sin marcador persistido el reintento usa el de memoria; si
+        // tampoco cierra, la escritura del marcador se reintenta diferida
+        // para que el barrido tenga qué consumir (nunca `processing` huérfana).
+        try {
+          paymentFinishPending =
+            (await (markerWritten
+              ? this.resumeFinishPendingAfterPayment(orderId)
+              : this.resumeFinishPendingAfterPayment(orderId, finishPendingMarker))) !==
+            'resolved';
+        } catch (resumeError) {
+          this.logger.error(
+            `[flow/pay finish_pending immediate retry failed] order=${orderId}: ${(resumeError as Error)?.message ?? resumeError}`,
+          );
+        }
+        if (paymentFinishPending && !markerWritten) {
+          this.scheduleFinishPendingMarkerRetry(orderId, finishPendingMarker);
+        }
+        try {
+          updatedOrder = await this.getOrder(orderId);
+        } catch {
+          updatedOrder = { id: orderId, state: 'processing' };
+        }
+        if (!paymentFinishPending) {
+          return {
+            order: updatedOrder,
+            ...this.buildLeggedPaymentResponse(legPayments, change),
+          };
+        }
+      }
+
+      if (paymentFinishPending) {
+        return {
+          order: updatedOrder,
+          ...this.buildLeggedPaymentResponse(legPayments, change),
+          finish_pending: true,
+          message: 'Pago registrado; el cierre de la venta quedó pendiente. No vuelvas a cobrar.',
+        };
       }
 
       if (paymentHistoryCtx.deferCashMovementUntilFinish) {
@@ -3266,17 +3411,275 @@ export class OrderFlowService {
    * existing reservation + idempotent stock-commit services exactly once.
    */
   async settleFinancialSplitSource(orderId: number, actorUserId?: number): Promise<void> {
+    return this.settlePaidSource(orderId, actorUserId, true);
+  }
+
+  /** B11: the same settlement for a table order paid through staff
+   * confirmation (no financial split). Idempotent; a no-op unless the order is
+   * fully paid and backed by a table session. */
+  async settlePaidTableOrder(orderId: number, actorUserId?: number): Promise<void> {
+    return this.settlePaidSource(orderId, actorUserId, false);
+  }
+
+  /**
+   * B07/B11 — consumer of `finish_pending_after_payment`. Repeats the closing
+   * step that failed after the money was taken, never the charge itself:
+   * - `pay_finish`: `processing → finished` with the settled balance, voids
+   *   the settlement markers, and writes the deferred `sale` of an in-place
+   *   confirmation (its close guard is already reserved).
+   * - `table_settlement`: the idempotent `settlePaidTableOrder`.
+   * Runs as the cashier who charged. Returns `skipped` when there is no open
+   * marker; a cancelled/refunded order resolves the marker without acting.
+   */
+  async resumeFinishPendingAfterPayment(
+    orderId: number,
+    /** R3 #3 — the marker whose write failed; used only when none is persisted. */
+    unpersistedMarker?: FinishPendingAfterPaymentMarker,
+  ): Promise<'resolved' | 'skipped'> {
+    const order = await this.getOrder(orderId);
+    const marker =
+      this.readFinishPendingMarker(order.internal_notes) ?? unpersistedMarker ?? null;
+    if (!marker) return 'skipped';
+    const context = RequestContextService.getContext();
+    if (marker.user_id && context?.user_id !== marker.user_id) {
+      return RequestContextService.runIsolated(
+        { is_super_admin: false, is_owner: false, ...context, user_id: marker.user_id },
+        () => this.applyFinishPendingAfterPayment(orderId, order.state, marker),
+      );
+    }
+    return this.applyFinishPendingAfterPayment(orderId, order.state, marker);
+  }
+
+  private async applyFinishPendingAfterPayment(
+    orderId: number,
+    state: string,
+    marker: FinishPendingAfterPaymentMarker,
+  ): Promise<'resolved'> {
+    let outcome: 'finished' | 'balance_due' | undefined;
+    let liveBalance: { total_paid: number; remaining_balance: number } | undefined;
+    if (marker.kind === 'table_settlement') {
+      await this.settlePaidTableOrder(orderId, marker.user_id ?? undefined);
+    } else if (state === 'processing') {
+      // R3 #1 — the balance frozen in the marker may be stale: within the
+      // window the order can be edited up (B22) or refunded. The finish is
+      // judged with the live payments, never with `marker.settled_balance`.
+      liveBalance = await this.computeLiveSettledBalance(orderId);
+      if (liveBalance.remaining_balance > 0.01) {
+        // Money still owed: the order stays `processing` with its real
+        // balance so the cashier sees "cobrar". The deferred `sale` stays in
+        // its outbox until that later finish (it waits for `ready_state`).
+        await this.prisma.orders.update({
+          where: { id: orderId },
+          data: { ...liveBalance, updated_at: new Date() },
+        });
+        outcome = 'balance_due';
+        this.logger.warn(
+          `[finish_pending] order=${orderId} not finished: live balance ${liveBalance.remaining_balance} due (marker froze ${marker.settled_balance?.remaining_balance ?? 'n/a'})`,
+        );
+      } else {
+        await this.finishResumedPayOrder(orderId, marker, liveBalance);
+        outcome = 'finished';
+      }
+    }
+
+    if (marker.kind === 'pay_finish' && marker.deferred_cash_signal_id != null) {
+      // The same delivery the 60 s outbox retries; doing it now keeps the
+      // drawer in step with the finish. A failure here stays queued there.
+      try {
+        await this.movementsService.deliverDeferredSaleCashMovement(
+          marker.deferred_cash_signal_id,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `[finish_pending] deferred sale movement #${marker.deferred_cash_signal_id} still queued for order=${orderId}: ${(error as Error)?.message ?? error}`,
+        );
+      }
+    }
+
+    await this.appendFlowMetadata(orderId, {
+      finish_pending_after_payment: null,
+      finish_pending_resolved: {
+        at: new Date().toISOString(),
+        kind: marker.kind,
+        state: (await this.getOrder(orderId)).state,
+        ...(outcome ? { outcome } : {}),
+        ...(outcome === 'balance_due' ? { remaining_balance: liveBalance!.remaining_balance } : {}),
+      },
+    });
+    this.logger.log(`[finish_pending] order=${orderId} ${marker.kind} resolved`);
+    return 'resolved';
+  }
+
+  /** `pay_finish` closing step: `processing → finished` with the live balance. */
+  private async finishResumedPayOrder(
+    orderId: number,
+    marker: FinishPendingAfterPaymentMarker,
+    liveBalance: { total_paid: number; remaining_balance: number },
+  ): Promise<void> {
+    this.validateTransition('processing', 'finished');
+    const finishedAt = new Date();
+    await this.updateOrderState(
+      orderId,
+      'finished',
+      { paid_at: finishedAt, finished_at: finishedAt, ...liveBalance },
+      { historyFromState: (marker.from_state as OrderState | null) ?? null },
+    );
+    await this.voidSettlementPendingMarkers(marker.void_marker_ids ?? []);
+    await this.computeAndPersistEta(orderId, finishedAt);
+    await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.finish_resumed');
+    if (marker.payment_ids[0] != null) {
+      await this.projectPaidOrderToTable(orderId, marker.payment_ids[0]);
+    }
+  }
+
+  /** R3 #1 — balance from the live rows: Σ settled payments − Σ completed
+   * refunds (same net as B22's `assertTotalNotBelowPaid`) against the current
+   * `grand_total`. */
+  private async computeLiveSettledBalance(
+    orderId: number,
+  ): Promise<{ total_paid: number; remaining_balance: number }> {
+    const order = await this.getOrder(orderId);
+    const gross = (order.payments ?? [])
+      .filter((p) => SETTLED_PAYMENT_STATES.has(p.state))
+      .reduce((sum, p) => sum.plus(new Prisma.Decimal(p.amount ?? 0)), new Prisma.Decimal(0));
+    const refunds = await this.prisma.refunds.findMany({
+      where: { order_id: orderId, state: 'completed' },
+      select: { amount: true },
+    });
+    const refunded = refunds.reduce(
+      (sum, r) => sum.plus(new Prisma.Decimal(r.amount ?? 0)),
+      new Prisma.Decimal(0),
+    );
+    const net = Prisma.Decimal.max(gross.minus(refunded), 0);
+    const remaining = Prisma.Decimal.max(new Prisma.Decimal(order.grand_total ?? 0).minus(net), 0);
+    return { total_paid: net.toNumber(), remaining_balance: remaining.toNumber() };
+  }
+
+  /**
+   * R3 #2 — a sweep retry of `resumeFinishPendingAfterPayment` failed. Counts
+   * it on the marker; at `FINISH_PENDING_MAX_ATTEMPTS` the marker is closed
+   * into `finish_pending_review` (internal note: the money is firm, the close
+   * is not), audited and logged, so the order leaves the sweep instead of
+   * being retried forever.
+   */
+  async recordFinishPendingFailure(
+    orderId: number,
+    error: unknown,
+  ): Promise<'retry' | 'escalated'> {
+    const order = await this.getOrder(orderId);
+    const marker = this.readFinishPendingMarker(order.internal_notes);
+    if (!marker) return 'retry';
+    const attempts = (marker.attempts ?? 0) + 1;
+    const last_error = (error as Error)?.message ?? String(error);
+    if (attempts < FINISH_PENDING_MAX_ATTEMPTS) {
+      await this.appendFlowMetadata(orderId, {
+        finish_pending_after_payment: { ...marker, attempts, last_error },
+      });
+      return 'retry';
+    }
+    const review = { ...marker, attempts, last_error, escalated_at: new Date().toISOString() };
+    await this.appendFlowMetadata(orderId, {
+      finish_pending_after_payment: null,
+      finish_pending_review: review,
+    });
+    this.logger.error(
+      `[finish_pending] order=${orderId} ${marker.kind} escalated to manual review after ${attempts} failed retries: ${last_error}`,
+    );
+    try {
+      await this.auditService.log({
+        userId: marker.user_id ?? undefined,
+        action: 'order.finish_pending.escalated',
+        resource: AuditResource.ORDERS,
+        resourceId: orderId,
+        metadata: review,
+      });
+    } catch (auditError) {
+      this.logger.error(
+        `[finish_pending] order=${orderId} escalation audit failed: ${(auditError as Error)?.message ?? auditError}`,
+      );
+    }
+    return 'escalated';
+  }
+
+  /** R3 #3 — delays of the deferred marker write after the request's failed. */
+  static readonly FINISH_PENDING_MARKER_RETRY_DELAYS_MS = [5_000, 30_000, 120_000];
+
+  /**
+   * R3 #3 — the marker write failed and the immediate close did not resolve:
+   * retries the write off the request (same store/user context) so the sweep
+   * gets a consumer. Exhausted, logs the full marker as ORPHAN for manual
+   * recovery. Never throws.
+   */
+  private scheduleFinishPendingMarkerRetry(
+    orderId: number,
+    marker: FinishPendingAfterPaymentMarker,
+    attempt = 0,
+  ): void {
+    const delays = OrderFlowService.FINISH_PENDING_MARKER_RETRY_DELAYS_MS;
+    if (attempt >= delays.length) {
+      this.logger.error(
+        `[finish_pending ORPHAN] order=${orderId} stays processing without marker after ${delays.length} deferred writes; recover manually: ${JSON.stringify(marker)}`,
+      );
+      return;
+    }
+    const timer = setTimeout(() => {
+      void this.appendFlowMetadata(orderId, { finish_pending_after_payment: marker })
+        .then(() =>
+          this.logger.warn(
+            `[finish_pending] order=${orderId} marker written on deferred attempt ${attempt + 1}`,
+          ),
+        )
+        .catch((error) => {
+          this.logger.error(
+            `[finish_pending] order=${orderId} deferred marker write ${attempt + 1} failed: ${(error as Error)?.message ?? error}`,
+          );
+          this.scheduleFinishPendingMarkerRetry(orderId, marker, attempt + 1);
+        });
+    }, delays[attempt]);
+    timer.unref?.();
+  }
+
+  /** B11 — leaves the B07 marker on an order whose money is firm but whose
+   * closing step failed outside `payOrder` (table staff confirmation), so
+   * `FinishPendingSweepJob` repeats it. */
+  async markFinishPendingAfterPayment(
+    orderId: number,
+    marker: Omit<FinishPendingAfterPaymentMarker, 'at'>,
+  ): Promise<void> {
+    await this.appendFlowMetadata(orderId, {
+      finish_pending_after_payment: { ...marker, at: new Date().toISOString() },
+    });
+  }
+
+  private readFinishPendingMarker(
+    internalNotes: string | null | undefined,
+  ): FinishPendingAfterPaymentMarker | null {
+    if (!internalNotes) return null;
+    try {
+      const marker = JSON.parse(internalNotes)?._flow_metadata
+        ?.finish_pending_after_payment;
+      return marker && typeof marker === 'object' && Array.isArray(marker.payment_ids)
+        ? { kind: 'pay_finish', ...marker }
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async settlePaidSource(orderId: number, actorUserId: number | undefined, requireSplit: boolean): Promise<void> {
     const context = RequestContextService.getContext();
     if (actorUserId && context?.user_id !== actorUserId) {
       return RequestContextService.runIsolated({ ...context!, user_id: actorUserId },
-        () => this.settleFinancialSplitSource(orderId, actorUserId));
+        () => this.settlePaidSource(orderId, actorUserId, requireSplit));
     }
     const order = await this.getOrder(orderId);
-    if (!order.active_financial_split_id || ['cancelled', 'refunded'].includes(order.state)) return;
+    if (['cancelled', 'refunded'].includes(order.state)) return;
+    if (requireSplit && !order.active_financial_split_id) return;
     const paid = order.payments.filter((p) => ['succeeded', 'captured'].includes(p.state))
       .reduce((sum, p) => sum.plus(p.amount), new Prisma.Decimal(0));
     if (paid.lt(order.grand_total)) return;
     const table = await this.prisma.table_sessions.findFirst({ where: { order_id: orderId, store_id: order.store_id }, select: { id: true } });
+    if (!requireSplit && !table) return;
     if (order.state === 'draft') {
       if (table) {
         // Mesa: la promocion draft->created reserva solo lineas NO consumidas
@@ -3833,6 +4236,18 @@ export class OrderFlowService {
         });
       }
 
+      // B4/B16 — la anulación devuelve a caja lo que el cobro registró como
+      // venta, en la MISMA tx que anula el pago: una caída ya no deja el pago
+      // anulado con el `sale` vivo (y "anular y volver a cobrar" no cuenta la
+      // venta dos veces). Sesión cerrada → outbox durable dentro de la tx.
+      await this.recordPaymentCompensationInTx(tx, cancelledPaymentIds, {
+        referenceFor: () => 'payment_cancelled',
+        dedupeFor: (paymentId) => `payment_cancelled:${paymentId}`,
+        notesFor: (paymentId, oid) =>
+          `Anulación del pago #${paymentId} de la orden #${oid}`,
+        orphanScanOrderId: orderId,
+      });
+
       if (freshIsFulfilledCancel) {
         // B4/B1b — NOT `created`, and NOT collapsed to `delivered` either:
         // the goods already left (stock stays exactly as committed), so the
@@ -3895,11 +4310,6 @@ export class OrderFlowService {
         });
       }
     }
-
-    // B4 — la anulación devuelve a caja lo que el cobro original registró
-    // como venta: sin esto, "anular y volver a cobrar" en efectivo contaba la
-    // venta dos veces en el cuadre de la sesión.
-    await this.reversePaymentCashMovements(order.store_id, orderId, cancelledPaymentIds);
 
     // Return updated order with all includes
     const updatedOrder = await this.prisma.orders.findFirst({
@@ -8077,27 +8487,44 @@ export class OrderFlowService {
         return true;
       }
 
-      if (!userId) {
-        await this.escalateCancelCashOutFailure(
-          orderId,
-          reversal,
-          'no_user_context',
-          userId,
-        );
-        return false;
+      // B17 — cancelación sin usuario (webhook/job): el egreso no se omite ni deja
+      // el refund `processing` huérfano; se asienta/encola a nombre del actor
+      // del `sale` de cada pago (o del creador de la orden). La lectura va sin
+      // scope y filtrada por `storeId`: un webhook no trae contexto de tienda.
+      // Sin actor se escala (falla visible), nunca se omite en silencio.
+      const actorByPayment = new Map<number, SaleActor>();
+      for (const pay of reversal.payments) {
+        const actor: SaleActor | null = userId
+          ? { user_id: userId, source: 'sale' }
+          : await this.movementsService.resolveSaleActor({
+              store_id: storeId,
+              order_id: orderId,
+              payment_ids: [pay.id],
+            });
+        if (!actor) {
+          await this.escalateCancelCashOutFailure(
+            orderId,
+            reversal,
+            'no_user_context',
+            userId,
+          );
+          return false;
+        }
+        actorByPayment.set(pay.id, actor);
       }
 
       // Un movimiento `refund` / `order_cancelled` por pago en efectivo, con su
       // `payment_id`. NO emite `cash_register.movement`: el asiento de la salida
       // de caja lo genera `refund.completed` (emitCancellationCashRefund) —
-      // exactamente uno por cancelación. Sesión destino: original abierta →
-      // operador → mismo registro; sin ninguna, outbox durable.
+      // exactamente uno por cancelación. Sesión destino: la abierta del
+      // operador (B03); sin ella, outbox durable.
       let pending = 0;
       for (const pay of reversal.payments) {
         const outcome =
           await this.movementsService.recordCompensationCashMovementDurable({
             store_id: storeId,
-            user_id: userId,
+            user_id: actorByPayment.get(pay.id)!.user_id,
+            actor_note: actorFallbackNote(actorByPayment.get(pay.id)),
             order_id: orderId,
             payment_id: pay.id,
             amount: Number(pay.amount),
@@ -8117,7 +8544,7 @@ export class OrderFlowService {
       if (pending > 0) {
         // Encolado durable: no se pierde, pero el operador debe saberlo.
         await this.auditService.log({
-          userId,
+          userId: userId ?? undefined,
           action: 'order.cancel.cash_out_queued',
           resource: AuditResource.ORDERS,
           resourceId: orderId,
@@ -8621,8 +9048,33 @@ export class OrderFlowService {
             undefined,
             tx,
             cashSession.id,
+            paymentMethod.system_payment_method.processing_mode,
           )
         : null;
+      // B29: bloquear la orden y leer el saldo dentro de la tx. Orden de locks
+      // igual al cierre de sesión (sesión → orden). La lectura de arriba solo
+      // sirvió para validar; el saldo que manda es el bloqueado.
+      await tx.$queryRaw`
+        SELECT id FROM orders
+        WHERE id = ${orderId} AND store_id = ${order.store_id}
+        FOR UPDATE
+      `;
+      const locked = await tx.orders.findFirst({
+        where: { id: orderId, store_id: order.store_id },
+        select: { total_paid: true, remaining_balance: true },
+      });
+      if (!locked) {
+        throw new NotFoundException('Order not found');
+      }
+      const lockedRemaining = Number(locked.remaining_balance);
+      if (lockedRemaining <= 0) {
+        throw new BadRequestException('This order has no remaining balance');
+      }
+      if (paymentAmount > lockedRemaining + 0.01) {
+        throw new BadRequestException(
+          `Payment amount (${paymentAmount}) exceeds remaining balance (${lockedRemaining})`,
+        );
+      }
       const payment = await tx.payments.create({
         data: {
           order_id: orderId,
@@ -8648,8 +9100,8 @@ export class OrderFlowService {
         });
       }
 
-      const newTotalPaid = Number(order.total_paid) + paymentAmount;
-      const newRemainingBalance = Math.max(remainingBalance - paymentAmount, 0);
+      const newTotalPaid = Number(locked.total_paid) + paymentAmount;
+      const newRemainingBalance = Math.max(lockedRemaining - paymentAmount, 0);
       await tx.orders.update({
         where: { id: orderId },
         data: {
@@ -9257,12 +9709,15 @@ export class OrderFlowService {
         bank_account_id: number | null;
       } | null;
       paymentMethodTypes?: Record<number, string>;
+      paymentMethodModes?: Record<number, string | null>;
       deferCashMovementUntilFinish?: boolean;
       deferCashSignalRequired?: boolean;
       deferredCashSessionId?: number | null;
       deferredCashSignalId?: number | null;
       deferredCashReadyState?: 'finished' | 'delivered' | null;
       deferredCashCompensationState?: OrderState | null;
+      /** B23 — clave de idempotencia de `flow/pay` (solo la guarda el primer tramo). */
+      financialIdempotencyKey?: string | null;
       /**
        * Pago online manual `pending` (fila completa de `getOrder`) que el
        * PRIMER tramo confirma en sitio: pasa a `succeeded` con el monto, el
@@ -9389,6 +9844,8 @@ export class OrderFlowService {
                   (leg.is_cash ? 'cash' : ''),
                 undefined,
                 tx,
+                undefined,
+                historyCtx.paymentMethodModes?.[leg.store_payment_method_id],
               )
             : null,
         );
@@ -9430,6 +9887,9 @@ export class OrderFlowService {
               amount: leg.amount,
               state: 'succeeded',
               transaction_id: transactionId,
+              ...(historyCtx?.financialIdempotencyKey
+                ? { financial_idempotency_key: historyCtx.financialIdempotencyKey }
+                : {}),
               gateway_reference:
                 leg.payment_reference ?? inPlace.gateway_reference ?? null,
               paid_at: new Date(),
@@ -9481,6 +9941,9 @@ export class OrderFlowService {
               currency,
               state: 'succeeded',
               transaction_id: transactionId,
+              ...(legIndex === 0 && historyCtx?.financialIdempotencyKey
+                ? { financial_idempotency_key: historyCtx.financialIdempotencyKey }
+                : {}),
               gateway_reference: leg.payment_reference ?? null,
               paid_at: new Date(),
               gateway_response: {
@@ -9517,6 +9980,8 @@ export class OrderFlowService {
               (leg.is_cash ? 'cash' : ''),
             undefined,
             tx,
+            undefined,
+            historyCtx.paymentMethodModes?.[leg.store_payment_method_id],
           );
         }
         const movement = cashMovements[legIndex];
@@ -9618,6 +10083,35 @@ export class OrderFlowService {
     cancellationReason: string,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
+      // B02 — cada tramo anulado (o devuelto a `pending` en sitio) que dejó un
+      // `sale` recibe su contramovimiento en la MISMA tx; los diferidos nunca
+      // crearon `sale`, así que no tienen nada que compensar.
+      const compensationOpts = {
+        // S03 (excepción): mismo cajón y mismo instante que el `sale`.
+        saleSessionFirst: true,
+        referenceFor: (paymentId: number, saleId: number) =>
+          `payment_compensated:${paymentId}:${saleId}`,
+        dedupeFor: (paymentId: number, saleId: number) =>
+          `payment_compensated:${paymentId}:${saleId}`,
+        notesFor: (paymentId: number, orderId: number) =>
+          `Compensación del pago #${paymentId} de la orden #${orderId}: ${cancellationReason}`,
+      };
+      await this.recordPaymentCompensationInTx(
+        tx,
+        legPayments
+          .filter(({ confirmedInPlaceOriginal }) => !confirmedInPlaceOriginal)
+          .map(({ payment }) => payment.id),
+        compensationOpts,
+      );
+      // Confirmado en sitio: el pago vuelve a `pending` y puede confirmarse de
+      // nuevo, así que su `sale` compensado se desvincula del pago.
+      await this.recordPaymentCompensationInTx(
+        tx,
+        legPayments
+          .filter(({ confirmedInPlaceOriginal }) => !!confirmedInPlaceOriginal)
+          .map(({ payment }) => payment.id),
+        { ...compensationOpts, unlinkSale: { reason: cancellationReason } },
+      );
       for (const { payment, confirmedInPlaceOriginal: original } of legPayments) {
         if (original) {
           // La fila confirmada en sitio era el pago online del cliente: no se
@@ -9627,6 +10121,8 @@ export class OrderFlowService {
             where: { id: payment.id },
             data: {
               state: 'pending',
+              // B23: libera la clave de idempotencia única global para el reintento.
+              financial_idempotency_key: null,
               store_payment_method_id: original.store_payment_method_id ?? null,
               bank_account_id: original.bank_account_id ?? null,
               amount: original.amount,
@@ -9643,6 +10139,8 @@ export class OrderFlowService {
           where: { id: payment.id },
           data: {
             state: 'cancelled',
+            // B23: libera la clave de idempotencia única global para el reintento.
+            financial_idempotency_key: null,
             updated_at: new Date(),
             gateway_response: {
               ...((payment.gateway_response as object) ?? {}),
@@ -9718,6 +10216,7 @@ export class OrderFlowService {
     paymentId: number | undefined,
     tx: Prisma.TransactionClient,
     sessionId?: number,
+    processingMode?: string | null,
   ): Promise<any | null> {
     // Cupón 100 %: sin dinero no hay movimiento que insertar.
     if (!(Number(amount) > 0)) return null;
@@ -9725,6 +10224,9 @@ export class OrderFlowService {
       ? { id: sessionId }
       : await this.resolveCashSessionForSale();
     if (!session) return null;
+    // Same policy as the POS (B08/B26): gateway / on-delivery methods leave no
+    // movement and a method without a type is rejected.
+    if (!shouldRecordCashMovement(paymentMethodType, processingMode)) return null;
     const userId = RequestContextService.getUserId();
     if (!userId) throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
     return this.movementsService.recordSaleMovement(session.id, {
@@ -9765,11 +10267,13 @@ export class OrderFlowService {
         payment_ids: legPayments.filter(({ leg }) => Number(leg.amount) > 0).map(({ payment }) => payment.id),
         movements: legPayments
           .filter(({ leg }) => Number(leg.amount) > 0)
-          .map(({ payment, leg }) => ({
-            amount: leg.amount,
-            payment_method: payment.store_payment_method?.system_payment_method?.type ?? 'cash',
-            payment_id: payment.id,
-          })),
+          .map(({ payment, leg }) => {
+            const type = payment.store_payment_method?.system_payment_method?.type;
+            // B26: never default a missing type to cash. The signal's payment_ids
+            // must match, so legs are validated here rather than filtered out.
+            if (!type) throw new VendixHttpException(ErrorCodes.PAY_METHOD_MISCONFIGURED);
+            return { amount: leg.amount, payment_method: type, payment_id: payment.id };
+          }),
       });
     });
   }
@@ -9809,134 +10313,149 @@ export class OrderFlowService {
   }
 
   /**
-   * B4 — contra-movimiento de caja de los pagos anulados por `cancelPayment`.
-   * Solo revierte pagos que SÍ dejaron un movimiento `sale` en caja (si la
-   * caja estaba apagada o el pago era no-efectivo sin rastreo, no hay nada
-   * que revertir). No crítico, igual que `recordPayOrderCashMovement`.
+   * B02/B16 — contra-movimiento `refund` de los movimientos `sale` de los pagos
+   * anulados, escrito DENTRO de la transacción del llamador (misma tx que anula
+   * el pago: o quedan los dos o ninguno).
    *
-   * Resolución de sesión por movimiento (ya no siempre la del operador que
-   * anula, que dejaba la venta contada doble si ese admin no tenía caja
-   * abierta):
-   * 1. La sesión ORIGINAL del movimiento `sale` (`movement.session_id`), si
-   *    sigue `open` — el contra-movimiento cae en el mismo cuadre que la
-   *    venta que revierte.
-   * 2. Si esa sesión ya cerró, la sesión activa del operador que anula
-   *    (`getActiveSession(userId)`).
-   * 3. Si tampoco hay una sesión activa del operador, no hay dónde asentar
-   *    el refund: se deja constancia explícita con `logger.warn` (antes
-   *    salía en silencio y la venta original quedaba contada en el cuadre
-   *    sin su reversa) y se continúa con los demás movimientos.
-   *
-   * El `user_id` que queda en el movimiento de reversa es siempre el del
-   * operador que anula (RequestContextService.getUserId()), sin importar en
-   * qué sesión caiga.
+   * Solo compensa pagos que SÍ dejaron un movimiento `sale`. Con `saleSessionFirst`
+   * (compensación B02) misma sesión de la venta si sigue abierta; sin él (anular
+   * pago, B16) manda la sesión del operador (cascada B03);
+   * sin sesión receptora se encola en el outbox durable, nunca se pierde.
+   * Actor: el usuario del contexto o, si no hay, el `user_id` del `sale` original.
+   * Idempotente por `reference` + pago + orden + método.
    */
-  private async reversePaymentCashMovements(
-    storeId: number,
-    orderId: number,
+  private async recordPaymentCompensationInTx(
+    tx: Prisma.TransactionClient,
     paymentIds: number[],
+    opts: {
+      referenceFor: (paymentId: number, saleId: number) => string;
+      dedupeFor: (paymentId: number, saleId: number) => string;
+      /** Tras compensar, desvincula el `sale` del pago (`payment_id: null`). */
+      unlinkSale?: { reason: string };
+      notesFor: (paymentId: number, orderId: number) => string;
+      /** Si se informa, además cubre `sale` de la orden sin `payment_id`. */
+      orphanScanOrderId?: number;
+      /** Compensación B02: el contra-movimiento va a la sesión del `sale` primero. */
+      saleSessionFirst?: boolean;
+    },
   ): Promise<void> {
-    if (paymentIds.length === 0) return;
-    const userId = RequestContextService.getUserId();
-    try {
-      if (!userId) {
+    const contextUserId = RequestContextService.getUserId();
+    const sales =
+      paymentIds.length > 0
+        ? await tx.cash_register_movements.findMany({
+            where: { type: 'sale', payment_id: { in: paymentIds } },
+            select: {
+              id: true,
+              store_id: true,
+              order_id: true,
+              payment_id: true,
+              amount: true,
+              payment_method: true,
+              user_id: true,
+            },
+          })
+        : [];
+
+    const enqueueOrWarn = async (
+      outcome: Awaited<
+        ReturnType<MovementsService['recordCompensationCashMovementDurable']>
+      >,
+      orderId: number,
+      paymentId: number | null,
+    ) => {
+      if (outcome.status !== 'pending') return;
+      this.logger.warn(
+        `recordPaymentCompensationInTx: orden #${orderId}, pago #${paymentId ?? 'n/a'} encolado (${outcome.reason}, outbox #${outcome.failure_id})`,
+      );
+      await this.auditCashReversalFailure(
+        orderId,
+        paymentId != null ? [paymentId] : [],
+        'queued_' + outcome.reason,
+      );
+    };
+
+    for (const sale of sales) {
+      const paymentId = sale.payment_id as number;
+      const orderId = sale.order_id;
+      if (orderId == null) {
+        // Sale incoherente (sin orden): no se puede emparejar; nunca en silencio.
         this.logger.warn(
-          `reversePaymentCashMovements: sin usuario en contexto; orden #${orderId}, pagos ${paymentIds.join(', ')} sin contra-movimiento de caja`,
+          `recordPaymentCompensationInTx: sale #${sale.id} del pago #${paymentId} sin order_id; sin contra-movimiento`,
         );
-        await this.auditCashReversalFailure(orderId, paymentIds, 'no_user_context');
-        return;
+        await this.auditCashReversalFailure(0, [paymentId], 'sale_without_order');
+        continue;
       }
-      const saleMovements = await this.prisma.cash_register_movements.findMany({
+      const outcome =
+        await this.movementsService.recordCompensationCashMovementDurable(
+          {
+            store_id: sale.store_id,
+            user_id: contextUserId ?? sale.user_id,
+            order_id: orderId,
+            payment_id: paymentId,
+            amount: Number(sale.amount),
+            reference: opts.referenceFor(paymentId, sale.id),
+            dedupe_key: opts.dedupeFor(paymentId, sale.id),
+            notes: opts.notesFor(paymentId, orderId),
+            payment_method: sale.payment_method ?? 'cash',
+            sale_session_first: opts.saleSessionFirst,
+          },
+          tx,
+        );
+      await enqueueOrWarn(outcome, orderId, paymentId);
+      if (opts.unlinkSale) {
+        // El pago vuelve a `pending` y se podrá confirmar otra vez: el `sale`
+        // compensado deja de ocupar el índice único de un `sale` por pago.
+        await tx.cash_register_movements.update({
+          where: { id: sale.id },
+          data: {
+            payment_id: null,
+            notes: `${UNLINKED_SALE_NOTES_PREFIX}${paymentId} tras compensación (${opts.unlinkSale.reason})`,
+          },
+        });
+      }
+    }
+
+    if (opts.orphanScanOrderId != null) {
+      const orphans = await tx.cash_register_movements.findMany({
         where: {
-          order_id: orderId,
           type: 'sale',
-          payment_id: { in: paymentIds },
+          order_id: opts.orphanScanOrderId,
+          payment_id: null,
         },
         select: {
-          session_id: true,
-          payment_id: true,
+          id: true,
+          store_id: true,
           amount: true,
           payment_method: true,
+          user_id: true,
+          notes: true,
         },
       });
-      if (saleMovements.length === 0) return;
-
-      for (const movement of saleMovements) {
-        const paymentId = movement.payment_id;
-        const method = movement.payment_method ?? '';
-        try {
-          if (method === 'cash') {
-            // Efectivo: nunca se pierde. Cascada original → operador → mismo
-            // registro; sin sesión, outbox durable (se entrega al abrir caja).
-            const outcome =
-              await this.movementsService.recordCompensationCashMovementDurable({
-                store_id: storeId,
-                user_id: userId,
-                order_id: orderId,
-                payment_id: paymentId,
-                amount: Number(movement.amount),
-                reference: 'payment_cancelled',
-                dedupe_key: `payment_cancelled:${paymentId}`,
-                notes: `Anulación del pago #${paymentId} de la orden #${orderId}`,
-              });
-            if (outcome.status === 'pending') {
-              this.logger.warn(
-                `reversePaymentCashMovements: orden #${orderId}, pago #${paymentId} encolado (${outcome.reason}, outbox #${outcome.failure_id})`,
-              );
-              await this.auditCashReversalFailure(orderId, [paymentId!], 'queued_' + outcome.reason);
-            }
-            continue;
-          }
-
-          // No efectivo: no cuenta en el esperado de efectivo; no se encola.
-          // Con sesión destino deja rastro; sin ella, auditoría explícita.
-          const targetSessionId =
-            await this.movementsService.resolveCompensationSessionId({
-              store_id: storeId,
-              user_id: userId,
-              payment_id: paymentId,
-              order_id: orderId,
-            });
-          if (!targetSessionId) {
-            this.logger.warn(
-              `reversePaymentCashMovements: orden #${orderId}, pago #${paymentId ?? 'n/a'} (${method || 'sin método'}): sin sesión abierta; contra-movimiento no efectivo NO registrado`,
-            );
-            await this.auditCashReversalFailure(
-              orderId,
-              paymentId != null ? [paymentId] : [],
-              'no_open_session_non_cash',
-            );
-            continue;
-          }
-          await this.movementsService.recordRefundMovement(targetSessionId, {
-            store_id: storeId,
-            user_id: userId,
-            amount: Number(movement.amount),
-            payment_method: method,
-            order_id: orderId,
-            payment_id: paymentId ?? undefined,
-            reference: 'payment_cancelled',
-          });
-        } catch (error) {
-          this.logger.error(
-            `reversePaymentCashMovements: orden #${orderId}, pago #${paymentId ?? 'n/a'}: ${(error as Error).message}`,
-            (error as Error).stack,
+      for (const sale of orphans.filter(
+        // BL-1: un sale ya compensado y desvinculado (unlinkSale) tiene su
+        // refund `payment_compensated:*`; el barrido no debe compensarlo otra vez.
+        (o) => !o.notes?.startsWith(UNLINKED_SALE_NOTES_PREFIX),
+      )) {
+        this.logger.warn(
+          `recordPaymentCompensationInTx: orden #${opts.orphanScanOrderId}, sale #${sale.id} sin payment_id; se compensa por orden`,
+        );
+        const outcome =
+          await this.movementsService.recordCompensationCashMovementDurable(
+            {
+              store_id: sale.store_id,
+              user_id: contextUserId ?? sale.user_id,
+              order_id: opts.orphanScanOrderId,
+              payment_id: null,
+              amount: Number(sale.amount),
+              reference: `payment_cancelled:sale:${sale.id}`,
+              dedupe_key: `payment_cancelled:sale:${sale.id}`,
+              notes: `Anulación de pago de la orden #${opts.orphanScanOrderId} (sale #${sale.id} sin payment_id)`,
+              payment_method: sale.payment_method ?? 'cash',
+            },
+            tx,
           );
-          await this.auditCashReversalFailure(
-            orderId,
-            paymentId != null ? [paymentId] : [],
-            'movement_write_failed',
-            error,
-          );
-        }
+        await enqueueOrWarn(outcome, opts.orphanScanOrderId, null);
       }
-    } catch (error) {
-      // La anulación ya quedó persistida: no se rompe, pero tampoco se calla.
-      this.logger.error(
-        `reversePaymentCashMovements: orden #${orderId}, pagos ${paymentIds.join(', ')}: ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-      await this.auditCashReversalFailure(orderId, paymentIds, 'reversal_failed', error);
     }
   }
 
@@ -10862,6 +11381,15 @@ export class OrderFlowService {
         (err as Error)?.stack,
       );
     }
+  }
+
+  /** Clave de `flow/pay` con alcance de orden (`payments.financial_idempotency_key` es única global). */
+  private buildPayIdempotencyKey(
+    orderId: number,
+    key?: string | null,
+  ): string | null {
+    const trimmed = key?.trim();
+    return trimmed ? `flow_pay:${orderId}:${trimmed}` : null;
   }
 
   private wrapPaymentFailure(

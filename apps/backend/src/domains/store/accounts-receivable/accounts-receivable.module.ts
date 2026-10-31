@@ -5,6 +5,7 @@ import { ArAgingService } from './services/ar-aging.service';
 import { ArCollectionService } from './services/ar-collection.service';
 import { PaymentAgreementService } from './services/payment-agreement.service';
 import { ArEventsListener } from './listeners/ar-events.listener';
+import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 // The receivables-payables tool family spans both sides of the ledger; this
@@ -16,7 +17,7 @@ import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createReceivablesPayablesTools } from '../../../ai-engine/tools/domains/receivables-payables.tools';
 
 @Module({
-  imports: [PrismaModule, ResponseModule, AccountsPayableModule],
+  imports: [PrismaModule, ResponseModule, AccountsPayableModule, CashRegistersModule],
   controllers: [AccountsReceivableController],
   providers: [
     AccountsReceivableService,

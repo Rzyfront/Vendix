@@ -588,6 +588,8 @@ describe('OrderFlowService.cancelPayment — payment_cancelled + state_changed',
       payments: ['update'],
       invoices: ['findFirst'],
     });
+    // B16: la reversa de caja corre en la tx de cancelPayment; sin `sale` no hay nada que compensar.
+    prismaMock.cash_register_movements = { findMany: jest.fn().mockResolvedValue([]) } as any;
     prismaMock.invoices.findFirst.mockResolvedValue(null);
     prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID });
     prismaMock.orders.findFirst.mockResolvedValue({ id: ORDER_ID, payments: [] });
@@ -709,6 +711,8 @@ describe('OrderFlowService.cancelPayment — D: el stock comprometido no bloquea
       invoices: ['findFirst'],
       order_items: ['updateMany', 'update'],
     });
+    // B16: la reversa de caja corre en la tx de cancelPayment; sin `sale` no hay nada que compensar.
+    prismaMock.cash_register_movements = { findMany: jest.fn().mockResolvedValue([]) } as any;
     prismaMock.invoices.findFirst.mockResolvedValue(null);
     prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID });
     prismaMock.orders.findFirst.mockResolvedValue({ id: ORDER_ID, payments: [] });

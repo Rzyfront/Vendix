@@ -45,7 +45,7 @@ function setup() {
     accounts_receivable: { findFirst: jest.fn().mockResolvedValue(creditAr) },
     $transaction: jest.fn((callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
   };
-  const service = new AccountsReceivableService(prisma as any, { emit: jest.fn() } as any);
+  const service = new AccountsReceivableService(prisma as any, { emit: jest.fn() } as any, { recordModuleCashMovement: jest.fn() } as any);
   return { tx, prisma, service };
 }
 
