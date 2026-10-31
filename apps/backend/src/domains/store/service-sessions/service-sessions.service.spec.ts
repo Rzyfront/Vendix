@@ -49,6 +49,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
   let stockLevelManager: { reserveStock: jest.Mock; getDefaultLocationForProduct: jest.Mock; releaseReservationQuantity: jest.Mock; releaseReservationsByReference: jest.Mock };
   let stockValidator: { resolveInventoryPolicy: jest.Mock };
   let allocator: { allocateForLine: jest.Mock; absorbShortfall: jest.Mock };
+  let shippingTax: { taxRowsForCategory: jest.Mock };
 
   beforeEach(() => {
     stockLevelManager = {
@@ -68,6 +69,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       getActiveTemplateById: jest.fn().mockResolvedValue(null),
     };
     notifications = { push: jest.fn() };
+    shippingTax = { taxRowsForCategory: jest.fn().mockResolvedValue([]) };
     prisma = {
       entity_metadata_values: { findMany: jest.fn().mockResolvedValue([]) },
       service_sessions: { findFirst: jest.fn() },
@@ -86,6 +88,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       stockLevelManager as any,
       stockValidator as any,
       allocator as any,
+      shippingTax as any,
     );
   });
 
@@ -634,6 +637,53 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
         // La línea se carga en una transacción propia: el 409 del cierre no la revierte.
         expect(prisma.$transaction).toHaveBeenCalledTimes(2);
         await expect(prisma.$transaction.mock.results[0].value).resolves.toBeUndefined();
+      });
+
+      it('la línea de alquiler toma el impuesto configurado en la estación', async () => {
+        withTariff();
+        tx.service_stations.findFirst.mockResolvedValue({
+          name: 'Sala 1',
+          rental_block_minutes: 30,
+          rental_block_price: 20000,
+          rental_tax_category_id: 3,
+          rental_tax_is_inclusive: false,
+        });
+        shippingTax.taxRowsForCategory.mockResolvedValue([
+          { tax_rate_id: 30, name: 'IVA 19%', rate: 0.19, tax_type: 'iva', is_inclusive: false },
+        ]);
+        tx.orders.findFirst.mockImplementation((args: any) =>
+          Promise.resolve(args?.select?.remaining_balance !== undefined ? { remaining_balance: 71400 } : { grand_total: 71400, tip_amount: 0, currency: 'COP' }),
+        );
+        await expect(service.transition(21, { action: 'close' } as any)).rejects.toMatchObject({
+          response: expect.objectContaining({ error_code: 'STATION_006' }),
+        });
+        expect(shippingTax.taxRowsForCategory).toHaveBeenCalledWith(tx, { tax_category_id: 3, tax_is_inclusive: false, store_id: 1 });
+        const data = tx.order_items.create.mock.calls[0][0].data;
+        // Agregado encima: base $20.000 + IVA 19 % = $23.800 por bloque, 3 bloques.
+        expect(Number(data.unit_price)).toBe(20000);
+        expect(Number(data.total_price)).toBe(60000);
+        expect(Number(data.tax_amount_item)).toBe(3800);
+        expect(Number(data.final_unit_price)).toBe(23800);
+        expect(data.order_item_taxes).toEqual({
+          create: [
+            { tax_rate_id: 30, tax_name: 'IVA 19%', tax_rate: 0.19, tax_amount: 11400, tax_type: 'iva', is_compound: false, is_inclusive: false },
+          ],
+        });
+      });
+
+      it('sin impuesto configurado la línea sale sin impuesto, como antes', async () => {
+        withTariff();
+        tx.orders.findFirst.mockImplementation((args: any) =>
+          Promise.resolve(args?.select?.remaining_balance !== undefined ? { remaining_balance: 60000 } : { grand_total: 60000, tip_amount: 0, currency: 'COP' }),
+        );
+        await expect(service.transition(21, { action: 'close' } as any)).rejects.toMatchObject({
+          response: expect.objectContaining({ error_code: 'STATION_006' }),
+        });
+        expect(shippingTax.taxRowsForCategory).toHaveBeenCalledWith(tx, { tax_category_id: null, tax_is_inclusive: true, store_id: 1 });
+        const data = tx.order_items.create.mock.calls[0][0].data;
+        expect(Number(data.tax_amount_item)).toBe(0);
+        expect(Number(data.final_unit_price)).toBe(20000);
+        expect(data.order_item_taxes).toBeUndefined();
       });
 
       it('no duplica la línea si la sesión ya tiene el alquiler de esa estación', async () => {

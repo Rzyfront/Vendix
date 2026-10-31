@@ -36,3 +36,30 @@ describe('Station DTOs — alquiler por bloque', () => {
     });
   });
 });
+
+describe('Station DTOs — impuesto del alquiler', () => {
+  const taxErrorsOf = (cls: typeof CreateServiceStationDto | typeof UpdateServiceStationDto, body: Record<string, unknown>) =>
+    validateSync(plainToInstance(cls, body)).filter((error) => error.property.startsWith('rental_tax'));
+
+  describe.each([
+    ['CreateServiceStationDto', CreateServiceStationDto, { name: 'Cancha 1' }],
+    ['UpdateServiceStationDto', UpdateServiceStationDto, {}],
+  ] as const)('%s', (_label, cls, base) => {
+    it.each([
+      ['sin impuesto (omitido)', {}],
+      ['quitar el impuesto (null)', { rental_tax_category_id: null }],
+      ['categoría y modo agregado', { rental_tax_category_id: 3, rental_tax_is_inclusive: false }],
+      ['categoría como texto numérico', { rental_tax_category_id: '3', rental_tax_is_inclusive: true }],
+    ])('acepta %s', (_case, body) => {
+      expect(taxErrorsOf(cls, { ...base, ...body })).toEqual([]);
+    });
+
+    it.each([
+      ['categoría 0', { rental_tax_category_id: 0 }],
+      ['categoría decimal', { rental_tax_category_id: 1.5 }],
+      ['modo no booleano', { rental_tax_is_inclusive: 'si' }],
+    ])('rechaza %s', (_case, body) => {
+      expect(taxErrorsOf(cls, { ...base, ...body }).length).toBeGreaterThan(0);
+    });
+  });
+});

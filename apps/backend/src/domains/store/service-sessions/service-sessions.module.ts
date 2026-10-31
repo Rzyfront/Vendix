@@ -10,9 +10,10 @@ import { ServiceSessionAccessModule } from '../../ecommerce/service-sessions/ser
 import { EmailModule } from '../../../email/email.module';
 import { DataCollectionModule } from '../data-collection/data-collection.module';
 import { InventoryModule } from '../inventory/inventory.module';
+import { ShippingModule } from '../shipping/shipping.module'; // ShippingTaxService: impuesto del alquiler de estación
 
 @Module({
-  imports: [ResponseModule, NotificationsModule, SettingsModule, ServiceAllocationModule, ServiceSessionAccessModule, EmailModule, DataCollectionModule, InventoryModule],
+  imports: [ResponseModule, NotificationsModule, SettingsModule, ServiceAllocationModule, ServiceSessionAccessModule, EmailModule, DataCollectionModule, InventoryModule, ShippingModule],
   controllers: [ServiceSessionsController],
   providers: [ServiceSessionsService, ServiceIndustryGuard],
   exports: [ServiceSessionsService],

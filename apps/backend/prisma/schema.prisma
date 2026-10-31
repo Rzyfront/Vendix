@@ -3477,6 +3477,7 @@ model tax_categories {
   // Tarifas de envío que cobran este impuesto (FK RESTRICT). `TaxesService
   // .remove` rechaza el borrado mientras alguna la use.
   shipping_rates          shipping_rates[]
+  service_stations_rental_tax service_stations[] @relation("service_stations_rental_tax_category")
 
   @@index([organization_id])
 }
@@ -14076,6 +14077,14 @@ model service_stations {
   /// Alquiler por bloque: al cerrar la atención se cobra ceil(minutos / bloque) × precio. NULL = sin alquiler.
   rental_block_minutes Int?
   rental_block_price Decimal? @db.Decimal(12, 2)
+  /// Impuesto OPCIONAL del alquiler, mismo mecanismo que `shipping_rates.tax_category_id`
+  /// (null = sin impuesto, el default). Elegible: IVA/INC con una sola tasa > 0 en el alcance
+  /// fiscal de la tienda (`ShippingTaxService.taxRowsForCategory`). RESTRICT: borrar la
+  /// categoría no debe quitar el impuesto del alquiler en silencio.
+  rental_tax_category_id Int?
+  rental_tax_category tax_categories? @relation("service_stations_rental_tax_category", fields: [rental_tax_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  /// Modo del impuesto del alquiler: true = incluido en el precio del bloque (default), false = agregado encima.
+  rental_tax_is_inclusive Boolean @default(true)
   intake_template_id Int?
   intake_template data_collection_templates? @relation("station_intake_template", fields: [intake_template_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
   public_id  String   @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -14096,6 +14105,7 @@ model service_stations {
   @@unique([store_id, id])
   @@index([store_id, status], map: "service_stations_store_status_idx")
   @@index([intake_template_id])
+  @@index([rental_tax_category_id])
   @@map("service_stations")
 }
 

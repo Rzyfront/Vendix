@@ -6,6 +6,7 @@ import { resolveLineTotals } from '../../taxes/utils/tax-inclusive-math.util';
 import type { SellableStockAllocator } from '../../inventory/shared/services/sellable-stock-allocator.service';
 import type { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import type { StockValidatorService } from '../../inventory/shared/services/stock-validator.service';
+import type { ShippingTaxService } from '../../shipping/services/shipping-tax.service';
 
 /**
  * Columnas de precio/impuesto de una línea de la cuenta SVC, igual que `addItems` de la
@@ -128,18 +129,26 @@ export function rentalBlocksConsumed(openedAt: Date, now: Date, blockMinutes: nu
 /**
  * Línea "Alquiler <estación>" de la cuenta SVC cuando la estación tiene tarifa por bloque.
  * Sin tarifa (NULL o cero) no hace nada. Se cobra una sola vez: si la sesión ya tiene la
- * línea de alquiler de esa estación, no se duplica. Sin producto, sin inventario y sin
- * impuesto (no hay tasa de catálogo que aplicar). Devuelve si creó la línea; el llamador
- * recalcula los totales.
+ * línea de alquiler de esa estación, no se duplica. Sin producto ni inventario. El impuesto
+ * es el configurado en la estación (`rental_tax_category_id` + `rental_tax_is_inclusive`),
+ * resuelto con la misma regla que la tarifa de envío; sin configuración la línea sale sin
+ * impuesto. Devuelve si creó la línea; el llamador recalcula los totales.
  */
 export async function ensureSessionRentalLine(
   tx: Prisma.TransactionClient,
   args: { storeId: number; sessionId: number; orderId: number; stationId: number; openedAt: Date; now: Date },
+  taxes: Pick<ShippingTaxService, 'taxRowsForCategory'>,
 ): Promise<boolean> {
   const { storeId, sessionId, orderId, stationId, openedAt, now } = args;
   const station = await tx.service_stations.findFirst({
     where: { id: stationId, store_id: storeId },
-    select: { name: true, rental_block_minutes: true, rental_block_price: true },
+    select: {
+      name: true,
+      rental_block_minutes: true,
+      rental_block_price: true,
+      rental_tax_category_id: true,
+      rental_tax_is_inclusive: true,
+    },
   });
   const blockMinutes = station?.rental_block_minutes ?? 0;
   const blockPrice = Number(station?.rental_block_price ?? 0);
@@ -156,6 +165,11 @@ export async function ensureSessionRentalLine(
   });
   if (existing) return false;
   const quantity = rentalBlocksConsumed(openedAt, now, blockMinutes);
+  const taxRows = await taxes.taxRowsForCategory(tx, {
+    tax_category_id: station.rental_tax_category_id ?? null,
+    tax_is_inclusive: station.rental_tax_is_inclusive ?? true,
+    store_id: storeId,
+  });
   await tx.order_items.create({
     data: {
       order_id: orderId,
@@ -165,7 +179,7 @@ export async function ensureSessionRentalLine(
       quantity,
       item_type: 'service',
       updated_at: now,
-      ...buildSessionTaxedLine(blockPrice, quantity, []),
+      ...buildSessionTaxedLine(blockPrice, quantity, taxRows),
     },
   });
   return true;

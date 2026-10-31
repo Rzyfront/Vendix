@@ -17,10 +17,14 @@ import {
   UpdateServiceStationDto,
 } from './dto/station.dto';
 import { StationListQueryDto } from './dto/station-list-query.dto';
+import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 
 @Injectable()
 export class ServiceStationsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly shippingTax: ShippingTaxService,
+  ) {}
 
   private get storeId(): number {
     const store_id = RequestContextService.getContext()?.store_id;
@@ -148,6 +152,8 @@ export class ServiceStationsService {
       throw new BadRequestException('Elige la plantilla de la estación (o diséñala primero).');
     }
     await this.assertIntakeTemplate(dto.intake_template_id);
+    // Impuesto del alquiler: misma validación que la tarifa de envío.
+    await this.shippingTax.assertCategoryAssignable(dto.rental_tax_category_id, 'station_rental');
     // Sin tipo explícito, la estación toma el tipo para el que se diseñó su plantilla.
     const template = !dto.station_type && dto.intake_template_id
       ? await this.prisma.data_collection_templates.findFirst({
@@ -167,6 +173,8 @@ export class ServiceStationsService {
           target_minutes: dto.target_minutes ?? null,
           rental_block_minutes: dto.rental_block_minutes ?? null,
           rental_block_price: dto.rental_block_price ?? null,
+          rental_tax_category_id: dto.rental_tax_category_id ?? null,
+          rental_tax_is_inclusive: dto.rental_tax_is_inclusive ?? true,
           intake_template_id: dto.intake_template_id ?? null,
         },
       });
@@ -182,6 +190,7 @@ export class ServiceStationsService {
   async update(id: number, dto: UpdateServiceStationDto) {
     await this.findOne(id);
     await this.assertIntakeTemplate(dto.intake_template_id);
+    await this.shippingTax.assertCategoryAssignable(dto.rental_tax_category_id, 'station_rental');
     try {
       await this.prisma.service_stations.updateMany({
         where: { id, store_id: this.storeId },
@@ -194,6 +203,8 @@ export class ServiceStationsService {
           ...(dto.target_minutes !== undefined && { target_minutes: dto.target_minutes }),
           ...(dto.rental_block_minutes !== undefined && { rental_block_minutes: dto.rental_block_minutes }),
           ...(dto.rental_block_price !== undefined && { rental_block_price: dto.rental_block_price }),
+          ...(dto.rental_tax_category_id !== undefined && { rental_tax_category_id: dto.rental_tax_category_id }),
+          ...(dto.rental_tax_is_inclusive !== undefined && { rental_tax_is_inclusive: dto.rental_tax_is_inclusive }),
           ...(dto.intake_template_id !== undefined && { intake_template_id: dto.intake_template_id }),
           updated_at: new Date(),
         },

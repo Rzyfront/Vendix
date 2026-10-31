@@ -160,6 +160,9 @@ const REQUIRED_COLUMNS = [
   // lee la tarifa de la estación; toda lectura de estaciones selecciona estas columnas.
   'service_stations.rental_block_minutes',
   'service_stations.rental_block_price',
+  // Impuesto del alquiler (migración 20261105120000): mismas lecturas de estación.
+  'service_stations.rental_tax_category_id',
+  'service_stations.rental_tax_is_inclusive',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

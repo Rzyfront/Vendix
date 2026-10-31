@@ -102,6 +102,21 @@ export class CreateServiceStationDto {
   @IsRentalBlockPair()
   rental_block_price?: number | null;
 
+  /**
+   * Impuesto del alquiler: categoría IVA/INC con una sola tasa > 0, igual que la tarifa de
+   * envío (null = sin impuesto). La elegibilidad la valida `ShippingTaxService`.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  rental_tax_category_id?: number | null;
+
+  /** Modo del impuesto del alquiler: true = incluido en el precio del bloque, false = agregado encima. */
+  @IsOptional()
+  @IsBoolean()
+  rental_tax_is_inclusive?: boolean;
+
   /** Formulario de Recolección de datos que se diligencia al ingresar a esta estación (null = el del servicio). */
   @IsOptional()
   @Type(() => Number)
@@ -160,6 +175,21 @@ export class UpdateServiceStationDto {
   @Max(RENTAL_BLOCK_PRICE_MAX)
   @IsRentalBlockPair()
   rental_block_price?: number | null;
+
+  /**
+   * Impuesto del alquiler: categoría IVA/INC con una sola tasa > 0, igual que la tarifa de
+   * envío (null = sin impuesto). La elegibilidad la valida `ShippingTaxService`.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  rental_tax_category_id?: number | null;
+
+  /** Modo del impuesto del alquiler: true = incluido en el precio del bloque, false = agregado encima. */
+  @IsOptional()
+  @IsBoolean()
+  rental_tax_is_inclusive?: boolean;
 
   /** Formulario de Recolección de datos que se diligencia al ingresar a esta estación (null = el del servicio). */
   @IsOptional()

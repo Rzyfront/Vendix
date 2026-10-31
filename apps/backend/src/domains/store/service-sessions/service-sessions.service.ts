@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { entity_type_enum, order_items, Prisma } from '@prisma/client';
 import { filter } from 'rxjs';
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
+import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 import { resolveFullTaxRowsByProductId } from '../orders/utils/catalog-line-pricing.util';
 import {
   buildSessionTaxedLine,
@@ -91,6 +92,7 @@ export class ServiceSessionsService {
     private readonly stockLevelManager: StockLevelManager,
     private readonly stockValidator: StockValidatorService,
     private readonly sellableStockAllocator: SellableStockAllocator,
+    private readonly shippingTax: ShippingTaxService,
   ) {}
 
   async open(dto: OpenServiceSessionDto) {
@@ -899,7 +901,7 @@ export class ServiceSessionsService {
       stationId: session.station_id,
       openedAt: session.opened_at,
       now,
-    });
+    }, this.shippingTax);
     if (added) await this.recalcOrderTotals(tx, orderId, now);
   }
 

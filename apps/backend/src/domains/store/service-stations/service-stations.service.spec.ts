@@ -16,7 +16,7 @@ describe('ServiceStationsService.getPublicUrl', () => {
       service_station_providers: { findMany: jest.fn().mockResolvedValue([]) },
       domain_settings: { findFirst: jest.fn() },
     };
-    service = new ServiceStationsService(prisma as unknown as StorePrismaService);
+    service = new ServiceStationsService(prisma as unknown as StorePrismaService, {} as any);
   });
 
   function run<T>(fn: () => Promise<T>): Promise<T> {
@@ -83,7 +83,7 @@ describe('ServiceStationsService.destroy', () => {
       booking_reschedule_requests: { count: jest.fn().mockResolvedValue(0) },
       $transaction: jest.fn(async (cb: any) => cb(tx)),
     };
-    service = new ServiceStationsService(prisma as unknown as StorePrismaService);
+    service = new ServiceStationsService(prisma as unknown as StorePrismaService, {} as any);
   });
 
   function run<T>(fn: () => Promise<T>): Promise<T> {
@@ -118,5 +118,54 @@ describe('ServiceStationsService.destroy', () => {
     expect(tx.booking_reschedule_requests.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: { requested_station_id: null } }),
     );
+  });
+});
+
+describe('ServiceStationsService — impuesto del alquiler', () => {
+  const context: RequestContext = { store_id: 10, is_super_admin: false, is_owner: false };
+  let service: ServiceStationsService;
+  let prisma: Record<string, any>;
+  let shippingTax: { assertCategoryAssignable: jest.Mock };
+
+  beforeEach(() => {
+    prisma = {
+      service_stations: {
+        findFirst: jest.fn().mockResolvedValue({ id: 2, name: 'Cancha 1' }),
+        create: jest.fn().mockResolvedValue({ id: 2 }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      data_collection_templates: { findFirst: jest.fn().mockResolvedValue({ id: 5, station_type: 'general' }) },
+      service_station_services: { findMany: jest.fn().mockResolvedValue([]) },
+      service_station_providers: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    shippingTax = { assertCategoryAssignable: jest.fn().mockResolvedValue(undefined) };
+    service = new ServiceStationsService(prisma as unknown as StorePrismaService, shippingTax as any);
+  });
+
+  const run = <T>(fn: () => Promise<T>): Promise<T> => RequestContextService.runIsolated(context, fn);
+
+  it('al crear valida la categoría con el contexto del alquiler y la guarda con su modo', async () => {
+    await run(() => service.create({ name: 'Cancha 1', intake_template_id: 5, rental_tax_category_id: 3, rental_tax_is_inclusive: false }));
+    expect(shippingTax.assertCategoryAssignable).toHaveBeenCalledWith(3, 'station_rental');
+    expect(prisma.service_stations.create.mock.calls[0][0].data).toMatchObject({ rental_tax_category_id: 3, rental_tax_is_inclusive: false });
+  });
+
+  it('al crear sin impuesto guarda null y modo incluido (comportamiento actual)', async () => {
+    await run(() => service.create({ name: 'Cancha 1', intake_template_id: 5 }));
+    expect(prisma.service_stations.create.mock.calls[0][0].data).toMatchObject({ rental_tax_category_id: null, rental_tax_is_inclusive: true });
+  });
+
+  it('una categoría rechazada no toca la estación', async () => {
+    shippingTax.assertCategoryAssignable.mockRejectedValue(new Error('no elegible'));
+    await expect(run(() => service.update(2, { rental_tax_category_id: 9 }))).rejects.toThrow('no elegible');
+    expect(prisma.service_stations.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('al editar solo cambia los campos de impuesto enviados', async () => {
+    await run(() => service.update(2, { rental_tax_category_id: null }));
+    expect(shippingTax.assertCategoryAssignable).toHaveBeenCalledWith(null, 'station_rental');
+    const data = prisma.service_stations.updateMany.mock.calls[0][0].data;
+    expect(data.rental_tax_category_id).toBeNull();
+    expect(data).not.toHaveProperty('rental_tax_is_inclusive');
   });
 });
