@@ -18,7 +18,11 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
   let prismaMock: any;
   let context: any;
   let orderHistory: { record: jest.Mock };
-  let orderFlowService: { markItemDelivered: jest.Mock; settlePaidTableOrder: jest.Mock };
+  let orderFlowService: {
+    markItemDelivered: jest.Mock;
+    settlePaidTableOrder: jest.Mock;
+    markFinishPendingAfterPayment: jest.Mock;
+  };
 
   const STORE_ID = 100;
   const USER_ID = 42;
@@ -146,6 +150,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
     orderFlowService = {
       markItemDelivered: jest.fn(),
       settlePaidTableOrder: jest.fn().mockResolvedValue(undefined),
+      markFinishPendingAfterPayment: jest.fn().mockResolvedValue(undefined),
     };
 
     service = new TableSessionsService(
@@ -536,12 +541,33 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         state: 'succeeded', payment_id: paymentId, effects_pending: true,
       });
       expect(prismaMock.payments.updateMany).toHaveBeenCalledTimes(1);
+      // The sweep can settle it unattended (B07 marker, kind table_settlement).
+      expect(orderFlowService.markFinishPendingAfterPayment).toHaveBeenCalledWith(orderId, {
+        kind: 'table_settlement',
+        payment_ids: [paymentId],
+        user_id: USER_ID,
+        error: 'stock unavailable',
+      });
 
       await expect(service.confirmPayment(sessionId, paymentId)).resolves.toEqual({
         state: 'succeeded', payment_id: paymentId,
       });
       expect(orderFlowService.settlePaidTableOrder).toHaveBeenCalledTimes(2);
+      // The retry never charges again: no second CAS, movement or balance bump.
       expect(prismaMock.payments.updateMany).toHaveBeenCalledTimes(1);
+      expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('B11: a concurrent loser of the CAS neither settles nor flags (the winner owns the settlement)', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 100));
+      prismaMock.payments.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      await expect(service.confirmPayment(sessionId, paymentId)).resolves.toEqual({
+        state: 'succeeded', payment_id: paymentId,
+      });
+
+      expect(orderFlowService.settlePaidTableOrder).not.toHaveBeenCalled();
+      expect(orderFlowService.markFinishPendingAfterPayment).not.toHaveBeenCalled();
     });
 
     it('does not project a partial payment', async () => {

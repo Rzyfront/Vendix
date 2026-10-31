@@ -3478,6 +3478,18 @@ export class OrderFlowService {
     return 'resolved';
   }
 
+  /** B11 — leaves the B07 marker on an order whose money is firm but whose
+   * closing step failed outside `payOrder` (table staff confirmation), so
+   * `FinishPendingSweepJob` repeats it. */
+  async markFinishPendingAfterPayment(
+    orderId: number,
+    marker: Omit<FinishPendingAfterPaymentMarker, 'at'>,
+  ): Promise<void> {
+    await this.appendFlowMetadata(orderId, {
+      finish_pending_after_payment: { ...marker, at: new Date().toISOString() },
+    });
+  }
+
   private readFinishPendingMarker(
     internalNotes: string | null | undefined,
   ): FinishPendingAfterPaymentMarker | null {

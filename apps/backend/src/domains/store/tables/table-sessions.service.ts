@@ -288,7 +288,8 @@ export class TableSessionsService {
     @Inject(forwardRef(() => require('../orders/order-flow/order-flow.service').OrderFlowService))
     private readonly orderFlowService: Pick<
       OrderFlowService,
-      'cancelOrderItem' | 'deliverOrderItem' | 'settlePaidTableOrder'
+      | 'cancelOrderItem' | 'deliverOrderItem' | 'settlePaidTableOrder'
+      | 'markFinishPendingAfterPayment'
     >,
     // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
     // Sin ciclo: OrderHistoryModule solo importa PrismaModule.
@@ -3110,7 +3111,10 @@ export class TableSessionsService {
     // B11: the confirmation that covers the grand total promotes the draft
     // order with the same settlement the financial split uses. It runs after
     // the money transaction; a failure is logged and flagged, never rolled
-    // into the payment, and a retry of this confirmation repairs it.
+    // into the payment. Two repairs, neither charges again: re-confirming the
+    // already `succeeded` payment takes the idempotent branch above (no new
+    // movement or balance bump) and settles again, and the B07 marker
+    // `table_settlement` lets `FinishPendingSweepJob` settle it unattended.
     let effectsPending = false;
     if (result.shouldProject) {
       try {
@@ -3124,6 +3128,21 @@ export class TableSessionsService {
           `[confirmPayment] order settlement failed for order ${result.orderId} payment ${result.payment_id}: ${(error as Error)?.message ?? String(error)}`,
           error instanceof Error ? error.stack : undefined,
         );
+        try {
+          await this.orderFlowService.markFinishPendingAfterPayment(
+            result.orderId,
+            {
+              kind: 'table_settlement',
+              payment_ids: [result.payment_id],
+              user_id: userId,
+              error: (error as Error)?.message ?? String(error),
+            },
+          );
+        } catch (markerError) {
+          this.logger.error(
+            `[confirmPayment] finish pending marker failed for order ${result.orderId}: ${(markerError as Error)?.message ?? String(markerError)}`,
+          );
+        }
       }
     }
 
