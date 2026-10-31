@@ -3851,6 +3851,18 @@ export class OrderFlowService {
         });
       }
 
+      // B4/B16 — la anulación devuelve a caja lo que el cobro registró como
+      // venta, en la MISMA tx que anula el pago: una caída ya no deja el pago
+      // anulado con el `sale` vivo (y "anular y volver a cobrar" no cuenta la
+      // venta dos veces). Sesión cerrada → outbox durable dentro de la tx.
+      await this.recordPaymentCompensationInTx(tx, cancelledPaymentIds, {
+        referenceFor: () => 'payment_cancelled',
+        dedupeFor: (paymentId) => `payment_cancelled:${paymentId}`,
+        notesFor: (paymentId, oid) =>
+          `Anulación del pago #${paymentId} de la orden #${oid}`,
+        orphanScanOrderId: orderId,
+      });
+
       if (freshIsFulfilledCancel) {
         // B4/B1b — NOT `created`, and NOT collapsed to `delivered` either:
         // the goods already left (stock stays exactly as committed), so the
@@ -3913,11 +3925,6 @@ export class OrderFlowService {
         });
       }
     }
-
-    // B4 — la anulación devuelve a caja lo que el cobro original registró
-    // como venta: sin esto, "anular y volver a cobrar" en efectivo contaba la
-    // venta dos veces en el cuadre de la sesión.
-    await this.reversePaymentCashMovements(order.store_id, orderId, cancelledPaymentIds);
 
     // Return updated order with all includes
     const updatedOrder = await this.prisma.orders.findFirst({
@@ -9642,6 +9649,19 @@ export class OrderFlowService {
     cancellationReason: string,
   ): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
+      // B02 — cada tramo anulado (o devuelto a `pending` en sitio) que dejó un
+      // `sale` recibe su contramovimiento en la MISMA tx; los diferidos nunca
+      // crearon `sale`, así que no tienen nada que compensar.
+      await this.recordPaymentCompensationInTx(
+        tx,
+        legPayments.map(({ payment }) => payment.id),
+        {
+          referenceFor: (paymentId) => `payment_compensated:${paymentId}`,
+          dedupeFor: (paymentId) => `payment_compensated:${paymentId}`,
+          notesFor: (paymentId, orderId) =>
+            `Compensación del pago #${paymentId} de la orden #${orderId}: ${cancellationReason}`,
+        },
+      );
       for (const { payment, confirmedInPlaceOriginal: original } of legPayments) {
         if (original) {
           // La fila confirmada en sitio era el pago online del cliente: no se
@@ -9839,134 +9859,127 @@ export class OrderFlowService {
   }
 
   /**
-   * B4 — contra-movimiento de caja de los pagos anulados por `cancelPayment`.
-   * Solo revierte pagos que SÍ dejaron un movimiento `sale` en caja (si la
-   * caja estaba apagada o el pago era no-efectivo sin rastreo, no hay nada
-   * que revertir). No crítico, igual que `recordPayOrderCashMovement`.
+   * B02/B16 — contra-movimiento `refund` de los movimientos `sale` de los pagos
+   * anulados, escrito DENTRO de la transacción del llamador (misma tx que anula
+   * el pago: o quedan los dos o ninguno).
    *
-   * Resolución de sesión por movimiento (ya no siempre la del operador que
-   * anula, que dejaba la venta contada doble si ese admin no tenía caja
-   * abierta):
-   * 1. La sesión ORIGINAL del movimiento `sale` (`movement.session_id`), si
-   *    sigue `open` — el contra-movimiento cae en el mismo cuadre que la
-   *    venta que revierte.
-   * 2. Si esa sesión ya cerró, la sesión activa del operador que anula
-   *    (`getActiveSession(userId)`).
-   * 3. Si tampoco hay una sesión activa del operador, no hay dónde asentar
-   *    el refund: se deja constancia explícita con `logger.warn` (antes
-   *    salía en silencio y la venta original quedaba contada en el cuadre
-   *    sin su reversa) y se continúa con los demás movimientos.
-   *
-   * El `user_id` que queda en el movimiento de reversa es siempre el del
-   * operador que anula (RequestContextService.getUserId()), sin importar en
-   * qué sesión caiga.
+   * Solo compensa pagos que SÍ dejaron un movimiento `sale`. Misma sesión de la
+   * venta si sigue abierta (cascada de `recordCompensationCashMovementDurable`);
+   * sin sesión receptora se encola en el outbox durable, nunca se pierde.
+   * Actor: el usuario del contexto o, si no hay, el `user_id` del `sale` original.
+   * Idempotente por `reference` + pago + orden + método.
    */
-  private async reversePaymentCashMovements(
-    storeId: number,
-    orderId: number,
+  private async recordPaymentCompensationInTx(
+    tx: Prisma.TransactionClient,
     paymentIds: number[],
+    opts: {
+      referenceFor: (paymentId: number) => string;
+      dedupeFor: (paymentId: number) => string;
+      notesFor: (paymentId: number, orderId: number) => string;
+      /** Si se informa, además cubre `sale` de la orden sin `payment_id`. */
+      orphanScanOrderId?: number;
+    },
   ): Promise<void> {
-    if (paymentIds.length === 0) return;
-    const userId = RequestContextService.getUserId();
-    try {
-      if (!userId) {
+    const contextUserId = RequestContextService.getUserId();
+    const sales =
+      paymentIds.length > 0
+        ? await tx.cash_register_movements.findMany({
+            where: { type: 'sale', payment_id: { in: paymentIds } },
+            select: {
+              id: true,
+              store_id: true,
+              order_id: true,
+              payment_id: true,
+              amount: true,
+              payment_method: true,
+              user_id: true,
+            },
+          })
+        : [];
+
+    const enqueueOrWarn = async (
+      outcome: Awaited<
+        ReturnType<MovementsService['recordCompensationCashMovementDurable']>
+      >,
+      orderId: number,
+      paymentId: number | null,
+    ) => {
+      if (outcome.status !== 'pending') return;
+      this.logger.warn(
+        `recordPaymentCompensationInTx: orden #${orderId}, pago #${paymentId ?? 'n/a'} encolado (${outcome.reason}, outbox #${outcome.failure_id})`,
+      );
+      await this.auditCashReversalFailure(
+        orderId,
+        paymentId != null ? [paymentId] : [],
+        'queued_' + outcome.reason,
+      );
+    };
+
+    for (const sale of sales) {
+      const paymentId = sale.payment_id as number;
+      const orderId = sale.order_id;
+      if (orderId == null) {
+        // Sale incoherente (sin orden): no se puede emparejar; nunca en silencio.
         this.logger.warn(
-          `reversePaymentCashMovements: sin usuario en contexto; orden #${orderId}, pagos ${paymentIds.join(', ')} sin contra-movimiento de caja`,
+          `recordPaymentCompensationInTx: sale #${sale.id} del pago #${paymentId} sin order_id; sin contra-movimiento`,
         );
-        await this.auditCashReversalFailure(orderId, paymentIds, 'no_user_context');
-        return;
+        await this.auditCashReversalFailure(0, [paymentId], 'sale_without_order');
+        continue;
       }
-      const saleMovements = await this.prisma.cash_register_movements.findMany({
+      const outcome =
+        await this.movementsService.recordCompensationCashMovementDurable(
+          {
+            store_id: sale.store_id,
+            user_id: contextUserId ?? sale.user_id,
+            order_id: orderId,
+            payment_id: paymentId,
+            amount: Number(sale.amount),
+            reference: opts.referenceFor(paymentId),
+            dedupe_key: opts.dedupeFor(paymentId),
+            notes: opts.notesFor(paymentId, orderId),
+            payment_method: sale.payment_method ?? 'cash',
+          },
+          tx,
+        );
+      await enqueueOrWarn(outcome, orderId, paymentId);
+    }
+
+    if (opts.orphanScanOrderId != null) {
+      const orphans = await tx.cash_register_movements.findMany({
         where: {
-          order_id: orderId,
           type: 'sale',
-          payment_id: { in: paymentIds },
+          order_id: opts.orphanScanOrderId,
+          payment_id: null,
         },
         select: {
-          session_id: true,
-          payment_id: true,
+          id: true,
+          store_id: true,
           amount: true,
           payment_method: true,
+          user_id: true,
         },
       });
-      if (saleMovements.length === 0) return;
-
-      for (const movement of saleMovements) {
-        const paymentId = movement.payment_id;
-        const method = movement.payment_method ?? '';
-        try {
-          if (method === 'cash') {
-            // Efectivo: nunca se pierde. Cascada original → operador → mismo
-            // registro; sin sesión, outbox durable (se entrega al abrir caja).
-            const outcome =
-              await this.movementsService.recordCompensationCashMovementDurable({
-                store_id: storeId,
-                user_id: userId,
-                order_id: orderId,
-                payment_id: paymentId,
-                amount: Number(movement.amount),
-                reference: 'payment_cancelled',
-                dedupe_key: `payment_cancelled:${paymentId}`,
-                notes: `Anulación del pago #${paymentId} de la orden #${orderId}`,
-              });
-            if (outcome.status === 'pending') {
-              this.logger.warn(
-                `reversePaymentCashMovements: orden #${orderId}, pago #${paymentId} encolado (${outcome.reason}, outbox #${outcome.failure_id})`,
-              );
-              await this.auditCashReversalFailure(orderId, [paymentId!], 'queued_' + outcome.reason);
-            }
-            continue;
-          }
-
-          // No efectivo: no cuenta en el esperado de efectivo; no se encola.
-          // Con sesión destino deja rastro; sin ella, auditoría explícita.
-          const targetSessionId =
-            await this.movementsService.resolveCompensationSessionId({
-              store_id: storeId,
-              user_id: userId,
-              payment_id: paymentId,
-              order_id: orderId,
-            });
-          if (!targetSessionId) {
-            this.logger.warn(
-              `reversePaymentCashMovements: orden #${orderId}, pago #${paymentId ?? 'n/a'} (${method || 'sin método'}): sin sesión abierta; contra-movimiento no efectivo NO registrado`,
-            );
-            await this.auditCashReversalFailure(
-              orderId,
-              paymentId != null ? [paymentId] : [],
-              'no_open_session_non_cash',
-            );
-            continue;
-          }
-          await this.movementsService.recordRefundMovement(targetSessionId, {
-            store_id: storeId,
-            user_id: userId,
-            amount: Number(movement.amount),
-            payment_method: method,
-            order_id: orderId,
-            payment_id: paymentId ?? undefined,
-            reference: 'payment_cancelled',
-          });
-        } catch (error) {
-          this.logger.error(
-            `reversePaymentCashMovements: orden #${orderId}, pago #${paymentId ?? 'n/a'}: ${(error as Error).message}`,
-            (error as Error).stack,
+      for (const sale of orphans) {
+        this.logger.warn(
+          `recordPaymentCompensationInTx: orden #${opts.orphanScanOrderId}, sale #${sale.id} sin payment_id; se compensa por orden`,
+        );
+        const outcome =
+          await this.movementsService.recordCompensationCashMovementDurable(
+            {
+              store_id: sale.store_id,
+              user_id: contextUserId ?? sale.user_id,
+              order_id: opts.orphanScanOrderId,
+              payment_id: null,
+              amount: Number(sale.amount),
+              reference: `payment_cancelled:sale:${sale.id}`,
+              dedupe_key: `payment_cancelled:sale:${sale.id}`,
+              notes: `Anulación de pago de la orden #${opts.orphanScanOrderId} (sale #${sale.id} sin payment_id)`,
+              payment_method: sale.payment_method ?? 'cash',
+            },
+            tx,
           );
-          await this.auditCashReversalFailure(
-            orderId,
-            paymentId != null ? [paymentId] : [],
-            'movement_write_failed',
-            error,
-          );
-        }
+        await enqueueOrWarn(outcome, opts.orphanScanOrderId, null);
       }
-    } catch (error) {
-      // La anulación ya quedó persistida: no se rompe, pero tampoco se calla.
-      this.logger.error(
-        `reversePaymentCashMovements: orden #${orderId}, pagos ${paymentIds.join(', ')}: ${(error as Error).message}`,
-        (error as Error).stack,
-      );
-      await this.auditCashReversalFailure(orderId, paymentIds, 'reversal_failed', error);
     }
   }
 

@@ -53,6 +53,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
       count: jest.fn(async () => events.filter((e) => e === 'payment').length),
     };
     const tx: any = {
+      cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) },
       $queryRaw: jest.fn(async () => [{ id: 1, state }]),
       orders: {
         findFirst: jest.fn(async () => ({
@@ -963,6 +964,7 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
     projectTablePayment = jest.fn().mockResolvedValue(null);
     prismaMock = {
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) },
       store_payment_methods: {
         findFirst: jest
           .fn()
@@ -3715,6 +3717,7 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
 
   const buildService = () => {
     const prismaMock: any = {
+      cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       store_payment_methods: {
         findFirst: jest
@@ -4507,6 +4510,7 @@ describe('OrderFlowService.cancelPayment — B4 (release-855) delivered/finished
       orders: ['update', 'findFirst'],
       payments: ['update'],
       invoices: ['findFirst'],
+      cash_register_movements: ['findMany'],
     });
     // Lock: first $queryRaw call is the order row (must be non-empty or
     // `lockOrderLifecycle` throws NotFoundException); the second is the
@@ -4516,6 +4520,7 @@ describe('OrderFlowService.cancelPayment — B4 (release-855) delivered/finished
       .mockResolvedValueOnce([{ id: ORDER_ID, state: 'delivered' }])
       .mockResolvedValue([]);
     prismaMock.invoices.findFirst.mockResolvedValue(null);
+    prismaMock.cash_register_movements.findMany.mockResolvedValue([]);
     prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, state: 'delivered' });
     prismaMock.orders.findFirst.mockResolvedValue({ id: ORDER_ID, state: 'delivered', payments: [] });
 
@@ -4703,47 +4708,48 @@ describe('OrderFlowService.cancelPayment — B4 (release-855) delivered/finished
 });
 
 /**
- * B4/B8 follow-up — resolución de sesión de caja en la reversa de
- * `cancelPayment`. Antes SIEMPRE caía en `getActiveSession(userId)` del
- * operador que anula: si ese admin no tenía caja abierta, la reversa salía en
- * silencio y la venta original quedaba contada doble en el cuadre. Ahora
- * prioriza la sesión ORIGINAL del movimiento `sale` si sigue abierta.
+ * B16 — la reversa de caja de `cancelPayment` se escribe DENTRO de la tx que
+ * anula (`recordPaymentCompensationInTx`): misma sesión del `sale` si sigue
+ * abierta, outbox durable si no, actor = usuario del contexto o el del `sale`.
  */
-describe('OrderFlowService.reversePaymentCashMovements — resolución de sesión', () => {
+describe('OrderFlowService.recordPaymentCompensationInTx — contramovimiento en la tx', () => {
   let service: OrderFlowService;
-  let prismaMock: PrismaMock;
-  let sessionsService: { getActiveSession: jest.Mock };
-  let movementsService: {
-    recordRefundMovement: jest.Mock;
-    recordCompensationCashMovementDurable: jest.Mock;
-    resolveCompensationSessionId: jest.Mock;
+  let movementsService: { recordCompensationCashMovementDurable: jest.Mock };
+  let audit: { log: jest.Mock };
+  let tx: any;
+
+  const REFS = {
+    referenceFor: () => 'payment_cancelled',
+    dedupeFor: (id: number) => `payment_cancelled:${id}`,
+    notesFor: (id: number, oid: number) => `Anulación del pago #${id} de la orden #${oid}`,
   };
-  let audit: { log: jest.Mock; logCustom: jest.Mock };
+
+  const sale = (over: any = {}) => ({
+    id: 11,
+    store_id: 100,
+    order_id: 9001,
+    payment_id: 5001,
+    amount: new Prisma.Decimal('59.50'),
+    payment_method: 'cash',
+    user_id: 3,
+    ...over,
+  });
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
-
-    prismaMock = createPrismaMock({
-      cash_register_movements: ['findMany'],
-      cash_register_sessions: ['findMany'],
-    });
-
-    sessionsService = { getActiveSession: jest.fn() };
     movementsService = {
-      recordRefundMovement: jest.fn().mockResolvedValue({ id: 999 }),
       recordCompensationCashMovementDurable: jest
         .fn()
         .mockResolvedValue({ status: 'recorded', movement_id: 999 }),
-      resolveCompensationSessionId: jest.fn().mockResolvedValue(null),
     };
-    audit = { log: jest.fn().mockResolvedValue(undefined), logCustom: jest.fn() };
-
+    audit = { log: jest.fn().mockResolvedValue(undefined) };
+    tx = { cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) } };
     service = new OrderFlowService(
-      prismaMock as unknown as StorePrismaService,
+      {} as unknown as StorePrismaService,
       { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
       {} as any,
-      sessionsService as any,
+      {} as any,
       movementsService as any,
       {} as any, {} as any, {} as any,
       audit as any,
@@ -4751,14 +4757,10 @@ describe('OrderFlowService.reversePaymentCashMovements — resolución de sesió
     );
   });
 
-  const cashSale = (method = 'cash') => [
-    { session_id: 501, payment_id: 5001, amount: new Prisma.Decimal('59.50'), payment_method: method },
-  ];
+  it('escribe el contramovimiento con el MISMO tx, método y monto del sale', async () => {
+    tx.cash_register_movements.findMany.mockResolvedValue([sale({ payment_method: 'card' })]);
 
-  it('efectivo: delega en la cola durable con reference payment_cancelled y dedupe por pago', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale());
-
-    await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
+    await (service as any).recordPaymentCompensationInTx(tx, [5001], REFS);
 
     expect(movementsService.recordCompensationCashMovementDurable).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -4767,78 +4769,74 @@ describe('OrderFlowService.reversePaymentCashMovements — resolución de sesió
         order_id: 9001,
         payment_id: 5001,
         amount: 59.5,
+        payment_method: 'card',
         reference: 'payment_cancelled',
         dedupe_key: 'payment_cancelled:5001',
       }),
+      tx,
     );
     expect(audit.log).not.toHaveBeenCalled();
   });
 
-  it('efectivo sin ninguna sesión: queda encolado, con warn y auditoría (nunca en silencio)', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale());
+  it('sin usuario en contexto usa el user_id del sale original como actor', async () => {
+    mockRequestContext({ store_id: 100, organization_id: 1, user_id: undefined as any });
+    tx.cash_register_movements.findMany.mockResolvedValue([sale()]);
+
+    await (service as any).recordPaymentCompensationInTx(tx, [5001], REFS);
+
+    expect(movementsService.recordCompensationCashMovementDurable).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: 3 }),
+      tx,
+    );
+  });
+
+  it('sesión cerrada: queda encolado, con warn y auditoría (nunca en silencio)', async () => {
+    tx.cash_register_movements.findMany.mockResolvedValue([sale()]);
     movementsService.recordCompensationCashMovementDurable.mockResolvedValue({
       status: 'pending', failure_id: 12, reason: 'no_open_cash_session',
     });
     const warnSpy = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
 
-    await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
+    await (service as any).recordPaymentCompensationInTx(tx, [5001], REFS);
 
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('9001'));
     expect(warnSpy.mock.calls[0][0]).toEqual(expect.stringContaining('5001'));
     expect(audit.log).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'payment.cancel.cash_reversal_issue',
-        resourceId: 9001,
         metadata: expect.objectContaining({ cause: 'queued_no_open_cash_session', payment_ids: [5001] }),
       }),
     );
   });
 
-  it('no efectivo con sesión destino: contra-movimiento directo en esa sesión', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale('card'));
-    movementsService.resolveCompensationSessionId.mockResolvedValue(501);
+  it('sale sin payment_id: avisa con warn y compensa por orden (no sale en silencio)', async () => {
+    tx.cash_register_movements.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([sale({ id: 21, payment_id: null })]);
+    const warnSpy = jest.spyOn((service as any).logger, 'warn').mockImplementation(() => undefined);
 
-    await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
+    await (service as any).recordPaymentCompensationInTx(tx, [5001], {
+      ...REFS,
+      orphanScanOrderId: 9001,
+    });
 
-    expect(movementsService.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
-    expect(movementsService.recordRefundMovement).toHaveBeenCalledWith(
-      501,
-      expect.objectContaining({ payment_method: 'card', payment_id: 5001, reference: 'payment_cancelled' }),
-    );
-  });
-
-  it('no efectivo sin sesión: se audita, NO se encola', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale('card'));
-    movementsService.resolveCompensationSessionId.mockResolvedValue(null);
-
-    await (service as any).reversePaymentCashMovements(100, 9001, [5001]);
-
-    expect(movementsService.recordCompensationCashMovementDurable).not.toHaveBeenCalled();
-    expect(movementsService.recordRefundMovement).not.toHaveBeenCalled();
-    expect(audit.log).toHaveBeenCalledWith(
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('sale #21'));
+    expect(movementsService.recordCompensationCashMovementDurable).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'payment.cancel.cash_reversal_issue',
-        metadata: expect.objectContaining({ cause: 'no_open_session_non_cash' }),
+        order_id: 9001,
+        payment_id: null,
+        reference: 'payment_cancelled:sale:21',
       }),
+      tx,
     );
   });
 
-  it('un fallo de escritura no rompe la anulación pero se loguea y audita (sin catch mudo)', async () => {
-    prismaMock.cash_register_movements.findMany.mockResolvedValue(cashSale());
+  it('un fallo de escritura se propaga para abortar la tx (pago anulado y sale vivo no pueden quedar)', async () => {
+    tx.cash_register_movements.findMany.mockResolvedValue([sale()]);
     movementsService.recordCompensationCashMovementDurable.mockRejectedValue(new Error('db caída'));
-    const errSpy = jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
 
     await expect(
-      (service as any).reversePaymentCashMovements(100, 9001, [5001]),
-    ).resolves.toBeUndefined();
-
-    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('db caída'), expect.anything());
-    expect(audit.log).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: 'payment.cancel.cash_reversal_issue',
-        metadata: expect.objectContaining({ cause: 'movement_write_failed', error: 'db caída' }),
-      }),
-    );
+      (service as any).recordPaymentCompensationInTx(tx, [5001], REFS),
+    ).rejects.toThrow('db caída');
   });
 });
 
@@ -5637,6 +5635,7 @@ describe('OrderFlowService.payOrder — cobro multimétodo de contado (Paso 3)',
     const stateUpdates: Array<{ state: string; metadata: unknown }> = [];
     const createdPayments: any[] = [];
     const prismaMock: any = {
+      cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       store_payment_methods: {
         findFirst: jest.fn().mockResolvedValue(LEG_METHODS[0]),
@@ -7175,6 +7174,7 @@ describe('OrderFlowService.payOrder — registrar pago online manual (Fase 2 pas
     const confirmedInPlace: any[] = [];
     const stateUpdates: Array<{ state: string; metadata: unknown }> = [];
     const prismaMock: any = {
+      cash_register_movements: { findMany: jest.fn().mockResolvedValue([]) },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       store_payment_methods: {
         findFirst: jest.fn().mockImplementation(async ({ where }: any) =>
