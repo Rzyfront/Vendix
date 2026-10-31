@@ -88,7 +88,10 @@ export class KdsTicketDetailModalComponent {
    *  para tickets todo-para-llevar; el resto lo registra mesero/cajero. */
   readonly allTakeaway = computed(() => {
     const ticket = this.ticketDisplay();
-    if (!this.isTableTicket() && ticket?.order?.delivery_type === 'direct_delivery') {
+    // Cocina entrega mostrador (direct_delivery) y domicilio (home_delivery).
+    // Los de mesa (dine_in) los sirve el mesero: siguen bloqueados.
+    const dt = ticket?.order?.delivery_type;
+    if (!this.isTableTicket() && (dt === 'direct_delivery' || dt === 'home_delivery')) {
       return true;
     }
     const items = ticket?.items ?? [];
@@ -233,7 +236,7 @@ export class KdsTicketDetailModalComponent {
     }
     switch (this.ticketDisplay()?.order?.delivery_type) {
       case 'home_delivery':
-        return 'ENVÍO';
+        return 'DOMICILIO';
       case 'direct_delivery':
         return 'PARA LLEVAR';
       default:
@@ -243,7 +246,7 @@ export class KdsTicketDetailModalComponent {
 
   itemDeliveryBadge(item: KitchenTicketItem): string | null {
     if (this.ticketDisplay()?.order?.delivery_type === 'home_delivery') {
-      return 'ENVÍO';
+      return 'DOMICILIO';
     }
     if (this.isTableTicket()) {
       return item.order_item?.is_takeaway === true ? 'PARA LLEVAR' : null;

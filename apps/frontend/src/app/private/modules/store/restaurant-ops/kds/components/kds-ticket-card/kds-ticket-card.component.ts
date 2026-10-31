@@ -46,7 +46,7 @@ export class KdsTicketCardComponent {
   readonly deliveryBadgeLabel = computed(() => {
     switch (this.ticket().order?.delivery_type) {
       case 'home_delivery':
-        return 'ENVÍO';
+        return 'DOMICILIO';
       case 'direct_delivery':
         return 'PARA LLEVAR';
       default:
@@ -64,14 +64,14 @@ export class KdsTicketCardComponent {
 
   /**
    * Rótulo de empaque por plato individual:
-   * - 'ENVÍO' para domicilio.
+   * - 'DOMICILIO' para domicilio.
    * - En mesas de salón, SOLO 'PARA LLEVAR' si el plato fue expresamente marcado (order_item.is_takeaway = true).
    * - 'PARA LLEVAR' para pedidos de mostrador (direct_delivery) sin mesa.
    * - null para consumo regular en mesa.
    */
   itemDeliveryBadge(item: KitchenTicketItem): string | null {
     if (this.ticket().order?.delivery_type === 'home_delivery') {
-      return 'ENVÍO';
+      return 'DOMICILIO';
     }
     if (this.isTableTicket()) {
       return item.order_item?.is_takeaway === true ? 'PARA LLEVAR' : null;
@@ -91,7 +91,10 @@ export class KdsTicketCardComponent {
    */
   readonly allTakeaway = computed(() => {
     const ticket = this.ticket();
-    if (!this.isTableTicket() && ticket?.order?.delivery_type === 'direct_delivery') {
+    // Cocina entrega mostrador (direct_delivery) y domicilio (home_delivery).
+    // Los de mesa (dine_in) los sirve el mesero: siguen bloqueados.
+    const dt = ticket?.order?.delivery_type;
+    if (!this.isTableTicket() && (dt === 'direct_delivery' || dt === 'home_delivery')) {
       return true;
     }
     const items = ticket?.items ?? [];

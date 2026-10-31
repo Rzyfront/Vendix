@@ -24,8 +24,8 @@
             {{ t.order?.order_number ?? ('#' + t.order_id) }}
           </p>
           @if (deliveryBadgeLabel(); as label) {
-            <app-badge variant="info" size="xs" [title]="label === 'ENVÍO' ? 'Pedido para envío a domicilio' : 'Pedido para llevar'">
-              <app-icon name="shopping-bag" [size]="10" /> {{ label }}
+            <app-badge variant="info" size="xs" [title]="label === 'DOMICILIO' ? 'Pedido para envío a domicilio' : 'Pedido para llevar'">
+              <app-icon [name]="label === 'DOMICILIO' ? 'bike' : 'shopping-bag'" [size]="10" /> {{ label }}
             </app-badge>
           }
         </div>
@@ -79,8 +79,8 @@
                 <p class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-1.5 flex-wrap">
                   <span>×{{ item.quantity }} {{ item.product?.name || ('Producto #' + item.product_id) }}</span>
                   @if (itemDeliveryBadge(item); as label) {
-                    <app-badge variant="info" size="xs" [title]="label === 'ENVÍO' ? 'Pedido para envío a domicilio' : 'Pedido para llevar'">
-                      <app-icon name="shopping-bag" [size]="10" /> {{ label }}
+                    <app-badge variant="info" size="xs" [title]="label === 'DOMICILIO' ? 'Pedido para envío a domicilio' : 'Pedido para llevar'">
+                      <app-icon [name]="label === 'DOMICILIO' ? 'bike' : 'shopping-bag'" [size]="10" /> {{ label }}
                     </app-badge>
                   }
                 </p>
