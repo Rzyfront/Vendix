@@ -125,6 +125,71 @@ describe('CrmOutboundProcessor', () => {
     });
   });
 
+  it('SMS: passes the customer for the consent check and stores the cost', async () => {
+    const { processor, prisma, messaging } = setup(
+      row({
+        channel: 'sms',
+        provider: 'sns_sms',
+        conversation: {
+          id: 3,
+          contact_address: '+573001234567',
+          last_inbound_at: null,
+          assigned_user_id: 5,
+          customer_id: 33,
+        },
+      }),
+    );
+    (messaging.send as jest.Mock).mockResolvedValue({
+      status: 'sent',
+      provider: 'sns_sms',
+      provider_message_id: 'sns-msg-1',
+      retryable: false,
+      cost_amount: 0.0075,
+    });
+
+    await processor.process(job());
+
+    expect(messaging.send).toHaveBeenCalledWith({
+      store_id: 10,
+      channel: 'sms',
+      to: '+573001234567',
+      body: 'Hola',
+      customer_id: 33,
+      idempotency_key: '77',
+    });
+    expect(prisma.crm_messages.updateMany).toHaveBeenCalledWith({
+      where: { id: 77, status: 'queued' },
+      data: expect.objectContaining({
+        status: 'sent',
+        provider: 'sns_sms',
+        provider_message_id: 'sns-msg-1',
+        cost_amount: 0.0075,
+      }),
+    });
+  });
+
+  it('SMS over the spend cap ends failed with SPEND_LIMIT, without retries', async () => {
+    const { processor, prisma, messaging } = setup(row({ channel: 'sms', provider: 'sns_sms' }));
+    (messaging.send as jest.Mock).mockResolvedValue({
+      status: 'failed',
+      provider: 'sns_sms',
+      error_code: 'SPEND_LIMIT',
+      error_message: 'Monthly SMS spend limit reached',
+      retryable: false,
+    });
+
+    await expect(processor.process(job())).resolves.toBeUndefined();
+
+    expect(prisma.crm_messages.updateMany).toHaveBeenCalledWith({
+      where: { id: 77, status: 'queued' },
+      data: expect.objectContaining({
+        status: 'failed',
+        error_code: 'SPEND_LIMIT',
+        error_message: 'Monthly SMS spend limit reached',
+      }),
+    });
+  });
+
   it('maps a stored template row to the template contract', async () => {
     const { processor, messaging } = setup(
       row({

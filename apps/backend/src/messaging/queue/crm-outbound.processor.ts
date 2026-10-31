@@ -76,6 +76,9 @@ export class CrmOutboundProcessor extends WorkerHost {
           status: 'sent',
           provider: result.provider,
           provider_message_id: result.provider_message_id ?? null,
+          ...(result.cost_amount !== undefined
+            ? { cost_amount: result.cost_amount }
+            : {}),
           sent_at: new Date(),
           error_code: null,
           error_message: null,
@@ -143,12 +146,17 @@ export class CrmOutboundProcessor extends WorkerHost {
     template_language: string | null;
     template_variables: unknown;
     media: unknown;
-    conversation: { contact_address: string; last_inbound_at: Date | null };
+    conversation: {
+      contact_address: string;
+      last_inbound_at: Date | null;
+      customer_id: number | null;
+    };
   }): OutboundMessage {
     const outbound: OutboundMessage = {
       store_id: message.store_id,
       channel: message.channel as OutboundMessage['channel'],
       to: message.conversation.contact_address,
+      customer_id: message.conversation.customer_id,
       idempotency_key: String(message.id),
     };
     if (message.body) outbound.body = message.body;

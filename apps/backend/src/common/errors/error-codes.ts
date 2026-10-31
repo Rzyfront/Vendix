@@ -7569,6 +7569,13 @@ export const ErrorCodes = {
     devMessage:
       'Pasaron más de 24 horas desde el último mensaje del cliente. Solo puedes enviarle una plantilla aprobada.',
   },
+  // SMS: la tienda agotó su tope mensual de gasto (o no tiene tope definido).
+  CRM_SMS_SPEND_LIMIT: {
+    code: 'CRM_SMS_SPEND_LIMIT',
+    httpStatus: 409,
+    devMessage:
+      'La tienda alcanzó su tope mensual de SMS. Sube el tope en Integraciones → Canales o espera al próximo mes.',
+  },
 
   // CRM Landing (QUI-719): fallo al encolar el job en BullMQ.
   // 500: Redis/caída del queue — la fila queda `failed` con mensaje y el

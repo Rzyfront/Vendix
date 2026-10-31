@@ -4,6 +4,7 @@ import { Subject } from 'rxjs';
 import { RequestContextService } from '@common/context/request-context.service';
 import { CrmConversationsService } from './crm-conversations.service';
 import { CrmInboxEvent } from '../../../../../messaging/events/crm-inbox-events.service';
+import { ErrorCodes, VendixHttpException } from '../../../../../common/errors';
 
 /**
  * In-memory stand-in for `StorePrismaService`. Like the real scope extension
@@ -140,6 +141,9 @@ function conversation(overrides: Row): Row {
   };
 }
 
+const SMS_CONVERSATION = () =>
+  conversation({ id: 6, store_id: STORE_A, channel: 'sms', contact_address: '+573007778899' });
+
 function setup() {
   const people = new Map<number, Row>(
     [
@@ -209,6 +213,7 @@ function setup() {
     signUrl: jest.fn(async (key: string) => `https://signed.example/${key}`),
   };
   const audit = { log: jest.fn().mockResolvedValue(undefined) };
+  const smsSpend = { assertAvailable: jest.fn().mockResolvedValue(undefined) };
   const redisStore = new Map<string, string>();
   const redis = {
     set: jest.fn(async (key: string, value: string, ...args: unknown[]) => {
@@ -228,8 +233,9 @@ function setup() {
     s3 as never,
     audit as never,
     redis as never,
+    smsSpend as never,
   );
-  return { service, prisma, outbound, events, live, redis, redisStore, audit };
+  return { service, prisma, outbound, events, live, redis, redisStore, audit, smsSpend };
 }
 
 /** Owner and admin carry `assign`; seller (employee) and cashier do not. */
@@ -474,6 +480,40 @@ describe('CrmConversationsService', () => {
       expect(row).toMatchObject({ template_name: 'recordatorio', template_language: 'es', template_variables: ['Ana'], body: null });
       expect(outbound.enqueue).toHaveBeenCalledWith(message.id);
       expect(prisma.crm_conversations.rows.find((c) => c.id === 4)).toMatchObject({ status: 'open', closed_at: null });
+    });
+
+    it('SMS con el tope del mes agotado: CRM_SMS_SPEND_LIMIT y no se encola', async () => {
+      const { service, outbound, prisma, smsSpend } = setup();
+      prisma.crm_conversations.rows.push(SMS_CONVERSATION());
+      as('ownerA');
+      const before = prisma.crm_messages.rows.length;
+      smsSpend.assertAvailable.mockRejectedValueOnce(
+        new VendixHttpException(ErrorCodes.CRM_SMS_SPEND_LIMIT),
+      );
+      await expect(
+        service.send(6, { body: 'hola', client_request_id: 'req-00000020' }),
+      ).rejects.toMatchObject({ errorCode: 'CRM_SMS_SPEND_LIMIT' });
+      expect(smsSpend.assertAvailable).toHaveBeenCalledWith(STORE_A);
+      expect(outbound.enqueue).not.toHaveBeenCalled();
+      expect(prisma.crm_messages.rows).toHaveLength(before);
+    });
+
+    it('SMS con tope disponible: queda queued con provider sns_sms', async () => {
+      const { service, prisma, outbound, smsSpend } = setup();
+      prisma.crm_conversations.rows.push(SMS_CONVERSATION());
+      as('ownerA');
+      const message = await service.send(6, { body: 'hola', client_request_id: 'req-00000021' });
+      const row = prisma.crm_messages.rows.find((r) => r.id === message.id)!;
+      expect(row).toMatchObject({ channel: 'sms', provider: 'sns_sms', status: 'queued' });
+      expect(outbound.enqueue).toHaveBeenCalledWith(message.id);
+      expect(smsSpend.assertAvailable).toHaveBeenCalledWith(STORE_A);
+    });
+
+    it('WhatsApp no consulta el tope de SMS', async () => {
+      const { service, smsSpend } = setup();
+      as('ownerA');
+      await service.send(1, { body: 'hola', client_request_id: 'req-00000022' });
+      expect(smsSpend.assertAvailable).not.toHaveBeenCalled();
     });
 
     it('sin texto ni plantilla: CRM_INBOX_005', async () => {

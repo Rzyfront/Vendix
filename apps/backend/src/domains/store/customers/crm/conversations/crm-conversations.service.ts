@@ -10,6 +10,7 @@ import { AuditService } from '../../../../../common/audit/audit.service';
 import { ErrorCodes, VendixHttpException } from '../../../../../common/errors';
 import { MessagingService } from '../../../../../messaging/messaging.service';
 import { CrmOutboundQueue } from '../../../../../messaging/queue/crm-outbound.queue';
+import { SmsSpendService } from '../../../../../messaging/spend/sms-spend.service';
 import {
   CrmInboxEvent,
   CrmInboxEventsService,
@@ -80,6 +81,7 @@ export class CrmConversationsService {
     private readonly s3: S3Service,
     private readonly audit: AuditService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly smsSpend: SmsSpendService,
   ) {}
 
   async list(query: CrmConversationsQueryDto) {
@@ -177,6 +179,10 @@ export class CrmConversationsService {
       !this.messaging.isWindowOpen(conversation.last_inbound_at)
     ) {
       throw new VendixHttpException(ErrorCodes.CRM_WINDOW_CLOSED);
+    }
+    // Explicit error up front; the worker still reserves the spend atomically.
+    if (conversation.channel === 'sms') {
+      await this.smsSpend.assertAvailable(viewer.store_id);
     }
 
     const key = `crm:inbox:send:${viewer.store_id}:${id}:${dto.client_request_id}`;
