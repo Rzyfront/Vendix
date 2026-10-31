@@ -413,6 +413,14 @@ export const ErrorCodes = {
       'Payment method has no system_payment_method.type; it cannot be classified for cash register movements',
   },
 
+  // B09/BL-2: venta POS a crédito con cuota inicial y caja habilitada sin medio
+  // de pago: sin él no se puede asentar el `sale` de la cuota en la caja.
+  PAY_CREDIT_INITIAL_METHOD_REQUIRED_001: {
+    code: 'PAY_CREDIT_INITIAL_METHOD_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'Elige el medio de pago de la cuota inicial',
+  },
+
   PAY_REFUND_USE_ORDER_FLOW: {
     code: 'PAY_REFUND_USE_ORDER_FLOW',
     httpStatus: 409,

@@ -2232,6 +2232,28 @@ describe('PaymentsService', () => {
         expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
       });
 
+      it('BL-2: cuota inicial sin medio con caja habilitada: error claro antes de crear nada', async () => {
+        const db = buildDb('cash');
+
+        await expect(run(db, true, undefined)).rejects.toMatchObject({
+          errorCode: 'PAY_CREDIT_INITIAL_METHOD_REQUIRED_001',
+          message: 'Elige el medio de pago de la cuota inicial',
+        });
+        expect(db.order_installments.create).not.toHaveBeenCalled();
+        expect(db.payments.create).not.toHaveBeenCalled();
+        expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+      });
+
+      it('BL-2: caja no habilitada y sin medio: conserva la base (pago inicial sin sale ni error)', async () => {
+        const db = buildDb('cash');
+
+        await run(db, false, undefined);
+
+        expect(db.payments.create).toHaveBeenCalledTimes(1);
+        expect(db.payments.create.mock.calls[0][0].data.store_payment_method_id).toBeNull();
+        expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+      });
+
       it('método wompi o switch apagado: no crea sale', async () => {
         await run(buildDb('wompi'), true, 3);
         await run(buildDb('cash'), false, 3);

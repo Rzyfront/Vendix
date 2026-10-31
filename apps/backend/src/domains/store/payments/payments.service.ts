@@ -3054,6 +3054,18 @@ export class PaymentsService {
 
       if (creditType === 'installments') {
         const initialPayment = terms.initial_payment || 0;
+        // BL-2: con caja habilitada la cuota inicial deja un `sale`; sin medio
+        // de pago no se puede clasificar. Se rechaza antes de crear nada.
+        if (
+          initialPayment > 0 &&
+          ctx?.cash_register_enabled &&
+          !terms.initial_payment_method_id
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.PAY_CREDIT_INITIAL_METHOD_REQUIRED_001,
+            'Elige el medio de pago de la cuota inicial',
+          );
+        }
         // Subtract initial payment from total BEFORE calculating installments
         const amountToFinance =
           Math.round((orderTotal - initialPayment) * 100) / 100;
