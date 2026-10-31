@@ -59,43 +59,6 @@
     (submit)="preventNativeFormSubmit($event)"
     (keydown.enter)="preventImplicitEnterSubmit($event)"
   >
-    <!-- Naturaleza de uso: Venta · Insumo · Uso interno (todas las industrias). -->
-    <section
-      class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm"
-    >
-      <div class="flex items-center gap-2 mb-4">
-        <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
-        <h2 class="text-base font-bold text-gray-900">¿Para qué es este producto?</h2>
-      </div>
-      <app-input-buttons
-        [options]="usageNatureOptions"
-        formControlName="usage_nature"
-        (valueChange)="onUsageNatureChange($event)"
-        customWrapperClass="!mt-0"
-      >
-      </app-input-buttons>
-      <p class="mt-2 text-sm text-text-secondary">{{ usageNatureHelp() }}</p>
-    </section>
-
-    <!-- Tipo de Producto — oculto en insumos (siempre Producto Físico) -->
-    @if (!isIngredient()) {
-      <section
-        class="bg-surface rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm"
-      >
-        <div class="flex items-center gap-2 mb-4">
-          <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
-          <h2 class="text-base font-bold text-gray-900">Tipo de Producto</h2>
-        </div>
-        <app-input-buttons
-          [options]="productTypeOptions()"
-          formControlName="product_type"
-          (valueChange)="onProductTypeChange($event)"
-          customWrapperClass="!mt-0"
-        >
-        </app-input-buttons>
-      </section>
-    }
-
     <!-- Main Grid: General Info + Images (Desktop layout) -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
       <!-- Left Column: General Information (2 cols on desktop) -->
@@ -987,6 +950,42 @@
               Disponibilidad y Estado
             </h2>
           </div>
+
+          <!-- Naturaleza de uso: Venta · Insumo · Uso interno (todas las industrias).
+               Vive junto al estado para decidir de una vez qué es y cómo se ofrece. -->
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
+              <h3 class="text-sm font-bold text-gray-900">
+                ¿Para qué es este producto?
+              </h3>
+            </div>
+            <app-input-buttons
+              [options]="usageNatureOptions"
+              formControlName="usage_nature"
+              (valueChange)="onUsageNatureChange($event)"
+              customWrapperClass="!mt-0"
+            >
+            </app-input-buttons>
+            <p class="text-sm text-text-secondary">{{ usageNatureHelp() }}</p>
+          </div>
+
+          <!-- Tipo de Producto — oculto en insumos (siempre Producto Físico) -->
+          @if (!isIngredient()) {
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
+                <h3 class="text-sm font-bold text-gray-900">Tipo de Producto</h3>
+              </div>
+              <app-input-buttons
+                [options]="productTypeOptions()"
+                formControlName="product_type"
+                (valueChange)="onProductTypeChange($event)"
+                customWrapperClass="!mt-0"
+              >
+              </app-input-buttons>
+            </div>
+          }
 
           <!-- Grid 2x2: Estado, Stock, Variantes, Inventario -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
