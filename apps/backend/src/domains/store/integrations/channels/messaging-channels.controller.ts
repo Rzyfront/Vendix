@@ -1,4 +1,4 @@
-import { Body, Controller, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { ResponseService } from '@common/responses/response.service';
@@ -17,6 +17,13 @@ export class MessagingChannelsController {
     private readonly channels: MessagingChannelsService,
     private readonly responseService: ResponseService,
   ) {}
+
+  @Get()
+  @Permissions('store:social_sales:read')
+  async list() {
+    const result = await this.channels.list();
+    return this.responseService.success(result, 'Canales obtenidos');
+  }
 
   @Put('sms')
   @Permissions('store:social_sales:manage')

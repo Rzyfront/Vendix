@@ -161,6 +161,34 @@ describe('MessagingChannelsService', () => {
     });
   });
 
+  describe('GET /', () => {
+    it('returns both channels of the store, null when not configured yet', async () => {
+      const { service } = setup([
+        {
+          id: 7,
+          store_id: STORE,
+          channel_type: 'sms',
+          provider: 'sns_sms',
+          status: 'connected',
+          metadata: { sender_id: 'Tienda' },
+          connected_at: new Date('2026-10-01T00:00:00Z'),
+          disconnected_at: null,
+          monthly_spend_limit: new Prisma.Decimal(20),
+          monthly_spend_used: new Prisma.Decimal(3.5),
+          spend_period_start: null,
+          updated_at: new Date(),
+        },
+        // Another store's email channel must not leak.
+        { id: 8, store_id: 99, channel_type: 'email', provider: 'ses_email', status: 'connected', metadata: {} },
+      ]);
+
+      const view = await service.list();
+
+      expect(view.sms).toMatchObject({ id: 7, enabled: true, sender_id: 'Tienda', spend: expect.objectContaining({ currency: 'USD', limit: 20 }) });
+      expect(view.email).toBeNull();
+    });
+  });
+
   it('requires a store context', async () => {
     (RequestContextService.getStoreId as jest.Mock).mockReturnValue(undefined);
     const { service } = setup();

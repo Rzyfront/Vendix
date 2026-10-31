@@ -24,6 +24,12 @@ describe('MessagingChannelsController', () => {
     expect(meta(PERMISSIONS_KEY, handler)).toEqual(['store:social_sales:manage']);
   });
 
+  it('list is GET / and requires store:social_sales:read', () => {
+    expect(meta(METHOD_METADATA, 'list')).toBe(RequestMethod.GET);
+    expect(meta(PATH_METADATA, 'list')).toBe('/');
+    expect(meta(PERMISSIONS_KEY, 'list')).toEqual(['store:social_sales:read']);
+  });
+
   describe('validation (global pipe options)', () => {
     const pipe = new ValidationPipe({
       transform: true,

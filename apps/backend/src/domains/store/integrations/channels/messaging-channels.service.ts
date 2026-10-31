@@ -49,6 +49,16 @@ export class MessagingChannelsService {
     private readonly smsSpend: SmsSpendService,
   ) {}
 
+  /** Current SMS and email settings; `null` until the store saves one. */
+  async list() {
+    this.requireStoreId();
+    const [sms, email] = await Promise.all([this.find('sms'), this.find('email')]);
+    return {
+      sms: sms ? this.toView(sms) : null,
+      email: email ? this.toView(email) : null,
+    };
+  }
+
   async updateSms(dto: UpdateSmsChannelDto) {
     const existing = await this.find('sms');
     const previousMetadata = this.asRecord(existing?.metadata);
