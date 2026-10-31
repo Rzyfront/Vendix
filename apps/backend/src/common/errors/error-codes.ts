@@ -7403,6 +7403,25 @@ export const ErrorCodes = {
     devMessage: 'The cash session is already closed',
   },
 
+  // Caja registradora — movimientos manuales (B13).
+  CASH_MOVEMENT_FOREIGN_SESSION_001: {
+    code: 'CASH_MOVEMENT_FOREIGN_SESSION_001',
+    httpStatus: 403,
+    devMessage:
+      'Manual cash movements can only be recorded on your own cash session',
+  },
+  CASH_MOVEMENT_NOTES_REQUIRED_001: {
+    code: 'CASH_MOVEMENT_NOTES_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'A cash_out movement requires notes explaining the withdrawal',
+  },
+  CASH_MOVEMENT_AMOUNT_INVALID_001: {
+    code: 'CASH_MOVEMENT_AMOUNT_INVALID_001',
+    httpStatus: 400,
+    devMessage:
+      'Manual cash movement amount must be positive, up to 2 decimals and within the allowed maximum',
+  },
+
   // Caja registradora — cobro sin sesión del operador
   // (`assertSessionForSales`). 409 y no 403: el usuario SÍ tiene permiso para
   // cobrar; lo que falta es que tenga su caja abierta. No es "no puedes", es

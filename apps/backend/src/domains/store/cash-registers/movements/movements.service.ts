@@ -10,6 +10,7 @@ import { Interval } from '@nestjs/schedule';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { MAX_MANUAL_MOVEMENT_AMOUNT } from '../dto/create-movement.dto';
 
 /**
  * CP-REFUND-FLOW-REDESIGN paso 4 — outbox semántico para el movimiento de
@@ -195,8 +196,37 @@ export class MovementsService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
+    const amount_number = Number(data.amount);
+    if (
+      !Number.isFinite(amount_number) ||
+      amount_number <= 0 ||
+      amount_number > MAX_MANUAL_MOVEMENT_AMOUNT ||
+      Math.round(amount_number * 100) / 100 !== amount_number
+    ) {
+      throw new VendixHttpException(ErrorCodes.CASH_MOVEMENT_AMOUNT_INVALID_001);
+    }
+    if (data.type === 'cash_out' && !data.notes?.trim()) {
+      throw new VendixHttpException(ErrorCodes.CASH_MOVEMENT_NOTES_REQUIRED_001);
+    }
+
     const movement = await this.prisma.$transaction(async (tx) => {
       await this.assertOpenSessionLocked(tx, session_id, store_id);
+      // B13: la sesión debe ser del usuario, salvo quien puede cerrar cajas
+      // ajenas (no existe `close_any`; el permiso de cierre es el vigente).
+      const session = await tx.cash_register_sessions.findFirst({
+        where: { id: session_id, store_id },
+        select: { opened_by: true },
+      });
+      const can_use_foreign =
+        context.is_owner ||
+        (context.permissions ?? []).includes(
+          'store:cash_registers:close_session',
+        );
+      if (session?.opened_by !== context.user_id && !can_use_foreign) {
+        throw new VendixHttpException(
+          ErrorCodes.CASH_MOVEMENT_FOREIGN_SESSION_001,
+        );
+      }
       return tx.cash_register_movements.create({
         data: {
           session_id,

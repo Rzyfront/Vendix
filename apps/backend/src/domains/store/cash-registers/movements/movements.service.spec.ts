@@ -150,6 +150,72 @@ describe('MovementsService — compensación de caja', () => {
       contextSpy.mockRestore();
     });
 
+    describe('manual movement — B13', () => {
+      const run = async (
+        ctx: Record<string, any>,
+        data: any,
+        opened_by = OPERATOR,
+      ) => {
+        const db = makeDb(
+          [{ id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by }],
+          [],
+        );
+        const { service } = makeService(db);
+        const spy = jest
+          .spyOn(RequestContextService, 'getContext')
+          .mockReturnValue({ store_id: STORE_ID, user_id: OPERATOR, ...ctx } as any);
+        try {
+          return { db, result: service.createManualMovement(200, data) };
+        } finally {
+          spy.mockRestore();
+        }
+      };
+
+      it('rejects a session opened by someone else without the permission', async () => {
+        const { db, result } = await run(
+          { permissions: ['store:cash_registers:movements'] },
+          { type: 'cash_in', amount: 100 },
+          OTHER_USER,
+        );
+        await expect(result).rejects.toMatchObject({
+          errorCode: 'CASH_MOVEMENT_FOREIGN_SESSION_001',
+        });
+        expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+      });
+
+      it('allows a foreign session with close_session permission', async () => {
+        const { db, result } = await run(
+          { permissions: ['store:cash_registers:close_session'] },
+          { type: 'cash_in', amount: 100 },
+          OTHER_USER,
+        );
+        await result;
+        expect(db.cash_register_movements.create).toHaveBeenCalled();
+      });
+
+      it('rejects cash_out without notes', async () => {
+        const { db, result } = await run({}, { type: 'cash_out', amount: 100 });
+        await expect(result).rejects.toMatchObject({
+          errorCode: 'CASH_MOVEMENT_NOTES_REQUIRED_001',
+        });
+        expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+      });
+
+      it.each([0, -5, 10.123, 2_000_000_000, NaN])(
+        'rejects invalid amount %p',
+        async (amount) => {
+          const { db, result } = await run(
+            {},
+            { type: 'cash_in', amount },
+          );
+          await expect(result).rejects.toMatchObject({
+            errorCode: 'CASH_MOVEMENT_AMOUNT_INVALID_001',
+          });
+          expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+        },
+      );
+    });
+
     it('recordRefundMovement opens its own transaction when no tx is supplied', async () => {
       const db = makeDb(
         [{ id: 200, status: 'open', cash_register_id: REGISTER_ID, opened_by: OPERATOR }],
