@@ -7,7 +7,9 @@ import {
   IsInt,
   IsNumber,
   IsOptional,
+  IsString,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -103,6 +105,19 @@ export class RecipeItemInputDto {
     typeof value === 'string' ? value === 'true' : value,
   )
   is_optional?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Anotación libre del insumo dentro de la receta ("picar fino", "sin cáscara").',
+    example: 'Picar en cubos de 1 cm',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || null : value,
+  )
+  notes?: string | null;
 }
 
 /**

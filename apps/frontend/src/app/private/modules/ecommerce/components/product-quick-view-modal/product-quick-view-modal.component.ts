@@ -25,6 +25,11 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
 import { CatalogService, ProductDetail, ProductVariantDetail, EcommerceProduct, SaleUnitOption, formatMenuNextAvailable } from '../../services/catalog.service';
 import { AddProductOptions, CartService } from '../../services/cart.service';
 import { SaleUnitSelectorComponent } from '../sale-unit-selector/sale-unit-selector.component';
+import {
+  EMPTY_OPTION_STATE,
+  ProductOptionSelectorComponent,
+  ProductOptionSelectorState,
+} from '../product-option-selector/product-option-selector.component';
 import { TableContextService } from '../../services/table-context.service';
 import { ShareModalComponent } from '../share-modal/share-modal.component';
 import {
@@ -48,6 +53,7 @@ import {
     CurrencyPipe,
     SaleUnitSelectorComponent,
     PromotionStackComponent,
+    ProductOptionSelectorComponent,
   ],
   template: `
     <app-modal
@@ -220,6 +226,13 @@ import {
                 </div>
               </div>
             }
+
+            <!-- Adiciones (no pinta nada si el producto no tiene grupos) -->
+            <app-product-option-selector
+              [productId]="prod.id"
+              [quantity]="quantity()"
+              (stateChange)="optionState.set($event)"
+            />
 
             <!-- Categories Mini Badges -->
             @if (prod.categories && prod.categories.length > 0) {
@@ -933,8 +946,13 @@ export class ProductQuickViewModalComponent {
     () => this.product()?.is_available_now === false,
   );
 
+  /** Estado del selector de adiciones (sin grupos = no afecta nada). */
+  readonly optionState = signal<ProductOptionSelectorState>(EMPTY_OPTION_STATE);
+
   readonly purchaseDisabled = computed(() => {
     if (this.isOffSchedule()) return true;
+    // Adiciones obligatorias pendientes.
+    if (this.optionState().hasGroups && !this.optionState().valid) return true;
     // Sin presentación elegida no hay precio ni escala que cobrar.
     if (this.hasSaleUnitChoice() && !this.selectedSaleUnit()) return true;
     if (this.hasVariants() && !this.selectedVariant()) return true;
@@ -1144,6 +1162,7 @@ export class ProductQuickViewModalComponent {
             price: unit.price,
           }
         : undefined,
+      optionSelection: this.optionState().selection ?? undefined,
     };
   }
 
@@ -1230,5 +1249,6 @@ export class ProductQuickViewModalComponent {
     this.selectedTierId.set(null);
     this.hasError.set(false);
     this.quantity.set(1);
+    this.optionState.set(EMPTY_OPTION_STATE);
   }
 }

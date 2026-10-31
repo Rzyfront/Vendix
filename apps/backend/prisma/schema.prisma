@@ -8,6 +8,7 @@ datasource db {
 }
 
 model users {
+  service_reminder_logs_customer service_reminder_logs[] @relation("service_reminder_logs_customer_id_fkey")
   invoice_resolutions_archived invoice_resolutions[] @relation("invoice_resolutions_archived_by")
   financial_split_creations order_financial_splits[] @relation("financial_split_creator")
   financial_accounts order_financial_accounts[] @relation("financial_account_customer")
@@ -286,10 +287,15 @@ model users {
   dian_configuration_documents_uploaded dian_configuration_documents[]
   print_templates_created               print_templates[]             @relation("print_templates_created_by")
 
+  service_progress_events_actor_user_id_fkey service_progress_events[] @relation("service_progress_events_actor_user_id_fkey")
+
   @@index([email_verified])
   @@index([state])
   @@index([document_number])
   @@index([requires_terms_update])
+  // Pedidos programados
+  order_fulfillment_schedules_created order_fulfillment_schedules[] @relation("order_fulfillment_schedules_created_by")
+  order_fulfillment_changes_made      order_fulfillment_changes[]   @relation("order_fulfillment_changes_changed_by")
 }
 
 model user_settings {
@@ -587,6 +593,8 @@ model order_events {
   stores        stores         @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   orders        orders         @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users         users?         @relation(fields: [actor_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  service_progress_events_order_event_id_fkey service_progress_events[] @relation("service_progress_events_order_event_id_fkey")
 
   @@index([order_id, created_at])
   @@index([store_id, created_at])
@@ -1125,8 +1133,20 @@ model stores {
   // CRM Landing (QUI-719)
   crm_landing_page crm_landing_pages?
 
+  service_stations_store_fkey service_stations[] @relation("service_stations_store_fkey")
+  service_reminder_logs_store_id_fkey service_reminder_logs[] @relation("service_reminder_logs_store_id_fkey")
+
   @@unique([organization_id, slug])
   @@index([onboarding])
+  // Pedidos programados + adiciones
+  fulfillment_schedule_exceptions  fulfillment_schedule_exceptions[]
+  order_fulfillment_schedules      order_fulfillment_schedules[]
+  order_fulfillment_changes        order_fulfillment_changes[]
+  scheduled_order_reminder_logs    scheduled_order_reminder_logs[]
+  product_option_groups            product_option_groups[]
+  product_options                  product_options[]
+  product_option_group_assignments product_option_group_assignments[]
+  order_item_options               order_item_options[]
 }
 
 model store_settings {
@@ -1333,6 +1353,8 @@ model categories {
 
   @@unique([store_id, slug])
   @@index([store_id, is_featured])
+  // Adiciones
+  product_option_group_assignments product_option_group_assignments[]
 }
 
 model currencies {
@@ -1454,6 +1476,7 @@ model order_items {
   // H3.4 — hotel night this line charges (folio).
   lodging_room_night lodging_room_nights?
   id                               Int                      @id @default(autoincrement())
+  service_session_id               Int?
   order_id                         Int
   product_id                       Int?
   product_variant_id               Int?
@@ -1548,7 +1571,10 @@ model order_items {
   cancelled_at                    DateTime?                @db.Timestamp(6)
   cancellation_reason             String?
   cancellation_type               String?                  @db.VarChar(20)
+  service_session orders? @relation("order_items_service_session_fkey", fields: [order_id, service_session_id], references: [id, service_session_id], onDelete: Restrict, onUpdate: NoAction, map: "order_items_service_session_fkey")
+
   @@index([order_id, cancelled_at])
+  @@index([service_session_id])
   // Restaurant Suite Fase K / Plan KDS fire-flows: marca persistida de la intencion
   // del cajero al aniadir el item al carrito ("usar stock" en pos-prepared-choice-modal).
   // - skip_kds=true: el item NO se enviara a cocina; su stock se descuenta en el
@@ -1652,14 +1678,19 @@ model order_items {
 
   // Restaurant Suite Foundation (Fase A) — back-relation
   kitchen_ticket_items kitchen_ticket_items[]
+  // Adiciones vendidas (snapshot)
+  order_item_options order_item_options[]
 }
 
 model orders {
   // F-006: financial ownership only; this order remains the sole physical sale.
   active_financial_split_id Int? @unique
+  service_reminder_logs_source_order service_reminder_logs[] @relation("service_reminder_logs_source_order_id_fkey")
   active_financial_split order_financial_splits? @relation("active_financial_split", fields: [active_financial_split_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   financial_splits order_financial_splits[] @relation("financial_split_source")
   id                                              Int                       @id @default(autoincrement())
+  service_session_id                              Int?
+  service_version                                 Int                       @default(1)
   store_id                                        Int
   origin_cash_session_id                          Int?
   customer_id                                     Int?
@@ -1745,6 +1776,11 @@ model orders {
   tip_value                                       Decimal?                  @db.Decimal(14, 2)
   tip_waiter_id                                   Int?
   users_orders_tip_waiter_idTousers               users?                    @relation("orders_tip_waiter_idTousers", fields: [tip_waiter_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  service_session service_sessions? @relation("orders_service_session_fkey", fields: [store_id, service_session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "orders_service_session_fkey")
+
+  service_sessions_order_fkey service_sessions[] @relation("service_sessions_order_fkey")
+  order_items_service_session_fkey order_items[] @relation("order_items_service_session_fkey")
+
   @@index([tip_waiter_id])
   // QUI-551: Usuario interno / vendedor que registró la orden (atribución de ventas)
   created_by_user_id                              Int?
@@ -1809,12 +1845,16 @@ model orders {
   product_reviews             reviews[]
 
   @@unique([store_id, order_number])
+  @@unique([store_id, id])
+  @@unique([id, service_session_id])
   @@index([store_id, order_number])
   @@index([store_id, channel])
   @@index([store_id, dispatch_pool_at])
   @@index([store_id, created_by_user_id])
   @@index([shipping_tax_rate_id])
   @@index([store_id, origin_cash_session_id, state])
+  // Pedidos programados
+  fulfillment_schedule order_fulfillment_schedules?
 }
 
 model order_installments {
@@ -2029,6 +2069,8 @@ model product_variants {
 
   @@unique([product_id, sku])
   @@index([barcode])
+  // Adiciones
+  product_option_components product_options[] @relation("product_option_component_variant")
 }
 
 model products {
@@ -2058,14 +2100,18 @@ model products {
   service_modality               service_modality_enum?
   service_pricing_type           service_pricing_type_enum?
   requires_booking               Boolean                          @default(false)
+  /// CP-estaciones-servicio-reservas-qr-presupue A.2: opt-in, preserving legacy behavior.
+  requires_station               Boolean                          @default(false)
   booking_mode                   booking_mode_enum                @default(provider_required)
   buffer_minutes                 Int?                             @default(0)
   is_recurring                   Boolean                          @default(false)
+  recurrence_interval_days       Int?
   service_instructions           String?                          @db.Text
   preparation_time_minutes       Int?
   is_consultation                Boolean                          @default(false)
   send_preconsultation           Boolean                          @default(false)
   consultation_template_id       Int?
+  service_reminder_logs_product service_reminder_logs[] @relation("service_reminder_logs_product_id_fkey")
   consultation_template          data_collection_templates?       @relation("product_consultation_template", fields: [consultation_template_id], references: [id], onDelete: SetNull)
   preconsultation_template_id    Int?
   preconsultation_template       data_collection_templates?       @relation("product_preconsultation_template", fields: [preconsultation_template_id], references: [id], onDelete: SetNull)
@@ -2097,6 +2143,11 @@ model products {
   is_ingredient                  Boolean                          @default(false)
   is_combo                       Boolean                          @default(false)
   is_batch_produced              Boolean                          @default(false)
+  /// Naturaleza de uso: para qué existe el producto. `sale` se vende; `supply`
+  /// (insumo) solo entra en recetas/producción/fórmulas; `internal_use` lo
+  /// consume la operación. `supply` e `internal_use` NUNCA son vendibles en
+  /// ningún canal (lo garantiza el backend, no solo la interfaz).
+  usage_nature                   product_usage_nature_enum        @default(sale)
   /// Appointment redesign phase 2 — whether this product/service is
   /// eligible to be performed at the customer's home
   /// (when `bookings.service_location_type = 'home'`). When false, the
@@ -2249,11 +2300,15 @@ model products {
   /// No lo vuelvas a declarar como @@unique al regenerar: por eso no existe
   /// `store_id_sku` / `store_id_slug` / `store_id_barcode` como where-unique;
   /// usa findFirst con `state: { not: 'archived' }`.
+  service_station_services_product_fkey service_station_services[] @relation("service_station_services_product_fkey")
+  service_sessions_product_fkey service_sessions[] @relation("service_sessions_product_fkey")
+
   @@index([store_id, slug])
   @@index([store_id, sku])
   @@index([store_id, barcode])
   @@index([store_id, product_type])
   @@index([store_id, is_ingredient])
+  @@index([store_id, usage_nature, state])
   @@index([kds_id])
   @@index([stock_uom_id])
   @@index([purchase_uom_id])
@@ -2268,6 +2323,10 @@ model products {
   /// tienda, que es como lo consultan los reportes con scope.
   @@index([state, id])
   @@index([store_id, state])
+  @@unique([store_id, id])
+  // Adiciones
+  product_option_components  product_options[]                  @relation("product_option_component")
+  product_option_assignments product_option_group_assignments[] @relation("product_option_group_assignment_product")
 }
 
 /// CP-pos-smart-search E.4 (F-069) — log append-only de selecciones del
@@ -3418,6 +3477,7 @@ model tax_categories {
   // Tarifas de envío que cobran este impuesto (FK RESTRICT). `TaxesService
   // .remove` rechaza el borrado mientras alguna la use.
   shipping_rates          shipping_rates[]
+  service_stations_rental_tax service_stations[] @relation("service_stations_rental_tax_category")
 
   @@index([organization_id])
 }
@@ -4822,6 +4882,8 @@ enum notification_type_enum {
   booking_cancelled
   booking_no_show
   booking_reminder
+  scheduled_order_reminder
+  scheduled_order_rescheduled
   booking_rescheduled
   /// Appointment redesign phase 2 — fired when a customer requests a
   /// reschedule that requires admin approval (settings.reservations.
@@ -4894,6 +4956,9 @@ enum notification_type_enum {
   /// ya no es una alerta para el operador; lo silencia el listener de
   /// `order.status_changed` cuando `source === 'kitchen_bridge'`.
   kitchen_ticket_ready
+  service_session_email_failed
+  service_reminder_due
+  checkout_reconciliation_required
   /// H4.3 — yearly reminder (March) to renew the hotel's RNT before March 31.
   lodging_rnt_renewal
 }
@@ -5145,6 +5210,12 @@ enum price_tier_amount_scope_enum {
 enum pricing_type_enum {
   unit
   weight
+}
+
+enum product_usage_nature_enum {
+  sale
+  supply
+  internal_use
 }
 
 enum product_type_enum {
@@ -9820,6 +9891,7 @@ enum entity_type_enum {
   customer
   booking
   order
+  service_session
 }
 
 enum template_status_enum {
@@ -10463,6 +10535,7 @@ model invoice_retry_queue {
 
 model bookings {
   id                        Int                           @id @default(autoincrement())
+  service_allocation_id     Int?
   store_id                  Int
   /// CP-POS-SVC-PERF-001 / HU-B + HU-C — anonymous sales ("Venta
   /// Anónima" / Consumidor Final) must be able to carry a booking
@@ -10531,7 +10604,13 @@ model bookings {
   reschedule_requests         booking_reschedule_requests[]
   proximity_notifications     proximity_notification_log[]
 
+  service_allocation service_allocations? @relation("bookings_service_allocation_fkey", fields: [store_id, service_allocation_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "bookings_service_allocation_fkey")
+
+  service_allocations_booking_fkey service_allocations[] @relation("service_allocations_booking_fkey")
+  service_sessions_booking_fkey service_sessions[] @relation("service_sessions_booking_fkey")
+
   @@unique([store_id, booking_number])
+  @@unique([store_id, id])
   @@index([store_id, date])
   @@index([store_id, status])
   @@index([store_id, product_id, product_variant_id, date])
@@ -10599,7 +10678,12 @@ model service_providers {
   exceptions provider_exceptions[]
   bookings   bookings[]
 
+  service_station_providers_provider_fkey service_station_providers[] @relation("service_station_providers_provider_fkey")
+  service_allocations_provider_fkey service_allocations[] @relation("service_allocations_provider_fkey")
+  booking_reschedule_requests_provider_store_fkey booking_reschedule_requests[] @relation("booking_reschedule_requests_provider_store_fkey")
+
   @@unique([store_id, employee_id])
+  @@unique([store_id, id])
   @@index([store_id, is_active])
 }
 
@@ -11267,6 +11351,14 @@ model data_collection_templates {
   icon        String?              @db.VarChar(100)
   status      template_status_enum @default(active)
   entity_type entity_type_enum     @default(booking)
+  /// Tipo de estación para el que se diseñó (carro, moto, barberia…); null = plantilla general.
+  station_type             String?                             @db.VarChar(32)
+  /// Bloques fijos de la recepción (Asignar) que esta plantilla muestra.
+  /// Servicio y técnico van siempre; presupuesto, productos y notas los
+  /// puede quitar el administrador por plantilla.
+  checkin_show_budget   Boolean @default(true)
+  checkin_show_products Boolean @default(true)
+  checkin_show_notes    Boolean @default(true)
   is_default  Boolean              @default(false)
   created_at  DateTime             @default(now()) @db.Timestamp(6)
   updated_at  DateTime             @default(now()) @db.Timestamp(6)
@@ -11278,6 +11370,7 @@ model data_collection_templates {
   submissions              data_collection_submissions[]
   consultation_products    products[]                          @relation("product_consultation_template")
   preconsultation_products products[]                          @relation("product_preconsultation_template")
+  intake_stations          service_stations[]                  @relation("station_intake_template")
 
   @@index([store_id, status])
   @@index([store_id, entity_type])
@@ -11494,18 +11587,25 @@ model booking_reschedule_requests {
   /// The admin/employee who approved/rejected the request. NULL while
   /// pending; populated on `approved`/`rejected`.
   decided_by_user_id       Int?
-  decided_at               DateTime?
+  decided_at               DateTime?                              @db.Timestamp(6)
   /// Free-text reason the admin typed when rejecting (also allowed on
   /// approve, but most approvals won't use it).
   decision_reason          String?                                @db.Text
   created_at               DateTime?                              @default(now()) @db.Timestamp(6)
   updated_at               DateTime?                              @default(now()) @db.Timestamp(6)
+  /// Reprogramación hacia una estación (migración 20261011140000).
+  requested_station_id     Int?
+  requested_provider_id    Int?
+  requested_slot_start_at  DateTime?                              @db.Timestamptz(6)
 
   booking               bookings @relation(fields: [booking_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  store                 stores   @relation(fields: [store_id], references: [id])
+  store                 stores   @relation(fields: [store_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   requested_by_user     users?   @relation("reschedule_req_user", fields: [requested_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   requested_by_customer users?   @relation("reschedule_req_customer", fields: [requested_by_customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   decided_by_user       users?   @relation("reschedule_req_decided", fields: [decided_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  requested_station service_stations? @relation("booking_reschedule_requests_station_store_fkey", fields: [requested_station_id, store_id], references: [id, store_id], onDelete: Restrict, onUpdate: NoAction, map: "booking_reschedule_requests_station_store_fkey")
+  requested_provider service_providers? @relation("booking_reschedule_requests_provider_store_fkey", fields: [requested_provider_id, store_id], references: [id, store_id], onDelete: Restrict, onUpdate: NoAction, map: "booking_reschedule_requests_provider_store_fkey")
 
   @@index([booking_id])
   @@index([store_id, status])
@@ -12491,6 +12591,10 @@ model recipe_items {
   /// (e.g. ml, g, unit). Only honoured when `waste_mode='absolute'`.
   waste_absolute       Decimal         @default(0) @db.Decimal(12, 4)
   is_optional          Boolean         @default(false)
+  /// Anotación libre del insumo dentro de esta receta ("picar fino", "sin
+  /// cáscara"). Texto para quien ejecuta la receta, no reemplaza
+  /// `recipes.preparation_notes` (que son las del plato completo).
+  notes                String?         @db.Text
   created_at           DateTime?       @default(now()) @db.Timestamp(6)
   updated_at           DateTime?       @default(now()) @db.Timestamp(6)
 
@@ -13958,6 +14062,368 @@ model fiscal_tax_payments {
   @@index([reversal_of_id], map: "fiscal_tax_payments_reversal_idx")
 }
 
+/// Physical service station. Cross-table tenant invariants and partial indexes
+/// are enforced by the additive SQL migration because Prisma cannot represent
+/// PostgreSQL exclusion constraints or partial unique indexes.
+model service_stations {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  name       String   @db.VarChar(120)
+  station_type String @default("general") @db.VarChar(32)
+  status     String   @default("active") @db.VarChar(20)
+  capacity   Int      @default(1)
+  track_time Boolean  @default(false)
+  target_minutes Int?
+  /// Alquiler por bloque: al cerrar la atención se cobra ceil(minutos / bloque) × precio. NULL = sin alquiler.
+  rental_block_minutes Int?
+  rental_block_price Decimal? @db.Decimal(12, 2)
+  /// Impuesto OPCIONAL del alquiler, mismo mecanismo que `shipping_rates.tax_category_id`
+  /// (null = sin impuesto, el default). Elegible: IVA/INC con una sola tasa > 0 en el alcance
+  /// fiscal de la tienda (`ShippingTaxService.taxRowsForCategory`). RESTRICT: borrar la
+  /// categoría no debe quitar el impuesto del alquiler en silencio.
+  rental_tax_category_id Int?
+  rental_tax_category tax_categories? @relation("service_stations_rental_tax_category", fields: [rental_tax_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  /// Modo del impuesto del alquiler: true = incluido en el precio del bloque (default), false = agregado encima.
+  rental_tax_is_inclusive Boolean @default(true)
+  intake_template_id Int?
+  intake_template data_collection_templates? @relation("station_intake_template", fields: [intake_template_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  public_id  String   @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  store stores @relation("service_stations_store_fkey", fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_stations_store_fkey")
+
+  service_station_services_station_fkey service_station_services[] @relation("service_station_services_station_fkey")
+  service_station_providers_station_fkey service_station_providers[] @relation("service_station_providers_station_fkey")
+  service_station_schedules_station_fkey service_station_schedules[] @relation("service_station_schedules_station_fkey")
+  service_station_exceptions_station_fkey service_station_exceptions[] @relation("service_station_exceptions_station_fkey")
+  service_allocations_station_fkey service_allocations[] @relation("service_allocations_station_fkey")
+  service_sessions_station_fkey service_sessions[] @relation("service_sessions_station_fkey")
+  booking_reschedule_requests_station_store_fkey booking_reschedule_requests[] @relation("booking_reschedule_requests_station_store_fkey")
+
+  @@unique([store_id, name], map: "service_stations_store_name_key")
+  @@unique([store_id, id])
+  @@index([store_id, status], map: "service_stations_store_status_idx")
+  @@index([intake_template_id])
+  @@index([rental_tax_category_id])
+  @@map("service_stations")
+}
+
+model service_station_services {
+  id         Int @id @default(autoincrement())
+  store_id   Int
+  station_id Int
+  product_id Int
+  station service_stations @relation("service_station_services_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_services_station_fkey")
+  product products @relation("service_station_services_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_services_product_fkey")
+
+  @@unique([station_id, product_id], map: "service_station_services_station_product_key")
+  @@index([store_id, product_id], map: "service_station_services_store_product_idx")
+  @@map("service_station_services")
+}
+
+model service_station_providers {
+  id          Int @id @default(autoincrement())
+  store_id    Int
+  station_id  Int
+  provider_id Int
+  station service_stations @relation("service_station_providers_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_providers_station_fkey")
+  provider service_providers @relation("service_station_providers_provider_fkey", fields: [store_id, provider_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_providers_provider_fkey")
+
+  @@unique([station_id, provider_id], map: "service_station_providers_station_provider_key")
+  @@index([store_id, provider_id], map: "service_station_providers_store_provider_idx")
+  @@map("service_station_providers")
+}
+
+model service_station_schedules {
+  id          Int      @id @default(autoincrement())
+  store_id    Int
+  station_id  Int
+  weekday     Int      @db.SmallInt
+  block_order Int      @default(0)
+  start_time  String   @db.VarChar(5)
+  end_time    String   @db.VarChar(5)
+  is_active   Boolean  @default(true)
+  station service_stations @relation("service_station_schedules_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_schedules_station_fkey")
+
+  @@unique([station_id, weekday, block_order], map: "service_station_schedules_station_weekday_block_key")
+  @@index([store_id, station_id, weekday], map: "service_station_schedules_store_station_weekday_idx")
+  @@map("service_station_schedules")
+}
+
+model service_station_exceptions {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  station_id Int
+  start_at   DateTime @db.Timestamptz(6)
+  end_at     DateTime @db.Timestamptz(6)
+  reason     String?  @db.VarChar(255)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  station service_stations @relation("service_station_exceptions_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_exceptions_station_fkey")
+
+  @@index([store_id, station_id, start_at], map: "service_station_exceptions_store_station_start_idx")
+  @@map("service_station_exceptions")
+}
+
+model service_allocations {
+  id          Int      @id @default(autoincrement())
+  store_id    Int
+  station_id  Int
+  provider_id Int?
+  booking_id  Int?
+  session_id  Int?
+  start_at    DateTime @db.Timestamptz(6)
+  end_at      DateTime @db.Timestamptz(6)
+  expires_at  DateTime? @db.Timestamptz(6)
+  state       String   @default("held") @db.VarChar(24)
+  /// SQL-only CHECK: exactly one allocation owner (booking XOR session).
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  station service_stations @relation("service_allocations_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_allocations_station_fkey")
+  provider service_providers? @relation("service_allocations_provider_fkey", fields: [store_id, provider_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_allocations_provider_fkey")
+  booking bookings? @relation("service_allocations_booking_fkey", fields: [store_id, booking_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_allocations_booking_fkey")
+  session service_sessions? @relation("service_allocations_session_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_allocations_session_fkey")
+
+  bookings_service_allocation_fkey bookings[] @relation("bookings_service_allocation_fkey")
+
+  @@index([store_id, station_id, start_at], map: "service_allocations_store_station_start_idx")
+  @@index([store_id, provider_id, start_at], map: "service_allocations_store_provider_start_idx")
+  @@index([booking_id], map: "service_allocations_booking_idx")
+  @@index([session_id], map: "service_allocations_session_idx")
+  @@unique([store_id, id], map: "service_allocations_store_id_key")
+  @@map("service_allocations")
+}
+
+model service_sessions {
+  id          Int      @id @default(autoincrement())
+  store_id    Int
+  station_id  Int
+  product_id  Int
+  booking_id  Int?
+  order_id    Int?
+  contact_email String? @db.VarChar(255)
+  status      service_session_status_enum @default(open)
+  opened_at   DateTime @default(now()) @db.Timestamptz(6)
+  closed_at   DateTime? @db.Timestamptz(6)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  station service_stations @relation("service_sessions_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_station_fkey")
+  product products @relation("service_sessions_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_product_fkey")
+  booking bookings? @relation("service_sessions_booking_fkey", fields: [store_id, booking_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_booking_fkey")
+  order orders? @relation("service_sessions_order_fkey", fields: [store_id, order_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_order_fkey")
+
+  service_allocations_session_fkey service_allocations[] @relation("service_allocations_session_fkey")
+  orders_service_session_fkey orders[] @relation("orders_service_session_fkey")
+  service_session_email_deliveries_session_store_fkey service_session_email_deliveries[] @relation("service_session_email_deliveries_session_store_fkey")
+  service_subjects_session_id_fkey service_subjects[] @relation("service_subjects_session_id_fkey")
+  service_subjects_session_store_fkey service_subjects[] @relation("service_subjects_session_store_fkey")
+  service_session_tokens_session_id_fkey service_session_tokens[] @relation("service_session_tokens_session_id_fkey")
+  service_session_tokens_session_store_fkey service_session_tokens[] @relation("service_session_tokens_session_store_fkey")
+  service_progress_events_session_id_fkey service_progress_events[] @relation("service_progress_events_session_id_fkey")
+  service_progress_events_session_store_fkey service_progress_events[] @relation("service_progress_events_session_store_fkey")
+  service_budgets_session_id_fkey service_budgets[] @relation("service_budgets_session_id_fkey")
+  service_budgets_session_store_fkey service_budgets[] @relation("service_budgets_session_store_fkey")
+  service_change_proposals_session_id_fkey service_change_proposals[] @relation("service_change_proposals_session_id_fkey")
+  service_change_proposals_session_store_fkey service_change_proposals[] @relation("service_change_proposals_session_store_fkey")
+
+  @@index([store_id, status], map: "service_sessions_store_status_idx")
+  @@index([booking_id], map: "service_sessions_booking_idx")
+  @@index([order_id], map: "service_sessions_order_idx")
+  @@unique([store_id, id], map: "service_sessions_store_id_key")
+  @@map("service_sessions")
+}
+
+model service_session_email_deliveries {
+  id                 Int      @id @default(autoincrement())
+  store_id           Int
+  session_id         Int
+  token_id           Int      @unique
+  idempotency_key    String   @unique @db.VarChar(120)
+  recipient          String   @db.VarChar(255)
+  status             String   @default("pending") @db.VarChar(20)
+  attempt_count      Int      @default(0)
+  provider_message_id String? @db.VarChar(255)
+  last_error         String?  @db.VarChar(500)
+  sent_at            DateTime? @db.Timestamptz(6)
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  session service_sessions @relation("service_session_email_deliveries_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_session_email_deliveries_session_store_fkey")
+  token service_session_tokens @relation("service_session_email_deliveries_token_scope_fkey", fields: [store_id, session_id, token_id], references: [store_id, session_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_session_email_deliveries_token_scope_fkey")
+
+  @@index([store_id, session_id, status], map: "service_session_email_deliveries_store_session_status_idx")
+  // SQL-only composite FK also enforces that token and delivery share a session/store.
+  @@map("service_session_email_deliveries")
+}
+
+enum service_session_status_enum {
+  open
+  paused
+  closed
+  cancelled
+  no_show
+}
+
+model service_subjects {
+  store_id Int
+  id         Int      @id @default(autoincrement())
+  session_id Int
+  subject_type String @db.VarChar(32)
+  label      String   @db.VarChar(120)
+  metadata   Json?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  session service_sessions @relation("service_subjects_session_id_fkey", fields: [session_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_subjects_session_id_fkey")
+  session_scoped service_sessions @relation("service_subjects_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_subjects_session_store_fkey")
+
+  @@index([session_id], map: "service_subjects_session_idx")
+  @@map("service_subjects")
+}
+
+model service_session_tokens {
+  store_id Int
+  id         Int      @id @default(autoincrement())
+  session_id Int
+  token_hash String   @unique @db.VarChar(64)
+  expires_at DateTime @db.Timestamptz(6)
+  revoked_at DateTime? @db.Timestamptz(6)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  session service_sessions @relation("service_session_tokens_session_id_fkey", fields: [session_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_session_tokens_session_id_fkey")
+  session_scoped service_sessions @relation("service_session_tokens_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_session_tokens_session_store_fkey")
+
+  service_session_email_deliveries_token_scope_fkey service_session_email_deliveries[] @relation("service_session_email_deliveries_token_scope_fkey")
+
+  @@index([session_id, expires_at], map: "service_session_tokens_session_expiry_idx")
+  @@unique([store_id, session_id, id], map: "service_session_tokens_store_session_id_key")
+  @@map("service_session_tokens")
+}
+
+model service_progress_events {
+  store_id Int
+  id              Int      @id @default(autoincrement())
+  session_id      Int
+  event_type      String   @db.VarChar(40)
+  public_text     String?  @db.VarChar(500)
+  actor_user_id   Int?
+  order_event_id  Int?
+  metadata        Json?
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  session service_sessions @relation("service_progress_events_session_id_fkey", fields: [session_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_progress_events_session_id_fkey")
+  session_scoped service_sessions @relation("service_progress_events_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_progress_events_session_store_fkey")
+  actor_user users? @relation("service_progress_events_actor_user_id_fkey", fields: [actor_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "service_progress_events_actor_user_id_fkey")
+  order_event order_events? @relation("service_progress_events_order_event_id_fkey", fields: [order_event_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "service_progress_events_order_event_id_fkey")
+
+  @@index([session_id, created_at], map: "service_progress_events_session_created_idx")
+  @@index([order_event_id], map: "service_progress_events_order_event_idx")
+  @@map("service_progress_events")
+}
+
+model service_budgets {
+  store_id Int
+  id         Int      @id @default(autoincrement())
+  session_id Int
+  amount     Decimal  @db.Decimal(12, 2)
+  currency   String   @db.VarChar(10)
+  version    Int      @default(1)
+  approved_at DateTime? @db.Timestamptz(6)
+  /// true = presupuesto base que crea el sistema para poder cobrar (sigue al total);
+  /// false = tope que fijó el comercio/cliente (nunca se sube solo).
+  is_system  Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  session service_sessions @relation("service_budgets_session_id_fkey", fields: [session_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_budgets_session_id_fkey")
+  session_scoped service_sessions @relation("service_budgets_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_budgets_session_store_fkey")
+
+  @@unique([session_id, version], map: "service_budgets_session_version_key")
+  @@map("service_budgets")
+}
+
+model service_change_proposals {
+  store_id Int
+  id             Int      @id @default(autoincrement())
+  session_id     Int
+  version        Int
+  order_version  Int
+  snapshot_hash  String   @db.VarChar(64)
+  lines          Json
+  subtotal       Decimal  @db.Decimal(12, 2)
+  tax            Decimal  @db.Decimal(12, 2)
+  discount       Decimal  @default(0) @db.Decimal(12, 2)
+  currency       String   @db.VarChar(10)
+  total          Decimal  @db.Decimal(12, 2)
+  status         String   @default("pending") @db.VarChar(24)
+  expires_at     DateTime @db.Timestamptz(6)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  session service_sessions @relation("service_change_proposals_session_id_fkey", fields: [session_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_change_proposals_session_id_fkey")
+  session_scoped service_sessions @relation("service_change_proposals_session_store_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_change_proposals_session_store_fkey")
+
+  service_contact_attempts_proposal_id_fkey service_contact_attempts[] @relation("service_contact_attempts_proposal_id_fkey")
+  service_contact_attempts_proposal_store_fkey service_contact_attempts[] @relation("service_contact_attempts_proposal_store_fkey")
+  service_proposal_decisions_proposal_id_fkey service_proposal_decisions? @relation("service_proposal_decisions_proposal_id_fkey")
+  service_proposal_decisions_proposal_store_fkey service_proposal_decisions[] @relation("service_proposal_decisions_proposal_store_fkey")
+
+  @@unique([session_id, version], map: "service_change_proposals_session_version_key")
+  @@index([session_id, status, expires_at], map: "service_change_proposals_session_status_expiry_idx")
+  @@unique([store_id, id], map: "service_change_proposals_store_id_key")
+  @@map("service_change_proposals")
+}
+
+model service_proposal_decisions {
+  store_id Int
+  id          Int      @id @default(autoincrement())
+  proposal_id Int
+  decision    String   @db.VarChar(20)
+  actor_type  String   @db.VarChar(20)
+  actor_id    String?  @db.VarChar(120)
+  decided_at  DateTime @default(now()) @db.Timestamptz(6)
+  proof       Json?
+  proposal service_change_proposals @relation("service_proposal_decisions_proposal_id_fkey", fields: [proposal_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_proposal_decisions_proposal_id_fkey")
+  proposal_scoped service_change_proposals @relation("service_proposal_decisions_proposal_store_fkey", fields: [store_id, proposal_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_proposal_decisions_proposal_store_fkey")
+
+  @@unique([proposal_id])
+  @@map("service_proposal_decisions")
+}
+
+model service_contact_attempts {
+  store_id Int
+  id                Int      @id @default(autoincrement())
+  proposal_id       Int
+  idempotency_key   String   @unique @db.VarChar(100)
+  channel           String   @db.VarChar(24)
+  status            String   @default("pending") @db.VarChar(24)
+  recipient         String   @db.VarChar(255)
+  provider_message_id String? @db.VarChar(255)
+  attempted_at      DateTime @default(now()) @db.Timestamptz(6)
+  completed_at      DateTime? @db.Timestamptz(6)
+  proposal service_change_proposals @relation("service_contact_attempts_proposal_id_fkey", fields: [proposal_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_contact_attempts_proposal_id_fkey")
+  proposal_scoped service_change_proposals @relation("service_contact_attempts_proposal_store_fkey", fields: [store_id, proposal_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_contact_attempts_proposal_store_fkey")
+
+  @@index([proposal_id, attempted_at], map: "service_contact_attempts_proposal_attempted_idx")
+  @@map("service_contact_attempts")
+}
+
+model service_reminder_logs {
+  id              Int       @id @default(autoincrement())
+  store_id        Int
+  customer_id     Int
+  product_id      Int
+  source_order_id Int
+  due_date        DateTime  @db.Date
+  channel         String    @default("notification") @db.VarChar(20)
+  status          String    @default("pending") @db.VarChar(20)
+  sent_at         DateTime? @db.Timestamptz(6)
+  notification_sent_at DateTime? @db.Timestamptz(6)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  store stores @relation("service_reminder_logs_store_id_fkey", fields: [store_id], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "service_reminder_logs_store_id_fkey")
+  customer users @relation("service_reminder_logs_customer_id_fkey", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "service_reminder_logs_customer_id_fkey")
+  product products @relation("service_reminder_logs_product_id_fkey", fields: [product_id], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "service_reminder_logs_product_id_fkey")
+  source_order orders @relation("service_reminder_logs_source_order_id_fkey", fields: [source_order_id], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "service_reminder_logs_source_order_id_fkey")
+
+  @@unique([store_id, customer_id, product_id, source_order_id], map: "service_reminder_logs_store_customer_product_order_key")
+  @@index([store_id, status], map: "service_reminder_logs_store_status_idx")
+  @@map("service_reminder_logs")
+}
+
 /// F runtime procedural guidance. Global rows have NO tenant provenance.
 model ai_agent_recipes {
   id Int @id @default(autoincrement())
@@ -14004,4 +14470,226 @@ model ai_agent_recipe_events {
   created_at DateTime @default(now()) @db.Timestamptz(6)
   @@index([store_id,organization_id,user_id,objective_id],map:"ai_agent_recipe_events_owner_idx")
   @@index([recipe_id,created_at],map:"ai_agent_recipe_events_recipe_idx")
+}
+
+// ===== Pedidos programados + adiciones (venta por encargo) =====
+// Todo es aditivo: ninguna tienda cambia de comportamiento hasta activar
+// `store_settings.scheduled_orders.enabled` o `store_settings.product_options.enabled`.
+
+/// Ciclo de cumplimiento del pedido programado. Vive en el agendamiento, NO en
+/// `order_state_enum` (que gobierna pago, stock y contabilidad).
+enum order_fulfillment_status_enum {
+  scheduled
+  in_production
+  ready
+  delivered
+  no_show
+  cancelled
+}
+
+enum order_fulfillment_type_enum {
+  pickup
+  delivery
+}
+
+/// Destino de una adición: insumo directo, mini-receta (producto con receta) o
+/// producto vendible. Nunca texto libre.
+enum product_option_component_type_enum {
+  ingredient
+  recipe
+  product
+}
+
+/// `per_unit` se repite por cada unidad de la línea; `per_line` va una vez.
+enum product_option_scope_enum {
+  per_unit
+  per_line
+}
+
+/// Excepción de la agenda de cumplimiento para una fecha (hora local de tienda).
+model fulfillment_schedule_exceptions {
+  id            Int       @id @default(autoincrement())
+  store_id      Int
+  date          DateTime  @db.Date
+  is_closed     Boolean   @default(false)
+  /// "HH:mm" en hora de tienda; null = usa el horario semanal.
+  start_time    String?   @db.VarChar(5)
+  end_time      String?   @db.VarChar(5)
+  slot_capacity Int?
+  day_capacity  Int?
+  reason        String?   @db.VarChar(255)
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  updated_at    DateTime? @default(now()) @updatedAt @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, date])
+}
+
+/// Agendamiento 1:1 de una orden programada (POS o tienda en línea).
+model order_fulfillment_schedules {
+  id                 Int                           @id @default(autoincrement())
+  store_id           Int
+  order_id           Int                           @unique
+  scheduled_start    DateTime                      @db.Timestamp(6)
+  scheduled_end      DateTime                      @db.Timestamp(6)
+  fulfillment_type   order_fulfillment_type_enum   @default(pickup)
+  status             order_fulfillment_status_enum @default(scheduled)
+  /// Tienda en línea: el cupo se sostiene hasta esta hora mientras la orden
+  /// espera pago; vencido, el agendamiento se cancela y libera la franja.
+  hold_expires_at    DateTime?                     @db.Timestamp(6)
+  produced_at        DateTime?                     @db.Timestamp(6)
+  ready_at           DateTime?                     @db.Timestamp(6)
+  delivered_at       DateTime?                     @db.Timestamp(6)
+  cancelled_at       DateTime?                     @db.Timestamp(6)
+  notes              String?
+  created_by_user_id Int?
+  created_at         DateTime?                     @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?                     @default(now()) @updatedAt @db.Timestamp(6)
+
+  store         stores                          @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order         orders                          @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by    users?                          @relation("order_fulfillment_schedules_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  changes       order_fulfillment_changes[]
+  reminder_logs scheduled_order_reminder_logs[]
+
+  @@index([store_id, scheduled_start])
+  @@index([store_id, status])
+}
+
+/// Historial de estados y reprogramaciones del agendamiento.
+model order_fulfillment_changes {
+  id                 Int                            @id @default(autoincrement())
+  store_id           Int
+  schedule_id        Int
+  /// 'status' | 'reschedule' | 'created'
+  change_type        String                         @db.VarChar(20)
+  from_status        order_fulfillment_status_enum?
+  to_status          order_fulfillment_status_enum?
+  from_start         DateTime?                      @db.Timestamp(6)
+  to_start           DateTime?                      @db.Timestamp(6)
+  from_end           DateTime?                      @db.Timestamp(6)
+  to_end             DateTime?                      @db.Timestamp(6)
+  note               String?                        @db.VarChar(500)
+  changed_by_user_id Int?
+  created_at         DateTime?                      @default(now()) @db.Timestamp(6)
+
+  store      stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  schedule   order_fulfillment_schedules @relation(fields: [schedule_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  changed_by users?                      @relation("order_fulfillment_changes_changed_by", fields: [changed_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([schedule_id])
+  @@index([store_id, created_at])
+}
+
+/// Dedupe de recordatorios: una fila por (agendamiento, regla, canal).
+model scheduled_order_reminder_logs {
+  id          Int       @id @default(autoincrement())
+  store_id    Int
+  schedule_id Int
+  /// Clave de la regla, ej. "1440m" para 24 h.
+  rule_key    String    @db.VarChar(30)
+  channel     String    @db.VarChar(20)
+  sent_at     DateTime? @default(now()) @db.Timestamp(6)
+
+  store    stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  schedule order_fulfillment_schedules @relation(fields: [schedule_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([schedule_id, rule_key, channel])
+  @@index([store_id])
+}
+
+/// Grupo reutilizable de adiciones ("Frutas", "Cubierta", "Velas").
+model product_option_groups {
+  id          Int                       @id @default(autoincrement())
+  store_id    Int
+  name        String                    @db.VarChar(120)
+  description String?                   @db.VarChar(500)
+  min_select  Int                       @default(0)
+  max_select  Int                       @default(1)
+  is_required Boolean                   @default(false)
+  scope       product_option_scope_enum @default(per_unit)
+  sort_order  Int                       @default(0)
+  is_active   Boolean                   @default(true)
+  created_at  DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at  DateTime?                 @default(now()) @updatedAt @db.Timestamp(6)
+
+  store       stores                             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  options     product_options[]
+  assignments product_option_group_assignments[]
+
+  @@index([store_id, is_active])
+}
+
+/// Opción de un grupo. Siempre apunta a un componente (insumo, mini-receta o
+/// producto vendible); su costo sale de ese componente, nunca se digita.
+model product_options {
+  id                   Int                                @id @default(autoincrement())
+  store_id             Int
+  group_id             Int
+  name                 String                             @db.VarChar(120)
+  price_delta          Decimal                            @default(0) @db.Decimal(12, 2)
+  component_type       product_option_component_type_enum
+  component_product_id Int
+  component_variant_id Int?
+  quantity             Decimal                            @default(1) @db.Decimal(12, 4)
+  uom                  String?                            @db.VarChar(20)
+  sort_order           Int                                @default(0)
+  is_active            Boolean                            @default(true)
+  created_at           DateTime?                          @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                          @default(now()) @updatedAt @db.Timestamp(6)
+
+  store              stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  group              product_option_groups @relation(fields: [group_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  component_product  products              @relation("product_option_component", fields: [component_product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  component_variant  product_variants?     @relation("product_option_component_variant", fields: [component_variant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  order_item_options order_item_options[]
+
+  @@index([group_id])
+  @@index([store_id])
+}
+
+/// Enganche de un grupo a un producto o a una categoría (exactamente uno).
+model product_option_group_assignments {
+  id          Int       @id @default(autoincrement())
+  store_id    Int
+  group_id    Int
+  product_id  Int?
+  category_id Int?
+  sort_order  Int       @default(0)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  store    stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  group    product_option_groups @relation(fields: [group_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  product  products?             @relation("product_option_group_assignment_product", fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  category categories?           @relation(fields: [category_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([group_id])
+  @@index([product_id])
+  @@index([category_id])
+}
+
+/// Snapshot congelado de cada adición vendida en una línea.
+model order_item_options {
+  id                   Int                                @id @default(autoincrement())
+  store_id             Int
+  order_item_id        Int
+  option_id            Int?
+  group_name           String                             @db.VarChar(120)
+  option_name          String                             @db.VarChar(120)
+  scope                product_option_scope_enum
+  price_delta          Decimal                            @db.Decimal(12, 2)
+  component_type       product_option_component_type_enum
+  component_product_id Int
+  component_variant_id Int?
+  quantity             Decimal                            @db.Decimal(12, 4)
+  uom                  String?                            @db.VarChar(20)
+  created_at           DateTime?                          @default(now()) @db.Timestamp(6)
+
+  store      stores           @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order_item order_items      @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  option     product_options? @relation(fields: [option_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([order_item_id])
+  @@index([store_id])
 }

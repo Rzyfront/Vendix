@@ -126,10 +126,26 @@ export class ManufacturingFormulasService {
               id: p.id,
               name: p.name,
               sku: p.sku ?? null,
+              description: p.description ?? null,
               stock_unit: p.stock_unit ?? null,
               product_type: p.product_type ?? null,
               is_batch_produced: p.is_batch_produced === true,
               cost_price: p.cost_price ?? null,
+              // Miniatura para el selector y la ficha del producto.
+              image_url:
+                p.image_url ??
+                p.product_images?.find((img: any) => img?.is_main)?.image_url ??
+                p.product_images?.[0]?.image_url ??
+                null,
+              product_images: Array.isArray(p.product_images)
+                ? p.product_images.map((img: any) => ({
+                    id: img?.id,
+                    image_url: img?.image_url,
+                    is_main: img?.is_main ?? false,
+                    alt_text: img?.alt_text ?? null,
+                    sort_order: img?.sort_order ?? 0,
+                  }))
+                : [],
             }),
           ),
         ),

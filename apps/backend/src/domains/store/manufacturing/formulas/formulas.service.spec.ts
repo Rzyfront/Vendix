@@ -40,10 +40,25 @@ describe('FormulasService.calculateCost', () => {
       stock_levels: { findMany: jest.fn().mockResolvedValue([]) },
     };
     recipes = { findOne: jest.fn() };
-    service = new FormulasService(prisma, recipes);
+    service = new FormulasService(prisma, recipes, {
+      signUrl: jest.fn(async (k?: string | null) => (k ? `https://signed.test/${k}` : undefined)),
+    } as any);
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  it('findAll devuelve la miniatura firmada, no la key de S3', async () => {
+    prisma.recipes.findMany = jest.fn().mockResolvedValue([
+      { id: 1, product: { product_images: [{ image_url: 'store/1/f.jpg' }] } },
+    ]);
+    prisma.recipes.count = jest.fn().mockResolvedValue(1);
+
+    const res: any = await service.findAll({ page: 1, limit: 10 } as any);
+
+    expect(res.data[0].product.product_images[0].image_url).toBe(
+      'https://signed.test/store/1/f.jpg',
+    );
+  });
 
   it('usa cost_per_unit de stock_levels (ponderado) y cae al costo del producto', async () => {
     prisma.recipes.findFirst.mockResolvedValue(recipe());

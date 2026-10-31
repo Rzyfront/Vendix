@@ -4,6 +4,7 @@ import {
   isFinancialSplitSettled,
 } from '../shared/financial-split-policy';
 import { lockOrderLifecycle } from './order-lifecycle-lock.util';
+import { serviceBudgetBlocks } from '../utils/service-budget-cap.util';
 import {
   getCancellationBlocker,
   SETTLED_PAYMENT_STATES,
@@ -2008,6 +2009,24 @@ export class OrderFlowService {
     try {
     let order = await this.getOrder(orderId);
     draftStoreId = order.store_id;
+
+    if (order.service_session_id != null) {
+      const budget = await this.prisma.service_budgets.findFirst({
+        where: { store_id: order.store_id, session_id: order.service_session_id },
+        orderBy: { version: 'desc' },
+        select: { amount: true, currency: true, is_system: true },
+      });
+      const authorizedTotal = new Prisma.Decimal(order.grand_total).minus(
+        order.tip_amount ?? 0,
+      );
+      if (serviceBudgetBlocks(budget, order.currency, authorizedTotal)) {
+        throw new VendixHttpException(
+          ErrorCodes.SERVICE_BUDGET_001,
+          'No se puede cobrar: el total de la orden supera el presupuesto vigente o su moneda no coincide.',
+          { order_id: orderId, service_session_id: order.service_session_id },
+        );
+      }
+    }
 
     // The winning state claim serializes flow/pay attempts. Re-read settled
     // payments AFTER it, before draft reservation or any new payment row.
@@ -5913,6 +5932,9 @@ export class OrderFlowService {
         ...(rederivedTip != null
           ? { tip_amount: new Prisma.Decimal(rederivedTip) }
           : {}),
+        ...(order?.service_session_id != null
+          ? { service_version: { increment: 1 } }
+          : {}),
         ...(opts?.discountOverride != null
           ? { discount_amount: new Prisma.Decimal(discountAmount) }
           : {}),
@@ -8538,6 +8560,24 @@ export class OrderFlowService {
       throw new BadRequestException(
         `Payment amount (${paymentAmount}) exceeds remaining balance (${remainingBalance})`,
       );
+    }
+
+    if (order.service_session_id != null) {
+      const budget = await this.prisma.service_budgets.findFirst({
+        where: { store_id: order.store_id, session_id: order.service_session_id },
+        orderBy: { version: 'desc' },
+        select: { amount: true, currency: true, is_system: true },
+      });
+      const authorizedTotal = new Prisma.Decimal(order.grand_total).minus(
+        order.tip_amount ?? 0,
+      );
+      if (serviceBudgetBlocks(budget, order.currency, authorizedTotal)) {
+        throw new VendixHttpException(
+          ErrorCodes.SERVICE_BUDGET_001,
+          'No se puede registrar el abono: el total de la orden supera el presupuesto vigente o su moneda no coincide.',
+          { order_id: orderId, service_session_id: order.service_session_id },
+        );
+      }
     }
 
     // Validate payment method

@@ -534,6 +534,15 @@ export class AuthService {
       legacyKeysToRemove.forEach((key) => {
         localStorage.removeItem(key);
       });
+
+      // Unfinished fiscal wizard drafts hold legal name, NIT and address; they
+      // must not outlive the session on a shared computer.
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key?.startsWith('vendix:fiscal-wizard-draft:')) {
+          localStorage.removeItem(key);
+        }
+      }
     }
   }
 

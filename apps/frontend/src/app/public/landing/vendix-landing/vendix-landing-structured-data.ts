@@ -9,11 +9,30 @@ const VENDIX_DESCRIPTION =
 /** Razón social según el certificado de Cámara de Comercio. */
 const VENDIX_LEGAL_NAME = 'QUICKSS SOLUCIONES RÁPIDAS DE SOFTWARE S.A.S.';
 
-/** Perfiles oficiales publicados en el pie de la landing. */
+/**
+ * Perfiles oficiales de Vendix: redes enlazadas en el Perfil de Negocio de
+ * Google y el propio perfil (SEO-OPS-27). Ayudan a que buscadores e IA no
+ * confundan a Vendix con otras marcas de nombre parecido (SEO-OPS-29).
+ */
 const VENDIX_SAME_AS = [
+  'https://maps.google.com/?cid=2119636985592340036',
   'https://www.instagram.com/vendix.online/',
   'https://www.tiktok.com/@vendix.online',
+  'https://www.youtube.com/@VENDIX.ONLINE',
+  'https://www.facebook.com/people/Vendix-App-Multitienda/61587350788405/',
 ];
+
+/** Descripción de la organización: qué es, de quién y desde dónde. */
+const VENDIX_ORGANIZATION_DESCRIPTION =
+  'Software colombiano de punto de venta (POS), inventario y tienda online desarrollado por Quickss S.A.S. en Riohacha, La Guajira.';
+
+/** Sede declarada sin dirección exacta: el Perfil de Negocio la oculta (área de servicio). */
+const VENDIX_ADDRESS = {
+  '@type': 'PostalAddress',
+  addressLocality: 'Riohacha',
+  addressRegion: 'La Guajira',
+  addressCountry: 'CO',
+};
 
 /** Canal de soporte publicado en la landing. */
 const VENDIX_CONTACT_POINT = {
@@ -30,7 +49,9 @@ const VENDIX_CONTACT_POINT = {
  * navegador desde VendixLandingComponent: index.html y el prerender se sirven
  * también a los storefronts de los tenants, así que no puede ir en estático.
  *
- * Reglas (SEO-TECH-10): describe solo lo que muestra la página; nunca
+ * Reglas (SEO-TECH-10): solo datos verificables de Vendix (lo que muestra la
+ * página y lo publicado en su Perfil de Negocio de Google, como la sede en
+ * Riohacha y los perfiles de sameAs, aunque no aparezcan en la página); nunca
  * calificaciones, reseñas ni precios inventados. Los precios salen de los
  * planes mensuales publicados por GET /api/public/plans.
  */
@@ -77,10 +98,13 @@ export function buildVendixStructuredData(
         '@id': ORGANIZATION_ID,
         name: 'Vendix',
         legalName: VENDIX_LEGAL_NAME,
+        description: VENDIX_ORGANIZATION_DESCRIPTION,
         url: `${VENDIX_ORIGIN}/`,
         // 128 px (#945): cumple el mínimo de 112 px de Google sin descargar el PNG de 505 KB.
         logo: `${VENDIX_ORIGIN}/vlogo-128.png`,
         sameAs: VENDIX_SAME_AS,
+        address: VENDIX_ADDRESS,
+        areaServed: 'CO',
         contactPoint: [VENDIX_CONTACT_POINT],
       },
       {

@@ -7,7 +7,7 @@ import {
   signal,
   computed,
 } from '@angular/core';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 
 import {
@@ -18,8 +18,8 @@ import {
   Brand,
 } from '../../interfaces';
 import {
+  ALL_NATURES_TAB,
   PRODUCT_LIST_DEFAULT_FILTER_VALUES,
-  PRODUCT_LIST_DEFAULT_QUERY,
 } from './product-list.constants';
 
 // Import shared components
@@ -39,6 +39,8 @@ import {
   ImageLightboxComponent,
   ButtonComponent, // FIX QUI-503
   IconComponent,  // FIX QUI-503
+  ScrollableTabsComponent,
+  ScrollableTab,
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
@@ -47,7 +49,14 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 // una entrada más de `filterConfigs` (label "Productos e insumos"). El
 // componente `product-type-chip-filter` queda en disco pero huérfano, sin
 // importes ni usos — el usuario decide si eliminarlo.
-import type { ProductTypeFilterValue } from '../product-type-chip-filter/product-type-chip-filter.component';
+import {
+  effectiveUsageNature,
+  ProductUsageNature,
+  USAGE_NATURE_COLORS,
+  USAGE_NATURE_LABELS,
+  USAGE_NATURE_ORDER,
+  USAGE_NATURE_TAB_LABELS,
+} from '../../utils/usage-nature.util';
 
 // Import styles
 import './product-list.component.css';
@@ -67,12 +76,14 @@ import './product-list.component.css';
     ImageLightboxComponent,
     ButtonComponent, // FIX QUI-503
     IconComponent,   // FIX QUI-503
+    ScrollableTabsComponent,
   ],
   templateUrl: './product-list.component.html',
 })
 export class ProductListComponent {
   private currencyService = inject(CurrencyFormatService);
   private readonly authFacade = inject(AuthFacade);
+  private readonly router = inject(Router);
 
   readonly products = input<Product[]>([]);
   readonly isLoading = input(false);
@@ -90,6 +101,49 @@ export class ProductListComponent {
    * `PermissionsGuard` is the real authorization boundary.
    */
   readonly canBulkEdit = input(false);
+
+  /** Contadores de las pestañas (stats del backend). */
+  readonly natureCounts = input<Partial<Record<ProductUsageNature, number>> | null>(null);
+
+  /**
+   * Pestaña activa: Todos · Venta · Insumos · Uso interno. Filtra en el
+   * backend; `all` no manda `usage_nature` (lista todo, como antes).
+   */
+  readonly activeNature = signal<ProductUsageNature | typeof ALL_NATURES_TAB>('sale');
+
+  readonly natureTabs = computed<ScrollableTab[]>(() => {
+    const counts = this.natureCounts();
+    const total = counts
+      ? USAGE_NATURE_ORDER.reduce((sum, nature) => sum + (counts[nature] ?? 0), 0)
+      : undefined;
+    return [
+      {
+        id: ALL_NATURES_TAB,
+        label: total !== undefined ? `Todos (${total})` : 'Todos',
+      },
+      ...USAGE_NATURE_ORDER.map((nature) => ({
+        id: nature,
+        label:
+          counts && counts[nature] !== undefined
+            ? `${USAGE_NATURE_TAB_LABELS[nature]} (${counts[nature]})`
+            : USAGE_NATURE_TAB_LABELS[nature],
+      })),
+    ];
+  });
+
+  /** `usage_nature` del query para la pestaña activa (`undefined` en Todos). */
+  private natureQuery(): ProductUsageNature | undefined {
+    const nature = this.activeNature();
+    return nature === ALL_NATURES_TAB ? undefined : nature;
+  }
+
+  /** Filas con la naturaleza efectiva para el badge (insumo heredado = Insumo). */
+  readonly rows = computed(() =>
+    this.products().map((p) => ({
+      ...p,
+      usage_nature_effective: effectiveUsageNature(p),
+    })),
+  );
 
   readonly refresh = output<void>();
   readonly search = output<string>();
@@ -125,27 +179,6 @@ export class ProductListComponent {
   // del constructor haya mutado los options. Convertirlo a signal elimina
   // el truco y hace que la mutacion + el re-render sean lo mismo.
   readonly filterConfigs = signal<FilterConfig[]>([
-    // QUI-729 — filtro tri-estado Productos / Insumos / Todos. Va PRIMERO a
-    // proposito: `.filters-body` corta en `max-height: 40vh` con scroll
-    // interno y sin indicio visual, asi que la quinta seccion quedaba fuera
-    // de vista y el filtro se leia como inexistente. Es ademas el unico
-    // filtro activo por defecto (el badge marca 1 por el), asi que encabezar
-    // la lista es lo coherente.
-    //
-    // Distinto de "Tipo de Producto": esa dimension es `product_type`
-    // (Fisico / Servicio); esta es `is_ingredient`. El default 'products'
-    // vive en el CLIENTE (ADR-6) y se manda como `is_ingredient: false`, no
-    // como `undefined`, para que la carga inicial ya llegue filtrada.
-    {
-      key: 'is_ingredient',
-      label: 'Productos e insumos',
-      type: 'select',
-      options: [
-        { value: 'products', label: 'Productos' },
-        { value: 'ingredients', label: 'Insumos' },
-        { value: 'all', label: 'Todos' },
-      ],
-    },
     {
       key: 'state',
       label: 'Estado',
@@ -240,6 +273,7 @@ export class ProductListComponent {
       { label: 'Carga Masiva', icon: 'upload-cloud', action: 'bulk-upload' },
       { label: 'Carga de Imágenes', icon: 'image', action: 'bulk-image-upload' },
       { label: 'Edición masiva', icon: 'list-checks', action: 'bulk-edit' },
+      { label: 'Adiciones', icon: 'layers', action: 'option-groups' },
       {
         label: 'Descargar Plantilla con Productos Actuales',
         icon: 'file-spreadsheet',
@@ -322,6 +356,22 @@ export class ProductListComponent {
         value === 'service' ? 'Servicio' : 'Producto',
     },
     {
+      key: 'usage_nature_effective',
+      label: 'Naturaleza',
+      sortable: false,
+      width: '110px',
+      align: 'center',
+      priority: 1,
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: USAGE_NATURE_COLORS,
+      },
+      transform: (value: ProductUsageNature) =>
+        USAGE_NATURE_LABELS[value] ?? USAGE_NATURE_LABELS.sale,
+    },
+    {
       key: 'state',
       label: 'Estado',
       sortable: true,
@@ -399,6 +449,12 @@ export class ProductListComponent {
         key: 'sku',
         label: 'SKU',
       },
+      {
+        key: 'usage_nature_effective',
+        label: 'Naturaleza',
+        transform: (value: ProductUsageNature) =>
+          USAGE_NATURE_LABELS[value] ?? USAGE_NATURE_LABELS.sale,
+      },
     ],
   };
 
@@ -475,16 +531,8 @@ export class ProductListComponent {
   }
 
   /**
-   * Construye el `ProductQueryDto` a partir de los filtros del dropdown y lo
-   * emite. El filtro tri-estado de productos/insumos vive ahora en
-   * `filterValues['is_ingredient']` (string) y traduce:
-   *   - 'products'    → `is_ingredient: false` (default del listado admin)
-   *   - 'ingredients' → `is_ingredient: true`
-   *   - 'all'         → OMITE `is_ingredient` (productos E insumos, tercer estado)
-   *
-   * El default 'products' lo fija `filterValues` al construirse — esa es la
-   * fuente del primer render con 90 productos, sin tener que depender de un
-   * signal ni de un side-effect en constructor.
+   * Construye el `ProductQueryDto` a partir de los filtros del dropdown y de
+   * la pestaña de naturaleza activa (siempre presente: Venta por defecto).
    */
   private emitQuery(): void {
     const query: ProductQueryDto = {};
@@ -502,16 +550,9 @@ export class ProductListComponent {
       query.product_type = this.selectedProductType as 'physical' | 'service';
     }
 
-    // Si el dropdown dejó el campo vacío (caso "limpiar" antes de que la
-    // lista cargue) caemos al default 'products' para mantener la invariante
-    // del primer render (ADR-6).
-    const ingredient: ProductTypeFilterValue =
-      (this.filterValues['is_ingredient'] as ProductTypeFilterValue) ||
-      PRODUCT_LIST_DEFAULT_FILTER_VALUES.is_ingredient;
-    if (ingredient === 'products') {
-      query.is_ingredient = false;
-    } else if (ingredient === 'ingredients') {
-      query.is_ingredient = true;
+    const nature = this.natureQuery();
+    if (nature) {
+      query.usage_nature = nature;
     }
 
     const lodging = this.filterValues['is_lodging'];
@@ -530,14 +571,16 @@ export class ProductListComponent {
     this.selectedCategory = '';
     this.selectedBrand = '';
     this.selectedProductType = '';
-    // "Limpiar todo" vuelve al default del listado: solo productos, sin
-    // insumos. Restauramos `filterValues` al mismo default unico del modulo,
-    // no a `{}`, porque el "Limpiar todo" genérico del dropdown emitiría
-    // `''` y la lista pasaría a mostrar 106 (regresión silenciosa que
-    // QUI-729 vino a matar).
+    // "Limpiar todo" limpia el dropdown pero conserva la pestaña activa.
     this.filterValues = { ...PRODUCT_LIST_DEFAULT_FILTER_VALUES };
     this.search.emit('');
-    this.filter.emit({ ...PRODUCT_LIST_DEFAULT_QUERY });
+    const nature = this.natureQuery();
+    this.filter.emit(nature ? { usage_nature: nature } : {});
+  }
+
+  onNatureTabChange(tabId: string): void {
+    this.activeNature.set(tabId as ProductUsageNature | typeof ALL_NATURES_TAB);
+    this.emitQuery();
   }
 
   onActionClick(action: string): void {
@@ -553,6 +596,9 @@ export class ProductListComponent {
         break;
       case 'bulk-edit':
         this.bulkEdit.emit();
+        break;
+      case 'option-groups':
+        this.router.navigate(['/admin/products/option-groups']);
         break;
       case 'download-current-products':
         this.downloadCurrentProducts.emit();

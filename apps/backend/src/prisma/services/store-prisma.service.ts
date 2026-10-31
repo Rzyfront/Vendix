@@ -78,6 +78,22 @@ export class StorePrismaService extends BasePrismaService {
     'layaway_plans',
     'exogenous_reports',
     'bookings',
+    'service_stations',
+    'service_station_services',
+    'service_station_providers',
+    'service_station_schedules',
+    'service_station_exceptions',
+    'service_allocations',
+    'service_sessions',
+    'service_contact_attempts',
+    'service_session_email_deliveries',
+    'service_proposal_decisions',
+    'service_change_proposals',
+    'service_budgets',
+    'service_progress_events',
+    'service_session_tokens',
+    'service_subjects',
+    'service_reminder_logs',
     // Tiene columna `store_id` propia. Sin este registro el getter
     // `booking_reschedule_requests` devolvía un delegate SIN scoping, y
     // `cancelRescheduleRequest` hacía `update({ where: { id } })` antes de
@@ -209,6 +225,16 @@ export class StorePrismaService extends BasePrismaService {
     // ===== CRM Landing (QUI-719) =====
     // 1:1 con la tienda (store_id @unique) → scoping directo por tienda.
     'crm_landing_pages',
+    // ===== Pedidos programados + adiciones =====
+    // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
+    'fulfillment_schedule_exceptions',
+    'order_fulfillment_schedules',
+    'order_fulfillment_changes',
+    'scheduled_order_reminder_logs',
+    'product_option_groups',
+    'product_options',
+    'product_option_group_assignments',
+    'order_item_options',
   ];
 
   private readonly fiscal_entity_scoped_models = [
@@ -1574,6 +1600,25 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.provider_exceptions;
   }
 
+  // Service stations & service-session models (CP A.2). Child records are
+  // relationally scoped through their service session/proposal.
+  get service_stations() { return this.scoped_client.service_stations; }
+  get service_station_services() { return this.scoped_client.service_station_services; }
+  get service_station_providers() { return this.scoped_client.service_station_providers; }
+  get service_station_schedules() { return this.scoped_client.service_station_schedules; }
+  get service_station_exceptions() { return this.scoped_client.service_station_exceptions; }
+  get service_allocations() { return this.scoped_client.service_allocations; }
+  get service_sessions() { return this.scoped_client.service_sessions; }
+  get service_subjects() { return this.scoped_client.service_subjects; }
+  get service_session_tokens() { return this.scoped_client.service_session_tokens; }
+  get service_progress_events() { return this.scoped_client.service_progress_events; }
+  get service_budgets() { return this.scoped_client.service_budgets; }
+  get service_change_proposals() { return this.scoped_client.service_change_proposals; }
+  get service_proposal_decisions() { return this.scoped_client.service_proposal_decisions; }
+  get service_contact_attempts() { return this.scoped_client.service_contact_attempts; }
+  get service_session_email_deliveries() { return this.scoped_client.service_session_email_deliveries; }
+  get service_reminder_logs() { return this.scoped_client.service_reminder_logs; }
+
   // Reviews models
   get reviews() {
     return this.scoped_client.reviews;
@@ -1996,6 +2041,39 @@ export class StorePrismaService extends BasePrismaService {
 
   get store_sequences() {
     return this.scoped_client.store_sequences;
+  }
+
+  // ===== Pedidos programados + adiciones =====
+  get fulfillment_schedule_exceptions() {
+    return this.scoped_client.fulfillment_schedule_exceptions;
+  }
+
+  get order_fulfillment_schedules() {
+    return this.scoped_client.order_fulfillment_schedules;
+  }
+
+  get order_fulfillment_changes() {
+    return this.scoped_client.order_fulfillment_changes;
+  }
+
+  get scheduled_order_reminder_logs() {
+    return this.scoped_client.scheduled_order_reminder_logs;
+  }
+
+  get product_option_groups() {
+    return this.scoped_client.product_option_groups;
+  }
+
+  get product_options() {
+    return this.scoped_client.product_options;
+  }
+
+  get product_option_group_assignments() {
+    return this.scoped_client.product_option_group_assignments;
+  }
+
+  get order_item_options() {
+    return this.scoped_client.order_item_options;
   }
 
   get tables() {

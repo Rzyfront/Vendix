@@ -11,6 +11,8 @@ import {
   type VatFiscalDataInput,
 } from '../../../../common/helpers/vat-responsibility.helper';
 import { storeIsRestaurant } from '../../../../common/helpers/industry-capabilities.helper';
+import type { FullTaxRow } from '../../orders/utils/catalog-line-pricing.util';
+import { TaxFiscalType } from '../../taxes/dto';
 import {
   EMPTY_SHIPPING_TAX,
   buildShippingTaxBreakdownRow,
@@ -34,6 +36,17 @@ export type ShippingTaxDbClient = Pick<
   Prisma.TransactionClient,
   'shipping_rates' | 'stores'
 >;
+
+/** Cliente para leer el emisor al resolver una categoría configurada (acepta el `tx`). */
+export type CategoryTaxDbClient = Pick<Prisma.TransactionClient, 'stores'>;
+
+/** Dónde vive la categoría configurada (mismo mecanismo, distinto texto). */
+export type ConfiguredTaxContext = 'shipping' | 'station_rental';
+
+const CONFIGURED_TAX_SUBJECT: Record<ConfiguredTaxContext, string> = {
+  shipping: 'el envío',
+  station_rental: 'el alquiler de la estación',
+};
 
 /** Forma pública de la categoría de impuesto en las lecturas de tarifa. */
 export interface ShippingRateTaxCategoryView {
@@ -356,6 +369,70 @@ export class ShippingTaxService {
     return out;
   }
 
+  /**
+   * Filas de impuesto (`FullTaxRow`) de una categoría configurada fuera del
+   * envío — hoy el alquiler de estación (`service_stations.rental_tax_*`) —
+   * con la MISMA regla que la tarifa de envío: categoría en el alcance
+   * fiscal, elegible (`evaluateShippingTaxCategory`) y emisor responsable
+   * del tipo. El modo (`tax_is_inclusive`) viene de la configuración, no de
+   * la categoría.
+   *
+   * Nunca lanza (el impuesto es accesorio a la venta): sin categoría, fuera
+   * de alcance, no elegible o emisor sin O-48/O-33 ⇒ `[]` (+ warn salvo sin
+   * categoría), es decir, la línea sale sin impuesto como antes.
+   */
+  async taxRowsForCategory(
+    client: CategoryTaxDbClient | null | undefined,
+    args: {
+      tax_category_id: number | null | undefined;
+      tax_is_inclusive: boolean;
+      store_id: number;
+    },
+  ): Promise<FullTaxRow[]> {
+    const { tax_category_id, tax_is_inclusive, store_id } = args;
+    if (!tax_category_id || !store_id) return [];
+    const issuer = await this.readIssuerContext(
+      client ?? this.prisma.withoutScope(),
+      store_id,
+    );
+    const skip = (reason: string): FullTaxRow[] => {
+      this.logger.warn(
+        `[configured-tax] store=${store_id} category=${tax_category_id} sin impuesto (${reason})`,
+      );
+      return [];
+    };
+    // La categoría se lee SIN scoping de tienda y con el alcance fiscal
+    // explícito (igual que `assertCategoryAssignable`): el `tx` de una
+    // transacción del StorePrismaService filtra `tax_categories` por
+    // `store_id` y ocultaría las categorías de la org (fiscal_scope=ORGANIZATION).
+    const category = (await this.prisma.withoutScope().tax_categories.findFirst({
+      where: { id: tax_category_id, ...this.categoryScopeWhere(store_id, issuer) },
+      select: SHIPPING_TAX_CATEGORY_SELECT,
+    })) as CategoryRow | null;
+    if (!category || !this.categoryInScope(category, store_id, issuer)) {
+      return skip('out_of_scope');
+    }
+    const evaluation = evaluateShippingTaxCategory(category);
+    if (!evaluation.eligible) return skip(evaluation.reason_code);
+    const fiscal_data = issuer?.fiscal_data ?? null;
+    if (evaluation.tax_type === 'iva' && !isVatResponsible(fiscal_data)) {
+      return skip('vat_not_responsible');
+    }
+    if (evaluation.tax_type === 'inc' && !isIncResponsible(fiscal_data)) {
+      return skip('inc_not_responsible');
+    }
+    return [
+      {
+        tax_rate_id: evaluation.rate.id,
+        name: evaluation.rate.name,
+        rate: evaluation.rate.fraction,
+        tax_type:
+          evaluation.tax_type === 'inc' ? TaxFiscalType.INC : TaxFiscalType.IVA,
+        is_inclusive: tax_is_inclusive,
+      },
+    ];
+  }
+
   /** Fila de desglose del envío desde la COPIA de la orden (ver util). */
   buildShippingTaxBreakdownRow(
     order: ShippingTaxOrderInput | null | undefined,
@@ -367,16 +444,18 @@ export class ShippingTaxService {
 
   /**
    * Valida la categoría que se quiere asignar a una tarifa de la tienda en
-   * contexto. `null`/`undefined` ⇒ sin impuesto, nada que validar.
+   * contexto (o, con `context: 'station_rental'`, al alquiler de una
+   * estación). `null`/`undefined` ⇒ sin impuesto, nada que validar.
    * - Fuera del alcance (otra tienda/org, o inexistente) ⇒ 404.
    * - No elegible ⇒ 400 con el motivo.
    * - IVA con emisor sin O-48 ⇒ 412 `FISCAL_VAT_NOT_RESPONSIBLE_001`
-   *   (`context: 'shipping'`).
+   *   (`details.context` = `context`).
    * - INC con emisor sin O-33 ⇒ 412 `FISCAL_INC_NOT_RESPONSIBLE_001`
-   *   (`context: 'shipping'`).
+   *   (`details.context` = `context`).
    */
   async assertCategoryAssignable(
     tax_category_id: number | null | undefined,
+    context: ConfiguredTaxContext = 'shipping',
   ): Promise<void> {
     if (tax_category_id === null || tax_category_id === undefined) return;
     const store_id = this.requireStoreId();
@@ -399,15 +478,15 @@ export class ShippingTaxService {
     if (!evaluation.eligible) {
       throw new VendixHttpException(
         ErrorCodes.SHIP_VALIDATE_001,
-        `La categoría "${category.name}" no se puede usar en el envío: ${evaluation.reason}`,
+        `La categoría "${category.name}" no se puede usar en ${CONFIGURED_TAX_SUBJECT[context]}: ${evaluation.reason}`,
         { tax_category_id, reason: evaluation.reason_code },
       );
     }
     if (evaluation.tax_type === 'iva') {
-      assertCanChargeVat(issuer?.fiscal_data ?? null, 'shipping');
+      assertCanChargeVat(issuer?.fiscal_data ?? null, context);
     }
     if (evaluation.tax_type === 'inc') {
-      assertCanChargeInc(issuer?.fiscal_data ?? null, 'shipping');
+      assertCanChargeInc(issuer?.fiscal_data ?? null, context);
     }
   }
 
@@ -558,7 +637,7 @@ export class ShippingTaxService {
    * recibido para no depender del contexto de request (webhooks, jobs).
    */
   private async readIssuerContext(
-    db: ShippingTaxDbClient,
+    db: Pick<Prisma.TransactionClient, 'stores'>,
     store_id: number,
   ): Promise<IssuerContext | null> {
     const store = await db.stores.findFirst({

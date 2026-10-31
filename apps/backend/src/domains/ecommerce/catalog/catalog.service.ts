@@ -1,3 +1,4 @@
+import { isSaleNature } from '../../store/products/services/product-usage-nature.util';
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
@@ -184,6 +185,8 @@ export class CatalogService {
       is_sellable: true,
       // Los insumos nunca se publican en la tienda en línea (defensa de datos viejos).
       is_ingredient: false,
+      // Naturaleza de uso: Insumo y Uso interno nunca salen en la tienda.
+      usage_nature: 'sale',
       // Hotelería (R5): las noches "Noche – {tipo}" se cobran desde la cuenta
       // del huésped, nunca se venden en la tienda en línea.
       lodging_unit_type: { is: null },
@@ -860,6 +863,7 @@ export class CatalogService {
         available_for_ecommerce: true,
         is_sellable: true,
         is_ingredient: false,
+        usage_nature: 'sale',
         // Hotelería (R5): las noches "Noche – {tipo}" se cobran desde la cuenta
         // del huésped, nunca se venden en la tienda en línea.
         lodging_unit_type: { is: null },
@@ -2358,6 +2362,7 @@ export class CatalogService {
                     is_combo: true,
                     is_sellable: true,
                     is_ingredient: true,
+                    usage_nature: true,
                     // Buyability invariant: a carta item must be both active
                     // and available_for_ecommerce; non-buyable products are
                     // filtered out below so the carta never shows a dish the
@@ -2414,6 +2419,8 @@ export class CatalogService {
                 item.product.state === 'active' &&
                 item.product.available_for_ecommerce === true &&
                 item.product.is_ingredient !== true &&
+                // Insumo / Uso interno: nunca en la carta pública.
+                isSaleNature(item.product.usage_nature) &&
                 !item.product.lodging_unit_type,
             );
             const items = await Promise.all(

@@ -49,6 +49,7 @@ export interface EcommerceCheckoutSettings {
 export interface BookingSelection {
   product_id: number;
   product_variant_id?: number;
+  station_id?: number;
   date: string;
   start_time: string;
   end_time: string;
@@ -120,7 +121,22 @@ export interface CheckoutRequest {
      * decir recorre el objeto genéricamente y no una lista fija de campos.
      */
     price_tier_id?: number;
+    /**
+     * Adiciones elegidas (`product_options.id`). El servidor valida las reglas
+     * y recalcula el precio; el cliente NUNCA envía el delta.
+     */
+    option_ids?: number[];
   }>;
+  /**
+   * Día y franja del pedido programado (valores de una franja de
+   * `GET /ecommerce/scheduled-orders/availability`). Se omite cuando la tienda
+   * no usa pedidos programados.
+   */
+  schedule?: {
+    start: string;
+    end: string;
+    fulfillment_type?: 'pickup' | 'delivery';
+  };
   guest_customer?: GuestCheckoutCustomer;
   /**
    * Optional coupon code typed by the customer. Backend validates against

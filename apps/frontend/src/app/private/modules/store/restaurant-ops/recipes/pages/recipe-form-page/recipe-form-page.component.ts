@@ -38,6 +38,14 @@ import {
 } from '../../../../../../../shared/components/index';
 
 import { RecipeItemsEditorComponent } from '../../components/recipe-items-editor/recipe-items-editor.component';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
+
+import {
+  ProductProfileComponent,
+  ProductProfileProduct,
+  ProductProfileRecipe,
+  ProductProfileVariant,
+} from '../../../../../../../shared/components/product-profile/index';
 import { ProductsService } from '../../../../products/services/products.service';
 import { Product } from '../../../../products/interfaces/product.interface';
 import { RecipesService, RecipeMutationError } from '../../services';
@@ -92,6 +100,7 @@ function atLeastOneItemValidator(control: AbstractControl): ValidationErrors | n
     TextareaComponent,
     IconComponent,
     RecipeItemsEditorComponent,
+    ProductProfileComponent,
   ],
   templateUrl: './recipe-form-page.component.html',
   styleUrl: './recipe-form-page.component.scss',
@@ -105,6 +114,16 @@ export class RecipeFormPageComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
+
+  /**
+   * ¿Puede este usuario editar recetas? La ficha de lectura vive en una ruta
+   * con permiso `read`, así que un rol de consulta (cocina, mesero) no debe
+   * recibir el botón "Editar": el backend le respondería 403 al guardar.
+   */
+  readonly canEditRecipe = computed(() =>
+    this.authFacade.hasPermission('store:recipes:update'),
+  );
 
   readonly isEditMode = signal(false);
   readonly recipeId = signal<number | null>(null);
@@ -120,11 +139,76 @@ export class RecipeFormPageComponent implements OnInit {
   readonly conflictingRecipeId = signal<number | null>(null);
   readonly isReactivating = signal(false);
   readonly isLoadingRecipe = signal(false);
+  /**
+   * Modo lectura de una receta existente (pedido de Rafael, 2026-10-29).
+   * Al abrir una receta desde la lista se muestra la ficha compacta; los
+   * inputs aparecen solo al pulsar "Editar". Crear una receta entra directo
+   * en edición (`isViewing` queda en false).
+   */
+  readonly isViewing = signal(false);
+  /** Ficha abierta a pantalla completa desde la vista de lectura. */
+  readonly isProfileOpen = signal(false);
   readonly isSubmitting = signal(false);
   readonly isLoadingProducts = signal(false);
   // Receta cargada en modo edición. Expone `product_variant` al template para
   // la sub-línea del paso 7 (el backend la devuelve vía el include del paso 4).
   readonly loadedRecipe = signal<Recipe | null>(null);
+
+  /**
+   * Adaptadores receta → ficha (`app-product-profile`). Se derivan de
+   * `loadedRecipe` para que la vista de lectura y el modal muestren lo mismo
+   * sin otra llamada HTTP. Ver `product-profile.interface.ts`.
+   */
+  readonly profileProduct = computed<ProductProfileProduct | null>(() => {
+    const product = this.loadedRecipe()?.product;
+    if (!product) return null;
+    return {
+      id: product.id,
+      name: product.name,
+      sku: product.sku ?? null,
+      description: product.description ?? null,
+      base_price: product.base_price ?? null,
+      stock_unit: product.stock_unit ?? null,
+      preparation_time_minutes: product.preparation_time_minutes ?? null,
+      is_ingredient: product.is_ingredient ?? false,
+      is_sellable: product.is_sellable ?? false,
+      product_images: product.product_images ?? [],
+    };
+  });
+
+  readonly profileVariant = computed<ProductProfileVariant | null>(() => {
+    const variant = this.loadedRecipe()?.product_variant;
+    if (!variant) return null;
+    return {
+      id: variant.id,
+      name: variant.name ?? null,
+      sku: variant.sku ?? null,
+      product_images: variant.product_images ?? null,
+    };
+  });
+
+  readonly profileRecipe = computed<ProductProfileRecipe | null>(() => {
+    const recipe = this.loadedRecipe();
+    if (!recipe) return null;
+    return {
+      id: recipe.id,
+      yield_quantity: recipe.yield_quantity,
+      yield_unit: recipe.yield_unit,
+      waste_percent: recipe.waste_percent,
+      preparation_notes: recipe.preparation_notes ?? null,
+      is_active: recipe.is_active,
+      items: (recipe.items ?? []).map((item) => ({
+        id: item.id,
+        name: item.component_product?.name ?? `Producto #${item.component_product_id}`,
+        sku: item.component_product?.sku ?? null,
+        quantity: item.quantity,
+        stock_unit: item.component_product?.stock_unit ?? null,
+        waste_percent: item.waste_percent,
+        notes: item.notes ?? null,
+        product_images: item.component_product?.product_images ?? [],
+      })),
+    };
+  });
 
   /**
    * Yield candidates: `product_type='prepared'` OR `is_batch_produced=true`.
@@ -198,6 +282,25 @@ export class RecipeFormPageComponent implements OnInit {
   readonly itemsCount = computed(() => this.itemsArray.length);
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
+    if (this.isViewing()) {
+      return [
+        {
+          id: 'cancel',
+          label: 'Volver',
+          variant: 'outline',
+        },
+        ...(this.canEditRecipe()
+          ? [
+              {
+                id: 'edit',
+                label: 'Editar',
+                icon: 'pencil',
+                variant: 'primary' as const,
+              },
+            ]
+          : []),
+      ];
+    }
     const invalid = this.formStatus() !== 'VALID' || this.isLoadingRecipe();
     return [
       {
@@ -273,9 +376,14 @@ export class RecipeFormPageComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.loadYieldOptions();
-
     const id = this.route.snapshot.paramMap.get('id');
+    // La ficha de lectura no usa el catálogo: pedirlo solo cuando se va a
+    // crear o editar evita una llamada inútil y un toast de error para roles
+    // sin permiso de productos.
+    if (!id || this.isEditRequested()) {
+      this.loadYieldOptions();
+    }
+
     if (id) {
       this.isEditMode.set(true);
       this.recipeId.set(Number(id));
@@ -389,6 +497,12 @@ export class RecipeFormPageComponent implements OnInit {
     const options: SelectorOption[] = [];
     for (const p of rows) {
       const variants = p.product_variants ?? [];
+      // Foto del plato: la miniatura del selector + el resumen del producto.
+      const photo =
+        p.image_url ??
+        p.product_images?.find((img) => img?.is_main)?.image_url ??
+        p.product_images?.[0]?.image_url ??
+        undefined;
       if (variants.length > 0) {
         for (const v of variants) {
           options.push({
@@ -397,6 +511,7 @@ export class RecipeFormPageComponent implements OnInit {
             description: v.sku
               ? `${v.sku} · ${p.stock_unit ?? ''}`.trim()
               : (p.stock_unit ?? undefined),
+            imageUrl: v.image_url ?? photo,
           });
         }
       } else {
@@ -406,6 +521,7 @@ export class RecipeFormPageComponent implements OnInit {
           description: p.sku
             ? `${p.sku} · ${p.stock_unit ?? ''}`.trim()
             : (p.stock_unit ?? undefined),
+          imageUrl: photo,
         });
       }
     }
@@ -526,10 +642,16 @@ export class RecipeFormPageComponent implements OnInit {
                 is_optional: this.fb.nonNullable.control<boolean>(
                   !!item.is_optional,
                 ),
+                notes: this.fb.nonNullable.control<string>(item.notes ?? ''),
               }),
             );
           }
           this.isLoadingRecipe.set(false);
+          // Receta existente: abre en lectura compacta, no en formulario.
+          // "Editar" desde la lista llega con `?mode=edit` y entra directo al
+          // formulario; cualquier otro acceso (fila, "Ver receta", enlace
+          // directo) abre la ficha de lectura.
+          this.isViewing.set(!this.isEditRequested());
         },
         error: (err: unknown) => {
           const msg = typeof err === 'string' ? err : 'No se pudo cargar la receta';
@@ -547,10 +669,45 @@ export class RecipeFormPageComponent implements OnInit {
       this.cancel();
     } else if (actionId === 'save') {
       this.submit();
+    } else if (actionId === 'edit') {
+      this.enterEditMode();
     }
   }
 
+  /**
+   * Pasa de lectura a edición dejando la intención en la URL (`?mode=edit`):
+   * un F5 o un enlace compartido vuelven al formulario, no a la ficha.
+   */
+  private enterEditMode(): void {
+    this.isViewing.set(false);
+    if (this.yieldOptions().length === 0) {
+      this.loadYieldOptions();
+    }
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { mode: 'edit' },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
+
+  /**
+   * ¿La entrada pide edición explícita? Solo la acción "Editar" de la lista
+   * agrega `?mode=edit`; el default de una receta existente es lectura (S3).
+   */
+  private isEditRequested(): boolean {
+    if (this.route.snapshot.queryParamMap.get('mode') === 'edit') return true;
+    // Compatibilidad: enlaces viejos a `/recipes/:id/edit` (sin query) siguen
+    // abriendo el formulario, que es lo que su URL promete.
+    return this.router.url.split('?')[0].endsWith('/edit');
+  }
+
   private cancel(): void {
+    // En lectura no hay nada que descartar: "Volver" sale a la lista.
+    if (this.isViewing()) {
+      this.router.navigate(['/admin/restaurant-ops/recipes']);
+      return;
+    }
     if (this.form.dirty || this.itemsArray.dirty) {
       this.dialogService
         .confirm({
@@ -698,6 +855,7 @@ export class RecipeFormPageComponent implements OnInit {
             (rawItem.waste_mode as 'percent' | 'absolute') ?? 'percent',
           waste_absolute: Number(rawItem.waste_absolute ?? 0),
           is_optional: !!rawItem.is_optional,
+          notes: rawItem.notes?.trim() ? rawItem.notes.trim() : null,
         };
       },
     );

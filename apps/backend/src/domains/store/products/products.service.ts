@@ -53,6 +53,12 @@ import {
 import { syncEnabledTierAssignments } from './services/tier-assignments-sync.util';
 import { assertProductSaleValid } from './services/product-sale.util';
 import {
+  applyUsageNatureRules,
+  effectiveUsageNature,
+  NEVER_SELLABLE_WHERE,
+  usageNatureListWhere,
+} from './services/product-usage-nature.util';
+import {
   assertVariantRemovalAllowed,
   VariantRemovalCandidate,
 } from './services/variant-removal-guard.util';
@@ -1063,6 +1069,11 @@ export class ProductsService {
         store_id,
       );
       sanitizedDto = this.sanitizeIngredientPayload(sanitizedDto);
+      // Naturaleza de uso: Insumo / Uso interno nunca quedan vendibles ni
+      // publicados. Va después del gate de capacidad para que siempre gane.
+      sanitizedDto = this.sanitizeIngredientPayload(
+        applyUsageNatureRules(sanitizedDto),
+      );
 
       assertProductSaleValid(sanitizedDto, sanitizedDto);
 
@@ -1152,6 +1163,15 @@ export class ProductsService {
         // Si brand_id es nulo pero la tabla lo requiere, poner un valor por defecto o error
       }
 
+      if (
+        sanitizedDto.requires_station &&
+        sanitizedDto.product_type !== ProductType.SERVICE
+      ) {
+        throw new BadRequestException(
+          'Solo los productos de tipo servicio pueden requerir una estación',
+        );
+      }
+
       // Consultation validation
       if (sanitizedDto.is_consultation) {
         if (sanitizedDto.product_type !== ProductType.SERVICE) {
@@ -1208,7 +1228,15 @@ export class ProductsService {
         variants,
         enabled_price_tier_ids,
         ...productData
-      } = createProductDto;
+        // Igual que `update()`: se destructura `sanitizedDto`, no el DTO
+        // original; si no, las neutralizaciones de insumo y de naturaleza de
+        // uso se descartaban y se persistían los flags crudos del cliente.
+      } = sanitizedDto;
+
+      if (!productData.is_recurring) {
+        productData.recurrence_interval_days = null;
+      }
+
       const onlinePurchaseData = await this.buildOnlinePurchaseData(
         store_id,
         slug,
@@ -1759,7 +1787,7 @@ export class ProductsService {
       effectiveState = { not: ProductState.ARCHIVED };
     }
 
-    return {
+    const where = {
       // Auto-scoped by StorePrismaService
       state: effectiveState,
       ...(barcode && {
@@ -1813,6 +1841,12 @@ export class ProductsService {
       // conjunto, así que "seleccionar todo" conserva la capacidad de incluir
       // insumos cuando el parámetro se omite.
       ...(is_ingredient !== undefined && { is_ingredient }),
+      // Naturaleza de uso: el POS es superficie de venta y SIEMPRE se limita a
+      // productos de Venta, aunque un cliente viejo o una llamada directa pida
+      // otra cosa. Fuera del POS, `usage_nature` alimenta las pestañas (abajo).
+      // Con POS también se excluye el insumo puro heredado (anterior a la
+      // columna): `NOT (usage_nature <> sale OR (is_ingredient AND !is_sellable))`.
+      ...(pos_optimized && { NOT: NEVER_SELLABLE_WHERE }),
       // Hotelería (R5): noches "Noche – {tipo}" por la relación existente con
       // su tipo de habitación. El POS las excluye por defecto.
       ...(isLodging !== undefined && {
@@ -1825,6 +1859,14 @@ export class ProductsService {
       // excluyendo, igual que en el listado.
       ...(ids?.length && { id: { in: ids } }),
     } as Prisma.productsWhereInput;
+    // Pestañas Venta · Insumos · Uso interno (naturaleza efectiva). Va en AND
+    // para no chocar con las claves OR/NOT de los filtros de arriba.
+    if (!pos_optimized && query.usage_nature) {
+      return {
+        AND: [where, usageNatureListWhere(query.usage_nature)],
+      } as Prisma.productsWhereInput;
+    }
+    return where;
   }
 
   /**
@@ -2246,7 +2288,8 @@ export class ProductsService {
     // Solo se anexa si están activos: sin estos filtros la clave queda idéntica.
     const unassigned =
       (query.without_category === true ? '|wc' : '') +
-      (query.without_brand === true ? '|wb' : '');
+      (query.without_brand === true ? '|wb' : '') +
+      (query.usage_nature ? `|un:${query.usage_nature}` : '');
     let fhash = 'nofilter';
     try {
       fhash = createHash('sha256').update(filter + unassigned).digest('hex').slice(0, 12);
@@ -2460,6 +2503,7 @@ export class ProductsService {
       isBatchProduced: query.is_batch_produced ?? null,
       isIngredient: query.is_ingredient ?? undefined,
       isLodging: this.resolveIsLodging(query) ?? null,
+      usageNature: query.pos_optimized ? 'sale' : (query.usage_nature ?? null),
       ids: query.ids ?? null,
     };
     const ranked = buildTrigramRankedQuery(
@@ -3215,9 +3259,11 @@ export class ProductsService {
             allow_pos_price_override: product.allow_pos_price_override,
             requires_batch_tracking: product.requires_batch_tracking,
             requires_booking: product.requires_booking,
+            requires_station: product.requires_station,
             booking_mode: product.booking_mode,
             buffer_minutes: product.buffer_minutes,
             is_recurring: product.is_recurring,
+            recurrence_interval_days: product.recurrence_interval_days,
             service_duration_minutes: product.service_duration_minutes,
             service_modality: product.service_modality,
             service_pricing_type: product.service_pricing_type,
@@ -3419,6 +3465,7 @@ export class ProductsService {
           // RecipeIngredientsService: is_ingredient || is_sellable) y los
           // flujos de producción/KDS. Sin estos campos el listado los omitía
           // y el selector quedaba vacío.
+          usage_nature: product.usage_nature,
           is_sellable: product.is_sellable,
           is_ingredient: product.is_ingredient,
           is_combo: product.is_combo,
@@ -3433,9 +3480,11 @@ export class ProductsService {
           allow_pos_price_override: product.allow_pos_price_override,
           requires_batch_tracking: product.requires_batch_tracking,
           requires_booking: product.requires_booking,
+          requires_station: product.requires_station,
           booking_mode: product.booking_mode,
           buffer_minutes: product.buffer_minutes,
           is_recurring: product.is_recurring,
+          recurrence_interval_days: product.recurrence_interval_days,
           service_duration_minutes: product.service_duration_minutes,
           service_modality: product.service_modality,
           service_pricing_type: product.service_pricing_type,
@@ -3705,6 +3754,7 @@ export class ProductsService {
       // Flags de la suite restaurante. Se persisten vía `...productData` en
       // create/update, pero el form de edición los lee de ESTE mapeo de
       // detalle al recargar; sin exponerlos aquí parecían "no guardarse".
+      usage_nature: product.usage_nature,
       is_sellable: product.is_sellable,
       is_ingredient: product.is_ingredient,
       is_combo: product.is_combo,
@@ -3744,7 +3794,9 @@ export class ProductsService {
       service_modality: product.service_modality,
       service_pricing_type: product.service_pricing_type,
       requires_booking: product.requires_booking,
+      requires_station: product.requires_station,
       is_recurring: product.is_recurring,
+      recurrence_interval_days: product.recurrence_interval_days,
       service_instructions: product.service_instructions,
       booking_mode: product.booking_mode,
       buffer_minutes: product.buffer_minutes,
@@ -3973,6 +4025,15 @@ export class ProductsService {
         throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
       }
 
+      const effectiveProductType =
+        sanitizedDto.product_type ?? existingProduct.product_type;
+      const effectiveRequiresStation =
+        sanitizedDto.requires_station ?? existingProduct.requires_station;
+      if (effectiveRequiresStation && effectiveProductType !== ProductType.SERVICE) {
+        throw new BadRequestException(
+          'Solo los productos de tipo servicio pueden requerir una estación',
+        );
+      }
       if (
         !options?.from_lodging &&
         ((sanitizedDto.name !== undefined &&
@@ -3994,6 +4055,11 @@ export class ProductsService {
       );
       sanitizedDto = this.sanitizeIngredientPayload(
         sanitizedDto,
+        existingProduct.is_ingredient,
+      );
+      // Naturaleza de uso (update parcial hereda la del producto existente).
+      sanitizedDto = this.sanitizeIngredientPayload(
+        applyUsageNatureRules(sanitizedDto, existingProduct.usage_nature),
         existingProduct.is_ingredient,
       );
 
@@ -4240,6 +4306,10 @@ export class ProductsService {
         price, // Exclude as it's not in DB
         ...productData
       } = sanitizedDto as UpdateProductDto & { price?: number };
+
+      if (productData.is_recurring === false) {
+        productData.recurrence_interval_days = null;
+      }
       const onlinePurchaseData = await this.buildOnlinePurchaseData(
         existingProduct.store_id,
         sanitizedDto.slug || existingProduct.slug,
@@ -5914,6 +5984,19 @@ export class ProductsService {
           ? { archived_stock_value: null }
           : { archived_stock_value }),
         archived_stock_units,
+        /**
+         * Contadores de las pestañas Venta · Insumos · Uso interno (sin
+         * archivados), con la misma naturaleza efectiva que el filtro.
+         */
+        usage_nature_counts: products.reduce(
+          (acc, p) => {
+            if (p.state !== ProductState.ARCHIVED) {
+              acc[effectiveUsageNature(p)] += 1;
+            }
+            return acc;
+          },
+          { sale: 0, supply: 0, internal_use: 0 },
+        ),
       };
     } catch (error) {
       throw new BadRequestException(

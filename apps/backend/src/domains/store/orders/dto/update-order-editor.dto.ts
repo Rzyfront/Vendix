@@ -1,6 +1,7 @@
 import {
   IsArray,
   ArrayMinSize,
+  ArrayMaxSize,
   IsOptional,
   IsInt,
   Min,
@@ -41,6 +42,11 @@ export class UpdateOrderEditorItemBookingDto {
   @IsInt()
   @Min(1)
   booking_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  station_id?: number;
 
   @IsOptional()
   @IsInt()
@@ -252,6 +258,18 @@ export class UpdateOrderEditorItemDto {
   @ValidateNested()
   @Type(() => UpdateOrderEditorItemBookingDto)
   booking?: UpdateOrderEditorItemBookingDto;
+
+  /**
+   * N2 (PR #1003): declarado solo para responder `OPT_DRAFT_ADD_LOCKED` en vez
+   * de un 400 genérico. El editor no vende adiciones: el servicio rechaza
+   * cualquier línea que las traiga.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsInt({ each: true })
+  @Type(() => Number)
+  option_ids?: number[];
 }
 
 /**

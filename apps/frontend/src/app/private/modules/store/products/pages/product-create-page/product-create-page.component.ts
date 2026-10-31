@@ -6,6 +6,7 @@ import {
   signal,
   inject,
   DestroyRef,
+  untracked,
 } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
@@ -13,7 +14,7 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { KdsStationsService } from '../../../restaurant-ops/kds/services';
 import { KitchenTicketPrintService } from '../../../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import type { KdsStation } from '../../../restaurant-ops/kds/interfaces';
-import { map, startWith, switchMap } from 'rxjs/operators';
+import { map, startWith, switchMap, finalize } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
 import {
   FormBuilder,
@@ -60,6 +61,7 @@ import {
   TaxCategory,
 } from '../../interfaces';
 import { ProductsService } from '../../services/products.service';
+import { DataCollectionTemplatesService } from '../../../data-collection/services/data-collection-templates.service';
 import { CategoriesService } from '../../services/categories.service';
 import { BrandsService } from '../../services/brands.service';
 import { TaxesService } from '../../services/taxes.service';
@@ -132,6 +134,13 @@ import { ProductSerialsManagerModalComponent } from '../../../serial-numbers/com
 import { SaveRequirementsModalComponent } from '../../../../../../shared/components/save-requirements-modal/save-requirements-modal.component';
 import { SaveRequirement } from '../../../../../../shared/components/save-requirements-modal/save-requirements.interface';
 import { mapBackendErrorToRequirements } from '../../utils/product-save-requirements';
+import {
+  effectiveUsageNature,
+  ProductUsageNature,
+  USAGE_NATURE_HELP,
+  USAGE_NATURE_LABELS,
+  USAGE_NATURE_ORDER,
+} from '../../utils/usage-nature.util';
 
 interface VariantAttribute {
   name: string;
@@ -560,6 +569,7 @@ export class ProductCreatePageComponent {
   private priceTiersService = inject(PriceTiersService);
   private priceTierCache = inject(PriceTierCacheService);
   private http = inject(HttpClient);
+  private dataCollectionTemplatesService = inject(DataCollectionTemplatesService);
   private destroyRef = inject(DestroyRef);
   /** QUI-651 — estaciones de KDS para el selector del plato preparado. */
   private readonly kdsStationsService = inject(KdsStationsService);
@@ -796,8 +806,51 @@ export class ProductCreatePageComponent {
    * Fase 1 of the insumos-vs-retail consolidation plan.
    */
   readonly isPureIngredient = computed(
-    () => this.isIngredient() && !this.isSellable(),
+    () =>
+      (this.isIngredient() && !this.isSellable()) || this.isNonSaleNature(),
   );
+
+  /**
+   * Naturaleza de uso (Venta · Insumo · Uso interno). Insumo y Uso interno
+   * reutilizan el modo "insumo puro" de arriba: se ocultan precio de venta,
+   * ofertas, tarifas y publicación en canales en vez de dejarlos en cero.
+   */
+  readonly usageNature = computed<ProductUsageNature>(() => {
+    this.formUpdateTrigger();
+    return (this.productForm?.get('usage_nature')?.value ?? 'sale') as ProductUsageNature;
+  });
+  readonly isNonSaleNature = computed(() => this.usageNature() !== 'sale');
+  readonly usageNatureHelp = computed(() => USAGE_NATURE_HELP[this.usageNature()]);
+  /** Badge de la ficha: siempre visible para no confundir naturalezas. */
+  readonly usageNatureLabel = computed(() => USAGE_NATURE_LABELS[this.usageNature()]);
+  readonly usageNatureBadgeColor = computed<'green' | 'yellow' | 'gray'>(() => {
+    const nature = this.usageNature();
+    return nature === 'supply' ? 'yellow' : nature === 'internal_use' ? 'gray' : 'green';
+  });
+  readonly usageNatureOptions = USAGE_NATURE_ORDER.map((value) => ({
+    value,
+    label: USAGE_NATURE_LABELS[value],
+  }));
+
+  /**
+   * Alinea los flags heredados con la naturaleza elegida (el backend aplica
+   * la misma regla): Insumo ⇒ ingrediente y no vendible; Uso interno ⇒ ni
+   * ingrediente ni vendible; volver a Venta ⇒ vendible.
+   */
+  onUsageNatureChange(value: string): void {
+    const nature = value as ProductUsageNature;
+    const patch =
+      nature === 'supply'
+        ? { is_ingredient: true, is_sellable: false, is_combo: false, product_type: 'physical' }
+        : nature === 'internal_use'
+          ? { is_ingredient: false, is_sellable: false, is_combo: false }
+          : { is_ingredient: false, is_sellable: true };
+    this.lastIngredientFlag = patch.is_ingredient;
+    this.lastSellableFlag = patch.is_sellable;
+    this.productForm.patchValue(patch, { emitEvent: false });
+    if (!patch.is_ingredient) this.resetUomControls();
+    this.formUpdateTrigger.update((v) => v + 1);
+  }
 
 
   /**
@@ -935,18 +988,20 @@ export class ProductCreatePageComponent {
   }
 
   // Data Collection Templates (for consultation configuration)
-  dataCollectionTemplates: {
+  dataCollectionTemplates = signal<{
     id: number;
     name: string;
     productIds: number[];
-  }[] = [];
+  }[]>([]);
 
-  get templateSelectorOptions(): SelectorOption[] {
-    return this.dataCollectionTemplates.map((t) => ({
+  readonly templateSelectorOptions = computed<SelectorOption[]>(() =>
+    this.dataCollectionTemplates().map((t) => ({
       value: t.id,
       label: t.name,
-    }));
-  }
+    })),
+  );
+
+  creatingDefaultTemplate = signal(false);
 
   // Provider assignment (for services with requires_booking)
   assignedProviders = signal<ServiceProvider[]>([]);
@@ -1016,6 +1071,17 @@ export class ProductCreatePageComponent {
   readonly isVariantAccountingOpen = signal(false);
 
   isSubmitting = signal(false);
+  /**
+   * Formulario de recepción (plantilla de Recolección de datos) vinculado al
+   * servicio. 0 = "Sin formulario". El vínculo se guarda aparte del producto
+   * (PUT /store/data-collection/templates/product/:id) y solo si cambió.
+   */
+  readonly intakeTemplateId = signal<number>(0);
+  private readonly originalIntakeTemplateId = signal<number>(0);
+  readonly intakeTemplateSelectorOptions = computed<SelectorOption[]>(() => [
+    { value: 0, label: 'Sin formulario' },
+    ...this.templateSelectorOptions(),
+  ]);
   // Modal de "requisitos para guardar": consolida en un solo lugar todo lo que
   // impide guardar (errores de form + reglas de variantes + reservas), en vez
   // de disparar toasts sueltos y bloquear el botón.
@@ -1468,15 +1534,19 @@ export class ProductCreatePageComponent {
     this.lastIngredientFlag = isIngredient;
     this.lastSellableFlag = isSellable;
     // Only react to the field that actually flipped.
+    // Con la naturaleza de uso, "Es insumo" en un producto de Venta significa
+    // "También se usa como ingrediente" (la salsa): sigue siendo vendible.
+    const isSaleNature =
+      (this.productForm?.get('usage_nature')?.value ?? 'sale') === 'sale';
     if (isIngredient !== prevIng) {
-      if (isIngredient && sellCtrl.value !== false) {
+      if (isIngredient && !isSaleNature && sellCtrl.value !== false) {
         sellCtrl.patchValue(false, { emitEvent: false });
         this.lastSellableFlag = false;
       }
       // Al activar "Es insumo": un insumo siempre es Producto Físico
       // (nunca servicio ni plato preparado) y nunca un combo/menú fijo.
       // Forzamos esos valores y ocultamos sus controles en el template.
-      if (isIngredient) {
+      if (isIngredient && !isSaleNature) {
         this.productForm
           .get('product_type')
           ?.patchValue('physical', { emitEvent: false });
@@ -1545,7 +1615,8 @@ export class ProductCreatePageComponent {
     this.formUpdateTrigger();
     const pure = this.isPureIngredient();
     // Un insumo (puro o no) nunca se publica ni se destaca en la tienda.
-    const anyIngredient = !!form.get('is_ingredient')?.value;
+    const anyIngredient =
+      !!form.get('is_ingredient')?.value || this.isNonSaleNature();
     const ingredientBlocked = new Set([
       'available_for_ecommerce',
       'is_featured',
@@ -1733,9 +1804,9 @@ export class ProductCreatePageComponent {
 
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
+    this.loadDataCollectionTemplates();
     afterNextRender(() => {
       this.loadCategoriesAndBrands();
-      this.loadDataCollectionTemplates();
     });
 
     // Verificar draft del modal de creación rápida
@@ -1744,12 +1815,19 @@ export class ProductCreatePageComponent {
       this.applyDraftData(navState.draft);
     }
 
+    this.takeIntakeDraft();
+
     // Check for ID in route to determine edit mode
     this.route.params.subscribe((params: Params) => {
+      if (!params['id'] && this.pendingIntakeDraft) {
+        // Creación: no hay nada que cargar del servidor; se aplica ya.
+        queueMicrotask(() => this.applyIntakeDraft());
+      }
       if (params['id']) {
         this.productId = +params['id'];
         this.isEditMode.set(true);
         this.loadProduct(this.productId);
+        this.loadIntakeTemplateLink(this.productId);
         this.loadPromotionOptions();
         this.loadProductPromotions(this.productId);
       }
@@ -1798,6 +1876,14 @@ export class ProductCreatePageComponent {
       if (this.isRestaurant() || this.isPreparedProduct()) {
         this.loadKdsStations();
       }
+    });
+
+    // Las estaciones de servicio solo existen en tiendas con industria `service`;
+    // en las demás el endpoint responde 403, así que ni se consulta. El effect
+    // también cubre el caso en que las industrias llegan tras la construcción.
+    effect(() => {
+      if (!this.isServiceIndustry()) return;
+      untracked(() => this.loadServiceStations(this.productId ?? undefined));
     });
 }
 
@@ -1993,22 +2079,276 @@ export class ProductCreatePageComponent {
     }
   }
 
-  private loadDataCollectionTemplates(): void {
+  loadDataCollectionTemplates(): void {
     this.http
       .get<any>(`${environment.apiUrl}/store/data-collection/templates`)
       .pipe(map((r: any) => r.data || []))
       .subscribe({
         next: (templates: any[]) => {
-          this.dataCollectionTemplates = templates.map((t: any) => ({
-            id: t.id,
-            name: t.name,
-            productIds: (t.products || []).map(
-              (p: any) => p.product_id || p.product?.id,
-            ),
-          }));
+          this.dataCollectionTemplates.set(
+            templates.map((t: any) => ({
+              id: t.id,
+              name: t.name,
+              productIds: (t.products || []).map(
+                (p: any) => p.product_id || p.product?.id,
+              ),
+            })),
+          );
         },
         error: () => {}, // Silently fail — not critical
       });
+  }
+
+  createDefaultConsultationTemplates(): void {
+    this.creatingDefaultTemplate.set(true);
+    const body = {
+      name: 'Plantilla General de Consulta',
+      description: 'Formulario estándar para registro de atenciones, diagnóstico y notas clínicas del paciente/cliente.',
+      entity_type: 'booking',
+      status: 'active',
+      icon: 'clipboard-list',
+    };
+
+    this.http
+      .post<any>(`${environment.apiUrl}/store/data-collection/templates`, body)
+      .pipe(
+        finalize(() => this.creatingDefaultTemplate.set(false)),
+      )
+      .subscribe({
+        next: (res: any) => {
+          const created = res?.data || res;
+          this.toastService.success('Plantilla de consulta creada exitosamente');
+          this.loadDataCollectionTemplates();
+          if (created?.id) {
+            this.productForm.get('consultation_template_id')?.setValue(created.id);
+            this.productForm.get('preconsultation_template_id')?.setValue(created.id);
+          }
+        },
+        error: () => {
+          this.toastService.error('Error al crear plantilla de consulta');
+        },
+      });
+  }
+
+  /**
+   * "Diseñar": abre el editor de plantillas en ESTA pestaña. Antes guarda el
+   * avance del formulario (sessionStorage) para recuperarlo al volver; si el
+   * servicio aún no tiene formulario, crea uno vacío y lo deja elegido.
+   */
+  readonly designingIntakeTemplate = signal(false);
+
+  openTemplateManager(): void {
+    const goToEditor = (templateId: number) => {
+      this.saveIntakeDraft(templateId);
+      const [path, query = ''] = this.router.url.split('?');
+      const params = new URLSearchParams(query);
+      params.set('restoreDraft', '1');
+      this.router.navigate(['/admin/data-collection/templates', templateId, 'edit'], {
+        queryParams: { returnTo: `${path}?${params.toString()}` },
+      });
+    };
+    const current = Number(this.intakeTemplateId()) || 0;
+    if (current) {
+      goToEditor(current);
+      return;
+    }
+    this.designingIntakeTemplate.set(true);
+    const name = String(this.productForm.get('name')?.value || '').trim();
+    this.dataCollectionTemplatesService
+      .create({ name: `Formulario ${name || 'del servicio'}`, entity_type: 'service_session', status: 'active', sections: [] })
+      .subscribe({
+        next: (template) => {
+          this.designingIntakeTemplate.set(false);
+          goToEditor(template.id);
+        },
+        error: (error) => {
+          this.designingIntakeTemplate.set(false);
+          this.toastService.error(extractApiErrorMessage(error) || 'No fue posible crear el formulario.');
+        },
+      });
+  }
+
+  /** Plantillas de consulta: se gestionan en su listado (pestaña aparte, como antes). */
+  openTemplatesListInNewTab(): void {
+    window.open('/admin/data-collection/templates', '_blank');
+  }
+
+  private intakeDraftKey(): string {
+    // `takeIntakeDraft()` corre antes de que `route.params` asigne `productId`: el id
+    // de la ruta evita leer `:new` al volver al editar un producto existente.
+    const id = this.productId ?? this.route.snapshot.paramMap.get('id');
+    return `vendix:product-intake-draft:${id ?? 'new'}`;
+  }
+
+  private saveIntakeDraft(templateId: number): void {
+    try {
+      sessionStorage.setItem(
+        this.intakeDraftKey(),
+        JSON.stringify({ form: this.productForm.getRawValue(), intake_template_id: templateId }),
+      );
+    } catch {
+      /* Sin storage (modo privado): se vuelve sin borrador. */
+    }
+  }
+
+  /** Borrador pendiente de aplicar al volver del editor (solo con ?restoreDraft=1). */
+  private pendingIntakeDraft: { form: Record<string, unknown>; intake_template_id: number } | null = null;
+  /** Plantilla elegida en el editor; gana sobre el vínculo guardado aunque este llegue después. */
+  private restoredIntakeTemplateId: number | null = null;
+
+  private takeIntakeDraft(): void {
+    if (this.route.snapshot.queryParamMap.get('restoreDraft') !== '1') return;
+    try {
+      const raw = sessionStorage.getItem(this.intakeDraftKey());
+      sessionStorage.removeItem(this.intakeDraftKey());
+      this.pendingIntakeDraft = raw ? JSON.parse(raw) : null;
+    } catch {
+      this.pendingIntakeDraft = null;
+    }
+    // Quita el parámetro para que recargar no vuelva a aplicar el borrador.
+    this.router.navigate([], { queryParams: { restoreDraft: null }, queryParamsHandling: 'merge', replaceUrl: true });
+  }
+
+  /** Reaplica lo que el usuario llevaba (sobre lo cargado del servidor) y elige la plantilla. */
+  private applyIntakeDraft(): void {
+    const draft = this.pendingIntakeDraft;
+    if (!draft) return;
+    this.pendingIntakeDraft = null;
+    this.productForm.patchValue(draft.form ?? {});
+    this.productForm.markAsDirty();
+    this.restoredIntakeTemplateId = Number(draft.intake_template_id) || 0;
+    this.intakeTemplateId.set(this.restoredIntakeTemplateId);
+    this.loadDataCollectionTemplates();
+    this.toastService.info('Recuperamos lo que llevabas del producto. Guarda para conservar los cambios.');
+  }
+
+
+  onIntakeTemplateChange(value: number | string | null): void {
+    this.intakeTemplateId.set(Number(value) || 0);
+  }
+
+  private loadIntakeTemplateLink(productId: number): void {
+    this.dataCollectionTemplatesService
+      .getProductTemplate(productId)
+      .subscribe({
+        next: (templateId) => {
+          const id = Number(templateId) || 0;
+          this.originalIntakeTemplateId.set(id);
+          // Volviendo del editor, la plantilla elegida allí gana sobre la guardada.
+          this.intakeTemplateId.set(this.restoredIntakeTemplateId ?? id);
+        },
+        error: () => {}, // No crítico: el selector queda en "Sin formulario"
+      });
+  }
+
+  /**
+   * Persiste el vínculo producto → formulario de recepción solo si cambió.
+   * Nunca rechaza: un fallo se avisa con un warning y el guardado del producto
+   * sigue su curso.
+   */
+  // --- Estaciones donde se presta el servicio ("Requiere estación de servicio") ---
+
+  /** Estaciones activas de la tienda; vacío (y sección oculta) si la tienda no usa estaciones. */
+  readonly serviceStationOptions = signal<Array<{ value: number; label: string }>>([]);
+  readonly productStationIds = signal<number[]>([]);
+  private readonly originalProductStationIds = signal<number[]>([]);
+
+  private loadServiceStations(productId?: number): void {
+    this.http
+      .get<any>(`${environment.apiUrl}/store/service-stations?limit=100&status=active`)
+      .subscribe({
+        next: (res) => {
+          const rows = res?.data?.data ?? res?.data ?? [];
+          this.serviceStationOptions.set((Array.isArray(rows) ? rows : []).map((s: any) => ({ value: s.id, label: s.name })));
+        },
+        error: () => this.serviceStationOptions.set([]), // 403: la tienda no tiene la industria Servicios
+      });
+    if (!productId) return;
+    this.http.get<any>(`${environment.apiUrl}/store/service-stations/by-product/${productId}`).subscribe({
+      next: (res) => {
+        const ids: number[] = res?.data?.station_ids ?? [];
+        this.productStationIds.set(ids);
+        this.originalProductStationIds.set(ids);
+      },
+      error: () => {},
+    });
+  }
+
+  /** Guarda en qué estaciones se presta el servicio, solo si cambió. Nunca rechaza. */
+  /** Opción especial del selector: marca o desmarca todas las estaciones de una vez. */
+  private static readonly ALL_STATIONS = -1;
+
+  readonly stationSelectorOptions = computed(() => [
+    { value: ProductCreatePageComponent.ALL_STATIONS, label: 'Todas las estaciones' },
+    ...this.serviceStationOptions(),
+  ]);
+
+  /** Valor mostrado: incluye "Todas" cuando cada estación está marcada. */
+  readonly stationSelectorValue = computed(() => {
+    const ids = this.productStationIds();
+    const all = this.serviceStationOptions().map((o) => o.value);
+    return all.length && all.every((id) => ids.includes(id)) ? [ProductCreatePageComponent.ALL_STATIONS, ...ids] : ids;
+  });
+
+  onStationSelectorChange(value: Array<string | number>): void {
+    const ALL = ProductCreatePageComponent.ALL_STATIONS;
+    const next = (value ?? []).map(Number);
+    const wasAll = this.stationSelectorValue().includes(ALL);
+    const all = this.serviceStationOptions().map((o) => o.value);
+    if (next.includes(ALL) && !wasAll) {
+      this.productStationIds.set(all); // marcó "Todas"
+    } else if (!next.includes(ALL) && wasAll && next.length === all.length) {
+      this.productStationIds.set([]); // desmarcó "Todas"
+    } else {
+      this.productStationIds.set(next.filter((id) => id !== ALL));
+    }
+  }
+
+  private syncProductStations(productId: number | undefined, isService: boolean): Promise<void> {
+    const next = isService && this.productForm.get('requires_station')?.value ? [...this.productStationIds()].sort() : [];
+    const prev = [...this.originalProductStationIds()].sort();
+    if (!productId || !this.serviceStationOptions().length || JSON.stringify(next) === JSON.stringify(prev)) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.http
+        .put<any>(`${environment.apiUrl}/store/service-stations/by-product/${productId}`, { station_ids: next })
+        .subscribe({
+          next: () => {
+            this.originalProductStationIds.set(next);
+            resolve();
+          },
+          error: () => {
+            this.toastService.warning('Producto guardado, pero no se pudieron asignar las estaciones.');
+            resolve();
+          },
+        });
+    });
+  }
+
+  private syncIntakeTemplateLink(productId: number | undefined, isService: boolean): Promise<void> {
+    // Los formularios de recepción son de estaciones: fuera de la industria `service` no se tocan (403).
+    if (!this.isServiceIndustry()) return Promise.resolve();
+    const next = isService ? this.intakeTemplateId() : 0;
+    if (!productId || next === this.originalIntakeTemplateId()) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      this.dataCollectionTemplatesService
+        .setProductTemplate(productId, next || null)
+        .subscribe({
+          next: () => {
+            this.originalIntakeTemplateId.set(next);
+            resolve();
+          },
+          error: () => {
+            this.toastService.warning(
+              'Producto guardado, pero no se pudo vincular el formulario de recepción.',
+            );
+            resolve();
+          },
+        });
+    });
   }
 
   private createForm(): FormGroup {
@@ -2066,8 +2406,10 @@ export class ProductCreatePageComponent {
         service_modality: [null],
         service_pricing_type: [null],
         requires_booking: [false],
+        requires_station: [false],
         booking_mode: [null],
         is_recurring: [false],
+        recurrence_interval_days: [30, [Validators.required, Validators.min(1)]],
         service_instructions: [''],
         is_consultation: [false],
         send_preconsultation: [false],
@@ -2084,6 +2426,8 @@ export class ProductCreatePageComponent {
         // Si la tienda en línea ofrece TAMBIÉN la unidad suelta junto a las
         // presentaciones. Encendido por defecto: es como se comporta el POS.
         offer_loose_unit: [true],
+        // Naturaleza de uso: venta (default), insumo o uso interno.
+        usage_nature: ['sale'],
         // ===== Restaurant Suite toggles (Fase B) =====
         is_sellable: [true],
         is_ingredient: [false],
@@ -2322,6 +2666,8 @@ export class ProductCreatePageComponent {
         this.productMinStockLevel.set(product?.min_stock_level ?? null);
         this.onlinePurchaseProduct.set(product);
         this.patchForm(product);
+        // Volviendo del editor de plantillas: lo que el usuario llevaba va encima de lo cargado.
+        this.applyIntakeDraft();
         // Hotelería (R5): the night's name and state follow its room type
         // ("Noche – {tipo}"); getRawValue() still sends them unchanged.
         if (product?.lodging_unit_type) {
@@ -2411,8 +2757,10 @@ export class ProductCreatePageComponent {
       service_modality: product.service_modality || null,
       service_pricing_type: product.service_pricing_type || null,
       requires_booking: product.requires_booking || false,
+      requires_station: product.requires_station || false,
       booking_mode: product.booking_mode || null,
       is_recurring: product.is_recurring || false,
+      recurrence_interval_days: product.recurrence_interval_days || 30,
       service_instructions: product.service_instructions || '',
       is_consultation: product.is_consultation || false,
       send_preconsultation: product.send_preconsultation || false,
@@ -2425,6 +2773,9 @@ export class ProductCreatePageComponent {
       has_multiple_price_tiers: !!product.has_multiple_price_tiers,
       // `undefined` en un producto anterior a la columna ⇒ true (se ofrece).
       offer_loose_unit: product.offer_loose_unit !== false,
+      // Naturaleza efectiva: el insumo puro anterior a la columna se muestra
+      // como Insumo (igual que el badge del listado).
+      usage_nature: effectiveUsageNature(product),
       // Restaurant Suite toggles (Fase B)
       is_sellable: product.is_sellable !== false,
       is_ingredient: !!product.is_ingredient,
@@ -4290,10 +4641,13 @@ export class ProductCreatePageComponent {
     // value for retail-sale constructs; we force them to neutral values
     // and let the backend ignore them. This keeps the persisted DTO
     // coherent regardless of UI state.
-    const isPureIngredient = !!formValue.is_ingredient && !formValue.is_sellable;
+    const usageNature: ProductUsageNature = formValue.usage_nature ?? 'sale';
+    const isNonSale = usageNature !== 'sale';
+    const isPureIngredient =
+      (!!formValue.is_ingredient && !formValue.is_sellable) || isNonSale;
     const neutral = (v: any, fallback: any) => (isPureIngredient ? fallback : v);
     // Un insumo nunca se publica ni se destaca, sea o no vendible.
-    const isIngredientAny = !!formValue.is_ingredient;
+    const isIngredientAny = !!formValue.is_ingredient || isNonSale;
 
     // F-008: ids efectivos (F4 ya aplicado) para filtrar el mapa inclusivo.
     const effectiveTaxIds = this.sanitizeTaxCategoryIds(
@@ -4371,8 +4725,10 @@ export class ProductCreatePageComponent {
         service_modality: formValue.service_modality || undefined,
         service_pricing_type: formValue.service_pricing_type || undefined,
         requires_booking: !!formValue.requires_booking,
+        requires_station: !!formValue.requires_station,
         booking_mode: formValue.booking_mode || undefined,
         is_recurring: !!formValue.is_recurring,
+        recurrence_interval_days: formValue.is_recurring ? Number(formValue.recurrence_interval_days || 30) : undefined,
         service_instructions: formValue.service_instructions || undefined,
         is_consultation: !!formValue.is_consultation,
         send_preconsultation: !!formValue.send_preconsultation,
@@ -4418,8 +4774,9 @@ export class ProductCreatePageComponent {
         ? formValue.offer_loose_unit !== false
         : true,
       // Restaurant Suite toggles (Fase B)
-      is_sellable: formValue.is_sellable !== false,
-      is_ingredient: !!formValue.is_ingredient,
+      usage_nature: usageNature,
+      is_sellable: !isNonSale && formValue.is_sellable !== false,
+      is_ingredient: usageNature === 'supply' || (!isNonSale && !!formValue.is_ingredient),
       // Un insumo no puede ser combo / menú fijo: se neutraliza por robustez.
       is_combo: formValue.is_ingredient ? false : !!formValue.is_combo,
       is_batch_produced: !!formValue.is_batch_produced,
@@ -4529,8 +4886,13 @@ export class ProductCreatePageComponent {
 
         const navigateAfterSave = () => {
           const returnPage = this.route.snapshot.queryParams['fromPage'] || 1;
-          this.router.navigate(['/admin/products'], {
-            queryParams: { page: returnPage },
+          Promise.all([
+            this.syncIntakeTemplateLink(savedProduct?.id, isServiceType),
+            this.syncProductStations(savedProduct?.id, isServiceType),
+          ]).then(() => {
+            this.router.navigate(['/admin/products'], {
+              queryParams: { page: returnPage },
+            });
           });
         };
 

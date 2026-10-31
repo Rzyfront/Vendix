@@ -19,7 +19,9 @@ import { UpdateProviderDto } from './dto/update-provider.dto';
 import { UpsertProviderScheduleDto } from './dto/upsert-provider-schedule.dto';
 import { CreateProviderExceptionDto } from './dto/create-provider-exception.dto';
 import { AssignServiceDto } from './dto/assign-service.dto';
+import { AssignStationsDto } from './dto/assign-stations.dto';
 import { AvailabilityOverviewQueryDto } from '../dto/availability-overview-query.dto';
+import { ServiceIndustryGuard } from '../../../../common/guards/service-industry.guard';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
@@ -220,4 +222,60 @@ export class ProvidersController {
       'Excepcion eliminada exitosamente',
     );
   }
+
+  // --- Stations ---
+
+  @Get(':id/stations')
+  @UseGuards(ServiceIndustryGuard)
+  @Permissions('store:reservations:read')
+  async getStations(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.providersService.getStations(id);
+    return this.responseService.success(
+      result,
+      'Estaciones del proveedor obtenidas exitosamente',
+    );
+  }
+
+  @Put(':id/stations')
+  @UseGuards(ServiceIndustryGuard)
+  @Permissions('store:reservations:update')
+  async setStations(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignStationsDto,
+  ) {
+    const result = await this.providersService.setStations(id, dto.station_ids);
+    return this.responseService.success(
+      result,
+      'Estaciones del proveedor actualizadas exitosamente',
+    );
+  }
+
+  @Post(':id/stations/:stationId')
+  @UseGuards(ServiceIndustryGuard)
+  @Permissions('store:reservations:update')
+  async assignStation(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('stationId', ParseIntPipe) stationId: number,
+  ) {
+    const result = await this.providersService.assignStation(id, stationId);
+    return this.responseService.created(
+      result,
+      'Estación asignada exitosamente',
+    );
+  }
+
+  @Delete(':id/stations/:stationId')
+  @UseGuards(ServiceIndustryGuard)
+  @Permissions('store:reservations:update')
+  async removeStation(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('stationId', ParseIntPipe) stationId: number,
+  ) {
+    await this.providersService.removeStation(id, stationId);
+    return this.responseService.success(
+      null,
+      'Estación removida exitosamente',
+    );
+  }
 }
+

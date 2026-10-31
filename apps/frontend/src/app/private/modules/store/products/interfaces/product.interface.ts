@@ -1,3 +1,4 @@
+import type { ProductUsageNature } from '../utils/usage-nature.util';
 export enum ProductState {
   ACTIVE = 'active',
   INACTIVE = 'inactive',
@@ -69,9 +70,11 @@ export interface Product {
     | 'package'
     | 'subscription';
   requires_booking?: boolean;
+  requires_station?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
   is_recurring?: boolean;
+  recurrence_interval_days?: number | null;
   service_instructions?: string;
   is_consultation?: boolean;
   send_preconsultation?: boolean;
@@ -111,6 +114,8 @@ export interface Product {
   // ===== Restaurant Suite toggles (Fase A defaults) =====
   // is_sellable=true, is_ingredient=false, is_combo=false, is_batch_produced=false.
   // stock_unit / purchase_unit are nullable for non-restaurant stores.
+  /** Naturaleza de uso. Ausente = venta (default de la columna). */
+  usage_nature?: ProductUsageNature;
   is_sellable?: boolean;
   is_ingredient?: boolean;
   is_combo?: boolean;
@@ -389,9 +394,11 @@ export interface CreateProductDto {
     | 'package'
     | 'subscription';
   requires_booking?: boolean;
+  requires_station?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
   is_recurring?: boolean;
+  recurrence_interval_days?: number | null;
   service_instructions?: string;
   is_consultation?: boolean;
   send_preconsultation?: boolean;
@@ -406,6 +413,8 @@ export interface CreateProductDto {
    */
   kds_id?: number | null;
   // ===== Restaurant Suite toggles (Fase B) =====
+  /** Naturaleza de uso. Ausente = venta (default de la columna). */
+  usage_nature?: ProductUsageNature;
   is_sellable?: boolean;
   is_ingredient?: boolean;
   is_combo?: boolean;
@@ -469,6 +478,8 @@ export interface UpdateProductDto {
   track_inventory?: boolean;
   min_stock_level?: number | null;
   requires_serial_numbers?: boolean;
+  /** Naturaleza de uso. Ausente = venta (default de la columna). */
+  usage_nature?: ProductUsageNature;
   is_sellable?: boolean;
   available_for_ecommerce?: boolean;
   is_featured?: boolean;
@@ -493,6 +504,7 @@ export interface UpdateProductDto {
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
   is_recurring?: boolean;
+  recurrence_interval_days?: number | null;
   service_instructions?: string;
   is_consultation?: boolean;
   send_preconsultation?: boolean;
@@ -587,6 +599,8 @@ export interface ProductQueryDto {
   // so a future server-side filter can be enabled without touching the
   // frontend.
   is_ingredient?: boolean;
+  /** Naturaleza de uso. Ausente = venta (default de la columna). */
+  usage_nature?: ProductUsageNature;
   is_sellable?: boolean;
   // Hotelería (R5): true = solo noches de hotel, false = sin ellas.
   is_lodging?: boolean;
@@ -637,6 +651,8 @@ export interface ProductStats {
   total_value: number;
   categories_count: number;
   brands_count: number;
+  /** Contadores de las pestañas Venta · Insumos · Uso interno. */
+  usage_nature_counts?: Record<ProductUsageNature, number>;
   products_without_images?: number;
   productsGrowthRate?: number;
   activeProductsGrowthRate?: number;

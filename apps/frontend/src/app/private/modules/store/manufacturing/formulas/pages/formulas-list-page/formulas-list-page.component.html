@@ -95,3 +95,35 @@
     }
   </app-card>
 </div>
+
+<!-- Ficha del producto que se costea (S1/S6): mismo componente que recetas,
+     producción y KDS. Vive fuera del contenedor para no heredar su scroll. -->
+<app-product-profile-modal
+  [isOpen]="isProfileOpen()"
+  [product]="profileProduct()"
+  [recipe]="profileRecipe()"
+  (isOpenChange)="isProfileOpen.set($event)"
+/>
+
+<!-- Miniatura en la columna Producto (tabla desktop). Fuera de cualquier @if
+     para que el viewChild resuelva en el primer ciclo; mismo contrato que
+     `recipes-list-page`. -->
+<ng-template #productCellTemplate let-item>
+  <span class="formula-product-cell">
+    @if (item.image_url) {
+      <img
+        [src]="item.image_url"
+        [alt]="'Foto de ' + (item.product?.name ?? 'producto')"
+        class="formula-product-thumb"
+        loading="lazy"
+      />
+    } @else {
+      <span class="formula-product-thumb formula-product-thumb--empty" aria-hidden="true">
+        <app-icon name="flask-conical" [size]="14" />
+      </span>
+    }
+    <span class="formula-product-name">{{
+      item.product?.name ?? ('Producto #' + item.product_id)
+    }}</span>
+  </span>
+</ng-template>

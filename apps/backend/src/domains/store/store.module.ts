@@ -38,6 +38,8 @@ import { LayawayModule } from './layaway/layaway.module';
 import { WithholdingTaxModule } from './withholding-tax/withholding-tax.module';
 import { ExogenousModule } from './exogenous/exogenous.module';
 import { ReservationsModule } from './reservations/reservations.module';
+import { ScheduledOrdersModule } from './scheduled-orders/scheduled-orders.module';
+import { ProductOptionsModule } from './product-options/product-options.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { AIChatModule } from './ai-chat/ai-chat.module';
 import { VexiModule } from './vexi/vexi.module';
@@ -80,6 +82,10 @@ import { UomModule } from './uom/uom.module';
 import { WeeklyReportModule } from './weekly-report/weekly-report.module';
 import { PrintFormatsModule } from './print-formats/print-formats.module';
 import { CrmModule } from './crm/crm.module';
+import { ServiceStationsModule } from './service-stations/service-stations.module';
+import { ServiceSessionsModule } from './service-sessions/service-sessions.module';
+import { ServiceRemindersModule } from './service-reminders/service-reminders.module';
+import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
 
 @Module({
   imports: [
@@ -121,6 +127,8 @@ import { CrmModule } from './crm/crm.module';
     WithholdingTaxModule,
     ExogenousModule,
     ReservationsModule,
+    ScheduledOrdersModule,
+    ProductOptionsModule,
     ReviewsModule,
     AIChatModule,
     VexiModule,
@@ -163,6 +171,10 @@ import { CrmModule } from './crm/crm.module';
     WeeklyReportModule,
     PrintFormatsModule,
     CrmModule,
+    ServiceStationsModule,
+    ServiceSessionsModule,
+    ServiceRemindersModule,
+    ServiceBudgetsModule,
   ],
   exports: [PrintFormatsModule],
 })

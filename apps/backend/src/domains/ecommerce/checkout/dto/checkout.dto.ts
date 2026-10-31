@@ -14,15 +14,24 @@ import {
   Matches,
   IsEmail,
   IsPositive,
+  ArrayMaxSize,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ItemNotes } from '@common/decorators/item-notes.decorator';
+import { ScheduleInputDto } from '../../../store/scheduled-orders/dto/scheduled-orders.dto';
 
 class CheckoutCartItemDto {
   @IsInt()
   @Min(1)
   product_id: number;
+
+  // Adiciones elegidas (ids de `product_options`); el precio lo calcula el servidor.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsInt({ each: true })
+  option_ids?: number[];
 
   @IsOptional()
   @IsInt()
@@ -127,6 +136,13 @@ export class CheckoutShippingAddressDto {
  * apagado el archivo es opcional y se ignora en métodos no elegibles.
  */
 export class CheckoutDto {
+  // Pedido programado: día y franja de entrega/recogida. Solo con
+  // `store_settings.scheduled_orders.enabled`; el servidor valida cupo.
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ScheduleInputDto)
+  schedule?: ScheduleInputDto;
+
   // Booking selections for bookable services
   @IsOptional()
   @IsArray()
@@ -277,6 +293,16 @@ class CheckoutBookingDto {
   @IsInt()
   @Min(1)
   product_variant_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  station_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  provider_id?: number;
 
   @IsDateString()
   date: string;

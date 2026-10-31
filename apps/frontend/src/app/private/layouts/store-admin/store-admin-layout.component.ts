@@ -690,6 +690,16 @@ export class StoreAdminLayoutComponent {
           icon: 'calendar-clock',
           route: '/admin/reservations',
         },
+        {
+          label: 'Pedidos programados',
+          icon: 'calendar-clock',
+          route: '/admin/scheduled-orders',
+        },
+        {
+          label: 'Estaciones de Servicio',
+          icon: 'warehouse',
+          route: '/admin/services/stations',
+        },
       ],
     },
     {
@@ -1302,6 +1312,13 @@ export class StoreAdminLayoutComponent {
         this.weeklyReportSnapshot.set(report);
         this.showWeeklyReportTakeover.set(true);
       }
+    });
+
+    // Pedidos programados: la entrada solo aparece si el ajuste está activo.
+    effect(() => {
+      this.menuFilterService.scheduledOrdersEnabled.set(
+        this.storeSettingsFacade.settings()?.scheduled_orders?.enabled === true,
+      );
     });
 
     // ── PQR stats: hidratar `hasStorePqrs` cuando hay store context ──

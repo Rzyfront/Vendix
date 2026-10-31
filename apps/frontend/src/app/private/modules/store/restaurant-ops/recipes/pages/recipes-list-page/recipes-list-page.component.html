@@ -122,7 +122,7 @@
     @if (!isLoading() && recipes().length > 0) {
       <div class="px-2 pb-2 pt-3 md:p-4">
         <app-responsive-data-view
-          [data]="recipes()"
+          [data]="rows()"
           [columns]="tableColumns"
           [cardConfig]="cardConfig"
           [actions]="tableActions()"
@@ -158,13 +158,27 @@
 -->
 <ng-template #productCellTemplate let-item>
   <span class="recipe-product-cell">
-    <span class="recipe-product-name">{{
-      item.product?.name ? item.product.name : ('Receta #' + item.id)
-    }}</span>
-    @if (variantName(item)) {
-      <span class="recipe-variant-line">
-        <span class="sr-only">Variante: </span>{{ variantName(item) }}
+    @if (productImage(item); as image) {
+      <img
+        [src]="image"
+        [alt]="'Foto de ' + (item.product?.name ?? 'receta')"
+        class="recipe-product-thumb"
+        loading="lazy"
+      />
+    } @else {
+      <span class="recipe-product-thumb recipe-product-thumb--empty" aria-hidden="true">
+        <app-icon name="chef-hat" [size]="14" />
       </span>
     }
+    <span class="recipe-product-text">
+      <span class="recipe-product-name">{{
+        item.product?.name ? item.product.name : ('Receta #' + item.id)
+      }}</span>
+      @if (variantName(item)) {
+        <span class="recipe-variant-line">
+          <span class="sr-only">Variante: </span>{{ variantName(item) }}
+        </span>
+      }
+    </span>
   </span>
 </ng-template>

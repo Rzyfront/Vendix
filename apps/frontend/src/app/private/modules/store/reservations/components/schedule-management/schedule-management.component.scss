@@ -112,8 +112,12 @@
 // ▸ Stat Cards Row
 .stats-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
+
+  @media (max-width: 640px) {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .stat-card {
@@ -154,6 +158,14 @@
   color: var(--color-primary);
 
   .stat-number { color: var(--color-primary); }
+}
+
+.stat-warning {
+  border-color: color-mix(in srgb, #f59e0b 20%, var(--color-border));
+  background: color-mix(in srgb, #f59e0b 5%, var(--color-surface));
+  color: #f59e0b;
+
+  .stat-number { color: #f59e0b; }
 }
 
 .stat-info {

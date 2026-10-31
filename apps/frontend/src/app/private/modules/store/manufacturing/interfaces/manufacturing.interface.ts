@@ -180,10 +180,20 @@ export interface ManufacturingProductOption {
   id: number;
   name: string;
   sku?: string | null;
+  description?: string | null;
   stock_unit?: string | null;
   product_type?: string | null;
   is_batch_produced?: boolean;
   cost_price?: number | string | null;
+  /** Foto principal resuelta por el endpoint de productos. */
+  image_url?: string | null;
+  product_images?: Array<{
+    id?: number;
+    image_url: string;
+    is_main?: boolean | null;
+    alt_text?: string | null;
+    sort_order?: number | null;
+  }>;
 }
 
 // ─── Utilidades de presentación ────────────────────────────────────────────

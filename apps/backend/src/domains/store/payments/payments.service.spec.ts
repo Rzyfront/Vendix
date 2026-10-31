@@ -147,6 +147,8 @@ describe('PaymentsService', () => {
 
   beforeEach(async () => {
     const mockPrismaService = {
+      // Guard de naturaleza de uso (assertSaleNatureLines): sin ofensores.
+      products: { findMany: jest.fn().mockResolvedValue([]) },
       payments: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
@@ -655,6 +657,57 @@ describe('PaymentsService', () => {
       await expect(
         service.processPayment(createPaymentDto, mockUser),
       ).rejects.toBeDefined();
+    });
+  });
+
+  describe('processPaymentWithOrder — naturaleza de uso', () => {
+    const buildWithOrderDto = () =>
+      ({
+        customerId: 1,
+        amount: 100,
+        currency: 'COP',
+        storePaymentMethodId: 1,
+        storeId: 1,
+        items: [{ productId: 7, quantity: 1, price: 100 }],
+      }) as any;
+
+    beforeEach(() => {
+      jest
+        .spyOn(prisma.store_users, 'findMany')
+        .mockResolvedValue([{ store_id: 1 }]);
+    });
+
+    it('rechaza con 422 un Insumo antes de crear la orden y cobrar', async () => {
+      (prisma as any).products.findMany.mockResolvedValueOnce([
+        { id: 7, name: 'Harina 1kg', usage_nature: 'supply', is_ingredient: true, is_sellable: false },
+      ]);
+      const gatewaySpy = jest.spyOn(paymentGateway, 'processPaymentWithNewOrder');
+
+      const error = await service
+        .processPaymentWithOrder(buildWithOrderDto(), mockUser)
+        .catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.getStatus()).toBe(422);
+      expect(error.errorCode).toBe(ErrorCodes.PROD_NATURE_NOT_SELLABLE.code);
+      expect(error.message).toBe('"Harina 1kg" es un producto de Insumo y no se puede vender.');
+      expect((prisma as any).products.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: [7] } }),
+        }),
+      );
+      expect(gatewaySpy).not.toHaveBeenCalled();
+    });
+
+    it('cobra normal un producto de Venta', async () => {
+      jest
+        .spyOn(paymentGateway, 'processPaymentWithNewOrder')
+        .mockResolvedValue(mockPaymentResult as any);
+
+      const result = await service.processPaymentWithOrder(buildWithOrderDto(), mockUser);
+
+      expect(result.success).toBe(true);
+      expect(paymentGateway.processPaymentWithNewOrder).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -1243,6 +1296,20 @@ describe('PaymentsService', () => {
 
     afterEach(() => {
       contextSpy?.mockRestore();
+    });
+
+    it('rechaza con 422 un Insumo (Leche Entera) antes de abrir la venta', async () => {
+      arrange({ checkout: { require_customer_data: false } });
+      (prisma as any).products.findMany.mockResolvedValueOnce([
+        { id: 1, name: 'Leche Entera 1L', usage_nature: 'sale', is_ingredient: true, is_sellable: false },
+      ]);
+      const error = await service.processPosPayment(buildDto(), posUser).catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.getStatus()).toBe(422);
+      expect(error.errorCode).toBe(ErrorCodes.PROD_NATURE_NOT_SELLABLE.code);
+      expect(error.message).toBe('"Leche Entera 1L" es un producto de Insumo y no se puede vender.');
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -4452,6 +4519,7 @@ describe('PaymentsService', () => {
           })),
         },
         orders: {
+          findFirst: jest.fn().mockResolvedValue(null),
           update: jest.fn().mockResolvedValue({ id: 4242 }),
           findUnique: jest
             .fn()
@@ -4892,6 +4960,7 @@ describe('PaymentsService', () => {
           findFirst: jest.fn().mockResolvedValue(null),
         },
         orders: {
+          findFirst: jest.fn().mockResolvedValue(null),
           update: jest.fn(async ({ data }: any) => {
             if (data.total_paid != null) totalPaid = Number(data.total_paid);
             if (typeof data.state === 'string') orderState = data.state;
@@ -5187,6 +5256,7 @@ describe('PaymentsService', () => {
           findFirst: jest.fn().mockResolvedValue(null),
         },
         orders: {
+          findFirst: jest.fn().mockResolvedValue(null),
           update: jest.fn(async ({ data }: any) => {
             if (data.total_paid != null) {
               fakeTotalPaid = Number(data.total_paid);

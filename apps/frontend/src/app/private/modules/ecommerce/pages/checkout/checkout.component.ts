@@ -66,6 +66,10 @@ import {
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
 import { BookingSlotPickerComponent } from '../../components/booking-slot-picker/booking-slot-picker.component';
+import {
+  FulfillmentSlotPickerComponent,
+  FulfillmentSlotValue,
+} from '../../components/fulfillment-slot-picker/fulfillment-slot-picker.component';
 import { CartPromotionsComponent } from '../../components/cart-promotions/cart-promotions.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import {
@@ -112,6 +116,7 @@ const UNLOCATED_ADDRESS_WARNING =
     IconComponent,
     SelectorComponent,
     BookingSlotPickerComponent,
+    FulfillmentSlotPickerComponent,
     GuestCheckoutDataModalComponent,
     PaymentInstructionsModalComponent,
     CustomerAddressPickerComponent,
@@ -565,9 +570,28 @@ export class CheckoutComponent implements OnInit {
     );
   }
 
+  /** Franja de pedido programado elegida (null = pedido normal). */
+  readonly scheduled_slot = signal<FulfillmentSlotValue | null>(null);
+
   /** True when all cart items are services (no physical products) */
   get cartHasOnlyServices(): boolean {
     return this.cart_service.hasOnlyServices();
+  }
+
+  /**
+   * Adiciones en el carrito: solo se venden en pedido programado, así que la
+   * franja de entrega pasa a ser obligatoria antes de pagar.
+   */
+  get cartHasOptions(): boolean {
+    return (this.cart()?.items ?? []).some(
+      (item: CartItem) => (item.options?.option_ids?.length ?? 0) > 0,
+    );
+  }
+
+  /** Mensaje cuando hay adiciones sin franja; null si se puede pagar. */
+  private missingScheduleForOptions(): string | null {
+    if (!this.cartHasOptions || this.scheduled_slot()) return null;
+    return 'Tu pedido tiene adiciones: elige el día y la hora de entrega para continuar.';
   }
 
   /** True when the cart has at least one physical product */
@@ -905,6 +929,7 @@ export class CheckoutComponent implements OnInit {
         newSelections.set(this.getBookingKey(cartItem), {
           product_id: booking['product_id'],
           product_variant_id: booking['product_variant_id'],
+          station_id: booking['station_id'],
           date: booking['date'],
           start_time: booking['start_time'],
           end_time: booking['end_time'],
@@ -3515,6 +3540,13 @@ export class CheckoutComponent implements OnInit {
       return;
     }
 
+    const missingSchedule = this.missingScheduleForOptions();
+    if (missingSchedule) {
+      this.error_message.set(missingSchedule);
+      this.toast.warning(missingSchedule, 'Pedido programado');
+      return;
+    }
+
     // Soporte obligatorio: sin comprobante no se finaliza la compra (defensa
     // en profundidad junto al gate de nextStep y al bloqueo del modal).
     if (this.requiresPaymentReceipt() && !this.payment_receipt_file()) {
@@ -3558,52 +3590,6 @@ export class CheckoutComponent implements OnInit {
     this.is_submitting.set(true);
     this.error_message.set('');
 
-    // LAST-RESORT FALLBACK: also peek at sessionStorage in case the
-    // cart$ subscription + restorePendingBooking() race-condition still
-    // hasn't populated bookingSelections by the time the user hits "Pagar".
-    // We merge any pending_booking found there into the payload so the
-    // booking always travels with the order. Cleanup happens at the end
-    // of placeOrder() (success or failure).
-    const pendingBookings: Array<{
-      product_id: number;
-      product_variant_id?: number;
-      date: string;
-      start_time: string;
-      end_time: string;
-    }> = [...this.bookingSelections().values()];
-    try {
-      const stored = sessionStorage.getItem('pending_booking');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (
-          parsed?.product_id &&
-          parsed?.date &&
-          parsed?.start_time &&
-          parsed?.end_time
-        ) {
-          // Only add if not already represented in bookingSelections
-          const alreadyIn =
-            pendingBookings.find(
-              (b) =>
-                b.product_id === parsed.product_id &&
-                b.date === parsed.date &&
-                b.start_time === parsed.start_time,
-            );
-          if (!alreadyIn) {
-            pendingBookings.push({
-              product_id: parsed.product_id,
-              product_variant_id: parsed.product_variant_id,
-              date: parsed.date,
-              start_time: parsed.start_time,
-              end_time: parsed.end_time,
-            });
-          }
-        }
-      }
-    } catch {
-      // Ignore parse errors; the bookingSelections path still works.
-    }
-
     const request: CheckoutRequest = {
       payment_method_id: this.selected_payment_method_id()!,
       notes: this.notes() || undefined,
@@ -3633,7 +3619,23 @@ export class CheckoutComponent implements OnInit {
         // y el comprador paga otra cosa de la que eligió.
         price_tier_id: item.price_tier?.id ?? undefined,
         notes: item.notes?.trim() || undefined,
+        // Adiciones: solo los ids; el servidor recalcula el precio.
+        ...(item.options?.option_ids?.length
+          ? { option_ids: item.options.option_ids }
+          : {}),
       })),
+      // Pedido programado: solo si el cliente eligió una franja.
+      ...(this.scheduled_slot()
+        ? {
+            schedule: {
+              ...this.scheduled_slot()!,
+              fulfillment_type:
+                this.selected_delivery() === 'home'
+                  ? ('delivery' as const)
+                  : ('pickup' as const),
+            },
+          }
+        : {}),
       guest_customer: this.toGuestCustomer(this.guest_checkout_data),
       // Send coupon code as raw string; backend validates and recomputes
       // the total. Frontend never sends a precomputed grand_total.
@@ -3832,6 +3834,11 @@ export class CheckoutComponent implements OnInit {
    * uses, so the two flows never drift apart.
    */
   private submitWhatsappFallbackOrder(): void {
+    const missingSchedule = this.missingScheduleForOptions();
+    if (missingSchedule) {
+      this.toast.warning(missingSchedule, 'Pedido programado');
+      return;
+    }
     const shippingAddress = this.resolveShippingAddressForRequest();
     if (shippingAddress.unresolvedCityError) {
       this.toast.error(ERROR_MESSAGES['ORD_SHIP_CITY_UNRESOLVED_001']);
@@ -3850,7 +3857,14 @@ export class CheckoutComponent implements OnInit {
         quantity: item.quantity,
         price_tier_id: item.price_tier?.id ?? undefined,
         notes: item.notes?.trim() || undefined,
+        // Adiciones: solo los ids; el servidor recalcula el precio.
+        ...(item.options?.option_ids?.length
+          ? { option_ids: item.options.option_ids }
+          : {}),
       })),
+      ...(this.scheduled_slot()
+        ? { schedule: { ...this.scheduled_slot()! } }
+        : {}),
       guest_customer: this.toGuestCustomer(this.guest_checkout_data),
       coupon_code: this.coupon_code().trim() || undefined,
       ...(shippingAddress.shipping_address

@@ -118,6 +118,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         [paginationData]="pagination()"
         [canCreate]="canCreateProduct()"
         [canBulkEdit]="canBulkEditProducts()"
+        [natureCounts]="stats().usage_nature_counts ?? null"
         (refresh)="loadProducts()"
         (search)="onSearch($event)"
         (filter)="onFilter($event)"
@@ -218,7 +219,7 @@ export class ProductsComponent {
   // Queries
   searchTerm = '';
   // QUI-729 — inicializar con el default para que la PRIMERA peticion
-  // ya llegue filtrada (`is_ingredient=false`). El hijo
+  // ya llegue filtrada (pestaña Venta: `usage_nature=sale`). El hijo
   // (`ProductListComponent`) ya no necesita reemitir tras el render, asi
   // que no hay carrera contra esta carga.
   currentFilters: Partial<ProductQueryDto> = { ...PRODUCT_LIST_DEFAULT_QUERY };

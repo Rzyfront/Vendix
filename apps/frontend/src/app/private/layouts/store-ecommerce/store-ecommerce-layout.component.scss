@@ -1775,6 +1775,27 @@
         color: var(--color-primary);
       }
     }
+
+    // Abren un modal (no navegan): son botones para que el teclado los alcance y
+    // los buscadores no los lean como enlaces rotos. Mismo aspecto que los enlaces.
+    .footer-link-button {
+      display: block;
+      padding: 0;
+      border: 0;
+      background: none;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      color: var(--color-text-secondary);
+      margin-bottom: 0.75rem;
+      font-size: 0.875rem;
+      transition: color var(--transition-fast);
+
+      &:hover,
+      &:focus-visible {
+        color: var(--color-primary);
+      }
+    }
   }
 
   .footer-section .footer-vendix-credit {

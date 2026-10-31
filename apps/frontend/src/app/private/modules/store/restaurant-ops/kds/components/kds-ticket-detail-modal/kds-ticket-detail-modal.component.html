@@ -58,6 +58,23 @@
         @for (item of t.items; track item.id) {
           <div class="rounded-lg border border-[var(--color-border)] p-3">
             <div class="flex items-start gap-2">
+              <!-- Foto del plato: la cocina reconoce antes por imagen que por
+                   nombre. Placeholder neutro si el producto no tiene foto. -->
+              @if (item.product?.product_images?.[0]?.image_url; as photo) {
+                <img
+                  [src]="photo"
+                  [alt]="'Foto de ' + (item.product?.name || 'plato')"
+                  class="h-10 w-10 shrink-0 rounded-xl object-cover border border-border"
+                  loading="lazy"
+                />
+              } @else {
+                <span
+                  class="h-10 w-10 shrink-0 rounded-xl border border-dashed border-border flex items-center justify-center text-text-secondary"
+                  aria-hidden="true"
+                >
+                  <app-icon name="image-off" [size]="16" />
+                </span>
+              }
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-1.5 flex-wrap">
                   <span>×{{ item.quantity }} {{ item.product?.name || ('Producto #' + item.product_id) }}</span>
@@ -88,6 +105,19 @@
               >
                 {{ item.status }}
               </app-badge>
+            </div>
+            <!-- Ficha del plato: foto, descripción e insumos con su
+                 anotación, sin salir del tablero. Usa la receta ya cacheada
+                 por este modal (cero llamadas extra). -->
+            <div class="mt-1.5 flex justify-end">
+              <app-button
+                variant="ghost"
+                size="xsm"
+                (clicked)="openProfile(item)"
+              >
+                <app-icon slot="icon" name="chef-hat" [size]="12" />
+                Ver ficha del plato
+              </app-button>
             </div>
 
             <!-- Receta + nota (30/70: insumos izquierda, nota derecha) -->
@@ -257,3 +287,11 @@
     </div>
   }
 </app-modal>
+
+<!-- Ficha del plato (modal propio para poder abrirse sobre el detalle). -->
+<app-product-profile-modal
+  [(isOpen)]="isProfileOpen"
+  [product]="profileProduct()"
+  [recipe]="profileRecipe()"
+  [showMoney]="false"
+/>

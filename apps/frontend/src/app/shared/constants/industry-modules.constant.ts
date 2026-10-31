@@ -154,6 +154,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'restaurant_ops',
     'memberships',
     'orders_reservations',
+    'orders_service_stations',
     'orders_contracts',
   ],
   restaurant: [
@@ -167,6 +168,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'hospitality_rates',
     'memberships',
     'orders_reservations',
+    'orders_service_stations',
     'orders_contracts',
     'dispatch',
     'orders_dispatch_notes',
@@ -184,6 +186,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'restaurant_ops',
     'memberships',
     'orders_reservations',
+    'orders_service_stations',
     'orders_contracts',
     'dispatch',
     'orders_dispatch_notes',
@@ -224,6 +227,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'hospitality_rates',
     'restaurant_ops',
     'orders_reservations',
+    'orders_service_stations',
     'orders_contracts',
     'dispatch',
     'orders_dispatch_notes',
@@ -255,6 +259,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'restaurant_ops',
     'memberships',
     'orders_reservations',
+    'orders_service_stations',
     'dispatch',
     'orders_dispatch_notes',
     'orders_dispatch_routes',
@@ -363,6 +368,6 @@ export function industriesSupportIngredients(
 
 /**
  * List of store industries that support the `is_ingredient` product capacity.
- * Today only `restaurant`; designed to grow as the suite expands.
+ * `restaurant` and `manufacturing`; designed to grow as the suite expands.
  */
-export const INDUSTRIES_SUPPORTING_INGREDIENTS = ['restaurant'] as const;
+export const INDUSTRIES_SUPPORTING_INGREDIENTS = ['restaurant', 'manufacturing'] as const;

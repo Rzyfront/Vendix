@@ -1,0 +1,150 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (cancel)="cancel.emit()"
+  size="lg"
+  [title]="group() ? 'Editar grupo de adiciones' : 'Nuevo grupo de adiciones'"
+  subtitle="Define qué adiciones puede elegir el cliente y qué componente descuenta cada una"
+>
+  <form [formGroup]="form" (ngSubmit)="submit()" class="space-y-4">
+    <app-input
+      label="Nombre *"
+      formControlName="name"
+      placeholder="Ej: Frutas"
+      [error]="form.controls.name.touched && form.controls.name.invalid ? 'Este campo es requerido' : ''"
+    />
+    <app-input label="Descripción" formControlName="description" />
+
+    <div class="grid grid-cols-2 gap-3">
+      <app-input label="Mínimo a elegir" type="number" [min]="0" formControlName="min_select" />
+      <app-input label="Máximo a elegir" type="number" [min]="1" formControlName="max_select" />
+    </div>
+
+    <app-selector
+      label="Aplica"
+      formControlName="scope"
+      [options]="scopeOptions"
+    />
+
+    <app-setting-toggle
+      formControlName="is_required"
+      label="Obligatorio"
+      description="El cliente debe elegir al menos el mínimo antes de agregar el producto."
+    />
+    <app-setting-toggle
+      formControlName="is_active"
+      label="Grupo activo"
+      description="Desactiva para ocultarlo de la venta sin perder su configuración."
+    />
+
+    <!-- Adiciones -->
+    <div class="space-y-3">
+      <div class="flex items-center justify-between gap-3">
+        <h4 class="text-sm font-semibold text-text-primary">Adiciones</h4>
+        <app-button variant="outline" size="sm" type="button" (clicked)="addOption()">
+          <app-icon slot="icon" name="plus" [size]="14" />
+          Agregar adición
+        </app-button>
+      </div>
+
+      @if (optionsError()) {
+        <p class="text-sm text-red-600" role="alert">{{ optionsError() }}</p>
+      }
+
+      @for (row of optionRows; track row; let i = $index) {
+        <div
+          class="rounded-lg border border-border p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-end"
+          [formGroup]="row"
+        >
+          <div class="md:col-span-4">
+            <app-input label="Nombre *" formControlName="name" placeholder="Ej: Fresas" />
+          </div>
+          <div class="md:col-span-3">
+            <app-input
+              label="Precio adicional"
+              formControlName="price_delta"
+              [currency]="true"
+            />
+          </div>
+          <div class="md:col-span-3">
+            <app-selector
+              label="Tipo de componente"
+              formControlName="component_type"
+              [options]="componentTypeOptions"
+            />
+          </div>
+          <div class="md:col-span-2 flex md:justify-end">
+            <app-button
+              variant="outline-danger"
+              size="sm"
+              type="button"
+              aria-label="Quitar adición"
+              (clicked)="removeOption(i)"
+            >
+              <app-icon slot="icon" name="trash-2" [size]="14" />
+            </app-button>
+          </div>
+
+          <div class="md:col-span-6">
+            <app-selector
+              label="Componente *"
+              formControlName="component_product_id"
+              placeholder="Busca un insumo, preparación o producto"
+              [options]="productOptions()"
+              [searchable]="true"
+              (valueChange)="optionsError.set(null)"
+            />
+          </div>
+          <div class="md:col-span-3">
+            <app-input label="Cantidad" type="number" [min]="0" step="0.0001" formControlName="quantity" />
+          </div>
+          <div class="md:col-span-3">
+            <app-selector
+              label="Unidad"
+              formControlName="uom"
+              placeholder="Sin unidad"
+              [options]="uomOptions()"
+            />
+          </div>
+
+          @if (row.controls.estimated_cost.value; as cost) {
+            <p class="md:col-span-12 text-xs text-text-secondary">
+              Costo estimado: {{ cost }}
+            </p>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- Asignaciones -->
+    <div class="space-y-3">
+      <h4 class="text-sm font-semibold text-text-primary">Dónde aplica</h4>
+      <app-multi-selector
+        label="Productos"
+        formControlName="product_ids"
+        placeholder="Selecciona productos"
+        [options]="productOptions()"
+      />
+      <app-multi-selector
+        label="Categorías"
+        formControlName="category_ids"
+        placeholder="Selecciona categorías"
+        [options]="categoryOptions()"
+      />
+    </div>
+  </form>
+
+  <div slot="footer">
+    <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+      <app-button variant="outline" type="button" (clicked)="cancel.emit()">Cancelar</app-button>
+      <app-button
+        variant="primary"
+        type="button"
+        [loading]="isSubmitting()"
+        [disabled]="isSubmitting()"
+        (clicked)="submit()"
+      >
+        {{ group() ? 'Guardar cambios' : 'Crear grupo' }}
+      </app-button>
+    </div>
+  </div>
+</app-modal>

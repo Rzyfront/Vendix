@@ -17,6 +17,14 @@ export class CreateEcommerceBookingDto {
   @IsInt()
   product_variant_id?: number;
 
+  @IsOptional()
+  @IsInt()
+  station_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  provider_id?: number;
+
   @IsDateString()
   date: string;
 

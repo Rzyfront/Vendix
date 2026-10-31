@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { S3Module } from '@common/services/s3.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { RecipesModule } from '../recipes/recipes.module';
 import { ProductionOrdersModule } from '../production/production.module';
@@ -21,6 +22,7 @@ import { ManufacturingSettingsService } from './settings/manufacturing-settings.
   imports: [
     ResponseModule,
     PrismaModule,
+    S3Module,
     InventoryModule,
     RecipesModule,
     ProductionOrdersModule,

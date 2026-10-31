@@ -40,6 +40,11 @@ import { PosCustomer } from '../models/customer.model';
 import { PosProductService, Product, PosProductVariant } from './pos-product.service';
 import { PriceResolverService } from '../../../../../shared/services/pricing';
 import {
+  OptionDeltaParts,
+  optionUnitDelta,
+  sumOptionDeltaParts,
+} from '../../../../../shared/utils/option-pricing.util';
+import {
   PriceTier,
   ProductPriceTierOverride,
 } from '../../price-tiers/interfaces';
@@ -68,6 +73,14 @@ import { differsByAtLeastCents } from '@money-kernel/money-compare';
  * quantity_tiered promotion. Derived from cart state + active promotions;
  * carries no money/discount calculation.
  */
+/**
+ * N2 (PR #1003): un pedido ya guardado (borrador adoptado o editor) se
+ * persiste con `PUT /items` / `PUT /editor`, que no venden adiciones. Mismo
+ * texto que `OPT_DRAFT_ADD_LOCKED` del servidor.
+ */
+export const OPTIONS_ON_SAVED_ORDER_MESSAGE =
+  'Este pedido ya está guardado: no se le pueden agregar productos con adiciones. Cóbralo o cancélalo y registra las adiciones en un pedido nuevo.';
+
 export interface PromotionTierProgress {
   promotion_id: number;
   name: string;
@@ -364,6 +377,15 @@ export class PosCartService {
    *     vino de un escaneo con tarifa.
    */
   addToCart(request: AddToCartRequest): Observable<CartState> {
+    // N2 (PR #1003): el pedido guardado no puede llevar adiciones nuevas; sin
+    // este corte la línea se guardaba sin ellas, a precio de catálogo.
+    if (
+      this.cartState().linkedOrderId != null &&
+      (request.option_ids?.length ?? 0) > 0
+    ) {
+      return throwError(() => new Error(OPTIONS_ON_SAVED_ORDER_MESSAGE));
+    }
+
     // Validate request FIRST. Hotfix post-PR-576: el carrito adoptado se
     // saltaba la validación por un early-return mal puesto, así que un
     // cajero podía meter líneas con SKU inválido o stock insuficiente en
@@ -1221,7 +1243,25 @@ export class PosCartService {
       originalFinalPrice: Number(
         item.catalog_final_price ?? item.final_unit_price ?? finalUnitPrice,
       ),
+      ...this.mapOrderItemOptions(item, quantity),
     } as CartItem;
+  }
+
+  /**
+   * Adiciones guardadas en la línea (borrador): se reponen para que el cobro
+   * exija el pedido programado. El precio persistido ya incluye el delta.
+   */
+  private mapOrderItemOptions(item: any, quantity: number): Partial<CartItem> {
+    const rows: any[] = Array.isArray(item.order_item_options) ? item.order_item_options : [];
+    if (rows.length === 0) return {};
+    const parts: OptionDeltaParts = sumOptionDeltaParts(rows);
+    const delta = optionUnitDelta(parts, quantity);
+    return {
+      option_ids: rows.map((r) => Number(r.option_id)).filter((id) => Number.isFinite(id) && id > 0),
+      option_labels: rows.map((r) => String(r.option_name ?? '')),
+      option_delta: delta > 0 ? delta : undefined,
+      option_delta_parts: parts,
+    };
   }
 
   /**
@@ -2553,12 +2593,20 @@ export class PosCartService {
               (item.variant_id || null) === (request.variant?.id || null) &&
               (item.skipKds ?? false) === (request.skipKds === true) &&
               (item.isTakeaway ?? false) === (request.isTakeaway === true) &&
+              // Adiciones: otro conjunto de opciones es otra línea.
+              this.optionKey(item.option_ids) === this.optionKey(request.option_ids) &&
               !(item.serial_ids?.length || item.serial_numbers?.length) &&
               !item.booking,
           );
 
-    // Variant-aware pricing
-    const basePrice = this.resolveUnitPrice(request.product, request.variant);
+    // Variant-aware pricing (+ adiciones: vista previa del delta por unidad;
+    // el servidor recalcula el precio real a partir de `option_ids`). Con las
+    // partes per_unit/per_line el delta depende de la cantidad de la línea,
+    // igual que en el servidor (per_line ÷ cantidad, al centavo hacia arriba).
+    const optionParts = request.option_delta_parts;
+    const optionDeltaFor = (qty: number): number =>
+      optionParts ? optionUnitDelta(optionParts, qty) : (request.option_delta ?? 0);
+    const catalogUnitPrice = this.resolveUnitPrice(request.product, request.variant);
     // QUI-648: cómo se mide el producto. Sin unidad de stock declarada esto es
     // la configuración por pieza y toda la aritmética de abajo colapsa a la
     // histórica (`precio × cantidad`).
@@ -2571,11 +2619,14 @@ export class PosCartService {
       // Update existing item
       const existingItem = currentState.items[existingItemIndex];
       const newQuantity = existingItem.quantity + request.quantity;
-      const finalUnitPrice = this.resolveCatalogFinalUnitPrice(
-        request.product,
-        request.variant,
-        basePrice,
-      );
+      const optionDelta = optionDeltaFor(newQuantity);
+      const basePrice = catalogUnitPrice + optionDelta;
+      const finalUnitPrice =
+        this.resolveCatalogFinalUnitPrice(
+          request.product,
+          request.variant,
+          catalogUnitPrice,
+        ) + optionDelta;
       const mergedUnits = resolveLineUnits({
         ...existingItem,
         quantity: newQuantity,
@@ -2589,18 +2640,23 @@ export class PosCartService {
         finalPrice: finalUnitPrice,
         totalPrice: mergedUnits * finalUnitPrice,
         notes: request.notes || existingItem.notes,
+        ...(existingItem.option_ids?.length
+          ? { unitPrice: basePrice, option_delta: optionDelta > 0 ? optionDelta : undefined }
+          : {}),
       };
     } else {
       // Add new item
-      const finalUnitPrice = this.resolveCatalogFinalUnitPrice(
-        request.product,
-        request.variant,
-        basePrice,
-      );
-
       // Calculate total price for weight products
       const weight = request.weight || 1;
       const quantity = isWeightProduct ? 1 : request.quantity;
+      const optionDelta = optionDeltaFor(quantity);
+      const basePrice = catalogUnitPrice + optionDelta;
+      const finalUnitPrice =
+        this.resolveCatalogFinalUnitPrice(
+          request.product,
+          request.variant,
+          catalogUnitPrice,
+        ) + optionDelta;
       // Multiplicador monetario único: peso capturado (legado), o cantidad
       // dividida por la escala del precio cuando el producto publica "$X por N
       // unidades". Con escala 1 es la cantidad, como siempre.
@@ -2677,6 +2733,12 @@ export class PosCartService {
           : undefined,
         // CP-POS-SVC-BOOKING-001 — Scheduled appointment details for service lines.
         booking: request.booking,
+        option_ids: request.option_ids?.length ? request.option_ids : undefined,
+        option_labels: request.option_labels?.length
+          ? request.option_labels
+          : undefined,
+        option_delta: optionDelta > 0 ? optionDelta : undefined,
+        option_delta_parts: request.option_ids?.length ? optionParts : undefined,
       };
       updatedItems = [newItem, ...currentState.items];
     }
@@ -2737,7 +2799,14 @@ export class PosCartService {
     }
 
     const updatedItems = [...currentState.items];
-    const finalUnitPrice = item.finalPrice;
+    // Adiciones por línea: el delta por unidad cambia con la cantidad (mismo
+    // reparto que el servidor), así que precio unitario y final se ajustan.
+    const oldOptionDelta = item.option_delta ?? 0;
+    const newOptionDelta = item.option_delta_parts
+      ? optionUnitDelta(item.option_delta_parts, request.quantity)
+      : oldOptionDelta;
+    const finalUnitPrice = item.finalPrice - oldOptionDelta + newOptionDelta;
+    const unitPrice = item.unitPrice - oldOptionDelta + newOptionDelta;
 
     // Peso legado, presentación o escala de precio: un solo multiplicador.
     const lineUnits = resolveLineUnits({ ...item, quantity: request.quantity });
@@ -2747,7 +2816,11 @@ export class PosCartService {
     updatedItems[itemIndex] = {
       ...item,
       quantity: request.quantity,
-      taxAmount: this.calculateItemTaxWithBase(item.product, item.unitPrice, taxMultiplier),
+      unitPrice,
+      ...(item.option_delta_parts
+        ? { option_delta: newOptionDelta > 0 ? newOptionDelta : undefined }
+        : {}),
+      taxAmount: this.calculateItemTaxWithBase(item.product, unitPrice, taxMultiplier),
       finalPrice: finalUnitPrice,
       totalPrice: newTotalPrice,
       // PSVERSION0001 paso 5 — `request.notes || item.notes` hacía imposible
@@ -3334,6 +3407,11 @@ export class PosCartService {
   /**
    * Generate unique item ID
    */
+  /** Clave estable (ids ordenados) del conjunto de adiciones de una línea. */
+  private optionKey(ids: number[] | undefined): string {
+    return ids?.length ? [...ids].sort((a, b) => a - b).join(',') : '';
+  }
+
   private generateItemId(): string {
     return 'ITEM_' + this.randomId();
   }

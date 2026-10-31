@@ -9,6 +9,8 @@ import type { industry_enum } from '@prisma/client';
  */
 export const INDUSTRIES_SUPPORTING_INGREDIENTS: industry_enum[] = [
   'restaurant',
+  // Manufactura: los insumos (madera, tornillos, barniz) entran en fórmulas.
+  'manufacturing',
 ];
 
 /**
@@ -100,6 +102,25 @@ export function storeIsRestaurant(
     return false;
   }
   return industries.some((industry) => industry === 'restaurant');
+}
+
+/**
+ * Industrias con estaciones de servicio (bahías, sillas, mesas de reparación):
+ * espejo del frontend, donde `orders_service_stations` solo queda visible si la
+ * tienda incluye `service`.
+ */
+export const INDUSTRIES_SUPPORTING_SERVICE_STATIONS: industry_enum[] = ['service'];
+
+/** OR: una tienda multi-industria que incluye `service` puede usar estaciones. */
+export function storeSupportsServiceStations(
+  industries: industry_enum[] | string[] | null | undefined,
+): boolean {
+  if (!industries || industries.length === 0) {
+    return false;
+  }
+  return industries.some((industry) =>
+    (INDUSTRIES_SUPPORTING_SERVICE_STATIONS as readonly string[]).includes(industry as string),
+  );
 }
 
 /**

@@ -152,6 +152,13 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.BrandsPageComponent,
               ),
           },
+          {
+            path: 'option-groups',
+            loadComponent: () =>
+              import('../../private/modules/store/products/pages/option-groups/option-groups-page.component').then(
+                (c) => c.OptionGroupsPageComponent,
+              ),
+          },
           // MUST stay BEFORE ':id': otherwise the param route swallows the
           // literal segment 'bulk-edit' and renders the product detail page
           // for a non-existent id.
@@ -485,6 +492,13 @@ export const storeAdminRoutes: Routes = [
               ).then((c) => c.BusinessHoursComponent),
           },
           {
+            path: 'reminders',
+            loadComponent: () =>
+              import('../../private/modules/store/reservations/components/service-reminders-page/service-reminders-page.component').then(
+                (c) => c.ServiceRemindersPageComponent,
+              ),
+          },
+          {
             // Appointment redesign phase 2 — dedicated page for the
             // pending-reschedule-requests queue. Reached from the
             // "Solicitudes de reagenda" header button.
@@ -493,6 +507,26 @@ export const storeAdminRoutes: Routes = [
               import(
                 '../../private/modules/store/reservations/components/reschedule-requests-page/reschedule-requests-page.component'
               ).then((c) => c.RescheduleRequestsPageComponent),
+          },
+        ],
+      },
+      // Scheduled Orders Routes
+      {
+        path: 'scheduled-orders',
+        loadChildren: () =>
+          import('../../private/modules/store/scheduled-orders/scheduled-orders.routes').then(
+            (r) => r.SCHEDULED_ORDERS_ROUTES,
+          ),
+      },
+      {
+        path: 'services',
+        children: [
+          {
+            path: 'stations',
+            loadComponent: () =>
+              import('../../private/modules/store/reservations/components/service-stations/service-stations-page.component').then(
+                (c) => c.ServiceStationsPageComponent,
+              ),
           },
         ],
       },

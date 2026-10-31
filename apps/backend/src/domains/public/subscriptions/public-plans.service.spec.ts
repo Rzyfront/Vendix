@@ -241,7 +241,7 @@ describe('PublicPlansService', () => {
       expect(features).toEqual([
         {
           key: 'pos',
-          label: 'Punto de Venta POS (Online/Offline)',
+          label: 'Punto de Venta POS en la nube',
           enabled: true,
           value: null,
           is_limited: false,

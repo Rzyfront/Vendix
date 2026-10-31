@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable, of, throwError, Subject } from 'rxjs';
-import { catchError, map, switchMap, timeout, delay } from 'rxjs/operators';
+import { catchError, map, switchMap, tap, timeout, delay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 import {
@@ -24,6 +24,7 @@ import {
   posShippingRateIdForPayload,
 } from '../models/shipping.model';
 import { PosApiService } from './pos-api.service';
+import { PosScheduledOrderService } from './pos-scheduled-order.service';
 import type { TableStatus } from '../../restaurant-ops/tables/interfaces';
 // B15(2) — cobro multimétodo sobre una orden adoptada: reusa el mismo
 // `flow/pay` que ya usa `pos-payment-step.component.ts` para el borrador
@@ -218,6 +219,15 @@ export class PosPaymentService {
 
   private transactions: Transaction[] = [];
 
+  /**
+   * Pedido programado: agrega `schedule` solo cuando el cajero lo eligió (ajuste
+   * activo). Sin elección el payload queda idéntico al de hoy.
+   */
+  private withSchedule<T extends object>(body: T): T {
+    const schedule = this.scheduledOrders?.schedule() ?? null;
+    return schedule ? { ...body, schedule } : body;
+  }
+
   constructor(
     private http: HttpClient,
     private storeContextService: StoreContextService,
@@ -225,6 +235,8 @@ export class PosPaymentService {
     private paymentMethodsCatalog: PaymentMethodsCatalogService,
     private posApi: PosApiService,
     private ordersService: StoreOrdersService,
+    // Opcional: los specs construyen el servicio a mano sin este colaborador.
+    private scheduledOrders?: PosScheduledOrderService,
   ) {}
 
   /**
@@ -299,7 +311,12 @@ export class PosPaymentService {
       notes: notes || undefined,
       product_sku: isCustomItem ? undefined : item.product.sku,
       quantity: item.quantity,
-      unit_price: Number(item.unitPrice.toFixed(2)),
+      // Adiciones: el delta del cajero es solo visual; el servidor recalcula
+      // el precio desde `option_ids`, así que `unit_price` viaja SIN delta.
+      unit_price: Number((item.unitPrice - (item.option_delta ?? 0)).toFixed(2)),
+      ...(!isCustomItem && item.option_ids?.length
+        ? { option_ids: item.option_ids }
+        : {}),
       // F-218 — `final_unit_price` es el único portador del bruto declarado y
       // declararlo arma el guard `store:pos:price_override` en el backend. Viaja
       // SOLO con edición real del cajero (`isPriceOverridden`) o ítem custom
@@ -664,7 +681,7 @@ export class PosPaymentService {
       sale_data.customer_alias = customerAlias;
     }
 
-    return this.http.post<any>(this.apiUrl, sale_data).pipe(
+    return this.http.post<any>(this.apiUrl, this.withSchedule(sale_data)).pipe(
       map((response) => {
         const data = response.data || response;
         if (data.success) {
@@ -695,6 +712,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al procesar la venta');
         }
       }),
+      tap(() => this.scheduledOrders?.reset()),
       catchError((error) => this.rethrowChargeError(error)),
     );
   }
@@ -861,7 +879,7 @@ export class PosPaymentService {
       }
     }
 
-    return this.http.post<any>(this.apiUrl, sale_data).pipe(
+    return this.http.post<any>(this.apiUrl, this.withSchedule(sale_data)).pipe(
       map((response) => {
         const data = response.data || response;
         if (data.success) {
@@ -885,6 +903,7 @@ export class PosPaymentService {
           throw new Error(data.message || 'Error al procesar el envío');
         }
       }),
+      tap(() => this.scheduledOrders?.reset()),
       catchError((error) => this.rethrowChargeError(error)),
     );
   }

@@ -152,6 +152,7 @@ jobs:
         run: npm run buildcheck:types
       - name: nest build
         working-directory: apps/backend
+
         env:
           NODE_OPTIONS: --max-old-space-size=6144
         run: npm run build
@@ -299,6 +300,7 @@ jobs:
           --include='**/orders/utils/fiscal-alert-dictionary.spec.ts'
           --include='**/orders/utils/cancel-credit-note.util.spec.ts'
           --include='**/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts'
+          --include='**/shared/utils/option-pricing.util.spec.ts'
           --include='**/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.spec.ts'
           --include='**/print-formats/services/print-annex-validator.service.spec.ts'
           --include='**/settings/shipping/components/add-rate-wizard-modal/add-rate-wizard-modal.component.spec.ts'
@@ -330,6 +332,7 @@ jobs:
           --include='**/customer-holder-completion-modal/holder-issue.model.spec.ts'
           --include='**/orders/bulk/orders-bulk-invoice.util.spec.ts'
           --include='**/credit-invoice-modal/credit-invoice-modal.component.spec.ts'
+          --include='**/core/services/fiscal-activation-wizard.service.spec.ts'
 
   mobile:
     name: Mobile

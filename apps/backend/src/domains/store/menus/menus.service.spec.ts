@@ -197,6 +197,43 @@ describe('MenusService / MenuSectionsService — ownership & uniqueness', () => 
     expect(prismaMock.menu_section_items.create).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['supply', { usage_nature: 'supply' }, 'Harina es un Insumo y no puede ir en la carta.'],
+    [
+      'internal_use',
+      { usage_nature: 'internal_use' },
+      'Harina es un producto de Uso interno y no puede ir en la carta.',
+    ],
+    [
+      'insumo puro heredado',
+      { usage_nature: 'sale', is_ingredient: true },
+      'Harina es un Insumo y no puede ir en la carta.',
+    ],
+  ])('rechaza %s en la carta con 422 y no lo promueve a vendible', async (_label, flags, message) => {
+    const mod: TestingModule = await buildMenusModule(
+      { 1: { id: 1, store_id: STORE_ID, name: 'Lunch' } },
+      { 10: { id: 10, store_id: STORE_ID, menu_id: 1, name: 'Entradas' } },
+      {
+        88: {
+          id: 88,
+          store_id: STORE_ID,
+          name: 'Harina',
+          is_sellable: false,
+          available_for_ecommerce: false,
+          state: 'active',
+          ...flags,
+        },
+      },
+    );
+    const sections = mod.get(MenuSectionsService);
+    await expect(sections.addItem(1, 10, { product_id: 88 })).rejects.toMatchObject({
+      errorCode: ErrorCodes.MENU_ITEM_NOT_SALE_NATURE.code,
+      message,
+    });
+    expect(prismaMock.products.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.menu_section_items.create).not.toHaveBeenCalled();
+  });
+
   // `addItem` NO rechaza un plato no vendible: lo promueve, para que aparezca
   // en la carta publica y sea comprable (menu-sections.service.ts:170-182).
   // Este test cubre esa promocion; antes afirmaba un rechazo que el servicio

@@ -138,6 +138,8 @@ interface CartaBlock {
                   size="sm"
                   customClasses="action-btn"
                   [class.active]="isInWishlist(dish.product?.id)"
+                  [ariaLabel]="isInWishlist(dish.product?.id) ? 'Quitar de favoritos' : 'Agregar a favoritos'"
+                  [ariaPressed]="isInWishlist(dish.product?.id)"
                   (clicked)="onWishlistClick($event, dish)"
                 >
                   <app-icon slot="icon" name="heart" [size]="18" />
@@ -146,6 +148,7 @@ interface CartaBlock {
                   variant="ghost"
                   size="sm"
                   customClasses="action-btn"
+                  ariaLabel="Compartir plato"
                   (clicked)="onShareClick($event, dish)"
                 >
                   <app-icon slot="icon" name="share" [size]="18" />

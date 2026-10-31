@@ -33,9 +33,9 @@
         <!-- Navigation -->
         <nav class="main-nav desktop-only">
           <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Inicio</a>
-          <a routerLink="/products" routerLinkActive="active">Productos</a>
-          <a routerLink="/new" routerLinkActive="active">Novedades</a>
-          <a routerLink="/sale" routerLinkActive="active">Ofertas</a>
+          <a routerLink="/catalog" routerLinkActive="active">Productos</a>
+          <a routerLink="/novedades" routerLinkActive="active">Novedades</a>
+          <a routerLink="/ofertas" routerLinkActive="active">Ofertas</a>
           @if (is_hotel()) {
             <a routerLink="/hotel" routerLinkActive="active">Reservar habitación</a>
           }
@@ -218,7 +218,7 @@
         </div>
 
         <!-- Mobile Menu Toggle -->
-        <button class="mobile-menu-btn" (click)="toggleMobileMenu()">
+        <button type="button" class="mobile-menu-btn" aria-label="Abrir menú" (click)="toggleMobileMenu()">
           <app-icon name="menu" [size]="24"></app-icon>
         </button>
       </div>
@@ -489,10 +489,6 @@
           {{ footer_settings()!.store_info!.support_email }}
         </a>
         }
-        <p class="footer-vendix-credit">
-          <a [href]="vendix_whatsapp_url" target="_blank" rel="noopener">Software construido y proveído por&nbsp;</a>
-          <a href="https://vendix.online" target="_blank" rel="noopener" class="vendix-name vendix-link">Vendix</a><a [href]="vendix_whatsapp_url" target="_blank" rel="noopener">. Para más información, comunícate con nosotros haciendo&nbsp;</a><a [href]="vendix_whatsapp_url" target="_blank" rel="noopener" class="vendix-link">clic aquí</a><a [href]="vendix_whatsapp_url" target="_blank" rel="noopener">.</a>
-        </p>
       </div>
 
       <!-- Sección 2: Enlaces -->
@@ -516,13 +512,13 @@
         <a routerLink="/pqr">Peticiones, Quejas y Reclamos</a>
         }
         @if (hasFaq()) {
-        <a class="cursor-pointer hover:text-[var(--color-primary)]" (click)="show_faq_modal.set(true)">Preguntas Frecuentes</a>
+        <button type="button" class="footer-link-button" (click)="show_faq_modal.set(true)">Preguntas Frecuentes</button>
         }
         @if (hasShippingInfo()) {
-        <a class="cursor-pointer hover:text-[var(--color-primary)]" (click)="show_shipping_modal.set(true)">Envíos</a>
+        <button type="button" class="footer-link-button" (click)="show_shipping_modal.set(true)">Envíos</button>
         }
         @if (hasReturnsInfo()) {
-        <a class="cursor-pointer hover:text-[var(--color-primary)]" (click)="show_returns_modal.set(true)">Devoluciones</a>
+        <button type="button" class="footer-link-button" (click)="show_returns_modal.set(true)">Devoluciones</button>
         }
         @if (!hasFaq() && !hasShippingInfo() && !hasReturnsInfo()) {
         <p class="text-sm text-[var(--color-text-muted)]">Contáctanos para ayuda</p>
@@ -559,7 +555,10 @@
     </div>
     <div class="footer-bottom">
       <p>&copy; {{ store_display_name() }} {{ current_year }}. Todos los derechos reservados.</p>
-      <p class="footer-powered">Powered by <a href="https://vendix.online" target="_blank" rel="noopener" class="vendix-link">Vendix</a></p>
+      <!-- SEO-TECH-21: un solo crédito, nofollow, con UTM y ocultable por el comerciante -->
+      @if (show_powered_by()) {
+      <p class="footer-powered"><a [href]="powered_by_url()" target="_blank" rel="nofollow noopener" class="vendix-link">Tienda creada con Vendix</a></p>
+      }
     </div>
   </footer>
 
@@ -608,9 +607,9 @@
       <h5 class="nav-subtitle">Menú Principal</h5>
       <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
         (click)="toggleMobileMenu()">Inicio</a>
-      <a routerLink="/products" routerLinkActive="active" (click)="toggleMobileMenu()">Productos</a>
-      <a routerLink="/new" routerLinkActive="active" (click)="toggleMobileMenu()">Novedades</a>
-      <a routerLink="/sale" routerLinkActive="active" (click)="toggleMobileMenu()">Ofertas</a>
+      <a routerLink="/catalog" routerLinkActive="active" (click)="toggleMobileMenu()">Productos</a>
+      <a routerLink="/novedades" routerLinkActive="active" (click)="toggleMobileMenu()">Novedades</a>
+      <a routerLink="/ofertas" routerLinkActive="active" (click)="toggleMobileMenu()">Ofertas</a>
       @if (is_hotel()) {
         <a routerLink="/hotel" routerLinkActive="active" (click)="toggleMobileMenu()">Reservar habitación</a>
       }

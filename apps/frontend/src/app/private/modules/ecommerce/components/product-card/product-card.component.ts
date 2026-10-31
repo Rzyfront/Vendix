@@ -100,6 +100,8 @@ import { prepMinutesOrNull } from '../../../../../public/ecommerce/components/st
             size="sm"
             customClasses="action-btn"
             [class.active]="in_wishlist()"
+            [ariaLabel]="in_wishlist() ? 'Quitar de favoritos' : 'Agregar a favoritos'"
+            [ariaPressed]="in_wishlist()"
             (clicked)="onWishlistClick($event)">
             <app-icon slot="icon" name="heart" [size]="18"></app-icon>
           </app-button>
@@ -107,6 +109,7 @@ import { prepMinutesOrNull } from '../../../../../public/ecommerce/components/st
             variant="ghost"
             size="sm"
             customClasses="action-btn"
+            ariaLabel="Compartir producto"
             (clicked)="onShareClick($event)">
             <app-icon slot="icon" name="share" [size]="18"></app-icon>
           </app-button>

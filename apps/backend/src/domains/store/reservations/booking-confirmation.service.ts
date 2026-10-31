@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import * as crypto from 'crypto';
 import { AvailabilityService } from './availability.service';
+import { ServiceAllocationCoordinator } from './service-allocation-coordinator.service';
 
 @Injectable()
 export class BookingConfirmationService {
@@ -13,6 +14,7 @@ export class BookingConfirmationService {
     private readonly prisma: StorePrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly availabilityService: AvailabilityService,
+    @Optional() private readonly allocationCoordinator?: ServiceAllocationCoordinator,
   ) {}
 
   async sendConfirmationRequest(
@@ -101,13 +103,6 @@ export class BookingConfirmationService {
     if (tokenRecord.expires_at < new Date())
       throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_001);
 
-    // Mark the token as used atomically before any side effects, so
-    // double-clicks on the customer's email link can't re-trigger the flow.
-    await this.prisma.withoutScope().booking_confirmation_tokens.update({
-      where: { id: tokenRecord.id },
-      data: { used: true, used_at: new Date() },
-    });
-
     const booking = tokenRecord.booking;
     const dateStr =
       booking.date instanceof Date
@@ -117,6 +112,25 @@ export class BookingConfirmationService {
     const serviceName = booking.product?.name ?? 'Servicio';
 
     if (tokenRecord.action === 'confirm') {
+      if (booking.product?.requires_station && !this.allocationCoordinator) {
+        throw new VendixHttpException(ErrorCodes.STATION_012);
+      }
+      await this.prisma.withoutScope().$transaction(async (tx) => {
+        const tokenClaim = await tx.booking_confirmation_tokens.updateMany({
+          where: { id: tokenRecord.id, used: false, expires_at: { gt: new Date() } },
+          data: { used: true, used_at: new Date() },
+        });
+        if (tokenClaim.count !== 1) throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_002);
+        if (booking.product?.requires_station) {
+          const allocation = await tx.service_allocations.findFirst({
+            where: { store_id: booking.store_id, booking_id: booking.id, state: { in: ['held', 'payment_pending', 'confirmed'] }, OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }] },
+            select: { id: true },
+          });
+          if (!allocation) throw new VendixHttpException(ErrorCodes.STATION_011);
+          await tx.service_allocations.update({ where: { id: allocation.id }, data: { state: 'confirmed', expires_at: null, updated_at: new Date() } });
+        }
+        await tx.bookings.update({ where: { id: booking.id }, data: { status: 'confirmed', updated_at: new Date() } });
+      });
       // Double-validation: re-check the slot is still available before
       // confirming. The customer might have clicked the email link hours
       // after the booking was placed; meanwhile another customer could
@@ -144,10 +158,6 @@ export class BookingConfirmationService {
         slotAvailable = true;
       }
 
-      await this.prisma.withoutScope().bookings.update({
-        where: { id: booking.id },
-        data: { status: 'confirmed', updated_at: new Date() },
-      });
       this.logger.log(`Booking ${booking.id} confirmed via token`);
 
       this.eventEmitter.emit('booking.confirmed', {
@@ -171,9 +181,19 @@ export class BookingConfirmationService {
         });
       }
     } else if (tokenRecord.action === 'cancel') {
-      await this.prisma.withoutScope().bookings.update({
-        where: { id: booking.id },
-        data: { status: 'cancelled', updated_at: new Date() },
+      if (booking.product?.requires_station && !this.allocationCoordinator) {
+        throw new VendixHttpException(ErrorCodes.STATION_012);
+      }
+      await this.prisma.withoutScope().$transaction(async (tx) => {
+        const tokenClaim = await tx.booking_confirmation_tokens.updateMany({
+          where: { id: tokenRecord.id, used: false, expires_at: { gt: new Date() } },
+          data: { used: true, used_at: new Date() },
+        });
+        if (tokenClaim.count !== 1) throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_002);
+        if (booking.product?.requires_station) {
+          await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, booking.id, 'cancelled');
+        }
+        await tx.bookings.update({ where: { id: booking.id }, data: { status: 'cancelled', updated_at: new Date() } });
       });
       this.logger.log(`Booking ${booking.id} cancelled via token`);
 

@@ -258,6 +258,11 @@ import {
                               {{ item.variant_display_name }}
                             </span>
                           }
+                          @if (item.option_labels?.length) {
+                            <span class="text-[10px] text-text-secondary leading-tight">
+                              {{ item.option_labels!.join(', ') }}
+                            </span>
+                          }
                           @if (item.itemType === 'custom') {
                             <span
                               class="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded shrink-0 leading-tight"
@@ -682,6 +687,18 @@ import {
                 <span class="truncate">{{ customerButtonLabel(cartState()?.customer) }}</span>
               </button>
             </div>
+
+            @if (showChargeToStation() && !isEditMode()) {
+              <button
+                type="button"
+                class="action-btn save-btn w-full"
+                (click)="chargeToStation.emit()"
+                [disabled]="!cartState()?.items?.length"
+              >
+                <app-icon name="warehouse" [size]="16"></app-icon>
+                <span>Cargar a estación</span>
+              </button>
+            }
 
             <button
               type="button"
@@ -1856,6 +1873,9 @@ export class PosCartModalComponent {
   readonly isLayawayMode = input<boolean>(false);
   readonly readyToPayOrder = input<unknown>(null);
   readonly isCharging = input<boolean>(false);
+  /** Muestra "Cargar a estación" (tienda con estaciones de servicio). */
+  readonly showChargeToStation = input<boolean>(false);
+  readonly chargeToStation = output<void>();
 
   /**
    * Retención (preview) y total neto a cobrar.

@@ -1,0 +1,156 @@
+<!-- Ficha de producto/receta — lectura pura, densa. Tokens de Soft UI. -->
+<div class="flex flex-col gap-3">
+  <!-- Cabecera: foto + identidad, todo en una fila para no gastar alto. -->
+  <header class="flex items-start gap-3">
+    @if (mainImage(); as image) {
+      <img
+        [src]="image"
+        [alt]="'Foto de ' + product().name"
+        class="h-24 w-24 sm:h-28 sm:w-28 shrink-0 rounded-2xl object-cover border border-border bg-surface-secondary"
+        loading="lazy"
+      />
+    } @else {
+      <div
+        class="h-24 w-24 sm:h-28 sm:w-28 shrink-0 rounded-2xl border border-dashed border-border bg-surface-secondary flex items-center justify-center text-text-secondary"
+        role="img"
+        [attr.aria-label]="'Sin foto de ' + product().name"
+      >
+        <app-icon name="image-off" [size]="28" />
+      </div>
+    }
+
+    <div class="min-w-0 flex-1 flex flex-col gap-1">
+      <h3 class="text-base font-bold text-text-primary leading-tight truncate">
+        {{ product().name }}
+      </h3>
+
+      @if (variantLabel(); as variant) {
+        <p class="text-xs text-text-secondary leading-none">
+          <span class="sr-only">Variante: </span>{{ variant }}
+        </p>
+      }
+
+      @if (product().description?.trim()) {
+        <p class="text-xs text-text-secondary leading-snug line-clamp-3">
+          {{ product().description }}
+        </p>
+      }
+
+      <div class="flex flex-wrap items-center gap-1.5">
+        @for (chip of metaChips(); track chip.label) {
+          <span
+            class="inline-flex items-center gap-1 rounded-xl border border-border bg-surface-secondary px-2 py-0.5 text-xs text-text-secondary"
+          >
+            <app-icon [name]="chip.icon" [size]="12" />
+            {{ chip.label }}
+          </span>
+        }
+        @if (product().is_ingredient) {
+          <app-badge variant="info" size="xs">Insumo</app-badge>
+        }
+        @if (showMoney() && price(); as price) {
+          <span class="text-sm font-bold text-text-primary">
+            {{ price | currency }}
+          </span>
+        }
+      </div>
+    </div>
+  </header>
+
+  <!-- Galería: secundarias, miniaturas sin texto para que no ocupe alto. -->
+  @if (gallery().length > 0) {
+    <div class="flex items-center gap-1.5 overflow-x-auto">
+      @for (image of gallery(); track image.image_url) {
+        <img
+          [src]="image.image_url"
+          [alt]="image.alt_text || ('Foto adicional de ' + product().name)"
+          class="h-12 w-12 shrink-0 rounded-xl object-cover border border-border bg-surface-secondary"
+          loading="lazy"
+        />
+      }
+    </div>
+  }
+
+  @if (recipe(); as r) {
+    <!-- Rendimiento y merma en una sola línea de datos. -->
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-surface-secondary px-3 py-2">
+      @for (total of recipeTotals(); track total.label) {
+        <span class="text-xs text-text-secondary">
+          {{ total.label }}
+          <span class="font-bold text-text-primary">{{ total.value }}</span>
+        </span>
+      }
+    </div>
+
+    <!-- Insumos: fila densa, foto 28px, nota en la misma fila. -->
+    <section class="flex flex-col gap-1">
+      <div class="flex items-center justify-between">
+        <h4 class="text-xs font-semibold text-text-primary uppercase tracking-wide">
+          Insumos ({{ ingredients().length }})
+        </h4>
+      </div>
+
+      @if (ingredients().length === 0) {
+        <p class="text-xs text-text-secondary flex items-center gap-1 py-2">
+          <app-icon name="utensils" [size]="14" />
+          Esta receta no tiene insumos registrados.
+        </p>
+      } @else {
+        <ul class="flex flex-col divide-y divide-border rounded-xl border border-border overflow-hidden">
+          @for (item of ingredients(); track item.id ?? item.name) {
+            <li class="flex items-center gap-2 px-2 py-1.5 bg-surface">
+              @if (item.image) {
+                <img
+                  [src]="item.image"
+                  [alt]="'Foto de ' + item.name"
+                  class="h-7 w-7 shrink-0 rounded-md object-cover border border-border bg-surface-secondary"
+                  loading="lazy"
+                />
+              } @else {
+                <span
+                  class="h-7 w-7 shrink-0 rounded-md border border-dashed border-border bg-surface-secondary flex items-center justify-center text-text-secondary"
+                  aria-hidden="true"
+                >
+                  <app-icon name="package" [size]="14" />
+                </span>
+              }
+
+              <span class="text-xs font-semibold text-text-primary truncate shrink-0">
+                {{ item.name }}
+              </span>
+
+              <span class="text-xs text-text-secondary whitespace-nowrap">
+                {{ quantityLabel(item) }}
+              </span>
+
+              @if (ingredientWasteLabel(item); as waste) {
+                <span class="text-xs text-text-secondary whitespace-nowrap hidden sm:inline">
+                  {{ waste }}
+                </span>
+              }
+
+              @if (ingredientNote(item); as note) {
+                <span class="text-xs text-text-secondary italic truncate flex-1 text-right">
+                  {{ note }}
+                </span>
+              } @else {
+                <span class="flex-1"></span>
+              }
+            </li>
+          }
+        </ul>
+      }
+    </section>
+
+    @if (r.preparation_notes?.trim()) {
+      <section class="flex flex-col gap-1">
+        <h4 class="text-xs font-semibold text-text-primary uppercase tracking-wide">
+          Instrucciones
+        </h4>
+        <p class="text-xs text-text-secondary leading-snug whitespace-pre-wrap">
+          {{ r.preparation_notes }}
+        </p>
+      </section>
+    }
+  }
+</div>

@@ -14,6 +14,32 @@ export const ErrorCodes = {
   EMAIL_RECEPTION_NOT_FOUND: { code: 'EMAIL_RECEPTION_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la configuración de recepción por correo.' },
   EMAIL_RECEPTION_VERSION_CONFLICT: { code: 'EMAIL_RECEPTION_VERSION_CONFLICT', httpStatus: 409, devMessage: 'La configuración cambió. Vuelve a cargarla antes de guardar.' },
 
+
+  // Pedidos programados (venta por encargo)
+  SCHED_DISABLED: { code: 'SCHED_DISABLED', httpStatus: 400, devMessage: 'Los pedidos programados no están activos en esta tienda.' },
+  SCHED_SLOT_FULL: { code: 'SCHED_SLOT_FULL', httpStatus: 409, devMessage: 'No hay cupo en esa franja. Elige otra hora.' },
+  SCHED_LEAD_TIME: { code: 'SCHED_LEAD_TIME', httpStatus: 400, devMessage: 'Este pedido requiere más anticipación.' },
+  SCHED_DAY_BLOCKED: { code: 'SCHED_DAY_BLOCKED', httpStatus: 400, devMessage: 'La tienda no recibe pedidos para ese día.' },
+  SCHED_OUT_OF_HOURS: { code: 'SCHED_OUT_OF_HOURS', httpStatus: 400, devMessage: 'Esa franja no existe en el horario de pedidos programados.' },
+  SCHED_TOO_FAR: { code: 'SCHED_TOO_FAR', httpStatus: 400, devMessage: 'Esa fecha está demasiado lejos para programar un pedido.' },
+  SCHED_INVALID_RANGE: { code: 'SCHED_INVALID_RANGE', httpStatus: 400, devMessage: 'El rango de fechas no es válido.' },
+  SCHED_FULFILLMENT_TYPE: { code: 'SCHED_FULFILLMENT_TYPE', httpStatus: 400, devMessage: 'La tienda no ofrece ese tipo de entrega para pedidos programados.' },
+  SCHED_NOT_FOUND: { code: 'SCHED_NOT_FOUND', httpStatus: 404, devMessage: 'Pedido programado no encontrado.' },
+  SCHED_ALREADY_SCHEDULED: { code: 'SCHED_ALREADY_SCHEDULED', httpStatus: 409, devMessage: 'Esta orden ya tiene un agendamiento.' },
+  SCHED_INVALID_TRANSITION: { code: 'SCHED_INVALID_TRANSITION', httpStatus: 409, devMessage: 'Ese cambio de estado no está permitido para el pedido.' },
+  SCHED_EXCEPTION_NOT_FOUND: { code: 'SCHED_EXCEPTION_NOT_FOUND', httpStatus: 404, devMessage: 'Excepción de agenda no encontrada.' },
+
+  // Adiciones de producto
+  OPT_DISABLED: { code: 'OPT_DISABLED', httpStatus: 400, devMessage: 'Las adiciones no están activas en esta tienda.' },
+  OPT_COMPONENT_REQUIRED: { code: 'OPT_COMPONENT_REQUIRED', httpStatus: 400, devMessage: 'Cada adición debe tener un insumo, una preparación o un producto asociado.' },
+  OPT_GROUP_NOT_FOUND: { code: 'OPT_GROUP_NOT_FOUND', httpStatus: 404, devMessage: 'Grupo de adiciones no encontrado.' },
+  OPT_NOT_FOUND: { code: 'OPT_NOT_FOUND', httpStatus: 404, devMessage: 'Adición no encontrada.' },
+  OPT_GROUP_RULES: { code: 'OPT_GROUP_RULES', httpStatus: 400, devMessage: 'Las reglas del grupo no son válidas (mínimo, máximo u obligatorio).' },
+  OPT_ASSIGNMENT_TARGET: { code: 'OPT_ASSIGNMENT_TARGET', httpStatus: 400, devMessage: 'El grupo se engancha a un producto o a una categoría, no a ambos.' },
+  OPT_REQUIRES_SCHEDULE: { code: 'OPT_REQUIRES_SCHEDULE', httpStatus: 400, devMessage: 'Las adiciones solo se venden en pedidos programados: agenda el pedido o quita las adiciones.' },
+  OPT_SELECTION_INVALID: { code: 'OPT_SELECTION_INVALID', httpStatus: 400, devMessage: 'Las adiciones elegidas no cumplen las reglas del producto.' },
+  OPT_DRAFT_LINE_LOCKED: { code: 'OPT_DRAFT_LINE_LOCKED', httpStatus: 409, devMessage: 'Esta línea del borrador tiene adiciones y no se puede cambiar aquí: quítala y vuelve a agregarla con sus adiciones.' },
+  OPT_DRAFT_ADD_LOCKED: { code: 'OPT_DRAFT_ADD_LOCKED', httpStatus: 409, devMessage: 'Este pedido ya está guardado: no se le pueden agregar productos con adiciones. Cóbralo o cancélalo y registra las adiciones en un pedido nuevo.' },
   // System
   SYS_INTERNAL_001: {
     code: 'SYS_INTERNAL_001',
@@ -961,6 +987,18 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage:
       'sale_price inválido: debe ser > 0 y < base_price cuando is_on_sale=true',
+  },
+  PROD_NATURE_NOT_SELLABLE: {
+    code: 'PROD_NATURE_NOT_SELLABLE',
+    httpStatus: 422,
+    devMessage:
+      'El producto es Insumo o Uso interno (usage_nature != sale) y no puede venderse en ningún canal',
+  },
+  MENU_ITEM_NOT_SALE_NATURE: {
+    code: 'MENU_ITEM_NOT_SALE_NATURE',
+    httpStatus: 422,
+    devMessage:
+      'Solo los productos de Venta pueden ir en una carta (usage_nature != sale)',
   },
   PROD_VAR_SALE_PRICE_001: {
     code: 'PROD_VAR_SALE_PRICE_001',
@@ -4065,6 +4103,19 @@ export const ErrorCodes = {
       'More than one active numbering resolution declares the same number and range; deactivate the duplicate before emitting',
   },
   /**
+   * El NIT con el que se armaría el XML del emisor (fiscal_data de la tienda u
+   * organización, que gana sobre `dian_configurations.nit`) no coincide con el NIT
+   * de la configuración DIAN. La DIAN registra el set de pruebas contra el NIT de
+   * la habilitación, así que enviar con otro emisor gasta el envío y la numeración
+   * en documentos que no puede aceptar. Se detecta antes de reservar consecutivos.
+   */
+  DIAN_TEST_SET_009: {
+    code: 'DIAN_TEST_SET_009',
+    httpStatus: 422,
+    devMessage:
+      'Issuer NIT resolved for the test set differs from the DIAN configuration NIT; aborted before reserving numbering or calling DIAN',
+  },
+  /**
    * A RADIAN event references a document that DIAN never accepted. Events attach
    * to an existing electronic document by CUFE, so registering one against a
    * draft, rejected or not-yet-transmitted invoice would reference a key that does
@@ -5294,6 +5345,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Cannot delete template with existing submissions',
   },
+  DCOL_PRODUCT_001: {
+    code: 'DCOL_PRODUCT_001',
+    httpStatus: 400,
+    devMessage: 'Product not found in this store or is not a service',
+  },
 
   // Customer History
   CUST_HISTORY_001: {
@@ -5310,6 +5366,128 @@ export const ErrorCodes = {
     code: 'CUST_HISTORY_003',
     httpStatus: 404,
     devMessage: 'Note not found',
+  },
+
+  // Service station reservation allocation (CP estaciones / B.2)
+  STATION_001: {
+    code: 'STATION_001',
+    httpStatus: 400,
+    devMessage: 'Service, provider, and station are not compatible',
+  },
+  STATION_002: {
+    code: 'STATION_002',
+    httpStatus: 409,
+    devMessage: 'The station interval is already allocated',
+  },
+  STATION_003: {
+    code: 'STATION_003',
+    httpStatus: 409,
+    devMessage: 'The provider interval is already allocated',
+  },
+  STATION_005: {
+    code: 'STATION_005',
+    httpStatus: 409,
+    devMessage: 'An active service session already exists for this station',
+  },
+  STATION_006: {
+    code: 'STATION_006',
+    httpStatus: 409,
+    devMessage: 'The service session lifecycle transition is invalid or stale',
+  },
+  STATION_007: {
+    code: 'STATION_007',
+    httpStatus: 422,
+    devMessage: 'Required customer or service subject information is missing',
+  },
+  STATION_004: {
+    code: 'STATION_004',
+    httpStatus: 404,
+    devMessage: 'Service station not found in this store',
+  },
+  STATION_008: {
+    code: 'STATION_008',
+    httpStatus: 409,
+    devMessage: 'A PostgreSQL allocation exclusion constraint was violated',
+  },
+  STATION_009: {
+    code: 'STATION_009',
+    httpStatus: 400,
+    devMessage: 'The service allocation interval is invalid or in the past',
+  },
+  STATION_011: {
+    code: 'STATION_011',
+    httpStatus: 409,
+    devMessage: 'The service booking hold has expired',
+  },
+  STATION_012: {
+    code: 'STATION_012',
+    httpStatus: 400,
+    devMessage: 'A station is required for this service',
+  },
+  STATION_INDUSTRY_001: {
+    code: 'STATION_INDUSTRY_001',
+    httpStatus: 403,
+    devMessage: 'Store industry does not support service stations (service required)',
+  },
+  STATION_013: {
+    code: 'STATION_013',
+    httpStatus: 400,
+    devMessage: 'Service session intake values include fields outside the linked data collection template',
+  },
+  STATION_014: {
+    code: 'STATION_014',
+    httpStatus: 404,
+    devMessage: 'No active store domain to build the station public URL',
+  },
+  SERVICE_BOOKING_001: {
+    code: 'SERVICE_BOOKING_001',
+    httpStatus: 409,
+    devMessage: 'A required service booking could not be allocated during checkout',
+  },
+  SERVICE_BUDGET_001: {
+    code: 'SERVICE_BUDGET_001',
+    httpStatus: 409,
+    devMessage: 'The service order total exceeds its current approved customer budget',
+  },
+  SERVICE_BUDGET_002: {
+    code: 'SERVICE_BUDGET_002',
+    httpStatus: 409,
+    devMessage: 'The service proposal or its order/budget snapshot is stale',
+  },
+  SERVICE_BUDGET_003: {
+    code: 'SERVICE_BUDGET_003',
+    httpStatus: 410,
+    devMessage: 'The service proposal approval link is expired or revoked',
+  },
+  SERVICE_BUDGET_004: {
+    code: 'SERVICE_BUDGET_004',
+    httpStatus: 403,
+    devMessage: 'The service proposal approval proof is invalid',
+  },
+  STATION_010: {
+    code: 'STATION_010',
+    httpStatus: 403,
+    devMessage: 'Missing staff permission for service station action',
+  },
+  SERVICE_QR_001: {
+    code: 'SERVICE_QR_001',
+    httpStatus: 410,
+    devMessage: 'The service session access link is invalid or expired',
+  },
+  SERVICE_CONTACT_001: {
+    code: 'SERVICE_CONTACT_001',
+    httpStatus: 422,
+    devMessage: 'No usable contact channel available for the service customer',
+  },
+  SERVICE_CONTACT_002: {
+    code: 'SERVICE_CONTACT_002',
+    httpStatus: 503,
+    devMessage: 'Service session notification delivery failed',
+  },
+  SERVICE_QR_002: {
+    code: 'SERVICE_QR_002',
+    httpStatus: 429,
+    devMessage: 'Too many concurrent progress connections on service session',
   },
 
   // Booking Confirmation

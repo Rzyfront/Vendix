@@ -92,6 +92,11 @@ const REQUIRED_COLUMNS = [
   // falla CUALQUIER lectura de producto — catálogo público, POS y editor.
   'products.offer_loose_unit',
 
+  // --- Naturaleza de uso (migración 20261104120000) -----------------------
+  // Igual que offer_loose_unit: Prisma la selecciona en toda lectura de
+  // producto; sin ella se cae el catálogo, el POS y el editor.
+  'products.usage_nature',
+
   // --- Alcance fiscal (lo que cubría el guard anterior, ahora del lado DB) -
   'organizations.fiscal_scope',
   'accounting_entities.fiscal_scope',
@@ -151,6 +156,13 @@ const REQUIRED_COLUMNS = [
   'recipes.status',
   'production_orders.order_number',
   'production_orders.unit_cost',
+  // Alquiler por bloque (migración 20261104120000): cerrar o cobrar una atención
+  // lee la tarifa de la estación; toda lectura de estaciones selecciona estas columnas.
+  'service_stations.rental_block_minutes',
+  'service_stations.rental_block_price',
+  // Impuesto del alquiler (migración 20261105120000): mismas lecturas de estación.
+  'service_stations.rental_tax_category_id',
+  'service_stations.rental_tax_is_inclusive',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

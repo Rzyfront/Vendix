@@ -1,0 +1,1672 @@
+<div class="w-full overflow-x-hidden">
+  <app-sticky-header
+    title="Estaciones de Servicio"
+    subtitle="Control de mando operativo y telemetría de bahías en vivo"
+    icon="warehouse"
+    variant="glass"
+    [showBackButton]="true"
+    backRoute="/admin"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
+    [tabs]="viewTabs"
+    [activeTab]="view()"
+    tabsAriaLabel="Vistas de estaciones de servicio"
+    (tabChanged)="setView($any($event))"
+  />
+
+  @if (view() === 'registry') {
+    <app-service-reminders-page [embedded]="true" />
+  } @else {
+
+  <div
+    class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent"
+  >
+    <app-stats
+      title="Total"
+      [value]="totalStations()"
+      smallText="Estaciones registradas"
+      iconName="warehouse"
+      iconBgColor="bg-blue-100 dark:bg-blue-950"
+      iconColor="text-blue-600 dark:text-blue-400"
+    />
+    <app-stats
+      title="Disponibles"
+      [value]="freeCount()"
+      smallText="Listas para atención"
+      iconName="check"
+      iconBgColor="bg-emerald-100 dark:bg-emerald-950"
+      iconColor="text-emerald-600 dark:text-emerald-400"
+    />
+    <app-stats
+      title="Ocupadas"
+      [value]="occupiedCount()"
+      smallText="En atención activa"
+      iconName="activity"
+      iconBgColor="bg-red-100 dark:bg-red-950"
+      iconColor="text-red-600 dark:text-red-400"
+    />
+    <app-stats
+      title="En Pausa / Limpieza"
+      [value]="pausedCount()"
+      smallText="Pausadas o en reset"
+      iconName="clock"
+      iconBgColor="bg-amber-100 dark:bg-amber-950"
+      iconColor="text-amber-600 dark:text-amber-400"
+    />
+  </div>
+
+  <div class="p-2 md:p-4">
+    <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <!-- Card Header: Filtros de Sectores / Categorías y Estado -->
+      <div class="px-3 py-2.5 md:px-6 md:py-4 border-b border-[var(--color-border)]">
+        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <!-- Pestañas de Sectores / Categorías -->
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 max-w-full">
+            @for (tab of availableCategoryTabs(); track tab.id) {
+              <button
+                type="button"
+                (click)="selectedCategory.set(tab.id)"
+                class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 shrink-0"
+                [ngClass]="selectedCategory() === tab.id
+                  ? 'bg-[var(--color-primary)] text-white shadow-sm'
+                  : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background)]'"
+              >
+                <app-icon [name]="tab.icon" [size]="14" />
+                <span>{{ tab.label }}</span>
+              </button>
+            }
+          </div>
+
+          <!-- Filtro de Estado -->
+          <div class="flex items-center gap-1 bg-[var(--color-background)] p-1 rounded-xl border border-[var(--color-border)]/60 text-xs self-start md:self-auto shrink-0">
+            <button
+              type="button"
+              (click)="selectedStatusFilter.set('all')"
+              class="px-2.5 py-1 rounded-lg font-medium transition-all"
+              [ngClass]="selectedStatusFilter() === 'all' ? 'bg-[var(--color-surface)] text-[var(--color-text-primary)] shadow-sm font-bold' : 'text-[var(--color-text-secondary)]'"
+            >
+              Todas
+            </button>
+            <button
+              type="button"
+              (click)="selectedStatusFilter.set('occupied')"
+              class="px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-1"
+              [ngClass]="selectedStatusFilter() === 'occupied' ? 'bg-[var(--color-surface)] text-red-600 dark:text-red-400 shadow-sm font-bold' : 'text-[var(--color-text-secondary)]'"
+            >
+              <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
+              Ocupadas ({{ occupiedCount() }})
+            </button>
+            <button
+              type="button"
+              (click)="selectedStatusFilter.set('free')"
+              class="px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-1"
+              [ngClass]="selectedStatusFilter() === 'free' ? 'bg-[var(--color-surface)] text-emerald-600 dark:text-emerald-400 shadow-sm font-bold' : 'text-[var(--color-text-secondary)]'"
+            >
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              Disponibles ({{ freeCount() }})
+            </button>
+            <button
+              type="button"
+              (click)="selectedStatusFilter.set('paused')"
+              class="px-2.5 py-1 rounded-lg font-medium transition-all"
+              [ngClass]="selectedStatusFilter() === 'paused' ? 'bg-[var(--color-surface)] text-amber-500 shadow-sm font-bold' : 'text-[var(--color-text-secondary)]'"
+            >
+              En Pausa ({{ pausedCount() }})
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card Body: Loading Spinner o Matriz de Bahías -->
+      <div class="p-3 md:p-6">
+        @if (loading()) {
+          <div class="py-16 flex flex-col items-center justify-center gap-3 text-[var(--color-text-secondary)]">
+            <app-spinner size="md"></app-spinner>
+            <p class="text-xs">Cargando estaciones de servicio…</p>
+          </div>
+        } @else if (stations().length === 0) {
+          <div class="py-16 text-center">
+            <div class="w-14 h-14 mx-auto rounded-2xl bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex items-center justify-center mb-3">
+              <app-icon name="warehouse" [size]="28" />
+            </div>
+            <h3 class="font-bold text-base text-[var(--color-text-primary)]">Sin estaciones configuradas</h3>
+            <p class="text-xs text-[var(--color-text-secondary)] mt-1 max-w-sm mx-auto">
+              Crea tu primera bahía, box, silla de barbería o cabina para comenzar a operar.
+            </p>
+            <div class="mt-4">
+              <app-button variant="primary" size="sm" (clicked)="openCreateModal()">
+                <app-icon name="plus" [size]="14" slot="icon" /> Nueva Estación
+              </app-button>
+            </div>
+          </div>
+        } @else {
+          <!-- Matriz de Bahías por Sectores Operativos -->
+          <div class="space-y-8">
+    @for (group of displayedGroups(); track group.id) {
+      <section class="space-y-4">
+        <!-- Encabezado del Sector -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-sm">
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex items-center justify-center shrink-0">
+              <app-icon [name]="group.icon" [size]="18" />
+            </div>
+            <div>
+              <h2 class="text-base font-bold text-[var(--color-text-primary)] leading-tight">
+                {{ group.label }}
+              </h2>
+              <p class="text-xs text-[var(--color-text-secondary)]">
+                {{ group.description }}
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 text-xs shrink-0">
+            <span class="px-2.5 py-1 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 font-bold border border-red-500/20">
+              {{ group.activeCount }} Ocupadas
+            </span>
+            <span class="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold border border-emerald-500/20">
+              {{ group.freeCount }} Disponibles
+            </span>
+            @if (group.pausedCount > 0) {
+              <span class="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-600 font-semibold border border-amber-500/20">
+                {{ group.pausedCount }} En Pausa
+              </span>
+            }
+          </div>
+        </div>
+
+        <!-- Grid de Tarjetas de Estación -->
+        @if (group.stations.length === 0) {
+          <div class="p-8 text-center rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)]">
+            No hay estaciones en este sector para el filtro actual.
+          </div>
+        } @else {
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            @for (station of group.stations; track station.id) {
+              <!-- Caso 1: Estación con Sesión Activa (OCUPADA) -->
+              @if (stationSession(station.id); as session) {
+                @if (session.status !== 'paused') {
+                  <div class="p-4 rounded-2xl bg-[var(--color-surface)] border-2 border-red-500/50 dark:border-red-500/40 shadow-sm flex flex-col justify-between hover:border-red-500 transition-all group">
+                    <div>
+                      <!-- Card Header (estilo restaurante: mesa ocupada) -->
+                      <div class="flex items-center justify-between gap-2 pb-2.5 border-b border-[var(--color-border)]/60">
+                        <div class="flex items-center gap-2">
+                          <span class="font-bold text-sm text-[var(--color-text-primary)] tracking-wide">{{ station.name }}</span>
+                          <span class="px-2 py-0.5 rounded-full bg-red-500/15 text-red-600 dark:text-red-400 text-[10px] font-bold flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span> OCUPADA
+                          </span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                          <button
+                            type="button"
+                            class="p-1 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] hover:bg-[var(--color-background)] transition-all cursor-pointer"
+                            (click)="openQrModal(station); $event.stopPropagation()"
+                            title="Ver e imprimir código QR"
+                          >
+                            <app-icon name="qr-code" [size]="14" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <!-- Vehicle / Subject Box -->
+                      <div class="mt-3 p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 flex items-center justify-between gap-2">
+                        <div class="min-w-0 flex-1">
+                          @if (getCustomerPlate(session); as plate) {
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                              <span class="px-2 py-0.5 rounded font-mono font-bold bg-amber-400/20 text-amber-800 dark:text-amber-300 text-xs border border-amber-400/40 shrink-0">
+                                {{ plate }}
+                              </span>
+                              @if (getVehicleName(session); as veh) {
+                                <span class="font-bold text-xs text-[var(--color-text-primary)] truncate">
+                                  {{ veh }}
+                                </span>
+                              }
+                            </div>
+                            <div class="flex items-center gap-1 text-[11px] text-[var(--color-text-secondary)] mt-1 truncate">
+                              <app-icon name="user" [size]="11" />
+                              <span class="truncate">{{ getCustomerName(session) }}</span>
+                            </div>
+                          } @else {
+                            <div class="flex items-center gap-1.5 font-bold text-xs text-[var(--color-text-primary)] truncate">
+                              <app-icon name="user" [size]="13" class="text-[var(--color-primary)] shrink-0" />
+                              <span class="truncate">{{ getCustomerName(session) }}</span>
+                            </div>
+                            @if (getCustomerDoc(session); as doc) {
+                              <div class="text-[10px] text-[var(--color-text-secondary)] font-mono mt-0.5">
+                                Doc: {{ doc }}
+                              </div>
+                            }
+                          }
+                          <div class="text-[10px] text-[var(--color-text-secondary)] font-mono mt-0.5">
+                            Sesión #{{ session.id }}
+                          </div>
+                        </div>
+                        <div class="w-8 h-8 rounded-lg bg-[var(--color-surface)] text-[var(--color-primary)] flex items-center justify-center shrink-0 border border-[var(--color-border)]">
+                          <app-icon [name]="group.icon" [size]="16" />
+                        </div>
+                      </div>
+
+                      <!-- Service & Tech Details -->
+                      <div class="mt-3 space-y-1.5 text-xs">
+                        <div class="flex items-center justify-between text-[var(--color-text-secondary)]">
+                          <span>Servicio:</span>
+                          <span class="font-semibold text-[var(--color-text-primary)] truncate max-w-[170px] text-right">{{ session.product_name }}</span>
+                        </div>
+                        <div class="flex items-center justify-between text-[var(--color-text-secondary)]">
+                          <span>Especialista:</span>
+                          <span class="font-semibold text-[var(--color-text-primary)] flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                            {{ session.allocation?.provider_name || 'Asignado' }}
+                          </span>
+                        </div>
+                      </div>
+
+                      <!-- Total en Cuenta Abierta (Estilo restaurante mesa) -->
+                      <div class="mt-2.5 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between">
+                        <span class="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 flex items-center gap-1">
+                          <app-icon name="shopping-bag" [size]="12" /> Cuenta abierta:
+                        </span>
+                        <span class="font-bold text-xs font-mono text-emerald-700 dark:text-emerald-300">
+                          {{ (session.order?.grand_total ?? session.budget_amount ?? 0) | currency }}
+                        </span>
+                      </div>
+
+                      <!-- Timer & Progress Bar: solo si la estación lleva cronómetro -->
+                      @if (station.track_time) {
+                      <div class="mt-3 p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 space-y-1.5">
+                        <div class="flex items-center justify-between text-xs font-mono">
+                          <span class="text-[var(--color-text-secondary)] flex items-center gap-1 text-[11px]">
+                            <app-icon name="clock" [size]="12" class="text-red-500" /> Cronómetro
+                          </span>
+                          <span class="font-bold text-red-600 dark:text-red-400">
+                            {{ sessionElapsedMinutes(session.opened_at) }}m / {{ sessionPlannedMinutes(session) }}m ({{ sessionProgressPercent(session) }}%)
+                          </span>
+                        </div>
+                        <div class="w-full bg-[var(--color-surface)] h-2 rounded-full overflow-hidden border border-[var(--color-border)]/40">
+                          <div class="bg-gradient-to-r from-red-500 to-amber-500 h-full rounded-full transition-all duration-300" [style.width.%]="sessionProgressPercent(session)"></div>
+                        </div>
+                      </div>
+                      }
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="mt-4 pt-3 border-t border-[var(--color-border)]/60 flex items-center gap-2">
+                      <app-button variant="primary" size="sm" class="flex-1" (clicked)="openManageSession(session)">
+                        <app-icon name="file-text" [size]="14" slot="icon" /> Ver Cuenta
+                      </app-button>
+                      <app-button variant="outline" size="sm" (clicked)="openQrModal(station)" ariaLabel="Ver QR" title="Ver e imprimir QR">
+                        <app-icon name="qr-code" [size]="14" slot="icon" />
+                      </app-button>
+                      <app-button variant="secondary" size="sm" (clicked)="requestClose(session)">
+                        Finalizar
+                      </app-button>
+                    </div>
+                  </div>
+                } @else {
+                  <!-- Caso 2: Estación en Pausa / Limpieza -->
+                  <div class="p-4 rounded-2xl bg-[var(--color-surface)] border-2 border-amber-500/50 shadow-sm flex flex-col justify-between hover:border-amber-500 transition-all">
+                    <div>
+                      <div class="flex items-center justify-between gap-2 pb-2.5 border-b border-[var(--color-border)]/60">
+                        <div class="flex items-center gap-2">
+                          <span class="font-bold text-sm text-[var(--color-text-primary)] tracking-wide">{{ station.name }}</span>
+                          <span class="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 text-[10px] font-bold flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> PAUSADA
+                          </span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                          <button
+                            type="button"
+                            class="p-1 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] hover:bg-[var(--color-background)] transition-all cursor-pointer"
+                            (click)="openQrModal(station); $event.stopPropagation()"
+                            title="Ver e imprimir código QR"
+                          >
+                            <app-icon name="qr-code" [size]="14" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div class="py-6 text-center">
+                        <div class="w-12 h-12 rounded-full bg-amber-500/10 text-amber-500 mx-auto flex items-center justify-center mb-2">
+                          <app-icon name="pause" [size]="20" />
+                        </div>
+                        <h4 class="font-bold text-xs text-[var(--color-text-primary)]">Atención en Pausa</h4>
+                        <p class="text-[11px] text-[var(--color-text-secondary)] mt-0.5">
+                          {{ session.subject?.label || 'Vehículo en bahía' }}
+                        </p>
+                        @if (station.track_time) {
+                          <span class="inline-block font-mono text-xs font-semibold text-amber-600 mt-2">
+                            {{ sessionElapsedMinutes(session.opened_at) }} min transcurridos
+                          </span>
+                        }
+                      </div>
+                    </div>
+
+                    <div class="mt-4 pt-3 border-t border-[var(--color-border)]/60 flex items-center gap-2">
+                      <app-button variant="secondary" size="sm" class="flex-1" (clicked)="openManageSession(session)">
+                        Detalle
+                      </app-button>
+                      <app-button variant="outline" size="sm" (clicked)="openQrModal(station)" ariaLabel="Ver QR" title="Ver e imprimir QR">
+                        <app-icon name="qr-code" [size]="14" slot="icon" />
+                      </app-button>
+                      <app-button variant="outline" size="sm" class="flex-1 text-emerald-600 border-emerald-500/40" (clicked)="transitionSession(session, 'resume')">
+                        Reanudar
+                      </app-button>
+                    </div>
+                  </div>
+                }
+              } @else {
+                <!-- Caso 3: Estación Libre / DISPONIBLE (estilo restaurante: mesa libre) -->
+                @if (station.status === 'active') {
+                  <div class="p-4 rounded-2xl bg-[var(--color-surface)] border-2 border-emerald-500/40 dark:border-emerald-500/30 shadow-sm flex flex-col justify-between hover:border-emerald-500 transition-all">
+                    <div>
+                      <div class="flex items-center justify-between gap-2 pb-2.5 border-b border-[var(--color-border)]/60">
+                        <div class="flex items-center gap-2">
+                          <span class="font-bold text-sm text-[var(--color-text-primary)] tracking-wide">{{ station.name }}</span>
+                          <span class="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> DISPONIBLE
+                          </span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                          <button
+                            type="button"
+                            class="p-1 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] hover:bg-[var(--color-background)] transition-all cursor-pointer"
+                            (click)="openQrModal(station); $event.stopPropagation()"
+                            title="Ver e imprimir código QR"
+                          >
+                            <app-icon name="qr-code" [size]="14" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div class="my-auto py-7 text-center">
+                        <div class="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 mx-auto flex items-center justify-center mb-2.5">
+                          <app-icon name="check-circle" [size]="22" />
+                        </div>
+                        <h4 class="font-bold text-xs text-[var(--color-text-primary)]">Disponible para atención</h4>
+                        <p class="text-[11px] text-[var(--color-text-secondary)] mt-0.5">
+                          {{ station.services.length }} servicios compatibles configurados
+                        </p>
+                      </div>
+                    </div>
+
+                    <div class="mt-4 pt-3 border-t border-[var(--color-border)]/60 flex items-center gap-2">
+                      <app-button variant="primary" size="sm" class="flex-1" (clicked)="openCheckinModal(station)">
+                        <app-icon name="plus" [size]="14" slot="icon" /> Asignar
+                      </app-button>
+                      <app-button variant="outline" size="sm" (clicked)="openQrModal(station)" ariaLabel="Ver QR" title="Ver e imprimir QR">
+                        <app-icon name="qr-code" [size]="14" slot="icon" />
+                      </app-button>
+                      <app-button variant="ghost" size="sm" (clicked)="selectStationForConfig(station)" ariaLabel="Configurar estación" title="Configurar estación">
+                        <app-icon name="settings" [size]="14" slot="icon" />
+                      </app-button>
+                    </div>
+                  </div>
+                } @else {
+                  <!-- Caso 4: Estación Inactiva -->
+                  <div class="p-4 rounded-2xl bg-[var(--color-surface)]/60 border border-[var(--color-border)]/60 shadow-sm flex flex-col justify-between opacity-75">
+                    <div>
+                      <div class="flex items-center justify-between gap-2 pb-2.5 border-b border-[var(--color-border)]/60">
+                        <span class="font-bold text-sm text-[var(--color-text-primary)]">{{ station.name }}</span>
+                        <div class="flex items-center gap-1">
+                          <button
+                            type="button"
+                            class="p-1 rounded-md text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] hover:bg-[var(--color-background)] transition-all cursor-pointer"
+                            (click)="openQrModal(station); $event.stopPropagation()"
+                            title="Ver e imprimir código QR"
+                          >
+                            <app-icon name="qr-code" [size]="14" />
+                          </button>
+                          <span class="px-2 py-0.5 rounded-full bg-slate-500/10 text-slate-500 text-[10px] font-bold">INACTIVA</span>
+                        </div>
+                      </div>
+                      <div class="my-auto py-7 text-center text-xs text-[var(--color-text-secondary)]">
+                        Estación fuera de servicio
+                      </div>
+                    </div>
+                    <div class="mt-4 pt-3 border-t border-[var(--color-border)]/60 flex items-center gap-2">
+                      <app-button variant="secondary" size="sm" class="flex-1" (clicked)="selectStationForConfig(station)">
+                        Configurar / Activar
+                      </app-button>
+                      <app-button variant="outline" size="sm" (clicked)="openQrModal(station)" ariaLabel="Ver QR" title="Ver e imprimir QR">
+                        <app-icon name="qr-code" [size]="14" slot="icon" />
+                      </app-button>
+                    </div>
+                  </div>
+                }
+              }
+            }
+          </div>
+        }
+      </section>
+    }
+  </div>
+}
+      </div>
+    </app-card>
+  </div>
+
+  }
+
+  <!-- Servicio recurrente sin cliente: pedir cliente para poder recordarle -->
+  @if (closePrompt(); as pending) {
+    <app-modal
+      [isOpen]="true"
+      (isOpenChange)="!$event && closePrompt.set(null)"
+      title="¿A quién le recordamos el próximo servicio?"
+      [subtitle]="pending.product_name + ' es un servicio recurrente'"
+      size="md"
+    >
+      <div class="space-y-3">
+        <p class="text-sm text-[var(--color-text-secondary)]">
+          Esta atención no tiene cliente registrado, así que no recibirá recordatorio. Búscalo o créalo; también puedes asignarlo después desde el Registro de servicios.
+        </p>
+        <app-customer-select
+          label="Cliente"
+          [selected]="closeCustomer()"
+          (selectedChange)="closeCustomer.set($event)"
+        />
+      </div>
+      <div slot="footer" class="flex flex-wrap items-center justify-end gap-2.5">
+        <app-button variant="outline" [disabled]="saving()" (clicked)="confirmClose(false)">Finalizar sin cliente</app-button>
+        <app-button variant="primary" [disabled]="!closeCustomer()" [loading]="saving()" (clicked)="confirmClose(true)">Asignar y finalizar</app-button>
+      </div>
+    </app-modal>
+  }
+
+  <!-- Tipo de la plantilla de estación: define con qué campos arranca -->
+  <app-modal [(isOpen)]="showTemplateTypePicker" title="¿Para qué tipo de estación es la plantilla?" subtitle="Arranca con los campos típicos de ese tipo; luego los puedes cambiar" size="md">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      @for (t of stationTemplateTypes; track t.value) {
+        <button
+          type="button"
+          class="p-3 rounded-xl border border-[var(--color-border)] hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)]/5 flex items-center gap-3 text-left transition-colors"
+          (click)="createTemplateForType(t.value)"
+        >
+          <span class="w-9 h-9 rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex items-center justify-center shrink-0">
+            <app-icon [name]="t.icon" [size]="18" />
+          </span>
+          <span class="min-w-0">
+            <span class="block text-sm font-semibold text-[var(--color-text-primary)]">{{ t.label }}</span>
+            <span class="block text-xs text-[var(--color-text-secondary)] truncate">{{ t.keys.length }} campos para empezar</span>
+          </span>
+        </button>
+      }
+    </div>
+  </app-modal>
+
+  <!-- Modal 1: Creación de Nueva Estación / Bahía -->
+  <app-modal [(isOpen)]="showCreateModal" title="Crear Nueva Estación" subtitle="Alta de nuevo punto operativo multirrubro" size="md">
+    <div class="space-y-4">
+      <app-input
+        label="Nombre / N° de Estación"
+        [ngModel]="newName()"
+        (ngModelChange)="newName.set($event)"
+        placeholder="Ej. Bahía 1, Elevador 2, Silla 3"
+        [required]="true"
+      />
+
+      <div>
+        <app-selector
+          label="Plantilla de estación"
+          [options]="stationTemplateOptions()"
+          [ngModel]="newIntakeTemplateId() || null"
+          (ngModelChange)="newIntakeTemplateId.set($event)"
+          placeholder="Elige la plantilla"
+          [required]="true"
+        />
+        @if (!stationTemplateOptions().length) {
+          <p class="mt-1 text-xs text-red-600">Aún no tienes plantillas de estación. Créala con “Diseñar plantilla de estación” (arriba, junto a Nueva Estación).</p>
+        } @else {
+          <p class="mt-1 text-xs text-[var(--color-text-secondary)]">Define los datos que se piden al ingresar un cliente en esta estación.</p>
+        }
+      </div>
+
+      <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <span class="text-xs font-bold text-[var(--color-text-primary)]">Cronómetro de atención</span>
+            <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">Muestra el tiempo transcurrido de cada atención en esta estación. Apagado, no se controla tiempo.</p>
+          </div>
+          <app-toggle
+            [checked]="newTrackTime()"
+            ariaLabel="Activar cronómetro de atención"
+            (changed)="newTrackTime.set($event)"
+          />
+        </div>
+        @if (newTrackTime()) {
+          <app-input
+            label="Minutos objetivo por atención (opcional)"
+            type="number"
+            [ngModel]="newTargetMinutes()"
+            (ngModelChange)="newTargetMinutes.set($event)"
+            placeholder="Vacío = duración del servicio"
+          />
+        }
+      </div>
+
+      <section class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3" aria-labelledby="new-station-tax-title">
+        <div>
+          <h4 id="new-station-tax-title" class="text-xs font-bold text-[var(--color-text-primary)]">Impuesto del alquiler (opcional)</h4>
+          <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">Se aplica a la línea “Alquiler” de la estación. Sin impuesto, el alquiler se cobra tal cual.</p>
+        </div>
+        <app-selector
+          id="new-station-tax-category"
+          label="Categoría de impuesto"
+          [options]="newTaxSelectorOptions()"
+          [ngModel]="newTaxCategoryId()"
+          (ngModelChange)="onNewTaxCategoryChange($event)"
+          [helpText]="loadingTaxOptions() ? 'Cargando impuestos…' : ''"
+        />
+        @if (taxOptionsError()) {
+          <p class="text-xs text-red-600" role="alert">{{ taxOptionsError() }}</p>
+        }
+        @if (newTaxCategoryId() !== null) {
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <span class="text-xs font-bold text-[var(--color-text-primary)]">Impuesto incluido en el precio</span>
+              <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">{{ newTaxIsInclusive() ? 'El precio del bloque ya trae el impuesto.' : 'El impuesto se suma al cobrar.' }}</p>
+            </div>
+            <app-toggle
+              [checked]="newTaxIsInclusive()"
+              ariaLabel="Impuesto incluido en el precio del alquiler"
+              (changed)="newTaxIsInclusive.set($event)"
+            />
+          </div>
+        }
+      </section>
+    </div>
+
+    <div slot="footer" class="flex items-center justify-end gap-2.5">
+      <app-button variant="secondary" (clicked)="showCreateModal.set(false)">Cancelar</app-button>
+      <app-button variant="primary" [loading]="saving()" (clicked)="createStation()">Guardar Estación</app-button>
+    </div>
+  </app-modal>
+
+  <!-- Modal 2: Nuevo Ingreso Operativo (Apertura de Cuenta) -->
+  <app-modal [(isOpen)]="showCheckinModal" title="Nuevo Ingreso de Estación" subtitle="Datos de la estación, cliente y apertura de cuenta" size="lg">
+    <div class="space-y-4">
+      <!-- Estación: nombre fijo si se abrió desde "Asignar"; select solo en ingreso general -->
+      @if (checkinStationLocked() && selectedCheckinStation(); as st) {
+        <div>
+          <span class="block font-medium mb-2 text-[11px] uppercase tracking-[0.05em] text-[var(--color-text-muted)]">Estación / Bahía a Ocupar</span>
+          <div class="flex items-center gap-2 h-10 sm:h-11 px-3 sm:px-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-background,#f9fafb)] text-sm sm:text-base font-semibold text-[var(--color-text-primary)]">
+            <app-icon name="warehouse" [size]="16" class="text-[var(--color-primary)]" />
+            {{ st.name }}
+          </div>
+        </div>
+      } @else {
+        <app-selector
+          label="Estación / Bahía a Ocupar"
+          [options]="stationSelectorOptions()"
+          [ngModel]="checkinStationId()"
+          (ngModelChange)="onCheckinStationChange($event)"
+          [required]="true"
+        />
+      }
+
+      <!-- Campos fijos por tipo: solo cuando la estación/servicio no tiene formulario de recepción -->
+      @if (!checkinIntakeTemplate() && !checkinIntakeLoading() && !selectedCheckinStation()?.intake_template_id) {
+      <!-- Datos del Vehículo (Solo si la estación es de Carro o Moto) -->
+      @if (checkinRequiresVehicle()) {
+        <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-amber-500/25 space-y-3">
+          <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
+            <app-icon [name]="checkinIsMoto() ? 'zap' : 'warehouse'" [size]="14" class="text-amber-500" />
+            <span>{{ checkinIsMoto() ? 'Datos de la Motocicleta (Moto)' : 'Datos del Vehículo (Carro / Auto)' }}</span>
+          </span>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <app-input
+              [label]="checkinIsMoto() ? 'Marca / Modelo de la Moto' : 'Marca / Modelo del Carro'"
+              [ngModel]="checkinVehicleName()"
+              (ngModelChange)="checkinVehicleName.set($event)"
+              [placeholder]="checkinIsMoto() ? 'Ej. Yamaha NMAX 155 / Pulsar NS 200' : 'Ej. Toyota Hilux / Chevrolet Onix'"
+              [required]="true"
+            />
+            <app-input
+              [label]="checkinIsMoto() ? 'Placa de la Moto' : 'Placa del Carro'"
+              [ngModel]="checkinPlate()"
+              (ngModelChange)="checkinPlate.set($event)"
+              [placeholder]="checkinIsMoto() ? 'Ej. XYZ-45D' : 'Ej. ABC-123'"
+              [required]="true"
+            />
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <app-input
+              label="Kilometraje Actual (Opcional)"
+              [ngModel]="checkinMileage()"
+              (ngModelChange)="checkinMileage.set($event)"
+              placeholder="Ej. 45.200 km"
+            />
+          </div>
+        </div>
+      }
+
+      <!-- Datos del Dispositivo Móvil / Electrónica (Solo si la estación es Celular) -->
+      @if (checkinIsCelular()) {
+        <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-blue-500/25 space-y-3">
+          <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
+            <app-icon name="smartphone" [size]="14" class="text-blue-500" />
+            <span>Datos del Dispositivo Móvil / Electrónica</span>
+          </span>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <app-input
+              label="Marca / Modelo del Equipo"
+              [ngModel]="checkinDeviceModel()"
+              (ngModelChange)="checkinDeviceModel.set($event)"
+              placeholder="Ej. iPhone 13 Pro, Samsung Galaxy S21"
+              [required]="true"
+            />
+            <app-input
+              label="IMEI / Serial (Opcional)"
+              [ngModel]="checkinImei()"
+              (ngModelChange)="checkinImei.set($event)"
+              placeholder="Ej. 356987123456789"
+            />
+          </div>
+          <app-input
+            label="Falla Reportada por el Cliente"
+            [ngModel]="checkinReportedIssue()"
+            (ngModelChange)="checkinReportedIssue.set($event)"
+            placeholder="Ej. Pantalla rota no da imagen, no carga el puerto, batería inflada"
+            [required]="true"
+          />
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <app-input
+              label="Contraseña / Patrón de Desbloqueo (Opcional)"
+              [ngModel]="checkinUnlockCode()"
+              (ngModelChange)="checkinUnlockCode.set($event)"
+              placeholder="Ej. 1234 / Patrón en L"
+            />
+            <app-input
+              label="Accesorios Entregados (Opcional)"
+              [ngModel]="checkinAccessories()"
+              (ngModelChange)="checkinAccessories.set($event)"
+              placeholder="Ej. Cable, cargador, funda protectora"
+            />
+          </div>
+        </div>
+      }
+
+      <!-- Preferencias de Belleza (Peluquería, Barbería, Salón / Spa) -->
+      @if (checkinIsBeauty()) {
+        <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-purple-500/25 space-y-3">
+          <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
+            <app-icon name="sparkles" [size]="14" class="text-purple-500" />
+            <span>Preferencias y Cuidado Personal (Opcional)</span>
+          </span>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <app-input
+              label="Estilo Deseado / Preferencias (Opcional)"
+              [ngModel]="checkinStylePreference()"
+              (ngModelChange)="checkinStylePreference.set($event)"
+              placeholder="Ej. Fade medio con navaja, tinte balayage cenizo"
+            />
+            <app-input
+              label="Alergias o Sensibilidades (Opcional)"
+              [ngModel]="checkinAllergies()"
+              (ngModelChange)="checkinAllergies.set($event)"
+              placeholder="Ej. Alergia al amoníaco o peróxido, piel sensible"
+            />
+          </div>
+        </div>
+      }
+
+      }
+
+      <!-- Datos del Cliente (Siempre solicitados para la orden / factura) -->
+      <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/80 space-y-3">
+        <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
+          <app-icon name="user" [size]="14" class="text-[var(--color-primary)]" />
+          <span>Datos del Cliente</span>
+        </span>
+        <app-customer-select
+          label="Cliente registrado (opcional)"
+          helpText="Busca o crea el cliente para vincular la atención a su perfil. Puedes continuar sin cliente."
+          [selected]="checkinCustomer()"
+          (selectedChange)="onCheckinCustomerChange($event)"
+          [createInitialValues]="checkinCustomerInitialValues()"
+        />
+        <!-- La plantilla define los campos de cliente: se muestran aquí mismo, una sola vez -->
+        @if (checkinCustomerIntakeItems().length) {
+          @if (!templateHandlesCustomer()) {
+            <app-input
+              label="Nombre Completo del Cliente"
+              [ngModel]="checkinCustomerName()"
+              (ngModelChange)="checkinCustomerName.set($event)"
+              placeholder="Ej. Juan Pérez o Mariana Vega"
+              [required]="true"
+            />
+          }
+          <div class="flex flex-wrap gap-3">
+            @for (item of checkinCustomerIntakeItems(); track item.id) {
+              <div [class]="getItemWidthClass(item.width)">
+                @if (item.metadata_field.field_type === 'file') {
+                  <p class="text-xs text-[var(--color-text-secondary)]">
+                    {{ item.metadata_field.label }}: los archivos no se capturan en la recepción.
+                  </p>
+                } @else {
+                  <app-dynamic-field
+                    [field]="item.metadata_field"
+                    [value]="intakeValue(item.metadata_field.id)"
+                    [required]="isIntakeItemRequired(item)"
+                    [placeholder]="item.placeholder || ''"
+                    [helpText]="item.help_text || ''"
+                    [icon]="item.icon || ''"
+                    (valueChange)="setIntakeValue(item.metadata_field.id, $event)"
+                  />
+                }
+              </div>
+            }
+          </div>
+          <p class="text-[11px] text-[var(--color-text-secondary)]">Estos campos se guardan en el perfil del cliente.</p>
+        } @else {
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <app-input
+            label="Nombre Completo del Cliente"
+            [ngModel]="checkinCustomerName()"
+            (ngModelChange)="checkinCustomerName.set($event)"
+            placeholder="Ej. Juan Pérez o Mariana Vega"
+            [required]="true"
+          />
+          <app-input
+            label="Cédula / NIT / Documento (Opcional)"
+            [ngModel]="checkinCustomerDoc()"
+            (ngModelChange)="checkinCustomerDoc.set($event)"
+            placeholder="Ej. 1020304050"
+          />
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <app-input
+            label="Teléfono / Celular (Opcional)"
+            type="tel"
+            [ngModel]="checkinCustomerPhone()"
+            (ngModelChange)="checkinCustomerPhone.set($event)"
+            placeholder="Ej. 310 123 4567"
+          />
+          <app-input
+            label="Correo Electrónico (Opcional)"
+            type="email"
+            [ngModel]="checkinCustomerEmail()"
+            (ngModelChange)="checkinCustomerEmail.set($event)"
+            placeholder="cliente@ejemplo.com"
+          />
+        </div>
+        }
+      </div>
+
+      <!-- Presupuesto del Cliente Opcional (Común para TODOS los tipos) -->
+      @if (checkinShowBudget()) {
+      <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/80 space-y-3">
+        <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
+          <app-icon name="dollar-sign" [size]="14" class="text-emerald-500" />
+          <span>Presupuesto del cliente (opcional)</span>
+        </span>
+        <app-input
+          label="Presupuesto del cliente (opcional)"
+          [currency]="true"
+          [ngModel]="checkinBudgetAmount()"
+          (ngModelChange)="checkinBudgetAmount.set($event)"
+          placeholder="Ej. 150000"
+          hint="Monto máximo que el cliente autoriza gastar"
+        />
+      </div>
+      }
+
+      <!-- Servicio inicial: sus datos y campos de recepción quedan guardados en esta atención -->
+      <div class="grid grid-cols-1 gap-3" [class.sm:grid-cols-2]="checkinTracksTime()">
+        <div>
+          <app-selector
+            label="Servicio"
+            [options]="serviceSelectorOptions()"
+            [ngModel]="checkinProductId() || null"
+            (ngModelChange)="onCheckinServiceChange($event)"
+            placeholder="Selecciona el servicio"
+            [required]="true"
+          />
+          @if (!serviceSelectorOptions().length) {
+            <p class="mt-1 text-xs text-red-600">Esta estación no tiene servicios activos. Asígnalos en Configurar estación → Servicios.</p>
+          }
+        </div>
+        @if (checkinTracksTime()) {
+          <app-input
+            label="Tiempo Estimado (Minutos)"
+            type="number"
+            [ngModel]="checkinDurationMinutes()"
+            (ngModelChange)="checkinDurationMinutes.set($event)"
+          />
+        }
+      </div>
+
+      <!-- Cuenta de la estación: productos que entran desde el ingreso y total -->
+      @if (checkinShowProducts()) {
+      <div class="rounded-xl border border-[var(--color-border)] p-3 space-y-3">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
+            <app-icon name="shopping-bag" [size]="14" class="text-[var(--color-primary)]" /> Productos de la cuenta
+          </span>
+          <app-button variant="outline" size="sm" (clicked)="addCheckinLine()">
+            <app-icon name="plus" [size]="14" slot="icon" /> Agregar producto
+          </app-button>
+        </div>
+
+        @for (line of checkinLines(); track line.key) {
+          <div class="grid grid-cols-12 gap-2 items-end p-2 rounded-lg bg-[var(--color-background)]">
+            <div class="col-span-12 sm:col-span-5">
+              <app-selector
+                label="Producto"
+                [options]="checkinProductOptions()"
+                [ngModel]="line.product_id"
+                (ngModelChange)="onCheckinLineProduct(line.key, $event)"
+                placeholder="Gaseosa, aceite, repuesto…"
+              />
+            </div>
+            @if (checkinLineVariantOptions(line.product_id).length) {
+              <div class="col-span-12 sm:col-span-3">
+                <app-selector
+                  label="Variante"
+                  [options]="checkinLineVariantOptions(line.product_id)"
+                  [ngModel]="line.product_variant_id"
+                  (ngModelChange)="onCheckinLineVariant(line.key, $event)"
+                />
+              </div>
+            }
+            <div class="col-span-4 sm:col-span-1">
+              <app-input label="Cant." type="number" [min]="1" [ngModel]="line.quantity" (ngModelChange)="updateCheckinLine(line.key, { quantity: $event })" />
+            </div>
+            <div class="col-span-6 sm:col-span-2">
+              <app-input label="Precio" [currency]="true" [ngModel]="line.unit_price" (ngModelChange)="updateCheckinLine(line.key, { unit_price: $event })" />
+            </div>
+            <div class="col-span-2 sm:col-span-1 flex justify-end">
+              <app-button variant="ghost" size="sm" (clicked)="removeCheckinLine(line.key)" ariaLabel="Quitar producto">
+                <app-icon name="trash-2" [size]="14" class="text-red-500" />
+              </app-button>
+            </div>
+          </div>
+        } @empty {
+          <p class="text-xs text-[var(--color-text-secondary)] italic">Solo el servicio. Agrega productos ahora o después desde "Ver Cuenta".</p>
+        }
+
+        <div class="pt-2 border-t border-[var(--color-border)]/60 flex flex-wrap items-center justify-between gap-2">
+          <span class="text-sm font-semibold text-[var(--color-text-primary)]">Total de la cuenta</span>
+          <strong class="font-mono text-lg text-emerald-700 dark:text-emerald-300">{{ checkinEstimatedTotal() | currency }}</strong>
+        </div>
+        <p class="text-[11px] text-[var(--color-text-secondary)]">Estimado: el IVA de cada producto se aplica según su configuración (incluido o adicional).</p>
+      </div>
+      }
+
+      @if (checkinIntakeLoading()) {
+        <div class="rounded-xl border border-[var(--color-border)] p-4 flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+          <app-spinner size="sm" /> Cargando formulario de recepción...
+        </div>
+      } @else if (checkinIntakeTemplate(); as intakeTemplate) {
+        @if (checkinNonCustomerIntakeSections().length) {
+          <div class="rounded-xl border border-[var(--color-border)] p-4 space-y-4">
+            <div>
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-1.5">
+                <app-icon name="clipboard-list" [size]="14" class="text-[var(--color-primary)]" />
+                {{ intakeTemplate.name || 'Formulario de recepción' }}
+              </h4>
+              <p class="text-xs text-[var(--color-text-secondary)]">
+                Se guarda con esta atención.
+              </p>
+            </div>
+            @for (section of checkinNonCustomerIntakeSections(); track section.key) {
+              <div class="space-y-2">
+                @if (checkinNonCustomerIntakeSections().length > 1 || section.description) {
+                  <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">{{ section.title }}</p>
+                    @if (section.description) {
+                      <p class="text-xs text-[var(--color-text-secondary)]">{{ section.description }}</p>
+                    }
+                  </div>
+                }
+                <div class="flex flex-wrap gap-3">
+                  @for (item of section.items; track item.id) {
+                    <div [class]="getItemWidthClass(item.width)">
+                      @if (item.metadata_field.field_type === 'file') {
+                        <p class="text-xs text-[var(--color-text-secondary)]">
+                          {{ item.metadata_field.label }}: los archivos no se capturan en la recepción.
+                        </p>
+                      } @else {
+                        <app-dynamic-field
+                          [field]="item.metadata_field"
+                          [value]="intakeValue(item.metadata_field.id)"
+                          [required]="isIntakeItemRequired(item)"
+                          [placeholder]="item.placeholder || ''"
+                          [helpText]="item.help_text || ''"
+                          [icon]="item.icon || ''"
+                          (valueChange)="setIntakeValue(item.metadata_field.id, $event)"
+                        />
+                      }
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        }
+      } @else if (checkinProductId()) {
+        <div class="rounded-xl border border-dashed border-[var(--color-border)] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
+          <span>Este servicio no tiene formulario de recepción. Los datos a pedir se configuran en el servicio (Productos → editar → “Formulario de recepción”).</span>
+          <app-button variant="outline" size="sm" (clicked)="openServiceIntakeConfig()">
+            <app-icon name="pencil" [size]="14" slot="icon" /> Configurar
+          </app-button>
+        </div>
+      }
+
+      <div>
+        <app-selector
+          label="Técnico / Especialista Asignado"
+          placeholder="Selecciona una persona de servicio"
+          [required]="true"
+          [options]="providerSelectorOptions()"
+          [ngModel]="checkinProviderId()"
+          (ngModelChange)="checkinProviderId.set($event)"
+          [errorText]="checkinProviderError() && !checkinProviderId() ? 'Selecciona una persona de servicio.' : ''"
+        />
+        @if (unavailableCheckinProviders().length) {
+          <div class="mt-2 p-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 text-xs space-y-1">
+            <span class="font-semibold text-amber-700 dark:text-amber-300">No disponibles ahora:</span>
+            @for (p of unavailableCheckinProviders(); track p.provider_id) {
+              <div class="text-[var(--color-text-secondary)]">
+                <span class="font-semibold text-[var(--color-text-primary)]">{{ p.display_name }}</span> — {{ p.detail }}
+                @if (p.status === 'no_schedule' || p.status === 'off_schedule') {
+                  · <span class="text-amber-700 dark:text-amber-300">revisa su horario en Reservas → Personal</span>
+                }
+              </div>
+            }
+          </div>
+        }
+      </div>
+
+      @if (checkinShowNotes()) {
+      <app-textarea
+        label="Instrucciones Especiales / Notas (Opcional)"
+        [ngModel]="checkinNotes()"
+        (ngModelChange)="checkinNotes.set($event)"
+        placeholder="Notas de recepción, estado inicial, indicaciones del cliente..."
+        [rows]="2"
+      />
+      }
+    </div>
+
+    <div slot="footer" class="flex items-center justify-end gap-2.5">
+      <app-button variant="secondary" (clicked)="showCheckinModal.set(false)">Cancelar</app-button>
+      <app-button variant="primary" [loading]="saving()" (clicked)="submitCheckin()">
+        <app-icon name="play" [size]="14" slot="icon" /> Iniciar Atención & Abrir Cuenta
+      </app-button>
+    </div>
+  </app-modal>
+
+  <!-- Modal 3: Gestión de Atención y Cuenta Abierta de la Bahía (Estilo Mesa Restaurante) -->
+  @if (selectedSession(); as session) {
+    <app-modal [(isOpen)]="showSessionModal" [title]="'Cuenta de Estación: ' + stationNameOf(session)" [subtitle]="getCustomerName(session) + ' • Sesión #' + session.id" size="xl-mid">
+      <div class="space-y-5">
+        <!-- Ficha del Cliente y Estado de la Atención -->
+        <div class="p-4 rounded-2xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-3">
+            <div class="w-11 h-11 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] flex items-center justify-center text-[var(--color-primary)] shrink-0">
+              <app-icon name="user" [size]="20" />
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="font-bold text-sm text-[var(--color-text-primary)]">{{ getCustomerName(session) }}</span>
+                @if (getCustomerPlate(session); as plate) {
+                  <span class="px-2 py-0.5 rounded font-mono font-bold bg-amber-400/20 text-amber-800 dark:text-amber-300 text-[10px] border border-amber-400/40">
+                    {{ plate }}
+                  </span>
+                }
+              </div>
+              <div class="flex flex-wrap items-center gap-3 text-xs text-[var(--color-text-secondary)] mt-0.5">
+                @if (getCustomerPhone(session); as phone) {
+                  <span class="flex items-center gap-1 font-mono">
+                    <app-icon name="phone" [size]="12" /> {{ phone }}
+                  </span>
+                }
+                @if (getCustomerDoc(session); as doc) {
+                  <span class="flex items-center gap-1 font-mono">
+                    <app-icon name="credit-card" [size]="12" /> CC: {{ doc }}
+                  </span>
+                }
+                <span class="flex items-center gap-1">
+                  <app-icon name="user-check" [size]="12" /> {{ session.allocation?.provider_name || 'Especialista asignado' }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <app-badge [variant]="session.status === 'paused' ? 'warning' : 'success'" size="sm">
+              {{ session.status === 'paused' ? 'En Pausa' : 'Atención Activa' }}
+            </app-badge>
+            @if (stationTracksTime(session.station_id)) {
+              <span class="px-2.5 py-1 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] text-xs font-mono font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
+                <app-icon name="clock" [size]="12" /> {{ sessionElapsedMinutes(session.opened_at) }} min
+              </span>
+            }
+          </div>
+        </div>
+
+        @if (session.intake; as intake) {
+          @if (intake.answers.length) {
+            <div class="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] space-y-2">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
+                  <app-icon name="clipboard-list" [size]="14" class="text-[var(--color-primary)]" />
+                  Datos de la atención
+                </span>
+                @if (intake.template_name) {
+                  <span class="text-xs text-[var(--color-text-secondary)] truncate">{{ intake.template_name }}</span>
+                }
+              </div>
+              <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                @for (answer of intake.answers; track answer.field_id) {
+                  <div class="flex gap-1.5 min-w-0">
+                    <dt class="text-[var(--color-text-secondary)] shrink-0">{{ answer.label }}:</dt>
+                    <dd class="font-medium text-[var(--color-text-primary)] break-words min-w-0">{{ formatIntakeAnswer(answer.field_type, answer.value) }}</dd>
+                  </div>
+                }
+              </dl>
+            </div>
+          }
+        }
+
+        <!-- Sección: Consumo / Cuenta Abierta (Estilo restaurante mesa) -->
+        <div class="p-4 rounded-2xl bg-[var(--color-surface)] border-2 border-emerald-500/30 shadow-sm space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[var(--color-border)]">
+            <div class="flex items-center gap-2">
+              <div class="w-8 h-8 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                <app-icon name="shopping-bag" [size]="16" />
+              </div>
+              <div>
+                <h4 class="font-bold text-sm text-[var(--color-text-primary)]">Cuenta de la Estación</h4>
+                <p class="text-[11px] text-[var(--color-text-secondary)]">
+                  Orden #{{ sessionOrder()?.order_number || ('SVC-' + session.id) }} • Ítems y productos cargados
+                </p>
+              </div>
+            </div>
+
+            <!-- Total de la Cuenta Destacado -->
+            <div class="text-right">
+              <span class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)] block">Total Acumulado</span>
+              <span class="font-mono font-black text-lg text-emerald-600 dark:text-emerald-400">
+                {{ (sessionOrder()?.grand_total ?? session.order?.grand_total ?? session.budget_amount ?? 0) | currency }}
+              </span>
+            </div>
+          </div>
+
+          <!-- Barra para Agregar Producto, Insumo o Servicio a la Cuenta -->
+          <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-2.5">
+            <span class="text-xs font-bold text-[var(--color-text-primary)] flex items-center gap-1.5">
+              <app-icon name="plus-circle" [size]="14" class="text-[var(--color-primary)]" />
+              Agregar Producto o Servicio Adicional
+            </span>
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+              <div class="sm:col-span-6">
+                <app-selector
+                  label="Producto / Servicio del Catálogo"
+                  [options]="sessionCatalogProductSelectorOptions()"
+                  [ngModel]="selectedAddProductId()"
+                  (ngModelChange)="onAddProductSelect($event)"
+                  placeholder="-- Seleccionar producto o servicio --"
+                />
+              </div>
+
+              @if (addVariantOptions().length) {
+                <div class="sm:col-span-12">
+                  <app-selector
+                    label="Variante"
+                    [options]="addVariantOptions()"
+                    [ngModel]="selectedAddVariantId()"
+                    (ngModelChange)="onAddVariantSelect($event)"
+                    placeholder="-- Elegir variante --"
+                    [required]="true"
+                  />
+                </div>
+              }
+
+              <div class="sm:col-span-2">
+                <app-input
+                  label="Cantidad"
+                  type="number"
+                  [ngModel]="addQuantity()"
+                  (ngModelChange)="addQuantity.set($event)"
+                />
+              </div>
+
+              <div class="sm:col-span-2">
+                <app-input
+                  label="Precio Unitario"
+                  type="number"
+                  [ngModel]="addUnitPrice()"
+                  (ngModelChange)="onAddUnitPriceChange($event)"
+                  [placeholder]="currencyCode() || 'COP'"
+                />
+              </div>
+
+              <div class="sm:col-span-2 pb-0.5">
+                <app-button
+                  variant="primary"
+                  size="md"
+                  class="w-full"
+                  [disabled]="!selectedAddProductId()"
+                  [loading]="addingItem()"
+                  (clicked)="addItemToAccount()"
+                >
+                  <app-icon name="plus" [size]="14" slot="icon" /> Agregar
+                </app-button>
+              </div>
+            </div>
+            <div class="flex justify-end text-xs text-[var(--color-text-secondary)]">
+              Total estimado al agregar: <strong class="ml-1 font-mono text-emerald-600">{{ addItemEstimatedTotal() | currency }}</strong>
+            </div>
+          </div>
+
+          <!-- Lista de Ítems en la Cuenta -->
+          <div class="space-y-2">
+            @if (sessionOrderLoading()) {
+              <div class="py-6 text-center text-xs text-[var(--color-text-secondary)]">
+                Cargando cuenta de la estación...
+              </div>
+            } @else if (sessionOrder()?.order_items?.length > 0) {
+              <div class="divide-y divide-[var(--color-border)]/60 rounded-xl border border-[var(--color-border)] overflow-hidden">
+                @for (item of sessionOrder().order_items; track item.id) {
+                  <div class="p-3 bg-[var(--color-surface)] flex items-center justify-between gap-3 text-xs">
+                    <div class="flex items-center gap-2.5 min-w-0">
+                      <span class="px-2 py-0.5 rounded-md text-[10px] font-bold" [ngClass]="item.item_type === 'physical' ? 'bg-blue-500/15 text-blue-600' : 'bg-purple-500/15 text-purple-600'">
+                        {{ item.item_type === 'physical' ? 'Producto' : 'Servicio' }}
+                      </span>
+                      <div class="min-w-0">
+                        <div class="font-bold text-[var(--color-text-primary)] truncate">{{ item.product_name }}</div>
+                        <div class="text-[11px] text-[var(--color-text-secondary)] font-mono">
+                          {{ item.quantity }} x {{ (item.final_unit_price ?? item.unit_price) | currency }}
+                          @if (Number(item.tax_rate) > 0) {
+                            <span class="ml-1 text-[10px]">· IVA {{ Number(item.tax_rate) * 100 | number: '1.0-2' }}%</span>
+                          }
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                      <span class="font-mono font-bold text-xs text-[var(--color-text-primary)]">
+                        {{ lineTotalWithTax(item) | currency }}
+                      </span>
+                      <app-button variant="ghost" size="sm" (clicked)="removeItemFromAccount(item.id)" ariaLabel="Eliminar ítem">
+                        <app-icon name="trash-2" [size]="13" class="text-red-500" />
+                      </app-button>
+                    </div>
+                  </div>
+                }
+              </div>
+              <div class="mt-2 p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-xs space-y-1 font-mono">
+                <div class="flex justify-between text-[var(--color-text-secondary)]">
+                  <span>Subtotal</span><span>{{ sessionOrder()?.subtotal_amount | currency }}</span>
+                </div>
+                <div class="flex justify-between text-[var(--color-text-secondary)]">
+                  <span>Impuestos</span><span>{{ (sessionOrder()?.tax_amount || 0) | currency }}</span>
+                </div>
+                <div class="flex justify-between font-bold text-[var(--color-text-primary)]">
+                  <span>Total</span><span>{{ sessionOrder()?.grand_total | currency }}</span>
+                </div>
+              </div>
+              @if (budget() && Number(sessionOrder()?.grand_total) > Number(budget()?.amount)) {
+                <div class="mt-2 p-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
+                  <app-icon name="alert-triangle" [size]="14" class="shrink-0 mt-0.5" />
+                  <span>La cuenta supera el presupuesto autorizado por el cliente ({{ budget()?.amount | currency }}). Ajusta el presupuesto abajo para poder cobrarla.</span>
+                </div>
+              }
+            } @else {
+              <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-center text-xs text-[var(--color-text-secondary)] italic">
+                La cuenta de esta estación está abierta con el servicio inicial. Puedes agregar productos, consumibles o servicios adicionales con el botón de arriba.
+              </div>
+            }
+          </div>
+        </div>
+
+        <!-- Techo de Presupuesto Autorizado -->
+        <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
+          <div class="flex items-center justify-between">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
+              <app-icon name="dollar-sign" [size]="14" class="text-emerald-500" />
+              Techo de Presupuesto Autorizado ({{ currencyCode() || 'COP' }})
+            </h4>
+            <span class="text-xs font-semibold text-[var(--color-text-secondary)]">Control POS</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <app-input
+              type="number"
+              [ngModel]="sessionBudgetAmount()"
+              (ngModelChange)="sessionBudgetAmount.set($event)"
+              placeholder="Ej. 250000"
+            />
+            <app-button variant="primary" size="md" class="shrink-0" [loading]="saving()" (clicked)="saveBudget()">
+              Guardar Tope
+            </app-button>
+          </div>
+          <p class="text-[11px] text-[var(--color-text-secondary)]">
+            El POS validará este monto y bloqueará el cobro de líneas no aprobadas por el cliente.
+          </p>
+        </div>
+
+        <!-- Propuestas de Trabajo Adicional -->
+        <div class="space-y-2.5">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
+            <app-icon name="file-text" [size]="14" /> Propuestas de Trabajo Adicional
+          </h4>
+          @if (proposals().length > 0) {
+            <div class="space-y-2">
+              @for (prop of proposals(); track prop.id) {
+                <div class="p-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between text-xs">
+                  <div>
+                    <span class="font-bold text-[var(--color-text-primary)]">Versión {{ prop.version }}</span>
+                    <span class="text-[var(--color-text-secondary)] ml-2 font-mono">Total: {{ prop.total | currency }}</span>
+                  </div>
+                  <app-badge [variant]="prop.status === 'approved' ? 'success' : prop.status === 'rejected' ? 'error' : 'warning'" size="xs">
+                    {{ prop.status === 'approved' ? 'Aprobada' : prop.status === 'rejected' ? 'Rechazada' : 'Pendiente' }}
+                  </app-badge>
+                </div>
+              }
+            </div>
+          } @else {
+            <p class="text-xs text-[var(--color-text-secondary)] italic p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60">
+              No hay propuestas de trabajo adicional registradas en esta atención.
+            </p>
+          }
+        </div>
+
+        <!-- Compartir seguimiento con el cliente -->
+        <div class="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-[var(--color-border)]/60">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
+              <app-icon name="smartphone" [size]="14" class="text-[var(--color-primary)]" />
+              Compartir seguimiento con el cliente
+            </h4>
+            @if (sessionAccessUrl()) {
+              <span class="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
+                Enlace Activo
+              </span>
+            }
+          </div>
+
+          @if (sessionAccessUrl(); as url) {
+            <div class="flex flex-col sm:flex-row items-center gap-4">
+              @if (sessionAccessQrDataUrl(); as qr) {
+                <div class="p-2 rounded-xl bg-white border border-[var(--color-border)] shrink-0">
+                  <img [src]="qr" alt="QR Seguimiento" class="w-28 h-28 object-contain" />
+                </div>
+              } @else if (sessionAccessQrLoading()) {
+                <div class="w-28 h-28 flex items-center justify-center bg-[var(--color-background)] rounded-xl border border-[var(--color-border)] shrink-0">
+                  <app-spinner size="sm" />
+                </div>
+              }
+              <div class="flex-1 min-w-0 space-y-2 text-center sm:text-left">
+                <p class="text-xs text-[var(--color-text-secondary)]">
+                  El cliente puede ver el avance en vivo, fotos, ítems cargados y aprobar presupuestos desde su móvil.
+                </p>
+                <div class="p-2 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)]/70 text-[11px] font-mono text-[var(--color-text-primary)] truncate select-all">
+                  {{ url }}
+                </div>
+                <div class="flex flex-wrap items-center gap-2 pt-1 justify-center sm:justify-start">
+                  <app-button variant="outline" size="sm" (clicked)="copySessionAccessUrl()">
+                    <app-icon name="copy" [size]="13" slot="icon" /> Copiar enlace
+                  </app-button>
+                  <app-button variant="primary" size="sm" (clicked)="shareSessionByWhatsApp(session)">
+                    <app-icon name="smartphone" [size]="13" slot="icon" /> Enviar por WhatsApp
+                  </app-button>
+                </div>
+              </div>
+            </div>
+          } @else {
+            <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-xs text-[var(--color-text-secondary)] space-y-3">
+              <p>Por seguridad el enlace solo se muestra al abrir la atención. Si se cerró o recargó la página, genera uno nuevo: el anterior deja de funcionar.</p>
+              @if (session.contact_email) {
+                <label class="flex items-start gap-2 cursor-pointer text-[var(--color-text-primary)]">
+                  <input type="checkbox" class="mt-0.5" [checked]="reissueIdentityChecked()" (change)="reissueIdentityChecked.set($any($event.target).checked)" />
+                  <span>Verifiqué en persona que es el cliente ({{ session.contact_email }})</span>
+                </label>
+                <app-button variant="outline" size="sm" [disabled]="!reissueIdentityChecked()" [loading]="reissuingLink()" (clicked)="reissueSessionLink()">
+                  <app-icon name="refresh-cw" [size]="14" slot="icon" /> Generar nuevo enlace
+                </app-button>
+              } @else {
+                <p class="italic">Esta atención no tiene correo de contacto, así que no se puede reemitir el enlace.</p>
+              }
+            </div>
+          }
+        </div>
+
+        <!-- Acciones Operativas -->
+        <div class="pt-3 border-t border-[var(--color-border)] flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center gap-2">
+            @if (session.status === 'paused') {
+              <app-button variant="outline" size="sm" class="text-emerald-600 border-emerald-500/40" [loading]="saving()" (clicked)="transitionSession(session, 'resume')">
+                <app-icon name="play" [size]="14" slot="icon" /> Reanudar Atención
+              </app-button>
+            } @else {
+              <app-button variant="secondary" size="sm" [loading]="saving()" (clicked)="transitionSession(session, 'pause')">
+                <app-icon name="pause" [size]="14" slot="icon" /> Pausar Atención
+              </app-button>
+            }
+          </div>
+          <div class="flex items-center gap-2">
+            <app-button variant="outline" size="sm" (clicked)="chargeSessionAccount(session)">
+              <app-icon name="credit-card" [size]="14" slot="icon" /> Cobrar cuenta
+            </app-button>
+            <app-button variant="danger" size="sm" [loading]="saving()" (clicked)="requestClose(session)">
+              <app-icon name="check-circle" [size]="14" slot="icon" /> Finalizar y cobrar
+            </app-button>
+          </div>
+        </div>
+      </div>
+    </app-modal>
+  }
+
+  <!-- Modal 4: Configuración Avanzada de Bahía (Servicios, Proveedores, QR) -->
+  @if (selectedStation(); as station) {
+    <app-modal [(isOpen)]="showConfigModal" [title]="'Configurar Estación: ' + station.name" subtitle="Ajusta servicios compatibles, especialistas autorizados y datos operativos" size="xl-mid">
+      <div class="space-y-5">
+        <!-- Pestañas de Configuración -->
+        <div class="flex items-center gap-1.5 border-b border-[var(--color-border)] pb-2 overflow-x-auto text-xs font-semibold">
+          <button
+            type="button"
+            (click)="selectedConfigTab.set('details')"
+            class="px-3 py-1.5 rounded-lg transition-all"
+            [ngClass]="selectedConfigTab() === 'details' ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'"
+          >
+            Datos & QR
+          </button>
+          <button
+            type="button"
+            (click)="selectedConfigTab.set('intake')"
+            class="px-3 py-1.5 rounded-lg transition-all"
+            [ngClass]="selectedConfigTab() === 'intake' ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'"
+          >
+            Plantilla de estación
+          </button>
+          <button
+            type="button"
+            (click)="selectedConfigTab.set('services')"
+            class="px-3 py-1.5 rounded-lg transition-all"
+            [ngClass]="selectedConfigTab() === 'services' ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'"
+          >
+            Servicios ({{ serviceIds().length }})
+          </button>
+          <button
+            type="button"
+            (click)="selectedConfigTab.set('providers')"
+            class="px-3 py-1.5 rounded-lg transition-all"
+            [ngClass]="selectedConfigTab() === 'providers' ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'"
+          >
+            Proveedores ({{ providerIds().length }})
+          </button>
+        </div>
+
+        @if (selectedConfigTab() === 'intake') {
+          <div class="space-y-4">
+            <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-2">
+              <div class="flex flex-col sm:flex-row sm:items-end gap-2">
+                <div class="flex-1 min-w-0">
+                  <app-selector
+                    label="Plantilla de estación"
+                    [options]="intakeTemplateOptions()"
+                    [ngModel]="editIntakeTemplateId()"
+                    (ngModelChange)="editIntakeTemplateId.set($event)"
+                  />
+                </div>
+                <app-button variant="outline" size="sm" [loading]="designingTemplate()" (clicked)="designStationTemplate(station)">
+                  <app-icon name="layout-template" [size]="14" slot="icon" /> Diseñar plantilla de estación
+                </app-button>
+              </div>
+              <p class="text-xs text-[var(--color-text-secondary)]">Elige una plantilla existente o diseña la de esta estación. Sus campos son los que se piden al ingresar un cliente.</p>
+            </div>
+            <div class="flex justify-end">
+              <app-button variant="primary" [loading]="saving()" (clicked)="saveStationIntakeTemplate()">Guardar plantilla</app-button>
+            </div>
+          </div>
+        }
+
+        <!-- Pestaña 1: Datos & QR -->
+        @if (selectedConfigTab() === 'details') {
+          <div class="space-y-4">
+            <app-input
+              label="Nombre de la Estación"
+              [ngModel]="editName()"
+              (ngModelChange)="editName.set($event)"
+              placeholder="Ej. Bahía de Alineación 1, Silla Barber 2"
+              [required]="true"
+            />
+
+            <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <span class="text-xs font-bold text-[var(--color-text-primary)]">Cronómetro de atención</span>
+                  <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">Muestra el tiempo transcurrido de cada atención en esta estación. Apagado, no se controla tiempo.</p>
+                </div>
+                <app-toggle
+                  [checked]="editTrackTime()"
+                  ariaLabel="Activar cronómetro de atención"
+                  (changed)="editTrackTime.set($event)"
+                />
+              </div>
+              @if (editTrackTime()) {
+                <app-input
+                  label="Minutos objetivo por atención (opcional)"
+                  type="number"
+                  [ngModel]="editTargetMinutes()"
+                  (ngModelChange)="editTargetMinutes.set($event)"
+                  placeholder="Vacío = duración del servicio"
+                />
+              }
+            </div>
+
+            <section class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3" aria-labelledby="edit-station-tax-title">
+              <div>
+                <h4 id="edit-station-tax-title" class="text-xs font-bold text-[var(--color-text-primary)]">Impuesto del alquiler (opcional)</h4>
+                <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">Se aplica a la línea “Alquiler” de la estación. Sin impuesto, el alquiler se cobra tal cual.</p>
+              </div>
+              <app-selector
+                id="edit-station-tax-category"
+                label="Categoría de impuesto"
+                [options]="editTaxSelectorOptions()"
+                [ngModel]="editTaxCategoryId()"
+                (ngModelChange)="onEditTaxCategoryChange($event)"
+                [helpText]="loadingTaxOptions() ? 'Cargando impuestos…' : ''"
+              />
+              @if (taxOptionsError()) {
+                <p class="text-xs text-red-600" role="alert">{{ taxOptionsError() }}</p>
+              }
+              @if (editTaxCategoryId() !== null) {
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <span class="text-xs font-bold text-[var(--color-text-primary)]">Impuesto incluido en el precio</span>
+                    <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">{{ editTaxIsInclusive() ? 'El precio del bloque ya trae el impuesto.' : 'El impuesto se suma al cobrar.' }}</p>
+                  </div>
+                  <app-toggle
+                    [checked]="editTaxIsInclusive()"
+                    ariaLabel="Impuesto incluido en el precio del alquiler"
+                    (changed)="editTaxIsInclusive.set($event)"
+                  />
+                </div>
+              }
+            </section>
+
+            <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex items-center justify-center shrink-0">
+                  <app-icon name="qr-code" [size]="20" />
+                </div>
+                <div>
+                  <div class="font-bold text-xs text-[var(--color-text-primary)]">Identificador QR de la Bahía</div>
+                  <div class="text-[11px] font-mono text-[var(--color-text-secondary)]">{{ station.public_id || 'Aún no asignado' }}</div>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <app-button variant="outline" size="sm" (clicked)="openQrModal(station)">
+                  <app-icon name="qr-code" [size]="14" slot="icon" /> Ver e Imprimir QR
+                </app-button>
+                <app-badge [variant]="station.qr_status === 'ready' ? 'success' : 'warning'" size="xs">
+                  {{ station.qr_status === 'ready' ? 'Activo' : 'Pendiente' }}
+                </app-badge>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between pt-2">
+              <div class="flex items-center gap-2">
+                <app-button
+                  [variant]="station.status === 'active' ? 'outline-danger' : 'secondary'"
+                  (clicked)="toggleStationStatus()"
+                  [disabled]="saving()"
+                >
+                  <app-icon name="power" [size]="14" slot="icon" />
+                  {{ station.status === 'active' ? 'Desactivar Estación' : 'Activar Estación' }}
+                </app-button>
+                <app-button variant="outline-danger" (clicked)="askDeleteStation()" [disabled]="saving()">
+                  <app-icon name="trash" [size]="14" slot="icon" />
+                  Eliminar Estación
+                </app-button>
+              </div>
+              <app-button variant="primary" (clicked)="saveStationDetails()" [loading]="saving()">
+                Guardar Datos
+              </app-button>
+            </div>
+          </div>
+        }
+
+        <!-- Pestaña 2: Servicios Compatibles -->
+        @if (selectedConfigTab() === 'services') {
+          <div class="space-y-4">
+            <p class="text-xs text-[var(--color-text-secondary)]">Selecciona los servicios que pueden realizarse en esta bahía:</p>
+            @if (services().length === 0) {
+              <p class="text-xs italic text-[var(--color-text-secondary)]">No encontramos servicios activos registrados en la tienda.</p>
+            } @else {
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-1">
+                @for (svc of services(); track svc.id) {
+                  <label class="flex items-center gap-2.5 p-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] text-xs cursor-pointer hover:border-[var(--color-primary)] transition-all">
+                    <input type="checkbox" [checked]="serviceIds().includes(svc.id)" (change)="toggleService(svc.id)" class="rounded text-[var(--color-primary)] focus:ring-[var(--color-primary)]" />
+                    <div class="min-w-0">
+                      <div class="font-bold text-[var(--color-text-primary)] truncate">{{ svc.name }}</div>
+                      <div class="text-[11px] text-[var(--color-text-secondary)]">{{ svc.service_duration_minutes ? svc.service_duration_minutes + ' min' : 'Duración estándar' }}</div>
+                    </div>
+                  </label>
+                }
+              </div>
+            }
+            <div class="flex justify-end pt-2">
+              <app-button variant="primary" (clicked)="saveServices()" [loading]="saving()">Guardar Servicios</app-button>
+            </div>
+          </div>
+        }
+
+        <!-- Pestaña 3: Proveedores Compatibles -->
+        @if (selectedConfigTab() === 'providers') {
+          <div class="space-y-4">
+            <p class="text-xs text-[var(--color-text-secondary)]">Asigna los técnicos y especialistas autorizados para operar en esta estación:</p>
+            @if (providers().length === 0) {
+              <p class="text-xs italic text-[var(--color-text-secondary)]">No hay especialistas registrados en la tienda.</p>
+            } @else {
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-1">
+                @for (prov of providers(); track prov.id) {
+                  <label class="flex items-center gap-2.5 p-2.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] text-xs cursor-pointer hover:border-[var(--color-primary)] transition-all">
+                    <input type="checkbox" [checked]="providerIds().includes(prov.id)" (change)="toggleProvider(prov.id)" class="rounded text-[var(--color-primary)] focus:ring-[var(--color-primary)]" />
+                    <div class="min-w-0">
+                      <div class="font-bold text-[var(--color-text-primary)] truncate">{{ prov.display_name }}</div>
+                      <div class="text-[11px] text-[var(--color-text-secondary)]">
+                        @if (serviceIds().length > 0) {
+                          {{ providerSupportsSelectedServices(prov) ? 'Compatible con servicios de la estación' : 'Personal autorizado' }}
+                        } @else {
+                          Personal autorizado
+                        }
+                      </div>
+                    </div>
+                  </label>
+                }
+              </div>
+            }
+            <div class="flex justify-end pt-2">
+              <app-button variant="primary" (clicked)="saveProviders()" [loading]="saving()">Guardar Proveedores</app-button>
+            </div>
+          </div>
+        }
+      </div>
+    </app-modal>
+  }
+
+  @if (showDeactivateConfirm()) {
+    <app-confirmation-modal
+      [isOpen]="true"
+      title="Desactivar estación"
+      [message]="'¿Desactivar ' + (selectedStation()?.name || 'la estación') + '? No aceptará nuevos ingresos, pero se conserva su historial.'"
+      confirmText="Desactivar"
+      cancelText="Cancelar"
+      confirmVariant="danger"
+      (confirm)="confirmDeactivateStation()"
+      (cancel)="showDeactivateConfirm.set(false)"
+    />
+  }
+
+  @if (showDeleteConfirm()) {
+    <app-confirmation-modal
+      [isOpen]="true"
+      title="Eliminar estación"
+      [message]="'¿Eliminar ' + (selectedStation()?.name || 'la estación') + ' definitivamente? Solo es posible si no tiene atenciones registradas.'"
+      confirmText="Eliminar"
+      cancelText="Cancelar"
+      confirmVariant="danger"
+      (confirm)="confirmDeleteStation()"
+      (cancel)="showDeleteConfirm.set(false)"
+    />
+  }
+
+  <!-- Modal 5: Visualización, Descarga e Impresión de Código QR -->
+  <app-modal
+    [(isOpen)]="showQrModal"
+    [title]="'Código QR • ' + (qrStation()?.name || 'Estación')"
+    subtitle="Identificador físico para colocar en la bahía o puesto de atención"
+    size="sm"
+  >
+    <div class="flex flex-col items-center gap-4 py-2 text-center">
+      @if (qrLoading()) {
+        <div class="py-12 flex flex-col items-center justify-center gap-2">
+          <app-spinner size="md"></app-spinner>
+          <p class="text-xs text-[var(--color-text-secondary)]">Generando código QR de alta resolución...</p>
+        </div>
+      } @else if (qrDataUrl()) {
+        <div class="p-3.5 rounded-2xl bg-white border border-[var(--color-border)] shadow-sm">
+          <img
+            [src]="qrDataUrl()"
+            [alt]="'QR de ' + (qrStation()?.name || '')"
+            class="w-56 h-56 object-contain mx-auto"
+          />
+        </div>
+
+        <div>
+          @if (qrStation(); as st) {
+            <span class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-[var(--color-primary)]/10 text-[var(--color-primary)]">
+              {{ stationTypesMeta[getStationType(st)].singularLabel }}
+            </span>
+          }
+          <h3 class="font-bold text-base text-[var(--color-text-primary)] mt-1.5">{{ qrStation()?.name }}</h3>
+          <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">Coloca este identificador en el letrero, elevador o pared de la bahía</p>
+        </div>
+
+        <div class="w-full p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-left space-y-1">
+          <div class="text-[10px] font-bold uppercase text-[var(--color-text-secondary)]">Identificador Público (UUID)</div>
+          <div class="text-[11px] font-mono text-[var(--color-text-primary)] break-all select-all">{{ qrStation()?.public_id || 'ID no generado' }}</div>
+        </div>
+      } @else {
+        <div class="py-8 text-center text-xs text-[var(--color-text-secondary)]">
+          No se pudo generar el código QR. Verifica la conexión.
+        </div>
+      }
+    </div>
+
+    <div slot="footer" class="flex flex-wrap items-center justify-end gap-2 w-full">
+      <app-button variant="ghost" size="sm" (clicked)="copyQrLink()">
+        <app-icon name="copy" [size]="14" slot="icon" /> Copiar Enlace
+      </app-button>
+      <app-button variant="secondary" size="sm" (clicked)="downloadQrImage()" [disabled]="!qrDataUrl()">
+        <app-icon name="download" [size]="14" slot="icon" /> Descargar PNG
+      </app-button>
+      <app-button variant="primary" size="sm" (clicked)="printQrCode()" [disabled]="!qrDataUrl()">
+        <app-icon name="printer" [size]="14" slot="icon" /> Imprimir Identificador
+      </app-button>
+    </div>
+  </app-modal>
+</div>

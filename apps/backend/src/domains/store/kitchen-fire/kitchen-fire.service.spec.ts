@@ -2668,3 +2668,67 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     });
   });
 });
+
+describe('KitchenFireService — firma de la foto del plato en el KDS (recipe-profile-ui)', () => {
+  const ticket = () => ({
+    id: 7,
+    items: [
+      { product: { id: 10, product_images: [{ id: 1, image_url: 'store/1/dish.jpg' }] } },
+    ],
+  });
+  const signUrl = jest.fn(async (key?: string | null) =>
+    key ? `https://signed.test/${key}` : undefined,
+  );
+  const build = (prisma: any) =>
+    new KitchenFireService(
+      prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      undefined, undefined, undefined, { signUrl } as any,
+    );
+
+  beforeEach(() => {
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 1 } as any);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('el snapshot del tablero devuelve la imagen firmada, no la key de S3', async () => {
+    const service = build({
+      store_settings: { findUnique: jest.fn().mockResolvedValue(null) },
+      kitchen_tickets: { findMany: jest.fn().mockResolvedValue([ticket()]) },
+    });
+
+    const res = await service.getActiveTicketsSnapshot();
+
+    expect(res.data[0].items[0].product.product_images[0].image_url).toBe(
+      'https://signed.test/store/1/dish.jpg',
+    );
+  });
+
+  it('el detalle de ticket (base de los eventos SSE de mutación) va firmado', async () => {
+    const service = build({
+      kitchen_tickets: { findFirst: jest.fn().mockResolvedValue(ticket()) },
+    });
+
+    const res: any = await service.findTicketById(7);
+
+    expect(res.items[0].product.product_images[0].image_url).toBe(
+      'https://signed.test/store/1/dish.jpg',
+    );
+  });
+
+  it('el listado de tickets va firmado', async () => {
+    const service = build({
+      kitchen_tickets: {
+        findMany: jest.fn().mockResolvedValue([ticket()]),
+        count: jest.fn().mockResolvedValue(1),
+      },
+    });
+
+    const res = await service.findTickets({} as any);
+
+    expect((res.data[0] as any).items[0].product.product_images[0].image_url).toBe(
+      'https://signed.test/store/1/dish.jpg',
+    );
+  });
+});

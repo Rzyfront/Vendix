@@ -1,3 +1,4 @@
+import { isSaleNature } from '../../store/products/services/product-usage-nature.util';
 import { Injectable, Optional } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -17,6 +18,11 @@ import {
 import { CheckoutDto, CouponPreviewDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { ScheduledOrdersService } from '../../store/scheduled-orders/scheduled-orders.service';
+import {
+  OptionPricingService,
+  ResolvedOptions,
+} from '../../store/product-options/option-pricing.service';
 import {
   Prisma,
   payment_processing_mode_enum,
@@ -191,6 +197,13 @@ export class CheckoutService {
     // motivo; sin él devuelve "sin alcance fijo".
     @Optional()
     private readonly shippingCalculator?: ShippingCalculatorService,
+    // Pedidos programados. `@Optional()` por el mismo motivo; sin él un
+    // `schedule` en el payload se rechaza con SCHED_DISABLED.
+    @Optional()
+    private readonly scheduledOrdersService?: ScheduledOrdersService,
+    // Adiciones de producto. `@Optional()` por el mismo motivo.
+    @Optional()
+    private readonly optionPricingService?: OptionPricingService,
   ) {}
 
   /**
@@ -209,6 +222,16 @@ export class CheckoutService {
     return this.shippingTaxService.snapshotForRate(null, rate_id, shipping_cost, {
       store_id,
     });
+  }
+
+  private async cancelCheckoutBookings(bookingIds: number[]): Promise<void> {
+    for (const bookingId of bookingIds) {
+      try {
+        await this.reservationsService.cancel(bookingId);
+      } catch (error) {
+        this.logger.error(`Could not release booking ${bookingId} during checkout compensation: ${error instanceof Error ? error.message : 'unknown error'}`);
+      }
+    }
   }
 
   /**
@@ -252,6 +275,38 @@ export class CheckoutService {
     const limit = Number(threshold);
     if (!Number.isFinite(limit) || limit < 0) return price;
     return products_gross >= limit ? 0 : price;
+  }
+
+  /**
+   * Adiciones de una línea del checkout. La línea armada desde `dto.items`
+   * (invitado) trae sus `option_ids`; la del carrito de backend las toma del
+   * `dto.items` que coincida por producto + variante + presentación (mismo
+   * emparejamiento que `notes`). Sin servicio (specs) → sin efecto. Solo se
+   * aceptan con pedido programado (`scheduled`), que las descuenta al
+   * pasar a producción.
+   */
+  private async resolveCheckoutLineOptions(
+    item: { product_id: number; product_variant_id?: number | null; applied_price_tier_id?: number | null; quantity: number; option_ids?: number[] },
+    dto_items: Array<{ product_id: number; product_variant_id?: number | null; price_tier_id?: number | null; option_ids?: number[] }> | undefined,
+    scheduled: boolean,
+  ): Promise<ResolvedOptions> {
+    const option_ids =
+      item.option_ids ??
+      dto_items?.find(
+        (d) =>
+          d.option_ids !== undefined &&
+          d.product_id === item.product_id &&
+          (d.product_variant_id ?? null) === (item.product_variant_id ?? null) &&
+          (d.price_tier_id ?? null) === (item.applied_price_tier_id ?? null),
+      )?.option_ids;
+    const store_id = RequestContextService.getStoreId();
+    if (!this.optionPricingService || !store_id) {
+      if (option_ids?.length) throw new VendixHttpException(ErrorCodes.OPT_DISABLED);
+      return { unit_price_delta: new Prisma.Decimal(0), snapshots: [] };
+    }
+    return this.optionPricingService.resolve(store_id, item.product_id, option_ids, Number(item.quantity) || 1, {
+      scheduled,
+    });
   }
 
   /**
@@ -1374,7 +1429,9 @@ export class CheckoutService {
       if (
         !product ||
         product.is_sellable !== true ||
-        product.is_ingredient === true
+        product.is_ingredient === true ||
+        // Insumo / Uso interno: nunca se venden en línea.
+        !isSaleNature(product.usage_nature)
       ) {
         throw new VendixHttpException(ErrorCodes.ECOM_PRODUCT_002);
       }
@@ -1645,6 +1702,14 @@ export class CheckoutService {
     }
 
     const store_id_ctx = RequestContextService.getStoreId();
+    // Pedido programado: falla temprano (antes de crear la orden) si la
+    // franja no existe, no cumple anticipación o no tiene cupo.
+    if (dto.schedule) {
+      if (!this.scheduledOrdersService || !store_id_ctx) {
+        throw new VendixHttpException(ErrorCodes.SCHED_DISABLED);
+      }
+      await this.scheduledOrdersService.preValidate(store_id_ctx, dto.schedule);
+    }
     let resolved_customer_id: number | null = user_id ?? null;
     if (is_guest && guest_customer && store_id_ctx) {
       const resolved =
@@ -1723,6 +1788,8 @@ export class CheckoutService {
             // no tenga que saber de qué origen viene el carrito.
             applied_price_tier_id: item.price_tier_id ?? null,
             notes: item.notes?.trim() || null,
+            // Adiciones de esta línea (invitado: una línea por selección).
+            option_ids: item.option_ids,
             product,
             product_variant,
           } as any;
@@ -1732,6 +1799,42 @@ export class CheckoutService {
 
     if (cart_items.length === 0) {
       throw new VendixHttpException(ErrorCodes.ECOM_CART_001);
+    }
+
+    // A station-required service is a scheduled sale: every cart unit needs
+    // exactly one matching booking in this checkout request. Validate the
+    // cart/booking relationship before creating an order or payment.
+    const requiredServiceUnits = new Map<string, number>();
+    const cartUnits = new Map<string, number>();
+    const stationRequiredKeys = new Set<string>();
+    for (const item of cart_items) {
+      const key = `${item.product_id}:${item.product_variant_id ?? ''}`;
+      cartUnits.set(key, (cartUnits.get(key) ?? 0) + Number(item.quantity));
+      if (item.product?.requires_station) {
+        requiredServiceUnits.set(key, (requiredServiceUnits.get(key) ?? 0) + Number(item.quantity));
+        stationRequiredKeys.add(key);
+      }
+    }
+    const submittedBookingUnits = new Map<string, number>();
+    for (const booking of dto.bookings ?? []) {
+      const key = `${booking.product_id}:${booking.product_variant_id ?? ''}`;
+      submittedBookingUnits.set(key, (submittedBookingUnits.get(key) ?? 0) + 1);
+    }
+    for (const [key, count] of submittedBookingUnits) {
+      // Solo las reservas de estación abortan el checkout; fuera de estación
+      // se mantiene el contrato anterior (se intentan post-orden y el fallo
+      // solo se registra).
+      if (stationRequiredKeys.has(key) && count > (cartUnits.get(key) ?? 0)) {
+        throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001, 'La reserva no corresponde a una unidad del carrito.');
+      }
+    }
+    for (const [key, units] of requiredServiceUnits) {
+      if ((submittedBookingUnits.get(key) ?? 0) !== units) {
+        throw new VendixHttpException(
+          ErrorCodes.SERVICE_BOOKING_001,
+          'Cada unidad de servicio con estación requiere una reserva compatible antes del pago.',
+        );
+      }
     }
 
     const cart_currency =
@@ -1806,7 +1909,8 @@ export class CheckoutService {
       if (
         !item.product ||
         item.product.is_sellable !== true ||
-        item.product.is_ingredient === true
+        item.product.is_ingredient === true ||
+        !isSaleNature(item.product.usage_nature)
       ) {
         throw new VendixHttpException(
           ErrorCodes.ECOM_PRODUCT_002,
@@ -2074,15 +2178,38 @@ export class CheckoutService {
           quantity: item.quantity,
         });
 
-        const netPrice = line.net_unit_price;
+        // Adiciones (S3): delta FINAL (con impuestos) por unidad calculado en
+        // el servidor sobre los `option_ids` de la línea, igual que en POS.
+        // Sin adiciones → 0 y nada de este bloque cambia el cálculo de hoy.
+        const lineOptions = await this.resolveCheckoutLineOptions(item, dto.items, !!dto.schedule);
+        const optionDelta = Number(lineOptions.unit_price_delta);
 
         const stockUnitsConsumed = line.stock_units_consumed;
         stockUnitsByIndex[index] = stockUnitsConsumed;
 
-        const taxInfo = await this.taxes_service.calculateProductTaxes(
+        const baseTaxInfo = await this.taxes_service.calculateProductTaxes(
           item.product_id,
-          netPrice,
+          line.net_unit_price,
         );
+        // Con impuestos NO incluidos el precio del catálogo es neto: al neto
+        // se suma solo la base del delta, para que el impuesto que se agrega
+        // después no se cobre dos veces sobre la adición (POS = tienda en línea).
+        const allInclusive = baseTaxInfo.taxes.every((t: any) => t.is_inclusive);
+        const optionNet =
+          optionDelta === 0 || allInclusive
+            ? optionDelta
+            : resolveLineTotals(
+                optionDelta,
+                // Solo las tasas NO incluidas: las incluidas ya van dentro del delta.
+                baseTaxInfo.taxes
+                  .filter((t: any) => !t.is_inclusive)
+                  .map((t: any) => ({ rate: t.rate, is_inclusive: true, rate_basis: t.rate_basis })),
+              ).base;
+        const netPrice = line.net_unit_price + optionNet;
+        const taxInfo =
+          optionDelta === 0
+            ? baseTaxInfo
+            : await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
 
         const cost_price =
           item.product_variant?.cost_price != null
@@ -2145,6 +2272,7 @@ export class CheckoutService {
 
         return {
           ...item,
+          option_snapshots: lineOptions.snapshots,
           net_price: netPrice,
           base_unit_price: unitTotals.base,
           cost_price,
@@ -2290,6 +2418,44 @@ export class CheckoutService {
       guest_customer,
       resolved_customer_id,
     );
+    // Only station-required services reserve before order/payment creation:
+    // a scheduled sale cannot exist without its slot, so any allocation
+    // error aborts checkout without leaving a payable order. Services
+    // without station keep the historical behavior below (order first, booking
+    // failures only logged).
+    const stationBookings = (dto.bookings ?? []).filter((booking) =>
+      stationRequiredKeys.has(
+        `${booking.product_id}:${booking.product_variant_id ?? ''}`,
+      ),
+    );
+    const openBookings = (dto.bookings ?? []).filter(
+      (booking) =>
+        !stationRequiredKeys.has(
+          `${booking.product_id}:${booking.product_variant_id ?? ''}`,
+        ),
+    );
+    const createdBookingIds: number[] = [];
+    try {
+      for (const booking of stationBookings) {
+        const created = await this.reservationsService.create({
+          customer_id: resolved_customer_id ?? undefined,
+          product_id: booking.product_id,
+          product_variant_id: booking.product_variant_id,
+          station_id: booking.station_id,
+          provider_id: booking.provider_id,
+          date: booking.date,
+          start_time: booking.start_time,
+          end_time: booking.end_time,
+          channel: order_channel_enum.ecommerce,
+          skip_order_creation: true,
+        });
+        createdBookingIds.push(created.id);
+      }
+    } catch (error) {
+      await this.cancelCheckoutBookings(createdBookingIds);
+      throw error;
+    }
+
     // store_id y customer_id (user_id) se inyectan automáticamente
     const order = await this.prisma.orders.create({
       data: {
@@ -2342,6 +2508,17 @@ export class CheckoutService {
         placed_at: new Date(),
         order_items: {
           create: itemsWithTaxes.map((item) => ({
+            // Snapshot congelado de adiciones (solo si la línea las tiene).
+            ...(item.option_snapshots.length
+              ? {
+                  order_item_options: {
+                    create: item.option_snapshots.map((option) => ({
+                      store_id: store_id_ctx!,
+                      ...option,
+                    })),
+                  },
+                }
+              : {}),
             // Online/whatsapp para enviar: el plato KDS se empaca.
             is_takeaway:
               markTakeawayForDelivery &&
@@ -2390,7 +2567,56 @@ export class CheckoutService {
       include: {
         order_items: true,
       },
+    }).catch(async (error) => {
+      await this.cancelCheckoutBookings(createdBookingIds);
+      throw error;
     });
+
+    // Only station bookings pre-exist here; checkouts without them skip the
+    // link transaction entirely (an empty $transaction is a wasted roundtrip).
+    if (createdBookingIds.length > 0) {
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          for (const bookingId of createdBookingIds) {
+            const linked = await tx.bookings.updateMany({
+              where: { id: bookingId, store_id: order.store_id, order_id: null },
+              data: { order_id: order.id, updated_at: new Date() },
+            });
+            if (linked.count !== 1) throw new VendixHttpException(ErrorCodes.SERVICE_BOOKING_001);
+          }
+        });
+      } catch (error) {
+        await this.prisma.orders.updateMany({
+          where: { id: order.id, store_id: order.store_id },
+          data: { state: 'cancelled', updated_at: new Date() },
+        });
+        await this.cancelCheckoutBookings(createdBookingIds);
+        throw error;
+      }
+    }
+
+    // Pedido programado: toma el cupo bajo el bloqueo de la tienda. Si otro
+    // cliente ganó el último cupo entre la validación previa y aquí, la orden
+    // se cancela igual que con una reserva de servicio que no se pudo enlazar.
+    if (dto.schedule) {
+      try {
+        await this.prisma.$transaction((tx) =>
+          this.scheduledOrdersService!.createForOrder(tx, {
+            store_id: order.store_id,
+            order_id: order.id,
+            schedule: dto.schedule!,
+            user_id: user_id ?? null,
+          }),
+        );
+      } catch (error) {
+        await this.prisma.orders.updateMany({
+          where: { id: order.id, store_id: order.store_id },
+          data: { state: 'cancelled', updated_at: new Date() },
+        });
+        await this.cancelCheckoutBookings(createdBookingIds);
+        throw error;
+      }
+    }
 
     // Persist applied promotions + coupon usage. We do this OUTSIDE the order
     // create call so the snapshot/coupon flow doesn't tangle with order_items
@@ -2476,6 +2702,19 @@ export class CheckoutService {
           bank_account_id: resolved_bank_account_id,
         },
         select: { id: true },
+      }).catch(async (error) => {
+        await this.prisma.orders.updateMany({
+          where: { id: order.id, store_id: order.store_id },
+          data: { state: 'cancelled', updated_at: new Date() },
+        });
+        await this.cancelCheckoutBookings(createdBookingIds);
+        // Pedido programado: la orden cancelada libera su franja.
+        if (dto.schedule) {
+          await this.scheduledOrdersService
+            ?.cancelForOrder(order.id, 'Pago no registrado')
+            .catch(() => undefined);
+        }
+        throw error;
       });
     }
     const payment_id_with_receipt: number | null =
@@ -2527,32 +2766,30 @@ export class CheckoutService {
       }
     }
 
-    // Create bookings for bookable services
-    if (dto.bookings && dto.bookings.length > 0) {
-      const user_id = RequestContextService.getUserId();
-      for (const booking of dto.bookings) {
-        try {
-          await this.reservationsService.create({
-            customer_id: user_id!,
-            product_id: booking.product_id,
-            product_variant_id: booking.product_variant_id,
-            date: booking.date,
-            start_time: booking.start_time,
-            end_time: booking.end_time,
-            channel: order_channel_enum.ecommerce,
-            order_id: order.id,
-            skip_availability_check: false,
-          });
-          this.logger.log(
-            `Booking created for product ${booking.product_id} linked to order ${order.id}`,
-          );
-        } catch (error) {
-          this.logger.warn(
-            `Failed to create booking for product ${booking.product_id}: ${error.message}`,
-          );
-          // Don't fail the entire checkout if a booking fails
-          // The order is already created; booking can be retried manually
-        }
+    // Station bookings were allocated before order creation and linked
+    // atomically above. Services without station keep the historical
+    // behavior: the order is already created, so a booking failure is logged
+    // and never aborts checkout (the booking can be retried manually).
+    for (const booking of openBookings) {
+      try {
+        await this.reservationsService.create({
+          customer_id: resolved_customer_id ?? undefined,
+          product_id: booking.product_id,
+          product_variant_id: booking.product_variant_id,
+          date: booking.date,
+          start_time: booking.start_time,
+          end_time: booking.end_time,
+          channel: order_channel_enum.ecommerce,
+          order_id: order.id,
+          skip_availability_check: false,
+        });
+        this.logger.log(
+          `Booking created for product ${booking.product_id} linked to order ${order.id}`,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Failed to create booking for product ${booking.product_id}: ${(error as Error).message}`,
+        );
       }
     }
 
@@ -2888,7 +3125,8 @@ export class CheckoutService {
       if (
         !item.product ||
         item.product.is_sellable !== true ||
-        item.product.is_ingredient === true
+        item.product.is_ingredient === true ||
+        !isSaleNature(item.product.usage_nature)
       ) {
         throw new VendixHttpException(
           ErrorCodes.ECOM_PRODUCT_002,

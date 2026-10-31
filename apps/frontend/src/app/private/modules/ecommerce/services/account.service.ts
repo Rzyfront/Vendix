@@ -51,6 +51,22 @@ export interface Order {
    * a useful label ("1 producto(s): Zapatillas") instead of just a count.
    */
   first_item_name: string | null;
+  total_paid?: number | string | null;
+  /** Orden de estación de servicio (SVC-*): qué se atendió, dónde y en qué va. */
+  service_session?: ServiceSessionSummary | null;
+}
+
+export interface ServiceSessionSummary {
+  status: string;
+  opened_at: string;
+  closed_at: string | null;
+  station_name: string | null;
+  service_name: string | null;
+  subject_label: string | null;
+  /** Especialista que atiende (nombre visible). */
+  provider_name?: string | null;
+  /** Respuestas de la plantilla de la estación (solo en el detalle). */
+  intake?: Array<{ label: string; value: string }>;
 }
 
 export interface OrderAppliedPromotion {

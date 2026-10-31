@@ -5,6 +5,7 @@ import { RecipesController } from './recipes.controller';
 import { RecipesService } from './recipes.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { S3Module } from '@common/services/s3.module';
 
 /**
  * Store-scoped Recipes / BOM module (Restaurant Suite — Phase B).
@@ -15,7 +16,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
  * duplicating the provider.
  */
 @Module({
-  imports: [ResponseModule, PrismaModule],
+  imports: [ResponseModule, PrismaModule, S3Module],
   controllers: [RecipesController],
   providers: [RecipesService],
   exports: [RecipesService],

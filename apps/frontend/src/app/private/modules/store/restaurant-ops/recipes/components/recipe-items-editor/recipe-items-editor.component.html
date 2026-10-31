@@ -142,6 +142,21 @@
             <app-icon slot="icon" name="trash-2" [size]="16" />
           </app-button>
         </div>
+
+        <!--
+          Anotación por insumo (pedido de Rafael, 2026-10-29): la instrucción
+          viaja con la línea y se ve en la ficha y en el KDS. Opcional: vacío
+          se envía como null y no se pinta en lectura.
+        -->
+        <div class="md:col-span-12">
+          <app-input
+            label="Anotación para cocina (opcional)"
+            formControlName="notes"
+            placeholder="Picar fino, sin cáscara, porcionar en 80 g…"
+            [maxlength]="500"
+            tooltipText="Instrucción de ESTE insumo dentro de la receta. Se muestra en la ficha del plato y en el KDS."
+          />
+        </div>
       </div>
     }
   </div>

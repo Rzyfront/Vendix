@@ -26,6 +26,11 @@ import { KitchenTicketsService } from '../../services/kitchen-tickets.service';
 import { RecipesService } from '../../../recipes/services/recipes.service';
 import { Recipe } from '../../../recipes/interfaces';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
+import {
+  ProductProfileModalComponent,
+  ProductProfileProduct,
+  ProductProfileRecipe,
+} from '../../../../../../../shared/components/product-profile/index';
 
 interface RecipeLoadState {
   status: 'idle' | 'loading' | 'ok' | 'missing' | 'error';
@@ -56,7 +61,14 @@ interface RecipeLoadState {
   selector: 'app-kds-ticket-detail-modal',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent, BadgeComponent],
+  imports: [
+    CommonModule,
+    ModalComponent,
+    ButtonComponent,
+    IconComponent,
+    BadgeComponent,
+    ProductProfileModalComponent,
+  ],
   templateUrl: './kds-ticket-detail-modal.component.html',
   styleUrl: './kds-ticket-detail-modal.component.scss',
 })
@@ -151,6 +163,61 @@ export class KdsTicketDetailModalComponent {
    */
   private readonly recipeCache = new Map<string, RecipeLoadState>();
   readonly recipeStates = signal<Record<string, RecipeLoadState>>({});
+
+  /**
+   * Ficha del plato abierta desde el ticket (pedido de Rafael, 2026-10-29).
+   * Se arma con el producto del ticket y la receta YA cacheada, así abrir la
+   * ficha no dispara ningún fetch nuevo ni saca al cocinero del tablero.
+   */
+  readonly profileItem = signal<KitchenTicketItem | null>(null);
+  readonly isProfileOpen = signal(false);
+
+  readonly profileProduct = computed<ProductProfileProduct | null>(() => {
+    const item = this.profileItem();
+    if (!item) return null;
+    const product = item.product;
+    return {
+      id: product?.id ?? item.product_id,
+      name: product?.name ?? `Producto #${item.product_id}`,
+      sku: product?.sku ?? null,
+      description: product?.description ?? null,
+      stock_unit: product?.stock_unit ?? null,
+      preparation_time_minutes: product?.preparation_time_minutes ?? null,
+      product_images: product?.product_images ?? [],
+    };
+  });
+
+  readonly profileRecipe = computed<ProductProfileRecipe | null>(() => {
+    const item = this.profileItem();
+    if (!item) return null;
+    const state = this.recipeStateFor(item);
+    if (state.status !== 'ok' || !state.recipe) return null;
+    const recipe = state.recipe;
+    return {
+      id: recipe.id,
+      yield_quantity: recipe.yield_quantity,
+      yield_unit: recipe.yield_unit,
+      waste_percent: recipe.waste_percent,
+      preparation_notes: recipe.preparation_notes ?? null,
+      is_active: recipe.is_active,
+      items: (recipe.items ?? []).map((ri) => ({
+        id: ri.id,
+        name:
+          ri.component_product?.name ?? `Producto #${ri.component_product_id}`,
+        sku: ri.component_product?.sku ?? null,
+        quantity: ri.quantity,
+        stock_unit: ri.component_product?.stock_unit ?? null,
+        waste_percent: ri.waste_percent,
+        notes: ri.notes ?? null,
+        product_images: ri.component_product?.product_images ?? [],
+      })),
+    };
+  });
+
+  openProfile(item: KitchenTicketItem): void {
+    this.profileItem.set(item);
+    this.isProfileOpen.set(true);
+  }
 
   /** Clave de cache para un item: par exacto que bloquea (o no) el ticket. */
   recipeKeyFor(item: Pick<KitchenTicketItem, 'product_id' | 'product_variant_id'>): string {

@@ -24,7 +24,7 @@ import { ErrorCodes } from 'src/common/errors';
  * `EcommercePrismaService`/`S3Service`, que este método nunca usa.
  */
 describe('AccountService#deriveLineGross — fallback ADR-06', () => {
-  const service = new AccountService({} as any, {} as any);
+  const service = new AccountService({} as any, {} as any, {} as any);
   const deriveLineGross = (item: Record<string, unknown>) =>
     (service as any).deriveLineGross(item);
 
@@ -104,7 +104,7 @@ describe('AccountService#deriveLineGross — fallback ADR-06', () => {
 });
 
 describe('AccountService#kitchenStatusFor — cocina por línea (paridad guest)', () => {
-  const service = new AccountService({} as any, {} as any);
+  const service = new AccountService({} as any, {} as any, {} as any);
   const kitchenStatusFor = (rows: { id: number; status: string }[] | null) =>
     (service as any).kitchenStatusFor(rows);
 
@@ -194,7 +194,7 @@ describe('AccountService#comprobante — visor y subida (espejo guest)', () => {
       deleteFile: jest.fn().mockResolvedValue(undefined),
     };
     prisma.$transaction.mockImplementation(async (callback) => callback(prisma));
-    const service = new AccountService(prisma as any, s3 as any);
+    const service = new AccountService(prisma as any, s3 as any, {} as any);
     return { service, prisma, s3 };
   };
 
@@ -434,7 +434,7 @@ describe('AccountService receipt authorization and post-S3 lifecycle races', () 
     };
     const s3 = { uploadFile: jest.fn().mockResolvedValue(undefined), deleteFile: jest.fn().mockResolvedValue(undefined), getPresignedUrl: jest.fn().mockResolvedValue('https://signed.example/receipt'), headObject: jest.fn().mockResolvedValue({ contentType: 'image/jpeg' }), signUrl: jest.fn().mockResolvedValue(null) };
     const prisma = { orders: { findFirst: read, update: write }, payments, stores: { findUnique: jest.fn().mockResolvedValue({ id: 5, slug: 'shop', organization_id: 1, organizations: { id: 1, slug: 'org' } }) }, $transaction: transaction, withoutScope: jest.fn() };
-    const service = new AccountService(prisma as unknown as EcommercePrismaService, s3 as unknown as S3Service);
+    const service = new AccountService(prisma as unknown as EcommercePrismaService, s3 as unknown as S3Service, {} as any);
     return { service, prisma, s3, order, control, trace, read, write, raw };
   }
 
@@ -575,7 +575,7 @@ describe('AccountService detail physical ETA and canonical payment payload', () 
       payments: [{ id: 63, state: 'pending', receipt_s3_key: null, store_payment_method: { system_payment_method: { display_name: 'Mi transferencia', type: 'bank_transfer' } } }],
       stores: { id: 5, name: 'Tienda', logo_url: null, store_settings: { settings: { operations: { default_preparation_time_minutes: 15 } } } },
     };
-    const service = new AccountService({ orders: { findFirst: jest.fn().mockResolvedValue(raw) } } as unknown as EcommercePrismaService, { signUrl: jest.fn(), headObject: jest.fn() } as unknown as S3Service);
+    const service = new AccountService({ orders: { findFirst: jest.fn().mockResolvedValue(raw) } } as unknown as EcommercePrismaService, { signUrl: jest.fn(), headObject: jest.fn() } as unknown as S3Service, {} as any);
     return service.getOrderDetail(95);
   };
   it('does not manufacture preparation15 for service-only orders', async () => {

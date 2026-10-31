@@ -1,13 +1,45 @@
 <app-sticky-header
-  [title]="isEditMode() ? 'Editar receta' : 'Nueva receta'"
+  [title]="isViewing() ? 'Receta' : isEditMode() ? 'Editar receta' : 'Nueva receta'"
   [subtitle]="
-    isEditMode()
-      ? 'Modifica el rendimiento, la merma y los componentes de la receta.'
-      : 'Define el rendimiento, la merma y los insumos que componen el plato.'
+    isViewing()
+      ? 'Vista compacta de la receta. Pulsa Editar para cambiar cantidades o insumos.'
+      : isEditMode()
+        ? 'Modifica el rendimiento, la merma y los componentes de la receta.'
+        : 'Define el rendimiento, la merma y los insumos que componen el plato.'
   "
   [actions]="headerActions()"
   (actionClicked)="onHeaderAction($event)"
 ></app-sticky-header>
+
+<!--
+  Modo LECTURA (pedido de Rafael, 2026-10-29): la receta existente abre como
+  ficha densa, sin inputs. Los campos de edición viven solo en el bloque de
+  abajo, que se monta al pulsar "Editar".
+-->
+@if (isViewing()) {
+  <div class="px-2 pb-4 md:px-0 md:pb-6">
+    @if (isLoadingRecipe()) {
+      <div
+        class="flex items-center gap-2 px-3 py-2 text-sm text-text-secondary"
+        role="status"
+      >
+        <span
+          class="inline-block h-4 w-4 rounded-full border-2 border-border border-b-primary animate-spin"
+          aria-hidden="true"
+        ></span>
+        Cargando receta…
+      </div>
+    } @else if (profileProduct(); as product) {
+      <app-card [responsive]="true" [padding]="true">
+        <app-product-profile
+          [product]="product"
+          [variant]="profileVariant()"
+          [recipe]="profileRecipe()"
+        />
+      </app-card>
+    }
+  </div>
+} @else {
 
 <form
   [formGroup]="form"
@@ -164,3 +196,5 @@
     <app-recipe-items-editor [items]="itemsArray" />
   </app-card>
 </form>
+
+}

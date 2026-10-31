@@ -25,6 +25,11 @@ export type FinalizeMissingSteps = Partial<
   Record<FiscalArea, FiscalWizardStepId[]>
 >;
 
+/** Legal-data draft keys, scoped to user + organization + store. */
+const FISCAL_WIZARD_DRAFT_PREFIX = 'vendix:fiscal-wizard-draft:v2:';
+/** Pre-v2 keys carried no tenant identity; they are purged, never read. */
+const LEGACY_FISCAL_WIZARD_DRAFT_PREFIX = 'vendix:fiscal-wizard-draft:';
+
 @Injectable({
   providedIn: 'root',
 })
@@ -535,15 +540,44 @@ export class FiscalActivationWizardService {
    * NOT a source of truth — the canonical write path is still the fiscal-data
    * PATCH in the legal-data step.
    */
-  private draftKey(): string {
-    return `vendix:fiscal-wizard-draft:${this.fiscalContextKey()}`;
+  private draftKey(): string | null {
+    // The fiscal context alone (`store:STORE:none`) is identical for every
+    // store admin, so the key must also carry the tenant and the user: without
+    // them a draft typed in one tenant (e.g. the platform's own RUT) was
+    // restored over another tenant's legal data in the same browser.
+    const user_id = this.authFacade.userId();
+    const organization_id = this.authFacade.userOrganization()?.id ?? null;
+    const store_id = this.authFacade.userStore()?.id ?? null;
+    if (!user_id || !organization_id) return null;
+    return (
+      `${FISCAL_WIZARD_DRAFT_PREFIX}u${user_id}:o${organization_id}:s${store_id ?? 'none'}:` +
+      this.fiscalContextKey()
+    );
+  }
+
+  /**
+   * Drops drafts saved under the legacy tenant-less key format. Those entries
+   * may hold another tenant's data, so they are never read back.
+   */
+  private purgeLegacyDrafts(): void {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (
+        key?.startsWith(LEGACY_FISCAL_WIZARD_DRAFT_PREFIX) &&
+        !key.startsWith(FISCAL_WIZARD_DRAFT_PREFIX)
+      ) {
+        localStorage.removeItem(key);
+      }
+    }
   }
 
   /** Persist the current legal-data form value for the active fiscal context. */
   saveWizardDraft(value: Record<string, unknown>): void {
     if (typeof localStorage === 'undefined') return;
+    const key = this.draftKey();
+    if (!key) return;
     try {
-      localStorage.setItem(this.draftKey(), JSON.stringify(value));
+      localStorage.setItem(key, JSON.stringify(value));
     } catch {
       // Quota / serialization failures are non-fatal: the draft is optional.
     }
@@ -556,8 +590,11 @@ export class FiscalActivationWizardService {
    */
   hydrateWizardDraft<T = Record<string, unknown>>(): T | null {
     if (typeof localStorage === 'undefined') return null;
+    const key = this.draftKey();
+    if (!key) return null;
     try {
-      const raw = localStorage.getItem(this.draftKey());
+      this.purgeLegacyDrafts();
+      const raw = localStorage.getItem(key);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       return parsed && typeof parsed === 'object' ? (parsed as T) : null;
@@ -570,8 +607,10 @@ export class FiscalActivationWizardService {
   /** Drop the saved draft for the active fiscal context. */
   clearWizardDraft(): void {
     if (typeof localStorage === 'undefined') return;
+    const key = this.draftKey();
+    if (!key) return;
     try {
-      localStorage.removeItem(this.draftKey());
+      localStorage.removeItem(key);
     } catch {
       // Ignore: nothing actionable if removal fails.
     }

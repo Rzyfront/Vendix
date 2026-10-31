@@ -1,3 +1,4 @@
+import { assertSaleNatureProducts } from '../../../products/services/product-usage-nature.util';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
@@ -635,6 +636,7 @@ export class LodgingFolioService {
         is_on_sale: true,
         sale_price: true,
         is_sellable: true,
+        usage_nature: true,
         state: true,
         product_type: true,
         track_inventory: true,
@@ -652,6 +654,8 @@ export class LodgingFolioService {
         },
       },
     });
+    // Insumo / Uso interno: nunca a la cuenta del huésped (422 legible).
+    if (product) assertSaleNatureProducts([product]);
     if (!product || !product.is_sellable || product.state !== 'active') {
       throw new VendixHttpException(
         ErrorCodes.LODGING_FOLIO_CHARGE_001,

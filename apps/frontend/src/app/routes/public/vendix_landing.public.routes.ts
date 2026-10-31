@@ -7,6 +7,8 @@ const sectorGuideRoutes: Routes = SECTOR_GUIDES_ENABLED
       'comandas-restaurantes',
       'ventas-mayoristas-al-detal',
       'preparar-demostracion',
+      'cierre-de-caja',
+      'control-de-inventario',
     ].map((guideKey) => ({
       path: `guias/${guideKey}`,
       loadComponent: () =>

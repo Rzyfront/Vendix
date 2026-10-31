@@ -1,4 +1,5 @@
 import {Component, input, output, signal, computed, inject, effect, DestroyRef} from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CurrencyPipe, DatePipe, NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -9,6 +10,7 @@ import { ReservationsService } from '../../services/reservations.service';
 import { DataCollectionSubmissionsService } from '../../../data-collection/services/data-collection-submissions.service';
 import { Booking, BookingStatus, AvailabilitySlot, ProviderDateInfo } from '../../interfaces/reservation.interface';
 import { finalize } from 'rxjs';
+import { environment } from '../../../../../../../environments/environment';
 
 @Component({
   selector: 'app-booking-detail-modal',
@@ -27,6 +29,7 @@ export class BookingDetailModalComponent {
   private submissionsService = inject(DataCollectionSubmissionsService);
   private toastService = inject(ToastService);
   private router = inject(Router);
+  private http = inject(HttpClient);
 
   readonly isOpen = input<boolean>(false);
   readonly booking = input<Booking | null>(null);
@@ -424,6 +427,30 @@ export class BookingDetailModalComponent {
   startBooking(): void {
     const b = this.booking();
     if (!b) return;
+    if (b.product?.requires_station) {
+      this.checkingIn.set(true);
+      this.http.post<any>(`${environment.apiUrl}/store/service-sessions`, { booking_id: b.id })
+        .pipe(finalize(() => this.checkingIn.set(false)), takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (response) => {
+            const token = response?.data?.access_token;
+            const url = response?.data?.access_url || (token ? `${window.location.origin}/seguimiento-servicio/${encodeURIComponent(token)}` : '');
+            if (response?.data?.email_delivery_status === 'sent') this.toastService.success('Enlace de seguimiento enviado al correo del cliente.');
+            else if (response?.data?.email_delivery_status === 'failed') this.toastService.error('No se pudo enviar el correo; copia el enlace temporal para compartirlo.');
+            if (url && navigator.clipboard?.writeText) {
+              navigator.clipboard.writeText(url).then(
+                () => this.toastService.success('Atención iniciada. Enlace de seguimiento copiado.'),
+                () => window.prompt('Atención iniciada. Copia el enlace temporal para compartirlo con el cliente:', url),
+              );
+            } else if (url) {
+              window.prompt('Atención iniciada. Copia el enlace temporal para compartirlo con el cliente:', url);
+            }
+            this.started.emit(b);
+          },
+          error: (error) => this.toastService.error(error?.error?.message || 'No se pudo iniciar la atención. Verifica que la reserva tenga estación asignada.'),
+        });
+      return;
+    }
     this.checkingIn.set(true);
     this.reservationsService.startReservation(b.id)
       .pipe(finalize(() => this.checkingIn.set(false)))

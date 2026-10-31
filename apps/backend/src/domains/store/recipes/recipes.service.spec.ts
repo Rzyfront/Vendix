@@ -6,6 +6,7 @@ import {
   type RequestContext,
 } from '@common/context/request-context.service';
 import { VendixHttpException } from 'src/common/errors';
+import { S3Service } from '@common/services/s3.service';
 
 /**
  * Unit tests for the anti-cycle logic in RecipesService.addItem.
@@ -193,6 +194,7 @@ describe('RecipesService — cycle detection & explosion', () => {
     return Test.createTestingModule({
       providers: [
         RecipesService,
+        { provide: S3Service, useValue: { signUrl: jest.fn(async (k: string) => k) } },
         {
           provide: StorePrismaService,
           useValue: prisma,
@@ -627,6 +629,40 @@ describe('RecipesService — cycle detection & explosion', () => {
       expect(result).toMatchObject({ id: 10 });
       expect(Array.isArray(result.items)).toBe(true);
     });
+
+    it('PUT sin `notes` conserva la anotación existente (cliente viejo)', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2] },
+      });
+      items.update.mockClear();
+
+      await service.replaceItems(10, [
+        { id: 1, component_product_id: 2, quantity: 1 },
+      ]);
+
+      expect(items.update).toHaveBeenCalledTimes(1);
+      expect(items.update.mock.calls[0][0].data).not.toHaveProperty('notes');
+    });
+
+    it('PUT con `notes: null` explícito borra la anotación', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2] },
+      });
+      items.update.mockClear();
+
+      await service.replaceItems(10, [
+        { id: 1, component_product_id: 2, quantity: 1, notes: null },
+      ]);
+
+      expect(items.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 1 },
+          data: expect.objectContaining({ notes: null }),
+        }),
+      );
+    });
   });
 });
 
@@ -769,6 +805,7 @@ describe('RecipesService — resolución determinista de receta (recetas-por-var
     const mod: TestingModule = await Test.createTestingModule({
       providers: [
         RecipesService,
+        { provide: S3Service, useValue: { signUrl: jest.fn(async (k: string) => k) } },
         { provide: StorePrismaService, useValue: prisma },
         {
           provide: RequestContextService,
@@ -1096,6 +1133,7 @@ describe('RecipesService — vigencia + ciclo completo (recetas-kds paso 1)', ()
     const mod: TestingModule = await Test.createTestingModule({
       providers: [
         RecipesService,
+        { provide: S3Service, useValue: { signUrl: jest.fn(async (k: string) => k) } },
         { provide: StorePrismaService, useValue: prisma },
         {
           provide: RequestContextService,
@@ -1356,5 +1394,94 @@ describe('RecipesService — vigencia + ciclo completo (recetas-kds paso 1)', ()
       expect(result).toMatchObject({ deleted: true });
       expect(recipes.delete).toHaveBeenCalledWith({ where: { id: 10 } });
     });
+  });
+});
+
+describe('RecipesService — firma de imágenes (recipe-profile-ui)', () => {
+  const signUrl = jest.fn(async (key?: string | null) =>
+    key ? `https://signed.test/${key}` : undefined,
+  );
+
+  const build = async (prisma: any) => {
+    const mod: TestingModule = await Test.createTestingModule({
+      providers: [
+        RecipesService,
+        { provide: StorePrismaService, useValue: prisma },
+        { provide: S3Service, useValue: { signUrl } },
+      ],
+    }).compile();
+    return mod.get(RecipesService);
+  };
+
+  beforeEach(() => {
+    signUrl.mockClear();
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 1, is_owner: true, roles: [] } as any);
+    jest.spyOn(RequestContextService, 'getRoles').mockReturnValue([]);
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('findAll devuelve la foto del producto firmada, no la key de S3', async () => {
+    const service = await build({
+      recipes: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 1,
+            product: { id: 10, product_images: [{ id: 5, image_url: 'store/1/dish.jpg' }] },
+          },
+        ]),
+        count: jest.fn().mockResolvedValue(1),
+      },
+    });
+
+    const res = await service.findAll({ page: 1, limit: 10 } as any);
+
+    expect(res.data[0].product.product_images[0].image_url).toBe(
+      'https://signed.test/store/1/dish.jpg',
+    );
+  });
+
+  it('findOne firma producto, variante (objeto único) y componentes', async () => {
+    const service = await build({
+      recipes: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 1,
+          product: { product_images: [{ image_url: 'p.jpg' }] },
+          product_variant: { id: 3, product_images: { image_url: 'v.jpg' } },
+          items: [
+            { component_product: { product_images: [{ image_url: 'c.jpg' }] } },
+          ],
+        }),
+      },
+    });
+
+    const res: any = await service.findOne(1);
+
+    expect(res.product.product_images[0].image_url).toBe('https://signed.test/p.jpg');
+    expect(res.product_variant.product_images.image_url).toBe('https://signed.test/v.jpg');
+    expect(res.items[0].component_product.product_images[0].image_url).toBe(
+      'https://signed.test/c.jpg',
+    );
+  });
+
+  it('findByProduct firma las fotos de los componentes', async () => {
+    const service = await build({
+      recipes: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 1,
+          items: [
+            { component_product: { product_images: [{ image_url: 'c.jpg' }] } },
+          ],
+        }),
+      },
+    });
+
+    const res: any = await service.findByProduct(10);
+
+    expect(res.items[0].component_product.product_images[0].image_url).toBe(
+      'https://signed.test/c.jpg',
+    );
   });
 });

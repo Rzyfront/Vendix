@@ -111,7 +111,7 @@ export const INC_RESPONSIBLE_CODE = 'O-33';
 export const INC_NOT_RESPONSIBLE_CODE = 'O-50';
 
 /** Contexto de la operación bloqueada, viaja en `details.context` del error. */
-export type VatChargeContext = 'product' | 'sale' | 'shipping';
+export type VatChargeContext = 'product' | 'sale' | 'shipping' | 'station_rental';
 
 /** Forma mínima de `fiscal_data` que consume la resolución de responsabilidad. */
 export interface VatFiscalDataInput {
@@ -641,10 +641,11 @@ export function assertCanChargeVat(
 }
 
 /**
- * Contexto de la operación bloqueada por INC. Solo `'shipping'`: el INC de
+ * Contexto de la operación bloqueada por INC: el envío y el alquiler de
+ * estación (mismo mecanismo de impuesto por configuración). El INC de
  * productos no se toca en este plan.
  */
-export type IncChargeContext = 'shipping';
+export type IncChargeContext = 'shipping' | 'station_rental';
 
 /**
  * Enforcement de escritura: lanza `FISCAL_INC_NOT_RESPONSIBLE_001` (HTTP 412)

@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { PosSettingsForm } from '../components/pos-settings-form/pos-settings-form.component';
 import { ReceiptsSettingsForm } from '../components/receipts-settings-form/receipts-settings-form.component';
+import { ScheduledOrdersSettingsForm } from '../components/scheduled-orders-settings-form/scheduled-orders-settings-form.component';
 import { PromotionsSettingsForm } from '../components/promotions-settings-form/promotions-settings-form.component';
 import { SettingsSectionComponent } from '../components/settings-section/settings-section.component';
 import { GeneralSettingsStore } from '../services/general-settings.store';
@@ -24,6 +25,7 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
     PosSettingsForm,
     ReceiptsSettingsForm,
     PromotionsSettingsForm,
+    ScheduledOrdersSettingsForm,
   ],
   template: `
     <div class="settings-page">
@@ -63,6 +65,20 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
           [settings]="store.settings().pos"
           [settingsLoaded]="store.settingsLoaded()"
           (settingsChange)="store.onSectionChange('pos', $event)" />
+      </app-settings-section>
+
+      <!-- Pedidos programados y Adiciones -->
+      <app-settings-section
+        anchorId="section-scheduled-orders"
+        icon="calendar-clock"
+        iconTone="pink"
+        title="Pedidos programados"
+        hint="Define cuándo puedes cumplir encargos: días, franjas, cupos y recordatorios.">
+        <app-scheduled-orders-settings-form
+          [settings]="store.settings().scheduled_orders"
+          [productOptions]="store.settings().product_options"
+          (settingsChange)="store.onSectionChange('scheduled_orders', $event)"
+          (productOptionsChange)="store.onSectionChange('product_options', $event)" />
       </app-settings-section>
 
       <!-- Recibos y Facturación — el título depende del estado real de emisión

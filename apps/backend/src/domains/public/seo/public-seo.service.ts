@@ -200,6 +200,8 @@ Disallow: /
             store_id: context.store_id,
             state: 'active',
             available_for_ecommerce: true,
+            // Insumo / Uso interno: nunca indexados como producto a la venta.
+            usage_nature: 'sale',
             // Hotelería (R5): las noches "Noche – {tipo}" se cobran desde la cuenta
             // del huésped, nunca se venden en la tienda en línea.
             lodging_unit_type: { is: null },
