@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseModule } from '@common/responses/response.module';
-import { SocialChannelEncryptionService } from '../../store/social-sales/social-channel-encryption.service';
+import { ChannelEncryptionService } from '../../store/integrations/channels/channel-encryption.service';
 import { MetaWhatsappPlatformConfigController } from './meta-whatsapp-platform-config.controller';
 import { MetaWhatsappPlatformConfigService } from './meta-whatsapp-platform-config.service';
 
@@ -10,7 +10,7 @@ import { MetaWhatsappPlatformConfigService } from './meta-whatsapp-platform-conf
   controllers: [MetaWhatsappPlatformConfigController],
   providers: [
     MetaWhatsappPlatformConfigService,
-    SocialChannelEncryptionService,
+    ChannelEncryptionService,
   ],
   exports: [MetaWhatsappPlatformConfigService],
 })

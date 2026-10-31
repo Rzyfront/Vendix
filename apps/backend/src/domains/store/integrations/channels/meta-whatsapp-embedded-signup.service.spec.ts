@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { RequestContextService } from '@common/context/request-context.service';
 import { MetaWhatsappEmbeddedSignupService } from './meta-whatsapp-embedded-signup.service';
-import { SocialChannelEncryptionService } from './social-channel-encryption.service';
+import { ChannelEncryptionService } from './channel-encryption.service';
 
 const configValues: Record<string, string> = {
   META_APP_ID: '123',
@@ -29,7 +29,7 @@ function createService(overrides?: {
         })[key],
     ),
   } as any as ConfigService;
-  const encryption = new SocialChannelEncryptionService(config);
+  const encryption = new ChannelEncryptionService(config);
   const prisma = {
     social_channels: {
       findFirst: overrides?.findFirst ?? jest.fn(),

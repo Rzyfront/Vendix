@@ -7,12 +7,12 @@ import {
   CompleteWhatsappEmbeddedSignupRequest,
   MetaReadiness,
   WhatsappChannel,
-} from './social-sales.interface';
+} from './channels.interface';
 
 @Injectable({ providedIn: 'root' })
-export class SocialSalesService {
+export class ChannelsService {
   private readonly http = inject(HttpClient);
-  private readonly baseUrl = `${environment.apiUrl}/store/social-sales`;
+  private readonly baseUrl = `${environment.apiUrl}/store/integrations/channels`;
 
   getMetaReadiness(): Observable<MetaReadiness> {
     return this.http
@@ -22,7 +22,7 @@ export class SocialSalesService {
 
   getWhatsappChannel(): Observable<WhatsappChannel> {
     return this.http
-      .get<ApiResponse<WhatsappChannel>>(`${this.baseUrl}/channels/whatsapp`)
+      .get<ApiResponse<WhatsappChannel>>(`${this.baseUrl}/whatsapp`)
       .pipe(map((response) => response.data));
   }
 
@@ -32,7 +32,7 @@ export class SocialSalesService {
     return this.http
       .post<
         ApiResponse<WhatsappChannel>
-      >(`${this.baseUrl}/channels/whatsapp/embedded-signup/complete`, data)
+      >(`${this.baseUrl}/whatsapp/embedded-signup/complete`, data)
       .pipe(map((response) => response.data));
   }
 
@@ -40,7 +40,7 @@ export class SocialSalesService {
     return this.http
       .post<
         ApiResponse<WhatsappChannel>
-      >(`${this.baseUrl}/channels/whatsapp/disconnect`, {})
+      >(`${this.baseUrl}/whatsapp/disconnect`, {})
       .pipe(map((response) => response.data));
   }
 }

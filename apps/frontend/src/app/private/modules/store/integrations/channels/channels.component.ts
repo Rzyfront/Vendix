@@ -13,8 +13,8 @@ import type {
   BadgeVariant,
   StickyHeaderActionButton,
 } from '../../../../../shared/components';
-import { SocialSalesService } from './social-sales.service';
-import { MetaReadiness, WhatsappChannel } from './social-sales.interface';
+import { ChannelsService } from './channels.service';
+import { MetaReadiness, WhatsappChannel } from './channels.interface';
 
 declare global {
   interface Window {
@@ -32,7 +32,7 @@ interface EmbeddedSignupResult {
 }
 
 @Component({
-  selector: 'app-social-sales',
+  selector: 'app-integrations-channels',
   standalone: true,
   imports: [
     AlertBannerComponent,
@@ -45,8 +45,8 @@ interface EmbeddedSignupResult {
   template: `
     <section class="w-full">
       <app-sticky-header
-        title="Social Sales"
-        subtitle="Conecta WhatsApp para iniciar ventas conversacionales."
+        title="Canales"
+        subtitle="Conecta tus canales de mensajería y administra sus credenciales."
         icon="message-circle"
         [actions]="headerActions()"
         (actionClicked)="onHeaderAction($event)"
@@ -240,8 +240,8 @@ interface EmbeddedSignupResult {
     </section>
   `,
 })
-export class SocialSalesComponent {
-  private readonly service = inject(SocialSalesService);
+export class ChannelsComponent {
+  private readonly service = inject(ChannelsService);
   private readonly toast = inject(ToastService);
   private sdkLoadingPromise: Promise<void> | null = null;
 

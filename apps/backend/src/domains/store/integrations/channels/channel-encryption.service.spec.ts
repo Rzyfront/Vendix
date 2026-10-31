@@ -1,9 +1,9 @@
 import { ConfigService } from '@nestjs/config';
-import { SocialChannelEncryptionService } from './social-channel-encryption.service';
+import { ChannelEncryptionService } from './channel-encryption.service';
 
-describe('SocialChannelEncryptionService', () => {
+describe('ChannelEncryptionService', () => {
   it('encrypts and decrypts social channel tokens with AES-GCM', () => {
-    const service = new SocialChannelEncryptionService({
+    const service = new ChannelEncryptionService({
       get: (key: string) =>
         key === 'SOCIAL_CHANNEL_ENCRYPTION_KEY'
           ? 'test-social-channel-encryption-key'
