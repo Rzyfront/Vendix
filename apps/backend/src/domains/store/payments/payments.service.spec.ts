@@ -583,6 +583,81 @@ describe('PaymentsService', () => {
       });
     });
 
+    describe('B06: cobro de mostrador deja su sale en la tx del pago', () => {
+      const dto = {
+        orderId: 9, customerId: 1, amount: 30000, currency: 'COP',
+        storePaymentMethodId: 1, storeId: 1,
+      };
+      const tx = { marker: 'tx' } as any;
+
+      // El gateway real invoca `onSucceeded` dentro de la tx que confirma el pago.
+      const arrange = (methodType: string | null, processingMode: string | null = null) => {
+        jest.spyOn(prisma.store_users, 'findMany').mockResolvedValue([{ store_id: 1 }]);
+        jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(77);
+        (settingsService.getSettings as jest.Mock).mockResolvedValue({
+          pos: { cash_register: { enabled: true } },
+        });
+        (sessionsService.getActiveSession as jest.Mock).mockResolvedValue({ id: 5 });
+        jest.spyOn(paymentGateway, 'processPayment').mockImplementation(
+          async (_data: any, options?: any) => {
+            await options?.onSucceeded?.({
+              tx, paymentId: 321, methodType, processingMode,
+              amount: 30000, orderId: 9, storeId: 1,
+            });
+            return mockPaymentResult;
+          },
+        );
+      };
+
+      it('efectivo: crea el sale con payment_id y la tx del pago', async () => {
+        arrange('cash');
+        await service.processPayment(dto as any, mockUser);
+        expect(movementsService.recordSaleMovement).toHaveBeenCalledWith(
+          5,
+          expect.objectContaining({
+            store_id: 1, user_id: 77, amount: 30000,
+            payment_method: 'cash', order_id: 9, payment_id: 321,
+          }),
+          tx,
+        );
+      });
+
+      it('wompi: no crea sale', async () => {
+        arrange('wompi');
+        await service.processPayment(dto as any, mockUser);
+        expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+      });
+
+      it('efectivo sin caja abierta con el switch encendido: CASH_SESSION_REQUIRED_001', async () => {
+        arrange('cash');
+        (sessionsService.getActiveSession as jest.Mock).mockResolvedValue(null);
+        await expect(service.processPayment(dto as any, mockUser)).rejects.toMatchObject({
+          errorCode: 'CASH_SESSION_REQUIRED_001',
+        });
+        expect(movementsService.recordSaleMovement).not.toHaveBeenCalled();
+      });
+
+      it('processPaymentWithOrder usa la misma política', async () => {
+        arrange('cash');
+        jest.spyOn(paymentGateway, 'processPaymentWithNewOrder').mockImplementation(
+          async (_data: any, options?: any) => {
+            await options?.onSucceeded?.({
+              tx, paymentId: 322, methodType: 'cash', processingMode: null,
+              amount: 30000, orderId: 10, storeId: 1,
+            });
+            return mockPaymentResult;
+          },
+        );
+        await service.processPaymentWithOrder(
+          { ...dto, customerEmail: 'a@b.co', customerName: 'A', items: [] } as any,
+          mockUser,
+        );
+        expect(movementsService.recordSaleMovement).toHaveBeenCalledWith(
+          5, expect.objectContaining({ payment_id: 322, order_id: 10 }), tx,
+        );
+      });
+    });
+
     it('rejects paying the order of a hotel folio (only Hotelería charges it)', async () => {
       jest
         .spyOn(prisma.store_users, 'findMany')

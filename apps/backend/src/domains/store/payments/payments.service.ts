@@ -274,7 +274,7 @@ export class PaymentsService {
         metadata: createPaymentDto.metadata,
         returnUrl: createPaymentDto.returnUrl,
         cancelUrl: createPaymentDto.cancelUrl,
-      });
+      }, this.counterSaleOptions());
 
       return {
         success: true,
@@ -288,6 +288,53 @@ export class PaymentsService {
       }
       throw error;
     }
+  }
+
+  /**
+   * B06: un cobro de mostrador confirmado por `POST /store/payments` (o IA)
+   * deja su `sale` en la caja de quien cobra, en la misma tx que el pago.
+   * Misma política que el POS y `flow/pay` (`shouldRecordCashMovement`); las
+   * pasarelas y el contra entrega no mueven el cajón.
+   */
+  private counterSaleOptions() {
+    return {
+      onSucceeded: async (ctx: {
+        tx: Prisma.TransactionClient;
+        paymentId: number;
+        methodType: string | null;
+        processingMode: string | null;
+        amount: number;
+        orderId: number;
+        storeId: number;
+      }) => {
+        if (!(ctx.amount > 0)) return;
+        if (!shouldRecordCashMovement(ctx.methodType, ctx.processingMode)) {
+          return;
+        }
+        // Mismo gate que el POS: sin el switch de caja no hay movimiento.
+        const settings: any = await this.settingsService.getSettings();
+        if (!settings?.pos?.cash_register?.enabled) return;
+        const userId = RequestContextService.getUserId();
+        const session = userId
+          ? await this.sessionsService.getActiveSession(userId)
+          : null;
+        if (!session) {
+          throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+        }
+        await this.movementsService.recordSaleMovement(
+          session.id,
+          {
+            store_id: ctx.storeId,
+            user_id: userId as number,
+            amount: ctx.amount,
+            payment_method: ctx.methodType as string,
+            order_id: ctx.orderId,
+            payment_id: ctx.paymentId,
+          },
+          ctx.tx,
+        );
+      },
+    };
   }
 
   async processReservedPosPayment(
@@ -368,7 +415,7 @@ export class PaymentsService {
         items: createOrderPaymentDto.items || [],
         billingAddressId: createOrderPaymentDto.billingAddressId,
         shippingAddressId: createOrderPaymentDto.shippingAddressId,
-      });
+      }, this.counterSaleOptions());
 
       return {
         success: true,
