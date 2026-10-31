@@ -28,6 +28,7 @@ describe('FinishPendingSweepJob', () => {
     };
     orderFlow = {
       resumeFinishPendingAfterPayment: jest.fn(async () => 'resolved'),
+      recordFinishPendingFailure: jest.fn(async () => 'retry'),
     };
     job = new FinishPendingSweepJob(globalPrisma, runner, orderFlow);
   });
@@ -84,6 +85,19 @@ describe('FinishPendingSweepJob', () => {
       .mockResolvedValueOnce('resolved');
     await expect(job.sweep(now)).resolves.toBe(1);
     expect(orderFlow.resumeFinishPendingAfterPayment).toHaveBeenCalledTimes(2);
+  });
+
+  it('R3 #2: a failed retry is counted on the order (in its store context) so it can escalate to review', async () => {
+    const failure = new Error('still down');
+    orderFlow.resumeFinishPendingAfterPayment
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce('resolved');
+
+    await job.sweep(now);
+
+    expect(orderFlow.recordFinishPendingFailure).toHaveBeenCalledTimes(1);
+    expect(orderFlow.recordFinishPendingFailure).toHaveBeenCalledWith(7, failure);
+    expect(runner.runInStoreContext).toHaveBeenCalledTimes(3);
   });
 
   it('skips the tick when another pod holds the advisory lock', async () => {

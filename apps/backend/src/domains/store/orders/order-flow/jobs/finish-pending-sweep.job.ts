@@ -97,10 +97,27 @@ export class FinishPendingSweepJob {
         this.logger.error(
           `Finish pending retry failed order=${order.id} store=${order.store_id}: ${(error as Error)?.message ?? error}`,
         );
+        await this.recordFailure(order, error);
       }
     }
     if (resumed) this.logger.log(`Resumed ${resumed} order(s) pending close after payment`);
     return resumed;
+  }
+
+  /** R3 #2 — counts the failure; past the limit the order goes to review. */
+  private async recordFailure(
+    order: { id: number; store_id: number },
+    error: unknown,
+  ): Promise<void> {
+    try {
+      await this.storeContextRunner.runInStoreContext(order.store_id, () =>
+        this.orderFlow.recordFinishPendingFailure(order.id, error),
+      );
+    } catch (recordError) {
+      this.logger.error(
+        `Finish pending failure not counted order=${order.id}: ${(recordError as Error)?.message ?? recordError}`,
+      );
+    }
   }
 
   /** No open marker behind the stamp (`skipped`): clear it so it stops being leased. */

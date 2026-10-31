@@ -174,7 +174,14 @@ export interface FinishPendingAfterPaymentMarker {
   deferred_cash_signal_id?: number | null;
   from_state?: string | null;
   error: string;
+  /** R3 #2 — failed sweep retries so far; escalated at FINISH_PENDING_MAX_ATTEMPTS. */
+  attempts?: number;
+  last_error?: string;
 }
+
+/** R3 #2 — sweep retries (one per ≥5 min tick, ~1 h) before the order is
+ * taken off the sweep and left for manual review. */
+export const FINISH_PENDING_MAX_ATTEMPTS = 12;
 
 type CashSessionFinishSelection = {
   id: number;
@@ -3529,6 +3536,52 @@ export class OrderFlowService {
     const net = Prisma.Decimal.max(gross.minus(refunded), 0);
     const remaining = Prisma.Decimal.max(new Prisma.Decimal(order.grand_total ?? 0).minus(net), 0);
     return { total_paid: net.toNumber(), remaining_balance: remaining.toNumber() };
+  }
+
+  /**
+   * R3 #2 — a sweep retry of `resumeFinishPendingAfterPayment` failed. Counts
+   * it on the marker; at `FINISH_PENDING_MAX_ATTEMPTS` the marker is closed
+   * into `finish_pending_review` (internal note: the money is firm, the close
+   * is not), audited and logged, so the order leaves the sweep instead of
+   * being retried forever.
+   */
+  async recordFinishPendingFailure(
+    orderId: number,
+    error: unknown,
+  ): Promise<'retry' | 'escalated'> {
+    const order = await this.getOrder(orderId);
+    const marker = this.readFinishPendingMarker(order.internal_notes);
+    if (!marker) return 'retry';
+    const attempts = (marker.attempts ?? 0) + 1;
+    const last_error = (error as Error)?.message ?? String(error);
+    if (attempts < FINISH_PENDING_MAX_ATTEMPTS) {
+      await this.appendFlowMetadata(orderId, {
+        finish_pending_after_payment: { ...marker, attempts, last_error },
+      });
+      return 'retry';
+    }
+    const review = { ...marker, attempts, last_error, escalated_at: new Date().toISOString() };
+    await this.appendFlowMetadata(orderId, {
+      finish_pending_after_payment: null,
+      finish_pending_review: review,
+    });
+    this.logger.error(
+      `[finish_pending] order=${orderId} ${marker.kind} escalated to manual review after ${attempts} failed retries: ${last_error}`,
+    );
+    try {
+      await this.auditService.log({
+        userId: marker.user_id ?? undefined,
+        action: 'order.finish_pending.escalated',
+        resource: AuditResource.ORDERS,
+        resourceId: orderId,
+        metadata: review,
+      });
+    } catch (auditError) {
+      this.logger.error(
+        `[finish_pending] order=${orderId} escalation audit failed: ${(auditError as Error)?.message ?? auditError}`,
+      );
+    }
+    return 'escalated';
   }
 
   /** B11 — leaves the B07 marker on an order whose money is firm but whose

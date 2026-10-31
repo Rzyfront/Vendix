@@ -3,7 +3,12 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
-import { OrderFlowService, isActualCodTender, isManualConfirmationPending } from './order-flow.service';
+import {
+  FINISH_PENDING_MAX_ATTEMPTS,
+  OrderFlowService,
+  isActualCodTender,
+  isManualConfirmationPending,
+} from './order-flow.service';
 import { OrderFlowController } from './order-flow.controller';
 import { PERMISSIONS_KEY } from '../../../auth/decorators/permissions.decorator';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -4053,6 +4058,61 @@ describe('OrderFlowService.resumeFinishPendingAfterPayment — R3 #1 saldo vivo'
       'finished',
       expect.objectContaining({ total_paid: 4000, remaining_balance: 0 }),
       { historyFromState: 'created' },
+    );
+  });
+});
+
+describe('OrderFlowService.recordFinishPendingFailure — R3 #2 tope de reintentos', () => {
+  const build = (attempts?: number) => {
+    const audit = { log: jest.fn().mockResolvedValue(undefined), logCustom: jest.fn() };
+    const service = new OrderFlowService(
+      {} as unknown as StorePrismaService,
+      { emit: jest.fn(), emitAsync: jest.fn().mockResolvedValue([]) } as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      audit as any,
+    );
+    jest.spyOn(service, 'getOrder').mockResolvedValue({
+      id: 7,
+      internal_notes: JSON.stringify({
+        _flow_metadata: {
+          finish_pending_after_payment: {
+            kind: 'pay_finish', at: 'x', payment_ids: [55], user_id: 3, error: 'e',
+            ...(attempts != null ? { attempts } : {}),
+          },
+        },
+        notes: '',
+      }),
+    } as any);
+    const append = jest.spyOn(service as any, 'appendFlowMetadata').mockResolvedValue(undefined);
+    return { service, audit, append };
+  };
+
+  it('por debajo del tope: suma el intento en el marcador y sigue en el barrido', async () => {
+    const { service, audit, append } = build(3);
+
+    await expect(service.recordFinishPendingFailure(7, new Error('still down'))).resolves.toBe('retry');
+
+    expect(append).toHaveBeenCalledWith(7, {
+      finish_pending_after_payment: expect.objectContaining({ attempts: 4, last_error: 'still down' }),
+    });
+    expect(audit.log).not.toHaveBeenCalled();
+  });
+
+  it('al llegar al tope: cierra el marcador, deja finish_pending_review y lo audita', async () => {
+    const { service, audit, append } = build(FINISH_PENDING_MAX_ATTEMPTS - 1);
+
+    await expect(service.recordFinishPendingFailure(7, new Error('still down'))).resolves.toBe('escalated');
+
+    expect(append).toHaveBeenCalledWith(7, {
+      finish_pending_after_payment: null,
+      finish_pending_review: expect.objectContaining({
+        attempts: FINISH_PENDING_MAX_ATTEMPTS,
+        last_error: 'still down',
+        payment_ids: [55],
+      }),
+    });
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'order.finish_pending.escalated', resourceId: 7, userId: 3 }),
     );
   });
 });
