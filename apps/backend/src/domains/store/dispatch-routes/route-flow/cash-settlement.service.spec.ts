@@ -167,14 +167,16 @@ describe('CashSettlementService — cierre de planilla contra caja', () => {
     responsible_user_id: 33,
   };
 
-  it('crea un movimiento sale por método (null => cash) con user_id responsable y reference de cierre', async () => {
+  it('crea un movimiento sale por método real, solo con collected_amount (sin anticipo) y con origen dispatch_route', async () => {
     const { service, tx, eventEmitter } = build();
     const res = await service.recordRouteCloseMovements(tx, {
       ...base,
       stops: [
         stop(1),
-        stop(2, { payment_method: null, collected_amount: 50 }),
+        stop(2, { collected_amount: 50 }),
         stop(3, { payment_method: 'transfer', collected_amount: 70, anticipo_amount: 5 }),
+        // Anticipo con tarjeta y nada cobrado en ruta: no entra al cajón.
+        stop(7, { payment_method: 'card', collected_amount: 0, anticipo_amount: 200 }),
         stop(4, { is_prepaid: true }),
         stop(5, { result: 'rejected' }),
         stop(6, { collected_amount: 0 }),
@@ -191,17 +193,43 @@ describe('CashSettlementService — cierre de planilla contra caja', () => {
         payment_method: 'cash',
         reference: 'dispatch_route:3:close:cash',
         notes: 'Recaudo ruta PLN1 (2 paradas)',
+        source_type: 'dispatch_route',
+        source_id: 3,
       }),
     });
     expect(tx.cash_register_movements.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        amount: 75,
+        amount: 70,
         payment_method: 'transfer',
         reference: 'dispatch_route:3:close:transfer',
+        source_type: 'dispatch_route_transfer',
+        source_id: 3,
       }),
     });
+    expect(tx.cash_register_movements.create).toHaveBeenCalledTimes(2);
     // No `cash_register.movement` (el listener trataria un `sale` como retiro).
     expect(eventEmitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('B20: cobro sin método no se asume efectivo: PAY_METHOD_MISCONFIGURED y no crea nada', async () => {
+    const { service, tx } = build();
+    await expect(
+      service.recordRouteCloseMovements(tx, {
+        ...base,
+        stops: [stop(1), stop(2, { payment_method: null, collected_amount: 50 })],
+      }),
+    ).rejects.toMatchObject({ errorCode: 'PAY_METHOD_MISCONFIGURED' });
+    expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
+  });
+
+  it('B08: un método de pasarela (wompi) no mueve el cajón', async () => {
+    const { service, tx } = build();
+    const res = await service.recordRouteCloseMovements(tx, {
+      ...base,
+      stops: [stop(1, { payment_method: 'wompi', collected_amount: 80 })],
+    });
+    expect(res).toEqual([]);
+    expect(tx.cash_register_movements.create).not.toHaveBeenCalled();
   });
 
   it('excluye paradas con movimiento legado por parada', async () => {

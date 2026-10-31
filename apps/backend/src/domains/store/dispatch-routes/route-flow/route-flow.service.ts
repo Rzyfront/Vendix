@@ -1334,6 +1334,11 @@ export class RouteFlowService {
           );
         }
         settlement_cash_user_id = Number(sessions[0].opened_by);
+        // B20: el efectivo del recaudo entra al cajón de quien liquida; la
+        // sesión de otro usuario no puede recibirlo.
+        if (!user_id || settlement_cash_user_id !== Number(user_id)) {
+          throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+        }
         await this.cashSettlement.recordRouteCloseMovements(tx, {
           store_id,
           route_id: id,
