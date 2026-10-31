@@ -14,6 +14,7 @@ import { PurchaseOrdersModule } from './orders/purchase-orders/purchase-orders.m
 import { StoreUsersModule } from './store-users/store-users.module';
 import { SettingsModule } from './settings/settings.module';
 import { CustomersModule } from './customers/customers.module';
+import { CrmInboxModule } from './customers/crm/conversations/crm-inbox.module';
 import { StoreDomainsModule } from './domains/domains.module';
 import { ShippingModule } from './shipping/shipping.module';
 import { ExpensesModule } from './expenses/expenses.module';
@@ -60,6 +61,7 @@ import { DataCollectionModule } from './data-collection/data-collection.module';
 import { ConsultationsModule } from './consultations/consultations.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { SocialSalesModule } from './social-sales/social-sales.module';
+import { MessagingChannelsModule } from './integrations/channels/messaging-channels.module';
 import { MarketingAdCreativesModule } from './marketing-ad-creatives/marketing-ad-creatives.module';
 import { PriceTiersModule } from './price-tiers/price-tiers.module';
 import { UnitTypesModule } from './hospitality/unit-types/unit-types.module';
@@ -103,6 +105,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     StoreUsersModule,
     SettingsModule,
     CustomersModule,
+    CrmInboxModule,
     StoreDomainsModule,
     ShippingModule,
     ExpensesModule,
@@ -149,6 +152,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     ConsultationsModule,
     SubscriptionsModule,
     SocialSalesModule,
+    MessagingChannelsModule,
     MarketingAdCreativesModule,
     PriceTiersModule,
     UnitTypesModule,
