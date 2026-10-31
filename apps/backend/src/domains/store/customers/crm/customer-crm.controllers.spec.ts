@@ -74,7 +74,7 @@ describe('CRM 360, tareas y pipeline · permisos', () => {
   });
 
   it('the unsubscribe link is the only public CRM route', () => {
-    for (const handler of ['open', 'oneClick']) {
+    for (const handler of ['open', 'confirm']) {
       expect(
         Reflect.getMetadata(
           IS_PUBLIC_KEY,

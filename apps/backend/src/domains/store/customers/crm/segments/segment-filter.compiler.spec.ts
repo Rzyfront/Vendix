@@ -149,6 +149,8 @@ describe('segment filter compiler', () => {
   describe('rejected', () => {
     it.each([
       ['an unknown field', one('users.password', 'eq', 'x'), /Campo no permitido/],
+      ['a prototype key as field', one('constructor', 'eq', 1), /Campo no permitido/],
+      ['__proto__ as field', one('__proto__', 'eq', 1), /Campo no permitido/],
       ['SQL in the field name', one('tag"; DROP TABLE users; --', 'eq', 1), /Campo no permitido/],
       ['SQL in a custom field key', one('meta.x"; DELETE FROM orders', 'eq', 1), /Clave de campo/],
       ['an operator outside the field catalog', one('total_spent', 'eq', 10), /Operador no permitido/],

@@ -41,6 +41,7 @@ function setup(options: {
   const row = options.row === undefined ? campaign() : options.row;
   let nextMessage = 100;
   let nextConversation = 50;
+  const created: number[] = [];
   const prisma = {
     crm_campaigns: {
       findUnique: jest.fn().mockResolvedValue(row),
@@ -48,11 +49,18 @@ function setup(options: {
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     crm_conversations: {
-      upsert: jest.fn().mockImplementation(() => Promise.resolve({ id: nextConversation++ })),
+      upsert: jest.fn().mockImplementation(() => Promise.resolve({ id: nextConversation++, customer_id: 1 })),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     crm_messages: {
       findFirst: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockImplementation(() => Promise.resolve({ id: nextMessage++ })),
+      create: jest.fn().mockImplementation(() => {
+        const id = nextMessage++;
+        created.push(id);
+        return Promise.resolve({ id });
+      }),
+      findMany: jest.fn().mockImplementation(() => Promise.resolve(created.map((id) => ({ id })))),
+      count: jest.fn().mockImplementation(() => Promise.resolve(created.length)),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
       groupBy: jest.fn().mockResolvedValue([]),
     },
@@ -181,7 +189,13 @@ describe('CrmCampaignDispatcher', () => {
     prisma.crm_messages.findFirst
       .mockResolvedValueOnce({ id: 7, status: 'sent' })
       .mockResolvedValueOnce({ id: 8, status: 'queued' });
+    prisma.crm_messages.findMany.mockResolvedValue([{ id: 8 }]);
+    prisma.crm_messages.count.mockResolvedValue(2);
     await dispatcher.dispatch(30, NOW);
+    expect(prisma.crm_campaigns.updateMany).toHaveBeenCalledWith({
+      where: { id: 30, status: 'sending' },
+      data: { recipients_total: 2 },
+    });
     expect(prisma.crm_messages.create).not.toHaveBeenCalled();
     expect(outbound.enqueue.mock.calls).toEqual([[8, { delayMs: 0 }]]);
   });
@@ -210,15 +224,74 @@ describe('CrmCampaignDispatcher', () => {
     expect(outbound.enqueue).not.toHaveBeenCalled();
   });
 
-  it('drops what it created when the campaign was cancelled meanwhile', async () => {
+  it('drops what it created when the campaign was cancelled while materializing', async () => {
     const { dispatcher, prisma, outbound } = setup();
-    prisma.crm_campaigns.updateMany.mockResolvedValueOnce({ count: 0 });
+    prisma.crm_campaigns.findUnique
+      .mockResolvedValueOnce(campaign())
+      .mockResolvedValueOnce({ status: 'cancelled' });
     await dispatcher.dispatch(30, NOW);
     expect(prisma.crm_messages.updateMany).toHaveBeenCalledWith({
       where: { campaign_id: 30, status: 'queued' },
       data: expect.objectContaining({ status: 'failed', error_code: 'CAMPAIGN_CANCELLED' }),
     });
     expect(outbound.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('marks the campaign materialized only after enqueuing, and drops queued messages if it was cancelled meanwhile', async () => {
+    const { dispatcher, prisma, outbound } = setup();
+    prisma.crm_campaigns.updateMany.mockResolvedValueOnce({ count: 0 });
+    await dispatcher.dispatch(30, NOW);
+    const enqueuedAt = outbound.enqueue.mock.invocationCallOrder[0];
+    const markedAt = prisma.crm_campaigns.updateMany.mock.invocationCallOrder[0];
+    expect(enqueuedAt).toBeLessThan(markedAt);
+    expect(prisma.crm_messages.updateMany).toHaveBeenCalledWith({
+      where: { campaign_id: 30, status: 'queued' },
+      data: expect.objectContaining({ status: 'failed', error_code: 'CAMPAIGN_CANCELLED' }),
+    });
+  });
+
+  it('re-enqueues messages left queued by a crashed run even if their recipient opted out since', async () => {
+    const { dispatcher, prisma, outbound } = setup({ recipients: [] });
+    prisma.crm_messages.findMany.mockResolvedValue([{ id: 7 }]);
+    prisma.crm_messages.count.mockResolvedValue(1);
+    // An empty audience only closes the campaign when nothing was created before.
+    await dispatcher.dispatch(30, NOW);
+    expect(outbound.enqueue.mock.calls).toEqual([[7, { delayMs: 0 }]]);
+    expect(prisma.crm_campaigns.updateMany).toHaveBeenCalledWith({
+      where: { id: 30, status: 'sending' },
+      data: { recipients_total: 1 },
+    });
+
+    const partial = setup({ recipients: [eligible[0]] });
+    partial.prisma.crm_messages.findFirst.mockResolvedValue({ id: 9, status: 'sent' });
+    partial.prisma.crm_messages.findMany.mockResolvedValue([{ id: 7 }]);
+    partial.prisma.crm_messages.count.mockResolvedValue(2);
+    await partial.dispatcher.dispatch(30, NOW);
+    expect(partial.outbound.enqueue.mock.calls).toEqual([[7, { delayMs: 0 }]]);
+  });
+
+  it('fails an email campaign instead of sending without a production unsubscribe secret', async () => {
+    const { dispatcher, prisma, outbound } = setup({
+      row: campaign({ channel: 'email', subject: 'Hola', body: 'Promo' }),
+      env: { NODE_ENV: 'production' },
+    });
+    await dispatcher.dispatch(30, NOW);
+    expect(prisma.crm_messages.create).not.toHaveBeenCalled();
+    expect(outbound.enqueue).not.toHaveBeenCalled();
+    expect(prisma.crm_campaigns.updateMany).toHaveBeenCalledWith({
+      where: { id: 30, status: 'sending' },
+      data: expect.objectContaining({ status: 'failed' }),
+    });
+  });
+
+  it('links a pre-existing unlinked conversation to the recipient', async () => {
+    const { dispatcher, prisma } = setup({ recipients: [eligible[0]] });
+    prisma.crm_conversations.upsert.mockResolvedValue({ id: 50, customer_id: null });
+    await dispatcher.dispatch(30, NOW);
+    expect(prisma.crm_conversations.updateMany).toHaveBeenCalledWith({
+      where: { id: 50, customer_id: null },
+      data: { customer_id: 1 },
+    });
   });
 
   it('does nothing when another worker holds the lock or the campaign is not sending', async () => {

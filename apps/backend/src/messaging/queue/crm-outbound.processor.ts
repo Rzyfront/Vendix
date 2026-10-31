@@ -48,7 +48,7 @@ export class CrmOutboundProcessor extends WorkerHost {
     const messageId = job.data.message_id;
     const message = await this.prisma.crm_messages.findUnique({
       where: { id: messageId },
-      include: { conversation: true },
+      include: { conversation: true, campaign: { select: { status: true } } },
     });
 
     if (
@@ -62,6 +62,19 @@ export class CrmOutboundProcessor extends WorkerHost {
       this.logger.warn(
         `Skipping crm-outbound job for message ${messageId}: ${message ? `${message.direction}/${message.channel}/${message.status}` : 'not found'}`,
       );
+      return;
+    }
+
+    if (message.campaign?.status === 'cancelled') {
+      await this.prisma.crm_messages.updateMany({
+        where: { id: messageId, status: 'queued' },
+        data: {
+          status: 'failed',
+          error_code: 'CAMPAIGN_CANCELLED',
+          error_message: 'La campaña se canceló antes del envío',
+          failed_at: new Date(),
+        },
+      });
       return;
     }
 

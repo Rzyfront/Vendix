@@ -203,7 +203,10 @@ export class CrmCampaignDispatcher {
       });
       return 0;
     }
-    if (audience.eligible.length === 0) {
+    if (
+      audience.eligible.length === 0 &&
+      (await this.prisma.crm_messages.count({ where: { campaign_id: campaignId } })) === 0
+    ) {
       await this.prisma.crm_campaigns.updateMany({
         where: { id: campaignId, status: 'sending' },
         data: { status: 'sent', finished_at: now },
@@ -212,33 +215,52 @@ export class CrmCampaignDispatcher {
     }
 
     const channel = content.channel;
-    const messageIds: number[] = [];
+    if (channel === 'email') {
+      try {
+        // Without CRM_UNSUBSCRIBE_SECRET in production no email may leave.
+        this.unsubscribe.token({ store_id: campaign.store_id, customer_id: 1, channel: 'email' });
+      } catch (error) {
+        await this.fail(campaign, 'crm_campaign_unsubscribe_unavailable', (error as Error)?.message);
+        return 0;
+      }
+    }
     for (const recipient of audience.eligible) {
-      const id = await this.messageFor(campaign, content, channel, recipient, store_name, now);
-      if (id) messageIds.push(id);
+      await this.messageFor(campaign, content, channel, recipient, store_name, now);
     }
 
-    const updated = await this.prisma.crm_campaigns.updateMany({
-      where: { id: campaignId, status: 'sending' },
-      data: { recipients_total: audience.eligible.length },
+    // Every message still queued is enqueued, including those of a crashed
+    // earlier run whose recipient has opted out since: the worker re-checks
+    // consent and fails them, so the campaign can always close.
+    const queued = await this.prisma.crm_messages.findMany({
+      where: { campaign_id: campaignId, status: 'queued' },
+      select: { id: true },
+      orderBy: { id: 'asc' },
     });
-    if (updated.count === 0) {
-      // Cancelled while materializing: nothing created here may leave.
-      await this.prisma.crm_messages.updateMany({
-        where: { campaign_id: campaignId, status: 'queued' },
-        data: {
-          status: 'failed',
-          error_code: 'CAMPAIGN_CANCELLED',
-          error_message: 'La campaña se canceló antes del envío',
-          failed_at: now,
-        },
-      });
+    const current = await this.prisma.crm_campaigns.findUnique({
+      where: { id: campaignId },
+      select: { status: true },
+    });
+    if (current?.status !== 'sending') {
+      await this.dropQueued(campaignId, now);
       return 0;
     }
 
     const rate = this.ratePerStore();
-    for (const [index, id] of messageIds.entries()) {
+    for (const [index, { id }] of queued.entries()) {
       await this.outbound.enqueue(id, { delayMs: Math.floor(index / rate) * 1000 });
+    }
+
+    // Marks the campaign materialized only after everything is enqueued, so a
+    // crash before this line is retried from scratch (and deduped).
+    const total = await this.prisma.crm_messages.count({ where: { campaign_id: campaignId } });
+    const updated = await this.prisma.crm_campaigns.updateMany({
+      where: { id: campaignId, status: 'sending' },
+      data: { recipients_total: total },
+    });
+    if (updated.count === 0) {
+      // Cancelled meanwhile; the worker also skips messages of cancelled campaigns.
+      await this.dropQueued(campaignId, now);
+      return 0;
     }
 
     await this.audit.log({
@@ -256,7 +278,19 @@ export class CrmCampaignDispatcher {
         estimated_cost: estimate.estimated_cost,
       },
     });
-    return messageIds.length;
+    return queued.length;
+  }
+
+  private async dropQueued(campaignId: number, now: Date): Promise<void> {
+    await this.prisma.crm_messages.updateMany({
+      where: { campaign_id: campaignId, status: 'queued' },
+      data: {
+        status: 'failed',
+        error_code: 'CAMPAIGN_CANCELLED',
+        error_message: 'La campaña se canceló antes del envío',
+        failed_at: now,
+      },
+    });
   }
 
   /**
@@ -293,8 +327,16 @@ export class CrmCampaignDispatcher {
         closed_at: now,
       },
       update: {},
-      select: { id: true },
+      select: { id: true, customer_id: true },
     });
+    if (!conversation.customer_id) {
+      // A contact that wrote before being a customer: link it, so the consent
+      // checked at send time is this recipient's.
+      await this.prisma.crm_conversations.updateMany({
+        where: { id: conversation.id, customer_id: null },
+        data: { customer_id: recipient.customer_id },
+      });
+    }
 
     const existing = await this.prisma.crm_messages.findFirst({
       where: { campaign_id: campaign.id, conversation_id: conversation.id },

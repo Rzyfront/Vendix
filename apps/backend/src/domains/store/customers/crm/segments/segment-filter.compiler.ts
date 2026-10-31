@@ -233,7 +233,10 @@ function parseRule(raw: unknown, path: string): SegmentRule {
     }
     return { field, cmp: cmp as SegmentOperator, value: rawMetaValue(raw.value, `${path}.value`) };
   }
-  const spec = FIELDS[field];
+  // Own keys only: `constructor`, `__proto__`… are not fields.
+  const spec = Object.prototype.hasOwnProperty.call(FIELDS, field)
+    ? FIELDS[field]
+    : undefined;
   if (!spec) {
     throw new SegmentFilterError(`Campo no permitido: ${field}`, `${path}.field`);
   }

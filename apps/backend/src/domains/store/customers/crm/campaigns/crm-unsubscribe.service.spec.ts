@@ -65,11 +65,16 @@ describe('CrmUnsubscribeService', () => {
     expect(prisma.store_users.updateMany).not.toHaveBeenCalled();
   });
 
-  it('the public link answers without revealing anything for an invalid token', async () => {
+  it('the public link only asks for confirmation on GET and unsubscribes on POST', async () => {
     const { controller, service, prisma } = setup();
-    await expect(controller.open('nope')).resolves.toContain('Enlace no válido');
+    expect(controller.open('nope')).toContain('Enlace no válido');
+    const token = service.token(payload);
+    expect(controller.open(token)).toContain('Confirmar baja');
     expect(prisma.store_users.updateMany).not.toHaveBeenCalled();
-    await expect(controller.open(service.token(payload))).resolves.toContain('te diste de baja');
-    await expect(controller.oneClick(service.token(payload))).resolves.toEqual({ unsubscribed: true });
+
+    await expect(controller.confirm('nope')).resolves.toContain('Enlace no válido');
+    expect(prisma.store_users.updateMany).not.toHaveBeenCalled();
+    await expect(controller.confirm(token)).resolves.toContain('te diste de baja');
+    expect(prisma.store_users.updateMany).toHaveBeenCalledTimes(1);
   });
 });

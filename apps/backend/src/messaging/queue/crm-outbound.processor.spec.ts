@@ -329,4 +329,16 @@ describe('CrmOutboundProcessor', () => {
     await processor.process(job());
     expect((messaging.send as jest.Mock).mock.calls[0][0].marketing).toBeUndefined();
   });
+
+  it('never sends a message of a cancelled campaign', async () => {
+    const { processor, prisma, messaging } = setup(
+      row({ campaign_id: 12, campaign: { status: 'cancelled' } }),
+    );
+    await processor.process(job());
+    expect(messaging.send).not.toHaveBeenCalled();
+    expect(prisma.crm_messages.updateMany).toHaveBeenCalledWith({
+      where: { id: 77, status: 'queued' },
+      data: expect.objectContaining({ status: 'failed', error_code: 'CAMPAIGN_CANCELLED' }),
+    });
+  });
 });
