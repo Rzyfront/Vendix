@@ -6,6 +6,7 @@ import {
   addresses,
   cash_registers,
   kds,
+  crm_pipelines,
 } from '@prisma/client';
 import { OrganizationPrismaService } from '../../prisma/services/organization-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../errors';
@@ -133,6 +134,25 @@ export const DEFAULT_KDS = {
  * so the gate and the identifiers travel together.
  */
 const KDS_INDUSTRY = 'restaurant';
+
+/**
+ * Sales pipeline every store is born with (PLAN-CRM §3, M5).
+ *
+ * MUST match the backfill in
+ * `prisma/migrations/20261106100300_crm_seed_default_pipeline/migration.sql`:
+ * the migration seeds existing stores and this bootstrap seeds new ones, and
+ * both skip any store that already owns a pipeline.
+ */
+export const DEFAULT_CRM_PIPELINE = {
+  name: 'Ventas',
+  stages: [
+    { name: 'Nuevo', sort_order: 0, kind: 'open' },
+    { name: 'Contactado', sort_order: 1, kind: 'open' },
+    { name: 'Cotizado', sort_order: 2, kind: 'open' },
+    { name: 'Ganado', sort_order: 3, kind: 'won' },
+    { name: 'Perdido', sort_order: 4, kind: 'lost' },
+  ],
+} as const;
 
 /**
  * StoreBootstrapHelper
@@ -385,6 +405,66 @@ export class StoreBootstrapHelper {
     }
   }
 
+  /**
+   * Ensure the store owns a CRM pipeline, creating the default `Ventas` one
+   * with its five stages when it owns none. Idempotent, same contract as
+   * `ensureDefaultCashRegister`: the guard is "does this store have ANY
+   * pipeline", so a store that already built its own board does not also get
+   * one it never asked for, and creating a store twice never duplicates it.
+   *
+   * The pipeline is marked `is_default`; the DB carries a partial unique index
+   * (`crm_pipelines_one_default_per_store`) plus `@@unique([store_id, name])`,
+   * so a concurrent caller surfaces as P2002 and we read the winner.
+   */
+  async ensureDefaultCrmPipeline(
+    params: { store_id: number },
+    tx?: Prisma.TransactionClient,
+  ): Promise<crm_pipelines> {
+    if (!tx) {
+      return (this.prisma as any).$transaction((t: Prisma.TransactionClient) =>
+        this.ensureDefaultCrmPipeline(params, t),
+      );
+    }
+    const client = tx;
+
+    const existing = await client.crm_pipelines.findFirst({
+      where: { store_id: params.store_id },
+      orderBy: { id: 'asc' },
+    });
+    if (existing) return existing;
+
+    const now = new Date();
+    try {
+      return await client.crm_pipelines.create({
+        data: {
+          store_id: params.store_id,
+          name: DEFAULT_CRM_PIPELINE.name,
+          is_default: true,
+          created_at: now,
+          updated_at: now,
+          // The tx client is unscoped: every stage names its store explicitly.
+          stages: {
+            create: DEFAULT_CRM_PIPELINE.stages.map((stage) => ({
+              store_id: params.store_id,
+              name: stage.name,
+              sort_order: stage.sort_order,
+              kind: stage.kind,
+            })),
+          },
+        },
+      });
+    } catch (e: any) {
+      if (e?.code === 'P2002') {
+        const raced = await client.crm_pipelines.findFirst({
+          where: { store_id: params.store_id },
+          orderBy: { id: 'asc' },
+        });
+        if (raced) return raced;
+      }
+      throw e;
+    }
+  }
+
   private validateInput(input: StoreBootstrapInput): void {
     if (!input?.organization_id || input.organization_id <= 0) {
       throw new VendixHttpException(
@@ -580,6 +660,11 @@ export class StoreBootstrapHelper {
       },
       client,
     );
+
+    // 7) Default CRM sales pipeline (PLAN-CRM PR 2). Same transaction as the
+    //    other defaults: the CRM board must open with its columns, and the
+    //    backfill migration only covers stores that existed before it ran.
+    await this.ensureDefaultCrmPipeline({ store_id: store.id }, client);
 
     return {
       store: storeWithDefault,

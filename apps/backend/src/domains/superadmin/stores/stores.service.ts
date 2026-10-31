@@ -110,6 +110,12 @@ export class StoresService {
       industries: store.industries as unknown as string[],
     });
 
+    // Default CRM sales pipeline (PLAN-CRM PR 2). Same idempotent helper the
+    // bootstrap transaction uses, so this path cannot drift from the other two.
+    await this.storeBootstrapHelper.ensureDefaultCrmPipeline({
+      store_id: store.id,
+    });
+
     // Create store settings if provided
     if (settings && Object.keys(settings).length > 0) {
       await this.prisma.store_settings.create({
