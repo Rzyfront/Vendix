@@ -951,25 +951,6 @@
             </h2>
           </div>
 
-          <!-- Naturaleza de uso: Venta · Insumo · Uso interno (todas las industrias).
-               Vive junto al estado para decidir de una vez qué es y cómo se ofrece. -->
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
-              <h3 class="text-sm font-bold text-gray-900">
-                ¿Para qué es este producto?
-              </h3>
-            </div>
-            <app-input-buttons
-              [options]="usageNatureOptions"
-              formControlName="usage_nature"
-              (valueChange)="onUsageNatureChange($event)"
-              customWrapperClass="!mt-0"
-            >
-            </app-input-buttons>
-            <p class="text-sm text-text-secondary">{{ usageNatureHelp() }}</p>
-          </div>
-
           <!-- Tipo de Producto — oculto en insumos (siempre Producto Físico) -->
           @if (!isIngredient()) {
             <div class="space-y-2">
@@ -987,18 +968,49 @@
             </div>
           }
 
-          <!-- Grid 2x2: Estado, Stock, Variantes, Inventario -->
+          <!-- Fila simétrica: naturaleza de uso | estado del producto -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-            <!-- Row 1, Col 1: Estado -->
-            <app-input-buttons
-              [options]="productStateButtonOptions"
-              formControlName="state"
-              (valueChange)="onStateChange($event)"
-              customWrapperClass="!mt-3"
-              customContainerClass="!bg-gray-50 !border-gray-100 !h-[46px]"
-            >
-            </app-input-buttons>
+            <!-- Naturaleza de uso: Venta · Insumo · Uso interno -->
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
+                <h3 class="text-sm font-bold text-gray-900">
+                  ¿Para qué es este producto?
+                </h3>
+              </div>
+              <app-input-buttons
+                [options]="usageNatureOptions"
+                formControlName="usage_nature"
+                (valueChange)="onUsageNatureChange($event)"
+                customWrapperClass="!mt-0"
+              >
+              </app-input-buttons>
+              <p class="text-sm text-text-secondary">{{ usageNatureHelp() }}</p>
+            </div>
 
+            <!-- Estado del producto: Activo · Archivado -->
+            <div class="space-y-2">
+              <div class="flex items-center gap-2">
+                <app-icon
+                  name="check-circle"
+                  size="18"
+                  class="text-primary-600"
+                ></app-icon>
+                <h3 class="text-sm font-bold text-gray-900">Estado</h3>
+              </div>
+              <app-input-buttons
+                [options]="productStateButtonOptions"
+                formControlName="state"
+                (valueChange)="onStateChange($event)"
+                customWrapperClass="!mt-0"
+                customContainerClass="!bg-gray-50 !border-gray-100 !h-[46px]"
+              >
+              </app-input-buttons>
+            </div>
+          </div>
+
+          <!-- Grid: Stock, Variantes, Inventario -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
             <!-- Row 1, Col 2: Disponibilidad E-commerce -->
             <div [hidden]="isPureIngredient()" class="contents">
             <app-setting-toggle
