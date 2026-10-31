@@ -2865,6 +2865,7 @@ export class OrderFlowService {
       await this.commitCouponUseForOrder(orderId);
 
       let updatedOrder;
+      let paymentFinishPending = false;
       try {
         updatedOrder = await this.updateOrderState(orderId, 'finished', {
           paid_at: new Date(),
@@ -3070,6 +3071,7 @@ export class OrderFlowService {
       // restores the pre-claim state before throwing; this block covers the
       // finish throw.
       let updatedOrder;
+      let paymentFinishPending = false;
       try {
         updatedOrder = await this.updateOrderState(orderId, 'finished', {
           paid_at: new Date(),
@@ -3099,16 +3101,51 @@ export class OrderFlowService {
           // `details.cause_code` para que la UI y soporte puedan pivotar.
           throw this.wrapPaymentFailure('finish_blocked', e);
         }
-        // Error de infra (no Vendix): envolvemos también, pero sin un
-        // cause_code tipado. La restauración aplica igual: el claim ya se
-        // tomó y el finish no comprometió nada.
-        if (preClaimState !== 'draft') {
-          await this.restorePreClaimState(orderId, preClaimState);
+        // B07 — error de infraestructura (no Vendix): el pago y su `sale` ya
+        // están firmes. NO se restaura el estado ni se relanza como fallo (eso
+        // invitaba a cobrar otra vez): la orden queda en `processing` con el
+        // marcador `finish_pending_after_payment` y se responde "pago
+        // registrado, cierre pendiente". El pago es real, así que se emiten
+        // sus eventos como en el camino de éxito.
+        this.logger.error(
+          `[flow/pay finish_blocked_infra] order=${orderId}: pago registrado, cierre pendiente: ${(e as Error)?.message ?? 'unknown'}`,
+          (e as Error)?.stack,
+        );
+        paymentFinishPending = true;
+        try {
+          await this.appendFlowMetadata(orderId, {
+            finish_pending_after_payment: {
+              at: new Date().toISOString(),
+              payment_ids: legPayments.map(({ payment }) => payment.id),
+              error: (e as Error)?.message ?? 'unknown',
+            },
+          });
+        } catch (markerError) {
+          this.logger.error(
+            `[flow/pay finish_pending marker failed] order=${orderId}: ${(markerError as Error)?.message ?? markerError}`,
+          );
         }
-        throw this.wrapPaymentFailure('finish_blocked_infra', {
-          order_id: orderId,
-          error: (e as Error)?.message ?? 'unknown',
-        });
+        try {
+          await this.emitLegPaymentReceivedEvents(orderId, order, legPayments);
+        } catch (eventError) {
+          this.logger.error(
+            `[flow/pay finish_pending events failed] order=${orderId}: ${(eventError as Error)?.message ?? eventError}`,
+          );
+        }
+        try {
+          updatedOrder = await this.getOrder(orderId);
+        } catch {
+          updatedOrder = { id: orderId, state: 'processing' };
+        }
+      }
+
+      if (paymentFinishPending) {
+        return {
+          order: updatedOrder,
+          ...this.buildLeggedPaymentResponse(legPayments, change),
+          finish_pending: true,
+          message: 'Pago registrado; el cierre de la venta quedó pendiente. No vuelvas a cobrar.',
+        };
       }
 
       if (paymentHistoryCtx.deferCashMovementUntilFinish) {

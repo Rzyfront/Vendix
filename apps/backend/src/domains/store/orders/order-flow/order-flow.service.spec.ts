@@ -3821,6 +3821,35 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
     ).toHaveLength(0);
   });
 
+  it('B07: error de infraestructura al finalizar → pago firme, marcador finish_pending_after_payment y sin fallo que invite a re-cobrar', async () => {
+    const { service, prismaMock } = buildService();
+    jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockRejectedValue(new Error('deadlock detected'));
+    const marker = jest
+      .spyOn(service as any, 'appendFlowMetadata')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'emitLegPaymentReceivedEvents')
+      .mockResolvedValue(undefined);
+
+    const result: any = await service.payOrder(1, DTO);
+
+    expect(result.finish_pending).toBe(true);
+    expect(result.payment.transaction_id).toBe('TXN-1');
+    expect(marker).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        finish_pending_after_payment: expect.objectContaining({ payment_ids: [999] }),
+      }),
+    );
+    // El pago NO se anula y la orden NO se restaura: el único updateMany es el claim.
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledTimes(1);
+    // Ningún segundo pago.
+    expect(prismaMock.payments.create).toHaveBeenCalledTimes(1);
+  });
+
   it('finish OK: NO restaura (el claim es el único updateMany)', async () => {
     const { service, prismaMock } = buildService();
     jest
