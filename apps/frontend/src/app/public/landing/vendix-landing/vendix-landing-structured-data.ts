@@ -49,7 +49,9 @@ const VENDIX_CONTACT_POINT = {
  * navegador desde VendixLandingComponent: index.html y el prerender se sirven
  * también a los storefronts de los tenants, así que no puede ir en estático.
  *
- * Reglas (SEO-TECH-10): describe solo lo que muestra la página; nunca
+ * Reglas (SEO-TECH-10): solo datos verificables de Vendix (lo que muestra la
+ * página y lo publicado en su Perfil de Negocio de Google, como la sede en
+ * Riohacha y los perfiles de sameAs, aunque no aparezcan en la página); nunca
  * calificaciones, reseñas ni precios inventados. Los precios salen de los
  * planes mensuales publicados por GET /api/public/plans.
  */
