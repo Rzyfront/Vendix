@@ -20,6 +20,8 @@ describe('RefundCalculationService — per-line quantity integrity', () => {
       tax_amount: new Prisma.Decimal(0),
       total_paid: new Prisma.Decimal(1010),
       remaining_balance: new Prisma.Decimal(0),
+      // B19: el techo de reembolso es lo cobrado (Σ pagos), no solo grand_total.
+      payments: [{ amount: new Prisma.Decimal(1010) }],
       refunds: [],
       order_items: [
         buildOrderItem({
@@ -137,6 +139,7 @@ describe('RefundCalculationService — per-line quantity integrity', () => {
       subtotal_amount: new Prisma.Decimal(2010),
       grand_total: new Prisma.Decimal(2010),
       total_paid: new Prisma.Decimal(2010),
+      payments: [{ amount: new Prisma.Decimal(2010) }],
       order_items: [
         order.order_items[0],
         {

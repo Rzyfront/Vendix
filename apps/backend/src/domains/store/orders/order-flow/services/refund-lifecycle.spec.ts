@@ -426,6 +426,7 @@ describe('RefundCalculationService — techo pendiente-aware + cancelled_at (pas
     discount_amount: 0,
     shipping_cost: 0,
     shipping_tax_amount: 0,
+    payments: [{ amount: 10000 }],
     order_items: [line()],
     refunds: [],
     ...over,
@@ -435,6 +436,43 @@ describe('RefundCalculationService — techo pendiente-aware + cancelled_at (pas
     const prisma = { orders: { findFirst: jest.fn().mockResolvedValue(row) } };
     return { service: new RefundCalculationService(prisma as any), prisma };
   };
+
+  it('B19: orden pagada a medias rechaza un reembolso mayor a lo cobrado (aunque quepa en grand_total)', async () => {
+    const { service } = makeService(
+      orderRow({ payments: [{ amount: 4000 }], order_items: [line({ quantity: 1, total_price: 10000 })] }),
+    );
+
+    await expect(
+      service.calculate({
+        order_id: 1,
+        items: [{ order_item_id: 11, quantity: 1, inventory_action: 'no_return' } as any],
+        include_shipping: false,
+      }),
+    ).rejects.toThrow(/exceeds max refundable amount \(4000\.00\)/);
+  });
+
+  it('B19: el techo es min(grand_total, cobrado) − ya reembolsado', async () => {
+    const { service } = makeService(
+      orderRow({
+        payments: [{ amount: 4000 }],
+        refunds: [{ id: 1, state: 'completed', amount: 1500, refund_items: [] }],
+      }),
+    );
+
+    const result = await service.calculate({ order_id: 1, items: [], include_shipping: false });
+
+    expect(result.max_refundable).toBe(2500);
+  });
+
+  it('B19: el tope por pagos se puede desactivar (tramo de cancelación)', async () => {
+    const { service } = makeService(orderRow({ payments: [] }));
+
+    const result = await service.calculate({
+      order_id: 1, items: [], include_shipping: false, skip_paid_cap: true,
+    });
+
+    expect(result.max_refundable).toBe(10000);
+  });
 
   it('include_pending_states cuenta processing/pending_approval contra el techo', async () => {
     const row = orderRow({
@@ -514,6 +552,7 @@ describe('RefundCalculationService — techo pendiente-aware + cancelled_at (pas
       order_items: [line({ id: 11, quantity: 2, total_price: 10000 }), line({ id: 12, quantity: 1, total_price: 5000 })],
       grand_total: 15000,
       subtotal_amount: 15000,
+      payments: [{ amount: 15000 }],
       refunds: [
         {
           id: 1,

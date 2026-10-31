@@ -19,6 +19,7 @@ describe('RefundCalculationService — impuesto del envío', () => {
       tax_amount: new Prisma.Decimal(0),
       shipping_cost: new Prisma.Decimal(15000),
       grand_total: new Prisma.Decimal(35000),
+      payments: [{ amount: new Prisma.Decimal(35000) }],
       refunds: [],
       order_items: [
         buildOrderItem({ id: 1, product_name: 'A', quantity: 1, unit_price: new Prisma.Decimal(10000), total_price: new Prisma.Decimal(10000), tax_rate: new Prisma.Decimal(0), tax_amount_item: new Prisma.Decimal(0) }),
@@ -65,6 +66,7 @@ describe('RefundCalculationService — impuesto del envío', () => {
       subtotal_amount: new Prisma.Decimal(30000),
       shipping_cost: new Prisma.Decimal(15000),
       grand_total: new Prisma.Decimal(45000),
+      payments: [{ amount: new Prisma.Decimal(45000) }],
       shipping_tax_type: 'inc',
       shipping_tax_rate: new Prisma.Decimal(0.08),
       shipping_tax_amount: new Prisma.Decimal(1111.12),

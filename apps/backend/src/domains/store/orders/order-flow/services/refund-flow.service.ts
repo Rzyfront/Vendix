@@ -361,8 +361,10 @@ export class RefundFlowService {
     if (legs.length === 0) {
       return [];
     }
+    // B19: el tramo de cancelación sale del propio pago (que puede estar ya
+    // anulado en esta tx): el tope por pagos no aplica a este carril.
     const ceiling = await this.calculationService.calculate(
-      { order_id: order.id, items: [], include_shipping: false }, tx,
+      { order_id: order.id, items: [], include_shipping: false, skip_paid_cap: true }, tx,
     );
     const plannedTotal = legs.reduce(
       (acc, leg) => acc.plus(new Prisma.Decimal(leg.amount as any)),

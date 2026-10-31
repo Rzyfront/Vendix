@@ -146,6 +146,12 @@ export interface CalculateRefundParams {
    * counting it again would double-book the ceiling. Defaults to false.
    */
   include_pending_states?: boolean;
+  /**
+   * B19: por defecto el techo es `min(grand_total, Σ pagos recibidos) − ya
+   * reembolsado`. La cancelación calcula su tramo desde el propio pago, así
+   * que desactiva el tope por pagos (los pagos pueden estar ya anulados).
+   */
+  skip_paid_cap?: boolean;
 }
 
 @Injectable()
@@ -156,7 +162,7 @@ export class RefundCalculationService {
     params: CalculateRefundParams,
     client: Prisma.TransactionClient | StorePrismaService = this.prisma,
   ): Promise<RefundCalculationResult> {
-    const { order_id, items, include_shipping, include_pending_states } = params;
+    const { order_id, items, include_shipping, include_pending_states, skip_paid_cap } = params;
 
     // Load order with items, taxes, and previous refunds
     const order = await client.orders.findFirst({
@@ -181,6 +187,16 @@ export class RefundCalculationService {
               },
             },
           },
+        },
+        // B19: solo pagos que retuvieron dinero. `refunded` cuenta porque su
+        // devolución ya está dentro de `already_refunded`.
+        payments: {
+          where: {
+            state: {
+              in: ['succeeded', 'captured', 'partially_refunded', 'refunded'],
+            },
+          },
+          select: { amount: true },
         },
         refunds: {
           where: include_pending_states
@@ -222,7 +238,16 @@ export class RefundCalculationService {
     );
 
     const grand_total = Number(order.grand_total);
-    const max_refundable = grand_total - already_refunded;
+    // B19 — no se puede devolver más de lo que entró: en órdenes con saldo
+    // parcial o a crédito `grand_total` es mayor que lo cobrado.
+    const paid_total = (order.payments ?? []).reduce(
+      (sum, p) => sum + Number(p.amount),
+      0,
+    );
+    const refund_base = skip_paid_cap
+      ? grand_total
+      : Math.min(grand_total, paid_total);
+    const max_refundable = refund_base - already_refunded;
     const subtotal_amount = Number(order.subtotal_amount) || 0;
     const discount_amount = Number(order.discount_amount) || 0;
     const discount_ratio =
@@ -444,7 +469,8 @@ export class RefundCalculationService {
     kindLabel = 'Cancellation refund',
   ) {
     const ceiling = await this.calculate(
-      { order_id: orderId, items: [], include_shipping: false }, client,
+      { order_id: orderId, items: [], include_shipping: false, skip_paid_cap: true },
+      client,
     );
     const amount = new Prisma.Decimal(paidAmount);
     if (amount.lessThanOrEqualTo(0) || amount.greaterThan(ceiling.max_refundable)) {
