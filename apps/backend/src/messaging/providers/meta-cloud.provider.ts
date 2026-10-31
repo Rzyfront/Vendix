@@ -12,6 +12,7 @@ import { maskAddress } from '../utils/mask-address.util';
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_RETRIES = 2;
 const DEFAULT_RETRY_BASE_MS = 500;
+const PRE_CONNECT_ERRORS = ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN'];
 
 /**
  * Meta error codes → normalized code. Retryable codes are transient on Meta's
@@ -161,13 +162,18 @@ export class MetaCloudMessagingProvider implements MessagingProvider {
           safe_to_retry: false,
         };
       }
+      // Only errors raised before a connection exists prove Meta never saw
+      // the request. A reset or hang-up after the body left may already have
+      // been accepted, so it is not resent (same rule as the timeout).
+      const cause = (error as { cause?: { code?: string } })?.cause?.code;
+      const beforeConnect = !!cause && PRE_CONNECT_ERRORS.includes(cause);
       return {
         result: this.failure(
           'PROVIDER_ERROR',
-          true,
-          `Network error: ${(error as Error)?.message ?? 'unknown'}`,
+          beforeConnect,
+          `Network error${cause ? ` ${cause}` : ''}: ${(error as Error)?.message ?? 'unknown'}`,
         ),
-        safe_to_retry: true,
+        safe_to_retry: beforeConnect,
       };
     } finally {
       clearTimeout(timer);

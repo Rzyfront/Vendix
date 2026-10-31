@@ -269,9 +269,28 @@ describe('MetaCloudMessagingProvider', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('retries a network error raised before any response', async () => {
+  function networkError(code: string) {
+    return Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error(code), { code }),
+    });
+  }
+
+  it('does not resend after a connection reset (the request may have reached Meta)', async () => {
+    fetchSpy.mockRejectedValue(networkError('ECONNRESET'));
+
+    const result = await createProvider().send(message(), channel);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error_code: 'PROVIDER_ERROR',
+      retryable: false,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a network error raised before the connection was made', async () => {
     fetchSpy
-      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(networkError('ECONNREFUSED'))
       .mockResolvedValueOnce(
         jsonResponse(200, { messages: [{ id: 'wamid.NET' }] }),
       );
