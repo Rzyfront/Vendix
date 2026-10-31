@@ -356,8 +356,10 @@ export class MovementsService {
     try {
       return await this.prisma.$transaction((db) => create(db));
     } catch (error) {
-      // P2002 (índice único parcial por reference) = otro intento ya lo creó.
-      // La tx abortada no se puede reutilizar: se relee fuera de ella.
+      // No existe índice único por reference (b15 lo descartó: hay referencias
+      // repetibles legítimas). La deduplicación real es `findExisting` bajo el
+      // lock de la sesión (`assertOpenSessionLocked`). Este P2002 es defensa por
+      // si un índice futuro lo cubre; la tx abortada no se reutiliza: se relee.
       if (
         data.reference &&
         (error as { code?: string } | null)?.code === 'P2002'

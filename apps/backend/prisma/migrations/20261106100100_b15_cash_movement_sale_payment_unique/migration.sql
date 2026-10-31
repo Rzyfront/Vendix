@@ -3,13 +3,15 @@
 -- Expected row changes: none. Impone "a lo sumo un movimiento 'sale' por payment_id".
 -- Destructive operations: none (sin DROP/DELETE/TRUNCATE/UPDATE).
 -- FK/cascade risk: none.
--- Idempotency: IF NOT EXISTS dentro de un bloque DO.
+-- Idempotency: IF NOT EXISTS dentro de un bloque DO (si el indice ya existe no hace nada).
 --
 -- Contexto (caja B15): los reintentos podian duplicar el movimiento de venta de un pago.
 --
--- Comportamiento ante duplicados: si ya existen dos 'sale' con el mismo payment_id, NO se crea
---   el indice (RAISE NOTICE) y la migracion termina sin error; los duplicados se resuelven con
---   un ajuste, nunca con borrado. Consulta:
+-- Comportamiento ante duplicados: si ya existen dos 'sale' con el mismo payment_id, la
+--   migracion FALLA (RAISE EXCEPTION con los payment_id) y el deploy se detiene: el codigo
+--   cuenta con este indice (P2002 en recordSaleMovement), asi que no puede quedar "aplicada"
+--   sin el. Los duplicados se resuelven con un ajuste, nunca con borrado; luego se marca la
+--   migracion --rolled-back y se redespliega. Consulta ANTES del deploy:
 --     SELECT payment_id, count(*) FROM cash_register_movements
 --      WHERE type = 'sale' AND payment_id IS NOT NULL GROUP BY 1 HAVING count(*) > 1;
 --
@@ -24,21 +26,27 @@
 -- Nota Prisma: schema.prisma NO se toca. Sin CONCURRENTLY (migracion transaccional).
 
 DO $$
+DECLARE
+  dupes TEXT;
 BEGIN
-  IF EXISTS (
+  SELECT string_agg(format('payment_id=%s sales=%s', payment_id, n), '; ')
+    INTO dupes
+    FROM (
+      SELECT payment_id, count(*) AS n FROM cash_register_movements
+       WHERE type = 'sale' AND payment_id IS NOT NULL
+       GROUP BY payment_id
+      HAVING count(*) > 1
+       ORDER BY payment_id
+       LIMIT 50
+    ) d;
+  IF dupes IS NOT NULL THEN
+    RAISE EXCEPTION 'cash_register_movements_one_sale_per_payment NO creado: pagos con mas de un movimiento sale: %', dupes
+      USING HINT = 'Resolver con ajuste (nunca borrado), marcar la migracion --rolled-back y redesplegar.';
+  ELSIF NOT EXISTS (
     SELECT 1 FROM pg_indexes
      WHERE schemaname = current_schema()
        AND indexname = 'cash_register_movements_one_sale_per_payment'
   ) THEN
-    RAISE NOTICE 'cash_register_movements_one_sale_per_payment ya existe; sin cambios';
-  ELSIF EXISTS (
-    SELECT 1 FROM cash_register_movements
-     WHERE type = 'sale' AND payment_id IS NOT NULL
-     GROUP BY payment_id
-    HAVING count(*) > 1
-  ) THEN
-    RAISE NOTICE 'cash_register_movements_one_sale_per_payment NO creado: hay pagos con mas de un movimiento sale. Resolver con ajuste (nunca borrado) y crear el indice.';
-  ELSE
     CREATE UNIQUE INDEX "cash_register_movements_one_sale_per_payment"
       ON "cash_register_movements"("payment_id")
       WHERE "type" = 'sale' AND "payment_id" IS NOT NULL;
