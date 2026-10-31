@@ -31,6 +31,10 @@ export interface ServiceStation {
   target_minutes?: number | null;
   /** Formulario de Recolección de datos de la estación; null = se usa el del servicio. */
   intake_template_id?: number | null;
+  /** Impuesto del alquiler (categoría IVA/INC, igual que la tarifa de envío); null = sin impuesto. */
+  rental_tax_category_id?: number | null;
+  /** true = incluido en el precio del bloque; false = se suma al cobrar. */
+  rental_tax_is_inclusive?: boolean;
   status: 'active' | 'inactive';
   public_id: string | null;
   qr_status: 'ready' | 'unavailable';
@@ -171,11 +175,11 @@ export class ServiceStationsService {
       .pipe(map((response) => this.unwrap(response)));
   }
 
-  create(body: { name: string; capacity: number; station_type?: StationType; track_time?: boolean; target_minutes?: number | null; intake_template_id?: number | null }): Observable<ServiceStation> {
+  create(body: { name: string; capacity: number; station_type?: StationType; track_time?: boolean; target_minutes?: number | null; intake_template_id?: number | null; rental_tax_category_id?: number | null; rental_tax_is_inclusive?: boolean }): Observable<ServiceStation> {
     return this.http.post<{ data?: ServiceStation } | ServiceStation>(this.base, body).pipe(map((r) => this.unwrap(r)));
   }
 
-  update(id: number, body: Partial<Pick<ServiceStation, 'name' | 'capacity' | 'status' | 'station_type' | 'track_time' | 'target_minutes' | 'intake_template_id'>>): Observable<ServiceStation> {
+  update(id: number, body: Partial<Pick<ServiceStation, 'name' | 'capacity' | 'status' | 'station_type' | 'track_time' | 'target_minutes' | 'intake_template_id' | 'rental_tax_category_id' | 'rental_tax_is_inclusive'>>): Observable<ServiceStation> {
     return this.http.patch<{ data?: ServiceStation } | ServiceStation>(`${this.base}/${id}`, body).pipe(map((r) => this.unwrap(r)));
   }
 

@@ -28,6 +28,8 @@ import {
   ToggleComponent,
 } from '../../../../../../shared/components';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { ShippingMethodsService } from '../../../settings/shipping/services/shipping-methods.service';
+import { ShippingRateTaxOptions } from '../../../settings/shipping/interfaces/shipping-zones.interface';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ReservationsService } from '../../services/reservations.service';
 import { ServiceProvider } from '../../interfaces/reservation.interface';
@@ -69,6 +71,13 @@ import { forkJoin, of } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 import { ServiceRemindersPageComponent } from '../service-reminders-page/service-reminders-page.component';
 import { ServiceRegistryService } from '../service-reminders-page/service-registry.service';
+
+/** El selector de impuesto trabaja con `number`; `null` es «Sin impuesto». */
+function toTaxCategoryId(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
 
 interface CheckinLine {
   key: number;
@@ -278,6 +287,20 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly newIntakeTemplateId = signal<number>(0);
   readonly designingTemplate = signal(false);
   readonly editIntakeTemplateId = signal<number>(0);
+
+  // Impuesto del alquiler: mismo catálogo y elegibilidad que la tarifa de envío.
+  private readonly shippingService = inject(ShippingMethodsService);
+  readonly taxOptions = signal<ShippingRateTaxOptions | null>(null);
+  readonly loadingTaxOptions = signal(false);
+  readonly taxOptionsError = signal<string | null>(null);
+  readonly newTaxCategoryId = signal<number | null>(null);
+  readonly newTaxIsInclusive = signal(true);
+  readonly editTaxCategoryId = signal<number | null>(null);
+  readonly editTaxIsInclusive = signal(true);
+  readonly newTaxSelectorOptions = computed(() => this.buildTaxSelectorOptions(null));
+  readonly editTaxSelectorOptions = computed(() =>
+    this.buildTaxSelectorOptions(this.selectedStation()?.rental_tax_category_id ?? null),
+  );
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly toastService = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
@@ -1361,8 +1384,63 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.newTrackTime.set(false);
     this.newTargetMinutes.set(null);
     this.newIntakeTemplateId.set(0);
+    this.newTaxCategoryId.set(null);
+    this.newTaxIsInclusive.set(true);
     this.loadIntakeTemplates();
+    this.loadTaxOptions();
     this.showCreateModal.set(true);
+  }
+
+  loadTaxOptions(): void {
+    if (this.taxOptions() || this.loadingTaxOptions()) return;
+    this.loadingTaxOptions.set(true);
+    this.taxOptionsError.set(null);
+    this.shippingService
+      .getRateTaxOptions()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (options) => {
+          this.taxOptions.set(options);
+          this.loadingTaxOptions.set(false);
+        },
+        error: () => {
+          this.taxOptionsError.set('No se pudieron cargar los impuestos. Puedes guardar la estación sin impuesto.');
+          this.loadingTaxOptions.set(false);
+        },
+      });
+  }
+
+  /** «Sin impuesto» + categorías del catálogo; conserva visible la categoría guardada aunque ya no esté. */
+  private buildTaxSelectorOptions(currentId: number | null): SelectorOption[] {
+    // `SelectorOption.value` no admite null en su tipo; el selector compara por identidad.
+    const options: SelectorOption[] = [{ value: null as unknown as number, label: 'Sin impuesto' }];
+    const categories = this.taxOptions()?.categories ?? [];
+    for (const c of categories) {
+      const taxLabel = this.shippingService.getRateTaxLabel(c);
+      const base = taxLabel ? `${c.name} (${taxLabel})` : c.name;
+      options.push({
+        value: c.id,
+        label: c.eligible ? base : `${base} — ${c.reason || 'No disponible'}`,
+        disabled: !c.eligible,
+        description: c.eligible ? undefined : c.reason,
+      });
+    }
+    if (currentId && !categories.some((c) => c.id === currentId)) {
+      options.push({ value: currentId, label: `Impuesto #${currentId}` });
+    }
+    return options;
+  }
+
+  /** En una estación nueva el modo se preselecciona desde la categoría (`is_inclusive`). */
+  onNewTaxCategoryChange(value: unknown): void {
+    const id = toTaxCategoryId(value);
+    this.newTaxCategoryId.set(id);
+    const hint = this.taxOptions()?.categories.find((c) => c.id === id)?.is_inclusive;
+    if (typeof hint === 'boolean') this.newTaxIsInclusive.set(hint);
+  }
+
+  onEditTaxCategoryChange(value: unknown): void {
+    this.editTaxCategoryId.set(toTaxCategoryId(value));
   }
 
   createStation(): void {
@@ -1384,6 +1462,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       track_time: this.newTrackTime(),
       target_minutes: this.newTrackTime() ? this.positiveMinutes(this.newTargetMinutes()) : null,
       intake_template_id: templateId,
+      rental_tax_category_id: this.newTaxCategoryId(),
+      rental_tax_is_inclusive: this.newTaxIsInclusive(),
     }).subscribe({
       next: (station) => {
         this.saving.set(false);
@@ -2355,7 +2435,10 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.editTrackTime.set(!!station.track_time);
     this.editTargetMinutes.set(station.target_minutes ?? null);
     this.editIntakeTemplateId.set(station.intake_template_id ?? 0);
+    this.editTaxCategoryId.set(station.rental_tax_category_id ?? null);
+    this.editTaxIsInclusive.set(station.rental_tax_is_inclusive !== false);
     this.loadIntakeTemplates();
+    this.loadTaxOptions();
     this.selectedConfigTab.set('details');
     this.serviceIds.set(station.services?.map((s) => s.product_id) ?? []);
     this.providerIds.set(station.providers?.map((p) => p.provider_id) ?? []);
@@ -2376,6 +2459,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
         capacity: 1,
         track_time: this.editTrackTime(),
         target_minutes: this.editTrackTime() ? this.positiveMinutes(this.editTargetMinutes()) : null,
+        rental_tax_category_id: this.editTaxCategoryId(),
+        rental_tax_is_inclusive: this.editTaxIsInclusive(),
       }),
       'Datos guardados.',
       station.id,

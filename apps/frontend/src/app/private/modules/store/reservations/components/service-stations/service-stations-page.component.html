@@ -542,6 +542,37 @@
           />
         }
       </div>
+
+      <section class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3" aria-labelledby="new-station-tax-title">
+        <div>
+          <h4 id="new-station-tax-title" class="text-xs font-bold text-[var(--color-text-primary)]">Impuesto del alquiler (opcional)</h4>
+          <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">Se aplica a la línea “Alquiler” de la estación. Sin impuesto, el alquiler se cobra tal cual.</p>
+        </div>
+        <app-selector
+          id="new-station-tax-category"
+          label="Categoría de impuesto"
+          [options]="newTaxSelectorOptions()"
+          [ngModel]="newTaxCategoryId()"
+          (ngModelChange)="onNewTaxCategoryChange($event)"
+          [helpText]="loadingTaxOptions() ? 'Cargando impuestos…' : ''"
+        />
+        @if (taxOptionsError()) {
+          <p class="text-xs text-red-600" role="alert">{{ taxOptionsError() }}</p>
+        }
+        @if (newTaxCategoryId() !== null) {
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <span class="text-xs font-bold text-[var(--color-text-primary)]">Impuesto incluido en el precio</span>
+              <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">{{ newTaxIsInclusive() ? 'El precio del bloque ya trae el impuesto.' : 'El impuesto se suma al cobrar.' }}</p>
+            </div>
+            <app-toggle
+              [checked]="newTaxIsInclusive()"
+              ariaLabel="Impuesto incluido en el precio del alquiler"
+              (changed)="newTaxIsInclusive.set($event)"
+            />
+          </div>
+        }
+      </section>
     </div>
 
     <div slot="footer" class="flex items-center justify-end gap-2.5">
@@ -1424,6 +1455,37 @@
                 />
               }
             </div>
+
+            <section class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3" aria-labelledby="edit-station-tax-title">
+              <div>
+                <h4 id="edit-station-tax-title" class="text-xs font-bold text-[var(--color-text-primary)]">Impuesto del alquiler (opcional)</h4>
+                <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">Se aplica a la línea “Alquiler” de la estación. Sin impuesto, el alquiler se cobra tal cual.</p>
+              </div>
+              <app-selector
+                id="edit-station-tax-category"
+                label="Categoría de impuesto"
+                [options]="editTaxSelectorOptions()"
+                [ngModel]="editTaxCategoryId()"
+                (ngModelChange)="onEditTaxCategoryChange($event)"
+                [helpText]="loadingTaxOptions() ? 'Cargando impuestos…' : ''"
+              />
+              @if (taxOptionsError()) {
+                <p class="text-xs text-red-600" role="alert">{{ taxOptionsError() }}</p>
+              }
+              @if (editTaxCategoryId() !== null) {
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <span class="text-xs font-bold text-[var(--color-text-primary)]">Impuesto incluido en el precio</span>
+                    <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">{{ editTaxIsInclusive() ? 'El precio del bloque ya trae el impuesto.' : 'El impuesto se suma al cobrar.' }}</p>
+                  </div>
+                  <app-toggle
+                    [checked]="editTaxIsInclusive()"
+                    ariaLabel="Impuesto incluido en el precio del alquiler"
+                    (changed)="editTaxIsInclusive.set($event)"
+                  />
+                </div>
+              }
+            </section>
 
             <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div class="flex items-center gap-3">
