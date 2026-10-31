@@ -20,7 +20,7 @@ describe('ReviewsService.findAllOrderReviews', () => {
           }),
       },
     };
-    service = new ReviewsService(prisma, { emit: jest.fn() } as any);
+    service = new ReviewsService(prisma, { emit: jest.fn() } as any, {} as any);
     jest
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue({ store_id: 1 } as any);
