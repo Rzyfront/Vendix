@@ -940,7 +940,7 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/customers/crm',
-      title: 'CRM / Landing Inteligente',
+      title: 'Landing de captación',
       parent: 'Clientes',
       icon: 'sparkles',
     },
@@ -981,6 +981,20 @@ export class BreadcrumbService {
       title: 'Anuncios',
       parent: 'Marketing',
       icon: 'image',
+    },
+
+    // Integraciones
+    {
+      path: '/admin/integrations',
+      title: 'Integraciones',
+      parent: 'Tienda',
+      icon: 'plug',
+    },
+    {
+      path: '/admin/integrations/channels',
+      title: 'Canales',
+      parent: 'Integraciones',
+      icon: 'message-circle',
     },
 
     // Analytics

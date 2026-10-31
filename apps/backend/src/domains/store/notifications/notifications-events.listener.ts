@@ -34,6 +34,7 @@ import { writeInvoiceDeliveryEvent } from '../invoicing/delivery/invoice-deliver
 // de clase y el siguiente ejecutor fuera del ALS lo adoptaría en silencio.
 import { InvoiceDeliveryService } from '../invoicing/delivery/invoice-delivery.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
+import { SmsSpendLimitReachedEvent } from '../../../messaging/spend/sms-spend.service';
 
 @Injectable()
 export class NotificationsEventsListener {
@@ -355,6 +356,28 @@ export class NotificationsEventsListener {
       'Nuevo Cliente',
       `${event.first_name} ${event.last_name} se registró`,
       { customer_id: event.customer_id, email: event.email },
+    );
+  }
+
+  /**
+   * CRM PR 6: the store used up its monthly SMS cap. Emitted once per store
+   * and month by `SmsSpendService`, from the worker that sends the SMS.
+   */
+  @OnEvent('crm.sms_spend_limit_reached')
+  async handleSmsSpendLimitReached(event: SmsSpendLimitReachedEvent) {
+    const limit =
+      event.limit === null ? 'sin tope definido' : `${event.limit} USD`;
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'crm_sms_spend_limit_reached',
+      'Tope de SMS alcanzado',
+      `Los SMS de este mes se pausaron: se usaron ${event.used} USD (${limit}). Sube el tope en Integraciones → Canales para seguir enviando.`,
+      {
+        channel_id: event.channel_id,
+        period_start: event.period_start,
+        limit: event.limit,
+        used: event.used,
+      },
     );
   }
 

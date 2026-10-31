@@ -201,13 +201,13 @@ export class MenuFilterService {
     Reseñas: ['analytics_reviews', 'customers_reviews'],
     'Recolección de Datos': 'customers_data_collection',
     CRM: 'customers_crm',
+    'Landing de captación': 'customers_crm',
 
     // STORE_ADMIN - Marketing (padre + submódulos)
     Marketing: 'marketing',
     Promociones: 'marketing_promotions',
     Cupones: 'marketing_coupons',
     Anuncios: 'marketing_anuncios',
-    'Social Sales': 'marketing_social_sales',
 
     // STORE_ADMIN - Analíticas (padre + submódulos)
     // Solo mapear los que NO conflictuan con otros módulos
@@ -1139,6 +1139,18 @@ export class MenuFilterService {
     if (item.route === '/admin/settings/ai-agents' && !this.canConfigureAiAgents()) {
       return false;
     }
+    if (item.route === '/admin/customers/inbox' && !this.canReadCrmInbox()) {
+      return false;
+    }
+    if (item.route === '/admin/customers/pipeline' && !this.canUseCrm('store:crm_pipeline:read')) {
+      return false;
+    }
+    if (item.route === '/admin/customers/tasks' && !this.canUseCrm('store:crm_tasks:manage')) {
+      return false;
+    }
+    if (item.route === '/admin/customers/segments' && !this.canUseCrm('store:customers:read')) {
+      return false;
+    }
     return true;
   }
 
@@ -1319,6 +1331,19 @@ export class MenuFilterService {
     const mapped = this.moduleKeyMap[item.label];
     if (!mapped) return [];
     return Array.isArray(mapped) ? mapped : [mapped];
+  }
+
+  /** CRM pipeline / tasks: same permission as their API. */
+  private canUseCrm(permission: string): boolean {
+    return this.authFacade.hasPermission(permission) || this.authFacade.isOwner();
+  }
+
+  /** CRM inbox: same permission as its API (`store:crm_inbox:read`). */
+  private canReadCrmInbox(): boolean {
+    return (
+      this.authFacade.hasPermission('store:crm_inbox:read') ||
+      this.authFacade.isOwner()
+    );
   }
 
   /**

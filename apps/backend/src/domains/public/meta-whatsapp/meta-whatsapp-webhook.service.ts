@@ -2,7 +2,8 @@ import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
-import { SocialChannelEncryptionService } from '../../store/social-sales/social-channel-encryption.service';
+import { ChannelEncryptionService } from '../../store/integrations/channels/channel-encryption.service';
+import { CrmInboundQueue } from './inbound/crm-inbound.queue';
 
 const PLATFORM_SETTINGS_KEY = 'social_sales:meta_whatsapp';
 
@@ -13,7 +14,8 @@ export class MetaWhatsappWebhookService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly configService: ConfigService,
-    private readonly encryption: SocialChannelEncryptionService,
+    private readonly encryption: ChannelEncryptionService,
+    private readonly inboundQueue: CrmInboundQueue,
   ) {}
 
   async verify(
@@ -48,16 +50,34 @@ export class MetaWhatsappWebhookService {
       },
     });
 
+    // The raw event is the durable inbox; processing happens in the
+    // crm-inbound worker so Meta gets its 200 fast. If Redis is down this
+    // throws, Meta retries the delivery and the worker stays idempotent.
+    await this.inboundQueue.enqueue(event.id);
+
     return {
       received: true,
       event_id: event.id,
       matched_channel: Boolean(channel),
+      queued: true,
     };
   }
 
   private async validateSignature(rawBody?: string, signature?: string) {
     const appSecret = await this.getAppSecret();
-    if (!appSecret) return;
+    if (!appSecret) {
+      // Production never accepts unsigned events (PLAN-CRM §4.8, §6).
+      if (this.configService.get<string>('NODE_ENV') === 'production') {
+        this.logger.error(
+          'Meta webhook rejected: no app_secret configured in production',
+        );
+        throw new ForbiddenException('Firma Meta no configurada');
+      }
+      this.logger.warn(
+        'Meta webhook accepted without signature check: no app_secret configured',
+      );
+      return;
+    }
 
     if (!rawBody || !signature) {
       throw new ForbiddenException('Firma Meta requerida');

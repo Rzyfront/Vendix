@@ -100,7 +100,7 @@ model users {
   stock_transfers            stock_transfers[]            @relation("stock_transfers_created_by")
   stock_transfers_dispatched stock_transfers[]            @relation("stock_transfers_dispatched_by")
   stock_transfers_cancelled  stock_transfers[]            @relation("stock_transfers_cancelled_by")
-  store_users                store_users[]
+  store_users                store_users[]                @relation("store_users_user")
   user_roles                 user_roles[]
   user_sessions              user_sessions[]
   user_settings              user_settings?
@@ -289,6 +289,23 @@ model users {
 
   service_progress_events_actor_user_id_fkey service_progress_events[] @relation("service_progress_events_actor_user_id_fkey")
 
+  // CRM (PLAN-CRM §2)
+  crm_owned_store_users      store_users[]                @relation("store_users_crm_owner")
+  crm_conversations          crm_conversations[]          @relation("crm_conversations_customer")
+  crm_assigned_conversations crm_conversations[]          @relation("crm_conversations_assigned")
+  crm_sent_messages          crm_messages[]               @relation("crm_messages_sent_by")
+  crm_customer_tags          crm_customer_tags[]          @relation("crm_customer_tags_customer")
+  crm_created_customer_tags  crm_customer_tags[]          @relation("crm_customer_tags_created_by")
+  crm_created_segments       crm_segments[]               @relation("crm_segments_created_by")
+  crm_opportunities          crm_opportunities[]          @relation("crm_opportunities_customer")
+  crm_owned_opportunities    crm_opportunities[]          @relation("crm_opportunities_owner")
+  crm_tasks                  crm_tasks[]                  @relation("crm_tasks_customer")
+  crm_assigned_tasks         crm_tasks[]                  @relation("crm_tasks_assigned")
+  crm_created_tasks          crm_tasks[]                  @relation("crm_tasks_created_by")
+  crm_notes                  crm_notes[]                  @relation("crm_notes_customer")
+  crm_created_notes          crm_notes[]                  @relation("crm_notes_created_by")
+  crm_created_campaigns      crm_campaigns[]              @relation("crm_campaigns_created_by")
+
   @@index([email_verified])
   @@index([state])
   @@index([document_number])
@@ -323,11 +340,28 @@ model store_users {
   /// Borrar la tarifa deja al cliente sin tarifa, nunca borra la membresía.
   price_tier_id Int?
   store         stores       @relation(fields: [store_id], references: [id])
-  user          users        @relation(fields: [user_id], references: [id])
+  user          users        @relation("store_users_user", fields: [user_id], references: [id])
   price_tier    price_tiers? @relation(fields: [price_tier_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  // CRM (PLAN-CRM §2.2): atributos comerciales por tienda. Nulos o con
+  // default constante: no reescriben filas existentes.
+  crm_owner_user_id   Int?
+  crm_source          String?                  @db.VarChar(40)
+  crm_stage_id        Int?
+  crm_last_contact_at DateTime?                @db.Timestamp(6)
+  whatsapp_consent    crm_contact_consent_enum @default(unknown)
+  sms_consent         crm_contact_consent_enum @default(unknown)
+  email_consent       crm_contact_consent_enum @default(unknown)
+  consent_updated_at  DateTime?                @db.Timestamp(6)
+  crm_owner           users?                   @relation("store_users_crm_owner", fields: [crm_owner_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  crm_stage           crm_pipeline_stages?     @relation(fields: [crm_stage_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([store_id, user_id])
   @@index([price_tier_id])
+  @@index([store_id, crm_owner_user_id])
+  @@index([store_id, crm_source])
+  @@index([store_id, crm_stage_id])
+  @@index([store_id, crm_last_contact_at])
 }
 
 model roles {
@@ -1136,6 +1170,20 @@ model stores {
   service_stations_store_fkey service_stations[] @relation("service_stations_store_fkey")
   service_reminder_logs_store_id_fkey service_reminder_logs[] @relation("service_reminder_logs_store_id_fkey")
 
+  // CRM (PLAN-CRM §2.3)
+  crm_conversations     crm_conversations[]
+  crm_messages          crm_messages[]
+  crm_tags              crm_tags[]
+  crm_customer_tags     crm_customer_tags[]
+  crm_segments          crm_segments[]
+  crm_pipelines         crm_pipelines[]
+  crm_pipeline_stages   crm_pipeline_stages[]
+  crm_opportunities     crm_opportunities[]
+  crm_tasks             crm_tasks[]
+  crm_notes             crm_notes[]
+  crm_campaigns         crm_campaigns[]
+  crm_message_templates crm_message_templates[]
+
   @@unique([organization_id, slug])
   @@index([onboarding])
   // Pedidos programados + adiciones
@@ -1783,6 +1831,8 @@ model orders {
 
   service_sessions_order_fkey service_sessions[] @relation("service_sessions_order_fkey")
   order_items_service_session_fkey order_items[] @relation("order_items_service_session_fkey")
+
+  crm_opportunities crm_opportunities[]
 
   @@index([tip_waiter_id])
   // QUI-551: Usuario interno / vendedor que registró la orden (atribución de ventas)
@@ -4946,6 +4996,9 @@ enum notification_type_enum {
   qr_table_scan
   /// QUI-719 — contacto desde la landing pública del módulo CRM.
   crm_contact_request
+  /// CRM PR 9 — tarea del CRM asignada a alguien / tarea pendiente vencida.
+  crm_task_assigned
+  crm_task_due
   order_awaiting_carrier
   appointment_upcoming
   appointment_checked_in
@@ -4957,6 +5010,9 @@ enum notification_type_enum {
   /// report and mislead the person who is looking for it.
   vexi_task_completed
   vexi_task_failed
+  /// CRM PR 6 — the store reached its monthly SMS spend limit; SMS stop until
+  /// the owner raises it or the month changes.
+  crm_sms_spend_limit_reached
   auto_renew_disabled_no_credential
   auto_renew_charge_failed
   /// T9 — listo de cocina (KDS → mesero). El puente de entrega
@@ -9134,6 +9190,8 @@ model quotations {
   contract        contracts?
   created_by_user users?            @relation("quotations_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  crm_opportunities crm_opportunities[]
+
   @@unique([store_id, quotation_number])
   @@index([store_id, quotation_number])
   @@index([store_id, status])
@@ -11756,11 +11814,20 @@ model social_channels {
   last_error             String?   @db.Text
   connected_at           DateTime? @db.Timestamp(6)
   disconnected_at        DateTime? @db.Timestamp(6)
+  /// SMS only (PLAN-CRM §5.2): hard monthly cap in USD. Null blocks every SMS.
+  monthly_spend_limit    Decimal?  @db.Decimal(12, 2)
+  /// Reserved spend of `spend_period_start`'s month, in USD.
+  monthly_spend_used     Decimal   @default(0) @db.Decimal(12, 4)
+  /// First day (UTC) of the month `monthly_spend_used` belongs to.
+  spend_period_start     DateTime? @db.Date
   created_at             DateTime  @default(now()) @db.Timestamp(6)
   updated_at             DateTime  @default(now()) @updatedAt @db.Timestamp(6)
 
   store          stores                  @relation(fields: [store_id], references: [id])
   webhook_events social_webhook_events[]
+
+  crm_conversations     crm_conversations[]
+  crm_message_templates crm_message_templates[]
 
   @@unique([store_id, channel_type, provider])
   @@index([store_id, status])
@@ -11784,6 +11851,8 @@ model social_webhook_events {
 
   store   stores?          @relation(fields: [store_id], references: [id], onDelete: SetNull)
   channel social_channels? @relation(fields: [social_channel_id], references: [id], onDelete: SetNull)
+
+  crm_messages crm_messages[]
 
   @@index([store_id, received_at])
   @@index([social_channel_id])
@@ -14707,4 +14776,376 @@ model order_item_options {
 
   @@index([order_item_id])
   @@index([store_id])
+}
+
+// ============================================
+// CRM (PLAN-CRM §2): atención al cliente, segmentación y mensajería.
+// Todas las tablas llevan `store_id` y se registran en StorePrismaService.
+// Ninguna FK hacia stores/users usa CASCADE: RESTRICT o SET NULL.
+// ============================================
+
+enum crm_conversation_status_enum {
+  open
+  pending
+  snoozed
+  closed
+}
+
+enum crm_message_direction_enum {
+  inbound
+  outbound
+}
+
+enum crm_message_status_enum {
+  queued
+  /// Reclamado por el worker; el proveedor puede haberlo aceptado.
+  sending
+  sent
+  delivered
+  read
+  failed
+  received
+}
+
+enum crm_message_channel_enum {
+  whatsapp
+  sms
+  email
+  internal_note
+}
+
+enum crm_task_status_enum {
+  pending
+  done
+  cancelled
+}
+
+enum crm_opportunity_status_enum {
+  open
+  won
+  lost
+}
+
+enum crm_campaign_status_enum {
+  draft
+  scheduled
+  sending
+  sent
+  cancelled
+  failed
+}
+
+enum crm_contact_consent_enum {
+  unknown
+  opted_in
+  opted_out
+}
+
+/// Un hilo por cliente y canal. Se reabre en vez de duplicar.
+model crm_conversations {
+  id                Int                          @id @default(autoincrement())
+  store_id          Int
+  /// Nulo mientras el contacto no se vincula a un cliente.
+  customer_id       Int?
+  social_channel_id Int?
+  channel           crm_message_channel_enum
+  /// Teléfono E.164 o correo, normalizado.
+  contact_address   String                       @db.VarChar(160)
+  status            crm_conversation_status_enum @default(open)
+  assigned_user_id  Int?
+  last_message_at   DateTime?                    @db.Timestamp(6)
+  /// Base de la ventana de 24 h de WhatsApp.
+  last_inbound_at   DateTime?                    @db.Timestamp(6)
+  unread_count      Int                          @default(0)
+  snoozed_until     DateTime?                    @db.Timestamp(6)
+  closed_at         DateTime?                    @db.Timestamp(6)
+  created_at        DateTime                     @default(now()) @db.Timestamp(6)
+  updated_at        DateTime                     @default(now()) @updatedAt @db.Timestamp(6)
+
+  store          stores           @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer       users?           @relation("crm_conversations_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  social_channel social_channels? @relation(fields: [social_channel_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  assigned_user  users?           @relation("crm_conversations_assigned", fields: [assigned_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  messages       crm_messages[]
+  tasks          crm_tasks[]
+
+  @@unique([store_id, channel, contact_address])
+  @@index([store_id, status, last_message_at(sort: Desc)])
+  @@index([store_id, assigned_user_id, status])
+  @@index([customer_id])
+}
+
+model crm_messages {
+  id                  Int                        @id @default(autoincrement())
+  store_id            Int
+  conversation_id     Int
+  direction           crm_message_direction_enum
+  /// `internal_note` = nota interna, nunca se envía.
+  channel             crm_message_channel_enum
+  status              crm_message_status_enum
+  body                String?                    @db.Text
+  /// Asunto del correo (campañas por correo).
+  subject             String?                    @db.VarChar(200)
+  template_name       String?                    @db.VarChar(120)
+  template_language   String?                    @db.VarChar(10)
+  template_variables  Json?
+  /// [{type, url, mime, s3_key}]
+  media               Json?
+  /// meta_cloud | sns_sms | ses_email | internal
+  provider            String                     @db.VarChar(30)
+  provider_message_id String?                    @db.VarChar(160)
+  error_code          String?                    @db.VarChar(60)
+  error_message       String?                    @db.Text
+  cost_amount         Decimal?                   @db.Decimal(12, 4)
+  sent_by_user_id     Int?
+  campaign_id         Int?
+  webhook_event_id    Int?
+  sent_at             DateTime?                  @db.Timestamp(6)
+  delivered_at        DateTime?                  @db.Timestamp(6)
+  read_at             DateTime?                  @db.Timestamp(6)
+  failed_at           DateTime?                  @db.Timestamp(6)
+  created_at          DateTime                   @default(now()) @db.Timestamp(6)
+
+  store         stores                 @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  conversation  crm_conversations      @relation(fields: [conversation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  sent_by       users?                 @relation("crm_messages_sent_by", fields: [sent_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  campaign      crm_campaigns?         @relation(fields: [campaign_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  webhook_event social_webhook_events? @relation(fields: [webhook_event_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([provider, provider_message_id])
+  @@index([conversation_id, created_at])
+  @@index([store_id, created_at])
+  @@index([campaign_id])
+}
+
+model crm_tags {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  name       String   @db.VarChar(60)
+  color      String?  @db.VarChar(20)
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamp(6)
+
+  store         stores              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer_tags crm_customer_tags[]
+
+  @@unique([store_id, name])
+}
+
+/// Puente cliente↔etiqueta. Borrar una etiqueta quita sus asignaciones,
+/// nunca clientes (CASCADE solo hacia el catálogo `crm_tags`).
+model crm_customer_tags {
+  store_id           Int
+  customer_id        Int
+  tag_id             Int
+  created_by_user_id Int?
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+
+  store      stores   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer   users    @relation("crm_customer_tags_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  tag        crm_tags @relation(fields: [tag_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  created_by users?   @relation("crm_customer_tags_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@id([customer_id, tag_id, store_id])
+  @@index([store_id, tag_id])
+}
+
+/// Segmento dinámico: se evalúa al usarse, sin tabla de miembros en fase 1.
+model crm_segments {
+  id                 Int       @id @default(autoincrement())
+  store_id           Int
+  name               String    @db.VarChar(120)
+  description        String?   @db.Text
+  /// Árbol de reglas versionado (ver `filter_version`).
+  filter             Json
+  filter_version     Int       @default(1)
+  is_dynamic         Boolean   @default(true)
+  last_count         Int?
+  last_counted_at    DateTime? @db.Timestamp(6)
+  created_by_user_id Int?
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+  updated_at         DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  store      stores          @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by users?          @relation("crm_segments_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  campaigns  crm_campaigns[]
+
+  @@unique([store_id, name])
+}
+
+/// La DB lleva además un índice único parcial (`crm_pipelines_one_default_per_store`,
+/// `WHERE is_default`) que Prisma no puede expresar: una sola pipeline por
+/// defecto por tienda.
+model crm_pipelines {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  name       String   @db.VarChar(80)
+  is_default Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamp(6)
+
+  store         stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stages        crm_pipeline_stages[]
+  opportunities crm_opportunities[]
+
+  @@unique([store_id, name])
+}
+
+model crm_pipeline_stages {
+  id          Int     @id @default(autoincrement())
+  store_id    Int
+  pipeline_id Int
+  name        String  @db.VarChar(80)
+  sort_order  Int
+  /// open | won | lost
+  kind        String  @default("open") @db.VarChar(10)
+  /// 0-100
+  probability Int?
+  color       String? @db.VarChar(20)
+  is_active   Boolean @default(true)
+
+  store         stores              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  pipeline      crm_pipelines       @relation(fields: [pipeline_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  opportunities crm_opportunities[]
+  store_users   store_users[]
+
+  @@unique([pipeline_id, name])
+  @@index([pipeline_id, sort_order])
+}
+
+model crm_opportunities {
+  id                  Int                         @id @default(autoincrement())
+  store_id            Int
+  customer_id         Int
+  pipeline_id         Int
+  stage_id            Int
+  title               String                      @db.VarChar(160)
+  amount              Decimal?                    @db.Decimal(12, 2)
+  currency            String?                     @db.VarChar(3)
+  status              crm_opportunity_status_enum @default(open)
+  owner_user_id       Int?
+  quotation_id        Int?
+  order_id            Int?
+  expected_close_date DateTime?                   @db.Date
+  won_at              DateTime?                   @db.Timestamp(6)
+  lost_at             DateTime?                   @db.Timestamp(6)
+  lost_reason         String?                     @db.VarChar(160)
+  /// Orden dentro de la columna del tablero.
+  sort_order          Int                         @default(0)
+  created_at          DateTime                    @default(now()) @db.Timestamp(6)
+  updated_at          DateTime                    @default(now()) @updatedAt @db.Timestamp(6)
+
+  store     stores              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer  users               @relation("crm_opportunities_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  pipeline  crm_pipelines       @relation(fields: [pipeline_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stage     crm_pipeline_stages @relation(fields: [stage_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  owner     users?              @relation("crm_opportunities_owner", fields: [owner_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  quotation quotations?         @relation(fields: [quotation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  order     orders?             @relation(fields: [order_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  tasks     crm_tasks[]
+
+  @@index([store_id, stage_id, sort_order])
+  @@index([store_id, owner_user_id, status])
+  @@index([customer_id])
+  @@index([quotation_id])
+}
+
+model crm_tasks {
+  id                 Int                  @id @default(autoincrement())
+  store_id           Int
+  customer_id        Int?
+  opportunity_id     Int?
+  conversation_id    Int?
+  title              String               @db.VarChar(200)
+  description        String?              @db.Text
+  due_at             DateTime?            @db.Timestamp(6)
+  status             crm_task_status_enum @default(pending)
+  assigned_user_id   Int?
+  created_by_user_id Int?
+  completed_at       DateTime?            @db.Timestamp(6)
+  created_at         DateTime             @default(now()) @db.Timestamp(6)
+  updated_at         DateTime             @default(now()) @updatedAt @db.Timestamp(6)
+
+  store         stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer      users?             @relation("crm_tasks_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  opportunity   crm_opportunities? @relation(fields: [opportunity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  conversation  crm_conversations? @relation(fields: [conversation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  assigned_user users?             @relation("crm_tasks_assigned", fields: [assigned_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  created_by    users?             @relation("crm_tasks_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([store_id, assigned_user_id, status, due_at])
+  @@index([customer_id])
+}
+
+/// Notas CRM del cliente. No reutiliza `customer_consultation_notes`, que está
+/// atada a reservas; la línea de tiempo lee ambas.
+model crm_notes {
+  id                 Int      @id @default(autoincrement())
+  store_id           Int
+  customer_id        Int
+  body               String   @db.Text
+  is_pinned          Boolean  @default(false)
+  created_by_user_id Int?
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamp(6)
+
+  store      stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer   users  @relation("crm_notes_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by users? @relation("crm_notes_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([store_id, customer_id, created_at])
+}
+
+model crm_campaigns {
+  id                 Int                      @id @default(autoincrement())
+  store_id           Int
+  name               String                   @db.VarChar(120)
+  channel            crm_message_channel_enum
+  segment_id         Int?
+  template_name      String?                  @db.VarChar(120)
+  template_language  String?                  @db.VarChar(10)
+  /// Variables posicionales de la plantilla (`{{1}}`…): texto fijo o un marcador
+  /// del catálogo cerrado (`{first_name}`, `{last_name}`, `{store_name}`).
+  template_variables Json?
+  body               String?                  @db.Text
+  /// Solo correo.
+  subject            String?                  @db.VarChar(200)
+  status             crm_campaign_status_enum @default(draft)
+  scheduled_at       DateTime?                @db.Timestamp(6)
+  started_at         DateTime?                @db.Timestamp(6)
+  finished_at        DateTime?                @db.Timestamp(6)
+  recipients_total   Int                      @default(0)
+  recipients_sent    Int                      @default(0)
+  recipients_failed  Int                      @default(0)
+  estimated_cost     Decimal?                 @db.Decimal(12, 4)
+  created_by_user_id Int?
+  created_at         DateTime                 @default(now()) @db.Timestamp(6)
+  updated_at         DateTime                 @default(now()) @updatedAt @db.Timestamp(6)
+
+  store      stores         @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  segment    crm_segments?  @relation(fields: [segment_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  created_by users?         @relation("crm_campaigns_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  messages   crm_messages[]
+
+  @@index([store_id, status])
+}
+
+/// Caché local de plantillas aprobadas en Meta.
+model crm_message_templates {
+  id                Int       @id @default(autoincrement())
+  store_id          Int
+  social_channel_id Int
+  name              String    @db.VarChar(120)
+  language          String    @db.VarChar(10)
+  /// MARKETING | UTILITY | AUTHENTICATION
+  category          String    @db.VarChar(30)
+  /// APPROVED | PENDING | REJECTED
+  status            String    @db.VarChar(20)
+  components        Json
+  synced_at         DateTime? @db.Timestamp(6)
+
+  store          stores          @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  social_channel social_channels @relation(fields: [social_channel_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([social_channel_id, name, language])
 }

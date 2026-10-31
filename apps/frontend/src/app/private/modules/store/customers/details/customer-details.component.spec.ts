@@ -28,7 +28,10 @@ describe('CustomerDetailsComponent industry sections (H0.6)', () => {
         {
           provide: ActivatedRoute,
           // No id → the constructor triggers no data loads.
-          useValue: { paramMap: of(convertToParamMap({})) },
+          useValue: {
+            paramMap: of(convertToParamMap({})),
+            queryParamMap: of(convertToParamMap({})),
+          },
         },
         { provide: Router, useValue: { navigate: jasmine.createSpy('navigate') } },
         { provide: CustomersService, useValue: {} },

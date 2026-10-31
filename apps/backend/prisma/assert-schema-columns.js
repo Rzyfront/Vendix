@@ -166,6 +166,26 @@ const REQUIRED_COLUMNS = [
   // Cierre pendiente tras cobro (migración 20261106100400): el pago y su
   // barrido escriben y filtran esta columna.
   'orders.finish_pending_at',
+  // CRM M2 (migración 20261106100100): Prisma selecciona estas columnas en toda
+  // lectura de store_users (login, clientes, POS); sin ellas revientan con
+  // ColumnNotFound aunque nadie use el CRM todavía.
+  'store_users.crm_owner_user_id',
+  'store_users.crm_source',
+  'store_users.crm_stage_id',
+  'store_users.crm_last_contact_at',
+  'store_users.whatsapp_consent',
+  'store_users.sms_consent',
+  'store_users.email_consent',
+  'store_users.consent_updated_at',
+  // CRM PR 6 (migración 20261106100300): Prisma selecciona estas columnas en
+  // toda lectura de social_channels (webhook de WhatsApp, embedded signup,
+  // MessagingService); sin ellas WhatsApp revienta con ColumnNotFound.
+  'social_channels.monthly_spend_limit',
+  'social_channels.monthly_spend_used',
+  'social_channels.spend_period_start',
+  // CRM PR 10 (migración 20261106100500): toda lectura de crm_campaigns/crm_messages las selecciona.
+  'crm_campaigns.template_variables',
+  'crm_messages.subject',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */
@@ -208,6 +228,10 @@ const REQUIRED_ENUM_VALUES = {
   order_installment_state_enum: ['cancelled'],
   production_order_state_enum: ['released', 'partially_completed'],
   product_type_enum: ['manufactured', 'semi_finished'],
+  // CRM PR 6: aviso del tope de SMS (20261106100300) y reclamo de la fila
+  // antes de enviar (20261106100400).
+  notification_type_enum: ['crm_sms_spend_limit_reached'],
+  crm_message_status_enum: ['sending'],
 };
 
 /** La identidad única de un abono CxC manual evita refund duplicado por retry. */
