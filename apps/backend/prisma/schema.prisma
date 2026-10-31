@@ -14867,6 +14867,8 @@ model crm_messages {
   channel             crm_message_channel_enum
   status              crm_message_status_enum
   body                String?                    @db.Text
+  /// Asunto del correo (campañas por correo).
+  subject             String?                    @db.VarChar(200)
   template_name       String?                    @db.VarChar(120)
   template_language   String?                    @db.VarChar(10)
   template_variables  Json?
@@ -15085,6 +15087,9 @@ model crm_campaigns {
   segment_id         Int?
   template_name      String?                  @db.VarChar(120)
   template_language  String?                  @db.VarChar(10)
+  /// Variables posicionales de la plantilla (`{{1}}`…): texto fijo o un marcador
+  /// del catálogo cerrado (`{first_name}`, `{last_name}`, `{store_name}`).
+  template_variables Json?
   body               String?                  @db.Text
   /// Solo correo.
   subject            String?                  @db.VarChar(200)

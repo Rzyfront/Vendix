@@ -174,6 +174,9 @@ const REQUIRED_COLUMNS = [
   'store_users.sms_consent',
   'store_users.email_consent',
   'store_users.consent_updated_at',
+  // CRM PR 10 (migración 20261106100500): toda lectura de crm_campaigns/crm_messages las selecciona.
+  'crm_campaigns.template_variables',
+  'crm_messages.subject',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */
