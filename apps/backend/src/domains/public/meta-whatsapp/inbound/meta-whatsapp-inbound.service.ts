@@ -142,7 +142,10 @@ export class MetaWhatsappInboundService {
           phone_number_id: String(phoneNumberId),
           status: { in: ['connected', 'error'] },
         },
-        orderBy: [{ connected_at: 'desc' }, { id: 'desc' }],
+        orderBy: [
+          { connected_at: { sort: 'desc', nulls: 'last' } },
+          { id: 'desc' },
+        ],
       });
       if (!channel) continue;
       matchedChannel = true;

@@ -133,7 +133,10 @@ describe('MetaWhatsappInboundService', () => {
           phone_number_id: PHONE_NUMBER_ID,
           status: { in: ['connected', 'error'] },
         },
-        orderBy: [{ connected_at: 'desc' }, { id: 'desc' }],
+        orderBy: [
+          { connected_at: { sort: 'desc', nulls: 'last' } },
+          { id: 'desc' },
+        ],
       });
       expect(prisma.crm_conversations.create).toHaveBeenCalledWith({
         data: {
