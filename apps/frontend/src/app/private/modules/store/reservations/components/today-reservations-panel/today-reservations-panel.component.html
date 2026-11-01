@@ -40,12 +40,19 @@
           <!-- Info -->
           <div class="flex-1 min-w-0">
             <p class="text-sm font-semibold text-[var(--color-text-primary)] truncate">
-              {{ booking.customer?.first_name }} {{ booking.customer?.last_name }}
+              @if (booking.customer?.first_name || booking.customer?.last_name) {
+                {{ booking.customer?.first_name }} {{ booking.customer?.last_name }}
+              } @else {
+                Sin cliente
+              }
             </p>
             <p class="text-xs text-[var(--color-text-secondary)] truncate">
               {{ booking.product?.name }}
               @if (booking.product?.service_duration_minutes) {
                 · {{ booking.product?.service_duration_minutes }}min
+              }
+              @if (booking.provider?.display_name || booking.provider?.employee?.first_name) {
+                · {{ booking.provider?.display_name || booking.provider?.employee?.first_name }}
               }
             </p>
           </div>

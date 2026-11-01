@@ -71,8 +71,12 @@
         </div>
       }
 
-      <!-- Booking blocks -->
-      @for (booking of bookings(); track booking.id) {
+      <!-- Booking blocks, grouped by start time (QUI-971).
+           Single bookings keep the legacy block; same-hour bookings
+           stack vertically so none hides behind another. -->
+      @for (group of bookingGroups(); track group.startKey) {
+        @if (group.bookings.length === 1) {
+          @let booking = group.bookings[0];
         <div
           class="booking-block"
           [class]="'status-' + booking.status"
@@ -106,6 +110,45 @@
             <span class="booking-number">#{{ booking.booking_number }}</span>
           }
         </div>
+        } @else {
+          <div
+            class="booking-stack"
+            [style.top.%]="getGroupTop(group)"
+            [style.min-height.%]="getGroupMinHeight(group)"
+            (click)="$event.stopPropagation()"
+            [attr.aria-label]="group.bookings.length + ' citas a las ' + group.startKey">
+            @for (stacked of visibleStackBookings(group); track stacked.id) {
+              <button
+                type="button"
+                class="stack-row"
+                [class]="'status-' + stacked.status"
+                [class.expired-pending]="isBookingExpired(stacked)"
+                (click)="onBookingClick($event, stacked)"
+                [title]="formatTimeRange(stacked.start_time, stacked.end_time) + ' · ' + customerName(stacked) + (providerName(stacked) ? ' · ' + providerName(stacked) : '')">
+                <span class="stack-time">{{ formatTimeRange(stacked.start_time, stacked.end_time) }}</span>
+                <span class="stack-customer">{{ customerName(stacked) }}</span>
+                @if (providerName(stacked)) {
+                  <span class="stack-provider">· {{ providerName(stacked) }}</span>
+                }
+              </button>
+            }
+            @if (stackHiddenCount(group) > 0) {
+              <button
+                type="button"
+                class="stack-more"
+                (click)="toggleStackExpanded(group.startKey, $event)">
+                +{{ stackHiddenCount(group) }} más
+              </button>
+            } @else if (isStackExpanded(group.startKey)) {
+              <button
+                type="button"
+                class="stack-more"
+                (click)="toggleStackExpanded(group.startKey, $event)">
+                Ver menos
+              </button>
+            }
+          </div>
+        }
       }
 
       <!-- Current time indicator -->
