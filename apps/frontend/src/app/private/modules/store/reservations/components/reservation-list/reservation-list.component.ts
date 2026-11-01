@@ -81,7 +81,7 @@ export class ReservationListComponent {
         { value: 'in_progress', label: 'En Progreso' },
         { value: 'completed', label: 'Completada' },
         { value: 'cancelled', label: 'Cancelada' },
-        { value: 'no_show', label: 'No Show' },
+        { value: 'no_show', label: 'No asistió' },
       ],
     },
     {
@@ -247,7 +247,7 @@ export class ReservationListComponent {
         row.status === 'confirmed' || row.status === 'in_progress',
     },
     {
-      label: 'No Show',
+      label: 'No asistió',
       icon: 'user-x',
       variant: 'ghost',
       action: (row: any) => this.noShow.emit(row),
@@ -322,7 +322,7 @@ export class ReservationListComponent {
       in_progress: 'En Progreso',
       completed: 'Completada',
       cancelled: 'Cancelada',
-      no_show: 'No Show',
+      no_show: 'No asistió',
     };
     return labels[status] || status;
   }
