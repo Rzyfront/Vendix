@@ -229,6 +229,117 @@
   }
 }
 
+/**
+ * QUI-971: stack of same-hour bookings. Absolutely positioned at the
+ * group's start like a regular block, with the longest member's span
+ * as a floor — the column of compact rows grows past it when needed
+ * so no appointment hides behind another.
+ */
+.booking-stack {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  .stack-row {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    width: 100%;
+    text-align: left;
+    border-radius: 6px;
+    padding: 3px 6px;
+    font-size: 10px;
+    line-height: 1.35;
+    cursor: pointer;
+    border: 0;
+    border-left: 3px solid transparent;
+    transition: box-shadow 0.15s ease;
+
+    &:hover {
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      z-index: 3;
+    }
+
+    .stack-time {
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .stack-customer {
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .stack-provider {
+      opacity: 0.7;
+      font-style: italic;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    &.status-pending {
+      background: var(--color-warning-100, #fef3c7);
+      border-left-color: #f59e0b;
+      color: #92400e;
+    }
+
+    &.status-confirmed {
+      background: rgba(var(--color-primary-rgb, 126, 215, 165), 0.2);
+      border-left-color: var(--color-primary);
+      color: var(--color-text-primary);
+    }
+
+    &.status-in_progress {
+      background: var(--color-info-100, #dbeafe);
+      border-left-color: #3b82f6;
+      color: #1e40af;
+    }
+
+    &.status-completed {
+      background: #d1fae5;
+      border-left-color: #10b981;
+      color: #065f46;
+    }
+
+    &.status-cancelled,
+    &.status-no_show,
+    &.expired-pending {
+      background: #fee2e2;
+      border-left-color: #ef4444;
+      color: #991b1b;
+    }
+
+    &.status-cancelled,
+    &.status-no_show {
+      opacity: 0.6;
+    }
+  }
+
+  .stack-more {
+    align-self: flex-start;
+    border: 0;
+    background: var(--color-surface, #fff);
+    color: var(--color-primary);
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
 .current-time-line {
   position: absolute;
   left: 0;
