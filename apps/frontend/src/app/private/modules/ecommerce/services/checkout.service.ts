@@ -344,6 +344,15 @@ export class CheckoutService {
     return checkout?.require_payment_receipt === true;
   }
 
+  /**
+   * El soporte obligatorio aplica solo a transferencia (`bank_transfer`).
+   * Datáfono (`voucher`) conserva el adjunto como opcional aunque el flag
+   * de la tienda esté activo.
+   */
+  requiresPaymentReceiptFor(methodType: string | null | undefined): boolean {
+    return methodType === 'bank_transfer' && this.getRequirePaymentReceipt();
+  }
+
   getPaymentMethods(
     shippingType?: string,
   ): Observable<{ success: boolean; data: PaymentMethod[] }> {
