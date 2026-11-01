@@ -106,7 +106,7 @@ export class ProviderScheduleService {
         !SCHEDULE_TIME_PATTERN.test(item.start_time)
       ) {
         throw new BadRequestException(
-          `La hora de inicio del ${dayName} no es válida (usa HH:mm, 00:00-23:59)`,
+          `La hora de inicio del ${dayName} no es válida (usa HH:mm de 00:00 a 23:59)`,
         );
       }
       if (
@@ -114,7 +114,7 @@ export class ProviderScheduleService {
         !SCHEDULE_TIME_PATTERN.test(item.end_time)
       ) {
         throw new BadRequestException(
-          `La hora de fin del ${dayName} no es válida (usa HH:mm, 00:00-23:59)`,
+          `La hora de fin del ${dayName} no es válida (usa HH:mm de 00:00 a 23:59)`,
         );
       }
       const startMin = this.timeToMinutes(item.start_time);

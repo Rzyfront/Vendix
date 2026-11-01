@@ -34,13 +34,13 @@ export class ProviderScheduleItemDto {
 
   @IsString()
   @Matches(SCHEDULE_TIME_PATTERN, {
-    message: 'start_time debe usar formato HH:mm (00:00-23:59)',
+    message: 'start_time debe usar formato HH:mm de 00:00 a 23:59',
   })
   start_time: string;
 
   @IsString()
   @Matches(SCHEDULE_TIME_PATTERN, {
-    message: 'end_time debe usar formato HH:mm (00:00-23:59)',
+    message: 'end_time debe usar formato HH:mm de 00:00 a 23:59',
   })
   end_time: string;
 
