@@ -115,6 +115,9 @@ export interface CartItemBooking {
   booking_id?: number;
   provider_id?: number | null;
   provider_name?: string;
+  // QUI-970 — station chosen in the scheduler for requires_station lines.
+  station_id?: number | null;
+  station_name?: string;
   date: string;
   start_time: string;
   end_time: string;

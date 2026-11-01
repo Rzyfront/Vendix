@@ -86,6 +86,9 @@ export interface Product {
   product_type?: string;
   // CP-POS-SVC-BOOKING-001 — Service scheduling fields
   requires_booking?: boolean;
+  // QUI-970 — the backend list already exposes this; the scheduler
+  // modal and the pre-pay guard read it to offer/require a station.
+  requires_station?: boolean;
   booking_mode?: 'free_booking' | 'provider_required' | string | null;
   is_eligible_for_home_service?: boolean;
   service_duration_minutes?: number | null;
@@ -858,6 +861,7 @@ export class PosProductService {
         // Campos de servicio y reserva
         product_type: product.product_type || 'physical',
         requires_booking: product.requires_booking === true,
+        requires_station: product.requires_station === true,
         booking_mode: product.booking_mode || null,
         is_eligible_for_home_service: product.is_eligible_for_home_service === true,
         service_duration_minutes: product.service_duration_minutes || null,

@@ -26,6 +26,7 @@ import { DialogService } from '../../../../../shared/components/dialog/dialog.se
 import { PosScaleService } from '../services/pos-scale.service';
 import { BookingSchedulerModalComponent } from '../../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
 import { PosCartService } from '../services/pos-cart.service';
+import { PosStationBookingService } from '../services/pos-station-booking.service';
 import { PosPreCuentaPrintService } from '../services/pos-pre-cuenta-print.service';
 import { PosApiService } from '../services/pos-api.service';
 import {
@@ -1856,6 +1857,7 @@ export class PosCartModalComponent {
   private readonly authFacade = inject(AuthFacade);
   private readonly priceTierCache = inject(PriceTierCacheService);
   private readonly cartService = inject(PosCartService);
+  private readonly stationBookingService = inject(PosStationBookingService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly saleUnitService = inject(PosSaleUnitService);
@@ -2413,6 +2415,46 @@ export class PosCartModalComponent {
       product_variant_id: target.variant_id ?? booking.product_variant_id ?? null,
       cart_item_id: target.id,
     };
+    // QUI-970: station lines persist the booking NOW — the payments gate
+    // needs a booking with a live allocation before charging. On error
+    // the scheduler stays open so the cashier picks another slot.
+    if (target.product?.requires_station === true) {
+      this.stationBookingService
+        .persistScheduledStationBooking(
+          {
+            ...enrichedBooking,
+            customer_id:
+              booking.customer_id ??
+              booking.customer?.id ??
+              this.cartState()?.customer?.id ??
+              null,
+          },
+          this.cartState()?.customer?.id ?? null,
+        )
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (created) =>
+            this.attachScheduledBooking(target, booking, {
+              ...enrichedBooking,
+              booking_id: created?.id ?? created?.booking_id ?? 0,
+            }),
+          error: (err) =>
+            this.toastService.error(
+              err?.error?.message ||
+                'No se pudo reservar la estación. Elige otro horario.',
+            ),
+        });
+      return;
+    }
+    this.attachScheduledBooking(target, booking, enrichedBooking);
+  }
+
+  private attachScheduledBooking(
+    target: any,
+    booking: any,
+    enrichedBooking: any,
+  ): void {
+    const resolvedProductId = Number(enrichedBooking.product_id) || 0;
     const next = new Map(this.cartBookingsByItemId());
     next.set(target.id, enrichedBooking);
     this.cartBookingsByItemId.set(next);
@@ -2420,7 +2462,7 @@ export class PosCartModalComponent {
     this.bookingsChanged.emit(next);
     this.cartService
       .addPendingBooking({
-        id: booking.booking_id ?? 0,
+        id: enrichedBooking.booking_id ?? 0,
         booking_number: '',
         product_id: resolvedProductId,
         product_name: target.product?.name ?? '',
