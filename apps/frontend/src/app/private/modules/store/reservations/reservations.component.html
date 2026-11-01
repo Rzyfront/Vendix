@@ -337,4 +337,12 @@
       (notesUpdated)="onNotesUpdated()"
     />
   }
+
+  @defer (when isExportModalOpen()) {
+    <app-report-export-modal
+      [(isOpen)]="isExportModalOpen"
+      [defaultDateFrom]="dateFrom()"
+      [defaultDateTo]="dateTo()"
+    />
+  }
 </div>

@@ -1,5 +1,6 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { ReservationsService } from './reservations.service';
+import { ReservationsExportService } from './reservations-export.service';
 import { AvailabilityService } from './availability.service';
 // Vexi tool family owned by this domain (O-46..O-52). AIToolRegistry comes
 // from the @Global() AIEngineModule, so it is injectable WITHOUT importing
@@ -46,6 +47,7 @@ import { ServiceAllocationModule } from './service-allocation.module';
   ],
   providers: [
     ReservationsService,
+    ReservationsExportService,
     AvailabilityService,
     BookingConfirmationService,
     BusinessHoursService,
