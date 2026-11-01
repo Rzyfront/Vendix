@@ -34,6 +34,19 @@ interface ProviderOption {
   };
 }
 
+interface AvailabilitySlotOption {
+  date: string;
+  start_time: string;
+  end_time: string;
+  available_providers: Array<{
+    id: number;
+    display_name?: string;
+    avatar_url?: string | null;
+  }>;
+  total_available: number;
+  is_booked?: boolean;
+}
+
 interface SimpleCustomer {
   id: number;
   first_name: string;
@@ -337,6 +350,19 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
                 <!-- Timeline contenedor con scroll interno exclusivo (mismo alto que el calendario) -->
                 <div class="rounded-xl border border-border bg-surface shadow-2xs h-[235px] overflow-y-auto divide-y divide-border/40 p-1">
+                  @if (slotsLoading()) {
+                    <div class="h-full flex items-center justify-center text-xs text-text-secondary">
+                      Cargando horarios...
+                    </div>
+                  } @else if (slotsError()) {
+                    <div class="h-full flex items-center justify-center text-xs text-text-secondary text-center px-4">
+                      No se pudo cargar la disponibilidad. Cambia de día o intenta de nuevo.
+                    </div>
+                  } @else if (serviceId() && availableTimeSlots().length === 0) {
+                    <div class="h-full flex items-center justify-center text-xs text-text-secondary text-center px-4">
+                      No hay horarios disponibles para este día.
+                    </div>
+                  }
                   @for (slot of availableTimeSlots(); track slot.start) {
                     <button
                       type="button"
@@ -455,8 +481,8 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
                 </div>
               }
 
-              <!-- Lista de especialistas -->
-              @for (p of providers(); track p.id) {
+              <!-- Lista de especialistas (QUI-969: solo disponibles en fecha+hora) -->
+              @for (p of availableProvidersForSlot(); track p.id) {
                 <div
                   (click)="setProvider(p.id)"
                   class="p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3 provider-card"
@@ -481,6 +507,10 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
             @if (providers().length === 0 && !providersLoading()) {
               <div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 text-center">
                 No hay especialistas registrados específicamente para este servicio. Se asignará automáticamente.
+              </div>
+            } @else if (noAvailabilityForSlot() && !providersLoading() && !slotsLoading()) {
+              <div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 text-center">
+                No hay profesionales disponibles en este horario.
               </div>
             }
           </div>
@@ -754,6 +784,17 @@ export class BookingSchedulerModalComponent {
   readonly providers = signal<ProviderOption[]>([]);
   readonly providersLoading = signal<boolean>(false);
 
+  // ── Day availability (QUI-969) ──
+  // Real slots for the selected service+date, from
+  // GET /store/reservations/availability/:productId. Both the time
+  // grid and the provider list derive from this — never from a
+  // hardcoded 08:00–20:00 range.
+  readonly daySlots = signal<AvailabilitySlotOption[]>([]);
+  readonly slotsLoading = signal<boolean>(false);
+  readonly slotsLoadedFor = signal<string>('');
+  readonly slotsError = signal<boolean>(false);
+  private daySlotsRequestKey = '';
+
   // ── Customers State ──
   readonly selectedCustomer = signal<SimpleCustomer | null>(null);
   readonly customerSearchQuery = signal<string>('');
@@ -923,31 +964,74 @@ export class BookingSchedulerModalComponent {
     return cells;
   });
 
-  /** Available dynamic time slots partitioned in 30-minute intervals */
+  /** Service id behind this scheduling flow, from any input shape. */
+  readonly serviceId = computed<number | null>(() => {
+    const p = this.resolvedProduct();
+    const pid = p?.id ?? this.existingBooking()?.product_id;
+    const n = Number(pid);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  });
+
+  /**
+   * Time slots for the selected day, from real availability (QUI-969).
+   * Only slots with capacity left are shown — a professional without
+   * schedule for this day produces no slots, so the grid can no longer
+   * offer phantom 08:00–20:00 hours. Without service context (no
+   * product resolved) it keeps the legacy static grid.
+   */
   readonly availableTimeSlots = computed<Array<{ start: string; end: string }>>(() => {
+    if (!this.serviceId()) return this.legacyStaticSlots();
+    if (this.slotsLoadedFor() !== this.date()) return [];
+    return this.daySlots()
+      .filter((s) => (s.total_available ?? 0) > 0)
+      .map((s) => ({ start: s.start_time, end: s.end_time }));
+  });
+
+  /** Legacy static grid, only when no service is resolved. */
+  private legacyStaticSlots(): Array<{ start: string; end: string }> {
     const dur = this.durationMinutes();
     const slots: Array<{ start: string; end: string }> = [];
-
-    // Particionado en tiempos de media hora entre 08:00 y 20:00
-    const startHour = 8;
-    const endHour = 20;
     const stepMinutes = 30;
-
-    let currentTotalMinutes = startHour * 60;
-    const maxTotalMinutes = endHour * 60;
-
+    let currentTotalMinutes = 8 * 60;
+    const maxTotalMinutes = 20 * 60;
     while (currentTotalMinutes + dur <= maxTotalMinutes) {
       const h = Math.floor(currentTotalMinutes / 60);
       const m = currentTotalMinutes % 60;
       const hhmm = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-      slots.push({
-        start: hhmm,
-        end: addMinutes(hhmm, dur),
-      });
+      slots.push({ start: hhmm, end: addMinutes(hhmm, dur) });
       currentTotalMinutes += stepMinutes;
     }
-
     return slots;
+  }
+
+  /**
+   * Providers actually available at the selected date+time (QUI-969).
+   * For `provider_required` services this intersects the specialists
+   * offering the service with the chosen slot's `available_providers`;
+   * a professional without schedule never appears. Free-booking
+   * services keep the full list (capacity-based, no per-provider
+   * schedule applies). While availability is loading, the full list
+   * is shown to avoid flashing an empty state.
+   */
+  readonly availableProvidersForSlot = computed<ProviderOption[]>(() => {
+    const all = this.providers();
+    if (!this.isProviderRequired()) return all;
+    if (!this.serviceId() || this.slotsLoadedFor() !== this.date()) return all;
+    const slot = this.daySlots().find((s) => s.start_time === this.startTime());
+    if (!slot) return [];
+    const ids = new Set((slot.available_providers ?? []).map((p) => p.id));
+    return all.filter((p) => ids.has(p.id));
+  });
+
+  /** True when specialists exist but none covers the chosen slot. */
+  readonly noAvailabilityForSlot = computed<boolean>(() => {
+    return (
+      this.isProviderRequired() &&
+      !!this.serviceId() &&
+      this.slotsLoadedFor() === this.date() &&
+      this.providers().length > 0 &&
+      this.availableProvidersForSlot().length === 0
+    );
   });
 
   readonly isTimeSelected = computed<boolean>(() => {
@@ -1059,8 +1143,71 @@ export class BookingSchedulerModalComponent {
       }
     });
 
+    // QUI-969: reload day availability whenever the service or the
+    // selected date changes.
+    effect(() => {
+      const pid = this.serviceId();
+      const dateStr = this.date();
+      if (pid && dateStr) {
+        this.loadDaySlots(pid, dateStr);
+      }
+    });
+
+    // QUI-969: drop a selected provider that is no longer available
+    // at the chosen date+time (e.g. the user moved to a day the
+    // professional doesn't work).
+    effect(() => {
+      if (!this.isProviderRequired()) return;
+      if (!this.serviceId() || this.slotsLoadedFor() !== this.date()) return;
+      const id = this.providerId();
+      if (
+        id !== null &&
+        !this.availableProvidersForSlot().some((p) => p.id === id)
+      ) {
+        this.providerIdText.set('');
+      }
+    });
+
     this.loadTopCustomers();
     this.scrollToSelectedSlot();
+  }
+
+  private loadDaySlots(productId: number, dateStr: string): void {
+    const key = `${productId}|${dateStr}`;
+    this.daySlotsRequestKey = key;
+    this.slotsLoading.set(true);
+    this.slotsError.set(false);
+    const params: Record<string, string> = {
+      date_from: dateStr,
+      date_to: dateStr,
+    };
+    const variantId =
+      this.productVariantId() ??
+      this.cartItem()?.variant_id ??
+      this.existingBooking()?.product_variant_id;
+    if (variantId) params['product_variant_id'] = String(variantId);
+    this.http
+      .get<any>(
+        `${environment.apiUrl}/store/reservations/availability/${productId}`,
+        { params },
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (resp) => {
+          if (this.daySlotsRequestKey !== key) return;
+          const list = resp?.data ?? resp ?? [];
+          this.daySlots.set(Array.isArray(list) ? list : []);
+          this.slotsLoadedFor.set(dateStr);
+          this.slotsLoading.set(false);
+        },
+        error: () => {
+          if (this.daySlotsRequestKey !== key) return;
+          this.daySlots.set([]);
+          this.slotsLoadedFor.set(dateStr);
+          this.slotsLoading.set(false);
+          this.slotsError.set(true);
+        },
+      });
   }
 
   private loadCustomerById(customerId: number): void {

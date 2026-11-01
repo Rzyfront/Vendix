@@ -216,3 +216,108 @@ describe('AvailabilityService — business hours integration', () => {
     ).resolves.toBeDefined();
   });
 });
+
+describe('AvailabilityService — provider_required never returns generic slots (QUI-969)', () => {
+  function buildService(opts: {
+    products?: any[];
+    providers?: any[];
+    schedules?: any[];
+    bookings?: any[];
+  }) {
+    const businessHoursService = {
+      // Store open all day Monday so the provider window is the only bound.
+      loadStoreHours: jest.fn().mockResolvedValue(
+        new Map([[1, { start_time: '00:00', end_time: '23:59' }]]),
+      ),
+      loadStoreWindows: jest.fn().mockResolvedValue(
+        new Map([[1, [{ start_time: '00:00', end_time: '23:59' }]]]),
+      ),
+    } as any;
+    const prisma: any = {
+      products: {
+        findFirst: jest.fn(({ where }: any) =>
+          Promise.resolve(
+            opts.products?.find((p) => p.id === where.id) ?? null,
+          ),
+        ),
+      },
+      service_providers: {
+        findMany: jest.fn().mockResolvedValue(opts.providers ?? []),
+      },
+      provider_schedules: {
+        findMany: jest.fn().mockResolvedValue(opts.schedules ?? []),
+      },
+      provider_exceptions: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      bookings: {
+        findMany: jest.fn().mockResolvedValue(opts.bookings ?? []),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+    };
+    return {
+      service: new AvailabilityService(prisma, businessHoursService),
+      prisma,
+    };
+  }
+
+  const REQUIRED = {
+    id: 10,
+    store_id: 1,
+    booking_mode: 'provider_required',
+    requires_station: false,
+    service_duration_minutes: 60,
+    buffer_minutes: 0,
+  };
+
+  it('returns [] when providers have no schedules (no phantom store-hour slots)', async () => {
+    const { service } = buildService({
+      products: [REQUIRED],
+      providers: [{ id: 5, display_name: 'Ana', avatar_url: null }],
+      schedules: [],
+    });
+    // Monday — inside default working days, so the old generic
+    // fallback would have emitted store-hour slots here.
+    const slots = await service.getAvailableSlots(10, '2026-08-17', '2026-08-17');
+    expect(slots).toEqual([]);
+  });
+
+  it('returns [] when no active provider offers the service', async () => {
+    const { service } = buildService({
+      products: [REQUIRED],
+      providers: [],
+    });
+    const slots = await service.getAvailableSlots(10, '2026-08-17', '2026-08-17');
+    expect(slots).toEqual([]);
+  });
+
+  it('keeps generic slots for free_booking (10 fixed capacity)', async () => {
+    const { service } = buildService({
+      products: [{ ...REQUIRED, booking_mode: 'free_booking' }],
+      providers: [],
+    });
+    const slots = await service.getAvailableSlots(10, '2026-08-17', '2026-08-17');
+    expect(slots.length).toBeGreaterThan(0);
+    expect(slots[0].available_providers).toEqual([]);
+    expect(slots[0].total_available).toBe(10);
+  });
+
+  it('still returns provider slots when a schedule covers the day', async () => {
+    const { service } = buildService({
+      products: [REQUIRED],
+      providers: [{ id: 5, display_name: 'Ana', avatar_url: null }],
+      schedules: [
+        { provider_id: 5, day_of_week: 1, start_time: '08:00', end_time: '12:00', is_active: true },
+      ],
+    });
+    const slots = await service.getAvailableSlots(10, '2026-08-17', '2026-08-17');
+    expect(slots.length).toBeGreaterThan(0);
+    expect(slots[0].available_providers).toEqual([
+      { id: 5, display_name: 'Ana', avatar_url: null },
+    ]);
+  });
+});
