@@ -265,6 +265,30 @@
           <span class="current-value">{{ formatDate(b.date) }} · {{ formatTime(b.start_time) }} - {{ formatTime(b.end_time) }}</span>
         </div>
 
+        <!-- QUI-972: professional without schedule → say so and offer a switch -->
+        @if (!isFreeBooking() && providerHasSchedule() === false && !loadingDates()) {
+          <p class="empty-slots">
+            {{ rescheduleProviderName() || 'Este profesional' }} no tiene horario configurado
+          </p>
+          @if (providersLoading()) {
+            <div class="loading-center">
+              <app-spinner size="sm" color="primary"></app-spinner>
+            </div>
+          } @else if (serviceProviders().length > 1) {
+            <label class="section-label">Elegir otro profesional</label>
+            <div class="date-selector">
+              @for (p of serviceProviders(); track p.id) {
+                <button
+                  class="date-chip"
+                  [class.selected]="rescheduleProviderId() === p.id"
+                  (click)="selectRescheduleProvider(p.id)">
+                  {{ p.display_name || p.employee?.first_name }}
+                </button>
+              }
+            </div>
+          }
+        }
+
         <!-- Date selector -->
         <label class="section-label">Nueva fecha</label>
         @if (loadingDates()) {
