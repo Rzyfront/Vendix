@@ -614,3 +614,132 @@ describe('ReservationsService.hold — provider_id del técnico', () => {
     );
   });
 });
+
+/**
+ * QUI-972 — reschedule may move the booking to another professional
+ * (e.g. the current one has no schedule configured). The new provider
+ * must offer the service and be active; availability is validated
+ * against the target provider.
+ */
+describe('ReservationsService.reschedule — provider change (QUI-972)', () => {
+  function build(opts: { assignment?: any; slotAvailable?: boolean } = {}) {
+    const bookings: any[] = [
+      {
+        id: 7,
+        store_id: 1,
+        product_id: 10,
+        provider_id: 1,
+        customer_id: 3,
+        status: 'pending',
+        date: new Date('2026-11-02T00:00:00Z'),
+        start_time: '08:00',
+        end_time: '08:30',
+        product: { name: 'Corte' },
+        customer: { first_name: 'Ana', last_name: 'Ruiz' },
+      },
+    ];
+    const prisma: any = {
+      bookings: {
+        findFirst: jest.fn(({ where }: any) =>
+          Promise.resolve(bookings.find((b) => b.id === where.id) ?? null),
+        ),
+        update: jest.fn(({ where, data }: any) => {
+          const target = bookings.find((b) => b.id === where.id);
+          Object.assign(target, data);
+          return Promise.resolve({ ...target });
+        }),
+      },
+      products: {
+        findFirst: jest.fn().mockResolvedValue({ requires_station: false }),
+      },
+      store_settings: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+      provider_services: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(
+            'assignment' in opts
+              ? opts.assignment
+              : { provider: { id: 2, is_active: true } },
+          ),
+      },
+      $transaction: jest.fn(async (cb: any) => cb(prisma)),
+    };
+    const availabilityService: any = {
+      isSlotAvailable: jest
+        .fn()
+        .mockResolvedValue(opts.slotAvailable ?? true),
+      validateNoOverlapForCustomer: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new ReservationsService(
+      prisma,
+      availabilityService,
+      {} as any,
+      { signUrl: jest.fn((u: string) => Promise.resolve(u)) } as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { record: jest.fn().mockResolvedValue(null) } as any,
+    );
+    return { service, prisma, bookings, availabilityService };
+  }
+
+  const dto = { date: '2026-11-03', start_time: '09:00', end_time: '09:30' };
+
+  it('keeps the provider when dto has no provider_id', async () => {
+    const { service, prisma, availabilityService } = build();
+    await service.reschedule(7, dto as any);
+    expect(prisma.bookings.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.not.objectContaining({ provider_id: expect.anything() }),
+      }),
+    );
+    expect(availabilityService.isSlotAvailable).toHaveBeenCalledWith(
+      10,
+      '2026-11-03',
+      '09:00',
+      '09:30',
+      1,
+      7,
+    );
+  });
+
+  it('moves the booking to another active provider offering the service', async () => {
+    const { service, prisma, availabilityService } = build();
+    const result = await service.reschedule(7, { ...dto, provider_id: 2 } as any);
+    expect(prisma.bookings.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ provider_id: 2 }),
+      }),
+    );
+    expect(availabilityService.isSlotAvailable).toHaveBeenCalledWith(
+      10,
+      '2026-11-03',
+      '09:00',
+      '09:30',
+      2,
+      7,
+    );
+    expect(result.provider_id).toBe(2);
+  });
+
+  it.each([
+    ['not offering the service', null],
+    ['inactive', { provider: { id: 2, is_active: false } }],
+  ])('rejects with 400 when the provider is %s', async (_label, assignment) => {
+    const { service, prisma } = build({ assignment });
+    await expect(
+      service.reschedule(7, { ...dto, provider_id: 2 } as any),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.bookings.update).not.toHaveBeenCalled();
+  });
+
+  it('propagates slot conflicts for the target provider', async () => {
+    const { service } = build({ slotAvailable: false });
+    await expect(
+      service.reschedule(7, { ...dto, provider_id: 2 } as any),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+});
