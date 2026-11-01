@@ -377,10 +377,10 @@ export class ReservationsComponent {
   onNoShow(booking: Booking): void {
     this.dialogService
       .confirm({
-        title: 'Marcar como No Show',
+        title: 'Marcar como no asistió',
         message: `¿Confirmas que el cliente no se presento para la reserva #${booking.booking_number}?`,
         confirmVariant: 'danger',
-        confirmText: 'Confirmar No Show',
+        confirmText: 'Confirmar',
       })
       .then((confirmed) => {
         if (confirmed) {
@@ -390,14 +390,14 @@ export class ReservationsComponent {
             .subscribe({
               next: () => {
                 this.isDetailModalOpen.set(false);
-                this.toastService.success('Reserva marcada como No Show');
+                this.toastService.success('Reserva marcada como no asistió');
                 this.loadBookings();
                 this.loadStats();
                 this.loadTodayBookings();
                 this.calendarRefreshTrigger.update(v => v + 1);
               },
               error: () => {
-                this.toastService.error('Error al marcar como No Show');
+                this.toastService.error('Error al marcar como no asistió');
               },
             });
         }

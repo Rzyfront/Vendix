@@ -146,7 +146,7 @@ export class TodayReservationsPanelComponent {
       in_progress: 'En progreso',
       completed: 'Completada',
       cancelled: 'Cancelada',
-      no_show: 'No show',
+      no_show: 'No asistió',
     };
     return map[status] ?? status;
   }
