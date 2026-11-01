@@ -104,6 +104,16 @@ export class ReservationFormModalComponent {
   selectedCustomer = signal<any>(null);
   searchingCustomers = signal(false);
 
+  // QUI-976 — frequent-customers suggestions (same backend source as POS).
+  topCustomers = signal<any[]>([]);
+  loadingTopCustomers = signal(false);
+  showingTopSuggestions = computed(
+    () =>
+      this.customerSearch().trim().length < 2 &&
+      !this.searchingCustomers() &&
+      !this.selectedCustomer(),
+  );
+
   // Agenda directa (sin proveedor ni horario específico)
   directBooking = signal(false);
 
@@ -515,6 +525,8 @@ export class ReservationFormModalComponent {
     this.submitting.set(false);
     this.directBooking.set(false);
     this.providerScheduleBlocks.set([]);
+    this.topCustomers.set([]);
+    this.loadTopCustomers();
     if (this.initialProduct()) {
       const product = this.initialProduct();
       this.selectedService.set(product);
@@ -1063,6 +1075,25 @@ export class ReservationFormModalComponent {
   onCustomerSearch(query: string): void {
     this.customerSearch.set(query);
     this.searchSubject.next(query);
+  }
+
+  /** QUI-976 — lazy, idempotent top-3 load for the suggestions block. */
+  loadTopCustomers(): void {
+    if (this.topCustomers().length > 0 || this.loadingTopCustomers()) return;
+    this.loadingTopCustomers.set(true);
+    this.reservationsService
+      .getTopCustomers(3)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (list) => {
+          this.topCustomers.set(list ?? []);
+          this.loadingTopCustomers.set(false);
+        },
+        error: () => {
+          this.topCustomers.set([]);
+          this.loadingTopCustomers.set(false);
+        },
+      });
   }
 
   selectCustomer(customer: any): void {
