@@ -3,6 +3,13 @@ import { Component, input, output, computed, signal, DestroyRef, inject } from '
 import { IconComponent } from '../../../../../../../shared/components';
 import { Booking, BookingStatus } from '../../../interfaces/reservation.interface';
 import { isBookingExpired as checkBookingExpired } from '../booking-expired.util';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
+import {
+  clampBlockHeight,
+  clampBlockTop,
+  generateTimeSlots,
+  resolveCalendarRange,
+} from '../calendar-range.util';
 
 /**
  * A free slot = a time range where the provider has capacity and no booking.
@@ -25,6 +32,7 @@ export interface FreeSlot {
 })
 export class CalendarDayViewComponent {
   private readonly destroyRef = inject(DestroyRef);
+  private readonly settings = inject(StoreSettingsFacade);
 
   readonly bookings = input.required<Booking[]>();
   /**
@@ -57,13 +65,38 @@ export class CalendarDayViewComponent {
   readonly bookingClicked = output<Booking>();
   readonly bookingDropped = output<{ bookingId: number; newDate: string; newStartTime: string; newEndTime: string }>();
 
-  private readonly DAY_START = 7 * 60;  // 07:00
-  private readonly DAY_END = 22 * 60;   // 22:00
-  private readonly TOTAL_MINUTES = this.DAY_END - this.DAY_START;
+  /**
+   * QUI-977 — visible grid range from the store's `business_hours` for the
+   * selected weekday, expanded to fit every booking and snapped to
+   * `slotMinutes`. Falls back to the legacy 07:00–22:00 when the store has
+   * no usable hours.
+   */
+  private readonly viewRange = computed(() =>
+    resolveCalendarRange(
+      this.settings.pos()?.business_hours,
+      [this.currentDate()],
+      this.bookings().map((b) => ({ start: b.start_time, end: b.end_time })),
+      this.slotMinutes(),
+    ),
+  );
+
+  private get rangeStart(): number {
+    return this.viewRange().start;
+  }
+
+  private get rangeEnd(): number {
+    return this.viewRange().end;
+  }
+
+  private get rangeTotal(): number {
+    return this.viewRange().end - this.viewRange().start;
+  }
 
   private currentTimeSignal = signal(new Date());
 
-  readonly timeSlots = computed<string[]>(() => this.generateTimeSlots(this.slotMinutes()));
+  readonly timeSlots = computed<string[]>(() =>
+    generateTimeSlots(this.viewRange().start, this.viewRange().end, this.slotMinutes()),
+  );
 
   constructor() {
     const interval = setInterval(() => {
@@ -94,8 +127,8 @@ export class CalendarDayViewComponent {
   readonly currentTimePercent = computed(() => {
     const now = this.currentTimeSignal();
     const minutes = now.getHours() * 60 + now.getMinutes();
-    if (minutes < this.DAY_START || minutes > this.DAY_END) return -1;
-    return ((minutes - this.DAY_START) / this.TOTAL_MINUTES) * 100;
+    if (minutes < this.rangeStart || minutes > this.rangeEnd) return -1;
+    return ((minutes - this.rangeStart) / this.rangeTotal) * 100;
   });
 
   /**
@@ -118,11 +151,11 @@ export class CalendarDayViewComponent {
     if (!this.isToday()) return [];
     const now = this.currentTimeSignal();
     const nowMin = now.getHours() * 60 + now.getMinutes();
-    if (nowMin <= this.DAY_START) return [];
+    if (nowMin <= this.rangeStart) return [];
     const step = this.slotMinutes();
-    const cap = Math.min(nowMin, this.DAY_END);
+    const cap = Math.min(nowMin, this.rangeEnd);
     const out: FreeSlot[] = [];
-    for (let t = this.DAY_START; t + step <= cap; t += step) {
+    for (let t = this.rangeStart; t + step <= cap; t += step) {
       const start = this.minutesToTimeLocal(t);
       const end = this.minutesToTimeLocal(t + step);
       if (this.overlapsAny(start, end)) continue;
@@ -164,14 +197,11 @@ export class CalendarDayViewComponent {
   });
 
   getBlockTop(booking: Booking): number {
-    const startMinutes = this.parseTimeToMinutes(booking.start_time);
-    return ((startMinutes - this.DAY_START) / this.TOTAL_MINUTES) * 100;
+    return this.blockGeometry(booking.start_time, booking.end_time).top;
   }
 
   getBlockHeight(booking: Booking): number {
-    const startMinutes = this.parseTimeToMinutes(booking.start_time);
-    const endMinutes = this.parseTimeToMinutes(booking.end_time);
-    return ((endMinutes - startMinutes) / this.TOTAL_MINUTES) * 100;
+    return this.blockGeometry(booking.start_time, booking.end_time).height;
   }
 
   /**
@@ -189,17 +219,25 @@ export class CalendarDayViewComponent {
   }
 
   getFreeSlotTop(slot: FreeSlot): number {
-    const startMinutes = this.parseTimeToMinutes(slot.start);
-    return ((startMinutes - this.DAY_START) / this.TOTAL_MINUTES) * 100;
+    return this.blockGeometry(slot.start, slot.end).top;
   }
 
   getFreeSlotHeight(slot: FreeSlot): number {
-    const startMinutes = this.parseTimeToMinutes(slot.start);
-    const endMinutes = this.parseTimeToMinutes(slot.end);
-    return Math.max(
-      ((endMinutes - startMinutes) / this.TOTAL_MINUTES) * 100,
-      1.2, // ensure even 15-min slots remain clickable
-    );
+    const height = this.blockGeometry(slot.start, slot.end).height;
+    // Ensure even 15-min slots remain clickable — but keep fully-clipped
+    // overlays invisible instead of painting an edge sliver.
+    return height <= 0 ? 0 : Math.max(height, 1.2);
+  }
+
+  private blockGeometry(startTime: string, endTime: string): { top: number; height: number } {
+    const startMinutes = this.parseTimeToMinutes(startTime);
+    const endMinutes = this.parseTimeToMinutes(endTime);
+    const rawTop = ((startMinutes - this.rangeStart) / this.rangeTotal) * 100;
+    const rawHeight = ((endMinutes - startMinutes) / this.rangeTotal) * 100;
+    return {
+      top: clampBlockTop(rawTop, rawHeight),
+      height: clampBlockHeight(rawTop, rawHeight),
+    };
   }
 
   onBookingClick(event: MouseEvent, booking: Booking): void {
@@ -220,7 +258,7 @@ export class CalendarDayViewComponent {
     const y = event.clientY - rect.top;
     const percent = y / rect.height;
     const step = this.slotMinutes();
-    const minutes = Math.round((percent * this.TOTAL_MINUTES + this.DAY_START) / step) * step;
+    const minutes = Math.round((percent * this.rangeTotal + this.rangeStart) / step) * step;
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     const time = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
@@ -273,14 +311,4 @@ export class CalendarDayViewComponent {
     return h * 60 + m;
   }
 
-  private generateTimeSlots(stepMinutes: number): string[] {
-    const slots: string[] = [];
-    for (let h = 7; h <= 22; h++) {
-      for (let m = 0; m < 60; m += stepMinutes) {
-        if (h === 22 && m > 0) break;
-        slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-      }
-    }
-    return slots;
-  }
 }
