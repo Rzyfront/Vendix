@@ -16,6 +16,7 @@ import { ReservationsService } from './services/reservations.service';
 import { BookingDetailModalComponent } from './components/booking-detail-modal/booking-detail-modal.component';
 import { TodayReservationsPanelComponent } from './components/today-reservations-panel/today-reservations-panel.component';
 import { QuickActionsPanelComponent } from './components/quick-actions-panel/quick-actions-panel.component';
+import { ReportExportModalComponent } from './components/report-export-modal/report-export-modal.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import {
@@ -49,6 +50,7 @@ type ReservationView = 'calendar' | 'list';
     BookingDetailModalComponent,
     TodayReservationsPanelComponent,
     QuickActionsPanelComponent,
+    ReportExportModalComponent,
     CardComponent,
     ButtonComponent,
     IconComponent,
@@ -566,8 +568,10 @@ export class ReservationsComponent {
     this.router.navigate(['/admin/reservations/schedules']);
   }
 
+  isExportModalOpen = signal(false);
+
   onExportReport(): void {
-    this.toastService.info('Funcionalidad de exportacion proximamente');
+    this.isExportModalOpen.set(true);
   }
 
   onViewAllToday(): void {

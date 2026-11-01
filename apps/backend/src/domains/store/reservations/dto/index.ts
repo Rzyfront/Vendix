@@ -3,6 +3,7 @@ export * from './reschedule-booking.dto';
 export * from './create-reschedule-request.dto';
 export * from './decide-reschedule-request.dto';
 export * from './booking-query.dto';
+export * from './export-bookings-query.dto';
 export * from './availability-query.dto';
 export * from './calendar-query.dto';
 export * from './send-confirmation.dto';
