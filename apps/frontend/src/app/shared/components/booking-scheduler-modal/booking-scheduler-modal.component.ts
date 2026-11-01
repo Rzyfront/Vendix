@@ -468,7 +468,11 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
                     <span class="text-xs text-text-muted">Cargando estaciones...</span>
                   }
                 </div>
-                @if (noStationsForSlot() && !slotsLoading()) {
+                @if (slotsError()) {
+                  <div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 text-center">
+                    No se pudieron cargar las estaciones. Cambia de día o intenta de nuevo.
+                  </div>
+                } @else if (noStationsForSlot() && !slotsLoading()) {
                   <div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 text-center">
                     No hay estaciones libres en este horario.
                   </div>
