@@ -145,7 +145,7 @@ export class AvailabilityService {
       });
     }
 
-    if (isFreeBooking || providers.length === 0) {
+    if (isFreeBooking) {
       return this.generateGenericSlots(
         product_id,
         date_from,
@@ -153,6 +153,14 @@ export class AvailabilityService {
         duration,
         buffer,
       );
+    }
+
+    // provider_required with no active providers offering the service:
+    // no generic fallback — store-hour slots with no professional
+    // behind them would look bookable and the booking gate would have
+    // to reject them later (QUI-969).
+    if (providers.length === 0) {
+      return [];
     }
 
     const providerIds = providers.map((p) => p.id);
@@ -370,17 +378,10 @@ export class AvailabilityService {
       return a.start_time.localeCompare(b.start_time);
     });
 
-    // Fallback a slots genéricos si proveedores no tienen schedules configurados
-    if (slots.length === 0) {
-      return this.generateGenericSlots(
-        product_id,
-        date_from,
-        date_to,
-        duration,
-        buffer,
-      );
-    }
-
+    // NOTE (QUI-969): no generic fallback here. When the providers
+    // offering this service have no schedules covering the range, the
+    // truthful answer is "no availability" — generic store-hour slots
+    // used to appear bookable with no professional behind them.
     return slots;
   }
 
