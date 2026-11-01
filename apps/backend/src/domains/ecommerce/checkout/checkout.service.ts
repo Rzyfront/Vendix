@@ -1872,12 +1872,12 @@ export class CheckoutService {
       }
 
       // Soporte obligatorio por tienda: con
-      // `ecommerce.checkout.require_payment_receipt` activo, bank_transfer /
-      // voucher sin `file` se rechaza aquí (fail-fast, antes de crear orden y
-      // pago). Con el flag apagado el flujo queda idéntico al actual.
+      // `ecommerce.checkout.require_payment_receipt` activo, bank_transfer
+      // sin `file` se rechaza aquí (fail-fast, antes de crear orden y pago).
+      // Voucher (datáfono) admite soporte pero nunca lo exige. Con el flag
+      // apagado el flujo queda idéntico al actual.
       if (
-        (payment_method.system_payment_method.type === 'bank_transfer' ||
-          payment_method.system_payment_method.type === 'voucher') &&
+        payment_method.system_payment_method.type === 'bank_transfer' &&
         !file
       ) {
         const checkoutSettings = await this.getCheckoutSettings();

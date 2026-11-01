@@ -315,6 +315,7 @@ jobs:
           --include='**/orders/components/orders-list/orders-list.component.spec.ts'
           --include='**/inventory/inventory-dashboard.component.spec.ts'
           --include='**/ecommerce/pages/guest-order-summary/guest-order-summary.component.spec.ts'
+          --include='**/ecommerce/services/checkout-payment-receipt.spec.ts'
           --include='**/ecommerce/pages/account/order-detail/order-detail.component.spec.ts'
           --include='**/reports/services/reports-data.service.spec.ts'
           --include='**/reports/state/reports.effects.spec.ts'

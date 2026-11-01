@@ -195,8 +195,8 @@ export interface EcommerceSettings {
     whatsapp_number?: string;
     // Pitch que encabeza el mensaje de pedido. Acepta {tienda} y {web}.
     whatsapp_pitch?: string;
-    // Opt-in: comprobante obligatorio para bank_transfer/voucher en el
-    // checkout ecommerce. Ausente ⇒ opcional (default `false`).
+    // Opt-in: comprobante obligatorio para bank_transfer en el checkout
+    // ecommerce (voucher siempre opcional). Ausente ⇒ opcional (default `false`).
     require_payment_receipt?: boolean;
   };
   orders?: {

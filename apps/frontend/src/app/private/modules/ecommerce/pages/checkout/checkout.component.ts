@@ -435,14 +435,15 @@ export class CheckoutComponent implements OnInit {
     return t === 'bank_transfer' || t === 'voucher';
   });
   /**
-   * True cuando el método actual exige instrucciones Y la tienda marcó el
+   * True cuando el método actual es transferencia Y la tienda marcó el
    * soporte como obligatorio (`ecommerce.checkout.require_payment_receipt`).
+   * Datáfono (voucher) admite soporte pero nunca lo exige.
    * Ausente/false ⇒ comprobante opcional (flujo actual sin cambios).
    */
-  readonly requiresPaymentReceipt = computed(
-    () =>
-      this.requiresPaymentInstructions() &&
-      this.checkout_service.getRequirePaymentReceipt(),
+  readonly requiresPaymentReceipt = computed(() =>
+    this.checkout_service.requiresPaymentReceiptFor(
+      this.selectedPaymentMethodObj()?.type,
+    ),
   );
 
   // ====== Cuentas bancarias (bank_transfer / voucher) ======
