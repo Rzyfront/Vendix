@@ -3,9 +3,11 @@
   <div
     class="sticky top-0 z-30 bg-surface/80 backdrop-blur-md border-b border-[var(--color-border)] shadow-sm rounded-b-xl mb-4 md:mb-6 px-4 py-2.5 md:px-6 md:py-3"
   >
-    <div class="flex items-center justify-between gap-3">
+    <!-- QUI-974: wrap so the actions never overlap the title/subtitle;
+         on medium widths they flow to a second line, right-aligned. -->
+    <div class="flex items-center justify-between gap-3 flex-wrap">
       <!-- Left: Title -->
-      <div class="flex items-center gap-2.5 min-w-0">
+      <div class="flex items-center gap-2.5 min-w-0 flex-1 basis-48">
         <div
           class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0"
         >
@@ -36,7 +38,7 @@
       </div>
 
       <!-- Right: View Toggle + New Button -->
-      <div class="flex items-center gap-2 md:gap-3 shrink-0">
+      <div class="flex items-center gap-2 md:gap-3 flex-wrap justify-end min-w-0">
         <app-input-buttons
           [options]="viewOptions"
           [ngModel]="activeView()"
@@ -108,7 +110,8 @@
               : 'var(--color-border)'"
           >
             <app-icon name="inbox" [size]="14"></app-icon>
-            <span class="hidden sm:inline">Solicitudes de reagenda</span>
+            <span class="hidden lg:inline">Solicitudes de reagenda</span>
+            <span class="hidden sm:inline lg:hidden">Solicitudes</span>
             @if (rescheduleRequestsCount() > 0) {
               <span
                 class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-white text-[var(--color-primary)] text-[10px] font-extrabold leading-none"
