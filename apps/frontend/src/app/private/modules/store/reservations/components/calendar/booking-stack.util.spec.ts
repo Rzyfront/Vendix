@@ -29,7 +29,7 @@ describe('booking-stack.util (QUI-971)', () => {
       booking({ id: 1, start_time: '08:00' }),
       booking({ id: 2, start_time: '08:00:00' }),
     ]);
-    expect(groups).toHaveLength(1);
+    expect(groups.length).toBe(1);
     expect(groups[0].bookings.map((b) => b.id)).toEqual([1, 2]);
   });
 
