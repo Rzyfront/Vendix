@@ -2,6 +2,13 @@ import { Component, input, output, computed, signal, DestroyRef, inject } from '
 
 import { Booking } from '../../../interfaces/reservation.interface';
 import { isBookingExpired as checkBookingExpired } from '../booking-expired.util';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
+import {
+  clampBlockHeight,
+  clampBlockTop,
+  generateTimeSlots,
+  resolveCalendarRange,
+} from '../calendar-range.util';
 
 /**
  * A free slot = a time range where the provider has capacity and no booking.
@@ -31,6 +38,7 @@ interface WeekDay {
 })
 export class CalendarWeekViewComponent {
   private readonly destroyRef = inject(DestroyRef);
+  private readonly settings = inject(StoreSettingsFacade);
 
   readonly bookingsByDate = input.required<Record<string, Booking[]>>();
   /**
@@ -54,13 +62,40 @@ export class CalendarWeekViewComponent {
   readonly bookingClicked = output<Booking>();
   readonly bookingDropped = output<{ bookingId: number; newDate: string; newStartTime: string; newEndTime: string }>();
 
-  private readonly DAY_START = 7 * 60; // 07:00 = 420 min
-  private readonly DAY_END = 22 * 60;  // 22:00 = 1320 min
-  private readonly TOTAL_MINUTES = this.DAY_END - this.DAY_START; // 900 min
+  /**
+   * QUI-977 — visible grid range from the store's `business_hours` (union
+   * across the visible week), expanded to fit every booking and snapped to
+   * `slotMinutes`. Falls back to the legacy 07:00–22:00 when the store has
+   * no usable hours.
+   */
+  private readonly viewRange = computed(() =>
+    resolveCalendarRange(
+      this.settings.pos()?.business_hours,
+      this.weekDates(),
+      Object.values(this.bookingsByDate())
+        .flat()
+        .map((b) => ({ start: b.start_time, end: b.end_time })),
+      this.slotMinutes(),
+    ),
+  );
+
+  private get rangeStart(): number {
+    return this.viewRange().start;
+  }
+
+  private get rangeEnd(): number {
+    return this.viewRange().end;
+  }
+
+  private get rangeTotal(): number {
+    return this.viewRange().end - this.viewRange().start;
+  }
 
   private currentTimeSignal = signal(new Date());
 
-  readonly timeSlots = computed<string[]>(() => this.generateTimeSlots(this.slotMinutes()));
+  readonly timeSlots = computed<string[]>(() =>
+    generateTimeSlots(this.viewRange().start, this.viewRange().end, this.slotMinutes()),
+  );
 
   constructor() {
     const interval = setInterval(() => {
@@ -71,38 +106,44 @@ export class CalendarWeekViewComponent {
 
   readonly dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
-  readonly weekDays = computed<WeekDay[]>(() => {
+  readonly weekDates = computed<Date[]>(() => {
     const d = this.currentDate();
-    const today = new Date();
-    const todayStr = this.formatDateStr(today);
 
     // Find Monday of the current week
     const monday = new Date(d);
     const dayOfWeek = (d.getDay() + 6) % 7; // Monday = 0
     monday.setDate(d.getDate() - dayOfWeek);
 
-    const days: WeekDay[] = [];
+    const dates: Date[] = [];
     for (let i = 0; i < 7; i++) {
       const day = new Date(monday);
       day.setDate(monday.getDate() + i);
+      dates.push(day);
+    }
+
+    return dates;
+  });
+
+  readonly weekDays = computed<WeekDay[]>(() => {
+    const todayStr = this.formatDateStr(new Date());
+
+    return this.weekDates().map((day, i) => {
       const dateStr = this.formatDateStr(day);
 
-      days.push({
+      return {
         date: dateStr,
         name: this.dayNames[i],
         dayNumber: day.getDate(),
         isToday: dateStr === todayStr,
-      });
-    }
-
-    return days;
+      };
+    });
   });
 
   readonly currentTimePercent = computed(() => {
     const now = this.currentTimeSignal();
     const minutes = now.getHours() * 60 + now.getMinutes();
-    if (minutes < this.DAY_START || minutes > this.DAY_END) return -1;
-    return ((minutes - this.DAY_START) / this.TOTAL_MINUTES) * 100;
+    if (minutes < this.rangeStart || minutes > this.rangeEnd) return -1;
+    return ((minutes - this.rangeStart) / this.rangeTotal) * 100;
   });
 
   getBookingsForDate(dateStr: string): Booking[] {
@@ -131,28 +172,33 @@ export class CalendarWeekViewComponent {
   }
 
   getBlockTop(booking: Booking): number {
-    const startMinutes = this.parseTimeToMinutes(booking.start_time);
-    return ((startMinutes - this.DAY_START) / this.TOTAL_MINUTES) * 100;
+    return this.blockGeometry(booking.start_time, booking.end_time).top;
   }
 
   getBlockHeight(booking: Booking): number {
-    const startMinutes = this.parseTimeToMinutes(booking.start_time);
-    const endMinutes = this.parseTimeToMinutes(booking.end_time);
-    return ((endMinutes - startMinutes) / this.TOTAL_MINUTES) * 100;
+    return this.blockGeometry(booking.start_time, booking.end_time).height;
   }
 
   getFreeSlotTop(slot: FreeSlot): number {
-    const startMinutes = this.parseTimeToMinutes(slot.start);
-    return ((startMinutes - this.DAY_START) / this.TOTAL_MINUTES) * 100;
+    return this.blockGeometry(slot.start, slot.end).top;
   }
 
   getFreeSlotHeight(slot: FreeSlot): number {
-    const startMinutes = this.parseTimeToMinutes(slot.start);
-    const endMinutes = this.parseTimeToMinutes(slot.end);
-    return Math.max(
-      ((endMinutes - startMinutes) / this.TOTAL_MINUTES) * 100,
-      1.2, // ensure even 15-min slots remain clickable
-    );
+    const height = this.blockGeometry(slot.start, slot.end).height;
+    // Ensure even 15-min slots remain clickable — but keep fully-clipped
+    // overlays invisible instead of painting an edge sliver.
+    return height <= 0 ? 0 : Math.max(height, 1.2);
+  }
+
+  private blockGeometry(startTime: string, endTime: string): { top: number; height: number } {
+    const startMinutes = this.parseTimeToMinutes(startTime);
+    const endMinutes = this.parseTimeToMinutes(endTime);
+    const rawTop = ((startMinutes - this.rangeStart) / this.rangeTotal) * 100;
+    const rawHeight = ((endMinutes - startMinutes) / this.rangeTotal) * 100;
+    return {
+      top: clampBlockTop(rawTop, rawHeight),
+      height: clampBlockHeight(rawTop, rawHeight),
+    };
   }
 
   onBookingClick(event: MouseEvent, booking: Booking): void {
@@ -173,7 +219,7 @@ export class CalendarWeekViewComponent {
     const y = event.clientY - rect.top;
     const percent = y / rect.height;
     const step = this.slotMinutes();
-    const minutes = Math.round((percent * this.TOTAL_MINUTES + this.DAY_START) / step) * step;
+    const minutes = Math.round((percent * this.rangeTotal + this.rangeStart) / step) * step;
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     const time = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
@@ -190,17 +236,6 @@ export class CalendarWeekViewComponent {
   private parseTimeToMinutes(time: string): number {
     const [h, m] = time.split(':').map(Number);
     return h * 60 + m;
-  }
-
-  private generateTimeSlots(stepMinutes: number): string[] {
-    const slots: string[] = [];
-    for (let h = 7; h <= 22; h++) {
-      for (let m = 0; m < 60; m += stepMinutes) {
-        if (h === 22 && m > 0) break;
-        slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-      }
-    }
-    return slots;
   }
 
   private formatDateStr(d: Date): string {
