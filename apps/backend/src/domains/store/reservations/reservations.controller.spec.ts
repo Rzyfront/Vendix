@@ -29,6 +29,12 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
       update: jest.fn(),
     } as any;
 
+    // Segunda dependencia (ReservationsExportService, QUI-975): este smoke
+    // suite no ejercita el endpoint de exportar, así que un stub basta.
+    const reservationsExportService = {
+      getExportRows: jest.fn(),
+    } as any;
+
     const availabilityService = {
       getAvailableSlots: jest.fn(),
     } as any;
@@ -55,6 +61,7 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
 
     const controller = new ReservationsController(
       reservationsService,
+      reservationsExportService,
       availabilityService,
       bookingConfirmationService,
       appointmentQueueService,
