@@ -101,9 +101,12 @@ export class WeeklyScheduleEditorComponent {
       { day: 0, label: 'Domingo', short: 'Dom' },
     ];
 
-    // Group schedules by day_of_week, support multiple blocks per day
+    // Group schedules by day_of_week, support multiple blocks per day.
+    // Rows with malformed times (legacy garbage) are dropped so they can
+    // never flow back into a save payload (QUI-968: the API rejects them).
     const blocksByDay = new Map<number, ScheduleBlock[]>();
     for (const s of schedules) {
+      if (!this.isValidBlock(s.start_time, s.end_time)) continue;
       if (!blocksByDay.has(s.day_of_week)) {
         blocksByDay.set(s.day_of_week, []);
       }
@@ -134,6 +137,18 @@ export class WeeklyScheduleEditorComponent {
   private timeToMinutes(time: string): number {
     const [h, m] = time.split(':').map(Number);
     return h * 60 + m;
+  }
+
+  private static readonly TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+  private isValidBlock(start: string, end: string): boolean {
+    if (
+      !WeeklyScheduleEditorComponent.TIME_PATTERN.test(start ?? '') ||
+      !WeeklyScheduleEditorComponent.TIME_PATTERN.test(end ?? '')
+    ) {
+      return false;
+    }
+    return this.timeToMinutes(end) > this.timeToMinutes(start);
   }
 
   formatTimeShort(time: string): string {
@@ -199,6 +214,9 @@ export class WeeklyScheduleEditorComponent {
   }
 
   updateTime(dayIndex: number, blockIndex: number, field: 'start_time' | 'end_time', value: string): void {
+    // Ignore cleared/invalid time inputs so malformed values never enter
+    // the model (QUI-968: the API answers 400 on them).
+    if (!WeeklyScheduleEditorComponent.TIME_PATTERN.test(value ?? '')) return;
     const updated = [...this.days()];
     const day = { ...updated[dayIndex] };
     const blocks = [...day.blocks];
@@ -213,9 +231,12 @@ export class WeeklyScheduleEditorComponent {
     const updated = [...this.days()];
     const day = { ...updated[dayIndex] };
     const lastBlock = day.blocks[day.blocks.length - 1];
-    // New block starts 1 hour after the last block ends
-    const lastEndMinutes = this.timeToMinutes(lastBlock.end_time);
-    const newStartMinutes = Math.min(lastEndMinutes + 60, this.RANGE_END * 60 - 60);
+    // New block starts 1 hour after the last block ends. If the last
+    // block has no usable end time, fall back to the range start
+    // instead of producing NaN:NaN (QUI-968).
+    const lastEndMinutes = this.timeToMinutes(lastBlock?.end_time ?? '');
+    const anchor = Number.isFinite(lastEndMinutes) ? lastEndMinutes : this.RANGE_START * 60 - 60;
+    const newStartMinutes = Math.min(anchor + 60, this.RANGE_END * 60 - 60);
     const newEndMinutes = Math.min(newStartMinutes + 60, this.RANGE_END * 60);
 
     day.blocks = [
@@ -293,6 +314,20 @@ export class WeeklyScheduleEditorComponent {
   }
 
   save(): void {
+    // Pre-validate so the operator gets a clear message naming the day
+    // instead of an API error (QUI-968).
+    for (const d of this.days()) {
+      if (!d.is_active) continue;
+      for (const block of d.blocks) {
+        if (!this.isValidBlock(block.start_time, block.end_time)) {
+          this.toastService.error(
+            `Revisa el horario del ${d.label.toLowerCase()}: usa horas válidas (HH:mm) y fin mayor que inicio`,
+          );
+          return;
+        }
+      }
+    }
+
     this.saving.set(true);
     const items: any[] = [];
     for (const d of this.days()) {
@@ -316,7 +351,10 @@ export class WeeklyScheduleEditorComponent {
       )
       .subscribe({
         next: () => this.toastService.success('Horario guardado'),
-        error: () => this.toastService.error('Error al guardar horario'),
+        error: (err) =>
+          this.toastService.error(
+            err?.error?.message || 'Error al guardar horario',
+          ),
       });
   }
 }
