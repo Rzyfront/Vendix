@@ -628,6 +628,12 @@ export function getDefaultStoreSettings(): StoreSettings {
       enabled: false,
     },
 
+    // Módulo Apps (apps-module D3/T8) — apagado por defecto: con `false` el
+    // menú lateral queda exactamente como antes del módulo.
+    apps: {
+      enabled: false,
+    },
+
     // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & UI
     promotions: {
       evaluation_strategy: 'winner_takes_all',
