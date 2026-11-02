@@ -14,6 +14,7 @@ import { ProductPageSettingsModalComponent } from './components/product-page-set
 import { ServicePageSettingsModalComponent } from './components/service-page-settings-modal.component';
 import { BookingSettingsModalComponent } from './components/booking-settings-modal.component';
 import { StoreHomeSettingsModalComponent } from './components/store-home-settings-modal.component';
+import { LandingSettingsModalComponent } from './components/landing-settings-modal.component';
 
 /**
  * `/admin/apps` — catalog of the store's web apps (odd/tasks/apps-module.md,
@@ -32,6 +33,7 @@ import { StoreHomeSettingsModalComponent } from './components/store-home-setting
     ServicePageSettingsModalComponent,
     BookingSettingsModalComponent,
     StoreHomeSettingsModalComponent,
+    LandingSettingsModalComponent,
   ],
   template: `
     <div class="w-full max-w-6xl mx-auto px-3 py-4 md:px-6 md:py-6">
@@ -156,6 +158,7 @@ import { StoreHomeSettingsModalComponent } from './components/store-home-setting
     <app-service-page-settings-modal [(isOpen)]="servicePageOpen" (changed)="load()" />
     <app-booking-settings-modal [(isOpen)]="bookingOpen" (changed)="load()" />
     <app-store-home-settings-modal [(isOpen)]="storeHomeOpen" (changed)="load()" />
+    <app-landing-settings-modal [(isOpen)]="landingOpen" (changed)="load()" />
   `,
 })
 export class AppsCatalogComponent {
@@ -170,6 +173,7 @@ export class AppsCatalogComponent {
   readonly servicePageOpen = signal(false);
   readonly bookingOpen = signal(false);
   readonly storeHomeOpen = signal(false);
+  readonly landingOpen = signal(false);
 
   private readonly settings = computed(
     () => this.authFacade.storeSettings() as StoreSettings | null,
@@ -198,6 +202,7 @@ export class AppsCatalogComponent {
     else if (kind === 'product_page') this.productPageOpen.set(true);
     else if (kind === 'booking') this.bookingOpen.set(true);
     else if (kind === 'store_home') this.storeHomeOpen.set(true);
+    else if (kind === 'landing') this.landingOpen.set(true);
   }
 
   load(): void {

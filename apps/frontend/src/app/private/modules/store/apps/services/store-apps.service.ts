@@ -10,7 +10,7 @@ import {
 
 /**
  * Client of the Apps catalog (`GET /store/apps`, permission `store:apps:read`)
- * and of the store home (Fase 5), product page (Fase 2), service page (Fase 3) and booking (Fase 4) activation
+ * and of the store home (Fase 5), product page (Fase 2), service page (Fase 3), booking (Fase 4) and landing page (Fase 6) activation
  * (`store:apps:manage`).
  */
 @Injectable({ providedIn: 'root' })
@@ -107,5 +107,33 @@ export class StoreAppsService {
   /** Gives `{tienda}-store` back the landing it served before. */
   unpublishStoreHome(): Observable<unknown> {
     return this.http.post(`${this.apiUrl}/store-home/unpublish`, {});
+  }
+
+  /** Offer of the landing page (Fase 6); the landing content stays in "Landing de captación". */
+  saveLandingConfig(body: {
+    offer_mode: 'info' | 'product';
+    offer_title: string | null;
+    offer_description: string | null;
+    offer_product_id: number | null;
+  }): Observable<unknown> {
+    return this.http.patch(`${this.apiUrl}/landing/config`, body);
+  }
+
+  /** Puts the landing on `{tienda}-landing` or on one of the store's custom domains. */
+  publishLanding(customDomainId: number | null): Observable<unknown> {
+    return this.http.post(
+      `${this.apiUrl}/landing/publish`,
+      customDomainId ? { custom_domain_id: customDomainId } : {},
+    );
+  }
+
+  unpublishLanding(): Observable<unknown> {
+    return this.http.post(`${this.apiUrl}/landing/unpublish`, {});
+  }
+
+  landingCustomDomains(): Observable<{ data: ProductPageCustomDomain[] }> {
+    return this.http.get<{ data: ProductPageCustomDomain[] }>(
+      `${this.apiUrl}/landing/custom-domains`,
+    );
   }
 }

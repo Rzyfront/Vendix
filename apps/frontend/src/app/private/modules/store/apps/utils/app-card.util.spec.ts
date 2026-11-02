@@ -40,11 +40,11 @@ describe('toAppCard (apps-module T6)', () => {
     });
   });
 
-  it('Landing sin publicar lleva a su pantalla actual para configurarla', () => {
+  it('Landing sin publicar se configura desde /admin/apps (oferta y dominio, Fase 6)', () => {
     const card = toAppCard(app({ key: 'landing', name: 'Landing page' }), 'hybrid');
 
     expect(card.statusLabel).toBe('No instalada');
-    expect(card.action).toEqual({ kind: 'route', label: 'Configurar', route: '/admin/customers/crm' });
+    expect(card.action).toEqual({ kind: 'configure', label: 'Configurar' });
   });
 
   it('Booking fuera de hotelería: no aplica a la industria', () => {

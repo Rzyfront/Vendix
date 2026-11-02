@@ -76,3 +76,12 @@ export interface StoreHomeConfig {
   /** Footer line about Vendix; `null` = Vendix's default tagline. */
   footer_text: string | null;
 }
+
+/** `store_apps.config` of the landing page (backend `landing-page.reader.ts`). */
+export interface LandingPageConfig {
+  /** `info` only captures the lead; `product` adds one product to buy. */
+  offer_mode: 'info' | 'product';
+  offer_title: string | null;
+  offer_description: string | null;
+  offer_product_id: number | null;
+}

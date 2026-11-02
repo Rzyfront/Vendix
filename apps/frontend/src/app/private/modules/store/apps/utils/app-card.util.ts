@@ -41,16 +41,22 @@ const ICONS: Record<AppKind, string> = {
  */
 const ADMIN_SCREEN: Partial<Record<AppKind, { label: string; route: string }>> = {
   ecommerce: { label: 'Administrar', route: '/admin/ecommerce' },
-  landing: { label: 'Configurar', route: '/admin/customers/crm' },
 };
 
 /**
  * Apps configured from `/admin/apps` itself (Fase 2 product page, Fase 3
- * service page, Fase 4 booking, Fase 5 store home). Booking only reaches this
+ * service page, Fase 4 booking, Fase 5 store home, Fase 6 landing page: its
+ * offer and domain here, its content still in "Landing de captación"). Booking only reaches this
  * point for a `hospitality` store: the industry check above disables it for
  * the rest.
  */
-const CONFIGURABLE_HERE: AppKind[] = ['store_home', 'product_page', 'service_page', 'booking'];
+const CONFIGURABLE_HERE: AppKind[] = [
+  'store_home',
+  'landing',
+  'product_page',
+  'service_page',
+  'booking',
+];
 
 /** Store types without online store (`MenuFilterService.storeTypeHiddenModules`). */
 const STORE_TYPES_WITHOUT_ECOMMERCE = ['physical', 'popup', 'kiosko'];
