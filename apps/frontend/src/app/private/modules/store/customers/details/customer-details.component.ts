@@ -28,8 +28,13 @@ import {
   SelectorComponent,
   PaginationComponent,
   ScrollableTabsComponent,
+  BadgeComponent,
 } from '../../../../../../app/shared/components';
-import type { ScrollableTab } from '../../../../../../app/shared/components';
+import type { BadgeVariant, ScrollableTab } from '../../../../../../app/shared/components';
+import {
+  CustomerSectionComponent,
+  CustomerSectionEmptyComponent,
+} from '../components/customer-section/customer-section.component';
 import { CustomerCrmPanelComponent } from '../crm/profile/customer-crm-panel.component';
 import {
   StickyHeaderComponent,
@@ -54,6 +59,9 @@ import {
     StickyHeaderComponent,
     ScrollableTabsComponent,
     CustomerCrmPanelComponent,
+    CustomerSectionComponent,
+    CustomerSectionEmptyComponent,
+    BadgeComponent,
 ],
   template: `
     <div class="w-full">
@@ -98,8 +106,7 @@ import {
         <!-- Error -->
         @if (errorMessage() && !loadingCustomer()) {
           <div
-            class="p-4 rounded-lg"
-            style="background: var(--color-error-light); color: var(--color-error)"
+            class="p-4 rounded-xl border border-error/25 bg-error/10 text-error"
             >
             {{ errorMessage() }}
           </div>
@@ -111,48 +118,46 @@ import {
             <div class="flex flex-col sm:flex-row sm:items-center gap-4 mb-4">
               <div class="flex items-center gap-4 flex-1">
                 <div
-                  class="w-14 h-14 rounded-full flex items-center justify-center font-bold text-xl flex-shrink-0"
-                  style="background: var(--color-primary); color: var(--color-text-on-primary)"
+                  class="w-14 h-14 rounded-full flex items-center justify-center font-bold text-xl flex-shrink-0 bg-primary/10 text-primary-on-tint"
                   >
                   {{ getInitials() }}
                 </div>
                 <div>
-                  <h2 class="text-xl font-bold" style="color: var(--color-text-primary)">
+                  <h2 class="text-xl font-bold text-text-primary">
                     {{ getDisplayName() }}
                   </h2>
                   @if (customer().person_type === 'JURIDICA') {
-                    <p class="text-xs uppercase tracking-wider mt-0.5" style="color: var(--color-text-muted)">
+                    <p class="text-xs uppercase tracking-wider mt-0.5 text-text-secondary">
                       Persona jurídica
                     </p>
                   } @else {
-                    <p class="text-xs uppercase tracking-wider mt-0.5" style="color: var(--color-text-muted)">
+                    <p class="text-xs uppercase tracking-wider mt-0.5 text-text-secondary">
                       Persona natural
                     </p>
                   }
                   <div class="flex items-center gap-2 mt-1">
-                    <app-icon name="mail" [size]="14" style="color: var(--color-text-muted)"></app-icon>
-                    <span class="text-sm" style="color: var(--color-text-muted)">{{ customer().email }}</span>
+                    <app-icon name="mail" [size]="14" class="text-text-secondary"></app-icon>
+                    <span class="text-sm text-text-secondary">{{ customer().email }}</span>
                   </div>
                   @if (customer().phone) {
                     <div class="flex items-center gap-2 mt-0.5">
-                      <app-icon name="phone" [size]="14" style="color: var(--color-text-muted)"></app-icon>
-                      <span class="text-sm" style="color: var(--color-text-muted)">{{ customer().phone }}</span>
+                      <app-icon name="phone" [size]="14" class="text-text-secondary"></app-icon>
+                      <span class="text-sm text-text-secondary">{{ customer().phone }}</span>
                     </div>
                   }
                 </div>
               </div>
             </div>
             <div
-              class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 pt-4"
-              style="border-top: 1px solid var(--color-border)"
+              class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 pt-4 border-t border-border"
               >
               <div class="flex flex-col gap-1">
-                <span class="text-xs" style="color: var(--color-text-muted)">Documento</span>
-                <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                <span class="text-xs text-text-secondary">Documento</span>
+                <span class="text-sm font-semibold text-text-primary">
                   @if (customer().document_number) {
                     {{ getDocumentLabel(customer().document_type) }} {{ customer().document_number }}
                     @if (customer().verification_digit) {
-                      <span class="text-xs ml-1" style="color: var(--color-text-muted)">DV {{ customer().verification_digit }}</span>
+                      <span class="text-xs ml-1 text-text-secondary">DV {{ customer().verification_digit }}</span>
                     }
                   } @else {
                     Sin documento
@@ -160,32 +165,32 @@ import {
                 </span>
               </div>
               <div class="flex flex-col gap-1">
-                <span class="text-xs" style="color: var(--color-text-muted)">Cliente desde</span>
-                <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                <span class="text-xs text-text-secondary">Cliente desde</span>
+                <span class="text-sm font-semibold text-text-primary">
                   {{ formatDate(customer().created_at) }}
                 </span>
               </div>
               <div class="flex flex-col gap-1">
-                <span class="text-xs" style="color: var(--color-text-muted)">Última compra</span>
-                <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                <span class="text-xs text-text-secondary">Última compra</span>
+                <span class="text-sm font-semibold text-text-primary">
                   {{ customer().last_order_date ? formatDate(customer().last_order_date) : 'Sin compras' }}
                 </span>
               </div>
               <div class="flex flex-col gap-1">
-                <span class="text-xs" style="color: var(--color-text-muted)">Pedidos</span>
-                <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                <span class="text-xs text-text-secondary">Pedidos</span>
+                <span class="text-sm font-semibold text-text-primary">
                   {{ customer().total_orders || 0 }}
                 </span>
               </div>
               <div class="flex flex-col gap-1">
-                <span class="text-xs" style="color: var(--color-text-muted)">Gasto total</span>
-                <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                <span class="text-xs text-text-secondary">Gasto total</span>
+                <span class="text-sm font-semibold text-text-primary">
                   {{ customer().total_spend | currency }}
                 </span>
               </div>
               <div class="flex flex-col gap-1">
-                <span class="text-xs" style="color: var(--color-text-muted)">Ticket promedio</span>
-                <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                <span class="text-xs text-text-secondary">Ticket promedio</span>
+                <span class="text-sm font-semibold text-text-primary">
                   {{ getAverageTicket() | currency }}
                 </span>
               </div>
@@ -194,43 +199,36 @@ import {
 
           <!-- Fiscal / DIAN Card -->
           @if (hasFiscalData()) {
-            <app-card>
-              <div class="flex items-center gap-2 mb-4">
-                <app-icon name="file-text" [size]="20" class="text-primary"></app-icon>
-                <h3 class="text-lg font-bold" style="color: var(--color-text-primary)">
-                  Datos fiscales y tributarios
-                </h3>
-              </div>
+            <app-customer-section title="Datos fiscales y tributarios" icon="file-text">
               <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div class="flex flex-col gap-1">
-                  <span class="text-xs" style="color: var(--color-text-muted)">Régimen tributario</span>
-                  <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                  <span class="text-xs text-text-secondary">Régimen tributario</span>
+                  <span class="text-sm font-semibold text-text-primary">
                     {{ getTaxRegimeLabel() }}
                   </span>
                 </div>
                 <div class="flex flex-col gap-1">
-                  <span class="text-xs" style="color: var(--color-text-muted)">Código CIIU</span>
-                  <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                  <span class="text-xs text-text-secondary">Código CIIU</span>
+                  <span class="text-sm font-semibold text-text-primary">
                     {{ customer().ciiu_code || '—' }}
                   </span>
                 </div>
                 <div class="flex flex-col gap-1">
-                  <span class="text-xs" style="color: var(--color-text-muted)">¿Agente retenedor?</span>
-                  <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                  <span class="text-xs text-text-secondary">¿Agente retenedor?</span>
+                  <span class="text-sm font-semibold text-text-primary">
                     {{ customer().is_withholding_agent ? 'Sí' : 'No' }}
                   </span>
                 </div>
               </div>
               @if (customer().fiscal_responsibilities && customer().fiscal_responsibilities!.length > 0) {
-                <div class="mt-4 pt-4" style="border-top: 1px solid var(--color-border)">
-                  <span class="text-xs block mb-2" style="color: var(--color-text-muted)">
+                <div class="mt-4 border-t border-border pt-4">
+                  <span class="mb-2 block text-xs text-text-secondary">
                     Responsabilidades tributarias
                   </span>
                   <div class="flex flex-wrap gap-2">
                     @for (code of customer().fiscal_responsibilities!; track code) {
                       <span
-                        class="text-xs px-2 py-1 rounded-full font-mono"
-                        style="background: var(--color-bg-secondary); color: var(--color-text-primary); border: 1px solid var(--color-border)"
+                        class="rounded-full border border-border bg-surface px-2 py-1 font-mono text-xs text-text-primary"
                         title="{{ getFiscalResponsibilityLabel(code) }}"
                       >
                         {{ code }}
@@ -239,53 +237,40 @@ import {
                   </div>
                 </div>
               }
-            </app-card>
+            </app-customer-section>
           }
 
           <!-- Dirección Card -->
           @if (primaryAddress(); as addr) {
-            <app-card>
-              <div class="flex items-center gap-2 mb-4">
-                <app-icon name="map-pin" [size]="20" class="text-primary"></app-icon>
-                <h3 class="text-lg font-bold" style="color: var(--color-text-primary)">
-                  Dirección
-                </h3>
-              </div>
+            <app-customer-section title="Dirección" icon="map-pin">
               <div class="space-y-1">
-                <p class="text-sm" style="color: var(--color-text-primary)">
+                <p class="text-sm text-text-primary">
                   {{ addr.address_line1 }}{{ addr.address_line2 ? ', ' + addr.address_line2 : '' }}
                 </p>
-                <p class="text-sm" style="color: var(--color-text-secondary)">
+                <p class="text-sm text-text-secondary">
                   {{ addr.city }}{{ addr.state_province ? ', ' + addr.state_province : '' }} · {{ addr.country_code }}
                   @if (addr.postal_code) {
                     · CP {{ addr.postal_code }}
                   }
                 </p>
                 @if (addr.phone_number) {
-                  <p class="text-xs" style="color: var(--color-text-muted)">
+                  <p class="text-xs text-text-secondary">
                     Tel: {{ addr.phone_number }}
                   </p>
                 }
               </div>
-            </app-card>
+            </app-customer-section>
           }
         }
     
         <!-- Customer Metadata Card -->
         @if (customerMetadata().length > 0) {
-          <div class="card p-4 mb-4" style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 0.75rem">
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="font-bold text-base flex items-center gap-2" style="color: var(--color-text)">
-                <app-icon name="file-text" [size]="18"></app-icon>
-                Ficha del Cliente
-              </h3>
-            </div>
-    
+          <app-customer-section title="Ficha del cliente" icon="clipboard-list">
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
               @for (field of summaryFields(); track field.id) {
                 <div class="flex flex-col">
-                  <span class="text-xs font-medium" style="color: var(--color-text-muted)">{{ field.field?.label }}</span>
-                  <span class="text-sm font-medium" style="color: var(--color-text)">
+                  <span class="text-xs text-text-secondary">{{ field.field?.label }}</span>
+                  <span class="text-sm font-semibold text-text-primary">
                     {{ field.value_text || field.value_number || field.value_bool || field.value_date || '-' }}
                   </span>
                 </div>
@@ -293,15 +278,15 @@ import {
             </div>
     
             @if (detailFields().length > 0) {
-              <button class="text-xs" style="color: var(--color-primary)" (click)="showAllMetadata.set(!showAllMetadata())">
+              <button type="button" class="text-xs font-semibold text-primary hover:underline" (click)="showAllMetadata.set(!showAllMetadata())">
                 {{ showAllMetadata() ? 'Ver menos' : 'Ver todos los datos (' + detailFields().length + ')' }}
               </button>
               @if (showAllMetadata()) {
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                   @for (field of detailFields(); track field.id) {
                     <div class="flex flex-col">
-                      <span class="text-xs" style="color: var(--color-text-muted)">{{ field.field?.label }}</span>
-                      <span class="text-sm" style="color: var(--color-text)">
+                      <span class="text-xs text-text-secondary">{{ field.field?.label }}</span>
+                      <span class="text-sm text-text-primary">
                         {{ field.value_text || field.value_number || field.value_bool || field.value_date || '-' }}
                       </span>
                     </div>
@@ -309,66 +294,51 @@ import {
                 </div>
               }
             }
-          </div>
+          </app-customer-section>
         }
     
         <!-- Hospitality (Hotelería) — placeholder until stays land -->
         @if (customer() && !loadingCustomer() && showHospitalitySection()) {
-          <app-card>
-            <h3 class="font-bold text-base flex items-center gap-2 mb-2" style="color: var(--color-text)">
-              <app-icon name="bed-double" [size]="18"></app-icon>
-              Hotelería
-            </h3>
-            <p class="text-sm" style="color: var(--color-text-secondary)">
-              Aquí verás las estadías de este huésped.
-            </p>
-          </app-card>
+          <app-customer-section title="Hotelería" icon="bed-double">
+            <app-customer-section-empty icon="bed-double" text="Aquí verás las estadías de este huésped."></app-customer-section-empty>
+          </app-customer-section>
         }
 
         <!-- Consultation History (service industry) -->
         @if (showConsultationHistory() && bookingHistory().length > 0) {
-          <div class="card p-4" style="background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 0.75rem">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="font-bold text-base flex items-center gap-2" style="color: var(--color-text)">
-                <app-icon name="clipboard-list" [size]="18"></app-icon>
-                Historia de Consultas
-              </h3>
-            </div>
-    
+          <app-customer-section title="Historia de consultas" icon="clipboard-list">
             @for (entry of bookingHistory(); track entry.id) {
-              <div class="flex gap-3 py-3" style="border-bottom: 1px solid var(--color-border)">
+              <div class="flex gap-3 border-b border-border py-3 last:border-b-0">
                 <div class="flex flex-col items-center flex-shrink-0">
-                  <div class="w-3 h-3 rounded-full"
-                    [style.background]="entry.status === 'completed' ? '#22c55e' : entry.status === 'confirmed' ? '#3b82f6' : entry.status === 'cancelled' ? '#ef4444' : '#9ca3af'">
+                  <div class="h-3 w-3 rounded-full"
+                    [class]="bookingDotClass(entry.status)">
                   </div>
-                  <div class="w-px flex-1 mt-1" style="background: var(--color-border)"></div>
+                  <div class="mt-1 w-px flex-1 bg-border"></div>
                 </div>
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center justify-between">
-                    <span class="text-sm font-semibold truncate" style="color: var(--color-text)">{{ entry.product?.name }}</span>
-                    <span class="text-xs px-2 py-0.5 rounded-full flex-shrink-0"
-                      [style.background]="entry.status === 'completed' ? 'var(--color-success-100, #dcfce7)' : entry.status === 'confirmed' ? 'var(--color-info-100, #dbeafe)' : 'var(--color-error-100, #fee2e2)'"
-                      [style.color]="entry.status === 'completed' ? '#166534' : entry.status === 'confirmed' ? '#1e40af' : '#991b1b'">
+                    <span class="truncate text-sm font-semibold text-text-primary">{{ entry.product?.name }}</span>
+                    <app-badge size="xs" [variant]="bookingBadgeVariant(entry.status)">
                       {{ getBookingStatusLabel(entry.status) }}
-                    </span>
+                    </app-badge>
                   </div>
-                  <div class="text-xs mt-1" style="color: var(--color-text-muted)">
+                  <div class="mt-1 text-xs text-text-secondary">
                     {{ formatDate(entry.date) }} · {{ entry.start_time }}
                     @if (entry.provider) { · {{ entry.provider.display_name }} }
                     </div>
                     <div class="flex gap-2 mt-1.5 flex-wrap">
                       @if (entry.has_intake_data) {
-                        <span class="text-xs flex items-center gap-1" style="color: #3b82f6">
+                        <span class="flex items-center gap-1 text-xs text-text-secondary">
                           <app-icon name="file-text" [size]="12"></app-icon> Formulario
                         </span>
                       }
                       @if (entry.has_prediagnosis) {
-                        <span class="text-xs flex items-center gap-1" style="color: #7c3aed">
+                        <span class="flex items-center gap-1 text-xs text-text-secondary">
                           <app-icon name="brain" [size]="12"></app-icon> Prediagnóstico
                         </span>
                       }
                       @if (entry.notes_count > 0) {
-                        <span class="text-xs flex items-center gap-1" style="color: #22c55e">
+                        <span class="flex items-center gap-1 text-xs text-text-secondary">
                           <app-icon name="clipboard-check" [size]="12"></app-icon> {{ entry.notes_count }} notas
                         </span>
                       }
@@ -376,28 +346,14 @@ import {
                   </div>
                 </div>
               }
-            </div>
+            </app-customer-section>
           }
     
           <!-- Wallet Card -->
           @if (customer() && !loadingCustomer()) {
-            <app-card>
-              <div class="flex items-center justify-between mb-4">
-                <div class="flex items-center gap-2">
-                  <app-icon
-                    name="wallet"
-                    [size]="20"
-                    class="text-primary"
-                  ></app-icon>
-                  <h3
-                    class="text-lg font-bold"
-                    style="color: var(--color-text-primary)"
-                    >
-                    Billetera
-                  </h3>
-                </div>
+            <app-customer-section title="Billetera" icon="wallet">
                 @if (wallet()) {
-                  <div class="flex items-center gap-2">
+                  <div slot="actions" class="flex items-center gap-2">
                     <app-button
                       variant="outline"
                       size="sm"
@@ -414,7 +370,6 @@ import {
                     </app-button>
                   </div>
                 }
-              </div>
               <!-- Wallet Loading -->
               @if (loadingWallet()) {
                 <div class="flex justify-center py-6">
@@ -424,11 +379,7 @@ import {
               <!-- Wallet Error -->
               @if (walletError() && !loadingWallet()) {
                 <div
-                  class="p-3 rounded-lg mb-4"
-              style="
-                background: var(--color-error-light);
-                color: var(--color-error);
-              "
+                  class="p-3 rounded-xl mb-4 border border-error/25 bg-error/10 text-error"
                   >
                   {{ walletError() }}
                 </div>
@@ -438,47 +389,38 @@ import {
                 <div>
                   <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
                     <div
-                      class="p-3 rounded-lg"
-                      style="background: var(--color-background)"
+                      class="p-3 rounded-xl bg-background"
                       >
                       <span
-                        class="text-xs block"
-                        style="color: var(--color-text-muted)"
+                        class="text-xs block text-text-secondary"
                         >Saldo disponible</span
                         >
                         <span
-                          class="text-xl font-bold"
-                          style="color: var(--color-success)"
+                          class="text-xl font-bold text-success"
                           >{{ getAvailable() | currency }}</span
                           >
                         </div>
                         <div
-                          class="p-3 rounded-lg"
-                          style="background: var(--color-background)"
+                          class="p-3 rounded-xl bg-background"
                           >
                           <span
-                            class="text-xs block"
-                            style="color: var(--color-text-muted)"
+                            class="text-xs block text-text-secondary"
                             >Saldo retenido</span
                             >
                             <span
-                              class="text-xl font-bold"
-                              style="color: var(--color-text-muted)"
+                              class="text-xl font-bold text-text-secondary"
                               >{{ wallet().held_balance | currency }}</span
                               >
                             </div>
                             <div
-                              class="p-3 rounded-lg"
-                              style="background: var(--color-background)"
+                              class="p-3 rounded-xl bg-background"
                               >
                               <span
-                                class="text-xs block"
-                                style="color: var(--color-text-muted)"
+                                class="text-xs block text-text-secondary"
                                 >Saldo total</span
                                 >
                                 <span
-                                  class="text-xl font-bold"
-                                  style="color: var(--color-text-primary)"
+                                  class="text-xl font-bold text-text-primary"
                                   >{{ wallet().balance | currency }}</span
                                   >
                                 </div>
@@ -486,15 +428,10 @@ import {
                               <!-- Top Up Form -->
                               @if (showTopUpForm()) {
                                 <div
-                                  class="p-4 rounded-lg mb-4"
-                style="
-                  background: var(--color-background);
-                  border: 1px solid var(--color-border);
-                "
+                                  class="p-4 rounded-xl mb-4 bg-background border border-border"
                                   >
                                   <h4
-                                    class="font-semibold mb-3"
-                                    style="color: var(--color-text-primary)"
+                                    class="font-semibold mb-3 text-text-primary"
                                     >
                                     Recargar saldo
                                   </h4>
@@ -524,11 +461,7 @@ import {
                                     </div>
                                     @if (topUpError()) {
                                       <div
-                                        class="mt-2 p-2 rounded text-sm"
-                    style="
-                      background: var(--color-error-light);
-                      color: var(--color-error);
-                    "
+                                        class="mt-2 p-2 rounded-xl text-sm border border-error/25 bg-error/10 text-error"
                                         >
                                         {{ topUpError() }}
                                       </div>
@@ -555,10 +488,9 @@ import {
                                   <!-- Adjust Form -->
                                   @if (showAdjustForm()) {
                                     <div
-                                      class="p-4 rounded-lg mb-4"
-                                      style="background: var(--color-background); border: 1px solid var(--color-border);"
+                                      class="p-4 rounded-xl mb-4 bg-background border border-border"
                                       >
-                                      <h4 class="font-semibold mb-3" style="color: var(--color-text-primary)">
+                                      <h4 class="font-semibold mb-3 text-text-primary">
                                         Ajustar saldo
                                       </h4>
                                       <form [formGroup]="adjustForm" (ngSubmit)="adjustWallet()">
@@ -594,8 +526,7 @@ import {
                                         </div>
                                         @if (adjustError()) {
                                           <div
-                                            class="mt-2 p-2 rounded text-sm"
-                                            style="background: var(--color-error-light); color: var(--color-error);"
+                                            class="mt-2 p-2 rounded-xl text-sm border border-error/25 bg-error/10 text-error"
                                             >
                                             {{ adjustError() }}
                                           </div>
@@ -622,8 +553,7 @@ import {
                                     <!-- Header with filters toggle -->
                                     <div class="flex items-center justify-between mb-3">
                                       <h4
-                                        class="font-semibold"
-                                        style="color: var(--color-text-primary)"
+                                        class="font-semibold text-text-primary"
                                         >
                                         Historial de Movimientos
                                       </h4>
@@ -650,8 +580,7 @@ import {
                                     <!-- Filter row (collapsible) -->
                                     @if (showHistoryFilters()) {
                                       <div
-                                        class="grid grid-cols-1 sm:grid-cols-3 gap-2 p-3 rounded-lg mb-3"
-                                        style="background: var(--color-background); border: 1px solid var(--color-border);"
+                                        class="grid grid-cols-1 sm:grid-cols-3 gap-2 p-3 rounded-xl mb-3 bg-background border border-border"
                                         >
                                         <app-selector
                                           label="Tipo"
@@ -694,8 +623,8 @@ import {
                                           >
                                           @for (tx of walletHistory(); track tx) {
                                             <div
-                                              class="flex justify-between items-center py-3"
-                                              style="border-bottom: 1px solid var(--color-border)"
+                                              class="flex justify-between items-center border-b border-border py-3 last:border-b-0"
+                                              
                                               >
                                               <div class="flex items-center gap-3">
                                                 <div
@@ -719,14 +648,12 @@ import {
                                                 </div>
                                                 <div>
                                                   <p
-                                                    class="text-sm font-medium"
-                                                    style="color: var(--color-text-primary)"
+                                                    class="text-sm font-medium text-text-primary"
                                                     >
                                                     {{ getTransactionLabel(tx.type) }}
                                                   </p>
                                                   <p
-                                                    class="text-xs"
-                                                    style="color: var(--color-text-muted)"
+                                                    class="text-xs text-text-secondary"
                                                     >
                                                     {{ tx.description || tx.reference_type || '-' }}
                                                   </p>
@@ -748,8 +675,7 @@ import {
                                                   }}{{ tx.amount | currency }}
                                                 </p>
                                                 <p
-                                                  class="text-xs"
-                                                  style="color: var(--color-text-muted)"
+                                                  class="text-xs text-text-secondary"
                                                   >
                                                   {{ formatDateTime(tx.created_at) }}
                                                 </p>
@@ -793,7 +719,7 @@ import {
                                     >
                                   </div>
                                 }
-                              </app-card>
+                              </app-customer-section>
                             }
                           </div>
                         </div>
@@ -1162,6 +1088,21 @@ export class CustomerDetailsComponent {
       release: 'Liberación',
     };
     return labels[type] || type;
+  }
+
+  bookingBadgeVariant(status: string): BadgeVariant {
+    if (status === 'completed') return 'success';
+    if (status === 'confirmed' || status === 'in_progress') return 'info';
+    if (status === 'cancelled' || status === 'no_show') return 'error';
+    return 'neutral';
+  }
+
+  bookingDotClass(status: string): string {
+    const variant = this.bookingBadgeVariant(status);
+    if (variant === 'success') return 'bg-success';
+    if (variant === 'info') return 'bg-info';
+    if (variant === 'error') return 'bg-error';
+    return 'bg-muted';
   }
 
   getBookingStatusLabel(status: string): string {
