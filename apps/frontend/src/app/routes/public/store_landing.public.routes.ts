@@ -1,7 +1,10 @@
-import { Routes } from '@angular/router';
+import { inject } from '@angular/core';
+import { CanMatchFn, Routes } from '@angular/router';
+import { map } from 'rxjs/operators';
 import { pricingRoutes } from '../../public/pricing/pricing.routes';
 import { AuthGuard } from '../../core/guards/auth.guard';
 import { mesaCartGuard } from '../../core/guards/mesa-cart.guard';
+import { LandingPageService } from '../../public/landing-page/landing-page.service';
 
 /**
  * Purchase pages of the landing on its own domain (Apps · landing page, Fase 6):
@@ -9,6 +12,11 @@ import { mesaCartGuard } from '../../core/guards/mesa-cart.guard';
  * same composition the product page domain uses. They only add paths the
  * landing never had, so `/` and the station pages stay as they are.
  */
+/** Only on the landing's own domain; `{tienda}-store` keeps no purchase pages. */
+const ownLandingDomain: CanMatchFn = () =>
+    inject(LandingPageService)
+        .load()
+        .pipe(map((page) => page !== null));
 const productDetail = () =>
     import('../../private/modules/ecommerce/pages/product-detail/product-detail.component').then(
         (c) => c.ProductDetailComponent,
@@ -45,6 +53,7 @@ export const storeLandingPublicRoutes: Routes = [
     ...pricingRoutes,
     {
         path: '',
+        canMatch: [ownLandingDomain],
         loadComponent: () =>
             import('../../public/landing-page/landing-shop-layout.component').then(
                 (c) => c.LandingShopLayoutComponent,

@@ -102,13 +102,13 @@ export class LandingOfferComponent {
   );
 
   constructor() {
-    effect(() => {
+    effect((onCleanup) => {
       const id = this.productId();
       if (id === null) {
         this.product.set(null);
         return;
       }
-      this.catalog
+      const sub = this.catalog
         .getProducts({ ids: String(id), limit: 1 })
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
@@ -116,6 +116,7 @@ export class LandingOfferComponent {
           next: (res) => this.product.set(res.data.find((p) => p.id === id) ?? null),
           error: () => this.product.set(null),
         });
+      onCleanup(() => sub.unsubscribe());
     });
   }
 }

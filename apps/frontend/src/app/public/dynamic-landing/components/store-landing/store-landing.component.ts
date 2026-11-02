@@ -6,6 +6,7 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { switchMap } from 'rxjs/operators';
 
 import { ConfigFacade } from '../../../../core/store/config';
 import { ThemeService } from '../../../../core/services';
@@ -572,10 +573,18 @@ export class StoreLandingComponent {
       ...(email && { email }),
       ...(phone && { phone }),
     };
-    const submit$ = this.ownLanding()
-      ? this.landingPage.submitLead(payload)
-      : this.crmLandingService.submitContact(payload);
-    submit$.subscribe({
+    // Waits for the landing lookup (cached) so an early submission on the
+    // landing's own domain still reaches the pipeline.
+    this.landingPage
+      .load()
+      .pipe(
+        switchMap((page) =>
+          page
+            ? this.landingPage.submitLead(payload)
+            : this.crmLandingService.submitContact(payload),
+        ),
+      )
+      .subscribe({
       next: () => {
         this.submitted.set(true);
         this.sending.set(false);
