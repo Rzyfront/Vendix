@@ -5,15 +5,18 @@ export class CompleteWhatsappEmbeddedSignupDto {
   @IsNotEmpty()
   code!: string;
 
+  /** May be missing when the popup closes before the session event arrives. */
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
-  waba_id!: string;
+  waba_id?: string;
 
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
-  phone_number_id!: string;
+  phone_number_id?: string;
 
   @IsOptional()
   @IsString()

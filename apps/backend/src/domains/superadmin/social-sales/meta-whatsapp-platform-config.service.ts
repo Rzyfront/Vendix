@@ -1,9 +1,22 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  AuditAction,
+  AuditResource,
+  AuditService,
+} from '@common/audit/audit.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { ChannelEncryptionService } from '../../store/integrations/channels/channel-encryption.service';
 import { UpdateMetaWhatsappPlatformConfigDto } from './dto/update-meta-whatsapp-platform-config.dto';
 
 const PLATFORM_SETTINGS_KEY = 'social_sales:meta_whatsapp';
+
+const AUDITED_PLAIN_FIELDS = [
+  'app_id',
+  'whatsapp_config_id',
+  'graph_version',
+  'app_review_status',
+  'allow_dev_signup',
+] as const;
 
 interface StoredMetaWhatsappConfig {
   app_id?: string | null;
@@ -22,7 +35,10 @@ export class MetaWhatsappPlatformConfigService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly encryption: ChannelEncryptionService,
+    private readonly auditService: AuditService,
   ) {}
+
+  private readonly logger = new Logger(MetaWhatsappPlatformConfigService.name);
 
   async getMaskedConfig() {
     const row = await this.findRow();
@@ -75,7 +91,51 @@ export class MetaWhatsappPlatformConfigService {
       },
     });
 
+    await this.auditUpdate(dto, previous, next, userId, saved?.id);
+
     return this.toMaskedView(next, saved.updated_at);
+  }
+
+  /**
+   * One audit record per successful PATCH. Secrets are recorded by field
+   * name only: never their value, encrypted or masked.
+   */
+  private async auditUpdate(
+    dto: UpdateMetaWhatsappPlatformConfigDto,
+    previous: StoredMetaWhatsappConfig,
+    next: StoredMetaWhatsappConfig,
+    userId: number | null,
+    rowId?: number,
+  ): Promise<void> {
+    const changedFields: string[] = [];
+    const oldValues: Record<string, unknown> = {};
+    const newValues: Record<string, unknown> = {};
+
+    for (const field of AUDITED_PLAIN_FIELDS) {
+      if (dto[field] === undefined) continue;
+      if (previous[field] === next[field]) continue;
+      changedFields.push(field);
+      oldValues[field] = previous[field] ?? null;
+      newValues[field] = next[field] ?? null;
+    }
+    if (dto.app_secret !== undefined) changedFields.push('app_secret');
+    if (dto.verify_token !== undefined) changedFields.push('verify_token');
+
+    try {
+      await this.auditService.log({
+        userId: userId ?? undefined,
+        action: AuditAction.UPDATE,
+        resource: AuditResource.SETTINGS,
+        resourceId: typeof rowId === 'number' ? rowId : undefined,
+        oldValues,
+        newValues,
+        metadata: { key: PLATFORM_SETTINGS_KEY, changed_fields: changedFields },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Audit write failed for ${PLATFORM_SETTINGS_KEY}: ${(error as Error).message}`,
+      );
+    }
   }
 
   private encryptSecret(value: string): string {

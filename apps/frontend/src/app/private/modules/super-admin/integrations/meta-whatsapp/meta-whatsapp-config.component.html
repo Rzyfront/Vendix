@@ -1,0 +1,147 @@
+<div class="space-y-4 md:space-y-6 p-4 md:p-6 max-w-4xl">
+  <div class="flex items-center justify-between gap-3 flex-wrap">
+    <div>
+      <h1 class="text-lg font-bold text-text-primary">Meta / WhatsApp</h1>
+      <p class="text-sm text-text-secondary">
+        Integraciones · credenciales de la app de Meta para las conexiones de
+        WhatsApp de las tiendas.
+      </p>
+    </div>
+    @if (config(); as cfg) {
+      <span
+        class="inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold"
+        [class]="
+          cfg.configured
+            ? 'border-success/25 bg-success/10 text-success'
+            : 'border-warning/25 bg-warning/10 text-warning'
+        "
+      >
+        {{ cfg.configured ? 'Configurado ✓' : 'Falta configurar' }}
+      </span>
+    }
+  </div>
+
+  @if (!canRead()) {
+    <div class="rounded-2xl border border-error/25 bg-error/10 p-4 text-sm text-error">
+      No tienes permiso para ver esta configuración.
+    </div>
+  } @else if (loading()) {
+    <div class="rounded-2xl border border-border bg-surface p-6 text-center text-sm text-text-secondary">
+      Cargando configuración...
+    </div>
+  } @else {
+    <!-- Webhook callback URL -->
+    <div class="rounded-2xl border border-border bg-surface p-4 md:p-6 space-y-2">
+      <h2 class="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+        URL de callback del webhook
+      </h2>
+      <div class="flex items-center gap-2">
+        <code class="flex-1 min-w-0 truncate rounded-xl border border-border bg-background px-3 py-2 text-sm">{{ webhookUrl }}</code>
+        <app-button
+          variant="outline"
+          size="sm"
+          (clicked)="copy(webhookUrl, 'URL')"
+        >
+          <app-icon name="copy" [size]="14" slot="icon"></app-icon>
+          Copiar
+        </app-button>
+      </div>
+      <p class="text-xs text-text-secondary">Solo lectura. Configúrala en Meta → WhatsApp → Configuración → Webhook.</p>
+    </div>
+
+    <form
+      [formGroup]="form"
+      class="rounded-2xl border border-border bg-surface p-4 md:p-6 space-y-4"
+    >
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <app-input
+          label="App ID"
+          [formControl]="appIdControl"
+          [readonly]="!canWrite()"
+        ></app-input>
+        <app-input
+          label="Config ID"
+          [formControl]="configIdControl"
+          [readonly]="!canWrite()"
+        ></app-input>
+        <app-input
+          label="App Secret"
+          type="password"
+          [formControl]="appSecretControl"
+          [readonly]="!canWrite()"
+          [placeholder]="config()?.app_secret_masked ?? 'Sin configurar'"
+          [helperText]="
+            'Actual: ' +
+            (config()?.app_secret_masked ?? 'sin configurar') +
+            '. Déjalo vacío para conservarlo.'
+          "
+        ></app-input>
+        <app-input
+          label="Versión de Graph"
+          [formControl]="graphVersionControl"
+          [readonly]="!canWrite()"
+          placeholder="v23.0"
+        ></app-input>
+        <app-selector
+          label="Estado del App Review"
+          [options]="reviewOptions"
+          [formControl]="reviewStatusControl"
+        ></app-selector>
+        <div class="flex items-end pb-2">
+          <app-toggle
+            label="Permitir conexión en modo desarrollo"
+            [formControl]="devSignupControl"
+          ></app-toggle>
+        </div>
+      </div>
+
+      <!-- Verify token -->
+      <div class="space-y-2">
+        <app-input
+          label="Verify token"
+          type="password"
+          [formControl]="verifyTokenControl"
+          [readonly]="!canWrite()"
+          [placeholder]="config()?.verify_token_masked ?? 'Sin configurar'"
+          [helperText]="
+            'Actual: ' +
+            (config()?.verify_token_masked ?? 'sin configurar') +
+            '. Déjalo vacío para conservarlo.'
+          "
+        ></app-input>
+        @if (canWrite()) {
+          <app-button variant="outline" size="sm" (clicked)="generateVerifyToken()">
+            <app-icon name="key" [size]="14" slot="icon"></app-icon>
+            Generar verify token
+          </app-button>
+        }
+        @if (generatedToken(); as token) {
+          <div class="rounded-xl border border-warning/25 bg-warning/10 p-3 space-y-2">
+            <code class="block break-all text-sm">{{ token }}</code>
+            <p class="text-xs text-text-primary">{{ verifyTokenWarning }}</p>
+            <app-button variant="outline" size="sm" (clicked)="copy(token, 'Verify token')">
+              <app-icon name="copy" [size]="14" slot="icon"></app-icon>
+              Copiar
+            </app-button>
+          </div>
+        }
+      </div>
+
+      <div class="flex items-center justify-between gap-3 flex-wrap pt-2 border-t border-border">
+        <p class="text-xs text-text-secondary">
+          @if (config()?.updated_at; as updatedAt) {
+            Última actualización: {{ updatedAt | date: 'medium' }}
+            @if (config()?.updated_by_user_id; as uid) { por usuario #{{ uid }} }
+          } @else {
+            Sin cambios registrados.
+          }
+        </p>
+        @if (canWrite()) {
+          <app-button variant="primary" [loading]="saving()" (clicked)="save()">
+            Guardar
+          </app-button>
+        }
+      </div>
+    </form>
+  }
+</div>

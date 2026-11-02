@@ -1,6 +1,6 @@
 import { Injectable, effect, signal } from '@angular/core';
-import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, map, tap, catchError } from 'rxjs';
+import { HttpClient, HttpParams, HttpResponse } from '@angular/common/http';
+import { Observable, map, tap, catchError, of } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
   Booking,
@@ -570,6 +570,50 @@ export class ReservationsService {
   getProviders(): Observable<ServiceProvider[]> {
     return this.http.get<any>(`${this.apiUrl}/providers`).pipe(
       map((response) => response.data || response),
+    );
+  }
+
+  /**
+   * QUI-975 — download the reservations report (XLSX blob). The backend
+   * generates the file; the caller only saves `body` with the filename
+   * from the `Content-Disposition` header. Empty ranges answer 404 with
+   * a JSON body (still delivered as a blob to parse).
+   */
+  exportBookingsReport(filters: {
+    date_from?: string;
+    date_to?: string;
+    status?: string;
+    provider_id?: number;
+    product_id?: number;
+  }): Observable<HttpResponse<Blob>> {
+    let params = new HttpParams();
+    if (filters.date_from) params = params.set('date_from', filters.date_from);
+    if (filters.date_to) params = params.set('date_to', filters.date_to);
+    if (filters.status) params = params.set('status', filters.status);
+    if (filters.provider_id != null)
+      params = params.set('provider_id', String(filters.provider_id));
+    if (filters.product_id != null)
+      params = params.set('product_id', String(filters.product_id));
+    return this.http.get(`${this.apiUrl}/export`, {
+      params,
+      responseType: 'blob',
+      observe: 'response',
+    });
+  }
+
+  /**
+   * QUI-976 — top customers by order volume for the "Clientes frecuentes"
+   * suggestions (same backend source as the POS selector). Errors resolve
+   * to an empty list so the suggestions block degrades gracefully.
+   */
+  getTopCustomers(limit = 3): Observable<any[]> {
+    const params = new HttpParams().set('limit', String(limit));
+    return this.http.get<any>(`${environment.apiUrl}/store/customers/top`, { params }).pipe(
+      map((response) => {
+        const list = response?.data || response || [];
+        return (Array.isArray(list) ? list : []).slice(0, limit);
+      }),
+      catchError(() => of([])),
     );
   }
 

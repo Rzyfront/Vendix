@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { ChannelEncryptionService } from '../domains/store/integrations/channels/channel-encryption.service';
+import { resolveMetaWhatsappPlatformConfig } from '../domains/store/integrations/channels/meta-whatsapp-platform-config.resolver';
 import {
   MessagingErrorCode,
   MessagingProviderName,
@@ -18,9 +19,6 @@ import { SesEmailMessagingProvider } from './providers/ses-email.provider';
 import { SmsSpendService } from './spend/sms-spend.service';
 import { maskAddress } from './utils/mask-address.util';
 
-/** Same platform settings row the embedded signup and webhook read. */
-const META_PLATFORM_SETTINGS_KEY = 'social_sales:meta_whatsapp';
-const DEFAULT_GRAPH_VERSION = 'v23.0';
 const WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /** SMS failures where SNS certainly did not take the message. */
@@ -383,21 +381,12 @@ export class MessagingService {
   }
 
   private async resolveGraphVersion(): Promise<string> {
-    const row = await this.prisma.platform_settings.findUnique({
-      where: { key: META_PLATFORM_SETTINGS_KEY },
-    });
-    const value = row?.value as Record<string, unknown> | null | undefined;
-    const fromPlatform =
-      value &&
-      typeof value.graph_version === 'string' &&
-      value.graph_version.trim()
-        ? value.graph_version
-        : null;
-    return (
-      fromPlatform ||
-      this.config.get<string>('META_GRAPH_VERSION') ||
-      DEFAULT_GRAPH_VERSION
+    const cfg = await resolveMetaWhatsappPlatformConfig(
+      this.prisma,
+      this.config,
+      this.encryption,
     );
+    return cfg.graph_version;
   }
 
   /** Meta rejected the token: stop using the channel until the owner reconnects it. */

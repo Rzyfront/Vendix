@@ -314,7 +314,14 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportFilename: 'resenas_por_producto',
     stats: [
       { key: 'total_reviews', label: 'Total Reseñas', type: 'number', icon: 'message-square' },
-      { key: 'average_rating', label: 'Promedio General', type: 'number', icon: 'star' },
+      {
+        key: 'average_rating',
+        label: 'Promedio General',
+        type: 'number',
+        icon: 'star',
+        aggregate: 'weighted_avg',
+        weightKey: 'total_reviews',
+      },
       { key: 'verified_count', label: 'Verificadas', type: 'number', icon: 'check-circle' },
     ],
     dataEndpoint: 'store/analytics/reviews/by-product',
