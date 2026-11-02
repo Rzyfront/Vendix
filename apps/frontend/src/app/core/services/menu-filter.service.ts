@@ -39,6 +39,31 @@ export const PANEL_UI_TERMINAL_ROUTE = '/admin/settings/general';
 export const PANEL_UI_NO_ACCESS_ROUTE = '/admin/no-access';
 
 /**
+ * `panel_ui` keys that are visible unless a map says `false` explicitly
+ * (opt-out), instead of the usual "visible only when `true`".
+ *
+ * Bandeja, Pipeline, Tareas and Segmentos (apps-module T0) used to be
+ * `alwaysVisible` with no key at all: every user with the permission saw them,
+ * whatever their stored `panel_ui`. Giving them a key with the usual opt-in
+ * rule would hide them from every user whose stored map predates the key —
+ * the backend fills defaults only for privileged roles. Opt-out keeps exactly
+ * today's audience and still lets a store or a user switch them off.
+ *
+ * `apps` follows the same rule: the real gate of the Apps catalog is the
+ * store switch `store_settings.apps.enabled`; the key only lets a user hide it.
+ */
+export const DEFAULT_ON_PANEL_KEYS: readonly string[] = [
+  'customers_inbox',
+  'customers_pipeline',
+  'customers_tasks',
+  'customers_segments',
+  'apps',
+];
+
+/** Route of the Apps catalog page (apps-module T6). */
+export const APPS_CATALOG_ROUTE = '/admin/apps';
+
+/**
  * Why a module is not on screen. Ordered from structural (the store simply
  * does not do this) to fixable (a toggle is off).
  */
@@ -117,7 +142,7 @@ export class MenuFilterService {
   private readonly authorizationGates$ = toObservable(
     computed(
       () =>
-        `${this.canManageUsers()}|${this.storeHasPqrs()}|${this.scheduledOrdersEnabled()}|${this.canConfigureAiAgents()}|${this.canAccessDashboard()}`,
+        `${this.canManageUsers()}|${this.storeHasPqrs()}|${this.scheduledOrdersEnabled()}|${this.canConfigureAiAgents()}|${this.canAccessDashboard()}|${this.canOpenAppsCatalog()}`,
     ),
   );
 
@@ -431,7 +456,12 @@ export class MenuFilterService {
 
           // Layer 3: user panel UI (the existing per-user `panel_ui` map — comes in
           // as `visibleModules` from `getVisibleModules$()` — already merged with
-          // defaults and the active app_type).
+          // defaults and the active app_type). Opt-out keys
+          // (`DEFAULT_ON_PANEL_KEYS`) count as on unless the map says `false`.
+          const userModules = this.withDefaultOnKeys(
+            visibleModules,
+            currentAppPanelUi,
+          );
 
           // Layer 4: store_type (modality) — physical/popup/kiosko hide ecommerce,
           // online hides POS / cash registers, hybrid shows everything.
@@ -454,7 +484,7 @@ export class MenuFilterService {
 
           // Layers 5+6 (operating scope / fiscal scope / fiscal area / subscription)
           // run inside filterItemsRecursive below.
-          const effectiveModules = visibleModules.filter(
+          const effectiveModules = userModules.filter(
             (m) =>
               !hiddenByIndustries.includes(m) &&
               !hiddenByStorePanel.includes(m) &&
@@ -482,6 +512,32 @@ export class MenuFilterService {
         },
       ),
     );
+  }
+
+  /**
+   * Adds the opt-out keys (`DEFAULT_ON_PANEL_KEYS`) that the per-user map does
+   * not switch off explicitly. Store-wide, industry and store-type layers still
+   * run afterwards, so a store-wide `false` keeps hiding them.
+   */
+  private withDefaultOnKeys(
+    visibleModules: string[],
+    userPanelUi: Record<string, boolean> | null | undefined,
+  ): string[] {
+    const extra = DEFAULT_ON_PANEL_KEYS.filter(
+      (key) => !visibleModules.includes(key) && userPanelUi?.[key] !== false,
+    );
+    return extra.length ? [...visibleModules, ...extra] : visibleModules;
+  }
+
+  /** Per-user verdict for one key, honoring the opt-out keys. */
+  private isUserModuleVisible(key: string): boolean {
+    if (this.authFacade.isModuleVisible(key)) return true;
+    if (!DEFAULT_ON_PANEL_KEYS.includes(key)) return false;
+    const panelUi = this.authFacade.currentAppPanelUi() as
+      | Record<string, boolean>
+      | null
+      | undefined;
+    return panelUi?.[key] !== false;
   }
 
   /**
@@ -1019,7 +1075,7 @@ export class MenuFilterService {
       // la restricción UX para que el owner nunca aterrice en "sin módulos"
       // ni tenga que mantener su propio `panel_ui`. Coherente con
       // `mergePanelUiSoft` que ya rellena defaults para roles privilegiados.
-      if (!this.authFacade.isOwner() && !moduleKeys.some((key) => this.authFacade.isModuleVisible(key))) {
+      if (!this.authFacade.isOwner() && !moduleKeys.some((key) => this.isUserModuleVisible(key))) {
         return {
           visible: false,
           blockedBy: 'user_panel_ui',
@@ -1079,6 +1135,26 @@ export class MenuFilterService {
         blockedBy: 'permission',
         detail:
           'Solo el propietario o un administrador puede configurar los agentes de IA.',
+        fixPath: null,
+      };
+    }
+    if (menuItem.route === APPS_CATALOG_ROUTE && !this.canOpenAppsCatalog()) {
+      return {
+        visible: false,
+        blockedBy: 'permission',
+        detail: this.appsCatalogEnabled()
+          ? 'Necesitas el permiso de lectura de Apps para ver el catálogo de aplicaciones.'
+          : 'El módulo Apps está apagado en esta tienda. El propietario lo enciende en Configuración > General > Negocio.',
+        fixPath: null,
+      };
+    }
+    // Remaining prefilters (CRM entries) share the observable pass's rule, so
+    // the redirect chain never lands on an entry the sidebar would not show.
+    if (!this.passesAuthorizationGates(menuItem)) {
+      return {
+        visible: false,
+        blockedBy: 'permission',
+        detail: 'Tu usuario no tiene el permiso que este módulo requiere.',
         fixPath: null,
       };
     }
@@ -1149,6 +1225,9 @@ export class MenuFilterService {
       return false;
     }
     if (item.route === '/admin/customers/segments' && !this.canUseCrm('store:customers:read')) {
+      return false;
+    }
+    if (item.route === APPS_CATALOG_ROUTE && !this.canOpenAppsCatalog()) {
       return false;
     }
     return true;
@@ -1331,6 +1410,27 @@ export class MenuFilterService {
     const mapped = this.moduleKeyMap[item.label];
     if (!mapped) return [];
     return Array.isArray(mapped) ? mapped : [mapped];
+  }
+
+  /** `store_settings.apps.enabled === true`; absent or anything else is off. */
+  appsCatalogEnabled(): boolean {
+    return (
+      (this.authFacade.storeSettings() as { apps?: { enabled?: boolean } } | null)
+        ?.apps?.enabled === true
+    );
+  }
+
+  /**
+   * Apps catalog: store switch on AND the API permission (`store:apps:read`,
+   * owner always). With the switch off the entry never exists, not even as a
+   * redirect target of `firstActiveModuleRoute`.
+   */
+  private canOpenAppsCatalog(): boolean {
+    return (
+      this.appsCatalogEnabled() &&
+      (this.authFacade.hasPermission('store:apps:read') ||
+        this.authFacade.isOwner())
+    );
   }
 
   /** CRM pipeline / tasks: same permission as their API. */
