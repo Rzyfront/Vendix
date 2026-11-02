@@ -56,6 +56,7 @@ import {
   CartState,
   CartItem,
 } from './services/pos-cart.service';
+import { PosStationBookingService } from './services/pos-station-booking.service';
 import {
   AddCustomItemRequest,
   CartSummary,
@@ -648,6 +649,7 @@ export function resolvePosPaymentCustomerName(
         <app-booking-scheduler-modal
           [product]="pendingBookingProduct()"
           [posCustomer]="selectedCustomer()"
+          [confirmBusy]="stationPersistBusy()"
           (customerSelected)="onCustomerSelected($event)"
           (scheduled)="onPosServiceScheduled($event)"
           (cancelled)="onBookingModalClosed()"
@@ -997,6 +999,8 @@ export class PosComponent {
         product_variant_id: resolvedVariantId ? Number(resolvedVariantId) : null,
         customer_id: customerId ? Number(customerId) : (block.customer_id ? Number(block.customer_id) : null),
         provider_id: block.provider_id ? Number(block.provider_id) : null,
+        // QUI-970: keep the chosen station when the booking is (re-)saved.
+        station_id: block.station_id ? Number(block.station_id) : null,
         date: block.date,
         start_time: block.start_time,
         end_time: block.end_time,
@@ -1009,6 +1013,12 @@ export class PosComponent {
 
       const existingId = Number(block.booking_id || block.id);
       const isUpdate = Number.isFinite(existingId) && existingId > 0;
+      // QUI-970: station bookings persist at schedule time (orderless)
+      // and the payments gate links them via booking_ids — re-firing
+      // them here PUTs a route that doesn't exist (404) and toasts
+      // after a successful sale. Non-station updates keep legacy
+      // behavior (pre-existing, out of scope).
+      if (isUpdate && block.station_id != null) continue;
       const request$ = isUpdate
         ? this.http.put(
             `${environment.apiUrl}/store/reservations/${existingId}`,
@@ -1247,6 +1257,9 @@ export class PosComponent {
   // Booking desde POS
   showReservationModal = signal(false);
   pendingBookingProduct = signal<any>(null);
+  // QUI-970: in-flight flag for async station persists — drives the
+  // scheduler modal's Confirm disable so double clicks can't duplicate.
+  stationPersistBusy = signal(false);
   pendingBookingVariant = signal<any>(null);
 
   // Quotation mode
@@ -1289,6 +1302,7 @@ export class PosComponent {
 
   private destroyRef = inject(DestroyRef);
   private cartService = inject(PosCartService);
+  private stationBookingService = inject(PosStationBookingService);
   private barcodeService = inject(PosBarcodeService);
   private productService = inject(PosProductService);
 
@@ -2052,8 +2066,9 @@ export class PosComponent {
   }
 
   onClearCart(): void {
+    // QUI-970 — "Vaciar" is an abandonment: release station bookings too.
     this.cartService
-      .clearCart()
+      .abandonCart()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
@@ -3227,7 +3242,6 @@ export class PosComponent {
   }
 
   onPosServiceScheduled(booking: any): void {
-    this.showReservationModal.set(false);
     this.focusSearchSoon();
     const prod = this.pendingBookingProduct();
     const variant = this.pendingBookingVariant();
@@ -3237,6 +3251,55 @@ export class PosComponent {
       this.onCustomerSelected(booking.customer);
     }
 
+    // QUI-970: station lines persist the booking BEFORE entering the
+    // cart — the payments gate needs it. The scheduler modal only
+    // closes once the booking (and its allocation) exists.
+    if (prod.requires_station === true) {
+      this.stationPersistBusy.set(true);
+      this.stationBookingService
+        .persistScheduledStationBooking(
+          {
+            ...booking,
+            product_id: Number(prod.id),
+            product_variant_id: variant?.id ?? booking.product_variant_id ?? null,
+            customer_id:
+              booking.customer_id ??
+              booking.customer?.id ??
+              this.selectedCustomer()?.id ??
+              null,
+          },
+          this.selectedCustomer()?.id ?? null,
+        )
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (created) => {
+            this.stationPersistBusy.set(false);
+            this.showReservationModal.set(false);
+            this.addScheduledServiceToCart(prod, variant, {
+              ...booking,
+              booking_id: created?.id ?? created?.booking_id ?? 0,
+            });
+          },
+          error: (err) => {
+            this.stationPersistBusy.set(false);
+            this.toastService.error(
+              err?.error?.message ||
+                'No se pudo reservar la estación. Elige otro horario.',
+            );
+          },
+        });
+      return;
+    }
+
+    this.showReservationModal.set(false);
+    this.addScheduledServiceToCart(prod, variant, booking);
+  }
+
+  private addScheduledServiceToCart(
+    prod: any,
+    variant: any,
+    booking: any,
+  ): void {
     this.cartService
       .addToCart({
         product: prod,
@@ -3246,6 +3309,8 @@ export class PosComponent {
           booking_id: booking.booking_id,
           provider_id: booking.provider_id,
           provider_name: booking.provider_name,
+          station_id: booking.station_id ?? null,
+          station_name: booking.station_name,
           date: booking.date,
           start_time: booking.start_time,
           end_time: booking.end_time,

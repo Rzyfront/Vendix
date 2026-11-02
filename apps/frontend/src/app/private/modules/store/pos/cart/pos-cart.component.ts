@@ -8,6 +8,7 @@ import {
   CartState,
   CartItem,
   PromotionTierProgress } from '../services/pos-cart.service';
+import { PosStationBookingService } from '../services/pos-station-booking.service';
 import { AddCustomItemRequest, CartDiscount } from '../models/cart.model';
 import { PosCustomItemModalComponent } from '../components/pos-custom-item-modal/pos-custom-item-modal.component';
 import { PosSessionStatusBarComponent } from '../components/pos-session-status-bar.component';
@@ -1338,6 +1339,7 @@ import {
         [cartItem]="schedulerTarget()"
         [existingBooking]="schedulerExisting()"
         [posCustomer]="cartState().customer"
+        [confirmBusy]="stationPersistBusy()"
         (customerSelected)="onCustomerSelected($event)"
         (scheduled)="onScheduled($event)"
         (cancelled)="closeScheduler()"
@@ -1536,6 +1538,7 @@ import {
 export class PosCartComponent {
   private destroyRef = inject(DestroyRef);
 private cartService = inject(PosCartService);
+private stationBookingService = inject(PosStationBookingService);
   /** PSVERSION0001 paso 4 — solo lectura de activeSession() para la tira. */
   readonly cashRegisterService = inject(PosCashRegisterService);
   private toastService = inject(ToastService);
@@ -2196,8 +2199,9 @@ private cartService = inject(PosCartService);
       const next = new Map<string, any>();
       this.cartBookingsByItemId.set(next);
       this.bookingsChanged.emit(next);
+      // QUI-970 — "Vaciar" is an abandonment: release station bookings too.
       this.cartService
-        .clearCart()
+        .abandonCart()
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
@@ -2232,6 +2236,9 @@ private cartService = inject(PosCartService);
   readonly schedulerTarget = signal<any>(null);
   readonly schedulerExisting = signal<any>(null);
   readonly cartBookingsByItemId = signal<Map<string, any>>(new Map());
+  // QUI-970: in-flight flag for async station persists — drives the
+  // scheduler modal's Confirm disable so double clicks can't duplicate.
+  readonly stationPersistBusy = signal(false);
 
   openScheduler(item: any): void {
     this.schedulerTarget.set(item);
@@ -2273,6 +2280,51 @@ private cartService = inject(PosCartService);
       product_variant_id: target.variant_id ?? booking.product_variant_id ?? null,
       cart_item_id: target.id,
     };
+    // QUI-970: station lines persist the booking NOW — the payments gate
+    // needs a booking with a live allocation before charging. On error
+    // the scheduler stays open so the cashier picks another slot.
+    if (target.product?.requires_station === true) {
+      this.stationPersistBusy.set(true);
+      this.stationBookingService
+        .persistScheduledStationBooking(
+          {
+            ...enrichedBooking,
+            customer_id:
+              booking.customer_id ??
+              booking.customer?.id ??
+              this.cartState()?.customer?.id ??
+              null,
+          },
+          this.cartState()?.customer?.id ?? null,
+        )
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (created) => {
+            this.stationPersistBusy.set(false);
+            this.attachScheduledBooking(target, booking, {
+              ...enrichedBooking,
+              booking_id: created?.id ?? created?.booking_id ?? 0,
+            });
+          },
+          error: (err) => {
+            this.stationPersistBusy.set(false);
+            this.toastService.error(
+              err?.error?.message ||
+                'No se pudo reservar la estación. Elige otro horario.',
+            );
+          },
+        });
+      return;
+    }
+    this.attachScheduledBooking(target, booking, enrichedBooking);
+  }
+
+  private attachScheduledBooking(
+    target: any,
+    booking: any,
+    enrichedBooking: any,
+  ): void {
+    const resolvedProductId = Number(enrichedBooking.product_id) || 0;
     const next = new Map(this.cartBookingsByItemId());
     next.set(target.id, enrichedBooking);
     this.cartBookingsByItemId.set(next);
@@ -2281,8 +2333,9 @@ private cartService = inject(PosCartService);
     this.bookingsChanged.emit(next);
     this.cartService
       .addPendingBooking({
-        id: booking.booking_id ?? 0,
+        id: enrichedBooking.booking_id ?? 0,
         booking_number: '',
+        station_id: enrichedBooking.station_id ?? null,
         product_id: resolvedProductId,
         product_name: target.product?.name ?? '',
         product_variant_id: target.variant_id ?? booking.product_variant_id ?? null,
