@@ -10,9 +10,16 @@ import { ErrorCodes } from '@common/errors/error-codes';
 
 /** `app_type` values an app publishes on (plan S1/S5). */
 export type PublishedAppType =
+  | 'STORE_HOME'
   | 'STORE_PRODUCT_PAGE'
   | 'STORE_SERVICE_PAGE'
   | 'STORE_BOOKING';
+
+/**
+ * `app_type` values the store's primary `{tienda}-store` domain may carry
+ * while the store home is off (`STORE_LANDING`) or on (`STORE_HOME`).
+ */
+const STORE_HOME_DOMAIN_APP_TYPES = ['STORE_LANDING', 'STORE_HOME'];
 
 /** Custom domains that serve these apps are never taken over by an app. */
 const PROTECTED_APP_TYPES = ['STORE_ECOMMERCE', 'STORE_ADMIN'];
@@ -203,16 +210,52 @@ export class AppDomainService {
     if (domain.ownership === 'vendix_subdomain') {
       await this.setDomainStatus(domain.id, 'disabled');
     } else if (previousAppType) {
-      await this.prisma.domain_settings.update({
-        where: { id: domain.id },
-        data: { app_type: previousAppType as any, updated_at: new Date() },
-      });
-      this.events.emit('domain.updated', {
-        domainId: domain.id,
-        hostname: domain.hostname,
-      });
+      await this.setAppType(domain, previousAppType);
     }
     await this.clearSeoCache(domain.hostname);
+  }
+
+  /**
+   * The store's primary `{tienda}-store` domain (Fase 5, store home). It is
+   * never created here: the store home only changes the `app_type` of the
+   * domain the store already has, so the URL stays the same.
+   */
+  async findStoreHomeDomain(
+    storeId: number,
+  ): Promise<{ id: number; hostname: string; app_type: string }> {
+    const domain = await this.prisma.domain_settings.findFirst({
+      where: {
+        store_id: storeId,
+        is_primary: true,
+        ownership: 'vendix_subdomain',
+        app_type: { in: STORE_HOME_DOMAIN_APP_TYPES as any },
+        status: { not: 'disabled' },
+      },
+      select: { id: true, hostname: true, app_type: true },
+      orderBy: { id: 'asc' },
+    });
+    if (!domain) {
+      throw new VendixHttpException(ErrorCodes.STORE_APPS_010);
+    }
+    return { ...domain, app_type: String(domain.app_type) };
+  }
+
+  /**
+   * Changes which app a domain serves, keeping its hostname, status and
+   * certificate, and clears the resolver caches like the domains module.
+   */
+  async setAppType(
+    domain: { id: number; hostname: string },
+    appType: string,
+  ): Promise<void> {
+    await this.prisma.domain_settings.update({
+      where: { id: domain.id },
+      data: { app_type: appType as any, updated_at: new Date() },
+    });
+    this.events.emit('domain.updated', {
+      domainId: domain.id,
+      hostname: domain.hostname,
+    });
   }
 
   /** The sitemap and robots of an app's host are cached for an hour. */

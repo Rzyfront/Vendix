@@ -7657,6 +7657,15 @@ export const ErrorCodes = {
       'Crea al menos un tipo de habitación activo antes de publicar la página de reservas.',
   },
 
+  // Apps · store home: the store has no active primary `{tienda}-store`
+  // domain (Vendix subdomain serving the store landing or the store home).
+  STORE_APPS_010: {
+    code: 'STORE_APPS_010',
+    httpStatus: 409,
+    devMessage:
+      'La tienda no tiene activo su dominio principal ({tienda}-store) para publicar el inicio de tienda.',
+  },
+
   // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra
   // tienda como si no está asignada a quien no puede ver todas: no se revela
   // que existe.
