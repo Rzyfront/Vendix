@@ -51,6 +51,10 @@ import {
   assertVariantsAllowed,
 } from './services/tiers-variants-exclusive.util';
 import { syncEnabledTierAssignments } from './services/tier-assignments-sync.util';
+import {
+  syncProductSaleUoms,
+  SaleUomRow,
+} from './services/sale-uoms-sync.util';
 import { assertProductSaleValid } from './services/product-sale.util';
 import {
   applyUsageNatureRules,
@@ -516,6 +520,74 @@ export class ProductsService {
     }
   }
 
+  /**
+   * QUI-978 — valida las UoMs de venta contra el catálogo y el stock.
+   *
+   * Reglas (espejo de `derivePurchaseToStockFactor`):
+   * - Sin filas no hay nada que validar.
+   * - El producto debe tener unidad de stock: es la dimensión de referencia.
+   * - Cada UoM debe existir y estar activa en el catálogo.
+   * - Cada UoM debe compartir la dimensión del stock (no se vende masa en ml).
+   * - Sin duplicados y con EXACTAMENTE una principal.
+   */
+  private async assertSaleUomsValid(
+    sale_uoms: SaleUomRow[] | null | undefined,
+    stock_uom_id: number | null | undefined,
+  ): Promise<void> {
+    if (!sale_uoms || sale_uoms.length === 0) return;
+
+    if (stock_uom_id === undefined || stock_uom_id === null) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
+        'Para declarar unidades de venta el producto debe tener unidad de stock',
+        { sale_uoms },
+      );
+    }
+
+    const uomIds = sale_uoms.map((row) => row.uom_id);
+    if (new Set(uomIds).size !== uomIds.length) {
+      throw new BadRequestException(
+        'Las unidades de venta no pueden repetirse',
+      );
+    }
+
+    const principals = sale_uoms.filter((row) => row.is_principal === true);
+    if (principals.length !== 1) {
+      throw new BadRequestException(
+        'Debe haber exactamente una unidad de venta principal',
+      );
+    }
+
+    const uoms = await this.prisma.units_of_measure.findMany({
+      where: { id: { in: [stock_uom_id, ...uomIds] } },
+    });
+
+    const stockUom = uoms.find((u) => u.id === stock_uom_id);
+    if (!stockUom || !stockUom.is_active) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
+        'Unidad de medida no encontrada en el catálogo',
+        { stock_uom_id },
+      );
+    }
+
+    for (const uom_id of uomIds) {
+      const uom = uoms.find((u) => u.id === uom_id);
+      if (!uom || !uom.is_active) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VALIDATE_001,
+          'Unidad de medida no encontrada en el catálogo',
+          { uom_id },
+        );
+      }
+      if (uom.dimension !== stockUom.dimension) {
+        throw new BadRequestException(
+          `La unidad de venta (${uom.code}) debe pertenecer a la misma dimensión que la de stock (${stockUom.code}) para poder convertirse`,
+        );
+      }
+    }
+  }
+
   async generateDescription(dto: GenerateProductDescriptionDto) {
     const productData: Record<string, any> = { nombre: dto.name };
 
@@ -827,6 +899,7 @@ export class ProductsService {
       allow_pos_price_override?: boolean | null;
       has_multiple_price_tiers?: boolean | null;
       enabled_price_tier_ids?: number[] | null;
+      sale_uoms?: SaleUomRow[] | null;
       available_for_ecommerce?: boolean | null;
       is_featured?: boolean | null;
       online_purchase_url?: string | null;
@@ -856,6 +929,7 @@ export class ProductsService {
       allow_pos_price_override: false,
       has_multiple_price_tiers: false,
       enabled_price_tier_ids: [],
+      sale_uoms: [],
       available_for_ecommerce: false,
       is_featured: false,
       online_purchase_url: null,
@@ -1227,6 +1301,7 @@ export class ProductsService {
         stock_by_location,
         variants,
         enabled_price_tier_ids,
+        sale_uoms,
         ...productData
         // Igual que `update()`: se destructura `sanitizedDto`, no el DTO
         // original; si no, las neutralizaciones de insumo y de naturaleza de
@@ -1254,6 +1329,9 @@ export class ProductsService {
         sanitizedDto.purchase_uom_id,
         sanitizedDto.purchase_to_stock_factor,
       );
+
+      // QUI-978 — UoMs de venta contra catálogo y dimensión del stock.
+      await this.assertSaleUomsValid(sale_uoms, sanitizedDto.stock_uom_id);
 
       const result = await this.prisma.$transaction(
         async (prisma) => {
@@ -1304,6 +1382,11 @@ export class ProductsService {
               })),
               skipDuplicates: true,
             });
+          }
+
+          // QUI-978 — UoMs de venta (principal + adicionales).
+          if (sale_uoms !== undefined) {
+            await syncProductSaleUoms(prisma, product.id, sale_uoms);
           }
 
           // Crear variantes si se proporcionan
@@ -1577,6 +1660,20 @@ export class ProductsService {
               product_price_tier_assignments: {
                 select: { price_tier_id: true },
               },
+              // QUI-978 — UoMs de venta con detalle del catálogo.
+              product_sale_uoms: {
+                include: {
+                  uom: {
+                    select: {
+                      id: true,
+                      code: true,
+                      name: true,
+                      dimension: true,
+                      factor_to_base: true,
+                    },
+                  },
+                },
+              },
               product_images: {
                 orderBy: { is_main: 'desc' },
               },
@@ -1652,6 +1749,19 @@ export class ProductsService {
               completeProduct.product_price_tier_assignments?.map(
                 (assignment) => assignment.price_tier_id,
               ) ?? [],
+            // QUI-978 — UoMs en las que se puede vender (principal + adicionales).
+            sale_uoms: (completeProduct.product_sale_uoms as any[] | undefined)?.map(
+              (row: any) => ({
+                uom_id: row.uom_id,
+                code: row.uom?.code ?? null,
+                name: row.uom?.name ?? null,
+                factor_to_base:
+                  row.uom?.factor_to_base != null
+                    ? Number(row.uom.factor_to_base)
+                    : null,
+                is_principal: row.is_principal === true,
+              }),
+            ) ?? [],
             stock_by_location: completeProduct.stock_levels.map((stock) => ({
               location_id: stock.inventory_locations.id,
               location_name: stock.inventory_locations.name,
@@ -2926,6 +3036,21 @@ export class ProductsService {
           product_price_tier_assignments: {
             select: { price_tier_id: true, barcode: true },
           },
+          // QUI-978 — UoMs de venta con detalle del catálogo (el POS
+          // decide la captura al tocar la tarjeta, igual que QUI-648).
+          product_sale_uoms: {
+            include: {
+              uom: {
+                select: {
+                  id: true,
+                  code: true,
+                  name: true,
+                  dimension: true,
+                  factor_to_base: true,
+                },
+              },
+            },
+          },
           product_images: {
             where: { is_main: true },
             take: 1,
@@ -3283,6 +3408,19 @@ export class ProductsService {
               (product as any).product_price_tier_assignments?.map(
                 (assignment: any) => assignment.price_tier_id,
               ) ?? [],
+            // QUI-978 — UoMs en las que se puede vender (principal + adicionales).
+            sale_uoms: (
+              (product as any).product_sale_uoms as any[] | undefined
+            )?.map((row: any) => ({
+              uom_id: row.uom_id,
+              code: row.uom?.code ?? null,
+              name: row.uom?.name ?? null,
+              factor_to_base:
+                row.uom?.factor_to_base != null
+                  ? Number(row.uom.factor_to_base)
+                  : null,
+              is_principal: row.is_principal === true,
+            })) ?? [],
             // QUI-648: cómo se mide y cómo se cobra el producto. Van en el
             // LISTADO —no solo en el detalle— porque el POS decide la captura
             // al tocar la tarjeta: sin esto tendría que pedir el detalle de
@@ -3526,6 +3664,19 @@ export class ProductsService {
             (product as any).product_price_tier_assignments?.map(
               (assignment: any) => assignment.price_tier_id,
             ) ?? [],
+          // QUI-978 — UoMs en las que se puede vender (principal + adicionales).
+          sale_uoms: (
+            (product as any).product_sale_uoms as any[] | undefined
+          )?.map((row: any) => ({
+            uom_id: row.uom_id,
+            code: row.uom?.code ?? null,
+            name: row.uom?.name ?? null,
+            factor_to_base:
+              row.uom?.factor_to_base != null
+                ? Number(row.uom.factor_to_base)
+                : null,
+            is_principal: row.is_principal === true,
+          })) ?? [],
           // QUI-648: cómo se mide y cómo se cobra el producto (ver la rama
           // `pos_optimized` para el porqué de exponerlo en el listado).
           stock_uom_id: (product as any).stock_uom_id ?? null,
@@ -3639,6 +3790,20 @@ export class ProductsService {
         },
         product_price_tier_assignments: {
           select: { price_tier_id: true },
+        },
+        // QUI-978 — UoMs de venta con detalle del catálogo.
+        product_sale_uoms: {
+          include: {
+            uom: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                dimension: true,
+                factor_to_base: true,
+              },
+            },
+          },
         },
         product_images: {
           orderBy: { is_main: 'desc' },
@@ -3824,6 +3989,19 @@ export class ProductsService {
         (product as any).product_price_tier_assignments?.map(
           (assignment: any) => assignment.price_tier_id,
         ) ?? [],
+      // QUI-978 — UoMs en las que se puede vender (principal + adicionales).
+      sale_uoms: (
+        (product as any).product_sale_uoms as any[] | undefined
+      )?.map((row: any) => ({
+        uom_id: row.uom_id,
+        code: row.uom?.code ?? null,
+        name: row.uom?.name ?? null,
+        factor_to_base:
+          row.uom?.factor_to_base != null
+            ? Number(row.uom.factor_to_base)
+            : null,
+        is_principal: row.is_principal === true,
+      })) ?? [],
       image_url: await this.signProductImage(product),
       brand: product.brands,
       categories:
@@ -4303,6 +4481,7 @@ export class ProductsService {
         stock_transfer_mode,
         variant_removal_stock_mode,
         enabled_price_tier_ids,
+        sale_uoms,
         price, // Exclude as it's not in DB
         ...productData
       } = sanitizedDto as UpdateProductDto & { price?: number };
@@ -4333,6 +4512,10 @@ export class ProductsService {
       if (sanitizedDto.stock_uom_id !== undefined) {
         await this.assertStockUomEligible(sanitizedDto.stock_uom_id);
       }
+
+      // QUI-978 — UoMs de venta contra la unidad de stock efectiva (PATCH:
+      // DTO con fallback al producto existente).
+      await this.assertSaleUomsValid(sale_uoms, effectiveStockUomId);
 
       // Cambiar la unidad de stock de un producto que YA opera no es renombrar
       // una etiqueta: existencias, capas de costo, lotes y recetas están
@@ -4444,6 +4627,11 @@ export class ProductsService {
               existingProduct.store_id,
               enabled_price_tier_ids,
             );
+          }
+
+          // QUI-978 — UoMs de venta (principal + adicionales).
+          if (sale_uoms !== undefined) {
+            await syncProductSaleUoms(prisma, id, sale_uoms);
           }
 
           // Actualizar categorías de impuestos si se proporcionan.
