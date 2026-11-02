@@ -5,7 +5,7 @@ import { ConfigState } from './config.reducer';
 import * as ConfigSelectors from './config.selectors';
 import * as ConfigActions from './config.actions';
 import type { DomainResolutionErrorKind } from './config.actions';
-import { AppConfig } from '../../services/app-config.service';
+import type { AppConfig } from '../../services/app-config.service';
 
 @Injectable({
   providedIn: 'root',

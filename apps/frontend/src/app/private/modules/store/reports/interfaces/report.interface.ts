@@ -31,6 +31,14 @@ export interface ReportStatField {
   label: string;
   type: 'currency' | 'number' | 'text' | 'percentage' | 'date';
   icon: string;
+  /**
+   * Cómo se agrega la columna sobre las filas cuando el backend no envía el
+   * stat. Por defecto `sum`; `weighted_avg` exige `weightKey` (QUI-697: un
+   * promedio de promedios no se suma).
+   */
+  aggregate?: 'sum' | 'weighted_avg';
+  /** Columna de peso para `weighted_avg` (p. ej. `total_reviews`). */
+  weightKey?: string;
 }
 
 export interface ReportDefinition {

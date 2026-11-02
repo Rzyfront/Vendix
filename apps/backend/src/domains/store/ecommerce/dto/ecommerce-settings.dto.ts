@@ -482,7 +482,7 @@ export class EcommerceCheckoutDto {
   @ApiPropertyOptional({
     example: false,
     description:
-      'Hace obligatorio el soporte/comprobante de pago en checkout bank_transfer/voucher. Ausente ⇒ opcional (default false).',
+      'Hace obligatorio el soporte/comprobante de pago en checkout bank_transfer (en voucher sigue opcional). Ausente ⇒ opcional (default false).',
   })
   @IsOptional()
   @IsBoolean()

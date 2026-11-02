@@ -7,16 +7,21 @@ import {
   Param,
   Delete,
   Query,
+  Res,
   UseGuards,
   ParseIntPipe,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { ReservationsService } from './reservations.service';
+import { ReservationsExportService } from './reservations-export.service';
 import { AvailabilityService } from './availability.service';
 import {
   BookingQueryDto,
   AvailabilityQueryDto,
   CreateBookingDto,
+  ExportBookingsQueryDto,
   RescheduleBookingDto,
   CalendarQueryDto,
   SendConfirmationDto,
@@ -24,6 +29,19 @@ import {
   ApproveRescheduleRequestDto,
   RejectRescheduleRequestDto,
 } from './dto';
+import { buildReportBuffer } from '@common/reports/report-builder';
+import {
+  sendXlsxReport,
+  buildReportFilename,
+} from '@common/reports/report-response.util';
+import type {
+  ReportColumn,
+  ReportSheet,
+} from '@common/reports/report-column.types';
+import {
+  resolveStoreTimezone,
+  DEFAULT_STORE_TIMEZONE,
+} from '@common/utils/store-timezone.util';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { Public } from '@common/decorators/public.decorator';
@@ -33,11 +51,33 @@ import { BookingConfirmationService } from './booking-confirmation.service';
 import { AppointmentQueueService } from './appointment-queue/appointment-queue.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 
+/** QUI-975 — Spanish labels for the export (matches the UI labels). */
+const BOOKING_STATUS_LABELS: Record<string, string> = {
+  pending: 'Pendiente',
+  confirmed: 'Confirmada',
+  arriving: 'En sala',
+  attending: 'Atendiendo',
+  in_progress: 'En progreso',
+  completed: 'Completada',
+  cancelled: 'Cancelada',
+  no_show: 'No asistió',
+};
+
+/** QUI-975 — Spanish labels for the export channels. */
+const BOOKING_CHANNEL_LABELS: Record<string, string> = {
+  pos: 'POS',
+  ecommerce: 'Ecommerce',
+  whatsapp: 'WhatsApp',
+  agent: 'Agente AI',
+  marketplace: 'Marketplace',
+};
+
 @Controller('store/reservations')
 @UseGuards(PermissionsGuard)
 export class ReservationsController {
   constructor(
     private readonly reservationsService: ReservationsService,
+    private readonly reservationsExportService: ReservationsExportService,
     private readonly availabilityService: AvailabilityService,
     private readonly bookingConfirmationService: BookingConfirmationService,
     private readonly appointmentQueueService: AppointmentQueueService,
@@ -83,6 +123,57 @@ export class ReservationsController {
       result,
       'Calendario de reservas obtenido exitosamente',
     );
+  }
+
+  /**
+   * QUI-975 — download the reservations report as XLSX. Declared before
+   * `@Get(':id')` so `export` is never parsed as an id.
+   */
+  @Get('export')
+  @Permissions('store:reservations:read')
+  async exportBookings(
+    @Query() query: ExportBookingsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const storeId = RequestContextService.getStoreId();
+    const tz = storeId
+      ? await resolveStoreTimezone(this.prisma, storeId)
+      : DEFAULT_STORE_TIMEZONE;
+    const { rows } = await this.reservationsExportService.getExportRows(query);
+    if (rows.length === 0) {
+      throw new NotFoundException(
+        'No hay reservas para exportar en este rango',
+      );
+    }
+    const columns: ReportColumn[] = [
+      { key: 'booking_number', header: 'Número', type: 'text', width: 22 },
+      { key: 'date', header: 'Fecha', type: 'date-only', width: 13 },
+      { key: 'start_time', header: 'Inicio', type: 'text', width: 9 },
+      { key: 'end_time', header: 'Fin', type: 'text', width: 9 },
+      { key: 'service_name', header: 'Servicio', type: 'text', width: 28 },
+      { key: 'provider_name', header: 'Profesional', type: 'text', width: 22 },
+      { key: 'customer_name', header: 'Cliente', type: 'text', width: 26 },
+      { key: 'customer_phone', header: 'Teléfono', type: 'text', width: 16 },
+      { key: 'status', header: 'Estado', type: 'text', width: 14 },
+      { key: 'channel', header: 'Canal', type: 'text', width: 12 },
+      { key: 'order_number', header: 'Orden', type: 'text', width: 16 },
+      { key: 'total', header: 'Valor', type: 'currency', width: 14 },
+    ];
+    const sheet: ReportSheet = {
+      name: 'Reservas',
+      columns,
+      rows: rows.map((r) => ({
+        ...r,
+        customer_name:
+          `${r.customer_first_name} ${r.customer_last_name}`.trim() ||
+          'Sin cliente',
+        status: BOOKING_STATUS_LABELS[r.status] ?? r.status,
+        channel: BOOKING_CHANNEL_LABELS[r.channel] ?? r.channel,
+      })),
+      tz,
+    };
+    const buffer = await buildReportBuffer({ sheets: [sheet] });
+    sendXlsxReport(res, buffer, buildReportFilename('reservas', { tz }));
   }
 
   @Get('availability/:productId')

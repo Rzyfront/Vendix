@@ -19,7 +19,7 @@ export interface Booking {
   created_at: string;
   updated_at: string;
   customer?: { id: number; first_name: string; last_name: string; email: string; phone?: string };
-  product?: { id: number; name: string; service_duration_minutes?: number; image_url?: string; base_price?: number; is_consultation?: boolean; requires_station?: boolean };
+  product?: { id: number; name: string; service_duration_minutes?: number; image_url?: string; base_price?: number; is_consultation?: boolean; requires_station?: boolean; booking_mode?: string };
   product_variant?: { id: number; name?: string; sku?: string };
   created_by?: { id: number; first_name: string; last_name: string };
   order?: { id: number; order_number: string };
@@ -130,6 +130,8 @@ export interface RescheduleBookingDto {
   date: string;
   start_time: string;
   end_time: string;
+  /** QUI-972: move the booking to another professional. */
+  provider_id?: number;
 }
 
 /**

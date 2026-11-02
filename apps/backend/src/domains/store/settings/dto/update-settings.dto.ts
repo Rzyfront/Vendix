@@ -54,6 +54,23 @@ export class VexSettingsDto {
   enabled?: boolean;
 }
 
+/**
+ * Apps module master switch (odd/tasks/apps-module.md, D3/T8). Declared here
+ * for the same reason as `VexSettingsDto`: without a declared property the
+ * global `ValidationPipe` strips `apps` and the PATCH answers 200 unchanged.
+ */
+export class AppsSettingsDto {
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Muestra el módulo Apps en el menú lateral (Tienda en línea y Landing page pasan a colgar de Apps). Solo el propietario puede cambiarlo.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+}
+
 @ApiSchema({ name: 'StoreUpdateSettingsDto' })
 export class UpdateSettingsDto {
   @ApiProperty({ type: PromotionsSettingsDto, required: false })
@@ -169,6 +186,12 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => VexSettingsDto)
   vex?: VexSettingsDto;
+
+  @ApiProperty({ type: AppsSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AppsSettingsDto)
+  apps?: AppsSettingsDto;
 
   @ApiProperty({ type: InvoicingSettingsDto, required: false })
   @IsOptional()

@@ -195,8 +195,8 @@ export interface EcommerceSettings {
     whatsapp_number?: string;
     // Pitch que encabeza el mensaje de pedido. Acepta {tienda} y {web}.
     whatsapp_pitch?: string;
-    // Opt-in: comprobante obligatorio para bank_transfer/voucher en el
-    // checkout ecommerce. Ausente ⇒ opcional (default `false`).
+    // Opt-in: comprobante obligatorio para bank_transfer en el checkout
+    // ecommerce (voucher siempre opcional). Ausente ⇒ opcional (default `false`).
     require_payment_receipt?: boolean;
   };
   orders?: {
@@ -592,6 +592,9 @@ export interface StoreSettings {
   // Vex - the whole-business agent's master switch, independent from Vexi's
   vex?: VexSettings;
 
+  // Apps module switch (apps-module T8)
+  apps?: AppsSettings;
+
   // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & display settings
   promotions?: PromotionsSettings;
 
@@ -654,6 +657,14 @@ export interface VexiSettings {
  * block, absent settings row and explicit `false` all read as off.
  */
 export interface VexSettings {
+  enabled: boolean;
+}
+
+/**
+ * Apps module switch (odd/tasks/apps-module.md, D3). `false` (default) keeps
+ * the store-admin sidebar exactly as it was before the module existed.
+ */
+export interface AppsSettings {
   enabled: boolean;
 }
 

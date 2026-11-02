@@ -56,6 +56,17 @@ export class ChannelsController {
     );
   }
 
+  @Post('whatsapp/register')
+  @Permissions('store:social_sales:manage')
+  @HttpCode(HttpStatus.OK)
+  async retryWhatsappRegistration() {
+    const result = await this.metaWhatsappService.retryWhatsappRegistration();
+    return this.responseService.success(
+      result,
+      'Registro del número de WhatsApp procesado',
+    );
+  }
+
   @Post('whatsapp/disconnect')
   @Permissions('store:social_sales:manage')
   @HttpCode(HttpStatus.OK)

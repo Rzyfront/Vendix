@@ -1921,4 +1921,81 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(result.customer_alias).toBeNull();
     });
   });
+
+  describe('soporte de pago obligatorio — solo transferencia', () => {
+    function mockRequirePaymentReceipt(enabled: boolean) {
+      storePrisma.store_settings.findUnique.mockResolvedValue({
+        settings: {
+          ecommerce: { checkout: { require_payment_receipt: enabled } },
+        },
+      });
+    }
+
+    function mockMethod(type: 'bank_transfer' | 'voucher') {
+      prisma.store_payment_methods.findFirst.mockResolvedValueOnce({
+        id: 7,
+        state: 'enabled',
+        system_payment_method: {
+          id: 2,
+          display_name: type === 'voucher' ? 'Datáfono' : 'Transferencia',
+          type,
+          provider: 'manual',
+        },
+      });
+    }
+
+    function runCheckoutWithoutFile() {
+      return service
+        .checkout({
+          payment_method_id: 7,
+          items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+          guest_customer: { first_name: 'Invitado' },
+        } as any)
+        .then(
+          () => null,
+          (e) => e,
+        );
+    }
+
+    beforeEach(() => {
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
+      mockOrderCreate(10000);
+    });
+
+    it('flag activo: transferencia sin comprobante se rechaza con ECOM_CHECKOUT_001', async () => {
+      mockRequirePaymentReceipt(true);
+      mockMethod('bank_transfer');
+
+      const err = await runCheckoutWithoutFile();
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('ECOM_CHECKOUT_001');
+      expect(err.message).toContain('El comprobante de pago es obligatorio');
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+      expect(prisma.payments.create).not.toHaveBeenCalled();
+    });
+
+    it('flag activo: datáfono sin comprobante crea la orden y el pago', async () => {
+      mockRequirePaymentReceipt(true);
+      mockMethod('voucher');
+
+      const err = await runCheckoutWithoutFile();
+
+      expect(err).toBeNull();
+      expect(prisma.orders.create).toHaveBeenCalledTimes(1);
+      expect(prisma.payments.create).toHaveBeenCalledTimes(1);
+      expect(prisma.payments.create.mock.calls[0][0].data.receipt_s3_key).toBeFalsy();
+    });
+
+    it('flag apagado: transferencia sin comprobante crea la orden (sin cambios)', async () => {
+      mockRequirePaymentReceipt(false);
+      mockMethod('bank_transfer');
+
+      const err = await runCheckoutWithoutFile();
+
+      expect(err).toBeNull();
+      expect(prisma.orders.create).toHaveBeenCalledTimes(1);
+      expect(prisma.payments.create).toHaveBeenCalledTimes(1);
+    });
+  });
 });

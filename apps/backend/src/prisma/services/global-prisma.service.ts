@@ -33,6 +33,19 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.domain_settings;
   }
 
+  /** Apps: public product page and its sitemap read published rows by store. */
+  get store_apps() {
+    return this.baseClient.store_apps;
+  }
+
+  /**
+   * Apps · landing page (Fase 6): the public read and the sitemap check that
+   * the landing still has published content, by store_id.
+   */
+  get crm_landing_pages() {
+    return this.baseClient.crm_landing_pages;
+  }
+
   get domain_roots() {
     return this.baseClient.domain_roots;
   }
@@ -894,6 +907,12 @@ export class GlobalPrismaService extends BasePrismaService {
   // token, outside any store context; callers filter by store_id/unit_id.
   get lodging_units() {
     return this.baseClient.lodging_units;
+  }
+
+  // Apps: the public booking page counts active room types by store_id
+  // before deciding whether the page exists.
+  get lodging_unit_types() {
+    return this.baseClient.lodging_unit_types;
   }
 
   get lodging_room_nights() {

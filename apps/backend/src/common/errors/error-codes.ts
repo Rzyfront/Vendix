@@ -7582,6 +7582,107 @@ export const ErrorCodes = {
       'El contenido de la landing no cumple la estructura esperada. Revisa las secciones e intenta de nuevo.',
   },
 
+  // Apps (odd/tasks/apps-module.md): el tipo de app no está en el catálogo.
+  // 404: el path param ya se valida en el DTO; esto cubre llamadas internas.
+  STORE_APPS_001: {
+    code: 'STORE_APPS_001',
+    httpStatus: 404,
+    devMessage: 'La app solicitada no existe en el catálogo de Apps.',
+  },
+
+  // Apps · product page: the featured product or a complement is not one of
+  // this store's products sold online (active, available for ecommerce, for
+  // sale). Same rule the public page and its sitemap apply.
+  STORE_APPS_002: {
+    code: 'STORE_APPS_002',
+    httpStatus: 400,
+    devMessage:
+      'El producto elegido no está a la venta en línea en esta tienda.',
+  },
+
+  // Apps · product page: publishing needs a featured product first.
+  STORE_APPS_003: {
+    code: 'STORE_APPS_003',
+    httpStatus: 409,
+    devMessage: 'Elige el producto destacado antes de publicar la página.',
+  },
+
+  // Apps · product page: the hostname is built from the featured product, so
+  // the product cannot change while the page is published on that hostname.
+  STORE_APPS_004: {
+    code: 'STORE_APPS_004',
+    httpStatus: 409,
+    devMessage:
+      'Despublica la página para cambiar el producto destacado.',
+  },
+
+  // Apps · product page: the custom domain is not this store's, is not a
+  // custom domain, or already serves the online store or the admin panel.
+  STORE_APPS_005: {
+    code: 'STORE_APPS_005',
+    httpStatus: 400,
+    devMessage:
+      'Ese dominio no se puede usar para la página de producto.',
+  },
+
+  // Apps · service page: a featured service is not one of this store's
+  // services sold online (active, available for ecommerce, for sale).
+  STORE_APPS_006: {
+    code: 'STORE_APPS_006',
+    httpStatus: 400,
+    devMessage: 'El servicio elegido no se ofrece en línea en esta tienda.',
+  },
+
+  // Apps · service page: publishing needs at least one service sold online.
+  STORE_APPS_007: {
+    code: 'STORE_APPS_007',
+    httpStatus: 409,
+    devMessage:
+      'La tienda no tiene servicios disponibles en línea para publicar la página.',
+  },
+
+  // Apps · booking: the hotel booking page applies only to stores whose
+  // industries include `hospitality` (catalog entry `booking`).
+  STORE_APPS_008: {
+    code: 'STORE_APPS_008',
+    httpStatus: 403,
+    devMessage: 'La página de reservas solo está disponible para tiendas de hotelería.',
+  },
+
+  // Apps · booking: publishing needs at least one active room type in the PMS.
+  STORE_APPS_009: {
+    code: 'STORE_APPS_009',
+    httpStatus: 409,
+    devMessage:
+      'Crea al menos un tipo de habitación activo antes de publicar la página de reservas.',
+  },
+
+  // Apps · store home: the store has no active primary `{tienda}-store`
+  // domain (Vendix subdomain serving the store landing or the store home).
+  STORE_APPS_010: {
+    code: 'STORE_APPS_010',
+    httpStatus: 409,
+    devMessage:
+      'La tienda no tiene activo su dominio principal ({tienda}-store) para publicar el inicio de tienda.',
+  },
+
+  // Apps · landing page (Fase 6): the landing app publishes the content made
+  // in "Landing de captación"; with nothing published there, there is nothing
+  // to put on its own domain.
+  STORE_APPS_011: {
+    code: 'STORE_APPS_011',
+    httpStatus: 409,
+    devMessage:
+      'Publica primero la landing en Landing de captación para ponerla en su propio dominio.',
+  },
+
+  // Apps · landing page: a product offer needs its product.
+  STORE_APPS_012: {
+    code: 'STORE_APPS_012',
+    httpStatus: 400,
+    devMessage: 'Elige el producto de la oferta.',
+  },
+
   // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra
   // tienda como si no está asignada a quien no puede ver todas: no se revela
   // que existe.

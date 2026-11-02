@@ -469,6 +469,26 @@
 // Customer Dropdown
 // ─────────────────────────────────────────────
 
+// QUI-976 — frequent-customers suggestions header + loading row.
+.top-label {
+  display: block;
+  margin-top: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.top-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 .customer-dropdown {
   border: 1.5px solid var(--color-border, #e5e7eb);
   border-radius: var(--radius-md, 0.5rem);

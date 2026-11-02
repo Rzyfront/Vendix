@@ -168,6 +168,13 @@ export const APP_MODULES: {
       label: 'E-commerce',
       description: 'Ventas online de la tienda',
     },
+    // Catálogo de apps web (apps-module T6). Solo aparece en el menú cuando
+    // `store_settings.apps.enabled === true`; esta key lo oculta por usuario.
+    {
+      key: 'apps',
+      label: 'Apps',
+      description: 'Catálogo de aplicaciones web de la tienda',
+    },
 
     // \u00d3rdenes (padre con hijos)
     {
@@ -309,6 +316,27 @@ export const APP_MODULES: {
           key: 'customers_all',
           label: 'Todos los Clientes',
           description: 'Directorio completo de clientes',
+        },
+        // CRM real (apps-module T0): antes sin key y con `alwaysVisible`.
+        {
+          key: 'customers_inbox',
+          label: 'Bandeja',
+          description: 'Conversaciones con clientes de todos los canales',
+        },
+        {
+          key: 'customers_pipeline',
+          label: 'Pipeline',
+          description: 'Oportunidades de venta por etapa',
+        },
+        {
+          key: 'customers_tasks',
+          label: 'Tareas',
+          description: 'Seguimientos pendientes con clientes',
+        },
+        {
+          key: 'customers_segments',
+          label: 'Segmentos',
+          description: 'Grupos de clientes y campañas',
         },
         {
           key: 'customers_reviews',

@@ -119,7 +119,7 @@ export class PosReservationsPanelComponent {
       confirmed: 'Confirmada',
       completed: 'Completada',
       cancelled: 'Cancelada',
-      no_show: 'No asistio',
+      no_show: 'No asistió',
     };
     return labels[status] || status;
   }
