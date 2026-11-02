@@ -7582,6 +7582,14 @@ export const ErrorCodes = {
       'El contenido de la landing no cumple la estructura esperada. Revisa las secciones e intenta de nuevo.',
   },
 
+  // Apps (odd/tasks/apps-module.md): el tipo de app no está en el catálogo.
+  // 404: el path param ya se valida en el DTO; esto cubre llamadas internas.
+  STORE_APPS_001: {
+    code: 'STORE_APPS_001',
+    httpStatus: 404,
+    devMessage: 'La app solicitada no existe en el catálogo de Apps.',
+  },
+
   // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra
   // tienda como si no está asignada a quien no puede ver todas: no se revela
   // que existe.
