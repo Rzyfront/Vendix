@@ -271,6 +271,10 @@ export class TasksComponent {
   protected readonly editing = signal<CrmTask | null>(null);
 
   protected readonly canSeeAll = computed(() => crmCanSeeAll(this.auth));
+  /** Whose tasks the counters count: the same filter as the list. */
+  private readonly statsScope = computed<AssignedFilter>(() =>
+    this.canSeeAll() ? this.assigned() : 'me',
+  );
   protected readonly hasMore = computed(
     () => this.tab() !== 'today' && this.page() < this.totalPages(),
   );
@@ -284,7 +288,11 @@ export class TasksComponent {
       this.search();
       untracked(() => void this.load(true));
     });
-    void this.loadStats();
+    // The counters follow "De quién", so they always match the list below.
+    effect(() => {
+      this.statsScope();
+      untracked(() => void this.loadStats());
+    });
   }
 
   openNew(): void {
@@ -364,7 +372,7 @@ export class TasksComponent {
   private async loadStats(): Promise<void> {
     this.statsLoading.set(true);
     try {
-      this.stats.set(await firstValueFrom(this.crm.taskStats()));
+      this.stats.set(await firstValueFrom(this.crm.taskStats(this.statsScope())));
     } catch {
       // The list still works; the counters stay at zero.
     } finally {

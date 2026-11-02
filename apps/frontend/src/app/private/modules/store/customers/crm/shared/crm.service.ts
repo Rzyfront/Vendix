@@ -156,9 +156,12 @@ export class CrmService {
       .pipe(map((r) => r.data));
   }
 
-  taskStats(): Observable<CrmTaskStats> {
+  /** Counters of the same tasks the list shows for `assigned`. */
+  taskStats(assigned?: CrmTasksQuery['assigned']): Observable<CrmTaskStats> {
     return this.http
-      .get<ApiResponse<CrmTaskStats>>(`${this.base}/crm/tasks/stats`)
+      .get<ApiResponse<CrmTaskStats>>(`${this.base}/crm/tasks/stats`, {
+        params: toParams({ assigned }),
+      })
       .pipe(map((r) => r.data));
   }
 

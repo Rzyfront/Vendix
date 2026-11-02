@@ -15,6 +15,7 @@ import { ResponseService } from '@common/responses/response.service';
 import { CRM_TASKS_PERMISSION, CrmTasksService } from './crm-tasks.service';
 import {
   CreateCrmTaskDto,
+  CrmTaskStatsQueryDto,
   CrmTasksQueryDto,
   UpdateCrmTaskDto,
 } from './dto/crm-tasks.dto';
@@ -24,7 +25,7 @@ import {
  *
  *   GET   /store/customers/crm/tasks             ?assigned&status&due&customer_id
  *   GET   /store/customers/crm/tasks/today       my overdue + due today
- *   GET   /store/customers/crm/tasks/stats
+ *   GET   /store/customers/crm/tasks/stats       ?assigned (same filter as the list)
  *   GET   /store/customers/crm/tasks/:id
  *   POST  /store/customers/crm/tasks
  *   PATCH /store/customers/crm/tasks/:id
@@ -54,8 +55,8 @@ export class CrmTasksController {
 
   @Get('stats')
   @Permissions(CRM_TASKS_PERMISSION)
-  async stats() {
-    return this.response.success(await this.service.stats());
+  async stats(@Query() query: CrmTaskStatsQueryDto) {
+    return this.response.success(await this.service.stats(query));
   }
 
   @Get(':id')
