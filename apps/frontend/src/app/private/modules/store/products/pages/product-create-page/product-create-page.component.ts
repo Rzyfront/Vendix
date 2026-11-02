@@ -733,6 +733,94 @@ export class ProductCreatePageComponent {
   });
 
   /**
+   * QUI-978 — UoMs en las que se puede vender. Solo existen con unidad de
+   * stock: misma dimensión, una sola principal (el precio se expresa en
+   * ella). La primera marcada se vuelve principal sola; el operador puede
+   * cambiarla. Estado inválido (marcadas sin principal) inalcanzable por UI.
+   */
+  readonly saleUomIds = signal<number[]>([]);
+  readonly principalSaleUomId = signal<number | null>(null);
+
+  /** Candidatas a UoM de venta: la dimensión del stock, ordenadas por factor. */
+  readonly saleUomOptions = computed<UnitOfMeasure[]>(() => {
+    const stock = this.selectedStockUom();
+    if (!stock) return [];
+    return this.uomOptions()
+      .filter((u) => u.dimension === stock.dimension)
+      .sort(
+        (a, b) => Number(a.factor_to_base) - Number(b.factor_to_base),
+      );
+  });
+
+  /** Principal elegible: solo entre las marcadas. */
+  readonly principalSaleUomOptions = computed<SelectorOption[]>(() =>
+    this.saleUomIds().map((id) => {
+      const u = this.uomOptions().find((row) => row.id === id);
+      return {
+        value: id,
+        label: u ? `${u.name} (${u.code})` : `#${id}`,
+      };
+    }),
+  );
+
+  isSaleUomChecked(id: number): boolean {
+    return this.saleUomIds().includes(id);
+  }
+
+  toggleSaleUom(id: number, checked: boolean): void {
+    const current = this.saleUomIds().filter((row) => row !== id);
+    if (checked) current.push(id);
+    this.saleUomIds.set(current);
+    const principal = this.principalSaleUomId();
+    if (current.length === 0) {
+      this.principalSaleUomId.set(null);
+    } else if (principal == null || !current.includes(principal)) {
+      // La primera marcada gobierna hasta que el operador elija otra.
+      this.principalSaleUomId.set(current[0]);
+    }
+  }
+
+  setPrincipalSaleUom(id: number | string | null): void {
+    const num = id == null || id === '' ? null : Number(id);
+    if (num == null || !Number.isFinite(num)) return;
+    if (!this.saleUomIds().includes(num)) {
+      this.saleUomIds.set([...this.saleUomIds(), num]);
+    }
+    this.principalSaleUomId.set(num);
+  }
+
+  /** "1 kg = 1000 g": equivalencia de una candidata contra el stock. */
+  saleUomHint(u: UnitOfMeasure): string {
+    const stock = this.selectedStockUom();
+    if (!stock) return '';
+    const ratio = Number(u.factor_to_base) / Number(stock.factor_to_base);
+    const pretty =
+      Number.isInteger(ratio) ? String(ratio) : String(Number(ratio.toFixed(4)));
+    return `1 ${u.code} = ${pretty} ${stock.code}`;
+  }
+
+  /** Poda las marcadas a la dimensión del stock (o las limpia sin stock). */
+  private pruneSaleUomsToStock(): void {
+    const allowed = new Set(this.saleUomOptions().map((u) => u.id));
+    const kept = this.saleUomIds().filter((id) => allowed.has(id));
+    this.saleUomIds.set(kept);
+    if (
+      this.principalSaleUomId() == null ||
+      !kept.includes(this.principalSaleUomId() as number)
+    ) {
+      this.principalSaleUomId.set(kept.length > 0 ? kept[0] : null);
+    }
+  }
+
+  private saleUomsPayload(): Array<{ uom_id: number; is_principal?: boolean }> {
+    const principal = this.principalSaleUomId();
+    return this.saleUomIds().map((uom_id) => ({
+      uom_id,
+      ...(uom_id === principal ? { is_principal: true } : {}),
+    }));
+  }
+
+  /**
    * Escalas de precio ofrecidas: cada unidad de la misma dimensión que quepa un
    * número entero de veces en la unidad de stock. El comerciante elige "por
    * metro" y el sistema guarda 1.000; nunca se le pide pensar en milímetros.
@@ -954,6 +1042,8 @@ export class ProductCreatePageComponent {
     if (scaleCtrl && Number(scaleCtrl.value ?? 1) !== 1) {
       scaleCtrl.setValue(1);
     }
+    // QUI-978 — sin stock (o con otra dimensión) las marcadas no valen.
+    this.pruneSaleUomsToStock();
     this.productForm.updateValueAndValidity();
   }
 
@@ -1583,6 +1673,9 @@ export class ProductCreatePageComponent {
       { stock_uom_id: null, purchase_uom_id: null },
       { emitEvent: false },
     );
+    // QUI-978 — sin stock no hay UoMs de venta que valgan.
+    this.saleUomIds.set([]);
+    this.principalSaleUomId.set(null);
     this.productForm.updateValueAndValidity({ emitEvent: false });
   }
   /** Last seen is_ingredient value (used to detect the just-flipped field). */
@@ -1681,6 +1774,11 @@ export class ProductCreatePageComponent {
       } else if (tierIdsCtrl.disabled) {
         tierIdsCtrl.enable({ emitEvent: false });
       }
+    }
+    // QUI-978 — un insumo puro no se vende: sin UoMs de venta.
+    if (pure) {
+      this.saleUomIds.set([]);
+      this.principalSaleUomId.set(null);
     }
     // Promotions are stored on a sibling form/sub-form; we handle the
     // common one if present.
@@ -2800,6 +2898,24 @@ export class ProductCreatePageComponent {
 
     // Providers se auto-cargan vía effect() que observa requiresBookingSig
     // (el patchValue dispara valueChanges → espejea requires_booking en el signal)
+
+    // QUI-978 — hidratar UoMs de venta desde lo persistido.
+    const persistedSaleUoms = Array.isArray((product as any).sale_uoms)
+      ? (product as any).sale_uoms
+      : [];
+    this.saleUomIds.set(
+      persistedSaleUoms
+        .map((row: any) => Number(row.uom_id))
+        .filter((id: number) => Number.isFinite(id) && id > 0),
+    );
+    const persistedPrincipal = persistedSaleUoms.find(
+      (row: any) => row.is_principal === true,
+    );
+    this.principalSaleUomId.set(
+      persistedPrincipal != null
+        ? Number(persistedPrincipal.uom_id)
+        : (this.saleUomIds()[0] ?? null),
+    );
 
     // Load images
     if (product.product_images && product.product_images.length > 0) {
@@ -4794,6 +4910,8 @@ export class ProductCreatePageComponent {
         1,
         Number(formValue.price_unit_quantity ?? 1) || 1,
       ),
+      // QUI-978 — UoMs de venta (un insumo puro no se vende: lista vacía).
+      sale_uoms: neutral(this.saleUomsPayload(), []),
       // Se envía explícitamente null cuando queda vacía, no se omite: omitirla
       // en una edición dejaría pegada la cuenta anterior aunque el operador la
       // haya limpiado, y el ingreso seguiría acreditándose donde ya no debe.

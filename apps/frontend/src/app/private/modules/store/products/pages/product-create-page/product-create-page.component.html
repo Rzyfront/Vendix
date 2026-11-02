@@ -1207,6 +1207,49 @@
                       }
                     </div>
 
+                    <!-- QUI-978 — en qué unidades se puede vender. Solo con
+                         stock: misma dimensión, una principal (el precio se
+                         expresa en ella). -->
+                    @if (selectedStockUom()) {
+                      <div
+                        class="rounded-xl border border-border bg-bg p-3 space-y-2"
+                      >
+                        <p
+                          class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
+                        >
+                          Unidades de venta
+                        </p>
+                        <p class="text-xs text-text-muted">
+                          Márcalas todas: en el POS se podrá pesar en
+                          cualquiera. La principal es en la que se pide el peso
+                          y sobre la que se calcula el precio.
+                        </p>
+                        <div
+                          class="grid grid-cols-1 sm:grid-cols-2 gap-2"
+                        >
+                          @for (u of saleUomOptions(); track u.id) {
+                            <app-setting-toggle
+                              [label]="u.name + ' (' + u.code + ')'"
+                              [description]="saleUomHint(u)"
+                              [ngModel]="isSaleUomChecked(u.id)"
+                              [ngModelOptions]="{ standalone: true }"
+                              (changed)="toggleSaleUom(u.id, $event)"
+                            ></app-setting-toggle>
+                          }
+                        </div>
+                        @if (saleUomIds().length > 0) {
+                          <app-selector
+                            label="Unidad principal"
+                            helpText="El precio que escribes arriba se expresa en esta unidad."
+                            [options]="principalSaleUomOptions()"
+                            [value]="principalSaleUomId()"
+                            (valueChange)="setPrincipalSaleUom($event)"
+                            placeholder="Elige la principal"
+                          ></app-selector>
+                        }
+                      </div>
+                    }
+
                     <!-- Explica con los números del producto qué va a pasar al
                          venderlo, y ofrece ejemplos por industria mientras el
                          producto todavía no declara unidad. -->
