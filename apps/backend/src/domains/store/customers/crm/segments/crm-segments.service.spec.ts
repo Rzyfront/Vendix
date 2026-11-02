@@ -15,7 +15,7 @@ function setup() {
     store_settings: { findFirst: jest.fn().mockResolvedValue({ settings: {}, stores: { timezone: 'America/Bogota' } }) },
     crm_segments: {
       findMany: jest.fn().mockResolvedValue([]),
-      findFirst: jest.fn().mockResolvedValue({ id: 3, name: 'VIP', filter: FILTER }),
+      findFirst: jest.fn().mockResolvedValue({ id: 3, name: 'VIP', filter: FILTER, is_dynamic: true }),
       create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 3, ...data })),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -36,7 +36,7 @@ function setup() {
   const query = new CrmSegmentQueryService(scoped as never, customers as never);
   const audit = { log: jest.fn().mockResolvedValue(undefined) };
   const service = new CrmSegmentsService(scoped as never, query, audit as never);
-  return { service, prisma, raw, audit };
+  return { service, prisma, raw, audit, query, customers };
 }
 
 const as = <T>(fn: () => Promise<T>, extra: Record<string, unknown> = {}) =>
@@ -53,6 +53,35 @@ const code = async (promise: Promise<unknown>) => {
   }
   return null;
 };
+
+describe('CrmSegmentQueryService.ruleMembersOf', () => {
+  it('loads tags, stages, fields and timezone once for many segments; a broken one maps to its error', async () => {
+    const { query, prisma, raw } = setup();
+    const result = await as(() =>
+      query.ruleMembersOf(
+        [
+          { id: 1, filter: FILTER },
+          { id: 2, filter: { op: 'or', rules: [{ field: 'tag', cmp: 'eq', value: 4 }] } },
+          { id: 3, filter: { op: 'and', rules: [{ field: 'tag', cmp: 'eq', value: 8 }] } },
+        ],
+        [11, 12],
+      ),
+    );
+
+    expect(prisma.crm_tags.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.crm_tags.findMany.mock.calls[0][0].where.id.in).toEqual([4, 8]);
+    expect(prisma.store_settings.findFirst).toHaveBeenCalledTimes(1);
+    expect(result.get(1)).toEqual([11]);
+    expect(result.get(2)).toEqual([11]);
+    expect((result.get(3) as VendixHttpException).errorCode).toBe('CRM_SEGMENT_001');
+    // Only the two compilable segments query, each scoped to the store and the page ids.
+    expect(raw).toHaveBeenCalledTimes(2);
+    for (const [sql] of raw.mock.calls) {
+      expect(sql.values).toContain(STORE);
+      expect(sql.values).toEqual(expect.arrayContaining([11, 12]));
+    }
+  });
+});
 
 describe('CrmSegmentsService', () => {
   it('previews count and a sample scoped to the store, masking contact without contact:read', async () => {
@@ -125,6 +154,47 @@ describe('CrmSegmentsService', () => {
       where: { id: 3 },
       data: { last_count: 2, last_counted_at: expect.any(Date) },
     });
+  });
+
+  it('a saved segment is its rules or its manual members, both scoped to the store', async () => {
+    const { service, raw } = setup();
+    await as(() => service.customers(3, { page: 1, limit: 10 }));
+    const [sql] = raw.mock.calls[0];
+    expect(sql.text).toContain('"crm_segment_members" sm');
+    expect(sql.text).toMatch(/\) OR EXISTS \(/);
+    expect(sql.text).toContain('sm."store_id" = $');
+    expect(sql.values).toEqual(expect.arrayContaining([3, STORE]));
+  });
+
+  it('a manual segment saves no rules and starts empty', async () => {
+    const { service, prisma, raw } = setup();
+    await as(() => service.create({ name: 'Mayoristas', is_dynamic: false }));
+    expect(prisma.crm_segments.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          name: 'Mayoristas',
+          filter: { op: 'and', rules: [] },
+          is_dynamic: false,
+          last_count: 0,
+        }),
+      }),
+    );
+    expect(raw).not.toHaveBeenCalled();
+  });
+
+  it('a manual segment lists only its members', async () => {
+    const { service, prisma, raw } = setup();
+    prisma.crm_segments.findFirst.mockResolvedValue({
+      id: 5,
+      name: 'Mayoristas',
+      filter: { op: 'and', rules: [] },
+      is_dynamic: false,
+    });
+    await as(() => service.customers(5, {}));
+    const [sql] = raw.mock.calls[0];
+    expect(sql.text).toContain('"crm_segment_members" sm');
+    expect(sql.text).not.toMatch(/\) OR EXISTS \(/);
+    expect(prisma.crm_tags.findMany).not.toHaveBeenCalled();
   });
 
   it('answers 404 for a segment of another store', async () => {

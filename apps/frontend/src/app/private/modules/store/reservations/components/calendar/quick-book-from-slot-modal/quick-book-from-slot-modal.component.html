@@ -176,6 +176,7 @@
               placeholder="Buscar por nombre, email o teléfono..."
               [value]="customerSearch()"
               (input)="onCustomerSearch($any($event.target).value)"
+              (focus)="loadTopCustomers()"
             />
             @if (searchingCustomers()) {
               <div class="search-suffix">
@@ -183,6 +184,49 @@
               </div>
             }
           </div>
+
+          <!-- QUI-976 — show frequent customers as clickable suggestions when the search is empty. -->
+          @if (showingTopSuggestions()) {
+            @if (loadingTopCustomers()) {
+              <div class="top-loading">
+                <app-spinner size="sm" color="primary"></app-spinner>
+                <span>Cargando clientes frecuentes…</span>
+              </div>
+            } @else if (topCustomers().length > 0) {
+              <span class="top-label">Clientes frecuentes (3)</span>
+              <div class="customer-dropdown">
+                @for (customer of topCustomers(); track customer.id) {
+                  <button
+                    class="customer-option"
+                    (click)="selectCustomer(customer)"
+                  >
+                    <div class="option-avatar">
+                      {{ customer.first_name?.charAt(0)
+                      }}{{ customer.last_name?.charAt(0) }}
+                    </div>
+                    <div class="option-info">
+                      <span class="option-name"
+                        >{{ customer.first_name }} {{ customer.last_name }}</span
+                      >
+                      <div class="option-details">
+                        @if (customer.email) {
+                          <span class="option-detail">
+                            <app-icon name="mail" [size]="10"></app-icon>
+                            {{ customer.email }}
+                          </span>
+                        } @else if (customer.phone) {
+                          <span class="option-detail">
+                            <app-icon name="phone" [size]="10"></app-icon>
+                            {{ customer.phone }}
+                          </span>
+                        }
+                      </div>
+                    </div>
+                  </button>
+                }
+              </div>
+            }
+          }
 
           @if (customers().length > 0) {
             <div class="customer-dropdown">

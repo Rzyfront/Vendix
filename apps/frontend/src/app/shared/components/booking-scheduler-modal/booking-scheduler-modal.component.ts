@@ -34,6 +34,26 @@ interface ProviderOption {
   };
 }
 
+interface AvailabilitySlotOption {
+  date: string;
+  start_time: string;
+  end_time: string;
+  station_id?: number;
+  station_name?: string;
+  available_providers: Array<{
+    id: number;
+    display_name?: string;
+    avatar_url?: string | null;
+  }>;
+  total_available: number;
+  is_booked?: boolean;
+}
+
+interface StationOption {
+  id: number;
+  name: string;
+}
+
 interface SimpleCustomer {
   id: number;
   first_name: string;
@@ -337,6 +357,19 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
                 <!-- Timeline contenedor con scroll interno exclusivo (mismo alto que el calendario) -->
                 <div class="rounded-xl border border-border bg-surface shadow-2xs h-[235px] overflow-y-auto divide-y divide-border/40 p-1">
+                  @if (slotsLoading()) {
+                    <div class="h-full flex items-center justify-center text-xs text-text-secondary">
+                      Cargando horarios...
+                    </div>
+                  } @else if (slotsError()) {
+                    <div class="h-full flex items-center justify-center text-xs text-text-secondary text-center px-4">
+                      No se pudo cargar la disponibilidad. Cambia de día o intenta de nuevo.
+                    </div>
+                  } @else if (serviceId() && availableTimeSlots().length === 0) {
+                    <div class="h-full flex items-center justify-center text-xs text-text-secondary text-center px-4">
+                      No hay horarios disponibles para este día.
+                    </div>
+                  }
                   @for (slot of availableTimeSlots(); track slot.start) {
                     <button
                       type="button"
@@ -437,6 +470,50 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
               }
             </div>
 
+            <!-- QUI-970: Estación (solo servicios que la requieren) -->
+            @if (requiresStation()) {
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <h5 class="text-xs font-bold text-text-primary">
+                    Estación <span class="text-amber-600">* Requerida</span>
+                  </h5>
+                  @if (slotsLoading()) {
+                    <span class="text-xs text-text-muted">Cargando estaciones...</span>
+                  }
+                </div>
+                @if (slotsError()) {
+                  <div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 text-center">
+                    No se pudieron cargar las estaciones. Cambia de día o intenta de nuevo.
+                  </div>
+                } @else if (noStationsForSlot() && !slotsLoading()) {
+                  <div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 text-center">
+                    No hay estaciones libres en este horario.
+                  </div>
+                } @else {
+                  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    @for (s of stationsForSlot(); track s.id) {
+                      <div
+                        (click)="setStation(s.id)"
+                        class="p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3"
+                        [class]="stationId() === s.id ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-border bg-surface hover:border-primary/40'"
+                      >
+                        <div class="w-9 h-9 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center flex-shrink-0">
+                          <app-icon name="warehouse" [size]="18"></app-icon>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <h5 class="text-xs font-bold text-text-primary truncate">{{ s.name }}</h5>
+                          <p class="text-[10px] text-emerald-600 font-medium flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                            Libre en este horario
+                          </p>
+                        </div>
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
+
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               <!-- Opción: Cualquier disponible (si no es obligatorio) -->
               @if (!isProviderRequired()) {
@@ -455,8 +532,8 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
                 </div>
               }
 
-              <!-- Lista de especialistas -->
-              @for (p of providers(); track p.id) {
+              <!-- Lista de especialistas (QUI-969: solo disponibles en fecha+hora; QUI-970: y en la estación elegida) -->
+              @for (p of visibleProviders(); track p.id) {
                 <div
                   (click)="setProvider(p.id)"
                   class="p-3 rounded-xl border cursor-pointer transition-all flex items-center gap-3 provider-card"
@@ -481,6 +558,14 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
             @if (providers().length === 0 && !providersLoading()) {
               <div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 text-center">
                 No hay especialistas registrados específicamente para este servicio. Se asignará automáticamente.
+              </div>
+            } @else if (slotsError() && !providersLoading() && !slotsLoading()) {
+              <div class="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-800 text-center">
+                No se pudo cargar la disponibilidad. Vuelve al paso anterior o intenta de nuevo.
+              </div>
+            } @else if (noAvailabilityForSlot() && !providersLoading() && !slotsLoading()) {
+              <div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 text-center">
+                No hay profesionales disponibles en este horario.
               </div>
             }
           </div>
@@ -619,6 +704,18 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
                   </p>
                 </div>
 
+                @if (requiresStation()) {
+                  <div class="p-2.5 rounded-xl bg-surface/80 border border-border/50">
+                    <span class="text-[10px] text-text-muted flex items-center gap-1.5 font-semibold">
+                      <app-icon name="warehouse" [size]="13" class="text-amber-600"></app-icon>
+                      Estación Asignada
+                    </span>
+                    <p class="font-bold text-text-primary mt-0.5">
+                      {{ stationName() || 'Sin asignar' }}
+                    </p>
+                  </div>
+                }
+
                 <div class="p-2.5 rounded-xl bg-surface/80 border border-border/50">
                   <span class="text-[10px] text-text-muted flex items-center gap-1.5 font-semibold">
                     <app-icon name="users" [size]="13" class="text-primary"></app-icon>
@@ -676,6 +773,7 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
             <app-button
               variant="primary"
               size="sm"
+              [disabled]="confirmBusy()"
               (clicked)="onFinalConfirm()"
             >
               <app-icon slot="icon" name="check" [size]="14"></app-icon>
@@ -699,6 +797,14 @@ export class BookingSchedulerModalComponent {
   readonly productVariantId = input<number | null>(null);
   readonly cartItem = input<any>(null);
   readonly existingBooking = input<any>(null);
+  /**
+   * Parent-owned in-flight flag for async schedule persists (QUI-970
+   * station flow keeps the modal open during the HTTP round-trip).
+   * While true, Confirm is disabled and re-emits are ignored so a
+   * double click can't duplicate the booking. The parent clears it
+   * on persist error (success closes the modal).
+   */
+  readonly confirmBusy = input<boolean>(false);
   readonly modalTitleOverride = input<string | null>(null);
   readonly posCustomer = input<any>(null);
 
@@ -754,6 +860,20 @@ export class BookingSchedulerModalComponent {
   readonly providers = signal<ProviderOption[]>([]);
   readonly providersLoading = signal<boolean>(false);
 
+  // ── Day availability (QUI-969/QUI-970) ──
+  // Real slots for the selected service+date, from
+  // GET /store/reservations/availability/:productId. The time grid,
+  // the provider list (QUI-969) and station picking (QUI-970) derive
+  // from this — never from a hardcoded 08:00–20:00 range.
+  readonly daySlots = signal<AvailabilitySlotOption[]>([]);
+  readonly slotsLoading = signal<boolean>(false);
+  readonly slotsLoadedFor = signal<string>('');
+  readonly slotsError = signal<boolean>(false);
+  private daySlotsRequestKey = '';
+
+  // ── Station State (QUI-970) ──
+  readonly stationIdText = signal<string>('');
+
   // ── Customers State ──
   readonly selectedCustomer = signal<SimpleCustomer | null>(null);
   readonly customerSearchQuery = signal<string>('');
@@ -771,6 +891,19 @@ export class BookingSchedulerModalComponent {
 
   readonly isProviderRequired = computed<boolean>(() => {
     return this.resolvedProduct()?.booking_mode === 'provider_required';
+  });
+
+  /** Service id behind this scheduling flow, from any input shape. */
+  readonly serviceId = computed<number | null>(() => {
+    const p = this.resolvedProduct();
+    const pid = p?.id ?? this.existingBooking()?.product_id;
+    const n = Number(pid);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  });
+
+  /** Station-required services must pick a free station (QUI-970). */
+  readonly requiresStation = computed<boolean>(() => {
+    return this.resolvedProduct()?.requires_station === true;
   });
 
   readonly durationMinutes = computed<number>(() => {
@@ -800,6 +933,82 @@ export class BookingSchedulerModalComponent {
     if (!id) return '';
     const p = this.providers().find((item) => item.id === id);
     return p?.display_name || p?.employee?.first_name || '';
+  });
+
+  readonly stationId = computed<number | null>(() => {
+    const v = this.stationIdText();
+    if (!v) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  });
+
+  readonly stationName = computed<string>(() => {
+    const id = this.stationId();
+    if (!id) return '';
+    return (
+      this.stationsForSlot().find((s) => s.id === id)?.name || ''
+    );
+  });
+
+  /**
+   * Stations assigned to the service and free at the selected
+   * date+time (QUI-970). Derived from the station-annotated
+   * availability slots for the day.
+   */
+  readonly stationsForSlot = computed<StationOption[]>(() => {
+    if (!this.requiresStation()) return [];
+    if (!this.serviceId() || this.slotsLoadedFor() !== this.date()) return [];
+    const seen = new Map<number, string>();
+    for (const s of this.daySlots()) {
+      if (s.start_time !== this.startTime()) continue;
+      if ((s.total_available ?? 0) <= 0) continue;
+      if (s.station_id == null) continue;
+      if (!seen.has(s.station_id)) {
+        seen.set(s.station_id, s.station_name || `Estación ${s.station_id}`);
+      }
+    }
+    return [...seen.entries()].map(([id, name]) => ({ id, name }));
+  });
+
+  /** True when the service needs a station but none is free at the slot. */
+  readonly noStationsForSlot = computed<boolean>(() => {
+    return (
+      this.requiresStation() &&
+      !!this.serviceId() &&
+      this.slotsLoadedFor() === this.date() &&
+      this.stationsForSlot().length === 0
+    );
+  });
+
+  /**
+   * Specialists shown in the provider step. For station services the
+   * list narrows to professionals free at the chosen station+time
+   * (before a station is picked, to those free at the time in any
+   * station); other services keep the QUI-969 date+time list
+   * (`availableProvidersForSlot`).
+   */
+  readonly visibleProviders = computed<ProviderOption[]>(() => {
+    // QUI-969: start from the specialists available at the date+time.
+    const all = this.availableProvidersForSlot();
+    if (!this.requiresStation()) return all;
+    if (!this.serviceId() || this.slotsLoadedFor() !== this.date()) return all;
+    const chosen = this.stationId();
+    const ids = new Set<number>();
+    for (const s of this.daySlots()) {
+      if (s.start_time !== this.startTime()) continue;
+      if ((s.total_available ?? 0) <= 0) continue;
+      if (chosen != null && s.station_id !== chosen) continue;
+      for (const p of s.available_providers ?? []) ids.add(p.id);
+    }
+    // Availability unknown for this time (e.g. static grid time with
+    // no matching slot): keep the full list instead of flashing empty.
+    if (ids.size === 0 && this.daySlots().length > 0) {
+      const anyForTime = this.daySlots().some(
+        (s) => s.start_time === this.startTime() && (s.total_available ?? 0) > 0,
+      );
+      if (!anyForTime) return all;
+    }
+    return all.filter((p) => ids.has(p.id));
   });
 
   readonly modalTitle = computed<string>(() => {
@@ -923,31 +1132,100 @@ export class BookingSchedulerModalComponent {
     return cells;
   });
 
-  /** Available dynamic time slots partitioned in 30-minute intervals */
+
+  /**
+   * Time slots for the selected day, from real availability (QUI-969).
+   * Only slots with capacity left are shown — a professional without
+   * schedule for this day produces no slots, so the grid can no longer
+   * offer phantom 08:00–20:00 hours. Without service context (no
+   * product resolved) it keeps the legacy static grid.
+   */
+  /**
+   * Day slots normalized by start time. The station route emits one slot
+   * per (station, start), so the same start repeats once per station;
+   * the grid tracks by `slot.start` (duplicate keys throw NG0955) and
+   * the provider lookup would only see the first station. Merging
+   * providers across stations per start keeps station services working
+   * here until they get their station picker (QUI-970). No-op for
+   * non-station routes (one slot per start).
+   */
+  readonly mergedDaySlots = computed<AvailabilitySlotOption[]>(() => {
+    const byStart = new Map<string, AvailabilitySlotOption>();
+    for (const s of this.daySlots()) {
+      const prev = byStart.get(s.start_time);
+      if (!prev) {
+        byStart.set(s.start_time, {
+          ...s,
+          available_providers: [...(s.available_providers ?? [])],
+        });
+        continue;
+      }
+      const ids = new Set(prev.available_providers.map((p) => p.id));
+      for (const p of s.available_providers ?? []) {
+        if (!ids.has(p.id)) {
+          ids.add(p.id);
+          prev.available_providers.push(p);
+        }
+      }
+      prev.total_available = (prev.total_available ?? 0) + (s.total_available ?? 0);
+    }
+    return [...byStart.values()];
+  });
+
   readonly availableTimeSlots = computed<Array<{ start: string; end: string }>>(() => {
+    if (!this.serviceId()) return this.legacyStaticSlots();
+    if (this.slotsLoadedFor() !== this.date()) return [];
+    return this.mergedDaySlots()
+      .filter((s) => (s.total_available ?? 0) > 0)
+      .map((s) => ({ start: s.start_time, end: s.end_time }));
+  });
+
+  /** Legacy static grid, only when no service is resolved. */
+  private legacyStaticSlots(): Array<{ start: string; end: string }> {
     const dur = this.durationMinutes();
     const slots: Array<{ start: string; end: string }> = [];
-
-    // Particionado en tiempos de media hora entre 08:00 y 20:00
-    const startHour = 8;
-    const endHour = 20;
     const stepMinutes = 30;
-
-    let currentTotalMinutes = startHour * 60;
-    const maxTotalMinutes = endHour * 60;
-
+    let currentTotalMinutes = 8 * 60;
+    const maxTotalMinutes = 20 * 60;
     while (currentTotalMinutes + dur <= maxTotalMinutes) {
       const h = Math.floor(currentTotalMinutes / 60);
       const m = currentTotalMinutes % 60;
       const hhmm = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-      slots.push({
-        start: hhmm,
-        end: addMinutes(hhmm, dur),
-      });
+      slots.push({ start: hhmm, end: addMinutes(hhmm, dur) });
       currentTotalMinutes += stepMinutes;
     }
-
     return slots;
+  }
+
+  /**
+   * Providers actually available at the selected date+time (QUI-969).
+   * For `provider_required` services this intersects the specialists
+   * offering the service with the chosen slot's `available_providers`;
+   * a professional without schedule never appears. Free-booking
+   * services keep the full list (capacity-based, no per-provider
+   * schedule applies). While availability is loading, the full list
+   * is shown to avoid flashing an empty state.
+   */
+  readonly availableProvidersForSlot = computed<ProviderOption[]>(() => {
+    const all = this.providers();
+    if (!this.isProviderRequired()) return all;
+    if (!this.serviceId() || this.slotsLoadedFor() !== this.date()) return all;
+    const slot = this.mergedDaySlots().find((s) => s.start_time === this.startTime());
+    if (!slot) return [];
+    const ids = new Set((slot.available_providers ?? []).map((p) => p.id));
+    return all.filter((p) => ids.has(p.id));
+  });
+
+  /** True when specialists exist but none covers the chosen slot. */
+  readonly noAvailabilityForSlot = computed<boolean>(() => {
+    return (
+      this.isProviderRequired() &&
+      !!this.serviceId() &&
+      !this.slotsError() &&
+      this.slotsLoadedFor() === this.date() &&
+      this.providers().length > 0 &&
+      this.availableProvidersForSlot().length === 0
+    );
   });
 
   readonly isTimeSelected = computed<boolean>(() => {
@@ -964,6 +1242,11 @@ export class BookingSchedulerModalComponent {
     return !!this.date() && this.isTimeSelected();
   });
 
+  readonly isStationConfigured = computed<boolean>(() => {
+    if (!this.requiresStation()) return true;
+    return this.stationId() !== null;
+  });
+
   readonly isProviderConfigured = computed<boolean>(() => {
     if (this.isProviderRequired()) {
       return this.providerId() !== null;
@@ -974,13 +1257,18 @@ export class BookingSchedulerModalComponent {
   readonly canAdvanceStep = computed<boolean>(() => {
     const step = this.currentStep();
     if (step === 'date_time') return this.isDateTimeConfigured();
-    if (step === 'provider') return this.isProviderConfigured();
+    if (step === 'provider')
+      return this.isProviderConfigured() && this.isStationConfigured();
     if (step === 'customer') return true;
     return true;
   });
 
   readonly canConfirm = computed<boolean>(() => {
-    return this.isDateTimeConfigured() && this.isProviderConfigured();
+    return (
+      this.isDateTimeConfigured() &&
+      this.isProviderConfigured() &&
+      this.isStationConfigured()
+    );
   });
 
   readonly displayedCustomers = computed<SimpleCustomer[]>(() => {
@@ -1018,6 +1306,9 @@ export class BookingSchedulerModalComponent {
       }
       if (eb?.provider_id) {
         this.providerIdText.set(String(eb.provider_id));
+      }
+      if (eb?.station_id) {
+        this.stationIdText.set(String(eb.station_id));
       }
       if (eb?.service_location_type) {
         this.serviceLocationType.set(eb.service_location_type);
@@ -1059,8 +1350,86 @@ export class BookingSchedulerModalComponent {
       }
     });
 
+    // QUI-969/QUI-970: reload day availability whenever the service
+    // or the selected date changes.
+    effect(() => {
+      const pid = this.serviceId();
+      const dateStr = this.date();
+      if (pid && dateStr) {
+        this.loadDaySlots(pid, dateStr);
+      }
+    });
+
+    // QUI-970: drop a selected station that is no longer free at the
+    // chosen date+time.
+    effect(() => {
+      if (!this.requiresStation()) return;
+      if (!this.serviceId() || this.slotsLoadedFor() !== this.date()) return;
+      const id = this.stationId();
+      if (
+        id !== null &&
+        !this.stationsForSlot().some((s) => s.id === id)
+      ) {
+        this.stationIdText.set('');
+      }
+    });
+
+    // QUI-969/QUI-970: drop a selected provider that is no longer
+    // available at the chosen date+time (e.g. the user moved to a day
+    // the professional doesn't work) or at the chosen station.
+    effect(() => {
+      if (!this.isProviderRequired() && !this.requiresStation()) return;
+      if (!this.serviceId() || this.slotsLoadedFor() !== this.date()) return;
+      if (this.slotsError()) return;
+      const id = this.providerId();
+      if (
+        id !== null &&
+        !this.visibleProviders().some((p) => p.id === id)
+      ) {
+        this.providerIdText.set('');
+      }
+    });
+
     this.loadTopCustomers();
     this.scrollToSelectedSlot();
+  }
+
+  private loadDaySlots(productId: number, dateStr: string): void {
+    const key = `${productId}|${dateStr}`;
+    this.daySlotsRequestKey = key;
+    this.slotsLoading.set(true);
+    this.slotsError.set(false);
+    const params: Record<string, string> = {
+      date_from: dateStr,
+      date_to: dateStr,
+    };
+    const variantId =
+      this.productVariantId() ??
+      this.cartItem()?.variant_id ??
+      this.existingBooking()?.product_variant_id;
+    if (variantId) params['product_variant_id'] = String(variantId);
+    this.http
+      .get<any>(
+        `${environment.apiUrl}/store/reservations/availability/${productId}`,
+        { params },
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (resp) => {
+          if (this.daySlotsRequestKey !== key) return;
+          const list = resp?.data ?? resp ?? [];
+          this.daySlots.set(Array.isArray(list) ? list : []);
+          this.slotsLoadedFor.set(dateStr);
+          this.slotsLoading.set(false);
+        },
+        error: () => {
+          if (this.daySlotsRequestKey !== key) return;
+          this.daySlots.set([]);
+          this.slotsLoadedFor.set(dateStr);
+          this.slotsLoading.set(false);
+          this.slotsError.set(true);
+        },
+      });
   }
 
   private loadCustomerById(customerId: number): void {
@@ -1237,6 +1606,10 @@ export class BookingSchedulerModalComponent {
     this.providerIdText.set(id ? String(id) : '');
   }
 
+  setStation(id: number | null): void {
+    this.stationIdText.set(id ? String(id) : '');
+  }
+
   goToStep(step: SchedulerWizardStep): void {
     this.currentStep.set(step);
   }
@@ -1268,17 +1641,22 @@ export class BookingSchedulerModalComponent {
   }
 
   onFinalConfirm(): void {
+    if (this.confirmBusy()) return;
     const prodId = this.resolvedProduct()?.id ? Number(this.resolvedProduct()!.id) : undefined;
     const variantId = this.productVariantId() ?? this.cartItem()?.variant_id ?? this.existingBooking()?.product_variant_id ?? undefined;
     const payload = {
       product_id: prodId,
       product_variant_id: variantId,
-      booking_id: this.existingBooking()?.id ?? undefined,
+      // POS cart blocks key their persisted booking as `booking_id`
+      // (no `id`); backend rows use `id`. Both shapes reschedule.
+      booking_id: this.existingBooking()?.booking_id ?? this.existingBooking()?.id ?? undefined,
       date: this.date(),
       start_time: this.startTime(),
       end_time: this.endTime(),
       provider_id: this.providerId(),
       provider_name: this.providerName() || undefined,
+      station_id: this.stationId() ?? undefined,
+      station_name: this.stationName() || undefined,
       service_location_type: this.serviceLocationType(),
       notes: this.notes() || undefined,
       customer_id: this.selectedCustomer()?.id ?? undefined,

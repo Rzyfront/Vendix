@@ -25,12 +25,24 @@ const toInt = ({ value }: { value: unknown }) =>
     ? undefined
     : Number(value);
 
+const ASSIGNED_PATTERN = /^(me|unassigned|all|\d+)$/;
+const ASSIGNED_MESSAGE = 'assigned must be me, unassigned, all or a user id';
+
+/**
+ * Counters of the tasks screen. With `assigned` they count the same tasks the
+ * list shows for that filter; without it, everything the viewer can see.
+ */
+export class CrmTaskStatsQueryDto {
+  /** `me`, `unassigned`, `all` or a user id. */
+  @IsOptional()
+  @Matches(ASSIGNED_PATTERN, { message: ASSIGNED_MESSAGE })
+  assigned?: string;
+}
+
 export class CrmTasksQueryDto {
   /** `me`, `unassigned`, `all` or a user id. */
   @IsOptional()
-  @Matches(/^(me|unassigned|all|\d+)$/, {
-    message: 'assigned must be me, unassigned, all or a user id',
-  })
+  @Matches(ASSIGNED_PATTERN, { message: ASSIGNED_MESSAGE })
   assigned?: string;
 
   @IsOptional()

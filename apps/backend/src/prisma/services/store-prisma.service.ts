@@ -225,12 +225,16 @@ export class StorePrismaService extends BasePrismaService {
     // ===== CRM Landing (QUI-719) =====
     // 1:1 con la tienda (store_id @unique) → scoping directo por tienda.
     'crm_landing_pages',
+    // ===== Apps (odd/tasks/apps-module.md) =====
+    // `store_id` propio NOT NULL → scoping directo por tienda.
+    'store_apps',
     // ===== CRM (PLAN-CRM §2.3) =====
     // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
     'crm_conversations',
     'crm_messages',
     'crm_tags',
     'crm_customer_tags',
+    'crm_segment_members',
     'crm_segments',
     'crm_pipelines',
     'crm_pipeline_stages',
@@ -1899,6 +1903,10 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.crm_customer_tags;
   }
 
+  get crm_segment_members() {
+    return this.scoped_client.crm_segment_members;
+  }
+
   get crm_segments() {
     return this.scoped_client.crm_segments;
   }
@@ -2231,6 +2239,11 @@ export class StorePrismaService extends BasePrismaService {
   // ===== CRM Landing (QUI-719) — scoped getter =====
   get crm_landing_pages() {
     return this.scoped_client.crm_landing_pages;
+  }
+
+  // ===== Apps (odd/tasks/apps-module.md) — scoped getter =====
+  get store_apps() {
+    return this.scoped_client.store_apps;
   }
 
   // Email reception remains scoped to the operational tenant, not a shared NIT.

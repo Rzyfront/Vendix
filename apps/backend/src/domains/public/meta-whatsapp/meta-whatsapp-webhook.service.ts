@@ -3,9 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { ChannelEncryptionService } from '../../store/integrations/channels/channel-encryption.service';
+import { resolveMetaWhatsappPlatformConfig } from '../../store/integrations/channels/meta-whatsapp-platform-config.resolver';
 import { CrmInboundQueue } from './inbound/crm-inbound.queue';
-
-const PLATFORM_SETTINGS_KEY = 'social_sales:meta_whatsapp';
 
 @Injectable()
 export class MetaWhatsappWebhookService {
@@ -144,54 +143,18 @@ export class MetaWhatsappWebhookService {
   }
 
   private async getVerifyToken(): Promise<string | null> {
-    const value = await this.getPlatformValue();
-    const platformToken = this.resolveSecret(
-      this.stringOrNull(value?.verify_token),
-      this.stringOrNull(value?.verify_token_encrypted),
-    );
-    return (
-      platformToken ||
-      this.configService.get<string>('META_WHATSAPP_VERIFY_TOKEN') ||
-      null
-    );
+    return (await this.getPlatformConfig()).verify_token;
   }
 
   private async getAppSecret(): Promise<string | null> {
-    const value = await this.getPlatformValue();
-    const platformSecret = this.resolveSecret(
-      this.stringOrNull(value?.app_secret),
-      this.stringOrNull(value?.app_secret_encrypted),
+    return (await this.getPlatformConfig()).app_secret;
+  }
+
+  private getPlatformConfig() {
+    return resolveMetaWhatsappPlatformConfig(
+      this.prisma,
+      this.configService,
+      this.encryption,
     );
-    return (
-      platformSecret ||
-      this.configService.get<string>('META_APP_SECRET') ||
-      null
-    );
-  }
-
-  private async getPlatformValue(): Promise<Record<string, any> | null> {
-    const row = await this.prisma.platform_settings.findUnique({
-      where: { key: PLATFORM_SETTINGS_KEY },
-    });
-    if (
-      !row?.value ||
-      typeof row.value !== 'object' ||
-      Array.isArray(row.value)
-    ) {
-      return null;
-    }
-    return row.value as Record<string, any>;
-  }
-
-  private stringOrNull(value: unknown): string | null {
-    return typeof value === 'string' && value.trim() ? value : null;
-  }
-
-  private resolveSecret(
-    plainValue?: string | null,
-    encryptedValue?: string | null,
-  ): string | null {
-    if (encryptedValue) return this.encryption.decrypt(encryptedValue);
-    return plainValue || null;
   }
 }

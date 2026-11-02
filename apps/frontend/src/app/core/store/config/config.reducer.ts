@@ -1,5 +1,5 @@
 import { createReducer, on } from '@ngrx/store';
-import { AppConfig } from '../../services/app-config.service';
+import type { AppConfig } from '../../services/app-config.service';
 import * as ConfigActions from './config.actions';
 import type { DomainResolutionErrorKind } from './config.actions';
 

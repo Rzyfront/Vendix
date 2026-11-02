@@ -23,6 +23,23 @@ export interface CrmTag {
   customers_count?: number;
 }
 
+/** How a customer belongs to a segment: by its rules, added by hand, or both. */
+export type CrmSegmentMembershipVia = 'rule' | 'manual' | 'both';
+
+export interface CrmSegmentMembership {
+  id: number;
+  name: string;
+  is_dynamic: boolean;
+  via: CrmSegmentMembershipVia;
+}
+
+/** Segments and tags of one customer (customer list and profile). */
+export interface CustomerCrmMemberships {
+  customer_id: number;
+  tags: CrmTag[];
+  segments: CrmSegmentMembership[];
+}
+
 export interface CrmStage {
   id: number;
   pipeline_id: number;

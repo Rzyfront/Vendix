@@ -4,7 +4,10 @@ import { StorePrismaService } from '../../../../../prisma/services/store-prisma.
 import { AuditService } from '../../../../../common/audit/audit.service';
 import { ErrorCodes, VendixHttpException } from '../../../../../common/errors';
 import { resolveCrmViewer } from '../shared/crm-access';
-import { CrmSegmentQueryService } from './crm-segment-query.service';
+import {
+  CrmSegmentQueryService,
+  MANUAL_SEGMENT_FILTER,
+} from './crm-segment-query.service';
 import { SEGMENT_FILTER_VERSION } from './segment-filter.compiler';
 import {
   CreateCrmSegmentDto,
@@ -17,8 +20,10 @@ export const SEGMENT_PREVIEW_SAMPLE = 20;
 
 /**
  * Saved segments (PLAN-CRM §4.5): a name and a v1 filter, evaluated every
- * time they are used (no member table). Saving re-validates and recounts the
- * filter, so `last_count` is what the owner saw in the preview.
+ * time they are used. Saving re-validates and recounts the filter, so
+ * `last_count` is what the owner saw in the preview. Customers can also be
+ * added by hand (`crm_segment_members`): a segment is its rules ∪ those
+ * members, and a manual segment (`is_dynamic = false`) is only its members.
  */
 @Injectable()
 export class CrmSegmentsService {
@@ -51,17 +56,23 @@ export class CrmSegmentsService {
 
   async create(dto: CreateCrmSegmentDto) {
     const viewer = resolveCrmViewer(ErrorCodes.CRM_SEGMENT_002);
-    const segment = await this.query.resolve(dto.filter);
-    const count = await this.query.count(segment);
+    const manual = dto.is_dynamic === false;
+    let filter = MANUAL_SEGMENT_FILTER;
+    let count = 0;
+    if (!manual) {
+      const segment = await this.query.resolve(dto.filter);
+      filter = segment.filter;
+      count = await this.query.count(segment);
+    }
     try {
       return await this.prisma.crm_segments.create({
         data: {
           store_id: viewer.store_id,
           name: dto.name.trim(),
           description: dto.description?.trim() || null,
-          filter: segment.filter as unknown as Prisma.InputJsonValue,
+          filter: filter as unknown as Prisma.InputJsonValue,
           filter_version: SEGMENT_FILTER_VERSION,
-          is_dynamic: true,
+          is_dynamic: !manual,
           last_count: count,
           last_counted_at: new Date(),
           created_by_user_id: viewer.user_id,
@@ -79,9 +90,16 @@ export class CrmSegmentsService {
     if (dto.name !== undefined) data.name = dto.name.trim();
     if (dto.description !== undefined) data.description = dto.description?.trim() || null;
     if (dto.filter !== undefined) {
-      const segment = await this.query.resolve(dto.filter);
+      // Giving rules to a manual segment turns it into a rule segment; the
+      // customers added by hand stay in it.
+      const segment = await this.query.resolveSaved({
+        id,
+        filter: dto.filter,
+        is_dynamic: true,
+      });
       data.filter = segment.filter as unknown as Prisma.InputJsonValue;
       data.filter_version = SEGMENT_FILTER_VERSION;
+      data.is_dynamic = true;
       data.last_count = await this.query.count(segment);
       data.last_counted_at = new Date();
     }
@@ -114,7 +132,7 @@ export class CrmSegmentsService {
     const saved = await this.findOrFail(id);
     const page = query.page ?? 1;
     const limit = query.limit ?? 25;
-    const segment = await this.query.resolve(saved.filter);
+    const segment = await this.query.resolveSaved(saved);
     const [total, data] = await Promise.all([
       this.query.count(segment),
       this.query.page(segment, page, limit),

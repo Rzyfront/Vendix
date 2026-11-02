@@ -40,29 +40,72 @@
           </div>
         }
 
-        <!-- Booking blocks -->
-        @for (booking of getBookingsForDate(day.date); track booking.id) {
-          <div
-            class="booking-block"
-            [class]="'status-' + booking.status"
-            [class.expired-pending]="isBookingExpired(booking)"
-            [style.top.%]="getBlockTop(booking)"
-            [style.height.%]="getBlockHeight(booking)"
-            (click)="onBookingClick($event, booking)">
-            <span class="booking-time">{{ formatTime(booking.start_time) }}</span>
-            <span class="booking-title">{{ booking.product?.name }}</span>
-            <span class="booking-customer">{{ booking.customer?.first_name }}</span>
-            @if (booking.provider) {
-              <span class="booking-provider">{{ booking.provider.display_name || booking.provider.employee?.first_name }}</span>
-            }
-            @if (isBookingExpired(booking)) {
-              <!-- Compact "VENCIDA" badge for the week-view (which has less
-                   vertical space than the day-view). Mirrors the day-view's
-                   centered status label but fits in ~12px so it doesn't
-                   push other content out of the block. -->
-              <span class="booking-expired-badge">VENCIDA</span>
-            }
-          </div>
+        <!-- Booking blocks, grouped by start time (QUI-971).
+             Single bookings keep the legacy block; same-hour bookings
+             stack vertically so none hides behind another. -->
+        @for (group of getBookingGroupsForDate(day.date); track group.startKey) {
+          @if (group.bookings.length === 1) {
+            @let booking = group.bookings[0];
+            <div
+              class="booking-block"
+              [class]="'status-' + booking.status"
+              [class.expired-pending]="isBookingExpired(booking)"
+              [style.top.%]="getBlockTop(booking)"
+              [style.height.%]="getBlockHeight(booking)"
+              (click)="onBookingClick($event, booking)">
+              <span class="booking-time">{{ formatTime(booking.start_time) }}</span>
+              <span class="booking-title">{{ booking.product?.name }}</span>
+              <span class="booking-customer">{{ booking.customer?.first_name }}</span>
+              @if (booking.provider) {
+                <span class="booking-provider">{{ booking.provider.display_name || booking.provider.employee?.first_name }}</span>
+              }
+              @if (isBookingExpired(booking)) {
+                <!-- Compact "VENCIDA" badge for the week-view (which has less
+                     vertical space than the day-view). Mirrors the day-view's
+                     centered status label but fits in ~12px so it doesn't
+                     push other content out of the block. -->
+                <span class="booking-expired-badge">VENCIDA</span>
+              }
+            </div>
+          } @else {
+            <div
+              class="booking-stack"
+              [style.top.%]="getGroupTop(group)"
+              [style.min-height.%]="getGroupMinHeight(group)"
+              (click)="$event.stopPropagation()"
+              [attr.aria-label]="group.bookings.length + ' citas a las ' + group.startKey">
+              @for (stacked of visibleStackBookings(day.date, group); track stacked.id) {
+                <button
+                  type="button"
+                  class="stack-row"
+                  [class]="'status-' + stacked.status"
+                  [class.expired-pending]="isBookingExpired(stacked)"
+                  (click)="onBookingClick($event, stacked)"
+                  [title]="formatTime(stacked.start_time) + ' · ' + customerName(stacked) + (providerName(stacked) ? ' · ' + providerName(stacked) : '')">
+                  <span class="stack-time">{{ formatTime(stacked.start_time) }}</span>
+                  <span class="stack-customer">{{ customerName(stacked) }}</span>
+                  @if (providerName(stacked)) {
+                    <span class="stack-provider">· {{ providerName(stacked) }}</span>
+                  }
+                </button>
+              }
+              @if (stackHiddenCount(day.date, group) > 0) {
+                <button
+                  type="button"
+                  class="stack-more"
+                  (click)="toggleStackExpanded(day.date, group.startKey, $event)">
+                  +{{ stackHiddenCount(day.date, group) }} más
+                </button>
+              } @else if (isStackExpanded(day.date, group.startKey)) {
+                <button
+                  type="button"
+                  class="stack-more"
+                  (click)="toggleStackExpanded(day.date, group.startKey, $event)">
+                  Ver menos
+                </button>
+              }
+            </div>
+          }
         }
 
         <!-- Current time indicator (only on today) -->

@@ -100,6 +100,9 @@ export const KNOWN_SECTIONS = [
   // still off — a switch that silently refuses to move, in the other
   // direction.
   'vex',
+  // Apps module switch (apps-module T8). Same rule as `vex`: unlisted, the
+  // sanitizer drops it and the switch silently refuses to move.
+  'apps',
   // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & UI
   'promotions',
   // Pedidos programados y adiciones (venta por encargo). Sección + DTO, ver `invoicing`.
@@ -521,6 +524,22 @@ export class SettingsService {
       }
     }
 
+    // El interruptor de Apps reordena el menú lateral de toda la tienda, así
+    // que es exclusivo del propietario (apps-module T8): ni `admin` ni
+    // `manager`, aunque tengan `store:settings:update`.
+    if (dto.apps !== undefined) {
+      const roles = RequestContextService.getRoles();
+      const esPropietario = roles.some((role) =>
+        ['owner', 'STORE_OWNER', 'ORG_OWNER', 'super_admin'].includes(role),
+      );
+      if (!esPropietario) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_FORBIDDEN_001,
+          'Solo el propietario de la tienda puede activar o desactivar el módulo Apps.',
+        );
+      }
+    }
+
     // Validar que el sonido de notificación referenciado exista en el
     // catálogo global y esté activo. Permitimos null (sin sonido).
     const incomingSoundId = dto.notifications?.sound_id;
@@ -687,6 +706,14 @@ export class SettingsService {
       (updatedSettings as any).vex = {
         ...((currentSettings as any).vex ?? {}),
         ...dto.vex,
+      };
+    }
+
+    // `apps` se mezcla por clave, como `vex`.
+    if (dto.apps !== undefined) {
+      (updatedSettings as any).apps = {
+        ...((currentSettings as any).apps ?? {}),
+        ...dto.apps,
       };
     }
 

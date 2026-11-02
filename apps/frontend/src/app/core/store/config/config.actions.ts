@@ -1,5 +1,5 @@
 import { createAction, props } from '@ngrx/store';
-import { AppConfig } from '../../services/app-config.service';
+import type { AppConfig } from '../../services/app-config.service';
 import { AppEnvironment } from '../../models/domain-config.interface';
 
 /**

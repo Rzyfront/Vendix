@@ -4805,6 +4805,20 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/crm/landing',
       method: 'PUT',
     },
+
+    // Apps — catálogo de aplicaciones web por tienda (odd/tasks/apps-module.md)
+    {
+      name: 'store:apps:read',
+      description: 'Ver el catálogo de Apps de la tienda con su estado y dominio',
+      path: '/api/store/apps',
+      method: 'GET',
+    },
+    {
+      name: 'store:apps:manage',
+      description: 'Activar y desactivar las Apps de la tienda',
+      path: '/api/store/apps/:kind/activate',
+      method: 'POST',
+    },
   ];
 
   // Create-only seed: never delete existing permission rows.

@@ -334,6 +334,9 @@ jobs:
           --include='**/orders/bulk/orders-bulk-invoice.util.spec.ts'
           --include='**/credit-invoice-modal/credit-invoice-modal.component.spec.ts'
           --include='**/core/services/fiscal-activation-wizard.service.spec.ts'
+          --include='**/integrations/meta-whatsapp/services/meta-whatsapp-config.service.spec.ts'
+          --include='**/integrations/meta-whatsapp/meta-whatsapp-config.component.spec.ts'
+          --include='**/integrations/channels/embedded-signup-flow.spec.ts'
 
   mobile:
     name: Mobile

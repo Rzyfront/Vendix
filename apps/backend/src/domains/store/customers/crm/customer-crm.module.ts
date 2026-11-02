@@ -16,6 +16,8 @@ import { CrmQuotationListener } from './pipeline/crm-quotation.listener';
 import { CrmSegmentsController } from './segments/crm-segments.controller';
 import { CrmSegmentsService } from './segments/crm-segments.service';
 import { CrmSegmentQueryService } from './segments/crm-segment-query.service';
+import { CrmSegmentMembersService } from './segments/crm-segment-members.service';
+import { CrmMembershipsController } from './segments/crm-memberships.controller';
 import { CrmCampaignsController } from './campaigns/crm-campaigns.controller';
 import { CrmCampaignsService } from './campaigns/crm-campaigns.service';
 import { CrmCampaignDispatcher } from './campaigns/crm-campaign.dispatcher';
@@ -36,6 +38,7 @@ import { CrmUnsubscribeService } from './campaigns/crm-unsubscribe.service';
     CrmTasksController,
     CrmPipelineController,
     CrmSegmentsController,
+    CrmMembershipsController,
     CrmCampaignsController,
     CrmUnsubscribeController,
   ],
@@ -48,6 +51,7 @@ import { CrmUnsubscribeService } from './campaigns/crm-unsubscribe.service';
     CrmQuotationListener,
     CrmSegmentQueryService,
     CrmSegmentsService,
+    CrmSegmentMembersService,
     CrmCampaignsService,
     CrmCampaignDispatcher,
     CrmUnsubscribeService,

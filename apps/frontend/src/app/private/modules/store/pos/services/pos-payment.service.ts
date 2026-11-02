@@ -11,6 +11,7 @@ import {
 import { PaymentMethodsCatalogService } from '../../../../../shared/services/payment-methods-catalog.service';
 import { PosCashRegisterService } from './pos-cash-register.service';
 import { CartItem, CartState } from '../models/cart.model';
+import { findUnscheduledStationLine } from './pos-station-booking.service';
 import { resolveLineUnits } from '../utils/line-units.util';
 import {
   PaymentMethod,
@@ -289,6 +290,8 @@ export class PosPaymentService {
         product_variant_id: item.variant_id ?? null,
         provider_id: item.booking.provider_id ?? null,
         provider_name: item.booking.provider_name ?? null,
+        station_id: item.booking.station_id ?? null,
+        station_name: item.booking.station_name ?? null,
         date: item.booking.date,
         start_time: item.booking.start_time,
         end_time: item.booking.end_time,
@@ -536,6 +539,11 @@ export class PosPaymentService {
 
     const register_id = this.getRegisterId();
 
+    // QUI-970: station lines must be scheduled with a persisted booking
+    // before charging — the payments gate rejects them otherwise.
+    const unscheduledStation = findUnscheduledStationLine(cartState);
+    if (unscheduledStation) return throwError(() => new Error(unscheduledStation));
+
     // QUI-649 — bifurcar al processor de orden adoptada: carga el
     // `linkedOrderId` directamente, con table session + restaurant table
     // propagados al backend para que el cierre de mesa refleje el cobro.
@@ -751,6 +759,11 @@ export class PosPaymentService {
 
     const register_id = this.getRegisterId();
 
+    // QUI-970: station lines must be scheduled with a persisted booking
+    // before charging — the payments gate rejects them otherwise.
+    const unscheduledStation = findUnscheduledStationLine(cartState);
+    if (unscheduledStation) return throwError(() => new Error(unscheduledStation));
+
     const customerAlias = shippingData.customerAlias?.trim() || undefined;
     if (!cartState.customer && !customerAlias) {
       return throwError(
@@ -938,6 +951,11 @@ export class PosPaymentService {
       return throwError(() => new Error('Debe seleccionar un cliente.'));
     }
 
+    // QUI-970: station lines must be scheduled with a persisted booking
+    // before charging — the payments gate rejects them otherwise.
+    const unscheduledStation = findUnscheduledStationLine(cartState);
+    if (unscheduledStation) return throwError(() => new Error(unscheduledStation));
+
     // Backend recalculates discounts from `promotion_ids` + `coupon_code`.
     // See `processSaleWithPayment` comment for full rationale.
     const credit_data: any = {
@@ -1020,6 +1038,11 @@ export class PosPaymentService {
     if (!cartState.customer) {
       return throwError(() => new Error('Debe seleccionar un cliente para ventas a crédito.'));
     }
+
+    // QUI-970: station lines must be scheduled with a persisted booking
+    // before charging — the payments gate rejects them otherwise.
+    const unscheduledStation = findUnscheduledStationLine(cartState);
+    if (unscheduledStation) return throwError(() => new Error(unscheduledStation));
 
     // Backend recalculates discounts from `promotion_ids` + `coupon_code`.
     // See `processSaleWithPayment` comment for full rationale.

@@ -50,6 +50,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   settings_price_tiers: '/admin/price-tiers',
 
   ecommerce: '/admin/ecommerce',
+  apps: '/admin/apps',
 
   // Órdenes
   orders: '/admin/orders/sales',
@@ -85,6 +86,10 @@ export const MODULE_ROUTES: Record<string, string> = {
   // Clientes
   customers: '/admin/customers/all',
   customers_all: '/admin/customers/all',
+  customers_inbox: '/admin/customers/inbox',
+  customers_pipeline: '/admin/customers/pipeline',
+  customers_tasks: '/admin/customers/tasks',
+  customers_segments: '/admin/customers/segments',
   customers_reviews: '/admin/customers/reviews',
   customers_data_collection: '/admin/data-collection',
   customers_crm: '/admin/customers/crm',

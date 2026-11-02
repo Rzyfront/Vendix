@@ -83,6 +83,13 @@ export interface StoreSettings {
   vex?: VexSettings;
 
   /**
+   * Apps module switch (odd/tasks/apps-module.md, D3/T8). Mirrors backend
+   * `AppsSettings`. Absent or `false` keeps the sidebar exactly as before the
+   * module existed; only an explicit `true` shows the "Apps" group.
+   */
+  apps?: AppsSettings;
+
+  /**
    * Parámetros de emisión fiscal que la ley deja al contribuyente. Espejo de
    * `InvoicingSettingsDto` en
    * `apps/backend/src/domains/store/settings/dto/settings-schemas.dto.ts`.
@@ -137,6 +144,11 @@ export interface VexiSettings {
    * único que pasa por la tarjeta de aprobación del panel.
    */
   voice_engine?: 'realtime' | 'pipeline';
+}
+
+/** Apps module switch. Owner-only on the backend (`SYS_FORBIDDEN_001`). */
+export interface AppsSettings {
+  enabled?: boolean;
 }
 
 /**

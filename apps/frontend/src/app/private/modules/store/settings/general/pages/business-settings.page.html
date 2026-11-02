@@ -34,6 +34,22 @@
       (formValidityChange)="store.setGeneralFormValidity($event)" />
   </app-settings-section>
 
+  <!-- Módulo Apps: solo el propietario lo enciende -->
+  @if (canToggleApps()) {
+    <app-settings-section
+      anchorId="section-apps"
+      icon="app-window"
+      iconTone="blue"
+      title="Módulo Apps"
+      hint="Agrupa en el menú lateral las apps web de tu tienda. Apagado, el menú queda como siempre.">
+      <app-setting-toggle
+        label="Activar el módulo Apps"
+        description="Muestra el grupo Apps en el menú lateral, con la Tienda en línea y la Landing page."
+        [ngModel]="appsEnabled()"
+        (ngModelChange)="onAppsToggle($event)" />
+    </app-settings-section>
+  }
+
   <!-- Personalización -->
   <app-settings-section
     anchorId="section-branding"

@@ -38,6 +38,7 @@ export type {
 } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
 import { PosProductService, Product, PosProductVariant } from './pos-product.service';
+import { PosStationBookingService } from './pos-station-booking.service';
 import { PriceResolverService } from '../../../../../shared/services/pricing';
 import {
   OptionDeltaParts,
@@ -107,6 +108,7 @@ export class PosCartService {
   private priceTierCache = inject(PriceTierCacheService);
   private authFacade = inject(AuthFacade);
   private storeSettingsFacade = inject(StoreSettingsFacade);
+  private stationBookings = inject(PosStationBookingService);
 
   /** Only an explicit store opt-in permits negative sellable stock. */
   readonly allowNegativeStock = computed(
@@ -578,14 +580,53 @@ export class PosCartService {
    * pero la línea sobrevivía en el backend y reaparecía al resincronizar.
    */
   removeFromCart(itemId: string): Observable<CartState> {
+    // QUI-970 — a station line scheduled here already holds an orderless
+    // booking; dropping the line must release it (see releaseStationBookings).
+    const orphanIds = this.stationBookings.posCreatedBookingIds(
+      this.cartState().items.filter((item) => item.id === itemId),
+    );
     const adoptedId = this.cartState().linkedOrderId;
     if (adoptedId != null) {
-      return this.removeItemFromAdoptedOrder(itemId, adoptedId);
+      return this.removeItemFromAdoptedOrder(itemId, adoptedId).pipe(
+        tap(() => this.releaseStationBookings(orphanIds)),
+      );
     }
     return of(itemId).pipe(
       map((id) => this.processRemoveFromCart(id)),
       tap((newState) => this.cartState.set(newState)),
+      tap(() => this.releaseStationBookings(orphanIds)),
     );
+  }
+
+  /**
+   * QUI-970 — the cashier empties the cart without charging ("Vaciar").
+   * Cancels the orderless station bookings this POS created for its lines,
+   * then runs the regular `clearCart()`. Not used by the flows that hand
+   * the cart elsewhere (table, station account, kitchen), which call
+   * `clearCart()` directly.
+   */
+  abandonCart(): Observable<CartState> {
+    const orphanIds = this.stationBookings.posCreatedBookingIds(
+      this.cartState().items,
+    );
+    this.stationBookings.cancelOrphanBookings(orphanIds).subscribe();
+    return this.clearCart();
+  }
+
+  /**
+   * QUI-970 — cancels the given POS-created station bookings and drops
+   * them from `pendingBookings`, so neither the agenda keeps a ghost
+   * appointment nor the pay guard counts them for another line.
+   */
+  private releaseStationBookings(ids: ReadonlyArray<number>): void {
+    if (ids.length === 0) return;
+    const current = this.cartState();
+    this.cartState.set({
+      ...current,
+      pendingBookings: current.pendingBookings.filter((b) => !ids.includes(b.id)),
+      updatedAt: new Date(),
+    });
+    this.stationBookings.cancelOrphanBookings(ids).subscribe();
   }
 
   /**
@@ -625,6 +666,9 @@ export class PosCartService {
       tap((newState) => {
         this.cartState.set(newState);
         this.clearStorage();
+        // QUI-970 — once the cart resets, its station bookings are either
+        // charged (linked to the order) or already cancelled.
+        this.stationBookings.forgetAll();
       }),
     );
   }

@@ -399,10 +399,11 @@ export class CrmCampaignsService {
 
     const saved = await this.prisma.crm_segments.findFirst({
       where: { id: content.segment_id },
-      select: { filter: true },
+      select: { id: true, filter: true, is_dynamic: true },
     });
     if (!saved) throw new VendixHttpException(ErrorCodes.CRM_SEGMENT_002);
-    const segment = await this.segments.resolve(saved.filter, now);
+    // Rules ∪ customers added by hand, the same audience the segment lists.
+    const segment = await this.segments.resolveSaved(saved, now);
 
     const max = this.maxRecipients();
     const [rows, segmentTotal, store] = await Promise.all([

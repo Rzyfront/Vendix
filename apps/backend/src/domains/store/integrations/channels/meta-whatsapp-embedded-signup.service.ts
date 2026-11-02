@@ -1,3 +1,4 @@
+import { randomInt } from 'crypto';
 import {
   BadRequestException,
   ForbiddenException,
@@ -5,11 +6,17 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { CompleteWhatsappEmbeddedSignupDto } from './dto';
 import { ChannelEncryptionService } from './channel-encryption.service';
+import {
+  META_WHATSAPP_PLATFORM_SETTINGS_KEY,
+  MetaWhatsappPlatformConfig,
+  resolveMetaWhatsappPlatformConfig,
+} from './meta-whatsapp-platform-config.resolver';
 
 type MetaReadinessStatus =
   | 'missing_env'
@@ -30,18 +37,14 @@ interface MetaTokenResponse {
   };
 }
 
-interface MetaWhatsappPlatformConfig {
-  source: 'platform_settings' | 'environment';
-  app_id?: string | null;
-  app_secret?: string | null;
-  whatsapp_config_id?: string | null;
-  verify_token?: string | null;
-  graph_version?: string | null;
-  app_review_status?: string | null;
-  allow_dev_signup?: boolean | string | null;
-}
-
-const PLATFORM_SETTINGS_KEY = 'social_sales:meta_whatsapp';
+// A type alias (not an interface) so it is assignable to Prisma's Json input.
+type RegistrationState = {
+  pin_encrypted?: string;
+  status: 'registered' | 'failed';
+  attempted_at: string;
+  registered_at?: string;
+  error?: string;
+};
 
 @Injectable()
 export class MetaWhatsappEmbeddedSignupService {
@@ -96,7 +99,7 @@ export class MetaWhatsappEmbeddedSignupService {
       allow_dev_signup,
       can_start_signup,
       source: platformConfig.source,
-      platform_settings_key: PLATFORM_SETTINGS_KEY,
+      platform_settings_key: META_WHATSAPP_PLATFORM_SETTINGS_KEY,
       app_id: platformConfig.app_id || null,
       whatsapp_config_id: platformConfig.whatsapp_config_id || null,
       graph_version: platformConfig.graph_version || null,
@@ -135,14 +138,16 @@ export class MetaWhatsappEmbeddedSignupService {
           'Meta no retorno access_token para Embedded Signup',
       );
     }
+    const accessToken = tokenResponse.access_token;
 
-    const encryptedToken = this.encryption.encrypt(tokenResponse.access_token);
+    const ids = await this.resolveSignupIds(dto, accessToken, platformConfig);
+    const encryptedToken = this.encryption.encrypt(accessToken);
     const token_expires_at = tokenResponse.expires_in
       ? new Date(Date.now() + tokenResponse.expires_in * 1000)
       : null;
     const webhookSubscription = await this.subscribeWaba(
-      dto.waba_id,
-      tokenResponse.access_token,
+      ids.waba_id,
+      accessToken,
       platformConfig,
     );
     const connected_at = new Date();
@@ -153,13 +158,21 @@ export class MetaWhatsappEmbeddedSignupService {
         provider: 'meta_cloud',
       },
     });
+    const previousMetadata = this.asRecord(existing?.metadata) ?? {};
+
+    const registration = await this.registerPhoneNumber(
+      ids.phone_number_id,
+      accessToken,
+      platformConfig,
+      this.asRecord(previousMetadata.registration) as RegistrationState | null,
+    );
 
     const data = {
       channel_type: 'whatsapp',
       provider: 'meta_cloud',
-      status: 'connected',
-      waba_id: dto.waba_id,
-      phone_number_id: dto.phone_number_id,
+      status: registration.status === 'registered' ? 'connected' : 'error',
+      waba_id: ids.waba_id,
+      phone_number_id: ids.phone_number_id,
       display_phone_number: dto.display_phone_number || null,
       business_account_id: dto.business_account_id || null,
       access_token_encrypted: encryptedToken,
@@ -167,17 +180,17 @@ export class MetaWhatsappEmbeddedSignupService {
       token_expires_at,
       connected_at,
       disconnected_at: null,
-      last_error:
-        webhookSubscription.status === 'failed'
-          ? webhookSubscription.message
-          : null,
+      last_error: this.buildLastError(registration, webhookSubscription),
       metadata: {
+        ...previousMetadata,
         embedded_signup: {
           completed_at: connected_at.toISOString(),
           config_id: platformConfig.whatsapp_config_id,
+          ...(ids.note ? { note: ids.note } : {}),
         },
         webhook_subscription: webhookSubscription,
-      },
+        registration,
+      } as Prisma.InputJsonValue,
     };
 
     if (existing) {
@@ -197,6 +210,87 @@ export class MetaWhatsappEmbeddedSignupService {
         },
       });
     }
+
+    return this.getWhatsappChannel();
+  }
+
+  /**
+   * Retries the phone number registration for a channel that never completed
+   * it (channels connected before registration existed, or a failed attempt).
+   * Meta limits register to 10 requests per 72 hours, so this is only ever
+   * triggered by an explicit user action, never in a loop.
+   */
+  async retryWhatsappRegistration() {
+    this.requireStoreId();
+    if (!this.encryption.isEnabled) {
+      throw new BadRequestException(
+        'SOCIAL_CHANNEL_ENCRYPTION_KEY es obligatoria para registrar el número',
+      );
+    }
+
+    const existing = await this.prisma.social_channels.findFirst({
+      where: {
+        channel_type: 'whatsapp',
+        provider: 'meta_cloud',
+      },
+    });
+    if (
+      !existing ||
+      existing.status === 'disconnected' ||
+      !existing.phone_number_id ||
+      !existing.access_token_encrypted
+    ) {
+      throw new BadRequestException(
+        'No hay un canal de WhatsApp conectado para registrar. Conéctalo primero.',
+      );
+    }
+
+    const metadata = this.asRecord(existing.metadata) ?? {};
+    const previous = this.asRecord(
+      metadata.registration,
+    ) as RegistrationState | null;
+    if (previous?.status === 'registered') {
+      return this.getWhatsappChannel();
+    }
+
+    let accessToken: string;
+    try {
+      accessToken = this.encryption.decrypt(existing.access_token_encrypted);
+    } catch {
+      throw new BadRequestException(
+        'No se pudo leer el token del canal. Desconecta y vuelve a conectar WhatsApp.',
+      );
+    }
+
+    const platformConfig = await this.getPlatformConfig();
+    const registration = await this.registerPhoneNumber(
+      existing.phone_number_id,
+      accessToken,
+      platformConfig,
+      previous,
+    );
+    // A channel connected before registration existed may already send
+    // (registered outside Vendix). A failed retry must not take it offline:
+    // keep 'connected' and only surface the error.
+    const failedStatus =
+      existing.status === 'connected' && !previous ? 'connected' : 'error';
+
+    await this.prisma.social_channels.updateMany({
+      where: {
+        id: existing.id,
+        channel_type: 'whatsapp',
+        provider: 'meta_cloud',
+      },
+      data: {
+        status:
+          registration.status === 'registered' ? 'connected' : failedStatus,
+        last_error: this.buildLastError(
+          registration,
+          this.asRecord(metadata.webhook_subscription),
+        ),
+        metadata: { ...metadata, registration } as Prisma.InputJsonValue,
+      },
+    });
 
     return this.getWhatsappChannel();
   }
@@ -266,6 +360,189 @@ export class MetaWhatsappEmbeddedSignupService {
     }
 
     return platformConfig;
+  }
+
+  private buildLastError(
+    registration: RegistrationState,
+    webhookSubscription: Record<string, any> | null,
+  ): string | null {
+    if (registration.status === 'failed') return registration.error ?? null;
+    return webhookSubscription?.status === 'failed'
+      ? (webhookSubscription.message ?? null)
+      : null;
+  }
+
+  /**
+   * Registers the number on the Cloud API (required, otherwise sending fails
+   * with error 133010). Never throws: a failure is stored on the channel so
+   * the token and ids already obtained are kept.
+   *
+   * Docs: https://developers.facebook.com/documentation/business-messaging/whatsapp/business-phone-numbers/registration.md
+   * The endpoint "responds with true" on success. The docs define no
+   * "already registered" error code, so none is special-cased: only
+   * `success: true` counts as registered. Error 133016 means the limit of
+   * 10 register requests per 72 hours was hit.
+   */
+  private async registerPhoneNumber(
+    phoneNumberId: string,
+    accessToken: string,
+    platformConfig: MetaWhatsappPlatformConfig,
+    previous: RegistrationState | null,
+  ): Promise<RegistrationState> {
+    const attempted_at = new Date().toISOString();
+    const pin = this.resolvePin(previous);
+    const pin_encrypted = this.encryption.encrypt(pin);
+    const url = `https://graph.facebook.com/${platformConfig.graph_version}/${phoneNumberId}/register`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ messaging_product: 'whatsapp', pin }),
+      });
+      const body: any = await response.json().catch(() => ({}));
+
+      if (response.ok && body?.success === true) {
+        return {
+          pin_encrypted,
+          status: 'registered',
+          attempted_at,
+          registered_at: new Date().toISOString(),
+        };
+      }
+
+      const code = body?.error?.code;
+      const detail = this.extractMetaError(body);
+      return {
+        pin_encrypted,
+        status: 'failed',
+        attempted_at,
+        error: `No se pudo registrar el número en WhatsApp${
+          code ? ` (código ${code})` : ''
+        }${detail ? `: ${detail}` : ''}. Puedes reintentar el registro más tarde.`,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `WhatsApp register request failed: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+      return {
+        pin_encrypted,
+        status: 'failed',
+        attempted_at,
+        error:
+          'No se pudo registrar el número en WhatsApp por un error de conexión. Puedes reintentar el registro más tarde.',
+      };
+    }
+  }
+
+  /** Reuses the stored PIN so a later re-register keeps the same 2FA PIN. */
+  private resolvePin(previous: RegistrationState | null): string {
+    if (previous?.pin_encrypted) {
+      try {
+        const stored = this.encryption.decrypt(previous.pin_encrypted);
+        if (/^\d{6}$/.test(stored)) return stored;
+      } catch {
+        // Unreadable stored PIN: generate a new one.
+      }
+    }
+    return String(randomInt(0, 1_000_000)).padStart(6, '0');
+  }
+
+  /**
+   * Completes waba_id / phone_number_id when the popup closed before the
+   * session event delivered them.
+   */
+  private async resolveSignupIds(
+    dto: CompleteWhatsappEmbeddedSignupDto,
+    accessToken: string,
+    platformConfig: MetaWhatsappPlatformConfig,
+  ): Promise<{ waba_id: string; phone_number_id: string; note?: string }> {
+    let waba_id = dto.waba_id || null;
+    let phone_number_id = dto.phone_number_id || null;
+    let note: string | undefined;
+
+    if (!waba_id) {
+      waba_id = await this.lookupWabaIdFromToken(accessToken, platformConfig);
+    }
+    if (!phone_number_id && waba_id) {
+      const numbers = await this.listPhoneNumberIds(
+        waba_id,
+        accessToken,
+        platformConfig,
+      );
+      phone_number_id = numbers[0] ?? null;
+      if (numbers.length > 1) {
+        note = `La cuenta tiene ${numbers.length} números; se usó el primero.`;
+      }
+    }
+
+    if (!waba_id || !phone_number_id) {
+      throw new BadRequestException(
+        'No pudimos identificar la cuenta o el número de WhatsApp que conectaste. Vuelve a intentarlo y pulsa "Finalizar" al terminar.',
+      );
+    }
+    return { waba_id, phone_number_id, note };
+  }
+
+  private async lookupWabaIdFromToken(
+    accessToken: string,
+    platformConfig: MetaWhatsappPlatformConfig,
+  ): Promise<string | null> {
+    // NOT verified in the current Meta docs: debug_token's granular_scopes
+    // list the assets the user granted per scope. Defensive best effort.
+    const params = new URLSearchParams({
+      input_token: accessToken,
+      access_token: `${platformConfig.app_id}|${platformConfig.app_secret}`,
+    });
+    const body = await this.graphGet(
+      `https://graph.facebook.com/${platformConfig.graph_version}/debug_token?${params.toString()}`,
+    );
+    const scopes: any[] = Array.isArray(body?.data?.granular_scopes)
+      ? body.data.granular_scopes
+      : [];
+    const scope = scopes.find(
+      (s) => s?.scope === 'whatsapp_business_management',
+    );
+    const id = scope?.target_ids?.[0];
+    return typeof id === 'string' && id ? id : null;
+  }
+
+  private async listPhoneNumberIds(
+    wabaId: string,
+    accessToken: string,
+    platformConfig: MetaWhatsappPlatformConfig,
+  ): Promise<string[]> {
+    const body = await this.graphGet(
+      `https://graph.facebook.com/${platformConfig.graph_version}/${wabaId}/phone_numbers`,
+      accessToken,
+    );
+    const rows: any[] = Array.isArray(body?.data) ? body.data : [];
+    return rows
+      .map((row) => row?.id)
+      .filter((id): id is string => typeof id === 'string' && !!id);
+  }
+
+  private async graphGet(url: string, accessToken?: string): Promise<any> {
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        ...(accessToken
+          ? { headers: { Authorization: `Bearer ${accessToken}` } }
+          : {}),
+      });
+      if (!response.ok) return null;
+      return await response.json().catch(() => null);
+    } catch (error) {
+      this.logger.warn(
+        `Graph lookup failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+      return null;
+    }
   }
 
   private async exchangeCodeForToken(
@@ -352,6 +629,9 @@ export class MetaWhatsappEmbeddedSignupService {
       };
     }
 
+    const metadata = this.asRecord(channel.metadata);
+    const registration = this.asRecord(metadata?.registration);
+
     return {
       id: channel.id,
       connected: channel.status === 'connected',
@@ -366,8 +646,20 @@ export class MetaWhatsappEmbeddedSignupService {
       connected_at: channel.connected_at,
       disconnected_at: channel.disconnected_at,
       last_error: channel.last_error,
-      metadata: channel.metadata,
+      registration_status: registration?.status ?? null,
+      metadata: this.stripRegistrationSecret(metadata),
     };
+  }
+
+  /** The encrypted PIN must never leave the server. */
+  private stripRegistrationSecret(
+    metadata: Record<string, any> | null,
+  ): Record<string, any> | null {
+    if (!metadata) return null;
+    const registration = this.asRecord(metadata.registration);
+    if (!registration) return metadata;
+    const { pin_encrypted: _pin, ...safe } = registration;
+    return { ...metadata, registration: safe };
   }
 
   private maskPhone(phone?: string | null): string | null {
@@ -396,50 +688,12 @@ export class MetaWhatsappEmbeddedSignupService {
     return value as Record<string, any>;
   }
 
-  private async getPlatformConfig(): Promise<MetaWhatsappPlatformConfig> {
-    const row = await this.globalPrisma.platform_settings.findUnique({
-      where: { key: PLATFORM_SETTINGS_KEY },
-    });
-    const value = this.asRecord(row?.value);
-
-    if (value) {
-      return {
-        source: 'platform_settings',
-        app_id: this.stringOrNull(value.app_id),
-        app_secret: this.resolveStoredSecret(
-          this.stringOrNull(value.app_secret),
-          this.stringOrNull(value.app_secret_encrypted),
-        ),
-        whatsapp_config_id: this.stringOrNull(value.whatsapp_config_id),
-        verify_token: this.resolveStoredSecret(
-          this.stringOrNull(value.verify_token),
-          this.stringOrNull(value.verify_token_encrypted),
-        ),
-        graph_version: this.stringOrNull(value.graph_version) || 'v23.0',
-        app_review_status: this.stringOrNull(value.app_review_status),
-        allow_dev_signup: value.allow_dev_signup as string | boolean | null,
-      };
-    }
-
-    return {
-      source: 'environment',
-      app_id: this.configService.get<string>('META_APP_ID'),
-      app_secret: this.configService.get<string>('META_APP_SECRET'),
-      whatsapp_config_id: this.configService.get<string>(
-        'META_WHATSAPP_CONFIG_ID',
-      ),
-      verify_token: this.configService.get<string>(
-        'META_WHATSAPP_VERIFY_TOKEN',
-      ),
-      graph_version:
-        this.configService.get<string>('META_GRAPH_VERSION') || 'v23.0',
-      app_review_status: this.configService.get<string>(
-        'META_WHATSAPP_APP_REVIEW_STATUS',
-      ),
-      allow_dev_signup: this.configService.get<string>(
-        'META_WHATSAPP_ALLOW_DEV_SIGNUP',
-      ),
-    };
+  private getPlatformConfig(): Promise<MetaWhatsappPlatformConfig> {
+    return resolveMetaWhatsappPlatformConfig(
+      this.globalPrisma,
+      this.configService,
+      this.encryption,
+    );
   }
 
   private getConfigValue(
@@ -460,17 +714,5 @@ export class MetaWhatsappEmbeddedSignupService {
     }
 
     return platformConfig[map[envName]] as string | null | undefined;
-  }
-
-  private resolveStoredSecret(
-    plainValue?: string | null,
-    encryptedValue?: string | null,
-  ): string | null {
-    if (encryptedValue) return this.encryption.decrypt(encryptedValue);
-    return plainValue || null;
-  }
-
-  private stringOrNull(value: unknown): string | null {
-    return typeof value === 'string' && value.trim() ? value : null;
   }
 }

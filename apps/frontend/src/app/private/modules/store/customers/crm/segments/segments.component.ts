@@ -113,7 +113,12 @@ const PAGE_SIZE = 25;
               @for (segment of visibleSegments(); track segment.id) {
                 <li class="flex flex-col gap-2 py-3 md:flex-row md:items-center md:justify-between">
                   <div class="min-w-0">
-                    <p class="text-sm font-semibold text-[var(--color-text-primary)]">{{ segment.name }}</p>
+                    <p class="flex flex-wrap items-center gap-2 text-sm font-semibold text-[var(--color-text-primary)]">
+                      {{ segment.name }}
+                      @if (!segment.is_dynamic) {
+                        <app-badge variant="neutral" size="xs">Manual</app-badge>
+                      }
+                    </p>
                     @if (segment.description) {
                       <p class="text-xs text-[var(--color-text-secondary)]">{{ segment.description }}</p>
                     }

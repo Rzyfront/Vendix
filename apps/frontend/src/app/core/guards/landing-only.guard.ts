@@ -31,6 +31,9 @@ export class LandingOnlyGuard implements CanActivate {
     'VENDIX_LANDING',
     'ORG_LANDING',
     'STORE_LANDING',
+    // Apps · inicio de tienda: the store's `{tienda}-store` entry page, a
+    // landing context like STORE_LANDING (its button opens this login).
+    'STORE_HOME',
   ];
 
   // Routes that are allowed from ANY app type (including ADMIN)
