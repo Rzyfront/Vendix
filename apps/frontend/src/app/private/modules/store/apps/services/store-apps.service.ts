@@ -10,7 +10,7 @@ import {
 
 /**
  * Client of the Apps catalog (`GET /store/apps`, permission `store:apps:read`)
- * and of the product page (Fase 2), service page (Fase 3) and booking (Fase 4) activation
+ * and of the store home (Fase 5), product page (Fase 2), service page (Fase 3) and booking (Fase 4) activation
  * (`store:apps:manage`).
  */
 @Injectable({ providedIn: 'root' })
@@ -93,5 +93,19 @@ export class StoreAppsService {
     return this.http.get<{ data: ProductPageCustomDomain[] }>(
       `${this.apiUrl}/booking/custom-domains`,
     );
+  }
+
+  saveStoreHomeConfig(body: { footer_text: string | null }): Observable<unknown> {
+    return this.http.patch(`${this.apiUrl}/store-home/config`, body);
+  }
+
+  /** Switches the store's `{tienda}-store` domain to the store home. */
+  publishStoreHome(): Observable<unknown> {
+    return this.http.post(`${this.apiUrl}/store-home/publish`, {});
+  }
+
+  /** Gives `{tienda}-store` back the landing it served before. */
+  unpublishStoreHome(): Observable<unknown> {
+    return this.http.post(`${this.apiUrl}/store-home/unpublish`, {});
   }
 }

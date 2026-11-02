@@ -56,12 +56,10 @@ describe('toAppCard (apps-module T6)', () => {
     expect(card.action).toEqual({ kind: 'disabled', label: 'No aplica a tu industria' });
   });
 
-  it('las apps sin pantalla todavía se muestran como próximamente', () => {
-    for (const key of ['store_home'] as const) {
-      expect(toAppCard(app({ key }), 'hybrid').action)
-        .withContext(key)
-        .toEqual({ kind: 'disabled', label: 'Próximamente' });
-    }
+  it('Inicio de tienda se configura desde la misma pantalla de Apps', () => {
+    const card = toAppCard(app({ key: 'store_home', name: 'Inicio de tienda' }), 'physical');
+
+    expect(card.action).toEqual({ kind: 'configure', label: 'Configurar' });
   });
 
   it('Página de producto se configura desde la misma pantalla de Apps', () => {

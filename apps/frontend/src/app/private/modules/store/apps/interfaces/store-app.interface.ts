@@ -70,3 +70,9 @@ export interface ServicePageConfig {
 export interface BookingPageConfig {
   product_ids: number[];
 }
+
+/** `store_apps.config` of the store home (backend `store-home.reader.ts`). */
+export interface StoreHomeConfig {
+  /** Footer line about Vendix; `null` = Vendix's default tagline. */
+  footer_text: string | null;
+}
