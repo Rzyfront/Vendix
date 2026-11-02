@@ -901,6 +901,12 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.lodging_units;
   }
 
+  // Apps: the public booking page counts active room types by store_id
+  // before deciding whether the page exists.
+  get lodging_unit_types() {
+    return this.baseClient.lodging_unit_types;
+  }
+
   get lodging_room_nights() {
     return this.baseClient.lodging_room_nights;
   }
