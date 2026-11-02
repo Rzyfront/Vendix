@@ -508,6 +508,10 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
               <div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 text-center">
                 No hay especialistas registrados específicamente para este servicio. Se asignará automáticamente.
               </div>
+            } @else if (slotsError() && !providersLoading() && !slotsLoading()) {
+              <div class="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-800 text-center">
+                No se pudo cargar la disponibilidad. Vuelve al paso anterior o intenta de nuevo.
+              </div>
             } @else if (noAvailabilityForSlot() && !providersLoading() && !slotsLoading()) {
               <div class="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 text-center">
                 No hay profesionales disponibles en este horario.
@@ -979,10 +983,42 @@ export class BookingSchedulerModalComponent {
    * offer phantom 08:00–20:00 hours. Without service context (no
    * product resolved) it keeps the legacy static grid.
    */
+  /**
+   * Day slots normalized by start time. The station route emits one slot
+   * per (station, start), so the same start repeats once per station;
+   * the grid tracks by `slot.start` (duplicate keys throw NG0955) and
+   * the provider lookup would only see the first station. Merging
+   * providers across stations per start keeps station services working
+   * here until they get their station picker (QUI-970). No-op for
+   * non-station routes (one slot per start).
+   */
+  readonly mergedDaySlots = computed<AvailabilitySlotOption[]>(() => {
+    const byStart = new Map<string, AvailabilitySlotOption>();
+    for (const s of this.daySlots()) {
+      const prev = byStart.get(s.start_time);
+      if (!prev) {
+        byStart.set(s.start_time, {
+          ...s,
+          available_providers: [...(s.available_providers ?? [])],
+        });
+        continue;
+      }
+      const ids = new Set(prev.available_providers.map((p) => p.id));
+      for (const p of s.available_providers ?? []) {
+        if (!ids.has(p.id)) {
+          ids.add(p.id);
+          prev.available_providers.push(p);
+        }
+      }
+      prev.total_available = (prev.total_available ?? 0) + (s.total_available ?? 0);
+    }
+    return [...byStart.values()];
+  });
+
   readonly availableTimeSlots = computed<Array<{ start: string; end: string }>>(() => {
     if (!this.serviceId()) return this.legacyStaticSlots();
     if (this.slotsLoadedFor() !== this.date()) return [];
-    return this.daySlots()
+    return this.mergedDaySlots()
       .filter((s) => (s.total_available ?? 0) > 0)
       .map((s) => ({ start: s.start_time, end: s.end_time }));
   });
@@ -1017,7 +1053,7 @@ export class BookingSchedulerModalComponent {
     const all = this.providers();
     if (!this.isProviderRequired()) return all;
     if (!this.serviceId() || this.slotsLoadedFor() !== this.date()) return all;
-    const slot = this.daySlots().find((s) => s.start_time === this.startTime());
+    const slot = this.mergedDaySlots().find((s) => s.start_time === this.startTime());
     if (!slot) return [];
     const ids = new Set((slot.available_providers ?? []).map((p) => p.id));
     return all.filter((p) => ids.has(p.id));
@@ -1028,6 +1064,7 @@ export class BookingSchedulerModalComponent {
     return (
       this.isProviderRequired() &&
       !!this.serviceId() &&
+      !this.slotsError() &&
       this.slotsLoadedFor() === this.date() &&
       this.providers().length > 0 &&
       this.availableProvidersForSlot().length === 0
@@ -1159,6 +1196,7 @@ export class BookingSchedulerModalComponent {
     effect(() => {
       if (!this.isProviderRequired()) return;
       if (!this.serviceId() || this.slotsLoadedFor() !== this.date()) return;
+      if (this.slotsError()) return;
       const id = this.providerId();
       if (
         id !== null &&
