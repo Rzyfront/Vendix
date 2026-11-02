@@ -12,6 +12,22 @@ import { WithholdingTaxService } from '../../withholding-tax/services/withholdin
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import { PosStationBookingService } from './pos-station-booking.service';
+
+/**
+ * QUI-970 — PosCartService injects PosStationBookingService (HttpClient-backed)
+ * to release the orderless station bookings this POS created. These specs do
+ * not exercise HTTP: by default no line owns a POS-created booking.
+ */
+const stationBookingsStub = (posCreatedIds: number[] = []) => ({
+  posCreatedBookingIds: jasmine
+    .createSpy('posCreatedBookingIds')
+    .and.returnValue(posCreatedIds),
+  cancelOrphanBookings: jasmine
+    .createSpy('cancelOrphanBookings')
+    .and.returnValue(of(undefined)),
+  forgetAll: jasmine.createSpy('forgetAll'),
+});
 
 /**
  * CP-POS-CREAR-EDITAR-COBRAR-001 — G.1 / D.1
@@ -95,6 +111,7 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
         // aserción. Mismo doble que ya usan los demás describes del archivo.
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: inventorySettings } },
+        { provide: PosStationBookingService, useValue: stationBookingsStub() },
       ],
     });
 
@@ -313,6 +330,7 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
         // aserción. Mismo doble que ya usan los demás describes del archivo.
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
+        { provide: PosStationBookingService, useValue: stationBookingsStub() },
       ],
     });
 
@@ -488,6 +506,7 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
  */
 describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
   let service: PosCartService;
+  let stationBookings: ReturnType<typeof stationBookingsStub>;
 
   const cartLine = (id: string) =>
     ({
@@ -512,6 +531,7 @@ describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
   };
 
   beforeEach(() => {
+    stationBookings = stationBookingsStub();
     TestBed.configureTestingModule({
       providers: [
         PosCartService,
@@ -529,6 +549,7 @@ describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
         { provide: CurrencyFormatService, useValue: {} },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
+        { provide: PosStationBookingService, useValue: stationBookings },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -545,7 +566,38 @@ describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
       done();
     });
   });
+  it('libera la reserva de estación creada por el POS al quitar su línea (QUI-970)', (done) => {
+    seedCartWithOneItem();
+    service.cartState.set({
+      ...service.cartState(),
+      pendingBookings: [
+        { id: 42, booking_number: 'BK-42' } as any,
+        { id: 7, booking_number: 'BK-7' } as any,
+      ],
+    });
+    stationBookings.posCreatedBookingIds.and.returnValue([42]);
+
+    service.removeFromCart('only-item').subscribe(() => {
+      expect(stationBookings.posCreatedBookingIds).toHaveBeenCalledWith([
+        jasmine.objectContaining({ id: 'only-item' }),
+      ]);
+      expect(stationBookings.cancelOrphanBookings).toHaveBeenCalledWith([42]);
+      // Sólo sale la reserva huérfana; las demás siguen en el carrito.
+      expect(service.cartState().pendingBookings.map((b) => b.id)).toEqual([7]);
+      done();
+    });
+  });
+
+  it('sin reserva creada por el POS no cancela nada al quitar la línea', (done) => {
+    seedCartWithOneItem();
+
+    service.removeFromCart('only-item').subscribe(() => {
+      expect(stationBookings.cancelOrphanBookings).not.toHaveBeenCalled();
+      done();
+    });
+  });
 });
+
 
 /**
  * C.6 CP-pos-exclusive-tax-double-charge — el subtotal del resumen compone
@@ -581,6 +633,7 @@ describe('PosCartService — calculateSummary base neta (C.6)', () => {
         { provide: CurrencyFormatService, useValue: {} },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
+        { provide: PosStationBookingService, useValue: stationBookingsStub() },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -759,6 +812,7 @@ describe('PosCartService — precio con impuesto incluido al repetir producto', 
         { provide: CurrencyFormatService, useValue: {} },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
+        { provide: PosStationBookingService, useValue: stationBookingsStub() },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -909,6 +963,7 @@ describe('PosCartService — tarifa de cliente con impuesto incluido (C.8, terce
         { provide: CurrencyFormatService, useValue: {} },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
+        { provide: PosStationBookingService, useValue: stationBookingsStub() },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -1076,6 +1131,7 @@ describe('PosCartService — applyTierToCartItems (tarifa del cliente)', () => {
         { provide: CurrencyFormatService, useValue: {} },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
+        { provide: PosStationBookingService, useValue: stationBookingsStub() },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -1188,6 +1244,7 @@ describe('PosCartService — precio de oferta a nivel producto (B5/B14)', () => 
         { provide: CurrencyFormatService, useValue: {} },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
+        { provide: PosStationBookingService, useValue: stationBookingsStub() },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -1298,6 +1355,7 @@ describe('PosCartService — isPriceOverridden en centavos enteros (F-225)', () 
         { provide: CurrencyFormatService, useValue: {} },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
+        { provide: PosStationBookingService, useValue: stationBookingsStub() },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -1398,6 +1456,7 @@ describe('PosCartService — updateCartItem preserva/borra notas por línea (pas
         { provide: CurrencyFormatService, useValue: {} },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
+        { provide: PosStationBookingService, useValue: stationBookingsStub() },
       ],
     });
     service = TestBed.inject(PosCartService);
@@ -1509,6 +1568,7 @@ describe('PosCartService — loadFromOrder repone shippingContext (flete del bor
         { provide: CurrencyFormatService, useValue: {} },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
         { provide: StoreSettingsFacade, useValue: { settings: () => ({ inventory: { allow_negative_stock: false } }) } },
+        { provide: PosStationBookingService, useValue: stationBookingsStub() },
       ],
     });
 
