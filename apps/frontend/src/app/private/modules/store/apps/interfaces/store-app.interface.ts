@@ -65,3 +65,8 @@ export interface ServicePageConfig {
   featured_service_ids: number[];
   product_ids: number[];
 }
+
+/** `store_apps.config` of the hotel booking page (backend `booking-page.reader.ts`). */
+export interface BookingPageConfig {
+  product_ids: number[];
+}

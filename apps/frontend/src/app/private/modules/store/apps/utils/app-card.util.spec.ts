@@ -57,7 +57,7 @@ describe('toAppCard (apps-module T6)', () => {
   });
 
   it('las apps sin pantalla todavía se muestran como próximamente', () => {
-    for (const key of ['store_home', 'booking'] as const) {
+    for (const key of ['store_home'] as const) {
       expect(toAppCard(app({ key }), 'hybrid').action)
         .withContext(key)
         .toEqual({ kind: 'disabled', label: 'Próximamente' });
@@ -77,6 +77,15 @@ describe('toAppCard (apps-module T6)', () => {
   it('Service page se configura desde la misma pantalla de Apps', () => {
     const card = toAppCard(
       app({ key: 'service_page', name: 'Service page', status: 'not_installed' }),
+      'hybrid',
+    );
+
+    expect(card.action).toEqual({ kind: 'configure', label: 'Configurar' });
+  });
+
+  it('Booking en un hotel se configura desde la misma pantalla de Apps', () => {
+    const card = toAppCard(
+      app({ key: 'booking', name: 'Booking', applies_to_store_industries: true }),
       'hybrid',
     );
 
