@@ -57,7 +57,33 @@ export function buildProductPageHostname(
     product = `${product}-producto`;
   }
   const label = store ? `${store}-${product}` : product;
+  return firstFreeHostname(label, baseDomain, isTaken);
+}
 
+/**
+ * Hostname of an app with a fixed suffix: `{store}-{suffix}.{base}`
+ * (plan S5, e.g. `{tienda}-service` for the service page). Same collision
+ * and length rules as the product page.
+ */
+export function buildAppSuffixHostname(
+  storeSlug: string,
+  appSuffix: string,
+  baseDomain: string,
+  isTaken: (hostname: string) => boolean,
+): string | null {
+  // Trim the store, never the app suffix: the suffix says which app it is.
+  // Room is kept for a collision suffix (`-50`).
+  const room = MAX_LABEL_LENGTH - appSuffix.length - 1 - 3;
+  const store =
+    cleanHostnameSlug(storeSlug).slice(0, room).replace(/-$/, '') || 'tienda';
+  return firstFreeHostname(`${store}-${appSuffix}`, baseDomain, isTaken);
+}
+
+function firstFreeHostname(
+  label: string,
+  baseDomain: string,
+  isTaken: (hostname: string) => boolean,
+): string | null {
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const suffix = attempt === 1 ? '' : `-${attempt}`;
     const hostname = `${fitLabel(label, suffix)}.${baseDomain}`;

@@ -1,4 +1,5 @@
 import {
+  buildAppSuffixHostname,
   buildProductPageHostname,
   cleanHostnameSlug,
 } from './product-page-hostname';
@@ -65,5 +66,27 @@ describe('buildProductPageHostname', () => {
 describe('cleanHostnameSlug', () => {
   it('strips accents, symbols and repeated hyphens', () => {
     expect(cleanHostnameSlug('  Café -- Ñandú! ')).toBe('cafe-nandu');
+  });
+});
+
+describe('buildAppSuffixHostname', () => {
+  it('builds {store}-{suffix} on the base domain', () => {
+    expect(
+      buildAppSuffixHostname('Spa Las Palmas', 'service', 'vendix.online', free),
+    ).toBe('spa-las-palmas-service.vendix.online');
+  });
+
+  it('adds -2 on collision and keeps the app suffix', () => {
+    const taken = new Set(['roku-service.vendix.online']);
+    expect(
+      buildAppSuffixHostname('roku', 'service', 'vendix.online', (h) => taken.has(h)),
+    ).toBe('roku-service-2.vendix.online');
+  });
+
+  it('trims the store slug, never the suffix, within 63 characters', () => {
+    const host = buildAppSuffixHostname('a'.repeat(80), 'service', 'vendix.online', free)!;
+    const label = host.split('.')[0];
+    expect(label.length).toBeLessThanOrEqual(63);
+    expect(label.endsWith('-service')).toBe(true);
   });
 });
