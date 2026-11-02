@@ -7590,6 +7590,41 @@ export const ErrorCodes = {
     devMessage: 'La app solicitada no existe en el catálogo de Apps.',
   },
 
+  // Apps · product page: the featured product or a complement is not one of
+  // this store's products sold online (active, available for ecommerce, for
+  // sale). Same rule the public page and its sitemap apply.
+  STORE_APPS_002: {
+    code: 'STORE_APPS_002',
+    httpStatus: 400,
+    devMessage:
+      'El producto elegido no está a la venta en línea en esta tienda.',
+  },
+
+  // Apps · product page: publishing needs a featured product first.
+  STORE_APPS_003: {
+    code: 'STORE_APPS_003',
+    httpStatus: 409,
+    devMessage: 'Elige el producto destacado antes de publicar la página.',
+  },
+
+  // Apps · product page: the hostname is built from the featured product, so
+  // the product cannot change while the page is published on that hostname.
+  STORE_APPS_004: {
+    code: 'STORE_APPS_004',
+    httpStatus: 409,
+    devMessage:
+      'Despublica la página para cambiar el producto destacado.',
+  },
+
+  // Apps · product page: the custom domain is not this store's, is not a
+  // custom domain, or already serves the online store or the admin panel.
+  STORE_APPS_005: {
+    code: 'STORE_APPS_005',
+    httpStatus: 400,
+    devMessage:
+      'Ese dominio no se puede usar para la página de producto.',
+  },
+
   // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra
   // tienda como si no está asignada a quien no puede ver todas: no se revela
   // que existe.

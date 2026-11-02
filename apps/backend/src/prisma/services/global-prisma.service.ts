@@ -33,6 +33,11 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.domain_settings;
   }
 
+  /** Apps: public product page and its sitemap read published rows by store. */
+  get store_apps() {
+    return this.baseClient.store_apps;
+  }
+
   get domain_roots() {
     return this.baseClient.domain_roots;
   }

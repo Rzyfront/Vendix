@@ -3,6 +3,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { PublicDomainsService } from '../domains/public-domains.service';
+import { readPublishedProductPage } from '../../store/apps/product-page/product-page.reader';
 import { DomainConfigService } from '@common/config/domain.config';
 import { API_HOSTS, normalizeHostname } from '@common/utils/tenant-hostname.util';
 import { isValidSlug } from '@common/utils/slug.util';
@@ -54,6 +55,9 @@ export class PublicSeoService {
         break;
       case 'STORE_ECOMMERCE':
         xml = await this.buildEcommerceSitemap(context);
+        break;
+      case 'STORE_PRODUCT_PAGE':
+        xml = await this.buildProductPageSitemap(context);
         break;
       default:
         // Admin panels and other private apps — minimal sitemap
@@ -143,6 +147,23 @@ Sitemap: ${context.base_url}/sitemap.xml
 `;
         break;
 
+      case 'STORE_PRODUCT_PAGE':
+        // Apps · product page: the featured product and its complements are
+        // indexable; cart, checkout, account and token pages are not.
+        content = `User-agent: *
+Allow: /
+Allow: /products
+Disallow: /cart
+Disallow: /checkout
+Disallow: /account
+Disallow: /api/
+Disallow: /pedido/
+Disallow: /order/
+
+Sitemap: ${context.base_url}/sitemap.xml
+`;
+        break;
+
       default:
         // Admin panels — block all indexing
         content = `User-agent: *
@@ -182,6 +203,39 @@ Disallow: /
     const urls = [{ path: '/', priority: '1.0', changefreq: 'weekly' }];
 
     return this.buildSitemapXml(context.base_url, urls, now);
+  }
+
+  /**
+   * Apps · product page: only the published page's products, at the same
+   * `/products/{slug}` path the page uses as canonical. The featured product
+   * comes first; `/` redirects to it, so it is not listed separately.
+   */
+  private async buildProductPageSitemap(context: DomainContext): Promise<string> {
+    const page = context.store_id
+      ? await readPublishedProductPage(this.globalPrisma, context.store_id)
+      : null;
+    const products = page
+      ? [
+          { ...page.product, priority: '1.0' },
+          ...page.complements.map((c) => ({ ...c, priority: '0.6' })),
+        ].filter((p) => isValidSlug(p.slug))
+      : [];
+
+    const entries = products
+      .map(
+        (p) => `  <url>
+    <loc>${escapeXml(context.base_url + '/products/' + p.slug)}</loc>
+${p.updated_at ? `    <lastmod>${p.updated_at.toISOString()}</lastmod>
+` : ''}    <changefreq>weekly</changefreq>
+    <priority>${p.priority}</priority>
+  </url>`,
+      )
+      .join('\n');
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${entries}
+</urlset>`;
   }
 
   private async buildEcommerceSitemap(context: DomainContext): Promise<string> {
