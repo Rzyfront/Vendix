@@ -5,9 +5,9 @@ import {
   ElementRef,
   inject,
   input,
+  linkedSignal,
   model,
   output,
-  signal,
   viewChild,
 } from '@angular/core';
 
@@ -235,18 +235,21 @@ export class PosManualWeightModalComponent {
   private readonly amountInput =
     viewChild<ElementRef<HTMLInputElement>>('amountInput');
 
-  readonly amountText = signal('');
-  readonly unitCode = signal('');
-
-  constructor() {
-    this.amountText.set(this.initialAmount());
+  /**
+   * `linkedSignal` y no inicialización en el constructor: el servicio monta
+   * el modal con `createComponent` + `setInput`, así que en el constructor
+   * los inputs aún van vacíos. El link se recalcula cuando llegan y después
+   * conserva lo digitado/elegido.
+   */
+  readonly amountText = linkedSignal(() => this.initialAmount());
+  readonly unitCode = linkedSignal(() => {
     const units = this.units();
     const initial = this.initialUnitCode();
-    this.unitCode.set(
-      initial && units.some((u) => u.code === initial)
-        ? initial
-        : (defaultWeighUnit(units)?.code ?? ''),
-    );
+    if (initial && units.some((u) => u.code === initial)) return initial;
+    return defaultWeighUnit(units)?.code ?? '';
+  });
+
+  constructor() {
     // Foco + autoselección al abrir: el cajero digita sin borrar nada.
     effect(() => {
       if (!this.isOpen()) return;

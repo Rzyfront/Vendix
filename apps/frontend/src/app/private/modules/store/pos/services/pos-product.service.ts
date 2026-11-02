@@ -866,6 +866,10 @@ export class PosProductService {
         ...(product.sale_config_summary !== undefined && {
           sale_config_summary: product.sale_config_summary ?? null,
         }),
+        // QUI-978 — misma regla: ausente = hidratar desde el detalle.
+        ...(product.sale_uoms !== undefined && {
+          sale_uoms: Array.isArray(product.sale_uoms) ? product.sale_uoms : null,
+        }),
         ...(product.scanned_price_tier_id !== undefined && {
           scanned_price_tier_id: product.scanned_price_tier_id ?? null,
         }),

@@ -1980,7 +1980,10 @@ private stationBookingService = inject(PosStationBookingService);
   unitPriceSuffix(item: CartItem): string {
     if (item.is_weight_product) return '/' + (item.weight_unit || 'kg');
     if (this.isPackageLine(item)) return '/paquete';
-    return item.sale_unit_code ? '/' + item.sale_unit_code : '';
+    // QUI-978 — el precio publicado va por la unidad de captura automática,
+    // no por la elegida ("Base: $25.000/kg" aunque se pesaran gramos).
+    const priced = item.price_unit_code || item.sale_unit_code;
+    return priced ? '/' + priced : '';
   }
 
   /** `true` cuando la línea se capturó en una unidad de venta ≠ unidad mínima. */
@@ -2060,6 +2063,9 @@ private stationBookingService = inject(PosStationBookingService);
     this.updateQuantity(item.id, quantity, {
       code: newUnit,
       stock_units_per_sale_unit: newFactor,
+      price_unit_code:
+        this.saleUnitService.configFor(item.product)?.captureUnit?.code ??
+        unit,
     });
   }
 
@@ -2100,7 +2106,11 @@ private stationBookingService = inject(PosStationBookingService);
   updateQuantity(
     itemId: string,
     quantity: number,
-    saleUnit?: { code: string; stock_units_per_sale_unit: number },
+    saleUnit?: {
+      code: string;
+      stock_units_per_sale_unit: number;
+      price_unit_code?: string;
+    },
   ): void {
     if (quantity <= 0) {
       this.removeFromCart(itemId);
@@ -2117,6 +2127,9 @@ private stationBookingService = inject(PosStationBookingService);
           ? {
               sale_unit_code: saleUnit.code,
               stock_units_per_sale_unit: saleUnit.stock_units_per_sale_unit,
+              ...(saleUnit.price_unit_code != null
+                ? { price_unit_code: saleUnit.price_unit_code }
+                : {}),
             }
           : {}),
       })

@@ -2020,7 +2020,10 @@ export class PosCartModalComponent {
   unitPriceSuffix(item: CartItem): string {
     if (item.is_weight_product) return '/' + (item.weight_unit || 'kg');
     if (this.isPackageLine(item)) return '/paquete';
-    return item.sale_unit_code ? '/' + item.sale_unit_code : '';
+    // QUI-978 — igual que el carrito lateral: el precio publicado va por la
+    // unidad de captura automática, no por la elegida.
+    const priced = item.price_unit_code || item.sale_unit_code;
+    return priced ? '/' + priced : '';
   }
 
   /** `true` cuando la línea se capturó en una unidad de venta ≠ unidad mínima. */

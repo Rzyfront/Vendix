@@ -51,6 +51,12 @@ export interface CartItem {
   sale_unit_code?: string | null;
   /** Unidades mínimas que consume UNA unidad de venta (1000 mm por metro). */
   stock_units_per_sale_unit?: number | null;
+  /**
+   * QUI-978 — unidad en la que está expresado el precio publicado (la de
+   * captura automática). Cuando se pesa en otra, "Base: $X/…" usa esta para
+   * no mentir. Ausente = se usa `sale_unit_code` (comportamiento histórico).
+   */
+  price_unit_code?: string | null;
   /** Escala del precio publicado (`products.price_unit_quantity`). */
   price_unit_quantity?: number | null;
   /**
@@ -350,10 +356,14 @@ export interface AddToCartRequest {
   /**
    * QUI-978 — unidad de venta ELEGIDA por el cajero (puede diferir de la
    * automática del config). Sin esto la línea anota la automática.
+   * `price_unit_code` es la unidad en la que está expresado el precio (la
+   * automática de captura): la línea "Base: $X/kg" la usa para no mentir
+   * cuando se pesó en otra unidad.
    */
   sale_unit_override?: {
     code: string;
     stock_units_per_sale_unit: number;
+    price_unit_code?: string | null;
   } | null;
   /**
    * QUI-648 — presentación pistoleada. El código de barras pertenece a una
@@ -407,6 +417,7 @@ export interface UpdateCartItemRequest {
    */
   sale_unit_code?: string | null;
   stock_units_per_sale_unit?: number | null;
+  price_unit_code?: string | null;
 }
 
 export interface UpdateCartItemPriceRequest {

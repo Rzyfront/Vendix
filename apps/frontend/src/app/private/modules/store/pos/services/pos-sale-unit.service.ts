@@ -339,6 +339,12 @@ export class PosSaleUnitService {
   private needsHydration(product: Product): boolean {
     const raw = product as Product & SaleUnitFields;
     if (raw.stock_uom_id !== undefined || raw.price_unit_quantity !== undefined) {
+      // QUI-978 — el contrato trae stock pero no UoMs de venta: se completa
+      // una sola vez desde el detalle (el hidratado guarda `[]` cuando el
+      // producto no declara ninguna, así que no se repite).
+      if (raw.stock_uom_id != null && raw.sale_uoms === undefined) {
+        return !this.hydrated.has(String(product.id));
+      }
       return false;
     }
     return !this.hydrated.has(String(product.id));

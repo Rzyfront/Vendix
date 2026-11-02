@@ -2773,6 +2773,13 @@ export class PosCartService {
             ? (request.sale_unit_override?.stock_units_per_sale_unit ??
               saleUnit.unitsPerCapture)
             : null,
+        // QUI-978 — unidad del precio publicado (ver el modelo).
+        price_unit_code:
+          !isWeightProduct && saleUnit.unitsPerCapture > 1
+            ? (request.sale_unit_override?.price_unit_code ??
+              saleUnit.captureUnit?.code ??
+              null)
+            : null,
         price_unit_quantity: isWeightProduct ? null : priceUnitQuantity,
         captured_by_scale: request.capturedByScale === true,
         // Restaurant Suite — Fase K Gap 1: persist the cashier's
@@ -2895,6 +2902,9 @@ export class PosCartService {
         : {}),
       ...('stock_units_per_sale_unit' in request
         ? { stock_units_per_sale_unit: request.stock_units_per_sale_unit ?? null }
+        : {}),
+      ...('price_unit_code' in request
+        ? { price_unit_code: request.price_unit_code ?? null }
         : {}),
     };
 

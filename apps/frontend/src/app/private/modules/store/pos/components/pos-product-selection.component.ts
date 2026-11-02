@@ -2659,11 +2659,14 @@ export class PosProductSelectionComponent {
     // declara presentaciones (que es donde vive el catálogo medido). El resto
     // —la inmensa mayoría, vendida por pieza— resuelve en memoria y no dispara
     // una sola petición extra, que es lo que un POS de escaneo necesita.
+    // QUI-978 — el que declara unidad de stock también resuelve async: con el
+    // catálogo aún sin cargar, `configFor` devolvía PIEZA y el primer toque de
+    // un medido entraba como 1 unidad mínima ($25 por 1 g) sin abrir el pesado.
     const declaresPresentations =
       product.has_multiple_price_tiers === true ||
       (product.enabled_price_tier_ids?.length ?? 0) > 0;
     const saleUnit =
-      isWeightProduct || declaresPresentations
+      isWeightProduct || declaresPresentations || product.stock_uom_id != null
         ? await this.saleUnitService.resolveFor(product)
         : this.saleUnitService.configFor(product);
 
@@ -2768,6 +2771,7 @@ export class PosProductSelectionComponent {
     amount: number;
     unitCode: string;
     stockUnitsPerSaleUnit: number;
+    priceUnitCode: string;
     byScale: boolean;
   } | null> {
     const unitCode = saleUnit.captureUnit?.code ?? saleUnit.stockUnit!.code;
@@ -2815,6 +2819,8 @@ export class PosProductSelectionComponent {
         1,
         Math.round(quantity / captured.amount),
       ),
+      // La automática (la del precio), no la elegida: para "Base: $X/…".
+      priceUnitCode: unitCode,
       byScale: useScale && this.scaleService.isConnected(),
     };
   }
@@ -2827,6 +2833,7 @@ export class PosProductSelectionComponent {
       amount: number;
       unitCode: string;
       stockUnitsPerSaleUnit: number;
+      priceUnitCode: string;
       byScale: boolean;
     },
   ): void {
@@ -2841,6 +2848,7 @@ export class PosProductSelectionComponent {
         sale_unit_override: {
           code: captured.unitCode,
           stock_units_per_sale_unit: captured.stockUnitsPerSaleUnit,
+          price_unit_code: captured.priceUnitCode,
         },
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
