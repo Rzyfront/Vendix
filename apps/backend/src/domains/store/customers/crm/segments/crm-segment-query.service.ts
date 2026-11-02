@@ -26,6 +26,16 @@ export interface ResolvedSegment {
   from: Prisma.Sql;
 }
 
+/** A saved segment: its rules (when `is_dynamic`) plus its manual members. */
+export interface SavedSegmentRef {
+  id: number;
+  filter: unknown;
+  is_dynamic: boolean;
+}
+
+/** Filter stored by a manual segment: no rules, only `crm_segment_members`. */
+export const MANUAL_SEGMENT_FILTER: SegmentGroup = { op: 'and', rules: [] };
+
 export interface SegmentCustomerRow {
   id: number;
   first_name: string;
@@ -67,6 +77,66 @@ export class CrmSegmentQueryService {
 
   async resolve(rawFilter: unknown, now = new Date()): Promise<ResolvedSegment> {
     const storeId = this.storeId();
+    const { filter, condition } = await this.compile(storeId, rawFilter, now);
+    return { store_id: storeId, filter, from: segmentCustomersFrom(storeId, condition) };
+  }
+
+  /**
+   * A saved segment: customers that match its rules or were added by hand
+   * (`crm_segment_members`). A manual segment (`is_dynamic = false`) has no
+   * rules and is only its members. `customerIds` narrows the evaluation to
+   * those customers (memberships of a page of the customer list).
+   */
+  async resolveSaved(
+    saved: SavedSegmentRef,
+    now = new Date(),
+    customerIds?: number[],
+  ): Promise<ResolvedSegment> {
+    const storeId = this.storeId();
+    const member = Prisma.sql`EXISTS (
+      SELECT 1 FROM "crm_segment_members" sm
+      WHERE sm."segment_id" = ${saved.id}
+        AND sm."store_id" = ${storeId}
+        AND sm."customer_id" = su."user_id"
+    )`;
+    let filter = MANUAL_SEGMENT_FILTER;
+    let condition = member;
+    if (saved.is_dynamic) {
+      const compiled = await this.compile(storeId, saved.filter, now);
+      filter = compiled.filter;
+      condition = Prisma.sql`(${compiled.condition} OR ${member})`;
+    }
+    return {
+      store_id: storeId,
+      filter,
+      from: segmentCustomersFrom(storeId, condition, customerIds),
+    };
+  }
+
+  /**
+   * Ids among `customerIds` that match the rules of a rule segment, without
+   * its manual members. Lets the profile tell "by rule" from "added by hand".
+   */
+  async ruleMemberIds(
+    rawFilter: unknown,
+    customerIds: number[],
+    now = new Date(),
+  ): Promise<number[]> {
+    if (!customerIds.length) return [];
+    const storeId = this.storeId();
+    const { filter, condition } = await this.compile(storeId, rawFilter, now);
+    return this.memberIds({
+      store_id: storeId,
+      filter,
+      from: segmentCustomersFrom(storeId, condition, customerIds),
+    });
+  }
+
+  private async compile(
+    storeId: number,
+    rawFilter: unknown,
+    now: Date,
+  ): Promise<{ filter: SegmentGroup; condition: Prisma.Sql }> {
     let filter: SegmentGroup;
     try {
       filter = parseSegmentFilter(rawFilter);
@@ -91,10 +161,18 @@ export class CrmSegmentQueryService {
         meta_fields: metaFields,
         rfm_members: rfmMembers,
       });
-      return { store_id: storeId, filter, from: segmentCustomersFrom(storeId, condition) };
+      return { filter, condition };
     } catch (error) {
       throw this.toHttp(error);
     }
+  }
+
+  /** Ids of the given customers that belong to the segment. */
+  async memberIds(segment: ResolvedSegment): Promise<number[]> {
+    const rows = await this.prisma.withoutScope().$queryRaw<Array<{ id: number }>>(
+      Prisma.sql`SELECT u."id" ${segment.from}`,
+    );
+    return rows.map((row) => Number(row.id));
   }
 
   async count(segment: ResolvedSegment): Promise<number> {

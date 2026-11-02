@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -14,6 +15,7 @@ import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
 import { CustomerCrmService } from './customer-crm.service';
+import { CrmSegmentMembersService } from '../segments/crm-segment-members.service';
 import {
   CreateCrmCustomerNoteDto,
   CrmNotesQueryDto,
@@ -30,6 +32,9 @@ import {
  *   PATCH /store/customers/:customerId/crm/profile       owner needs crm_inbox:assign
  *   GET   /store/customers/:customerId/crm/timeline      ?types&before&limit
  *   PUT   /store/customers/:customerId/crm/tags          replaces the set
+ *   GET   /store/customers/:customerId/crm/segments      segments and tags
+ *   PUT   /store/customers/:customerId/crm/segments/:id  adds by hand
+ *   DELETE /store/customers/:customerId/crm/segments/:id removes the manual row
  *   GET   /store/customers/:customerId/crm/notes
  *   POST  /store/customers/:customerId/crm/notes
  *   PATCH /store/customers/:customerId/crm/notes/:noteId author or see-all
@@ -39,6 +44,7 @@ import {
 export class CustomerCrmController {
   constructor(
     private readonly service: CustomerCrmService,
+    private readonly members: CrmSegmentMembersService,
     private readonly response: ResponseService,
   ) {}
 
@@ -80,6 +86,37 @@ export class CustomerCrmController {
     return this.response.success(
       await this.service.setTags(customerId, dto.tag_ids),
       'Etiquetas actualizadas',
+    );
+  }
+
+  @Get('segments')
+  @Permissions('store:customers:read')
+  async segments(@Param('customerId', ParseIntPipe) customerId: number) {
+    const [memberships] = await this.members.membershipsOf([customerId]);
+    return this.response.success(memberships);
+  }
+
+  @Put('segments/:segmentId')
+  @Permissions('store:customers:update')
+  async addSegment(
+    @Param('customerId', ParseIntPipe) customerId: number,
+    @Param('segmentId', ParseIntPipe) segmentId: number,
+  ) {
+    return this.response.success(
+      await this.members.add(customerId, segmentId),
+      'Cliente agregado al segmento',
+    );
+  }
+
+  @Delete('segments/:segmentId')
+  @Permissions('store:customers:update')
+  async removeSegment(
+    @Param('customerId', ParseIntPipe) customerId: number,
+    @Param('segmentId', ParseIntPipe) segmentId: number,
+  ) {
+    return this.response.success(
+      await this.members.remove(customerId, segmentId),
+      'Cliente quitado del segmento',
     );
   }
 

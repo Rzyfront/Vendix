@@ -1,5 +1,9 @@
 import { Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsObject,
@@ -8,6 +12,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 const toInt = ({ value }: { value: unknown }) =>
@@ -30,8 +35,18 @@ export class CreateCrmSegmentDto {
   @MaxLength(1000)
   description?: string | null;
 
+  /**
+   * `false` creates a manual segment: no rules, only customers added by hand
+   * from their profile. Defaults to a rule segment.
+   */
+  @IsOptional()
+  @IsBoolean()
+  is_dynamic?: boolean;
+
+  /** Required for a rule segment; ignored by a manual one. */
+  @ValidateIf((dto: CreateCrmSegmentDto) => dto.is_dynamic !== false)
   @IsObject()
-  filter!: Record<string, unknown>;
+  filter?: Record<string, unknown>;
 }
 
 export class UpdateCrmSegmentDto {
@@ -69,4 +84,21 @@ export class CrmSegmentCustomersQueryDto {
   @Min(1)
   @Max(100)
   limit?: number;
+}
+
+/** `customer_ids=1,2,3`: the customers of a list page (at most 100). */
+export class CrmMembershipsQueryDto {
+  @Transform(({ value }: { value: unknown }) =>
+    String(value ?? '')
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map(Number),
+  )
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  customer_ids!: number[];
 }
