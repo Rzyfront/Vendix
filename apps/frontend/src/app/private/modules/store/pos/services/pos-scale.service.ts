@@ -13,12 +13,40 @@ import {
   ScaleConnectionStatus,
 } from '../../../../../core/models/store-settings.interface';
 import { PosScaleWeightModalComponent } from '../components/pos-scale-weight-modal.component';
+import {
+  ManualWeighResult,
+  PosManualWeightModalComponent,
+} from '../components/pos-manual-weight-modal.component';
+import { ManualWeighUnit } from '../utils/manual-weigh.util';
 
 export interface ScaleWeightData {
   title: string;
   message: string;
   weightUnit: string;
   allowManualFallback: boolean;
+}
+
+export interface ManualWeightData {
+  title: string;
+  message: string;
+  /**
+   * UoMs elegibles (principal marcada). Una sola = sin selector.
+   * `factorToBase` va POR UNIDAD DE STOCK (ver el modal).
+   */
+  units: ManualWeighUnit[];
+  /** Precio por unidad de stock, para el total en vivo. Null = sin total. */
+  pricePerStockUnit: number | null;
+  /** Precio por principal (flujo de peso legado; se usa si el anterior es null). */
+  pricePerPrincipal?: number | null;
+  /** Código de la unidad de stock (línea "descuenta N g"). */
+  stockUnitCode?: string;
+  /** Cantidad inicial (edición). Vacío = campo vacío con foco. */
+  initialAmount?: string;
+  /** Unidad inicial (edición). */
+  initialUnitCode?: string;
+  confirmText?: string;
+  /** Apagar la exigencia de stock (flujo de peso legado). */
+  enforceStockQuantity?: boolean;
 }
 
 const DEFAULT_CONFIG: ScaleDeviceConfig = {
@@ -179,6 +207,77 @@ export class PosScaleService implements OnDestroy {
         resolve(weight);
         cleanup();
       });
+
+      subCancel = componentRef.instance.cancel.subscribe(() => {
+        resolve(undefined);
+        cleanup();
+      });
+
+      this.appRef.attachView(componentRef.hostView);
+      const domElem = (componentRef.hostView as any)
+        .rootNodes[0] as HTMLElement;
+      document.body.appendChild(domElem);
+    });
+  }
+
+  /**
+   * QUI-978 — pesado manual multi-UoM. Mismo montaje dinámico que
+   * `showWeightModal`; el confirm trae cantidad + unidad elegida + cantidad
+   * convertida a la principal.
+   */
+  showManualWeightModal(
+    data: ManualWeightData,
+  ): Promise<ManualWeighResult | undefined> {
+    return new Promise<ManualWeighResult | undefined>((resolve) => {
+      const componentRef = createComponent(PosManualWeightModalComponent, {
+        environmentInjector: this.injector,
+      });
+
+      componentRef.setInput('title', data.title);
+      componentRef.setInput('message', data.message);
+      componentRef.setInput('units', data.units);
+      componentRef.setInput('pricePerStockUnit', data.pricePerStockUnit);
+      if (data.pricePerPrincipal !== undefined) {
+        componentRef.setInput('pricePerPrincipal', data.pricePerPrincipal);
+      }
+      if (data.stockUnitCode !== undefined) {
+        componentRef.setInput('stockUnitCode', data.stockUnitCode);
+      }
+      if (data.initialAmount !== undefined) {
+        componentRef.setInput('initialAmount', data.initialAmount);
+      }
+      if (data.initialUnitCode !== undefined) {
+        componentRef.setInput('initialUnitCode', data.initialUnitCode);
+      }
+      if (data.enforceStockQuantity !== undefined) {
+        componentRef.setInput('enforceStockQuantity', data.enforceStockQuantity);
+      }
+      if (data.confirmText !== undefined) {
+        componentRef.setInput('confirmText', data.confirmText);
+      }
+
+      const destroy = () => {
+        this.appRef.detachView(componentRef.hostView);
+        componentRef.destroy();
+      };
+
+      let sub: any;
+      let subCancel: any;
+
+      const cleanup = () => {
+        sub?.unsubscribe();
+        subCancel?.unsubscribe();
+        destroy();
+      };
+
+      this.destroyRef.onDestroy(() => cleanup());
+
+      sub = componentRef.instance.confirm.subscribe(
+        (result: ManualWeighResult) => {
+          resolve(result);
+          cleanup();
+        },
+      );
 
       subCancel = componentRef.instance.cancel.subscribe(() => {
         resolve(undefined);

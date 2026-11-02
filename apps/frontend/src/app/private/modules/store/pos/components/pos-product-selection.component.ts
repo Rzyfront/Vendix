@@ -55,6 +55,7 @@ import {
   PosSaleUnitService,
   PosSaleUnitConfig,
 } from '../services/pos-sale-unit.service';
+import { ManualWeighResult } from './pos-manual-weight-modal.component';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
 import { PosOptionSelectorComponent } from './pos-option-selector/pos-option-selector.component';
@@ -2263,20 +2264,24 @@ export class PosProductSelectionComponent {
     const isWeightProduct =
       product.pricing_type === 'weight' && this.scaleEnabled();
     if (isWeightProduct) {
-      const unit = this.defaultWeightUnit();
       const variantPrice =
         variant.final_price ?? variant.price_override ?? product.final_price;
-      const weight = await this.getWeightFromScaleOrManual(
-        product.name,
-        variantPrice,
-        unit,
-      );
-      if (weight === undefined) return;
+      const captured = await this.captureWeighAmount({
+        product,
+        saleUnit: this.saleUnitService.configFor(product),
+        price: variantPrice,
+        priceUnitQuantity: Number(product.price_unit_quantity ?? 1) || 1,
+        fallbackUnitCode: this.defaultWeightUnit(),
+        title: 'Ingresar peso',
+        confirmText: 'Agregar',
+        weighOnly: true,
+      });
+      if (!captured) return;
 
-      if (weight <= 0) {
-        this.toastService.warning('El peso debe ser mayor a 0');
-        return;
-      }
+      // El peso viaja en la unidad del precio (la principal): lo digitado
+      // en otra unidad ya viene convertido (QUI-978).
+      const weight = captured.principalAmount;
+      const unit = captured.principalCode;
       if (weight > 999) {
         this.toastService.warning('El peso máximo permitido es 999 ' + unit);
         return;
@@ -2680,24 +2685,26 @@ export class PosProductSelectionComponent {
 
     // For weight products, require weight input
     if (isWeightProduct) {
-      const unit = this.defaultWeightUnit();
-      const weight = await this.getWeightFromScaleOrManual(
-        product.name,
-        product.final_price,
-        unit,
-      );
-      if (weight === undefined) return;
+      const captured = await this.captureWeighAmount({
+        product,
+        saleUnit: this.saleUnitService.configFor(product),
+        price: product.final_price,
+        priceUnitQuantity: Number(product.price_unit_quantity ?? 1) || 1,
+        fallbackUnitCode: this.defaultWeightUnit(),
+        title: 'Ingresar peso',
+        confirmText: 'Agregar',
+        weighOnly: true,
+      });
+      if (!captured) return;
 
-      if (weight <= 0) {
-        this.toastService.warning('El peso debe ser mayor a 0');
+      if (captured.principalAmount > 999) {
+        this.toastService.warning(
+          'El peso máximo permitido es 999 ' + captured.principalCode,
+        );
         return;
       }
-      if (weight > 999) {
-        this.toastService.warning('El peso máximo permitido es 999 ' + unit);
-        return;
-      }
 
-      this.addWeightProductToCart(product, weight);
+      this.addWeightProductToCart(product, captured);
       return;
     }
 
@@ -2760,6 +2767,7 @@ export class PosProductSelectionComponent {
     quantity: number;
     amount: number;
     unitCode: string;
+    stockUnitsPerSaleUnit: number;
     byScale: boolean;
   } | null> {
     const unitCode = saleUnit.captureUnit?.code ?? saleUnit.stockUnit!.code;
@@ -2767,58 +2775,46 @@ export class PosProductSelectionComponent {
       saleUnit.stockUnit?.dimension === 'mass' && this.scaleEnabled();
     const useScale = preferScale || weighable;
 
-    let amount: number | undefined;
-    if (useScale) {
-      amount = await this.getWeightFromScaleOrManual(
-        product.name,
-        product.final_price,
-        unitCode,
-      );
-      if (amount !== undefined && amount > 999) {
-        this.toastService.warning(
-          `El peso máximo permitido es 999 ${unitCode}`,
-        );
-        return null;
-      }
-    } else {
-      const raw = await this.dialogService.prompt(
-        {
-          title: `Cantidad en ${unitCode}`,
-          message: `${product.name}\nPrecio: ${this.formatPrice(product.final_price)}/${unitCode}`,
-          placeholder: `Cantidad en ${unitCode}`,
-          defaultValue: '1',
-          confirmText: 'Agregar',
-          cancelText: 'Cancelar',
-          inputType: 'number',
-        },
-        { size: 'sm' },
-      );
-      if (!raw) return null;
-      const parsed = parseFloat(String(raw).replace(',', '.'));
-      amount = Number.isNaN(parsed) ? undefined : parsed;
-    }
+    // QUI-978 — la captura (báscula o el nuevo modal manual) ya resuelve la
+    // unidad ELEGIDA y trae la cantidad convertida a stock: acá solo se
+    // valida el mínimo y se anota la unidad para el ticket.
+    const captured = await this.captureWeighAmount({
+      product,
+      saleUnit,
+      price: product.final_price ?? 0,
+      priceUnitQuantity: Number(product.price_unit_quantity ?? 1) || 1,
+      fallbackUnitCode: unitCode,
+      title: `Cantidad en ${unitCode}`,
+      confirmText: 'Agregar',
+      allowScale: useScale,
+    });
+    if (!captured) return null;
 
-    if (amount === undefined) return null;
-    if (!(amount > 0)) {
-      this.toastService.warning('La cantidad debe ser mayor a 0');
+    if (captured.amount > 999) {
+      this.toastService.warning(
+        'La cantidad máxima permitida es 999 ' + captured.unitCode,
+      );
       return null;
     }
 
-    const quantity = Math.round(amount * saleUnit.unitsPerCapture);
+    const quantity = captured.stockQuantity;
     if (quantity <= 0) {
       // Redondear a cero sería vender aire: se le dice al cajero cuál es el
       // mínimo real en vez de aceptar una línea sin mercancía detrás.
-      const minimum = 1 / saleUnit.unitsPerCapture;
       this.toastService.warning(
-        `La cantidad mínima es ${minimum} ${unitCode} (${saleUnit.stockUnit!.code}).`,
+        `La cantidad mínima es 1 ${saleUnit.stockUnit!.code} (${captured.unitCode}).`,
       );
       return null;
     }
 
     return {
       quantity,
-      amount,
-      unitCode,
+      amount: captured.amount,
+      unitCode: captured.unitCode,
+      stockUnitsPerSaleUnit: Math.max(
+        1,
+        Math.round(quantity / captured.amount),
+      ),
       byScale: useScale && this.scaleService.isConnected(),
     };
   }
@@ -2830,6 +2826,7 @@ export class PosProductSelectionComponent {
       quantity: number;
       amount: number;
       unitCode: string;
+      stockUnitsPerSaleUnit: number;
       byScale: boolean;
     },
   ): void {
@@ -2840,6 +2837,11 @@ export class PosProductSelectionComponent {
         product,
         quantity: captured.quantity,
         capturedByScale: captured.byScale,
+        // QUI-978 — la unidad ELEGIDA (no la automática) para el ticket.
+        sale_unit_override: {
+          code: captured.unitCode,
+          stock_units_per_sale_unit: captured.stockUnitsPerSaleUnit,
+        },
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -2866,10 +2868,17 @@ export class PosProductSelectionComponent {
       });
   }
 
-  private addWeightProductToCart(product: any, weight: number): void {
+  private addWeightProductToCart(
+    product: any,
+    captured: ManualWeighResult,
+  ): void {
     this.addingToCart.add(product.id);
 
-    const unit = this.defaultWeightUnit();
+    // QUI-978 — el peso viaja en la unidad del precio (la principal):
+    // `resolveLineUnits` multiplica `finalPrice × weight` en frontend y
+    // backend, así que mandar gramos con precio por kilo cobraría de más.
+    const weight = captured.principalAmount;
+    const unit = captured.principalCode;
     const totalPrice = product.final_price * weight;
 
     this.cartService
@@ -2896,37 +2905,74 @@ export class PosProductSelectionComponent {
       });
   }
 
-  private async getWeightFromScaleOrManual(
-    productName: string,
-    price: number,
-    unit: string,
-  ): Promise<number | undefined> {
-    if (this.scaleService.isConnected()) {
-      return this.scaleService.showWeightModal({
+  /**
+   * QUI-978 — captura de peso/cantidad multi-UoM (báscula o manual).
+   *
+   * Reemplaza al `dialogService.prompt` con `defaultValue: '1.0'` que abría
+   * siempre en "1" y no dejaba borrarlo. El cajero pesa en cualquiera de las
+   * UoMs de venta del producto (la principal por defecto); sin declaradas,
+   * una sola unidad con el comportamiento histórico. Los factores viajan
+   * POR UNIDAD DE STOCK para que el redondeo a stock sea directo.
+   */
+  private async captureWeighAmount(opts: {
+    product: any;
+    saleUnit: PosSaleUnitConfig | null;
+    price: number;
+    priceUnitQuantity: number;
+    fallbackUnitCode: string;
+    title: string;
+    confirmText: string;
+    /** Peso legado: sin conversión a stock ni exigencia de stock. */
+    weighOnly?: boolean;
+    /**
+     * Intentar la báscula cuando está conectada. El flujo medido lo apaga
+     * para no-masa (la báscula pesa, no mide metros).
+     */
+    allowScale?: boolean;
+  }): Promise<ManualWeighResult | undefined> {
+    const perCapture =
+      opts.saleUnit && opts.saleUnit.unitsPerCapture > 1
+        ? opts.saleUnit.unitsPerCapture
+        : 1;
+    const units = await this.saleUnitService.weighModalUnits(
+      opts.product,
+      opts.fallbackUnitCode,
+      perCapture,
+    );
+    const principal = units.find((u) => u.isPrincipal) ?? units[0];
+    const pricePerStockUnit =
+      opts.price / (opts.priceUnitQuantity > 0 ? opts.priceUnitQuantity : 1);
+    const priceMessage = `${opts.product.name}\nPrecio: ${this.formatPrice(pricePerStockUnit * principal.factorToBase)}/${principal.code}`;
+
+    if (opts.allowScale !== false && this.scaleService.isConnected()) {
+      const amount = await this.scaleService.showWeightModal({
         title: 'Lectura de Báscula',
-        message: `${productName}\nPrecio: ${this.formatPrice(price)}/${unit}`,
-        weightUnit: unit,
+        message: priceMessage,
+        weightUnit: principal.code,
         allowManualFallback: this.allowManualWeightEntry(),
       });
+      if (amount === undefined) return undefined;
+      return {
+        amount,
+        unitCode: principal.code,
+        principalAmount: amount,
+        principalCode: principal.code,
+        stockQuantity: Math.max(0, Math.round(amount * principal.factorToBase)),
+      };
     }
 
     if (this.allowManualWeightEntry()) {
-      const weightStr = await this.dialogService.prompt(
-        {
-          title: 'Ingresar Peso',
-          message: `${productName}\nPrecio: ${this.formatPrice(price)}/${unit}`,
-          placeholder: `Peso en ${unit}`,
-          defaultValue: '1.0',
-          confirmText: 'Agregar',
-          cancelText: 'Cancelar',
-          inputType: 'number',
-        },
-        { size: 'sm' },
-      );
-
-      if (!weightStr) return undefined;
-      const weight = parseFloat(weightStr.replace(',', '.'));
-      return isNaN(weight) ? undefined : weight;
+      return this.scaleService.showManualWeightModal({
+        title: opts.title,
+        message: priceMessage,
+        units,
+        pricePerStockUnit,
+        stockUnitCode: opts.weighOnly
+          ? ''
+          : (opts.saleUnit?.stockUnit?.code ?? ''),
+        confirmText: opts.confirmText,
+        enforceStockQuantity: !opts.weighOnly,
+      });
     }
 
     this.toastService.warning(

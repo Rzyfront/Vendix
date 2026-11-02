@@ -39,7 +39,8 @@ export interface CartItem {
   // cambien de lectura; los productos que declaran unidad de stock ya NO pasan
   // por acá — ver `sale_unit_code` abajo.
   weight?: number;
-  weight_unit?: 'kg' | 'g' | 'lb';
+  /** QUI-978 — unidad en la que se digitó/pesó (`weight` va en ella). */
+  weight_unit?: string;
   is_weight_product?: boolean;
   // ===== QUI-648 · captura por unidad de venta =====
   // `quantity` vive SIEMPRE en la unidad mínima del producto (mm, g, ml,
@@ -335,14 +336,25 @@ export interface AddToCartRequest {
   notes?: string;
   variant?: PosProductVariant;
   // Weight product fields (camino legado; ver `CartItem.weight`).
+  // QUI-978: `weight` viaja en la unidad del precio (la principal) y
+  // `weight_unit` la nombra, para que `resolveLineUnits` (frontend y backend)
+  // multiplique bien. Lo digitado en otra unidad se convierte antes de mandar.
   weight?: number;
-  weight_unit?: 'kg' | 'g' | 'lb';
+  weight_unit?: string;
   /**
    * QUI-648 — la línea se capturó pesando. `quantity` ya viene convertido a la
    * unidad mínima (2,35 kg de un producto en gramos ⇒ 2350), así que la línea
    * NO necesita `weight`.
    */
   capturedByScale?: boolean;
+  /**
+   * QUI-978 — unidad de venta ELEGIDA por el cajero (puede diferir de la
+   * automática del config). Sin esto la línea anota la automática.
+   */
+  sale_unit_override?: {
+    code: string;
+    stock_units_per_sale_unit: number;
+  } | null;
   /**
    * QUI-648 — presentación pistoleada. El código de barras pertenece a una
    * tarifa `sale_unit` del producto: la línea entra con esa presentación ya
@@ -389,6 +401,12 @@ export interface UpdateCartItemRequest {
   itemId: string;
   quantity: number;
   notes?: string;
+  /**
+   * QUI-978 — al reeditar una línea medida en otra unidad, la línea anota
+   * la nueva unidad y su factor. Ausentes = se conservan los actuales.
+   */
+  sale_unit_code?: string | null;
+  stock_units_per_sale_unit?: number | null;
 }
 
 export interface UpdateCartItemPriceRequest {

@@ -1550,9 +1550,17 @@ export class PosCartService {
   }
 
   /**
-   * Update weight for a weight-based cart item
+   * Update weight for a weight-based cart item.
+   *
+   * QUI-978 — `newWeight` llega en la unidad del precio (la principal) y
+   * `unitCode` la nombra; lo digitado en otra unidad se convierte antes de
+   * llamar. Sin `unitCode`, se conserva la unidad actual (histórico: kg).
    */
-  updateCartItemWeight(itemId: string, newWeight: number): Observable<CartState> {
+  updateCartItemWeight(
+    itemId: string,
+    newWeight: number,
+    unitCode?: string,
+  ): Observable<CartState> {
     const currentState = this.cartState();
     const itemIndex = currentState.items.findIndex(item => item.id === itemId);
 
@@ -1572,6 +1580,7 @@ export class PosCartService {
     updatedItems[itemIndex] = {
       ...item,
       weight: newWeight,
+      ...(unitCode !== undefined ? { weight_unit: unitCode } : {}),
       totalPrice,
       taxAmount: this.calculateItemTaxWithBase(item.product, item.unitPrice, taxMultiplier),
     };
@@ -2750,13 +2759,19 @@ export class PosCartService {
         // la línea. `quantity` sigue viviendo en la unidad mínima. Solo se
         // anota cuando hay conversión real: si la unidad de venta YA es la
         // mínima, la línea se lee como siempre.
+        // QUI-978 — la unidad ELEGIDA (g con captura automática kg) gana
+        // sobre la automática: el ticket y la reedición hablan de lo que el
+        // cajero pesó, no de lo que el sistema habría supuesto.
         sale_unit_code:
           !isWeightProduct && saleUnit.unitsPerCapture > 1
-            ? (saleUnit.captureUnit?.code ?? null)
+            ? (request.sale_unit_override?.code ??
+              saleUnit.captureUnit?.code ??
+              null)
             : null,
         stock_units_per_sale_unit:
           !isWeightProduct && saleUnit.unitsPerCapture > 1
-            ? saleUnit.unitsPerCapture
+            ? (request.sale_unit_override?.stock_units_per_sale_unit ??
+              saleUnit.unitsPerCapture)
             : null,
         price_unit_quantity: isWeightProduct ? null : priceUnitQuantity,
         captured_by_scale: request.capturedByScale === true,
@@ -2873,6 +2888,14 @@ export class PosCartService {
       // clave distingue intención: ambos editores de nota la pasan siempre,
       // los cambios solo-cantidad la omiten y preservan.
       notes: 'notes' in request ? request.notes : item.notes,
+      // QUI-978 — misma regla para la unidad de venta: reeditar en otra
+      // unidad la anota; los cambios solo-cantidad la preservan.
+      ...('sale_unit_code' in request
+        ? { sale_unit_code: request.sale_unit_code ?? null }
+        : {}),
+      ...('stock_units_per_sale_unit' in request
+        ? { stock_units_per_sale_unit: request.stock_units_per_sale_unit ?? null }
+        : {}),
     };
 
     return {

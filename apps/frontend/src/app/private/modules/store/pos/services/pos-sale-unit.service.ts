@@ -13,6 +13,7 @@ import {
 } from '../../../../../shared/services/pricing/sale-config-explainer.util';
 import { PosProductService, Product } from './pos-product.service';
 import { resolvePriceUnitQuantity } from '../utils/line-units.util';
+import { ManualWeighUnit } from '../utils/manual-weigh.util';
 
 /**
  * Cómo se mide y cómo se captura un producto en el POS — QUI-648.
@@ -56,6 +57,25 @@ interface SaleUnitFields {
   stock_uom_id?: number | null;
   price_unit_quantity?: number | null;
   sale_config_summary?: SaleConfigExplanation | null;
+  sale_uoms?: SaleUomRow[] | null;
+}
+
+/** Fila de UoM de venta tal como la trae el producto (detalle o listado). */
+export interface SaleUomRow {
+  uom_id: number;
+  code: string | null;
+  name: string | null;
+  factor_to_base: number | string | null;
+  is_principal: boolean;
+}
+
+/** UoM elegible en el pesado manual, con factor numérico garantizado. */
+export interface PosSaleUnitOption {
+  id: number;
+  code: string;
+  name: string;
+  factorToBase: number;
+  isPrincipal: boolean;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -236,7 +256,79 @@ export class PosSaleUnitService {
         raw.price_unit_quantity ?? cached?.price_unit_quantity ?? 1,
       sale_config_summary:
         raw.sale_config_summary ?? cached?.sale_config_summary ?? null,
+      sale_uoms: raw.sale_uoms ?? cached?.sale_uoms ?? null,
     };
+  }
+
+  /**
+   * QUI-978 — UoMs en las que se puede pesar este producto, en el orden de
+   * la ficha (principal primero). Vacío = el producto no declara ninguna y
+   * el llamador usa su fallback histórico (unidad de captura / kg).
+   */
+  saleUnitsFor(product: Product | null | undefined): PosSaleUnitOption[] {
+    if (!product) return [];
+    const rows = this.fieldsFor(product).sale_uoms;
+    if (!rows || rows.length === 0) return [];
+    const options: PosSaleUnitOption[] = [];
+    for (const row of rows) {
+      const factor = Number(row.factor_to_base);
+      if (!row.code || !Number.isFinite(factor) || factor <= 0) continue;
+      options.push({
+        id: Number(row.uom_id),
+        code: row.code,
+        name: row.name ?? row.code,
+        factorToBase: factor,
+        isPrincipal: row.is_principal === true,
+      });
+    }
+    options.sort(
+      (a, b) =>
+        Number(b.isPrincipal) - Number(a.isPrincipal) ||
+        a.factorToBase - b.factorToBase,
+    );
+    return options;
+  }
+
+  /**
+   * QUI-978 — unidades para el modal de pesado manual, con factores
+   * relativos a la unidad de STOCK del producto (no a la base de la
+   * dimensión): así el redondeo a stock del modal es directo. Sin
+   * declaradas (o sin catálogo para ubicar el stock), una sola unidad con
+   * el comportamiento histórico.
+   */
+  async weighModalUnits(
+    product: any,
+    fallbackUnitCode: string,
+    fallbackFactor = 1,
+  ): Promise<ManualWeighUnit[]> {
+    const single: ManualWeighUnit[] = [
+      {
+        code: fallbackUnitCode,
+        name: fallbackUnitCode,
+        factorToBase: fallbackFactor,
+        isPrincipal: true,
+      },
+    ];
+    const declared = this.saleUnitsFor(product);
+    if (declared.length === 0) return single;
+    const stockId = Number(product?.stock_uom_id ?? 0);
+    if (!stockId) return single;
+    let catalog: UnitOfMeasure[] = [];
+    try {
+      catalog = await this.ensureCatalog();
+    } catch {
+      return single;
+    }
+    const stockFactor = Number(
+      catalog.find((u) => Number(u.id) === stockId)?.factor_to_base,
+    );
+    if (!Number.isFinite(stockFactor) || stockFactor <= 0) return single;
+    return declared.map((u) => ({
+      code: u.code,
+      name: u.name,
+      factorToBase: u.factorToBase / stockFactor,
+      isPrincipal: u.isPrincipal,
+    }));
   }
 
   /**
@@ -268,6 +360,7 @@ export class PosSaleUnitService {
           stock_uom_id: data.stock_uom_id ?? null,
           price_unit_quantity: data.price_unit_quantity ?? 1,
           sale_config_summary: data.sale_config_summary ?? null,
+          sale_uoms: Array.isArray(data.sale_uoms) ? data.sale_uoms : null,
         });
       })
       .catch(() => {
