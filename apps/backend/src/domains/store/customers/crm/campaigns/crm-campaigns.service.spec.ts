@@ -86,6 +86,7 @@ function setup(options: {
   };
   const segments = {
     resolve: jest.fn().mockResolvedValue({ store_id: STORE, filter: {}, from: {} }),
+    resolveSaved: jest.fn().mockResolvedValue({ store_id: STORE, filter: {}, from: {} }),
     recipients: jest.fn().mockResolvedValue(rows),
     count: jest.fn().mockResolvedValue(rows.length),
     canReadContact: jest.fn().mockReturnValue(false),

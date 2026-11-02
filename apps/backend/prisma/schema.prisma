@@ -296,6 +296,8 @@ model users {
   crm_sent_messages          crm_messages[]               @relation("crm_messages_sent_by")
   crm_customer_tags          crm_customer_tags[]          @relation("crm_customer_tags_customer")
   crm_created_customer_tags  crm_customer_tags[]          @relation("crm_customer_tags_created_by")
+  crm_segment_memberships    crm_segment_members[]        @relation("crm_segment_members_customer")
+  crm_created_segment_members crm_segment_members[]       @relation("crm_segment_members_created_by")
   crm_created_segments       crm_segments[]               @relation("crm_segments_created_by")
   crm_opportunities          crm_opportunities[]          @relation("crm_opportunities_customer")
   crm_owned_opportunities    crm_opportunities[]          @relation("crm_opportunities_owner")
@@ -1178,6 +1180,7 @@ model stores {
   crm_messages          crm_messages[]
   crm_tags              crm_tags[]
   crm_customer_tags     crm_customer_tags[]
+  crm_segment_members   crm_segment_members[]
   crm_segments          crm_segments[]
   crm_pipelines         crm_pipelines[]
   crm_pipeline_stages   crm_pipeline_stages[]
@@ -15016,8 +15019,28 @@ model crm_segments {
   store      stores          @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   created_by users?          @relation("crm_segments_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   campaigns  crm_campaigns[]
+  members    crm_segment_members[]
 
   @@unique([store_id, name])
+}
+
+/// Clientes agregados a mano a un segmento (desde la ficha). Un segmento es
+/// sus reglas (si `is_dynamic`) ∪ estos miembros. Borrar un segmento quita sus
+/// miembros, nunca clientes (CASCADE solo hacia el catálogo `crm_segments`).
+model crm_segment_members {
+  store_id           Int
+  segment_id         Int
+  customer_id        Int
+  created_by_user_id Int?
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+
+  store      stores       @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  segment    crm_segments @relation(fields: [segment_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  customer   users        @relation("crm_segment_members_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by users?       @relation("crm_segment_members_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@id([segment_id, customer_id])
+  @@index([store_id, customer_id])
 }
 
 /// La DB lleva además un índice único parcial (`crm_pipelines_one_default_per_store`,

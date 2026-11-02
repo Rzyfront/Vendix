@@ -76,6 +76,13 @@ export interface SaveCrmSegment {
   filter: SegmentGroup;
 }
 
+/** A segment without rules: its customers are added by hand from their profile. */
+export interface SaveManualCrmSegment {
+  name: string;
+  description?: string | null;
+  is_dynamic: false;
+}
+
 export type CampaignChannel = 'whatsapp' | 'sms' | 'email';
 export type CampaignStatus =
   | 'draft'

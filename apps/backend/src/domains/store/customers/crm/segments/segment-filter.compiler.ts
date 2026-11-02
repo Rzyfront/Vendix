@@ -614,7 +614,19 @@ function innerCondition(
  * (`store_users` of the store, role `customer`, not archived), with their
  * finished-order stats. `store_id` is always the request's.
  */
-export function segmentCustomersFrom(storeId: number, condition: Prisma.Sql): Prisma.Sql {
+export function segmentCustomersFrom(
+  storeId: number,
+  condition: Prisma.Sql,
+  customerIds?: number[],
+): Prisma.Sql {
+  // Narrowed to a few customers (memberships of a list page): the orders
+  // aggregate only reads theirs instead of the whole store.
+  const onlyOrders = customerIds
+    ? Prisma.sql`AND o."customer_id" IN (${Prisma.join(customerIds)})`
+    : Prisma.empty;
+  const onlyCustomers = customerIds
+    ? Prisma.sql`AND su."user_id" IN (${Prisma.join(customerIds)})`
+    : Prisma.empty;
   return Prisma.sql`
     FROM "store_users" su
     JOIN "users" u ON u."id" = su."user_id"
@@ -627,6 +639,7 @@ export function segmentCustomersFrom(storeId: number, condition: Prisma.Sql): Pr
       WHERE o."store_id" = ${storeId}
         AND o."state" = 'finished'
         AND o."customer_id" IS NOT NULL
+        ${onlyOrders}
       GROUP BY o."customer_id"
     ) os ON os."customer_id" = su."user_id"
     WHERE su."store_id" = ${storeId}
@@ -636,6 +649,7 @@ export function segmentCustomersFrom(storeId: number, condition: Prisma.Sql): Pr
         JOIN "roles" r ON r."id" = ur."role_id"
         WHERE ur."user_id" = u."id" AND r."name" = 'customer'
       )
+      ${onlyCustomers}
       AND ${condition}`;
 }
 

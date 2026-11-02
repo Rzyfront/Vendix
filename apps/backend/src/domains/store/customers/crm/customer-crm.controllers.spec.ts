@@ -4,6 +4,7 @@ import { CrmTagsController } from './tags/crm-tags.controller';
 import { CrmTasksController } from './tasks/crm-tasks.controller';
 import { CrmPipelineController } from './pipeline/crm-pipeline.controller';
 import { CrmSegmentsController } from './segments/crm-segments.controller';
+import { CrmMembershipsController } from './segments/crm-memberships.controller';
 import { CrmCampaignsController } from './campaigns/crm-campaigns.controller';
 import { CrmUnsubscribeController } from './campaigns/crm-unsubscribe.controller';
 import { IS_PUBLIC_KEY } from '../../../../common/decorators/public.decorator';
@@ -27,6 +28,10 @@ describe('CRM 360, tareas y pipeline · permisos', () => {
     [CustomerCrmController, 'notes', 'store:customers:read'],
     [CustomerCrmController, 'createNote', 'store:customers:update'],
     [CustomerCrmController, 'updateNote', 'store:customers:update'],
+    [CustomerCrmController, 'segments', 'store:customers:read'],
+    [CustomerCrmController, 'addSegment', 'store:customers:update'],
+    [CustomerCrmController, 'removeSegment', 'store:customers:update'],
+    [CrmMembershipsController, 'list', 'store:customers:read'],
     [CrmTagsController, 'list', 'store:customers:read'],
     [CrmTagsController, 'create', 'store:crm_segments:manage'],
     [CrmTagsController, 'update', 'store:crm_segments:manage'],

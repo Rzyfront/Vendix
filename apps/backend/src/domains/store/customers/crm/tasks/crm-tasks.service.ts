@@ -16,6 +16,7 @@ import {
 } from '../shared/crm-access';
 import {
   CreateCrmTaskDto,
+  CrmTaskStatsQueryDto,
   CrmTasksQueryDto,
   UpdateCrmTaskDto,
 } from './dto/crm-tasks.dto';
@@ -127,30 +128,36 @@ export class CrmTasksService {
     };
   }
 
-  async stats() {
+  /**
+   * Counters of the tasks screen. "Today" starts now, like {@link today}: a
+   * task due earlier today is overdue and is not counted twice.
+   */
+  async stats(query: CrmTaskStatsQueryDto = {}) {
     const viewer = this.viewer();
     const window = await this.dayWindow(viewer.store_id);
-    const visible = this.visibility(viewer);
-    const pending = { ...visible, status: 'pending' as const };
+    const scope: Prisma.crm_tasksWhereInput[] = [this.visibility(viewer)];
+    if (query.assigned) scope.push(this.assignedWhere(viewer, query.assigned));
+    const where = (...extra: Prisma.crm_tasksWhereInput[]) => ({
+      AND: [...scope, ...extra],
+    });
+    const pending = { status: 'pending' as const };
     const [overdue, today, open, doneWeek] = await Promise.all([
       this.prisma.crm_tasks.count({
-        where: { ...pending, due_at: { lt: window.now } },
+        where: where(pending, { due_at: { lt: window.now } }),
       }),
       this.prisma.crm_tasks.count({
-        where: {
-          ...pending,
-          due_at: { gte: window.todayStart, lt: window.tomorrowStart },
-        },
+        where: where(pending, {
+          due_at: { gte: window.now, lt: window.tomorrowStart },
+        }),
       }),
-      this.prisma.crm_tasks.count({ where: pending }),
+      this.prisma.crm_tasks.count({ where: where(pending) }),
       this.prisma.crm_tasks.count({
-        where: {
-          ...visible,
+        where: where({
           status: 'done',
           completed_at: {
             gte: new Date(window.todayStart.getTime() - 6 * 86_400_000),
           },
-        },
+        }),
       }),
     ]);
     return { overdue, today, open, done_last_7_days: doneWeek };
@@ -252,10 +259,8 @@ export class CrmTasksService {
     window: DayWindow,
   ): Prisma.crm_tasksWhereInput {
     const and: Prisma.crm_tasksWhereInput[] = [this.visibility(viewer)];
-    const assigned = query.assigned ?? 'me';
-    if (assigned === 'me') and.push({ assigned_user_id: viewer.user_id });
-    else if (assigned === 'unassigned') and.push({ assigned_user_id: null });
-    else if (assigned !== 'all') and.push({ assigned_user_id: Number(assigned) });
+    const assigned = this.assignedWhere(viewer, query.assigned ?? 'me');
+    if (Object.keys(assigned).length) and.push(assigned);
 
     if (query.status) and.push({ status: query.status });
     if (query.due === 'overdue') {
@@ -272,6 +277,17 @@ export class CrmTasksService {
     const q = query.q?.trim();
     if (q) and.push({ title: { contains: q, mode: 'insensitive' } });
     return { AND: and };
+  }
+
+  /** `me`, `unassigned`, `all` (no filter) or a user id. */
+  private assignedWhere(
+    viewer: CrmViewer,
+    assigned: string,
+  ): Prisma.crm_tasksWhereInput {
+    if (assigned === 'me') return { assigned_user_id: viewer.user_id };
+    if (assigned === 'unassigned') return { assigned_user_id: null };
+    if (assigned === 'all') return {};
+    return { assigned_user_id: Number(assigned) };
   }
 
   private async findVisible(viewer: CrmViewer, id: number): Promise<TaskRow> {

@@ -271,6 +271,10 @@ export class TasksComponent {
   protected readonly editing = signal<CrmTask | null>(null);
 
   protected readonly canSeeAll = computed(() => crmCanSeeAll(this.auth));
+  /** Whose tasks the counters count: the same filter as the list. */
+  private readonly statsScope = computed<AssignedFilter>(() =>
+    this.canSeeAll() ? this.assigned() : 'me',
+  );
   protected readonly hasMore = computed(
     () => this.tab() !== 'today' && this.page() < this.totalPages(),
   );
@@ -284,7 +288,11 @@ export class TasksComponent {
       this.search();
       untracked(() => void this.load(true));
     });
-    void this.loadStats();
+    // The counters follow "De quién", so they always match the list below.
+    effect(() => {
+      this.statsScope();
+      untracked(() => void this.loadStats());
+    });
   }
 
   openNew(): void {
@@ -361,14 +369,19 @@ export class TasksComponent {
     };
   }
 
+  private statsRequest = 0;
+
   private async loadStats(): Promise<void> {
+    // Switching the scope quickly must not let an older answer win.
+    const request = ++this.statsRequest;
     this.statsLoading.set(true);
     try {
-      this.stats.set(await firstValueFrom(this.crm.taskStats()));
+      const stats = await firstValueFrom(this.crm.taskStats(this.statsScope()));
+      if (request === this.statsRequest) this.stats.set(stats);
     } catch {
       // The list still works; the counters stay at zero.
     } finally {
-      this.statsLoading.set(false);
+      if (request === this.statsRequest) this.statsLoading.set(false);
     }
   }
 }

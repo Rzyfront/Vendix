@@ -15,7 +15,7 @@ import { CrmSegmentsService } from '../shared/crm-segments.service';
 import { CrmSegment, SegmentPreview } from '../shared/crm-segments.interface';
 import { formatDateOnly } from '../shared/crm.utils';
 import { SegmentBuilderComponent } from './segment-builder.component';
-import { GroupDraft, draftFromFilter, filterFromDraft, newGroup } from './segments.utils';
+import { GroupDraft, countRules, draftFromFilter, filterFromDraft, newGroup } from './segments.utils';
 
 /**
  * Create, edit or duplicate a segment: name, rule builder and a count with a
@@ -61,9 +61,15 @@ import { GroupDraft, draftFromFilter, filterFromDraft, newGroup } from './segmen
           ></app-textarea>
 
           <div class="flex flex-col gap-2">
-            <span class="text-sm font-medium text-[var(--color-text-primary)]">Reglas</span>
+            <span class="text-sm font-medium text-text-primary">Reglas</span>
+            @if (manual()) {
+              <p class="rounded-xl border border-primary/25 bg-primary/5 p-3 text-sm text-text-secondary">
+                Segmento manual: incluye a los clientes que agregas desde su ficha. Si le agregas reglas,
+                también incluirá a quienes las cumplan.
+              </p>
+            }
             @if (unsupported()) {
-              <p class="rounded-xl border border-[var(--color-border)] p-3 text-sm text-[var(--color-text-secondary)]">
+              <p class="rounded-xl border border-border p-3 text-sm text-text-secondary">
                 Este segmento usa reglas que el constructor no puede editar. Puedes cambiar su nombre
                 y descripción; las reglas se conservan tal como están.
               </p>
@@ -72,9 +78,9 @@ import { GroupDraft, draftFromFilter, filterFromDraft, newGroup } from './segmen
             }
           </div>
 
-          <div class="flex flex-col gap-3 rounded-2xl border border-[var(--color-border)] p-3">
+          <div class="flex flex-col gap-3 rounded-2xl border border-border p-3">
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <span class="text-sm font-medium text-[var(--color-text-primary)]">Vista previa</span>
+              <span class="text-sm font-medium text-text-primary">Vista previa</span>
               <app-button
                 variant="outline"
                 size="sm"
@@ -87,23 +93,23 @@ import { GroupDraft, draftFromFilter, filterFromDraft, newGroup } from './segmen
               </app-button>
             </div>
             @if (previewError()) {
-              <p class="text-sm text-[var(--color-error)]">{{ previewError() }}</p>
+              <p class="text-sm text-error">{{ previewError() }}</p>
             } @else if (preview(); as result) {
-              <p class="text-sm text-[var(--color-text-primary)]" aria-live="polite">
+              <p class="text-sm text-text-primary" aria-live="polite">
                 <strong>{{ result.count }}</strong>
                 {{ result.count === 1 ? 'cliente cumple' : 'clientes cumplen' }} estas reglas.
               </p>
               @if (result.sample.length) {
-                <ul class="flex flex-col divide-y divide-[var(--color-border)]" role="list">
+                <ul class="flex flex-col divide-y divide-border" role="list">
                   @for (customer of result.sample; track customer.id) {
                     <li class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 text-sm">
-                      <span class="font-medium text-[var(--color-text-primary)]">
+                      <span class="font-medium text-text-primary">
                         {{ customer.first_name }} {{ customer.last_name }}
                       </span>
-                      <span class="text-xs text-[var(--color-text-secondary)]">
+                      <span class="text-xs text-text-secondary">
                         {{ customer.email || customer.phone || 'Sin contacto' }}
                       </span>
-                      <span class="text-xs text-[var(--color-text-secondary)]">
+                      <span class="text-xs text-text-secondary">
                         {{ customer.orders_count }} compras · {{ +customer.total_spent | currency }}
                         @if (customer.last_order_at) {
                           · última {{ lastOrder(customer.last_order_at) }}
@@ -113,14 +119,20 @@ import { GroupDraft, draftFromFilter, filterFromDraft, newGroup } from './segmen
                   }
                 </ul>
                 @if (result.count > result.sample.length) {
-                  <p class="text-xs text-[var(--color-text-muted)]">
+                  <p class="text-xs text-muted">
                     Muestra de {{ result.sample.length }} de {{ result.count }}.
                   </p>
                 }
               }
             } @else {
-              <p class="text-sm text-[var(--color-text-secondary)]">
-                {{ filter() || unsupported() ? 'Calcula el conteo para ver a quién incluye.' : 'Completa todas las reglas para calcular el conteo.' }}
+              <p class="text-sm text-text-secondary">
+                {{
+                  filter() || unsupported()
+                    ? 'Calcula el conteo para ver a quién incluye.'
+                    : manual()
+                      ? 'Sin reglas: el conteo es el de los clientes agregados a mano.'
+                      : 'Completa todas las reglas para calcular el conteo.'
+                }}
               </p>
             }
           </div>
@@ -167,8 +179,14 @@ export class SegmentFormModalComponent {
   protected readonly title = computed(() =>
     this.duplicate() ? 'Duplicar segmento' : this.segment() ? 'Editar segmento' : 'Nuevo segmento',
   );
+  /** A segment without rules whose customers are added by hand. */
+  protected readonly manual = computed(() => this.segment()?.is_dynamic === false);
+  /** Rules left empty on a manual segment keep it manual instead of blocking the save. */
+  private readonly rulesEmpty = computed(() => countRules(this.draft()) === 0);
   protected readonly canSave = computed(
-    () => !!this.name().trim() && (this.unsupported() ? this.editing() : !!this.filter()),
+    () =>
+      !!this.name().trim() &&
+      (this.unsupported() ? this.editing() : !!this.filter() || (this.manual() && this.rulesEmpty())),
   );
   protected readonly lastOrder = formatDateOnly;
 
@@ -232,8 +250,10 @@ export class SegmentFormModalComponent {
         );
       } else {
         const filter = this.filter();
-        if (!filter) return;
-        result = await firstValueFrom(this.api.createSegment({ ...body, filter }));
+        if (!filter && !this.manual()) return;
+        result = await firstValueFrom(
+          this.api.createSegment(filter ? { ...body, filter } : { ...body, is_dynamic: false }),
+        );
       }
       this.toast.success(this.editing() ? 'Segmento actualizado' : 'Segmento creado');
       this.saved.emit(result);

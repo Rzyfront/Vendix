@@ -210,6 +210,12 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
   readonly lookupMode = input<'default' | 'staff'>('default');
   /** Non-CVA selection channel (plain signal consumers). See class doc. */
   readonly value = input<number | null>(null);
+  /**
+   * Name of the person behind `value` when the caller already knows it. The
+   * staff lookup cannot resolve a single id, so without it a preset value
+   * shows as `Usuario #id`.
+   */
+  readonly valueLabel = input<string | null>(null);
   readonly valueChange = output<number | null>();
 
   // Signal UI state (zoneless-safe)
@@ -260,6 +266,11 @@ export class StoreUserSelectComponent implements ControlValueAccessor, OnInit {
     }
     this.receivedValueInput = true;
     if (untracked(() => this.selected())?.id === id) return;
+    const label = untracked(() => this.valueLabel());
+    if (label) {
+      this.selected.set({ id, name: label });
+      return;
+    }
     this.lookup
       .getById(id, { mode: this.lookupMode() })
       .pipe(takeUntilDestroyed(this.destroyRef))

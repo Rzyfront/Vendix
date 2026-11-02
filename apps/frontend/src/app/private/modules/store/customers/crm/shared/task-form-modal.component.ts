@@ -77,6 +77,7 @@ import { crmCanSeeAll, fromLocalInput, toLocalInput } from './crm.utils';
               placeholder="Buscar persona del equipo..."
               lookupMode="staff"
               [value]="assignee()"
+              [valueLabel]="assigneeLabel()"
               (valueChange)="assignee.set($event)"
             ></app-store-user-select>
           </div>
@@ -120,6 +121,8 @@ export class TaskFormModalComponent {
   protected readonly dueAt = signal('');
   protected readonly description = signal('');
   protected readonly assignee = signal<number | null>(null);
+  /** Name of the preset assignee, so the picker never shows `Usuario #id`. */
+  protected readonly assigneeLabel = signal<string | null>(null);
   protected readonly customer = signal<CustomerSelectOption | null>(null);
   protected readonly saving = signal(false);
   protected readonly canSeeAll = () => crmCanSeeAll(this.auth);
@@ -134,6 +137,9 @@ export class TaskFormModalComponent {
         this.dueAt.set(toLocalInput(task?.due_at));
         this.description.set(task?.description ?? '');
         this.assignee.set(task ? (task.assigned_user?.id ?? null) : this.auth.userId());
+        this.assigneeLabel.set(
+          task ? personName(task.assigned_user) || null : this.auth.userName(),
+        );
         this.customer.set(
           task?.customer
             ? { id: task.customer.id, name: personName(task.customer) }

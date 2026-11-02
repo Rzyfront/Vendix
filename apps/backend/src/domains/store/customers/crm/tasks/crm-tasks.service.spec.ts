@@ -156,6 +156,41 @@ describe('CrmTasksService', () => {
     });
   });
 
+  it('stats scoped to "me" count only my tasks, like the list', async () => {
+    as('owner');
+    const { service, prisma } = setup();
+    await service.stats({ assigned: 'me' });
+    for (const [args] of prisma.crm_tasks.count.mock.calls) {
+      expect(args.where.AND).toContainEqual({ assigned_user_id: OWNER });
+    }
+  });
+
+  it('stats "today" starts now, so an overdue task is never counted twice', async () => {
+    jest.useFakeTimers({ now: new Date('2026-10-30T15:00:00Z') });
+    as('owner');
+    const { service, prisma } = setup();
+    await service.stats({ assigned: 'me' });
+    const [overdue, today] = prisma.crm_tasks.count.mock.calls.map(([a]: any) => a.where.AND);
+    expect(overdue).toContainEqual({ due_at: { lt: new Date('2026-10-30T15:00:00Z') } });
+    expect(today).toContainEqual({
+      due_at: {
+        gte: new Date('2026-10-30T15:00:00Z'),
+        lt: new Date('2026-10-31T05:00:00Z'),
+      },
+    });
+  });
+
+  it('stats without "assigned" keep counting everything the viewer can see', async () => {
+    as('seller');
+    const { service, prisma } = setup();
+    await service.stats();
+    const where = prisma.crm_tasks.count.mock.calls[2][0].where;
+    expect(where.AND).toEqual([
+      { OR: [{ assigned_user_id: SELLER }, { created_by_user_id: SELLER }] },
+      { status: 'pending' },
+    ]);
+  });
+
   it('a seller cannot assign a task to someone else', async () => {
     as('seller');
     const { service, prisma } = setup();

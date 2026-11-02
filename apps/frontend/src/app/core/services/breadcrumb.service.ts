@@ -944,6 +944,31 @@ export class BreadcrumbService {
       parent: 'Clientes',
       icon: 'sparkles',
     },
+    // CRM screens: listed before `:id` so they never read as a customer.
+    {
+      path: '/admin/customers/inbox',
+      title: 'Bandeja',
+      parent: 'Clientes',
+      icon: 'inbox',
+    },
+    {
+      path: '/admin/customers/pipeline',
+      title: 'Pipeline',
+      parent: 'Clientes',
+      icon: 'trending-up',
+    },
+    {
+      path: '/admin/customers/tasks',
+      title: 'Tareas',
+      parent: 'Clientes',
+      icon: 'check-square',
+    },
+    {
+      path: '/admin/customers/segments',
+      title: 'Segmentos',
+      parent: 'Clientes',
+      icon: 'users',
+    },
     {
       path: '/admin/customers/:id',
       title: 'Detalles del Cliente',

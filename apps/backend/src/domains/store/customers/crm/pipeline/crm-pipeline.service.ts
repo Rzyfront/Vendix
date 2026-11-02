@@ -259,6 +259,7 @@ export class CrmPipelineService {
       },
       include: OPPORTUNITY_INCLUDE,
     });
+    await this.syncCustomerStage(dto.customer_id, stage.id);
     return this.toOpportunity(created);
   }
 
@@ -345,7 +346,7 @@ export class CrmPipelineService {
   ): Promise<number> {
     const rows = await this.prisma.crm_opportunities.findMany({
       where: { store_id: storeId, quotation_id: quotationId, status: 'open' },
-      select: { id: true, pipeline_id: true },
+      select: { id: true, pipeline_id: true, customer_id: true },
     });
     let won = 0;
     const now = new Date();
@@ -372,6 +373,13 @@ export class CrmPipelineService {
           ...(orderId ? { order_id: orderId } : {}),
         },
       });
+      if (updated.count) {
+        // Event-driven: the store comes from the event, not the request.
+        await this.prisma.withoutScope().store_users.updateMany({
+          where: { store_id: storeId, user_id: row.customer_id },
+          data: { crm_stage_id: stage.id },
+        });
+      }
       won += updated.count;
     }
     return won;
@@ -493,6 +501,7 @@ export class CrmPipelineService {
       where: { id: current.id },
       data,
     });
+    await this.syncCustomerStage(current.customer_id, stage.id);
     if (data.status !== current.status) {
       await this.auditChange(
         viewer,
@@ -503,6 +512,17 @@ export class CrmPipelineService {
       );
     }
     return this.findOne(current.id);
+  }
+
+  /**
+   * The customer follows the stage of its last placed opportunity, so the
+   * profile and the segment rule `stage` read the same place as the board.
+   */
+  private async syncCustomerStage(customerId: number, stageId: number) {
+    await this.prisma.store_users.updateMany({
+      where: { user_id: customerId },
+      data: { crm_stage_id: stageId },
+    });
   }
 
   private async findVisible(

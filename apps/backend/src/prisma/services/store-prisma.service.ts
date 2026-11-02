@@ -234,6 +234,7 @@ export class StorePrismaService extends BasePrismaService {
     'crm_messages',
     'crm_tags',
     'crm_customer_tags',
+    'crm_segment_members',
     'crm_segments',
     'crm_pipelines',
     'crm_pipeline_stages',
@@ -1900,6 +1901,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get crm_customer_tags() {
     return this.scoped_client.crm_customer_tags;
+  }
+
+  get crm_segment_members() {
+    return this.scoped_client.crm_segment_members;
   }
 
   get crm_segments() {
