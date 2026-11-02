@@ -752,6 +752,7 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
             <app-button
               variant="primary"
               size="sm"
+              [disabled]="confirmBusy()"
               (clicked)="onFinalConfirm()"
             >
               <app-icon slot="icon" name="check" [size]="14"></app-icon>
@@ -775,6 +776,14 @@ export class BookingSchedulerModalComponent {
   readonly productVariantId = input<number | null>(null);
   readonly cartItem = input<any>(null);
   readonly existingBooking = input<any>(null);
+  /**
+   * Parent-owned in-flight flag for async schedule persists (QUI-970
+   * station flow keeps the modal open during the HTTP round-trip).
+   * While true, Confirm is disabled and re-emits are ignored so a
+   * double click can't duplicate the booking. The parent clears it
+   * on persist error (success closes the modal).
+   */
+  readonly confirmBusy = input<boolean>(false);
   readonly modalTitleOverride = input<string | null>(null);
   readonly posCustomer = input<any>(null);
 
@@ -1206,6 +1215,9 @@ export class BookingSchedulerModalComponent {
       if (eb?.provider_id) {
         this.providerIdText.set(String(eb.provider_id));
       }
+      if (eb?.station_id) {
+        this.stationIdText.set(String(eb.station_id));
+      }
       if (eb?.service_location_type) {
         this.serviceLocationType.set(eb.service_location_type);
       }
@@ -1535,12 +1547,15 @@ export class BookingSchedulerModalComponent {
   }
 
   onFinalConfirm(): void {
+    if (this.confirmBusy()) return;
     const prodId = this.resolvedProduct()?.id ? Number(this.resolvedProduct()!.id) : undefined;
     const variantId = this.productVariantId() ?? this.cartItem()?.variant_id ?? this.existingBooking()?.product_variant_id ?? undefined;
     const payload = {
       product_id: prodId,
       product_variant_id: variantId,
-      booking_id: this.existingBooking()?.id ?? undefined,
+      // POS cart blocks key their persisted booking as `booking_id`
+      // (no `id`); backend rows use `id`. Both shapes reschedule.
+      booking_id: this.existingBooking()?.booking_id ?? this.existingBooking()?.id ?? undefined,
       date: this.date(),
       start_time: this.startTime(),
       end_time: this.endTime(),

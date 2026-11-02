@@ -18,10 +18,15 @@ export class PosStationBookingService {
   private readonly apiUrl = environment.apiUrl;
 
   /**
-   * Creates (or updates, when the block already carries a booking id)
-   * the reservation for a station line scheduled in the POS.
+   * Creates (or reschedules, when the block already carries a booking
+   * id) the reservation for a station line scheduled in the POS.
    * `skip_order_creation` keeps the booking orderless until the gate
    * links it at pay time. Emits the created/updated booking row.
+   *
+   * Update path uses PATCH `:id/reschedule` (there is no PUT route;
+   * PATCH `:id` is notes-only). It moves date/time/station only —
+   * provider/customer are create-only on this path by backend
+   * contract (RescheduleBookingDto).
    */
   persistScheduledStationBooking(
     block: Record<string, any>,
@@ -45,9 +50,14 @@ export class PosStationBookingService {
     const existingId = Number(block['booking_id'] ?? block['id'] ?? 0);
     const request$ =
       Number.isFinite(existingId) && existingId > 0
-        ? this.http.put<any>(
-            `${this.apiUrl}/store/reservations/${existingId}`,
-            payload,
+        ? this.http.patch<any>(
+            `${this.apiUrl}/store/reservations/${existingId}/reschedule`,
+            {
+              station_id: block['station_id'] ?? null,
+              date: block['date'],
+              start_time: block['start_time'],
+              end_time: block['end_time'],
+            },
           )
         : this.http.post<any>(`${this.apiUrl}/store/reservations`, payload);
     return request$.pipe(map((resp: any) => resp?.data ?? resp));
@@ -65,6 +75,9 @@ export function findUnscheduledStationLine(
 ): string | null {
   const items = cartState?.items ?? [];
   const pending = cartState?.pendingBookings ?? [];
+  // Each persisted pending booking satisfies exactly one cart line
+  // (two lines of the same product need two bookings).
+  const consumedPending = new Set<object>();
   for (const item of items) {
     if (item?.product?.requires_station !== true) continue;
     const name = item?.product?.name || 'El servicio';
@@ -77,13 +90,17 @@ export function findUnscheduledStationLine(
     // A persisted booking for this line (scheduled here or adopted from
     // an existing reservation) satisfies the payments gate, which
     // matches bookings to lines by product+variant units.
-    const persisted = pending.some(
+    const persisted = pending.find(
       (pb: any) =>
+        !consumedPending.has(pb) &&
         Number(pb?.id ?? 0) > 0 &&
         Number(pb?.product_id ?? 0) === productId &&
         (pb?.product_variant_id ?? null) === (variantId ?? null),
     );
-    if (persisted) continue;
+    if (persisted) {
+      consumedPending.add(persisted);
+      continue;
+    }
     const booking: any = (item as any)?.booking;
     if (!booking || !booking.date || !booking.start_time) {
       return `Agenda "${name}" y elige una estación antes de cobrar.`;

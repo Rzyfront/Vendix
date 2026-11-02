@@ -953,6 +953,7 @@ import {
         [cartItem]="schedulerTarget()"
         [existingBooking]="schedulerExisting()"
         [posCustomer]="cartState()?.customer"
+        [confirmBusy]="stationPersistBusy()"
         (customerSelected)="onCustomerSelected($event)"
         (scheduled)="onScheduled($event)"
         (cancelled)="closeScheduler()"
@@ -1908,6 +1909,9 @@ export class PosCartModalComponent {
   readonly schedulerTarget = signal<any>(null);
   readonly schedulerExisting = signal<any>(null);
   readonly cartBookingsByItemId = signal<Map<string, any>>(new Map());
+  // QUI-970: in-flight flag for async station persists — drives the
+  // scheduler modal's Confirm disable so double clicks can't duplicate.
+  readonly stationPersistBusy = signal(false);
 
   // ─── QUI-787 · editor de nota por línea (paridad con desktop) ─────────
   readonly itemNoteModalOpen = signal(false);
@@ -2419,6 +2423,7 @@ export class PosCartModalComponent {
     // needs a booking with a live allocation before charging. On error
     // the scheduler stays open so the cashier picks another slot.
     if (target.product?.requires_station === true) {
+      this.stationPersistBusy.set(true);
       this.stationBookingService
         .persistScheduledStationBooking(
           {
@@ -2433,16 +2438,20 @@ export class PosCartModalComponent {
         )
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
-          next: (created) =>
+          next: (created) => {
+            this.stationPersistBusy.set(false);
             this.attachScheduledBooking(target, booking, {
               ...enrichedBooking,
               booking_id: created?.id ?? created?.booking_id ?? 0,
-            }),
-          error: (err) =>
+            });
+          },
+          error: (err) => {
+            this.stationPersistBusy.set(false);
             this.toastService.error(
               err?.error?.message ||
                 'No se pudo reservar la estación. Elige otro horario.',
-            ),
+            );
+          },
         });
       return;
     }
@@ -2464,6 +2473,7 @@ export class PosCartModalComponent {
       .addPendingBooking({
         id: enrichedBooking.booking_id ?? 0,
         booking_number: '',
+        station_id: enrichedBooking.station_id ?? null,
         product_id: resolvedProductId,
         product_name: target.product?.name ?? '',
         product_variant_id: target.variant_id ?? booking.product_variant_id ?? null,

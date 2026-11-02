@@ -179,6 +179,8 @@ export interface CartSummary {
 export interface PendingBooking {
   id: number;
   booking_number: string;
+  /** Station allocation for requires_station lines (QUI-970). */
+  station_id?: number | null;
   product_id: number;
   product_name: string;
   product_variant_id?: number;
