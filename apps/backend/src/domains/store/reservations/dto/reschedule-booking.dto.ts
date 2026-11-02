@@ -7,6 +7,16 @@ export class RescheduleBookingDto {
   @Type(() => Number)
   station_id?: number;
 
+  /**
+   * QUI-972: move the booking to another professional. When omitted the
+   * booking keeps its provider. The provider must offer the service
+   * and be active; availability is validated against this provider.
+   */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  provider_id?: number;
+
   @IsDateString()
   date: string;
 

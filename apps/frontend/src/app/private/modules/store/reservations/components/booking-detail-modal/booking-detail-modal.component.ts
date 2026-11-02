@@ -8,7 +8,7 @@ import { ModalComponent, IconComponent, SpinnerComponent, TooltipComponent } fro
 import { ToastService } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
 import { DataCollectionSubmissionsService } from '../../../data-collection/services/data-collection-submissions.service';
-import { Booking, BookingStatus, AvailabilitySlot, ProviderDateInfo } from '../../interfaces/reservation.interface';
+import { Booking, BookingStatus, AvailabilitySlot, ProviderDateInfo, ServiceProvider } from '../../interfaces/reservation.interface';
 import { finalize } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 
@@ -67,6 +67,29 @@ export class BookingDetailModalComponent {
   loadingDates = signal(false);
   loadingSlots = signal(false);
   submittingReschedule = signal(false);
+  // QUI-972: the professional the reschedule targets (may differ from
+  // the booking's when the current one has no schedule).
+  rescheduleProviderId = signal<number | null>(null);
+  serviceProviders = signal<ServiceProvider[]>([]);
+  providersLoading = signal(false);
+  // null = unknown (not loaded yet / free-booking skips provider dates).
+  providerHasSchedule = signal<boolean | null>(null);
+
+  isFreeBooking = computed(
+    () => this.booking()?.product?.booking_mode === 'free_booking',
+  );
+
+  rescheduleProviderName = computed(() => {
+    const id = this.rescheduleProviderId();
+    if (id == null) return '';
+    const fromList = this.serviceProviders().find((p) => p.id === id);
+    if (fromList) return fromList.display_name || fromList.employee?.first_name || '';
+    const b = this.booking();
+    if (b?.provider_id === id) {
+      return b.provider?.display_name || b.provider?.employee?.first_name || '';
+    }
+    return '';
+  });
 
   statusLabel = computed(() => {
     const status = this.booking()?.status;
@@ -246,7 +269,19 @@ export class BookingDetailModalComponent {
   // --- Inline Reschedule ---
 
   startReschedule(): void {
+    const b = this.booking();
     this.rescheduling.set(true);
+    this.rescheduleProviderId.set(b?.provider_id ?? null);
+    this.providerHasSchedule.set(null);
+    this.serviceProviders.set([]);
+    this.loadServiceProviders();
+    if (this.isFreeBooking()) {
+      // QUI-972: free-booking services follow store hours, not any
+      // professional — skip the provider path entirely (the backend
+      // answers [] when a provider filter meets free-booking).
+      this.generateFallbackDates();
+      return;
+    }
     this.loadProviderDates();
   }
 
@@ -255,11 +290,38 @@ export class BookingDetailModalComponent {
     this.selectedDate.set('');
     this.selectedSlot.set(null);
     this.slots.set([]);
+    this.rescheduleProviderId.set(null);
+    this.providerHasSchedule.set(null);
+  }
+
+  private loadServiceProviders(): void {
+    const b = this.booking();
+    if (!b?.product_id) return;
+    this.providersLoading.set(true);
+    this.reservationsService
+      .getProvidersForService(b.product_id)
+      .pipe(finalize(() => this.providersLoading.set(false)))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (providers) => this.serviceProviders.set(providers ?? []),
+        error: () => this.serviceProviders.set([]),
+      });
+  }
+
+  selectRescheduleProvider(providerId: number): void {
+    if (this.rescheduleProviderId() === providerId) return;
+    this.rescheduleProviderId.set(providerId);
+    this.selectedDate.set('');
+    this.selectedSlot.set(null);
+    this.slots.set([]);
+    this.dates.set([]);
+    this.loadProviderDates();
   }
 
   private loadProviderDates(): void {
+    const providerId = this.rescheduleProviderId();
     const b = this.booking();
-    if (!b?.provider_id) {
+    if (!providerId) {
       this.generateFallbackDates();
       return;
     }
@@ -272,12 +334,14 @@ export class BookingDetailModalComponent {
     const dateTo = this.formatDateISO(endDate);
 
     this.reservationsService
-      .getProviderDates(b.provider_id, dateFrom, dateTo, b.product_id)
+      .getProviderDates(providerId, dateFrom, dateTo, b?.product_id)
       .pipe(finalize(() => this.loadingDates.set(false)))
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (providerDates) => {
-          const availableDates = providerDates.filter((d) => d.has_schedule);
+          const list = providerDates ?? [];
+          this.providerHasSchedule.set(list.some((d) => d.has_schedule));
+          const availableDates = list.filter((d) => d.has_schedule);
           this.dates.set(availableDates);
           if (availableDates.length > 0) {
             this.selectDate(availableDates[0].date);
@@ -318,7 +382,12 @@ export class BookingDetailModalComponent {
     if (!b) return;
 
     this.loadingSlots.set(true);
-    this.reservationsService.getAvailability(b.product_id, date, date, b.provider_id)
+    // QUI-972: free-booking uses store hours (no provider filter); other
+    // modes use the targeted professional (possibly just switched).
+    const providerId = this.isFreeBooking()
+      ? undefined
+      : (this.rescheduleProviderId() ?? undefined);
+    this.reservationsService.getAvailability(b.product_id, date, date, providerId)
       .pipe(finalize(() => this.loadingSlots.set(false)))
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (slots) => this.slots.set(slots.filter(s => s.total_available > 0)),
@@ -349,10 +418,15 @@ export class BookingDetailModalComponent {
     if (!slot || !b) return;
 
     this.submittingReschedule.set(true);
+    const targetProviderId = this.isFreeBooking() ? undefined : (this.rescheduleProviderId() ?? undefined);
     this.reservationsService.rescheduleReservation(b.id, {
       date: slot.date,
       start_time: slot.start_time,
       end_time: slot.end_time,
+      // QUI-972: only send when the professional actually changed.
+      ...(targetProviderId != null && targetProviderId !== b.provider_id
+        ? { provider_id: targetProviderId }
+        : {}),
     })
       .pipe(finalize(() => this.submittingReschedule.set(false)))
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({

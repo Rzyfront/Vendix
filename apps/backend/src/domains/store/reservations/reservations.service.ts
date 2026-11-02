@@ -83,6 +83,7 @@ export class ReservationsService {
         base_price: true,
         is_consultation: true,
         requires_station: true,
+        booking_mode: true,
         consultation_template_id: true,
         preconsultation_template_id: true,
         product_images: {
@@ -1088,13 +1089,33 @@ export class ReservationsService {
     booking: Awaited<ReturnType<ReservationsService['findOne']>>,
     dto: RescheduleBookingDto,
   ) {
+    // QUI-972: the reschedule may move the booking to another
+    // professional (e.g. the current one has no schedule). Same
+    // assignment validation as creation.
+    if (dto.provider_id != null) {
+      const providerAssignment =
+        await this.prisma.provider_services.findFirst({
+          where: {
+            provider_id: dto.provider_id,
+            product_id: booking.product_id,
+          },
+          include: { provider: { select: { id: true, is_active: true } } },
+        });
+      if (!providerAssignment || !providerAssignment.provider.is_active) {
+        throw new BadRequestException(
+          'El proveedor especificado no ofrece este servicio o no esta activo',
+        );
+      }
+    }
+    const targetProviderId = dto.provider_id ?? booking.provider_id ?? undefined;
+
     // Validar disponibilidad del nuevo slot (excluyendo la reserva actual)
     const isAvailable = await this.availabilityService.isSlotAvailable(
       booking.product_id,
       dto.date,
       dto.start_time,
       dto.end_time,
-      booking.provider_id ?? undefined,
+      targetProviderId,
       booking.id,
     );
 
@@ -1126,7 +1147,13 @@ export class ReservationsService {
       }
       const saved = await tx.bookings.update({
         where: { id },
-        data: { date: new Date(dto.date), start_time: dto.start_time, end_time: dto.end_time, updated_at: new Date() },
+        data: {
+          date: new Date(dto.date),
+          start_time: dto.start_time,
+          end_time: dto.end_time,
+          ...(dto.provider_id != null ? { provider_id: dto.provider_id } : {}),
+          updated_at: new Date(),
+        },
         include: this.BOOKING_INCLUDE,
       });
       if (product?.requires_station) {
@@ -1141,7 +1168,7 @@ export class ReservationsService {
           productId: booking.product_id,
           productVariantId: booking.product_variant_id,
           stationId: dto.station_id ?? oldAllocation?.station_id,
-          providerId: booking.provider_id ?? oldAllocation?.provider_id,
+          providerId: targetProviderId ?? oldAllocation?.provider_id,
           date: dto.date,
           startTime: dto.start_time,
           endTime: dto.end_time,
