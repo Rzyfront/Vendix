@@ -10,15 +10,23 @@ import { ServicePageAppController } from './service-page/service-page-app.contro
 import { ServicePageAppService } from './service-page/service-page-app.service';
 import { ServicePagePublicController } from './service-page/service-page-public.controller';
 import { AppDomainService } from './shared/app-domain.service';
+import { LodgingReservationsModule } from '../hospitality/reservations/reservations.module';
+import { BookingAppController } from './booking/booking-app.controller';
+import { BookingAppService } from './booking/booking-app.service';
+import { BookingCheckinService } from './booking/booking-checkin.service';
+import { BookingPublicController } from './booking/booking-public.controller';
 
 /** Apps — catálogo de aplicaciones web por tienda (odd/tasks/apps-module.md). */
 @Module({
-  imports: [ResponseModule, PrismaModule],
+  // Booking (Fase 4) opens the PMS online check-in link to the guest.
+  imports: [ResponseModule, PrismaModule, LodgingReservationsModule],
   controllers: [
     ProductPageAppController,
     ProductPagePublicController,
     ServicePageAppController,
     ServicePagePublicController,
+    BookingAppController,
+    BookingPublicController,
     AppsController,
   ],
   providers: [
@@ -26,6 +34,8 @@ import { AppDomainService } from './shared/app-domain.service';
     AppDomainService,
     ProductPageAppService,
     ServicePageAppService,
+    BookingAppService,
+    BookingCheckinService,
   ],
   exports: [AppsService],
 })

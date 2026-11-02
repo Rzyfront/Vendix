@@ -5,6 +5,7 @@ import { GlobalPrismaService } from '../../../prisma/services/global-prisma.serv
 import { PublicDomainsService } from '../domains/public-domains.service';
 import { readPublishedProductPage } from '../../store/apps/product-page/product-page.reader';
 import { readPublishedServicePage } from '../../store/apps/service-page/service-page.reader';
+import { readPublishedBookingPage } from '../../store/apps/booking/booking-page.reader';
 import { DomainConfigService } from '@common/config/domain.config';
 import { API_HOSTS, normalizeHostname } from '@common/utils/tenant-hostname.util';
 import { isValidSlug } from '@common/utils/slug.util';
@@ -62,6 +63,9 @@ export class PublicSeoService {
         break;
       case 'STORE_SERVICE_PAGE':
         xml = await this.buildServicePageSitemap(context);
+        break;
+      case 'STORE_BOOKING':
+        xml = await this.buildBookingPageSitemap(context);
         break;
       default:
         // Admin panels and other private apps — minimal sitemap
@@ -187,6 +191,27 @@ Sitemap: ${context.base_url}/sitemap.xml
 `;
         break;
 
+      case 'STORE_BOOKING':
+        // Apps · booking: the booking home and the amenities' detail are
+        // indexable; the stay status, the online check-in and stay rating
+        // (token links), cart, checkout and account are not.
+        content = `User-agent: *
+Allow: /
+Allow: /products
+Disallow: /hotel/reserva/
+Disallow: /pre-registro/
+Disallow: /calificar-estadia/
+Disallow: /cart
+Disallow: /checkout
+Disallow: /account
+Disallow: /api/
+Disallow: /pedido/
+Disallow: /order/
+
+Sitemap: ${context.base_url}/sitemap.xml
+`;
+        break;
+
       default:
         // Admin panels — block all indexing
         content = `User-agent: *
@@ -290,6 +315,40 @@ ${p.updated_at ? `    <lastmod>${p.updated_at.toISOString()}</lastmod>
     <priority>${p.priority}</priority>
   </url>`,
       ),
+    ].join('\n');
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${entries}
+</urlset>`;
+  }
+
+  /**
+   * Apps · booking: the booking home first (rooms and rates are searched by
+   * date, so they have no URL of their own), then the amenities' detail.
+   */
+  private async buildBookingPageSitemap(context: DomainContext): Promise<string> {
+    const page = context.store_id
+      ? await readPublishedBookingPage(this.globalPrisma, context.store_id)
+      : null;
+    if (!page) return this.buildMinimalSitemap(context.base_url);
+
+    const entries = [
+      `  <url>
+    <loc>${escapeXml(context.base_url + '/')}</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>`,
+      ...page.products
+        .filter((p) => isValidSlug(p.slug))
+        .map(
+          (p) => `  <url>
+    <loc>${escapeXml(context.base_url + '/products/' + p.slug)}</loc>
+${p.updated_at ? `    <lastmod>${p.updated_at.toISOString()}</lastmod>
+` : ''}    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>`,
+        ),
     ].join('\n');
 
     return `<?xml version="1.0" encoding="UTF-8"?>

@@ -9,7 +9,10 @@ import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
 
 /** `app_type` values an app publishes on (plan S1/S5). */
-export type PublishedAppType = 'STORE_PRODUCT_PAGE' | 'STORE_SERVICE_PAGE';
+export type PublishedAppType =
+  | 'STORE_PRODUCT_PAGE'
+  | 'STORE_SERVICE_PAGE'
+  | 'STORE_BOOKING';
 
 /** Custom domains that serve these apps are never taken over by an app. */
 const PROTECTED_APP_TYPES = ['STORE_ECOMMERCE', 'STORE_ADMIN'];
@@ -30,7 +33,7 @@ export interface AppDomainRef {
 
 /**
  * Domain lifecycle shared by the Apps that publish on their own domain
- * (product page, service page; plan S5).
+ * (product page, service page, booking; plan S5).
  *
  * Tenant isolation: every store read goes through `StorePrismaService`
  * (auto-scoped) and filters by the `storeId` the caller took from the request
@@ -95,7 +98,7 @@ export class AppDomainService {
         })
       ).map((d) => d.hostname.toLowerCase()),
     );
-    const own = new Map(
+    const own = new Map<string, number>(
       (
         await this.prisma.domain_settings.findMany({
           where: {
@@ -105,7 +108,7 @@ export class AppDomainService {
           },
           select: { id: true, hostname: true },
         })
-      ).map((d) => [d.hostname.toLowerCase(), d.id]),
+      ).map((d) => [d.hostname.toLowerCase(), d.id] as [string, number]),
     );
     const hostname = buildHostname(
       store?.slug ?? '',

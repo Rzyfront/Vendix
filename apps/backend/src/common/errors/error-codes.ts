@@ -7641,6 +7641,22 @@ export const ErrorCodes = {
       'La tienda no tiene servicios disponibles en línea para publicar la página.',
   },
 
+  // Apps · booking: the hotel booking page applies only to stores whose
+  // industries include `hospitality` (catalog entry `booking`).
+  STORE_APPS_008: {
+    code: 'STORE_APPS_008',
+    httpStatus: 403,
+    devMessage: 'La página de reservas solo está disponible para tiendas de hotelería.',
+  },
+
+  // Apps · booking: publishing needs at least one active room type in the PMS.
+  STORE_APPS_009: {
+    code: 'STORE_APPS_009',
+    httpStatus: 409,
+    devMessage:
+      'Crea al menos un tipo de habitación activo antes de publicar la página de reservas.',
+  },
+
   // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra
   // tienda como si no está asignada a quien no puede ver todas: no se revela
   // que existe.

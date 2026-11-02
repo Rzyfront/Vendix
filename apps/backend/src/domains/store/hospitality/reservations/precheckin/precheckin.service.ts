@@ -149,8 +149,9 @@ export class LodgingPrecheckinService {
   /**
    * Creates the reservation token only if it has none: a concurrent writer
    * (desk link, reminder job, stay review) never replaces a link already sent.
+   * Public for the Apps booking page, which opens the same link to the guest.
    */
-  private async ensureToken(reservationId: number): Promise<string> {
+  async ensureToken(reservationId: number): Promise<string> {
     const token = newPrecheckinToken();
     const { count } = await this.prisma.lodging_reservations.updateMany({
       where: { id: reservationId, precheckin_token: null },
