@@ -325,7 +325,7 @@ export class ConsultationsComponent {
       in_progress: 'En progreso',
       completed: 'Completada',
       cancelled: 'Cancelada',
-      no_show: 'No asistio',
+      no_show: 'No asistió',
     };
     return labels[status] || status;
   }
