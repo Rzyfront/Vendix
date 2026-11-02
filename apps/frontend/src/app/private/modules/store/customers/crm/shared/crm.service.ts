@@ -16,6 +16,7 @@ import {
   CrmTasksToday,
   CrmTimelinePage,
   CrmTimelineType,
+  CustomerCrmMemberships,
   CustomerCrmProfile,
   SaveCrmOpportunity,
   SaveCrmTask,
@@ -85,6 +86,41 @@ export class CrmService {
       .put<ApiResponse<CrmTag[]>>(`${this.base}/${customerId}/crm/tags`, {
         tag_ids: tagIds,
       })
+      .pipe(map((r) => r.data));
+  }
+
+  // ── Segments of a customer ────────────────────────────────
+  /** Segments and tags of a page of customers (at most 100 ids). */
+  memberships(customerIds: number[]): Observable<CustomerCrmMemberships[]> {
+    return this.http
+      .get<ApiResponse<CustomerCrmMemberships[]>>(`${this.base}/crm/memberships`, {
+        params: toParams({ customer_ids: customerIds.join(',') }),
+      })
+      .pipe(map((r) => r.data));
+  }
+
+  customerSegments(customerId: number): Observable<CustomerCrmMemberships> {
+    return this.http
+      .get<ApiResponse<CustomerCrmMemberships>>(`${this.base}/${customerId}/crm/segments`)
+      .pipe(map((r) => r.data));
+  }
+
+  /** Adds the customer to the segment by hand. */
+  addToSegment(customerId: number, segmentId: number): Observable<CustomerCrmMemberships> {
+    return this.http
+      .put<ApiResponse<CustomerCrmMemberships>>(
+        `${this.base}/${customerId}/crm/segments/${segmentId}`,
+        {},
+      )
+      .pipe(map((r) => r.data));
+  }
+
+  /** Removes the manual membership; a match by rules stays. */
+  removeFromSegment(customerId: number, segmentId: number): Observable<CustomerCrmMemberships> {
+    return this.http
+      .delete<ApiResponse<CustomerCrmMemberships>>(
+        `${this.base}/${customerId}/crm/segments/${segmentId}`,
+      )
       .pipe(map((r) => r.data));
   }
 

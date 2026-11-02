@@ -1,11 +1,16 @@
 import {
   Component,
+  TemplateRef,
+  computed,
+  effect,
   inject,
   input,
   output,
   signal,
-  computed,
+  untracked,
+  viewChild,
 } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
@@ -24,6 +29,10 @@ import { Customer } from '../../models/customer.model';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { getDocumentTypeLabel } from '../../../../../../shared/constants/document-types';
 import { customerDisplayName } from '../../../../../../shared/utils/customer-display-name.util';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { CrmService } from '../../crm/shared/crm.service';
+import { CustomerCrmMemberships } from '../../crm/shared/crm.interface';
+import { CrmMembershipChipsComponent } from '../../crm/shared/crm-membership-chips.component';
 
 @Component({
   selector: 'app-customer-list',
@@ -37,8 +46,16 @@ import { customerDisplayName } from '../../../../../../shared/utils/customer-dis
     ButtonComponent,
     FormsModule,
     PaginationComponent,
+    CrmMembershipChipsComponent,
   ],
   template: `
+    <ng-template #membershipCell let-row>
+      <app-crm-membership-chips
+        [segments]="membershipOf(row.id)?.segments ?? []"
+        [tags]="membershipOf(row.id)?.tags ?? []"
+      ></app-crm-membership-chips>
+    </ng-template>
+
     <!-- Contenedor de lista de clientes - Mobile First -->
     <app-card [responsive]="true" [padding]="false" overflow="visible">
       <!-- Search Section: sticky below stats on mobile -->
@@ -102,7 +119,7 @@ import { customerDisplayName } from '../../../../../../shared/utils/customer-dis
         <div class="px-2 pb-2 pt-1 md:p-4">
           <app-responsive-data-view
             [data]="customers()"
-            [columns]="columns"
+            [columns]="columns()"
             [cardConfig]="cardConfig"
             [actions]="actions"
             [loading]="loading()"
@@ -132,6 +149,11 @@ import { customerDisplayName } from '../../../../../../shared/utils/customer-dis
 })
 export class CustomerListComponent {
   private currencyService = inject(CurrencyFormatService);
+  private readonly crm = inject(CrmService);
+  private readonly auth = inject(AuthFacade);
+  private readonly canReadCustomers = computed(
+    () => this.auth.isOwner() || this.auth.hasPermission('store:customers:read'),
+  );
 
   readonly customers = input<Customer[]>([]);
   readonly loadingInput = input(false, { alias: 'loading' });
@@ -153,9 +175,52 @@ export class CustomerListComponent {
     return Math.ceil(this.totalItems() / this.limit());
   }
 
+  /** Segments and tags of the customers on screen, by customer id. */
+  private readonly memberships = signal<Map<number, CustomerCrmMemberships>>(new Map());
+  private membershipsRequest = 0;
+
   constructor() {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
+
+    effect(() => {
+      const ids = this.customers()
+        .map((customer) => customer.id)
+        .filter((id): id is number => typeof id === 'number');
+      untracked(() => void this.loadMemberships(ids));
+    });
+  }
+
+  protected membershipOf(customerId: number): CustomerCrmMemberships | undefined {
+    return this.memberships().get(customerId);
+  }
+
+  /** Text version for the mobile card: two names and "+N". */
+  private membershipText(customerId: number | undefined): string {
+    const row = customerId ? this.memberships().get(customerId) : undefined;
+    const names = [
+      ...(row?.segments ?? []).map((segment) => segment.name),
+      ...(row?.tags ?? []).map((tag) => tag.name),
+    ];
+    if (!names.length) return '—';
+    const rest = names.length - 2;
+    return names.slice(0, 2).join(', ') + (rest > 0 ? ` +${rest}` : '');
+  }
+
+  /** Best effort: without CRM access the column shows a dash. */
+  private async loadMemberships(ids: number[]): Promise<void> {
+    const request = ++this.membershipsRequest;
+    if (!ids.length || !this.canReadCustomers()) {
+      this.memberships.set(new Map());
+      return;
+    }
+    try {
+      const rows = await firstValueFrom(this.crm.memberships(ids));
+      if (request !== this.membershipsRequest) return;
+      this.memberships.set(new Map(rows.map((row) => [row.customer_id, row])));
+    } catch {
+      if (request === this.membershipsRequest) this.memberships.set(new Map());
+    }
   }
 
   // Dropdown actions
@@ -169,11 +234,14 @@ export class CustomerListComponent {
     },
   ];
 
-  columns: TableColumn[] = [
+  private readonly membershipCell = viewChild<TemplateRef<unknown>>('membershipCell');
+
+  // Nothing here sorts: the list does not pass [sortable] and the API has no
+  // sort, so no column is marked sortable.
+  readonly columns = computed<TableColumn[]>(() => [
     {
       key: 'first_name',
       label: 'Cliente',
-      sortable: true,
       priority: 1,
       transform: (_val: any, row?: any) => customerDisplayName(row, '-'),
     },
@@ -191,7 +259,6 @@ export class CustomerListComponent {
     {
       key: 'email',
       label: 'Correo',
-      sortable: true,
       priority: 2,
       transform: (val: any) => val || 'Sin correo',
     },
@@ -201,22 +268,14 @@ export class CustomerListComponent {
       priority: 3,
       transform: (val: any) => val || 'Sin teléfono',
     },
-    { key: 'total_orders', label: 'Pedidos', sortable: true, priority: 3 },
     {
-      key: 'last_order_date',
-      label: 'Última compra',
-      sortable: true,
-      priority: 3,
-      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : 'Nunca'),
+      key: 'crm_memberships',
+      label: 'Segmentos y etiquetas',
+      priority: 2,
+      template: this.membershipCell(),
+      transform: (_val: any, row?: any) => this.membershipText(row?.id),
     },
-    {
-      key: 'created_at',
-      label: 'Registrado',
-      sortable: true,
-      priority: 3,
-      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '-'),
-    },
-  ];
+  ]);
 
   cardConfig: ItemListCardConfig = {
     titleKey: 'first_name',
@@ -243,16 +302,11 @@ export class CustomerListComponent {
           return docType ? `${getDocumentTypeLabel(docType)} ${docNumber}` : docNumber;
         },
       },
-      { key: 'total_orders', label: 'Pedidos' },
       {
-        key: 'last_order_date',
-        label: 'Última compra',
-        transform: (v: any) => (v ? new Date(v).toLocaleDateString() : 'Nunca'),
-      },
-      {
-        key: 'created_at',
-        label: 'Registrado',
-        transform: (v: any) => (v ? new Date(v).toLocaleDateString() : '-'),
+        key: 'crm_memberships',
+        label: 'Segmentos y etiquetas',
+        icon: 'users',
+        transform: (_v: any, item?: any) => this.membershipText(item?.id),
       },
     ],
     footerKey: 'total_spend',
