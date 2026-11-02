@@ -224,7 +224,9 @@ describe('AppsService', () => {
   it('without store context: forbidden, nothing is read', async () => {
     jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(undefined);
 
-    await expect(service.list()).rejects.toBeInstanceOf(VendixHttpException);
+    const error = await service.list().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect((error as VendixHttpException).errorCode).toBe('SYS_FORBIDDEN_001');
     expect(prismaMock.store_apps.findMany).not.toHaveBeenCalled();
   });
 });
