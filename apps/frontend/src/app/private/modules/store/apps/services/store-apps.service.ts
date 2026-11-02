@@ -2,11 +2,15 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
-import { StoreAppsResponse } from '../interfaces/store-app.interface';
+import {
+  ProductPageCustomDomain,
+  StoreAppDetailResponse,
+  StoreAppsResponse,
+} from '../interfaces/store-app.interface';
 
 /**
- * Read-only client of the Apps catalog (`GET /store/apps`, permission
- * `store:apps:read`). Activation endpoints arrive in a later phase.
+ * Client of the Apps catalog (`GET /store/apps`, permission `store:apps:read`)
+ * and of the product page activation (Fase 2, `store:apps:manage`).
  */
 @Injectable({ providedIn: 'root' })
 export class StoreAppsService {
@@ -15,5 +19,33 @@ export class StoreAppsService {
 
   list(): Observable<StoreAppsResponse> {
     return this.http.get<StoreAppsResponse>(this.apiUrl);
+  }
+
+  get(kind: string): Observable<StoreAppDetailResponse> {
+    return this.http.get<StoreAppDetailResponse>(`${this.apiUrl}/${kind}`);
+  }
+
+  saveProductPageConfig(body: {
+    product_id: number;
+    complement_product_ids: number[];
+  }): Observable<unknown> {
+    return this.http.patch(`${this.apiUrl}/product_page/config`, body);
+  }
+
+  publishProductPage(customDomainId: number | null): Observable<unknown> {
+    return this.http.post(
+      `${this.apiUrl}/product_page/publish`,
+      customDomainId ? { custom_domain_id: customDomainId } : {},
+    );
+  }
+
+  unpublishProductPage(): Observable<unknown> {
+    return this.http.post(`${this.apiUrl}/product_page/unpublish`, {});
+  }
+
+  productPageCustomDomains(): Observable<{ data: ProductPageCustomDomain[] }> {
+    return this.http.get<{ data: ProductPageCustomDomain[] }>(
+      `${this.apiUrl}/product_page/custom-domains`,
+    );
   }
 }

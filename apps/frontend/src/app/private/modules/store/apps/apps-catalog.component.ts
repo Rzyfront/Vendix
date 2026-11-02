@@ -10,17 +10,18 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
 import { StoreApp } from './interfaces/store-app.interface';
 import { StoreAppsService } from './services/store-apps.service';
 import { toAppCard } from './utils/app-card.util';
+import { ProductPageSettingsModalComponent } from './components/product-page-settings-modal.component';
 
 /**
  * `/admin/apps` — catalog of the store's web apps (odd/tasks/apps-module.md,
- * S4/T6). Read-only in this phase: every card shows status, domain and public
- * URL from `GET /store/apps`, and its button opens the app's existing admin
- * screen unchanged, or explains why there is none yet.
+ * S4/T6). Every card shows status, domain and public URL from `GET /store/apps`;
+ * its button opens the app's existing admin screen unchanged, the product page
+ * settings (Fase 2), or explains why there is none yet.
  */
 @Component({
   selector: 'app-apps-catalog',
   standalone: true,
-  imports: [RouterModule, BadgeComponent, IconComponent],
+  imports: [RouterModule, BadgeComponent, IconComponent, ProductPageSettingsModalComponent],
   template: `
     <div class="w-full max-w-6xl mx-auto px-3 py-4 md:px-6 md:py-6">
       <header class="mb-5">
@@ -115,6 +116,16 @@ import { toAppCard } from './utils/app-card.util';
                     {{ card.action.label }}
                     <app-icon name="arrow-right" [size]="14" />
                   </a>
+                } @else if (card.action.kind === 'configure') {
+                  <button
+                    type="button"
+                    class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-[var(--color-text-on-primary)]"
+                    [attr.data-configure]="card.key"
+                    (click)="productPageOpen.set(true)"
+                  >
+                    {{ card.action.label }}
+                    <app-icon name="settings" [size]="14" />
+                  </button>
                 } @else {
                   <span
                     class="inline-flex w-full items-center justify-center rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text-secondary)]"
@@ -129,6 +140,8 @@ import { toAppCard } from './utils/app-card.util';
         </div>
       }
     </div>
+
+    <app-product-page-settings-modal [(isOpen)]="productPageOpen" (changed)="load()" />
   `,
 })
 export class AppsCatalogComponent {
@@ -139,6 +152,7 @@ export class AppsCatalogComponent {
   readonly apps = signal<StoreApp[]>([]);
   readonly loading = signal(true);
   readonly error = signal<string | null>(null);
+  readonly productPageOpen = signal(false);
 
   private readonly settings = computed(
     () => this.authFacade.storeSettings() as StoreSettings | null,

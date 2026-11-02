@@ -1,18 +1,20 @@
 import { Routes } from '@angular/router';
 import { AuthGuard } from '../../core/guards/auth.guard';
 import { mesaCartGuard } from '../../core/guards/mesa-cart.guard';
+import { productPageRootGuard } from '../../public/product-page/product-page.guard';
 
 /**
  * STORE_PRODUCT_PAGE public routes: a single-product storefront on its own
- * domain. It composes the ecommerce layout, product detail, cart and checkout
- * exactly as they are (no ecommerce file is modified), so cart, taxes,
+ * domain. It composes the ecommerce product detail, cart and checkout exactly
+ * as they are (no ecommerce file is modified) inside a slim layout with no
+ * catalog navigation, so cart, taxes,
  * shipping and payment rules stay in one place. The paths mirror the ones the
  * ecommerce components navigate to (`/cart`, `/checkout`, `/products/:id`,
  * `/pedido/:token`), which is what lets them run unchanged on this domain.
  */
 const layout = () =>
-  import('../../private/layouts/store-ecommerce/store-ecommerce-layout.component').then(
-    (c) => c.StoreEcommerceLayoutComponent,
+  import('../../public/product-page/product-page-layout.component').then(
+    (c) => c.ProductPageLayoutComponent,
   );
 const productDetail = () =>
   import('../../private/modules/ecommerce/pages/product-detail/product-detail.component').then(
@@ -28,6 +30,18 @@ export const storeProductPagePublicRoutes: Routes = [
     path: '',
     loadComponent: layout,
     children: [
+      // `/` opens the featured product; with no published page it says so.
+      {
+        path: '',
+        pathMatch: 'full',
+        canActivate: [productPageRootGuard],
+        loadComponent: () =>
+          import(
+            '../../public/product-page/components/product-page-unavailable.component'
+          ).then((c) => c.ProductPageUnavailableComponent),
+      },
+      // The detail's "back to catalog" link lands on the featured product.
+      { path: 'catalog', pathMatch: 'full', redirectTo: '' },
       { path: 'producto/:slug', loadComponent: productDetail },
       { path: 'products/:slug', loadComponent: productDetail },
       { path: 'catalog/:slug', loadComponent: productDetail },

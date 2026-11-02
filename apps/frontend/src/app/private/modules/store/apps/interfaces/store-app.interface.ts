@@ -34,3 +34,28 @@ export interface StoreAppsResponse {
   data: StoreApp[];
   message?: string;
 }
+
+/** GET /store/apps/:kind — the list item plus the app's own config. */
+export interface StoreAppDetail extends StoreApp {
+  config: Record<string, unknown>;
+}
+
+export interface StoreAppDetailResponse {
+  success: boolean;
+  data: StoreAppDetail;
+  message?: string;
+}
+
+/** `store_apps.config` of the product page (backend `product-page.reader.ts`). */
+export interface ProductPageConfig {
+  product_id: number | null;
+  complement_product_ids: number[];
+}
+
+/** A custom domain of the store the product page can take over. */
+export interface ProductPageCustomDomain {
+  id: number;
+  hostname: string;
+  status: string;
+  app_type: string;
+}

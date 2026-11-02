@@ -57,11 +57,30 @@ describe('toAppCard (apps-module T6)', () => {
   });
 
   it('las apps sin pantalla todavía se muestran como próximamente', () => {
-    for (const key of ['store_home', 'product_page', 'service_page', 'booking'] as const) {
+    for (const key of ['store_home', 'service_page', 'booking'] as const) {
       expect(toAppCard(app({ key }), 'hybrid').action)
         .withContext(key)
         .toEqual({ kind: 'disabled', label: 'Próximamente' });
     }
+  });
+
+  it('Página de producto se configura desde la misma pantalla de Apps', () => {
+    const card = toAppCard(
+      app({ key: 'product_page', name: 'Página de producto', status: 'draft' }),
+      'hybrid',
+    );
+
+    expect(card.statusLabel).toBe('Borrador');
+    expect(card.action).toEqual({ kind: 'configure', label: 'Configurar' });
+  });
+
+  it('Página de producto fuera de las industrias que aplica sigue bloqueada', () => {
+    const card = toAppCard(
+      app({ key: 'product_page', applies_to_store_industries: false }),
+      'hybrid',
+    );
+
+    expect(card.action).toEqual({ kind: 'disabled', label: 'No aplica a tu industria' });
   });
 
   it('traduce cada estado', () => {
