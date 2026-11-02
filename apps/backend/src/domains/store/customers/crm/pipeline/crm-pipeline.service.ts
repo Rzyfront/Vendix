@@ -346,7 +346,7 @@ export class CrmPipelineService {
   ): Promise<number> {
     const rows = await this.prisma.crm_opportunities.findMany({
       where: { store_id: storeId, quotation_id: quotationId, status: 'open' },
-      select: { id: true, pipeline_id: true },
+      select: { id: true, pipeline_id: true, customer_id: true },
     });
     let won = 0;
     const now = new Date();
@@ -373,6 +373,13 @@ export class CrmPipelineService {
           ...(orderId ? { order_id: orderId } : {}),
         },
       });
+      if (updated.count) {
+        // Event-driven: the store comes from the event, not the request.
+        await this.prisma.withoutScope().store_users.updateMany({
+          where: { store_id: storeId, user_id: row.customer_id },
+          data: { crm_stage_id: stage.id },
+        });
+      }
       won += updated.count;
     }
     return won;

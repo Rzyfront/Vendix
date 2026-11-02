@@ -108,7 +108,16 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
       <div class="flex flex-col gap-4 md:gap-6">
         <!-- Relationship -->
         <app-customer-section title="Relación comercial" icon="user-check">
-          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <app-selector
+              label="Etapa"
+              placeholder="Sin etapa"
+              [options]="stageOptions()"
+              [disabled]="!canUpdate() || saving()"
+              [ngModel]="p.stage?.id ?? ''"
+              (ngModelChange)="patch({ stage_id: $event ? +$event : null })"
+            ></app-selector>
+
             <app-selector
               label="Origen"
               placeholder="Sin origen"
@@ -135,11 +144,7 @@ const TAG_CHIP = `${CHIP} border-border bg-surface text-text-secondary`;
             </div>
           </div>
 
-          <dl class="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 sm:grid-cols-4">
-            <div class="flex flex-col gap-1">
-              <dt class="text-xs font-semibold text-text-secondary">Etapa</dt>
-              <dd class="text-sm font-bold text-text-primary">{{ p.stage?.name ?? 'Sin etapa' }}</dd>
-            </div>
+          <dl class="mt-4 grid grid-cols-2 gap-3 border-t border-border pt-4 sm:grid-cols-3">
             <div class="flex flex-col gap-1">
               <dt class="text-xs font-semibold text-text-secondary">Tareas abiertas</dt>
               <dd class="text-sm font-bold text-text-primary">
@@ -661,6 +666,18 @@ export class CustomerCrmPanelComponent {
   protected readonly error = signal<string | null>(null);
   protected readonly saving = signal(false);
   protected readonly pipelines = signal<CrmPipeline[]>([]);
+  /** Every active stage, so the profile stage can be set (or cleared) without an opportunity. */
+  protected readonly stageOptions = computed<SelectorOption[]>(() =>
+    this.pipelines().flatMap((pipeline) =>
+      pipeline.stages
+        .filter((stage) => stage.is_active !== false)
+        .map((stage) => ({
+          value: stage.id,
+          label:
+            this.pipelines().length > 1 ? `${pipeline.name} · ${stage.name}` : stage.name,
+        })),
+    ),
+  );
   protected readonly tagCatalog = signal<CrmTag[]>([]);
   protected readonly tagPick = signal<number | null>(null);
   protected readonly newTag = signal('');

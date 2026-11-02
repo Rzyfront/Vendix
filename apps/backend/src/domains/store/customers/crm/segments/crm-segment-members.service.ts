@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { ErrorCodes, VendixHttpException } from '../../../../../common/errors';
 import { isStoreCustomer, resolveCrmViewer } from '../shared/crm-access';
-import { CrmSegmentQueryService } from './crm-segment-query.service';
+import { CrmSegmentQueryService, SavedSegmentRef } from './crm-segment-query.service';
 
 /** How a customer belongs to a segment. */
 export type SegmentMembershipVia = 'rule' | 'manual' | 'both';
@@ -71,22 +71,20 @@ export class CrmSegmentMembersService {
       manualRows.map((row) => `${row.segment_id}:${row.customer_id}`),
     );
     const ruleMembers = new Map<number, Set<number>>();
-    await Promise.all(
-      segments
-        .filter((segment) => segment.is_dynamic)
-        .map(async (segment) => {
-          try {
-            const matched = await this.query.ruleMemberIds(segment.filter, ids, now);
-            ruleMembers.set(segment.id, new Set(matched));
-          } catch (error) {
-            // A segment whose rules no longer compile (a deleted tag or stage)
-            // must not hide the rest; it shows only its manual members.
-            this.logger.warn(
-              `Segment ${segment.id} skipped in memberships: ${(error as Error).message}`,
-            );
-          }
-        }),
+    const matched = await this.query.ruleMembersOf(
+      segments.filter((segment) => segment.is_dynamic),
+      ids,
+      now,
     );
+    for (const [segmentId, members] of matched) {
+      if (members instanceof Error) {
+        // A segment whose rules no longer compile (a deleted tag or stage)
+        // must not hide the rest; it shows only its manual members.
+        this.logger.warn(`Segment ${segmentId} skipped in memberships: ${members.message}`);
+        continue;
+      }
+      ruleMembers.set(segmentId, new Set(members));
+    }
 
     return ids.map((customerId) => ({
       customer_id: customerId,
@@ -108,7 +106,7 @@ export class CrmSegmentMembersService {
   async add(customerId: number, segmentId: number) {
     const viewer = resolveCrmViewer(ErrorCodes.CRM_CUSTOMER_001);
     await this.assertCustomer(customerId);
-    await this.assertSegment(segmentId);
+    const segment = await this.assertSegment(segmentId);
     await this.prisma.crm_segment_members.createMany({
       data: [
         {
@@ -120,17 +118,42 @@ export class CrmSegmentMembersService {
       ],
       skipDuplicates: true,
     });
+    await this.refreshCount(segment);
     return this.single(customerId);
   }
 
   /** Removes the manual membership; membership by rule is not touched. */
   async remove(customerId: number, segmentId: number) {
     await this.assertCustomer(customerId);
-    await this.assertSegment(segmentId);
+    const segment = await this.assertSegment(segmentId);
     await this.prisma.crm_segment_members.deleteMany({
       where: { segment_id: segmentId, customer_id: customerId },
     });
+    await this.refreshCount(segment);
     return this.single(customerId);
+  }
+
+  /** Segments and tags of one customer of this store. */
+  async ofCustomer(customerId: number): Promise<CustomerCrmMemberships> {
+    await this.assertCustomer(customerId);
+    return this.single(customerId);
+  }
+
+  /**
+   * Keeps `last_count` (shown in the segment list) in step with a manual
+   * change. Best effort: a segment whose rules no longer compile keeps the
+   * old count instead of failing the membership change.
+   */
+  private async refreshCount(segment: SavedSegmentRef) {
+    try {
+      const total = await this.query.count(await this.query.resolveSaved(segment));
+      await this.prisma.crm_segments.updateMany({
+        where: { id: segment.id },
+        data: { last_count: total, last_counted_at: new Date() },
+      });
+    } catch (error) {
+      this.logger.warn(`Segment ${segment.id} count not refreshed: ${(error as Error).message}`);
+    }
   }
 
   private async single(customerId: number): Promise<CustomerCrmMemberships> {
@@ -144,11 +167,12 @@ export class CrmSegmentMembersService {
     }
   }
 
-  private async assertSegment(segmentId: number) {
+  private async assertSegment(segmentId: number): Promise<SavedSegmentRef> {
     const segment = await this.prisma.crm_segments.findFirst({
       where: { id: segmentId },
-      select: { id: true },
+      select: { id: true, filter: true, is_dynamic: true },
     });
     if (!segment) throw new VendixHttpException(ErrorCodes.CRM_SEGMENT_002);
+    return segment;
   }
 }

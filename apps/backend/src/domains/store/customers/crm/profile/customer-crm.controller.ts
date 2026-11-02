@@ -92,8 +92,7 @@ export class CustomerCrmController {
   @Get('segments')
   @Permissions('store:customers:read')
   async segments(@Param('customerId', ParseIntPipe) customerId: number) {
-    const [memberships] = await this.members.membershipsOf([customerId]);
-    return this.response.success(memberships);
+    return this.response.success(await this.members.ofCustomer(customerId));
   }
 
   @Put('segments/:segmentId')

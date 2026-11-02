@@ -17,7 +17,10 @@ function setup() {
         { id: 5, name: 'Mayoristas', filter: { op: 'and', rules: [] }, is_dynamic: false },
         { id: 7, name: 'Roto', filter: DELETED_TAG_RULE, is_dynamic: true },
       ]),
-      findFirst: jest.fn().mockResolvedValue({ id: 5 }),
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ id: 5, filter: { op: 'and', rules: [] }, is_dynamic: false }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
     crm_segment_members: {
       findMany: jest.fn().mockResolvedValue([
@@ -34,10 +37,19 @@ function setup() {
     },
   };
   const query = {
-    ruleMemberIds: jest.fn(async (filter: unknown, _ids: number[], _now: Date) => {
-      if (filter === DELETED_TAG_RULE) throw new Error('La etiqueta 8 no existe en esta tienda');
-      return [ANA, LUIS];
-    }),
+    ruleMembersOf: jest.fn(
+      async (segments: Array<{ id: number; filter: unknown }>, _ids: number[], _now: Date) =>
+        new Map<number, number[] | Error>(
+          segments.map((segment) => [
+            segment.id,
+            segment.filter === DELETED_TAG_RULE
+              ? new Error('La etiqueta 8 no existe en esta tienda')
+              : [ANA, LUIS],
+          ]),
+        ),
+    ),
+    resolveSaved: jest.fn(async (saved: unknown) => ({ saved })),
+    count: jest.fn().mockResolvedValue(3),
   };
   const service = new CrmSegmentMembersService(prisma as never, query as never);
   return { service, prisma, query };
@@ -63,8 +75,16 @@ describe('CrmSegmentMembersService', () => {
     const { service, query } = setup();
     const result = await as(() => service.membershipsOf([ANA, LUIS, ANA]));
 
-    expect(query.ruleMemberIds).toHaveBeenCalledTimes(2);
-    expect(query.ruleMemberIds).toHaveBeenCalledWith(TAG_RULE, [ANA, LUIS], expect.any(Date));
+    // One batched call for every rule segment; the manual one is not compiled.
+    expect(query.ruleMembersOf).toHaveBeenCalledTimes(1);
+    expect(query.ruleMembersOf).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ id: 3, filter: TAG_RULE }),
+        expect.objectContaining({ id: 7, filter: DELETED_TAG_RULE }),
+      ],
+      [ANA, LUIS],
+      expect.any(Date),
+    );
     expect(result).toEqual([
       {
         customer_id: ANA,
@@ -96,6 +116,11 @@ describe('CrmSegmentMembersService', () => {
       skipDuplicates: true,
     });
     expect(result.customer_id).toBe(ANA);
+    // The segment list shows the new size right away.
+    expect(prisma.crm_segments.updateMany).toHaveBeenCalledWith({
+      where: { id: 5 },
+      data: { last_count: 3, last_counted_at: expect.any(Date) },
+    });
   });
 
   it('removing deletes only the manual row of that customer', async () => {
@@ -104,6 +129,25 @@ describe('CrmSegmentMembersService', () => {
     expect(prisma.crm_segment_members.deleteMany).toHaveBeenCalledWith({
       where: { segment_id: 3, customer_id: LUIS },
     });
+    expect(prisma.crm_segments.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 5 } }),
+    );
+  });
+
+  it('a count that cannot be refreshed does not undo the membership change', async () => {
+    const { service, prisma, query } = setup();
+    query.count.mockRejectedValueOnce(new Error('regla rota'));
+    const result = await as(() => service.add(ANA, 5));
+    expect(prisma.crm_segment_members.createMany).toHaveBeenCalled();
+    expect(prisma.crm_segments.updateMany).not.toHaveBeenCalled();
+    expect(result.customer_id).toBe(ANA);
+  });
+
+  it('reading the segments of a customer of another store answers 404', async () => {
+    const { service, prisma } = setup();
+    prisma.store_users.findFirst.mockResolvedValueOnce(null);
+    await expect(code(as(() => service.ofCustomer(ANA)))).resolves.toBe('CRM_CUSTOMER_001');
+    expect(prisma.crm_segments.findMany).not.toHaveBeenCalled();
   });
 
   it('a customer or segment of another store answers 404 and writes nothing', async () => {
@@ -119,5 +163,6 @@ describe('CrmSegmentMembersService', () => {
 
     expect(prisma.crm_segment_members.createMany).not.toHaveBeenCalled();
     expect(prisma.crm_segment_members.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.crm_segments.updateMany).not.toHaveBeenCalled();
   });
 });

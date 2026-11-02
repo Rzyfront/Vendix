@@ -303,7 +303,8 @@ export class CustomerListComponent {
         },
       },
       {
-        key: 'crm_memberships',
+        // `id` always exists, so the card runs the transform instead of printing "-".
+        key: 'id',
         label: 'Segmentos y etiquetas',
         icon: 'users',
         transform: (_v: any, item?: any) => this.membershipText(item?.id),

@@ -11,6 +11,7 @@ import {
   MetaFieldRef,
   SegmentFilterError,
   SegmentGroup,
+  SegmentRequirements,
   collectSegmentRequirements,
   compileSegmentFilter,
   parseSegmentFilter,
@@ -31,6 +32,31 @@ export interface SavedSegmentRef {
   id: number;
   filter: unknown;
   is_dynamic: boolean;
+}
+
+/** Rule queries in flight at once when resolving many segments. */
+const RULE_QUERY_CONCURRENCY = 4;
+
+interface LoadedCompileContext {
+  tagIds: Set<number>;
+  stageIds: Set<number>;
+  metaFields: Map<string, MetaFieldRef>;
+  rfmMembers: Map<string, number[]>;
+  timezone: string;
+}
+
+/** Union of what several filters need, without repeats. */
+function mergeRequirements(all: SegmentRequirements[]): SegmentRequirements {
+  const union = <T>(pick: (req: SegmentRequirements) => T[]) => [
+    ...new Set(all.flatMap(pick)),
+  ];
+  return {
+    tag_ids: union((req) => req.tag_ids),
+    stage_ids: union((req) => req.stage_ids),
+    owner_ids: union((req) => req.owner_ids),
+    meta_keys: union((req) => req.meta_keys),
+    rfm_segments: union((req) => req.rfm_segments),
+  };
 }
 
 /** Filter stored by a manual segment: no rules, only `crm_segment_members`. */
@@ -114,22 +140,55 @@ export class CrmSegmentQueryService {
   }
 
   /**
-   * Ids among `customerIds` that match the rules of a rule segment, without
-   * its manual members. Lets the profile tell "by rule" from "added by hand".
+   * For each rule segment, the ids among `customerIds` that match its rules
+   * (without its manual members), so a profile tells "by rule" from "added by
+   * hand". Tags, stages, custom fields, RFM and timezone load once for all
+   * segments; a segment whose rules no longer compile maps to its error.
    */
-  async ruleMemberIds(
-    rawFilter: unknown,
+  async ruleMembersOf(
+    segments: Array<{ id: number; filter: unknown }>,
     customerIds: number[],
     now = new Date(),
-  ): Promise<number[]> {
-    if (!customerIds.length) return [];
+  ): Promise<Map<number, number[] | Error>> {
+    const result = new Map<number, number[] | Error>();
+    if (!segments.length || !customerIds.length) return result;
     const storeId = this.storeId();
-    const { filter, condition } = await this.compile(storeId, rawFilter, now);
-    return this.memberIds({
-      store_id: storeId,
-      filter,
-      from: segmentCustomersFrom(storeId, condition, customerIds),
-    });
+
+    const parsed: Array<{ id: number; filter: SegmentGroup; req: SegmentRequirements }> = [];
+    for (const segment of segments) {
+      try {
+        const filter = parseSegmentFilter(segment.filter);
+        parsed.push({ id: segment.id, filter, req: collectSegmentRequirements(filter) });
+      } catch (error) {
+        result.set(segment.id, error as Error);
+      }
+    }
+    const context = await this.loadContext(
+      storeId,
+      mergeRequirements(parsed.map((entry) => entry.req)),
+      now,
+    );
+
+    for (let i = 0; i < parsed.length; i += RULE_QUERY_CONCURRENCY) {
+      await Promise.all(
+        parsed.slice(i, i + RULE_QUERY_CONCURRENCY).map(async (entry) => {
+          try {
+            const condition = this.compileWith(storeId, entry.filter, entry.req, context, now);
+            result.set(
+              entry.id,
+              await this.memberIds({
+                store_id: storeId,
+                filter: entry.filter,
+                from: segmentCustomersFrom(storeId, condition, customerIds),
+              }),
+            );
+          } catch (error) {
+            result.set(entry.id, error as Error);
+          }
+        }),
+      );
+    }
+    return result;
   }
 
   private async compile(
@@ -143,25 +202,58 @@ export class CrmSegmentQueryService {
     } catch (error) {
       throw this.toHttp(error);
     }
-
     const req = collectSegmentRequirements(filter);
-    await this.assertTags(req.tag_ids);
-    await this.assertStages(req.stage_ids);
-    const [metaFields, rfmMembers, timezone] = await Promise.all([
+    const context = await this.loadContext(storeId, req, now);
+    return { filter, condition: this.compileWith(storeId, filter, req, context, now) };
+  }
+
+  /** Everything a set of filters needs from the database, read once. */
+  private async loadContext(
+    storeId: number,
+    req: SegmentRequirements,
+    now: Date,
+  ): Promise<LoadedCompileContext> {
+    const [tagIds, stageIds, metaFields, rfmMembers, timezone] = await Promise.all([
+      this.existingTags(req.tag_ids),
+      this.existingStages(req.stage_ids),
       this.metaFields(req.meta_keys),
       this.rfmMembers(req.rfm_segments, now),
       resolveStoreTimezone(this.prisma, storeId),
     ]);
+    return { tagIds, stageIds, metaFields, rfmMembers, timezone };
+  }
 
+  private compileWith(
+    storeId: number,
+    filter: SegmentGroup,
+    req: SegmentRequirements,
+    context: LoadedCompileContext,
+    now: Date,
+  ): Prisma.Sql {
+    const missingTags = req.tag_ids.filter((id) => !context.tagIds.has(id));
+    if (missingTags.length) {
+      throw new VendixHttpException(
+        ErrorCodes.CRM_SEGMENT_001,
+        `La etiqueta ${missingTags.join(', ')} no existe en esta tienda`,
+        { path: 'filter', field: 'tag' },
+      );
+    }
+    const missingStages = req.stage_ids.filter((id) => !context.stageIds.has(id));
+    if (missingStages.length) {
+      throw new VendixHttpException(
+        ErrorCodes.CRM_SEGMENT_001,
+        `La etapa ${missingStages.join(', ')} no existe en esta tienda`,
+        { path: 'filter', field: 'stage' },
+      );
+    }
     try {
-      const condition = compileSegmentFilter(filter, {
+      return compileSegmentFilter(filter, {
         store_id: storeId,
         now,
-        timezone,
-        meta_fields: metaFields,
-        rfm_members: rfmMembers,
+        timezone: context.timezone,
+        meta_fields: context.metaFields,
+        rfm_members: context.rfmMembers,
       });
-      return { filter, condition };
     } catch (error) {
       throw this.toHttp(error);
     }
@@ -231,36 +323,22 @@ export class CrmSegmentQueryService {
     return storeId;
   }
 
-  private async assertTags(ids: number[]) {
-    if (!ids.length) return;
+  private async existingTags(ids: number[]): Promise<Set<number>> {
+    if (!ids.length) return new Set();
     const found = await this.prisma.crm_tags.findMany({
       where: { id: { in: ids } },
       select: { id: true },
     });
-    const missing = ids.filter((id) => !found.some((tag) => tag.id === id));
-    if (missing.length) {
-      throw new VendixHttpException(
-        ErrorCodes.CRM_SEGMENT_001,
-        `La etiqueta ${missing.join(', ')} no existe en esta tienda`,
-        { path: 'filter', field: 'tag' },
-      );
-    }
+    return new Set(found.map((tag) => tag.id));
   }
 
-  private async assertStages(ids: number[]) {
-    if (!ids.length) return;
+  private async existingStages(ids: number[]): Promise<Set<number>> {
+    if (!ids.length) return new Set();
     const found = await this.prisma.crm_pipeline_stages.findMany({
       where: { id: { in: ids } },
       select: { id: true },
     });
-    const missing = ids.filter((id) => !found.some((stage) => stage.id === id));
-    if (missing.length) {
-      throw new VendixHttpException(
-        ErrorCodes.CRM_SEGMENT_001,
-        `La etapa ${missing.join(', ')} no existe en esta tienda`,
-        { path: 'filter', field: 'stage' },
-      );
-    }
+    return new Set(found.map((stage) => stage.id));
   }
 
   private async metaFields(keys: string[]): Promise<Map<string, MetaFieldRef>> {

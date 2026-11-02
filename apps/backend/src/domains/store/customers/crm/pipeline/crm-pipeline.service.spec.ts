@@ -109,7 +109,8 @@ function setup(options: { staff?: boolean } = {}) {
         return { count: 1 };
       }),
     },
-  };
+  } as Record<string, any>;
+  prisma.withoutScope = () => prisma;
   const audit = { log: jest.fn(async (..._args: any[]) => undefined) };
   const bootstrap = { ensureDefaultCrmPipeline: jest.fn(async (..._args: any[]) => ({ id: 1 })) };
   const service = new CrmPipelineService(prisma as any, audit as any, bootstrap as any);
@@ -312,7 +313,9 @@ describe('CrmPipelineService', () => {
   it('winByQuotation wins only open opportunities of the store and links the order', async () => {
     as('owner');
     const { service, prisma } = setup();
-    prisma.crm_opportunities.findMany.mockResolvedValueOnce([{ id: 500, pipeline_id: 1 }]);
+    prisma.crm_opportunities.findMany.mockResolvedValueOnce([
+      { id: 500, pipeline_id: 1, customer_id: 42 },
+    ]);
     const won = await service.winByQuotation(STORE, 7, 88);
     expect(won).toBe(1);
     expect(prisma.crm_opportunities.findMany.mock.calls[0][0].where).toEqual({
@@ -328,6 +331,11 @@ describe('CrmPipelineService', () => {
         won_at: expect.any(Date),
         order_id: 88,
       }),
+    });
+    // The profile stage follows the won stage, in the store of the event.
+    expect(prisma.store_users.updateMany).toHaveBeenLastCalledWith({
+      where: { store_id: STORE, user_id: 42 },
+      data: { crm_stage_id: 103 },
     });
   });
 });

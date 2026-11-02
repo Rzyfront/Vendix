@@ -369,14 +369,19 @@ export class TasksComponent {
     };
   }
 
+  private statsRequest = 0;
+
   private async loadStats(): Promise<void> {
+    // Switching the scope quickly must not let an older answer win.
+    const request = ++this.statsRequest;
     this.statsLoading.set(true);
     try {
-      this.stats.set(await firstValueFrom(this.crm.taskStats(this.statsScope())));
+      const stats = await firstValueFrom(this.crm.taskStats(this.statsScope()));
+      if (request === this.statsRequest) this.stats.set(stats);
     } catch {
       // The list still works; the counters stay at zero.
     } finally {
-      this.statsLoading.set(false);
+      if (request === this.statsRequest) this.statsLoading.set(false);
     }
   }
 }
