@@ -25,6 +25,7 @@ export enum AppType {
   STORE_DELIVERY = 'STORE_DELIVERY',   // App interna de reparto (rol carrier)
   STORE_PRODUCT_PAGE = 'STORE_PRODUCT_PAGE', // Apps: página de un producto en su propio dominio
   STORE_SERVICE_PAGE = 'STORE_SERVICE_PAGE', // Apps: servicios y agenda en su propio dominio
+  STORE_BOOKING = 'STORE_BOOKING', // Apps: reservas y check-in en línea del hotel en su propio dominio
 }
 
 // ============================================================================
