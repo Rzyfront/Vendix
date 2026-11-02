@@ -2199,8 +2199,9 @@ private stationBookingService = inject(PosStationBookingService);
       const next = new Map<string, any>();
       this.cartBookingsByItemId.set(next);
       this.bookingsChanged.emit(next);
+      // QUI-970 — "Vaciar" is an abandonment: release station bookings too.
       this.cartService
-        .clearCart()
+        .abandonCart()
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {

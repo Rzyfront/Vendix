@@ -2066,8 +2066,9 @@ export class PosComponent {
   }
 
   onClearCart(): void {
+    // QUI-970 — "Vaciar" is an abandonment: release station bookings too.
     this.cartService
-      .clearCart()
+      .abandonCart()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {

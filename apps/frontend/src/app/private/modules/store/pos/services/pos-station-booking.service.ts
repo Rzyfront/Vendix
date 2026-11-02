@@ -1,8 +1,11 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, catchError, forkJoin, map, of, tap } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
-import { CartState } from '../models/cart.model';
+import { CartItem, CartState } from '../models/cart.model';
+
+/** localStorage key for the ids of orderless station bookings this POS created. */
+const POS_CREATED_STATION_BOOKINGS_KEY = 'vendix_pos_station_bookings';
 
 /**
  * Station-required bookings must exist (with a live allocation) BEFORE
@@ -18,15 +21,24 @@ export class PosStationBookingService {
   private readonly apiUrl = environment.apiUrl;
 
   /**
+   * Orderless station bookings created by this POS for the current cart.
+   * Only these may be cancelled when the cashier drops the line or
+   * empties the cart: bookings adopted from an existing order or
+   * reservation are real appointments and are never touched. Persisted
+   * so a reload with the cart still in localStorage keeps the link.
+   */
+  private readonly posCreatedIds = new Set<number>(readStoredIds());
+
+  /**
    * Creates (or reschedules, when the block already carries a booking
    * id) the reservation for a station line scheduled in the POS.
    * `skip_order_creation` keeps the booking orderless until the gate
    * links it at pay time. Emits the created/updated booking row.
    *
    * Update path uses PATCH `:id/reschedule` (there is no PUT route;
-   * PATCH `:id` is notes-only). It moves date/time/station only —
-   * provider/customer are create-only on this path by backend
-   * contract (RescheduleBookingDto).
+   * PATCH `:id` is notes-only). It moves date/time/station and the
+   * specialist (`provider_id`, RescheduleBookingDto since QUI-972);
+   * the customer stays create-only on this path.
    */
   persistScheduledStationBooking(
     block: Record<string, any>,
@@ -48,19 +60,127 @@ export class PosStationBookingService {
       skip_order_creation: true,
     };
     const existingId = Number(block['booking_id'] ?? block['id'] ?? 0);
-    const request$ =
-      Number.isFinite(existingId) && existingId > 0
-        ? this.http.patch<any>(
-            `${this.apiUrl}/store/reservations/${existingId}/reschedule`,
-            {
-              station_id: block['station_id'] ?? null,
-              date: block['date'],
-              start_time: block['start_time'],
-              end_time: block['end_time'],
-            },
-          )
-        : this.http.post<any>(`${this.apiUrl}/store/reservations`, payload);
-    return request$.pipe(map((resp: any) => resp?.data ?? resp));
+    if (Number.isFinite(existingId) && existingId > 0) {
+      const reschedule: Record<string, any> = {
+        station_id: block['station_id'] ?? null,
+        date: block['date'],
+        start_time: block['start_time'],
+        end_time: block['end_time'],
+      };
+      // A specialist change must reach the booking, not only the cart.
+      const providerId = Number(block['provider_id'] ?? 0);
+      if (Number.isFinite(providerId) && providerId > 0) {
+        reschedule['provider_id'] = providerId;
+      }
+      return this.http
+        .patch<any>(
+          `${this.apiUrl}/store/reservations/${existingId}/reschedule`,
+          reschedule,
+        )
+        .pipe(map((resp: any) => resp?.data ?? resp));
+    }
+    return this.http
+      .post<any>(`${this.apiUrl}/store/reservations`, payload)
+      .pipe(
+        map((resp: any) => resp?.data ?? resp),
+        tap((created: any) => {
+          const id = Number(created?.id ?? created?.booking_id ?? 0);
+          if (Number.isFinite(id) && id > 0) {
+            this.posCreatedIds.add(id);
+            this.persistIds();
+          }
+        }),
+      );
+  }
+
+  /**
+   * Ids of the orderless station bookings this POS created for the
+   * given cart lines (the ones that would be orphaned if the lines
+   * leave the cart without being charged).
+   */
+  posCreatedBookingIds(items: ReadonlyArray<CartItem>): number[] {
+    const ids: number[] = [];
+    for (const item of items) {
+      if (item?.product?.requires_station !== true) continue;
+      const id = Number(item?.booking?.booking_id ?? 0);
+      if (Number.isFinite(id) && id > 0 && this.posCreatedIds.has(id)) {
+        ids.push(id);
+      }
+    }
+    return ids;
+  }
+
+  /**
+   * Cancels orderless station bookings whose line left the cart without
+   * payment, so they stop holding the station and the specialist.
+   * Failures are logged, never thrown: the cashier is not blocked and
+   * the booking can still be cancelled from the agenda. `ids` must come
+   * from `posCreatedBookingIds` (read before the cart reset, which may
+   * already have forgotten them).
+   */
+  cancelOrphanBookings(ids: ReadonlyArray<number>): Observable<void> {
+    const targets = [...new Set(ids)].filter((id) => Number.isFinite(id) && id > 0);
+    if (targets.length === 0) return of(undefined);
+    for (const id of targets) this.posCreatedIds.delete(id);
+    this.persistIds();
+    return forkJoin(
+      targets.map((id) =>
+        this.http
+          .patch<any>(`${this.apiUrl}/store/reservations/${id}/cancel`, {})
+          .pipe(
+            catchError((err) => {
+              // eslint-disable-next-line no-console
+              console.warn('[pos-station-booking] cancel failed', {
+                bookingId: id,
+                error: err?.message ?? err,
+              });
+              return of(null);
+            }),
+          ),
+      ),
+    ).pipe(map(() => undefined));
+  }
+
+  /**
+   * Stops tracking every POS-created booking: called whenever the cart
+   * resets (sale charged, cart sent to a table/station, or abandoned
+   * after its cancellations were issued). Charged bookings are linked
+   * to their order and must never be cancelled later.
+   */
+  forgetAll(): void {
+    if (this.posCreatedIds.size === 0) return;
+    this.posCreatedIds.clear();
+    this.persistIds();
+  }
+
+  private persistIds(): void {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      if (this.posCreatedIds.size === 0) {
+        localStorage.removeItem(POS_CREATED_STATION_BOOKINGS_KEY);
+      } else {
+        localStorage.setItem(
+          POS_CREATED_STATION_BOOKINGS_KEY,
+          JSON.stringify([...this.posCreatedIds]),
+        );
+      }
+    } catch {
+      // Storage full or blocked: tracking stays in memory.
+    }
+  }
+}
+
+function readStoredIds(): number[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = JSON.parse(
+      localStorage.getItem(POS_CREATED_STATION_BOOKINGS_KEY) ?? '[]',
+    );
+    return Array.isArray(raw)
+      ? raw.map(Number).filter((n) => Number.isFinite(n) && n > 0)
+      : [];
+  } catch {
+    return [];
   }
 }
 
