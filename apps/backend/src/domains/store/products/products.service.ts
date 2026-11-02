@@ -528,6 +528,9 @@ export class ProductsService {
    * - El producto debe tener unidad de stock: es la dimensión de referencia.
    * - Cada UoM debe existir y estar activa en el catálogo.
    * - Cada UoM debe compartir la dimensión del stock (no se vende masa en ml).
+   * - Ninguna UoM de venta puede ser menor que la de stock: el stock es Int
+   *   y vender fracciones de su unidad sería vender aire a veces sí y a
+   *   veces no. El stock va en la unidad mínima (g, ml, mm).
    * - Sin duplicados y con EXACTAMENTE una principal.
    */
   private async assertSaleUomsValid(
@@ -583,6 +586,11 @@ export class ProductsService {
       if (uom.dimension !== stockUom.dimension) {
         throw new BadRequestException(
           `La unidad de venta (${uom.code}) debe pertenecer a la misma dimensión que la de stock (${stockUom.code}) para poder convertirse`,
+        );
+      }
+      if (Number(uom.factor_to_base) < Number(stockUom.factor_to_base)) {
+        throw new BadRequestException(
+          `La unidad de venta (${uom.code}) no puede ser menor que la de stock (${stockUom.code}): el stock se cuenta en enteros de ${stockUom.code}`,
         );
       }
     }

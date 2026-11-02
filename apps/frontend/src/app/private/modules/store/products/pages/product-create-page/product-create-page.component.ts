@@ -745,8 +745,15 @@ export class ProductCreatePageComponent {
   readonly saleUomOptions = computed<UnitOfMeasure[]>(() => {
     const stock = this.selectedStockUom();
     if (!stock) return [];
+    const stockFactor = Number(stock.factor_to_base);
     return this.uomOptions()
-      .filter((u) => u.dimension === stock.dimension)
+      .filter(
+        (u) =>
+          u.dimension === stock.dimension &&
+          // Menor que el stock = vender fracciones de un Int (el backend
+          // también lo rechaza).
+          Number(u.factor_to_base) >= stockFactor,
+      )
       .sort(
         (a, b) => Number(a.factor_to_base) - Number(b.factor_to_base),
       );
