@@ -3,7 +3,7 @@ import { AppKind, AppStatus, StoreApp } from '../interfaces/store-app.interface'
 
 export type AppCardAction =
   | { kind: 'route'; label: string; route: string }
-  /** Opens the app's own settings inside `/admin/apps` (product page, Fase 2). */
+  /** Opens the app's own settings inside `/admin/apps` (product page, service page). */
   | { kind: 'configure'; label: string }
   | { kind: 'disabled'; label: string };
 
@@ -44,8 +44,8 @@ const ADMIN_SCREEN: Partial<Record<AppKind, { label: string; route: string }>> =
   landing: { label: 'Configurar', route: '/admin/customers/crm' },
 };
 
-/** Apps configured from `/admin/apps` itself (Fase 2: product page). */
-const CONFIGURABLE_HERE: AppKind[] = ['product_page'];
+/** Apps configured from `/admin/apps` itself (Fase 2 product page, Fase 3 service page). */
+const CONFIGURABLE_HERE: AppKind[] = ['product_page', 'service_page'];
 
 /** Store types without online store (`MenuFilterService.storeTypeHiddenModules`). */
 const STORE_TYPES_WITHOUT_ECOMMERCE = ['physical', 'popup', 'kiosko'];

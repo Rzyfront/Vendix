@@ -52,10 +52,16 @@ export interface ProductPageConfig {
   complement_product_ids: number[];
 }
 
-/** A custom domain of the store the product page can take over. */
+/** A custom domain of the store an app (product or service page) can take over. */
 export interface ProductPageCustomDomain {
   id: number;
   hostname: string;
   status: string;
   app_type: string;
+}
+
+/** `store_apps.config` of the service page (backend `service-page.reader.ts`). */
+export interface ServicePageConfig {
+  featured_service_ids: number[];
+  product_ids: number[];
 }

@@ -10,7 +10,8 @@ import {
 
 /**
  * Client of the Apps catalog (`GET /store/apps`, permission `store:apps:read`)
- * and of the product page activation (Fase 2, `store:apps:manage`).
+ * and of the product page (Fase 2) and service page (Fase 3) activation
+ * (`store:apps:manage`).
  */
 @Injectable({ providedIn: 'root' })
 export class StoreAppsService {
@@ -46,6 +47,30 @@ export class StoreAppsService {
   productPageCustomDomains(): Observable<{ data: ProductPageCustomDomain[] }> {
     return this.http.get<{ data: ProductPageCustomDomain[] }>(
       `${this.apiUrl}/product_page/custom-domains`,
+    );
+  }
+
+  saveServicePageConfig(body: {
+    featured_service_ids: number[];
+    product_ids: number[];
+  }): Observable<unknown> {
+    return this.http.patch(`${this.apiUrl}/service_page/config`, body);
+  }
+
+  publishServicePage(customDomainId: number | null): Observable<unknown> {
+    return this.http.post(
+      `${this.apiUrl}/service_page/publish`,
+      customDomainId ? { custom_domain_id: customDomainId } : {},
+    );
+  }
+
+  unpublishServicePage(): Observable<unknown> {
+    return this.http.post(`${this.apiUrl}/service_page/unpublish`, {});
+  }
+
+  servicePageCustomDomains(): Observable<{ data: ProductPageCustomDomain[] }> {
+    return this.http.get<{ data: ProductPageCustomDomain[] }>(
+      `${this.apiUrl}/service_page/custom-domains`,
     );
   }
 }

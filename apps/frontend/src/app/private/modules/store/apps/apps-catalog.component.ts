@@ -7,10 +7,11 @@ import type { StoreSettings } from '../../../../core/models/store-settings.inter
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { BadgeComponent } from '../../../../shared/components/badge/badge.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
-import { StoreApp } from './interfaces/store-app.interface';
+import { AppKind, StoreApp } from './interfaces/store-app.interface';
 import { StoreAppsService } from './services/store-apps.service';
 import { toAppCard } from './utils/app-card.util';
 import { ProductPageSettingsModalComponent } from './components/product-page-settings-modal.component';
+import { ServicePageSettingsModalComponent } from './components/service-page-settings-modal.component';
 
 /**
  * `/admin/apps` — catalog of the store's web apps (odd/tasks/apps-module.md,
@@ -21,7 +22,13 @@ import { ProductPageSettingsModalComponent } from './components/product-page-set
 @Component({
   selector: 'app-apps-catalog',
   standalone: true,
-  imports: [RouterModule, BadgeComponent, IconComponent, ProductPageSettingsModalComponent],
+  imports: [
+    RouterModule,
+    BadgeComponent,
+    IconComponent,
+    ProductPageSettingsModalComponent,
+    ServicePageSettingsModalComponent,
+  ],
   template: `
     <div class="w-full max-w-6xl mx-auto px-3 py-4 md:px-6 md:py-6">
       <header class="mb-5">
@@ -121,7 +128,7 @@ import { ProductPageSettingsModalComponent } from './components/product-page-set
                     type="button"
                     class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-[var(--color-text-on-primary)]"
                     [attr.data-configure]="card.key"
-                    (click)="productPageOpen.set(true)"
+                    (click)="configure(card.key)"
                   >
                     {{ card.action.label }}
                     <app-icon name="settings" [size]="14" />
@@ -142,6 +149,7 @@ import { ProductPageSettingsModalComponent } from './components/product-page-set
     </div>
 
     <app-product-page-settings-modal [(isOpen)]="productPageOpen" (changed)="load()" />
+    <app-service-page-settings-modal [(isOpen)]="servicePageOpen" (changed)="load()" />
   `,
 })
 export class AppsCatalogComponent {
@@ -153,6 +161,7 @@ export class AppsCatalogComponent {
   readonly loading = signal(true);
   readonly error = signal<string | null>(null);
   readonly productPageOpen = signal(false);
+  readonly servicePageOpen = signal(false);
 
   private readonly settings = computed(
     () => this.authFacade.storeSettings() as StoreSettings | null,
@@ -173,6 +182,12 @@ export class AppsCatalogComponent {
 
   constructor() {
     this.load();
+  }
+
+  /** Opens the settings modal of an app configured from this screen. */
+  configure(kind: AppKind): void {
+    if (kind === 'service_page') this.servicePageOpen.set(true);
+    else if (kind === 'product_page') this.productPageOpen.set(true);
   }
 
   load(): void {
