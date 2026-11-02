@@ -720,6 +720,15 @@ export const storeAdminRoutes: Routes = [
             (c) => c.EcommerceComponent,
           ),
       },
+      // Apps catalog (odd/tasks/apps-module.md T6). Gated by panelUiGuard:
+      // store flag apps.enabled + store:apps:read.
+      {
+        path: 'apps',
+        loadComponent: () =>
+          import('../../private/modules/store/apps/apps-catalog.component').then(
+            (c) => c.AppsCatalogComponent,
+          ),
+      },
       // Settings Routes
       {
         path: 'settings',
