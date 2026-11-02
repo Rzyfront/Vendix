@@ -16,20 +16,16 @@ import type {
 import { ChannelsService } from './channels.service';
 import { MessagingChannelCardsComponent } from './messaging-channels/messaging-channel-cards.component';
 import { MetaReadiness, WhatsappChannel } from './channels.interface';
+import {
+  EmbeddedSignupFlowError,
+  startEmbeddedSignupFlow,
+} from './embedded-signup-flow';
 
 declare global {
   interface Window {
     FB?: any;
     fbAsyncInit?: () => void;
   }
-}
-
-interface EmbeddedSignupResult {
-  code: string;
-  waba_id: string;
-  phone_number_id: string;
-  display_phone_number?: string;
-  business_account_id?: string;
 }
 
 @Component({
@@ -58,6 +54,23 @@ interface EmbeddedSignupResult {
         @if (error()) {
           <app-alert-banner variant="danger" icon="triangle-alert">
             {{ error() }}
+          </app-alert-banner>
+        }
+
+        @if (channel()?.status === 'error' && channel()?.last_error) {
+          <app-alert-banner variant="warning" icon="triangle-alert">
+            {{ channel()?.last_error }}
+          </app-alert-banner>
+        }
+
+        @if (
+          channel()?.status === 'connected' &&
+          channel()?.phone_number_id &&
+          !channel()?.registration_status
+        ) {
+          <app-alert-banner variant="warning" icon="triangle-alert">
+            Falta registrar el número de WhatsApp para poder enviar mensajes. Usa
+            "Reintentar registro".
           </app-alert-banner>
         }
 
@@ -99,6 +112,21 @@ interface EmbeddedSignupResult {
                   Desconectar
                 </app-button>
               } @else {
+                @if (canRetryRegistration()) {
+                  <app-button
+                    variant="outline"
+                    size="md"
+                    [loading]="registering()"
+                    (clicked)="retryRegistration()"
+                  >
+                    <app-icon
+                      slot="icon"
+                      name="refresh-cw"
+                      [size]="16"
+                    ></app-icon>
+                    Reintentar registro
+                  </app-button>
+                }
                 <app-button
                   variant="primary"
                   size="md"
@@ -252,6 +280,7 @@ export class ChannelsComponent {
   protected readonly loading = signal(false);
   protected readonly connecting = signal(false);
   protected readonly disconnecting = signal(false);
+  protected readonly registering = signal(false);
   protected readonly error = signal<string | null>(null);
   protected readonly readiness = signal<MetaReadiness | null>(null);
   protected readonly channel = signal<WhatsappChannel | null>(null);
@@ -273,6 +302,19 @@ export class ChannelsComponent {
     const channel = this.channel();
     return Boolean(
       readiness?.can_start_signup && !channel?.connected && !this.connecting(),
+    );
+  });
+
+  protected readonly canRetryRegistration = computed(() => {
+    const channel = this.channel();
+    // Also covers channels connected before registration existed: status
+    // 'connected' with no registration state yet.
+    return Boolean(
+      channel &&
+      channel.status !== 'disconnected' &&
+      channel.phone_number_id &&
+      channel.registration_status !== 'registered' &&
+      !this.registering(),
     );
   });
 
@@ -341,16 +383,49 @@ export class ChannelsComponent {
 
     try {
       await this.loadFacebookSdk(readiness);
-      const signup = await this.startEmbeddedSignupLogin(readiness);
+      if (!window.FB) {
+        throw new EmbeddedSignupFlowError(
+          'WhatsApp no está listo para conectar',
+        );
+      }
+      const signup = await startEmbeddedSignupFlow(window.FB, readiness);
       const channel = await firstValueFrom(
         this.service.completeWhatsappEmbeddedSignup(signup),
       );
       this.channel.set(channel);
-      this.toast.success('WhatsApp quedó conectado.');
+      if (channel.status === 'error') {
+        this.error.set(
+          channel.last_error ||
+            'WhatsApp quedó conectado, pero falta registrar el número.',
+        );
+      } else {
+        this.toast.success('WhatsApp quedó conectado.');
+      }
     } catch (error) {
       this.error.set(this.extractErrorMessage(error));
     } finally {
       this.connecting.set(false);
+    }
+  }
+
+  protected async retryRegistration(): Promise<void> {
+    this.registering.set(true);
+    this.error.set(null);
+
+    try {
+      const channel = await firstValueFrom(
+        this.service.retryWhatsappRegistration(),
+      );
+      this.channel.set(channel);
+      if (channel.status === 'error') {
+        this.error.set(channel.last_error || 'No se pudo registrar el número.');
+      } else {
+        this.toast.success('El número quedó registrado.');
+      }
+    } catch (error) {
+      this.error.set(this.extractErrorMessage(error));
+    } finally {
+      this.registering.set(false);
     }
   }
 
@@ -428,112 +503,10 @@ export class ChannelsComponent {
     return this.sdkLoadingPromise;
   }
 
-  private startEmbeddedSignupLogin(
-    readiness: MetaReadiness,
-  ): Promise<EmbeddedSignupResult> {
-    return new Promise((resolve, reject) => {
-      let loginCode: string | null = null;
-      let signupData: any = null;
-      let settled = false;
-
-      const allowedOrigins = new Set([
-        'https://www.facebook.com',
-        'https://web.facebook.com',
-      ]);
-
-      const cleanup = () => {
-        window.clearTimeout(timeout);
-        window.removeEventListener('message', handleMessage);
-      };
-
-      const fail = (message: string) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        reject(new Error(message));
-      };
-
-      const finishIfReady = () => {
-        if (settled || !loginCode) return;
-        if (!signupData?.waba_id || !signupData?.phone_number_id) return;
-
-        settled = true;
-        cleanup();
-        resolve({
-          code: loginCode,
-          waba_id: signupData.waba_id,
-          phone_number_id: signupData.phone_number_id,
-          display_phone_number: signupData.display_phone_number,
-          business_account_id: signupData.business_id,
-        });
-      };
-
-      const handleMessage = (event: MessageEvent) => {
-        if (!allowedOrigins.has(event.origin)) return;
-
-        const data = this.parseEmbeddedSignupMessage(event.data);
-        if (data?.type !== 'WA_EMBEDDED_SIGNUP') return;
-
-        if (data.event === 'FINISH') {
-          signupData = data.data;
-          finishIfReady();
-        }
-
-        if (data.event === 'ERROR') {
-          fail(
-            data.data?.error_message ||
-              'WhatsApp no pudo completar la conexión',
-          );
-        }
-      };
-
-      const timeout = window.setTimeout(() => {
-        fail('WhatsApp no completó la conexión a tiempo');
-      }, 45000);
-
-      window.addEventListener('message', handleMessage);
-
-      if (!window.FB) {
-        fail('WhatsApp no está listo para conectar');
-        return;
-      }
-
-      window.FB?.login(
-        (response: any) => {
-          const code = response?.authResponse?.code;
-          if (!code) {
-            fail('WhatsApp no autorizó la conexión');
-            return;
-          }
-
-          loginCode = code;
-          finishIfReady();
-        },
-        {
-          config_id: readiness.whatsapp_config_id,
-          response_type: 'code',
-          override_default_response_type: true,
-          extras: {
-            setup: {},
-            featureType: 'whatsapp_embedded_signup',
-          },
-        },
-      );
-    });
-  }
-
-  private parseEmbeddedSignupMessage(data: unknown): any {
-    if (typeof data === 'string') {
-      try {
-        return JSON.parse(data);
-      } catch {
-        return null;
-      }
-    }
-    return data;
-  }
-
   private extractErrorMessage(error: unknown): string {
+    // Messages written by the popup flow are already user-facing Spanish.
+    if (error instanceof EmbeddedSignupFlowError) return error.message;
+
     const apiError = error as any;
     const message =
       apiError?.error?.message ||

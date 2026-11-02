@@ -28,13 +28,15 @@ export interface WhatsappChannel {
   connected_at?: string | null;
   disconnected_at?: string | null;
   last_error?: string | null;
+  registration_status?: 'registered' | 'failed' | null;
   metadata?: Record<string, any> | null;
 }
 
 export interface CompleteWhatsappEmbeddedSignupRequest {
   code: string;
-  waba_id: string;
-  phone_number_id: string;
+  /** Optional: the backend resolves them from the token when missing. */
+  waba_id?: string;
+  phone_number_id?: string;
   display_phone_number?: string;
   business_account_id?: string;
 }

@@ -6,8 +6,13 @@ describe('CompleteWhatsappEmbeddedSignupDto', () => {
     const dto = new CompleteWhatsappEmbeddedSignupDto();
     const errors = await validate(dto);
 
-    expect(errors.map((error) => error.property)).toEqual(
-      expect.arrayContaining(['code', 'waba_id', 'phone_number_id']),
-    );
+    expect(errors.map((error) => error.property)).toEqual(['code']);
+  });
+
+  it('accepts a payload without waba_id and phone_number_id', async () => {
+    const dto = new CompleteWhatsappEmbeddedSignupDto();
+    dto.code = 'oauth-code';
+
+    expect(await validate(dto)).toHaveLength(0);
   });
 });

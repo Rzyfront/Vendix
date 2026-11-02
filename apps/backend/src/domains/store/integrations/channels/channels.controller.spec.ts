@@ -60,6 +60,9 @@ function createService() {
     getWhatsappChannel: jest.fn().mockResolvedValue({ connected: true }),
     completeEmbeddedSignup: jest.fn().mockResolvedValue({ connected: true }),
     disconnectWhatsapp: jest.fn().mockResolvedValue({ connected: false }),
+    retryWhatsappRegistration: jest
+      .fn()
+      .mockResolvedValue({ registration_status: 'registered' }),
   };
 }
 
@@ -89,6 +92,30 @@ describe('ChannelsController (Integraciones → Canales)', () => {
     },
   );
 
+  it('exposes the registration retry with the manage permission', async () => {
+    const route = routeOf(ChannelsController, 'retryWhatsappRegistration');
+    expect(route.path).toBe('whatsapp/register');
+    expect(route.method).toBe(RequestMethod.POST);
+    expect(route.permissions).toEqual(['store:social_sales:manage']);
+    expect(
+      Reflect.getMetadata(
+        '__httpCode__',
+        ChannelsController.prototype.retryWhatsappRegistration,
+      ),
+    ).toBe(200);
+
+    const service = createService();
+    const controller = new ChannelsController(
+      service as never,
+      responseService as never,
+    );
+    const result: unknown = await controller.retryWhatsappRegistration();
+    expect(service.retryWhatsappRegistration).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      data: { registration_status: 'registered' },
+    });
+  });
+
   it('delegates every endpoint to the Meta WhatsApp service', async () => {
     const service = createService();
     const controller = new ChannelsController(
@@ -114,9 +141,9 @@ describe('ChannelsController (Integraciones → Canales)', () => {
 
 describe('SocialSalesLegacyController (deprecated alias)', () => {
   it('keeps the old store/social-sales prefix', () => {
-    expect(Reflect.getMetadata(PATH_METADATA, SocialSalesLegacyController)).toBe(
-      'store/social-sales',
-    );
+    expect(
+      Reflect.getMetadata(PATH_METADATA, SocialSalesLegacyController),
+    ).toBe('store/social-sales');
   });
 
   it.each(expectedRoutes)(

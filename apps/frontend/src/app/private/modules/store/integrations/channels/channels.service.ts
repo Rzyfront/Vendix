@@ -36,6 +36,14 @@ export class ChannelsService {
       .pipe(map((response) => response.data));
   }
 
+  retryWhatsappRegistration(): Observable<WhatsappChannel> {
+    return this.http
+      .post<
+        ApiResponse<WhatsappChannel>
+      >(`${this.baseUrl}/whatsapp/register`, {})
+      .pipe(map((response) => response.data));
+  }
+
   disconnectWhatsapp(): Observable<WhatsappChannel> {
     return this.http
       .post<
