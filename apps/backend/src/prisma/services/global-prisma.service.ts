@@ -38,6 +38,14 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.store_apps;
   }
 
+  /**
+   * Apps · landing page (Fase 6): the public read and the sitemap check that
+   * the landing still has published content, by store_id.
+   */
+  get crm_landing_pages() {
+    return this.baseClient.crm_landing_pages;
+  }
+
   get domain_roots() {
     return this.baseClient.domain_roots;
   }

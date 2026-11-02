@@ -26,6 +26,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
   ],
   controllers: [CrmController, CrmPublicController],
   providers: [CrmService, CrmGenerationService, CrmPublicService, CrmLandingProcessor],
-  exports: [CrmService],
+  // CrmPublicService: the Apps landing page (Fase 6) reuses the contact
+  // flow for the leads of the landing on its own domain.
+  exports: [CrmService, CrmPublicService],
 })
 export class CrmModule {}

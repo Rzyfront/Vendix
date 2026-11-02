@@ -7666,6 +7666,23 @@ export const ErrorCodes = {
       'La tienda no tiene activo su dominio principal ({tienda}-store) para publicar el inicio de tienda.',
   },
 
+  // Apps · landing page (Fase 6): the landing app publishes the content made
+  // in "Landing de captación"; with nothing published there, there is nothing
+  // to put on its own domain.
+  STORE_APPS_011: {
+    code: 'STORE_APPS_011',
+    httpStatus: 409,
+    devMessage:
+      'Publica primero la landing en Landing de captación para ponerla en su propio dominio.',
+  },
+
+  // Apps · landing page: a product offer needs its product.
+  STORE_APPS_012: {
+    code: 'STORE_APPS_012',
+    httpStatus: 400,
+    devMessage: 'Elige el producto de la oferta.',
+  },
+
   // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra
   // tienda como si no está asignada a quien no puede ver todas: no se revela
   // que existe.

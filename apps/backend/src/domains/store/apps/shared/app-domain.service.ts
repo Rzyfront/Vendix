@@ -11,6 +11,9 @@ import { ErrorCodes } from '@common/errors/error-codes';
 /** `app_type` values an app publishes on (plan S1/S5). */
 export type PublishedAppType =
   | 'STORE_HOME'
+  // Landing page (Fase 6): its own `{tienda}-landing` domain serves the same
+  // landing the store already renders under `STORE_LANDING`.
+  | 'STORE_LANDING'
   | 'STORE_PRODUCT_PAGE'
   | 'STORE_SERVICE_PAGE'
   | 'STORE_BOOKING';

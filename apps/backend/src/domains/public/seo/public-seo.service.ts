@@ -6,6 +6,10 @@ import { PublicDomainsService } from '../domains/public-domains.service';
 import { readPublishedProductPage } from '../../store/apps/product-page/product-page.reader';
 import { readPublishedServicePage } from '../../store/apps/service-page/service-page.reader';
 import { readPublishedBookingPage } from '../../store/apps/booking/booking-page.reader';
+import {
+  PublishedLandingPage,
+  readPublishedLandingPage,
+} from '../../store/apps/landing/landing-page.reader';
 import { DomainConfigService } from '@common/config/domain.config';
 import { API_HOSTS, normalizeHostname } from '@common/utils/tenant-hostname.util';
 import { isValidSlug } from '@common/utils/slug.util';
@@ -66,6 +70,11 @@ export class PublicSeoService {
         break;
       case 'STORE_BOOKING':
         xml = await this.buildBookingPageSitemap(context);
+        break;
+      case 'STORE_LANDING':
+        // Apps · landing page (Fase 6): only the landing's own domain gets a
+        // sitemap of its own; every other store landing keeps the minimal one.
+        xml = await this.buildLandingPageSitemap(context);
         break;
       default:
         // Admin panels and other private apps — minimal sitemap
@@ -212,6 +221,30 @@ Sitemap: ${context.base_url}/sitemap.xml
 `;
         break;
 
+      case 'STORE_LANDING': {
+        // Apps · landing page (Fase 6): the landing's own domain and its
+        // offer product are indexable; cart, checkout, account and token
+        // pages are not. Any other store landing keeps blocking all indexing.
+        const page = await this.ownLandingPage(context);
+        content = page
+          ? `User-agent: *
+Allow: /
+Allow: /products
+Disallow: /cart
+Disallow: /checkout
+Disallow: /account
+Disallow: /api/
+Disallow: /pedido/
+Disallow: /order/
+
+Sitemap: ${context.base_url}/sitemap.xml
+`
+          : `User-agent: *
+Disallow: /
+`;
+        break;
+      }
+
       default:
         // Admin panels — block all indexing
         content = `User-agent: *
@@ -354,6 +387,46 @@ ${p.updated_at ? `    <lastmod>${p.updated_at.toISOString()}</lastmod>
     return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${entries}
+</urlset>`;
+  }
+
+  /**
+   * The store's landing published as an app, only when `context` is its own
+   * domain. The primary `{tienda}-store` domain also renders the landing
+   * (`STORE_LANDING`) and must keep its current SEO.
+   */
+  private async ownLandingPage(
+    context: DomainContext,
+  ): Promise<PublishedLandingPage | null> {
+    if (!context.store_id) return null;
+    const page = await readPublishedLandingPage(this.globalPrisma, context.store_id);
+    return page && context.base_url === `https://${page.hostname}` ? page : null;
+  }
+
+  /** Apps · landing page: `/`, then the offer product's detail. */
+  private async buildLandingPageSitemap(context: DomainContext): Promise<string> {
+    const page = await this.ownLandingPage(context);
+    if (!page) return this.buildMinimalSitemap(context.base_url);
+
+    const entries = [
+      `  <url>
+    <loc>${escapeXml(context.base_url + '/')}</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>`,
+    ];
+    const product = page.offer.product;
+    if (product && isValidSlug(product.slug)) {
+      entries.push(`  <url>
+    <loc>${escapeXml(context.base_url + '/products/' + product.slug)}</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.6</priority>
+  </url>`);
+    }
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${entries.join('\n')}
 </urlset>`;
   }
 

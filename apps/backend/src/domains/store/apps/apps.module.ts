@@ -19,12 +19,25 @@ import { BookingPublicController } from './booking/booking-public.controller';
 import { StoreHomeAppController } from './store-home/store-home-app.controller';
 import { StoreHomeAppService } from './store-home/store-home-app.service';
 import { StoreHomePublicController } from './store-home/store-home-public.controller';
+import { CrmModule } from '../crm/crm.module';
+import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
+import { LandingPageAppController } from './landing/landing-page-app.controller';
+import { LandingPageAppService } from './landing/landing-page-app.service';
+import { LandingPagePublicController } from './landing/landing-page-public.controller';
+import { LandingLeadService } from './landing/landing-lead.service';
 
 /** Apps — catálogo de aplicaciones web por tienda (odd/tasks/apps-module.md). */
 @Module({
   // Booking (Fase 4) opens the PMS online check-in link to the guest; the
-  // store home (Fase 5) signs the brand logo.
-  imports: [ResponseModule, PrismaModule, LodgingReservationsModule, S3Module],
+  // store home (Fase 5) signs the brand logo; the landing page (Fase 6)
+  // reuses the CRM contact flow for its leads.
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    LodgingReservationsModule,
+    S3Module,
+    CrmModule,
+  ],
   controllers: [
     ProductPageAppController,
     ProductPagePublicController,
@@ -34,6 +47,8 @@ import { StoreHomePublicController } from './store-home/store-home-public.contro
     BookingPublicController,
     StoreHomeAppController,
     StoreHomePublicController,
+    LandingPageAppController,
+    LandingPagePublicController,
     AppsController,
   ],
   providers: [
@@ -44,6 +59,10 @@ import { StoreHomePublicController } from './store-home/store-home-public.contro
     BookingAppService,
     BookingCheckinService,
     StoreHomeAppService,
+    LandingPageAppService,
+    LandingLeadService,
+    // Default CRM pipeline for the landing leads (same helper as the CRM).
+    StoreBootstrapHelper,
   ],
   exports: [AppsService],
 })
