@@ -1167,6 +1167,9 @@ model stores {
   // CRM Landing (QUI-719)
   crm_landing_page crm_landing_pages?
 
+  // Apps — catálogo de aplicaciones web por tienda
+  store_apps store_apps[]
+
   service_stations_store_fkey service_stations[] @relation("service_stations_store_fkey")
   service_reminder_logs_store_id_fkey service_reminder_logs[] @relation("service_reminder_logs_store_id_fkey")
 
@@ -1226,6 +1229,27 @@ model crm_landing_pages {
   @@index([enabled])
 }
 
+/// Apps — catálogo de aplicaciones web por tienda (odd/tasks/apps-module.md, S1).
+/// Una fila por (tienda, tipo de app). La ausencia de fila equivale a `not_installed`.
+/// `config` guarda lo propio de cada app sin tocar `store_settings`.
+model store_apps {
+  id                 Int              @id @default(autoincrement())
+  store_id           Int
+  kind               app_kind_enum
+  status             app_status_enum  @default(not_installed)
+  domain_settings_id Int?
+  config             Json             @default("{}")
+  published_at       DateTime?        @db.Timestamptz(6)
+  created_at         DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime         @default(now()) @updatedAt @db.Timestamptz(6)
+  stores             stores           @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  domain_settings    domain_settings? @relation(fields: [domain_settings_id], references: [id], onDelete: SetNull)
+
+  @@unique([store_id, kind])
+  @@index([store_id])
+  @@index([kind, status])
+}
+
 model domain_settings {
   id              Int    @id @default(autoincrement())
   hostname        String @db.VarChar(255)
@@ -1270,6 +1294,7 @@ model domain_settings {
   store                         stores?        @relation(fields: [store_id], references: [id], onDelete: Cascade)
   domain_root                   domain_roots?  @relation(fields: [domain_root_id], references: [id], onDelete: SetNull)
   product_online_purchase_links products[]     @relation("product_online_purchase_domain")
+  store_apps                    store_apps[]
 
   @@index([hostname])
   @@index([organization_id])
@@ -5732,6 +5757,28 @@ enum app_type_enum {
   STORE_ADMIN // Admin de tienda
   STORE_ECOMMERCE // Ecommerce de tienda
   STORE_DELIVERY // App interna de delivery (carrier / Vendix Repartos)
+  STORE_HOME // Apps: inicio de tienda ({tienda}-store)
+  STORE_PRODUCT_PAGE // Apps: página de producto
+  STORE_SERVICE_PAGE // Apps: página de servicios
+  STORE_BOOKING // Apps: reservas / check-in hotel
+}
+
+// Apps — tipo de aplicación web publicable por tienda.
+enum app_kind_enum {
+  ecommerce
+  store_home
+  landing
+  product_page
+  service_page
+  booking
+}
+
+// Apps — estado de una app en la tienda. `not_installed` también es la ausencia de fila.
+enum app_status_enum {
+  not_installed
+  draft
+  published
+  disabled
 }
 
 enum domain_status_enum {
