@@ -70,8 +70,11 @@ export class ProductPageAppService {
 
     const row = await this.findRow(storeId);
     const current = parseProductPageConfig(row?.config);
+    // The Vendix hostname is built from the featured product; a custom domain
+    // is not, so only the former locks the product while published.
     const onVendixHostname =
-      row?.status === 'published' && !current.custom_domain_previous_app_type;
+      row?.status === 'published' &&
+      row.domain_settings?.ownership === 'vendix_subdomain';
     if (onVendixHostname && current.product_id !== dto.product_id) {
       throw new VendixHttpException(ErrorCodes.STORE_APPS_004);
     }
@@ -111,6 +114,11 @@ export class ProductPageAppService {
       throw new VendixHttpException(ErrorCodes.STORE_APPS_003);
     }
     const product = await this.assertSellable(storeId, [config.product_id]);
+    // Validate the target before releasing anything, so a rejected republish
+    // leaves the current publication untouched.
+    if (dto.custom_domain_id) {
+      await this.findTakeableCustomDomain(storeId, dto.custom_domain_id);
+    }
 
     // Republishing an already published page on a different domain first
     // releases the current one, so a store never serves two product pages.
@@ -255,21 +263,7 @@ export class ProductPageAppService {
     domainId: number,
     config: ProductPageConfig,
   ): Promise<{ id: number; hostname: string }> {
-    const domain = await this.prisma.domain_settings.findFirst({
-      where: {
-        id: domainId,
-        store_id: storeId,
-        ownership: { in: [...CUSTOM_OWNERSHIPS] },
-        status: { not: 'disabled' },
-      },
-      select: { id: true, hostname: true, app_type: true, status: true },
-    });
-    if (
-      !domain ||
-      PROTECTED_APP_TYPES.includes(String(domain.app_type))
-    ) {
-      throw new VendixHttpException(ErrorCodes.STORE_APPS_005);
-    }
+    const domain = await this.findTakeableCustomDomain(storeId, domainId);
 
     config.custom_domain_previous_app_type =
       String(domain.app_type) === APP_TYPE ? null : String(domain.app_type);
@@ -281,6 +275,23 @@ export class ProductPageAppService {
       domain.status === 'active' ? 'domain.activated' : 'domain.updated',
       { domainId: domain.id, hostname: domain.hostname, store_id: storeId },
     );
+    return domain;
+  }
+
+  /** A custom domain of this store that is not the online store or the admin. */
+  private async findTakeableCustomDomain(storeId: number, domainId: number) {
+    const domain = await this.prisma.domain_settings.findFirst({
+      where: {
+        id: domainId,
+        store_id: storeId,
+        ownership: { in: [...CUSTOM_OWNERSHIPS] },
+        status: { not: 'disabled' },
+      },
+      select: { id: true, hostname: true, app_type: true, status: true },
+    });
+    if (!domain || PROTECTED_APP_TYPES.includes(String(domain.app_type))) {
+      throw new VendixHttpException(ErrorCodes.STORE_APPS_005);
+    }
     return domain;
   }
 
