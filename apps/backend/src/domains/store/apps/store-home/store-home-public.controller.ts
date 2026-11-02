@@ -15,9 +15,9 @@ import {
 
 /**
  * Public read of the store home, for the STORE_HOME app. Under `/ecommerce/`
- * so the domain resolver middleware sets the store from the hostname; the
- * store never comes from the client. Returns only the brand and the footer:
- * no products, prices or cart.
+ * so the domain resolver middleware sets the store (from the hostname, or the
+ * `x-store-id` the storefront sends, like every `/ecommerce/*` read). Returns
+ * only public data — the brand and the footer: no products, prices or cart.
  */
 @Controller('ecommerce/store-home')
 export class StoreHomePublicController {
