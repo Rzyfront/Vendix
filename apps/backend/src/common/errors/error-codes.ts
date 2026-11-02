@@ -7625,6 +7625,22 @@ export const ErrorCodes = {
       'Ese dominio no se puede usar para la página de producto.',
   },
 
+  // Apps · service page: a featured service is not one of this store's
+  // services sold online (active, available for ecommerce, for sale).
+  STORE_APPS_006: {
+    code: 'STORE_APPS_006',
+    httpStatus: 400,
+    devMessage: 'El servicio elegido no se ofrece en línea en esta tienda.',
+  },
+
+  // Apps · service page: publishing needs at least one service sold online.
+  STORE_APPS_007: {
+    code: 'STORE_APPS_007',
+    httpStatus: 409,
+    devMessage:
+      'La tienda no tiene servicios disponibles en línea para publicar la página.',
+  },
+
   // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra
   // tienda como si no está asignada a quien no puede ver todas: no se revela
   // que existe.
