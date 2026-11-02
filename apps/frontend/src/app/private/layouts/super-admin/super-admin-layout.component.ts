@@ -259,6 +259,8 @@ export class SuperAdminLayoutComponent {
     '/super-admin/fiscal/accounting/reports': 'Reportes Contables',
     '/super-admin/support': 'Tickets',
     '/super-admin/system/ai-engine': 'AI Engine',
+    '/super-admin/system/integrations/meta-whatsapp':
+      'Integraciones / Meta / WhatsApp',
     '/super-admin/system/templates': 'Plantillas',
     '/super-admin/system/backups': 'Copias de Seguridad',
     '/super-admin/system/payroll-defaults': 'Parámetros de Nómina',
@@ -422,6 +424,11 @@ export class SuperAdminLayoutComponent {
             label: 'Envíos del Sistema',
             icon: 'circle',
             route: '/super-admin/settings/shipping',
+          },
+          {
+            label: 'Integraciones · Meta / WhatsApp',
+            icon: 'circle',
+            route: '/super-admin/system/integrations/meta-whatsapp',
           },
           {
             label: 'Plantillas',

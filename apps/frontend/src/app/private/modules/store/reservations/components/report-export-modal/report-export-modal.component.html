@@ -1,0 +1,73 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="onModalOpenChange($event)"
+  [dialog]="true"
+  title="Exportar reporte de reservas"
+  subtitle="Descarga las reservas del rango en Excel"
+  size="md"
+>
+  <div class="export-form">
+    <div class="form-row">
+      <div class="form-field">
+        <span class="field-label">Desde</span>
+        <app-input
+          type="date"
+          [ngModel]="dateFrom()"
+          (ngModelChange)="dateFrom.set($event)"
+        ></app-input>
+      </div>
+      <div class="form-field">
+        <span class="field-label">Hasta</span>
+        <app-input
+          type="date"
+          [ngModel]="dateTo()"
+          (ngModelChange)="dateTo.set($event)"
+        ></app-input>
+      </div>
+    </div>
+
+    <div class="form-field">
+      <span class="field-label">Estado (opcional)</span>
+      <app-selector
+        [ngModel]="status()"
+        (ngModelChange)="status.set($event)"
+        [options]="statusOptions"
+        placeholder="Todos los estados"
+      ></app-selector>
+    </div>
+
+    <div class="form-field">
+      <span class="field-label">Profesional (opcional)</span>
+      <app-selector
+        [ngModel]="providerId()"
+        (ngModelChange)="providerId.set($event)"
+        [options]="providers()"
+        placeholder="Todos los profesionales"
+      ></app-selector>
+    </div>
+
+    <div class="form-field">
+      <span class="field-label">Servicio (opcional)</span>
+      <app-selector
+        [ngModel]="productId()"
+        (ngModelChange)="productId.set($event)"
+        [options]="services()"
+        placeholder="Todos los servicios"
+      ></app-selector>
+    </div>
+  </div>
+
+  <div slot="footer" class="modal-footer">
+    <app-button variant="outline" (clicked)="onCancel()" [disabled]="exporting()">
+      Cancelar
+    </app-button>
+    <app-button
+      variant="primary"
+      icon="download"
+      [loading]="exporting()"
+      (clicked)="onDownload()"
+    >
+      Descargar Excel
+    </app-button>
+  </div>
+</app-modal>

@@ -1,6 +1,7 @@
 import { Component, input, output, computed, signal, effect } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ReportColumn, ReportDefinition } from '../../interfaces/report.interface';
+import { aggregateStat } from './aggregate-stat';
 import { NestedReportComponent } from '../nested-report/nested-report.component';
 import { PaginationComponent } from '../../../../../../shared/components/pagination/pagination.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -527,11 +528,7 @@ export class ReportViewerComponent {
       if (hasSourceData && source[s.key] != null) {
         value = formatStatValue(source[s.key], s.type);
       } else if (data && data.length > 0) {
-        const sum = data.reduce((acc, row) => {
-          const v = Number(row[s.key]);
-          return isNaN(v) ? acc : acc + v;
-        }, 0);
-        value = formatStatValue(sum, s.type);
+        value = formatStatValue(aggregateStat(data, s), s.type);
       } else if (data) {
         // Dataset cargado pero vacío: el stat es 0, no '-'. `data`
         // undefined (cargando) conserva '-' para no mentir con un cero.
