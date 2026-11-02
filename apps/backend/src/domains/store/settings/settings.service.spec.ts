@@ -550,6 +550,76 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
     });
   });
 
+  // ------------------------------------- interruptor del módulo Apps (T8)
+
+  /**
+   * `apps.enabled` (odd/tasks/apps-module.md, D3/T8) decide si el sidebar
+   * muestra el padre «Apps». Mismo contrato que `vex`: default `false`, merge
+   * por clave, y compuerta propia — aquí más estrecha: solo el propietario.
+   */
+  describe('updateSettings — interruptor del módulo Apps', () => {
+    let stored: any;
+
+    beforeEach(() => {
+      sessionsService.countOpenSessions.mockResolvedValue(NO_OPEN_SESSIONS);
+      jest
+        .spyOn(RequestContextService, 'getRoles')
+        .mockReturnValue(['owner'] as any);
+
+      stored = { ...STORED_WITH_CASH_REGISTER_ON };
+
+      prisma.store_settings.findUnique.mockImplementation(async () => ({
+        store_id: STORE_ID,
+        settings: stored,
+      }));
+      prisma.store_settings.upsert.mockImplementation(
+        async ({ update }: any) => {
+          stored = update?.settings ?? stored;
+          return { store_id: STORE_ID, settings: stored };
+        },
+      );
+    });
+
+    it('una tienda sin bloque apps lo lee apagado', async () => {
+      const settings: any = await service.updateSettings({
+        inventory: { low_stock_threshold: 5 },
+      });
+
+      expect(settings.apps).toEqual({ enabled: false });
+    });
+
+    it('el propietario lo enciende y lo apaga', async () => {
+      await service.updateSettings({ apps: { enabled: true } });
+      expect(stored.apps).toEqual({ enabled: true });
+
+      await service.updateSettings({ apps: { enabled: false } });
+      expect(stored.apps).toEqual({ enabled: false });
+    });
+
+    it('un PATCH que no menciona apps conserva el true explícito', async () => {
+      stored = { ...STORED_WITH_CASH_REGISTER_ON, apps: { enabled: true } };
+
+      await service.updateSettings({ inventory: { low_stock_threshold: 5 } });
+
+      expect(stored.apps).toEqual({ enabled: true });
+    });
+
+    it.each([['admin'], ['manager']])(
+      'un %s no puede moverlo aunque edite settings',
+      async (role) => {
+        jest
+          .spyOn(RequestContextService, 'getRoles')
+          .mockReturnValue([role] as any);
+
+        await expect(
+          service.updateSettings({ apps: { enabled: true } }),
+        ).rejects.toMatchObject({ errorCode: 'SYS_FORBIDDEN_001' });
+
+        expect(prisma.store_settings.upsert).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   // ------------------------------------------------ sección hotelería (H0.5)
 
   /**

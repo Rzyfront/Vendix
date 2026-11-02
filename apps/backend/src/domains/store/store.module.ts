@@ -85,6 +85,7 @@ import { UomModule } from './uom/uom.module';
 import { WeeklyReportModule } from './weekly-report/weekly-report.module';
 import { PrintFormatsModule } from './print-formats/print-formats.module';
 import { CrmModule } from './crm/crm.module';
+import { AppsModule } from './apps/apps.module';
 import { ServiceStationsModule } from './service-stations/service-stations.module';
 import { ServiceSessionsModule } from './service-sessions/service-sessions.module';
 import { ServiceRemindersModule } from './service-reminders/service-reminders.module';
@@ -177,6 +178,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     WeeklyReportModule,
     PrintFormatsModule,
     CrmModule,
+    AppsModule,
     ServiceStationsModule,
     ServiceSessionsModule,
     ServiceRemindersModule,

@@ -139,6 +139,17 @@ export class DefaultPanelUIService {
         // CRM Landing (QUI-719): incluido por defecto (decisión de plan:
         // default_visible_for_privileged_users=true, show_new_badge=yes)
         customers_crm: true,
+        // CRM real (Bandeja, Pipeline, Tareas, Segmentos) — apps-module T0.
+        // Antes iban en el sidebar con `alwaysVisible` y sin key; ahora tienen
+        // key para poder ocultarse. Default `true`: nadie pierde la entrada.
+        customers_inbox: true,
+        customers_pipeline: true,
+        customers_tasks: true,
+        customers_segments: true,
+        // Catálogo de apps (apps-module T6/T7). Solo aparece con
+        // `store_settings.apps.enabled`; esta key permite ocultarlo por
+        // usuario. Default `true` (ver REPORTE.md: `false` lo ocultaría a todos).
+        apps: true,
         marketing: true,
         marketing_promotions: true,
         marketing_coupons: true,

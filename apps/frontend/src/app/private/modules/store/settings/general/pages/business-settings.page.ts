@@ -1,4 +1,8 @@
-import { Component, inject } from '@angular/core';
+import { Component, computed, inject } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { SettingToggleComponent } from '../../../../../../shared/components/setting-toggle/setting-toggle.component';
 
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { AppSettingsForm } from '../components/app-settings-form/app-settings-form.component';
@@ -19,7 +23,9 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
   selector: 'app-business-settings-page',
   standalone: true,
   imports: [
+    FormsModule,
     IconComponent,
+    SettingToggleComponent,
     SettingsSectionComponent,
     GeneralSettingsForm,
     AppSettingsForm,
@@ -29,4 +35,18 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
 })
 export class BusinessSettingsPage {
   protected readonly store = inject(GeneralSettingsStore);
+  private readonly authFacade = inject(AuthFacade);
+
+  /** Only the owner turns the Apps module on or off (apps-module S7/T8). */
+  protected readonly canToggleApps = computed(() => this.authFacade.isOwner());
+
+  protected readonly appsEnabled = computed(
+    () => this.store.settings().apps?.enabled === true,
+  );
+
+  /** Saves immediately; the sidebar reacts through the auth store. */
+  protected onAppsToggle(enabled: boolean): void {
+    if (enabled === this.appsEnabled()) return;
+    this.store.saveSectionNow('apps', { enabled });
+  }
 }

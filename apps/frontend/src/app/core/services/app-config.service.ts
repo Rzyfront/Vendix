@@ -13,6 +13,10 @@ import { vendixLandingPublicRoutes } from '../../routes/public/vendix_landing.pu
 import { orgLandingPublicRoutes } from '../../routes/public/org_landing.public.routes';
 import { storeEcommercePublicRoutes } from '../../routes/public/store_ecommerce.public.routes';
 import { storeLandingPublicRoutes } from '../../routes/public/store_landing.public.routes';
+import { storeProductPagePublicRoutes } from '../../routes/public/store_product_page.public.routes';
+import { storeServicePagePublicRoutes } from '../../routes/public/store_service_page.public.routes';
+import { storeBookingPublicRoutes } from '../../routes/public/store_booking.public.routes';
+import { storeHomePublicRoutes } from '../../routes/public/store_home.public.routes';
 import { defaultPublicRoutes } from '../../routes/public/default.public.routes';
 import { ecommerceRoutes } from '../../routes/private/ecommerce.routes';
 import { BrandingConfig } from '../models/tenant-config.interface';
@@ -229,6 +233,18 @@ export class AppConfigService {
         break;
       case AppType.STORE_LANDING:
         routes = storeLandingPublicRoutes;
+        break;
+      case AppType.STORE_PRODUCT_PAGE:
+        routes = storeProductPagePublicRoutes;
+        break;
+      case AppType.STORE_SERVICE_PAGE:
+        routes = storeServicePagePublicRoutes;
+        break;
+      case AppType.STORE_BOOKING:
+        routes = storeBookingPublicRoutes;
+        break;
+      case AppType.STORE_HOME:
+        routes = storeHomePublicRoutes;
         break;
       default:
         routes = defaultPublicRoutes;

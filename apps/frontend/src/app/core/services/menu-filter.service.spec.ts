@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { signal, type WritableSignal } from '@angular/core';
-import { MenuFilterService } from './menu-filter.service';
+import { MenuFilterService, DEFAULT_ON_PANEL_KEYS } from './menu-filter.service';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { SubscriptionAccessService } from './subscription-access.service';
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
@@ -83,6 +83,7 @@ describe('MenuFilterService.diagnose', () => {
     storeSettings: ReturnType<typeof signal<any>>;
     userIndustries: ReturnType<typeof signal<string[]>>;
     userStoreType: ReturnType<typeof signal<string | null>>;
+    currentAppPanelUi: ReturnType<typeof signal<Record<string, boolean> | null>>;
     isModuleVisible: jasmine.Spy;
     hasPermission: jasmine.Spy;
     hasAnyRole: jasmine.Spy;
@@ -108,6 +109,7 @@ describe('MenuFilterService.diagnose', () => {
       storeSettings: signal<any>(null),
       userIndustries: signal<string[]>(['retail']),
       userStoreType: signal<string | null>('physical'),
+      currentAppPanelUi: signal<Record<string, boolean> | null>(null),
       isModuleVisible: jasmine.createSpy('isModuleVisible').and.returnValue(true),
       hasPermission: jasmine.createSpy('hasPermission').and.returnValue(true),
       hasAnyRole: jasmine.createSpy('hasAnyRole').and.returnValue(true),
@@ -344,6 +346,7 @@ describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
     storeSettings: ReturnType<typeof signal<any>>;
     userIndustries: ReturnType<typeof signal<string[]>>;
     userStoreType: ReturnType<typeof signal<string | null>>;
+    currentAppPanelUi: ReturnType<typeof signal<Record<string, boolean> | null>>;
     isModuleVisible: jasmine.Spy;
     hasPermission: jasmine.Spy;
     hasAnyRole: jasmine.Spy;
@@ -366,6 +369,7 @@ describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
       storeSettings: signal<any>(null),
       userIndustries: signal<string[]>(['retail']),
       userStoreType: signal<string | null>('physical'),
+      currentAppPanelUi: signal<Record<string, boolean> | null>(null),
       isModuleVisible: jasmine.createSpy('isModuleVisible').and.returnValue(false),
       hasPermission: jasmine.createSpy('hasPermission').and.returnValue(true),
       hasAnyRole: jasmine.createSpy('hasAnyRole').and.returnValue(false),
@@ -602,5 +606,151 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
     // Control: with the child visible the group still shows.
     visibleModules$.next(['fiscal_operations', 'settings', 'settings_general']);
     expect(await labels()).toEqual(['Configuración']);
+  });
+});
+
+/**
+ * apps-module T0/T7/T9. Bandeja, Pipeline, Tareas y Segmentos dejan
+ * `alwaysVisible` y pasan a tener key opt-out; la entrada «Todas las apps»
+ * existe solo con `store_settings.apps.enabled` y el permiso de lectura.
+ */
+describe('MenuFilterService — apps-module (keys opt-out y catálogo Apps)', () => {
+  let service: MenuFilterService;
+  let visibleModules$: BehaviorSubject<string[]>;
+  let panelUi$: BehaviorSubject<Record<string, boolean>>;
+  let settings$: BehaviorSubject<Record<string, any>>;
+  let settingsState: WritableSignal<Record<string, any>>;
+  let panelUiState: WritableSignal<Record<string, boolean>>;
+  let permissions: string[];
+  let owner: boolean;
+
+  const clientes = (): MenuItem[] => [{
+    label: 'Clientes', icon: 'users', children: [
+      { label: 'Todos los Clientes', icon: 'circle', route: '/admin/customers/all' },
+      { label: 'Bandeja', icon: 'inbox', route: '/admin/customers/inbox', panelUiKey: 'customers_inbox' },
+      { label: 'Pipeline', icon: 'trending-up', route: '/admin/customers/pipeline', panelUiKey: 'customers_pipeline' },
+      { label: 'Tareas', icon: 'check-square', route: '/admin/customers/tasks', panelUiKey: 'customers_tasks' },
+      { label: 'Segmentos', icon: 'users', route: '/admin/customers/segments', panelUiKey: 'customers_segments' },
+    ],
+  }];
+  const appsGroup = (): MenuItem[] => [{
+    label: 'Apps', icon: 'app-window', children: [
+      { label: 'Todas las apps', icon: 'layout-grid', route: '/admin/apps', panelUiKey: 'apps' },
+      { label: 'Tienda en línea', icon: 'shopping-bag', route: '/admin/ecommerce' },
+    ],
+  }];
+  const routes = async (tree: MenuItem[]) =>
+    (await firstValueFrom(service.filterMenuItems(tree).pipe(take(1))))
+      .flatMap((i) => (i.children ?? [i]).map((c) => c.route));
+  const setSettings = (value: Record<string, any>) => {
+    settings$.next(value);
+    settingsState.set(value);
+  };
+  const setUserPanel = (value: Record<string, boolean>) => {
+    panelUi$.next(value);
+    panelUiState.set(value);
+  };
+
+  beforeEach(() => {
+    // Usuario cuyo panel_ui guardado es anterior a las keys nuevas.
+    visibleModules$ = new BehaviorSubject<string[]>(['customers', 'customers_all', 'ecommerce']);
+    panelUi$ = new BehaviorSubject<Record<string, boolean>>({ customers: true, customers_all: true, ecommerce: true });
+    settings$ = new BehaviorSubject<Record<string, any>>({ general: { store_type: 'hybrid' } });
+    settingsState = signal<Record<string, any>>({ general: { store_type: 'hybrid' } });
+    panelUiState = signal<Record<string, boolean>>({ customers: true, customers_all: true, ecommerce: true });
+    permissions = [
+      'store:crm_inbox:read', 'store:crm_pipeline:read', 'store:crm_tasks:manage', 'store:customers:read',
+    ];
+    owner = false;
+    const authFacade = {
+      getVisibleModules$: () => visibleModules$.asObservable(),
+      userStoreType$: of('hybrid'), userIndustries$: of(['retail']), storeSettings$: settings$.asObservable(),
+      userOrganization$: of({ operating_scope: 'STORE', fiscal_scope: 'STORE' }), activeFiscalAreas$: of([]),
+      currentAppPanelUi$: panelUi$.asObservable(), userPermissions$: of([]),
+      fiscalScope: signal('STORE'), operatingScope: signal('STORE'), activeFiscalAreas: signal<string[]>([]),
+      storeSettings: settingsState, userIndustries: signal(['retail']), userStoreType: signal<string | null>('hybrid'),
+      currentAppPanelUi: panelUiState,
+      isModuleVisible: (key: string) => panelUiState()[key] === true,
+      hasPermission: (permission: string) => permissions.includes(permission),
+      hasAnyRole: () => false, hasAnyPermission: () => false,
+      isOwner: () => owner, isAdmin: () => false,
+    };
+    TestBed.configureTestingModule({ providers: [
+      MenuFilterService, { provide: AuthFacade, useValue: authFacade },
+      { provide: SubscriptionAccessService, useValue: { canUseAI: () => () => true } },
+    ] });
+    service = TestBed.inject(MenuFilterService);
+  });
+
+  it('las cuatro entradas del CRM tienen key registrada en APP_MODULES y MODULE_ROUTES', () => {
+    const known = new Set(allStoreAdminKeys());
+    for (const key of ['customers_inbox', 'customers_pipeline', 'customers_tasks', 'customers_segments', 'apps']) {
+      expect(known.has(key)).withContext(key).toBe(true);
+      expect(MODULE_ROUTES[key]).withContext(key).toBeDefined();
+      expect(DEFAULT_ON_PANEL_KEYS).toContain(key);
+    }
+  });
+
+  it('T0: un panel_ui guardado sin las keys nuevas sigue viendo Bandeja, Pipeline, Tareas y Segmentos', async () => {
+    expect(await routes(clientes())).toEqual([
+      '/admin/customers/all', '/admin/customers/inbox', '/admin/customers/pipeline',
+      '/admin/customers/tasks', '/admin/customers/segments',
+    ]);
+    expect(service.diagnose(clientes()[0].children![1]).visible).toBe(true);
+  });
+
+  it('T0: la compuerta de permisos sigue mandando', async () => {
+    permissions = ['store:customers:read'];
+    expect(await routes(clientes())).toEqual(['/admin/customers/all', '/admin/customers/segments']);
+    expect(service.diagnose(clientes()[0].children![1]).blockedBy).toBe('permission');
+  });
+
+  it('diagnose no culpa a un permiso en módulos fuera del CRM (pedidos programados apagados)', () => {
+    setUserPanel({ customers: true, orders_scheduled: true });
+    const scheduled: MenuItem = {
+      label: 'Pedidos programados', icon: 'calendar', route: '/admin/scheduled-orders', panelUiKey: 'orders_scheduled',
+    };
+    expect(service.diagnose(scheduled).blockedBy).not.toBe('permission');
+  });
+
+  it('T0: ahora se pueden ocultar por usuario y por tienda', async () => {
+    setUserPanel({ customers: true, customers_all: true, customers_inbox: false });
+    expect(await routes(clientes())).not.toContain('/admin/customers/inbox');
+    expect(service.diagnose(clientes()[0].children![1]).blockedBy).toBe('user_panel_ui');
+
+    setUserPanel({ customers: true, customers_all: true });
+    setSettings({ general: { store_type: 'hybrid' }, panel_ui: { STORE_ADMIN: { customers_pipeline: false } } });
+    expect(await routes(clientes())).not.toContain('/admin/customers/pipeline');
+    expect(await routes(clientes())).toContain('/admin/customers/inbox');
+  });
+
+  it('T7: sin el flag, «Todas las apps» no aparece ni es destino de redirección', async () => {
+    owner = true;
+    expect(await routes(appsGroup())).toEqual(['/admin/ecommerce']);
+    expect(service.diagnose(appsGroup()[0].children![0]).visible).toBe(false);
+  });
+
+  it('T7: con el flag, el owner ve el catálogo; sin store:apps:read, no', async () => {
+    setSettings({ general: { store_type: 'hybrid' }, apps: { enabled: true } });
+    expect(await routes(appsGroup())).toEqual(['/admin/ecommerce']);
+
+    owner = true;
+    expect(await routes(appsGroup())).toEqual(['/admin/apps', '/admin/ecommerce']);
+
+    owner = false;
+    permissions = ['store:apps:read'];
+    expect(await routes(appsGroup())).toEqual(['/admin/apps', '/admin/ecommerce']);
+  });
+
+  it('T7: Tienda en línea dentro de Apps conserva el filtro por tipo de tienda', async () => {
+    owner = true;
+    setSettings({ general: { store_type: 'physical' }, apps: { enabled: true } });
+    expect(await routes(appsGroup())).toEqual(['/admin/apps']);
+  });
+
+  it('no cambia ninguna etiqueta existente del mapa por texto', () => {
+    expect(service.getModuleKey('Tienda en línea')).toBe('ecommerce');
+    expect(service.getModuleKey('Landing de captación')).toBe('customers_crm');
+    expect(service.getModuleKey('CRM')).toBe('customers_crm');
   });
 });

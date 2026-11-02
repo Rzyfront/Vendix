@@ -689,7 +689,13 @@ export class ContextualLoginComponent {
   }
 
   private applyAuthContext(appConfig: any): void {
-    const allowedEnvs = ['VENDIX_LANDING', 'ORG_LANDING', 'STORE_LANDING'];
+    // STORE_HOME (Apps · inicio de tienda) is the store landing context too.
+    const allowedEnvs = [
+      'VENDIX_LANDING',
+      'ORG_LANDING',
+      'STORE_LANDING',
+      'STORE_HOME',
+    ];
     const domainConfig = appConfig.domainConfig;
     const env = domainConfig.environment;
 
@@ -714,7 +720,7 @@ export class ContextualLoginComponent {
       );
       this.loginForm.get('vlink')?.clearValidators();
     } else if (
-      ['STORE_ADMIN', 'STORE_LANDING', 'STORE_ECOMMERCE'].includes(env)
+      ['STORE_ADMIN', 'STORE_LANDING', 'STORE_HOME', 'STORE_ECOMMERCE'].includes(env)
     ) {
       this.contextType.set('store');
       this.contextSlug.set(domainConfig.store_slug || '');

@@ -42,6 +42,7 @@ import { WeeklyReportSnapshot } from '../../modules/store/weekly-report/interfac
 import { WeeklyReportService } from '../../modules/store/weekly-report/services/weekly-report.service';
 import { PqrAdminService } from '../../modules/store/pqr/services/pqr-admin.service';
 import { ArrivalBannerComponent } from '../components/arrival-banner/arrival-banner.component';
+import { applyAppsMenu } from './apps-menu.util';
 import { SubscriptionFacade } from '../../../core/store/subscription/subscription.facade';
 import { MembershipAmbientAccessService } from '../../../core/services/membership-ambient-access.service';
 import type { StoreSettings } from '../../../core/models/store-settings.interface';
@@ -805,31 +806,30 @@ export class StoreAdminLayoutComponent {
           route: '/admin/customers/all',
         },
         {
-          // No panel_ui key: shown by permission (MenuFilterService gate).
+          // Opt-out panel_ui key (DEFAULT_ON_PANEL_KEYS, apps-module T0) on top
+          // of the permission gate in MenuFilterService.
           label: 'Bandeja',
           icon: 'inbox',
           route: '/admin/customers/inbox',
-          alwaysVisible: true,
+          panelUiKey: 'customers_inbox',
         },
         {
-          // No panel_ui key: shown by permission (MenuFilterService gate).
           label: 'Pipeline',
           icon: 'trending-up',
           route: '/admin/customers/pipeline',
-          alwaysVisible: true,
+          panelUiKey: 'customers_pipeline',
         },
         {
           label: 'Tareas',
           icon: 'check-square',
           route: '/admin/customers/tasks',
-          alwaysVisible: true,
+          panelUiKey: 'customers_tasks',
         },
         {
-          // No panel_ui key: shown by permission (MenuFilterService gate).
           label: 'Segmentos',
           icon: 'users',
           route: '/admin/customers/segments',
-          alwaysVisible: true,
+          panelUiKey: 'customers_segments',
         },
         {
           label: 'Reseñas',
@@ -1257,8 +1257,30 @@ export class StoreAdminLayoutComponent {
   // Reactive menu items as signal via toSignal. Both authorization gates
   // ("Usuarios" by permission, "PQRS" by count) now live inside
   // `filterMenuItems`, which re-emits on its own when either flips.
+  /**
+   * `store_settings.apps.enabled` (apps-module T7). Only an explicit `true`
+   * regroups the sidebar under "Apps"; absent or `false` keeps today's tree.
+   */
+  private readonly appsEnabled = computed(
+    () =>
+      (this.authFacade.storeSettings() as StoreSettings | null)?.apps
+        ?.enabled === true,
+  );
+
+  /** Sidebar tree for the current store: today's tree, or regrouped under Apps. */
+  private readonly menuTree = computed(() =>
+    applyAppsMenu(this.allMenuItems, this.appsEnabled()),
+  );
+
   readonly filteredMenuItems = toSignal(
-    this.menuFilterService.filterMenuItems(this.allMenuItems),
+    toObservable(this.menuTree).pipe(
+      switchMap((tree) => {
+        // Keep MenuFilterService's registered tree in sync with what renders
+        // (guards and `firstActiveModuleRoute` read it).
+        this.menuFilterService.registerMenuTree(tree);
+        return this.menuFilterService.filterMenuItems(tree);
+      }),
+    ),
     { initialValue: [] as MenuItem[] },
   );
 
@@ -1300,7 +1322,7 @@ export class StoreAdminLayoutComponent {
     // A.4: registra el árbol real del sidebar en MenuFilterService para que
     // `currentMenuTree()`/`firstActiveModuleRoute()` lo usen una vez montado
     // (los guards usan el catálogo mientras el layout aún no existe).
-    this.menuFilterService.registerMenuTree(this.allMenuItems);
+    this.menuFilterService.registerMenuTree(this.menuTree());
 
     // ─── W4: Ambient membership-access validation ──────────────────────────
     // Connect the background SSE stream ONLY when the gym industry is active
