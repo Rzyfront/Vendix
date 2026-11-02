@@ -65,6 +65,7 @@ function setup(options: { staff?: boolean } = {}) {
   const prisma = {
     store_users: {
       findFirst: jest.fn(async (..._args: any[]) => (options.staff === false ? null : { id: 8 })),
+      updateMany: jest.fn(async (..._args: any[]) => ({ count: 1 })),
     },
     quotations: { findFirst: jest.fn(async (..._args: any[]) => ({ customer_id: CUSTOMER })) },
     crm_pipelines: {
@@ -186,6 +187,29 @@ describe('CrmPipelineService', () => {
       expected_close_date: new Date('2026-12-01T00:00:00.000Z'),
     });
     expect(created.id).toBe(501);
+  });
+
+  it('placing a customer on the board moves their profile stage too', async () => {
+    as('seller');
+    const { service, prisma } = setup();
+    await service.create({ customer_id: CUSTOMER, title: 'Uniformes', stage_id: 102 });
+    expect(prisma.store_users.updateMany).toHaveBeenLastCalledWith({
+      where: { user_id: CUSTOMER },
+      data: { crm_stage_id: 102 },
+    });
+
+    await service.move(501, { stage_id: 103 });
+    expect(prisma.store_users.updateMany).toHaveBeenLastCalledWith({
+      where: { user_id: CUSTOMER },
+      data: { crm_stage_id: 103 },
+    });
+  });
+
+  it('a rejected move leaves the profile stage alone', async () => {
+    as('seller');
+    const { service, prisma } = setup();
+    await codeOf(service.move(500, { stage_id: 104 }));
+    expect(prisma.store_users.updateMany).not.toHaveBeenCalled();
   });
 
   it('a seller cannot give an opportunity to someone else', async () => {

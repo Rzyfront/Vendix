@@ -259,6 +259,7 @@ export class CrmPipelineService {
       },
       include: OPPORTUNITY_INCLUDE,
     });
+    await this.syncCustomerStage(dto.customer_id, stage.id);
     return this.toOpportunity(created);
   }
 
@@ -493,6 +494,7 @@ export class CrmPipelineService {
       where: { id: current.id },
       data,
     });
+    await this.syncCustomerStage(current.customer_id, stage.id);
     if (data.status !== current.status) {
       await this.auditChange(
         viewer,
@@ -503,6 +505,17 @@ export class CrmPipelineService {
       );
     }
     return this.findOne(current.id);
+  }
+
+  /**
+   * The customer follows the stage of its last placed opportunity, so the
+   * profile and the segment rule `stage` read the same place as the board.
+   */
+  private async syncCustomerStage(customerId: number, stageId: number) {
+    await this.prisma.store_users.updateMany({
+      where: { user_id: customerId },
+      data: { crm_stage_id: stageId },
+    });
   }
 
   private async findVisible(
