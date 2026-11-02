@@ -1,4 +1,4 @@
-import { Component, input, output, signal, computed, inject } from '@angular/core';
+import { Component, input, output, signal, computed, inject, DestroyRef } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -70,6 +70,17 @@ export class QuickBookFromSlotModalComponent {
   notes = signal('');
   submitting = signal(false);
 
+  // QUI-976 — frequent-customers suggestions (same backend source as POS).
+  topCustomers = signal<any[]>([]);
+  loadingTopCustomers = signal(false);
+  showingTopSuggestions = computed(
+    () =>
+      this.customerSearch().trim().length < 2 &&
+      !this.searchingCustomers() &&
+      !this.selectedCustomer(),
+  );
+  private destroyRef = inject(DestroyRef);
+
   readonly wizardSteps: StepsLineItem[] = [
     { label: 'Servicio' },
     { label: 'Detalles' },
@@ -118,6 +129,10 @@ export class QuickBookFromSlotModalComponent {
     this.selectedCustomer.set(null);
     this.serviceSearch.set('');
     this.notes.set('');
+    // QUI-976 — refresh frequent customers on every open.
+    this.topCustomers.set([]);
+    this.customerSearch.set('');
+    this.customers.set([]);
     this.providers.set([]);
     this.selectedProvider.set(null);
     this.skipAvailability.set(false);
@@ -170,6 +185,25 @@ export class QuickBookFromSlotModalComponent {
   onCustomerSearch(query: string): void {
     this.customerSearch.set(query);
     this.searchSubject.next(query);
+  }
+
+  /** QUI-976 — lazy, idempotent top-3 load for the suggestions block. */
+  loadTopCustomers(): void {
+    if (this.topCustomers().length > 0 || this.loadingTopCustomers()) return;
+    this.loadingTopCustomers.set(true);
+    this.reservationsService
+      .getTopCustomers(3)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (list) => {
+          this.topCustomers.set(list ?? []);
+          this.loadingTopCustomers.set(false);
+        },
+        error: () => {
+          this.topCustomers.set([]);
+          this.loadingTopCustomers.set(false);
+        },
+      });
   }
 
   selectCustomer(customer: any): void {
