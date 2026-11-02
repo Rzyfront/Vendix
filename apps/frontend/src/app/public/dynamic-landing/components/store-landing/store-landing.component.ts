@@ -19,6 +19,8 @@ import {
 } from '../../blocks/landing-blocks.types';
 import { BlockRendererComponent } from '../../blocks/block-renderer/block-renderer.component';
 import { ContactBlockComponent } from '../../blocks/contact-block.component';
+import { LandingOfferComponent } from '../../../landing-page/landing-offer.component';
+import { LandingPageService } from '../../../landing-page/landing-page.service';
 import {
   CrmLandingService,
   CrmContactPayload,
@@ -40,6 +42,7 @@ import {
     BlockRendererComponent,
     ContactBlockComponent,
     IconComponent,
+    LandingOfferComponent,
   ],
   template: `
     <app-landing-layout [brandName]="storeName()" [logoUrl]="logoUrl()">
@@ -57,88 +60,7 @@ import {
                   [props]="block.props"
                   (ctaClick)="scrollToForm()"
                 />
-                <section id="contacto" class="crm-contact-section max-w-xl mx-auto px-4 pb-20">
-                  <div class="crm-contact-card bg-white rounded-3xl p-7 sm:p-9 border border-slate-200/90 shadow-xl">
-                    <h3 class="text-xl font-bold text-slate-900 text-center mb-1.5">Envíanos un mensaje directo</h3>
-                    <p class="text-xs sm:text-sm text-slate-500 text-center mb-6">Déjanos tus datos y un asesor se pondrá en contacto contigo en breve.</p>
-                    
-                    <div class="space-y-4">
-                      <div>
-                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">Nombre completo *</label>
-                        <input
-                          class="crm-field"
-                          type="text"
-                          placeholder="Tu nombre completo"
-                          maxlength="80"
-                          [value]="formName()"
-                          (input)="onForm('name', $event)"
-                        />
-                      </div>
-                      
-                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                        <div>
-                          <label class="block text-xs font-semibold text-slate-700 mb-1.5">Correo electrónico</label>
-                          <input
-                            class="crm-field"
-                            type="email"
-                            placeholder="nombre@ejemplo.com"
-                            maxlength="160"
-                            [value]="formEmail()"
-                            (input)="onForm('email', $event)"
-                          />
-                        </div>
-                        <div>
-                          <label class="block text-xs font-semibold text-slate-700 mb-1.5">Teléfono / WhatsApp</label>
-                          <input
-                            class="crm-field"
-                            type="tel"
-                            placeholder="Ej. 300 123 4567"
-                            maxlength="30"
-                            [value]="formPhone()"
-                            (input)="onForm('phone', $event)"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">¿En qué podemos ayudarte? *</label>
-                        <textarea
-                          class="crm-field"
-                          rows="4"
-                          placeholder="Escribe aquí tu consulta o los productos de tu interés…"
-                          maxlength="1000"
-                          [value]="formMessage()"
-                          (input)="onForm('message', $event)"
-                        ></textarea>
-                      </div>
-
-                      @if (submitted()) {
-                        <div class="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium text-center flex items-center justify-center gap-2">
-                          <app-icon name="check-circle" [size]="18" color="#059669" />
-                          <span>¡Gracias! Tu mensaje fue enviado con éxito. Te responderemos muy pronto.</span>
-                        </div>
-                      } @else {
-                        @if (formError()) {
-                          <p class="crm-form-error text-center text-xs text-rose-600 font-semibold">{{ formError() }}</p>
-                        }
-                        <button
-                          type="button"
-                          class="crm-submit-btn w-full py-3.5 px-6 rounded-full text-white font-bold text-sm shadow-md transition-all duration-200 cursor-pointer flex items-center justify-center gap-2"
-                          [disabled]="sending()"
-                          (click)="submitContact()"
-                        >
-                          @if (sending()) {
-                            <app-icon name="loader" [size]="16" [spin]="true" color="white" />
-                            <span>Enviando mensaje…</span>
-                          } @else {
-                            <app-icon name="mail" [size]="16" color="white" />
-                            <span>Enviar mensaje</span>
-                          }
-                        </button>
-                      }
-                    </div>
-                  </div>
-                </section>
+                <ng-container [ngTemplateOutlet]="contactForm" />
               } @else {
                 <app-block-renderer
                   [block]="block"
@@ -148,6 +70,14 @@ import {
                 />
               }
             </div>
+            @if (i === 0 && ownLanding(); as page) {
+              <app-landing-offer [offer]="page.offer" (interested)="scrollToForm()" />
+            }
+          }
+
+          <!-- Landing on its own domain: the lead form is always there. -->
+          @if (ownLanding() && !hasContactBlock()) {
+            <ng-container [ngTemplateOutlet]="contactForm" />
           }
 
           <!-- Floating WhatsApp Widget Button -->
@@ -282,6 +212,91 @@ import {
         }
       </div>
     </app-landing-layout>
+
+    <ng-template #contactForm>
+                <section id="contacto" class="crm-contact-section max-w-xl mx-auto px-4 pb-20">
+                  <div class="crm-contact-card bg-white rounded-3xl p-7 sm:p-9 border border-slate-200/90 shadow-xl">
+                    <h3 class="text-xl font-bold text-slate-900 text-center mb-1.5">Envíanos un mensaje directo</h3>
+                    <p class="text-xs sm:text-sm text-slate-500 text-center mb-6">Déjanos tus datos y un asesor se pondrá en contacto contigo en breve.</p>
+                    
+                    <div class="space-y-4">
+                      <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">Nombre completo *</label>
+                        <input
+                          class="crm-field"
+                          type="text"
+                          placeholder="Tu nombre completo"
+                          maxlength="80"
+                          [value]="formName()"
+                          (input)="onForm('name', $event)"
+                        />
+                      </div>
+                      
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        <div>
+                          <label class="block text-xs font-semibold text-slate-700 mb-1.5">Correo electrónico</label>
+                          <input
+                            class="crm-field"
+                            type="email"
+                            placeholder="nombre@ejemplo.com"
+                            maxlength="160"
+                            [value]="formEmail()"
+                            (input)="onForm('email', $event)"
+                          />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-semibold text-slate-700 mb-1.5">Teléfono / WhatsApp</label>
+                          <input
+                            class="crm-field"
+                            type="tel"
+                            placeholder="Ej. 300 123 4567"
+                            maxlength="30"
+                            [value]="formPhone()"
+                            (input)="onForm('phone', $event)"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">¿En qué podemos ayudarte? *</label>
+                        <textarea
+                          class="crm-field"
+                          rows="4"
+                          placeholder="Escribe aquí tu consulta o los productos de tu interés…"
+                          maxlength="1000"
+                          [value]="formMessage()"
+                          (input)="onForm('message', $event)"
+                        ></textarea>
+                      </div>
+
+                      @if (submitted()) {
+                        <div class="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium text-center flex items-center justify-center gap-2">
+                          <app-icon name="check-circle" [size]="18" color="#059669" />
+                          <span>¡Gracias! Tu mensaje fue enviado con éxito. Te responderemos muy pronto.</span>
+                        </div>
+                      } @else {
+                        @if (formError()) {
+                          <p class="crm-form-error text-center text-xs text-rose-600 font-semibold">{{ formError() }}</p>
+                        }
+                        <button
+                          type="button"
+                          class="crm-submit-btn w-full py-3.5 px-6 rounded-full text-white font-bold text-sm shadow-md transition-all duration-200 cursor-pointer flex items-center justify-center gap-2"
+                          [disabled]="sending()"
+                          (click)="submitContact()"
+                        >
+                          @if (sending()) {
+                            <app-icon name="loader" [size]="16" [spin]="true" color="white" />
+                            <span>Enviando mensaje…</span>
+                          } @else {
+                            <app-icon name="mail" [size]="16" color="white" />
+                            <span>Enviar mensaje</span>
+                          }
+                        </button>
+                      }
+                    </div>
+                  </div>
+                </section>
+    </ng-template>
   `,
   styles: [
     `
@@ -353,6 +368,7 @@ export class StoreLandingComponent {
   private readonly configFacade = inject(ConfigFacade);
   private readonly themeService = inject(ThemeService);
   private readonly crmLandingService = inject(CrmLandingService);
+  private readonly landingPage = inject(LandingPageService);
 
   // Branding del host (header/footer del layout y fallback)
   readonly storeName = signal('Tienda');
@@ -375,6 +391,17 @@ export class StoreLandingComponent {
   readonly sending = signal(false);
   readonly submitted = signal(false);
   readonly formError = signal('');
+
+  /**
+   * Apps · landing page (Fase 6): set only on the landing's own domain, where
+   * the offer block shows and leads go to the CRM pipeline with their origin.
+   * On `{tienda}-store` it stays null and the page behaves as before.
+   */
+  readonly ownLanding = computed(() => this.landingPage.ownPage() ?? null);
+
+  readonly hasContactBlock = computed(
+    () => this.document()?.blocks.some((b) => b.type === 'contact') ?? false,
+  );
 
   readonly primaryColor = computed(
     () => this.document()?.theme?.primary_color ?? '#1E40AF',
@@ -400,6 +427,7 @@ export class StoreLandingComponent {
 
   constructor() {
     this.loadDocument();
+    this.landingPage.load().subscribe();
 
     // Reactividad del branding (regression fix): getCurrentConfig() inicia en
     // null (signal async). El efecto re-dispara loadBranding() cuando la
@@ -544,7 +572,10 @@ export class StoreLandingComponent {
       ...(email && { email }),
       ...(phone && { phone }),
     };
-    this.crmLandingService.submitContact(payload).subscribe({
+    const submit$ = this.ownLanding()
+      ? this.landingPage.submitLead(payload)
+      : this.crmLandingService.submitContact(payload);
+    submit$.subscribe({
       next: () => {
         this.submitted.set(true);
         this.sending.set(false);
