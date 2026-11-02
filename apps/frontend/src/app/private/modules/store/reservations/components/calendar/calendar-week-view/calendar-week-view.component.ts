@@ -2,6 +2,12 @@ import { Component, input, output, computed, signal, DestroyRef, inject } from '
 
 import { Booking } from '../../../interfaces/reservation.interface';
 import { isBookingExpired as checkBookingExpired } from '../booking-expired.util';
+import {
+  BookingStackGroup,
+  bookingCustomerName,
+  bookingProviderName,
+  groupBookingsByStart,
+} from '../booking-stack.util';
 
 /**
  * A free slot = a time range where the provider has capacity and no booking.
@@ -60,6 +66,10 @@ export class CalendarWeekViewComponent {
 
   private currentTimeSignal = signal(new Date());
 
+  /** QUI-971: expanded stack keys (`${date}|${start}`) showing all rows. */
+  private readonly expandedStacks = signal<Set<string>>(new Set());
+  private readonly STACK_VISIBLE_ROWS = 4;
+
   readonly timeSlots = computed<string[]>(() => this.generateTimeSlots(this.slotMinutes()));
 
   constructor() {
@@ -107,6 +117,55 @@ export class CalendarWeekViewComponent {
 
   getBookingsForDate(dateStr: string): Booking[] {
     return this.bookingsByDate()[dateStr] || [];
+  }
+
+  /**
+   * QUI-971: bookings grouped by start time so same-hour appointments
+   * render stacked instead of overlapped.
+   */
+  getBookingGroupsForDate(dateStr: string): BookingStackGroup[] {
+    return groupBookingsByStart(this.getBookingsForDate(dateStr));
+  }
+
+  getGroupTop(group: BookingStackGroup): number {
+    return this.getBlockTop(group.bookings[0]);
+  }
+
+  getGroupMinHeight(group: BookingStackGroup): number {
+    return Math.max(...group.bookings.map((b) => this.getBlockHeight(b)));
+  }
+
+  isStackExpanded(dateStr: string, startKey: string): boolean {
+    return this.expandedStacks().has(`${dateStr}|${startKey}`);
+  }
+
+  toggleStackExpanded(dateStr: string, startKey: string, event: MouseEvent): void {
+    event.stopPropagation();
+    const key = `${dateStr}|${startKey}`;
+    this.expandedStacks.update((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  visibleStackBookings(dateStr: string, group: BookingStackGroup): Booking[] {
+    if (this.isStackExpanded(dateStr, group.startKey)) return group.bookings;
+    return group.bookings.slice(0, this.STACK_VISIBLE_ROWS);
+  }
+
+  stackHiddenCount(dateStr: string, group: BookingStackGroup): number {
+    if (this.isStackExpanded(dateStr, group.startKey)) return 0;
+    return Math.max(group.bookings.length - this.STACK_VISIBLE_ROWS, 0);
+  }
+
+  customerName(booking: Booking): string {
+    return bookingCustomerName(booking);
+  }
+
+  providerName(booking: Booking): string {
+    return bookingProviderName(booking);
   }
 
   /**

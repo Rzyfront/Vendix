@@ -3,6 +3,12 @@ import { Component, input, output, computed, signal, DestroyRef, inject } from '
 import { IconComponent } from '../../../../../../../shared/components';
 import { Booking, BookingStatus } from '../../../interfaces/reservation.interface';
 import { isBookingExpired as checkBookingExpired } from '../booking-expired.util';
+import {
+  BookingStackGroup,
+  bookingCustomerName,
+  bookingProviderName,
+  groupBookingsByStart,
+} from '../booking-stack.util';
 
 /**
  * A free slot = a time range where the provider has capacity and no booking.
@@ -62,6 +68,10 @@ export class CalendarDayViewComponent {
   private readonly TOTAL_MINUTES = this.DAY_END - this.DAY_START;
 
   private currentTimeSignal = signal(new Date());
+
+  /** QUI-971: expanded stack keys (`${start}`) showing all rows. */
+  private readonly expandedStacks = signal<Set<string>>(new Set());
+  private readonly STACK_VISIBLE_ROWS = 4;
 
   readonly timeSlots = computed<string[]>(() => this.generateTimeSlots(this.slotMinutes()));
 
@@ -162,6 +172,54 @@ export class CalendarDayViewComponent {
     ];
     return `${days[d.getDay()]} ${d.getDate()} de ${months[d.getMonth()]}`;
   });
+
+  /**
+   * QUI-971: bookings grouped by start time so same-hour appointments
+   * render stacked instead of overlapped.
+   */
+  readonly bookingGroups = computed<BookingStackGroup[]>(() =>
+    groupBookingsByStart(this.bookings()),
+  );
+
+  getGroupTop(group: BookingStackGroup): number {
+    return this.getBlockTop(group.bookings[0]);
+  }
+
+  getGroupMinHeight(group: BookingStackGroup): number {
+    return Math.max(...group.bookings.map((b) => this.getBlockHeight(b)));
+  }
+
+  isStackExpanded(startKey: string): boolean {
+    return this.expandedStacks().has(startKey);
+  }
+
+  toggleStackExpanded(startKey: string, event: MouseEvent): void {
+    event.stopPropagation();
+    this.expandedStacks.update((prev) => {
+      const next = new Set(prev);
+      if (next.has(startKey)) next.delete(startKey);
+      else next.add(startKey);
+      return next;
+    });
+  }
+
+  visibleStackBookings(group: BookingStackGroup): Booking[] {
+    if (this.isStackExpanded(group.startKey)) return group.bookings;
+    return group.bookings.slice(0, this.STACK_VISIBLE_ROWS);
+  }
+
+  stackHiddenCount(group: BookingStackGroup): number {
+    if (this.isStackExpanded(group.startKey)) return 0;
+    return Math.max(group.bookings.length - this.STACK_VISIBLE_ROWS, 0);
+  }
+
+  customerName(booking: Booking): string {
+    return bookingCustomerName(booking);
+  }
+
+  providerName(booking: Booking): string {
+    return bookingProviderName(booking);
+  }
 
   getBlockTop(booking: Booking): number {
     const startMinutes = this.parseTimeToMinutes(booking.start_time);
