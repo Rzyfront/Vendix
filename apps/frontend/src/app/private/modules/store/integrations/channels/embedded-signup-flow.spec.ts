@@ -67,26 +67,26 @@ describe('startEmbeddedSignupFlow', () => {
     expect(flow.error()?.message).toBe(EMBEDDED_SIGNUP_INCOMPLETE_MESSAGE);
   }));
 
-  it.each([
+  for (const event of [
     'FINISH',
     'FINISH_ONLY_WABA',
     'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING',
     'FINISH_GRANT_ONLY_API_ACCESS',
-  ])('treats %s as completion', (event) => {
-    fakeAsync(() => {
+  ]) {
+    it(`treats ${event} as completion`, fakeAsync(() => {
       const flow = setup();
       postSession(event, { waba_id: 'w1', phone_number_id: 'p1' });
       flow.login({ authResponse: { code: 'abc' } });
       tick();
       expect(flow.result()).toEqual(
-        expect.objectContaining({
+        jasmine.objectContaining({
           code: 'abc',
           waba_id: 'w1',
           phone_number_id: 'p1',
         }),
       );
-    })();
-  });
+    }));
+  }
 
   it('resolves when the session event arrives after the code', fakeAsync(() => {
     const flow = setup();
@@ -105,7 +105,7 @@ describe('startEmbeddedSignupFlow', () => {
     expect(flow.result()).toBeUndefined();
     tick(1);
     expect(flow.result()).toEqual(
-      expect.objectContaining({
+      jasmine.objectContaining({
         code: 'abc',
         waba_id: undefined,
         phone_number_id: undefined,
