@@ -16,6 +16,7 @@ import { storeLandingPublicRoutes } from '../../routes/public/store_landing.publ
 import { storeProductPagePublicRoutes } from '../../routes/public/store_product_page.public.routes';
 import { storeServicePagePublicRoutes } from '../../routes/public/store_service_page.public.routes';
 import { storeBookingPublicRoutes } from '../../routes/public/store_booking.public.routes';
+import { storeHomePublicRoutes } from '../../routes/public/store_home.public.routes';
 import { defaultPublicRoutes } from '../../routes/public/default.public.routes';
 import { ecommerceRoutes } from '../../routes/private/ecommerce.routes';
 import { BrandingConfig } from '../models/tenant-config.interface';
@@ -241,6 +242,9 @@ export class AppConfigService {
         break;
       case AppType.STORE_BOOKING:
         routes = storeBookingPublicRoutes;
+        break;
+      case AppType.STORE_HOME:
+        routes = storeHomePublicRoutes;
         break;
       default:
         routes = defaultPublicRoutes;
