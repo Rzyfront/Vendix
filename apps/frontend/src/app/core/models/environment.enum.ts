@@ -23,6 +23,7 @@ export enum AppType {
   STORE_ADMIN = 'STORE_ADMIN',         // Admin de tienda
   STORE_ECOMMERCE = 'STORE_ECOMMERCE', // Ecommerce de tienda
   STORE_DELIVERY = 'STORE_DELIVERY',   // App interna de reparto (rol carrier)
+  STORE_PRODUCT_PAGE = 'STORE_PRODUCT_PAGE', // Apps: página de un producto en su propio dominio
 }
 
 // ============================================================================
