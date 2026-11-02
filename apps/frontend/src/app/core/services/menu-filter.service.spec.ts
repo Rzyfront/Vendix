@@ -705,6 +705,14 @@ describe('MenuFilterService — apps-module (keys opt-out y catálogo Apps)', ()
     expect(service.diagnose(clientes()[0].children![1]).blockedBy).toBe('permission');
   });
 
+  it('diagnose no culpa a un permiso en módulos fuera del CRM (pedidos programados apagados)', () => {
+    setUserPanel({ customers: true, orders_scheduled: true });
+    const scheduled: MenuItem = {
+      label: 'Pedidos programados', icon: 'calendar', route: '/admin/scheduled-orders', panelUiKey: 'orders_scheduled',
+    };
+    expect(service.diagnose(scheduled).blockedBy).not.toBe('permission');
+  });
+
   it('T0: ahora se pueden ocultar por usuario y por tienda', async () => {
     setUserPanel({ customers: true, customers_all: true, customers_inbox: false });
     expect(await routes(clientes())).not.toContain('/admin/customers/inbox');

@@ -61,6 +61,14 @@ export const DEFAULT_ON_PANEL_KEYS: readonly string[] = [
 ];
 
 /** Route of the Apps catalog page (apps-module T6). */
+/** CRM entries whose permission prefilter diagnose reports (apps-module T0). */
+const CRM_PERMISSION_ROUTES = new Set([
+  '/admin/customers/inbox',
+  '/admin/customers/pipeline',
+  '/admin/customers/tasks',
+  '/admin/customers/segments',
+]);
+
 export const APPS_CATALOG_ROUTE = '/admin/apps';
 
 /**
@@ -1148,9 +1156,11 @@ export class MenuFilterService {
         fixPath: null,
       };
     }
-    // Remaining prefilters (CRM entries) share the observable pass's rule, so
-    // the redirect chain never lands on an entry the sidebar would not show.
-    if (!this.passesAuthorizationGates(menuItem)) {
+    // The CRM entries left `alwaysVisible` (apps-module T0), so their
+    // permission prefilter must also reach diagnose; otherwise the redirect
+    // chain could land on an entry the sidebar does not show. Scoped to those
+    // routes: other prefilters keep their pre-existing diagnose behavior.
+    if (CRM_PERMISSION_ROUTES.has(menuItem.route ?? '') && !this.passesAuthorizationGates(menuItem)) {
       return {
         visible: false,
         blockedBy: 'permission',

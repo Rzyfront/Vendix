@@ -720,8 +720,9 @@ export const storeAdminRoutes: Routes = [
             (c) => c.EcommerceComponent,
           ),
       },
-      // Apps catalog (odd/tasks/apps-module.md T6). Gated by panelUiGuard:
-      // store flag apps.enabled + store:apps:read.
+      // Apps catalog (odd/tasks/apps-module.md T6). Read-only: the sidebar only
+      // links it with apps.enabled, the page shows a notice when the flag is
+      // off, and the API itself requires store:apps:read.
       {
         path: 'apps',
         loadComponent: () =>
