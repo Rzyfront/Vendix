@@ -15,6 +15,7 @@ import {
   CrmCampaignWithEstimate,
   CrmSegment,
   SaveCrmSegment,
+  SaveManualCrmSegment,
   SegmentCustomer,
   SegmentCustomersPage,
   SegmentGroup,
@@ -78,7 +79,7 @@ export class CrmSegmentsService {
       .pipe(map((r) => r.data));
   }
 
-  createSegment(body: SaveCrmSegment): Observable<CrmSegment> {
+  createSegment(body: SaveCrmSegment | SaveManualCrmSegment): Observable<CrmSegment> {
     return this.http
       .post<ApiResponse<CrmSegment>>(this.segmentsUrl, body)
       .pipe(map((r) => r.data));

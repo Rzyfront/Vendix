@@ -25,7 +25,7 @@ import {
 } from './segments.utils';
 
 const CONTROL =
-  'h-10 rounded-lg border border-[var(--color-border)] bg-surface px-3 text-sm text-[var(--color-text-primary)] focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20';
+  'h-10 rounded-xl border border-border bg-surface px-3 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20';
 
 function mapGroup(group: GroupDraft, uid: number, fn: (g: GroupDraft) => GroupDraft): GroupDraft {
   if (group.uid === uid) return fn(group);
@@ -44,10 +44,10 @@ function mapGroup(group: GroupDraft, uid: number, fn: (g: GroupDraft) => GroupDr
   template: `
     <ng-template #groupTpl let-group let-child="child">
       <div
-        class="flex flex-col gap-3 rounded-2xl border border-[var(--color-border)] p-3"
+        class="flex flex-col gap-3 rounded-2xl border border-border p-3"
         [style.background]="child ? 'var(--color-background)' : 'var(--color-surface, transparent)'"
       >
-        <div class="flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+        <div class="flex flex-wrap items-center gap-2 text-sm text-text-secondary">
           <span>Cumplen</span>
           <select
             [class]="control"
@@ -68,7 +68,7 @@ function mapGroup(group: GroupDraft, uid: number, fn: (g: GroupDraft) => GroupDr
 
         @for (rule of group.rules; track rule.uid) {
           @let def = defOf(rule);
-          <div class="flex flex-col gap-2 rounded-xl bg-[var(--color-background)] p-2 md:flex-row md:flex-wrap md:items-center">
+          <div class="flex flex-col gap-2 rounded-xl bg-background p-2 md:flex-row md:flex-wrap md:items-center">
             <select
               [class]="control"
               aria-label="Campo"
@@ -126,7 +126,7 @@ function mapGroup(group: GroupDraft, uid: number, fn: (g: GroupDraft) => GroupDr
                       [class]="
                         rule.multi.includes(option.value)
                           ? 'border-primary bg-primary text-white'
-                          : 'border-[var(--color-border)] bg-surface text-[var(--color-text-secondary)]'
+                          : 'border-border bg-surface text-text-secondary'
                       "
                       [attr.aria-pressed]="rule.multi.includes(option.value)"
                       (click)="toggleMulti(group.uid, rule, option.value)"
@@ -134,7 +134,7 @@ function mapGroup(group: GroupDraft, uid: number, fn: (g: GroupDraft) => GroupDr
                       {{ option.label }}
                     </button>
                   } @empty {
-                    <span class="text-xs text-[var(--color-text-muted)]">Sin opciones disponibles</span>
+                    <span class="text-xs text-muted">Sin opciones disponibles</span>
                   }
                 </div>
               }
@@ -147,7 +147,7 @@ function mapGroup(group: GroupDraft, uid: number, fn: (g: GroupDraft) => GroupDr
                     [ngModel]="rule.value"
                     (ngModelChange)="patch(group.uid, rule.uid, { value: $event })"
                   />
-                  <span class="text-sm text-[var(--color-text-secondary)]">y</span>
+                  <span class="text-sm text-text-secondary">y</span>
                   <input
                     [type]="inputType(def)"
                     [class]="control + ' w-36'"
@@ -159,7 +159,7 @@ function mapGroup(group: GroupDraft, uid: number, fn: (g: GroupDraft) => GroupDr
               }
               @default {
                 @if (def.kind === 'owner') {
-                  <div class="min-w-[220px]">
+                  <div class="min-w-56">
                     <app-store-user-select
                       placeholder="Buscar persona del equipo..."
                       lookupMode="staff"
@@ -193,7 +193,7 @@ function mapGroup(group: GroupDraft, uid: number, fn: (g: GroupDraft) => GroupDr
 
             <button
               type="button"
-              class="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-border)]"
+              class="ml-auto inline-flex h-8 w-8 items-center justify-center rounded-md text-text-secondary hover:bg-border"
               aria-label="Quitar regla"
               [disabled]="totalRules() <= 1"
               (click)="removeRule(group.uid, rule.uid)"
@@ -232,7 +232,7 @@ function mapGroup(group: GroupDraft, uid: number, fn: (g: GroupDraft) => GroupDr
       [ngTemplateOutletContext]="{ $implicit: draft(), child: false }"
     ></ng-container>
     @if (!canAddRule()) {
-      <p class="mt-2 text-xs text-[var(--color-text-muted)]">Máximo {{ maxRules }} reglas por segmento.</p>
+      <p class="mt-2 text-xs text-muted">Máximo {{ maxRules }} reglas por segmento.</p>
     }
   `,
 })
