@@ -88,6 +88,13 @@ export const superAdminRoutes: Routes = [
           ).then((c) => c.AIEngineComponent),
       },
       {
+        path: 'system/integrations/meta-whatsapp',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/integrations/meta-whatsapp/meta-whatsapp-config.component'
+          ).then((c) => c.MetaWhatsappConfigComponent),
+      },
+      {
         path: 'system/templates',
         loadComponent: () =>
           import(
