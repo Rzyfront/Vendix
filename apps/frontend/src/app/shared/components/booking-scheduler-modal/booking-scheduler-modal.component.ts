@@ -1132,13 +1132,6 @@ export class BookingSchedulerModalComponent {
     return cells;
   });
 
-  /** Service id behind this scheduling flow, from any input shape. */
-  readonly serviceId = computed<number | null>(() => {
-    const p = this.resolvedProduct();
-    const pid = p?.id ?? this.existingBooking()?.product_id;
-    const n = Number(pid);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  });
 
   /**
    * Time slots for the selected day, from real availability (QUI-969).
