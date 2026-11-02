@@ -66,11 +66,13 @@ declare global {
         @if (
           channel()?.status === 'connected' &&
           channel()?.phone_number_id &&
-          !channel()?.registration_status
+          channel()?.registration_status !== 'registered'
         ) {
           <app-alert-banner variant="warning" icon="triangle-alert">
-            Falta registrar el número de WhatsApp para poder enviar mensajes. Usa
-            "Reintentar registro".
+            {{
+              channel()?.last_error ||
+                'Falta registrar el número de WhatsApp para poder enviar mensajes. Usa "Reintentar registro".'
+            }}
           </app-alert-banner>
         }
 

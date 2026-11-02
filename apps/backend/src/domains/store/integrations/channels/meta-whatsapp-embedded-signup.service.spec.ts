@@ -394,7 +394,7 @@ describe('MetaWhatsappEmbeddedSignupService', () => {
       expect(result).toBeDefined();
     });
 
-    it('stores the failure as status error with the Meta code', async () => {
+    it('keeps a legacy connected channel online when its first retry fails', async () => {
       const updateMany = jest.fn();
       const base = createService();
       const { service } = createService({
@@ -411,8 +411,56 @@ describe('MetaWhatsappEmbeddedSignupService', () => {
       await run(() => service.retryWhatsappRegistration());
 
       const data = updateMany.mock.calls[0][0].data;
+      expect(data.status).toBe('connected');
+      expect(data.last_error).toContain('133016');
+      expect(data.metadata.registration.status).toBe('failed');
+    });
+
+    it('keeps status error when a previously failed registration fails again', async () => {
+      const updateMany = jest.fn();
+      const base = createService();
+      const channel = channelWith(base.encryption, {
+        status: 'error',
+        metadata: {
+          registration: {
+            status: 'failed',
+            pin_encrypted: base.encryption.encrypt('123456'),
+          },
+        },
+      });
+      const { service } = createService({
+        updateMany,
+        findFirst: jest.fn().mockResolvedValue(channel),
+      });
+      mockGraph({
+        '/phone-1/register': {
+          status: 400,
+          body: { error: { code: 133016, message: 'limit' } },
+        },
+      });
+
+      await run(() => service.retryWhatsappRegistration());
+
+      const data = updateMany.mock.calls[0][0].data;
       expect(data.status).toBe('error');
       expect(data.last_error).toContain('133016');
+    });
+
+    it('rejects with a readable message when the stored token cannot be decrypted', async () => {
+      const updateMany = jest.fn();
+      const base = createService();
+      const { service, encryption } = createService({
+        updateMany,
+        findFirst: jest.fn().mockResolvedValue(channelWith(base.encryption)),
+      });
+      jest.spyOn(encryption, 'decrypt').mockImplementation(() => {
+        throw new Error('bad key');
+      });
+
+      await expect(
+        run(() => service.retryWhatsappRegistration()),
+      ).rejects.toThrow('No se pudo leer el token del canal');
+      expect(updateMany).not.toHaveBeenCalled();
     });
 
     it('does not call Meta again when the number is already registered', async () => {

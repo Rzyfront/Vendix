@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
@@ -36,13 +37,14 @@ interface MetaTokenResponse {
   };
 }
 
-interface RegistrationState {
+// A type alias (not an interface) so it is assignable to Prisma's Json input.
+type RegistrationState = {
   pin_encrypted?: string;
   status: 'registered' | 'failed';
   attempted_at: string;
   registered_at?: string;
   error?: string;
-}
+};
 
 @Injectable()
 export class MetaWhatsappEmbeddedSignupService {
@@ -188,7 +190,7 @@ export class MetaWhatsappEmbeddedSignupService {
         },
         webhook_subscription: webhookSubscription,
         registration,
-      },
+      } as Prisma.InputJsonValue,
     };
 
     if (existing) {
@@ -251,13 +253,27 @@ export class MetaWhatsappEmbeddedSignupService {
       return this.getWhatsappChannel();
     }
 
+    let accessToken: string;
+    try {
+      accessToken = this.encryption.decrypt(existing.access_token_encrypted);
+    } catch {
+      throw new BadRequestException(
+        'No se pudo leer el token del canal. Desconecta y vuelve a conectar WhatsApp.',
+      );
+    }
+
     const platformConfig = await this.getPlatformConfig();
     const registration = await this.registerPhoneNumber(
       existing.phone_number_id,
-      this.encryption.decrypt(existing.access_token_encrypted),
+      accessToken,
       platformConfig,
       previous,
     );
+    // A channel connected before registration existed may already send
+    // (registered outside Vendix). A failed retry must not take it offline:
+    // keep 'connected' and only surface the error.
+    const failedStatus =
+      existing.status === 'connected' && !previous ? 'connected' : 'error';
 
     await this.prisma.social_channels.updateMany({
       where: {
@@ -266,12 +282,13 @@ export class MetaWhatsappEmbeddedSignupService {
         provider: 'meta_cloud',
       },
       data: {
-        status: registration.status === 'registered' ? 'connected' : 'error',
+        status:
+          registration.status === 'registered' ? 'connected' : failedStatus,
         last_error: this.buildLastError(
           registration,
           this.asRecord(metadata.webhook_subscription),
         ),
-        metadata: { ...metadata, registration },
+        metadata: { ...metadata, registration } as Prisma.InputJsonValue,
       },
     });
 
