@@ -8,7 +8,7 @@ import {
 } from '@angular/router';
 import { Observable, of } from 'rxjs';
 import { AuthFacade } from '../store/auth/auth.facade';
-import { ConfigFacade } from '../store/config';
+import { ConfigFacade } from '../store/config/config.facade';
 import { ToastService } from '../../shared/components/toast/toast.service';
 import { SessionService } from '../services/session.service';
 
