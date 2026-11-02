@@ -29,10 +29,17 @@ import { ProductQuickViewModalComponent } from '../../../private/modules/ecommer
   template: `
     @if (products().length > 0) {
       <section class="mx-auto w-full max-w-6xl px-4 py-8" aria-labelledby="complements-title">
-        <h2 id="complements-title" class="mb-4 text-lg font-semibold text-text-primary">
-          Complementa tu compra
+        <h2
+          id="complements-title"
+          class="mb-4 font-semibold text-text-primary"
+          [class]="compact() ? 'text-base' : 'text-lg'"
+        >
+          {{ title() }}
         </h2>
-        <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div
+          class="grid gap-4"
+          [class]="compact() ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5' : 'grid-cols-2 md:grid-cols-4'"
+        >
           @for (product of products(); track product.id) {
             <app-product-card
               [product]="product"
@@ -55,6 +62,10 @@ export class ProductComplementsComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly productIds = input<number[]>([]);
+  /** Section heading; the service page reuses the block as a secondary one. */
+  readonly title = input('Complementa tu compra');
+  /** Denser grid and smaller heading, for a block that must stay secondary. */
+  readonly compact = input(false);
 
   readonly products = signal<EcommerceProduct[]>([]);
   readonly quickViewSlug = signal<string | null>(null);
