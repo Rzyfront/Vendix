@@ -1051,6 +1051,16 @@ export class ProductCreatePageComponent {
     }
     // QUI-978 — sin stock (o con otra dimensión) las marcadas no valen.
     this.pruneSaleUomsToStock();
+    // QUI-978 — en retail el selector de compra solo existe con stock: si se
+    // vacía el stock (vuelve a pieza), la compra no puede quedarse flotando
+    // oculta. En insumo ambos selectores siempre están visibles y se respeta
+    // lo que el usuario dejó.
+    if (
+      this.productForm.get('stock_uom_id')?.value == null &&
+      !this.isIngredient()
+    ) {
+      this.productForm.get('purchase_uom_id')?.setValue(null);
+    }
     this.productForm.updateValueAndValidity();
   }
 

@@ -1183,6 +1183,20 @@
                     </div>
                   } @else {
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+                      <!-- QUI-978 — UoM de compra para retail medido (el líder:
+                           "cargar una carne pide kilo o tonelada"). Sin esto no
+                           había dónde configurarla y el POP no podía precargarla.
+                           Solo con stock: por pieza sigue sin pedir nada. -->
+                      @if (selectedStockUom()) {
+                        <app-selector
+                          formControlName="purchase_uom_id"
+                          label="Compra (presentación)"
+                          helpText="Como la recibes del proveedor. Se precarga al recomprar."
+                          [options]="purchaseUomOptions()"
+                          placeholder="Ej. Kilogramo, Tonelada..."
+                          (valueChange)="onPurchaseUomChange()"
+                        ></app-selector>
+                      }
                       <app-selector
                         formControlName="stock_uom_id"
                         label="El inventario se cuenta en"
