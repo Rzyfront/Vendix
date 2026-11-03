@@ -86,4 +86,60 @@ describe('BarcodeScannerSettingsDto.variable_barcodes', () => {
       (await check({ variable_barcodes: { formats: [{ ...validFormat, preset: 'x' }] } })).length,
     ).toBeGreaterThan(0);
   });
+
+  describe('layout de segmentos', () => {
+    const layoutErrors = async (overrides: Record<string, unknown>) =>
+      JSON.stringify(
+        await check({
+          variable_barcodes: { enabled: true, formats: [{ ...validFormat, ...overrides }] },
+        }),
+      );
+
+    it('acepta el layout Rongta tipo 27 (prefijo 1, código 6, peso 5)', async () => {
+      expect(
+        await check({
+          variable_barcodes: {
+            enabled: true,
+            formats: [
+              {
+                ...validFormat,
+                preset: 'rongta_27',
+                prefixes: ['2'],
+                prefix_length: 1,
+                product_code_start: 1,
+                product_code_length: 6,
+              },
+            ],
+          },
+        }),
+      ).toHaveLength(0);
+    });
+
+    it('rechaza un peso que invade el dígito de control', async () => {
+      expect(await layoutErrors({ value_start: 8 })).toContain('variableBarcodeLayout');
+    });
+
+    it('rechaza un código de producto que invade el dígito de control', async () => {
+      expect(
+        await layoutErrors({ product_code_start: 8, product_code_length: 5, value_start: 2 }),
+      ).toContain('variableBarcodeLayout');
+    });
+
+    it('rechaza código de producto y peso solapados', async () => {
+      expect(await layoutErrors({ value_start: 5 })).toContain('variableBarcodeLayout');
+    });
+
+    it('rechaza un código de producto que se solapa con el prefijo', async () => {
+      expect(await layoutErrors({ product_code_start: 1 })).toContain(
+        'variableBarcodeLayout',
+      );
+    });
+
+    it('rechaza segmentos de largo 0', async () => {
+      expect(await layoutErrors({ product_code_length: 0 })).toContain(
+        'variableBarcodeLayout',
+      );
+      expect(await layoutErrors({ value_length: 0 })).toContain('variableBarcodeLayout');
+    });
+  });
 });

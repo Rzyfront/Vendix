@@ -462,6 +462,58 @@ export class PrefixesMatchLengthConstraint
 }
 
 /**
+ * Prefijo, código de producto y peso deben caber en los 12 primeros dígitos
+ * (el 13.º es el dígito de control EAN-13), sin solaparse y con largo > 0
+ * en código y peso. Se valida sobre `value_length` mirando todo el objeto.
+ */
+@ValidatorConstraint({ name: 'variableBarcodeLayout', async: false })
+export class VariableBarcodeLayoutConstraint
+  implements ValidatorConstraintInterface
+{
+  validate(_value: unknown, args: ValidationArguments): boolean {
+    const f = args.object as Partial<
+      Record<
+        | 'prefix_length'
+        | 'product_code_start'
+        | 'product_code_length'
+        | 'value_start'
+        | 'value_length',
+        number
+      >
+    >;
+    const nums = [
+      f.prefix_length,
+      f.product_code_start,
+      f.product_code_length,
+      f.value_start,
+      f.value_length,
+    ];
+    // Los tipos y rangos individuales los reportan sus propios validadores.
+    if (!nums.every((n) => Number.isInteger(n))) return true;
+    const DATA_DIGITS = 12;
+    const spans: Array<[number, number]> = [
+      [0, f.prefix_length!],
+      [f.product_code_start!, f.product_code_start! + f.product_code_length!],
+      [f.value_start!, f.value_start! + f.value_length!],
+    ];
+    if (f.product_code_length! < 1 || f.value_length! < 1) return false;
+    if (spans.some(([, end]) => end > DATA_DIGITS)) return false;
+    for (let i = 0; i < spans.length; i++) {
+      for (let j = i + 1; j < spans.length; j++) {
+        const [aStart, aEnd] = spans[i];
+        const [bStart, bEnd] = spans[j];
+        if (aStart < bEnd && bStart < aEnd) return false;
+      }
+    }
+    return true;
+  }
+
+  defaultMessage(): string {
+    return 'Prefijo, código de producto y peso deben caber en los primeros 12 dígitos sin solaparse';
+  }
+}
+
+/**
  * Formato de etiqueta de balanza (código de barras de peso variable).
  * Ejemplo Rongta tipo 7: `DD IIIII WW.WWW C` (13 dígitos EAN-13).
  * Las posiciones son índices base 0 dentro del código de 13 dígitos.
@@ -536,6 +588,7 @@ export class VariableBarcodeFormatDto {
   @IsInt()
   @Min(0)
   @Max(13)
+  @Validate(VariableBarcodeLayoutConstraint)
   value_length: number;
 
   @ApiProperty({ example: 3, minimum: 0, maximum: 13 })
