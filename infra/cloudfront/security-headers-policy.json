@@ -1,0 +1,19 @@
+{
+  "Comment": "Vendix SEO-TECH-22: HSTS (1 anio, sin subdominios ni preload), nosniff y Referrer-Policy. Sin X-Frame-Options ni CSP a proposito.",
+  "Name": "vendix-security-headers",
+  "SecurityHeadersConfig": {
+    "StrictTransportSecurity": {
+      "Override": true,
+      "AccessControlMaxAgeSec": 31536000,
+      "IncludeSubdomains": false,
+      "Preload": false
+    },
+    "ContentTypeOptions": {
+      "Override": true
+    },
+    "ReferrerPolicy": {
+      "Override": true,
+      "ReferrerPolicy": "strict-origin-when-cross-origin"
+    }
+  }
+}
