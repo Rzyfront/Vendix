@@ -132,4 +132,11 @@ describe('exceedsWeighMax (PR #1062 ronda 4, punto 3)', () => {
     expect(exceedsWeighMax(999001, G, KG)).toBeTrue();
     expect(exceedsWeighMax(1000, KG, KG)).toBeTrue();
   });
+
+  it('el tope es 999 de la principal: con principal g son 999 g (ronda 5, H4)', () => {
+    expect(exceedsWeighMax(999, G, G)).toBeFalse();
+    expect(exceedsWeighMax(1000, G, G)).toBeTrue();
+    // 1 kg = 1.000 g supera los 999 g de la principal.
+    expect(exceedsWeighMax(1, KG, G)).toBeTrue();
+  });
 });

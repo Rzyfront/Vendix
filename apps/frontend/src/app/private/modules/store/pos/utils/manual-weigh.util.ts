@@ -15,8 +15,10 @@ export interface ManualWeighUnit {
 }
 
 /**
- * Máximo en la UoM principal (regla histórica del POS: 999 kg). Se compara
- * en unidad mínima, no contra el número tipeado: 1.500 g son 1,5 kg.
+ * Tope de captura: 999 de la UoM PRINCIPAL del producto, sea cual sea
+ * (PR #1062 ronda 5, H4). Con principal kg son 999 kg; con principal g son
+ * 999 g; con principal lb, 999 lb. Se compara en unidad mínima, no contra el
+ * número tipeado: con principal kg, 1.500 g son 1,5 kg y pasan.
  */
 export const MAX_WEIGH_AMOUNT = 999;
 
