@@ -714,8 +714,39 @@ export interface CashRegisterSettings {
   track_non_cash_payments: boolean;
 }
 
+export type VariableBarcodePreset =
+  | 'rongta_07'
+  | 'rongta_09'
+  | 'rongta_17'
+  | 'rongta_27'
+  | 'custom';
+
+/** Formato de etiqueta de balanza (código de barras EAN-13 de peso variable). */
+export interface VariableBarcodeFormat {
+  id: string;
+  name: string;
+  enabled: boolean;
+  preset: VariableBarcodePreset;
+  length: 13;
+  prefixes: string[];
+  prefix_length: number;
+  product_code_start: number;
+  product_code_length: number;
+  value_start: number;
+  value_length: number;
+  value_decimals: number;
+  value_unit: 'kg' | 'g';
+  max_weight_kg?: number;
+}
+
+export interface VariableBarcodeSettings {
+  enabled: boolean;
+  formats: VariableBarcodeFormat[];
+}
+
 export interface BarcodeScannerSettings {
   enabled: boolean;
+  variable_barcodes?: VariableBarcodeSettings;
 }
 
 export interface PosSettings {

@@ -609,6 +609,11 @@ export class ProductCreatePageComponent {
     initialValue: null as {
       general?: { industries?: string[] };
       inventory?: { low_stock_threshold?: number };
+      pos?: {
+        barcode_scanner?: {
+          variable_barcodes?: { enabled?: boolean };
+        };
+      };
     } | null,
   });
 
@@ -1452,6 +1457,24 @@ export class ProductCreatePageComponent {
     ),
     { initialValue: this.productForm.get('min_stock_level')!.value },
   );
+
+  /** `pricing_type` como señal (los computed no ven FormControl). */
+  private readonly pricingTypeValue = toSignal(
+    this.productForm.get('pricing_type')!.valueChanges.pipe(
+      startWith(this.productForm.get('pricing_type')!.value),
+    ),
+    { initialValue: this.productForm.get('pricing_type')!.value },
+  );
+
+  /** «Código de balanza»: solo con producto de peso y etiquetas variables activas. */
+  readonly showScaleCode = computed<boolean>(() => {
+    const raw = this.pricingTypeValue();
+    const pricing = typeof raw === 'object' && raw ? raw.value : raw;
+    return (
+      pricing === 'weight' &&
+      this.storeSettings()?.pos?.barcode_scanner?.variable_barcodes?.enabled === true
+    );
+  });
 
   /** `min_stock_level` del producto cargado/guardado, espejo en señal de `product`. */
   private readonly productMinStockLevel = signal<number | null>(null);
@@ -2820,6 +2843,10 @@ export class ProductCreatePageComponent {
         allow_pos_price_override: [false],
         sku: ['', [Validators.maxLength(100)]],
         barcode: ['', [Validators.maxLength(64)]],
+        scale_code: [
+          null as number | null,
+          [Validators.min(1), Validators.max(999999), Validators.pattern(/^\d+$/)],
+        ],
         stock_quantity: [0, [Validators.min(0)]],
         track_inventory: [true],
         min_stock_level: [null, [Validators.min(0)]],
@@ -3172,6 +3199,7 @@ export class ProductCreatePageComponent {
       allow_pos_price_override: product.allow_pos_price_override === true,
       sku: product.sku,
       barcode: product.barcode,
+      scale_code: product.scale_code ?? null,
       stock_quantity: product.stock_quantity,
       track_inventory: product.track_inventory !== false,
       min_stock_level: product.min_stock_level ?? null,
@@ -4741,6 +4769,7 @@ export class ProductCreatePageComponent {
       sale_price: 'Precio de oferta',
       sku: 'SKU',
       barcode: 'Código de barras',
+      scale_code: 'Código de balanza',
       stock_quantity: 'Stock',
       weight: 'Peso',
       dimensions: 'Dimensiones',
@@ -5141,6 +5170,7 @@ export class ProductCreatePageComponent {
       allow_pos_price_override: !!neutral(formValue.allow_pos_price_override, false),
       sku: formValue.sku || undefined,
       barcode: formValue.barcode || undefined,
+      scale_code: this.resolveScaleCodePayload(formValue),
       track_inventory: !!formValue.track_inventory,
       requires_serial_numbers: !!formValue.requires_serial_numbers,
       stock_quantity: formValue.track_inventory
@@ -5506,11 +5536,32 @@ export class ProductCreatePageComponent {
     });
   }
 
+  /**
+   * `scale_code` viaja como entero o `null` (vacío / oculto / no es de peso).
+   * Null explícito limpia el código al editar.
+   */
+  private resolveScaleCodePayload(formValue: {
+    scale_code?: unknown;
+    pricing_type?: unknown;
+  }): number | null {
+    const pricing =
+      typeof formValue.pricing_type === 'object' && formValue.pricing_type
+        ? (formValue.pricing_type as { value?: string }).value
+        : formValue.pricing_type;
+    if (pricing !== 'weight') return null;
+    const raw = formValue.scale_code;
+    if (raw === null || raw === undefined || raw === '') return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 1 && n <= 999999 ? n : null;
+  }
+
   getErrorMessage(fieldName: string): string {
     const field = this.productForm.get(fieldName);
     if (!field || !field.errors || !field.touched) return '';
     if (field.errors['required']) return 'Campo obligatorio';
     if (field.errors['min']) return `Valor mínimo: ${field.errors['min'].min}`;
+    if (field.errors['max']) return `Valor máximo: ${field.errors['max'].max}`;
+    if (field.errors['pattern'] && fieldName === 'scale_code') return 'Debe ser un número entero';
     // QUI-504: el slug se valida con ValidationUtils.slugValidator (regex
     // /^[a-z0-9-]+$/). Si el operador pega algo con espacios, mayúsculas o
     // caracteres raros, mostramos mensaje específico en lugar del genérico.

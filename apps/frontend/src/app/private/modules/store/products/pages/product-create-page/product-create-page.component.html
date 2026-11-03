@@ -127,6 +127,20 @@
               ></app-input>
             </div>
 
+            @if (showScaleCode()) {
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+                <app-input
+                  label="Código de balanza"
+                  type="number"
+                  formControlName="scale_code"
+                  placeholder="Ej. 3"
+                  [error]="getErrorMessage('scale_code')"
+                  helperText="Número del producto en la balanza etiquetadora (columna Código del PLU)"
+                  customWrapperClass="!mt-0"
+                ></app-input>
+              </div>
+            }
+
             <!-- Row 2: Descripción (full width) -->
             <div
               class="ai-description-wrapper"

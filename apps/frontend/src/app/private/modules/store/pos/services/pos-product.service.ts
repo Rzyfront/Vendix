@@ -962,6 +962,31 @@ export class PosProductService {
     );
   }
 
+  /**
+   * Etiqueta de balanza etiquetadora: busca el producto de peso por su
+   * `scale_code`. Devuelve el producto solo si hay exactamente uno y es de
+   * `pricing_type = weight`; en cualquier otro caso (o error) `null`.
+   */
+  getWeightProductByScaleCode(scaleCode: number): Observable<Product | null> {
+    const params = new HttpParams()
+      .set('scale_code', String(scaleCode))
+      .set('is_lodging', 'false');
+    return this.http.get<any>(this.apiUrl, { params }).pipe(
+      map((response) => {
+        const dataRoot = response?.success ? response.data : response;
+        const list = Array.isArray(dataRoot)
+          ? dataRoot
+          : Array.isArray(dataRoot?.data)
+            ? dataRoot.data
+            : [];
+        if (list.length !== 1) return null;
+        const product = (this.transformProducts(list)[0] as Product) ?? null;
+        return product && product.pricing_type === 'weight' ? product : null;
+      }),
+      catchError(() => of(null)),
+    );
+  }
+
   getProductBySku(sku: string): Observable<Product | null> {
     // Hotelería (R5): una noche de hotel se cobra en la cuenta del huésped.
     const params = new HttpParams().set('sku', sku).set('is_lodging', 'false');
