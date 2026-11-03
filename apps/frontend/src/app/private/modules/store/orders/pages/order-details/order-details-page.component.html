@@ -1122,7 +1122,7 @@
                         }}
                       </p>
                       <p class="text-[11px] text-gray-500">
-                        <span class="sr-only">Precio unitario: </span>{{ item.quantity }} x
+                        <span class="sr-only">Precio unitario: </span>{{ lineQuantityLabel(item) }} x
                         {{
                           (item.final_unit_price ?? item.unit_price) || 0
                             | currency

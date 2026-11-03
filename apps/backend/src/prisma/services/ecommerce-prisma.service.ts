@@ -222,6 +222,14 @@ export class EcommercePrismaService extends BasePrismaService {
   get product_price_tier_assignments() {
     return this.scoped_client.product_price_tier_assignments;
   }
+
+  /**
+   * UoMs de venta del producto (QUI-978). Solo lectura vía includes de
+   * producto, igual que `product_price_tier_assignments`.
+   */
+  get product_sale_uoms() {
+    return this.scoped_client.product_sale_uoms;
+  }
   get product_price_tier_overrides() {
     return this.scoped_client.product_price_tier_overrides;
   }

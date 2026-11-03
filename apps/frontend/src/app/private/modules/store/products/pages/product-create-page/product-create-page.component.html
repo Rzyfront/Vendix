@@ -1183,6 +1183,20 @@
                     </div>
                   } @else {
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+                      <!-- QUI-978 — UoM de compra para retail medido (el líder:
+                           "cargar una carne pide kilo o tonelada"). Sin esto no
+                           había dónde configurarla y el POP no podía precargarla.
+                           Solo con stock: por pieza sigue sin pedir nada. -->
+                      @if (selectedStockUom()) {
+                        <app-selector
+                          formControlName="purchase_uom_id"
+                          label="Compra (presentación)"
+                          helpText="Como la recibes del proveedor. Se precarga al recomprar."
+                          [options]="purchaseUomOptions()"
+                          placeholder="Ej. Kilogramo, Tonelada..."
+                          (valueChange)="onPurchaseUomChange()"
+                        ></app-selector>
+                      }
                       <app-selector
                         formControlName="stock_uom_id"
                         label="El inventario se cuenta en"
@@ -1197,8 +1211,10 @@
                           formControlName="price_unit_quantity"
                           label="El precio de venta es"
                           [helpText]="
-                            'El precio que escribes arriba cubre esta cantidad de ' +
-                            stockUom.code + '.'
+                            principalPriceScale() != null
+                              ? 'Lo fija la unidad principal de venta.'
+                              : 'El precio que escribes arriba cubre esta cantidad de ' +
+                                stockUom.code + '.'
                           "
                           [options]="priceScaleOptions()"
                           placeholder="Por unidad"
@@ -1206,6 +1222,49 @@
                         ></app-selector>
                       }
                     </div>
+
+                    <!-- QUI-978 — en qué unidades se puede vender. Solo con
+                         stock: misma dimensión, una principal (el precio se
+                         expresa en ella). -->
+                    @if (selectedStockUom()) {
+                      <div
+                        class="rounded-xl border border-border bg-bg p-3 space-y-2"
+                      >
+                        <p
+                          class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
+                        >
+                          Unidades de venta
+                        </p>
+                        <p class="text-xs text-text-muted">
+                          Márcalas todas: en el POS se podrá pesar en
+                          cualquiera. La principal es en la que se pide el peso
+                          y sobre la que se calcula el precio.
+                        </p>
+                        <div
+                          class="grid grid-cols-1 sm:grid-cols-2 gap-2"
+                        >
+                          @for (u of saleUomOptions(); track u.id) {
+                            <app-setting-toggle
+                              [label]="u.name + ' (' + u.code + ')'"
+                              [description]="saleUomHint(u)"
+                              [ngModel]="isSaleUomChecked(u.id)"
+                              [ngModelOptions]="{ standalone: true }"
+                              (changed)="toggleSaleUom(u.id, $event)"
+                            ></app-setting-toggle>
+                          }
+                        </div>
+                        @if (saleUomIds().length > 0) {
+                          <app-selector
+                            label="Unidad principal"
+                            helpText="El precio que escribes arriba se expresa en esta unidad. Cambiarla convierte el precio."
+                            [options]="principalSaleUomOptions()"
+                            [value]="principalSelectorValue()"
+                            (valueChange)="setPrincipalSaleUom($event)"
+                            placeholder="Elige la principal"
+                          ></app-selector>
+                        }
+                      </div>
+                    }
 
                     <!-- Explica con los números del producto qué va a pasar al
                          venderlo, y ofrece ejemplos por industria mientras el

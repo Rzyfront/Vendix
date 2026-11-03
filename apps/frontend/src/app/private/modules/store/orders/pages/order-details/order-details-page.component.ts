@@ -275,6 +275,7 @@ import {
   resolveFiscalAlert,
   type FiscalAlertEntry,
 } from '../../utils/fiscal-alert-dictionary';
+import { formatOrderLineQuantity } from '../../utils/order-line-quantity.util';
 
 // Misma política de cobro que SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES en
 // order-flow.service.ts: estas entregas no necesitan método de envío.
@@ -5544,6 +5545,11 @@ export class OrderDetailsPageComponent {
 
   parseVariantAttributes(raw: unknown): VariantAttribute[] {
     return parseVariantAttributes(raw);
+  }
+
+  /** QUI-978 — "300 g" / "0,5 lb" en vez de "300" en el precio de la línea. */
+  lineQuantityLabel(item: OrderItem): string {
+    return formatOrderLineQuantity(item);
   }
 
   // Template adapters over OrderTicketService: the packaging rule lives in one

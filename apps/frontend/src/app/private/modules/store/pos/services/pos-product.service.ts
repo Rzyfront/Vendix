@@ -110,6 +110,17 @@ export interface Product {
   /** Frase que explica cómo se vende, armada por el helper compartido. */
   sale_config_summary?: { headline: string; lines: string[] } | null;
   /**
+   * QUI-978 — UoMs en las que se puede vender (principal + adicionales).
+   * Ausente = el endpoint no trajo el contrato (hidratar desde el detalle).
+   */
+  sale_uoms?: Array<{
+    uom_id: number;
+    code: string | null;
+    name: string | null;
+    factor_to_base: number | string | null;
+    is_principal: boolean;
+  }> | null;
+  /**
    * Presentación pistoleada: cuando el código de barras pertenece a una tarifa
    * `sale_unit` del producto, el backend devuelve cuál. El POS agrega la línea
    * con esa presentación ya aplicada, sin preguntarle nada al cajero.
@@ -854,6 +865,10 @@ export class PosProductService {
         }),
         ...(product.sale_config_summary !== undefined && {
           sale_config_summary: product.sale_config_summary ?? null,
+        }),
+        // QUI-978 — misma regla: ausente = hidratar desde el detalle.
+        ...(product.sale_uoms !== undefined && {
+          sale_uoms: Array.isArray(product.sale_uoms) ? product.sale_uoms : null,
         }),
         ...(product.scanned_price_tier_id !== undefined && {
           scanned_price_tier_id: product.scanned_price_tier_id ?? null,

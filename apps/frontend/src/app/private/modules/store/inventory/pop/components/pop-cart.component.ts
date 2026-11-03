@@ -30,6 +30,7 @@ import type { QuantityClampEvent } from '../../../../../../shared/components/qua
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { UomService } from '../../services/uom.service';
 import {
   popLineAvailableStock,
   popLineHasStockData,
@@ -553,32 +554,42 @@ import {
                   >
                     {{
                       item.product.pricing_type === 'weight'
-                        ? 'Peso (kg)'
+                        ? 'Peso'
                         : 'Cantidad'
                     }}
                   </span>
-                  @if (item.product.pricing_type === 'weight') {
-                    <app-input
-                      type="number"
-                      size="sm"
-                      [ngModel]="item.quantity"
-                      (ngModelChange)="updateQuantity(item.id, $event)"
-                      customInputClass="text-right !h-7 !py-0 !w-24"
-                      customWrapperClass="!mt-0"
-                      min="0.001"
-                      step="0.001"
-                    ></app-input>
-                  } @else {
-                    <app-quantity-control
-                      [value]="item.quantity"
-                      [min]="1"
-                      [editable]="true"
-                      [disabled]="loading()"
-                      [size]="'sm'"
-                      (valueChange)="updateQuantity(item.id, $event)"
-                      (valueClamped)="onQuantityClamped($event)"
-                    ></app-quantity-control>
-                  }
+                  <!-- QUI-978 — la unidad va junto al valor ("30 kg"), no
+                       fija en la etiqueta: comprar en ton y ver "(kg)" mentía. -->
+                  <div class="flex items-center gap-1.5">
+                    @if (item.product.pricing_type === 'weight') {
+                      <app-input
+                        type="number"
+                        size="sm"
+                        [ngModel]="item.quantity"
+                        (ngModelChange)="updateQuantity(item.id, $event)"
+                        customInputClass="text-right !h-7 !py-0 !w-24"
+                        customWrapperClass="!mt-0"
+                        min="0.001"
+                        step="0.001"
+                      ></app-input>
+                    } @else {
+                      <app-quantity-control
+                        [value]="item.quantity"
+                        [min]="1"
+                        [editable]="true"
+                        [disabled]="loading()"
+                        [size]="'sm'"
+                        (valueChange)="updateQuantity(item.id, $event)"
+                        (valueClamped)="onQuantityClamped($event)"
+                      ></app-quantity-control>
+                    }
+                    @if (purchaseUnitCode(item); as unit) {
+                      <span
+                        class="text-xs font-semibold text-text-secondary shrink-0"
+                        >{{ unit }}</span
+                      >
+                    }
+                  </div>
                 </div>
                 <!-- QUI-855: editor multi-impuesto por línea. La fila 1 es siempre
                      el IVA visible (el tax_rate legacy se convierte en fila IVA);
@@ -647,6 +658,29 @@ export class PopCartComponent {
   private dialogService = inject(DialogService);
   private destroyRef = inject(DestroyRef);
   private storeSettingsFacade = inject(StoreSettingsFacade);
+
+  private uomService = inject(UomService);
+  /**
+   * QUI-978 — catálogo UoM (cacheado de por vida en el servicio: no dispara
+   * red si el modal de config ya lo pidió). Resuelve el código de la UoM de
+   * compra para pintarla junto a la cantidad ("30 kg").
+   */
+  private readonly uomCatalog = toSignal(this.uomService.getCatalog(), {
+    initialValue: null,
+  });
+
+  /**
+   * QUI-978 — iniciales de la UoM de compra de la línea ("kg", "ton"). La de
+   * la línea gana; si la línea aún no se configuró, la persistida del
+   * producto. `null` = línea por pieza, sin sufijo.
+   */
+  purchaseUnitCode(item: PopCartItem): string | null {
+    const id = Number(item.purchase_uom_id ?? item.product?.purchase_uom_id ?? 0);
+    if (!id) return null;
+    const data = this.uomCatalog()?.data;
+    if (!Array.isArray(data)) return null;
+    return data.find((u) => Number(u.id) === id)?.code ?? null;
+  }
 
   /** Default de tienda para el mínimo (QUI-861, misma fuente que selección). */
   readonly lowStockStoreDefault = computed(() => {

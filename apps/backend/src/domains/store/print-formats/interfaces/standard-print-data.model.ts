@@ -43,6 +43,12 @@ export interface StandardPrintItem {
   variant_sku?: string;
   variant_attributes?: string;
   quantity: number;
+  /**
+   * QUI-978 — cantidad con su unidad ("300 g", "0,5 lb"). Si viene, la columna
+   * de cantidad la imprime en vez de `quantity`. OPCIONAL: los providers que
+   * no la llenan siguen imprimiendo el número.
+   */
+  quantity_formatted?: string;
   unit_price: number;
   unit_price_formatted?: string;
   discount_amount?: number;

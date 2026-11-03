@@ -229,6 +229,23 @@ export class ProductImageDto {
   sort_order?: number;
 }
 
+/**
+ * QUI-978 — una UoM en la que se puede vender el producto.
+ */
+export class SaleUomDto {
+  @ApiPropertyOptional({ description: 'Id en el catálogo units_of_measure.' })
+  @IsInt()
+  @Type(() => Number)
+  uom_id!: number;
+
+  @ApiPropertyOptional({ description: 'La principal: pide el peso en ella y el precio está expresado en ella. Exactamente una por producto.' })
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_principal?: boolean;
+}
+
+
 export class CreateProductDto {
   /**
    * Subcuenta PUC de ingreso propia del producto. `null`/ausente ⇒ el asiento
@@ -486,6 +503,16 @@ export class CreateProductDto {
   @Type(() => Number)
   @Min(1, { message: 'El precio debe cubrir al menos una unidad de stock' })
   price_unit_quantity?: number;
+  @ApiPropertyOptional({
+    description:
+      'Unidades en las que se puede VENDER el producto (principal + adicionales, misma dimensión que el stock). La lista reemplaza a la anterior. Exactamente una debe llevar is_principal.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SaleUomDto)
+  sale_uoms?: SaleUomDto[];
+
 
   @ApiPropertyOptional({
     description:
@@ -1053,6 +1080,16 @@ export class UpdateProductDto {
   @Type(() => Number)
   @Min(1, { message: 'El precio debe cubrir al menos una unidad de stock' })
   price_unit_quantity?: number;
+  @ApiPropertyOptional({
+    description:
+      'Unidades en las que se puede VENDER el producto (principal + adicionales, misma dimensión que el stock). La lista reemplaza a la anterior. Exactamente una debe llevar is_principal.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SaleUomDto)
+  sale_uoms?: SaleUomDto[];
+
 
   @ApiPropertyOptional({
     description:

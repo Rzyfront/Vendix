@@ -1468,6 +1468,8 @@ model units_of_measure {
   products_stock    products[] @relation("product_stock_uom")
   products_purchase products[] @relation("product_purchase_uom")
 
+  product_sale_uoms product_sale_uoms[]
+
   @@index([dimension])
   @@index([is_active])
 }
@@ -2344,6 +2346,9 @@ model products {
   // Multi-tarifa overrides (Phase 1: price tiers)
   price_tier_overrides           product_price_tier_overrides[]
   product_price_tier_assignments product_price_tier_assignments[]
+
+  // QUI-978 — UoMs de venta del producto (principal + adicionales)
+  product_sale_uoms product_sale_uoms[]
 
   // Restaurant Suite Foundation (Fase A) — back-relations
   // Recetas-por-variante: un producto tiene 0..N recetas (base + una por
@@ -3345,6 +3350,35 @@ model product_price_tier_assignments {
   @@id([product_id, price_tier_id])
   @@index([price_tier_id])
   @@index([store_id])
+}
+
+/// QUI-978 — UoMs en las que se puede VENDER un producto medido/pesado.
+///
+/// La compra entra en `products.purchase_uom_id` y el stock vive en
+/// `products.stock_uom_id` (unidad mínima, `Int`); la venta puede capturarse
+/// en CUALQUIERA de estas UoMs y el POS convierte a stock con
+/// `factor_to_base` del catálogo. Una sola fila por producto lleva
+/// `is_principal = true`: es la UoM en la que se pide el peso por defecto y
+/// sobre la que está expresado el precio (`price_unit_quantity`).
+///
+/// La unicidad de la principal la garantiza un índice único PARCIAL que
+/// Prisma no puede expresar y vive solo en la migración:
+///   CREATE UNIQUE INDEX ... ON product_sale_uoms (product_id)
+///   WHERE is_principal;
+/// No lo borres al regenerar y no intentes `@@unique([product_id,
+/// is_principal])`: dejaría un solo `false` por producto.
+model product_sale_uoms {
+  id           Int      @id @default(autoincrement())
+  product_id   Int
+  uom_id       Int
+  is_principal Boolean  @default(false)
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+
+  product products         @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  uom     units_of_measure @relation(fields: [uom_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([product_id, uom_id])
+  @@index([uom_id])
 }
 
 model refund_items {

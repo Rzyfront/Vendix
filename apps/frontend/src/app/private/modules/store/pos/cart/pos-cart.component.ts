@@ -44,7 +44,12 @@ import { PosSaleUnitService } from '../services/pos-sale-unit.service';
 import {
   formatSaleQuantity,
   isSaleUnitLine as isLineCapturedInSaleUnit,
+  WeighedAs,
 } from '../utils/line-units.util';
+import {
+  rescaleExceedsWeighMax,
+  weighMaxFor,
+} from '../utils/manual-weigh.util';
 import {
   EMPTY_CART_MESSAGE,
   EMPTY_CART_INLINE_TITLE,
@@ -1980,7 +1985,10 @@ private stationBookingService = inject(PosStationBookingService);
   unitPriceSuffix(item: CartItem): string {
     if (item.is_weight_product) return '/' + (item.weight_unit || 'kg');
     if (this.isPackageLine(item)) return '/paquete';
-    return item.sale_unit_code ? '/' + item.sale_unit_code : '';
+    // QUI-978 — el precio publicado va por la unidad de captura automática,
+    // no por la elegida ("Base: $25.000/kg" aunque se pesaran gramos).
+    const priced = item.price_unit_code || item.sale_unit_code;
+    return priced ? '/' + priced : '';
   }
 
   /** `true` cuando la línea se capturó en una unidad de venta ≠ unidad mínima. */
@@ -1997,52 +2005,103 @@ private stationBookingService = inject(PosStationBookingService);
    * Reedita una línea medida EN SU UNIDAD DE VENTA. Si se capturó con la
    * balanza se vuelve a pesar; si se digitó, se vuelve a digitar. La conversión
    * a la unidad mínima es interna, igual que en la captura original.
+   * QUI-978 — el modal manual deja cambiar de unidad (g → kg); la línea
+   * anota la nueva unidad y su factor.
    */
   async editSaleQuantity(item: CartItem): Promise<void> {
     const factor = Number(item.stock_units_per_sale_unit ?? 1) || 1;
     const unit = item.sale_unit_code || '';
     const current = Number(item.quantity) / factor;
-    let amount: number | undefined;
+    let quantity: number | undefined;
+    let newFactor = factor;
+    let newUnit = unit;
 
     if (item.captured_by_scale && this.scaleService.isConnected()) {
-      amount = await this.scaleService.showWeightModal({
+      // La báscula emite en SU unidad (PR #1062, error 2).
+      const scaleUnit = this.scaleService.readingUnit();
+      const reading = await this.scaleService.showWeightModal({
         title: 'Volver a pesar',
-        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
-        weightUnit: unit,
+        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.finalPrice)}/${unit}`,
+        weightUnit: scaleUnit,
         allowManualFallback: true,
       });
-    } else {
-      const raw = await this.dialogService.prompt(
-        {
-          title: `Cantidad en ${unit}`,
-          message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
-          placeholder: `Cantidad en ${unit}`,
-          defaultValue: String(current),
-          confirmText: 'Actualizar',
-          cancelText: 'Cancelar',
-          inputType: 'number',
-        },
-        { size: 'sm' },
+      if (reading === undefined) return;
+      const amount = await this.saleUnitService.convertScaleReading(
+        reading,
+        scaleUnit,
+        unit,
       );
-      if (!raw) return;
-      const parsed = parseFloat(String(raw).replace(',', '.'));
-      amount = Number.isNaN(parsed) ? undefined : parsed;
+      if (!(amount > 0)) {
+        this.toastService.warning('La cantidad debe ser mayor a 0');
+        return;
+      }
+      // Mismo tope que el alta, medido en la principal (PR #1062 ronda 6, L1).
+      const max = weighMaxFor(
+        this.saleUnitService.configFor(item.product)?.stockUnit?.dimension,
+      );
+      if (max != null) {
+        const units = await this.saleUnitService.weighModalUnits(
+          item.product,
+          unit,
+          factor,
+        );
+        const exceeded = rescaleExceedsWeighMax(amount, factor, units, max);
+        if (exceeded) {
+          this.toastService.warning(
+            `La cantidad máxima permitida es ${max} ${exceeded.code}`,
+          );
+          return;
+        }
+      }
+      quantity = Math.round(amount * factor);
+    } else {
+      const units = await this.saleUnitService.weighModalUnits(
+        item.product,
+        unit,
+        factor,
+      );
+      const principal = units.find((u) => u.isPrincipal) ?? units[0];
+      const puq =
+        Number((item.product as any)?.price_unit_quantity ?? 1) || 1;
+      // PR #1062 ronda 3 (H3): con impuesto, como el alta (`final_price`).
+      const pricePerStockUnit = item.finalPrice / puq;
+      const captured = await this.scaleService.showManualWeightModal({
+        title: `Cantidad en ${unit}`,
+        message: `${item.product.name}\nPrecio: ${this.formatCurrency(pricePerStockUnit * principal.factorToBase)}/${principal.code}`,
+        units,
+        pricePerStockUnit,
+        stockUnitCode:
+          this.saleUnitService.configFor(item.product)?.stockUnit?.code ?? '',
+        initialAmount: String(current),
+        initialUnitCode: unit,
+        confirmText: 'Actualizar',
+        // Tope de 999 solo en masa (PR #1062 ronda 6, R1).
+        maxAmount: weighMaxFor(
+          this.saleUnitService.configFor(item.product)?.stockUnit?.dimension,
+        ),
+      });
+      if (!captured) return;
+      // El modal ya convirtió con factores exactos (el backend cobra sobre
+      // este mismo entero); acá solo se anota la unidad elegida.
+      quantity = captured.stockQuantity;
+      newUnit = captured.unitCode;
+      const chosen = units.find((u) => u.code === captured.unitCode);
+      newFactor = Math.max(1, Math.round(chosen?.factorToBase ?? factor));
     }
 
-    if (amount === undefined) return;
-    if (!(amount > 0)) {
-      this.toastService.warning('La cantidad debe ser mayor a 0');
-      return;
-    }
-
-    const quantity = Math.round(amount * factor);
     if (quantity <= 0) {
       this.toastService.warning(
-        `La cantidad mínima es ${1 / factor} ${unit}.`,
+        `La cantidad mínima es ${1 / newFactor} ${newUnit}.`,
       );
       return;
     }
-    this.updateQuantity(item.id, quantity);
+    this.updateQuantity(item.id, quantity, {
+      code: newUnit,
+      stock_units_per_sale_unit: newFactor,
+      price_unit_code:
+        this.saleUnitService.configFor(item.product)?.captureUnit?.code ??
+        unit,
+    });
   }
 
   onTierChange(item: CartItem, tierId: number | null): void {
@@ -2079,14 +2138,36 @@ private stationBookingService = inject(PosStationBookingService);
       });
   }
 
-  updateQuantity(itemId: string, quantity: number): void {
+  updateQuantity(
+    itemId: string,
+    quantity: number,
+    saleUnit?: {
+      code: string;
+      stock_units_per_sale_unit: number;
+      price_unit_code?: string;
+    },
+  ): void {
     if (quantity <= 0) {
       this.removeFromCart(itemId);
       return;
     }
 
     this.cartService
-      .updateCartItem({ itemId, quantity })
+      .updateCartItem({
+        itemId,
+        quantity,
+        // QUI-978 — al reeditar en otra unidad se anota; sin esto el
+        // servicio conserva la unidad actual (cambios solo-cantidad).
+        ...(saleUnit != null
+          ? {
+              sale_unit_code: saleUnit.code,
+              stock_units_per_sale_unit: saleUnit.stock_units_per_sale_unit,
+              ...(saleUnit.price_unit_code != null
+                ? { price_unit_code: saleUnit.price_unit_code }
+                : {}),
+            }
+          : {}),
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (state) => {
@@ -2468,32 +2549,52 @@ private stationBookingService = inject(PosStationBookingService);
   }
 
   async editWeight(item: CartItem): Promise<void> {
-    const unit = item.weight_unit || 'kg';
+    // QUI-978 — reedición multi-UoM: el modal deja repesar en cualquiera de
+    // las UoMs de venta; la línea guarda el peso en la unidad del precio.
+    const units = await this.saleUnitService.weighModalUnits(
+      item.product,
+      item.weight_unit || 'kg',
+      1,
+    );
+    const principal = units.find((u) => u.isPrincipal) ?? units[0];
     let newWeight: number;
+    let newUnit = item.weight_unit || 'kg';
+    let weighedAs: WeighedAs | null = null;
 
     if (this.scaleService.isConnected()) {
+      // La báscula emite en SU unidad (PR #1062, error 2).
+      const scaleUnit = this.scaleService.readingUnit();
       const scaleWeight = await this.scaleService.showWeightModal({
         title: 'Editar Peso',
-        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
-        weightUnit: unit,
+        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.finalPrice)}/${principal.code}`,
+        weightUnit: scaleUnit,
         allowManualFallback: true });
       if (scaleWeight === undefined) return;
-      newWeight = scaleWeight;
-    } else {
-      const weightStr = await this.dialogService.prompt(
-        {
-          title: 'Editar Peso',
-          message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
-          placeholder: `Peso en ${unit}`,
-          defaultValue: item.weight?.toString() || '1.0',
-          confirmText: 'Actualizar',
-          cancelText: 'Cancelar',
-          inputType: 'number' },
-        { size: 'sm' },
+      newWeight = await this.saleUnitService.convertScaleReading(
+        scaleWeight,
+        scaleUnit,
+        principal.code,
       );
-
-      if (!weightStr) return;
-      newWeight = parseFloat(weightStr.replace(',', '.'));
+      newUnit = principal.code;
+    } else {
+      const captured = await this.scaleService.showManualWeightModal({
+        title: 'Editar peso',
+        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.finalPrice)}/${principal.code}`,
+        units,
+        pricePerStockUnit: null,
+        // PR #1062 ronda 3 (H3): con impuesto, como el alta (`final_price`).
+        pricePerPrincipal: item.finalPrice,
+        stockUnitCode: '',
+        initialAmount: item.weight != null ? String(item.weight) : '',
+        initialUnitCode: item.weight_unit || principal.code,
+        confirmText: 'Actualizar',
+        enforceStockQuantity: false,
+      });
+      if (!captured) return;
+      // En la unidad del precio, como manda `resolveLineUnits`.
+      newWeight = captured.principalAmount;
+      newUnit = captured.principalCode;
+      weighedAs = { code: captured.unitCode, amount: captured.amount };
     }
 
     if (isNaN(newWeight) || newWeight <= 0) {
@@ -2501,16 +2602,16 @@ private stationBookingService = inject(PosStationBookingService);
       return;
     }
     if (newWeight > 999) {
-      this.toastService.warning('El peso máximo permitido es 999 ' + unit);
+      this.toastService.warning('El peso máximo permitido es 999 ' + newUnit);
       return;
     }
 
     this.cartService
-      .updateCartItemWeight(item.id, newWeight)
+      .updateCartItemWeight(item.id, newWeight, newUnit, weighedAs)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.toastService.success(`Peso actualizado: ${newWeight} ${unit}`);
+          this.toastService.success(`Peso actualizado: ${newWeight} ${newUnit}`);
         },
         error: (error) => {
           this.toastService.error(error.message || 'Error al actualizar peso');
