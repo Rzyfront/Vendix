@@ -908,7 +908,7 @@ export class PrintLayoutComposerService {
                     val = item.variant_sku || '';
                     break;
                   case 'quantity':
-                    val = item.quantity;
+                    val = item.quantity_formatted ?? item.quantity;
                     break;
                   case 'unit_price':
                     val = item.unit_price_formatted || `$${Number(item.unit_price).toLocaleString('es-CO')}`;

@@ -588,6 +588,36 @@ describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
     });
   });
 
+  it('repesar anota la unidad elegida y, sin ella, la limpia (PR #1062 ronda 4, punto 2)', () => {
+    service.cartState.set({
+      ...service.cartState(),
+      linkedOrderId: null,
+      linkedOrderNumber: null,
+      items: [
+        {
+          ...cartLine('weigh'),
+          is_weight_product: true,
+          weight: 0.3,
+          weight_unit: 'kg',
+          weighed_as: { code: 'g', amount: 300 },
+        },
+      ],
+    });
+
+    service
+      .updateCartItemWeight('weigh', 0.5, 'kg', { code: 'lb', amount: 1 })
+      .subscribe();
+    let line = service.cartState().items[0];
+    expect(line.weight).toBe(0.5);
+    expect(line.totalPrice).toBe(500);
+    expect(line.weighed_as).toEqual({ code: 'lb', amount: 1 });
+
+    // Báscula: llega en la principal, el tiquete usa el peso.
+    service.updateCartItemWeight('weigh', 0.7, 'kg').subscribe();
+    line = service.cartState().items[0];
+    expect(line.weighed_as).toBeNull();
+  });
+
   it('sin reserva creada por el POS no cancela nada al quitar la línea', (done) => {
     seedCartWithOneItem();
 
@@ -888,6 +918,48 @@ describe('PosCartService — precio con impuesto incluido al repetir producto', 
       expect(state.items[0].finalPrice).toBe(11900);
       done();
     });
+  });
+
+  // PR #1062 ronda 2 (bajo) — principal = unidad de stock (g, sin conversión
+  // automática): pesar en lb debe dejar "1 lb" en el tiquete, no "453,59 g".
+  it('guarda la unidad elegida por el cajero aunque la automática no convierta', (done) => {
+    const product = inclusiveProduct();
+    service
+      .addToCart({
+        product,
+        quantity: 453.59237,
+        sale_unit_override: {
+          code: 'lb',
+          stock_units_per_sale_unit: 453.59237,
+          price_unit_code: 'g',
+        },
+      })
+      .subscribe((state) => {
+        expect(state.items[0].sale_unit_code).toBe('lb');
+        expect(state.items[0].stock_units_per_sale_unit).toBe(453.59237);
+        expect(state.items[0].price_unit_code).toBe('g');
+        done();
+      });
+  });
+
+  it('pesar en la misma unidad de stock no anota conversión', (done) => {
+    const product = inclusiveProduct();
+    service
+      .addToCart({
+        product,
+        quantity: 500,
+        sale_unit_override: {
+          code: 'g',
+          stock_units_per_sale_unit: 1,
+          price_unit_code: 'g',
+        },
+      })
+      .subscribe((state) => {
+        expect(state.items[0].sale_unit_code).toBeNull();
+        expect(state.items[0].stock_units_per_sale_unit).toBeNull();
+        expect(state.items[0].price_unit_code).toBeNull();
+        done();
+      });
   });
 });
 

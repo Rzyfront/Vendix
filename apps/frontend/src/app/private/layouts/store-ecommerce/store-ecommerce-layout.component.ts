@@ -9,6 +9,7 @@ import {
   computed,
 } from '@angular/core';
 import { CatalogService } from '../../modules/ecommerce/services/catalog.service';
+import { canonicalStoreLinkUrl } from './store-footer-links';
 import { StoreSeoService } from '../../modules/ecommerce/services/store-seo';
 import { isPlatformBrowser, ViewportScroller } from '@angular/common';
 import { RouterModule, Router, NavigationEnd } from '@angular/router';
@@ -1235,7 +1236,12 @@ export class StoreEcommerceLayoutComponent {
 
   getFooterLinks(): FooterLink[] {
     const settings = this.footer_settings();
-    return settings?.links?.length ? settings.links : this.default_links;
+    const links = settings?.links?.length ? settings.links : this.default_links;
+    // SEO-TECH-14: los enlaces guardados con alias (/products, /new, /sale) apuntan a la URL canónica.
+    return links.map((link) => ({
+      ...link,
+      url: canonicalStoreLinkUrl(link.url, !!link.is_external),
+    }));
   }
 
   hasAboutUs(): boolean {

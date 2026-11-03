@@ -12,7 +12,10 @@ import { PaymentMethodsCatalogService } from '../../../../../shared/services/pay
 import { PosCashRegisterService } from './pos-cash-register.service';
 import { CartItem, CartState } from '../models/cart.model';
 import { findUnscheduledStationLine } from './pos-station-booking.service';
-import { resolveLineUnits } from '../utils/line-units.util';
+import {
+  resolveLineUnits,
+  resolveSaleUnitSnapshot,
+} from '../utils/line-units.util';
 import {
   PaymentMethod,
   PaymentRequest,
@@ -354,6 +357,7 @@ export class PosPaymentService {
           : null),
       weight: item.weight || undefined,
       weight_unit: item.weight_unit || undefined,
+      ...(isCustomItem ? {} : resolveSaleUnitSnapshot(item)),
       price_override_reason: item.isPriceOverridden
         ? item.priceOverrideReason
         : undefined,

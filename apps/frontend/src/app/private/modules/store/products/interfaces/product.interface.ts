@@ -145,6 +145,8 @@ export interface Product {
   price_unit_quantity?: number | null;
   stock_uom?: { id: number; code: string; name: string; dimension: string } | null;
   purchase_uom?: { id: number; code: string; name: string; dimension: string } | null;
+  /** QUI-978 — UoMs en las que se puede vender (principal + adicionales). */
+  sale_uoms?: SaleUomRead[];
   created_at: Date;
   updated_at: Date;
 
@@ -432,6 +434,11 @@ export interface CreateProductDto {
   purchase_uom_id?: number | null;
   /** Escala del precio: unidades de stock que cubre `base_price`. Default 1. */
   price_unit_quantity?: number | null;
+  /**
+   * QUI-978 — UoMs en las que se puede vender (principal + adicionales).
+   * La lista reemplaza a la anterior; exactamente una principal.
+   */
+  sale_uoms?: SaleUomPayload[];
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
@@ -535,6 +542,26 @@ export interface UpdateProductDto {
   enabled_price_tier_ids?: number[];
   /** Subcuenta PUC de ingreso. `null` la limpia. Ver `CreateProductDto`. */
   account_code?: string | null;
+  /**
+   * QUI-978 — UoMs en las que se puede vender. La lista reemplaza a la
+   * anterior; exactamente una principal.
+   */
+  sale_uoms?: SaleUomPayload[];
+}
+
+/** QUI-978 — fila de UoM de venta para create/update. */
+export interface SaleUomPayload {
+  uom_id: number;
+  is_principal?: boolean;
+}
+
+/** QUI-978 — fila de UoM de venta leída del backend (con catálogo). */
+export interface SaleUomRead {
+  uom_id: number;
+  code: string | null;
+  name: string | null;
+  factor_to_base: number | string | null;
+  is_principal: boolean;
 }
 
 export interface CreateProductVariantDto {

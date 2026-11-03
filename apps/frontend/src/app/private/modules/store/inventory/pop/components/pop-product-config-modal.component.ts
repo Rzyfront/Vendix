@@ -1287,6 +1287,12 @@ export class PopProductConfigModalComponent {
    * UoM selection from the product itself (purchase_uom_id, stock_uom_id
    * persisted at product create time). User can still change them in
    * this modal; the preview updates live.
+   *
+   * QUI-978: persisted UoMs also preload for NON-ingredients (rebuy of a
+   * measured retail product with "Configurar venta" on). Before, reopening
+   * the modal nulled them and the selects came back empty. The catalog
+   * fallback stays exclusive to the ingredient flow: retail never invents
+   * a UoM the product does not have.
    */
   private initializeIngredientUoMDefaults(): void {
     // Limpiar el costo/cantidad capturados de un producto/sesión previa.
@@ -1296,23 +1302,28 @@ export class PopProductConfigModalComponent {
     this.capturedContentPerPackage.set(null);
     const p: any = this.product();
     if (!p) return;
-    if (!this.isPureIngredient() || !this.storeSupportsIngredients()) {
+    const ingredientFlow =
+      this.isPureIngredient() && this.storeSupportsIngredients();
+    const hasPersistedUom =
+      p.stock_uom_id != null || p.purchase_uom_id != null;
+    if (!ingredientFlow && !hasPersistedUom) {
       // Not in ingredient mode: clear the UoM FKs so the cart line stays
       // neutral and the PO will be `retail` by default.
       this.purchaseUomId.set(null);
       this.stockUomId.set(null);
       return;
     }
-    // Prefer product-defined UoMs; fall back to first UoM in catalog.
+    // Prefer product-defined UoMs; fall back to first UoM in catalog (only
+    // in the ingredient flow — retail never invents one).
     const catalog = this.uomCatalog();
     const stockId =
       p.stock_uom_id ??
-      (catalog.length > 0
+      (ingredientFlow && catalog.length > 0
         ? catalog.find((u: any) => u.dimension === 'volume' || u.dimension === 'mass')?.id ?? catalog[0]?.id ?? null
         : null);
     const purchaseId =
       p.purchase_uom_id ??
-      (catalog.length > 0
+      (ingredientFlow && catalog.length > 0
         ? catalog.find((u: any) => u.id === stockId)?.id ?? stockId
         : null);
     this.stockUomId.set(stockId ?? null);
@@ -1917,7 +1928,11 @@ export class PopProductConfigModalComponent {
     // al comprador sobre cómo se está vendiendo.
     this.showSaleConfig.set(
       this.selectedPricingType() === 'weight' ||
-        (this.product() as any)?.has_multiple_price_tiers === true,
+        (this.product() as any)?.has_multiple_price_tiers === true ||
+        // QUI-978: con UoMs persistidas, el bloque nace abierto para que la
+        // precarga de initializeIngredientUoMDefaults quede visible.
+        (this.product() as any)?.stock_uom_id != null ||
+        (this.product() as any)?.purchase_uom_id != null,
     );
 
     // Pre-fill variant toggle and selection

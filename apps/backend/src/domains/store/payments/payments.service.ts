@@ -4683,6 +4683,12 @@ export class PaymentsService {
       price_overridden_by_user_id: params.priceOverriddenByUserId || undefined,
       weight: params.item.weight || undefined,
       weight_unit: params.item.weight_unit || undefined,
+      // QUI-978 — snapshot de la unidad de venta (ver CreatePosPaymentItemDto).
+      sale_unit_code_snapshot: params.item.sale_unit_code || null,
+      sale_quantity_snapshot:
+        params.item.sale_quantity != null
+          ? new Prisma.Decimal(params.item.sale_quantity)
+          : null,
       item_type: params.itemType,
       // Multi-tarifa (Fase 5.5): snapshot persistente. `null` cuando la línea
       // no tenía applied_price_tier_id o cuando la tarifa no existe en esta

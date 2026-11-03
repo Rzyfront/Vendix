@@ -47,6 +47,8 @@ export interface PopProduct {
   pricing_type?: 'unit' | 'weight';
   product_variants?: PopProductVariant[];
   requires_batch_tracking?: boolean;
+  /** QUI-978 — UoM de compra persistida (el listado la trae; fallback del sufijo). */
+  purchase_uom_id?: number | null;
 }
 
 /**
