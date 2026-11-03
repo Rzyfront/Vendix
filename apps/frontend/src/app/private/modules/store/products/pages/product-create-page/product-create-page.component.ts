@@ -106,7 +106,9 @@ import { ValidationUtils } from '../../utils/validation.utils';
 import {
   pickDefaultPrincipal,
   priceScaleFor,
+  PriceAnchor,
   rescalePrice,
+  rescalePriceAnchored,
 } from '../../utils/sale-uom-principal.util';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
@@ -867,10 +869,18 @@ export class ProductCreatePageComponent {
     const from = this.currentPriceScale();
     const to = this.priceScaleOfUom(id);
     if (to != null && to !== from) {
-      for (const field of ['base_price', 'sale_price']) {
+      for (const field of ['base_price', 'sale_price'] as const) {
         const ctrl = this.productForm?.get(field);
         const value = Number(ctrl?.value ?? 0);
-        if (ctrl && value > 0) ctrl.setValue(rescalePrice(value, from, to));
+        if (!ctrl || !(value > 0)) continue;
+        const next = rescalePriceAnchored(
+          value,
+          from,
+          to,
+          this.priceAnchors[field],
+        );
+        this.priceAnchors[field] = next.anchor;
+        ctrl.setValue(next.value);
       }
       const scaleCtrl = this.productForm?.get('price_unit_quantity');
       scaleCtrl?.setValue(to, { emitEvent: false });
@@ -879,6 +889,16 @@ export class ProductCreatePageComponent {
     }
     this.principalSaleUomId.set(id);
   }
+
+  /**
+   * Precio digitado antes de reescalar, por campo (PR #1062 ronda 4, punto 1):
+   * el ida y vuelta kg → g → kg deriva de aquí y no del valor ya redondeado
+   * a centavos. Se descarta al cambiar el stock (sus escalas son otras).
+   */
+  private priceAnchors: Record<'base_price' | 'sale_price', PriceAnchor | null> = {
+    base_price: null,
+    sale_price: null,
+  };
 
   /** "$25.000 por 1 kg" → "$25 por 1 g", o null si el precio no cambia. */
   private describePriceRescale(
@@ -896,9 +916,22 @@ export class ProductCreatePageComponent {
       return uom ? `1 ${uom.code}` : `${scale} ${stock?.code ?? ''}`.trim();
     };
     const money = (v: number) => this.currencyService.format(v);
+    const anchored = rescalePriceAnchored(
+      price,
+      from,
+      to,
+      this.priceAnchors.base_price,
+    );
+    // Centavos de Decimal(12,2): a escala menor el precio puede no
+    // representarse exacto. La deriva se muestra antes de aceptar.
+    const equivalent = (anchored.value * from) / to;
+    const drift =
+      Math.abs(equivalent - price) >= 0.005
+        ? ` (redondeado a centavos: equivale a ${money(equivalent)} por ${label(from)})`
+        : '';
     return {
       before: `${money(price)} por ${label(from)}`,
-      after: `${money(rescalePrice(price, from, to))} por ${label(to)}`,
+      after: `${money(anchored.value)} por ${label(to)}${drift}`,
     };
   }
 
@@ -952,6 +985,7 @@ export class ProductCreatePageComponent {
   ): void {
     const allowed = new Set(this.saleUomOptions().map((u) => u.id));
     const kept = this.saleUomIds().filter((id) => allowed.has(id));
+    if (prev) this.priceAnchors = { base_price: null, sale_price: null };
     this.saleUomIds.set(kept);
     if (!prev) {
       this.applyDefaultPrincipal();

@@ -49,3 +49,37 @@ export function rescalePrice(
   if (fromScale === toScale) return price;
   return Math.round(((price * toScale) / fromScale) * 100) / 100;
 }
+
+/** Precio de referencia (sin redondeo intermedio) y la escala en que se digitó. */
+export interface PriceAnchor {
+  value: number;
+  scale: number;
+}
+
+/**
+ * PR #1062 ronda 4 (punto 1) — reescalado sin deriva acumulada.
+ *
+ * `base_price` es `Decimal(12,2)`: $21.008,40/kg pasa a $21,01/g, y volver
+ * a kg desde 21,01 daba 21.010 (el ida y vuelta no regresaba al precio
+ * original). Si el precio vigente es justo la derivación redondeada del
+ * ancla, el nuevo valor se deriva del ancla; si se editó a mano, el precio
+ * vigente pasa a ser el ancla.
+ */
+export function rescalePriceAnchored(
+  price: number,
+  fromScale: number,
+  toScale: number,
+  anchor: PriceAnchor | null,
+): { value: number; anchor: PriceAnchor } {
+  const fromAnchor =
+    anchor != null &&
+    anchor.scale > 0 &&
+    rescalePrice(anchor.value, anchor.scale, fromScale) === price;
+  const source: PriceAnchor = fromAnchor
+    ? anchor
+    : { value: price, scale: fromScale };
+  return {
+    value: rescalePrice(source.value, source.scale, toScale),
+    anchor: source,
+  };
+}

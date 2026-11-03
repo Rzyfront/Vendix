@@ -2,6 +2,7 @@ import {
   pickDefaultPrincipal,
   priceScaleFor,
   rescalePrice,
+  rescalePriceAnchored,
 } from './sale-uom-principal.util';
 
 /**
@@ -83,5 +84,31 @@ describe('cambio de unidad de stock (PR #1062 ronda 3, H2)', () => {
     expect(rescalePrice(25, 1, 1)).toBe(25);
     // Entre factores absolutos (g = 1 → kg = 1000) se conserva el precio real.
     expect(rescalePrice(25, absFactor[G], absFactor[next as number])).toBe(25000);
+  });
+});
+
+describe('rescalePriceAnchored (PR #1062 ronda 4, punto 1)', () => {
+  it('kg → g → kg con $25.000/kg con IVA (base 21.008,40) vuelve al precio original', () => {
+    // kg → g: la base por gramo se redondea a centavos (Decimal(12,2)).
+    const toGram = rescalePriceAnchored(21008.4, 1000, 1, null);
+    expect(toGram.value).toBe(21.01);
+    expect(toGram.anchor).toEqual({ value: 21008.4, scale: 1000 });
+    // g → kg: se deriva del ancla, no del 21,01 ya redondeado (daba 21.010).
+    const back = rescalePriceAnchored(toGram.value, 1, 1000, toGram.anchor);
+    expect(back.value).toBe(21008.4);
+    // Con IVA 19 %: 21.008,40 × 1,19 = $25.000 por kg, igual que al inicio.
+    expect(Math.round(back.value * 1.19 * 100) / 100).toBe(25000);
+  });
+
+  it('si el precio se editó a mano, el ancla vieja se descarta', () => {
+    const edited = rescalePriceAnchored(30, 1, 1000, { value: 21008.4, scale: 1000 });
+    expect(edited.value).toBe(30000);
+    expect(edited.anchor).toEqual({ value: 30, scale: 1 });
+  });
+
+  it('kg → lb pasando por g sigue derivando del ancla original', () => {
+    const g = rescalePriceAnchored(21008.4, 1000, 1, null);
+    const lb = rescalePriceAnchored(g.value, 1, 500, g.anchor);
+    expect(lb.value).toBe(10504.2);
   });
 });
