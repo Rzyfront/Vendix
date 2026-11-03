@@ -645,7 +645,9 @@ export interface OrderInstallment {
   capital_amount: number;
   interest_amount: number;
   due_date: string;
-  state: 'pending' | 'paid' | 'partial' | 'overdue' | 'forgiven';
+  // QUI-979 — `cancelled` existe en `order_installment_state_enum` (la
+  // anulación de la orden cancela sus cuotas); la unión lo omitía.
+  state: 'pending' | 'paid' | 'partial' | 'overdue' | 'forgiven' | 'cancelled';
   amount_paid: number;
   remaining_balance: number;
   paid_at?: string;

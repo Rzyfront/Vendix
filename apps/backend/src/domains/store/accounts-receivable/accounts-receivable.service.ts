@@ -336,6 +336,34 @@ export class AccountsReceivableService {
             });
             rem -= payable;
           }
+          // QUI-979: el abono de CxC también mueve el ledger de la orden
+          // (`total_paid`/`remaining_balance`). Antes solo lo hacían la
+          // venta y los abonos de caja (`registerCreditPayment`): tras un
+          // abono fraccionado desde CxC, el POS validaba contra un saldo
+          // viejo (permitía sobrepagar) y el tiquete imprimía ese saldo
+          // viejo. Misma condición que las cuotas: con `payment_id` el
+          // carril POS ya escribió la orden y no se duplica. (Este bloque ya
+          // vive dentro del chequeo `source credit_sale/order` de arriba.)
+          const linked = await tx.orders.findFirst({
+            where: { id: currentAr.source_id, store_id: ar.store_id },
+            select: { total_paid: true, remaining_balance: true },
+          });
+          if (linked) {
+            await tx.orders.update({
+              where: { id: currentAr.source_id },
+              data: {
+                total_paid:
+                  Math.round((Number(linked.total_paid) + dto.amount) * 100) /
+                  100,
+                remaining_balance: Math.max(
+                  Math.round(
+                    (Number(linked.remaining_balance) - dto.amount) * 100,
+                  ) / 100,
+                  0,
+                ),
+              },
+            });
+          }
         }
 
         const nextOrderInst = await tx.order_installments.findFirst({
@@ -461,6 +489,10 @@ export class AccountsReceivableService {
         select: {
           customer_id: true,
           order_number: true,
+          grand_total: true,
+          total_paid: true,
+          remaining_balance: true,
+          total_with_interest: true,
           stores: { select: { organization_id: true } },
         },
       });
@@ -487,7 +519,23 @@ export class AccountsReceivableService {
         orderBy: { installment_number: 'asc' },
         select: { due_date: true },
       });
-      return tx.accounts_receivable.create({
+      // QUI-979: la CxC nace de la obligación REAL, no del grand_total
+      // crudo. `createOrderInstallments` (misma tx de la venta, ya
+      // commiteada al emitir el evento) dejó `total_paid` (cuota inicial),
+      // `remaining_balance` (financiado + interés) y `total_with_interest`.
+      // Antes: original = grand_total con paid = 0 — con inicial o con
+      // interés la cuenta NUNCA cerraba (saldo fantasma) por más abonos
+      // fraccionados que entraran, y el tiquete heredaba ese saldo.
+      const obligation =
+        order.total_with_interest != null
+          ? Number(order.total_with_interest)
+          : Number(data.total_amount ?? order.grand_total ?? 0);
+      const initialPaid = Number(order.total_paid ?? 0);
+      const openingBalance = Math.max(
+        Number(order.remaining_balance ?? obligation),
+        0,
+      );
+      const created = await tx.accounts_receivable.create({
         data: {
           store_id: scopedOrder.store_id,
           organization_id: order.stores.organization_id,
@@ -495,9 +543,9 @@ export class AccountsReceivableService {
           source_type: 'credit_sale',
           source_id: scopedOrder.id,
           document_number: order.order_number,
-          original_amount: data.total_amount,
-          paid_amount: 0,
-          balance: data.total_amount,
+          original_amount: obligation,
+          paid_amount: initialPaid,
+          balance: openingBalance,
           currency: 'COP',
           issue_date: new Date(),
           due_date: data.due_date ?? firstInstallment?.due_date ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
@@ -505,6 +553,56 @@ export class AccountsReceivableService {
           days_overdue: 0,
         },
       });
+      // La cuota inicial también deja su rastro en el historial (`paid_amount`
+      // sin fila huérfana): enlazada al pago POS (`payment_id`) para que el
+      // historial del tiquete no la duplique (ese carril excluye las filas
+      // con `payment_id` del tramo CxC). Sin pago identificable y sin filas
+      // succeeded, igual se registra (no hay nada que duplicar); con filas
+      // pero sin marca, se omite antes que duplicar.
+      if (initialPaid > 0) {
+        const succeeded = await tx.payments.findMany({
+          where: { order_id: scopedOrder.id, state: 'succeeded' },
+          select: {
+            id: true,
+            paid_at: true,
+            gateway_response: true,
+            store_payment_method: {
+              select: {
+                display_name: true,
+                system_payment_method: { select: { display_name: true } },
+              },
+            },
+          },
+          orderBy: { id: 'asc' },
+        });
+        const isInitial = (row: (typeof succeeded)[number]): boolean => {
+          const gateway = row.gateway_response as Record<string, any> | null;
+          return (
+            !!gateway &&
+            typeof gateway === 'object' &&
+            (gateway as any).metadata?.is_initial_credit_payment === true
+          );
+        };
+        const link =
+          succeeded.find(isInitial) ?? (succeeded.length === 1 ? succeeded[0] : null);
+        if (link || succeeded.length === 0) {
+          const method =
+            link?.store_payment_method?.display_name?.trim() ||
+            link?.store_payment_method?.system_payment_method?.display_name?.trim() ||
+            'Cuota inicial';
+          await tx.ar_payments.create({
+            data: {
+              accounts_receivable_id: created.id,
+              payment_id: link?.id ?? null,
+              amount: initialPaid,
+              payment_date: link?.paid_at ?? new Date(),
+              payment_method: method,
+              notes: 'Cuota inicial de la venta a crédito',
+            },
+          });
+        }
+      }
+      return created;
     });
   }
 
