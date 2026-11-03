@@ -174,6 +174,26 @@ describe('PublicSeoService (VENDIX_LANDING)', () => {
     expect(document.getElementsByTagName('parsererror').length).toBe(0);
   });
 
+  it('only queries active, sale products so drafts and inactive items are never published', async () => {
+    resolveDomain.mockResolvedValue({ app: 'STORE_ECOMMERCE', store_id: 7 });
+    const catalog = [
+      { slug: 'producto-activo', state: 'active', updated_at: new Date('2026-10-02T00:00:00Z') },
+      { slug: 'producto-borrador', state: 'draft', updated_at: new Date('2026-10-03T00:00:00Z') },
+      { slug: 'producto-inactivo', state: 'inactive', updated_at: new Date('2026-10-04T00:00:00Z') },
+    ];
+    // The mock honours the state filter the service sends, like the database would.
+    findMany.mockImplementation(async ({ where }: { where: { state: string } }) =>
+      catalog.filter((p) => p.state === where.state),
+    );
+
+    const xml = await service.generateSitemap('tienda.example');
+
+    expect(findMany.mock.calls[0][0].where).toMatchObject({ store_id: 7, state: 'active' });
+    expect(xml).toContain('/products/producto-activo');
+    expect(xml).not.toContain('producto-borrador');
+    expect(xml).not.toContain('producto-inactivo');
+  });
+
   it('never mixes product URLs between two stores', async () => {
     const domains: Record<string, { app: string; store_id: number }> = {
       'tienda-a.example': { app: 'STORE_ECOMMERCE', store_id: 1 },
