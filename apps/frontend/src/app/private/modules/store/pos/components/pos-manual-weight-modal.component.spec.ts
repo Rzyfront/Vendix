@@ -63,4 +63,21 @@ describe('PosManualWeightModalComponent — campo de cantidad', () => {
     expect(input.value).toBe('');
     expect(input.placeholder).toBe('0');
   });
+
+  it('con el chip g se pueden digitar 1.500 g (tope en la principal, PR #1062 ronda 4)', async () => {
+    const { fixture, input } = await render();
+    fixture.componentInstance.unitCode.set('g');
+    input.value = '1500';
+    input.dispatchEvent(new Event('input'));
+    await fixture.whenStable();
+    expect(fixture.componentInstance.canConfirm()).toBeTrue();
+    expect(document.body.textContent).not.toContain('El máximo es');
+
+    input.value = '1000';
+    fixture.componentInstance.unitCode.set('kg');
+    input.dispatchEvent(new Event('input'));
+    await fixture.whenStable();
+    expect(fixture.componentInstance.canConfirm()).toBeFalse();
+    expect(document.body.textContent).toContain('El máximo es 999 kg');
+  });
 });

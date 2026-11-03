@@ -22,6 +22,7 @@ import {
   formatWeighAmount,
   ManualWeighUnit,
   MAX_WEIGH_AMOUNT,
+  exceedsWeighMax,
   parseWeighAmount,
   stockUnitsForWeighAmount,
   weighTotal,
@@ -106,10 +107,10 @@ export interface ManualWeighResult {
               <app-icon name="alert-triangle" [size]="12"></app-icon>
               Escribe un peso mayor a 0.
             </p>
-          } @else if (parsed() != null && parsed()! > maxAmount()) {
+          } @else if (overMax()) {
             <p class="text-xs text-error mt-1 flex items-center gap-1">
               <app-icon name="alert-triangle" [size]="12"></app-icon>
-              El máximo es {{ maxAmount() }} {{ activeUnit()?.code ?? '' }}.
+              El máximo es {{ maxAmount() }} {{ principalUnit()?.code ?? '' }}.
             </p>
           }
         </div>
@@ -324,6 +325,15 @@ export class PosManualWeightModalComponent {
     return null;
   });
 
+  /** Tope en la principal, medido en unidad mínima (PR #1062 ronda 4). */
+  readonly overMax = computed<boolean>(() => {
+    const amount = this.parsed();
+    const from = this.activeUnit();
+    const principal = this.principalUnit();
+    if (amount == null || !from || !principal) return false;
+    return exceedsWeighMax(amount, from, principal, this.maxAmount());
+  });
+
   readonly canConfirm = computed<boolean>(() => {
     const amount = this.parsed();
     const qty = this.stockQuantity();
@@ -331,7 +341,7 @@ export class PosManualWeightModalComponent {
       !this.enforceStockQuantity() || (qty != null && qty > 0);
     return (
       amount != null &&
-      amount <= this.maxAmount() &&
+      !this.overMax() &&
       this.activeUnit() != null &&
       this.principalAmount() != null &&
       stockOk

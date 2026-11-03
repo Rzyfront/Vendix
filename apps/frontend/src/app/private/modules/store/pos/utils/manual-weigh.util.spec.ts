@@ -1,6 +1,7 @@
 import {
   convertWeighAmount,
   defaultWeighUnit,
+  exceedsWeighMax,
   formatWeighAmount,
   ManualWeighUnit,
   parseWeighAmount,
@@ -118,5 +119,17 @@ describe('scaleReadingToUnit (PR #1062 error 2)', () => {
     expect(scaleReadingToUnit(0.5, 'kg', 'oz', catalog)).toBe(0.5);
     expect(scaleReadingToUnit(0.5, 'kg', 'm', catalog)).toBe(0.5);
     expect(scaleReadingToUnit(0.5, null, 'lb', catalog)).toBe(0.5);
+  });
+});
+
+describe('exceedsWeighMax (PR #1062 ronda 4, punto 3)', () => {
+  it('el tope de 999 se mide en la principal, no en el número tipeado', () => {
+    // 1.500 g = 1,5 kg: dentro del tope de 999 kg.
+    expect(exceedsWeighMax(1500, G, KG)).toBeFalse();
+    // 999 kg exactos (999.000 g) pasan; un gramo más no.
+    expect(exceedsWeighMax(999, KG, KG)).toBeFalse();
+    expect(exceedsWeighMax(999000, G, KG)).toBeFalse();
+    expect(exceedsWeighMax(999001, G, KG)).toBeTrue();
+    expect(exceedsWeighMax(1000, KG, KG)).toBeTrue();
   });
 });

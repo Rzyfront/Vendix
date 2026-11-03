@@ -14,8 +14,27 @@ export interface ManualWeighUnit {
   isPrincipal: boolean;
 }
 
-/** Máximo digitadle en la unidad de captura (regla histórica del POS). */
+/**
+ * Máximo en la UoM principal (regla histórica del POS: 999 kg). Se compara
+ * en unidad mínima, no contra el número tipeado: 1.500 g son 1,5 kg.
+ */
 export const MAX_WEIGH_AMOUNT = 999;
+
+/**
+ * PR #1062 ronda 4 (punto 3) — `true` si lo digitado en `from` supera el tope
+ * expresado en la principal. Ambos lados se llevan a la unidad mínima
+ * (`amount × factor`) para no depender del chip elegido.
+ */
+export function exceedsWeighMax(
+  amount: number,
+  from: ManualWeighUnit,
+  principal: ManualWeighUnit,
+  max: number = MAX_WEIGH_AMOUNT,
+): boolean {
+  const minimal = amount * from.factorToBase;
+  const cap = max * principal.factorToBase;
+  return minimal - cap > cap * 1e-9;
+}
 
 /**
  * Parsea lo digitado: tolera coma o punto decimal y espacios. `null` cuando
