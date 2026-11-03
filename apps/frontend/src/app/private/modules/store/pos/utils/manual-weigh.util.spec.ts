@@ -1,6 +1,7 @@
 import {
   convertWeighAmount,
   defaultWeighUnit,
+  capturesInSaleUnit,
   exceedsWeighMax,
   formatWeighAmount,
   ManualWeighUnit,
@@ -138,5 +139,24 @@ describe('exceedsWeighMax (PR #1062 ronda 4, punto 3)', () => {
     expect(exceedsWeighMax(1000, G, G)).toBeTrue();
     // 1 kg = 1.000 g supera los 999 g de la principal.
     expect(exceedsWeighMax(1, KG, G)).toBeTrue();
+  });
+});
+
+describe('capturesInSaleUnit (PR #1062 ronda 5, H3)', () => {
+  it('principal igual al stock (escala 1) con g/lb/kg declaradas abre la captura', () => {
+    expect(capturesInSaleUnit(true, 1, 3)).toBeTrue();
+  });
+
+  it('unidad de venta mayor que la de stock sigue abriendo la captura', () => {
+    expect(capturesInSaleUnit(true, 1000, 0)).toBeTrue();
+  });
+
+  it('una sola UoM igual al stock agrega de un toque, como siempre', () => {
+    expect(capturesInSaleUnit(true, 1, 1)).toBeFalse();
+    expect(capturesInSaleUnit(true, 1, 0)).toBeFalse();
+  });
+
+  it('sin unidad de stock nunca abre la captura medida', () => {
+    expect(capturesInSaleUnit(false, 1, 3)).toBeFalse();
   });
 });

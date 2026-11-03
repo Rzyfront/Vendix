@@ -39,6 +39,21 @@ export function exceedsWeighMax(
 }
 
 /**
+ * PR #1062 ronda 5 (H3) — el alta pasa por la captura medida cuando la unidad
+ * de venta difiere de la de stock (`unitsPerCapture > 1`) O cuando el producto
+ * declara más de una UoM de venta: con stock g y principal g (escala 1) las
+ * otras (lb, kg) solo se ofrecen en ese modal; sin él el toque agregaba 1 g.
+ */
+export function capturesInSaleUnit(
+  hasStockUnit: boolean,
+  unitsPerCapture: number,
+  declaredSaleUnits: number,
+): boolean {
+  if (!hasStockUnit) return false;
+  return unitsPerCapture > 1 || declaredSaleUnits > 1;
+}
+
+/**
  * Parsea lo digitado: tolera coma o punto decimal y espacios. `null` cuando
  * no hay un número positivo.
  */

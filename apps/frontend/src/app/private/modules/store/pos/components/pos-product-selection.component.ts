@@ -56,7 +56,10 @@ import {
   PosSaleUnitConfig,
 } from '../services/pos-sale-unit.service';
 import { ManualWeighResult } from './pos-manual-weight-modal.component';
-import { MAX_WEIGH_AMOUNT } from '../utils/manual-weigh.util';
+import {
+  capturesInSaleUnit,
+  MAX_WEIGH_AMOUNT,
+} from '../utils/manual-weigh.util';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
 import { PosOptionSelectorComponent } from './pos-option-selector/pos-option-selector.component';
@@ -2684,7 +2687,16 @@ export class PosProductSelectionComponent {
     // cuya unidad de stock ya es la de venta —"unidad", precio por unidad— se
     // agrega de un toque como siempre: preguntarle la cantidad al cajero ahí
     // sería una regresión, no una mejora.
-    if (saleUnit.stockUnit && saleUnit.unitsPerCapture > 1) {
+    // PR #1062 ronda 5 (H3): también con varias UoMs de venta declaradas,
+    // aunque la principal sea la de stock (escala 1): sin el modal nunca se
+    // ofrecían lb/kg y el toque agregaba 1 g.
+    if (
+      capturesInSaleUnit(
+        saleUnit.stockUnit != null,
+        saleUnit.unitsPerCapture,
+        this.saleUnitService.saleUnitsFor(product).length,
+      )
+    ) {
       const captured = await this.captureSaleQuantity(
         product,
         saleUnit,
