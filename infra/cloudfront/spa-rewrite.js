@@ -16,6 +16,42 @@
 //
 // Como corre en viewer-request (antes de la caché), todas las rutas
 // reescritas comparten la entrada de caché de /index.html.
+// Redirecciones 301 solo en el host comercial (la función también corre en la
+// distribución de dominios propios de las tiendas, que no se tocan):
+//  - www.vendix.online → vendix.online (decisión del 22-oct: apex sin www).
+//  - alias de páginas comerciales → URL canónica (SEO-TECH-14).
+// La query se conserva.
+var MARKETING_HOST = 'vendix.online';
+var MARKETING_ORIGIN = 'https://vendix.online';
+var MARKETING_ALIASES = {
+  '/precios': '/pricing',
+  '/precios/': '/pricing'
+};
+
+function queryString(qs) {
+  var parts = [];
+  for (var key in qs) {
+    var entry = qs[key];
+    var values = entry.multiValue ? entry.multiValue : [entry];
+    for (var i = 0; i < values.length; i++) {
+      var value = values[i].value;
+      parts.push(value === '' ? key : key + '=' + value);
+    }
+  }
+  return parts.length ? '?' + parts.join('&') : '';
+}
+
+function redirect(location) {
+  return {
+    statusCode: 301,
+    statusDescription: 'Moved Permanently',
+    headers: {
+      location: { value: location },
+      'cache-control': { value: 'max-age=3600' }
+    }
+  };
+}
+
 var SPA_PREFIXES = [
   '/productos/',
   '/products/',
@@ -35,6 +71,14 @@ function handler(event) {
 
   if (uri.indexOf('/.well-known/') === 0) {
     return request;
+  }
+
+  var host = request.headers.host ? request.headers.host.value.toLowerCase() : '';
+  if (host === 'www.' + MARKETING_HOST) {
+    return redirect(MARKETING_ORIGIN + uri + queryString(request.querystring));
+  }
+  if (host === MARKETING_HOST && MARKETING_ALIASES[uri]) {
+    return redirect(MARKETING_ORIGIN + MARKETING_ALIASES[uri] + queryString(request.querystring));
   }
 
   for (var i = 0; i < SPA_PREFIXES.length; i++) {
