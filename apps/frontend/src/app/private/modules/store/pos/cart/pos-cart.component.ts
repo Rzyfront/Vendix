@@ -44,6 +44,7 @@ import { PosSaleUnitService } from '../services/pos-sale-unit.service';
 import {
   formatSaleQuantity,
   isSaleUnitLine as isLineCapturedInSaleUnit,
+  WeighedAs,
 } from '../utils/line-units.util';
 import {
   EMPTY_CART_MESSAGE,
@@ -2532,6 +2533,7 @@ private stationBookingService = inject(PosStationBookingService);
     const principal = units.find((u) => u.isPrincipal) ?? units[0];
     let newWeight: number;
     let newUnit = item.weight_unit || 'kg';
+    let weighedAs: WeighedAs | null = null;
 
     if (this.scaleService.isConnected()) {
       // La báscula emite en SU unidad (PR #1062, error 2).
@@ -2566,6 +2568,7 @@ private stationBookingService = inject(PosStationBookingService);
       // En la unidad del precio, como manda `resolveLineUnits`.
       newWeight = captured.principalAmount;
       newUnit = captured.principalCode;
+      weighedAs = { code: captured.unitCode, amount: captured.amount };
     }
 
     if (isNaN(newWeight) || newWeight <= 0) {
@@ -2578,7 +2581,7 @@ private stationBookingService = inject(PosStationBookingService);
     }
 
     this.cartService
-      .updateCartItemWeight(item.id, newWeight, newUnit)
+      .updateCartItemWeight(item.id, newWeight, newUnit, weighedAs)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {

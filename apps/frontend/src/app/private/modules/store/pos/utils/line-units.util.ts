@@ -64,6 +64,18 @@ export interface LineUnitsInput {
   price_unit_quantity?: number | null;
   sale_unit_code?: string | null;
   stock_units_per_sale_unit?: number | null;
+  /**
+   * PR #1062 ronda 4 (punto 2) — línea de peso legado: unidad y cantidad que
+   * ELIGIÓ el cajero ("300 g"). Solo para el tiquete; el cobro sigue con
+   * `weight` en la principal.
+   */
+  weighed_as?: WeighedAs | null;
+}
+
+/** Unidad y cantidad elegidas al pesar (puede diferir de la principal). */
+export interface WeighedAs {
+  code: string;
+  amount: number;
 }
 
 /** Escala de precio saneada: entero > 1, o 1 (sin escala). */
@@ -140,9 +152,17 @@ export function isSaleUnitLine(item: LineUnitsInput): boolean {
 export function resolveSaleUnitSnapshot(
   item: LineUnitsInput,
 ): { sale_unit_code?: string; sale_quantity?: number } {
-  // Balanza legada: ya viaja con `weight` + `weight_unit`.
+  // Balanza legada: el cobro viaja con `weight` + `weight_unit` (principal);
+  // el snapshot solo anota la unidad ELEGIDA para que el tiquete diga
+  // "300 g" y no "0,3 kg" (PR #1062 ronda 4, punto 2).
   const weight = Number(item.weight ?? 0) || 0;
-  if (item.is_weight_product && weight > 0) return {};
+  if (item.is_weight_product && weight > 0) {
+    const chosen = item.weighed_as;
+    const code = chosen?.code?.trim();
+    const amount = Number(chosen?.amount);
+    if (!code || !(amount > 0)) return {};
+    return { sale_unit_code: code, sale_quantity: Number(amount.toFixed(6)) };
+  }
   const code = item.sale_unit_code?.trim();
   if (!code) return {};
   // Sin `isSaleUnitLine`: vender en gramos con stock en gramos tiene factor 1

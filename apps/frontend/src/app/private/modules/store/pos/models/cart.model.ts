@@ -1,3 +1,4 @@
+import type { WeighedAs } from '../utils/line-units.util';
 import { Product, PosProductVariant } from '../services/pos-product.service';
 import { PosCustomer } from '../models/customer.model';
 import type { PosShippingMethod } from './shipping.model';
@@ -42,6 +43,8 @@ export interface CartItem {
   /** QUI-978 — unidad en la que se digitó/pesó (`weight` va en ella). */
   weight_unit?: string;
   is_weight_product?: boolean;
+  /** PR #1062 ronda 4 — unidad elegida al pesar, solo para el tiquete. */
+  weighed_as?: WeighedAs | null;
   // ===== QUI-648 · captura por unidad de venta =====
   // `quantity` vive SIEMPRE en la unidad mínima del producto (mm, g, ml,
   // unidad), igual que `order_items.quantity`. Estos tres campos son los que
@@ -347,6 +350,8 @@ export interface AddToCartRequest {
   // multiplique bien. Lo digitado en otra unidad se convierte antes de mandar.
   weight?: number;
   weight_unit?: string;
+  /** PR #1062 ronda 4 — unidad y cantidad elegidas ("300 g") para el tiquete. */
+  weighed_as?: WeighedAs | null;
   /**
    * QUI-648 — la línea se capturó pesando. `quantity` ya viene convertido a la
    * unidad mínima (2,35 kg de un producto en gramos ⇒ 2350), así que la línea

@@ -6,6 +6,7 @@ import {
   resolveLineUnits,
   resolvePriceUnitQuantity,
   resolveSaleQuantity,
+  resolveSaleUnitSnapshot,
 } from './line-units.util';
 
 /**
@@ -203,5 +204,43 @@ describe('line-units.util', () => {
         }),
       ).toMatch(/^2[.,]35 kg$/);
     });
+  });
+});
+
+describe('resolveSaleUnitSnapshot · peso legado (PR #1062 ronda 4, punto 2)', () => {
+  it('pesar 300 g con principal kg anota la unidad elegida para el tiquete', () => {
+    // El cobro va en la principal (weight 0,3 kg); el tiquete dice "300 g".
+    expect(
+      resolveSaleUnitSnapshot({
+        quantity: 1,
+        weight: 0.3,
+        weight_unit: 'kg',
+        is_weight_product: true,
+        weighed_as: { code: 'g', amount: 300 },
+      }),
+    ).toEqual({ sale_unit_code: 'g', sale_quantity: 300 });
+  });
+
+  it('sin unidad elegida la línea de peso no agrega llaves (weight + weight_unit)', () => {
+    expect(
+      resolveSaleUnitSnapshot({
+        quantity: 1,
+        weight: 0.3,
+        weight_unit: 'kg',
+        is_weight_product: true,
+      }),
+    ).toEqual({});
+  });
+
+  it('la unidad elegida no cambia el multiplicador del cobro', () => {
+    expect(
+      resolveLineUnits({
+        quantity: 1,
+        weight: 0.3,
+        weight_unit: 'kg',
+        is_weight_product: true,
+        weighed_as: { code: 'g', amount: 300 },
+      }),
+    ).toBe(0.3);
   });
 });

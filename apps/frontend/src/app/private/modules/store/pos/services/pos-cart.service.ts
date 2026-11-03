@@ -52,7 +52,7 @@ import {
 import { PriceTierCacheService } from '../../price-tiers/services/price-tier-cache.service';
 import { PosSaleUnitService } from './pos-sale-unit.service';
 import { PosApiService } from './pos-api.service';
-import { resolveLineUnits } from '../utils/line-units.util';
+import { resolveLineUnits, WeighedAs } from '../utils/line-units.util';
 import { WithholdingTaxService } from '../../withholding-tax/services/withholding-tax.service';
 import { WithholdingPreviewResult } from '../../withholding-tax/interfaces/withholding.interface';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
@@ -1560,6 +1560,7 @@ export class PosCartService {
     itemId: string,
     newWeight: number,
     unitCode?: string,
+    weighedAs: WeighedAs | null = null,
   ): Observable<CartState> {
     const currentState = this.cartState();
     const itemIndex = currentState.items.findIndex(item => item.id === itemId);
@@ -1581,6 +1582,8 @@ export class PosCartService {
       ...item,
       weight: newWeight,
       ...(unitCode !== undefined ? { weight_unit: unitCode } : {}),
+      // Repesar reemplaza la unidad elegida: sin ella, el tiquete usa el peso.
+      weighed_as: weighedAs,
       totalPrice,
       taxAmount: this.calculateItemTaxWithBase(item.product, item.unitPrice, taxMultiplier),
     };
@@ -2762,6 +2765,7 @@ export class PosCartService {
         // Weight product fields
         weight: isWeightProduct ? weight : undefined,
         weight_unit: isWeightProduct ? (request.weight_unit || 'kg') : undefined,
+        weighed_as: isWeightProduct ? (request.weighed_as ?? null) : undefined,
         is_weight_product: isWeightProduct,
         // QUI-648 — la escala en la que el cajero capturó y en la que se muestra
         // la línea. `quantity` sigue viviendo en la unidad mínima. Solo se

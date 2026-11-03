@@ -39,6 +39,7 @@ import { PosSaleUnitService } from '../services/pos-sale-unit.service';
 import {
   formatSaleQuantity,
   isSaleUnitLine as isLineCapturedInSaleUnit,
+  WeighedAs,
 } from '../utils/line-units.util';
 
 @Component({
@@ -2293,6 +2294,7 @@ export class PosCartModalComponent {
     const principal = units.find((u) => u.isPrincipal) ?? units[0];
     let newWeight: number;
     let newUnit = item.weight_unit || 'kg';
+    let weighedAs: WeighedAs | null = null;
 
     if (this.scaleService.isConnected()) {
       // La báscula emite en SU unidad (PR #1062, error 2).
@@ -2328,6 +2330,7 @@ export class PosCartModalComponent {
       // En la unidad del precio, como manda `resolveLineUnits`.
       newWeight = captured.principalAmount;
       newUnit = captured.principalCode;
+      weighedAs = { code: captured.unitCode, amount: captured.amount };
     }
 
     if (isNaN(newWeight) || newWeight <= 0) {
@@ -2340,7 +2343,7 @@ export class PosCartModalComponent {
     }
 
     this.cartService
-      .updateCartItemWeight(item.id, newWeight, newUnit)
+      .updateCartItemWeight(item.id, newWeight, newUnit, weighedAs)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {

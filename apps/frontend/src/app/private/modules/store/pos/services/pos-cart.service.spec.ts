@@ -588,6 +588,36 @@ describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
     });
   });
 
+  it('repesar anota la unidad elegida y, sin ella, la limpia (PR #1062 ronda 4, punto 2)', () => {
+    service.cartState.set({
+      ...service.cartState(),
+      linkedOrderId: null,
+      linkedOrderNumber: null,
+      items: [
+        {
+          ...cartLine('weigh'),
+          is_weight_product: true,
+          weight: 0.3,
+          weight_unit: 'kg',
+          weighed_as: { code: 'g', amount: 300 },
+        },
+      ],
+    });
+
+    service
+      .updateCartItemWeight('weigh', 0.5, 'kg', { code: 'lb', amount: 1 })
+      .subscribe();
+    let line = service.cartState().items[0];
+    expect(line.weight).toBe(0.5);
+    expect(line.totalPrice).toBe(500);
+    expect(line.weighed_as).toEqual({ code: 'lb', amount: 1 });
+
+    // Báscula: llega en la principal, el tiquete usa el peso.
+    service.updateCartItemWeight('weigh', 0.7, 'kg').subscribe();
+    line = service.cartState().items[0];
+    expect(line.weighed_as).toBeNull();
+  });
+
   it('sin reserva creada por el POS no cancela nada al quitar la línea', (done) => {
     seedCartWithOneItem();
 

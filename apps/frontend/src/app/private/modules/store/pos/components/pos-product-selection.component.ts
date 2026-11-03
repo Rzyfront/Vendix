@@ -2289,7 +2289,15 @@ export class PosProductSelectionComponent {
 
       this.addingToCart.add(product.id);
       this.cartService
-        .addToCart({ product, quantity: 1, variant, weight, weight_unit: unit })
+        .addToCart({
+          product,
+          quantity: 1,
+          variant,
+          weight,
+          weight_unit: unit,
+          // PR #1062 ronda 4 — el tiquete dice lo pesado ("300 g").
+          weighed_as: { code: captured.unitCode, amount: captured.amount },
+        })
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
@@ -2895,6 +2903,8 @@ export class PosProductSelectionComponent {
         quantity: 1,
         weight: weight,
         weight_unit: unit,
+        // PR #1062 ronda 4 — el tiquete dice lo pesado ("300 g").
+        weighed_as: { code: captured.unitCode, amount: captured.amount },
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
