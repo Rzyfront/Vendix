@@ -539,7 +539,7 @@ export class VendixLandingComponent implements OnInit {
       feature2: {
         icon: 'clock',
         title: 'Reserva en Línea',
-        desc: 'Tus clientes reservan, cancelan o reprograman desde tu tienda en línea, y las inasistencias se marcan solas.',
+        desc: 'Tus clientes reservan, cancelan o reprograman desde tu tienda en línea, y las citas confirmadas a las que no llegan quedan marcadas como inasistencia al día siguiente.',
       },
       image: 'assets/images/industries/services',
     },
