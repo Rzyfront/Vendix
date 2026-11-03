@@ -66,3 +66,19 @@ describe('rescalePrice', () => {
     expect(rescalePrice(0, 1000, 1)).toBe(0);
   });
 });
+
+describe('cambio de unidad de stock (PR #1062 ronda 3, H2)', () => {
+  it('stock g → kg con principal g a $25: la principal pasa a kg y el precio a $25.000 por factores absolutos', () => {
+    const absFactor: Record<number, number> = { [G]: 1, [LB]: 500, [KG]: 1000 };
+    // Stock nuevo kg: g y lb (menores) se podan; la escala vuelve a 1.
+    const kept = [KG];
+    const next = pickDefaultPrincipal(kept, null, 1, (id) =>
+      priceScaleFor(absFactor[id], 1000),
+    );
+    expect(next).toBe(KG);
+    // La escala relativa no ve el cambio (1 → 1) y dejaba $25 por kg.
+    expect(rescalePrice(25, 1, 1)).toBe(25);
+    // Entre factores absolutos (g = 1 → kg = 1000) se conserva el precio real.
+    expect(rescalePrice(25, absFactor[G], absFactor[next as number])).toBe(25000);
+  });
+});

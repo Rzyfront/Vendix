@@ -931,12 +931,84 @@ export class ProductCreatePageComponent {
     return `1 ${u.code} = ${pretty} ${stock.code}`;
   }
 
-  /** Poda las marcadas a la dimensión del stock (o las limpia sin stock). */
-  private pruneSaleUomsToStock(): void {
+  /** Factor absoluto (`factor_to_base`) de una UoM del catálogo. */
+  private factorOfUom(id: number | null): number | null {
+    if (id == null) return null;
+    const uom = this.uomOptions().find((u) => u.id === id);
+    const factor = Number(uom?.factor_to_base);
+    return factor > 0 ? factor : null;
+  }
+
+  /**
+   * Poda las marcadas a la dimensión del stock (o las limpia sin stock).
+   *
+   * PR #1062 ronda 3 (H2) — con `prev` (principal y su factor absoluto antes
+   * de cambiar el stock), si la principal cambia el precio se convierte por
+   * la relación entre factores absolutos: las escalas relativas al stock ya
+   * no sirven porque el stock cambió (g → kg dejaba $25/g como $25/kg).
+   */
+  private pruneSaleUomsToStock(
+    prev: { id: number; factor: number } | null = null,
+  ): void {
     const allowed = new Set(this.saleUomOptions().map((u) => u.id));
     const kept = this.saleUomIds().filter((id) => allowed.has(id));
     this.saleUomIds.set(kept);
-    this.applyDefaultPrincipal();
+    if (!prev) {
+      this.applyDefaultPrincipal();
+      return;
+    }
+    const next = pickDefaultPrincipal(
+      kept,
+      kept.includes(prev.id) ? prev.id : null,
+      this.currentPriceScale(),
+      (id) => this.priceScaleOfUom(id),
+    );
+    // Escala nueva sin reescalar por escala relativa: la conversión va abajo.
+    const scale = next != null ? this.priceScaleOfUom(next) : null;
+    if (scale != null) {
+      this.productForm
+        ?.get('price_unit_quantity')
+        ?.setValue(scale, { emitEvent: false });
+    }
+    this.principalSaleUomId.set(next);
+    if (next === prev.id) return;
+
+    // Unidad en la que queda expresado el precio: la principal nueva o, sin
+    // ella, `escala × stock`.
+    // Otra dimensión (peso → volumen) no tiene conversión: se deja el precio.
+    const stock = this.selectedStockUom();
+    const prevDimension = this.uomOptions().find((u) => u.id === prev.id)
+      ?.dimension;
+    const stockFactor =
+      stock && stock.dimension === prevDimension
+        ? Number(stock.factor_to_base)
+        : NaN;
+    const nextFactor =
+      this.factorOfUom(next) ??
+      (stockFactor > 0 ? this.currentPriceScale() * stockFactor : null);
+    if (nextFactor == null || nextFactor === prev.factor) return;
+
+    const price = Number(this.productForm?.get('base_price')?.value ?? 0);
+    for (const field of ['base_price', 'sale_price']) {
+      const ctrl = this.productForm?.get(field);
+      const value = Number(ctrl?.value ?? 0);
+      if (ctrl && value > 0) {
+        ctrl.setValue(rescalePrice(value, prev.factor, nextFactor));
+      }
+    }
+    if (this.productForm) this.recalculateMarginFromBasePrice(this.productForm);
+    this.formUpdateTrigger.update((t) => t + 1);
+    if (price > 0) {
+      const code = (id: number | null) =>
+        this.uomOptions().find((u) => u.id === id)?.code ?? '';
+      const money = (v: number) => this.currencyService.format(v);
+      const after = rescalePrice(price, prev.factor, nextFactor);
+      this.toastService.info(
+        `Cambió la unidad principal: el precio se convirtió de ${money(price)} por 1 ${code(prev.id)} a ${money(after)} por ${next != null ? `1 ${code(next)}` : 'unidad de stock'}`,
+        undefined,
+        6000,
+      );
+    }
   }
 
   private saleUomsPayload(): Array<{ uom_id: number; is_principal?: boolean }> {
@@ -1160,6 +1232,14 @@ export class ProductCreatePageComponent {
 
   /** Re-run validator + recompute capacity when the stock dropdown changes. */
   onStockUomChange(): void {
+    // PR #1062 ronda 3 (H2) — factor absoluto de la principal ANTES de podar:
+    // si la poda la cambia, el precio se convierte entre factores absolutos.
+    const prevPrincipalId = this.principalSaleUomId();
+    const prevPrincipalFactor = this.factorOfUom(prevPrincipalId);
+    const prevPrincipal =
+      prevPrincipalId != null && prevPrincipalFactor != null
+        ? { id: prevPrincipalId, factor: prevPrincipalFactor }
+        : null;
     this.uomTick.update((t) => t + 1);
     // La escala del precio se expresa en la unidad de stock: cambiar de
     // milímetros a metros dejaría un "por 1.000" que ya no significa un metro.
@@ -1170,7 +1250,7 @@ export class ProductCreatePageComponent {
       scaleCtrl.setValue(1);
     }
     // QUI-978 — sin stock (o con otra dimensión) las marcadas no valen.
-    this.pruneSaleUomsToStock();
+    this.pruneSaleUomsToStock(prevPrincipal);
     // QUI-978 — en retail el selector de compra solo existe con stock: si se
     // vacía el stock (vuelve a pieza), la compra no puede quedarse flotando
     // oculta. En insumo ambos selectores siempre están visibles y se respeta
