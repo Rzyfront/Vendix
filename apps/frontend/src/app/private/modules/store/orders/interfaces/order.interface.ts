@@ -424,6 +424,13 @@ export interface OrderItem {
   is_price_overridden?: boolean | null;
   /** Producto por peso (Decimal llega como string). */
   weight?: number | string | null;
+  weight_unit?: string | null;
+  /**
+   * QUI-978 — unidad de venta elegida al cobrar ("g", "lb") y la cantidad en
+   * ella (Decimal llega como string). Ver `formatOrderLineQuantity`.
+   */
+  sale_unit_code_snapshot?: string | null;
+  sale_quantity_snapshot?: number | string | null;
   item_type?: string;
   created_at: string;
   updated_at: string;

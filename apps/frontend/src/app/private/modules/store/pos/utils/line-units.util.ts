@@ -128,6 +128,29 @@ export function isSaleUnitLine(item: LineUnitsInput): boolean {
   );
 }
 
+/**
+ * QUI-978 — snapshot de la unidad de venta que viaja al backend al cobrar o al
+ * guardar la orden, y queda en `order_items.sale_unit_code_snapshot` /
+ * `sale_quantity_snapshot`. Con eso el detalle de la orden y el ticket
+ * reimpreso dicen "300 g" en vez de "300".
+ *
+ * Devuelve `{}` cuando la línea no tiene unidad que anotar: el spread en el
+ * payload no agrega llaves y las líneas de pieza siguen idénticas.
+ */
+export function resolveSaleUnitSnapshot(
+  item: LineUnitsInput,
+): { sale_unit_code?: string; sale_quantity?: number } {
+  // Balanza legada: ya viaja con `weight` + `weight_unit`.
+  const weight = Number(item.weight ?? 0) || 0;
+  if (item.is_weight_product && weight > 0) return {};
+  const code = item.sale_unit_code?.trim();
+  if (!code) return {};
+  // Sin `isSaleUnitLine`: vender en gramos con stock en gramos tiene factor 1
+  // y también debe quedar anotado ("300 g"). El DTO admite 6 decimales.
+  const saleQuantity = Number(resolveSaleQuantity(item).toFixed(6));
+  return { sale_unit_code: code, sale_quantity: saleQuantity };
+}
+
 /** "3 m", "2,35 kg", "4". Hasta 3 decimales, sin ceros de relleno. */
 export function formatSaleQuantity(item: LineUnitsInput): string {
   const value = resolveSaleQuantity(item);

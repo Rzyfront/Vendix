@@ -1517,6 +1517,9 @@ export class OrdersService {
                 product_price_tier_assignments: {
                   select: { price_tier_id: true },
                 },
+                // QUI-978 — unidad de respaldo de la cantidad en el detalle
+                // para líneas sin snapshot de venta ("300 g", no "300").
+                stock_uom: { select: { code: true } },
               },
             },
             product_variants: true,

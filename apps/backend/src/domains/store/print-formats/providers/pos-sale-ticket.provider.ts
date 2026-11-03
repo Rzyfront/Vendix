@@ -42,6 +42,7 @@ import {
 // B6 — el impuesto del envío vive en la copia de la orden, no en
 // `order_item_taxes`: el recibo pre-fiscal lo pinta desde esta definición.
 import { buildShippingTaxBreakdownRow } from '../../shipping/utils/shipping-tax.util';
+import { formatTicketLineQuantity } from './ticket-line-quantity.util';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
@@ -81,7 +82,12 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         // total agregado — inconsistencia visible para el cliente.
         order_items: {
           where: { cancelled_at: null },
-          include: { order_item_taxes: true },
+          include: {
+            order_item_taxes: true,
+            // QUI-978 — respaldo de unidad para líneas sin snapshot de venta
+            // (ver `formatTicketLineQuantity`).
+            products: { select: { stock_uom: { select: { code: true } } } },
+          },
         },
         // CP-print-token-flow A.1 — dirección del cliente para el ticket.
         // `take: 1` sobre la relación vigente (misma forma que
@@ -886,6 +892,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       // snapshot al crear la línea), no por un campo nuevo del modelo.
       variant_attributes: it.variant_attributes || undefined,
       quantity: Number(it.quantity || 1),
+      quantity_formatted: formatTicketLineQuantity(it),
       unit_price: gross_unit_price,
       unit_price_formatted: `$${gross_unit_price.toLocaleString('es-CO')}`,
       discount_amount: Number(it.discount_amount || 0),

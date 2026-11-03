@@ -173,6 +173,21 @@ export class PosOrderItemDto {
   @MaxLength(10)
   weight_unit?: string;
 
+  // QUI-978 — unidad de venta ELEGIDA por el cajero ("g", "lb", "kg") y la
+  // cantidad en esa unidad (300 de "300 g"). Se guardan como snapshot en
+  // order_items para que el detalle y el ticket digan "300 g" y no "300".
+  // Mismo contrato que CreateOrderItemDto (Bug 12).
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  sale_unit_code?: string;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 6 })
+  @Min(0)
+  @Type(() => Number)
+  sale_quantity?: number;
+
   @IsOptional()
   @IsString()
   @MaxLength(500)
