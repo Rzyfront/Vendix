@@ -8,6 +8,7 @@ import {
   linkedSignal,
   model,
   output,
+  signal,
   viewChild,
 } from '@angular/core';
 
@@ -87,7 +88,7 @@ export interface ManualWeighResult {
               type="text"
               inputmode="decimal"
               autocomplete="off"
-              placeholder="0"
+              [placeholder]="placeholderText()"
               [value]="amountText()"
               (input)="amountText.set($any($event.target).value)"
               (focus)="$any($event.target).select()"
@@ -220,7 +221,11 @@ export class PosManualWeightModalComponent {
   readonly pricePerPrincipal = input<number | null>(null);
   /** Código de la unidad de stock (línea "descuenta N g"). */
   readonly stockUnitCode = input<string>('');
-  /** Cantidad inicial (edición). Vacío = campo vacío con foco. */
+  /**
+   * Cantidad actual (edición). Nunca precarga el campo: se muestra como
+   * placeholder ("Actual: 1.5") y el cajero digita la nueva sobre un campo
+   * vacío (requisito de Rafael, PR #1062 ronda 2).
+   */
   readonly initialAmount = input<string>('');
   /** Unidad inicial (edición). Si no está en `units`, manda la principal. */
   readonly initialUnitCode = input<string>('');
@@ -241,12 +246,20 @@ export class PosManualWeightModalComponent {
     viewChild<ElementRef<HTMLInputElement>>('amountInput');
 
   /**
+   * El campo siempre nace vacío y solo lo escribe el cajero: ningún input
+   * lo repone al enfocarlo o al borrarlo.
+   */
+  readonly amountText = signal('');
+  readonly placeholderText = computed(() => {
+    const current = this.initialAmount().trim();
+    return current ? `Actual: ${current}` : '0';
+  });
+  /**
    * `linkedSignal` y no inicialización en el constructor: el servicio monta
    * el modal con `createComponent` + `setInput`, así que en el constructor
    * los inputs aún van vacíos. El link se recalcula cuando llegan y después
-   * conserva lo digitado/elegido.
+   * conserva lo elegido.
    */
-  readonly amountText = linkedSignal(() => this.initialAmount());
   readonly unitCode = linkedSignal(() => {
     const units = this.units();
     const initial = this.initialUnitCode();

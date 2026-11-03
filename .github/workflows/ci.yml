@@ -287,6 +287,7 @@ jobs:
           --include='**/pos/utils/cod-free-credit.util.spec.ts'
           --include='**/pos/utils/phone-format-hint.util.spec.ts'
           --include='**/pos/services/pos-cart.service.spec.ts'
+          --include='**/pos/components/pos-manual-weight-modal.component.spec.ts'
           --include='**/pos/services/pos-payment.service.spec.ts'
           --include='**/pos/services/pos-ticket.service.spec.ts'
           --include='**/pos/components/pos-order-confirmation.component.spec.ts'
