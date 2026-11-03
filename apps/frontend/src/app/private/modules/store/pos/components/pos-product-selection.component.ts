@@ -56,6 +56,7 @@ import {
   PosSaleUnitConfig,
 } from '../services/pos-sale-unit.service';
 import { ManualWeighResult } from './pos-manual-weight-modal.component';
+import { MAX_WEIGH_AMOUNT } from '../utils/manual-weigh.util';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
 import { PosOptionSelectorComponent } from './pos-option-selector/pos-option-selector.component';
@@ -2802,9 +2803,13 @@ export class PosProductSelectionComponent {
     });
     if (!captured) return null;
 
-    if (captured.amount > 999) {
+    // PR #1062 ronda 5 (H1) — el tope se mide en la principal, igual que el
+    // pesado legado y el modal (`exceedsWeighMax`): 1.500 g con principal kg
+    // son 1,5 kg y pasan. Este chequeo solo cubre la lectura de báscula, que
+    // no pasa por el modal.
+    if (captured.principalAmount > MAX_WEIGH_AMOUNT) {
       this.toastService.warning(
-        'La cantidad máxima permitida es 999 ' + captured.unitCode,
+        `La cantidad máxima permitida es ${MAX_WEIGH_AMOUNT} ${captured.principalCode}`,
       );
       return null;
     }
