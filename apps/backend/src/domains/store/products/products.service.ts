@@ -52,6 +52,7 @@ import {
 } from './services/tiers-variants-exclusive.util';
 import { syncEnabledTierAssignments } from './services/tier-assignments-sync.util';
 import {
+  saleUomsOf,
   syncProductSaleUoms,
   SaleUomRow,
 } from './services/sale-uoms-sync.util';
@@ -1794,18 +1795,7 @@ export class ProductsService {
                 (assignment) => assignment.price_tier_id,
               ) ?? [],
             // QUI-978 — UoMs en las que se puede vender (principal + adicionales).
-            sale_uoms: (completeProduct.product_sale_uoms as any[] | undefined)?.map(
-              (row: any) => ({
-                uom_id: row.uom_id,
-                code: row.uom?.code ?? null,
-                name: row.uom?.name ?? null,
-                factor_to_base:
-                  row.uom?.factor_to_base != null
-                    ? Number(row.uom.factor_to_base)
-                    : null,
-                is_principal: row.is_principal === true,
-              }),
-            ) ?? [],
+            sale_uoms: saleUomsOf(completeProduct),
             stock_by_location: completeProduct.stock_levels.map((stock) => ({
               location_id: stock.inventory_locations.id,
               location_name: stock.inventory_locations.name,
@@ -3453,18 +3443,7 @@ export class ProductsService {
                 (assignment: any) => assignment.price_tier_id,
               ) ?? [],
             // QUI-978 — UoMs en las que se puede vender (principal + adicionales).
-            sale_uoms: (
-              (product as any).product_sale_uoms as any[] | undefined
-            )?.map((row: any) => ({
-              uom_id: row.uom_id,
-              code: row.uom?.code ?? null,
-              name: row.uom?.name ?? null,
-              factor_to_base:
-                row.uom?.factor_to_base != null
-                  ? Number(row.uom.factor_to_base)
-                  : null,
-              is_principal: row.is_principal === true,
-            })) ?? [],
+            sale_uoms: saleUomsOf(product),
             // QUI-648: cómo se mide y cómo se cobra el producto. Van en el
             // LISTADO —no solo en el detalle— porque el POS decide la captura
             // al tocar la tarjeta: sin esto tendría que pedir el detalle de
@@ -3713,18 +3692,7 @@ export class ProductsService {
               (assignment: any) => assignment.price_tier_id,
             ) ?? [],
           // QUI-978 — UoMs en las que se puede vender (principal + adicionales).
-          sale_uoms: (
-            (product as any).product_sale_uoms as any[] | undefined
-          )?.map((row: any) => ({
-            uom_id: row.uom_id,
-            code: row.uom?.code ?? null,
-            name: row.uom?.name ?? null,
-            factor_to_base:
-              row.uom?.factor_to_base != null
-                ? Number(row.uom.factor_to_base)
-                : null,
-            is_principal: row.is_principal === true,
-          })) ?? [],
+          sale_uoms: saleUomsOf(product),
           // QUI-648: cómo se mide y cómo se cobra el producto (ver la rama
           // `pos_optimized` para el porqué de exponerlo en el listado).
           stock_uom_id: (product as any).stock_uom_id ?? null,
@@ -4040,18 +4008,7 @@ export class ProductsService {
           (assignment: any) => assignment.price_tier_id,
         ) ?? [],
       // QUI-978 — UoMs en las que se puede vender (principal + adicionales).
-      sale_uoms: (
-        (product as any).product_sale_uoms as any[] | undefined
-      )?.map((row: any) => ({
-        uom_id: row.uom_id,
-        code: row.uom?.code ?? null,
-        name: row.uom?.name ?? null,
-        factor_to_base:
-          row.uom?.factor_to_base != null
-            ? Number(row.uom.factor_to_base)
-            : null,
-        is_principal: row.is_principal === true,
-      })) ?? [],
+      sale_uoms: saleUomsOf(product),
       image_url: await this.signProductImage(product),
       brand: product.brands,
       categories:

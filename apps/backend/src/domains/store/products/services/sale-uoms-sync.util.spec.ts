@@ -1,4 +1,5 @@
 import {
+  saleUomsOf,
   syncProductSaleUoms,
   SaleUomsWriter,
 } from './sale-uoms-sync.util';
@@ -61,5 +62,27 @@ describe('syncProductSaleUoms (QUI-978)', () => {
       data: [{ product_id: 7, uom_id: 3, is_principal: true }],
       skipDuplicates: true,
     });
+  });
+});
+
+describe('saleUomsOf (PR #1062 menor — proyección única)', () => {
+  it('proyecta filas con su UoM y convierte el factor Decimal a número', () => {
+    const decimal = { toString: () => '1000.000000' };
+    expect(
+      saleUomsOf({
+        product_sale_uoms: [
+          { uom_id: 2, is_principal: true, uom: { code: 'kg', name: 'Kilogramo', factor_to_base: decimal } },
+          { uom_id: 1, is_principal: null, uom: null },
+        ],
+      }),
+    ).toEqual([
+      { uom_id: 2, code: 'kg', name: 'Kilogramo', factor_to_base: 1000, is_principal: true },
+      { uom_id: 1, code: null, name: null, factor_to_base: null, is_principal: false },
+    ]);
+  });
+
+  it('sin relación incluida devuelve []', () => {
+    expect(saleUomsOf({ id: 1 })).toEqual([]);
+    expect(saleUomsOf(null)).toEqual([]);
   });
 });

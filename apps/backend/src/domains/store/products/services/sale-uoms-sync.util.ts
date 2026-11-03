@@ -48,3 +48,52 @@ export async function syncProductSaleUoms(
     skipDuplicates: true,
   });
 }
+
+/** Fila persistida con su UoM incluida (`include: { uom: true }` o select). */
+export interface PersistedSaleUomRow {
+  uom_id: number;
+  is_principal: boolean | null;
+  uom?: {
+    code: string;
+    name: string;
+    factor_to_base: { toString(): string } | number | string | null;
+  } | null;
+}
+
+/** Forma pública de una UoM de venta en las respuestas de producto. */
+export interface SaleUomView {
+  uom_id: number;
+  code: string | null;
+  name: string | null;
+  factor_to_base: number | null;
+  is_principal: boolean;
+}
+
+/**
+ * Proyección única de `product_sale_uoms` a la respuesta (detalle, listado
+ * admin, listado POS y ecommerce). Sin filas (o sin include) devuelve `[]`.
+ */
+export function mapSaleUoms(
+  rows: PersistedSaleUomRow[] | null | undefined,
+): SaleUomView[] {
+  return (rows ?? []).map((row) => ({
+    uom_id: row.uom_id,
+    code: row.uom?.code ?? null,
+    name: row.uom?.name ?? null,
+    factor_to_base:
+      row.uom?.factor_to_base != null ? Number(row.uom.factor_to_base) : null,
+    is_principal: row.is_principal === true,
+  }));
+}
+
+/**
+ * `mapSaleUoms` sobre un producto cuya consulta incluyó (o no)
+ * `product_sale_uoms`: los mappers de listado reciben formas distintas según
+ * el `select` dinámico, así que se lee la relación sin `any`.
+ */
+export function saleUomsOf(product: object | null | undefined): SaleUomView[] {
+  return mapSaleUoms(
+    (product as { product_sale_uoms?: PersistedSaleUomRow[] | null } | null)
+      ?.product_sale_uoms,
+  );
+}
