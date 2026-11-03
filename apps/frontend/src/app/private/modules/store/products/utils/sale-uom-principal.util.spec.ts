@@ -5,7 +5,9 @@ import {
   rescalePriceAnchored,
   rescaleTierOverrides,
   countRescalableTierOverrides,
+  countFixedPerUnitTierRules,
 } from './sale-uom-principal.util';
+import { applyTierAdjustment } from '../../../../../shared/services/pricing/tier-adjustment.util';
 
 /**
  * PR #1062 ronda 2 (HIGH) — stock en g, precio $25.000 por kg (escala 1000).
@@ -149,5 +151,50 @@ describe('rescaleTierOverrides (PR #1062 ronda 5, H2)', () => {
     expect(out.rows).toEqual(rows);
     expect(out.changed).toBe(0);
     expect(countRescalableTierOverrides(rows)).toBe(0);
+  });
+});
+
+describe('countFixedPerUnitTierRules (PR #1062 ronda 6, L2)', () => {
+  const row = (
+    tier: Record<string, unknown>,
+    override_price: number | null = null,
+    enabled = true,
+  ) => ({
+    tier: { kind: 'customer_tier', ...tier },
+    enabled,
+    override_price,
+  });
+  const discount = {
+    adjustment_type: 'fixed_amount_discount',
+    adjustment_value: '2000',
+    amount_scope: 'per_unit',
+  };
+
+  it('el descuento fijo por unidad cambia de significado al pasar de kg a g', () => {
+    // −$2.000 sobre $25.000/kg = $23.000/kg; sobre $25/g queda en $0.
+    expect(applyTierAdjustment(25000, 1, discount)).toBe(23000);
+    expect(applyTierAdjustment(25, 1, discount)).toBe(0);
+    expect(countFixedPerUnitTierRules([row(discount)])).toBe(1);
+  });
+
+  it('cuenta precio fijo y recargo fijo por unidad', () => {
+    expect(
+      countFixedPerUnitTierRules([
+        row({ adjustment_type: 'fixed_price', adjustment_value: 20000 }),
+        row({ adjustment_type: 'fixed_amount_surcharge', adjustment_value: 500 }),
+      ]),
+    ).toBe(2);
+  });
+
+  it('no cuenta porcentajes, montos por paquete, overrides, deshabilitadas ni presentaciones', () => {
+    expect(
+      countFixedPerUnitTierRules([
+        row({ adjustment_type: 'percent_discount', discount_percentage: 10 }),
+        row({ ...discount, amount_scope: 'per_package' }),
+        row(discount, 22000),
+        row(discount, null, false),
+        { tier: { kind: 'sale_unit', ...discount }, enabled: true, override_price: null },
+      ]),
+    ).toBe(0);
   });
 });

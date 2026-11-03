@@ -1,3 +1,8 @@
+import {
+  resolveTierAdjustment,
+  TierAdjustmentRule,
+} from '../../../../../shared/services/pricing/tier-adjustment.util';
+
 /**
  * PR #1062 (ronda 2) — la unidad principal de venta fija la escala del precio
  * (`price_unit_quantity`). Elegirla o cambiarla nunca puede dejar el precio
@@ -141,4 +146,31 @@ export function countRescalableTierOverrides(
       row.enabled &&
       Number(row.override_price) > 0,
   ).length;
+}
+
+/** Fila de tarifa con la regla general de su `price_tier`. */
+export interface TierFixedRuleRow {
+  tier: { kind: string } & TierAdjustmentRule;
+  enabled: boolean;
+  override_price: number | null;
+}
+
+/**
+ * PR #1062 ronda 6 (L2) — tarifas de cliente habilitadas SIN precio propio
+ * cuya regla general es un monto fijo `per_unit` (`fixed_price`,
+ * `fixed_amount_discount`, `fixed_amount_surcharge`). Ese monto se aplica
+ * sobre la unidad del precio (`applyTierAdjustment`), así que al cambiar la
+ * principal cambia de significado: "−$2.000 por unidad" sobre $25.000/kg da
+ * $23.000/kg; con principal g queda max(0, 25 − 2.000) = $0 por g. No se
+ * convierte (la regla es de la tarifa, compartida entre productos): se avisa.
+ */
+export function countFixedPerUnitTierRules(
+  rows: readonly TierFixedRuleRow[],
+): number {
+  return rows.filter((row) => {
+    if (row.tier.kind !== 'customer_tier' || !row.enabled) return false;
+    if (Number(row.override_price) > 0) return false;
+    const { type, scope } = resolveTierAdjustment(row.tier);
+    return type.startsWith('fixed_') && scope === 'per_unit';
+  }).length;
 }

@@ -113,6 +113,7 @@ import {
   rescalePriceAnchored,
   rescaleTierOverrides,
   countRescalableTierOverrides,
+  countFixedPerUnitTierRules,
 } from '../../utils/sale-uom-principal.util';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
@@ -817,7 +818,7 @@ export class ProductCreatePageComponent {
         message:
           `El precio se expresa en la unidad principal. ` +
           `Antes: ${change.before}. Después: ${change.after}.` +
-          this.tierRescaleNotice(),
+          this.tierRescaleNotice(num),
         confirmText: 'Cambiar y convertir el precio',
         cancelText: 'Cancelar',
         confirmVariant: 'primary',
@@ -929,12 +930,28 @@ export class ProductCreatePageComponent {
   private tierPriceAnchors = new Map<number, PriceAnchor>();
 
   /** Aviso del diálogo de principal cuando hay tarifas de cliente con precio fijo. */
-  private tierRescaleNotice(): string {
+  private tierRescaleNotice(newPrincipalId: number): string {
     const n = countRescalableTierOverrides(this.priceTierRows());
-    if (n === 0) return '';
-    return n === 1
-      ? ' También se convierte el precio fijo de 1 tarifa de cliente.'
-      : ` También se convierten los precios fijos de ${n} tarifas de cliente.`;
+    const converted =
+      n === 0
+        ? ''
+        : n === 1
+          ? ' También se convierte el precio fijo de 1 tarifa de cliente.'
+          : ` También se convierten los precios fijos de ${n} tarifas de cliente.`;
+    // PR #1062 ronda 6 (L2): las reglas de monto fijo por unidad sin precio
+    // propio no se convierten; su monto pasa a contar por la nueva unidad.
+    const fixed = countFixedPerUnitTierRules(this.priceTierRows());
+    if (fixed === 0) return converted;
+    const code = this.uomOptions().find(
+      (u) => Number(u.id) === newPrincipalId,
+    )?.code;
+    const unit = code ? `cada ${code}` : 'la nueva unidad';
+    return (
+      converted +
+      (fixed === 1
+        ? ` Ojo: 1 tarifa de cliente con monto fijo por unidad no se convierte; su monto queda expresado por ${unit}.`
+        : ` Ojo: ${fixed} tarifas de cliente con monto fijo por unidad no se convierten; su monto queda expresado por ${unit}.`)
+    );
   }
 
   /** "$25.000 por 1 kg" → "$25 por 1 g", o null si el precio no cambia. */
