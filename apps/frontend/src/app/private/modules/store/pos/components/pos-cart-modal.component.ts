@@ -41,7 +41,10 @@ import {
   isSaleUnitLine as isLineCapturedInSaleUnit,
   WeighedAs,
 } from '../utils/line-units.util';
-import { weighMaxFor } from '../utils/manual-weigh.util';
+import {
+  rescaleExceedsWeighMax,
+  weighMaxFor,
+} from '../utils/manual-weigh.util';
 
 @Component({
   selector: 'app-pos-cart-modal',
@@ -2382,6 +2385,24 @@ export class PosCartModalComponent {
       if (!(amount > 0)) {
         this.toastService.warning('La cantidad debe ser mayor a 0');
         return;
+      }
+      // Mismo tope que el alta, medido en la principal (PR #1062 ronda 6, L1).
+      const max = weighMaxFor(
+        this.saleUnitService.configFor(item.product)?.stockUnit?.dimension,
+      );
+      if (max != null) {
+        const units = await this.saleUnitService.weighModalUnits(
+          item.product,
+          unit,
+          factor,
+        );
+        const exceeded = rescaleExceedsWeighMax(amount, factor, units, max);
+        if (exceeded) {
+          this.toastService.warning(
+            `La cantidad máxima permitida es ${max} ${exceeded.code}`,
+          );
+          return;
+        }
       }
       quantity = Math.round(amount * factor);
     } else {

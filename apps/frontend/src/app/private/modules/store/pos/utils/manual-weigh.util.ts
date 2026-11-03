@@ -50,6 +50,30 @@ export function exceedsWeighMax(
 }
 
 /**
+ * PR #1062 ronda 6 (L1) — volver a pesar con báscula: la lectura llega en la
+ * unidad de la línea (`saleFactor` unidades de stock por unidad) y se mide
+ * contra el mismo tope que el alta y el modal, en la principal. Devuelve la
+ * principal cuando se excede (para el mensaje) o `null` si pasa o no hay tope.
+ */
+export function rescaleExceedsWeighMax(
+  amount: number,
+  saleFactor: number,
+  units: ManualWeighUnit[],
+  max: number | null,
+): ManualWeighUnit | null {
+  if (max == null) return null;
+  const principal = defaultWeighUnit(units);
+  if (!principal || !(saleFactor > 0)) return null;
+  const from: ManualWeighUnit = {
+    code: '',
+    name: '',
+    factorToBase: saleFactor,
+    isPrincipal: false,
+  };
+  return exceedsWeighMax(amount, from, principal, max) ? principal : null;
+}
+
+/**
  * PR #1062 ronda 5 (H3) — el alta pasa por la captura medida cuando la unidad
  * de venta difiere de la de stock (`unitsPerCapture > 1`) O cuando el producto
  * declara más de una UoM de venta: con stock g y principal g (escala 1) las

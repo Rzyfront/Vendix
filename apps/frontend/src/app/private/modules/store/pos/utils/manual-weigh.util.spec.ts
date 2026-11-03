@@ -7,6 +7,7 @@ import {
   ManualWeighUnit,
   parseWeighAmount,
   principalWeighAmount,
+  rescaleExceedsWeighMax,
   scaleReadingToUnit,
   stockUnitsForWeighAmount,
   weighMaxFor,
@@ -172,5 +173,26 @@ describe('weighMaxFor (PR #1062 ronda 6, R1)', () => {
     expect(weighMaxFor('length')).toBeNull();
     expect(weighMaxFor('volume')).toBeNull();
     expect(weighMaxFor(null)).toBeNull();
+  });
+});
+
+describe('rescaleExceedsWeighMax (PR #1062 ronda 6, L1)', () => {
+  // Factores por unidad de stock (g): kg principal = 1000, g = 1.
+  const units = [KG, G];
+
+  it('re-pesar 1.000 kg en una línea en kg excede el tope de 999 kg', () => {
+    expect(rescaleExceedsWeighMax(1000, 1000, units, 999)?.code).toBe('kg');
+  });
+
+  it('1.500 g en una línea en g son 1,5 kg y pasan, igual que en el alta', () => {
+    expect(rescaleExceedsWeighMax(1500, 1, units, 999)).toBeNull();
+  });
+
+  it('999 kg exactos pasan', () => {
+    expect(rescaleExceedsWeighMax(999, 1000, units, 999)).toBeNull();
+  });
+
+  it('sin tope (medida que no es masa) nunca excede', () => {
+    expect(rescaleExceedsWeighMax(5000, 1000, units, null)).toBeNull();
   });
 });
