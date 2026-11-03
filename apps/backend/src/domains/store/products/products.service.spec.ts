@@ -951,6 +951,46 @@ describe('ProductsService', () => {
       // include_variants was requested — that flag is what the admin grid reads.
       expect(result.data[0].has_variants).toBe(true);
     });
+
+    it('QUI-978 — expone purchase_uom_id en el listado (admin y pos_optimized)', async () => {
+      // El POP precarga la UoM de compra al recomprar desde el listado; si el
+      // mapper la omite, el select vuelve vacío aunque el producto la tenga.
+      const row = {
+        id: 976,
+        name: 'Carne prueba',
+        stock_levels: [],
+        stock_uom_id: 1,
+        purchase_uom_id: 3,
+        price_unit_quantity: 1000,
+      };
+      mockPrismaService.products.findMany.mockResolvedValue([row]);
+      mockPrismaService.products.count.mockResolvedValue(1);
+      mockPrismaService.stores.findUnique.mockResolvedValue({
+        default_location_id: 1,
+      });
+
+      const admin = await service.findAll({ page: 1, limit: 10 });
+      expect(admin.data[0]).toEqual(
+        expect.objectContaining({
+          stock_uom_id: 1,
+          purchase_uom_id: 3,
+          price_unit_quantity: 1000,
+        }),
+      );
+
+      const pos = await service.findAll({
+        page: 1,
+        limit: 10,
+        pos_optimized: true,
+      });
+      expect(pos.data[0]).toEqual(
+        expect.objectContaining({
+          stock_uom_id: 1,
+          purchase_uom_id: 3,
+          price_unit_quantity: 1000,
+        }),
+      );
+    });
   });
 
   /**

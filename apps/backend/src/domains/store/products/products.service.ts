@@ -3436,6 +3436,10 @@ export class ProductsService {
             // `sale_config_summary` no viaja acá a propósito: cuesta dos
             // consultas por producto y sería un N+1 sobre la grilla.
             stock_uom_id: (product as any).stock_uom_id ?? null,
+            // QUI-978 — el POP precarga la UoM de compra al recomprar; sin
+            // exponerla acá el select volvía vacío (es escalar de la fila,
+            // cuesta cero consultas).
+            purchase_uom_id: (product as any).purchase_uom_id ?? null,
             price_unit_quantity: (product as any).price_unit_quantity ?? 1,
             ...(barcode && {
               scanned_price_tier_id:
@@ -3688,6 +3692,8 @@ export class ProductsService {
           // QUI-648: cómo se mide y cómo se cobra el producto (ver la rama
           // `pos_optimized` para el porqué de exponerlo en el listado).
           stock_uom_id: (product as any).stock_uom_id ?? null,
+          // QUI-978 — el POP precarga la UoM de compra al recomprar (idem).
+          purchase_uom_id: (product as any).purchase_uom_id ?? null,
           price_unit_quantity: (product as any).price_unit_quantity ?? 1,
           // Pistolear el código de una presentación devuelve el producto Y
           // cuál de sus presentaciones se escaneó. Sin esto el POS recibiría
