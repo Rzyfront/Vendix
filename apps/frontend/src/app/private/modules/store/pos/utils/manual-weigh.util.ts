@@ -103,8 +103,25 @@ export function parseWeighAmount(
   return parsed;
 }
 
-/** Convierte una cantidad entre factores a la base. `null` con factores malos. */
-export function convertWeighAmount(
+/**
+ * Decimales de una cantidad convertida. El DTO más estricto que recibe el
+ * `weight` es `UpdateOrderItemDto` ("Guardar orden", `maxDecimalPlaces: 3`);
+ * el cobro acepta 4. 0,457 lb son 0,2285 kg: sin redondear, "Guardar orden"
+ * respondía 400.
+ */
+export const WEIGH_AMOUNT_DECIMALS = 3;
+
+/**
+ * Redondeo decimal half-up. `toPrecision(12)` limpia el ruido binario antes
+ * de redondear: 0,2285 × 1000 da 228,49999999999997 y bajaría a 0,228.
+ */
+function roundWeighAmount(value: number): number {
+  const scale = 10 ** WEIGH_AMOUNT_DECIMALS;
+  return Math.round(Number((value * scale).toPrecision(12))) / scale;
+}
+
+/** Conversión exacta, sin redondear. `null` con factores malos. */
+function convertRaw(
   amount: number,
   fromFactor: number,
   toFactor: number,
@@ -120,6 +137,23 @@ export function convertWeighAmount(
   }
   const converted = (amount * fromFactor) / toFactor;
   return Number.isFinite(converted) ? converted : null;
+}
+
+/**
+ * Convierte una cantidad entre factores, redondeada a
+ * `WEIGH_AMOUNT_DECIMALS`. Único responsable de la precisión del `weight`:
+ * lo usan el modal de peso (`principalAmount`) y la báscula
+ * (`scaleReadingToUnit`). `null` con factores malos.
+ */
+export function convertWeighAmount(
+  amount: number,
+  fromFactor: number,
+  toFactor: number,
+): number | null {
+  const converted = convertRaw(amount, fromFactor, toFactor);
+  if (converted == null) return null;
+  const rounded = roundWeighAmount(converted);
+  return Number.isFinite(rounded) ? rounded : null;
 }
 
 /** Cantidad expresada en la UoM principal (la del precio). */
@@ -154,7 +188,8 @@ export function stockUnitsForWeighAmount(
   fromFactor: number,
   stockFactor: number,
 ): number | null {
-  const converted = convertWeighAmount(amount, fromFactor, stockFactor);
+  // Sin el redondeo a 3 decimales: redondear dos veces movería un 0,4996.
+  const converted = convertRaw(amount, fromFactor, stockFactor);
   if (converted == null) return null;
   return Math.round(converted);
 }
