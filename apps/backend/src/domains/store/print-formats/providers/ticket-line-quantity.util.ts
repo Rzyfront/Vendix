@@ -14,6 +14,14 @@
  *    el código crudo ("2 unit") ensuciaría el tiquete.
  *
  * `undefined` = la línea se imprime como siempre (solo el número).
+ *
+ * DUPLICADA a propósito en el frontend
+ * (`apps/frontend/src/app/private/modules/store/orders/utils/order-line-quantity.util.ts`):
+ * cambiar la cascada aquí obliga a cambiarla allá, o el detalle de la orden
+ * y el papel dirán cosas distintas. No vive en `libs/shared-types` porque
+ * cada lado formatea con su locale y recibe tipos distintos (Prisma Decimal
+ * `unknown` aquí, `number | string` allá); unificarla pide su propio cambio
+ * con tests en ambos (PR #1062 ronda 3, H7).
  */
 export interface TicketLineQuantitySource {
   quantity?: unknown;

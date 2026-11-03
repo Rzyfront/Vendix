@@ -11,6 +11,11 @@
  *    UoMs de conteo: "2", nunca "2 unit").
  *
  * Sin unidad devuelve solo el número, como antes.
+ *
+ * DUPLICADA a propósito (PR #1062 ronda 3, H7): cambiar la cascada aquí
+ * obliga a cambiarla en el backend. No se movió a `libs/shared-types` por
+ * los tipos (Decimal vs number) y el formato por locale de cada lado; ver la
+ * nota del archivo del backend.
  */
 export interface OrderLineQuantitySource {
   quantity?: number | string | null;
