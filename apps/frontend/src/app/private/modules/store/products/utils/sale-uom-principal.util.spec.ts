@@ -3,6 +3,8 @@ import {
   priceScaleFor,
   rescalePrice,
   rescalePriceAnchored,
+  rescaleTierOverrides,
+  countRescalableTierOverrides,
 } from './sale-uom-principal.util';
 
 /**
@@ -110,5 +112,42 @@ describe('rescalePriceAnchored (PR #1062 ronda 4, punto 1)', () => {
     const g = rescalePriceAnchored(21008.4, 1000, 1, null);
     const lb = rescalePriceAnchored(g.value, 1, 500, g.anchor);
     expect(lb.value).toBe(10504.2);
+  });
+});
+
+describe('rescaleTierOverrides (PR #1062 ronda 5, H2)', () => {
+  const row = (
+    id: number,
+    kind: 'customer_tier' | 'sale_unit',
+    override_price: number | null,
+    enabled = true,
+  ) => ({ tier: { id, kind }, enabled, override_price });
+
+  it('Mayorista a $22.000/kg pasa a $22/g al cambiar la principal kg → g', () => {
+    const rows = [row(1, 'customer_tier', 22000)];
+    const out = rescaleTierOverrides(rows, 1000, 1, null);
+    expect(out.rows[0].override_price).toBe(22);
+    expect(out.changed).toBe(1);
+    // 300 g con Mayorista: $6.600, no $6.600.000.
+    expect(300 * out.rows[0].override_price!).toBe(6600);
+  });
+
+  it('kg → g → kg vuelve al precio original por el ancla de cada tarifa', () => {
+    const first = rescaleTierOverrides([row(1, 'customer_tier', 21008.4)], 1000, 1, null);
+    expect(first.rows[0].override_price).toBe(21.01);
+    const back = rescaleTierOverrides(first.rows, 1, 1000, first.anchors);
+    expect(back.rows[0].override_price).toBe(21008.4);
+  });
+
+  it('presentaciones, tarifas por porcentaje y deshabilitadas no se tocan', () => {
+    const rows = [
+      row(2, 'sale_unit', 60000),
+      row(3, 'customer_tier', null),
+      row(4, 'customer_tier', 22000, false),
+    ];
+    const out = rescaleTierOverrides(rows, 1000, 1, null);
+    expect(out.rows).toEqual(rows);
+    expect(out.changed).toBe(0);
+    expect(countRescalableTierOverrides(rows)).toBe(0);
   });
 });

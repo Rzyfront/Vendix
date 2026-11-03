@@ -111,6 +111,8 @@ import {
   PriceAnchor,
   rescalePrice,
   rescalePriceAnchored,
+  rescaleTierOverrides,
+  countRescalableTierOverrides,
 } from '../../utils/sale-uom-principal.util';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
@@ -814,7 +816,8 @@ export class ProductCreatePageComponent {
         title: 'Cambiar la unidad principal',
         message:
           `El precio se expresa en la unidad principal. ` +
-          `Antes: ${change.before}. Después: ${change.after}.`,
+          `Antes: ${change.before}. Después: ${change.after}.` +
+          this.tierRescaleNotice(),
         confirmText: 'Cambiar y convertir el precio',
         cancelText: 'Cancelar',
         confirmVariant: 'primary',
@@ -894,6 +897,16 @@ export class ProductCreatePageComponent {
         this.priceAnchors[field] = next.anchor;
         ctrl.setValue(next.value);
       }
+      // PR #1062 ronda 5 (H2): las tarifas de cliente con precio fijo van en
+      // la misma escala; sin esto Mayorista $22.000/kg quedaba por gramo.
+      const tiers = rescaleTierOverrides(
+        this.priceTierRows(),
+        from,
+        to,
+        this.tierPriceAnchors,
+      );
+      this.tierPriceAnchors = tiers.anchors;
+      if (tiers.changed > 0) this.priceTierRows.set(tiers.rows);
       const scaleCtrl = this.productForm?.get('price_unit_quantity');
       scaleCtrl?.setValue(to, { emitEvent: false });
       if (this.productForm) this.recalculateMarginFromBasePrice(this.productForm);
@@ -911,6 +924,18 @@ export class ProductCreatePageComponent {
     base_price: null,
     sale_price: null,
   };
+
+  /** Mismo ancla, por tarifa de cliente (`tier.id`), para `override_price`. */
+  private tierPriceAnchors = new Map<number, PriceAnchor>();
+
+  /** Aviso del diálogo de principal cuando hay tarifas de cliente con precio fijo. */
+  private tierRescaleNotice(): string {
+    const n = countRescalableTierOverrides(this.priceTierRows());
+    if (n === 0) return '';
+    return n === 1
+      ? ' También se convierte el precio fijo de 1 tarifa de cliente.'
+      : ` También se convierten los precios fijos de ${n} tarifas de cliente.`;
+  }
 
   /** "$25.000 por 1 kg" → "$25 por 1 g", o null si el precio no cambia. */
   private describePriceRescale(
@@ -997,7 +1022,10 @@ export class ProductCreatePageComponent {
   ): void {
     const allowed = new Set(this.saleUomOptions().map((u) => u.id));
     const kept = this.saleUomIds().filter((id) => allowed.has(id));
-    if (prev) this.priceAnchors = { base_price: null, sale_price: null };
+    if (prev) {
+      this.priceAnchors = { base_price: null, sale_price: null };
+      this.tierPriceAnchors = new Map();
+    }
     this.saleUomIds.set(kept);
     if (!prev) {
       this.applyDefaultPrincipal();
@@ -1042,6 +1070,16 @@ export class ProductCreatePageComponent {
         ctrl.setValue(rescalePrice(value, prev.factor, nextFactor));
       }
     }
+    // PR #1062 ronda 5 (H2): las tarifas de cliente con precio fijo siguen
+    // la misma conversión que el precio base.
+    const tiers = rescaleTierOverrides(
+      this.priceTierRows(),
+      prev.factor,
+      nextFactor,
+      null,
+    );
+    this.tierPriceAnchors = tiers.anchors;
+    if (tiers.changed > 0) this.priceTierRows.set(tiers.rows);
     if (this.productForm) this.recalculateMarginFromBasePrice(this.productForm);
     this.formUpdateTrigger.update((t) => t + 1);
     if (price > 0) {

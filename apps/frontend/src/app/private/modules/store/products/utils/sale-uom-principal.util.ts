@@ -83,3 +83,62 @@ export function rescalePriceAnchored(
     anchor: source,
   };
 }
+
+/** Lo mínimo de una fila de tarifa que el reescalado necesita leer. */
+export interface TierOverrideRescaleRow {
+  tier: { id: number; kind: string };
+  enabled: boolean;
+  override_price: number | null;
+}
+
+/**
+ * PR #1062 ronda 5 (H2) — los precios fijos de las tarifas de cliente
+ * (`customer_tier` habilitadas con `override_price`) están en la misma escala
+ * que `base_price`: al cambiar la principal se reescalan con el mismo ancla.
+ * Mayorista a $22.000/kg pasa a $22/g, no se queda en $22.000 por gramo. Las
+ * presentaciones (`sale_unit`, precio por empaque) y las tarifas por
+ * porcentaje (sin `override_price`) no se tocan.
+ */
+export function rescaleTierOverrides<T extends TierOverrideRescaleRow>(
+  rows: readonly T[],
+  fromScale: number,
+  toScale: number,
+  anchors: ReadonlyMap<number, PriceAnchor> | null,
+): { rows: T[]; anchors: Map<number, PriceAnchor>; changed: number } {
+  const nextAnchors = new Map(anchors ?? []);
+  let changed = 0;
+  const next = rows.map((row) => {
+    const price = Number(row.override_price);
+    if (
+      row.tier.kind !== 'customer_tier' ||
+      !row.enabled ||
+      row.override_price == null ||
+      !(price > 0)
+    ) {
+      return row;
+    }
+    const scaled = rescalePriceAnchored(
+      price,
+      fromScale,
+      toScale,
+      nextAnchors.get(row.tier.id) ?? null,
+    );
+    nextAnchors.set(row.tier.id, scaled.anchor);
+    if (scaled.value === price) return row;
+    changed++;
+    return { ...row, override_price: scaled.value };
+  });
+  return { rows: next, anchors: nextAnchors, changed };
+}
+
+/** Cuántas tarifas de cliente tienen un precio fijo que se reescalaría. */
+export function countRescalableTierOverrides(
+  rows: readonly TierOverrideRescaleRow[],
+): number {
+  return rows.filter(
+    (row) =>
+      row.tier.kind === 'customer_tier' &&
+      row.enabled &&
+      Number(row.override_price) > 0,
+  ).length;
+}
