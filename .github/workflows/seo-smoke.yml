@@ -1,0 +1,121 @@
+name: SEO smoke programado
+
+# Sondeo público de solo lectura de la web comercial y de una tienda de referencia.
+# En `report` no falla nunca: informa y sube el JSON. Pasar a `enforce`: ver scripts/seo/README.md.
+# Sin secretos ni credenciales. El repo es público: los logs y artefactos son legibles por terceros.
+
+on:
+  schedule:
+    # UTC, cada 6 h. Minuto 23 y no 00: GitHub retrasa los cron de la hora en punto.
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'report = solo informa; enforce = falla si hay FALLA'
+        required: false
+        type: choice
+        options: [report, enforce]
+        default: report
+
+permissions:
+  contents: read
+
+concurrency:
+  group: seo-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Smoke SEO (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: landing
+            url: https://vendix.online
+          - name: tienda
+            url: https://vendix-pit-and-grill-shop.vendix.online
+    env:
+      SEO_SMOKE_MODE: ${{ inputs.mode || vars.SEO_SMOKE_MODE || 'report' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Pruebas del smoke y de la auditoría de redirecciones
+        run: |
+          node scripts/seo/seo-smoke.test.cjs
+          node scripts/seo/redirects-audit.test.cjs
+
+      - name: Auditar registro de redirecciones
+        if: matrix.name == 'landing'
+        run: node scripts/seo/redirects-audit.cjs docs/seo/redirects-registry.csv
+
+      # La salida va a archivo y no a pantalla: solo se imprime tras la guardia de tokens.
+      - name: Smoke SEO
+        id: smoke
+        shell: bash
+        run: |
+          set +e
+          mkdir -p out
+          node scripts/seo/seo-smoke.cjs "${{ matrix.url }}" --json "out/seo-smoke-${{ matrix.name }}.json" > "out/seo-smoke-${{ matrix.name }}.txt" 2>&1
+          echo "rc=$?" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Guardia de tokens
+        id: guardia
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p out
+          patron='/(pedido|order|factura|preconsulta)/|[?&](token|access_token|refresh_token)=|eyJ[A-Za-z0-9_-]{10,}\.'
+          if grep -rlE "$patron" out/ > /dev/null; then
+            echo "::error::Se detectó una ruta o parámetro con token. Se eliminan los resultados."
+            rm -rf out; mkdir -p out
+            echo "REDACTADO por la guardia" > out/redactado.txt
+            echo "pii=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "pii=0" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Resultados
+        if: always() && steps.guardia.outputs.pii == '0'
+        shell: bash
+        run: |
+          f="out/seo-smoke-${{ matrix.name }}.txt"
+          [ -f "$f" ] && cat "$f"
+          {
+            echo "## SEO smoke: ${{ matrix.url }}"
+            echo ""
+            echo "Modo: \`$SEO_SMOKE_MODE\`"
+            echo '```'
+            grep -h '^FALLA' "$f" 2>/dev/null || echo "(ninguna)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Subir JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: seo-smoke-${{ matrix.name }}-${{ github.run_id }}
+          path: out/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Puerta
+        if: always()
+        shell: bash
+        env:
+          RC: ${{ steps.smoke.outputs.rc }}
+          PII: ${{ steps.guardia.outputs.pii }}
+        run: |
+          if [ "${PII:-1}" != "0" ]; then echo "::error::La guardia de tokens se activó o no se ejecutó."; exit 1; fi
+          # El script ya devuelve 0 en report; una ejecución sin resultado (rc vacío) cuenta como fallo.
+          if [ "${RC:-1}" != "0" ]; then echo "::error::Smoke con FALLA bloqueante (modo $SEO_SMOKE_MODE)."; exit 1; fi
+          echo "OK"
