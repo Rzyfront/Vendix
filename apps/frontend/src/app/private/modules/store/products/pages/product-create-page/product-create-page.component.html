@@ -1258,7 +1258,7 @@
                             label="Unidad principal"
                             helpText="El precio que escribes arriba se expresa en esta unidad. Cambiarla convierte el precio."
                             [options]="principalSaleUomOptions()"
-                            [value]="principalSaleUomId()"
+                            [value]="principalSelectorValue()"
                             (valueChange)="setPrincipalSaleUom($event)"
                             placeholder="Elige la principal"
                           ></app-selector>

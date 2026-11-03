@@ -3,6 +3,7 @@ import {
   Component,
   computed,
   effect,
+  linkedSignal,
   signal,
   inject,
   DestroyRef,
@@ -750,6 +751,13 @@ export class ProductCreatePageComponent {
    */
   readonly saleUomIds = signal<number[]>([]);
   readonly principalSaleUomId = signal<number | null>(null);
+  /**
+   * Valor que muestra el selector de principal. Sigue a `principalSaleUomId`
+   * pero se puede reenviar sin tocarla: al cancelar el cambio, el bloqueo de
+   * `price_unit_quantity` (que depende de la principal) no parpadea
+   * (PR #1062 ronda 4, punto 5).
+   */
+  readonly principalSelectorValue = linkedSignal(() => this.principalSaleUomId());
 
   /** Candidatas a UoM de venta: la dimensión del stock, ordenadas por factor. */
   readonly saleUomOptions = computed<UnitOfMeasure[]>(() => {
@@ -813,10 +821,13 @@ export class ProductCreatePageComponent {
       });
       if (!confirmed) {
         // El selector ya muestra la elegida en su estado interno: se le
-        // reenvía la principal vigente para que no quede mintiendo.
+        // reenvía la principal vigente para que no quede mintiendo. Un
+        // binding con el mismo valor no se re-emite, por eso el paso por
+        // null; va sobre el valor del selector y no sobre la principal, así
+        // la escala bloqueada no se suelta ni un ciclo.
         const kept = this.principalSaleUomId();
-        this.principalSaleUomId.set(null);
-        setTimeout(() => this.principalSaleUomId.set(kept));
+        this.principalSelectorValue.set(null);
+        setTimeout(() => this.principalSelectorValue.set(kept));
         return;
       }
     }
