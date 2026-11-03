@@ -68,6 +68,13 @@ export class PosScaleService implements OnDestroy {
   private readonly _stable = signal<boolean>(false);
 
   readonly weight = this._weight.asReadonly();
+  /**
+   * Unidad en la que la báscula EMITE (`pos.scale.default_weight_unit`).
+   * La lectura llega en esta unidad, no en la principal del producto
+   * (PR #1062, error 2): el llamador la convierte antes de usarla.
+   */
+  private readonly _readingUnit = signal<string>('kg');
+  readonly readingUnit = this._readingUnit.asReadonly();
   readonly status = this._status.asReadonly();
   readonly stable = this._stable.asReadonly();
 
@@ -84,6 +91,10 @@ export class PosScaleService implements OnDestroy {
 
   isWebSerialSupported(): boolean {
     return 'serial' in navigator;
+  }
+
+  setReadingUnit(code: string | null | undefined): void {
+    this._readingUnit.set(code || 'kg');
   }
 
   configure(config: Partial<ScaleDeviceConfig>): void {

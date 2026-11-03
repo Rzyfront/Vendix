@@ -2012,13 +2012,20 @@ private stationBookingService = inject(PosStationBookingService);
     let newUnit = unit;
 
     if (item.captured_by_scale && this.scaleService.isConnected()) {
-      const amount = await this.scaleService.showWeightModal({
+      // La báscula emite en SU unidad (PR #1062, error 2).
+      const scaleUnit = this.scaleService.readingUnit();
+      const reading = await this.scaleService.showWeightModal({
         title: 'Volver a pesar',
         message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
-        weightUnit: unit,
+        weightUnit: scaleUnit,
         allowManualFallback: true,
       });
-      if (amount === undefined) return;
+      if (reading === undefined) return;
+      const amount = await this.saleUnitService.convertScaleReading(
+        reading,
+        scaleUnit,
+        unit,
+      );
       if (!(amount > 0)) {
         this.toastService.warning('La cantidad debe ser mayor a 0');
         return;
@@ -2526,13 +2533,19 @@ private stationBookingService = inject(PosStationBookingService);
     let newUnit = item.weight_unit || 'kg';
 
     if (this.scaleService.isConnected()) {
+      // La báscula emite en SU unidad (PR #1062, error 2).
+      const scaleUnit = this.scaleService.readingUnit();
       const scaleWeight = await this.scaleService.showWeightModal({
         title: 'Editar Peso',
         message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${principal.code}`,
-        weightUnit: principal.code,
+        weightUnit: scaleUnit,
         allowManualFallback: true });
       if (scaleWeight === undefined) return;
-      newWeight = scaleWeight;
+      newWeight = await this.saleUnitService.convertScaleReading(
+        scaleWeight,
+        scaleUnit,
+        principal.code,
+      );
       newUnit = principal.code;
     } else {
       const captured = await this.scaleService.showManualWeightModal({

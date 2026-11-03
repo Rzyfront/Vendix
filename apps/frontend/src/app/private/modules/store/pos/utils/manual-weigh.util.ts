@@ -101,3 +101,38 @@ export function formatWeighAmount(value: number): string {
   if (!Number.isFinite(value)) return '';
   return value.toLocaleString('es-CO', { maximumFractionDigits: 3 });
 }
+
+/** Unidad del catálogo con el factor a la base de su dimensión. */
+export interface CatalogWeighUnit {
+  code: string;
+  dimension: string;
+  factorToBase: number;
+}
+
+/**
+ * PR #1062 error 2 — la báscula emite en SU unidad configurada
+ * (`pos.scale.default_weight_unit`), no en la principal del producto. Con
+ * principal en lb (500 g) y báscula en kg, 0,5 kg leídos como 0,5 lb se
+ * cobraban como 250 g. Convierte la lectura a `targetCode` con el catálogo;
+ * misma unidad, códigos desconocidos o dimensiones distintas devuelven la
+ * lectura sin tocar (no se inventa una equivalencia).
+ */
+export function scaleReadingToUnit(
+  reading: number,
+  scaleUnitCode: string | null | undefined,
+  targetCode: string | null | undefined,
+  catalog: CatalogWeighUnit[],
+): number {
+  const from = String(scaleUnitCode ?? '').trim().toLowerCase();
+  const to = String(targetCode ?? '').trim().toLowerCase();
+  if (!from || !to || from === to) return reading;
+  const fromUnit = catalog.find((u) => u.code.toLowerCase() === from);
+  const toUnit = catalog.find((u) => u.code.toLowerCase() === to);
+  if (!fromUnit || !toUnit || fromUnit.dimension !== toUnit.dimension) {
+    return reading;
+  }
+  return (
+    convertWeighAmount(reading, fromUnit.factorToBase, toUnit.factorToBase) ??
+    reading
+  );
+}

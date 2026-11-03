@@ -13,7 +13,7 @@ import {
 } from '../../../../../shared/services/pricing/sale-config-explainer.util';
 import { PosProductService, Product } from './pos-product.service';
 import { resolvePriceUnitQuantity } from '../utils/line-units.util';
-import { ManualWeighUnit } from '../utils/manual-weigh.util';
+import { ManualWeighUnit, scaleReadingToUnit } from '../utils/manual-weigh.util';
 
 /**
  * Cómo se mide y cómo se captura un producto en el POS — QUI-648.
@@ -329,6 +329,32 @@ export class PosSaleUnitService {
       factorToBase: u.factorToBase / stockFactor,
       isPrincipal: u.isPrincipal,
     }));
+  }
+
+  /**
+   * PR #1062 error 2 — lectura de báscula (en `scaleUnitCode`, la unidad
+   * configurada del equipo) expresada en `targetCode` (principal o unidad de
+   * la línea). Sin catálogo o sin equivalencia, la lectura queda intacta.
+   */
+  async convertScaleReading(
+    reading: number,
+    scaleUnitCode: string,
+    targetCode: string,
+  ): Promise<number> {
+    if (scaleUnitCode.toLowerCase() === String(targetCode).toLowerCase()) {
+      return reading;
+    }
+    const catalog = await this.ensureCatalog();
+    return scaleReadingToUnit(
+      reading,
+      scaleUnitCode,
+      targetCode,
+      catalog.map((u) => ({
+        code: u.code,
+        dimension: String(u.dimension),
+        factorToBase: Number(u.factor_to_base) || 0,
+      })),
+    );
   }
 
   /**

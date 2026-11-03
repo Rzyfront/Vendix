@@ -5,6 +5,7 @@ import {
   ManualWeighUnit,
   parseWeighAmount,
   principalWeighAmount,
+  scaleReadingToUnit,
   stockUnitsForWeighAmount,
   weighTotal,
 } from './manual-weigh.util';
@@ -93,5 +94,29 @@ describe('manual-weigh.util (QUI-978)', () => {
       expect(formatWeighAmount(300)).toBe('300');
       expect(formatWeighAmount(2.3456)).toBe('2,346');
     });
+  });
+});
+
+describe('scaleReadingToUnit (PR #1062 error 2)', () => {
+  const catalog = [
+    { code: 'g', dimension: 'mass', factorToBase: 1 },
+    { code: 'kg', dimension: 'mass', factorToBase: 1000 },
+    { code: 'lb', dimension: 'mass', factorToBase: 500 },
+    { code: 'm', dimension: 'length', factorToBase: 1000 },
+  ];
+
+  it('báscula en kg y principal lb: 0,5 kg son 1 lb (500 g), no 0,5 lb', () => {
+    expect(scaleReadingToUnit(0.5, 'kg', 'lb', catalog)).toBeCloseTo(1, 10);
+  });
+
+  it('báscula en g y principal kg: 300 g son 0,3 kg', () => {
+    expect(scaleReadingToUnit(300, 'g', 'kg', catalog)).toBeCloseTo(0.3, 10);
+  });
+
+  it('misma unidad, desconocida o de otra dimensión: lectura intacta', () => {
+    expect(scaleReadingToUnit(0.5, 'kg', 'KG', catalog)).toBe(0.5);
+    expect(scaleReadingToUnit(0.5, 'kg', 'oz', catalog)).toBe(0.5);
+    expect(scaleReadingToUnit(0.5, 'kg', 'm', catalog)).toBe(0.5);
+    expect(scaleReadingToUnit(0.5, null, 'lb', catalog)).toBe(0.5);
   });
 });

@@ -2953,19 +2953,28 @@ export class PosProductSelectionComponent {
     const priceMessage = `${opts.product.name}\nPrecio: ${this.formatPrice(pricePerStockUnit * principal.factorToBase)}/${principal.code}`;
 
     if (opts.allowScale !== false && this.scaleService.isConnected()) {
-      const amount = await this.scaleService.showWeightModal({
+      // La báscula emite en SU unidad configurada (PR #1062, error 2): la
+      // lectura se convierte a la principal antes de cobrar y descontar.
+      const scaleUnit = this.scaleService.readingUnit();
+      const reading = await this.scaleService.showWeightModal({
         title: 'Lectura de Báscula',
         message: priceMessage,
-        weightUnit: principal.code,
+        weightUnit: scaleUnit,
         allowManualFallback: this.allowManualWeightEntry(),
       });
-      if (amount === undefined) return undefined;
+      if (reading === undefined) return undefined;
+      const amount = await this.saleUnitService.convertScaleReading(
+        reading,
+        scaleUnit,
+        principal.code,
+      );
       return {
         amount,
         unitCode: principal.code,
         principalAmount: amount,
         principalCode: principal.code,
         stockQuantity: Math.max(0, Math.round(amount * principal.factorToBase)),
+        unitFactor: principal.factorToBase,
       };
     }
 
@@ -3172,6 +3181,9 @@ export class PosProductSelectionComponent {
           this.scaleEnabled.set(storeSettings.pos.scale.enabled ?? false);
           this.defaultWeightUnit.set(
             storeSettings.pos.scale.default_weight_unit || 'kg',
+          );
+          this.scaleService.setReadingUnit(
+            storeSettings.pos.scale.default_weight_unit,
           );
           this.allowManualWeightEntry.set(
             storeSettings.pos.scale.allow_manual_weight_entry ?? true,
