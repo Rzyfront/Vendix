@@ -1641,6 +1641,9 @@
             <li><a routerLink="/legal/privacidad" class="hover:text-emerald-300 transition-colors">Política de Privacidad</a></li>
             <li><a routerLink="/legal/terminos" class="hover:text-emerald-300 transition-colors">Términos de Servicio</a></li>
             <li><a routerLink="/legal/cookies" class="hover:text-emerald-300 transition-colors">Política de Cookies</a></li>
+            @if (commercialConsent.available()) {
+              <li><button type="button" (click)="commercialConsent.openPreferences()" class="hover:text-emerald-300 transition-colors">Preferencias de cookies</button></li>
+            }
             <li><button (click)="openWhatsApp()" class="hover:text-emerald-300 transition-colors">WhatsApp Soporte</button></li>
           </ul>
         </div>
@@ -1691,6 +1694,11 @@
       </div>
     </div>
   </footer>
+
+  <!-- Aviso de cookies (SEO-TECH-06): solo en la portada comercial y hasta que el visitante elige. -->
+  @if (commercialConsent.bannerVisible()) {
+    <app-commercial-consent-banner />
+  }
 
   <!-- MODAL: DEMO EN VIDEO -->
   @if (showDemoModal()) {
