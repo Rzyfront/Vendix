@@ -2635,6 +2635,66 @@ describe('ProductsService', () => {
       expect(mockPrismaService.products.update).not.toHaveBeenCalled();
     });
 
+    describe('PR #1062 error 1 — la unidad principal fija price_unit_quantity', () => {
+      const gram = { id: 1, code: 'g', dimension: 'mass', factor_to_base: 1, is_active: true, is_stock_eligible: true };
+      const kilo = { id: 2, code: 'kg', dimension: 'mass', factor_to_base: 1000, is_active: true, is_stock_eligible: true };
+
+      it('stock g + principal kg + escala 1 en el payload ⇒ persiste 1000', async () => {
+        // $7.500/kg con escala 1 cobraba $7.500 POR GRAMO (300 g = $2.250.000).
+        primeUpdatePath();
+        mockPrismaService.units_of_measure.findFirst.mockResolvedValueOnce(gram);
+        mockPrismaService.units_of_measure.findMany.mockResolvedValueOnce([gram, kilo]);
+
+        await service.update(existingProduct.id, {
+          stock_uom_id: 1,
+          price_unit_quantity: 1,
+          sale_uoms: [{ uom_id: 1 }, { uom_id: 2, is_principal: true }],
+        } as UpdateProductDto);
+
+        expect(mockPrismaService.products.update).toHaveBeenCalledWith({
+          where: { id: existingProduct.id },
+          data: expect.objectContaining({ price_unit_quantity: 1000 }),
+        });
+      });
+
+      it('solo price_unit_quantity (edición masiva) respeta la principal persistida', async () => {
+        primeUpdatePath();
+        mockPrismaService.products.findFirst.mockReset();
+        mockPrismaService.products.findFirst.mockResolvedValueOnce({
+          ...existingProduct,
+          stock_uom_id: 1,
+        });
+        mockPrismaService.product_sale_uoms.findMany.mockResolvedValueOnce([
+          { uom_id: 2, is_principal: true },
+        ]);
+        mockPrismaService.units_of_measure.findMany.mockResolvedValueOnce([gram, kilo]);
+
+        await service.update(existingProduct.id, {
+          price_unit_quantity: 1,
+        } as UpdateProductDto);
+
+        expect(mockPrismaService.products.update).toHaveBeenCalledWith({
+          where: { id: existingProduct.id },
+          data: expect.objectContaining({ price_unit_quantity: 1000 }),
+        });
+      });
+
+      it('una principal que no es un entero de stock se rechaza', async () => {
+        primeUpdatePath();
+        const ounce = { id: 3, code: 'oz', dimension: 'mass', factor_to_base: 28.349523, is_active: true };
+        mockPrismaService.units_of_measure.findFirst.mockResolvedValueOnce(gram);
+        mockPrismaService.units_of_measure.findMany.mockResolvedValueOnce([gram, ounce]);
+
+        await expect(
+          service.update(existingProduct.id, {
+            stock_uom_id: 1,
+            sale_uoms: [{ uom_id: 3, is_principal: true }],
+          } as UpdateProductDto),
+        ).rejects.toThrow(/debe equivaler a un número entero de g/);
+        expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+      });
+    });
+
     it('persiste las neutralizaciones del sanitizer de insumo puro', async () => {
       primeUpdatePath();
 

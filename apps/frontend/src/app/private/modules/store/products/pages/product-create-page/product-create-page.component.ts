@@ -796,6 +796,25 @@ export class ProductCreatePageComponent {
     this.principalSaleUomId.set(num);
   }
 
+  /**
+   * PR #1062 error 1 — escala de precio que impone la principal
+   * (`principal.factor / stock.factor`). El precio se expresa en la
+   * principal: con stock en g y principal kg la escala es 1000, nunca el 1
+   * por defecto (que cobraba el precio del kilo por cada gramo). `null` sin
+   * principal o si no es un entero de stock (el backend la rechaza).
+   */
+  readonly principalPriceScale = computed<number | null>(() => {
+    const stock = this.selectedStockUom();
+    const principalId = this.principalSaleUomId();
+    if (!stock || principalId == null) return null;
+    const principal = this.uomOptions().find((u) => u.id === principalId);
+    if (!principal) return null;
+    const ratio =
+      Number(principal.factor_to_base) / Number(stock.factor_to_base);
+    const scale = Math.round(ratio);
+    return scale >= 1 && Math.abs(ratio - scale) <= 1e-6 ? scale : null;
+  });
+
   /** "1 kg = 1000 g": equivalencia de una candidata contra el stock. */
   saleUomHint(u: UnitOfMeasure): string {
     const stock = this.selectedStockUom();
@@ -1822,6 +1841,24 @@ export class ProductCreatePageComponent {
   }
 
   constructor() {
+    // PR #1062 error 1 — con unidad principal, la escala del precio no es
+    // libre: el selector "El precio de venta es" la refleja y queda bloqueado
+    // (el backend impone el mismo valor al guardar). Sin principal vuelve a
+    // ser editable.
+    effect(() => {
+      const scale = this.principalPriceScale();
+      untracked(() => {
+        const ctrl = this.productForm?.get('price_unit_quantity');
+        if (!ctrl) return;
+        if (scale == null) {
+          if (ctrl.disabled) ctrl.enable({ emitEvent: false });
+          return;
+        }
+        if (Number(ctrl.value) !== scale) ctrl.setValue(scale);
+        if (ctrl.enabled) ctrl.disable({ emitEvent: false });
+        this.formUpdateTrigger.update((t) => t + 1);
+      });
+    });
     // Deep-link desde otros módulos: si llegan queryParams (ej. ?is_combo=true&product_type=prepared)
     // los aplicamos al form. Usamos toSignal(queryParamMap) para que sea reactivo.
     const queryParamsSignal = toSignal(this.route.queryParamMap, {

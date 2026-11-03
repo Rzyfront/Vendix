@@ -532,12 +532,20 @@ export class ProductsService {
    *   y vender fracciones de su unidad sería vender aire a veces sí y a
    *   veces no. El stock va en la unidad mínima (g, ml, mm).
    * - Sin duplicados y con EXACTAMENTE una principal.
+   * - La principal debe equivaler a un número ENTERO de unidades de stock.
+   *
+   * Devuelve la escala de precio que la principal impone
+   * (`principal.factor_to_base / stock.factor_to_base`): el precio se
+   * expresa en la principal, así que `price_unit_quantity` no es libre
+   * cuando hay UoMs de venta (PR #1062, error 1: stock en g + principal kg +
+   * escala 1 cobraba el precio del kilo por cada gramo). `null` = sin filas,
+   * la escala la decide el payload.
    */
   private async assertSaleUomsValid(
     sale_uoms: SaleUomRow[] | null | undefined,
     stock_uom_id: number | null | undefined,
-  ): Promise<void> {
-    if (!sale_uoms || sale_uoms.length === 0) return;
+  ): Promise<number | null> {
+    if (!sale_uoms || sale_uoms.length === 0) return null;
 
     if (stock_uom_id === undefined || stock_uom_id === null) {
       throw new VendixHttpException(
@@ -602,6 +610,19 @@ export class ProductsService {
         );
       }
     }
+
+    const principalUom = uoms.find((u) => u.id === principals[0].uom_id)!;
+    const ratio =
+      Number(principalUom.factor_to_base) / Number(stockUom.factor_to_base);
+    const scale = Math.round(ratio);
+    if (!(scale >= 1) || Math.abs(ratio - scale) > 1e-6) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
+        `La unidad principal (${principalUom.code}) debe equivaler a un número entero de ${stockUom.code}: el precio se expresa en ella`,
+        { uom_id: principalUom.id, stock_uom_id },
+      );
+    }
+    return scale;
   }
 
   async generateDescription(dto: GenerateProductDescriptionDto) {
@@ -1347,7 +1368,14 @@ export class ProductsService {
       );
 
       // QUI-978 — UoMs de venta contra catálogo y dimensión del stock.
-      await this.assertSaleUomsValid(sale_uoms, sanitizedDto.stock_uom_id);
+      // La principal fija la escala del precio (PR #1062, error 1).
+      const principalScale = await this.assertSaleUomsValid(
+        sale_uoms,
+        sanitizedDto.stock_uom_id,
+      );
+      if (principalScale !== null) {
+        productData.price_unit_quantity = principalScale;
+      }
 
       const result = await this.prisma.$transaction(
         async (prisma) => {
@@ -4541,22 +4569,35 @@ export class ProductsService {
 
       // QUI-978 — UoMs de venta contra la unidad de stock efectiva (PATCH:
       // DTO con fallback al producto existente).
-      await this.assertSaleUomsValid(sale_uoms, effectiveStockUomId);
+      let principalScale = await this.assertSaleUomsValid(
+        sale_uoms,
+        effectiveStockUomId,
+      );
 
       // QUI-978 — cambiar (o quitar) la unidad de stock sin reenviar
       // `sale_uoms` no puede dejar unidades de venta que la nueva unidad ya no
       // admite (otra dimensión, o menores que el stock: "g" con stock en kg).
       // Se revalidan las persistidas; si no encajan, 400 pidiendo enviarlas.
+      // Lo mismo si solo llega `price_unit_quantity` (edición masiva): la
+      // principal persistida sigue mandando sobre la escala.
       if (
         sale_uoms === undefined &&
-        sanitizedDto.stock_uom_id !== undefined &&
-        sanitizedDto.stock_uom_id !== existingProduct.stock_uom_id
+        ((sanitizedDto.stock_uom_id !== undefined &&
+          sanitizedDto.stock_uom_id !== existingProduct.stock_uom_id) ||
+          sanitizedDto.price_unit_quantity !== undefined)
       ) {
         const persistedSaleUoms = await this.prisma.product_sale_uoms.findMany({
           where: { product_id: id },
           select: { uom_id: true, is_principal: true },
         });
-        await this.assertSaleUomsValid(persistedSaleUoms, effectiveStockUomId);
+        principalScale = await this.assertSaleUomsValid(
+          persistedSaleUoms,
+          effectiveStockUomId,
+        );
+      }
+      // La principal fija la escala del precio (PR #1062, error 1).
+      if (principalScale !== null) {
+        productData.price_unit_quantity = principalScale;
       }
 
       // Cambiar la unidad de stock de un producto que YA opera no es renombrar

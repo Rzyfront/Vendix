@@ -1211,8 +1211,10 @@
                           formControlName="price_unit_quantity"
                           label="El precio de venta es"
                           [helpText]="
-                            'El precio que escribes arriba cubre esta cantidad de ' +
-                            stockUom.code + '.'
+                            principalPriceScale() != null
+                              ? 'Lo fija la unidad principal de venta.'
+                              : 'El precio que escribes arriba cubre esta cantidad de ' +
+                                stockUom.code + '.'
                           "
                           [options]="priceScaleOptions()"
                           placeholder="Por unidad"
