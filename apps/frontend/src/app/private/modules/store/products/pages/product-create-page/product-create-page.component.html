@@ -1256,7 +1256,7 @@
                         @if (saleUomIds().length > 0) {
                           <app-selector
                             label="Unidad principal"
-                            helpText="El precio que escribes arriba se expresa en esta unidad."
+                            helpText="El precio que escribes arriba se expresa en esta unidad. Cambiarla convierte el precio."
                             [options]="principalSaleUomOptions()"
                             [value]="principalSaleUomId()"
                             (valueChange)="setPrincipalSaleUom($event)"
