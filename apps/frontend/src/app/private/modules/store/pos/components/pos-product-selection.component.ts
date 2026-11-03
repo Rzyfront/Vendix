@@ -59,6 +59,7 @@ import { ManualWeighResult } from './pos-manual-weight-modal.component';
 import {
   capturesInSaleUnit,
   MAX_WEIGH_AMOUNT,
+  weighMaxFor,
 } from '../utils/manual-weigh.util';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
@@ -2818,10 +2819,11 @@ export class PosProductSelectionComponent {
     // PR #1062 ronda 5 (H1) — el tope se mide en la principal, igual que el
     // pesado legado y el modal (`exceedsWeighMax`): 1.500 g con principal kg
     // son 1,5 kg y pasan. Este chequeo solo cubre la lectura de báscula, que
-    // no pasa por el modal.
-    if (captured.principalAmount > MAX_WEIGH_AMOUNT) {
+    // no pasa por el modal. Solo en masa (ronda 6, R1): 1.200 m de cable pasan.
+    const maxAmount = weighMaxFor(saleUnit.stockUnit?.dimension);
+    if (maxAmount != null && captured.principalAmount > maxAmount) {
       this.toastService.warning(
-        `La cantidad máxima permitida es ${MAX_WEIGH_AMOUNT} ${captured.principalCode}`,
+        `La cantidad máxima permitida es ${maxAmount} ${captured.principalCode}`,
       );
       return null;
     }
@@ -3025,6 +3027,10 @@ export class PosProductSelectionComponent {
           : (opts.saleUnit?.stockUnit?.code ?? ''),
         confirmText: opts.confirmText,
         enforceStockQuantity: !opts.weighOnly,
+        // El peso legado siempre es masa; el resto, según su unidad de stock.
+        maxAmount: opts.weighOnly
+          ? MAX_WEIGH_AMOUNT
+          : weighMaxFor(opts.saleUnit?.stockUnit?.dimension),
       });
       if (!result) return undefined;
       // Factor exacto de la unidad elegida (unidades de stock por unidad),

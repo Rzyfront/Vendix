@@ -41,6 +41,7 @@ import {
   isSaleUnitLine as isLineCapturedInSaleUnit,
   WeighedAs,
 } from '../utils/line-units.util';
+import { weighMaxFor } from '../utils/manual-weigh.util';
 
 @Component({
   selector: 'app-pos-cart-modal',
@@ -2404,6 +2405,10 @@ export class PosCartModalComponent {
         initialAmount: String(current),
         initialUnitCode: unit,
         confirmText: 'Actualizar',
+        // Tope de 999 solo en masa (PR #1062 ronda 6, R1).
+        maxAmount: weighMaxFor(
+          this.saleUnitService.configFor(item.product)?.stockUnit?.dimension,
+        ),
       });
       if (!captured) return;
       quantity = captured.stockQuantity;

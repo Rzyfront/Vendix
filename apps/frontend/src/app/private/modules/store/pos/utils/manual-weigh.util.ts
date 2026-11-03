@@ -23,6 +23,17 @@ export interface ManualWeighUnit {
 export const MAX_WEIGH_AMOUNT = 999;
 
 /**
+ * PR #1062 ronda 6 (R1) — el tope de 999 es una regla de PESO: solo aplica a
+ * la dimensión masa. Metros, litros y demás medidas no tenían tope antes del
+ * PR y no lo tienen ahora (1.200 m de cable se venden). `null` = sin tope.
+ */
+export function weighMaxFor(
+  dimension: string | null | undefined,
+): number | null {
+  return dimension === 'mass' ? MAX_WEIGH_AMOUNT : null;
+}
+
+/**
  * PR #1062 ronda 4 (punto 3) — `true` si lo digitado en `from` supera el tope
  * expresado en la principal. Ambos lados se llevan a la unidad mínima
  * (`amount × factor`) para no depender del chip elegido.

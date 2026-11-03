@@ -231,7 +231,8 @@ export class PosManualWeightModalComponent {
   /** Unidad inicial (edición). Si no está en `units`, manda la principal. */
   readonly initialUnitCode = input<string>('');
   readonly confirmText = input<string>('Agregar');
-  readonly maxAmount = input<number>(MAX_WEIGH_AMOUNT);
+  /** Tope en la principal; `null` = sin tope (medidas que no son masa). */
+  readonly maxAmount = input<number | null>(MAX_WEIGH_AMOUNT);
   /**
    * Exigir que la captura descuente al menos 1 unidad de stock. El flujo de
    * peso legado (sin stock) lo apaga: ahí no hay conversión a stock.
@@ -330,8 +331,9 @@ export class PosManualWeightModalComponent {
     const amount = this.parsed();
     const from = this.activeUnit();
     const principal = this.principalUnit();
-    if (amount == null || !from || !principal) return false;
-    return exceedsWeighMax(amount, from, principal, this.maxAmount());
+    const max = this.maxAmount();
+    if (amount == null || !from || !principal || max == null) return false;
+    return exceedsWeighMax(amount, from, principal, max);
   });
 
   readonly canConfirm = computed<boolean>(() => {

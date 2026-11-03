@@ -81,3 +81,40 @@ describe('PosManualWeightModalComponent — campo de cantidad', () => {
     expect(document.body.textContent).toContain('El máximo es 999 kg');
   });
 });
+
+/**
+ * PR #1062 ronda 6 (R1) — el tope de 999 es de peso: un producto medido en
+ * metros acepta 1.200 m.
+ */
+describe('PosManualWeightModalComponent — medida que no es masa', () => {
+  afterEach(() => {
+    document.body
+      .querySelectorAll('#manual-weigh-amount')
+      .forEach((el) => el.closest('app-pos-manual-weight-modal')?.remove());
+  });
+
+  it('sin tope (maxAmount null) deja confirmar 1.200 m', async () => {
+    TestBed.configureTestingModule({
+      imports: [PosManualWeightModalComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: CurrencyFormatService, useValue: { format: (v: number) => String(v) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(PosManualWeightModalComponent);
+    fixture.componentRef.setInput('units', [
+      { code: 'm', name: 'Metro', factorToBase: 1000, isPrincipal: true },
+    ]);
+    fixture.componentRef.setInput('maxAmount', null);
+    await fixture.whenStable();
+    const input = document.body.querySelector(
+      '#manual-weigh-amount',
+    ) as HTMLInputElement;
+    input.value = '1200';
+    input.dispatchEvent(new Event('input'));
+    await fixture.whenStable();
+    expect(fixture.componentInstance.overMax()).toBeFalse();
+    expect(fixture.componentInstance.canConfirm()).toBeTrue();
+    expect(document.body.textContent).not.toContain('El máximo es');
+  });
+});

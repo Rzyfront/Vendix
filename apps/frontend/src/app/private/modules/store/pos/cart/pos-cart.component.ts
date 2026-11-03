@@ -46,6 +46,7 @@ import {
   isSaleUnitLine as isLineCapturedInSaleUnit,
   WeighedAs,
 } from '../utils/line-units.util';
+import { weighMaxFor } from '../utils/manual-weigh.util';
 import {
   EMPTY_CART_MESSAGE,
   EMPTY_CART_INLINE_TITLE,
@@ -2053,6 +2054,10 @@ private stationBookingService = inject(PosStationBookingService);
         initialAmount: String(current),
         initialUnitCode: unit,
         confirmText: 'Actualizar',
+        // Tope de 999 solo en masa (PR #1062 ronda 6, R1).
+        maxAmount: weighMaxFor(
+          this.saleUnitService.configFor(item.product)?.stockUnit?.dimension,
+        ),
       });
       if (!captured) return;
       // El modal ya convirtió con factores exactos (el backend cobra sobre

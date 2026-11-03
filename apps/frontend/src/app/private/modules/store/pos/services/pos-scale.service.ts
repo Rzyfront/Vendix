@@ -47,6 +47,8 @@ export interface ManualWeightData {
   confirmText?: string;
   /** Apagar la exigencia de stock (flujo de peso legado). */
   enforceStockQuantity?: boolean;
+  /** Tope en la principal (999 en masa); `null` = sin tope. Omitido = 999. */
+  maxAmount?: number | null;
 }
 
 const DEFAULT_CONFIG: ScaleDeviceConfig = {
@@ -265,6 +267,9 @@ export class PosScaleService implements OnDestroy {
       }
       if (data.confirmText !== undefined) {
         componentRef.setInput('confirmText', data.confirmText);
+      }
+      if (data.maxAmount !== undefined) {
+        componentRef.setInput('maxAmount', data.maxAmount);
       }
 
       const destroy = () => {

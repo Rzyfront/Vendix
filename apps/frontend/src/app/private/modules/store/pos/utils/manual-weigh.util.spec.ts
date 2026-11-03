@@ -9,7 +9,9 @@ import {
   principalWeighAmount,
   scaleReadingToUnit,
   stockUnitsForWeighAmount,
+  weighMaxFor,
   weighTotal,
+  MAX_WEIGH_AMOUNT,
 } from './manual-weigh.util';
 
 const G: ManualWeighUnit = {
@@ -158,5 +160,17 @@ describe('capturesInSaleUnit (PR #1062 ronda 5, H3)', () => {
 
   it('sin unidad de stock nunca abre la captura medida', () => {
     expect(capturesInSaleUnit(false, 1, 3)).toBeFalse();
+  });
+});
+
+describe('weighMaxFor (PR #1062 ronda 6, R1)', () => {
+  it('en masa el tope es 999 de la principal', () => {
+    expect(weighMaxFor('mass')).toBe(MAX_WEIGH_AMOUNT);
+  });
+
+  it('metros, litros o sin unidad no tienen tope: 1.200 m de cable se venden', () => {
+    expect(weighMaxFor('length')).toBeNull();
+    expect(weighMaxFor('volume')).toBeNull();
+    expect(weighMaxFor(null)).toBeNull();
   });
 });
