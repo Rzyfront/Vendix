@@ -105,7 +105,7 @@ export interface ManualWeighResult {
           @if (amountText().trim() !== '' && parsed() == null) {
             <p class="text-xs text-error mt-1 flex items-center gap-1">
               <app-icon name="alert-triangle" [size]="12"></app-icon>
-              Escribe un peso mayor a 0.
+              Escribe una cantidad mayor a 0.
             </p>
           } @else if (overMax()) {
             <p class="text-xs text-error mt-1 flex items-center gap-1">

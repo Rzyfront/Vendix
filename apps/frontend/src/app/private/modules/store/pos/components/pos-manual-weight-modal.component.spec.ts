@@ -117,4 +117,27 @@ describe('PosManualWeightModalComponent — medida que no es masa', () => {
     expect(fixture.componentInstance.canConfirm()).toBeTrue();
     expect(document.body.textContent).not.toContain('El máximo es');
   });
+
+  it('una cantidad inválida pide "cantidad", no "peso" (ronda 6, Q1)', async () => {
+    TestBed.configureTestingModule({
+      imports: [PosManualWeightModalComponent],
+      providers: [
+        provideZonelessChangeDetection(),
+        { provide: CurrencyFormatService, useValue: { format: (v: number) => String(v) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(PosManualWeightModalComponent);
+    fixture.componentRef.setInput('units', [
+      { code: 'm', name: 'Metro', factorToBase: 1000, isPrincipal: true },
+    ]);
+    await fixture.whenStable();
+    const input = document.body.querySelector(
+      '#manual-weigh-amount',
+    ) as HTMLInputElement;
+    input.value = '0';
+    input.dispatchEvent(new Event('input'));
+    await fixture.whenStable();
+    expect(document.body.textContent).toContain('Escribe una cantidad mayor a 0.');
+    expect(document.body.textContent).not.toContain('Escribe un peso');
+  });
 });
