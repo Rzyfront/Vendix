@@ -11,6 +11,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import type { PopCartItem } from '../interfaces/pop-cart.interface';
+import { UomService } from '../../services/uom.service';
 
 describe('PopCartComponent — QUI-855 correcciones de auditoría', () => {
   let component: PopCartComponent;
@@ -24,6 +25,8 @@ describe('PopCartComponent — QUI-855 correcciones de auditoría', () => {
         { provide: AuthFacade, useValue: { activeFiscalAreas: () => [] } },
         { provide: ToastService, useValue: { success: () => undefined, error: () => undefined } },
         { provide: DialogService, useValue: {} },
+        // QUI-978 — el sufijo de UoM de compra lee el catálogo de UoMs.
+        { provide: UomService, useValue: { getCatalog: () => of({ data: [] }) } },
         { provide: CurrencyFormatService, useValue: { loadCurrency: () => Promise.resolve(null), format: (n: number) => String(n) } },
         {
           provide: StoreSettingsFacade,

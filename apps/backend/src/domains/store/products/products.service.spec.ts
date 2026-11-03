@@ -147,6 +147,12 @@ describe('ProductsService', () => {
       createMany: jest.fn(),
       deleteMany: jest.fn(),
     },
+    // QUI-978 — syncProductSaleUoms corre dentro del $transaction de
+    // create/update (también para neutralizar insumos puros).
+    product_sale_uoms: {
+      createMany: jest.fn(),
+      deleteMany: jest.fn(),
+    },
     order_items: {
       updateMany: jest.fn(),
     },
