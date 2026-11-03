@@ -2176,6 +2176,8 @@ model products {
   profit_margin                  Decimal?                         @db.Decimal(5, 2)
   sku                            String?                          @db.VarChar(100)
   barcode                        String?                          @db.VarChar(64)
+  /// Código de balanza (PLU) 1..999999 de la etiqueta de peso variable. Solo para pricing_type = weight.
+  scale_code                     Int?
   stock_quantity                 Int?                             @default(0)
   state                          product_state_enum               @default(active)
   pricing_type                   pricing_type_enum                @default(unit)
@@ -2374,7 +2376,7 @@ model products {
   excluded_in_kitchen_items kitchen_ticket_item_exclusions[] @relation("kti_exclusion_component")
   lodging_unit_type         lodging_unit_types?
 
-  /// Unicidad de slug, sku y barcode POR TIENDA y SOLO entre productos no
+  /// Unicidad de slug, sku, barcode y scale_code POR TIENDA y SOLO entre productos no
   /// archivados (borrar = archivar; el archivado libera sus identificadores).
   /// La garantizan indices unicos PARCIALES que Prisma no puede expresar y
   /// viven solo en la migracion 20261003200000_products_unique_ignores_archived:
@@ -2384,8 +2386,11 @@ model products {
   ///     ON products (store_id, slug) WHERE state <> 'archived';
   ///   CREATE UNIQUE INDEX products_store_id_barcode_active_key
   ///     ON products (store_id, barcode) WHERE state <> 'archived' AND barcode IS NOT NULL;
+  /// y, en 20261108090000_products_scale_code (con CHECK 1..999999):
+  ///   CREATE UNIQUE INDEX products_store_id_scale_code_active_key
+  ///     ON products (store_id, scale_code) WHERE state <> 'archived' AND scale_code IS NOT NULL;
   /// No lo vuelvas a declarar como @@unique al regenerar: por eso no existe
-  /// `store_id_sku` / `store_id_slug` / `store_id_barcode` como where-unique;
+  /// `store_id_sku` / `store_id_slug` / `store_id_barcode` / `store_id_scale_code` como where-unique;
   /// usa findFirst con `state: { not: 'archived' }`.
   service_station_services_product_fkey service_station_services[] @relation("service_station_services_product_fkey")
   service_sessions_product_fkey service_sessions[] @relation("service_sessions_product_fkey")
@@ -2393,6 +2398,7 @@ model products {
   @@index([store_id, slug])
   @@index([store_id, sku])
   @@index([store_id, barcode])
+  @@index([store_id, scale_code])
   @@index([store_id, product_type])
   @@index([store_id, is_ingredient])
   @@index([store_id, usage_nature, state])

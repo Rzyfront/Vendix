@@ -29,11 +29,13 @@ import {
   BusinessHoursBlock,
   ScaleSettings,
   ScaleDeviceConfig,
+  VariableBarcodeFormat,
 } from '../../../../../../../core/models/store-settings.interface';
 import { PosScaleService } from '../../../../pos/services/pos-scale.service';
 import { PosCashRegisterService } from '../../../../pos/services/pos-cash-register.service';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../../../shared/components/dialog/dialog.service';
+import { VariableBarcodeFormatsModalComponent } from '../variable-barcode-formats-modal.component';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 
 @Component({
@@ -50,6 +52,7 @@ import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
     TooltipComponent,
     ExpandableCardComponent,
     IconComponent,
+    VariableBarcodeFormatsModalComponent,
   ],
   templateUrl: './pos-settings-form.component.html',
   styleUrls: ['./pos-settings-form.component.scss'],
@@ -78,6 +81,13 @@ export class PosSettingsForm implements OnInit {
   /** Espejo en signal de `cash_register.enabled` (el control no es reactivo). */
   readonly cashRegisterEnabled = signal(false);
 
+  /** Espejos en signal de `scale.enabled` y `barcode_scanner.enabled`. */
+  readonly scaleOn = signal(false);
+  readonly barcodeScannerOn = signal(false);
+  readonly variableBarcodesOn = signal(false);
+  readonly variableBarcodesModalOpen = signal(false);
+  readonly variableBarcodeFormats = signal<VariableBarcodeFormat[]>([]);
+
   private destroyRef = inject(DestroyRef);
   private authFacade = inject(AuthFacade);
 
@@ -95,6 +105,13 @@ export class PosSettingsForm implements OnInit {
           {
             ...current,
             business_hours: current.business_hours || this.getDefaultBusinessHours(),
+            barcode_scanner: {
+              enabled: current.barcode_scanner?.enabled ?? null,
+              variable_barcodes: {
+                enabled: current.barcode_scanner?.variable_barcodes?.enabled ?? false,
+                formats: current.barcode_scanner?.variable_barcodes?.formats ?? [],
+              },
+            },
             tips: {
               enabled: current.tips?.enabled ?? this.authFacade.isRestaurant(),
               suggested_enabled: current.tips?.suggested_enabled ?? false,
@@ -105,6 +122,7 @@ export class PosSettingsForm implements OnInit {
           { emitEvent: false },
         );
         this.syncDependentControlsState();
+        this.syncVariableBarcodeMirrors();
       }
     });
   }
@@ -146,6 +164,10 @@ export class PosSettingsForm implements OnInit {
     }),
     barcode_scanner: new FormGroup({
       enabled: new FormControl<boolean | null>(null),
+      variable_barcodes: new FormGroup({
+        enabled: new FormControl<boolean | null>(null),
+        formats: new FormControl<VariableBarcodeFormat[]>([]),
+      }),
     }),
     customer_queue: new FormGroup({
       enabled: new FormControl<boolean | null>(null),
@@ -202,6 +224,18 @@ export class PosSettingsForm implements OnInit {
 
   get barcodeScannerEnabledControl(): FormControl<boolean> {
     return this.form.get('barcode_scanner.enabled') as FormControl<boolean>;
+  }
+
+  get variableBarcodesEnabledControl(): FormControl<boolean> {
+    return this.form.get(
+      'barcode_scanner.variable_barcodes.enabled',
+    ) as FormControl<boolean>;
+  }
+
+  get variableBarcodeFormatsControl(): FormControl<VariableBarcodeFormat[]> {
+    return this.form.get(
+      'barcode_scanner.variable_barcodes.formats',
+    ) as FormControl<VariableBarcodeFormat[]>;
   }
 
   get autoPrintReceiptControl(): FormControl<boolean> {
@@ -431,7 +465,26 @@ export class PosSettingsForm implements OnInit {
     };
   }
 
+  private syncVariableBarcodeMirrors(): void {
+    this.scaleOn.set(!!this.scaleEnabledControl.value);
+    this.barcodeScannerOn.set(!!this.barcodeScannerEnabledControl.value);
+    this.variableBarcodesOn.set(!!this.variableBarcodesEnabledControl.value);
+    this.variableBarcodeFormats.set(this.variableBarcodeFormatsControl.value ?? []);
+  }
+
+  openVariableBarcodeFormats(): void {
+    this.variableBarcodeFormats.set(this.variableBarcodeFormatsControl.value ?? []);
+    this.variableBarcodesModalOpen.set(true);
+  }
+
+  onVariableBarcodeFormatsSaved(formats: VariableBarcodeFormat[]): void {
+    this.variableBarcodeFormatsControl.setValue(formats);
+    this.variableBarcodeFormats.set(formats);
+    this.onFieldChange();
+  }
+
   onFieldChange() {
+    this.syncVariableBarcodeMirrors();
     if (this.form.valid) {
       this.settingsChange.emit(this.form.getRawValue());
     }

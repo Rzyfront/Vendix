@@ -306,6 +306,18 @@ export class CreateProductDto {
 
   @ApiPropertyOptional({
     description:
+      'Código de balanza (PLU) de la etiqueta de peso variable. Entero 1..999999, único por tienda entre productos no archivados. null lo limpia.',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(999999)
+  @Type(() => Number)
+  scale_code?: number | null;
+
+  @ApiPropertyOptional({
+    description:
       'Existencias totales. Solo para la creación inicial; después el stock se mueve por entradas, ventas y ajustes, no editando este campo.',
   })
   @IsOptional()
@@ -834,6 +846,18 @@ export class UpdateProductDto {
   @IsString()
   @MaxLength(64)
   barcode?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Código de balanza (PLU) de la etiqueta de peso variable. Entero 1..999999, único por tienda entre productos no archivados. null lo limpia.',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(999999)
+  @Type(() => Number)
+  scale_code?: number | null;
 
   @ApiPropertyOptional({
     description:
@@ -1473,6 +1497,11 @@ export class ProductQueryDto {
   barcode?: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  scale_code?: number;
+
+  @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
   include_stock?: boolean = true;
@@ -1923,6 +1952,18 @@ export class UpdateProductWithVariantsDto {
   @MaxLength(100)
   sku?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Código de balanza (PLU) de la etiqueta de peso variable. Entero 1..999999, único por tienda entre productos no archivados. null lo limpia.',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(999999)
+  @Type(() => Number)
+  scale_code?: number | null;
+
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
@@ -2254,6 +2295,13 @@ export class BulkProductItemDto {
   @IsString()
   @MaxLength(64)
   barcode?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(999999)
+  @Type(() => Number)
+  scale_code?: number;
 
   @IsOptional()
   @IsString()

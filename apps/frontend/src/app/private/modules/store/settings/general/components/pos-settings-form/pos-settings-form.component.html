@@ -152,6 +152,29 @@
             </app-tooltip>
           </div>
         </div>
+
+        @if (scaleOn() && barcodeScannerOn()) {
+          <div class="setting-cell">
+            <app-setting-toggle
+              [formControl]="variableBarcodesEnabledControl"
+              label="Etiquetas de balanza (código de barras de peso variable)"
+              description="Escanea la etiqueta de tu balanza etiquetadora y el producto entra con su peso"
+              (changed)="onFieldChange()"
+            ></app-setting-toggle>
+            @if (variableBarcodesOn()) {
+              <div class="setting-cell__meta">
+                <button
+                  type="button"
+                  class="help-chip"
+                  (click)="openVariableBarcodeFormats()"
+                >
+                  <app-icon name="settings" size="12"></app-icon>
+                  Configurar formatos ({{ variableBarcodeFormats().length }})
+                </button>
+              </div>
+            }
+          </div>
+        }
       </div>
     </div>
 
@@ -896,3 +919,9 @@
   </div>
   }
 </div>
+
+<app-variable-barcode-formats-modal
+  [(isOpen)]="variableBarcodesModalOpen"
+  [formats]="variableBarcodeFormats()"
+  (save)="onVariableBarcodeFormatsSaved($event)"
+></app-variable-barcode-formats-modal>

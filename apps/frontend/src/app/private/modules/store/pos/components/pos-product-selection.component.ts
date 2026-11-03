@@ -2788,6 +2788,7 @@ export class PosProductSelectionComponent {
     product: any,
     saleUnit: PosSaleUnitConfig,
     preferScale: boolean,
+    knownWeightKg?: number,
   ): Promise<{
     quantity: number;
     amount: number;
@@ -2813,6 +2814,7 @@ export class PosProductSelectionComponent {
       title: `Cantidad en ${unitCode}`,
       confirmText: 'Agregar',
       allowScale: useScale,
+      knownWeightKg,
     });
     if (!captured) return null;
 
@@ -2848,7 +2850,8 @@ export class PosProductSelectionComponent {
           : Math.max(1, Math.round(quantity / captured.amount)),
       // La automática (la del precio), no la elegida: para "Base: $X/…".
       priceUnitCode: unitCode,
-      byScale: useScale && this.scaleService.isConnected(),
+      byScale:
+        knownWeightKg == null && useScale && this.scaleService.isConnected(),
     };
   }
 
@@ -2901,6 +2904,73 @@ export class PosProductSelectionComponent {
           );
         },
       });
+  }
+
+  /**
+   * Etiqueta de balanza etiquetadora: agrega un producto de peso con el peso
+   * (kg) leído del código de barras, sin abrir modal ni leer la báscula.
+   * Mismas ramas, validaciones de stock y toasts que `onAddToCart`.
+   */
+  async addWeightProductWithKnownWeight(
+    product: any,
+    weightKg: number,
+  ): Promise<void> {
+    if (
+      !(weightKg > 0) ||
+      product?.pricing_type !== 'weight' ||
+      !this.scaleEnabled()
+    ) {
+      this.toastService.warning('No se pudo agregar el producto por peso');
+      return;
+    }
+    if (product.price <= 0) {
+      this.toastService.warning(
+        `${product.name} no tiene un precio de venta válido`,
+      );
+      return;
+    }
+
+    const saleUnit = await this.saleUnitService.resolveFor(product);
+
+    if (
+      capturesInSaleUnit(
+        saleUnit.stockUnit != null,
+        saleUnit.unitsPerCapture,
+        this.saleUnitService.saleUnitsFor(product).length,
+      )
+    ) {
+      const measured = await this.captureSaleQuantity(
+        product,
+        saleUnit,
+        true,
+        weightKg,
+      );
+      if (!measured) return;
+      this.addMeasuredProductToCart(product, measured);
+      return;
+    }
+
+    const captured = await this.captureWeighAmount({
+      product,
+      saleUnit: this.saleUnitService.configFor(product),
+      price: product.final_price,
+      priceUnitQuantity: Number(product.price_unit_quantity ?? 1) || 1,
+      fallbackUnitCode: this.defaultWeightUnit(),
+      title: 'Ingresar peso',
+      confirmText: 'Agregar',
+      weighOnly: true,
+      knownWeightKg: weightKg,
+    });
+    if (!captured) return;
+
+    if (captured.principalAmount > 999) {
+      this.toastService.warning(
+        'El peso máximo permitido es 999 ' + captured.principalCode,
+      );
+      return;
+    }
+
+    this.addWeightProductToCart(product, captured);
   }
 
   private addWeightProductToCart(
@@ -2966,6 +3036,11 @@ export class PosProductSelectionComponent {
      * para no-masa (la báscula pesa, no mide metros).
      */
     allowScale?: boolean;
+    /**
+     * Peso ya conocido (etiqueta de balanza etiquetadora), en kg: se salta
+     * báscula y modal y devuelve la captura equivalente.
+     */
+    knownWeightKg?: number;
   }): Promise<ManualWeighResult | undefined> {
     const perCapture =
       opts.saleUnit && opts.saleUnit.unitsPerCapture > 1
@@ -2980,6 +3055,23 @@ export class PosProductSelectionComponent {
     const pricePerStockUnit =
       opts.price / (opts.priceUnitQuantity > 0 ? opts.priceUnitQuantity : 1);
     const priceMessage = `${opts.product.name}\nPrecio: ${this.formatPrice(pricePerStockUnit * principal.factorToBase)}/${principal.code}`;
+
+    if (opts.knownWeightKg != null) {
+      // Misma conversión (y redondeo a 3 decimales) que la lectura de báscula.
+      const amount = await this.saleUnitService.convertScaleReading(
+        opts.knownWeightKg,
+        'kg',
+        principal.code,
+      );
+      return {
+        amount,
+        unitCode: principal.code,
+        principalAmount: amount,
+        principalCode: principal.code,
+        stockQuantity: Math.max(0, Math.round(amount * principal.factorToBase)),
+        unitFactor: principal.factorToBase,
+      };
+    }
 
     if (opts.allowScale !== false && this.scaleService.isConnected()) {
       // La báscula emite en SU unidad configurada (PR #1062, error 2): la
