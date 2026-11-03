@@ -12,7 +12,9 @@ import {
 const G = 1;
 const LB = 2;
 const KG = 3;
-const factors: Record<number, number> = { [G]: 1, [LB]: 453.59237, [KG]: 1000 };
+// Catálogo: la libra comercial colombiana son 500 g exactos
+// (20260811100100_uom_catalog_and_price_unit/migration.sql).
+const factors: Record<number, number> = { [G]: 1, [LB]: 500, [KG]: 1000 };
 const scaleOf = (id: number) => priceScaleFor(factors[id], 1);
 
 describe('pickDefaultPrincipal', () => {
@@ -49,9 +51,10 @@ describe('pickDefaultPrincipal', () => {
 });
 
 describe('priceScaleFor', () => {
-  it('kg sobre g es 1000; lb no es entero de g y no da escala', () => {
+  it('kg sobre g es 1000 y lb sobre g es 500; lb sobre kg no es entero y no da escala', () => {
     expect(priceScaleFor(1000, 1)).toBe(1000);
-    expect(priceScaleFor(453.59237, 1)).toBeNull();
+    expect(priceScaleFor(500, 1)).toBe(500);
+    expect(priceScaleFor(500, 1000)).toBeNull();
   });
 });
 
