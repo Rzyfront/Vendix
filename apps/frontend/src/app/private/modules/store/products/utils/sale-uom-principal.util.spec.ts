@@ -28,9 +28,23 @@ describe('pickDefaultPrincipal', () => {
     expect(pickDefaultPrincipal([G, KG], G, 1000, scaleOf)).toBe(G);
   });
 
-  it('sin coincidencia cae a la primera marcada; sin marcadas, null', () => {
-    expect(pickDefaultPrincipal([G], null, 1000, scaleOf)).toBe(G);
+  it('sin coincidencia no fija principal; sin marcadas, null', () => {
+    expect(pickDefaultPrincipal([G], null, 1000, scaleOf)).toBeNull();
     expect(pickDefaultPrincipal([], null, 1000, scaleOf)).toBeNull();
+  });
+
+  it('marcando de a una (g, luego lb, luego kg) con precio por kg, la principal queda kg y la escala no cambia', () => {
+    // Simula toggleSaleUom: cada toggle recalcula con la principal previa.
+    let checked: number[] = [];
+    let principal: number | null = null;
+    const scale = 1000;
+    const steps: Array<number | null> = [];
+    for (const id of [G, LB, KG]) {
+      checked = [...checked, id];
+      principal = pickDefaultPrincipal(checked, principal, scale, scaleOf);
+      steps.push(principal);
+    }
+    expect(steps).toEqual([null, null, KG]);
   });
 });
 

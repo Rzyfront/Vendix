@@ -742,7 +742,8 @@ export class ProductCreatePageComponent {
    * stock: misma dimensión, una sola principal (el precio se expresa en
    * ella). Por defecto la principal es la que ya corresponde a la escala del
    * precio (PR #1062 ronda 2); cambiarla reescala el precio, nunca lo deja en
-   * la escala vieja. Estado inválido (marcadas sin principal) inalcanzable.
+   * la escala vieja. Marcadas sin principal (ninguna coincide con la escala)
+   * es transitorio: el guardado exige elegirla (ronda 3, H1).
    */
   readonly saleUomIds = signal<number[]>([]);
   readonly principalSaleUomId = signal<number | null>(null);
@@ -834,7 +835,7 @@ export class ProductCreatePageComponent {
     return Number(this.productForm?.get('price_unit_quantity')?.value ?? 1) || 1;
   }
 
-  /** Principal por defecto: la de la escala vigente; reescala si no hay. */
+  /** Principal por defecto: la de la escala vigente; sin coincidencia, ninguna. */
   private applyDefaultPrincipal(): void {
     const next = pickDefaultPrincipal(
       this.saleUomIds(),
@@ -4790,6 +4791,24 @@ export class ProductCreatePageComponent {
           },
         });
       }
+    }
+
+    // QUI-978 (PR #1062 ronda 3, H1) — con unidades de venta marcadas pero
+    // ninguna coincidiendo con la escala del precio no se fija principal
+    // sola: el usuario la elige antes de guardar (el backend la exige).
+    if (this.saleUomIds().length > 0 && this.principalSaleUomId() == null) {
+      requirements.push({
+        id: 'sale-uom-principal-missing',
+        label: 'Falta la unidad principal de venta',
+        reason:
+          'Marcaste unidades de venta pero ninguna es la principal. Elige en cuál se expresa el precio.',
+        severity: 'required',
+        action: {
+          label: 'Revisar unidades de medida',
+          kind: 'scroll',
+          target: 'stock_uom_id',
+        },
+      });
     }
 
     // (c) Stock reservado (producto simple) -------------------------------

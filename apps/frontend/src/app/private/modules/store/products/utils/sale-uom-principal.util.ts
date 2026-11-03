@@ -17,8 +17,10 @@ export function priceScaleFor(
 
 /**
  * Principal por defecto entre las marcadas: se conserva la actual si sigue
- * marcada; si no, la que corresponde a la escala vigente del precio; solo si
- * ninguna coincide, la primera marcada (y el precio se reescala).
+ * marcada; si no, la que corresponde a la escala vigente del precio. Si
+ * ninguna coincide devuelve `null` (PR #1062 ronda 3, H1): marcar g antes que
+ * kg con precio por kg no puede fijar g ni reescalar; se espera a que se
+ * marque la que coincide o a que el usuario la elija explícitamente.
  */
 export function pickDefaultPrincipal(
   checkedIds: readonly number[],
@@ -31,7 +33,7 @@ export function pickDefaultPrincipal(
     return currentPrincipal;
   }
   const matching = checkedIds.find((id) => scaleOf(id) === currentScale);
-  return matching ?? checkedIds[0];
+  return matching ?? null;
 }
 
 /**
