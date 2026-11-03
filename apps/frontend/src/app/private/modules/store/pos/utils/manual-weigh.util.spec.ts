@@ -126,6 +126,54 @@ describe('scaleReadingToUnit (PR #1062 error 2)', () => {
   });
 });
 
+describe('precisión del weight convertido (QUI-978 hotfix decimales)', () => {
+  const decimals = (n: number) => (String(n).split('.')[1] ?? '').length;
+
+  it('0,457 lb son 0,229 kg: cabe en los 3 decimales de "Guardar orden"', () => {
+    const kg = principalWeighAmount(0.457, LB, KG)!;
+    expect(kg).toBe(0.229);
+    expect(decimals(kg)).toBeLessThanOrEqual(3);
+  });
+
+  it('12,34 g son 0,012 kg: cabe en los 4 decimales del cobro', () => {
+    const kg = convertWeighAmount(12.34, G.factorToBase, KG.factorToBase)!;
+    expect(kg).toBe(0.012);
+    expect(decimals(kg)).toBeLessThanOrEqual(3);
+  });
+
+  it('la báscula usa el mismo redondeo: 0,457 lb leídas en kg son 0,229', () => {
+    const catalog = [
+      { code: 'kg', dimension: 'mass', factorToBase: 1000 },
+      { code: 'lb', dimension: 'mass', factorToBase: 500 },
+    ];
+    expect(scaleReadingToUnit(0.457, 'lb', 'kg', catalog)).toBe(0.229);
+  });
+
+  it('el valor redondeado no pierde el total: kg × precio/kg = g × precio/g', () => {
+    const perKg = 25000;
+    const perG = perKg / 1000;
+    for (const [amount, unit] of [
+      [0.457, LB],
+      [12.34, G],
+    ] as const) {
+      const kg = principalWeighAmount(amount, unit, KG)!;
+      const grams = stockUnitsForWeighAmount(amount, unit.factorToBase, 1)!;
+      expect(weighTotal(kg, perKg)).toBeCloseTo(weighTotal(grams, perG)!, 6);
+    }
+    // 0,457 lb = 228,5 g → 229 g → $5.725, igual que 0,229 kg × $25.000.
+    expect(weighTotal(principalWeighAmount(0.457, LB, KG)!, perKg)).toBeCloseTo(5725, 6);
+  });
+
+  it('half-up sin ruido binario y sin NaN en valores diminutos', () => {
+    expect(convertWeighAmount(1.0005, 1, 1)).toBe(1.001);
+    expect(convertWeighAmount(0.0001, 1, 1000)).toBe(0);
+  });
+
+  it('el stock no redondea dos veces: 0,4996 g quedan en 0', () => {
+    expect(stockUnitsForWeighAmount(0.4996, 1, 1)).toBe(0);
+  });
+});
+
 describe('exceedsWeighMax (PR #1062 ronda 4, punto 3)', () => {
   it('el tope de 999 se mide en la principal, no en el número tipeado', () => {
     // 1.500 g = 1,5 kg: dentro del tope de 999 kg.
