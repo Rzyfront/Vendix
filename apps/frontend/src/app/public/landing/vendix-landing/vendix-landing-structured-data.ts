@@ -26,13 +26,17 @@ const VENDIX_SAME_AS = [
 const VENDIX_ORGANIZATION_DESCRIPTION =
   'Software colombiano de punto de venta (POS), inventario y tienda online desarrollado por Quickss S.A.S. en Riohacha, La Guajira.';
 
-/** Sede declarada sin dirección exacta: el Perfil de Negocio la oculta (área de servicio). */
+/** Domicilio principal según el certificado de Cámara de Comercio (matrícula 194368). */
 const VENDIX_ADDRESS = {
   '@type': 'PostalAddress',
+  streetAddress: 'Calle 14H 26 13, barrio Jorge Pérez',
   addressLocality: 'Riohacha',
   addressRegion: 'La Guajira',
   addressCountry: 'CO',
 };
+
+/** NIT con dígito de verificación, según el certificado de Cámara de Comercio. */
+const VENDIX_TAX_ID = '902056589-9';
 
 /** Canal de soporte publicado en la landing. */
 const VENDIX_CONTACT_POINT = {
@@ -104,6 +108,7 @@ export function buildVendixStructuredData(
         logo: `${VENDIX_ORIGIN}/vlogo-128.png`,
         sameAs: VENDIX_SAME_AS,
         address: VENDIX_ADDRESS,
+        taxID: VENDIX_TAX_ID,
         areaServed: 'CO',
         contactPoint: [VENDIX_CONTACT_POINT],
       },
