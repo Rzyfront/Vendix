@@ -2299,7 +2299,7 @@ export class PosCartModalComponent {
       const scaleUnit = this.scaleService.readingUnit();
       const scaleWeight = await this.scaleService.showWeightModal({
         title: 'Editar Peso',
-        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${principal.code}`,
+        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.finalPrice)}/${principal.code}`,
         weightUnit: scaleUnit,
         allowManualFallback: true,
       });
@@ -2313,10 +2313,11 @@ export class PosCartModalComponent {
     } else {
       const captured = await this.scaleService.showManualWeightModal({
         title: 'Editar peso',
-        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${principal.code}`,
+        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.finalPrice)}/${principal.code}`,
         units,
         pricePerStockUnit: null,
-        pricePerPrincipal: item.unitPrice,
+        // PR #1062 ronda 3 (H3): con impuesto, como el alta (`final_price`).
+        pricePerPrincipal: item.finalPrice,
         stockUnitCode: '',
         initialAmount: item.weight != null ? String(item.weight) : '',
         initialUnitCode: item.weight_unit || principal.code,
@@ -2364,7 +2365,7 @@ export class PosCartModalComponent {
       const scaleUnit = this.scaleService.readingUnit();
       const reading = await this.scaleService.showWeightModal({
         title: 'Volver a pesar',
-        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
+        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.finalPrice)}/${unit}`,
         weightUnit: scaleUnit,
         allowManualFallback: true,
       });
@@ -2388,7 +2389,8 @@ export class PosCartModalComponent {
       const principal = units.find((u) => u.isPrincipal) ?? units[0];
       const puq =
         Number((item.product as any)?.price_unit_quantity ?? 1) || 1;
-      const pricePerStockUnit = item.unitPrice / puq;
+      // PR #1062 ronda 3 (H3): con impuesto, como el alta (`final_price`).
+      const pricePerStockUnit = item.finalPrice / puq;
       const captured = await this.scaleService.showManualWeightModal({
         title: `Cantidad en ${unit}`,
         message: `${item.product.name}\nPrecio: ${this.formatCurrency(pricePerStockUnit * principal.factorToBase)}/${principal.code}`,
