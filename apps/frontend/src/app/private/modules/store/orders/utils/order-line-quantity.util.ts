@@ -7,7 +7,8 @@
  *
  * 1. Snapshot de la unidad elegida al vender.
  * 2. Peso legado de balanza.
- * 3. UoM de stock del producto (órdenes sin snapshot, salvo paquetes).
+ * 3. UoM de stock del producto (órdenes sin snapshot, salvo paquetes y
+ *    UoMs de conteo: "2", nunca "2 unit").
  *
  * Sin unidad devuelve solo el número, como antes.
  */
@@ -18,7 +19,9 @@ export interface OrderLineQuantitySource {
   weight?: number | string | null;
   weight_unit?: string | null;
   stock_units_consumed?: number | string | null;
-  products?: { stock_uom?: { code?: string | null } | null } | null;
+  products?: {
+    stock_uom?: { code?: string | null; dimension?: string | null } | null;
+  } | null;
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -44,7 +47,9 @@ export function formatOrderLineQuantity(item: OrderLineQuantitySource): string {
   }
 
   const quantity = toFiniteNumber(item.quantity) ?? 0;
-  const stockUnit = item.products?.stock_uom?.code?.trim();
+  const stockUom = item.products?.stock_uom;
+  const stockUnit =
+    stockUom?.dimension === 'count' ? undefined : stockUom?.code?.trim();
   const isPackageLine = (toFiniteNumber(item.stock_units_consumed) ?? 0) > 0;
   if (stockUnit && !isPackageLine) {
     return `${formatAmount(quantity)} ${stockUnit}`;

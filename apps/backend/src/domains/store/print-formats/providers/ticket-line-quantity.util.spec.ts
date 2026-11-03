@@ -50,4 +50,13 @@ describe('formatTicketLineQuantity (QUI-978)', () => {
       }),
     ).toBeUndefined();
   });
+
+  it('never appends a count UoM code ("2 unit") to piece lines', () => {
+    expect(
+      formatTicketLineQuantity({
+        quantity: 2,
+        products: { stock_uom: { code: 'unit', dimension: 'count' } },
+      }),
+    ).toBeUndefined();
+  });
 });

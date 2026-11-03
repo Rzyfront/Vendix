@@ -549,15 +549,19 @@ export class ProductsService {
 
     const uomIds = sale_uoms.map((row) => row.uom_id);
     if (new Set(uomIds).size !== uomIds.length) {
-      throw new BadRequestException(
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
         'Las unidades de venta no pueden repetirse',
+        { uom_ids: uomIds },
       );
     }
 
     const principals = sale_uoms.filter((row) => row.is_principal === true);
     if (principals.length !== 1) {
-      throw new BadRequestException(
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
         'Debe haber exactamente una unidad de venta principal',
+        { principals: principals.length },
       );
     }
 
@@ -584,13 +588,17 @@ export class ProductsService {
         );
       }
       if (uom.dimension !== stockUom.dimension) {
-        throw new BadRequestException(
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VALIDATE_001,
           `La unidad de venta (${uom.code}) debe pertenecer a la misma dimensión que la de stock (${stockUom.code}) para poder convertirse`,
+          { uom_id, stock_uom_id },
         );
       }
       if (Number(uom.factor_to_base) < Number(stockUom.factor_to_base)) {
-        throw new BadRequestException(
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VALIDATE_001,
           `La unidad de venta (${uom.code}) no puede ser menor que la de stock (${stockUom.code}): el stock se cuenta en enteros de ${stockUom.code}`,
+          { uom_id, stock_uom_id },
         );
       }
     }
@@ -4516,8 +4524,12 @@ export class ProductsService {
       // fallback al producto existente) para que cambiar una sola unidad
       // recalcule el factor contra la contraparte ya persistida. Solo se toca
       // el factor cuando ambos FKs efectivos están presentes.
+      // `!== undefined`, no `??`: un `null` explícito QUITA la unidad de stock
+      // y debe validarse como tal, no caer a la persistida.
       const effectiveStockUomId =
-        sanitizedDto.stock_uom_id ?? existingProduct.stock_uom_id;
+        sanitizedDto.stock_uom_id !== undefined
+          ? sanitizedDto.stock_uom_id
+          : existingProduct.stock_uom_id;
       const effectivePurchaseUomId =
         sanitizedDto.purchase_uom_id ?? existingProduct.purchase_uom_id;
       const uomFkTouched =
@@ -4530,6 +4542,22 @@ export class ProductsService {
       // QUI-978 — UoMs de venta contra la unidad de stock efectiva (PATCH:
       // DTO con fallback al producto existente).
       await this.assertSaleUomsValid(sale_uoms, effectiveStockUomId);
+
+      // QUI-978 — cambiar (o quitar) la unidad de stock sin reenviar
+      // `sale_uoms` no puede dejar unidades de venta que la nueva unidad ya no
+      // admite (otra dimensión, o menores que el stock: "g" con stock en kg).
+      // Se revalidan las persistidas; si no encajan, 400 pidiendo enviarlas.
+      if (
+        sale_uoms === undefined &&
+        sanitizedDto.stock_uom_id !== undefined &&
+        sanitizedDto.stock_uom_id !== existingProduct.stock_uom_id
+      ) {
+        const persistedSaleUoms = await this.prisma.product_sale_uoms.findMany({
+          where: { product_id: id },
+          select: { uom_id: true, is_principal: true },
+        });
+        await this.assertSaleUomsValid(persistedSaleUoms, effectiveStockUomId);
+      }
 
       // Cambiar la unidad de stock de un producto que YA opera no es renombrar
       // una etiqueta: existencias, capas de costo, lotes y recetas están

@@ -37,6 +37,11 @@ export interface ManualWeighResult {
   principalCode: string;
   /** Unidades de stock que se descuentan (redondeadas, como el backend). */
   stockQuantity: number;
+  /**
+   * Unidades de stock por cada unidad elegida (`factorToBase` de la elegida).
+   * Lo anota quien abre el modal; ausente = se deduce de la cantidad.
+   */
+  unitFactor?: number;
 }
 
 /**

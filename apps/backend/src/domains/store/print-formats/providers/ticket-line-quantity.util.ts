@@ -10,6 +10,8 @@
  * 2. Peso legado de balanza (`weight` + `weight_unit`).
  * 3. UoM de stock del producto, solo para líneas sin snapshot (órdenes
  *    anteriores al fix) que no sean de paquete: ahí `quantity` cuenta stock.
+ *    Nunca para UoMs de conteo (`unit`, `par`, `doc`…): "2" ya dice todo y
+ *    el código crudo ("2 unit") ensuciaría el tiquete.
  *
  * `undefined` = la línea se imprime como siempre (solo el número).
  */
@@ -20,7 +22,9 @@ export interface TicketLineQuantitySource {
   weight?: unknown;
   weight_unit?: string | null;
   stock_units_consumed?: unknown;
-  products?: { stock_uom?: { code?: string | null } | null } | null;
+  products?: {
+    stock_uom?: { code?: string | null; dimension?: string | null } | null;
+  } | null;
 }
 
 function formatAmount(value: number): string {
@@ -47,7 +51,9 @@ export function formatTicketLineQuantity(
     return `${formatAmount(weight)} ${item.weight_unit?.trim() || 'kg'}`;
   }
 
-  const stockUnit = item.products?.stock_uom?.code?.trim();
+  const stockUom = item.products?.stock_uom;
+  const stockUnit =
+    stockUom?.dimension === 'count' ? undefined : stockUom?.code?.trim();
   const quantity = toFiniteNumber(item.quantity);
   const isPackageLine = (toFiniteNumber(item.stock_units_consumed) ?? 0) > 0;
   if (stockUnit && quantity !== null && !isPackageLine) {

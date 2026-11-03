@@ -136,6 +136,7 @@ describe('ProductsService', () => {
     units_of_measure: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
     },
     promotion_products: {
       findMany: jest.fn(),
@@ -150,6 +151,7 @@ describe('ProductsService', () => {
     // QUI-978 — syncProductSaleUoms corre dentro del $transaction de
     // create/update (también para neutralizar insumos puros).
     product_sale_uoms: {
+      findMany: jest.fn().mockResolvedValue([]),
       createMany: jest.fn(),
       deleteMany: jest.fn(),
     },
@@ -2600,6 +2602,37 @@ describe('ProductsService', () => {
 
     afterEach(() => {
       findOneSpy.mockRestore();
+    });
+
+    it('QUI-978 — cambiar la UoM de stock sin reenviar sale_uoms revalida las persistidas', async () => {
+      // Producto con venta en g; pasar el stock a kg dejaría "g" (menor que
+      // el stock) guardada sin que nadie la revisara.
+      primeUpdatePath();
+      mockPrismaService.units_of_measure.findFirst.mockResolvedValueOnce({
+        id: 2,
+        code: 'kg',
+        is_active: true,
+        is_stock_eligible: true,
+      });
+      mockPrismaService.product_sale_uoms.findMany.mockResolvedValueOnce([
+        { uom_id: 1, is_principal: true },
+      ]);
+      mockPrismaService.units_of_measure.findMany.mockResolvedValueOnce([
+        { id: 2, code: 'kg', dimension: 'mass', factor_to_base: 1000, is_active: true },
+        { id: 1, code: 'g', dimension: 'mass', factor_to_base: 1, is_active: true },
+      ]);
+
+      await expect(
+        service.update(existingProduct.id, {
+          stock_uom_id: 2,
+        } as UpdateProductDto),
+      ).rejects.toThrow(/no puede ser menor que la de stock \(kg\)/);
+
+      expect(mockPrismaService.product_sale_uoms.findMany).toHaveBeenCalledWith({
+        where: { product_id: existingProduct.id },
+        select: { uom_id: true, is_principal: true },
+      });
+      expect(mockPrismaService.products.update).not.toHaveBeenCalled();
     });
 
     it('persiste las neutralizaciones del sanitizer de insumo puro', async () => {

@@ -2815,10 +2815,10 @@ export class PosProductSelectionComponent {
       quantity,
       amount: captured.amount,
       unitCode: captured.unitCode,
-      stockUnitsPerSaleUnit: Math.max(
-        1,
-        Math.round(quantity / captured.amount),
-      ),
+      stockUnitsPerSaleUnit:
+        captured.unitFactor && captured.unitFactor > 0
+          ? captured.unitFactor
+          : Math.max(1, Math.round(quantity / captured.amount)),
       // La automática (la del precio), no la elegida: para "Base: $X/…".
       priceUnitCode: unitCode,
       byScale: useScale && this.scaleService.isConnected(),
@@ -2969,18 +2969,32 @@ export class PosProductSelectionComponent {
       };
     }
 
-    if (this.allowManualWeightEntry()) {
-      return this.scaleService.showManualWeightModal({
+    // `allow_manual_weight_entry` gobierna el PESADO (masa sin báscula). Una
+    // medida que no es masa (metros, litros; `allowScale === false`) siempre
+    // se digita: en develop abría el prompt sin este gate (QUI-648).
+    if (opts.allowScale === false || this.allowManualWeightEntry()) {
+      const result = await this.scaleService.showManualWeightModal({
         title: opts.title,
         message: priceMessage,
         units,
-        pricePerStockUnit,
+        // Peso legado: el precio va por la principal y no hay unidad de stock
+        // con la que multiplicar (factor 1): el total vivo sale de la
+        // principal. Con stock por unidad mínima, de las unidades de stock.
+        pricePerStockUnit: opts.weighOnly ? null : pricePerStockUnit,
+        pricePerPrincipal: opts.weighOnly
+          ? pricePerStockUnit * principal.factorToBase
+          : undefined,
         stockUnitCode: opts.weighOnly
           ? ''
           : (opts.saleUnit?.stockUnit?.code ?? ''),
         confirmText: opts.confirmText,
         enforceStockQuantity: !opts.weighOnly,
       });
+      if (!result) return undefined;
+      // Factor exacto de la unidad elegida (unidades de stock por unidad),
+      // para no deducirlo de una cantidad ya redondeada.
+      const chosen = units.find((u) => u.code === result.unitCode);
+      return { ...result, unitFactor: chosen?.factorToBase };
     }
 
     this.toastService.warning(

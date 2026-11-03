@@ -1519,7 +1519,7 @@ export class OrdersService {
                 },
                 // QUI-978 — unidad de respaldo de la cantidad en el detalle
                 // para líneas sin snapshot de venta ("300 g", no "300").
-                stock_uom: { select: { code: true } },
+                stock_uom: { select: { code: true, dimension: true } },
               },
             },
             product_variants: true,

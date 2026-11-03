@@ -86,7 +86,9 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             order_item_taxes: true,
             // QUI-978 — respaldo de unidad para líneas sin snapshot de venta
             // (ver `formatTicketLineQuantity`).
-            products: { select: { stock_uom: { select: { code: true } } } },
+            products: {
+              select: { stock_uom: { select: { code: true, dimension: true } } },
+            },
           },
         },
         // CP-print-token-flow A.1 — dirección del cliente para el ticket.
