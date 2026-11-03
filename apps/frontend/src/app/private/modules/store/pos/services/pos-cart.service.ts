@@ -2726,6 +2726,14 @@ export class PosCartService {
         price_unit_quantity: priceUnitQuantity,
       });
       const itemTotalPrice = finalUnitPrice * lineUnits;
+      // PR #1062 ronda 2 — se anota la unidad cuando hay conversión real: la
+      // automática del config, o la que ELIGIÓ el cajero aunque la automática
+      // sea la de stock (principal g, pesado en lb → "1 lb", no "453,59 g").
+      const chosenUnits = request.sale_unit_override?.stock_units_per_sale_unit;
+      const annotateSaleUnit =
+        !isWeightProduct &&
+        (saleUnit.unitsPerCapture > 1 ||
+          (chosenUnits != null && chosenUnits > 0 && chosenUnits !== 1));
 
       // For weight products, tax is calculated on the total (price * weight), not just price * quantity
       const taxMultiplier = lineUnits;
@@ -2762,24 +2770,21 @@ export class PosCartService {
         // QUI-978 — la unidad ELEGIDA (g con captura automática kg) gana
         // sobre la automática: el ticket y la reedición hablan de lo que el
         // cajero pesó, no de lo que el sistema habría supuesto.
-        sale_unit_code:
-          !isWeightProduct && saleUnit.unitsPerCapture > 1
-            ? (request.sale_unit_override?.code ??
-              saleUnit.captureUnit?.code ??
-              null)
-            : null,
-        stock_units_per_sale_unit:
-          !isWeightProduct && saleUnit.unitsPerCapture > 1
-            ? (request.sale_unit_override?.stock_units_per_sale_unit ??
-              saleUnit.unitsPerCapture)
-            : null,
+        sale_unit_code: annotateSaleUnit
+          ? (request.sale_unit_override?.code ??
+            saleUnit.captureUnit?.code ??
+            null)
+          : null,
+        stock_units_per_sale_unit: annotateSaleUnit
+          ? (request.sale_unit_override?.stock_units_per_sale_unit ??
+            saleUnit.unitsPerCapture)
+          : null,
         // QUI-978 — unidad del precio publicado (ver el modelo).
-        price_unit_code:
-          !isWeightProduct && saleUnit.unitsPerCapture > 1
-            ? (request.sale_unit_override?.price_unit_code ??
-              saleUnit.captureUnit?.code ??
-              null)
-            : null,
+        price_unit_code: annotateSaleUnit
+          ? (request.sale_unit_override?.price_unit_code ??
+            saleUnit.captureUnit?.code ??
+            null)
+          : null,
         price_unit_quantity: isWeightProduct ? null : priceUnitQuantity,
         captured_by_scale: request.capturedByScale === true,
         // Restaurant Suite — Fase K Gap 1: persist the cashier's
