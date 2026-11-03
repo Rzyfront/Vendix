@@ -19,6 +19,17 @@ describe('syncProductSaleUoms (QUI-978)', () => {
     };
   }
 
+  it('sale_uoms: null limpia como [] sin reventar (PR #1062 ronda 3, H4)', async () => {
+    const client = makeClient();
+
+    await expect(syncProductSaleUoms(client, 7, null)).resolves.toBeUndefined();
+
+    expect(client.product_sale_uoms.deleteMany).toHaveBeenCalledWith({
+      where: { product_id: 7 },
+    });
+    expect(client.product_sale_uoms.createMany).not.toHaveBeenCalled();
+  });
+
   it('reemplaza el conjunto completo (borra todo y recrea)', async () => {
     const client = makeClient();
 

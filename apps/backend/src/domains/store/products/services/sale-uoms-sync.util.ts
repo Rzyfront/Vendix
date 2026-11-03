@@ -19,20 +19,23 @@ export interface SaleUomRow {
  * puede moverse de una UoM a otra), así que no hay nada que preservar.
  * Un `uom_id` duplicado se pliega en una sola fila (principal si alguna
  * marca lo pide); la validación de negocio vive en products.service.
+ * `null` (el DTO lo deja pasar por `@IsOptional`) limpia igual que `[]`
+ * (PR #1062 ronda 3, H4: antes `rows.length` daba 500).
  */
 export async function syncProductSaleUoms(
   client: SaleUomsWriter,
   productId: number,
-  rows: SaleUomRow[],
+  rows: SaleUomRow[] | null | undefined,
 ): Promise<void> {
   await client.product_sale_uoms.deleteMany({
     where: { product_id: productId },
   });
 
-  if (rows.length === 0) return;
+  const list = rows ?? [];
+  if (list.length === 0) return;
 
   const folded = new Map<number, boolean>();
-  for (const row of rows) {
+  for (const row of list) {
     folded.set(
       row.uom_id,
       (folded.get(row.uom_id) ?? false) || row.is_principal === true,
