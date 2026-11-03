@@ -58,6 +58,7 @@ import {
   Brand,
   Product,
   ProductState,
+  SaleUomRead,
   TaxCategory,
 } from '../../interfaces';
 import { ProductsService } from '../../services/products.service';
@@ -3168,17 +3169,18 @@ export class ProductCreatePageComponent {
     // Providers se auto-cargan vía effect() que observa requiresBookingSig
     // (el patchValue dispara valueChanges → espejea requires_booking en el signal)
 
-    // QUI-978 — hidratar UoMs de venta desde lo persistido.
-    const persistedSaleUoms = Array.isArray((product as any).sale_uoms)
-      ? (product as any).sale_uoms
+    // QUI-978 — hidratar UoMs de venta desde lo persistido (`SaleUomRead`,
+    // espejo del `SaleUomView` del backend).
+    const persistedSaleUoms: SaleUomRead[] = Array.isArray(product.sale_uoms)
+      ? product.sale_uoms
       : [];
     this.saleUomIds.set(
       persistedSaleUoms
-        .map((row: any) => Number(row.uom_id))
-        .filter((id: number) => Number.isFinite(id) && id > 0),
+        .map((row) => Number(row.uom_id))
+        .filter((id) => Number.isFinite(id) && id > 0),
     );
     const persistedPrincipal = persistedSaleUoms.find(
-      (row: any) => row.is_principal === true,
+      (row) => row.is_principal === true,
     );
     this.principalSaleUomId.set(
       persistedPrincipal != null
