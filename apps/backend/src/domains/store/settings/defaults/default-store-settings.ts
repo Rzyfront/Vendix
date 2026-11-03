@@ -180,6 +180,7 @@ export function getDefaultStoreSettings(): StoreSettings {
       },
       barcode_scanner: {
         enabled: false,
+        variable_barcodes: { enabled: false, formats: [] },
       },
       customer_queue: {
         enabled: false,

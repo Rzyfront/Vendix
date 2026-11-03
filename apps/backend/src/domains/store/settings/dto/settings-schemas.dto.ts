@@ -18,6 +18,7 @@ import {
   ValidateIf,
   Equals,
   ArrayMinSize,
+  ArrayMaxSize,
   Validate,
   ValidatorConstraint,
   ValidatorConstraintInterface,
@@ -443,11 +444,143 @@ export class TipsSettingsDto {
   suggested_value?: number;
 }
 
+/** Cada prefijo debe medir exactamente `prefix_length` dígitos. */
+@ValidatorConstraint({ name: 'prefixesMatchLength', async: false })
+export class PrefixesMatchLengthConstraint
+  implements ValidatorConstraintInterface
+{
+  validate(prefixes: unknown, args: ValidationArguments): boolean {
+    if (!Array.isArray(prefixes)) return true;
+    const len = (args.object as { prefix_length?: number }).prefix_length;
+    if (typeof len !== 'number') return true;
+    return prefixes.every((p) => typeof p === 'string' && p.length === len);
+  }
+
+  defaultMessage(): string {
+    return 'Cada prefijo debe tener exactamente prefix_length dígitos';
+  }
+}
+
+/**
+ * Formato de etiqueta de balanza (código de barras de peso variable).
+ * Ejemplo Rongta tipo 7: `DD IIIII WW.WWW C` (13 dígitos EAN-13).
+ * Las posiciones son índices base 0 dentro del código de 13 dígitos.
+ */
+export class VariableBarcodeFormatDto {
+  @ApiProperty({ example: 'fortaleza-rongta-07' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  id: string;
+
+  @ApiProperty({ example: 'Balanza carnicería' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  name: string;
+
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  enabled: boolean;
+
+  @ApiProperty({
+    enum: ['rongta_07', 'rongta_09', 'rongta_17', 'rongta_27', 'custom'],
+  })
+  @IsIn(['rongta_07', 'rongta_09', 'rongta_17', 'rongta_27', 'custom'])
+  preset: 'rongta_07' | 'rongta_09' | 'rongta_17' | 'rongta_27' | 'custom';
+
+  @ApiProperty({ example: 13 })
+  @IsInt()
+  @Equals(13)
+  length: 13;
+
+  @ApiProperty({
+    example: ['21'],
+    description: 'Prefijos numéricos de largo `prefix_length` (máx. 20)',
+  })
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @Matches(/^\d{1,13}$/, {
+    each: true,
+    message: 'Cada prefijo debe ser numérico (máx. 13 dígitos)',
+  })
+  @Validate(PrefixesMatchLengthConstraint)
+  prefixes: string[];
+
+  @ApiProperty({ example: 2, minimum: 0, maximum: 13 })
+  @IsInt()
+  @Min(0)
+  @Max(13)
+  prefix_length: number;
+
+  @ApiProperty({ example: 2, minimum: 0, maximum: 13 })
+  @IsInt()
+  @Min(0)
+  @Max(13)
+  product_code_start: number;
+
+  @ApiProperty({ example: 5, minimum: 0, maximum: 13 })
+  @IsInt()
+  @Min(0)
+  @Max(13)
+  product_code_length: number;
+
+  @ApiProperty({ example: 7, minimum: 0, maximum: 13 })
+  @IsInt()
+  @Min(0)
+  @Max(13)
+  value_start: number;
+
+  @ApiProperty({ example: 5, minimum: 0, maximum: 13 })
+  @IsInt()
+  @Min(0)
+  @Max(13)
+  value_length: number;
+
+  @ApiProperty({ example: 3, minimum: 0, maximum: 13 })
+  @IsInt()
+  @Min(0)
+  @Max(13)
+  value_decimals: number;
+
+  @ApiProperty({ enum: ['kg', 'g'] })
+  @IsIn(['kg', 'g'])
+  value_unit: 'kg' | 'g';
+
+  @ApiProperty({ example: 30, required: false })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  max_weight_kg?: number;
+}
+
+export class VariableBarcodesSettingsDto {
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @ApiProperty({ type: () => [VariableBarcodeFormatDto], required: false })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => VariableBarcodeFormatDto)
+  formats?: VariableBarcodeFormatDto[];
+}
+
 export class BarcodeScannerSettingsDto {
   @ApiProperty({ example: false, required: false })
   @IsOptional()
   @IsBoolean()
   enabled?: boolean;
+
+  @ApiProperty({ type: () => VariableBarcodesSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => VariableBarcodesSettingsDto)
+  variable_barcodes?: VariableBarcodesSettingsDto;
 }
 
 export class CustomerQueueSettingsDto {

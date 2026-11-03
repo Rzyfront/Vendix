@@ -777,8 +777,40 @@ export interface TipsSettings {
   suggested_value: number;
 }
 
+export type VariableBarcodePreset =
+  | 'rongta_07'
+  | 'rongta_09'
+  | 'rongta_17'
+  | 'rongta_27'
+  | 'custom';
+
+/** Formato de etiqueta de balanza (peso variable). Posiciones base 0. */
+export interface VariableBarcodeFormat {
+  id: string;
+  name: string;
+  enabled: boolean;
+  preset: VariableBarcodePreset;
+  length: 13;
+  prefixes: string[];
+  prefix_length: number;
+  product_code_start: number;
+  product_code_length: number;
+  value_start: number;
+  value_length: number;
+  value_decimals: number;
+  value_unit: 'kg' | 'g';
+  max_weight_kg?: number;
+}
+
+export interface VariableBarcodesSettings {
+  enabled: boolean;
+  formats: VariableBarcodeFormat[];
+}
+
 export interface BarcodeScannerSettings {
   enabled: boolean;
+  /** Ausente se trata como deshabilitado. */
+  variable_barcodes?: VariableBarcodesSettings;
 }
 
 export interface PosSettings {

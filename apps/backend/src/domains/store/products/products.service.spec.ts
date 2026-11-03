@@ -769,6 +769,66 @@ describe('ProductsService', () => {
     });
   });
 
+  describe('código de balanza (scale_code) — unicidad por tienda entre no archivados', () => {
+    const dto = {
+      name: 'Carne molida',
+      base_price: 10,
+      sku: 'SKU-BAL',
+      scale_code: 3,
+      store_id: 1,
+    } as CreateProductDto;
+
+    const arrange = () => {
+      mockPrismaService.products.findFirst.mockResolvedValue(null);
+      mockPrismaService.product_variants.findFirst.mockResolvedValue(null);
+      mockPrismaService.product_price_tier_assignments.findFirst.mockResolvedValue(
+        null,
+      );
+    };
+
+    it('create con scale_code usado por un producto activo: PROD_SCALE_CODE_DUP_001', async () => {
+      arrange();
+      mockPrismaService.products.findFirst.mockImplementation(
+        async ({ where }) =>
+          where.scale_code ? { id: 4, name: 'Chuleta' } : null,
+      );
+      const err: any = await service.create(dto).catch((e) => e);
+      expect(err.errorCode).toBe('PROD_SCALE_CODE_DUP_001');
+      expect(err.getResponse().details).toMatchObject({
+        scale_code: 3,
+        product_id: 4,
+        product_name: 'Chuleta',
+      });
+    });
+
+    it('la consulta de unicidad excluye archivados', async () => {
+      arrange();
+      mockPrismaService.products.findFirst.mockImplementation(
+        async ({ where }) => (where.scale_code ? { id: 4, name: 'X' } : null),
+      );
+      await service.create(dto).catch((e) => e);
+      const where = mockPrismaService.products.findFirst.mock.calls
+        .map((c) => c[0]?.where)
+        .find((w) => w && w.scale_code);
+      expect(where).toMatchObject({
+        scale_code: 3,
+        state: { not: 'archived' },
+      });
+    });
+
+    it('create sin scale_code (o null) no consulta unicidad de balanza', async () => {
+      arrange();
+      mockPrismaService.products.findFirst.mockClear();
+      await service
+        .create({ ...dto, scale_code: null } as CreateProductDto)
+        .catch((e) => e);
+      const wheres = mockPrismaService.products.findFirst.mock.calls
+        .map((c) => c[0]?.where)
+        .filter(Boolean);
+      expect(wheres.some((w) => 'scale_code' in w)).toBe(false);
+    });
+  });
+
   describe('P1-4 — combinación de impuestos del producto', () => {
     const txPassthrough = () =>
       mockPrismaService.$transaction.mockImplementation((callback) =>
@@ -2283,6 +2343,17 @@ describe('ProductsService', () => {
     it('Insumos incluye el insumo puro heredado', async () => {
       const where = await run({ usage_nature: 'supply' } as any);
       expect(where.AND[1]).toEqual({ OR: [{ usage_nature: 'supply' }, legacyPure] });
+    });
+
+    it('scale_code filtra por coincidencia exacta y no archivados', async () => {
+      const where = await run({ scale_code: 3 } as any);
+      expect(where.scale_code).toBe(3);
+      expect(where.state).toEqual({ not: 'archived' });
+    });
+
+    it('sin scale_code el where no lo incluye', async () => {
+      const where = await run({});
+      expect(where).not.toHaveProperty('scale_code');
     });
 
     it('Uso interno filtra por su naturaleza', async () => {

@@ -209,7 +209,8 @@ export type BulkEditItemStatus = 'ok' | 'warning' | 'error';
  * EXCLUIDOS DELIBERADAMENTE (no añadir sin revisar el motivo):
  * - `sku`, `slug`, `barcode`: tienen `@@unique([store_id, …])`
  *   (`apps/backend/prisma/schema.prisma:1607-1609`); aplicar el mismo valor a N
- *   productos colisiona.
+ *   productos colisiona. `scale_code` (código de balanza) es único por tienda
+ *   igual que sku/barcode, así que tampoco se edita en bloque.
  * - `stock_quantity`, `stock_by_location`, `stock_transfer_mode`,
  *   `variant_removal_stock_mode`: disparan `StockLevelManager.updateStock()`,
  *   que escribe `inventory_movements`.

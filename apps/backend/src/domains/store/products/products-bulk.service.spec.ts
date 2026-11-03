@@ -927,6 +927,124 @@ describe('ProductsBulkService', () => {
     });
   });
 
+  describe('código de balanza en carga masiva', () => {
+    const csv = (header: string, rows: string[]) =>
+      Buffer.from('\uFEFF' + [header, ...rows].join('\n'), 'utf-8');
+    const codes = (item: any) => item.errors.map((e: any) => e.code);
+
+    it("mapea 'Código Balanza' y sus alias a scale_code (número)", () => {
+      for (const h of [
+        'Código Balanza',
+        'codigo balanza',
+        'Código de balanza',
+        'codigo de balanza',
+        'scale code',
+        'scale_code',
+      ]) {
+        const [row] = service.parseFile(csv(`Nombre,SKU,${h}`, ['P,S-1,3']));
+        expect((row as any).scale_code).toBe(3);
+      }
+    });
+
+    it('rechaza decimales, texto y fuera de rango como error de celda', () => {
+      for (const bad of ['3.5', 'abc', '0', '1000000', '1e3']) {
+        const [row] = service.parseFile(
+          csv('Nombre,SKU,Código Balanza', [`P,S-1,${bad}`]),
+        );
+        expect((row as any).scale_code).toBeUndefined();
+        expect((row as any).__cell_errors?.[0]).toMatchObject({
+          code: 'INVALID_SCALE_CODE',
+          field: 'scale_code',
+        });
+      }
+    });
+
+    it('celda vacía = sin scale_code y sin error', () => {
+      const [row] = service.parseFile(
+        csv('Nombre,SKU,Código Balanza,Precio Venta', ['P,S-1,,1000']),
+      );
+      expect((row as any).scale_code).toBeUndefined();
+      expect((row as any).__cell_errors).toBeUndefined();
+    });
+
+    it('las plantillas traen la columna justo después de Tipo Precio', () => {
+      const headers = service.getProductTemplateHeaders();
+      expect(headers[headers.indexOf('Tipo Precio') + 1]).toBe('Código Balanza');
+    });
+
+    it('mapToCreate/Update propagan scale_code y NULL lo limpia', () => {
+      const create = (service as any).mapToCreateProductDto(
+        { name: 'P', sku: 'S-1', base_price: 10, scale_code: 3 },
+        1,
+      );
+      expect(create.scale_code).toBe(3);
+      const upd = (service as any).mapToUpdateProductDto({ sku: 'S-1', scale_code: 3 });
+      expect(upd.scale_code).toBe(3);
+      expect('scale_code' in (service as any).mapToUpdateProductDto({ sku: 'S-1' })).toBe(false);
+      expect(
+        (service as any).mapToUpdateProductDto({ sku: 'S-1', scale_code: (service as any).NULL_MARKER })
+          .scale_code,
+      ).toBe(null);
+    });
+
+    describe('analyzeProducts', () => {
+      const analyze = (rows: string[]) =>
+        service.analyzeProducts(
+          csv('Nombre,SKU,Código Balanza,Precio Venta', rows),
+          1,
+        );
+
+      beforeEach(() => {
+        mockPrismaService.products.findMany.mockReset();
+        mockPrismaService.products.findMany.mockResolvedValue([]);
+        mockPrismaService.product_variants.findMany.mockReset();
+        mockPrismaService.product_variants.findMany.mockResolvedValue([]);
+        mockPrismaService.product_price_tier_assignments.findMany.mockReset();
+        mockPrismaService.product_price_tier_assignments.findMany.mockResolvedValue(
+          [],
+        );
+      });
+
+      it('expone scale_code en el item y lo acepta cuando está libre', async () => {
+        const item = (await analyze(['P,S-1,3,1000'])).products[0] as any;
+        expect(item.scale_code).toBe(3);
+        expect(item.modified_fields).toContain('scale_code');
+        expect(codes(item)).not.toContain('SCALE_CODE_IN_USE');
+      });
+
+      it('error cuando el código se repite en el archivo con otro SKU', async () => {
+        const result = await analyze(['A,S-1,3,1000', 'B,S-2,3,1000']);
+        expect(codes(result.products[0])).not.toContain('DUPLICATE_SCALE_CODE_IN_BATCH');
+        expect(codes(result.products[1])).toContain('DUPLICATE_SCALE_CODE_IN_BATCH');
+      });
+
+      it('error cuando el código ya lo usa otro producto no archivado', async () => {
+        mockPrismaService.products.findMany.mockImplementation(
+          async (args: any) =>
+            args.where?.scale_code
+              ? [{ id: 50, scale_code: 3, name: 'Chuleta' }]
+              : [],
+        );
+        const result = await analyze(['A,S-2,3,1000']);
+        expect(codes(result.products[0])).toContain('SCALE_CODE_IN_USE');
+        const where = mockPrismaService.products.findMany.mock.calls
+          .map(([a]: any[]) => a.where)
+          .find((w: any) => w?.scale_code);
+        expect(where).toEqual({
+          store_id: 1,
+          scale_code: { in: [3] },
+          state: { not: 'archived' },
+        });
+      });
+
+      it('celda inválida llega como error de la fila', async () => {
+        const item = (await analyze(['A,S-2,abc,1000'])).products[0] as any;
+        expect(codes(item)).toContain('INVALID_SCALE_CODE');
+        expect(item.status).toBe('error');
+      });
+    });
+  });
+
   describe('analyzeProducts — volumen (tope 10.000, lecturas agrupadas)', () => {
     const buildCsv = (n: number) =>
       Buffer.from(

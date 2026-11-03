@@ -947,6 +947,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'El código de barras ya está en uso en esta tienda',
   },
+  PROD_SCALE_CODE_DUP_001: {
+    code: 'PROD_SCALE_CODE_DUP_001',
+    httpStatus: 409,
+    devMessage: 'El código de balanza ya está en uso en esta tienda',
+  },
   PROD_IMAGE_001: {
     code: 'PROD_IMAGE_001',
     httpStatus: 404,
