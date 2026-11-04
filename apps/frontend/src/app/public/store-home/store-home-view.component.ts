@@ -32,6 +32,7 @@ export interface StoreHomeDomainFallback {
   standalone: true,
   imports: [RouterModule, AppPageViewComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'block' },
   template: `
 
     <div class="flex min-h-screen flex-col bg-background" data-testid="store-home">

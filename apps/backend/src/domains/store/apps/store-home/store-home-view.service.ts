@@ -36,7 +36,8 @@ export class StoreHomeViewService {
     private readonly s3: S3Service,
   ) {}
 
-  async read(storeId: number, rawConfig: unknown): Promise<StoreHomeViewData> {
+  /** `withApps: false` skips reading the published apps (the public page only lists them when its block is on). */
+  async read(storeId: number, rawConfig: unknown, withApps = true): Promise<StoreHomeViewData> {
     const store = await this.globalPrisma.stores.findUnique({
       where: { id: storeId },
       select: { name: true, organization_id: true },
@@ -52,7 +53,7 @@ export class StoreHomeViewService {
             select: { settings: true },
           })
         : null,
-      this.publishedApps(storeId),
+      withApps ? this.publishedApps(storeId) : ([] as StoreHomeAppLink[]),
     ]);
     const branding = resolveStoreHomeBranding(
       (storeSettings?.settings as { branding?: Record<string, unknown> } | null)?.branding,

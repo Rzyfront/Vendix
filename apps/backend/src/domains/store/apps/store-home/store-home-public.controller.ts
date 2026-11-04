@@ -38,10 +38,10 @@ export class StoreHomePublicController {
       throw new VendixHttpException(ErrorCodes.STORE_APPS_001);
     }
 
-    const { apps, ...data } = await this.view.read(storeId, row.config);
     // Apps F2: the owner's page, only when saved (pre-F2 response otherwise).
     const page = readAppPage('store_home', row.config);
     const appsBlock = page?.blocks.find((block) => block.type === 'apps' && block.enabled);
+    const { apps, ...data } = await this.view.read(storeId, row.config, !!appsBlock);
     return this.responseService.success({
       ...data,
       ...(page ? { page } : {}),
