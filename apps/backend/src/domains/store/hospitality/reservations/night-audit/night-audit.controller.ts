@@ -6,10 +6,13 @@ import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingNightAuditService } from './night-audit.service';
 import { CloseNightAuditDto, NightAuditQueryDto, ReopenNightAuditDto } from './night-audit.dto';
 import { formatShortDate } from '../stay-dates';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H7.1) — night audit: close and reopen the business day. */
 @Controller('store/hospitality/night-audit')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingNightAuditController {
   constructor(
     private readonly nightAudit: LodgingNightAuditService,

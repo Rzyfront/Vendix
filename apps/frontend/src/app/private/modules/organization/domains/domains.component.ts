@@ -66,6 +66,7 @@ const PENDING_PROVISIONING_STATUSES = new Set([
   DomainStatus.PROPAGATING,
 ]);
 
+import { appOnlyAppTypeLabel } from '../../../../shared/constants/app-domain-app-types';
 @Component({
   selector: 'app-domains',
   standalone: true,
@@ -921,7 +922,7 @@ private loadInitialData(): void {
       STORE_LANDING: 'Landing Tienda',
       ORG_ADMIN: 'Admin Org',
       ORG_LANDING: 'Landing Org'};
-    return typeMap[type] || type || 'N/A';
+    return typeMap[type] || appOnlyAppTypeLabel(type) || type || 'N/A';
   }
 
   formatOwnership(ownership: string): string {

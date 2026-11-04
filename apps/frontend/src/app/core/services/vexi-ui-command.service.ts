@@ -286,6 +286,21 @@ export class VexiUiCommandService {
       });
     }
 
+    // apps-f4 S4: same canSeeKey gate as the sidebar and the URL guard.
+    // Audit mode only records; with the flag on the industry layer blocks.
+    if (!this.menuFilter.applyRouteGate(entry.route, true, 'vexi')) {
+      return JSON.stringify({
+        status: 'blocked',
+        target: entry.label,
+        blocked_by: 'industry',
+        detail: this.menuFilter.industryBlockMessage(
+          this.menuFilter.resolveGateKeysForRoute(entry.route),
+        ),
+        next_step:
+          'No navegues. Explícale que ese módulo no aplica a la industria de su tienda.',
+      });
+    }
+
     const accepted = await this.router.navigate([entry.route]);
     const landedOn = this.router.url;
 

@@ -554,8 +554,9 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
 
   /**
    * `apps.enabled` (odd/tasks/apps-module.md, D3/T8) decide si el sidebar
-   * muestra el padre «Apps». Mismo contrato que `vex`: default `false`, merge
-   * por clave, y compuerta propia — aquí más estrecha: solo el propietario.
+   * muestra el padre «Apps». Desde apps-vistas-f1 (S1) el default es `true`
+   * (Apps es el estándar); merge por clave como `vex`, y compuerta propia —
+   * aquí más estrecha: solo el propietario.
    */
   describe('updateSettings — interruptor del módulo Apps', () => {
     let stored: any;
@@ -580,12 +581,12 @@ describe('SettingsService — guard de transición de caja (QUI-560)', () => {
       );
     });
 
-    it('una tienda sin bloque apps lo lee apagado', async () => {
+    it('una tienda sin bloque apps lo lee encendido (Apps es el estándar)', async () => {
       const settings: any = await service.updateSettings({
         inventory: { low_stock_threshold: 5 },
       });
 
-      expect(settings.apps).toEqual({ enabled: false });
+      expect(settings.apps).toEqual({ enabled: true });
     });
 
     it('el propietario lo enciende y lo apaga', async () => {

@@ -29,6 +29,7 @@ import {
   FilterValues,
   CardComponent} from '../../../../../shared/components/index';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { StoreDomainsService } from './store-domains.service';
 import {
   StoreDomain,
@@ -46,6 +47,10 @@ const PENDING_PROVISIONING_STATUSES = new Set([
   'propagating',
 ]);
 
+import {
+  APP_ONLY_APP_TYPE_OPTIONS,
+  appOnlyAppTypeLabel,
+} from '../../../../../shared/constants/app-domain-app-types';
 @Component({
   selector: 'app-store-domains',
   standalone: true,
@@ -309,6 +314,7 @@ readonly domains = signal<StoreDomain[]>([]);
         { value: 'STORE_ECOMMERCE', label: 'E-commerce' },
         { value: 'STORE_LANDING', label: 'Landing tienda' },
         { value: 'STORE_ADMIN', label: 'Admin tienda' },
+        ...APP_ONLY_APP_TYPE_OPTIONS,
       ]},
   ];
 
@@ -529,14 +535,20 @@ loadDomains(
         .updateDomain(this.editing_domain.id, dto as UpdateStoreDomainDto)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
-          next: () => {
+          next: (response) => {
+            this.is_saving.set(false);
+            if (response?.success === false) {
+              this.toast_service.error(this.failureMessage(response, 'Error al actualizar el dominio'));
+              return;
+            }
             this.toast_service.success('Dominio actualizado correctamente');
             this.closeModal();
             this.loadDomains();
-            this.is_saving.set(false);
           },
-          error: () => {
-            this.toast_service.error('Error al actualizar el dominio');
+          error: (error) => {
+            this.toast_service.error(
+              parseApiError(error).userMessage || 'Error al actualizar el dominio',
+            );
             this.is_saving.set(false);
           }});
     } else {
@@ -545,6 +557,11 @@ loadDomains(
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (response) => {
+            if (response?.success === false) {
+              this.toast_service.error(this.failureMessage(response, 'Error al crear el dominio'));
+              this.is_saving.set(false);
+              return;
+            }
             this.toast_service.success('Dominio creado correctamente');
             this.closeModal();
             this.loadDomains();
@@ -557,11 +574,19 @@ loadDomains(
               ]);
             }
           },
-          error: () => {
-            this.toast_service.error('Error al crear el dominio');
+          error: (error) => {
+            this.toast_service.error(
+              parseApiError(error).userMessage || 'Error al crear el dominio',
+            );
             this.is_saving.set(false);
           }});
     }
+  }
+
+  /** A `success: false` body still carries the backend's reason in `error`. */
+  private failureMessage(response: unknown, fallback: string): string {
+    const reason = (response as { error?: unknown })?.error;
+    return typeof reason === 'string' && reason.trim() ? reason : fallback;
   }
 
   setAsPrimary(domain: StoreDomain): void {
@@ -696,7 +721,7 @@ loadDomains(
       STORE_ECOMMERCE: 'E-commerce',
       STORE_LANDING: 'Landing tienda',
       STORE_ADMIN: 'Admin tienda'};
-    return labels[type] || type;
+    return labels[type] || appOnlyAppTypeLabel(type) || type;
   }
 
   getStatusLabel(status: string): string {

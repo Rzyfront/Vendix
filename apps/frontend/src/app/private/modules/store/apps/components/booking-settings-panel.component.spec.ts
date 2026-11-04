@@ -1,7 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
-import { BookingSettingsModalComponent } from './booking-settings-modal.component';
+import { BookingSettingsPanelComponent } from './booking-settings-panel.component';
 import { StoreAppsService } from '../services/store-apps.service';
 import { ProductsService } from '../../products/services/products.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -17,6 +17,7 @@ const detail = (over: Partial<StoreAppDetail> = {}): StoreAppDetail => ({
   description: '',
   applies_to_store_industries: true,
   status: 'not_installed',
+  enabled: false,
   domain: null,
   public_url: null,
   published_at: null,
@@ -24,17 +25,16 @@ const detail = (over: Partial<StoreAppDetail> = {}): StoreAppDetail => ({
   ...over,
 });
 
-describe('BookingSettingsModalComponent (apps-module Fase 4)', () => {
-  let fixture: ComponentFixture<BookingSettingsModalComponent>;
-  let component: BookingSettingsModalComponent;
+describe('BookingSettingsPanelComponent (apps-module Fase 4)', () => {
+  let fixture: ComponentFixture<BookingSettingsPanelComponent>;
+  let component: BookingSettingsPanelComponent;
   let apps: jasmine.SpyObj<StoreAppsService>;
   let products: jasmine.SpyObj<ProductsService>;
 
   const open = async (d: StoreAppDetail) => {
     apps.get.and.returnValue(of({ success: true, data: d }));
-    fixture = TestBed.createComponent(BookingSettingsModalComponent);
+    fixture = TestBed.createComponent(BookingSettingsPanelComponent);
     component = fixture.componentInstance;
-    component.isOpen.set(true);
     fixture.detectChanges();
     await fixture.whenStable();
   };
@@ -57,7 +57,7 @@ describe('BookingSettingsModalComponent (apps-module Fase 4)', () => {
     products.getProductById.and.callFake((id: number) => of(item(id, `Item ${id}`)));
 
     TestBed.configureTestingModule({
-      imports: [BookingSettingsModalComponent],
+      imports: [BookingSettingsPanelComponent],
       providers: [
         provideZonelessChangeDetection(),
         { provide: StoreAppsService, useValue: apps },

@@ -28,6 +28,8 @@ import {
   KdsSnapshotQueryDto,
   CancelKitchenTicketDto,
 } from './dto';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * KitchenFireController (Restaurant Suite — Fase D + F)
@@ -53,7 +55,8 @@ import {
  *   - GET  /stream     → store:kitchen_fire:read
  */
 @Controller('store/kitchen-fire')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('restaurant_ops_kds')
 export class KitchenFireController {
   constructor(
     private readonly kitchenFireService: KitchenFireService,

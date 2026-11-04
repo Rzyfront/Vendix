@@ -7,6 +7,7 @@ const app = (over: Partial<StoreApp> = {}): StoreApp => ({
   description: 'Venta completa',
   applies_to_store_industries: true,
   status: 'not_installed',
+  enabled: false,
   domain: null,
   public_url: null,
   published_at: null,
@@ -28,7 +29,7 @@ describe('toAppCard (apps-module T6)', () => {
     expect(card.statusVariant).toBe('success');
     expect(card.hostname).toBe('roku-shop.vendix.online');
     expect(card.publicUrl).toBe('https://roku-shop.vendix.online');
-    expect(card.action).toEqual({ kind: 'route', label: 'Administrar', route: '/admin/ecommerce' });
+    expect(card.action).toEqual({ kind: 'route', label: 'Administrar', route: '/admin/apps/ecommerce' });
   });
 
   it('Tienda en línea en una tienda física: no disponible para el tipo de tienda', () => {
@@ -40,11 +41,11 @@ describe('toAppCard (apps-module T6)', () => {
     });
   });
 
-  it('Landing sin publicar se configura desde /admin/apps (oferta y dominio, Fase 6)', () => {
+  it('Landing abre su propia vista /admin/apps/landing (apps-vistas-f1 S4)', () => {
     const card = toAppCard(app({ key: 'landing', name: 'Landing page' }), 'hybrid');
 
     expect(card.statusLabel).toBe('No instalada');
-    expect(card.action).toEqual({ kind: 'configure', label: 'Configurar' });
+    expect(card.action).toEqual({ kind: 'route', label: 'Abrir', route: '/admin/apps/landing' });
   });
 
   it('Booking fuera de hotelería: no aplica a la industria', () => {
@@ -56,38 +57,38 @@ describe('toAppCard (apps-module T6)', () => {
     expect(card.action).toEqual({ kind: 'disabled', label: 'No aplica a tu industria' });
   });
 
-  it('Inicio de tienda se configura desde la misma pantalla de Apps', () => {
+  it('Inicio de tienda abre su vista /admin/apps/store-home', () => {
     const card = toAppCard(app({ key: 'store_home', name: 'Inicio de tienda' }), 'physical');
 
-    expect(card.action).toEqual({ kind: 'configure', label: 'Configurar' });
+    expect(card.action).toEqual({ kind: 'route', label: 'Abrir', route: '/admin/apps/store-home' });
   });
 
-  it('Página de producto se configura desde la misma pantalla de Apps', () => {
+  it('Página de producto abre su vista /admin/apps/product-page, sin modal', () => {
     const card = toAppCard(
       app({ key: 'product_page', name: 'Página de producto', status: 'draft' }),
       'hybrid',
     );
 
     expect(card.statusLabel).toBe('Borrador');
-    expect(card.action).toEqual({ kind: 'configure', label: 'Configurar' });
+    expect(card.action).toEqual({ kind: 'route', label: 'Abrir', route: '/admin/apps/product-page' });
   });
 
-  it('Service page se configura desde la misma pantalla de Apps', () => {
+  it('Service page abre su vista /admin/apps/service-page', () => {
     const card = toAppCard(
       app({ key: 'service_page', name: 'Service page', status: 'not_installed' }),
       'hybrid',
     );
 
-    expect(card.action).toEqual({ kind: 'configure', label: 'Configurar' });
+    expect(card.action).toEqual({ kind: 'route', label: 'Abrir', route: '/admin/apps/service-page' });
   });
 
-  it('Booking en un hotel se configura desde la misma pantalla de Apps', () => {
+  it('Booking en un hotel abre su vista /admin/apps/booking', () => {
     const card = toAppCard(
       app({ key: 'booking', name: 'Booking', applies_to_store_industries: true }),
       'hybrid',
     );
 
-    expect(card.action).toEqual({ kind: 'configure', label: 'Configurar' });
+    expect(card.action).toEqual({ kind: 'route', label: 'Abrir', route: '/admin/apps/booking' });
   });
 
   it('Página de producto fuera de las industrias que aplica sigue bloqueada', () => {
@@ -101,6 +102,18 @@ describe('toAppCard (apps-module T6)', () => {
 
   it('traduce cada estado', () => {
     expect(toAppCard(app({ status: 'draft' }), 'hybrid').statusLabel).toBe('Borrador');
-    expect(toAppCard(app({ status: 'disabled' }), 'hybrid').statusLabel).toBe('Desactivada');
+    expect(toAppCard(app({ status: 'disabled' }), 'hybrid').statusLabel).toBe('Apagada');
+  });
+
+  it('expone si la app está encendida (apps-vistas-f1 S2)', () => {
+    expect(toAppCard(app({ status: 'draft', enabled: true }), 'hybrid').enabled).toBeTrue();
+    expect(toAppCard(app({ status: 'disabled', enabled: false }), 'hybrid').enabled).toBeFalse();
+  });
+
+  it('ninguna tarjeta abre un modal: toda acción habilitada es una ruta (apps-vistas-f1 S6)', () => {
+    const kinds = ['ecommerce', 'store_home', 'landing', 'product_page', 'service_page', 'booking'] as const;
+    for (const key of kinds) {
+      expect(toAppCard(app({ key }), 'hybrid').action.kind).toBe('route');
+    }
   });
 });

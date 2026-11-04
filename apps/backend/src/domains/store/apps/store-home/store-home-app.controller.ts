@@ -2,8 +2,12 @@ import { Body, Controller, Patch, Post, UseGuards } from '@nestjs/common';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { AppPageService } from '../shared/app-page.service';
 import { StoreHomeAppService } from './store-home-app.service';
-import { UpdateStoreHomeConfigDto } from './store-home.dto';
+import {
+  UpdateStoreHomeConfigDto,
+  UpdateStoreHomePageDto,
+} from './store-home.dto';
 
 /**
  * Apps · store home (Fase 5): owner/admin configuration of the entry page of
@@ -16,6 +20,7 @@ export class StoreHomeAppController {
   constructor(
     private readonly storeHome: StoreHomeAppService,
     private readonly responseService: ResponseService,
+    private readonly appPage: AppPageService,
   ) {}
 
   @Permissions('store:apps:manage')
@@ -37,5 +42,13 @@ export class StoreHomeAppController {
   async unpublish() {
     await this.storeHome.unpublish();
     return this.responseService.success(null, 'Inicio de tienda despublicado');
+  }
+
+  /** Apps F2: the app's own page (hero, its own sections, brand and SEO). */
+  @Permissions('store:apps:manage')
+  @Patch('page')
+  async updatePage(@Body() dto: UpdateStoreHomePageDto) {
+    const page = await this.appPage.save('store_home', dto.page);
+    return this.responseService.success({ page }, 'Inicio de tienda: contenido guardado');
   }
 }

@@ -157,7 +157,7 @@ type ConfigTabId = 'branding' | 'seo' | 'features' | 'theme' | 'ecommerce' | 'in
             <app-selector
               formControlName="app_type"
               label="Tipo de Aplicación"
-              [options]="appTypeOptions"
+              [options]="appTypeOptions()"
               placeholder="Seleccionar aplicación"
               size="md"
               />
@@ -542,7 +542,12 @@ export class DomainCreateModalComponent implements OnInit {
 
   domainForm!: FormGroup;
   ownershipOptions: SelectorOption[] = [];
-  appTypeOptions: SelectorOption[] = [];
+  /** Apps F5: the app types of the apps only when a store is selected. */
+  readonly appTypeOptions = computed<SelectorOption[]>(() =>
+    this.domainsService
+      .getAppTypeOptions(!!this.selectedStoreId())
+      .map((opt) => ({ value: opt.value, label: opt.label })),
+  );
 
   readonly activeTab = signal<ConfigTabId>('branding');
   readonly selectedStoreId = signal<number | null>(null);
@@ -658,9 +663,6 @@ export class DomainCreateModalComponent implements OnInit {
   private loadOptions(): void {
     this.ownershipOptions = this.domainsService
       .getDomainOwnershipOptions()
-      .map((opt) => ({ value: opt.value, label: opt.label }));
-    this.appTypeOptions = this.domainsService
-      .getAppTypeOptions()
       .map((opt) => ({ value: opt.value, label: opt.label }));
   }
 

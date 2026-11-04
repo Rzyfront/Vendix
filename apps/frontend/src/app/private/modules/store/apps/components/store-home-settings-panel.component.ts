@@ -3,22 +3,19 @@ import {
   Component,
   DestroyRef,
   computed,
-  effect,
   inject,
-  model,
   output,
   signal,
-  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { of } from 'rxjs';
 import { map, switchMap } from 'rxjs/operators';
 
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
-import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { StoreAppDetail, StoreHomeConfig } from '../interfaces/store-app.interface';
 import { StoreAppsService } from '../services/store-apps.service';
+import type { AppSettingsPanel } from './app-settings-panel';
 
 /** Same limit as the backend (`store-home.reader.ts`). */
 export const MAX_STORE_HOME_FOOTER = 160;
@@ -30,17 +27,14 @@ export const MAX_STORE_HOME_FOOTER = 160;
  * The only setting is the footer line about Vendix.
  */
 @Component({
-  selector: 'app-store-home-settings-modal',
+  selector: 'app-store-home-settings-panel',
   standalone: true,
-  imports: [ModalComponent],
+  imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <app-modal
-      [(isOpen)]="isOpen"
-      title="Inicio de tienda"
-      subtitle="Portada de entrada de tu tienda con tu marca y el botón de ingreso."
-      size="md"
-    >
+    <section class="space-y-4" data-panel="store-home">
+      <p class="text-sm text-[var(--color-text-secondary)]">Portada de entrada de tu tienda con tu marca y el botón de ingreso.</p>
+
       @if (loading()) {
         <p class="text-sm text-[var(--color-text-secondary)]">Cargando…</p>
       } @else {
@@ -83,28 +77,19 @@ export const MAX_STORE_HOME_FOOTER = 160;
         </div>
       }
 
-      <div slot="footer" class="flex flex-wrap justify-end gap-2">
-        @if (isPublished()) {
-          <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm"
-                  [disabled]="busy()" (click)="unpublish()" data-testid="store-home-unpublish">Despublicar</button>
-        }
+      <div class="flex flex-wrap justify-end gap-2 border-t border-[var(--color-border)] pt-4">
         <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm"
                 [disabled]="busy() || loading()" (click)="save(false)" data-testid="store-home-save">Guardar</button>
-        @if (!isPublished()) {
-          <button type="button" class="rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-[var(--color-text-on-primary)] disabled:opacity-50"
-                  [disabled]="busy() || loading()" (click)="save(true)" data-testid="store-home-publish">Publicar</button>
-        }
       </div>
-    </app-modal>
+    </section>
   `,
 })
-export class StoreHomeSettingsModalComponent {
+export class StoreHomeSettingsPanelComponent implements AppSettingsPanel {
   private readonly appsService = inject(StoreAppsService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
-  readonly isOpen = model(false);
-  /** Emitted after a save, publish or unpublish, so the catalog reloads. */
+  /** Emitted after a save, publish or unpublish, so the view header reloads. */
   readonly changed = output<void>();
 
   readonly maxFooter = MAX_STORE_HOME_FOOTER;
@@ -130,10 +115,16 @@ export class StoreHomeSettingsModalComponent {
     }
   });
 
+  /** {@link AppSettingsPanel}: the view header publishes through these. */
+  readonly canPublish = computed(() => !this.loading());
+  readonly canUnpublish = computed(() => this.isPublished());
+
+  publish(): void {
+    this.save(true);
+  }
+
   constructor() {
-    effect(() => {
-      if (this.isOpen()) untracked(() => this.load());
-    });
+    this.load();
   }
 
   save(publish: boolean): void {
@@ -175,7 +166,7 @@ export class StoreHomeSettingsModalComponent {
     this.load();
   }
 
-  private load(): void {
+  load(): void {
     this.loading.set(true);
     this.error.set(null);
     this.appsService

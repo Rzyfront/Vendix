@@ -3,12 +3,9 @@ import {
   Component,
   DestroyRef,
   computed,
-  effect,
   inject,
-  model,
   output,
   signal,
-  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { forkJoin, of } from 'rxjs';
@@ -16,7 +13,6 @@ import { catchError, debounceTime, distinctUntilChanged, map, switchMap } from '
 
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { ProductsService } from '../../products/services/products.service';
 import type { Product } from '../../products/interfaces/product.interface';
@@ -24,8 +20,10 @@ import {
   BookingPageConfig,
   ProductPageCustomDomain,
   StoreAppDetail,
+  appDomainAliasIds,
 } from '../interfaces/store-app.interface';
 import { StoreAppsService } from '../services/store-apps.service';
+import type { AppSettingsPanel } from './app-settings-panel';
 
 /** Same limit as the backend (`booking-page.reader.ts`). */
 export const MAX_BOOKING_PRODUCTS = 8;
@@ -43,17 +41,14 @@ interface PickedItem {
  * re-validates every rule (hospitality industry, an active room type).
  */
 @Component({
-  selector: 'app-booking-settings-modal',
+  selector: 'app-booking-settings-panel',
   standalone: true,
-  imports: [ModalComponent, IconComponent],
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <app-modal
-      [(isOpen)]="isOpen"
-      title="Página de reservas"
-      subtitle="Reservas y check-in en línea de tu hotel, en su propio dominio."
-      size="lg"
-    >
+    <section class="space-y-4" data-panel="booking">
+      <p class="text-sm text-[var(--color-text-secondary)]">Reservas y check-in en línea de tu hotel, en su propio dominio.</p>
+
       @if (loading()) {
         <p class="text-sm text-[var(--color-text-secondary)]">Cargando…</p>
       } @else {
@@ -116,6 +111,14 @@ interface PickedItem {
 
           <section>
             <h3 class="font-semibold text-[var(--color-text-primary)]">Dominio</h3>
+            <p class="mt-1 text-xs text-[var(--color-text-secondary)]" data-testid="app-domain-hint">
+              La dirección de Vendix queda siempre activa. Si eliges uno de tus dominios, se suma como alias.
+            </p>
+            @if (aliasHostnames().length) {
+              <p class="mt-2 text-sm" data-testid="app-domain-aliases">
+                También responde en: {{ aliasHostnames().join(', ') }}
+              </p>
+            }
             <label class="mt-2 flex items-start gap-2">
               <input type="radio" name="bk-domain" [checked]="customDomainId() === null" (change)="customDomainId.set(null)" />
               <span>
@@ -126,7 +129,7 @@ interface PickedItem {
             @for (d of customDomains(); track d.id) {
               <label class="mt-2 flex items-start gap-2">
                 <input type="radio" name="bk-domain" [checked]="customDomainId() === d.id" (change)="customDomainId.set(d.id)" />
-                <span>{{ d.hostname }} <span class="text-xs text-[var(--color-text-secondary)]">(tu dominio)</span></span>
+                <span>{{ d.hostname }} <span class="text-xs text-[var(--color-text-secondary)]">(sumar como alias)</span></span>
               </label>
             }
           </section>
@@ -137,29 +140,20 @@ interface PickedItem {
         </div>
       }
 
-      <div slot="footer" class="flex flex-wrap justify-end gap-2">
-        @if (isPublished()) {
-          <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm"
-                  [disabled]="busy()" (click)="unpublish()" data-testid="booking-unpublish">Despublicar</button>
-        }
+      <div class="flex flex-wrap justify-end gap-2 border-t border-[var(--color-border)] pt-4">
         <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm"
                 [disabled]="busy() || loading()" (click)="save(false)">Guardar</button>
-        <button type="button" class="rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-[var(--color-text-on-primary)] disabled:opacity-50"
-                [disabled]="busy() || loading()" (click)="save(true)" data-testid="booking-publish">
-          {{ isPublished() ? 'Guardar y volver a publicar' : 'Publicar' }}
-        </button>
       </div>
-    </app-modal>
+    </section>
   `,
 })
-export class BookingSettingsModalComponent {
+export class BookingSettingsPanelComponent implements AppSettingsPanel {
   private readonly appsService = inject(StoreAppsService);
   private readonly productsService = inject(ProductsService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
-  readonly isOpen = model(false);
-  /** Emitted after a save, publish or unpublish, so the catalog reloads. */
+  /** Emitted after a save, publish or unpublish, so the view header reloads. */
   readonly changed = output<void>();
 
   readonly maxProducts = MAX_BOOKING_PRODUCTS;
@@ -171,6 +165,13 @@ export class BookingSettingsModalComponent {
   readonly customDomains = signal<ProductPageCustomDomain[]>([]);
   readonly products = signal<PickedItem[]>([]);
   readonly customDomainId = signal<number | null>(null);
+  /** Own domains already serving this app as aliases (Apps F5). */
+  readonly aliasHostnames = computed(() => {
+    const domains = this.customDomains();
+    return appDomainAliasIds(this.detail()?.config).map(
+      (id) => domains.find((d) => d.id === id)?.hostname ?? `Dominio #${id}`,
+    );
+  });
   readonly query = signal('');
   readonly results = signal<Product[]>([]);
 
@@ -189,10 +190,16 @@ export class BookingSettingsModalComponent {
     }
   });
 
+  /** {@link AppSettingsPanel}: the view header publishes through these. */
+  readonly canPublish = computed(() => !this.loading());
+  readonly canUnpublish = computed(() => this.isPublished());
+
+  publish(): void {
+    this.save(true);
+  }
+
   constructor() {
-    effect(() => {
-      if (this.isOpen()) untracked(() => this.load());
-    });
+    this.load();
 
     toObservable(this.query)
       .pipe(
@@ -268,7 +275,7 @@ export class BookingSettingsModalComponent {
       });
   }
 
-  private load(): void {
+  load(): void {
     this.loading.set(true);
     this.error.set(null);
     forkJoin({

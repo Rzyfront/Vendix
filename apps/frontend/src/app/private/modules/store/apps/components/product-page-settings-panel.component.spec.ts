@@ -1,7 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
-import { ProductPageSettingsModalComponent } from './product-page-settings-modal.component';
+import { ProductPageSettingsPanelComponent } from './product-page-settings-panel.component';
 import { StoreAppsService } from '../services/store-apps.service';
 import { ProductsService } from '../../products/services/products.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -17,6 +17,7 @@ const detail = (over: Partial<StoreAppDetail> = {}): StoreAppDetail => ({
   description: '',
   applies_to_store_industries: true,
   status: 'not_installed',
+  enabled: false,
   domain: null,
   public_url: null,
   published_at: null,
@@ -24,17 +25,16 @@ const detail = (over: Partial<StoreAppDetail> = {}): StoreAppDetail => ({
   ...over,
 });
 
-describe('ProductPageSettingsModalComponent (apps-module Fase 2)', () => {
-  let fixture: ComponentFixture<ProductPageSettingsModalComponent>;
-  let component: ProductPageSettingsModalComponent;
+describe('ProductPageSettingsPanelComponent (apps-module Fase 2)', () => {
+  let fixture: ComponentFixture<ProductPageSettingsPanelComponent>;
+  let component: ProductPageSettingsPanelComponent;
   let apps: jasmine.SpyObj<StoreAppsService>;
   let products: jasmine.SpyObj<ProductsService>;
 
   const open = async (d: StoreAppDetail) => {
     apps.get.and.returnValue(of({ success: true, data: d }));
-    fixture = TestBed.createComponent(ProductPageSettingsModalComponent);
+    fixture = TestBed.createComponent(ProductPageSettingsPanelComponent);
     component = fixture.componentInstance;
-    component.isOpen.set(true);
     fixture.detectChanges();
     await fixture.whenStable();
   };
@@ -57,7 +57,7 @@ describe('ProductPageSettingsModalComponent (apps-module Fase 2)', () => {
     products.getProductById.and.callFake((id: number) => of(product(id, `Producto ${id}`)));
 
     TestBed.configureTestingModule({
-      imports: [ProductPageSettingsModalComponent],
+      imports: [ProductPageSettingsPanelComponent],
       providers: [
         provideZonelessChangeDetection(),
         { provide: StoreAppsService, useValue: apps },

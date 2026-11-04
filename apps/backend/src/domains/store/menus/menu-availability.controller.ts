@@ -17,6 +17,8 @@ import {
   CreateAvailabilityWindowDto,
   UpdateAvailabilityWindowDto,
 } from './dto';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Menu-level availability windows. Section-scoped windows are created by
@@ -31,7 +33,8 @@ import {
  * éxito (falso positivo en el formulario de horarios).
  */
 @Controller('store/menus/:menuId/availability-windows')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('restaurant_ops_menus')
 export class MenuAvailabilityController {
   constructor(
     private readonly availabilityService: MenuAvailabilityService,

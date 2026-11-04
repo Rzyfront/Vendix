@@ -43,7 +43,8 @@ describe('LandingPageAppService', () => {
   const domain = (id: number): DomainRow => domains.find((d) => d.id === id)!;
 
   const matches = (d: DomainRow, where: any): boolean =>
-    (where.id === undefined || d.id === where.id) &&
+    (where.id === undefined ||
+      (typeof where.id === 'number' ? d.id === where.id : where.id.in.includes(d.id))) &&
     (where.store_id === undefined || d.store_id === where.store_id) &&
     (where.app_type === undefined ||
       (typeof where.app_type === 'string'
@@ -206,16 +207,84 @@ describe('LandingPageAppService', () => {
     expect(domains.filter((d) => d.hostname.startsWith('roku-landing'))).toHaveLength(1);
   });
 
-  it('a custom domain is taken over and gets its previous app back on unpublish', async () => {
+  it('a custom domain is added as an alias: the subdomain stays primary and both serve the landing', async () => {
     await service.publish({ custom_domain_id: 3 });
 
-    expect(domain(3).app_type).toBe('STORE_LANDING');
-    expect(
-      parseLandingPageConfig(row()!.config).custom_domain_previous_app_type,
-    ).toBe('STORE_HOME');
+    const sub = domains.find((d) => d.hostname === 'roku-landing.vendix.online')!;
+    expect(sub).toMatchObject({ app_type: 'STORE_LANDING', status: 'active' });
+    expect(row()).toMatchObject({ status: 'published', domain_settings_id: sub.id });
+    expect(domain(3)).toMatchObject({ app_type: 'STORE_LANDING', status: 'active' });
+    expect(parseLandingPageConfig(row()!.config).custom_domain_aliases).toEqual([
+      { domain_id: 3, previous_app_type: 'STORE_HOME' },
+    ]);
+
+    await service.unpublish();
+    expect(domain(3)).toMatchObject({ app_type: 'STORE_HOME', status: 'active' });
+    expect(domain(sub.id).status).toBe('disabled');
+    expect(parseLandingPageConfig(row()!.config).custom_domain_aliases).toEqual([]);
+  });
+
+  it('a second custom domain adds another alias and keeps the first one', async () => {
+    domains.push({
+      id: 4,
+      store_id: STORE_ID,
+      hostname: 'landing.roku.co',
+      app_type: 'STORE_LANDING',
+      is_primary: false,
+      ownership: 'custom_domain',
+      status: 'active',
+    });
+    await service.publish({ custom_domain_id: 3 });
+    await service.publish({ custom_domain_id: 4 });
+    // Republishing with no custom domain keeps both aliases.
+    await service.publish({});
+
+    expect(parseLandingPageConfig(row()!.config).custom_domain_aliases).toEqual([
+      { domain_id: 3, previous_app_type: 'STORE_HOME' },
+      { domain_id: 4, previous_app_type: 'STORE_LANDING' },
+    ]);
+    expect(domains.filter((d) => d.app_type === 'STORE_LANDING' && d.status === 'active')).toHaveLength(
+      4, // {tienda}-store, {tienda}-landing and the two aliases
+    );
+
+    await service.unpublish();
+    expect(domain(3)).toMatchObject({ app_type: 'STORE_HOME', status: 'active' });
+    // Already a landing domain before the app took it: left as it was.
+    expect(domain(4)).toMatchObject({ app_type: 'STORE_LANDING', status: 'active' });
+    expect(domain(1)).toMatchObject({ app_type: 'STORE_LANDING', status: 'active' });
+  });
+
+  it('a pre-F5 publication on a custom domain becomes an alias when republished', async () => {
+    apps.push({
+      id: 1,
+      store_id: STORE_ID,
+      kind: 'landing',
+      status: 'published',
+      config: { custom_domain_previous_app_type: 'STORE_HOME' },
+      domain_settings_id: 3,
+    });
+    domain(3).app_type = 'STORE_LANDING';
+
+    await service.publish({});
+
+    const sub = domains.find((d) => d.hostname === 'roku-landing.vendix.online')!;
+    expect(row()!.domain_settings_id).toBe(sub.id);
+    const config = parseLandingPageConfig(row()!.config);
+    expect(config.custom_domain_previous_app_type).toBeNull();
+    expect(config.custom_domain_aliases).toEqual([
+      { domain_id: 3, previous_app_type: 'STORE_HOME' },
+    ]);
 
     await service.unpublish();
     expect(domain(3).app_type).toBe('STORE_HOME');
+  });
+
+  it('an alias someone pointed elsewhere in the meantime is left alone on unpublish', async () => {
+    await service.publish({ custom_domain_id: 3 });
+    domain(3).app_type = 'STORE_BOOKING';
+
+    await service.unpublish();
+    expect(domain(3)).toMatchObject({ app_type: 'STORE_BOOKING', status: 'active' });
   });
 
   it('the online store custom domain cannot be taken', async () => {

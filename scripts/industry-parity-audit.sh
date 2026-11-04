@@ -117,6 +117,20 @@ extract_record_keys() { # $1 = archivo, $2 = nombre de la constante
   ' "$1"
 }
 
+# Claves de INDUSTRY_HIDDEN_MODULES. Cuando la constante se construye con
+# `STORE_INDUSTRIES.reduce(...)` no hay claves literales: sus claves son
+# exactamente las industrias de STORE_INDUSTRIES, que ya es un espejo vigilado.
+extract_hidden_keys() { # $1 = archivo
+  local file="$1" direct
+  direct="$(extract_record_keys "$file" "INDUSTRY_HIDDEN_MODULES")"
+  if awk '/^export const INDUSTRY_HIDDEN_MODULES/ {f=1; next} f && /^\};/ {exit} f' "$file" \
+      | grep -q "STORE_INDUSTRIES.reduce"; then
+    extract_const_array "$file" "STORE_INDUSTRIES"
+  else
+    echo "$direct"
+  fi
+}
+
 # Compara dos conjuntos y reporta las diferencias en ambos sentidos.
 compare_sets() { # $1 = etiqueta verdad, $2 = valores verdad, $3 = etiqueta espejo, $4 = valores espejo
   local truth_label="$1" truth="$2" mirror_label="$3" mirror="$4"
@@ -177,7 +191,7 @@ if require_file "$WEB_CONST"; then
   compare_sets "el enum" "$ENUM_VALUES" "INDUSTRY_METADATA (web)" \
     "$(extract_record_keys "$WEB_CONST" "INDUSTRY_METADATA")"
   compare_sets "el enum" "$ENUM_VALUES" "INDUSTRY_HIDDEN_MODULES (web)" \
-    "$(extract_record_keys "$WEB_CONST" "INDUSTRY_HIDDEN_MODULES")"
+    "$(extract_hidden_keys "$WEB_CONST")"
 fi
 
 # Regla 4: el vínculo en tiempo de compilación del backend sigue en su sitio.

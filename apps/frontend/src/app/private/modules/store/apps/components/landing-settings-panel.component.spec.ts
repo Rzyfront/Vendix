@@ -2,7 +2,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { of, throwError } from 'rxjs';
-import { LandingSettingsModalComponent } from './landing-settings-modal.component';
+import { LandingSettingsPanelComponent } from './landing-settings-panel.component';
 import { StoreAppsService } from '../services/store-apps.service';
 import { ProductsService } from '../../products/services/products.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -18,6 +18,7 @@ const detail = (over: Partial<StoreAppDetail> = {}): StoreAppDetail => ({
   description: '',
   applies_to_store_industries: true,
   status: 'not_installed',
+  enabled: false,
   domain: null,
   public_url: null,
   published_at: null,
@@ -25,17 +26,16 @@ const detail = (over: Partial<StoreAppDetail> = {}): StoreAppDetail => ({
   ...over,
 });
 
-describe('LandingSettingsModalComponent (apps-module Fase 6)', () => {
-  let fixture: ComponentFixture<LandingSettingsModalComponent>;
-  let component: LandingSettingsModalComponent;
+describe('LandingSettingsPanelComponent (apps-module Fase 6)', () => {
+  let fixture: ComponentFixture<LandingSettingsPanelComponent>;
+  let component: LandingSettingsPanelComponent;
   let apps: jasmine.SpyObj<StoreAppsService>;
   let products: jasmine.SpyObj<ProductsService>;
 
   const open = async (d: StoreAppDetail) => {
     apps.get.and.returnValue(of({ success: true, data: d }));
-    fixture = TestBed.createComponent(LandingSettingsModalComponent);
+    fixture = TestBed.createComponent(LandingSettingsPanelComponent);
     component = fixture.componentInstance;
-    component.isOpen.set(true);
     fixture.detectChanges();
     await fixture.whenStable();
   };
@@ -58,7 +58,7 @@ describe('LandingSettingsModalComponent (apps-module Fase 6)', () => {
     products.getProductById.and.callFake((id: number) => of(item(id, `Item ${id}`)));
 
     TestBed.configureTestingModule({
-      imports: [LandingSettingsModalComponent],
+      imports: [LandingSettingsPanelComponent],
       providers: [
         provideZonelessChangeDetection(),
         provideRouter([]),
@@ -127,8 +127,8 @@ describe('LandingSettingsModalComponent (apps-module Fase 6)', () => {
     await open(detail({ status: 'published' }));
 
     expect(component.hasOwnDomain()).toBeFalse();
-    expect(component.statusLabel()).toBe('Publicada en Landing de captación, sin dominio propio');
-    expect(fixture.nativeElement.querySelector('[data-testid="landing-unpublish"]')).toBeNull();
+    expect(component.statusLabel()).toBe('Publicada en el dominio de la tienda, sin dominio propio');
+    expect(component.canUnpublish()).toBeFalse();
   });
 
   it('publicada en su dominio muestra la URL y despublica', async () => {

@@ -34,6 +34,8 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Store-scoped membership access control (generalized membership core).
@@ -52,7 +54,8 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  *   - POST /enrollment-ping    → store:membership_access:create (live fingerprint enrollment fan-out)
  */
 @Controller('store/memberships/access')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('memberships_access')
 export class MembershipAccessController {
   constructor(
     private readonly service: MembershipAccessService,

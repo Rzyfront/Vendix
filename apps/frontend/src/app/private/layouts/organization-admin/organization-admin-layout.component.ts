@@ -230,7 +230,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Ver Todas las Tiendas',
           icon: '',
           route: '/admin/stores',
-          alwaysVisible: true,
+          panelUiKey: 'stores',
+          accessAuditOnly: true,
         },
       ],
     },
@@ -246,27 +247,21 @@ export class OrganizationAdminLayoutComponent {
       // matches the super-admin sidebar shape: click the group to
       // expand, click the child to navigate.
       //
-      // No `alwaysVisible` here: the filter (Case 2) keys this item
-      // through `Soporte` which already includes `help_pqrs`, so the
-      // group shows up when the org has the help_pqrs module enabled.
       label: 'Soporte',
       icon: 'headset',
-      // Both the parent and the PQRs child use `alwaysVisible: true`
-      // as a pragmatic workaround. The MenuFilterService keys the
-      // Soporte group through `Soporte: ['help_support',
-      // 'settings_support', 'help_pqrs']`, but the org's `panel_ui`
-      // doesn't always carry those flags — when the org has its own
-      // user_settings override that drops `help_pqrs`, the entire
-      // group disappears. Marking both as alwaysVisible decouples
-      // them from that mismatch until the panel_ui contract is
-      // cleaned up at the data layer.
-      alwaysVisible: true,
+      // apps-f4 S2: the parent and the PQRs child were `alwaysVisible`
+      // because the org `panel_ui` does not always carry `help_*`. They now
+      // carry their real keys and are audit-only: still shown, and the access
+      // gate records what it would hide until the F5 backfill.
+      panelUiKey: 'help',
+      accessAuditOnly: true,
       children: [
         {
           label: 'PQRS',
           icon: 'message-square',
           route: '/admin/support/pqrs',
-          alwaysVisible: true,
+          panelUiKey: 'help_pqrs',
+          accessAuditOnly: true,
         },
       ],
     },
@@ -278,7 +273,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Compras',
           icon: 'shopping-bag',
           route: '/admin/purchase-orders',
-          alwaysVisible: true,
+          panelUiKey: 'purchase_orders',
+          accessAuditOnly: true,
           requiredOperatingScope: 'ORGANIZATION',
           showLocked: true,
           lockedBadge: 'ORG',
@@ -289,7 +285,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Niveles de Stock',
           icon: '',
           route: '/admin/inventory/stock-levels',
-          alwaysVisible: true,
+          panelUiKey: 'inventory_stock_levels',
+          accessAuditOnly: true,
           requiredOperatingScope: 'ORGANIZATION',
           showLocked: true,
           lockedBadge: 'ORG',
@@ -300,7 +297,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Ubicaciones',
           icon: '',
           route: '/admin/inventory/locations',
-          alwaysVisible: true,
+          panelUiKey: 'inventory_locations',
+          accessAuditOnly: true,
           requiredOperatingScope: 'ORGANIZATION',
           showLocked: true,
           lockedBadge: 'ORG',
@@ -310,7 +308,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Movimientos',
           icon: '',
           route: '/admin/inventory/movements',
-          alwaysVisible: true,
+          panelUiKey: 'inventory_movements',
+          accessAuditOnly: true,
           requiredOperatingScope: 'ORGANIZATION',
           showLocked: true,
           lockedBadge: 'ORG',
@@ -320,7 +319,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Proveedores',
           icon: '',
           route: '/admin/inventory/suppliers',
-          alwaysVisible: true,
+          panelUiKey: 'inventory_suppliers',
+          accessAuditOnly: true,
           requiredOperatingScope: 'ORGANIZATION',
           showLocked: true,
           lockedBadge: 'ORG',
@@ -330,7 +330,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Transferencias',
           icon: '',
           route: '/admin/inventory/transfers',
-          alwaysVisible: true,
+          panelUiKey: 'inventory_transfers',
+          accessAuditOnly: true,
           requiredOperatingScope: 'ORGANIZATION',
           showLocked: true,
           lockedBadge: 'ORG',
@@ -340,7 +341,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Ajustes de Stock',
           icon: '',
           route: '/admin/inventory/adjustments',
-          alwaysVisible: true,
+          panelUiKey: 'inventory_adjustments',
+          accessAuditOnly: true,
           requiredOperatingScope: 'ORGANIZATION',
           showLocked: true,
           lockedBadge: 'ORG',
@@ -350,7 +352,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Números de Serie',
           icon: '',
           route: '/admin/inventory/serial-numbers',
-          alwaysVisible: true,
+          panelUiKey: 'inventory_serials',
+          accessAuditOnly: true,
           requiredOperatingScope: 'ORGANIZATION',
           showLocked: true,
           lockedBadge: 'ORG',
@@ -360,7 +363,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Lotes',
           icon: 'layers',
           route: '/admin/inventory/batches',
-          alwaysVisible: true,
+          panelUiKey: 'inventory_batches',
+          accessAuditOnly: true,
           requiredOperatingScope: 'ORGANIZATION',
           showLocked: true,
           lockedBadge: 'ORG',
@@ -391,19 +395,22 @@ export class OrganizationAdminLayoutComponent {
           label: 'Ventas',
           icon: '',
           route: '/admin/reports/sales',
-          alwaysVisible: true,
+          panelUiKey: 'reports_sales',
+          accessAuditOnly: true,
         },
         {
           label: 'Inventario',
           icon: '',
           route: '/admin/reports/inventory',
-          alwaysVisible: true,
+          panelUiKey: 'reports_inventory',
+          accessAuditOnly: true,
         },
         {
           label: 'Financiero',
           icon: '',
           route: '/admin/reports/financial',
-          alwaysVisible: true,
+          panelUiKey: 'reports_financial',
+          accessAuditOnly: true,
         },
       ],
     },
@@ -416,22 +423,26 @@ export class OrganizationAdminLayoutComponent {
       // parent is scope-neutral; each full operational leaf retains its
       // ORGANIZATION scope and activation gate, while a reader may reach only
       // the received-documents route when invoicing is not active.
+      // apps-f4 S2: pure group header with no panel_ui key of its own (it was
+      // `alwaysVisible`). It is shown iff one of its children is, which is
+      // exactly what `alwaysVisible` did here because every child is audit-only.
       label: 'Fiscal',
       icon: 'landmark',
-      alwaysVisible: true,
       children: [
         {
           label: 'Operación fiscal',
           icon: 'clipboard-list',
           route: '/admin/fiscal',
-          alwaysVisible: true,
+          panelUiKey: 'fiscal_operations',
+          accessAuditOnly: true,
           requiredFiscalScope: 'ORGANIZATION',
         },
         {
           label: 'Activar facturación electrónica',
           icon: 'zap',
           route: '/admin/invoicing/activation',
-          alwaysVisible: true,
+          panelUiKey: 'invoicing',
+          accessAuditOnly: true,
           requiredFiscalScope: 'ORGANIZATION',
           hiddenWhenFiscalAreaActive: 'invoicing',
         },
@@ -439,7 +450,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Facturación',
           icon: 'receipt',
           route: '/admin/invoicing',
-          alwaysVisible: true,
+          panelUiKey: 'invoicing',
+          accessAuditOnly: true,
           requiredFiscalScope: 'ORGANIZATION',
           requiresFiscalArea: 'invoicing',
           fiscalReadFallback: {
@@ -451,7 +463,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Contabilidad',
           icon: 'book-open',
           route: '/admin/accounting',
-          alwaysVisible: true,
+          panelUiKey: 'accounting',
+          accessAuditOnly: true,
           requiredFiscalScope: 'ORGANIZATION',
           requiresFiscalArea: 'accounting',
         },
@@ -459,7 +472,8 @@ export class OrganizationAdminLayoutComponent {
           label: 'Nómina',
           icon: 'banknote',
           route: '/admin/payroll',
-          alwaysVisible: true,
+          panelUiKey: 'payroll',
+          accessAuditOnly: true,
           requiredFiscalScope: 'ORGANIZATION',
           requiresFiscalArea: 'payroll',
         },
@@ -581,7 +595,8 @@ export class OrganizationAdminLayoutComponent {
               label: store.name,
               icon: '',
               action: () => this.switchToStoreEnvironment(store),
-              alwaysVisible: true,
+              panelUiKey: 'stores',
+              accessAuditOnly: true,
             })),
           ],
         };

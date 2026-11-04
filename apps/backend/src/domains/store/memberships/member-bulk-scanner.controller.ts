@@ -21,6 +21,8 @@ import {
   CommitMemberRosterDto,
   RosterScanResult,
 } from './dto/scan-roster.dto';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Member bulk scanner controller.
@@ -40,7 +42,8 @@ import {
  * `SYS_CONFLICT_001` with the underlying message preserved.
  */
 @Controller('store/memberships/bulk-scan')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('memberships_members')
 export class MemberBulkScannerController {
   private static readonly ALLOWED_MIMETYPES = [
     'image/jpeg',

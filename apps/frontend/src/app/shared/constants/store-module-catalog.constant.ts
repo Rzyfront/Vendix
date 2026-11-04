@@ -50,6 +50,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   settings_price_tiers: '/admin/price-tiers',
 
   ecommerce: '/admin/ecommerce',
+  // Apps catalog and every app view `/admin/apps/:kind` (apps-vistas-f1 S3).
   apps: '/admin/apps',
 
   // Órdenes
@@ -92,7 +93,10 @@ export const MODULE_ROUTES: Record<string, string> = {
   customers_segments: '/admin/customers/segments',
   customers_reviews: '/admin/customers/reviews',
   customers_data_collection: '/admin/data-collection',
-  customers_crm: '/admin/customers/crm',
+  // Landing de captación: its view is the landing app since apps-vistas-f1
+  // (S4). Longest prefix wins, so `/admin/apps/landing` is governed by
+  // `customers_crm` and every other `/admin/apps/:kind` by `apps`.
+  customers_crm: '/admin/apps/landing',
 
   // Marketing
   marketing: '/admin/marketing/promotions',
@@ -206,6 +210,110 @@ export const MODULE_ROUTES: Record<string, string> = {
   help_pqrs: '/admin/pqrs',
   help_center: '/admin/help/center',
   help_videos: '/admin/help/videos',
+};
+
+/**
+ * Extra routes governed by a module key besides its canonical `MODULE_ROUTES`
+ * entry. Only the route-to-key index of the URL guard reads them (longest
+ * prefix wins); Vexi navigation and the catalog keep the canonical route.
+ *
+ * `/admin/apps/ecommerce` hosts the online store inside Apps (apps-f2 S1), so
+ * it answers to `ecommerce`, not to `apps`.
+ */
+export const MODULE_ROUTE_ALIASES: Record<string, string[]> = {
+  ecommerce: ['/admin/apps/ecommerce'],
+};
+
+/**
+ * Routes apps-f4 (S3) adds to the access-gate index so that no STORE_ADMIN
+ * route is left without a key. Longest prefix wins, so a section root
+ * (`/admin/orders`) governs every detail page under it.
+ *
+ * They are kept apart from `MODULE_ROUTES`/`MODULE_ROUTE_ALIASES` on purpose:
+ * the URL guard keeps enforcing only the pre-F4 index, and these routes only
+ * feed `canSeeKey` in audit mode. Before F4 nobody was stopped at these URLs,
+ * so enforcing them now would block live stores; the audit log measures what
+ * they would block. F5 merges them into the enforced index after the backfill.
+ *
+ * Keys that exist only here (`vex`, `subscription`, `consultations`,
+ * `reports_*`, `analytics_payments`, `settings_ai_agents`) are also new in the
+ * positive map and are not offered in the "Módulos del Panel" editor yet (F5).
+ */
+export const MODULE_GATE_ROUTES: Record<string, string[]> = {
+  vex: ['/admin/vex'],
+  subscription: ['/admin/subscription'],
+  consultations: ['/admin/consultations'],
+  products: ['/admin/products'],
+  orders: ['/admin/orders'],
+  inventory: ['/admin/inventory'],
+  customers: ['/admin/customers'],
+  marketing: ['/admin/marketing'],
+  marketing_social_sales: ['/admin/integrations'],
+  analytics: ['/admin/analytics'],
+  analytics_payments: ['/admin/analytics/payments'],
+  reports: ['/admin/reports'],
+  reports_overview: ['/admin/reports/overview'],
+  reports_sales: ['/admin/reports/sales'],
+  reports_inventory: ['/admin/reports/inventory'],
+  reports_products: ['/admin/reports/products'],
+  reports_purchases: ['/admin/reports/purchases'],
+  reports_customers: ['/admin/reports/customers'],
+  reports_reviews: ['/admin/reports/reviews'],
+  reports_financial: ['/admin/reports/financial'],
+  reports_payments: ['/admin/reports/payments'],
+  reports_accounting: ['/admin/reports/accounting'],
+  reports_payroll: ['/admin/reports/payroll'],
+  settings: ['/admin/settings'],
+  settings_ai_agents: ['/admin/settings/ai-agents'],
+  help: ['/admin/help'],
+  restaurant_ops: ['/admin/restaurant-ops'],
+  manufacturing: ['/admin/manufacturing'],
+  memberships: ['/admin/memberships'],
+  hospitality: ['/admin/hospitality'],
+  hospitality_reservations: [
+    '/admin/hospitality/front-desk',
+    '/admin/hospitality/rack',
+  ],
+  hospitality_rooms: ['/admin/hospitality/housekeeping'],
+};
+
+/**
+ * ORG_ADMIN `panel_ui` key → routes (apps-f4 S3/S5). The organization panel
+ * had no URL guard before F4; `orgPanelUiGuard` resolves through this map and,
+ * in audit mode, only records.
+ */
+export const ORG_MODULE_ROUTES: Record<string, string[]> = {
+  dashboard: ['/admin/dashboard'],
+  stores: ['/admin/stores'],
+  help_pqrs: ['/admin/support/pqrs'],
+  users: ['/admin/users'],
+  orders: ['/admin/orders'],
+  audit: ['/admin/audit'],
+  settings_application: ['/admin/config', '/admin/config/application'],
+  settings_payment_methods: ['/admin/config/payment-methods'],
+  domains: ['/admin/domains'],
+  settings_roles: ['/admin/roles'],
+  accounting: ['/admin/accounting'],
+  inventory: ['/admin/inventory'],
+  inventory_stock_levels: ['/admin/inventory/stock-levels'],
+  inventory_locations: ['/admin/inventory/locations'],
+  inventory_movements: ['/admin/inventory/movements'],
+  inventory_suppliers: ['/admin/inventory/suppliers'],
+  inventory_transfers: ['/admin/inventory/transfers'],
+  inventory_adjustments: ['/admin/inventory/adjustments'],
+  inventory_serials: ['/admin/inventory/serial-numbers'],
+  inventory_batches: ['/admin/inventory/batches'],
+  reports: ['/admin/reports'],
+  reports_sales: ['/admin/reports/sales'],
+  reports_inventory: ['/admin/reports/inventory'],
+  reports_financial: ['/admin/reports/financial'],
+  fiscal_operations: ['/admin/fiscal'],
+  purchase_orders: ['/admin/purchase-orders'],
+  invoicing: ['/admin/invoicing'],
+  payroll: ['/admin/payroll'],
+  subscription: ['/admin/subscriptions'],
+  settings_operating_scope: ['/admin/settings/operating-scope'],
+  settings_fiscal_scope: ['/admin/settings/fiscal-scope'],
 };
 
 function flatten(

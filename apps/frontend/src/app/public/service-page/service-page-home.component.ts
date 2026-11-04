@@ -21,6 +21,13 @@ import {
 } from '../../private/modules/ecommerce/services/store-seo';
 import { IconComponent } from '../../shared/components/icon/icon.component';
 import { CurrencyPipe } from '../../shared/pipes/currency';
+import {
+  effectiveMode,
+  modeBooks,
+  modeSells,
+} from '../../private/modules/store/apps/templates/app-page.types';
+import { AppPageViewComponent } from '../app-page/app-page-view.component';
+import { withPageSeo } from '../app-page/app-page-seo';
 import { ProductComplementsComponent } from '../product-page/components/product-complements.component';
 import { ServicePageService } from './service-page.service';
 import {
@@ -43,7 +50,13 @@ import {
 @Component({
   selector: 'app-service-page-home',
   standalone: true,
-  imports: [RouterModule, IconComponent, CurrencyPipe, ProductComplementsComponent],
+  imports: [
+    RouterModule,
+    IconComponent,
+    CurrencyPipe,
+    ProductComplementsComponent,
+    AppPageViewComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (state() === 'loading') {
@@ -57,9 +70,17 @@ import {
         </p>
       </section>
     } @else {
-      <section class="mx-auto w-full max-w-6xl px-4 pb-4 pt-8">
-        <h1 class="text-2xl font-bold text-text-primary md:text-3xl">{{ heading() }}</h1>
-        <p class="mt-1 text-sm text-text-secondary">Elige un servicio, el día y la hora que prefieras.</p>
+      @if (page()) {
+        <app-app-page-view kind="service_page" [page]="page()" part="hero" />
+      }
+      @if (showServices()) {
+      <section class="mx-auto w-full max-w-6xl px-4 pb-4 pt-8" [attr.id]="page() ? 'app-page-main' : null">
+        @if (page()?.hero?.title) {
+          <h2 class="text-2xl font-bold text-text-primary md:text-3xl">{{ heading() }}</h2>
+        } @else {
+          <h1 class="text-2xl font-bold text-text-primary md:text-3xl">{{ heading() }}</h1>
+        }
+        <p class="mt-1 text-sm text-text-secondary">{{ subheading() }}</p>
 
         @if (categories().length > 1) {
           <div class="mt-5 flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Categorías">
@@ -112,7 +133,7 @@ import {
                 }
               </div>
               <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-secondary">
-                @if (duration(service); as d) {
+                @if (showDuration() && duration(service); as d) {
                   <span class="inline-flex items-center gap-1" data-testid="service-duration"><app-icon name="clock" [size]="12" /> {{ d }}</span>
                 }
                 @if (service.service_modality) {
@@ -123,14 +144,18 @@ import {
                 <p class="line-clamp-2 text-sm text-text-secondary"><span class="font-medium text-text-primary">Incluye:</span> {{ text }}</p>
               }
               <div class="mt-auto flex items-center justify-between gap-2 pt-1">
-                <span class="text-base font-bold text-text-primary">{{ service.final_price | currency }}</span>
+                @if (showPrice()) {
+                  <span class="text-base font-bold text-text-primary">{{ service.final_price | currency }}</span>
+                } @else {
+                  <span></span>
+                }
                 <button
                   type="button"
                   class="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white"
                   [attr.data-book]="service.id"
                   (click)="book(service)"
                 >
-                  {{ service.requires_booking ? 'Reservar' : 'Ver servicio' }}
+                  {{ service.requires_booking && books() ? 'Reservar' : 'Ver servicio' }}
                 </button>
               </div>
             </div>
@@ -139,10 +164,15 @@ import {
           <p class="text-sm text-text-secondary md:col-span-2">No hay servicios en esta categoría.</p>
         }
       </section>
+      }
 
-      @if (productIds().length > 0) {
+      @if (page()) {
+        <app-app-page-view kind="service_page" [page]="page()" part="blocks" />
+      }
+
+      @if (showProducts()) {
         <div class="border-t border-border bg-surface-secondary/40" data-testid="service-page-products">
-          <app-product-complements [productIds]="productIds()" title="También puedes comprar" [compact]="true" />
+          <app-product-complements [productIds]="productIds()" [title]="productsTitle()" [compact]="true" />
         </div>
       }
     }
@@ -166,11 +196,41 @@ export class ServicePageHomeComponent {
     () => new Set(this.servicePage.config()?.featured_service_ids ?? []),
   );
   readonly productIds = computed(() => this.servicePage.config()?.product_ids ?? []);
+
+  /** The owner's own page; `null` keeps the page exactly as it was (apps-f2 S5). */
+  readonly page = computed(() => this.servicePage.config()?.page ?? null);
+  private readonly mode = computed(() => effectiveMode('service_page', this.page()));
+  /** Booking buttons only when the mode books (always, with no saved page). */
+  readonly books = computed(() => !this.page() || modeBooks(this.mode()));
+  private blockProps(type: string): { enabled: boolean; props: Record<string, unknown> } | null {
+    const block = this.page()?.blocks.find((b) => b.type === type);
+    return block ? { enabled: block.enabled, props: block.props } : null;
+  }
+  private text(type: string, key: string): string | null {
+    const v = this.blockProps(type)?.props[key];
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  }
+  readonly showServices = computed(() => this.blockProps('services')?.enabled !== false);
+  readonly showDuration = computed(() => this.blockProps('services')?.props['show_duration'] !== false);
+  readonly showPrice = computed(() => this.blockProps('services')?.props['show_price'] !== false);
+  readonly subheading = computed(
+    () => this.text('services', 'subtitle') ?? 'Elige un servicio, el día y la hora que prefieras.',
+  );
+  readonly showProducts = computed(() => {
+    if (this.productIds().length === 0) return false;
+    if (!this.page()) return true;
+    return modeSells(this.mode()) && this.blockProps('products')?.enabled !== false;
+  });
+  readonly productsTitle = computed(
+    () => this.text('products', 'title') ?? 'También puedes comprar',
+  );
   readonly categories = computed<ServiceCategoryChip[]>(() => serviceCategories(this.services()));
   readonly visibleServices = computed(() =>
     servicesInCategory(this.services(), this.activeCategory()),
   );
   readonly heading = computed(() => {
+    const custom = this.text('services', 'title');
+    if (custom) return custom;
     const name = this.storeSeo.storeName();
     return name ? `Servicios de ${name}` : 'Nuestros servicios';
   });
@@ -211,7 +271,8 @@ export class ServicePageHomeComponent {
       const services = this.services();
       if (!name || services.length === 0) return;
       const origin = this.storeSeo.origin;
-      this.storeSeo.apply(this, {
+      const page = this.page();
+      this.storeSeo.apply(this, withPageSeo({
         title: `Servicios | ${name}`,
         description: plainDescription(
           null,
@@ -233,7 +294,7 @@ export class ServicePageHomeComponent {
             name: s.name,
           })),
         },
-      });
+      }, page));
     });
     this.destroyRef.onDestroy(() => this.storeSeo.release(this));
   }
@@ -260,6 +321,7 @@ export class ServicePageHomeComponent {
   }
 
   book(service: EcommerceProduct): void {
-    this.router.navigate(bookingTarget(service));
+    // A page that does not book sends the visitor to the service detail.
+    this.router.navigate(this.books() ? bookingTarget(service) : ['/products', service.slug]);
   }
 }

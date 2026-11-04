@@ -49,6 +49,7 @@ interface DomainNextStep {
   className: string;
 }
 
+import { appOnlyAppTypeLabel } from '../../../../../shared/constants/app-domain-app-types';
 @Component({
   selector: 'app-domain-setup-page',
   standalone: true,
@@ -1165,7 +1166,7 @@ export class DomainSetupPageComponent implements OnInit {
       STORE_LANDING: 'Landing tienda',
       STORE_ADMIN: 'Admin tienda',
     };
-    return labels[appType] || appType;
+    return labels[appType] || appOnlyAppTypeLabel(appType) || appType;
   }
 
   instructionStatusLabel(status?: string): string {

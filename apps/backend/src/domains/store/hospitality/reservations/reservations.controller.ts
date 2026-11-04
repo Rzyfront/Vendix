@@ -26,10 +26,13 @@ import {
   ReservationQuoteDto,
   RoomChangeDto,
 } from './dto';
+import { IndustryModuleGuard } from '../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H1.1/H1.2/H1.4/H1.5/H2.1/H3.2) — nightly reservations of a hotel store. */
 @Controller('store/hospitality/reservations')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingReservationsController {
   constructor(
     private readonly lodgingReservationsService: LodgingReservationsService,

@@ -7,6 +7,11 @@ export enum AppType {
   STORE_LANDING = 'STORE_LANDING',
   STORE_ADMIN = 'STORE_ADMIN',
   STORE_ECOMMERCE = 'STORE_ECOMMERCE',
+  // Apps F5: store domains only, and only when the store has the app published.
+  STORE_HOME = 'STORE_HOME',
+  STORE_PRODUCT_PAGE = 'STORE_PRODUCT_PAGE',
+  STORE_SERVICE_PAGE = 'STORE_SERVICE_PAGE',
+  STORE_BOOKING = 'STORE_BOOKING',
 }
 
 export enum DomainType {

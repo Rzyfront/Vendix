@@ -1,3 +1,9 @@
+import { carryPage } from '../shared/app-page.contract';
+import {
+  AppDomainAlias,
+  parseAppDomainAliases,
+} from '../shared/app-domain-aliases';
+
 /** Longest footer line the owner can write (a short, discreet sentence). */
 export const MAX_STORE_HOME_FOOTER = 160;
 
@@ -17,6 +23,13 @@ export interface StoreHomeConfig {
    * home took it, so unpublishing gives it back (normally `STORE_LANDING`).
    */
   domain_previous_app_type: string | null;
+  /** Apps F2: the app's own page (`app-page.contract.ts`), kept as stored. */
+  page?: unknown;
+  /**
+   * Apps F5: the store's own domains that also serve this app, besides its
+   * primary Vendix subdomain (`shared/app-domain-aliases.ts`).
+   */
+  custom_domain_aliases?: AppDomainAlias[];
 }
 
 /** Parses the stored JSON defensively. */
@@ -31,8 +44,10 @@ export function parseStoreHomeConfig(raw: unknown): StoreHomeConfig {
       : null;
   const previous = obj.domain_previous_app_type;
   return {
+    ...carryPage(raw),
     footer_text: footer,
     domain_previous_app_type: typeof previous === 'string' ? previous : null,
+    custom_domain_aliases: parseAppDomainAliases(raw),
   };
 }
 

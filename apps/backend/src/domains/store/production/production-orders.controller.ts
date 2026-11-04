@@ -21,6 +21,8 @@ import {
   CompleteProductionOrderDto,
   ProductionOrderQueryDto,
 } from './dto';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Production Orders (Restaurant Suite — Fase C)
@@ -36,7 +38,8 @@ import {
  *   POST   /:id/cancel             draft/in_progress → cancelled
  */
 @Controller('store/production-orders')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('restaurant_ops_production')
 export class ProductionOrdersController {
   constructor(
     private readonly productionOrdersService: ProductionOrdersService,

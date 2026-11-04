@@ -77,4 +77,49 @@ describe('Organization DomainsService', () => {
       }),
     );
   });
+
+  it('Apps F5: accepts the app types of the apps as store app types and checks the app is published', async () => {
+    const existing = {
+      id: 77,
+      hostname: 'reservas.hotel.com',
+      store_id: 10,
+      organization_id: 1,
+      app_type: 'STORE_LANDING',
+      domain_type: 'store',
+      ownership: 'custom_domain',
+      status: 'active',
+    };
+    const prisma = {
+      domain_settings: {
+        findFirst: jest.fn().mockResolvedValue(existing),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+      },
+    } as any;
+    const globalPrisma = {
+      store_apps: { findFirst: jest.fn().mockResolvedValue(null), update: jest.fn() },
+    } as any;
+    const service = new DomainsService(
+      prisma,
+      globalPrisma,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(
+      service.updateDomainSetting('reservas.hotel.com', { app_type: 'STORE_SERVICE_PAGE' } as any),
+    ).rejects.toMatchObject({
+      errorCode: 'STORE_APPS_016',
+      message: 'Publica primero la app «Página de servicios» para usar este dominio con ella.',
+    });
+    expect(globalPrisma.store_apps.findFirst).toHaveBeenCalledWith({
+      where: { store_id: 10, kind: 'service_page', status: 'published' },
+      select: { id: true },
+    });
+    expect(prisma.domain_settings.update).not.toHaveBeenCalled();
+  });
 });
+

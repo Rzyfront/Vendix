@@ -134,4 +134,151 @@ describe('AppDomainService', () => {
     );
     expect(events.emit).toHaveBeenCalledWith('domain.updated', expect.anything());
   });
+
+  describe('Apps F5: primary subdomain plus aliases', () => {
+    const empty = { primary: null, published: false, legacyPreviousAppType: null, aliases: [] };
+
+    it('a rejected custom domain changes nothing, not even the subdomain', async () => {
+      prisma.domain_settings.findFirst.mockResolvedValue(null);
+      await expect(
+        service.publishOnDomains(STORE_ID, 'STORE_SERVICE_PAGE', empty, 999, build),
+      ).rejects.toMatchObject({ errorCode: ErrorCodes.STORE_APPS_005.code });
+      expect(prisma.domain_settings.create).not.toHaveBeenCalled();
+      expect(prisma.domain_settings.update).not.toHaveBeenCalled();
+    });
+
+    it('a new subdomain (another featured product) disables the old one', async () => {
+      const old = { id: 30, hostname: 'roku-cafe.vendix.online', ownership: 'vendix_subdomain' };
+      const result = await service.publishOnDomains(
+        STORE_ID,
+        'STORE_SERVICE_PAGE',
+        { ...empty, primary: old, published: true },
+        undefined,
+        build,
+      );
+      expect(result.primary.id).toBe(50);
+      expect(prisma.domain_settings.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 30 }, data: expect.objectContaining({ status: 'disabled' }) }),
+      );
+      expect(cache.del).toHaveBeenCalledWith('seo:sitemap:roku-cafe.vendix.online');
+    });
+
+    it('releasing a legacy alias (no previous app type) leaves the verified custom domain untouched', async () => {
+      prisma.domain_settings.findFirst.mockResolvedValue({
+        id: 9, hostname: 'citas.roku.com', app_type: 'STORE_SERVICE_PAGE', status: 'active',
+      });
+      await service.releaseAlias(STORE_ID, 'STORE_SERVICE_PAGE', { domain_id: 9, previous_app_type: null });
+      expect(prisma.domain_settings.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 9, store_id: STORE_ID } }),
+      );
+      // Never disable a customer's verified domain: before F5 unpublishing an
+      // app did not touch it, and that is the behaviour to keep.
+      expect(prisma.domain_settings.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'disabled' }) }),
+      );
+      expect(cache.del).toHaveBeenCalledWith('seo:sitemap:citas.roku.com');
+    });
+
+    it('releasing an alias gives it back its previous app type', async () => {
+      prisma.domain_settings.findFirst.mockResolvedValue({
+        id: 9, hostname: 'citas.roku.com', app_type: 'STORE_SERVICE_PAGE', status: 'active',
+      });
+      await service.releaseAlias(STORE_ID, 'STORE_SERVICE_PAGE', {
+        domain_id: 9,
+        previous_app_type: 'STORE_LANDING',
+      });
+      expect(prisma.domain_settings.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 9 }, data: expect.objectContaining({ app_type: 'STORE_LANDING' }) }),
+      );
+    });
+
+    it('clearAppSeoCache clears the primary host and every alias host', async () => {
+      prisma.domain_settings.findMany.mockResolvedValue([{ hostname: 'citas.roku.com' }]);
+      await service.clearAppSeoCache(STORE_ID, 'roku-service.vendix.online', {
+        custom_domain_aliases: [{ domain_id: 9, previous_app_type: null }],
+      });
+      expect(prisma.domain_settings.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: [9] }, store_id: STORE_ID } }),
+      );
+      expect(cache.del).toHaveBeenCalledWith('seo:sitemap:roku-service.vendix.online');
+      expect(cache.del).toHaveBeenCalledWith('seo:sitemap:citas.roku.com');
+    });
+  });
+  describe("Apps F5: Rafael's publish rule (landing, service page, booking, product page)", () => {
+    const empty = { primary: null, published: false, legacyPreviousAppType: null, aliases: [] };
+    const disabledOwn = { id: 44, hostname: 'roku-service.vendix.online', ownership: 'vendix_subdomain' };
+
+    it('without a domain it generates a unique subdomain', async () => {
+      const result = await service.publishOnDomains(STORE_ID, 'STORE_SERVICE_PAGE', empty, undefined, build);
+      expect(result.primary.hostname).toBe('roku-service.vendix.online');
+      expect(prisma.domain_settings.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('with a disabled domain from an earlier unpublish it reactivates that same one', async () => {
+      // Its hostname is `-2` and the natural name is free again: still the old row.
+      const old = { ...disabledOwn, hostname: 'roku-service-2.vendix.online' };
+      globalPrisma.domain_settings.findMany.mockResolvedValue([{ hostname: old.hostname }]);
+      prisma.domain_settings.findMany.mockResolvedValue([{ id: 44, hostname: old.hostname }]);
+
+      const result = await service.publishOnDomains(
+        STORE_ID, 'STORE_SERVICE_PAGE', { ...empty, primary: old }, undefined, build,
+      );
+
+      expect(result.primary.id).toBe(44);
+      expect(prisma.domain_settings.create).not.toHaveBeenCalled();
+      expect(prisma.domain_settings.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 44 }, data: expect.objectContaining({ status: 'active' }) }),
+      );
+    });
+
+    it('a name taken by another store gets a suffix, never a failure', async () => {
+      globalPrisma.domain_settings.findMany.mockResolvedValue([{ hostname: 'roku-service.vendix.online' }]);
+      const result = await service.publishOnDomains(STORE_ID, 'STORE_SERVICE_PAGE', empty, undefined, build);
+      expect(result.primary.hostname).toBe('roku-service-2.vendix.online');
+    });
+
+    it('a name taken meanwhile by a concurrent publish (P2002) tries the next one', async () => {
+      prisma.domain_settings.create
+        .mockRejectedValueOnce(Object.assign(new Error('unique'), { code: 'P2002' }));
+      const result = await service.publishOnDomains(STORE_ID, 'STORE_SERVICE_PAGE', empty, undefined, build);
+      expect(result.primary.hostname).toBe('roku-service-2.vendix.online');
+      expect(prisma.domain_settings.create).toHaveBeenCalledTimes(2);
+    });
+
+    it('publishing twice reuses the active domain: no duplicate, nothing disabled', async () => {
+      const active = { ...disabledOwn };
+      globalPrisma.domain_settings.findMany.mockResolvedValue([{ hostname: active.hostname }]);
+      prisma.domain_settings.findMany.mockResolvedValue([{ id: 44, hostname: active.hostname }]);
+
+      const result = await service.publishOnDomains(
+        STORE_ID, 'STORE_SERVICE_PAGE', { ...empty, primary: active, published: true }, undefined, build,
+      );
+
+      expect(result.primary.id).toBe(44);
+      expect(prisma.domain_settings.create).not.toHaveBeenCalled();
+      expect(prisma.domain_settings.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'disabled' }) }),
+      );
+    });
+
+    it('does not reactivate the earlier subdomain when the app refuses it (another product)', async () => {
+      const old = { id: 30, hostname: 'roku-cafe.vendix.online', ownership: 'vendix_subdomain' };
+      prisma.domain_settings.findMany.mockResolvedValue([{ id: 30, hostname: old.hostname }]);
+
+      const result = await service.publishOnDomains(
+        STORE_ID, 'STORE_PRODUCT_PAGE', { ...empty, primary: old }, undefined, build, () => false,
+      );
+
+      expect(result.primary.id).toBe(50);
+      expect(prisma.domain_settings.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("never reactivates another app's domain passed as previous", async () => {
+      // Not in this app's own subdomains (e.g. repointed from the domains modal).
+      const result = await service.publishOnDomains(
+        STORE_ID, 'STORE_SERVICE_PAGE', { ...empty, primary: disabledOwn }, undefined, build,
+      );
+      expect(result.primary.id).toBe(50);
+    });
+  });
 });

@@ -7,20 +7,17 @@ import type { StoreSettings } from '../../../../core/models/store-settings.inter
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 import { BadgeComponent } from '../../../../shared/components/badge/badge.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
-import { AppKind, StoreApp } from './interfaces/store-app.interface';
+import { StoreApp } from './interfaces/store-app.interface';
 import { StoreAppsService } from './services/store-apps.service';
-import { toAppCard } from './utils/app-card.util';
-import { ProductPageSettingsModalComponent } from './components/product-page-settings-modal.component';
-import { ServicePageSettingsModalComponent } from './components/service-page-settings-modal.component';
-import { BookingSettingsModalComponent } from './components/booking-settings-modal.component';
-import { StoreHomeSettingsModalComponent } from './components/store-home-settings-modal.component';
-import { LandingSettingsModalComponent } from './components/landing-settings-modal.component';
+import { AppCard, toAppCard } from './utils/app-card.util';
+import { MenuFilterService } from '../../../../core/services/menu-filter.service';
 
 /**
- * `/admin/apps` — catalog of the store's web apps (odd/tasks/apps-module.md,
- * S4/T6). Every card shows status, domain and public URL from `GET /store/apps`;
- * its button opens the app's existing admin screen unchanged, the product page
- * settings (Fase 2), or explains why there is none yet.
+ * `/admin/apps` — catalog of the store's web apps (odd/tasks/apps-module.md
+ * S4/T6, apps-vistas-f1 S2/S6). It only loads the light list
+ * (`GET /store/apps`: status, encendida, domain, public URL); each card opens
+ * the app's own view, where its detail is fetched. No app is managed from a
+ * modal.
  */
 @Component({
   selector: 'app-apps-catalog',
@@ -29,11 +26,6 @@ import { LandingSettingsModalComponent } from './components/landing-settings-mod
     RouterModule,
     BadgeComponent,
     IconComponent,
-    ProductPageSettingsModalComponent,
-    ServicePageSettingsModalComponent,
-    BookingSettingsModalComponent,
-    StoreHomeSettingsModalComponent,
-    LandingSettingsModalComponent,
   ],
   template: `
     <div class="w-full max-w-6xl mx-auto px-3 py-4 md:px-6 md:py-6">
@@ -100,6 +92,10 @@ import { LandingSettingsModalComponent } from './components/landing-settings-mod
 
               <dl class="mt-3 space-y-1 text-xs text-[var(--color-text-secondary)]">
                 <div class="flex gap-1">
+                  <dt class="font-medium">Encendida:</dt>
+                  <dd>{{ card.enabled ? 'Sí' : 'No' }}</dd>
+                </div>
+                <div class="flex gap-1">
                   <dt class="font-medium">Dominio:</dt>
                   <dd class="truncate">{{ card.hostname ?? 'Sin dominio' }}</dd>
                 </div>
@@ -129,16 +125,6 @@ import { LandingSettingsModalComponent } from './components/landing-settings-mod
                     {{ card.action.label }}
                     <app-icon name="arrow-right" [size]="14" />
                   </a>
-                } @else if (card.action.kind === 'configure') {
-                  <button
-                    type="button"
-                    class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-[var(--color-text-on-primary)]"
-                    [attr.data-configure]="card.key"
-                    (click)="configure(card.key)"
-                  >
-                    {{ card.action.label }}
-                    <app-icon name="settings" [size]="14" />
-                  </button>
                 } @else {
                   <span
                     class="inline-flex w-full items-center justify-center rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text-secondary)]"
@@ -153,27 +139,17 @@ import { LandingSettingsModalComponent } from './components/landing-settings-mod
         </div>
       }
     </div>
-
-    <app-product-page-settings-modal [(isOpen)]="productPageOpen" (changed)="load()" />
-    <app-service-page-settings-modal [(isOpen)]="servicePageOpen" (changed)="load()" />
-    <app-booking-settings-modal [(isOpen)]="bookingOpen" (changed)="load()" />
-    <app-store-home-settings-modal [(isOpen)]="storeHomeOpen" (changed)="load()" />
-    <app-landing-settings-modal [(isOpen)]="landingOpen" (changed)="load()" />
   `,
 })
 export class AppsCatalogComponent {
   private readonly appsService = inject(StoreAppsService);
   private readonly authFacade = inject(AuthFacade);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly menuFilter = inject(MenuFilterService);
 
   readonly apps = signal<StoreApp[]>([]);
   readonly loading = signal(true);
   readonly error = signal<string | null>(null);
-  readonly productPageOpen = signal(false);
-  readonly servicePageOpen = signal(false);
-  readonly bookingOpen = signal(false);
-  readonly storeHomeOpen = signal(false);
-  readonly landingOpen = signal(false);
 
   private readonly settings = computed(
     () => this.authFacade.storeSettings() as StoreSettings | null,
@@ -189,20 +165,23 @@ export class AppsCatalogComponent {
   );
 
   readonly cards = computed(() =>
-    this.apps().map((app) => toAppCard(app, this.storeType())),
+    this.apps().map((app) => this.applyAccessGate(toAppCard(app, this.storeType()))),
   );
+
+  /**
+   * apps-f4 S4: the card consults the same `canSeeKey` gate as the sidebar
+   * and the URL guard. Audit mode only records (`would_hide`); with the flag
+   * on, an app whose view the store industry cannot open is disabled.
+   */
+  private applyAccessGate(card: AppCard): AppCard {
+    if (card.action.kind !== 'route') return card;
+    return this.menuFilter.applyRouteGate(card.action.route, true, 'apps_card')
+      ? card
+      : { ...card, action: { kind: 'disabled', label: 'No aplica a tu industria' } };
+  }
 
   constructor() {
     this.load();
-  }
-
-  /** Opens the settings modal of an app configured from this screen. */
-  configure(kind: AppKind): void {
-    if (kind === 'service_page') this.servicePageOpen.set(true);
-    else if (kind === 'product_page') this.productPageOpen.set(true);
-    else if (kind === 'booking') this.bookingOpen.set(true);
-    else if (kind === 'store_home') this.storeHomeOpen.set(true);
-    else if (kind === 'landing') this.landingOpen.set(true);
   }
 
   load(): void {

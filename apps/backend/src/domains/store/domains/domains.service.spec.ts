@@ -102,4 +102,92 @@ describe('StoreDomainsService', () => {
       }),
     );
   });
+
+  describe('Apps F5: app types of the apps in the domain modal', () => {
+    const CTX = { organization_id: 1, store_id: 10, is_super_admin: false, is_owner: true };
+    const existing = {
+      id: 77,
+      hostname: 'reservas.hotel.com',
+      store_id: 10,
+      organization_id: 1,
+      app_type: 'STORE_LANDING',
+      domain_type: 'store',
+      ownership: 'custom_domain',
+      status: 'active',
+      is_primary: true,
+      config: {},
+    };
+    let prisma: any;
+    let globalPrisma: any;
+    let service: StoreDomainsService;
+
+    beforeEach(() => {
+      prisma = {
+        domain_settings: {
+          findFirst: jest.fn().mockResolvedValue(existing),
+          update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ ...existing, ...data })),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+      };
+      globalPrisma = {
+        store_apps: {
+          findFirst: jest.fn().mockResolvedValue(null),
+          update: jest.fn().mockResolvedValue({}),
+        },
+      };
+      service = new StoreDomainsService(
+        prisma,
+        globalPrisma,
+        { emit: jest.fn() } as any,
+        {} as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+    });
+
+    const update = (dto: Record<string, unknown>) =>
+      RequestContextService.run(CTX, () => service.update(77, dto as any));
+
+    it('refuses an app type whose app is not published, without writing', async () => {
+      await expect(update({ app_type: 'STORE_BOOKING', is_primary: true })).rejects.toMatchObject({
+        errorCode: 'STORE_APPS_016',
+      });
+      expect(prisma.domain_settings.update).not.toHaveBeenCalled();
+      expect(prisma.domain_settings.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('with the app published, the domain becomes an alias and the app subdomain stays active', async () => {
+      globalPrisma.store_apps.findFirst
+        .mockResolvedValueOnce({ id: 5 }) // published check
+        .mockResolvedValueOnce({ id: 5, domain_settings_id: 40, config: {} }); // alias list
+
+      // The modal sends the domain_type it had; an app domain is never `ecommerce`.
+      const result = await update({ app_type: 'STORE_BOOKING', domain_type: 'ecommerce', is_primary: true });
+
+      expect(result.app_type).toBe('STORE_BOOKING');
+      expect(result.domain_type).toBe('store');
+      // No "single active domain per app type" sweep for an app.
+      expect(prisma.domain_settings.updateMany).not.toHaveBeenCalled();
+      expect(globalPrisma.store_apps.update).toHaveBeenCalledWith({
+        where: { id: 5 },
+        data: expect.objectContaining({
+          config: {
+            custom_domain_aliases: [{ domain_id: 77, previous_app_type: 'STORE_LANDING' }],
+          },
+        }),
+      });
+    });
+
+    it('the existing app types keep sweeping the other active domains as before', async () => {
+      await update({ app_type: 'STORE_LANDING', is_primary: true });
+      expect(prisma.domain_settings.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ app_type: 'STORE_LANDING', status: 'active' }),
+        }),
+      );
+      expect(globalPrisma.store_apps.findFirst).not.toHaveBeenCalled();
+    });
+  });
 });
+

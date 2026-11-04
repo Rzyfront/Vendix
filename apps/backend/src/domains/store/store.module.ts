@@ -58,6 +58,8 @@ import { PaymentLinksModule } from './payment-links/payment-links.module';
 import { CustomerQueueModule } from './customer-queue/customer-queue.module';
 import { InvoiceDataRequestsModule } from './invoicing/invoice-data-requests/invoice-data-requests.module';
 import { MetadataModule } from './metadata/metadata.module';
+import { AccessModule } from '../../common/access/access.module';
+import { StoreAccessGateModule } from './access-gate/store-access-gate.module';
 import { DataCollectionModule } from './data-collection/data-collection.module';
 import { ConsultationsModule } from './consultations/consultations.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
@@ -151,6 +153,8 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     CustomerQueueModule,
     InvoiceDataRequestsModule,
     MetadataModule,
+    AccessModule,
+    StoreAccessGateModule,
     DataCollectionModule,
     ConsultationsModule,
     SubscriptionsModule,

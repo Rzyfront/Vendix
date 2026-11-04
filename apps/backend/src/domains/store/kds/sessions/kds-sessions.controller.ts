@@ -15,6 +15,8 @@ import { ResponseService } from '../../../../common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { CloseKdsSessionDto, OpenKdsSessionDto } from '../dto';
+import { IndustryModuleGuard } from '../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../common/decorators/industry-module.decorator';
 
 /**
  * Turnos de estación (QUI-651). La sesión se exige AL ACTUAR sobre un ticket,
@@ -22,7 +24,8 @@ import { CloseKdsSessionDto, OpenKdsSessionDto } from '../dto';
  * convención que caja.
  */
 @Controller('store/kds-sessions')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('restaurant_ops_kds')
 export class KdsSessionsController {
   constructor(
     private readonly sessionsService: KdsSessionsService,

@@ -1,3 +1,4 @@
+import { IsAppPage } from '../shared/app-page.dto';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsInt, IsOptional, Min } from 'class-validator';
 import {
@@ -34,4 +35,14 @@ export class PublishServicePageDto {
   @IsInt()
   @Min(1)
   custom_domain_id?: number;
+}
+
+/**
+ * PATCH /store/apps/service_page/page — Apps F2: the service page's own page (hero,
+ * sections of its own catalog, brand and SEO). The blocks this app accepts
+ * are listed in `shared/app-page.contract.ts` (`APP_PAGE_BLOCKS.service_page`).
+ */
+export class UpdateServicePagePageDto {
+  @IsAppPage('service_page')
+  page!: Record<string, unknown>;
 }

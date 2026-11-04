@@ -6,10 +6,13 @@ import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
 import {
   AppCustomDomainView,
-  AppDomainRef,
   AppDomainService,
+  appDomainState,
 } from '../shared/app-domain.service';
-import { buildProductPageHostname } from './product-page-hostname';
+import {
+  buildProductPageHostname,
+  isHostnameVariant,
+} from './product-page-hostname';
 import {
   MAX_COMPLEMENTS,
   ProductPageConfig,
@@ -88,7 +91,11 @@ export class ProductPageAppService {
     }
 
     if (row?.status === 'published' && row.domain_settings) {
-      await this.domains.clearSeoCache(row.domain_settings.hostname);
+      await this.domains.clearAppSeoCache(
+        storeId,
+        row.domain_settings.hostname,
+        row.config,
+      );
     }
   }
 
@@ -106,16 +113,30 @@ export class ProductPageAppService {
       await this.domains.findTakeableCustomDomain(storeId, dto.custom_domain_id);
     }
 
-    // Republishing an already published page on a different domain first
-    // releases the current one, so a store never serves two product pages.
-    if (row.status === 'published') {
-      await this.releaseDomain(row.domain_settings, config);
-      config.custom_domain_previous_app_type = null;
-    }
-
-    const domain = dto.custom_domain_id
-      ? await this.takeOverCustomDomain(storeId, dto.custom_domain_id, config)
-      : await this.activateVendixHostname(storeId, product[0].slug);
+    // Apps F5: the `{store}-{product}` subdomain is always the primary
+    // domain (a new featured product moves it); a custom domain is added as
+    // an alias and the existing aliases stay.
+    const published = await this.domains.publishOnDomains(
+      storeId,
+      APP_TYPE,
+      appDomainState(row, config),
+      dto.custom_domain_id,
+      (storeSlug, baseDomain, isTaken) =>
+        buildProductPageHostname(storeSlug, product[0].slug, baseDomain, isTaken),
+      // Reactivate the earlier subdomain only while it names this product.
+      (hostname, storeSlug, baseDomain) => {
+        const natural = buildProductPageHostname(
+          storeSlug,
+          product[0].slug,
+          baseDomain,
+          () => false,
+        );
+        return natural !== null && isHostnameVariant(hostname, natural);
+      },
+    );
+    config.custom_domain_previous_app_type = null;
+    config.custom_domain_aliases = published.aliases;
+    const domain = published.primary;
 
     await this.prisma.store_apps.update({
       where: { id: row.id },
@@ -136,8 +157,13 @@ export class ProductPageAppService {
     if (!row || row.status !== 'published') return;
 
     const config = parseProductPageConfig(row.config);
-    await this.releaseDomain(row.domain_settings, config);
+    await this.domains.releaseAppDomains(
+      storeId,
+      APP_TYPE,
+      appDomainState(row, config),
+    );
     config.custom_domain_previous_app_type = null;
+    config.custom_domain_aliases = [];
 
     await this.prisma.store_apps.update({
       where: { id: row.id },
@@ -155,43 +181,6 @@ export class ProductPageAppService {
   }
 
   // ---------------------------------------------------------------------------
-
-  /**
-   * Activates `{store}-{product}.{base}`. The hostname always follows the
-   * current featured product; going back to a product reuses its hostname.
-   */
-  private activateVendixHostname(storeId: number, productSlug: string) {
-    return this.domains.activateVendixHostname(
-      storeId,
-      APP_TYPE,
-      (storeSlug, baseDomain, isTaken) =>
-        buildProductPageHostname(storeSlug, productSlug, baseDomain, isTaken),
-    );
-  }
-
-  private async takeOverCustomDomain(
-    storeId: number,
-    domainId: number,
-    config: ProductPageConfig,
-  ): Promise<{ id: number; hostname: string }> {
-    const { domain, previousAppType } = await this.domains.takeOverCustomDomain(
-      storeId,
-      domainId,
-      APP_TYPE,
-    );
-    config.custom_domain_previous_app_type = previousAppType;
-    return domain;
-  }
-
-  private releaseDomain(
-    domain: AppDomainRef | null,
-    config: ProductPageConfig,
-  ): Promise<void> {
-    return this.domains.releaseDomain(
-      domain,
-      config.custom_domain_previous_app_type,
-    );
-  }
 
   /** Returns the rows in input order; throws if any id is not sellable. */
   private async assertSellable(storeId: number, ids: number[]) {
