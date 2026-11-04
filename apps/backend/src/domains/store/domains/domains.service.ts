@@ -28,8 +28,22 @@ import {
   getRootWildcardHostname,
   isHostnameCoveredByRoot,
 } from '../../../common/services/domains/domain-root-hosting.util';
+import { isAppOnlyAppType } from '../apps/shared/app-domain-aliases';
+import {
+  assertAppTypeAssignable,
+  syncAppDomainAssignment,
+} from '../apps/shared/app-domain-assignment';
 
-const STORE_APP_TYPES = ['STORE_ECOMMERCE', 'STORE_LANDING', 'STORE_ADMIN'];
+const STORE_APP_TYPES = [
+  'STORE_ECOMMERCE',
+  'STORE_LANDING',
+  'STORE_ADMIN',
+  // Apps F5: only when the store has the app published.
+  'STORE_HOME',
+  'STORE_PRODUCT_PAGE',
+  'STORE_SERVICE_PAGE',
+  'STORE_BOOKING',
+];
 const CUSTOM_OWNERSHIPS = ['custom_domain', 'custom_subdomain'];
 
 @Injectable()
@@ -185,7 +199,7 @@ export class StoreDomainsService {
   private validateStoreAppType(appType: string): void {
     if (!STORE_APP_TYPES.includes(appType)) {
       throw new BadRequestException(
-        'Store domains only support STORE_ECOMMERCE, STORE_LANDING or STORE_ADMIN',
+        `Store domains only support ${STORE_APP_TYPES.join(', ')}`,
       );
     }
   }
@@ -255,6 +269,11 @@ export class StoreDomainsService {
 
     const app_type = create_domain_dto.app_type || 'STORE_ECOMMERCE';
     this.validateStoreAppType(app_type);
+    await assertAppTypeAssignable(this.globalPrisma, {
+      storeId: scope.store_id,
+      currentAppType: null,
+      nextAppType: app_type,
+    });
 
     const domain_type = this.inferDomainType(
       app_type,
@@ -414,6 +433,13 @@ export class StoreDomainsService {
       });
     }
 
+    await syncAppDomainAssignment(this.globalPrisma, {
+      storeId: created.store_id,
+      domainId: created.id,
+      previousAppType: null,
+      nextAppType: app_type,
+    });
+
     return this.decorateDomain(created);
   }
 
@@ -434,6 +460,8 @@ export class StoreDomainsService {
   }
 
   private async ensureSingleActiveApp(app_type: string, exclude_id?: number) {
+    // Apps F5: an app is served by its subdomain plus any number of aliases.
+    if (isAppOnlyAppType(app_type)) return;
     await this.prisma.domain_settings.updateMany({
       where: {
         app_type: app_type as any,
@@ -548,6 +576,11 @@ export class StoreDomainsService {
 
     const app_type = update_domain_dto.app_type || existing_domain.app_type;
     this.validateStoreAppType(app_type);
+    await assertAppTypeAssignable(this.globalPrisma, {
+      storeId: existing_domain.store_id,
+      currentAppType: existing_domain.app_type,
+      nextAppType: app_type,
+    });
 
     const domain_type =
       update_domain_dto.domain_type ||
@@ -609,6 +642,13 @@ export class StoreDomainsService {
     const updated = await this.prisma.domain_settings.update({
       where: { id },
       data: update_data,
+    });
+
+    await syncAppDomainAssignment(this.globalPrisma, {
+      storeId: updated.store_id,
+      domainId: updated.id,
+      previousAppType: existing_domain.app_type,
+      nextAppType: String(updated.app_type),
     });
 
     const transitioned_to_active =

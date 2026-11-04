@@ -7713,6 +7713,23 @@ export const ErrorCodes = {
     devMessage: 'Esta app no aplica a la industria de tu tienda.',
   },
 
+  // Apps F5: a domain modal points a domain to an app the store has not
+  // published (STORE_HOME, STORE_PRODUCT_PAGE, STORE_SERVICE_PAGE,
+  // STORE_BOOKING).
+  STORE_APPS_016: {
+    code: 'STORE_APPS_016',
+    httpStatus: 409,
+    devMessage: 'Publica primero esa app para usar este dominio con ella.',
+  },
+  // Apps F5: the domain serves the online store or the admin panel, which
+  // never move to an app.
+  STORE_APPS_017: {
+    code: 'STORE_APPS_017',
+    httpStatus: 400,
+    devMessage:
+      'Este dominio sirve la tienda en línea o el panel de administración; no se puede asignar a una app.',
+  },
+
   // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra
   // tienda como si no está asignada a quien no puede ver todas: no se revela
   // que existe.

@@ -31,6 +31,11 @@ import {
   getOneLevelSubdomainLabel,
   hasIssuedWildcardSsl,
 } from 'src/common/services/domains/domain-custom-hosting.util';
+import { isAppOnlyAppType } from '../../store/apps/shared/app-domain-aliases';
+import {
+  assertAppTypeAssignable,
+  syncAppDomainAssignment,
+} from '../../store/apps/shared/app-domain-assignment';
 
 const APP_TYPES = [
   'VENDIX_LANDING',
@@ -40,8 +45,21 @@ const APP_TYPES = [
   'STORE_LANDING',
   'STORE_ADMIN',
   'STORE_ECOMMERCE',
+  // Apps F5: only when the store has the app published.
+  'STORE_HOME',
+  'STORE_PRODUCT_PAGE',
+  'STORE_SERVICE_PAGE',
+  'STORE_BOOKING',
 ];
-const STORE_APP_TYPES = ['STORE_ECOMMERCE', 'STORE_LANDING', 'STORE_ADMIN'];
+const STORE_APP_TYPES = [
+  'STORE_ECOMMERCE',
+  'STORE_LANDING',
+  'STORE_ADMIN',
+  'STORE_HOME',
+  'STORE_PRODUCT_PAGE',
+  'STORE_SERVICE_PAGE',
+  'STORE_BOOKING',
+];
 const ORG_APP_TYPES = ['ORG_LANDING', 'ORG_ADMIN'];
 const CUSTOM_OWNERSHIPS = ['custom_domain', 'custom_subdomain'];
 
@@ -228,6 +246,8 @@ export class DomainsService implements OnModuleInit {
     appType: string,
     excludeId?: number,
   ) {
+    // Apps F5: an app is served by its subdomain plus any number of aliases.
+    if (isAppOnlyAppType(appType)) return;
     await this.prisma.domain_settings.updateMany({
       where: {
         organization_id: organizationId || null,
@@ -450,6 +470,11 @@ export class DomainsService implements OnModuleInit {
 
     const app_type = this.inferAppType(data.store_id, data.app_type);
     this.validateAppAssignment(app_type, data.store_id);
+    await assertAppTypeAssignable(this.globalPrisma, {
+      storeId: data.store_id,
+      currentAppType: null,
+      nextAppType: app_type,
+    });
 
     // Infer domain type and ownership
     const inferred_type = this.inferDomainType(
@@ -547,6 +572,13 @@ export class DomainsService implements OnModuleInit {
         hostname: domainSetting.hostname,
       });
     }
+
+    await syncAppDomainAssignment(this.globalPrisma, {
+      storeId: domainSetting.store_id,
+      domainId: domainSetting.id,
+      previousAppType: null,
+      nextAppType: app_type,
+    });
 
     return this.decorateDomain(domainSetting);
   }
@@ -668,6 +700,11 @@ export class DomainsService implements OnModuleInit {
 
     const app_type = updateData.app_type || existing_record.app_type;
     this.validateAppAssignment(app_type, existing_record.store_id);
+    await assertAppTypeAssignable(this.globalPrisma, {
+      storeId: existing_record.store_id,
+      currentAppType: existing_record.app_type,
+      nextAppType: app_type,
+    });
 
     const domain_type =
       updateData.domain_type ||
@@ -739,6 +776,13 @@ export class DomainsService implements OnModuleInit {
     const updated = await this.prisma.domain_settings.update({
       where: { id: existing_record.id },
       data: updates,
+    });
+
+    await syncAppDomainAssignment(this.globalPrisma, {
+      storeId: updated.store_id,
+      domainId: updated.id,
+      previousAppType: existing_record.app_type,
+      nextAppType: String(updated.app_type),
     });
 
     const transitioned_to_active =
