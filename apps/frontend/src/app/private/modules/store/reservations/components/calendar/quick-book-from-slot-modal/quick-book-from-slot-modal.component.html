@@ -304,7 +304,7 @@
                 (click)="selectProvider(p)"
               >
                 <app-icon name="user" [size]="14"></app-icon>
-                {{ p.display_name || p.employee?.first_name }}
+                {{ p | providerName }}
               </button>
             }
           </div>
@@ -397,10 +397,7 @@
               Proveedor
             </div>
             <div class="confirm-value">
-              {{
-                selectedProvider()?.display_name ||
-                  selectedProvider()?.employee?.first_name
-              }}
+              {{ selectedProvider() | providerName }}
             </div>
           </div>
         }

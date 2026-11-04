@@ -1,3 +1,4 @@
+import { providerDisplayName } from '../../../../../../shared/utils/provider-display-name';
 import { Component, inject, viewChild, input, output, effect, signal, computed, TemplateRef } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
@@ -147,7 +148,7 @@ export class ReservationListComponent {
       label: 'Proveedor',
       priority: 2,
       transform: (val: any) =>
-        val?.display_name || (val?.employee ? `${val.employee.first_name} ${val.employee.last_name}` : '\u2014'),
+        providerDisplayName(val) || '\u2014',
     },
     {
       key: 'status',
@@ -203,7 +204,7 @@ export class ReservationListComponent {
         label: 'Proveedor',
         icon: 'user-circle',
         transform: (v: any) =>
-          v?.display_name || (v?.employee ? `${v.employee.first_name} ${v.employee.last_name}` : '\u2014'),
+          providerDisplayName(v) || '\u2014',
       },
       {
         key: 'channel',

@@ -1,3 +1,4 @@
+import { ProviderNamePipe } from '../../../../../../../shared/pipes/provider-name/provider-name.pipe';
 import { Component, input, output, computed, signal, DestroyRef, inject } from '@angular/core';
 
 import { IconComponent } from '../../../../../../../shared/components';
@@ -32,7 +33,7 @@ export interface FreeSlot {
 @Component({
   selector: 'app-calendar-day-view',
   standalone: true,
-  imports: [IconComponent],
+  imports: [ProviderNamePipe, IconComponent],
   templateUrl: './calendar-day-view.component.html',
   styleUrls: ['./calendar-day-view.component.scss'],
 })

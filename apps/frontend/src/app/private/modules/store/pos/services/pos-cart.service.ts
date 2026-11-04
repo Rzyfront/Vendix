@@ -1,3 +1,4 @@
+import { providerDisplayName } from '../../../../../shared/utils/provider-display-name';
 import { Injectable, signal, computed, inject, DestroyRef, effect, untracked } from '@angular/core';
 import { Observable, of, throwError, forkJoin } from 'rxjs';
 import {
@@ -961,9 +962,7 @@ export class PosCartService {
       start_time: b.start_time || '',
       end_time: b.end_time || '',
       provider_name:
-        b.provider?.display_name ||
-        b.provider?.employee?.first_name ||
-        undefined,
+        providerDisplayName(b.provider) || undefined,
       service_location_type: b.service_location_type || 'shop',
       notes: b.notes || '',
       cart_item_id: b.cart_item_id || undefined,
@@ -999,8 +998,7 @@ export class PosCartService {
           booking_id: matchedBooking.id ?? matchedBooking.booking_id ?? 0,
           provider_id: matchedBooking.provider_id,
           provider_name:
-            matchedBooking.provider?.display_name ||
-            matchedBooking.provider?.employee?.first_name ||
+            providerDisplayName(matchedBooking.provider) ||
             matchedBooking.provider_name ||
             undefined,
           date: (matchedBooking.date ? String(matchedBooking.date) : '').slice(0, 10),

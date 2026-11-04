@@ -22,7 +22,8 @@ export interface BookingProvider {
   display_name: string;
   avatar_url?: string | null;
   bio?: string | null;
-  employee?: { id: number; first_name: string; last_name: string };
+  employee?: { id: number; first_name: string; last_name: string } | null;
+  user?: { id: number; first_name: string | null; last_name: string | null } | null;
 }
 
 /**

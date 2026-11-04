@@ -1,3 +1,5 @@
+import { providerDisplayName } from '../../../../../../shared/utils/provider-display-name';
+import { ProviderNamePipe } from '../../../../../../shared/pipes/provider-name/provider-name.pipe';
 import {Component, input, output, signal, computed, inject, effect, DestroyRef} from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -15,7 +17,7 @@ import { environment } from '../../../../../../../environments/environment';
 @Component({
   selector: 'app-booking-detail-modal',
   standalone: true,
-  imports: [FormsModule, ModalComponent, IconComponent, SpinnerComponent, TooltipComponent,
+  imports: [ProviderNamePipe, FormsModule, ModalComponent, IconComponent, SpinnerComponent, TooltipComponent,
     CurrencyPipe,
     DatePipe,
     NgClass,
@@ -83,10 +85,10 @@ export class BookingDetailModalComponent {
     const id = this.rescheduleProviderId();
     if (id == null) return '';
     const fromList = this.serviceProviders().find((p) => p.id === id);
-    if (fromList) return fromList.display_name || fromList.employee?.first_name || '';
+    if (fromList) return providerDisplayName(fromList);
     const b = this.booking();
     if (b?.provider_id === id) {
-      return b.provider?.display_name || b.provider?.employee?.first_name || '';
+      return providerDisplayName(b.provider);
     }
     return '';
   });

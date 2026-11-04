@@ -1,3 +1,4 @@
+import { ProviderNamePipe } from '../../../../../../shared/pipes/provider-name/provider-name.pipe';
 import {
   Component,
   computed,
@@ -24,7 +25,7 @@ const SPANISH_MONTHS = [
 @Component({
   selector: 'app-today-reservations-panel',
   standalone: true,
-  imports: [CardComponent, BadgeComponent, EmptyStateComponent, IconComponent, TooltipComponent],
+  imports: [ProviderNamePipe, CardComponent, BadgeComponent, EmptyStateComponent, IconComponent, TooltipComponent],
   templateUrl: './today-reservations-panel.component.html',
   styleUrls: ['./today-reservations-panel.component.scss'],
 })

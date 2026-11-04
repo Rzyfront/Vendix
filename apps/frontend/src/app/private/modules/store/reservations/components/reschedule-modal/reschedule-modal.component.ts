@@ -1,3 +1,4 @@
+import { ProviderNamePipe } from '../../../../../../shared/pipes/provider-name/provider-name.pipe';
 import {Component, computed, input, output, signal, inject, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -18,7 +19,7 @@ import { Observable } from 'rxjs';
 @Component({
   selector: 'app-reschedule-modal',
   standalone: true,
-  imports: [ModalComponent, ButtonComponent, IconComponent, SpinnerComponent],
+  imports: [ProviderNamePipe, ModalComponent, ButtonComponent, IconComponent, SpinnerComponent],
   templateUrl: './reschedule-modal.component.html',
   styleUrls: ['./reschedule-modal.component.scss'],
 })

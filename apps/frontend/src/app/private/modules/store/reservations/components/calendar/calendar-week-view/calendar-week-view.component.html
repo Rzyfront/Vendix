@@ -57,7 +57,7 @@
               <span class="booking-title">{{ booking.product?.name }}</span>
               <span class="booking-customer">{{ booking.customer?.first_name }}</span>
               @if (booking.provider) {
-                <span class="booking-provider">{{ booking.provider.display_name || booking.provider.employee?.first_name }}</span>
+                <span class="booking-provider">{{ booking.provider | providerName }}</span>
               }
               @if (isBookingExpired(booking)) {
                 <!-- Compact "VENCIDA" badge for the week-view (which has less

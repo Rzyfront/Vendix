@@ -1,3 +1,4 @@
+import { ProviderNamePipe } from '../../../../../../../shared/pipes/provider-name/provider-name.pipe';
 import { Component, input, output, computed, signal, DestroyRef, inject } from '@angular/core';
 
 import { Booking } from '../../../interfaces/reservation.interface';
@@ -38,7 +39,7 @@ interface WeekDay {
 @Component({
   selector: 'app-calendar-week-view',
   standalone: true,
-  imports: [],
+  imports: [ProviderNamePipe, ],
   templateUrl: './calendar-week-view.component.html',
   styleUrls: ['./calendar-week-view.component.scss'],
 })
