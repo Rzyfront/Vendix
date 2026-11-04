@@ -1,3 +1,4 @@
+import { AccessGateService } from '../services/access-gate.service';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { RouterTestingModule } from '@angular/router/testing';
@@ -43,6 +44,10 @@ describe('storeDashboardGuard (QUI-860)', () => {
         { provide: MenuFilterService, useValue: menuFilter },
         { provide: ToastService, useValue: toast },
         { provide: AuthFacade, useValue: authFacade },
+        {
+          provide: AccessGateService,
+          useValue: { mode: () => 'audit', industries: () => null, orgPanelUi: () => null, report: () => undefined },
+        },
       ],
     });
 

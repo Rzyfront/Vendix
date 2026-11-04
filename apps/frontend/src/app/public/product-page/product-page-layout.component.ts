@@ -16,8 +16,8 @@ import { CartService } from '../../private/modules/ecommerce/services/cart.servi
 import { StoreUiService } from '../../private/modules/ecommerce/services/store-ui.service';
 import { StoreSeoService } from '../../private/modules/ecommerce/services/store-seo';
 import { AuthModalComponent } from '../../private/layouts/store-ecommerce/components/auth-modal/auth-modal.component';
-import { IconComponent } from '../../shared/components/icon/icon.component';
 import { ProductComplementsComponent } from './components/product-complements.component';
+import { ProductPageViewComponent, complementsTitleOf } from './product-page-view.component';
 import { ProductPageService } from './product-page.service';
 
 /**
@@ -30,46 +30,27 @@ import { ProductPageService } from './product-page.service';
 @Component({
   selector: 'app-product-page-layout',
   standalone: true,
-  imports: [RouterModule, AuthModalComponent, IconComponent, ProductComplementsComponent],
+  imports: [
+    RouterModule,
+    AuthModalComponent,
+    ProductComplementsComponent,
+    ProductPageViewComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="flex min-h-screen flex-col bg-background">
-      <header class="sticky top-0 z-30 border-b border-border bg-surface/95 backdrop-blur">
-        <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4">
-          <a [routerLink]="homeLink()" class="flex min-w-0 items-center gap-3">
-            @if (storeLogo()) {
-              <img [src]="storeLogo()" [alt]="storeName()" class="h-9 w-auto max-w-[8rem] object-contain" />
-            }
-            <span class="truncate text-base font-semibold text-text-primary">{{ storeName() }}</span>
-          </a>
-          <a
-            routerLink="/cart"
-            class="relative inline-flex h-10 w-10 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary"
-            [attr.aria-label]="'Carrito, ' + cartCount() + ' producto(s)'"
-          >
-            <app-icon name="shopping-cart" [size]="22" />
-            @if (cartCount() > 0) {
-              <span
-                class="absolute -right-0.5 -top-0.5 min-w-[1.25rem] rounded-full bg-primary px-1 text-center text-xs font-semibold leading-5 text-white"
-              >
-                {{ cartCount() }}
-              </span>
-            }
-          </a>
-        </div>
-      </header>
-
-      <main class="flex-1">
-        <router-outlet />
-        @if (showComplements()) {
-          <app-product-complements [productIds]="complementIds()" />
-        }
-      </main>
-
-      <footer class="border-t border-border py-6 text-center text-xs text-text-secondary">
-        {{ storeName() }} · Hecho con Vendix
-      </footer>
-    </div>
+    <app-product-page-view
+      [page]="page()"
+      [storeName]="storeName()"
+      [storeLogo]="storeLogo()"
+      [homeLink]="homeLink()"
+      [cartCount]="cartCount()"
+      [featuredRoute]="isFeaturedRoute()"
+    >
+      <router-outlet />
+      @if (showComplements()) {
+        <app-product-complements [productIds]="complementIds()" [title]="complementsTitle()" />
+      }
+    </app-product-page-view>
 
     <app-auth-modal
       [isOpen]="authModalOpen()"
@@ -110,17 +91,34 @@ export class ProductPageLayoutComponent {
     return slug ? ['/products', slug] : ['/'];
   });
 
+  /** The owner's own page; `null` keeps the layout exactly as it was. */
+  readonly page = computed(() => this.productPage.config()?.page ?? null);
+
+  private readonly complementsBlock = computed(() =>
+    this.page()?.blocks.find((b) => b.type === 'complements'),
+  );
+
+  readonly complementsTitle = computed(() => complementsTitleOf(this.page()));
+
   readonly complementIds = computed(
     () => this.productPage.config()?.complement_product_ids ?? [],
   );
 
-  /** Complements only under the featured product, not in cart or checkout. */
-  readonly showComplements = computed(() => {
+  /** The featured product's own route (not cart, checkout or order pages). */
+  readonly isFeaturedRoute = computed(() => {
     const slug = this.productPage.config()?.product.slug;
-    if (!slug || this.complementIds().length === 0) return false;
+    if (!slug) return false;
     const path = this.url().split(/[?#]/)[0];
     return ['/products/', '/producto/', '/catalog/'].some((p) => path === p + slug);
   });
+
+  /** Complements only under the featured product, not in cart or checkout. */
+  readonly showComplements = computed(
+    () =>
+      this.complementIds().length > 0 &&
+      this.isFeaturedRoute() &&
+      this.complementsBlock()?.enabled !== false,
+  );
 
   constructor() {
     this.productPage.load().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();

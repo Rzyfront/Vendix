@@ -22,7 +22,10 @@ import {
 // Re-export types for component usage
 export type { ProcessPaymentRequest, PosOrder } from '../models/order.model';
 import { CartItem, CartState, CartDiscount } from '../models/cart.model';
-import { resolveLineUnits } from '../utils/line-units.util';
+import {
+  resolveLineUnits,
+  resolveSaleUnitSnapshot,
+} from '../utils/line-units.util';
 import { PosCustomer } from '../models/customer.model';
 import { PosCashRegisterService } from './pos-cash-register.service';
 
@@ -1104,6 +1107,7 @@ export class PosOrderService {
       variant_attributes: isCustomItem ? null : item.variant_attributes || null,
       weight: item.weight || undefined,
       weight_unit: item.weight_unit || undefined,
+      ...(isCustomItem ? {} : resolveSaleUnitSnapshot(item)),
       price_override_reason: item.isPriceOverridden
         ? item.priceOverrideReason
         : undefined,

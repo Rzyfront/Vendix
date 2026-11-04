@@ -10,10 +10,13 @@ import {
   FolioSplitDto,
   FolioSplitPayDto,
 } from './folio-split.dto';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H3.8) — split folio: one account per payer, each with its payment and invoice. */
 @Controller('store/hospitality/reservations/:id/folio/split')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingFolioSplitController {
   constructor(
     private readonly lodgingFolioSplitService: LodgingFolioSplitService,

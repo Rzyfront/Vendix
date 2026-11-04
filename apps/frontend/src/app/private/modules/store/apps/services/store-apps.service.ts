@@ -3,10 +3,24 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
+  AppKind,
   ProductPageCustomDomain,
   StoreAppDetailResponse,
   StoreAppsResponse,
 } from '../interfaces/store-app.interface';
+import type { ProductPageContext } from '../page-builder/product-page/product-page-builder';
+import type { BookingContext } from '../page-builder/booking/booking-builder';
+import type { ServicePageContext } from '../page-builder/service-page/service-page-builder';
+import type { StoreHomePublic } from '../../../../../public/store-home/store-home.service';
+import type { AppPageDocument, PageAppKind } from '../templates/app-page.types';
+
+/** URL segment of each app's `PATCH /store/apps/<segment>/page` (apps-f2 S7). */
+export const PAGE_SEGMENTS: Record<PageAppKind, string> = {
+  product_page: 'product_page',
+  service_page: 'service_page',
+  booking: 'booking',
+  store_home: 'store-home',
+};
 
 /**
  * Client of the Apps catalog (`GET /store/apps`, permission `store:apps:read`)
@@ -26,6 +40,27 @@ export class StoreAppsService {
     return this.http.get<StoreAppDetailResponse>(`${this.apiUrl}/${kind}`);
   }
 
+  /** Switches an app on (`draft`); apps-vistas-f1 S3. */
+  activate(kind: AppKind): Observable<StoreAppDetailResponse> {
+    return this.http.post<StoreAppDetailResponse>(`${this.apiUrl}/${kind}/activate`, {});
+  }
+
+  /** Switches a draft app off (`disabled`); a published app is unpublished first. */
+  deactivate(kind: AppKind): Observable<StoreAppDetailResponse> {
+    return this.http.post<StoreAppDetailResponse>(`${this.apiUrl}/${kind}/deactivate`, {});
+  }
+
+  /** Saves the app's own page (`config.page`); it never publishes (apps-f2 S3). */
+  savePage(
+    kind: PageAppKind,
+    page: AppPageDocument,
+  ): Observable<{ success: boolean; data: { page: AppPageDocument } }> {
+    return this.http.patch<{ success: boolean; data: { page: AppPageDocument } }>(
+      `${this.apiUrl}/${PAGE_SEGMENTS[kind]}/page`,
+      { page },
+    );
+  }
+
   saveProductPageConfig(body: {
     product_id: number;
     complement_product_ids: number[];
@@ -40,6 +75,11 @@ export class StoreAppsService {
     );
   }
 
+  /** F6-B — the featured product and complements the page paints, for the builder preview. */
+  productPagePreviewContext(): Observable<{ data: ProductPageContext }> {
+    return this.http.get<{ data: ProductPageContext }>(`${this.apiUrl}/product_page/preview-context`);
+  }
+
   unpublishProductPage(): Observable<unknown> {
     return this.http.post(`${this.apiUrl}/product_page/unpublish`, {});
   }
@@ -48,6 +88,11 @@ export class StoreAppsService {
     return this.http.get<{ data: ProductPageCustomDomain[] }>(
       `${this.apiUrl}/product_page/custom-domains`,
     );
+  }
+
+  /** F6-B — the services and secondary products the page paints, for the builder preview. */
+  servicePagePreviewContext(): Observable<{ data: ServicePageContext }> {
+    return this.http.get<{ data: ServicePageContext }>(`${this.apiUrl}/service_page/preview-context`);
   }
 
   saveServicePageConfig(body: {
@@ -72,6 +117,11 @@ export class StoreAppsService {
     return this.http.get<{ data: ProductPageCustomDomain[] }>(
       `${this.apiUrl}/service_page/custom-domains`,
     );
+  }
+
+  /** F6-B — the room types and secondary products the page paints, for the builder preview. */
+  bookingPreviewContext(): Observable<{ data: BookingContext }> {
+    return this.http.get<{ data: BookingContext }>(`${this.apiUrl}/booking/preview-context`);
   }
 
   saveBookingConfig(body: { product_ids: number[] }): Observable<unknown> {
@@ -99,6 +149,11 @@ export class StoreAppsService {
     return this.http.patch(`${this.apiUrl}/store-home/config`, body);
   }
 
+  /** F6-B — what the store home paints besides its page (name, brand, footer, published apps), for the builder preview. */
+  storeHomePreviewContext(): Observable<{ data: StoreHomePublic }> {
+    return this.http.get<{ data: StoreHomePublic }>(`${this.apiUrl}/store-home/preview-context`);
+  }
+
   /** Switches the store's `{tienda}-store` domain to the store home. */
   publishStoreHome(): Observable<unknown> {
     return this.http.post(`${this.apiUrl}/store-home/publish`, {});
@@ -109,7 +164,7 @@ export class StoreAppsService {
     return this.http.post(`${this.apiUrl}/store-home/unpublish`, {});
   }
 
-  /** Offer of the landing page (Fase 6); the landing content stays in "Landing de captación". */
+  /** Offer of the landing page (Fase 6); its content is the CRM landing, edited in the same view. */
   saveLandingConfig(body: {
     offer_mode: 'info' | 'product';
     offer_title: string | null;

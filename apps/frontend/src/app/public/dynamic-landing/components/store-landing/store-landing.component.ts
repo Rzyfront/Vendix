@@ -1,5 +1,6 @@
 import {
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
@@ -14,14 +15,15 @@ import { toTitleCase } from '../../../../core/utils/format.utils';
 import { LandingLayoutComponent } from '../../../../shared/components/layouts/landing-layout/landing-layout.component';
 import { DynamicHeroCarouselComponent } from '../shared/dynamic-hero-carousel/dynamic-hero-carousel.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
-import {
-  CrmLandingDocument,
-  CrmBlock,
-} from '../../blocks/landing-blocks.types';
-import { BlockRendererComponent } from '../../blocks/block-renderer/block-renderer.component';
-import { ContactBlockComponent } from '../../blocks/contact-block.component';
-import { LandingOfferComponent } from '../../../landing-page/landing-offer.component';
+import { CrmLandingDocument } from '../../blocks/landing-blocks.types';
 import { LandingPageService } from '../../../landing-page/landing-page.service';
+import { StoreSeoService } from '../../../../private/modules/ecommerce/services/store-seo';
+import { LandingDocumentViewComponent } from '../landing-document-view/landing-document-view.component';
+import {
+  IDLE_LEAD_STATE,
+  LandingLeadState,
+} from '../landing-document-view/landing-lead-form.component';
+import { landingLogo } from '../landing-document-view/landing-view.util';
 import {
   CrmLandingService,
   CrmContactPayload,
@@ -40,69 +42,26 @@ import {
     CommonModule,
     LandingLayoutComponent,
     DynamicHeroCarouselComponent,
-    BlockRendererComponent,
-    ContactBlockComponent,
     IconComponent,
-    LandingOfferComponent,
+    LandingDocumentViewComponent,
   ],
   template: `
-    <app-landing-layout [brandName]="storeName()" [logoUrl]="logoUrl()">
-      <div class="crm-landing" [style.--crm-primary]="primaryColor()" [style.--crm-secondary]="secondaryColor()">
+    <app-landing-layout [brandName]="storeName()" [logoUrl]="headerLogo()">
+      <div class="crm-landing">
         @if (loading()) {
           <section class="crm-state">
             <app-icon name="loader" [size]="22" />
             <span>Cargando…</span>
           </section>
         } @else if (document(); as doc) {
-          @for (block of doc.blocks; track block.id; let i = $index) {
-            <div #blockHost>
-              @if (block.type === 'contact') {
-                <app-contact-block
-                  [props]="block.props"
-                  (ctaClick)="scrollToForm()"
-                />
-                <ng-container [ngTemplateOutlet]="contactForm" />
-              } @else {
-                <app-block-renderer
-                  [block]="block"
-                  [baseUrl]="ecommerceBaseUrl()"
-                  (ctaClick)="goToStore()"
-                  (secondaryCtaClick)="scrollToForm()"
-                />
-              }
-            </div>
-            @if (i === 0 && ownLanding(); as page) {
-              <app-landing-offer [offer]="page.offer" (interested)="scrollToForm()" />
-            }
-          }
-
-          <!-- Landing on its own domain: the lead form is always there. -->
-          @if (ownLanding() && !hasContactBlock()) {
-            <ng-container [ngTemplateOutlet]="contactForm" />
-          }
-
-          <!-- Floating WhatsApp Widget Button -->
-          @if (enableWhatsappFloat()) {
-            @if (whatsappUrl(); as waUrl) {
-              <a
-                [href]="waUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="crm-floating-whatsapp fixed bottom-6 right-6 z-50 inline-flex items-center gap-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-4 py-3 rounded-full shadow-2xl transition-all duration-300 hover:scale-105 cursor-pointer"
-              >
-                <app-icon name="headphones" [size]="18" color="white" />
-                <span class="text-xs sm:text-sm font-bold">¿Dudas? Chatea en vivo</span>
-              </a>
-            } @else {
-              <a
-                (click)="scrollToForm()"
-                class="crm-floating-whatsapp fixed bottom-6 right-6 z-50 inline-flex items-center gap-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-4 py-3 rounded-full shadow-2xl transition-all duration-300 hover:scale-105 cursor-pointer"
-              >
-                <app-icon name="headphones" [size]="18" color="white" />
-                <span class="text-xs sm:text-sm font-bold">¿Dudas? Chatea en vivo</span>
-              </a>
-            }
-          }
+          <app-landing-document-view
+            [document]="doc"
+            [ecommerceBaseUrl]="ecommerceBaseUrl()"
+            [offer]="ownLanding()?.offer ?? null"
+            [leadState]="leadState()"
+            (ctaClick)="goToStore()"
+            (leadSubmit)="submitContact($event)"
+          />
         } @else {
           <!-- Fallback branded para tiendas sin landing CRM publicada -->
           <section class="relative h-screen">
@@ -214,90 +173,6 @@ import {
       </div>
     </app-landing-layout>
 
-    <ng-template #contactForm>
-                <section id="contacto" class="crm-contact-section max-w-xl mx-auto px-4 pb-20">
-                  <div class="crm-contact-card bg-white rounded-3xl p-7 sm:p-9 border border-slate-200/90 shadow-xl">
-                    <h3 class="text-xl font-bold text-slate-900 text-center mb-1.5">Envíanos un mensaje directo</h3>
-                    <p class="text-xs sm:text-sm text-slate-500 text-center mb-6">Déjanos tus datos y un asesor se pondrá en contacto contigo en breve.</p>
-                    
-                    <div class="space-y-4">
-                      <div>
-                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">Nombre completo *</label>
-                        <input
-                          class="crm-field"
-                          type="text"
-                          placeholder="Tu nombre completo"
-                          maxlength="80"
-                          [value]="formName()"
-                          (input)="onForm('name', $event)"
-                        />
-                      </div>
-                      
-                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                        <div>
-                          <label class="block text-xs font-semibold text-slate-700 mb-1.5">Correo electrónico</label>
-                          <input
-                            class="crm-field"
-                            type="email"
-                            placeholder="nombre@ejemplo.com"
-                            maxlength="160"
-                            [value]="formEmail()"
-                            (input)="onForm('email', $event)"
-                          />
-                        </div>
-                        <div>
-                          <label class="block text-xs font-semibold text-slate-700 mb-1.5">Teléfono / WhatsApp</label>
-                          <input
-                            class="crm-field"
-                            type="tel"
-                            placeholder="Ej. 300 123 4567"
-                            maxlength="30"
-                            [value]="formPhone()"
-                            (input)="onForm('phone', $event)"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">¿En qué podemos ayudarte? *</label>
-                        <textarea
-                          class="crm-field"
-                          rows="4"
-                          placeholder="Escribe aquí tu consulta o los productos de tu interés…"
-                          maxlength="1000"
-                          [value]="formMessage()"
-                          (input)="onForm('message', $event)"
-                        ></textarea>
-                      </div>
-
-                      @if (submitted()) {
-                        <div class="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium text-center flex items-center justify-center gap-2">
-                          <app-icon name="check-circle" [size]="18" color="#059669" />
-                          <span>¡Gracias! Tu mensaje fue enviado con éxito. Te responderemos muy pronto.</span>
-                        </div>
-                      } @else {
-                        @if (formError()) {
-                          <p class="crm-form-error text-center text-xs text-rose-600 font-semibold">{{ formError() }}</p>
-                        }
-                        <button
-                          type="button"
-                          class="crm-submit-btn w-full py-3.5 px-6 rounded-full text-white font-bold text-sm shadow-md transition-all duration-200 cursor-pointer flex items-center justify-center gap-2"
-                          [disabled]="sending()"
-                          (click)="submitContact()"
-                        >
-                          @if (sending()) {
-                            <app-icon name="loader" [size]="16" [spin]="true" color="white" />
-                            <span>Enviando mensaje…</span>
-                          } @else {
-                            <app-icon name="mail" [size]="16" color="white" />
-                            <span>Enviar mensaje</span>
-                          }
-                        </button>
-                      }
-                    </div>
-                  </div>
-                </section>
-    </ng-template>
   `,
   styles: [
     `
@@ -320,48 +195,6 @@ import {
         margin: 0;
       }
 
-      /* Formulario de contacto público */
-      .crm-contact-section {
-        margin: 0 auto;
-      }
-      .crm-contact-card {
-        background: #ffffff;
-      }
-      .crm-field {
-        width: 100%;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        padding: 11px 14px;
-        font-size: 0.9rem;
-        font-family: inherit;
-        background: #f8fafc;
-        box-sizing: border-box;
-        transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
-      }
-      .crm-field:focus {
-        outline: none;
-        background: #ffffff;
-        border-color: var(--crm-primary, #2563eb);
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-      }
-      textarea.crm-field {
-        resize: vertical;
-      }
-      .crm-submit-btn {
-        background: var(--crm-primary, #2563eb);
-      }
-      .crm-submit-btn:hover:not(:disabled) {
-        filter: brightness(1.08);
-        transform: translateY(-1px);
-        box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
-      }
-      .crm-submit-btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-      .crm-floating-whatsapp {
-        box-shadow: 0 12px 24px -4px rgba(16, 185, 129, 0.45);
-      }
     `,
   ],
 })
@@ -370,6 +203,7 @@ export class StoreLandingComponent {
   private readonly themeService = inject(ThemeService);
   private readonly crmLandingService = inject(CrmLandingService);
   private readonly landingPage = inject(LandingPageService);
+  private readonly storeSeo = inject(StoreSeoService);
 
   // Branding del host (header/footer del layout y fallback)
   readonly storeName = signal('Tienda');
@@ -384,14 +218,8 @@ export class StoreLandingComponent {
   readonly document = signal<CrmLandingDocument | null>(null);
   readonly ecommerceBaseUrl = signal<string | null>(null);
 
-  // Formulario de contacto (signals, zoneless-safe)
-  readonly formName = signal('');
-  readonly formEmail = signal('');
-  readonly formPhone = signal('');
-  readonly formMessage = signal('');
-  readonly sending = signal(false);
-  readonly submitted = signal(false);
-  readonly formError = signal('');
+  /** Lead form sending state; the form itself lives in the shared view. */
+  readonly leadState = signal<LandingLeadState>(IDLE_LEAD_STATE);
 
   /**
    * Apps · landing page (Fase 6): set only on the landing's own domain, where
@@ -400,35 +228,33 @@ export class StoreLandingComponent {
    */
   readonly ownLanding = computed(() => this.landingPage.ownPage() ?? null);
 
-  readonly hasContactBlock = computed(
-    () => this.document()?.blocks.some((b) => b.type === 'contact') ?? false,
-  );
-
-  readonly primaryColor = computed(
-    () => this.document()?.theme?.primary_color ?? '#1E40AF',
-  );
-
-  readonly secondaryColor = computed(
-    () => this.document()?.theme?.secondary_color ?? '#0F172A',
-  );
-
-  readonly enableWhatsappFloat = computed(
-    () => this.document()?.theme?.enable_whatsapp_float ?? true,
-  );
-
-  readonly whatsappUrl = computed(() => {
-    const rawNumber = this.document()?.theme?.whatsapp_number?.trim();
-    const rawMsg =
-      this.document()?.theme?.whatsapp_message?.trim() ||
-      '¡Hola! Vi su catálogo en la landing y quiero más información.';
-    if (!rawNumber) return null;
-    const cleanNumber = rawNumber.replace(/[^0-9]/g, '');
-    return `https://wa.me/${cleanNumber}?text=${encodeURIComponent(rawMsg)}`;
-  });
+  /** F6-A: the owner's landing logo, else the store branding logo. */
+  readonly headerLogo = computed(() => landingLogo(this.document()) ?? this.logoUrl());
 
   constructor() {
     this.loadDocument();
     this.landingPage.load().subscribe();
+
+    // F6-A: the owner's SEO, only when the published landing defines one; a
+    // landing without it keeps today's metadata untouched. Only the landing's
+    // own domain is indexable (backend robots/sitemap agree).
+    effect(() => {
+      const seo = this.document()?.seo;
+      const title = seo?.title?.trim();
+      const description = seo?.description?.trim();
+      const image = seo?.image_url?.trim();
+      if (!title && !description && !image) return;
+      const own = !!this.ownLanding();
+      this.storeSeo.apply(this, {
+        title: title || this.storeName(),
+        description: description || this.heroDescription(),
+        canonicalPath: own ? '/' : null,
+        robots: own ? 'index, follow' : 'noindex, follow',
+        image: image || null,
+        jsonLd: null,
+      });
+    });
+    inject(DestroyRef).onDestroy(() => this.storeSeo.release(this));
 
     // Reactividad del branding (regression fix): getCurrentConfig() inicia en
     // null (signal async). El efecto re-dispara loadBranding() cuando la
@@ -532,47 +358,8 @@ export class StoreLandingComponent {
     });
   }
 
-  onForm(field: 'name' | 'email' | 'phone' | 'message', event: Event): void {
-    const value = (event.target as HTMLInputElement).value;
-    switch (field) {
-      case 'name':
-        this.formName.set(value);
-        break;
-      case 'email':
-        this.formEmail.set(value);
-        break;
-      case 'phone':
-        this.formPhone.set(value);
-        break;
-      case 'message':
-        this.formMessage.set(value);
-        break;
-    }
-  }
-
-  submitContact(): void {
-    const name = this.formName().trim();
-    const message = this.formMessage().trim();
-    const email = this.formEmail().trim();
-    const phone = this.formPhone().trim();
-
-    if (!name || !message) {
-      this.formError.set('Cuéntanos tu nombre y qué necesitas.');
-      return;
-    }
-    if (!email && !phone) {
-      this.formError.set('Déjanos tu correo o tu teléfono para responderte.');
-      return;
-    }
-
-    this.sending.set(true);
-    this.formError.set('');
-    const payload: CrmContactPayload = {
-      first_name: name,
-      message,
-      ...(email && { email }),
-      ...(phone && { phone }),
-    };
+  submitContact(payload: CrmContactPayload): void {
+    this.leadState.set({ sending: true, submitted: false, error: '' });
     // Waits for the landing lookup (cached) so an early submission on the
     // landing's own domain still reaches the pipeline.
     this.landingPage
@@ -585,20 +372,19 @@ export class StoreLandingComponent {
         ),
       )
       .subscribe({
-      next: () => {
-        this.submitted.set(true);
-        this.sending.set(false);
-      },
-      error: (err) => {
-        this.sending.set(false);
-        const apiError = err?.error?.message;
-        this.formError.set(
-          typeof apiError === 'string'
-            ? apiError
-            : 'No pudimos enviar tu mensaje. Intenta de nuevo.',
-        );
-      },
-    });
+        next: () => this.leadState.set({ sending: false, submitted: true, error: '' }),
+        error: (err) => {
+          const apiError = err?.error?.message;
+          this.leadState.set({
+            sending: false,
+            submitted: false,
+            error:
+              typeof apiError === 'string'
+                ? apiError
+                : 'No pudimos enviar tu mensaje. Intenta de nuevo.',
+          });
+        },
+      });
   }
 
   goToStore(): void {
@@ -606,9 +392,5 @@ export class StoreLandingComponent {
     if (base) {
       window.location.href = `${base}/catalog`;
     }
-  }
-
-  scrollToForm(): void {
-    document.getElementById('contacto')?.scrollIntoView({ behavior: 'smooth' });
   }
 }

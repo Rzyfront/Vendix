@@ -1,11 +1,12 @@
 import { RequestContextService } from '@common/context/request-context.service';
-import { ErrorCodes } from '@common/errors/error-codes';
+import { DomainConfigService } from '@common/config/domain.config';
 import { AppDomainService } from '../shared/app-domain.service';
 import { StoreHomeAppService } from './store-home-app.service';
 import {
   DEFAULT_STORE_HOME_FOOTER,
   parseStoreHomeConfig,
   resolveStoreHomeBranding,
+  selectStoreHomeApps,
 } from './store-home.reader';
 
 /**
@@ -64,6 +65,30 @@ describe('StoreHomeAppService', () => {
         Object.assign(found, data);
         return found;
       }),
+      findMany: jest.fn(async ({ where }: any) =>
+        domains.filter(
+          (d) =>
+            d.store_id === where.store_id &&
+            d.app_type === where.app_type &&
+            d.ownership === where.ownership,
+        ),
+      ),
+      create: jest.fn(async ({ data }: any) => {
+        const created: DomainRow = {
+          id: domains.length + 1,
+          store_id: data.store_id,
+          hostname: data.hostname,
+          app_type: data.app_type,
+          is_primary: data.is_primary,
+          ownership: data.ownership,
+          status: data.status,
+        };
+        domains.push(created);
+        return created;
+      }),
+    },
+    stores: {
+      findUnique: jest.fn(async () => ({ slug: 'roku', organization_id: 3 })),
     },
     store_apps: {
       findFirst: jest.fn(async ({ where }: any) => {
@@ -77,7 +102,14 @@ describe('StoreHomeAppService', () => {
           status: found.status,
           config: found.config,
           domain_settings: domain
-            ? { id: domain.id, hostname: domain.hostname, app_type: domain.app_type }
+            ? {
+                id: domain.id,
+                hostname: domain.hostname,
+                app_type: domain.app_type,
+                ownership: domain.ownership,
+                is_primary: domain.is_primary,
+                status: domain.status,
+              }
             : null,
         };
       }),
@@ -96,6 +128,7 @@ describe('StoreHomeAppService', () => {
 
   beforeEach(() => {
     jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
+    jest.spyOn(DomainConfigService, 'getBaseDomain').mockReturnValue('vendix.online');
     domains = [
       {
         id: 1,
@@ -111,13 +144,20 @@ describe('StoreHomeAppService', () => {
     events = { emit: jest.fn() };
     cache = { del: jest.fn().mockResolvedValue(undefined) };
     const db = prisma();
+    const globalDb = {
+      domain_settings: {
+        findMany: jest.fn(async ({ where }: any) =>
+          domains.filter((d) => d.hostname.endsWith(where.hostname.endsWith)),
+        ),
+      },
+    };
     const appDomains = new AppDomainService(
       db as any,
-      {} as any,
+      globalDb as any,
       events as any,
       cache as any,
     );
-    service = new StoreHomeAppService(db as any, appDomains);
+    service = new StoreHomeAppService(db as any, appDomains, { read: jest.fn() } as any);
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -183,13 +223,63 @@ describe('StoreHomeAppService', () => {
     expect(row()?.status).toBe('disabled');
   });
 
-  it('refuses to publish without an active primary {store}-store domain', async () => {
-    primary().status = 'disabled';
+  describe('Apps F5: a domain for every publish', () => {
+    const own = () => domains.filter((d) => d.app_type === 'STORE_HOME' && !d.is_primary);
 
-    await expect(service.publish()).rejects.toMatchObject({
-      errorCode: ErrorCodes.STORE_APPS_010.code,
+    it('without a primary domain it generates its own {store}-store subdomain', async () => {
+      domains = [];
+
+      await service.publish();
+
+      expect(domains).toHaveLength(1);
+      expect(domains[0]).toMatchObject({
+        hostname: 'roku-store.vendix.online',
+        app_type: 'STORE_HOME',
+        ownership: 'vendix_subdomain',
+        is_primary: false,
+        status: 'active',
+      });
+      expect(row()).toMatchObject({ status: 'published', domain_settings_id: domains[0].id });
     });
-    expect(apps).toHaveLength(0);
+
+    it('a taken name gets a numeric suffix instead of failing', async () => {
+      // Another store owns roku-store; this store's primary is disabled.
+      domains[0].store_id = 99;
+      domains.push({
+        id: 2, store_id: 99, hostname: 'roku-store-2.vendix.online',
+        app_type: 'STORE_ADMIN', is_primary: false, ownership: 'vendix_subdomain', status: 'active',
+      });
+
+      await service.publish();
+
+      expect(own()).toHaveLength(1);
+      expect(own()[0].hostname).toBe('roku-store-3.vendix.online');
+      expect(row()?.status).toBe('published');
+    });
+
+    it('unpublish disables its own subdomain and republish reactivates the same one', async () => {
+      domains = [];
+      await service.publish();
+      const first = own()[0];
+
+      await service.unpublish();
+      expect(first.status).toBe('disabled');
+      expect(first.app_type).toBe('STORE_HOME');
+
+      await service.publish();
+      expect(own()).toHaveLength(1);
+      expect(own()[0]).toMatchObject({ id: first.id, status: 'active' });
+      expect(row()?.domain_settings_id).toBe(first.id);
+    });
+
+    it('publishing twice creates no second domain', async () => {
+      domains = [];
+      await service.publish();
+      await service.publish();
+
+      expect(domains).toHaveLength(1);
+      expect(domains[0].status).toBe('active');
+    });
   });
 
   it('unpublishing a store home that was never published changes nothing', async () => {
@@ -200,7 +290,53 @@ describe('StoreHomeAppService', () => {
   });
 });
 
+describe('StoreHomeAppService.previewContext (F6-B)', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('reads the preview data of the store in the request context, published or not', async () => {
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(7);
+    const config = { footer_text: 'Hola', page: { schema_version: 1, blocks: [] } };
+    const findFirst = jest.fn().mockResolvedValue({ id: 1, status: 'draft', config, domain_settings: null });
+    const data = { store_name: 'Roku', branding: {}, footer: { text: 'Hola', site_url: 'x' }, apps: [] };
+    const view = { read: jest.fn().mockResolvedValue(data) };
+    const service = new StoreHomeAppService({ store_apps: { findFirst } } as any, {} as any, view as any);
+
+    await expect(service.previewContext()).resolves.toBe(data);
+    expect(findFirst.mock.calls[0][0].where).toEqual({ store_id: 7, kind: 'store_home' });
+    expect(view.read).toHaveBeenCalledWith(7, config);
+  });
+
+  it('without a store in the context it refuses', async () => {
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(undefined as any);
+    const service = new StoreHomeAppService({} as any, {} as any, { read: jest.fn() } as any);
+    await expect(service.previewContext()).rejects.toThrow();
+  });
+});
+
 describe('store home reader', () => {
+  describe('selectStoreHomeApps (F6-B)', () => {
+    const apps = [
+      { kind: 'ecommerce', name: 'Tienda en línea', url: 'https://a' },
+      { kind: 'landing', name: 'Landing page', url: 'https://b' },
+      { kind: 'booking', name: 'Reservas', url: 'https://c' },
+    ];
+
+    it('without a choice shows every published app, in catalog order (as before)', () => {
+      expect(selectStoreHomeApps(apps, undefined)).toEqual(apps);
+    });
+
+    it('shows only the chosen apps, in the chosen order, skipping unpublished and repeated ones', () => {
+      expect(selectStoreHomeApps(apps, ['booking', 'service_page', 'ecommerce', 'booking']).map((a) => a.kind)).toEqual([
+        'booking',
+        'ecommerce',
+      ]);
+    });
+
+    it('an empty choice shows none', () => {
+      expect(selectStoreHomeApps(apps, [])).toEqual([]);
+    });
+  });
+
   it('uses the store brand first, then the organization, field by field', () => {
     expect(
       resolveStoreHomeBranding(

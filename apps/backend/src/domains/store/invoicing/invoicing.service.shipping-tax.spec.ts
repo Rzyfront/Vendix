@@ -271,6 +271,39 @@ describe('InvoicingService.createFromOrder — impuesto del envío (copia de la 
     serial_numbers_snapshot: null,
   });
 
+  it('línea de PESO: la factura no copia la pesada (180 g) como empaque; la presentación sí se copia', async () => {
+    const { data } = await createDraft({
+      shipping_cost: money(0),
+      ...emptyShippingCopy,
+      order_items: [
+        buildOrderItem({
+          id: 1,
+          quantity: 1,
+          unit_price: money('20000'),
+          total_price: money('3600'),
+          tax_rate: money('0'),
+          tax_amount_item: money('0'),
+          weight: money('0.180'),
+          weight_unit: 'kg',
+          stock_units_consumed: 180,
+        }),
+        buildOrderItem({
+          id: 2,
+          quantity: 1,
+          unit_price: money('50000'),
+          total_price: money('50000'),
+          tax_rate: money('0'),
+          tax_amount_item: money('0'),
+          stock_units_consumed: 50,
+          applied_price_tier_name_snapshot: 'Bulto',
+        }),
+      ],
+    });
+    const [weighed, bundle] = data.invoice_items.create;
+    expect(weighed.stock_units_consumed).toBeNull();
+    expect(bundle.stock_units_consumed).toBe(50);
+  });
+
   it('sin copia (shipping_tax_amount = 0): factura idéntica a la de hoy', async () => {
     const { data, line_tax_rows } = await createDraft({
       shipping_cost: money(15000),

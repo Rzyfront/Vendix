@@ -4,10 +4,13 @@ import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingPrecheckinService } from './precheckin.service';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H8.1) — online check-in link the desk shares with the guest. */
 @Controller('store/hospitality/reservations/:reservationId/precheckin-link')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingPrecheckinController {
   constructor(
     private readonly precheckinService: LodgingPrecheckinService,

@@ -7,6 +7,7 @@ import { ErrorCodes } from '@common/errors/error-codes';
 import {
   AppCustomDomainView,
   AppDomainService,
+  appDomainState,
 } from '../shared/app-domain.service';
 import { buildAppSuffixHostname } from '../product-page/product-page-hostname';
 import { secondaryProductsWhere } from '../service-page/service-page.reader';
@@ -15,6 +16,7 @@ import {
   BookingPageConfig,
   parseBookingPageConfig,
 } from './booking-page.reader';
+import { BookingViewData, BookingViewService } from './booking-view.service';
 import { PublishBookingPageDto, UpdateBookingPageConfigDto } from './booking-page.dto';
 
 const APP_TYPE = 'STORE_BOOKING';
@@ -40,7 +42,18 @@ export class BookingAppService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly domains: AppDomainService,
+    private readonly view: BookingViewService,
   ) {}
+
+  /**
+   * F6-B — the data the editor's preview paints besides the draft page: the
+   * room types and secondary products, whatever the app's status.
+   */
+  async previewContext(): Promise<BookingViewData> {
+    const storeId = this.requireStoreId();
+    const row = await this.findRow(storeId);
+    return this.view.read(storeId, row?.config ?? null);
+  }
 
   async updateConfig(dto: UpdateBookingPageConfigDto): Promise<void> {
     const storeId = this.requireStoreId();
@@ -77,7 +90,11 @@ export class BookingAppService {
     }
 
     if (row?.status === 'published' && row.domain_settings) {
-      await this.domains.clearSeoCache(row.domain_settings.hostname);
+      await this.domains.clearAppSeoCache(
+        storeId,
+        row.domain_settings.hostname,
+        row.config,
+      );
     }
   }
 
@@ -111,32 +128,19 @@ export class BookingAppService {
     if (!row) throw new VendixHttpException(ErrorCodes.STORE_APPS_001);
     const config = parseBookingPageConfig(row.config);
 
-    // Republishing on a different domain first releases the current one.
-    if (row.status === 'published') {
-      await this.domains.releaseDomain(
-        row.domain_settings,
-        config.custom_domain_previous_app_type,
-      );
-      config.custom_domain_previous_app_type = null;
-    }
-
-    let domain: { id: number; hostname: string };
-    if (dto.custom_domain_id) {
-      const taken = await this.domains.takeOverCustomDomain(
-        storeId,
-        dto.custom_domain_id,
-        APP_TYPE,
-      );
-      domain = taken.domain;
-      config.custom_domain_previous_app_type = taken.previousAppType;
-    } else {
-      domain = await this.domains.activateVendixHostname(
-        storeId,
-        APP_TYPE,
-        (storeSlug, baseDomain, isTaken) =>
-          buildAppSuffixHostname(storeSlug, APP_SUFFIX, baseDomain, isTaken),
-      );
-    }
+    // Apps F5: the subdomain is always the primary domain; a custom domain
+    // is added as an alias and the existing aliases stay.
+    const published = await this.domains.publishOnDomains(
+      storeId,
+      APP_TYPE,
+      appDomainState(row, config),
+      dto.custom_domain_id,
+      (storeSlug, baseDomain, isTaken) =>
+        buildAppSuffixHostname(storeSlug, APP_SUFFIX, baseDomain, isTaken),
+    );
+    config.custom_domain_previous_app_type = null;
+    config.custom_domain_aliases = published.aliases;
+    const domain = published.primary;
 
     await this.prisma.store_apps.update({
       where: { id: row.id },
@@ -158,11 +162,13 @@ export class BookingAppService {
     if (!row || row.status !== 'published') return;
 
     const config = parseBookingPageConfig(row.config);
-    await this.domains.releaseDomain(
-      row.domain_settings,
-      config.custom_domain_previous_app_type,
+    await this.domains.releaseAppDomains(
+      storeId,
+      APP_TYPE,
+      appDomainState(row, config),
     );
     config.custom_domain_previous_app_type = null;
+    config.custom_domain_aliases = [];
 
     await this.prisma.store_apps.update({
       where: { id: row.id },

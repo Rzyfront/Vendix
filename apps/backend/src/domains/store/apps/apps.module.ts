@@ -7,18 +7,23 @@ import { AppsService } from './apps.service';
 import { ProductPageAppController } from './product-page/product-page-app.controller';
 import { ProductPageAppService } from './product-page/product-page-app.service';
 import { ProductPagePublicController } from './product-page/product-page-public.controller';
+import { ProductPageViewService } from './product-page/product-page-view.service';
 import { ServicePageAppController } from './service-page/service-page-app.controller';
 import { ServicePageAppService } from './service-page/service-page-app.service';
 import { ServicePagePublicController } from './service-page/service-page-public.controller';
+import { ServicePageViewService } from './service-page/service-page-view.service';
 import { AppDomainService } from './shared/app-domain.service';
+import { AppPageService } from './shared/app-page.service';
 import { LodgingReservationsModule } from '../hospitality/reservations/reservations.module';
 import { BookingAppController } from './booking/booking-app.controller';
 import { BookingAppService } from './booking/booking-app.service';
 import { BookingCheckinService } from './booking/booking-checkin.service';
 import { BookingPublicController } from './booking/booking-public.controller';
+import { BookingViewService } from './booking/booking-view.service';
 import { StoreHomeAppController } from './store-home/store-home-app.controller';
 import { StoreHomeAppService } from './store-home/store-home-app.service';
 import { StoreHomePublicController } from './store-home/store-home-public.controller';
+import { StoreHomeViewService } from './store-home/store-home-view.service';
 import { CrmModule } from '../crm/crm.module';
 import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
 import { LandingPageAppController } from './landing/landing-page-app.controller';
@@ -54,11 +59,16 @@ import { LandingLeadService } from './landing/landing-lead.service';
   providers: [
     AppsService,
     AppDomainService,
+    AppPageService,
     ProductPageAppService,
+    ProductPageViewService,
     ServicePageAppService,
+    ServicePageViewService,
     BookingAppService,
+    BookingViewService,
     BookingCheckinService,
     StoreHomeAppService,
+    StoreHomeViewService,
     LandingPageAppService,
     LandingLeadService,
     // Default CRM pipeline for the landing leads (same helper as the CRM).

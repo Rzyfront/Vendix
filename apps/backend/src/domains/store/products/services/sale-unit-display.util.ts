@@ -14,7 +14,8 @@
  * Este helper traduce la cantidad a la unidad en la que el producto se VENDE.
  * Hay tres maneras de vender y por eso hay tres reglas, evaluadas en orden:
  *
- *   1. Por presentación (`order_items.stock_units_consumed` no nulo). La línea
+ *   1. Por presentación (`order_items.stock_units_consumed` no nulo y la línea
+ *      no es de peso; en una pesada ese número son gramos, no paquetes). La línea
  *      cuenta PAQUETES, no unidades mínimas: `quantity` ya está en la unidad
  *      correcta y lo único que falta es el nombre del paquete ("Caja x 12").
  *      Dividir aquí por la escala de precio contaría dos veces el empaque.
@@ -64,6 +65,11 @@ export interface SaleUnitContext {
   presentationName?: string | null;
   /** `order_items.stock_units_consumed`: presente ⇒ la línea cuenta paquetes. */
   stockUnitsConsumed?: number | null;
+  /**
+   * `order_items.weight`. En una línea de PESO `stock_units_consumed` es la
+   * pesada en unidades de stock (180 g), no paquetes: no aplica la regla 1.
+   */
+  weight?: number | string | null;
 }
 
 export interface SaleUnitQuantity {
@@ -105,8 +111,11 @@ export function formatQuantityInSaleUnit(
   const raw = Number(quantity);
   const qty = Number.isFinite(raw) ? raw : 0;
 
-  // Regla 1 — vendido por presentación: `quantity` ya cuenta paquetes.
-  if (context.stockUnitsConsumed != null) {
+  // Regla 1 — vendido por presentación: `quantity` ya cuenta paquetes. Una
+  // pesada (`weight > 0`) no es presentación aunque traiga el snapshot.
+  const weight = Number(context.weight ?? 0);
+  const isWeightLine = Number.isFinite(weight) && weight > 0;
+  if (context.stockUnitsConsumed != null && !isWeightLine) {
     const suffix = (context.presentationName ?? '').trim();
     const value = roundQuantity(qty);
     return { value, suffix, label: buildLabel(value, suffix) };

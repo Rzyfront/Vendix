@@ -43,7 +43,12 @@ export type StoreDomainType =
 export type StoreDomainAppType =
   | 'STORE_ECOMMERCE'
   | 'STORE_LANDING'
-  | 'STORE_ADMIN';
+  | 'STORE_ADMIN'
+  // Apps F5: only when the store has that app published.
+  | 'STORE_HOME'
+  | 'STORE_PRODUCT_PAGE'
+  | 'STORE_SERVICE_PAGE'
+  | 'STORE_BOOKING';
 
 export type StoreDomainStatus =
   | 'pending_dns'

@@ -12,7 +12,11 @@ import { PaymentMethodsCatalogService } from '../../../../../shared/services/pay
 import { PosCashRegisterService } from './pos-cash-register.service';
 import { CartItem, CartState } from '../models/cart.model';
 import { findUnscheduledStationLine } from './pos-station-booking.service';
-import { resolveLineUnits } from '../utils/line-units.util';
+import {
+  resolveLineUnits,
+  resolveSaleUnitSnapshot,
+  resolveStockUnitsConsumed,
+} from '../utils/line-units.util';
 import {
   PaymentMethod,
   PaymentRequest,
@@ -345,15 +349,13 @@ export class PosPaymentService {
       applied_price_tier_id: isCustomItem
         ? null
         : item.applied_price_tier_id || null,
-      stock_units_consumed: isCustomItem
-        ? null
-        : (item.units_per_package && item.units_per_package > 1
-          ? Number(item.quantity) * Number(item.units_per_package)
-          : item.stock_units_per_sale_unit && item.stock_units_per_sale_unit > 1
-          ? Number(item.quantity) * Number(item.stock_units_per_sale_unit)
-          : null),
+      // Unidades de stock reales de la línea: pesada convertida a la unidad
+      // de stock, o paquetes × empaque. La unidad de venta ya viene en unidad
+      // mínima y NO se vuelve a multiplicar (ver `resolveStockUnitsConsumed`).
+      stock_units_consumed: isCustomItem ? null : resolveStockUnitsConsumed(item),
       weight: item.weight || undefined,
       weight_unit: item.weight_unit || undefined,
+      ...(isCustomItem ? {} : resolveSaleUnitSnapshot(item)),
       price_override_reason: item.isPriceOverridden
         ? item.priceOverrideReason
         : undefined,

@@ -7,6 +7,9 @@
 #   ./apply-spa-rewrite.sh apply      valida la distribución, publica la función y la asocia al comportamiento (*)
 #   ./apply-spa-rewrite.sh verify     compara los códigos HTTP actuales contra la línea base
 #   ./apply-spa-rewrite.sh rollback   quita la asociación (deja la distribución como estaba)
+#     Ojo: si la función ya estaba asociada y solo se publicó código nuevo, 'rollback' quita TODA la
+#     reescritura SPA. Para deshacer solo el código, publica la versión anterior de spa-rewrite.js
+#     (git) con 'test' + 'apply'.
 set -euo pipefail
 
 DIST_ID="${DIST_ID:-E1I27OYFJX7VYJ}"
@@ -36,7 +39,7 @@ create_or_update() {
 # HOSTS: dominios a revisar en baseline/verify (separados por espacio).
 # Por defecto, vendix.online. Para la distribución multi-tenant, pasar los dominios de sus tenants.
 HOSTS="${HOSTS:-vendix.online}"
-PATHS=(/legal/privacidad /legal/terminos / /favicon.ico /no-existe.js /robots.txt /sitemap.xml /manifest.webmanifest /pwa/no-existe)
+PATHS=(/legal/privacidad /legal/terminos / /favicon.ico /no-existe.js /robots.txt /sitemap.xml /manifest.webmanifest /pwa/no-existe /precios)
 URLS=()
 for h in $HOSTS; do for p in "${PATHS[@]}"; do URLS+=("https://$h$p"); done; done
 BASELINE="$WORK/baseline-$DIST_ID.txt"
@@ -49,13 +52,19 @@ snapshot() {
 
 run_tests() {
   local fail=0
-  while read -r uri expected; do
+  # Cada caso: uri, resultado esperado y host opcional (por defecto vendix.online).
+  # Un resultado "301:<url>" espera una redirección; si no, la uri reescrita.
+  while read -r uri expected host; do
     [ -z "$uri" ] && continue
-    printf '{"version":"1.0","context":{"eventType":"viewer-request"},"viewer":{"ip":"1.2.3.4"},"request":{"method":"GET","uri":"%s","querystring":{},"headers":{},"cookies":{}}}' "$uri" > "$WORK/event.json"
+    host="${host:-vendix.online}"
+    printf '{"version":"1.0","context":{"eventType":"viewer-request"},"viewer":{"ip":"1.2.3.4"},"request":{"method":"GET","uri":"%s","querystring":{},"headers":{"host":{"value":"%s"}},"cookies":{}}}' "$uri" "$host" > "$WORK/event.json"
     out=$(aws cloudfront test-function --name "$FN_NAME" --if-match "$(fn_etag)" --stage DEVELOPMENT \
       --event-object "fileb://$WORK/event.json" --query 'TestResult.FunctionOutput' --output text)
-    got=$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["request"]["uri"])')
-    if [ "$got" = "$expected" ]; then echo "  OK   $uri -> $got"; else echo "  FAIL $uri -> $got (esperado $expected)"; fail=1; fi
+    got=$(printf '%s' "$out" | python3 -c 'import json,sys
+o=json.load(sys.stdin)
+r=o.get("response")
+print("%s:%s" % (r["statusCode"], r["headers"]["location"]["value"]) if r else o["request"]["uri"])')
+    if [ "$got" = "$expected" ]; then echo "  OK   $host$uri -> $got"; else echo "  FAIL $host$uri -> $got (esperado $expected)"; fail=1; fi
   done <<'CASES'
 /legal/privacidad /index.html
 /legal/terminos /index.html
@@ -72,6 +81,15 @@ run_tests() {
 /favicon.ico /favicon.ico
 /google002d194fa98388f5.html /google002d194fa98388f5.html
 /.well-known/apple-app-site-association /.well-known/apple-app-site-association
+/precios 301:https://vendix.online/pricing
+/pricing 301:https://vendix.online/pricing www.vendix.online
+/precios /index.html tienda-demo.vendix.online
+/precios /index.html midominio.com
+/ 301:https://mesura.beauty/ www.mesura.beauty
+/productos/labial-rojo 301:https://mesura.beauty/productos/labial-rojo www.mesura.beauty
+/ /index.html mesura.beauty
+/ /index.html www.tienda.vendix.online
+/.well-known/acme-challenge/x /.well-known/acme-challenge/x www.mesura.beauty
 CASES
   return $fail
 }

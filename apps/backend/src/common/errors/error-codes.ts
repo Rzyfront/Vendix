@@ -947,6 +947,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'El código de barras ya está en uso en esta tienda',
   },
+  PROD_SCALE_CODE_DUP_001: {
+    code: 'PROD_SCALE_CODE_DUP_001',
+    httpStatus: 409,
+    devMessage: 'El código de balanza ya está en uso en esta tienda',
+  },
   PROD_IMAGE_001: {
     code: 'PROD_IMAGE_001',
     httpStatus: 404,
@@ -5911,6 +5916,13 @@ export const ErrorCodes = {
     devMessage:
       'Este servicio pertenece a un tipo de habitación; edítalo desde Hotelería',
   },
+  // apps-f4: IndustryModuleGuard. Only thrown in `enforce` mode (Redis flag
+  // `access_gate:enforce:*`); in `audit` mode the request passes and is logged.
+  MODULE_INDUSTRY_001: {
+    code: 'MODULE_INDUSTRY_001',
+    httpStatus: 403,
+    devMessage: 'Este módulo no está disponible para la industria de tu tienda.',
+  },
   // A store without the `hospitality` industry gets 403 even through curl:
   // the menu is UX only, LodgingIndustryGuard is the real boundary.
   LODGING_INDUSTRY_001: {
@@ -7681,6 +7693,51 @@ export const ErrorCodes = {
     code: 'STORE_APPS_012',
     httpStatus: 400,
     devMessage: 'Elige el producto de la oferta.',
+  },
+
+  // Apps F1 (apps-vistas-f1): encender y apagar desde el catálogo.
+  STORE_APPS_013: {
+    code: 'STORE_APPS_013',
+    httpStatus: 400,
+    devMessage:
+      'La tienda en línea se enciende y se apaga en su propia vista, Tienda en línea.',
+  },
+  STORE_APPS_014: {
+    code: 'STORE_APPS_014',
+    httpStatus: 409,
+    devMessage: 'Despublica la app antes de apagarla.',
+  },
+  STORE_APPS_015: {
+    code: 'STORE_APPS_015',
+    httpStatus: 400,
+    devMessage: 'Esta app no aplica a la industria de tu tienda.',
+  },
+
+  // Apps F5: a domain modal points a domain to an app the store has not
+  // published (STORE_HOME, STORE_PRODUCT_PAGE, STORE_SERVICE_PAGE,
+  // STORE_BOOKING).
+  STORE_APPS_016: {
+    code: 'STORE_APPS_016',
+    httpStatus: 409,
+    devMessage: 'Publica primero esa app para usar este dominio con ella.',
+  },
+  // Apps F5: the domain serves the online store or the admin panel, which
+  // never move to an app.
+  STORE_APPS_017: {
+    code: 'STORE_APPS_017',
+    httpStatus: 400,
+    devMessage:
+      'Este dominio sirve la tienda en línea o el panel de administración; no se puede asignar a una app.',
+  },
+
+  // Apps F5: no free Vendix subdomain for the app (every numeric and random
+  // candidate was taken by another store). Not a custom-domain problem, which
+  // is STORE_APPS_005.
+  STORE_APPS_018: {
+    code: 'STORE_APPS_018',
+    httpStatus: 409,
+    devMessage:
+      'No se pudo generar un subdominio libre para esta app; intenta publicarla de nuevo.',
   },
 
   // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra

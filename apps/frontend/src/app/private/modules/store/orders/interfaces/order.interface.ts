@@ -424,6 +424,13 @@ export interface OrderItem {
   is_price_overridden?: boolean | null;
   /** Producto por peso (Decimal llega como string). */
   weight?: number | string | null;
+  weight_unit?: string | null;
+  /**
+   * QUI-978 — unidad de venta elegida al cobrar ("g", "lb") y la cantidad en
+   * ella (Decimal llega como string). Ver `formatOrderLineQuantity`.
+   */
+  sale_unit_code_snapshot?: string | null;
+  sale_quantity_snapshot?: number | string | null;
   item_type?: string;
   created_at: string;
   updated_at: string;
@@ -546,6 +553,13 @@ export interface Product {
   has_multiple_price_tiers?: boolean;
   /** Tarifas habilitadas en el producto (`GET /store/orders/:id`). */
   product_price_tier_assignments?: Array<{ price_tier_id: number }>;
+  /**
+   * QUI-978 — UoM de stock (`GET /store/orders/:id` la incluye). El detalle la
+   * usa de fallback para líneas sin snapshot (`formatOrderLineQuantity`). Sin
+   * declararla, `Product` no comparte props con la fuente del util y tsc
+   * rechaza la llamada (TS2345, weak type).
+   */
+  stock_uom?: { code?: string | null } | null;
 }
 
 export interface ProductVariant {

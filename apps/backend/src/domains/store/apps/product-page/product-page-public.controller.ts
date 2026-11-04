@@ -38,6 +38,9 @@ export class ProductPagePublicController {
         name: page.product.name,
       },
       complement_product_ids: page.complements.map((c) => c.id),
+      // Apps F2: only when the owner saved a page, so pre-F2 pages get the
+      // exact same response.
+      ...(page.page ? { page: page.page } : {}),
     });
   }
 }

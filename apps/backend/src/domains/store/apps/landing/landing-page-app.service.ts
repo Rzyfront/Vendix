@@ -7,6 +7,7 @@ import { ErrorCodes } from '@common/errors/error-codes';
 import {
   AppCustomDomainView,
   AppDomainService,
+  appDomainState,
 } from '../shared/app-domain.service';
 import { buildAppSuffixHostname } from '../product-page/product-page-hostname';
 import { sellableProductsWhere } from '../product-page/product-page.reader';
@@ -80,7 +81,11 @@ export class LandingPageAppService {
     }
 
     if (row?.status === 'published' && row.domain_settings) {
-      await this.domains.clearSeoCache(row.domain_settings.hostname);
+      await this.domains.clearAppSeoCache(
+        storeId,
+        row.domain_settings.hostname,
+        row.config,
+      );
     }
   }
 
@@ -115,34 +120,19 @@ export class LandingPageAppService {
     if (!row) throw new VendixHttpException(ErrorCodes.STORE_APPS_001);
     const config = parseLandingPageConfig(row.config);
 
-    // Republishing on a different domain first releases the current one. A
-    // row the Fase 0 backfill marked published has no domain: nothing to
-    // release, the landing on `{tienda}-store` is not this app's domain.
-    if (row.status === 'published') {
-      await this.domains.releaseDomain(
-        row.domain_settings,
-        config.custom_domain_previous_app_type,
-      );
-      config.custom_domain_previous_app_type = null;
-    }
-
-    let domain: { id: number; hostname: string };
-    if (dto.custom_domain_id) {
-      const taken = await this.domains.takeOverCustomDomain(
-        storeId,
-        dto.custom_domain_id,
-        APP_TYPE,
-      );
-      domain = taken.domain;
-      config.custom_domain_previous_app_type = taken.previousAppType;
-    } else {
-      domain = await this.domains.activateVendixHostname(
-        storeId,
-        APP_TYPE,
-        (storeSlug, baseDomain, isTaken) =>
-          buildAppSuffixHostname(storeSlug, APP_SUFFIX, baseDomain, isTaken),
-      );
-    }
+    // Apps F5: the subdomain is always the primary domain; a custom domain
+    // is added as an alias and the existing aliases stay.
+    const published = await this.domains.publishOnDomains(
+      storeId,
+      APP_TYPE,
+      appDomainState(row, config),
+      dto.custom_domain_id,
+      (storeSlug, baseDomain, isTaken) =>
+        buildAppSuffixHostname(storeSlug, APP_SUFFIX, baseDomain, isTaken),
+    );
+    config.custom_domain_previous_app_type = null;
+    config.custom_domain_aliases = published.aliases;
+    const domain = published.primary;
 
     await this.prisma.store_apps.update({
       where: { id: row.id },
@@ -168,11 +158,13 @@ export class LandingPageAppService {
     if (!row || row.status !== 'published' || !row.domain_settings) return;
 
     const config = parseLandingPageConfig(row.config);
-    await this.domains.releaseDomain(
-      row.domain_settings,
-      config.custom_domain_previous_app_type,
+    await this.domains.releaseAppDomains(
+      storeId,
+      APP_TYPE,
+      appDomainState(row, config),
     );
     config.custom_domain_previous_app_type = null;
+    config.custom_domain_aliases = [];
 
     await this.prisma.store_apps.update({
       where: { id: row.id },

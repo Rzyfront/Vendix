@@ -144,7 +144,7 @@ import { ShippingAddressModalComponent } from '../../orders/components/shipping-
 	                        {{ item.weight }} {{ item.weight_unit }} x {{ formatCurrency(item.unitPrice) }}/{{ item.weight_unit }}
 	                      } @else if (item.saleUnitCode && item.saleQuantity != null) {
 	                        <!-- QUI-648: la misma escala que capturó el cajero. -->
-	                        {{ item.saleQuantity }} {{ item.saleUnitCode }} x {{ formatCurrency(item.unitPrice) }}/{{ item.saleUnitCode }}
+	                        {{ item.saleQuantity }} {{ item.saleUnitCode }} x {{ formatCurrency(item.unitPrice) }}@if (item.priceUnitCode) {/{{ item.priceUnitCode }}}
 	                      } @else {
 	                        {{ item.quantity }}x {{ formatCurrency(item.unitPrice) }}
 	                      }
@@ -939,14 +939,34 @@ export class PosOrderConfirmationComponent {
       const weight_unit = item.weight_unit || 'kg';
       const is_weight_product = weight > 0;
       const stockUnitsConsumed = Number(item.stock_units_consumed || 0);
+      // En una línea de peso `stock_units_consumed` es la pesada en unidades
+      // de stock (180 g), no un empaque: derivarlo mostraría "×180".
       const unitsPerPackage =
         item.units_per_package != null
           ? Number(item.units_per_package)
-          : stockUnitsConsumed > 0 && quantity > 0 && stockUnitsConsumed !== quantity
+          : !is_weight_product &&
+              stockUnitsConsumed > 0 &&
+              quantity > 0 &&
+              stockUnitsConsumed !== quantity
             ? stockUnitsConsumed / quantity
             : null;
-      const saleUnitCode = item.sale_unit_code || item.saleUnitCode || null;
-      const rawSaleQuantity = item.sale_quantity ?? item.saleQuantity ?? null;
+      // QUI-978 — la orden persistida trae la unidad elegida como snapshot.
+      const saleUnitCode =
+        item.sale_unit_code ||
+        item.saleUnitCode ||
+        item.sale_unit_code_snapshot ||
+        null;
+      const rawSaleQuantity =
+        item.sale_quantity ??
+        item.saleQuantity ??
+        item.sale_quantity_snapshot ??
+        null;
+      // Unidad del PRECIO ("/kg"). Con 1 lb de algo que vale $24.000 el kg,
+      // poner "/lb" mentiría. Solo la línea del carrito (QUI-648) la conoce;
+      // desde el snapshot no se sabe y el sufijo se omite.
+      const priceUnitCode: string | null =
+        item.price_unit_code ||
+        (item.sale_unit_code || item.saleUnitCode ? saleUnitCode : null);
       const saleQuantity =
         rawSaleQuantity != null && Number.isFinite(Number(rawSaleQuantity))
           ? Number(rawSaleQuantity)
@@ -966,6 +986,7 @@ export class PosOrderConfirmationComponent {
         appliedPriceTierName: item.applied_price_tier_name || item.appliedPriceTierName,
         isPackageUnit: !!item.is_package_unit || !!unitsPerPackage,
         unitsPerPackage,
+        priceUnitCode,
         isTakeaway: !!item.is_takeaway,
         serials: (() => {
           const raw = item.serial_numbers_snapshot ?? item.serials ?? item.serial_numbers ?? null;

@@ -55,6 +55,12 @@ import {
   PosSaleUnitService,
   PosSaleUnitConfig,
 } from '../services/pos-sale-unit.service';
+import { ManualWeighResult } from './pos-manual-weight-modal.component';
+import {
+  capturesInSaleUnit,
+  MAX_WEIGH_AMOUNT,
+  weighMaxFor,
+} from '../utils/manual-weigh.util';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
 import { PosOptionSelectorComponent } from './pos-option-selector/pos-option-selector.component';
@@ -1916,6 +1922,19 @@ export class PosProductSelectionComponent {
     }
   }
 
+  /**
+   * Tras un escaneo resuelto, el buscador muestra el producto que entró al
+   * carrito en lugar de los dígitos que tecleó el lector (que no encuentran
+   * nada). El texto queda seleccionado: el siguiente escaneo lo reemplaza.
+   */
+  showScannedProduct(name: string): void {
+    const query = name?.trim();
+    if (!query) return;
+    this.searchInput()?.setValue(query, { select: true });
+    this.searchQuery.set(query);
+    this.searchSubject$.next(query);
+  }
+
   isVisible(): boolean {
     const el = this.hostRef.nativeElement as HTMLElement;
     return !!(
@@ -2263,28 +2282,49 @@ export class PosProductSelectionComponent {
     const isWeightProduct =
       product.pricing_type === 'weight' && this.scaleEnabled();
     if (isWeightProduct) {
-      const unit = this.defaultWeightUnit();
       const variantPrice =
         variant.final_price ?? variant.price_override ?? product.final_price;
-      const weight = await this.getWeightFromScaleOrManual(
-        product.name,
-        variantPrice,
-        unit,
-      );
-      if (weight === undefined) return;
+      const captured = await this.captureWeighAmount({
+        product,
+        saleUnit: this.saleUnitService.configFor(product),
+        price: variantPrice,
+        priceUnitQuantity: Number(product.price_unit_quantity ?? 1) || 1,
+        fallbackUnitCode: this.defaultWeightUnit(),
+        title: 'Ingresar peso',
+        confirmText: 'Agregar',
+        weighOnly: true,
+      });
+      if (!captured) return;
 
-      if (weight <= 0) {
-        this.toastService.warning('El peso debe ser mayor a 0');
-        return;
-      }
+      // El peso viaja en la unidad del precio (la principal): lo digitado
+      // en otra unidad ya viene convertido (QUI-978).
+      const weight = captured.principalAmount;
+      const unit = captured.principalCode;
       if (weight > 999) {
         this.toastService.warning('El peso máximo permitido es 999 ' + unit);
         return;
       }
 
+      // Unidades de stock por unidad pesada, igual que el alta sin variante
+      // (`addWeightProductToCart`): sin esto la pesada con variante seguía
+      // contando 1. El servidor recalcula el número al cobrar.
+      const stockUnitsPerWeightUnit = await this.saleUnitService.stockUnitsPerUnit(
+        product,
+        unit,
+      );
+
       this.addingToCart.add(product.id);
       this.cartService
-        .addToCart({ product, quantity: 1, variant, weight, weight_unit: unit })
+        .addToCart({
+          product,
+          quantity: 1,
+          variant,
+          weight,
+          weight_unit: unit,
+          stock_units_per_weight_unit: stockUnitsPerWeightUnit,
+          // PR #1062 ronda 4 — el tiquete dice lo pesado ("300 g").
+          weighed_as: { code: captured.unitCode, amount: captured.amount },
+        })
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
@@ -2654,11 +2694,14 @@ export class PosProductSelectionComponent {
     // declara presentaciones (que es donde vive el catálogo medido). El resto
     // —la inmensa mayoría, vendida por pieza— resuelve en memoria y no dispara
     // una sola petición extra, que es lo que un POS de escaneo necesita.
+    // QUI-978 — el que declara unidad de stock también resuelve async: con el
+    // catálogo aún sin cargar, `configFor` devolvía PIEZA y el primer toque de
+    // un medido entraba como 1 unidad mínima ($25 por 1 g) sin abrir el pesado.
     const declaresPresentations =
       product.has_multiple_price_tiers === true ||
       (product.enabled_price_tier_ids?.length ?? 0) > 0;
     const saleUnit =
-      isWeightProduct || declaresPresentations
+      isWeightProduct || declaresPresentations || product.stock_uom_id != null
         ? await this.saleUnitService.resolveFor(product)
         : this.saleUnitService.configFor(product);
 
@@ -2667,7 +2710,16 @@ export class PosProductSelectionComponent {
     // cuya unidad de stock ya es la de venta —"unidad", precio por unidad— se
     // agrega de un toque como siempre: preguntarle la cantidad al cajero ahí
     // sería una regresión, no una mejora.
-    if (saleUnit.stockUnit && saleUnit.unitsPerCapture > 1) {
+    // PR #1062 ronda 5 (H3): también con varias UoMs de venta declaradas,
+    // aunque la principal sea la de stock (escala 1): sin el modal nunca se
+    // ofrecían lb/kg y el toque agregaba 1 g.
+    if (
+      capturesInSaleUnit(
+        saleUnit.stockUnit != null,
+        saleUnit.unitsPerCapture,
+        this.saleUnitService.saleUnitsFor(product).length,
+      )
+    ) {
       const captured = await this.captureSaleQuantity(
         product,
         saleUnit,
@@ -2680,24 +2732,26 @@ export class PosProductSelectionComponent {
 
     // For weight products, require weight input
     if (isWeightProduct) {
-      const unit = this.defaultWeightUnit();
-      const weight = await this.getWeightFromScaleOrManual(
-        product.name,
-        product.final_price,
-        unit,
-      );
-      if (weight === undefined) return;
+      const captured = await this.captureWeighAmount({
+        product,
+        saleUnit: this.saleUnitService.configFor(product),
+        price: product.final_price,
+        priceUnitQuantity: Number(product.price_unit_quantity ?? 1) || 1,
+        fallbackUnitCode: this.defaultWeightUnit(),
+        title: 'Ingresar peso',
+        confirmText: 'Agregar',
+        weighOnly: true,
+      });
+      if (!captured) return;
 
-      if (weight <= 0) {
-        this.toastService.warning('El peso debe ser mayor a 0');
+      if (captured.principalAmount > 999) {
+        this.toastService.warning(
+          'El peso máximo permitido es 999 ' + captured.principalCode,
+        );
         return;
       }
-      if (weight > 999) {
-        this.toastService.warning('El peso máximo permitido es 999 ' + unit);
-        return;
-      }
 
-      this.addWeightProductToCart(product, weight);
+      await this.addWeightProductToCart(product, captured);
       return;
     }
 
@@ -2756,10 +2810,13 @@ export class PosProductSelectionComponent {
     product: any,
     saleUnit: PosSaleUnitConfig,
     preferScale: boolean,
+    knownWeightKg?: number,
   ): Promise<{
     quantity: number;
     amount: number;
     unitCode: string;
+    stockUnitsPerSaleUnit: number;
+    priceUnitCode: string;
     byScale: boolean;
   } | null> {
     const unitCode = saleUnit.captureUnit?.code ?? saleUnit.stockUnit!.code;
@@ -2767,59 +2824,56 @@ export class PosProductSelectionComponent {
       saleUnit.stockUnit?.dimension === 'mass' && this.scaleEnabled();
     const useScale = preferScale || weighable;
 
-    let amount: number | undefined;
-    if (useScale) {
-      amount = await this.getWeightFromScaleOrManual(
-        product.name,
-        product.final_price,
-        unitCode,
-      );
-      if (amount !== undefined && amount > 999) {
-        this.toastService.warning(
-          `El peso máximo permitido es 999 ${unitCode}`,
-        );
-        return null;
-      }
-    } else {
-      const raw = await this.dialogService.prompt(
-        {
-          title: `Cantidad en ${unitCode}`,
-          message: `${product.name}\nPrecio: ${this.formatPrice(product.final_price)}/${unitCode}`,
-          placeholder: `Cantidad en ${unitCode}`,
-          defaultValue: '1',
-          confirmText: 'Agregar',
-          cancelText: 'Cancelar',
-          inputType: 'number',
-        },
-        { size: 'sm' },
-      );
-      if (!raw) return null;
-      const parsed = parseFloat(String(raw).replace(',', '.'));
-      amount = Number.isNaN(parsed) ? undefined : parsed;
-    }
+    // QUI-978 — la captura (báscula o el nuevo modal manual) ya resuelve la
+    // unidad ELEGIDA y trae la cantidad convertida a stock: acá solo se
+    // valida el mínimo y se anota la unidad para el ticket.
+    const captured = await this.captureWeighAmount({
+      product,
+      saleUnit,
+      price: product.final_price ?? 0,
+      priceUnitQuantity: Number(product.price_unit_quantity ?? 1) || 1,
+      fallbackUnitCode: unitCode,
+      title: `Cantidad en ${unitCode}`,
+      confirmText: 'Agregar',
+      allowScale: useScale,
+      knownWeightKg,
+    });
+    if (!captured) return null;
 
-    if (amount === undefined) return null;
-    if (!(amount > 0)) {
-      this.toastService.warning('La cantidad debe ser mayor a 0');
+    // PR #1062 ronda 5 (H1) — el tope se mide en la principal, igual que el
+    // pesado legado y el modal (`exceedsWeighMax`): 1.500 g con principal kg
+    // son 1,5 kg y pasan. Este chequeo solo cubre la lectura de báscula, que
+    // no pasa por el modal. Solo en masa (ronda 6, R1): 1.200 m de cable pasan.
+    const maxAmount = weighMaxFor(saleUnit.stockUnit?.dimension);
+    if (maxAmount != null && captured.principalAmount > maxAmount) {
+      this.toastService.warning(
+        `La cantidad máxima permitida es ${maxAmount} ${captured.principalCode}`,
+      );
       return null;
     }
 
-    const quantity = Math.round(amount * saleUnit.unitsPerCapture);
+    const quantity = captured.stockQuantity;
     if (quantity <= 0) {
       // Redondear a cero sería vender aire: se le dice al cajero cuál es el
       // mínimo real en vez de aceptar una línea sin mercancía detrás.
-      const minimum = 1 / saleUnit.unitsPerCapture;
       this.toastService.warning(
-        `La cantidad mínima es ${minimum} ${unitCode} (${saleUnit.stockUnit!.code}).`,
+        `La cantidad mínima es 1 ${saleUnit.stockUnit!.code} (${captured.unitCode}).`,
       );
       return null;
     }
 
     return {
       quantity,
-      amount,
-      unitCode,
-      byScale: useScale && this.scaleService.isConnected(),
+      amount: captured.amount,
+      unitCode: captured.unitCode,
+      stockUnitsPerSaleUnit:
+        captured.unitFactor && captured.unitFactor > 0
+          ? captured.unitFactor
+          : Math.max(1, Math.round(quantity / captured.amount)),
+      // La automática (la del precio), no la elegida: para "Base: $X/…".
+      priceUnitCode: unitCode,
+      byScale:
+        knownWeightKg == null && useScale && this.scaleService.isConnected(),
     };
   }
 
@@ -2830,6 +2884,8 @@ export class PosProductSelectionComponent {
       quantity: number;
       amount: number;
       unitCode: string;
+      stockUnitsPerSaleUnit: number;
+      priceUnitCode: string;
       byScale: boolean;
     },
   ): void {
@@ -2840,6 +2896,12 @@ export class PosProductSelectionComponent {
         product,
         quantity: captured.quantity,
         capturedByScale: captured.byScale,
+        // QUI-978 — la unidad ELEGIDA (no la automática) para el ticket.
+        sale_unit_override: {
+          code: captured.unitCode,
+          stock_units_per_sale_unit: captured.stockUnitsPerSaleUnit,
+          price_unit_code: captured.priceUnitCode,
+        },
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -2866,11 +2928,92 @@ export class PosProductSelectionComponent {
       });
   }
 
-  private addWeightProductToCart(product: any, weight: number): void {
+  /**
+   * Etiqueta de balanza etiquetadora: agrega un producto de peso con el peso
+   * (kg) leído del código de barras, sin abrir modal ni leer la báscula.
+   * Mismas ramas, validaciones de stock y toasts que `onAddToCart`.
+   */
+  async addWeightProductWithKnownWeight(
+    product: any,
+    weightKg: number,
+  ): Promise<void> {
+    if (
+      !(weightKg > 0) ||
+      product?.pricing_type !== 'weight' ||
+      !this.scaleEnabled()
+    ) {
+      this.toastService.warning('No se pudo agregar el producto por peso');
+      return;
+    }
+    if (product.price <= 0) {
+      this.toastService.warning(
+        `${product.name} no tiene un precio de venta válido`,
+      );
+      return;
+    }
+
+    const saleUnit = await this.saleUnitService.resolveFor(product);
+
+    if (
+      capturesInSaleUnit(
+        saleUnit.stockUnit != null,
+        saleUnit.unitsPerCapture,
+        this.saleUnitService.saleUnitsFor(product).length,
+      )
+    ) {
+      const measured = await this.captureSaleQuantity(
+        product,
+        saleUnit,
+        true,
+        weightKg,
+      );
+      if (!measured) return;
+      this.addMeasuredProductToCart(product, measured);
+      return;
+    }
+
+    const captured = await this.captureWeighAmount({
+      product,
+      saleUnit: this.saleUnitService.configFor(product),
+      price: product.final_price,
+      priceUnitQuantity: Number(product.price_unit_quantity ?? 1) || 1,
+      fallbackUnitCode: this.defaultWeightUnit(),
+      title: 'Ingresar peso',
+      confirmText: 'Agregar',
+      weighOnly: true,
+      knownWeightKg: weightKg,
+    });
+    if (!captured) return;
+
+    if (captured.principalAmount > 999) {
+      this.toastService.warning(
+        'El peso máximo permitido es 999 ' + captured.principalCode,
+      );
+      return;
+    }
+
+    await this.addWeightProductToCart(product, captured);
+  }
+
+  private async addWeightProductToCart(
+    product: any,
+    captured: ManualWeighResult,
+  ): Promise<void> {
     this.addingToCart.add(product.id);
 
-    const unit = this.defaultWeightUnit();
+    // QUI-978 — el peso viaja en la unidad del precio (la principal):
+    // `resolveLineUnits` multiplica `finalPrice × weight` en frontend y
+    // backend, así que mandar gramos con precio por kilo cobraría de más.
+    const weight = captured.principalAmount;
+    const unit = captured.principalCode;
     const totalPrice = product.final_price * weight;
+    // Unidades de stock por unidad pesada, para que el cobro descuente la
+    // pesada real (0,180 kg ⇒ 180 g) y no 1. Solo con unidad de stock
+    // declarada; sin ella queda null y el descuento sigue como siempre.
+    const stockUnitsPerWeightUnit = await this.saleUnitService.stockUnitsPerUnit(
+      product,
+      unit,
+    );
 
     this.cartService
       .addToCart({
@@ -2878,6 +3021,9 @@ export class PosProductSelectionComponent {
         quantity: 1,
         weight: weight,
         weight_unit: unit,
+        // PR #1062 ronda 4 — el tiquete dice lo pesado ("300 g").
+        weighed_as: { code: captured.unitCode, amount: captured.amount },
+        stock_units_per_weight_unit: stockUnitsPerWeightUnit,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -2896,37 +3042,123 @@ export class PosProductSelectionComponent {
       });
   }
 
-  private async getWeightFromScaleOrManual(
-    productName: string,
-    price: number,
-    unit: string,
-  ): Promise<number | undefined> {
-    if (this.scaleService.isConnected()) {
-      return this.scaleService.showWeightModal({
-        title: 'Lectura de Báscula',
-        message: `${productName}\nPrecio: ${this.formatPrice(price)}/${unit}`,
-        weightUnit: unit,
-        allowManualFallback: this.allowManualWeightEntry(),
-      });
+  /**
+   * QUI-978 — captura de peso/cantidad multi-UoM (báscula o manual).
+   *
+   * Reemplaza al `dialogService.prompt` con `defaultValue: '1.0'` que abría
+   * siempre en "1" y no dejaba borrarlo. El cajero pesa en cualquiera de las
+   * UoMs de venta del producto (la principal por defecto); sin declaradas,
+   * una sola unidad con el comportamiento histórico. Los factores viajan
+   * POR UNIDAD DE STOCK para que el redondeo a stock sea directo.
+   */
+  private async captureWeighAmount(opts: {
+    product: any;
+    saleUnit: PosSaleUnitConfig | null;
+    price: number;
+    priceUnitQuantity: number;
+    fallbackUnitCode: string;
+    title: string;
+    confirmText: string;
+    /** Peso legado: sin conversión a stock ni exigencia de stock. */
+    weighOnly?: boolean;
+    /**
+     * Intentar la báscula cuando está conectada. El flujo medido lo apaga
+     * para no-masa (la báscula pesa, no mide metros).
+     */
+    allowScale?: boolean;
+    /**
+     * Peso ya conocido (etiqueta de balanza etiquetadora), en kg: se salta
+     * báscula y modal y devuelve la captura equivalente.
+     */
+    knownWeightKg?: number;
+  }): Promise<ManualWeighResult | undefined> {
+    const perCapture =
+      opts.saleUnit && opts.saleUnit.unitsPerCapture > 1
+        ? opts.saleUnit.unitsPerCapture
+        : 1;
+    const units = await this.saleUnitService.weighModalUnits(
+      opts.product,
+      opts.fallbackUnitCode,
+      perCapture,
+    );
+    const principal = units.find((u) => u.isPrincipal) ?? units[0];
+    const pricePerStockUnit =
+      opts.price / (opts.priceUnitQuantity > 0 ? opts.priceUnitQuantity : 1);
+    const priceMessage = `${opts.product.name}\nPrecio: ${this.formatPrice(pricePerStockUnit * principal.factorToBase)}/${principal.code}`;
+
+    if (opts.knownWeightKg != null) {
+      // Misma conversión (y redondeo a 3 decimales) que la lectura de báscula.
+      const amount = await this.saleUnitService.convertScaleReading(
+        opts.knownWeightKg,
+        'kg',
+        principal.code,
+      );
+      return {
+        amount,
+        unitCode: principal.code,
+        principalAmount: amount,
+        principalCode: principal.code,
+        stockQuantity: Math.max(0, Math.round(amount * principal.factorToBase)),
+        unitFactor: principal.factorToBase,
+      };
     }
 
-    if (this.allowManualWeightEntry()) {
-      const weightStr = await this.dialogService.prompt(
-        {
-          title: 'Ingresar Peso',
-          message: `${productName}\nPrecio: ${this.formatPrice(price)}/${unit}`,
-          placeholder: `Peso en ${unit}`,
-          defaultValue: '1.0',
-          confirmText: 'Agregar',
-          cancelText: 'Cancelar',
-          inputType: 'number',
-        },
-        { size: 'sm' },
+    if (opts.allowScale !== false && this.scaleService.isConnected()) {
+      // La báscula emite en SU unidad configurada (PR #1062, error 2): la
+      // lectura se convierte a la principal antes de cobrar y descontar.
+      const scaleUnit = this.scaleService.readingUnit();
+      const reading = await this.scaleService.showWeightModal({
+        title: 'Lectura de Báscula',
+        message: priceMessage,
+        weightUnit: scaleUnit,
+        allowManualFallback: this.allowManualWeightEntry(),
+      });
+      if (reading === undefined) return undefined;
+      const amount = await this.saleUnitService.convertScaleReading(
+        reading,
+        scaleUnit,
+        principal.code,
       );
+      return {
+        amount,
+        unitCode: principal.code,
+        principalAmount: amount,
+        principalCode: principal.code,
+        stockQuantity: Math.max(0, Math.round(amount * principal.factorToBase)),
+        unitFactor: principal.factorToBase,
+      };
+    }
 
-      if (!weightStr) return undefined;
-      const weight = parseFloat(weightStr.replace(',', '.'));
-      return isNaN(weight) ? undefined : weight;
+    // `allow_manual_weight_entry` gobierna el PESADO (masa sin báscula). Una
+    // medida que no es masa (metros, litros; `allowScale === false`) siempre
+    // se digita: en develop abría el prompt sin este gate (QUI-648).
+    if (opts.allowScale === false || this.allowManualWeightEntry()) {
+      const result = await this.scaleService.showManualWeightModal({
+        title: opts.title,
+        message: priceMessage,
+        units,
+        // Peso legado: el precio va por la principal y no hay unidad de stock
+        // con la que multiplicar (factor 1): el total vivo sale de la
+        // principal. Con stock por unidad mínima, de las unidades de stock.
+        pricePerStockUnit: opts.weighOnly ? null : pricePerStockUnit,
+        pricePerPrincipal: opts.weighOnly
+          ? pricePerStockUnit * principal.factorToBase
+          : undefined,
+        stockUnitCode: opts.weighOnly
+          ? ''
+          : (opts.saleUnit?.stockUnit?.code ?? ''),
+        confirmText: opts.confirmText,
+        enforceStockQuantity: !opts.weighOnly,
+        // El peso legado siempre es masa; el resto, según su unidad de stock.
+        maxAmount: opts.weighOnly
+          ? MAX_WEIGH_AMOUNT
+          : weighMaxFor(opts.saleUnit?.stockUnit?.dimension),
+      });
+      if (!result) return undefined;
+      // Factor exacto de la unidad elegida (unidades de stock por unidad),
+      // para no deducirlo de una cantidad ya redondeada.
+      const chosen = units.find((u) => u.code === result.unitCode);
+      return { ...result, unitFactor: chosen?.factorToBase };
     }
 
     this.toastService.warning(
@@ -3104,6 +3336,9 @@ export class PosProductSelectionComponent {
           this.scaleEnabled.set(storeSettings.pos.scale.enabled ?? false);
           this.defaultWeightUnit.set(
             storeSettings.pos.scale.default_weight_unit || 'kg',
+          );
+          this.scaleService.setReadingUnit(
+            storeSettings.pos.scale.default_weight_unit,
           );
           this.allowManualWeightEntry.set(
             storeSettings.pos.scale.allow_manual_weight_entry ?? true,

@@ -19,6 +19,8 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * TablesController (Restaurant Suite — Fase E)
@@ -54,7 +56,8 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  * `table-sessions.controller.ts` siempre siguió este patrón.
  */
 @Controller('store/tables')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('restaurant_ops_tables')
 export class TablesController {
   constructor(
     private readonly tablesService: TablesService,

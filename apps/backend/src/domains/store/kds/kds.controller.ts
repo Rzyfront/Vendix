@@ -17,6 +17,8 @@ import { ResponseService } from '../../../common/responses/response.service';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { CreateKdsDto, DeleteKdsQueryDto, UpdateKdsDto } from './dto';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Estaciones de preparación (QUI-651). Rutas planas namespaced, igual que
@@ -27,7 +29,8 @@ import { CreateKdsDto, DeleteKdsQueryDto, UpdateKdsDto } from './dto';
  * status real + `error_code`.
  */
 @Controller('store/kds')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('restaurant_ops_kds')
 export class KdsController {
   constructor(
     private readonly kdsService: KdsService,

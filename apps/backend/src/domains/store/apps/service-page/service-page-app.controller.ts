@@ -2,10 +2,12 @@ import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { AppPageService } from '../shared/app-page.service';
 import { ServicePageAppService } from './service-page-app.service';
 import {
   PublishServicePageDto,
   UpdateServicePageConfigDto,
+  UpdateServicePagePageDto,
 } from './service-page.dto';
 
 /**
@@ -19,7 +21,15 @@ export class ServicePageAppController {
   constructor(
     private readonly servicePage: ServicePageAppService,
     private readonly responseService: ResponseService,
+    private readonly appPage: AppPageService,
   ) {}
+
+  /** F6-B: services and secondary products for the editor preview. */
+  @Permissions('store:apps:read')
+  @Get('preview-context')
+  async previewContext() {
+    return this.responseService.success(await this.servicePage.previewContext());
+  }
 
   @Permissions('store:apps:read')
   @Get('custom-domains')
@@ -47,5 +57,13 @@ export class ServicePageAppController {
   async unpublish() {
     await this.servicePage.unpublish();
     return this.responseService.success(null, 'Página de servicios despublicada');
+  }
+
+  /** Apps F2: the app's own page (hero, its own sections, brand and SEO). */
+  @Permissions('store:apps:manage')
+  @Patch('page')
+  async updatePage(@Body() dto: UpdateServicePagePageDto) {
+    const page = await this.appPage.save('service_page', dto.page);
+    return this.responseService.success({ page }, 'Página de servicios: contenido guardado');
   }
 }

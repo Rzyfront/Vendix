@@ -22,6 +22,9 @@ describe('BookingAppService', () => {
     activateVendixHostname: jest.Mock;
     releaseDomain: jest.Mock;
     clearSeoCache: jest.Mock;
+    clearAppSeoCache: jest.Mock;
+    publishOnDomains: jest.Mock;
+    releaseAppDomains: jest.Mock;
     listCustomDomains: jest.Mock;
   };
   let service: BookingAppService;
@@ -53,9 +56,20 @@ describe('BookingAppService', () => {
         .mockResolvedValue({ id: 40, hostname: 'roku-booking.vendix.online' }),
       releaseDomain: jest.fn().mockResolvedValue(undefined),
       clearSeoCache: jest.fn().mockResolvedValue(undefined),
+      clearAppSeoCache: jest.fn().mockResolvedValue(undefined),
+      // Apps F5: the subdomain is the primary; a custom domain is an alias.
+      publishOnDomains: jest.fn().mockImplementation(
+        async (_store: number, _type: string, state: { aliases: unknown[] }, customId?: number) => ({
+          primary: { id: 40, hostname: 'roku-booking.vendix.online' },
+          aliases: customId
+            ? [...state.aliases, { domain_id: customId, previous_app_type: 'STORE_LANDING' }]
+            : state.aliases,
+        }),
+      ),
+      releaseAppDomains: jest.fn().mockResolvedValue(undefined),
       listCustomDomains: jest.fn().mockResolvedValue([]),
     };
-    service = new BookingAppService(prisma as any, domains as any);
+    service = new BookingAppService(prisma as any, domains as any, {} as any);
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -93,9 +107,11 @@ describe('BookingAppService', () => {
     expect(prisma.store_apps.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ store_id: STORE_ID, kind: 'booking', status: 'draft' }),
     });
-    const [storeId, appType, build] = domains.activateVendixHostname.mock.calls[0];
+    const [storeId, appType, state, customId, build] = domains.publishOnDomains.mock.calls[0];
     expect(storeId).toBe(STORE_ID);
     expect(appType).toBe('STORE_BOOKING');
+    expect(state).toEqual({ primary: null, published: false, legacyPreviousAppType: null, aliases: [] });
+    expect(customId).toBeUndefined();
     expect(build('Roku', 'vendix.online', () => false)).toBe('roku-booking.vendix.online');
     expect(prisma.store_apps.update).toHaveBeenCalledWith({
       where: { id: 5 },
@@ -104,7 +120,7 @@ describe('BookingAppService', () => {
     expect(domains.clearSeoCache).toHaveBeenCalledWith('roku-booking.vendix.online');
   });
 
-  it('publishing on a custom domain keeps its previous app_type for the release', async () => {
+  it('publishing with a custom domain keeps the subdomain as primary and adds the alias', async () => {
     prisma.store_apps.findFirst.mockResolvedValue({
       id: 5,
       status: 'draft',
@@ -114,13 +130,23 @@ describe('BookingAppService', () => {
 
     await service.publish({ custom_domain_id: 77 });
 
-    expect(domains.takeOverCustomDomain).toHaveBeenCalledWith(STORE_ID, 77, 'STORE_BOOKING');
+    expect(domains.publishOnDomains).toHaveBeenCalledWith(
+      STORE_ID,
+      'STORE_BOOKING',
+      expect.objectContaining({ aliases: [] }),
+      77,
+      expect.any(Function),
+    );
     expect(prisma.store_apps.update).toHaveBeenCalledWith({
       where: { id: 5 },
       data: expect.objectContaining({
         status: 'published',
-        domain_settings_id: 77,
-        config: { product_ids: [3], custom_domain_previous_app_type: 'STORE_LANDING' },
+        domain_settings_id: 40,
+        config: {
+          product_ids: [3],
+          custom_domain_previous_app_type: null,
+          custom_domain_aliases: [{ domain_id: 77, previous_app_type: 'STORE_LANDING' }],
+        },
       }),
     });
   });
@@ -145,7 +171,11 @@ describe('BookingAppService', () => {
         store_id: STORE_ID,
         kind: 'booking',
         status: 'draft',
-        config: { product_ids: [4, 9], custom_domain_previous_app_type: null },
+        config: {
+          product_ids: [4, 9],
+          custom_domain_previous_app_type: null,
+          custom_domain_aliases: [],
+        },
       },
     });
   });
@@ -162,7 +192,12 @@ describe('BookingAppService', () => {
 
     await service.unpublish();
 
-    expect(domains.releaseDomain).toHaveBeenCalledWith(domain, null);
+    expect(domains.releaseAppDomains).toHaveBeenCalledWith(STORE_ID, 'STORE_BOOKING', {
+      primary: domain,
+      published: true,
+      legacyPreviousAppType: null,
+      aliases: [],
+    });
     expect(prisma.store_apps.update).toHaveBeenCalledWith({
       where: { id: 5 },
       data: expect.objectContaining({ status: 'disabled' }),

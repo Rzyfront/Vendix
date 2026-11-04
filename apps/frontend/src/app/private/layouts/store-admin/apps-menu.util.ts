@@ -7,7 +7,8 @@ export const APPS_GROUP_LABEL = 'Apps';
 export const LANDING_APP_LABEL = 'Landing page';
 
 const ECOMMERCE_ROUTE = '/admin/ecommerce';
-const LANDING_ROUTE = '/admin/customers/crm';
+/** The landing view lives in Apps since apps-vistas-f1 (S4). */
+const LANDING_ROUTE = '/admin/apps/landing';
 
 /**
  * Regroups the store-admin sidebar under "Apps" when the store switch

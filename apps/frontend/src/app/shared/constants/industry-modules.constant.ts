@@ -1,3 +1,8 @@
+import {
+  LEGACY_INDUSTRY_GATED_KEYS,
+  MODULE_INDUSTRIES,
+} from './module-industries';
+
 export const STORE_INDUSTRIES = [
   'retail',
   'restaurant',
@@ -84,220 +89,31 @@ export const INDUSTRY_OPTIONS: ReadonlyArray<IndustryMeta> =
   STORE_INDUSTRIES.map((value) => INDUSTRY_METADATA[value]);
 
 /**
- * Map of panel_ui module keys hidden per industry.
+ * Map of panel_ui module keys hidden per industry — DERIVED (apps-f4 S1).
  *
- * - Key: a `StoreIndustry` value (lowercase, matches the backend `StoreIndustry`
- *   TS enum values that cross the wire — NOT the UPPER_CASE keys).
- * - Value: module keys to hide for that industry.
+ * The source of truth is the positive map `MODULE_INDUSTRIES`
+ * (`module-industries.ts`, mirror of `libs/shared-types/module-industries.ts`).
+ * This exclusion view keeps the pre-F4 behavior byte for byte: it only covers
+ * `LEGACY_INDUSTRY_GATED_KEYS`, the keys the old hand-written lists hid, so in
+ * audit mode the sidebar and the URL guard hide exactly what they hid before.
+ * `module-industries.spec.ts` pins the derived lists against the old
+ * literal ones. Every other restriction of the positive map (for example the
+ * `restaurant_ops_*` children) is only logged until F5.
  *
- * Phase I (Restaurant Suite): the `restaurant_ops` parent module is hidden for
- * every industry EXCEPT `restaurant`. Retail, manufacturing and service stores
- * never see it; the OR-semantics in `getModulesHiddenByIndustries` keeps a
- * multi-industry store (e.g. hotel = `service` + `restaurant`) visible because
- * the module is NOT hidden in the `restaurant` half of the intersection.
- *
- * Membership Suite: the generalized `memberships` module (plans, members,
- * access) is visible ⟺ the store's industry includes `gym`. It is hidden for
- * retail / restaurant / manufacturing / service. `gym` omits `memberships`
- * from its hidden list so the OR-semantics intersection keeps the suite
- * visible whenever `gym` is one of the store's industries (a `['gym','retail']`
- * store still sees it because the `gym` half of the intersection does not hide
- * it). A gym that also sells shakes adds `restaurant` to its industries to
- * unlock the restaurant suite too — the intersection empties for both
- * `memberships` and `restaurant_ops`, so a `['gym','restaurant']` store sees
- * BOTH suites. Note `gym` still hides `restaurant_ops` on its own, so a pure gym
- * store never sees the restaurant suite. `service` (citas/reservas) is its own
- * suite gated via `orders_reservations`; it does NOT unlock memberships.
- *
- * Service Suite: the `orders_reservations` module (booking calendar, providers,
- * schedules) is visible ⟺ the store's industry includes `service`. Every other
- * industry (retail / restaurant / manufacturing / gym) lists it as hidden, so
- * the OR-semantics intersection keeps it visible only when `service` is one of
- * the store's industries (a `['service','retail']` store still sees it because
- * the `service` half of the intersection does not hide it). This mirrors the
- * inverse gating of `restaurant_ops` for the restaurant suite.
- *
- * Contracts Suite (A.2, ADR-02): the `orders_contracts` module (contratos de
- * obra + factura AIU) is visible ⟺ the store's industry includes
- * `construction`. Every other industry (retail / restaurant / manufacturing /
- * service / gym) lists it as hidden, so the OR-semantics intersection keeps
- * it visible only when `construction` is one of the store's industries (a
- * `['construction','retail']` store still sees it because the `construction`
- * half of the intersection does not hide it). Backend enforcement is
- * `ConstructionIndustryGuard` (403 CONTRACT_INDUSTRY_001) — this map is UX
- * only. The sidebar entry and page land with C.2; the key is registered here
- * first so the rule exists before the first contracts endpoint does.
- *
- * Hospitality Suite (H0.1): the `hospitality` parent and its submodules
- * (`hospitality_rooms`, `hospitality_reservations`, `hospitality_rates`) are visible ⟺ the store's industry includes
- * `hospitality`. Every other industry lists them as hidden. A hotel with a
- * restaurant (`['hospitality','restaurant']`) sees both "Hotelería" and the
- * restaurant suite ("Mesas") because each half of the intersection keeps
- * its own suite visible.
- *
- * Manufacturing Suite (MVP): the `manufacturing` parent and its submodules
- * (`manufacturing_formulas`, `manufacturing_orders`, `manufacturing_settings`)
- * are visible ⟺ the store's industry includes `manufacturing`. Every other
- * industry lists them as hidden. `manufacturing` itself keeps `restaurant_ops`
- * hidden (it is not a restaurant).
+ * - Key: a `StoreIndustry` value (lowercase, as it crosses the wire).
+ * - Value: legacy-gated keys whose positive rule does not include it.
  */
-export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
-  retail: [
-    'manufacturing',
-    'manufacturing_formulas',
-    'manufacturing_orders',
-    'manufacturing_settings',
-    'hospitality',
-    'hospitality_rooms',
-    'hospitality_reservations',
-    'hospitality_rates',
-    'restaurant_ops',
-    'memberships',
-    'orders_reservations',
-    'orders_service_stations',
-    'orders_contracts',
-  ],
-  restaurant: [
-    'manufacturing',
-    'manufacturing_formulas',
-    'manufacturing_orders',
-    'manufacturing_settings',
-    'hospitality',
-    'hospitality_rooms',
-    'hospitality_reservations',
-    'hospitality_rates',
-    'memberships',
-    'orders_reservations',
-    'orders_service_stations',
-    'orders_contracts',
-    'dispatch',
-    'orders_dispatch_notes',
-    'orders_dispatch_routes',
-    'dispatch_fleet',
-    'settings_shipping',
-    'analytics_dispatch',
-    'reports_dispatch',
-  ],
-  manufacturing: [
-    'hospitality',
-    'hospitality_rooms',
-    'hospitality_reservations',
-    'hospitality_rates',
-    'restaurant_ops',
-    'memberships',
-    'orders_reservations',
-    'orders_service_stations',
-    'orders_contracts',
-    'dispatch',
-    'orders_dispatch_notes',
-    'orders_dispatch_routes',
-    'dispatch_fleet',
-    'settings_shipping',
-    'analytics_dispatch',
-    'reports_dispatch',
-  ],
-  service: [
-    'manufacturing',
-    'manufacturing_formulas',
-    'manufacturing_orders',
-    'manufacturing_settings',
-    'hospitality',
-    'hospitality_rooms',
-    'hospitality_reservations',
-    'hospitality_rates',
-    'restaurant_ops',
-    'memberships',
-    'orders_contracts',
-    'dispatch',
-    'orders_dispatch_notes',
-    'orders_dispatch_routes',
-    'dispatch_fleet',
-    'settings_shipping',
-    'analytics_dispatch',
-    'reports_dispatch',
-  ],
-  gym: [
-    'manufacturing',
-    'manufacturing_formulas',
-    'manufacturing_orders',
-    'manufacturing_settings',
-    'hospitality',
-    'hospitality_rooms',
-    'hospitality_reservations',
-    'hospitality_rates',
-    'restaurant_ops',
-    'orders_reservations',
-    'orders_service_stations',
-    'orders_contracts',
-    'dispatch',
-    'orders_dispatch_notes',
-    'orders_dispatch_routes',
-    'dispatch_fleet',
-    'settings_shipping',
-    'analytics_dispatch',
-    'reports_dispatch',
-  ],
-  // Construcción ejecuta obras por contrato: necesita inventario de materiales,
-  // compras, proveedores, facturación (AIU 1372) y contabilidad. Lo que no
-  // necesita es lo de atención al público en sitio ni la flota de reparto a
-  // clientes — de ahí la misma lista que `manufacturing`, que es la industria
-  // más cercana en forma (produce contra pedido, no vende al paso).
-  //
-  // Se arranca por lo CONSERVADOR a propósito: ocultar de más es un módulo que
-  // el usuario pide y se destapa en una línea; mostrar de más es un panel con
-  // secciones que no le sirven y que enseñan a ignorar el menú. Si una
-  // constructora pide despacho de materiales a obra, se quita 'dispatch' de acá.
-  construction: [
-    'manufacturing',
-    'manufacturing_formulas',
-    'manufacturing_orders',
-    'manufacturing_settings',
-    // `orders_contracts` is INTENTIONALLY absent here: the contracts suite
-    // (A.2, ADR-02) is visible ⟺ the store includes `construction`. Every
-    // other industry lists it above, so the OR-semantics intersection keeps
-    // it visible exactly for construction (solo o multi-industria).
-    'restaurant_ops',
-    'memberships',
-    'orders_reservations',
-    'orders_service_stations',
-    'dispatch',
-    'orders_dispatch_notes',
-    'orders_dispatch_routes',
-    'dispatch_fleet',
-    'settings_shipping',
-    'analytics_dispatch',
-    'reports_dispatch',
-    'hospitality',
-    'hospitality_rooms',
-    'hospitality_reservations',
-    'hospitality_rates',
-  ],
-  // Hotelería (H0.1): un hotel opera habitaciones, reservas de estadía,
-  // recepción y folio — no la agenda de citas (`orders_reservations`), ni
-  // contratos de obra, ni membresías, ni flota de reparto. Restaurante y citas
-  // se destapan sumando `restaurant` o `service` a las industrias de la tienda.
-  hospitality: [
-    'manufacturing',
-    'manufacturing_formulas',
-    'manufacturing_orders',
-    'manufacturing_settings',
-    // `hospitality` / `hospitality_rooms` are INTENTIONALLY absent here: the
-    // lodging suite is visible ⟺ the store includes `hospitality`. Every
-    // other industry lists them, so the OR-semantics intersection keeps them
-    // visible exactly for hospitality (solo o multi-industria).
-    'restaurant_ops',
-    'memberships',
-    'orders_reservations',
-    'orders_contracts',
-    'dispatch',
-    'orders_dispatch_notes',
-    'orders_dispatch_routes',
-    'dispatch_fleet',
-    'settings_shipping',
-    'analytics_dispatch',
-    'reports_dispatch',
-  ],
-};
+export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> =
+  STORE_INDUSTRIES.reduce(
+    (acc, industry) => {
+      acc[industry] = LEGACY_INDUSTRY_GATED_KEYS.filter((key) => {
+        const rule = MODULE_INDUSTRIES[key];
+        return rule !== undefined && rule !== 'all' && !rule.includes(industry);
+      });
+      return acc;
+    },
+    {} as Record<StoreIndustry, string[]>,
+  );
 
 /**
  * OR semantics: a module is hidden only if it is hidden for EVERY industry
@@ -325,14 +141,11 @@ export function getModulesHiddenByIndustries(
     (acc, industry) => acc.concat(INDUSTRY_HIDDEN_MODULES[industry] ?? []),
     [],
   );
-  const knownSet = new Set(allKnown);
-
-  const candidateKeys = allKnown.filter((key) => knownSet.has(key));
-  if (candidateKeys.length === 0) {
+  if (allKnown.length === 0) {
     return [];
   }
 
-  return candidateKeys.filter((key) =>
+  return allKnown.filter((key) =>
     industries.every((industry) => {
       const list = INDUSTRY_HIDDEN_MODULES[industry as StoreIndustry];
       return Array.isArray(list) && list.includes(key);

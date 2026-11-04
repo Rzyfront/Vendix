@@ -499,6 +499,7 @@ export class StorePrismaService extends BasePrismaService {
       'subscription_events', // Relational
       'product_price_tier_overrides', // Relational (via product.store_id)
       'product_price_tier_assignments', // Relational (via product.store_id)
+      'product_sale_uoms', // Relational (via product.store_id) — QUI-978
       // ===== Restaurant Suite child tables (no store_id, relational scope) =====
       'recipe_items', // Relational (via recipe.store_id)
       'kitchen_ticket_items', // Relational (via kitchen_ticket.store_id)
@@ -728,6 +729,10 @@ export class StorePrismaService extends BasePrismaService {
         product: { store_id: context.store_id },
       },
       product_price_tier_assignments: {
+        product: { store_id: context.store_id },
+      },
+      // QUI-978 — UoMs de venta del producto
+      product_sale_uoms: {
         product: { store_id: context.store_id },
       },
       // ===== Restaurant Suite child tables (scoped via parent store_id) =====
@@ -2088,6 +2093,11 @@ export class StorePrismaService extends BasePrismaService {
 
   get product_price_tier_assignments() {
     return this.scoped_client.product_price_tier_assignments;
+  }
+
+  /** QUI-978 — UoMs de venta (principal + adicionales), scope vía product. */
+  get product_sale_uoms() {
+    return this.scoped_client.product_sale_uoms;
   }
 
   // ===== Restaurant Suite Foundation (Fase A) =====

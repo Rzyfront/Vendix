@@ -16,6 +16,24 @@ import {
 import { CrmContactDto } from '../dto/crm-contact.dto';
 
 const PUBLIC_PRODUCTS_LIMIT = 6;
+
+/** Public fields of a product the landing shows (name, slug, price, signed image). */
+export interface PublicLandingProduct {
+  name: string;
+  slug: string;
+  price: number | null;
+  image_url: string | null;
+}
+
+/** F6-A: the public page never receives the sections the owner hid. */
+export function withoutHiddenBlocks(
+  document: CrmLandingDocument,
+): CrmLandingDocument {
+  return {
+    ...document,
+    blocks: document.blocks.filter((block) => block.hidden !== true),
+  };
+}
 const TOP_PRODUCTS_WINDOW_DAYS = 90;
 
 /**
@@ -99,10 +117,35 @@ export class CrmPublicService {
       return { document: null, ecommerce_base_url: null };
     }
 
-    const document = parsed as CrmLandingDocument;
+    const document = withoutHiddenBlocks(parsed as CrmLandingDocument);
     await this.enrichProductsGrid(storeId, document);
     return {
       document,
+      ecommerce_base_url: await this.ecommerceBaseUrl(storeId),
+    };
+  }
+
+  /**
+   * F6-A: real store data for the admin preview of the landing editor, so the
+   * preview shows what the public page will show. Same products and
+   * ecommerce base the public read injects; never the document itself.
+   */
+  async getPreviewContext(): Promise<{
+    products: PublicLandingProduct[];
+    ecommerce_base_url: string | null;
+  }> {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) throw new VendixHttpException(ErrorCodes.SYS_FORBIDDEN_001);
+    let products: PublicLandingProduct[] = [];
+    try {
+      products = await this.topProductsForStore(storeId);
+    } catch (err: any) {
+      this.logger.warn(
+        `[CrmPublic] Productos de la vista previa no disponibles: ${err?.message?.slice(0, 200) ?? 'desconocido'}`,
+      );
+    }
+    return {
+      products,
       ecommerce_base_url: await this.ecommerceBaseUrl(storeId),
     };
   }
@@ -136,9 +179,7 @@ export class CrmPublicService {
 
   private async topProductsForStore(
     storeId: number,
-  ): Promise<
-    Array<{ name: string; slug: string; price: number | null; image_url: string | null }>
-  > {
+  ): Promise<PublicLandingProduct[]> {
     const to = new Date();
     const from = new Date(
       to.getTime() - TOP_PRODUCTS_WINDOW_DAYS * 24 * 60 * 60 * 1000,

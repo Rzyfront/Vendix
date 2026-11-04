@@ -7,3 +7,4 @@ export * from './markdown.util';
 export * from './plan-features.util';
 export * from './variant-attributes.util';
 export * from './run-chunked';
+export * from './variable-barcode.util';

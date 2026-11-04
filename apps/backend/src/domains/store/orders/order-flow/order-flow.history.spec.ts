@@ -1119,6 +1119,79 @@ describe('OrderFlowService.cancelDeliveredOrderItem — item_delivery_reverted',
       }),
     );
   });
+  it('reversa con reingreso de una línea de PESO ya descontada repone 180 g, no 1', async () => {
+    const txMock: any = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
+      kitchen_ticket_items: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
+      payments: { findFirst: jest.fn().mockResolvedValue(null) },
+      order_items: {
+        update: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([{ total_price: 30000, order_item_taxes: [] }]),
+      },
+      orders: {
+        findFirst: jest.fn().mockResolvedValue({ active_financial_split_id: null }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const prismaMock: any = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      order_items: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: ITEM_ID,
+          product_id: 11,
+          product_variant_id: null,
+          product_name: 'Queso costeño',
+          quantity: 1,
+          weight: '0.180',
+          weight_unit: 'kg',
+          stock_units_consumed: 180,
+          inventory_committed: true,
+          delivered_at: new Date('2026-09-10T12:00:00.000Z'),
+          cancelled_at: null,
+          // H2/H4 — `cancelDeliveredOrderItem` selects this to resolve the
+          // ticket the item was fired under; empty ⇒ no ticket resolvable.
+          kitchen_ticket_items: [],
+        }),
+      },
+      $transaction: jest.fn((cb: any) => cb(txMock)),
+    };
+    const stockLevelManager = {
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(1),
+      updateStock: jest.fn().mockResolvedValue({}),
+      // `inventory_committed` no viene en el fixture de `order_items.findFirst`
+      // (undefined ⇒ falsy) ⇒ `cancelDeliveredOrderItem` toma la rama "nunca
+      // comprometido" y libera la reserva en vez de reponer stock.
+      releaseReservationQuantity: jest.fn().mockResolvedValue(undefined),
+    };
+    const auditService = { logCustom: jest.fn().mockResolvedValue(undefined) };
+    const orderHistoryService = { record: jest.fn().mockResolvedValue(null) };
+
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      {} as any, {} as any, {} as any, {} as any,
+      stockLevelManager as any,
+      {} as any, {} as any,
+      auditService as any,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      orderHistoryService as any,
+    );
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+      id: ORDER_ID,
+      state: 'created',
+      store_id: 4,
+      active_financial_split_id: null,
+      payments: [],
+      stores: { organization_id: 9 },
+    });
+
+    await service.cancelDeliveredOrderItem(ORDER_ID, ITEM_ID, 'cliente devolvió', 'restock');
+
+    expect(stockLevelManager.updateStock).toHaveBeenCalledWith(
+      expect.objectContaining({ product_id: 11, quantity_change: 180, movement_type: 'return' }),
+      txMock,
+    );
+    expect(stockLevelManager.releaseReservationQuantity).not.toHaveBeenCalled();
+  });
 });
 
 describe('OrderFlowService.reconcileOrderFromDispatch — source listener', () => {

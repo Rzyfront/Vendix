@@ -1,3 +1,4 @@
+
 /**
  * Cuántas "unidades de precio" cobra una línea del carrito — QUI-648.
  *
@@ -64,6 +65,24 @@ export interface LineUnitsInput {
   price_unit_quantity?: number | null;
   sale_unit_code?: string | null;
   stock_units_per_sale_unit?: number | null;
+  /**
+   * PR #1062 ronda 4 (punto 2) — línea de peso legado: unidad y cantidad que
+   * ELIGIÓ el cajero ("300 g"). Solo para el tiquete; el cobro sigue con
+   * `weight` en la principal.
+   */
+  weighed_as?: WeighedAs | null;
+  /**
+   * Línea de peso legado: unidades de STOCK por cada unidad de `weight_unit`
+   * (kg con stock en g ⇒ 1000). Solo se anota cuando el producto declara su
+   * unidad de stock (`stock_uom`); `null` = sin unidad de stock conocida.
+   */
+  stock_units_per_weight_unit?: number | null;
+}
+
+/** Unidad y cantidad elegidas al pesar (puede diferir de la principal). */
+export interface WeighedAs {
+  code: string;
+  amount: number;
 }
 
 /** Escala de precio saneada: entero > 1, o 1 (sin escala). */
@@ -128,6 +147,37 @@ export function isSaleUnitLine(item: LineUnitsInput): boolean {
   );
 }
 
+/**
+ * QUI-978 — snapshot de la unidad de venta que viaja al backend al cobrar o al
+ * guardar la orden, y queda en `order_items.sale_unit_code_snapshot` /
+ * `sale_quantity_snapshot`. Con eso el detalle de la orden y el ticket
+ * reimpreso dicen "300 g" en vez de "300".
+ *
+ * Devuelve `{}` cuando la línea no tiene unidad que anotar: el spread en el
+ * payload no agrega llaves y las líneas de pieza siguen idénticas.
+ */
+export function resolveSaleUnitSnapshot(
+  item: LineUnitsInput,
+): { sale_unit_code?: string; sale_quantity?: number } {
+  // Balanza legada: el cobro viaja con `weight` + `weight_unit` (principal);
+  // el snapshot solo anota la unidad ELEGIDA para que el tiquete diga
+  // "300 g" y no "0,3 kg" (PR #1062 ronda 4, punto 2).
+  const weight = Number(item.weight ?? 0) || 0;
+  if (item.is_weight_product && weight > 0) {
+    const chosen = item.weighed_as;
+    const code = chosen?.code?.trim();
+    const amount = Number(chosen?.amount);
+    if (!code || !(amount > 0)) return {};
+    return { sale_unit_code: code, sale_quantity: Number(amount.toFixed(6)) };
+  }
+  const code = item.sale_unit_code?.trim();
+  if (!code) return {};
+  // Sin `isSaleUnitLine`: vender en gramos con stock en gramos tiene factor 1
+  // y también debe quedar anotado ("300 g"). El DTO admite 6 decimales.
+  const saleQuantity = Number(resolveSaleQuantity(item).toFixed(6));
+  return { sale_unit_code: code, sale_quantity: saleQuantity };
+}
+
 /** "3 m", "2,35 kg", "4". Hasta 3 decimales, sin ceros de relleno. */
 export function formatSaleQuantity(item: LineUnitsInput): string {
   const value = resolveSaleQuantity(item);
@@ -138,4 +188,52 @@ export function formatSaleQuantity(item: LineUnitsInput): string {
     ? item.weight_unit || 'kg'
     : item.sale_unit_code;
   return unit ? `${text} ${unit}` : text;
+}
+
+/**
+ * Unidades de STOCK que consume la línea, o `null` cuando son las mismas que
+ * `quantity` (el backend cae a `stock_units_consumed ?? quantity`). Viaja en
+ * `stock_units_consumed` del cobro, pero en una línea de PESO el servidor lo
+ * recalcula con la unidad de stock del producto y solo lo usa para contrastar:
+ * aquí sirve para mostrar y para contar seriales, con la misma regla.
+ *
+ *  - PESO legado: `quantity` es 1 y el peso es solo el multiplicador
+ *    monetario. Se convierte `weight` a la unidad de stock declarada
+ *    (0,180 kg con stock en g ⇒ 180). Nunca 0 con peso > 0: si redondea a 0
+ *    (stock en kg y pesada < 0,5 kg) se cuenta 1. Sin factor conocido
+ *    devuelve `null` y la línea conserva el histórico (1 por pesada; qué
+ *    unidad de stock tiene un producto de peso SIN `stock_uom` es una
+ *    decisión de producto pendiente).
+ *  - PRESENTACIÓN (empaque > 1): `quantity` cuenta paquetes ⇒ paquetes × empaque.
+ *  - Unidad de VENTA (`stock_units_per_sale_unit > 1`, "3 m"): `quantity` YA
+ *    está en la unidad mínima (3000 mm, ver el encabezado). Multiplicarla otra
+ *    vez por el factor inflaba el número ×1000 (180 g ⇒ 180 000) y el motor de
+ *    promociones lo leía como 180 000 paquetes. No hay nada que convertir.
+ */
+export function resolveStockUnitsConsumed(item: LineUnitsInput): number | null {
+  const weight = Number(item.weight ?? 0) || 0;
+  if (item.is_weight_product && weight > 0) {
+    const factor = Number(item.stock_units_per_weight_unit ?? 0);
+    if (!Number.isFinite(factor) || factor <= 0) return null;
+    // Mismo cálculo que el servidor (`weight-stock-units.util.ts`): el
+    // `toFixed(6)` evita que 0,9995 × 1000 = 999,4999… redondee a 999.
+    const converted = Math.round(Number((weight * factor).toFixed(6)));
+    return Number.isFinite(converted) ? Math.max(1, converted) : null;
+  }
+  const packSize = resolveLinePackSize(item);
+  if (packSize > 1) return (Number(item.quantity ?? 0) || 0) * packSize;
+  return null;
+}
+
+/**
+ * Cantidad con la que la línea acumula tramos de promoción, la misma que
+ * cuenta el backend (`payments.service.ts`, cotizador): paquetes × empaque en
+ * una presentación; `quantity` en el resto. Una línea con unidad de venta ya
+ * trae `quantity` en unidad mínima (no se vuelve a multiplicar) y una pesada
+ * cuenta 1 (el cotizador no recibe sus unidades de stock).
+ */
+export function resolvePromotionTierQuantity(item: LineUnitsInput): number {
+  const quantity = Number(item.quantity ?? 0) || 0;
+  const packSize = resolveLinePackSize(item);
+  return packSize > 1 ? quantity * packSize : quantity;
 }

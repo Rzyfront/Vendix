@@ -5,10 +5,13 @@ import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { RackQueryDto } from '../dto';
 import { LodgingRackService } from './lodging-rack.service';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H1.3) — occupancy rack (read only). */
 @Controller('store/hospitality/rack')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingRackController {
   constructor(
     private readonly lodgingRackService: LodgingRackService,

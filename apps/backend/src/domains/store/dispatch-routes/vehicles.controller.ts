@@ -15,9 +15,12 @@ import { CreateVehicleDto, UpdateVehicleDto } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 @Controller('store/vehicles')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('dispatch_fleet')
 export class VehiclesController {
   constructor(
     private readonly vehiclesService: VehiclesService,

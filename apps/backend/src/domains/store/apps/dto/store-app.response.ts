@@ -6,7 +6,7 @@ export interface StoreAppDomainView {
   status: string;
 }
 
-/** One item of GET /store/apps. */
+/** One item of GET /store/apps — light catalog, never the app's config. */
 export interface StoreAppView {
   key: AppKind;
   name: string;
@@ -14,13 +14,15 @@ export interface StoreAppView {
   /** True when the app applies to at least one of the store industries. */
   applies_to_store_industries: boolean;
   status: AppStatus;
+  /** "Encendida": installed and not switched off (`draft` or `published`). */
+  enabled: boolean;
   domain: StoreAppDomainView | null;
   /** Only when the app is published on an active domain. */
   public_url: string | null;
   published_at: Date | null;
 }
 
-/** GET /store/apps/:kind — list item plus the app's own config. */
+/** GET /store/apps/:kind — what the app view needs: list item plus its config. */
 export interface StoreAppDetailView extends StoreAppView {
   config: Record<string, unknown>;
 }

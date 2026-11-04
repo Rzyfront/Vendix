@@ -5,10 +5,13 @@ import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingKeyHandoversService } from './key-handovers.service';
 import { DeliverKeyDto } from './key-handover.dto';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H8.4, D12) — key / access card handovers of a reservation. */
 @Controller('store/hospitality/reservations/:reservationId/keys')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingKeyHandoversController {
   constructor(
     private readonly keyHandoversService: LodgingKeyHandoversService,

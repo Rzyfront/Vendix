@@ -460,6 +460,10 @@ export class CreateDomainSettingDto {
     'STORE_ADMIN',
     'STORE_ECOMMERCE',
     'STORE_DELIVERY',
+    'STORE_HOME',
+    'STORE_PRODUCT_PAGE',
+    'STORE_SERVICE_PAGE',
+    'STORE_BOOKING',
   ])
   app_type?: string;
 
@@ -544,6 +548,10 @@ export class UpdateDomainSettingDto {
     'STORE_ADMIN',
     'STORE_ECOMMERCE',
     'STORE_DELIVERY',
+    'STORE_HOME',
+    'STORE_PRODUCT_PAGE',
+    'STORE_SERVICE_PAGE',
+    'STORE_BOOKING',
   ])
   app_type?: string;
 

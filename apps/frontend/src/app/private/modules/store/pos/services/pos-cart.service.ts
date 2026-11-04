@@ -52,7 +52,11 @@ import {
 import { PriceTierCacheService } from '../../price-tiers/services/price-tier-cache.service';
 import { PosSaleUnitService } from './pos-sale-unit.service';
 import { PosApiService } from './pos-api.service';
-import { resolveLineUnits } from '../utils/line-units.util';
+import {
+  resolveLineUnits,
+  resolvePromotionTierQuantity,
+  WeighedAs,
+} from '../utils/line-units.util';
 import { WithholdingTaxService } from '../../withholding-tax/services/withholding-tax.service';
 import { WithholdingPreviewResult } from '../../withholding-tax/interfaces/withholding.interface';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
@@ -1550,9 +1554,18 @@ export class PosCartService {
   }
 
   /**
-   * Update weight for a weight-based cart item
+   * Update weight for a weight-based cart item.
+   *
+   * QUI-978 — `newWeight` llega en la unidad del precio (la principal) y
+   * `unitCode` la nombra; lo digitado en otra unidad se convierte antes de
+   * llamar. Sin `unitCode`, se conserva la unidad actual (histórico: kg).
    */
-  updateCartItemWeight(itemId: string, newWeight: number): Observable<CartState> {
+  updateCartItemWeight(
+    itemId: string,
+    newWeight: number,
+    unitCode?: string,
+    weighedAs: WeighedAs | null = null,
+  ): Observable<CartState> {
     const currentState = this.cartState();
     const itemIndex = currentState.items.findIndex(item => item.id === itemId);
 
@@ -1569,9 +1582,19 @@ export class PosCartService {
     const totalPrice = item.finalPrice * newWeight;
     const taxMultiplier = newWeight;
 
+    // El factor a stock se calculó para la unidad del alta. Si el repesado
+    // cambia de unidad se recalcula para la nueva (abajo); mientras llega,
+    // la línea no conserva un factor que ya no corresponde.
+    const unitChanged =
+      unitCode !== undefined && unitCode !== (item.weight_unit ?? undefined);
+
     updatedItems[itemIndex] = {
       ...item,
       weight: newWeight,
+      ...(unitCode !== undefined ? { weight_unit: unitCode } : {}),
+      ...(unitChanged ? { stock_units_per_weight_unit: null } : {}),
+      // Repesar reemplaza la unidad elegida: sin ella, el tiquete usa el peso.
+      weighed_as: weighedAs,
       totalPrice,
       taxAmount: this.calculateItemTaxWithBase(item.product, item.unitPrice, taxMultiplier),
     };
@@ -1584,7 +1607,34 @@ export class PosCartService {
     };
 
     this.cartState.set(newState);
+    if (unitChanged && unitCode) {
+      void this.refreshWeightStockFactor(itemId, unitCode);
+    }
     return of(newState);
+  }
+
+  /**
+   * Repesado con cambio de unidad: recalcula unidades de stock por unidad
+   * pesada para la NUEVA unidad (g con stock en g ⇒ 1; kg ⇒ 1000), en vez de
+   * dejar la línea sin factor. Solo escribe si la línea sigue en esa unidad.
+   */
+  private async refreshWeightStockFactor(itemId: string, unitCode: string): Promise<void> {
+    const line = this.cartState().items.find((i) => i.id === itemId);
+    if (!line) return;
+    let factor: number | null = null;
+    try {
+      factor = await this.saleUnitService.stockUnitsPerUnit(line.product, unitCode);
+    } catch {
+      factor = null;
+    }
+    const state = this.cartState();
+    const index = state.items.findIndex(
+      (i) => i.id === itemId && i.weight_unit === unitCode,
+    );
+    if (index === -1) return;
+    const items = [...state.items];
+    items[index] = { ...items[index], stock_units_per_weight_unit: factor };
+    this.cartState.set({ ...state, items, updatedAt: new Date() });
   }
 
   /**
@@ -2068,19 +2118,12 @@ export class PosCartService {
   }
 
   /**
-   * Resuelve la cantidad base efectiva de un item para acumulación de tramos de promoción.
-   * Si la línea es una presentación/paquete (units_per_package > 1) o tiene escala
-   * (stock_units_per_sale_unit > 1), multiplica la cantidad de paquetes por las unidades base.
+   * Cantidad con la que un item acumula tramos de promoción: la misma que
+   * cuenta el backend (ver `resolvePromotionTierQuantity`). Una línea con
+   * unidad de venta ya trae `quantity` en unidad mínima: no se multiplica.
    */
   private getEffectiveItemQuantity(item: CartItem): number {
-    const qty = Number(item?.quantity) || 0;
-    if (item?.units_per_package && item.units_per_package > 1) {
-      return qty * Number(item.units_per_package);
-    }
-    if (item?.stock_units_per_sale_unit && item.stock_units_per_sale_unit > 1) {
-      return qty * Number(item.stock_units_per_sale_unit);
-    }
-    return qty;
+    return item ? resolvePromotionTierQuantity(item) : 0;
   }
 
   /**
@@ -2717,6 +2760,14 @@ export class PosCartService {
         price_unit_quantity: priceUnitQuantity,
       });
       const itemTotalPrice = finalUnitPrice * lineUnits;
+      // PR #1062 ronda 2 — se anota la unidad cuando hay conversión real: la
+      // automática del config, o la que ELIGIÓ el cajero aunque la automática
+      // sea la de stock (principal g, pesado en lb → "1 lb", no "453,59 g").
+      const chosenUnits = request.sale_unit_override?.stock_units_per_sale_unit;
+      const annotateSaleUnit =
+        !isWeightProduct &&
+        (saleUnit.unitsPerCapture > 1 ||
+          (chosenUnits != null && chosenUnits > 0 && chosenUnits !== 1));
 
       // For weight products, tax is calculated on the total (price * weight), not just price * quantity
       const taxMultiplier = lineUnits;
@@ -2745,19 +2796,33 @@ export class PosCartService {
         // Weight product fields
         weight: isWeightProduct ? weight : undefined,
         weight_unit: isWeightProduct ? (request.weight_unit || 'kg') : undefined,
+        weighed_as: isWeightProduct ? (request.weighed_as ?? null) : undefined,
+        stock_units_per_weight_unit: isWeightProduct
+          ? (request.stock_units_per_weight_unit ?? null)
+          : undefined,
         is_weight_product: isWeightProduct,
         // QUI-648 — la escala en la que el cajero capturó y en la que se muestra
         // la línea. `quantity` sigue viviendo en la unidad mínima. Solo se
         // anota cuando hay conversión real: si la unidad de venta YA es la
         // mínima, la línea se lee como siempre.
-        sale_unit_code:
-          !isWeightProduct && saleUnit.unitsPerCapture > 1
-            ? (saleUnit.captureUnit?.code ?? null)
-            : null,
-        stock_units_per_sale_unit:
-          !isWeightProduct && saleUnit.unitsPerCapture > 1
-            ? saleUnit.unitsPerCapture
-            : null,
+        // QUI-978 — la unidad ELEGIDA (g con captura automática kg) gana
+        // sobre la automática: el ticket y la reedición hablan de lo que el
+        // cajero pesó, no de lo que el sistema habría supuesto.
+        sale_unit_code: annotateSaleUnit
+          ? (request.sale_unit_override?.code ??
+            saleUnit.captureUnit?.code ??
+            null)
+          : null,
+        stock_units_per_sale_unit: annotateSaleUnit
+          ? (request.sale_unit_override?.stock_units_per_sale_unit ??
+            saleUnit.unitsPerCapture)
+          : null,
+        // QUI-978 — unidad del precio publicado (ver el modelo).
+        price_unit_code: annotateSaleUnit
+          ? (request.sale_unit_override?.price_unit_code ??
+            saleUnit.captureUnit?.code ??
+            null)
+          : null,
         price_unit_quantity: isWeightProduct ? null : priceUnitQuantity,
         captured_by_scale: request.capturedByScale === true,
         // Restaurant Suite — Fase K Gap 1: persist the cashier's
@@ -2873,6 +2938,17 @@ export class PosCartService {
       // clave distingue intención: ambos editores de nota la pasan siempre,
       // los cambios solo-cantidad la omiten y preservan.
       notes: 'notes' in request ? request.notes : item.notes,
+      // QUI-978 — misma regla para la unidad de venta: reeditar en otra
+      // unidad la anota; los cambios solo-cantidad la preservan.
+      ...('sale_unit_code' in request
+        ? { sale_unit_code: request.sale_unit_code ?? null }
+        : {}),
+      ...('stock_units_per_sale_unit' in request
+        ? { stock_units_per_sale_unit: request.stock_units_per_sale_unit ?? null }
+        : {}),
+      ...('price_unit_code' in request
+        ? { price_unit_code: request.price_unit_code ?? null }
+        : {}),
     };
 
     return {

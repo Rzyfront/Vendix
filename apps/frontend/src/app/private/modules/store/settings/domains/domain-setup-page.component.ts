@@ -12,6 +12,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { interval } from 'rxjs';
+import { appOnlyAppTypeLabel } from '../../../../../shared/constants/app-domain-app-types';
 import {
   ButtonComponent,
   IconComponent,
@@ -1165,7 +1166,7 @@ export class DomainSetupPageComponent implements OnInit {
       STORE_LANDING: 'Landing tienda',
       STORE_ADMIN: 'Admin tienda',
     };
-    return labels[appType] || appType;
+    return labels[appType] || appOnlyAppTypeLabel(appType) || appType;
   }
 
   instructionStatusLabel(status?: string): string {

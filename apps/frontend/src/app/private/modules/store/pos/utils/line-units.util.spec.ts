@@ -6,6 +6,9 @@ import {
   resolveLineUnits,
   resolvePriceUnitQuantity,
   resolveSaleQuantity,
+  resolveSaleUnitSnapshot,
+  resolveStockUnitsConsumed,
+  resolvePromotionTierQuantity,
 } from './line-units.util';
 
 /**
@@ -203,5 +206,168 @@ describe('line-units.util', () => {
         }),
       ).toMatch(/^2[.,]35 kg$/);
     });
+  });
+});
+
+describe('resolveSaleUnitSnapshot · peso legado (PR #1062 ronda 4, punto 2)', () => {
+  it('pesar 300 g con principal kg anota la unidad elegida para el tiquete', () => {
+    // El cobro va en la principal (weight 0,3 kg); el tiquete dice "300 g".
+    expect(
+      resolveSaleUnitSnapshot({
+        quantity: 1,
+        weight: 0.3,
+        weight_unit: 'kg',
+        is_weight_product: true,
+        weighed_as: { code: 'g', amount: 300 },
+      }),
+    ).toEqual({ sale_unit_code: 'g', sale_quantity: 300 });
+  });
+
+  it('sin unidad elegida la línea de peso no agrega llaves (weight + weight_unit)', () => {
+    expect(
+      resolveSaleUnitSnapshot({
+        quantity: 1,
+        weight: 0.3,
+        weight_unit: 'kg',
+        is_weight_product: true,
+      }),
+    ).toEqual({});
+  });
+
+  it('la unidad elegida no cambia el multiplicador del cobro', () => {
+    expect(
+      resolveLineUnits({
+        quantity: 1,
+        weight: 0.3,
+        weight_unit: 'kg',
+        is_weight_product: true,
+        weighed_as: { code: 'g', amount: 300 },
+      }),
+    ).toBe(0.3);
+  });
+});
+
+describe('resolveStockUnitsConsumed — unidades de stock que viajan al cobro', () => {
+  it('peso legado 0,180 kg con stock en g (factor 1000) descuenta 180, no 1', () => {
+    expect(
+      resolveStockUnitsConsumed({
+        quantity: 1,
+        weight: 0.18,
+        weight_unit: 'kg',
+        is_weight_product: true,
+        stock_units_per_weight_unit: 1000,
+      }),
+    ).toBe(180);
+  });
+
+  it('respeta el factor de la unidad de stock: 2,5 kg con stock en kg ⇒ 3 (redondeo a Int)', () => {
+    expect(
+      resolveStockUnitsConsumed({
+        quantity: 1,
+        weight: 2.5,
+        weight_unit: 'kg',
+        is_weight_product: true,
+        stock_units_per_weight_unit: 1,
+      }),
+    ).toBe(3);
+  });
+
+  it('pesado en g con stock en g (factor 1) descuenta los gramos', () => {
+    expect(
+      resolveStockUnitsConsumed({
+        quantity: 1,
+        weight: 180,
+        weight_unit: 'g',
+        is_weight_product: true,
+        stock_units_per_weight_unit: 1,
+      }),
+    ).toBe(180);
+  });
+
+  it('peso legado SIN unidad de stock declarada queda null (histórico, decisión pendiente)', () => {
+    expect(
+      resolveStockUnitsConsumed({
+        quantity: 1,
+        weight: 0.18,
+        weight_unit: 'kg',
+        is_weight_product: true,
+      }),
+    ).toBeNull();
+  });
+
+  it('unidad de venta: 180 g ya están en unidad mínima — no infla a 180 000', () => {
+    expect(
+      resolveStockUnitsConsumed({
+        quantity: 180,
+        sale_unit_code: 'kg',
+        stock_units_per_sale_unit: 1000,
+      }),
+    ).toBeNull();
+  });
+
+  it('presentación real: 2 rollos de 20 000 mm ⇒ 40 000', () => {
+    expect(
+      resolveStockUnitsConsumed({
+        quantity: 2,
+        units_per_package: 20000,
+        is_package_unit: true,
+      }),
+    ).toBe(40000);
+  });
+
+  it('línea por pieza ⇒ null (el backend usa quantity)', () => {
+    expect(resolveStockUnitsConsumed({ quantity: 4 })).toBeNull();
+  });
+});
+
+describe('resolveStockUnitsConsumed — ronda 2: nunca 0 y mismos números que el servidor', () => {
+  const weighed = (weight: number, factor: number) =>
+    resolveStockUnitsConsumed({
+      quantity: 1,
+      weight,
+      weight_unit: 'kg',
+      is_weight_product: true,
+      stock_units_per_weight_unit: factor,
+    });
+
+  it('stock en kg: 0,180 / 0,4 / 0,5 kg ⇒ 1, nunca 0', () => {
+    expect(weighed(0.18, 1)).toBe(1);
+    expect(weighed(0.4, 1)).toBe(1);
+    expect(weighed(0.5, 1)).toBe(1);
+  });
+
+  it('0,9995 kg con stock en g ⇒ 1000 (sin error de coma flotante)', () => {
+    expect(weighed(0.9995, 1000)).toBe(1000);
+  });
+
+  it('peso máximo 999 kg con stock en g ⇒ 999 000', () => {
+    expect(weighed(999, 1000)).toBe(999000);
+  });
+
+  it('0 g no es pesada: null', () => {
+    expect(weighed(0, 1000)).toBeNull();
+  });
+});
+
+describe('resolvePromotionTierQuantity — tramos del carrito alineados con el backend', () => {
+  it('unidad de venta: 180 g cuentan 180, no 180 000', () => {
+    expect(
+      resolvePromotionTierQuantity({ quantity: 180, sale_unit_code: 'kg', stock_units_per_sale_unit: 1000 }),
+    ).toBe(180);
+  });
+
+  it('presentación: 3 cajas de 12 cuentan 36', () => {
+    expect(resolvePromotionTierQuantity({ quantity: 3, units_per_package: 12, is_package_unit: true })).toBe(36);
+  });
+
+  it('pesada: cuenta 1 (el cotizador no recibe sus gramos)', () => {
+    expect(
+      resolvePromotionTierQuantity({
+        quantity: 1,
+        weight: 0.18,
+        is_weight_product: true,
+        stock_units_per_weight_unit: 1000,
+      }),
+    ).toBe(1);
   });
 });

@@ -375,8 +375,13 @@ export class OrderTicketService {
    * True when the line consumed a different number of stock units than the
    * quantity sold — i.e. the product was sold by package while stock is kept in
    * the contained unit.
+   *
+   * Una línea de PESO (`weight > 0`) guarda en `stock_units_consumed` la
+   * pesada en unidades de stock (0,180 kg ⇒ 180 g): no es un empaque y no
+   * debe imprimirse "× 180".
    */
   hasPackageStockConsumption(item: OrderItem): boolean {
+    if (Number(item.weight || 0) > 0) return false;
     const consumed = Number(item.stock_units_consumed || 0);
     const quantity = Number(item.quantity || 0);
     return consumed > 0 && quantity > 0 && consumed !== quantity;

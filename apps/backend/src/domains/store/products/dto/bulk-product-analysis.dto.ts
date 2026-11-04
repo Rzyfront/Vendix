@@ -25,6 +25,7 @@ export class BulkProductAnalysisItemDto {
   name: string;
   sku: string;
   barcode?: string;
+  scale_code?: number;
   product_type: 'physical' | 'service';
   base_price: number;
   cost_price: number;

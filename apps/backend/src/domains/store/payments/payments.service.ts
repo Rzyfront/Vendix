@@ -57,6 +57,10 @@ import {
   resolvePriceUnits,
 } from '../products/services/price-unit.util';
 import { resolvePackSize } from '../products/services/packaging.util';
+import {
+  resolveCommittedStockUnits,
+  resolveWeightLinesStockUnits,
+} from '../products/services/weight-stock-units.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
 import { pickCostPrice } from '../orders/utils/resolve-cost-price';
@@ -1459,11 +1463,10 @@ export class PaymentsService {
 
           const product = stockProductById.get(item.product_id);
 
-          const requiredStock =
-            typeof item.stock_units_consumed === 'number' &&
-            item.stock_units_consumed > 0
-              ? item.stock_units_consumed
-              : item.quantity;
+          // Misma fórmula que el commit de inventario
+          // (`stock_units_consumed ?? quantity`): validar una cosa y descontar
+          // otra dejaba pasar o bloquear ventas por el número equivocado.
+          const requiredStock = resolveCommittedStockUnits(item);
 
           stockDemandLines.push({
             product_id: item.product_id,
@@ -3268,7 +3271,14 @@ export class PaymentsService {
           ),
           quantity: Number(item.quantity || 0),
           applied_price_tier_id: item.applied_price_tier_id ?? null,
-          stock_units_consumed: item.stock_units_consumed ?? null,
+          // El motor lee `stock_units_consumed` como "vendido por
+          // presentación" y lo usa como contador de tramos. En una línea de
+          // PESO es la pesada en unidades de stock (180 g), no paquetes: se
+          // omite para que la línea siga contando 1, como siempre.
+          stock_units_consumed:
+            Number(item.weight || 0) > 0
+              ? null
+              : (item.stock_units_consumed ?? null),
         })),
     };
 
@@ -4436,6 +4446,7 @@ export class PaymentsService {
       storeId: dtoStoreId,
       userId: user?.id ?? null,
     });
+    await this.applyWeightStockUnits(tx, snapshot, item, product.id, tierSnap);
     // Snapshot congelado de las adiciones en la línea (nested create). Solo
     // se agrega con adiciones: las líneas de hoy no cambian de forma.
     if (lineOptions.snapshots.length) {
@@ -4444,6 +4455,36 @@ export class PaymentsService {
       };
     }
     return snapshot;
+  }
+
+  /**
+   * PESO legado: el servidor convierte la pesada a la unidad de stock del
+   * producto (0,180 kg con stock en g ⇒ 180) y la deja en
+   * `stock_units_consumed`, que leen validación, commit de inventario, capas
+   * de costo, anulaciones y devoluciones. Nunca persiste 0 con peso > 0 (piso
+   * de 1 con advertencia). El número del cliente solo se contrasta. La
+   * presentación de la tarifa, si existe, sigue mandando; sin `stock_uom` el
+   * producto conserva el histórico (`null` ⇒ 1 por pesada).
+   */
+  private async applyWeightStockUnits(
+    tx: Parameters<typeof resolveWeightLinesStockUnits>[0],
+    snapshot: Record<string, unknown>,
+    item: {
+      weight?: number | string | null;
+      weight_unit?: string | null;
+      stock_units_consumed?: number | string | null;
+    },
+    productId: number,
+    tierSnap?: PosTierSnapshot | null,
+  ): Promise<void> {
+    if (!(Number(item.weight || 0) > 0)) return;
+    if (tierSnap?.stock_units_consumed != null) return;
+    const [units] = await resolveWeightLinesStockUnits(
+      tx,
+      [{ ...item, product_id: productId }],
+      this.logger,
+    );
+    snapshot.stock_units_consumed = units;
   }
 
   /**
@@ -4683,6 +4724,12 @@ export class PaymentsService {
       price_overridden_by_user_id: params.priceOverriddenByUserId || undefined,
       weight: params.item.weight || undefined,
       weight_unit: params.item.weight_unit || undefined,
+      // QUI-978 — snapshot de la unidad de venta (ver CreatePosPaymentItemDto).
+      sale_unit_code_snapshot: params.item.sale_unit_code || null,
+      sale_quantity_snapshot:
+        params.item.sale_quantity != null
+          ? new Prisma.Decimal(params.item.sale_quantity)
+          : null,
       item_type: params.itemType,
       // Multi-tarifa (Fase 5.5): snapshot persistente. `null` cuando la línea
       // no tenía applied_price_tier_id o cuando la tarifa no existe en esta
@@ -4693,6 +4740,9 @@ export class PaymentsService {
       // usa el variant *Checked* y rechaza el scalar FK directo — exige la
       // relación. Por eso lo asignamos abajo como `applied_price_tier: { connect }`.
       applied_price_tier_name_snapshot: params.tierSnap?.tier_name ?? null,
+      // La presentación de la tarifa manda. Una línea de PESO de catálogo
+      // recibe sus unidades de stock en `buildPosOrderItem`, calculadas por el
+      // servidor (`resolveWeightLinesStockUnits`).
       stock_units_consumed: params.tierSnap?.stock_units_consumed ?? null,
       // QUI-648 — escala del precio al momento de vender. Solo se guarda
       // cuando realmente hay escala: `null` es "una unidad de stock = una

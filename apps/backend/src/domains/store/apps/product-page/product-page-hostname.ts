@@ -6,7 +6,7 @@
  *   `booking`, `shop`, plus `org` and `admin`) never end the hostname, so a
  *   product called "shop" or "mi-shop" can never look like another app;
  * - a taken hostname gets a numeric suffix (`-2`, `-3`, ...), like the
- *   existing generator does on collisions;
+ *   existing generator does on collisions, then a random `-v{5}` one;
  * - the DNS label stays within 63 characters.
  */
 export const RESERVED_APP_SUFFIXES = [
@@ -21,6 +21,7 @@ export const RESERVED_APP_SUFFIXES = [
 
 const MAX_LABEL_LENGTH = 63;
 const MAX_ATTEMPTS = 50;
+const RANDOM_TAG_LENGTH = 5;
 
 /** Same normalization as `DomainGeneratorHelper.cleanSlug`. */
 export function cleanHostnameSlug(slug: string): string {
@@ -89,5 +90,44 @@ function firstFreeHostname(
     const hostname = `${fitLabel(label, suffix)}.${baseDomain}`;
     if (!isTaken(hostname)) return hostname;
   }
+  // Every numeric suffix is taken: publishing must never fail because the
+  // name is busy, so fall back to a random `-v{5}` suffix.
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const hostname = `${fitLabel(label, `-${randomTag()}`)}.${baseDomain}`;
+    if (!isTaken(hostname)) return hostname;
+  }
   return null;
+}
+
+function randomTag(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let tag = 'v';
+  for (let i = 0; i < RANDOM_TAG_LENGTH; i++) {
+    tag += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return tag;
+}
+
+/**
+ * Whether `hostname` is `natural` itself or one of its collision variants
+ * (`-2`, `-3`, ... or the random `-v{5}` fallback), the label possibly
+ * trimmed to fit 63 characters. A product page uses it to reactivate its
+ * earlier subdomain only while it still names the same product.
+ */
+export function isHostnameVariant(hostname: string, natural: string): boolean {
+  const host = hostname.toLowerCase();
+  const nat = natural.toLowerCase();
+  if (host === nat) return true;
+  const dot = nat.indexOf('.');
+  const base = nat.slice(dot);
+  if (dot < 0 || !host.endsWith(base)) return false;
+  const label = host.slice(0, host.length - base.length);
+  const natLabel = nat.slice(0, dot);
+  const match = /^(.+)-(\d+|v[a-z0-9]{5})$/.exec(label);
+  if (!match) return false;
+  const stem = match[1];
+  // A trimmed label only happens at the 63-character limit (62 when the
+  // trim left a trailing `-` that was dropped).
+  const trimmed = label.length >= MAX_LABEL_LENGTH - 1 && natLabel.startsWith(stem);
+  return natLabel === stem || trimmed;
 }

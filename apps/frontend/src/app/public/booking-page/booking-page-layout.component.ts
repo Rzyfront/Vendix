@@ -15,7 +15,7 @@ import { CartService } from '../../private/modules/ecommerce/services/cart.servi
 import { StoreUiService } from '../../private/modules/ecommerce/services/store-ui.service';
 import { StoreSeoService } from '../../private/modules/ecommerce/services/store-seo';
 import { AuthModalComponent } from '../../private/layouts/store-ecommerce/components/auth-modal/auth-modal.component';
-import { IconComponent } from '../../shared/components/icon/icon.component';
+import { BookingPageViewComponent } from './booking-page-view.component';
 import { BookingPageService } from './booking-page.service';
 
 /**
@@ -29,51 +29,17 @@ import { BookingPageService } from './booking-page.service';
 @Component({
   selector: 'app-booking-page-layout',
   standalone: true,
-  imports: [RouterModule, AuthModalComponent, IconComponent],
+  imports: [RouterModule, AuthModalComponent, BookingPageViewComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="flex min-h-screen flex-col bg-background">
-      <header class="sticky top-0 z-30 border-b border-border bg-surface/95 backdrop-blur">
-        <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4">
-          <a routerLink="/" class="flex min-w-0 items-center gap-3">
-            @if (storeLogo()) {
-              <img [src]="storeLogo()" [alt]="storeName()" class="h-9 w-auto max-w-[8rem] object-contain" />
-            }
-            <span class="truncate text-base font-semibold text-text-primary">{{ storeName() }}</span>
-          </a>
-          <nav class="flex items-center gap-1">
-            <a
-              routerLink="/"
-              class="hidden rounded-full px-3 py-2 text-sm font-medium text-text-primary hover:bg-surface-secondary sm:inline-flex"
-            >
-              Reservar
-            </a>
-            <a
-              routerLink="/cart"
-              class="relative inline-flex h-10 w-10 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary"
-              [attr.aria-label]="'Carrito, ' + cartCount() + ' producto(s)'"
-            >
-              <app-icon name="shopping-cart" [size]="22" />
-              @if (cartCount() > 0) {
-                <span
-                  class="absolute -right-0.5 -top-0.5 min-w-[1.25rem] rounded-full bg-primary px-1 text-center text-xs font-semibold leading-5 text-white"
-                >
-                  {{ cartCount() }}
-                </span>
-              }
-            </a>
-          </nav>
-        </div>
-      </header>
-
-      <main class="flex-1">
-        <router-outlet />
-      </main>
-
-      <footer class="border-t border-border py-6 text-center text-xs text-text-secondary">
-        {{ storeName() }} · Hecho con Vendix
-      </footer>
-    </div>
+    <app-booking-page-view
+      [page]="page()"
+      [storeName]="storeName()"
+      [storeLogo]="storeLogo()"
+      [cartCount]="cartCount()"
+    >
+      <router-outlet />
+    </app-booking-page-view>
 
     <app-auth-modal
       [isOpen]="authModalOpen()"
@@ -97,6 +63,9 @@ export class BookingPageLayoutComponent {
   readonly storeLogo = signal<string | null>(null);
   readonly authModalOpen = signal(false);
   readonly authModalMode = signal<'login' | 'register' | 'forgot'>('login');
+
+  /** The owner's own page; `null` keeps the layout exactly as it was. */
+  readonly page = computed(() => this.bookingPage.config()?.page ?? null);
 
   readonly cartCount = computed(() => this.cartService.cart()?.item_count ?? 0);
 

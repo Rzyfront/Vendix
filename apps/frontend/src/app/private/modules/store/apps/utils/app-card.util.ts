@@ -1,10 +1,10 @@
 import type { BadgeVariant } from '../../../../../shared/components/badge/badge.component';
 import { AppKind, AppStatus, StoreApp } from '../interfaces/store-app.interface';
+import { appViewRoute } from './app-routes.util';
 
 export type AppCardAction =
+  /** Opens the app's own view: `/admin/apps/:kind` (the online store included, apps-f2 S1). */
   | { kind: 'route'; label: string; route: string }
-  /** Opens the app's own settings inside `/admin/apps` (store home, product page, service page, booking). */
-  | { kind: 'configure'; label: string }
   | { kind: 'disabled'; label: string };
 
 export interface AppCard {
@@ -14,6 +14,8 @@ export interface AppCard {
   icon: string;
   statusLabel: string;
   statusVariant: BadgeVariant;
+  /** "Encendida" (draft or published). */
+  enabled: boolean;
   hostname: string | null;
   publicUrl: string | null;
   action: AppCardAction;
@@ -22,7 +24,7 @@ export interface AppCard {
 const STATUS: Record<AppStatus, { label: string; variant: BadgeVariant }> = {
   published: { label: 'Publicada', variant: 'success' },
   draft: { label: 'Borrador', variant: 'warning' },
-  disabled: { label: 'Desactivada', variant: 'neutral' },
+  disabled: { label: 'Apagada', variant: 'neutral' },
   not_installed: { label: 'No instalada', variant: 'neutral' },
 };
 
@@ -35,35 +37,15 @@ const ICONS: Record<AppKind, string> = {
   booking: 'bed-double',
 };
 
-/**
- * Apps that already have an admin screen. The card sends the user to it,
- * unchanged (apps-module D1/D2); the rest arrive in their own phase.
- */
-const ADMIN_SCREEN: Partial<Record<AppKind, { label: string; route: string }>> = {
-  ecommerce: { label: 'Administrar', route: '/admin/ecommerce' },
-};
-
-/**
- * Apps configured from `/admin/apps` itself (Fase 2 product page, Fase 3
- * service page, Fase 4 booking, Fase 5 store home, Fase 6 landing page: its
- * offer and domain here, its content still in "Landing de captación"). Booking only reaches this
- * point for a `hospitality` store: the industry check above disables it for
- * the rest.
- */
-const CONFIGURABLE_HERE: AppKind[] = [
-  'store_home',
-  'landing',
-  'product_page',
-  'service_page',
-  'booking',
-];
-
 /** Store types without online store (`MenuFilterService.storeTypeHiddenModules`). */
 const STORE_TYPES_WITHOUT_ECOMMERCE = ['physical', 'popup', 'kiosko'];
 
 /**
- * Card view of one app of `GET /store/apps` (apps-module S4/T6).
+ * Card view of one app of `GET /store/apps` (apps-module S4/T6, apps-vistas-f1).
  *
+ * Every card navigates to the app's own view: no app is managed from a modal
+ * (S6). The online store opens inside Apps, `/admin/apps/ecommerce`; its old
+ * `/admin/ecommerce` route keeps working.
  * The action respects the same rules as the sidebar: a store type that hides
  * `ecommerce` gets an explanation instead of a silent gap, and an app that
  * does not apply to the store industries says so.
@@ -77,6 +59,7 @@ export function toAppCard(app: StoreApp, storeType: string | null): AppCard {
     icon: ICONS[app.key] ?? 'app-window',
     statusLabel: status.label,
     statusVariant: status.variant,
+    enabled: app.enabled === true,
     hostname: app.domain?.hostname ?? null,
     publicUrl: app.public_url,
     action: resolveAction(app, storeType),
@@ -93,8 +76,9 @@ function resolveAction(app: StoreApp, storeType: string | null): AppCardAction {
   ) {
     return { kind: 'disabled', label: 'No disponible para tu tipo de tienda' };
   }
-  const screen = ADMIN_SCREEN[app.key];
-  if (screen) return { kind: 'route', ...screen };
-  if (CONFIGURABLE_HERE.includes(app.key)) return { kind: 'configure', label: 'Configurar' };
-  return { kind: 'disabled', label: 'Próximamente' };
+  return {
+    kind: 'route',
+    label: app.key === 'ecommerce' ? 'Administrar' : 'Abrir',
+    route: appViewRoute(app.key),
+  };
 }

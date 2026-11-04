@@ -1,10 +1,12 @@
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { TenantFacade } from '../../core/store';
 import type { DomainConfig } from '../../core/models/domain-config.interface';
 import { StoreHomeComponent } from './store-home.component';
+import { StoreHomeViewComponent } from './store-home-view.component';
 import { StoreHomePublic, StoreHomeService } from './store-home.service';
 
 const home = (over: Partial<StoreHomePublic> = {}): StoreHomePublic => ({
@@ -81,7 +83,7 @@ describe('StoreHomeComponent (apps-module Fase 5)', () => {
     expect(el.querySelector<HTMLImageElement>('[data-testid="store-home-logo"]')?.getAttribute('src')).toBe(
       'vlogomono.png',
     );
-    expect(fixture.componentInstance.heroBackground()).toBe('var(--color-primary)');
+    expect((fixture.debugElement.query(By.directive(StoreHomeViewComponent)).componentInstance as StoreHomeViewComponent).heroBackground()).toBe('var(--color-primary)');
   });
 
   it('si la portada no se puede leer usa la marca que trae el dominio', async () => {
@@ -104,6 +106,38 @@ describe('StoreHomeComponent (apps-module Fase 5)', () => {
       }),
     );
 
-    expect(fixture.componentInstance.heroBackground()).toBe('linear-gradient(135deg, #112233, #445566)');
+    expect((fixture.debugElement.query(By.directive(StoreHomeViewComponent)).componentInstance as StoreHomeViewComponent).heroBackground()).toBe('linear-gradient(135deg, #112233, #445566)');
+  });
+
+  it('sin página propia no hay portada propia ni tarjetas de apps (DOM de siempre)', async () => {
+    const el = await render(home({ apps: [{ kind: 'booking', name: 'Reservas', url: 'https://r.example' }] }));
+    expect(el.querySelector('app-app-page-view')).toBeNull();
+    expect(el.querySelector('[data-testid="store-home-apps"]')).toBeNull();
+    expect(el.querySelector('[data-testid="store-home-name"]')?.textContent?.trim()).toBe('Roku');
+  });
+
+  it('con página propia muestra portada, tarjetas de apps, destacados y contacto', async () => {
+    const el = await render(
+      home({
+        page: {
+          schema_version: 1,
+          hero: { title: 'Bienvenido a Roku' },
+          blocks: [
+            { id: 'apps', type: 'apps', enabled: true, props: { title: 'Nuestras apps', subtitle: 'Entra a la que necesites' } },
+            { id: 'highlights', type: 'highlights', enabled: true, props: { items: [{ title: 'Rápido', text: 'Hoy' }] } },
+            { id: 'contact', type: 'contact', enabled: true, props: { phone: '3001112233' } },
+          ],
+        },
+        apps: [{ kind: 'booking', name: 'Reservas', url: 'https://r.example' }],
+      }),
+    );
+    expect(el.querySelector('[data-testid="hero-title"]')?.textContent).toContain('Bienvenido a Roku');
+    const apps = el.querySelector('[data-testid="store-home-apps"]');
+    expect(apps?.textContent).toContain('Nuestras apps');
+    expect(apps?.textContent).toContain('Entra a la que necesites');
+    expect(apps?.querySelector('a')?.getAttribute('href')).toBe('https://r.example');
+    expect(el.querySelector('[data-block="highlights"]')).not.toBeNull();
+    expect(el.querySelector('[data-block="contact"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="store-home-login"]')?.getAttribute('href')).toBe('/auth/login');
   });
 });

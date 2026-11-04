@@ -10,6 +10,7 @@ import { manageUsersGuard } from '../../core/guards/manage-users.guard';
 import { aiAgentsSettingsGuard } from '../../core/guards/vexi-settings.guard';
 import { vexAccessGuard } from '../../core/guards/vex-access.guard';
 import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
+import { appKindGuard } from '../../private/modules/store/apps/utils/app-routes.util';
 import {
   panelUiGuard,
   firstActiveModuleRedirectGuard,
@@ -35,6 +36,27 @@ export const storeAdminRoutes: Routes = [
       import('../../private/modules/store/vex/vex-page.component').then(
         (c) => c.VexPageComponent,
       ),
+  },
+  // F6-A: preview frame of the landing editor. Loaded only inside the
+  // editor's iframe, outside the admin layout, so the public landing renders
+  // at a real device width. It fetches nothing: the editor posts the draft.
+  {
+    path: 'admin/apps/landing/preview-frame',
+    canActivate: [AuthGuard],
+    loadComponent: () =>
+      import(
+        '../../private/modules/store/apps/landing-builder/landing-preview-frame.component'
+      ).then((c) => c.LandingPreviewFrameComponent),
+  },
+  // F6-B: preview frame of the app page builders (store home, product page,
+  // service page, booking), same rules as the landing frame above.
+  {
+    path: 'admin/apps/page-preview/:kind',
+    canActivate: [AuthGuard],
+    loadComponent: () =>
+      import(
+        '../../private/modules/store/apps/page-builder/app-page-preview-frame.component'
+      ).then((c) => c.AppPagePreviewFrameComponent),
   },
   {
     path: 'admin',
@@ -603,14 +625,9 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.SegmentsComponent,
               ),
           },
-          // Landing de captación (QUI-719; módulo interno `crm`)
-          {
-            path: 'crm',
-            loadChildren: () =>
-              import(
-                '../../private/modules/store/crm/crm.routes'
-              ).then((m) => m.crmRoutes),
-          },
+          // Landing de captación (QUI-719): vive en Apps desde apps-vistas-f1
+          // (S4). La ruta vieja queda como redirect para enlaces guardados.
+          { path: 'crm', pathMatch: 'full', redirectTo: '/admin/apps/landing' },
           {
             path: ':id',
             loadComponent: () =>
@@ -720,15 +737,32 @@ export const storeAdminRoutes: Routes = [
             (c) => c.EcommerceComponent,
           ),
       },
-      // Apps catalog (odd/tasks/apps-module.md T6). Read-only: the sidebar only
-      // links it with apps.enabled, the page shows a notice when the flag is
-      // off, and the API itself requires store:apps:read.
+      // Apps (odd/tasks/apps-module.md T6; apps-vistas-f1 S3-S5). The catalog
+      // only lists; each app opens its own reloadable view `/admin/apps/:kind`,
+      // governed by panelUiGuard through MODULE_ROUTES (`apps`, and
+      // `customers_crm` for the landing). `/admin/apps/ecommerce` hosts the
+      // online store inside Apps (apps-f2 S1) and is governed by the
+      // `ecommerce` key (MODULE_ROUTE_ALIASES); `/admin/ecommerce` is intact.
       {
         path: 'apps',
-        loadComponent: () =>
-          import('../../private/modules/store/apps/apps-catalog.component').then(
-            (c) => c.AppsCatalogComponent,
-          ),
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            loadComponent: () =>
+              import('../../private/modules/store/apps/apps-catalog.component').then(
+                (c) => c.AppsCatalogComponent,
+              ),
+          },
+          {
+            path: ':kind',
+            canActivate: [appKindGuard],
+            loadComponent: () =>
+              import('../../private/modules/store/apps/pages/app-detail/app-detail.component').then(
+                (c) => c.AppDetailComponent,
+              ),
+          },
+        ],
       },
       // Settings Routes
       {

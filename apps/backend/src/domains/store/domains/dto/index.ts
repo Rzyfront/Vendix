@@ -25,7 +25,17 @@ const DOMAIN_STATUSES = [
   'failed_alias',
 ];
 
-const STORE_APP_TYPES = ['STORE_ECOMMERCE', 'STORE_LANDING', 'STORE_ADMIN'];
+// Apps F5: the app types of the apps are accepted too; the service checks
+// that the store has the app published.
+const STORE_APP_TYPES = [
+  'STORE_ECOMMERCE',
+  'STORE_LANDING',
+  'STORE_ADMIN',
+  'STORE_HOME',
+  'STORE_PRODUCT_PAGE',
+  'STORE_SERVICE_PAGE',
+  'STORE_BOOKING',
+];
 
 export class CreateStoreDomainDto {
   @IsString()

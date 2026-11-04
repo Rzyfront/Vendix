@@ -35,6 +35,8 @@ import { ReassignTableSessionDto } from './dto/table-session.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Whitelist of notification `type` values that the staff dashboard cares
@@ -116,7 +118,8 @@ export const STAFF_EVENT_WHITELIST = (type: string): boolean => {
  * so the wire status always matches the body (fixes the 201-vs-404 skew).
  */
 @Controller('store/table-sessions')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('restaurant_ops_tables')
 export class TableSessionsController {
   constructor(
     private readonly tableSessionsService: TableSessionsService,

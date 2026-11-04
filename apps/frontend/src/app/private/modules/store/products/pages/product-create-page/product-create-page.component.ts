@@ -3,6 +3,7 @@ import {
   Component,
   computed,
   effect,
+  linkedSignal,
   signal,
   inject,
   DestroyRef,
@@ -58,6 +59,7 @@ import {
   Brand,
   Product,
   ProductState,
+  SaleUomRead,
   TaxCategory,
 } from '../../interfaces';
 import { ProductsService } from '../../services/products.service';
@@ -103,6 +105,16 @@ import {
   variantPriceOverrideToSend,
 } from '../../utils/variant-price-inheritance.util';
 import { ValidationUtils } from '../../utils/validation.utils';
+import {
+  pickDefaultPrincipal,
+  priceScaleFor,
+  PriceAnchor,
+  rescalePrice,
+  rescalePriceAnchored,
+  rescaleTierOverrides,
+  countRescalableTierOverrides,
+  countFixedPerUnitTierRules,
+} from '../../utils/sale-uom-principal.util';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
 import { environment } from '../../../../../../../environments/environment';
@@ -597,6 +609,11 @@ export class ProductCreatePageComponent {
     initialValue: null as {
       general?: { industries?: string[] };
       inventory?: { low_stock_threshold?: number };
+      pos?: {
+        barcode_scanner?: {
+          variable_barcodes?: { enabled?: boolean };
+        };
+      };
     } | null,
   });
 
@@ -731,6 +748,382 @@ export class ProductCreatePageComponent {
     if (!id) return null;
     return this.uomOptions().find((u) => u.id === id) ?? null;
   });
+
+  /**
+   * QUI-978 — UoMs en las que se puede vender. Solo existen con unidad de
+   * stock: misma dimensión, una sola principal (el precio se expresa en
+   * ella). Por defecto la principal es la que ya corresponde a la escala del
+   * precio (PR #1062 ronda 2); cambiarla reescala el precio, nunca lo deja en
+   * la escala vieja. Marcadas sin principal (ninguna coincide con la escala)
+   * es transitorio: el guardado exige elegirla (ronda 3, H1).
+   */
+  readonly saleUomIds = signal<number[]>([]);
+  readonly principalSaleUomId = signal<number | null>(null);
+  /**
+   * Valor que muestra el selector de principal. Sigue a `principalSaleUomId`
+   * pero se puede reenviar sin tocarla: al cancelar el cambio, el bloqueo de
+   * `price_unit_quantity` (que depende de la principal) no parpadea
+   * (PR #1062 ronda 4, punto 5).
+   */
+  readonly principalSelectorValue = linkedSignal(() => this.principalSaleUomId());
+
+  /** Candidatas a UoM de venta: la dimensión del stock, ordenadas por factor. */
+  readonly saleUomOptions = computed<UnitOfMeasure[]>(() => {
+    const stock = this.selectedStockUom();
+    if (!stock) return [];
+    const stockFactor = Number(stock.factor_to_base);
+    return this.uomOptions()
+      .filter(
+        (u) =>
+          u.dimension === stock.dimension &&
+          // Menor que el stock = vender fracciones de un Int (el backend
+          // también lo rechaza).
+          Number(u.factor_to_base) >= stockFactor,
+      )
+      .sort(
+        (a, b) => Number(a.factor_to_base) - Number(b.factor_to_base),
+      );
+  });
+
+  /** Principal elegible: solo entre las marcadas. */
+  readonly principalSaleUomOptions = computed<SelectorOption[]>(() =>
+    this.saleUomIds().map((id) => {
+      const u = this.uomOptions().find((row) => row.id === id);
+      return {
+        value: id,
+        label: u ? `${u.name} (${u.code})` : `#${id}`,
+      };
+    }),
+  );
+
+  isSaleUomChecked(id: number): boolean {
+    return this.saleUomIds().includes(id);
+  }
+
+  toggleSaleUom(id: number, checked: boolean): void {
+    const current = this.saleUomIds().filter((row) => row !== id);
+    if (checked) current.push(id);
+    this.saleUomIds.set(current);
+    this.applyDefaultPrincipal();
+  }
+
+  /**
+   * Cambio explícito de principal. Si el producto ya tiene precio y la escala
+   * cambia, se confirma mostrando el antes y el después; al aceptar el precio
+   * se reescala, al cancelar la principal no cambia.
+   */
+  async setPrincipalSaleUom(id: number | string | null): Promise<void> {
+    const num = id == null || id === '' ? null : Number(id);
+    if (num == null || !Number.isFinite(num)) return;
+    if (num === this.principalSaleUomId()) return;
+    const change = this.describePriceRescale(num);
+    if (change) {
+      const confirmed = await this.dialogService.confirm({
+        title: 'Cambiar la unidad principal',
+        message:
+          `El precio se expresa en la unidad principal. ` +
+          `Antes: ${change.before}. Después: ${change.after}.` +
+          this.tierRescaleNotice(num),
+        confirmText: 'Cambiar y convertir el precio',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      });
+      if (!confirmed) {
+        // El selector ya muestra la elegida en su estado interno: se le
+        // reenvía la principal vigente para que no quede mintiendo. Un
+        // binding con el mismo valor no se re-emite, por eso el paso por
+        // null; va sobre el valor del selector y no sobre la principal, así
+        // la escala bloqueada no se suelta ni un ciclo.
+        const kept = this.principalSaleUomId();
+        this.principalSelectorValue.set(null);
+        setTimeout(() => this.principalSelectorValue.set(kept));
+        return;
+      }
+    }
+    if (!this.saleUomIds().includes(num)) {
+      this.saleUomIds.set([...this.saleUomIds(), num]);
+    }
+    this.commitPrincipal(num);
+  }
+
+  /** Escala de precio que impondría una unidad como principal. */
+  private priceScaleOfUom(id: number): number | null {
+    const stock = this.selectedStockUom();
+    const uom = this.uomOptions().find((u) => u.id === id);
+    if (!stock || !uom) return null;
+    return priceScaleFor(Number(uom.factor_to_base), Number(stock.factor_to_base));
+  }
+
+  private currentPriceScale(): number {
+    return Number(this.productForm?.get('price_unit_quantity')?.value ?? 1) || 1;
+  }
+
+  /** Principal por defecto: la de la escala vigente; sin coincidencia, ninguna. */
+  private applyDefaultPrincipal(): void {
+    const next = pickDefaultPrincipal(
+      this.saleUomIds(),
+      this.principalSaleUomId(),
+      this.currentPriceScale(),
+      (id) => this.priceScaleOfUom(id),
+    );
+    if (next === this.principalSaleUomId()) return;
+    if (next == null) {
+      this.principalSaleUomId.set(null);
+      return;
+    }
+    const change = this.describePriceRescale(next);
+    this.commitPrincipal(next);
+    if (change) {
+      this.toastService.info(
+        `Precio convertido a la unidad principal: ${change.before} → ${change.after}`,
+        undefined,
+        6000,
+      );
+    }
+  }
+
+  /**
+   * Fija la principal y lleva base_price y sale_price a su escala, antes de
+   * que el effect bloquee `price_unit_quantity` en el valor nuevo.
+   */
+  private commitPrincipal(id: number): void {
+    const from = this.currentPriceScale();
+    const to = this.priceScaleOfUom(id);
+    if (to != null && to !== from) {
+      for (const field of ['base_price', 'sale_price'] as const) {
+        const ctrl = this.productForm?.get(field);
+        const value = Number(ctrl?.value ?? 0);
+        if (!ctrl || !(value > 0)) continue;
+        const next = rescalePriceAnchored(
+          value,
+          from,
+          to,
+          this.priceAnchors[field],
+        );
+        this.priceAnchors[field] = next.anchor;
+        ctrl.setValue(next.value);
+      }
+      // PR #1062 ronda 5 (H2): las tarifas de cliente con precio fijo van en
+      // la misma escala; sin esto Mayorista $22.000/kg quedaba por gramo.
+      const tiers = rescaleTierOverrides(
+        this.priceTierRows(),
+        from,
+        to,
+        this.tierPriceAnchors,
+      );
+      this.tierPriceAnchors = tiers.anchors;
+      if (tiers.changed > 0) this.priceTierRows.set(tiers.rows);
+      const scaleCtrl = this.productForm?.get('price_unit_quantity');
+      scaleCtrl?.setValue(to, { emitEvent: false });
+      if (this.productForm) this.recalculateMarginFromBasePrice(this.productForm);
+      this.formUpdateTrigger.update((t) => t + 1);
+    }
+    this.principalSaleUomId.set(id);
+  }
+
+  /**
+   * Precio digitado antes de reescalar, por campo (PR #1062 ronda 4, punto 1):
+   * el ida y vuelta kg → g → kg deriva de aquí y no del valor ya redondeado
+   * a centavos. Se descarta al cambiar el stock (sus escalas son otras).
+   */
+  private priceAnchors: Record<'base_price' | 'sale_price', PriceAnchor | null> = {
+    base_price: null,
+    sale_price: null,
+  };
+
+  /** Mismo ancla, por tarifa de cliente (`tier.id`), para `override_price`. */
+  private tierPriceAnchors = new Map<number, PriceAnchor>();
+
+  /** Aviso del diálogo de principal cuando hay tarifas de cliente con precio fijo. */
+  private tierRescaleNotice(newPrincipalId: number): string {
+    const n = countRescalableTierOverrides(this.priceTierRows());
+    const converted =
+      n === 0
+        ? ''
+        : n === 1
+          ? ' También se convierte el precio fijo de 1 tarifa de cliente.'
+          : ` También se convierten los precios fijos de ${n} tarifas de cliente.`;
+    // PR #1062 ronda 6 (L2): las reglas de monto fijo por unidad sin precio
+    // propio no se convierten; su monto pasa a contar por la nueva unidad.
+    const fixed = countFixedPerUnitTierRules(this.priceTierRows());
+    if (fixed === 0) return converted;
+    const code = this.uomOptions().find(
+      (u) => Number(u.id) === newPrincipalId,
+    )?.code;
+    const unit = code ? `cada ${code}` : 'la nueva unidad';
+    return (
+      converted +
+      (fixed === 1
+        ? ` Ojo: 1 tarifa de cliente con monto fijo por unidad no se convierte; su monto queda expresado por ${unit}.`
+        : ` Ojo: ${fixed} tarifas de cliente con monto fijo por unidad no se convierten; su monto queda expresado por ${unit}.`)
+    );
+  }
+
+  /** "$25.000 por 1 kg" → "$25 por 1 g", o null si el precio no cambia. */
+  private describePriceRescale(
+    id: number,
+  ): { before: string; after: string } | null {
+    const price = Number(this.productForm?.get('base_price')?.value ?? 0);
+    const from = this.currentPriceScale();
+    const to = this.priceScaleOfUom(id);
+    if (!(price > 0) || to == null || to === from) return null;
+    const stock = this.selectedStockUom();
+    const label = (scale: number): string => {
+      const uom = this.uomOptions().find(
+        (u) => this.priceScaleOfUom(u.id) === scale,
+      );
+      return uom ? `1 ${uom.code}` : `${scale} ${stock?.code ?? ''}`.trim();
+    };
+    const money = (v: number) => this.currencyService.format(v);
+    const anchored = rescalePriceAnchored(
+      price,
+      from,
+      to,
+      this.priceAnchors.base_price,
+    );
+    // Centavos de Decimal(12,2): a escala menor el precio puede no
+    // representarse exacto. La deriva se muestra antes de aceptar.
+    const equivalent = (anchored.value * from) / to;
+    const drift =
+      Math.abs(equivalent - price) >= 0.005
+        ? ` (redondeado a centavos: equivale a ${money(equivalent)} por ${label(from)})`
+        : '';
+    return {
+      before: `${money(price)} por ${label(from)}`,
+      after: `${money(anchored.value)} por ${label(to)}${drift}`,
+    };
+  }
+
+  /**
+   * PR #1062 error 1 — escala de precio que impone la principal
+   * (`principal.factor / stock.factor`). El precio se expresa en la
+   * principal: con stock en g y principal kg la escala es 1000, nunca el 1
+   * por defecto (que cobraba el precio del kilo por cada gramo). `null` sin
+   * principal o si no es un entero de stock (el backend la rechaza).
+   */
+  readonly principalPriceScale = computed<number | null>(() => {
+    const stock = this.selectedStockUom();
+    const principalId = this.principalSaleUomId();
+    if (!stock || principalId == null) return null;
+    const principal = this.uomOptions().find((u) => u.id === principalId);
+    if (!principal) return null;
+    return priceScaleFor(
+      Number(principal.factor_to_base),
+      Number(stock.factor_to_base),
+    );
+  });
+
+  /** "1 kg = 1000 g": equivalencia de una candidata contra el stock. */
+  saleUomHint(u: UnitOfMeasure): string {
+    const stock = this.selectedStockUom();
+    if (!stock) return '';
+    const ratio = Number(u.factor_to_base) / Number(stock.factor_to_base);
+    const pretty =
+      Number.isInteger(ratio) ? String(ratio) : String(Number(ratio.toFixed(4)));
+    return `1 ${u.code} = ${pretty} ${stock.code}`;
+  }
+
+  /** Factor absoluto (`factor_to_base`) de una UoM del catálogo. */
+  private factorOfUom(id: number | null): number | null {
+    if (id == null) return null;
+    const uom = this.uomOptions().find((u) => u.id === id);
+    const factor = Number(uom?.factor_to_base);
+    return factor > 0 ? factor : null;
+  }
+
+  /**
+   * Poda las marcadas a la dimensión del stock (o las limpia sin stock).
+   *
+   * PR #1062 ronda 3 (H2) — con `prev` (principal y su factor absoluto antes
+   * de cambiar el stock), si la principal cambia el precio se convierte por
+   * la relación entre factores absolutos: las escalas relativas al stock ya
+   * no sirven porque el stock cambió (g → kg dejaba $25/g como $25/kg).
+   */
+  private pruneSaleUomsToStock(
+    prev: { id: number; factor: number } | null = null,
+  ): void {
+    const allowed = new Set(this.saleUomOptions().map((u) => u.id));
+    const kept = this.saleUomIds().filter((id) => allowed.has(id));
+    if (prev) {
+      this.priceAnchors = { base_price: null, sale_price: null };
+      this.tierPriceAnchors = new Map();
+    }
+    this.saleUomIds.set(kept);
+    if (!prev) {
+      this.applyDefaultPrincipal();
+      return;
+    }
+    const next = pickDefaultPrincipal(
+      kept,
+      kept.includes(prev.id) ? prev.id : null,
+      this.currentPriceScale(),
+      (id) => this.priceScaleOfUom(id),
+    );
+    // Escala nueva sin reescalar por escala relativa: la conversión va abajo.
+    const scale = next != null ? this.priceScaleOfUom(next) : null;
+    if (scale != null) {
+      this.productForm
+        ?.get('price_unit_quantity')
+        ?.setValue(scale, { emitEvent: false });
+    }
+    this.principalSaleUomId.set(next);
+    if (next === prev.id) return;
+
+    // Unidad en la que queda expresado el precio: la principal nueva o, sin
+    // ella, `escala × stock`.
+    // Otra dimensión (peso → volumen) no tiene conversión: se deja el precio.
+    const stock = this.selectedStockUom();
+    const prevDimension = this.uomOptions().find((u) => u.id === prev.id)
+      ?.dimension;
+    const stockFactor =
+      stock && stock.dimension === prevDimension
+        ? Number(stock.factor_to_base)
+        : NaN;
+    const nextFactor =
+      this.factorOfUom(next) ??
+      (stockFactor > 0 ? this.currentPriceScale() * stockFactor : null);
+    if (nextFactor == null || nextFactor === prev.factor) return;
+
+    const price = Number(this.productForm?.get('base_price')?.value ?? 0);
+    for (const field of ['base_price', 'sale_price']) {
+      const ctrl = this.productForm?.get(field);
+      const value = Number(ctrl?.value ?? 0);
+      if (ctrl && value > 0) {
+        ctrl.setValue(rescalePrice(value, prev.factor, nextFactor));
+      }
+    }
+    // PR #1062 ronda 5 (H2): las tarifas de cliente con precio fijo siguen
+    // la misma conversión que el precio base.
+    const tiers = rescaleTierOverrides(
+      this.priceTierRows(),
+      prev.factor,
+      nextFactor,
+      null,
+    );
+    this.tierPriceAnchors = tiers.anchors;
+    if (tiers.changed > 0) this.priceTierRows.set(tiers.rows);
+    if (this.productForm) this.recalculateMarginFromBasePrice(this.productForm);
+    this.formUpdateTrigger.update((t) => t + 1);
+    if (price > 0) {
+      const code = (id: number | null) =>
+        this.uomOptions().find((u) => u.id === id)?.code ?? '';
+      const money = (v: number) => this.currencyService.format(v);
+      const after = rescalePrice(price, prev.factor, nextFactor);
+      this.toastService.info(
+        `Cambió la unidad principal: el precio se convirtió de ${money(price)} por 1 ${code(prev.id)} a ${money(after)} por ${next != null ? `1 ${code(next)}` : 'unidad de stock'}`,
+        undefined,
+        6000,
+      );
+    }
+  }
+
+  private saleUomsPayload(): Array<{ uom_id: number; is_principal?: boolean }> {
+    const principal = this.principalSaleUomId();
+    return this.saleUomIds().map((uom_id) => ({
+      uom_id,
+      ...(uom_id === principal ? { is_principal: true } : {}),
+    }));
+  }
 
   /**
    * Escalas de precio ofrecidas: cada unidad de la misma dimensión que quepa un
@@ -945,6 +1338,14 @@ export class ProductCreatePageComponent {
 
   /** Re-run validator + recompute capacity when the stock dropdown changes. */
   onStockUomChange(): void {
+    // PR #1062 ronda 3 (H2) — factor absoluto de la principal ANTES de podar:
+    // si la poda la cambia, el precio se convierte entre factores absolutos.
+    const prevPrincipalId = this.principalSaleUomId();
+    const prevPrincipalFactor = this.factorOfUom(prevPrincipalId);
+    const prevPrincipal =
+      prevPrincipalId != null && prevPrincipalFactor != null
+        ? { id: prevPrincipalId, factor: prevPrincipalFactor }
+        : null;
     this.uomTick.update((t) => t + 1);
     // La escala del precio se expresa en la unidad de stock: cambiar de
     // milímetros a metros dejaría un "por 1.000" que ya no significa un metro.
@@ -953,6 +1354,18 @@ export class ProductCreatePageComponent {
     const scaleCtrl = this.productForm.get('price_unit_quantity');
     if (scaleCtrl && Number(scaleCtrl.value ?? 1) !== 1) {
       scaleCtrl.setValue(1);
+    }
+    // QUI-978 — sin stock (o con otra dimensión) las marcadas no valen.
+    this.pruneSaleUomsToStock(prevPrincipal);
+    // QUI-978 — en retail el selector de compra solo existe con stock: si se
+    // vacía el stock (vuelve a pieza), la compra no puede quedarse flotando
+    // oculta. En insumo ambos selectores siempre están visibles y se respeta
+    // lo que el usuario dejó.
+    if (
+      this.productForm.get('stock_uom_id')?.value == null &&
+      !this.isIngredient()
+    ) {
+      this.productForm.get('purchase_uom_id')?.setValue(null);
     }
     this.productForm.updateValueAndValidity();
   }
@@ -1044,6 +1457,24 @@ export class ProductCreatePageComponent {
     ),
     { initialValue: this.productForm.get('min_stock_level')!.value },
   );
+
+  /** `pricing_type` como señal (los computed no ven FormControl). */
+  private readonly pricingTypeValue = toSignal(
+    this.productForm.get('pricing_type')!.valueChanges.pipe(
+      startWith(this.productForm.get('pricing_type')!.value),
+    ),
+    { initialValue: this.productForm.get('pricing_type')!.value },
+  );
+
+  /** «Código de balanza»: solo con producto de peso y etiquetas variables activas. */
+  readonly showScaleCode = computed<boolean>(() => {
+    const raw = this.pricingTypeValue();
+    const pricing = typeof raw === 'object' && raw ? raw.value : raw;
+    return (
+      pricing === 'weight' &&
+      this.storeSettings()?.pos?.barcode_scanner?.variable_barcodes?.enabled === true
+    );
+  });
 
   /** `min_stock_level` del producto cargado/guardado, espejo en señal de `product`. */
   private readonly productMinStockLevel = signal<number | null>(null);
@@ -1583,6 +2014,9 @@ export class ProductCreatePageComponent {
       { stock_uom_id: null, purchase_uom_id: null },
       { emitEvent: false },
     );
+    // QUI-978 — sin stock no hay UoMs de venta que valgan.
+    this.saleUomIds.set([]);
+    this.principalSaleUomId.set(null);
     this.productForm.updateValueAndValidity({ emitEvent: false });
   }
   /** Last seen is_ingredient value (used to detect the just-flipped field). */
@@ -1682,6 +2116,11 @@ export class ProductCreatePageComponent {
         tierIdsCtrl.enable({ emitEvent: false });
       }
     }
+    // QUI-978 — un insumo puro no se vende: sin UoMs de venta.
+    if (pure) {
+      this.saleUomIds.set([]);
+      this.principalSaleUomId.set(null);
+    }
     // Promotions are stored on a sibling form/sub-form; we handle the
     // common one if present.
     const promoCtrl = form.get('promotions');
@@ -1707,6 +2146,24 @@ export class ProductCreatePageComponent {
   }
 
   constructor() {
+    // PR #1062 error 1 — con unidad principal, la escala del precio no es
+    // libre: el selector "El precio de venta es" la refleja y queda bloqueado
+    // (el backend impone el mismo valor al guardar). Sin principal vuelve a
+    // ser editable.
+    effect(() => {
+      const scale = this.principalPriceScale();
+      untracked(() => {
+        const ctrl = this.productForm?.get('price_unit_quantity');
+        if (!ctrl) return;
+        if (scale == null) {
+          if (ctrl.disabled) ctrl.enable({ emitEvent: false });
+          return;
+        }
+        if (Number(ctrl.value) !== scale) ctrl.setValue(scale);
+        if (ctrl.enabled) ctrl.disable({ emitEvent: false });
+        this.formUpdateTrigger.update((t) => t + 1);
+      });
+    });
     // Deep-link desde otros módulos: si llegan queryParams (ej. ?is_combo=true&product_type=prepared)
     // los aplicamos al form. Usamos toSignal(queryParamMap) para que sea reactivo.
     const queryParamsSignal = toSignal(this.route.queryParamMap, {
@@ -2386,6 +2843,10 @@ export class ProductCreatePageComponent {
         allow_pos_price_override: [false],
         sku: ['', [Validators.maxLength(100)]],
         barcode: ['', [Validators.maxLength(64)]],
+        scale_code: [
+          null as number | null,
+          [Validators.min(1), Validators.max(999999), Validators.pattern(/^\d+$/)],
+        ],
         stock_quantity: [0, [Validators.min(0)]],
         track_inventory: [true],
         min_stock_level: [null, [Validators.min(0)]],
@@ -2738,6 +3199,7 @@ export class ProductCreatePageComponent {
       allow_pos_price_override: product.allow_pos_price_override === true,
       sku: product.sku,
       barcode: product.barcode,
+      scale_code: product.scale_code ?? null,
       stock_quantity: product.stock_quantity,
       track_inventory: product.track_inventory !== false,
       min_stock_level: product.min_stock_level ?? null,
@@ -2800,6 +3262,25 @@ export class ProductCreatePageComponent {
 
     // Providers se auto-cargan vía effect() que observa requiresBookingSig
     // (el patchValue dispara valueChanges → espejea requires_booking en el signal)
+
+    // QUI-978 — hidratar UoMs de venta desde lo persistido (`SaleUomRead`,
+    // espejo del `SaleUomView` del backend).
+    const persistedSaleUoms: SaleUomRead[] = Array.isArray(product.sale_uoms)
+      ? product.sale_uoms
+      : [];
+    this.saleUomIds.set(
+      persistedSaleUoms
+        .map((row) => Number(row.uom_id))
+        .filter((id) => Number.isFinite(id) && id > 0),
+    );
+    const persistedPrincipal = persistedSaleUoms.find(
+      (row) => row.is_principal === true,
+    );
+    this.principalSaleUomId.set(
+      persistedPrincipal != null
+        ? Number(persistedPrincipal.uom_id)
+        : (this.saleUomIds()[0] ?? null),
+    );
 
     // Load images
     if (product.product_images && product.product_images.length > 0) {
@@ -4288,6 +4769,7 @@ export class ProductCreatePageComponent {
       sale_price: 'Precio de oferta',
       sku: 'SKU',
       barcode: 'Código de barras',
+      scale_code: 'Código de balanza',
       stock_quantity: 'Stock',
       weight: 'Peso',
       dimensions: 'Dimensiones',
@@ -4522,6 +5004,24 @@ export class ProductCreatePageComponent {
       }
     }
 
+    // QUI-978 (PR #1062 ronda 3, H1) — con unidades de venta marcadas pero
+    // ninguna coincidiendo con la escala del precio no se fija principal
+    // sola: el usuario la elige antes de guardar (el backend la exige).
+    if (this.saleUomIds().length > 0 && this.principalSaleUomId() == null) {
+      requirements.push({
+        id: 'sale-uom-principal-missing',
+        label: 'Falta la unidad principal de venta',
+        reason:
+          'Marcaste unidades de venta pero ninguna es la principal. Elige en cuál se expresa el precio.',
+        severity: 'required',
+        action: {
+          label: 'Revisar unidades de medida',
+          kind: 'scroll',
+          target: 'stock_uom_id',
+        },
+      });
+    }
+
     // (c) Stock reservado (producto simple) -------------------------------
     if (!this.hasVariants && this.totalStockReserved > 0) {
       requirements.push({
@@ -4669,7 +5169,10 @@ export class ProductCreatePageComponent {
       is_featured: !isIngredientAny && !!neutral(formValue.is_featured, false),
       allow_pos_price_override: !!neutral(formValue.allow_pos_price_override, false),
       sku: formValue.sku || undefined,
-      barcode: formValue.barcode || undefined,
+      // Vaciar el campo debe borrar el código: el PATCH ignora `undefined`, así
+      // que se envía '' y el backend lo guarda como null (create y update).
+      barcode: formValue.barcode?.trim() ?? '',
+      scale_code: this.resolveScaleCodePayload(formValue),
       track_inventory: !!formValue.track_inventory,
       requires_serial_numbers: !!formValue.requires_serial_numbers,
       stock_quantity: formValue.track_inventory
@@ -4794,6 +5297,8 @@ export class ProductCreatePageComponent {
         1,
         Number(formValue.price_unit_quantity ?? 1) || 1,
       ),
+      // QUI-978 — UoMs de venta (un insumo puro no se vende: lista vacía).
+      sale_uoms: neutral(this.saleUomsPayload(), []),
       // Se envía explícitamente null cuando queda vacía, no se omite: omitirla
       // en una edición dejaría pegada la cuenta anterior aunque el operador la
       // haya limpiado, y el ingreso seguiría acreditándose donde ya no debe.
@@ -5033,11 +5538,32 @@ export class ProductCreatePageComponent {
     });
   }
 
+  /**
+   * `scale_code` viaja como entero o `null` (vacío / oculto / no es de peso).
+   * Null explícito limpia el código al editar.
+   */
+  private resolveScaleCodePayload(formValue: {
+    scale_code?: unknown;
+    pricing_type?: unknown;
+  }): number | null {
+    const pricing =
+      typeof formValue.pricing_type === 'object' && formValue.pricing_type
+        ? (formValue.pricing_type as { value?: string }).value
+        : formValue.pricing_type;
+    if (pricing !== 'weight') return null;
+    const raw = formValue.scale_code;
+    if (raw === null || raw === undefined || raw === '') return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 1 && n <= 999999 ? n : null;
+  }
+
   getErrorMessage(fieldName: string): string {
     const field = this.productForm.get(fieldName);
     if (!field || !field.errors || !field.touched) return '';
     if (field.errors['required']) return 'Campo obligatorio';
     if (field.errors['min']) return `Valor mínimo: ${field.errors['min'].min}`;
+    if (field.errors['max']) return `Valor máximo: ${field.errors['max'].max}`;
+    if (field.errors['pattern'] && fieldName === 'scale_code') return 'Debe ser un número entero';
     // QUI-504: el slug se valida con ValidationUtils.slugValidator (regex
     // /^[a-z0-9-]+$/). Si el operador pega algo con espacios, mayúsculas o
     // caracteres raros, mostramos mensaje específico en lugar del genérico.

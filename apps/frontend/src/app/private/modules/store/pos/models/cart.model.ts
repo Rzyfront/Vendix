@@ -1,3 +1,4 @@
+import type { WeighedAs } from '../utils/line-units.util';
 import { Product, PosProductVariant } from '../services/pos-product.service';
 import { PosCustomer } from '../models/customer.model';
 import type { PosShippingMethod } from './shipping.model';
@@ -39,8 +40,18 @@ export interface CartItem {
   // cambien de lectura; los productos que declaran unidad de stock ya NO pasan
   // por acá — ver `sale_unit_code` abajo.
   weight?: number;
-  weight_unit?: 'kg' | 'g' | 'lb';
+  /** QUI-978 — unidad en la que se digitó/pesó (`weight` va en ella). */
+  weight_unit?: string;
   is_weight_product?: boolean;
+  /** PR #1062 ronda 4 — unidad elegida al pesar, solo para el tiquete. */
+  weighed_as?: WeighedAs | null;
+  /**
+   * Unidades de STOCK por cada unidad de `weight_unit` (kg con stock en g ⇒
+   * 1000), para descontar la pesada real y no 1 por línea. Solo existe si el
+   * producto declara unidad de stock; `null` = comportamiento histórico. Ver
+   * `resolveStockUnitsConsumed`.
+   */
+  stock_units_per_weight_unit?: number | null;
   // ===== QUI-648 · captura por unidad de venta =====
   // `quantity` vive SIEMPRE en la unidad mínima del producto (mm, g, ml,
   // unidad), igual que `order_items.quantity`. Estos tres campos son los que
@@ -50,6 +61,12 @@ export interface CartItem {
   sale_unit_code?: string | null;
   /** Unidades mínimas que consume UNA unidad de venta (1000 mm por metro). */
   stock_units_per_sale_unit?: number | null;
+  /**
+   * QUI-978 — unidad en la que está expresado el precio publicado (la de
+   * captura automática). Cuando se pesa en otra, "Base: $X/…" usa esta para
+   * no mentir. Ausente = se usa `sale_unit_code` (comportamiento histórico).
+   */
+  price_unit_code?: string | null;
   /** Escala del precio publicado (`products.price_unit_quantity`). */
   price_unit_quantity?: number | null;
   /**
@@ -335,14 +352,33 @@ export interface AddToCartRequest {
   notes?: string;
   variant?: PosProductVariant;
   // Weight product fields (camino legado; ver `CartItem.weight`).
+  // QUI-978: `weight` viaja en la unidad del precio (la principal) y
+  // `weight_unit` la nombra, para que `resolveLineUnits` (frontend y backend)
+  // multiplique bien. Lo digitado en otra unidad se convierte antes de mandar.
   weight?: number;
-  weight_unit?: 'kg' | 'g' | 'lb';
+  weight_unit?: string;
+  /** PR #1062 ronda 4 — unidad y cantidad elegidas ("300 g") para el tiquete. */
+  weighed_as?: WeighedAs | null;
+  /** Ver `CartItem.stock_units_per_weight_unit`. */
+  stock_units_per_weight_unit?: number | null;
   /**
    * QUI-648 — la línea se capturó pesando. `quantity` ya viene convertido a la
    * unidad mínima (2,35 kg de un producto en gramos ⇒ 2350), así que la línea
    * NO necesita `weight`.
    */
   capturedByScale?: boolean;
+  /**
+   * QUI-978 — unidad de venta ELEGIDA por el cajero (puede diferir de la
+   * automática del config). Sin esto la línea anota la automática.
+   * `price_unit_code` es la unidad en la que está expresado el precio (la
+   * automática de captura): la línea "Base: $X/kg" la usa para no mentir
+   * cuando se pesó en otra unidad.
+   */
+  sale_unit_override?: {
+    code: string;
+    stock_units_per_sale_unit: number;
+    price_unit_code?: string | null;
+  } | null;
   /**
    * QUI-648 — presentación pistoleada. El código de barras pertenece a una
    * tarifa `sale_unit` del producto: la línea entra con esa presentación ya
@@ -389,6 +425,13 @@ export interface UpdateCartItemRequest {
   itemId: string;
   quantity: number;
   notes?: string;
+  /**
+   * QUI-978 — al reeditar una línea medida en otra unidad, la línea anota
+   * la nueva unidad y su factor. Ausentes = se conservan los actuales.
+   */
+  sale_unit_code?: string | null;
+  stock_units_per_sale_unit?: number | null;
+  price_unit_code?: string | null;
 }
 
 export interface UpdateCartItemPriceRequest {

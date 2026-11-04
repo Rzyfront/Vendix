@@ -787,6 +787,11 @@ export const APP_MODULES: {
           description: 'M\u00e9todos de pago aceptados',
         },
         {
+          key: 'settings_print_formats',
+          label: 'Formatos de Impresi\u00f3n',
+          description: 'Plantillas de impresi\u00f3n de documentos',
+        },
+        {
           key: 'settings_appearance',
           label: 'Apariencia',
           description: 'Personalizaci\u00f3n visual',

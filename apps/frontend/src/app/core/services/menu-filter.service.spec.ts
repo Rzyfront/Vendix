@@ -12,6 +12,18 @@ import {
 import { APP_MODULES } from '../../shared/constants/app-modules.constant';
 import { getModulesHiddenByIndustries } from '../../shared/constants/industry-modules.constant';
 import { BehaviorSubject, firstValueFrom, of, take } from 'rxjs';
+import { AccessGateService } from './access-gate.service';
+
+/** Access gate stub (apps-f4): audit mode, industries from the session. */
+function accessGateStub() {
+  return {
+    mode: signal<'audit' | 'enforce'>('audit'),
+    industries: signal<string[] | null>(null),
+    orgPanelUi: signal<Record<string, boolean> | null>(null),
+    report: jasmine.createSpy('report'),
+    currentApp: () => 'STORE_ADMIN' as const,
+  };
+}
 
 /**
  * Collects every key in the STORE_ADMIN tree, parents and children alike.
@@ -128,6 +140,7 @@ describe('MenuFilterService.diagnose', () => {
       providers: [
         MenuFilterService,
         { provide: AuthFacade, useValue: authFacade },
+        { provide: AccessGateService, useValue: accessGateStub() },
         {
           provide: SubscriptionAccessService,
           useValue: { canUseAI: () => () => true },
@@ -388,6 +401,7 @@ describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
       providers: [
         MenuFilterService,
         { provide: AuthFacade, useValue: authFacade },
+        { provide: AccessGateService, useValue: accessGateStub() },
         {
           provide: SubscriptionAccessService,
           useValue: { canUseAI: () => () => true },
@@ -499,6 +513,7 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
     };
     TestBed.configureTestingModule({ providers: [
       MenuFilterService, { provide: AuthFacade, useValue: authFacade },
+        { provide: AccessGateService, useValue: accessGateStub() },
       { provide: SubscriptionAccessService, useValue: { canUseAI: () => () => true } },
     ] });
     service = TestBed.inject(MenuFilterService);
@@ -510,32 +525,33 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
 
   it('shows only a received-documents route when fiscal area is inactive and the exact reader permission is present', async () => {
     const result = await filteredOnce();
-    expect(result[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal', '/admin/invoicing/received-documents']);
+    // Operación fiscal needs an active area (Finanzas stage gate), so only the inbox remains.
+    expect(result[0]?.children?.map((child) => child.route)).toEqual(['/admin/invoicing/received-documents']);
     expect(service.diagnose(buildTree()[0].children![1]).visible).toBe(true);
     expect(service.isMenuItemVisible(buildTree()[0].children![1])).toBe(true);
-    expect(result[0].children?.[1]).toEqual(jasmine.objectContaining({ label: 'Facturación', _fiscalReadFallbackActive: true, alwaysVisible: false }) as any);
-    expect(result[0].children?.[1]?.requiresFiscalArea).toBeUndefined();
-    expect(result[0].children?.[1]?.requiredFiscalScope).toBeUndefined();
+    expect(result[0].children?.[0]).toEqual(jasmine.objectContaining({ label: 'Facturación', _fiscalReadFallbackActive: true, accessAuditOnly: false }) as any);
+    expect(result[0].children?.[0]?.requiresFiscalArea).toBeUndefined();
+    expect(result[0].children?.[0]?.requiredFiscalScope).toBeUndefined();
   });
 
   it('hides the fallback when permission is absent, even if panel_ui is enabled', async () => {
     permissions$.next([]);
     const result = await filteredOnce();
-    expect(result[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal']);
+    expect(result[0]?.children?.map((child) => child.route)).toBeUndefined();
     expect(service.diagnose(buildTree()[0].children![1]).blockedBy).toBe('permission');
   });
 
   it('requires raw per-user panel_ui true and preserves the store-wide ceiling', async () => {
     panelUi$.next({ invoicing: false, accounting: true, fiscal_operations: true });
     panelUiState.set({ invoicing: false, accounting: true, fiscal_operations: true });
-    expect((await filteredOnce())[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal']);
+    expect((await filteredOnce())[0]?.children?.map((child) => child.route)).toBeUndefined();
     expect(service.diagnose(buildTree()[0].children![1]).blockedBy).toBe('user_panel_ui');
 
     panelUi$.next({ invoicing: true, accounting: true, fiscal_operations: true });
     panelUiState.set({ invoicing: true, accounting: true, fiscal_operations: true });
     settingsState.set({ panel_ui: { STORE_ADMIN: { invoicing: false } } });
     settings$.next({ panel_ui: { STORE_ADMIN: { invoicing: false } } });
-    expect((await filteredOnce())[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal']);
+    expect((await filteredOnce())[0]?.children?.map((child) => child.route)).toBeUndefined();
     expect(service.diagnose(buildTree()[0].children![1]).blockedBy).toBe('store_panel_ui');
   });
 
@@ -565,7 +581,7 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
     await firstValueFrom(service.filterMenuItems(buildTree()).pipe(take(1)));
     permissions$.next([]);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(observed[observed.length - 1]).toEqual(['/admin/fiscal']);
+    expect(observed[observed.length - 1]).toEqual([]);
     expect(observed.some((routes) => routes.includes('/admin/accounting'))).toBe(false);
     subscription.unsubscribe();
   });
@@ -573,7 +589,7 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
   it('hiddenWhenFiscalAreaActive: shows the activation entry while the area is WIP and hides it once ACTIVE', async () => {
     const activation: MenuItem = {
       label: 'Activar facturación electrónica', icon: 'zap', route: '/admin/invoicing/activation',
-      alwaysVisible: true, requiredFiscalScope: 'STORE', hiddenWhenFiscalAreaActive: 'invoicing',
+      accessAuditOnly: true, requiredFiscalScope: 'STORE', hiddenWhenFiscalAreaActive: 'invoicing',
     };
     const tree: MenuItem[] = [{ label: 'Fiscal', icon: 'landmark', children: [activation] }];
     const routes = async () => (await firstValueFrom(service.filterMenuItems(tree).pipe(take(1))))[0]?.children?.map((c) => c.route);
@@ -593,9 +609,9 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
     expect(await routes()).toEqual(['/admin/invoicing/activation']);
   });
 
-  it('H0.5: an alwaysVisible group with every child hidden is not rendered', async () => {
+  it('H0.5: an accessAuditOnly group with every child hidden is not rendered', async () => {
     const tree: MenuItem[] = [{
-      label: 'Configuración', icon: 'settings', alwaysVisible: true,
+      label: 'Configuración', icon: 'settings', accessAuditOnly: true,
       children: [{ label: 'General', icon: 'circle', route: '/admin/settings/general' }],
     }];
     const labels = async () => (await firstValueFrom(service.filterMenuItems(tree).pipe(take(1)))).map((i) => i.label);
@@ -677,6 +693,7 @@ describe('MenuFilterService — apps-module (keys opt-out y catálogo Apps)', ()
     };
     TestBed.configureTestingModule({ providers: [
       MenuFilterService, { provide: AuthFacade, useValue: authFacade },
+        { provide: AccessGateService, useValue: accessGateStub() },
       { provide: SubscriptionAccessService, useValue: { canUseAI: () => () => true } },
     ] });
     service = TestBed.inject(MenuFilterService);
@@ -689,6 +706,16 @@ describe('MenuFilterService — apps-module (keys opt-out y catálogo Apps)', ()
       expect(MODULE_ROUTES[key]).withContext(key).toBeDefined();
       expect(DEFAULT_ON_PANEL_KEYS).toContain(key);
     }
+  });
+
+  it('apps-f2 S1: /admin/apps/ecommerce lo gobierna `ecommerce`; el resto de /admin/apps/:kind, `apps`', () => {
+    expect(service.resolveKeysForRoute('/admin/apps/ecommerce')).toEqual(['ecommerce']);
+    expect(service.resolveKeysForRoute('/admin/apps/booking')).toEqual(['apps']);
+    expect(service.resolveKeysForRoute('/admin/apps/landing')).toEqual(['customers_crm']);
+    expect(service.resolveKeysForRoute('/admin/apps')).toEqual(['apps']);
+    // /admin/ecommerce intacta, y Vexi/el catálogo siguen con la ruta canónica.
+    expect(service.resolveKeysForRoute('/admin/ecommerce')).toEqual(['ecommerce']);
+    expect(MODULE_ROUTES['ecommerce']).toBe('/admin/ecommerce');
   });
 
   it('T0: un panel_ui guardado sin las keys nuevas sigue viendo Bandeja, Pipeline, Tareas y Segmentos', async () => {
@@ -752,5 +779,159 @@ describe('MenuFilterService — apps-module (keys opt-out y catálogo Apps)', ()
     expect(service.getModuleKey('Tienda en línea')).toBe('ecommerce');
     expect(service.getModuleKey('Landing de captación')).toBe('customers_crm');
     expect(service.getModuleKey('CRM')).toBe('customers_crm');
+  });
+});
+
+/**
+ * apps-f4 S4: `canSeeKey = user ∧ store ∧ industry` and `applyAccessGate`.
+ * Audit mode never changes the pre-F4 verdict; it only reports. The flag
+ * (`enforce`) blocks on the industry layer, owner included.
+ */
+describe('MenuFilterService.canSeeKey / applyAccessGate (apps-f4 S4)', () => {
+  let service: MenuFilterService;
+  let gate: ReturnType<typeof accessGateStub>;
+  let owner: boolean;
+  let userKeys: string[];
+  let storeSettings: WritableSignal<any>;
+  let industries: WritableSignal<string[]>;
+
+  beforeEach(() => {
+    owner = false;
+    userKeys = ['restaurant_ops_recipes', 'pos', 'inventory'];
+    storeSettings = signal<any>(null);
+    industries = signal<string[]>(['retail']);
+    gate = accessGateStub();
+    const authFacade = {
+      isOwner: () => owner,
+      isModuleVisible: (key: string) => userKeys.includes(key),
+      currentAppPanelUi: signal<Record<string, boolean> | null>(null),
+      storeSettings,
+      userIndustries: industries,
+      fiscalScope: signal('STORE'),
+      operatingScope: signal('STORE'),
+      activeFiscalAreas: signal<string[]>([]),
+      userStoreType: signal<string | null>('physical'),
+    };
+    TestBed.configureTestingModule({
+      providers: [
+        MenuFilterService,
+        { provide: AuthFacade, useValue: authFacade },
+        { provide: AccessGateService, useValue: gate },
+        { provide: SubscriptionAccessService, useValue: { canUseAI: () => () => true } },
+      ],
+    });
+    service = TestBed.inject(MenuFilterService);
+  });
+
+  it('capa industria: recetas en una tienda retail queda negada por industria', () => {
+    expect(service.canSeeKey('restaurant_ops_recipes')).toEqual(
+      jasmine.objectContaining({ allowed: false, layer: 'industry' }),
+    );
+    industries.set(['retail', 'restaurant']);
+    expect(service.canSeeKey('restaurant_ops_recipes').allowed).toBeTrue();
+  });
+
+  it('capa usuario: un no-owner sin la key en su panel queda negado por usuario', () => {
+    userKeys = [];
+    expect(service.canSeeKey('pos').layer).toBe('user');
+  });
+
+  it('capa tienda: store_panel_ui en false niega aunque el usuario la tenga', () => {
+    storeSettings.set({ panel_ui: { STORE_ADMIN: { pos: false } } });
+    expect(service.canSeeKey('pos').layer).toBe('store');
+  });
+
+  it('owner: pasa usuario y tienda en la URL, pero ya no salta la industria', () => {
+    owner = true;
+    userKeys = [];
+    storeSettings.set({ panel_ui: { STORE_ADMIN: { pos: false } } });
+    expect(service.canSeeKey('pos', 'url').allowed).toBeTrue();
+    expect(service.canSeeKey('restaurant_ops_recipes', 'url').layer).toBe('industry');
+  });
+
+  it('usa las industrias del backend cuando ya cargaron', () => {
+    gate.industries.set(['restaurant']);
+    expect(service.canSeeKey('restaurant_ops_recipes').allowed).toBeTrue();
+  });
+
+  it('auditoría: deja pasar y registra would_block con la key y la capa', () => {
+    const allowed = service.applyAccessGate(
+      ['restaurant_ops_recipes'], true, 'url', '/admin/restaurant-ops/recipes',
+    );
+    expect(allowed).toBeTrue();
+    expect(gate.report).toHaveBeenCalledOnceWith({
+      key: 'restaurant_ops_recipes',
+      decision: 'would_block',
+      layer: 'industry',
+      surface: 'url',
+      route: '/admin/restaurant-ops/recipes',
+    });
+  });
+
+  it('auditoría en sidebar registra would_hide; una capa no-industria nunca bloquea', () => {
+    gate.mode.set('enforce');
+    userKeys = [];
+    expect(service.applyAccessGate(['pos'], true, 'sidebar')).toBeTrue();
+    expect(gate.report).toHaveBeenCalledOnceWith(
+      jasmine.objectContaining({ key: 'pos', decision: 'would_hide', layer: 'user' }),
+    );
+  });
+
+  it('flag encendido: bloquea por industria (owner incluido) y registra blocked', () => {
+    gate.mode.set('enforce');
+    owner = true;
+    expect(service.applyAccessGate(['restaurant_ops_recipes'], true, 'url')).toBeFalse();
+    expect(gate.report).toHaveBeenCalledOnceWith(
+      jasmine.objectContaining({ decision: 'blocked', layer: 'industry' }),
+    );
+  });
+
+  it('nunca amplía: un veredicto pre-F4 negado sigue negado y no registra', () => {
+    expect(service.applyAccessGate(['pos'], false, 'url')).toBeFalse();
+    expect(gate.report).not.toHaveBeenCalled();
+  });
+
+  it('aviso de industria nombra la industria real', () => {
+    expect(service.industryBlockMessage(['restaurant_ops_recipes'])).toBe(
+      'No disponible en tu industria. Este módulo aplica solo a tiendas de restaurante.',
+    );
+    expect(service.industryBlockMessage(['orders_service_stations'])).toBe(
+      'No disponible en tu industria. Este módulo aplica solo a tiendas de servicios u hotelería.',
+    );
+  });
+
+  it('B1: un ítem accessAuditOnly sigue resolviéndose por su label en los caminos pre-F4', () => {
+    // Pre-F4 «Contabilidad» de Reportes (sin key) mapeaba a `accounting` y,
+    // por ir antes que Fiscal, era el ítem que el guard diagnosticaba.
+    const tree: MenuItem[] = [
+      {
+        label: 'Reportes', icon: '',
+        children: [{
+          label: 'Contabilidad', icon: '', route: '/admin/reports/accounting',
+          panelUiKey: 'reports_accounting', accessAuditOnly: true,
+        }],
+      },
+      {
+        label: 'Fiscal', icon: '',
+        children: [{
+          label: 'Contabilidad', icon: '', route: '/admin/accounting',
+          panelUiKey: 'accounting', requiredFiscalScope: 'STORE',
+        }],
+      },
+    ];
+    const found = service.findItemByModuleKey(tree, 'accounting');
+    expect(found?.route).toBe('/admin/reports/accounting');
+    userKeys = [];
+    expect(service.diagnose(found!).blockedBy).toBe('user_panel_ui');
+  });
+
+  it('applyRouteGate resuelve la key de una ruta nueva solo-auditoría', () => {
+    expect(service.resolveGateKeysForRoute('/admin/restaurant-ops/recipes')).toContain(
+      'restaurant_ops_recipes',
+    );
+    expect(service.applyRouteGate('/admin/restaurant-ops/recipes', true, 'vexi')).toBeTrue();
+    expect(gate.report).toHaveBeenCalledWith(
+      jasmine.objectContaining({ decision: 'would_block', surface: 'vexi' }),
+    );
   });
 });
