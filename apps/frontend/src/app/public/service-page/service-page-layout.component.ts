@@ -15,6 +15,10 @@ import { CartService } from '../../private/modules/ecommerce/services/cart.servi
 import { StoreUiService } from '../../private/modules/ecommerce/services/store-ui.service';
 import { StoreSeoService } from '../../private/modules/ecommerce/services/store-seo';
 import { AuthModalComponent } from '../../private/layouts/store-ecommerce/components/auth-modal/auth-modal.component';
+import {
+  effectiveMode,
+  modeSells,
+} from '../../private/modules/store/apps/templates/app-page.types';
 import { IconComponent } from '../../shared/components/icon/icon.component';
 import { ServicePageService } from './service-page.service';
 
@@ -35,8 +39,8 @@ import { ServicePageService } from './service-page.service';
       <header class="sticky top-0 z-30 border-b border-border bg-surface/95 backdrop-blur">
         <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4">
           <a routerLink="/" class="flex min-w-0 items-center gap-3">
-            @if (storeLogo()) {
-              <img [src]="storeLogo()" [alt]="storeName()" class="h-9 w-auto max-w-[8rem] object-contain" />
+            @if (headerLogo()) {
+              <img [src]="headerLogo()" [alt]="storeName()" class="h-9 w-auto max-w-[8rem] object-contain" />
             }
             <span class="truncate text-base font-semibold text-text-primary">{{ storeName() }}</span>
           </a>
@@ -47,20 +51,22 @@ import { ServicePageService } from './service-page.service';
             >
               Servicios
             </a>
-            <a
-              routerLink="/cart"
-              class="relative inline-flex h-10 w-10 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary"
-              [attr.aria-label]="'Carrito, ' + cartCount() + ' producto(s)'"
-            >
-              <app-icon name="shopping-cart" [size]="22" />
-              @if (cartCount() > 0) {
-                <span
-                  class="absolute -right-0.5 -top-0.5 min-w-[1.25rem] rounded-full bg-primary px-1 text-center text-xs font-semibold leading-5 text-white"
-                >
-                  {{ cartCount() }}
-                </span>
-              }
-            </a>
+            @if (showCartLink()) {
+              <a
+                routerLink="/cart"
+                class="relative inline-flex h-10 w-10 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary"
+                [attr.aria-label]="'Carrito, ' + cartCount() + ' producto(s)'"
+              >
+                <app-icon name="shopping-cart" [size]="22" />
+                @if (cartCount() > 0) {
+                  <span
+                    class="absolute -right-0.5 -top-0.5 min-w-[1.25rem] rounded-full bg-primary px-1 text-center text-xs font-semibold leading-5 text-white"
+                  >
+                    {{ cartCount() }}
+                  </span>
+                }
+              </a>
+            }
           </nav>
         </div>
       </header>
@@ -96,6 +102,15 @@ export class ServicePageLayoutComponent {
   readonly storeLogo = signal<string | null>(null);
   readonly authModalOpen = signal(false);
   readonly authModalMode = signal<'login' | 'register' | 'forgot'>('login');
+
+  /** The owner's own page; `null` keeps the layout exactly as it was. */
+  readonly page = computed(() => this.servicePage.config()?.page ?? null);
+  readonly headerLogo = computed(() => this.page()?.brand?.logo_url || this.storeLogo());
+  /** Cart link only when the page sells (always, with no saved page). */
+  readonly showCartLink = computed(() => {
+    const page = this.page();
+    return !page || (modeSells(effectiveMode('service_page', page)) && page.sales?.show_cart !== false);
+  });
 
   readonly cartCount = computed(() => this.cartService.cart()?.item_count ?? 0);
 

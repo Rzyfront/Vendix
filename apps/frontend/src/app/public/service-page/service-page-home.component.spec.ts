@@ -23,6 +23,20 @@ class StubComplementsComponent {
   readonly compact = input(false);
 }
 
+const ownPage = (over: Record<string, unknown> = {}) =>
+  ({
+    schema_version: 1,
+    mode: 'both',
+    hero: { title: 'Cuida tu piel', button_label: 'Ver servicios' },
+    seo: { title: 'SEO propio', description: 'Desc propia' },
+    blocks: [
+      { id: 'services', type: 'services', enabled: true, props: { title: 'Nuestro menú', subtitle: 'Elige con calma', show_price: false } },
+      { id: 'faq', type: 'faq', enabled: true, props: { items: [{ question: 'Pregunta?', answer: 'Sí' }] } },
+      { id: 'products', type: 'products', enabled: true, props: { title: 'Lleva a casa' } },
+    ],
+    ...over,
+  }) as ServicePagePublicConfig['page'];
+
 const facial = { id: 1, name: 'Facial', slug: 'facial' };
 const spa = { id: 2, name: 'Spa', slug: 'spa' };
 const service = (id: number, name: string, over: Partial<EcommerceProduct> = {}) =>
@@ -139,5 +153,48 @@ describe('ServicePageHomeComponent (apps-module Fase 3)', () => {
 
     expect(fixture.nativeElement.querySelector('[data-testid="service-page-unavailable"]')).not.toBeNull();
     expect(catalog.getProducts).not.toHaveBeenCalled();
+  });
+
+  it('sin página propia no hay portada ni bloques propios (DOM de siempre)', async () => {
+    catalog.getProducts.and.returnValue(of({ data: [service(10, 'Limpieza')] } as any));
+    await render({ service_ids: [10], featured_service_ids: [], product_ids: [] });
+
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('app-app-page-view')).toBeNull();
+    expect(el.querySelector('#app-page-main')).toBeNull();
+    expect(el.querySelector('h1')?.textContent).toContain('Servicios de Spa Roku');
+    expect(el.querySelector('[data-book="10"]')?.textContent).toContain('Reservar');
+  });
+
+  it('con página propia muestra portada, título del bloque, sin precio y los demás bloques después', async () => {
+    catalog.getProducts.and.returnValue(of({ data: [service(10, 'Limpieza')] } as any));
+    await render({ service_ids: [10], featured_service_ids: [], product_ids: [7], page: ownPage() });
+
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid="hero-title"]')?.textContent).toContain('Cuida tu piel');
+    expect(el.querySelector('h2')?.textContent).toContain('Nuestro menú');
+    expect(text()).toContain('Elige con calma');
+    expect(el.querySelector('[data-service]')?.textContent).not.toContain('$50000');
+    const list = el.querySelector('[data-testid="service-list"]')!;
+    expect(list.compareDocumentPosition(el.querySelector('[data-block="faq"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(el.querySelector('[data-testid="service-page-products"]')?.textContent).toContain('Lleva a casa:7');
+    expect(seo.apply).toHaveBeenCalledWith(
+      jasmine.anything(),
+      jasmine.objectContaining({ title: 'SEO propio', description: 'Desc propia' }),
+    );
+  });
+
+  it('en modo informativo oculta los productos y las reservas', async () => {
+    catalog.getProducts.and.returnValue(of({ data: [service(10, 'Limpieza')] } as any));
+    await render({ service_ids: [10], featured_service_ids: [], product_ids: [7], page: ownPage({ mode: 'info' }) });
+    const router = TestBed.inject(Router);
+    spyOn(router, 'navigate').and.resolveTo(true);
+
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid="service-page-products"]')).toBeNull();
+    const button = el.querySelector('[data-book="10"]') as HTMLButtonElement;
+    expect(button.textContent).toContain('Ver servicio');
+    button.click();
+    expect(router.navigate).toHaveBeenCalledWith(['/products', 's-10']);
   });
 });

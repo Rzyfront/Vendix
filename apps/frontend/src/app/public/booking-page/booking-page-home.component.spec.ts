@@ -107,4 +107,45 @@ describe('BookingPageHomeComponent (apps-module Fase 4)', () => {
     );
     expect(router.navigate).not.toHaveBeenCalled();
   });
+
+  const dates = { arrival_date: '2026-11-03', departure_date: '2026-11-04' };
+  const ownPage = (over: Record<string, unknown> = {}) =>
+    ({
+      schema_version: 1,
+      mode: 'both',
+      hero: { title: 'Descansa en Sol' },
+      blocks: [
+        { id: 'search', type: 'search', enabled: true, props: { title: 'Encuentra tu cuarto', subtitle: 'Fechas y huéspedes' } },
+        { id: 'checkin_info', type: 'checkin_info', enabled: true, props: { text: 'Registra a tus huéspedes antes.' } },
+        { id: 'amenities', type: 'amenities', enabled: true, props: { items: ['Wifi'] } },
+        { id: 'products', type: 'products', enabled: true, props: { title: 'Extras' } },
+      ],
+      ...over,
+    }) as BookingPagePublicConfig['page'];
+
+  it('sin página propia no hay portada ni bloques propios (DOM de siempre)', async () => {
+    const el = await render({ product_ids: [] }, dates);
+    expect(el.querySelector('app-app-page-view')).toBeNull();
+    expect(el.querySelector('#app-page-main')).toBeNull();
+    expect(el.querySelector('[data-testid="booking-page-checkin-info"]')?.textContent).toContain('Check-in en línea.');
+  });
+
+  it('con página propia muestra portada, títulos y texto propios y los bloques después de la búsqueda', async () => {
+    const el = await render({ product_ids: [3], page: ownPage() }, dates);
+    expect(el.querySelector('[data-testid="hero-title"]')?.textContent).toContain('Descansa en Sol');
+    expect(el.textContent).toContain('Encuentra tu cuarto');
+    expect(el.textContent).toContain('Fechas y huéspedes');
+    expect(el.querySelector('[data-testid="booking-page-checkin-info"]')?.textContent).toContain(
+      'Registra a tus huéspedes antes.',
+    );
+    const search = el.querySelector('[data-testid="pms-search"]')!;
+    expect(search.compareDocumentPosition(el.querySelector('[data-block="amenities"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(el.querySelector('[data-testid="booking-page-products"]')).not.toBeNull();
+  });
+
+  it('en modo solo reserva oculta los productos', async () => {
+    const el = await render({ product_ids: [3], page: ownPage({ mode: 'booking' }) }, dates);
+    expect(el.querySelector('[data-testid="booking-page-products"]')).toBeNull();
+    expect(el.querySelector('[data-testid="pms-search"]')).not.toBeNull();
+  });
 });

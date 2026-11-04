@@ -1,7 +1,7 @@
 import { Routes } from '@angular/router';
 import { AuthGuard } from '../../core/guards/auth.guard';
 import { mesaCartGuard } from '../../core/guards/mesa-cart.guard';
-import { productPageRootGuard } from '../../public/product-page/product-page.guard';
+import { productPageRootGuard, productPageSalesGuard } from '../../public/product-page/product-page.guard';
 
 /**
  * STORE_PRODUCT_PAGE public routes: a single-product storefront on its own
@@ -47,7 +47,7 @@ export const storeProductPagePublicRoutes: Routes = [
       { path: 'catalog/:slug', loadComponent: productDetail },
       {
         path: 'cart',
-        canActivate: [mesaCartGuard],
+        canActivate: [productPageSalesGuard, mesaCartGuard],
         loadComponent: () =>
           import('../../private/modules/ecommerce/pages/cart/cart.component').then(
             (c) => c.CartComponent,
@@ -55,7 +55,7 @@ export const storeProductPagePublicRoutes: Routes = [
       },
       {
         path: 'checkout',
-        canActivate: [mesaCartGuard],
+        canActivate: [productPageSalesGuard, mesaCartGuard],
         loadComponent: () =>
           import('../../private/modules/ecommerce/pages/checkout/checkout.component').then(
             (c) => c.CheckoutComponent,

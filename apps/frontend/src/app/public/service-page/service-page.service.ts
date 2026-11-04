@@ -4,6 +4,7 @@ import { Observable, of } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { TenantFacade } from '../../core/store';
+import type { AppPageDocument } from '../../private/modules/store/apps/templates/app-page.types';
 
 /** Public config of the store's service page (`GET /ecommerce/service-page`). */
 export interface ServicePagePublicConfig {
@@ -12,6 +13,8 @@ export interface ServicePagePublicConfig {
   featured_service_ids: number[];
   /** Secondary "también puedes comprar" block. */
   product_ids: number[];
+  /** The owner's own page (apps-f2); absent when never saved. */
+  page?: AppPageDocument;
 }
 
 /**
