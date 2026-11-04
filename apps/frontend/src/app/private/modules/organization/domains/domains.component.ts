@@ -23,6 +23,7 @@ import {
 import { OrganizationDomainsService } from './services/organization-domains.service';
 import { OrganizationStoresService } from '../stores/services/organization-stores.service';
 import { environment } from '../../../../../environments/environment';
+import { appOnlyAppTypeLabel } from '../../../../shared/constants/app-domain-app-types';
 
 import {
   DomainCreateModalComponent,
@@ -66,7 +67,6 @@ const PENDING_PROVISIONING_STATUSES = new Set([
   DomainStatus.PROPAGATING,
 ]);
 
-import { appOnlyAppTypeLabel } from '../../../../shared/constants/app-domain-app-types';
 @Component({
   selector: 'app-domains',
   standalone: true,
