@@ -1562,6 +1562,7 @@ export class PaymentsService {
                 unitsToReserve,
                 [],
                 tx,
+                { orderId: order.id },
               );
 
             let reserveSlices = allocation.slices;
@@ -1603,6 +1604,7 @@ export class PaymentsService {
               });
               const fallbackLocationId =
                 allocation.slices[0]?.location_id ??
+                allocation.restricted_location_ids?.[0] ??
                 (await this.stockLevelManager.getDefaultLocationForProduct(
                   item.product_id,
                   item.product_variant_id ?? undefined,

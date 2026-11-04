@@ -2780,7 +2780,7 @@ export class ProductsService {
     const posStockLevelsWhere =
       posStockScope && context?.store_id
         ? displayableStockLevelsWhere(context.store_id, posStockScope)
-        : posStockScope?.scope === 'main_location'
+        : posStockScope && posStockScope.scope !== 'all_locations'
           ? { location_id: posStockScope.mainLocationId }
           : undefined;
     // Force stock_levels include under pos_optimized so the recomputed
@@ -7129,7 +7129,30 @@ export class ProductsService {
       this.loadStoreScopeRef(),
       settingsPromise ?? this.loadMergedSettings(),
     ]);
-    return resolvePosStockScope(store, settings);
+    // "Bodega de la caja": the grid shows the warehouse of the operator's own
+    // open register. Only queried under that scope (no extra read otherwise).
+    const registerLocationId =
+      settings.inventory?.pos_stock_scope === 'register_location'
+        ? await this.loadOpenRegisterLocationId()
+        : null;
+    return resolvePosStockScope(store, settings, registerLocationId);
+  }
+
+  /**
+   * Location of the current operator's open cash register, or `null` when the
+   * operator has no open session or the register has no warehouse. Same
+   * predicate as the POS payment origin session (`opened_by` + `open`, newest).
+   */
+  private async loadOpenRegisterLocationId(): Promise<number | null> {
+    const storeId = RequestContextService.getStoreId();
+    const userId = RequestContextService.getUserId();
+    if (!storeId || !userId) return null;
+    const session = await this.prisma.cash_register_sessions.findFirst({
+      where: { store_id: storeId, opened_by: userId, status: 'open' },
+      orderBy: [{ opened_at: 'desc' }, { id: 'desc' }],
+      select: { register: { select: { location_id: true } } },
+    });
+    return session?.register?.location_id ?? null;
   }
 
   // StorePrismaService exposes `stores` via the unscoped baseClient, so we

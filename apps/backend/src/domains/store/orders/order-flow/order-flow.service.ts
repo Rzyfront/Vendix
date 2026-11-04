@@ -1755,7 +1755,7 @@ export class OrderFlowService {
 
             const allocation = await this.sellableStockAllocator?.allocateForLine(
               storeId, group.product_id, group.product_variant_id,
-              toReserve, [], tx,
+              toReserve, [], tx, { orderId },
             );
             if (allocation && allocation.shortfall > 0 && !allowOversell) {
               throw new VendixHttpException(
@@ -1783,6 +1783,7 @@ export class OrderFlowService {
                   ? this.sellableStockAllocator!.absorbShortfall(
                       allocation,
                       allocation.slices[0]?.location_id ??
+                        allocation.restricted_location_ids?.[0] ??
                         (await this.stockLevelManager.getDefaultLocationForProduct(
                           group.product_id, group.product_variant_id, tx,
                         )),

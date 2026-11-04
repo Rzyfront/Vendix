@@ -127,7 +127,9 @@ function sumUnder(where: Record<string, any>): number {
   }).reduce((sum, level) => sum + level.quantity_available, 0);
 }
 
-const settingsWith = (scope: 'main_location' | 'all_locations'): StoreSettings =>
+const settingsWith = (
+  scope: 'main_location' | 'all_locations' | 'register_location',
+): StoreSettings =>
   ({ inventory: { pos_stock_scope: scope } }) as unknown as StoreSettings;
 
 describe('sellableLocationsWhere', () => {
@@ -204,5 +206,48 @@ describe('QUI-559 — contrato: lo mostrado ≡ lo cobrable', () => {
         sumUnder(sellableStockLevelsWhere(STORE_ID)),
       );
     }
+  });
+});
+
+describe('register_location — bodega de la caja', () => {
+  it('con caja abierta, muestra solo la bodega de la caja (loc 2)', () => {
+    const scope = resolvePosStockScope(
+      { default_location_id: 1 },
+      settingsWith('register_location'),
+      2,
+    );
+
+    expect(scope).toEqual({ scope: 'register_location', mainLocationId: 2 });
+    expect(sumUnder(displayableStockLevelsWhere(STORE_ID, scope))).toBe(8);
+  });
+
+  it('sin caja abierta (o caja sin bodega), degrada a la bodega principal', () => {
+    for (const registerLocationId of [undefined, null]) {
+      const scope = resolvePosStockScope(
+        { default_location_id: 1 },
+        settingsWith('register_location'),
+        registerLocationId,
+      );
+      expect(scope).toEqual({ scope: 'main_location', mainLocationId: 1 });
+    }
+  });
+
+  it('la bodega de la caja sigue intersectada con lo vendible (inactiva → 0)', () => {
+    const scope = resolvePosStockScope(
+      { default_location_id: 1 },
+      settingsWith('register_location'),
+      3,
+    );
+    // loc 3 es inactiva en el fixture: el display nunca la suma.
+    expect(sumUnder(displayableStockLevelsWhere(STORE_ID, scope))).toBe(0);
+  });
+
+  it('main/all ignoran la bodega de la caja (sin regresión)', () => {
+    expect(
+      resolvePosStockScope({ default_location_id: 1 }, settingsWith('main_location'), 2),
+    ).toEqual({ scope: 'main_location', mainLocationId: 1 });
+    expect(
+      resolvePosStockScope({ default_location_id: 1 }, settingsWith('all_locations'), 2),
+    ).toEqual({ scope: 'all_locations', mainLocationId: null });
   });
 });

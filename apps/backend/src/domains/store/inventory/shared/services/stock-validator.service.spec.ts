@@ -35,6 +35,8 @@ describe('StockValidatorService — no-overselling guard', () => {
 
     allocatorMock = {
       getSellableLevels: jest.fn(),
+      // Sin "Bodega de la caja" por defecto: comportamiento previo.
+      resolveOrderSaleLocationIds: jest.fn().mockResolvedValue(null),
     };
 
     service = new StockValidatorService(
@@ -45,6 +47,39 @@ describe('StockValidatorService — no-overselling guard', () => {
   });
 
   describe('assertLinesAvailable', () => {
+    it('bodega de la caja: valida solo el stock de la bodega de la orden', async () => {
+      prismaMock.products.findMany.mockResolvedValue([
+        {
+          id: PRODUCT_A,
+          store_id: STORE_ID,
+          track_inventory: true,
+          product_type: 'physical',
+          name: 'MODELO',
+        },
+      ]);
+      // 1 en la bodega de la caja (2) y 9 en otra (1): pedir 3 debe bloquear.
+      allocatorMock.getSellableLevels.mockResolvedValue([
+        { location_id: 1, quantity_available: 9 },
+        { location_id: 2, quantity_available: 1 },
+      ]);
+      allocatorMock.resolveOrderSaleLocationIds.mockResolvedValue([2]);
+      prismaMock.stock_reservations.aggregate.mockResolvedValue({
+        _sum: { quantity: 0 },
+      });
+
+      await expect(
+        service.assertLinesAvailable(
+          [{ product_id: PRODUCT_A, quantity: 3 }],
+          { orderId: 900 },
+        ),
+      ).rejects.toMatchObject({ errorCode: 'INV_STOCK_INSUFFICIENT_LINES' });
+      expect(prismaMock.stock_reservations.aggregate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ location_id: { in: [2] } }),
+        }),
+      );
+    });
+
     it('producto tracked sin stock lanza INV_STOCK_INSUFFICIENT_LINES nombrando el producto', async () => {
       prismaMock.products.findMany.mockResolvedValue([
         {

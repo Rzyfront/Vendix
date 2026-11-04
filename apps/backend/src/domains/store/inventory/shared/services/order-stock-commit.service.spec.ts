@@ -499,6 +499,9 @@ describe('OrderStockCommitService — descuento multi-ubicación', () => {
       10,
       [1, 2],
       txMock,
+      // Venta de una orden: hereda la restricción "Bodega de la caja" de la
+      // orden (el allocator la resuelve; null ⇒ comportamiento previo).
+      { orderId: 1 },
     );
   });
 });
