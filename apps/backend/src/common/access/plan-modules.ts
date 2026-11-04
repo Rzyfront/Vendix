@@ -287,8 +287,9 @@ export const SALE_FLOW_API_PREFIXES: readonly string[] = [
   // POS holder warning: emission status on mount, holder check per customer.
   '/api/store/invoicing/dian-config/emission-status',
   '/api/store/invoicing/holder-check',
-  // POS confirmation modal lists the DIAN configs (the list only, not CRUD).
-  '/api/store/invoicing/dian-config$',
+  // POS confirmation modal lists the DIAN configs: GET of the list only, so
+  // creating a config (POST on the same path) stays gated.
+  'GET /api/store/invoicing/dian-config$',
   // Order detail «Cobrar»: UVT threshold on mount, invoice notes after paying,
   // «Facturar» and the invoice PDF.
   '/api/store/invoicing/uvt-threshold',
@@ -313,19 +314,32 @@ export const SALE_FLOW_UI_ROUTES: readonly string[] = [
 
 function normalizePath(raw: string | null | undefined): string {
   if (!raw) return '';
-  let path = String(raw);
-  const scheme = path.indexOf('://');
-  if (scheme >= 0) {
-    const slash = path.indexOf('/', scheme + 3);
-    path = slash >= 0 ? path.slice(slash) : '/';
-  }
-  return path.split('?')[0].split('#')[0].replace(/\/+$/, '').toLowerCase();
+  // Query and hash go first: nothing in them may change the path decision.
+  let path = String(raw).split('?')[0].split('#')[0];
+  // Absolute URL (frontend `environment.apiUrl`): keep only the pathname. The
+  // scheme counts only at the very start.
+  const absolute = /^[a-z][a-z0-9+.-]*:\/\/[^/]*/i.exec(path);
+  if (absolute) path = path.slice(absolute[0].length) || '/';
+  return path.replace(/\/+$/, '').toLowerCase();
 }
 
 /**
  * Whole-segment prefix match. In a pattern, `:id` matches one numeric segment
- * and a trailing `$` makes the match exact (no sub-paths).
+ * and a trailing `$` makes the match exact (no sub-paths). An entry may start
+ * with an HTTP method (`GET /api/...`): it then matches only that method, and
+ * never when the caller does not say which method it is.
  */
+function matchesEntry(
+  path: string,
+  entry: string,
+  method?: string | null,
+): boolean {
+  const space = entry.indexOf(' ');
+  if (space < 0) return matchesPrefix(path, entry);
+  if (!method || method.toUpperCase() !== entry.slice(0, space)) return false;
+  return matchesPrefix(path, entry.slice(space + 1));
+}
+
 function matchesPrefix(path: string, prefix: string): boolean {
   if (!prefix.includes(':') && !prefix.endsWith('$')) {
     return path === prefix || path.startsWith(`${prefix}/`);
@@ -345,13 +359,18 @@ function matchesPrefix(path: string, prefix: string): boolean {
  * THE decision "this request belongs to a sale". True when the API path is a
  * sale endpoint, or when the UI route is a screen where a sale is in progress.
  * Accepts absolute URLs (`https://host/api/...`) and strips query and hash.
+ * Pass `method` for API calls: some sale entries are bound to one method.
  */
 export function isSaleFlow(context: {
   apiPath?: string | null;
+  method?: string | null;
   uiRoute?: string | null;
 }): boolean {
   const apiPath = normalizePath(context.apiPath);
-  if (apiPath && SALE_FLOW_API_PREFIXES.some((prefix) => matchesPrefix(apiPath, prefix))) {
+  if (
+    apiPath &&
+    SALE_FLOW_API_PREFIXES.some((entry) => matchesEntry(apiPath, entry, context.method))
+  ) {
     return true;
   }
   const uiRoute = normalizePath(context.uiRoute);
@@ -402,11 +421,17 @@ export function mappedPlanModuleForApiPath(rawPath: string | null | undefined): 
   return best;
 }
 
-/** Module key governing an API path, or `null` when the plan layer skips it. */
-export function planModuleForApiPath(rawPath: string | null | undefined): string | null {
+/**
+ * Module key governing an API path, or `null` when the plan layer skips it.
+ * Without `method`, method-bound exemptions (`GET /api/...`) do not apply.
+ */
+export function planModuleForApiPath(
+  rawPath: string | null | undefined,
+  method?: string | null,
+): string | null {
   const path = normalizePath(rawPath);
   if (!path) return null;
-  if (PLAN_GATE_EXEMPT_API_PREFIXES.some((prefix) => matchesPrefix(path, prefix))) {
+  if (PLAN_GATE_EXEMPT_API_PREFIXES.some((entry) => matchesEntry(path, entry, method))) {
     return null;
   }
   return mappedPlanModuleForApiPath(path);

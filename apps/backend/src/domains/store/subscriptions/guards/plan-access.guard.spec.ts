@@ -169,6 +169,28 @@ describe('PlanAccessGuard', () => {
       );
     });
 
+    it('a query that names a sale path does not open a gated module', async () => {
+      const { guard } = build({ storeBlocked: NO_ACCOUNTING, mode: 'enforce' });
+      await expect(
+        guard.canActivate(ctx('/api/store/invoicing/stats?a=://')),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+      await expect(
+        guard.canActivate(
+          ctx('/api/store/invoicing/stats?x=https://h/api/store/withholding-tax/preview'),
+        ),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+    });
+
+    it('GET of the DIAN config list passes; POST (create config) stays gated', async () => {
+      const { guard } = build({ storeBlocked: ['invoicing_dian_config'], mode: 'enforce' });
+      await expect(
+        guard.canActivate(ctx('/api/store/invoicing/dian-config', undefined, 'GET')),
+      ).resolves.toBe(true);
+      await expect(
+        guard.canActivate(ctx('/api/store/invoicing/dian-config', undefined, 'POST')),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+    });
+
     it('the rest of withholding-tax stays gated in enforce', async () => {
       const { guard } = build({ storeBlocked: NO_ACCOUNTING, mode: 'enforce' });
       await expect(
@@ -176,16 +198,17 @@ describe('PlanAccessGuard', () => {
       ).rejects.toBeInstanceOf(VendixHttpException);
     });
 
-    it.each(SALE_FLOW_API_PREFIXES.filter((p) => p.startsWith('/api/store/')))(
-      'sale prefix %s passes in enforce for a plan without its module',
-      async (prefix) => {
+    it.each(SALE_FLOW_API_PREFIXES.filter((p) => p.includes('/api/store/')))(
+      'sale entry %s passes in enforce for a plan without its module',
+      async (entry) => {
         const blocked = Object.keys(PLAN_MODULE_API_ROUTES);
         const { guard, audit } = build({ storeBlocked: blocked, mode: 'enforce' });
+        const [method, prefix] = entry.includes(' ') ? entry.split(' ') : ['POST', entry];
         const concrete = prefix.replace(/:id/g, '41').replace(/\$$/, '');
-        await expect(guard.canActivate(ctx(concrete, undefined, 'POST'))).resolves.toBe(true);
+        await expect(guard.canActivate(ctx(concrete, undefined, method))).resolves.toBe(true);
         if (!prefix.endsWith('$')) {
           await expect(
-            guard.canActivate(ctx(`${concrete}/x`, undefined, 'POST')),
+            guard.canActivate(ctx(`${concrete}/x`, undefined, method)),
           ).resolves.toBe(true);
         }
         expect(audit.record).toHaveBeenCalledWith(

@@ -60,10 +60,11 @@ export class PlanAccessGuard implements CanActivate {
       .switchToHttp()
       .getRequest<Request & { user?: GateUser }>();
     const path = String(req?.originalUrl ?? req?.url ?? '');
-    const saleFlow = isSaleFlow({ apiPath: path });
+    const method = String(req?.method ?? 'GET');
+    const saleFlow = isSaleFlow({ apiPath: path, method });
     const moduleKey = saleFlow
       ? mappedPlanModuleForApiPath(path)
-      : planModuleForApiPath(path);
+      : planModuleForApiPath(path, method);
     if (!moduleKey) return true;
 
     const user = req.user;

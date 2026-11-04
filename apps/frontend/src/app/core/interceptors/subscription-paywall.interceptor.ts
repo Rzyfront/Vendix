@@ -119,7 +119,7 @@ export const subscriptionPaywallInterceptor: HttpInterceptorFn = (req, next) => 
         // sale in progress): a paywall must not cover a cart or a payment.
         // The backend already recorded the refusal in its access audit.
         if (code === 'PLAN_MODULE_NOT_INCLUDED') {
-          if (isSaleFlow({ apiPath: req.url, uiRoute: router.url })) {
+          if (isSaleFlow({ apiPath: req.url, method: req.method, uiRoute: router.url })) {
             console.warn(
               `[plan-gate] PLAN_MODULE_NOT_INCLUDED during a sale, paywall skipped: ${req.method} ${req.url.split('?')[0]}`,
             );

@@ -158,17 +158,19 @@ function tsFiles(dir: string): string[] {
 }
 
 const pathOf = (call: string) => call.split(' ')[1];
+const methodOf = (call: string) => call.split(' ')[0];
 
 describe('sale flow — contract: no sale endpoint is under a blockable module', () => {
   it.each(GATED_SALE_CALLS.map((c) => [c.call, c]))(
     '%s is a sale endpoint and is never gated',
     (_call, { call }) => {
       const path = pathOf(call);
+      const method = methodOf(call);
       // It IS under a gated prefix (otherwise it belongs in UNGATED_SALE_CALLS)…
       expect(mappedPlanModuleForApiPath(path)).not.toBeNull();
       // …and the single decision point calls it a sale, so nothing gates it.
-      expect(isSaleFlow({ apiPath: path })).toBe(true);
-      expect(planModuleForApiPath(path)).toBeNull();
+      expect(isSaleFlow({ apiPath: path, method })).toBe(true);
+      expect(planModuleForApiPath(path, method)).toBeNull();
     },
   );
 
@@ -218,16 +220,36 @@ describe('sale flow — the exemption stays narrow', () => {
     ['/api/store/invoicing/abc/notes', 'invoicing'],
     ['/api/store/invoicing/credit-notes', 'invoicing'],
     ['/api/store/accounting/journal-entries', 'accounting_journal_entries'],
+    // The query never changes the decision (no `?a=://` bypass).
+    ['/api/store/accounting/journal-entries?a=://', 'accounting_journal_entries'],
+    ['/api/store/accounting/journal-entries?r=https://h/api/store/invoicing/pos', 'accounting_journal_entries'],
+    ['/api/store/invoicing/dian-config/5?x=https://h/api/store/invoicing/pos', 'invoicing_dian_config'],
+    ['/api/store/invoicing/stats#https://h/api/store/withholding-tax/preview', 'invoicing'],
   ])('%s stays gated under %s', (path, key) => {
-    expect(isSaleFlow({ apiPath: path })).toBe(false);
-    expect(planModuleForApiPath(path)).toBe(key);
+    for (const method of ['GET', 'POST', undefined]) {
+      expect(isSaleFlow({ apiPath: path, method })).toBe(false);
+      expect(planModuleForApiPath(path, method)).toBe(key);
+    }
+  });
+
+  it('the DIAN config list is a sale read (GET) but creating a config stays gated', () => {
+    for (const path of ['/api/store/invoicing/dian-config', '/api/store/invoicing/dian-config/']) {
+      expect(planModuleForApiPath(path, 'GET')).toBeNull();
+      expect(planModuleForApiPath(path, 'POST')).toBe('invoicing_dian_config');
+      expect(planModuleForApiPath(path)).toBe('invoicing_dian_config');
+      expect(isSaleFlow({ apiPath: path, method: 'POST' })).toBe(false);
+    }
   });
 });
 
 describe('sale flow — isSaleFlow, the single decision point', () => {
   it.each([
     [{ apiPath: 'https://api.vendix.com/api/store/withholding-tax/preview' }, true],
-    [{ apiPath: '/api/store/invoicing/dian-config?x=1' }, true],
+    [{ apiPath: '/api/store/invoicing/dian-config?x=1', method: 'get' }, true],
+    [{ apiPath: '/api/store/invoicing/dian-config', method: 'POST' }, false],
+    [{ apiPath: '/api/store/invoicing/dian-config' }, false],
+    [{ uiRoute: '/admin/reports?r=https://x/admin/pos' }, false],
+    [{ apiPath: 'https://api.vendix.com', uiRoute: null }, false],
     [{ apiPath: '/API/Store/Invoicing/12/Notes/' }, true],
     [{ uiRoute: '/admin/pos' }, true],
     [{ uiRoute: '/admin/pos?tab=cart' }, true],

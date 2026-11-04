@@ -33,7 +33,10 @@ ve a `/admin/orders/<id>`, pulsa «Cobrar» en una orden pendiente y luego
 
 `SALE_FLOW_API_PREFIXES` entra completo en `PLAN_GATE_EXEMPT_API_PREFIXES`. En
 los patrones, `:id` corresponde a un segmento numérico y un `$` final pide la
-ruta exacta. Así se exime solo la llamada de venta, no el módulo entero.
+ruta exacta. Una entrada puede llevar método (`GET /api/...`) y entonces solo
+exime ese método. La query y el hash se descartan antes de decidir, así que no
+cambian el resultado. Así se exime solo la llamada de venta, no el módulo
+entero.
 
 ## Endpoints bajo prefijo bloqueable (exentos)
 
@@ -44,7 +47,7 @@ ruta exacta. Así se exime solo la llamada de venta, no el módulo entero.
 | `POST /api/store/invoicing/pos/orders/:id/emit` | facturación | Clic en «Reintentar» | `pos-fiscal.service.ts` |
 | `GET /api/store/invoicing/dian-config/emission-status` | facturación | Sí, al montar el POS, la cuenta dividida y el detalle de orden | `pos-holder-warning.component.ts`, `split-accounts-panel`, `order-details-page` |
 | `GET /api/store/invoicing/holder-check` | cliente | Sí, en cada cambio de cliente | `pos-holder-warning.component.ts` → `invoicing.service.ts` |
-| `GET /api/store/invoicing/dian-config` (solo la lista exacta) | facturación | Sí, al abrir el modal de confirmación | `pos-order-confirmation.component.ts` (`loadDianConfigs`) |
+| `GET /api/store/invoicing/dian-config` (solo `GET` de la lista exacta; crear una configuración sigue bloqueado) | facturación | Sí, al abrir el modal de confirmación | `pos-order-confirmation.component.ts` (`loadDianConfigs`) |
 | `GET /api/store/invoicing/uvt-threshold` | facturación | Sí, al montar el detalle de orden | `order-details-page` → `invoicing.service.ts` |
 | `GET /api/store/invoicing/:id/notes` | facturación | Sí, al recargar la orden después del cobro | `order-details-page` |
 | `POST /api/store/invoicing/orders/:id/emit` | facturación | Clic en «Facturar» | `order-details-page` |
