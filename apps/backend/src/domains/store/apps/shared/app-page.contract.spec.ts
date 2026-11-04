@@ -9,6 +9,9 @@ import { parseProductPageConfig } from '../product-page/product-page.reader';
 import { parseServicePageConfig } from '../service-page/service-page.reader';
 import { parseBookingPageConfig } from '../booking/booking-page.reader';
 import { parseStoreHomeConfig } from '../store-home/store-home.reader';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { UpdateProductPagePageDto } from '../product-page/product-page.dto';
 
 /**
  * Apps F2 — the per-app page contract (`store_apps.config.page`). Every case
@@ -129,7 +132,7 @@ describe('app page contract', () => {
   it('reports every wrong field', () => {
     const result = validateAppPage('booking', {
       schema_version: 2,
-      theme: {},
+      layout: {},
       mode: 'rent',
       booking: { require_account: true, source: 'calendar' },
       brand: { primary_color: 'red', logo_url: 'http://x.co/logo.png' },
@@ -141,7 +144,7 @@ describe('app page contract', () => {
     expect(result.valid).toBe(false);
     expect(result.value).toBeNull();
     expect(result.errors).toEqual([
-      'theme no es un campo permitido.',
+      'layout no es un campo permitido.',
       'schema_version debe ser 1.',
       'mode debe ser uno de: booking, sales, both, info.',
       'booking.source debe ser uno de: agenda, rooms.',
@@ -172,5 +175,95 @@ describe('app page contract', () => {
     expect(parseServicePageConfig({ page }).page).toEqual(page);
     expect(parseBookingPageConfig({ page }).page).toEqual(page);
     expect(parseStoreHomeConfig({ page }).page).toEqual(page);
+  });
+  describe('theme (Apps F3)', () => {
+    const fullTheme = {
+      primary_color: '#7A3E2E',
+      secondary_color: '#C8A27A',
+      surface_color: '#FBF7F2',
+      text_color: '#2B211C',
+      accent_color: '#8C5A2B',
+      heading_font: 'playfair',
+      body_font: 'lora',
+      radius: 'large',
+      density: 'spacious',
+      button_style: 'outline',
+      image_style: 'rounded',
+      content_width: 'narrow',
+    };
+
+    it('accepts every style token and keeps it as sent', () => {
+      const result = validateAppPage('service_page', {
+        schema_version: 1,
+        theme: fullTheme,
+        blocks: [],
+      });
+      expect(result.errors).toEqual([]);
+      expect(result.value?.theme).toEqual(fullTheme);
+    });
+
+    it('rejects values outside the closed catalogs and malformed colors', () => {
+      const result = validateAppPage('booking', {
+        schema_version: 1,
+        theme: {
+          primary_color: 'red',
+          heading_font: 'comic-sans',
+          radius: 'huge',
+          density: 'tight',
+          button_style: 'ghost',
+          image_style: 'circle',
+          content_width: 'full',
+          shadow: 'lg',
+        },
+        blocks: [],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(
+        expect.arrayContaining([
+          'theme.primary_color debe ser un color #RRGGBB.',
+          'theme.heading_font debe ser uno de: system, inter, poppins, playfair, montserrat, lora.',
+          'theme.radius debe ser uno de: none, small, medium, large.',
+          'theme.density debe ser uno de: compact, comfortable, spacious.',
+          'theme.button_style debe ser uno de: solid, outline.',
+          'theme.image_style debe ser uno de: square, rounded.',
+          'theme.content_width debe ser uno de: narrow, normal, wide.',
+          'theme.shadow no es un campo permitido.',
+        ]),
+      );
+    });
+
+    it('drops an empty theme, so the page keeps its pre-F3 look', () => {
+      const result = validateAppPage('store_home', {
+        schema_version: 1,
+        theme: { radius: '', primary_color: '' },
+        blocks: [],
+      });
+      expect(result.valid).toBe(true);
+      expect(result.value).not.toHaveProperty('theme');
+    });
+
+    it('the save DTO accepts a theme and answers a wrong one field by field', async () => {
+      const ok = plainToInstance(UpdateProductPagePageDto, {
+        page: { schema_version: 1, theme: { density: 'compact' }, blocks: [] },
+      });
+      expect(await validate(ok)).toEqual([]);
+
+      const bad = plainToInstance(UpdateProductPagePageDto, {
+        page: { schema_version: 1, theme: { button_style: 'ghost' }, blocks: [] },
+      });
+      const errors = await validate(bad);
+      expect(errors).toHaveLength(1);
+      expect(Object.values(errors[0].constraints ?? {})).toEqual([
+        'theme.button_style debe ser uno de: solid, outline.',
+      ]);
+    });
+
+    it('a stored page with a broken theme reads as no page (pre-F2 render)', () => {
+      expect(
+        readAppPage('product_page', {
+          page: { schema_version: 1, theme: { radius: 'huge' }, blocks: [] },
+        }),
+      ).toBeNull();
+    });
   });
 });

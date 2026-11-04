@@ -18,6 +18,9 @@
  *   `sales.enabled` / `booking.enabled` are derived from `mode` on save, so
  *   they can never contradict it.
  * - `brand`: logo, colors, font, cover. `seo`: title, description, image.
+ * - `theme` (Apps F3): style tokens (palette, heading/body fonts, corner
+ *   radius, density, button and image treatment, content width). Every token
+ *   is optional and closed; a missing one keeps the look the page has today.
  *   The hostname is the app's domain (settings panel), not part of the page.
  *
  * Everything is optional: a store without `config.page` renders its public
@@ -53,6 +56,22 @@ export const APP_PAGE_FONTS = [
   'playfair',
   'montserrat',
   'lora',
+] as const;
+
+/** Apps F3 — closed catalogs of the style tokens (`page.theme`). */
+export const APP_THEME_RADII = ['none', 'small', 'medium', 'large'] as const;
+export const APP_THEME_DENSITIES = ['compact', 'comfortable', 'spacious'] as const;
+export const APP_THEME_BUTTON_STYLES = ['solid', 'outline'] as const;
+export const APP_THEME_IMAGE_STYLES = ['square', 'rounded'] as const;
+export const APP_THEME_CONTENT_WIDTHS = ['narrow', 'normal', 'wide'] as const;
+
+/** Color tokens of `page.theme`, all `#RRGGBB`. */
+export const APP_THEME_COLOR_KEYS = [
+  'primary_color',
+  'secondary_color',
+  'surface_color',
+  'text_color',
+  'accent_color',
 ] as const;
 
 /**
@@ -278,6 +297,21 @@ const BRAND: FieldsSpec = {
   cover_url: url,
 };
 
+const THEME: FieldsSpec = {
+  primary_color: text(7),
+  secondary_color: text(7),
+  surface_color: text(7),
+  text_color: text(7),
+  accent_color: text(7),
+  heading_font: oneOf(APP_PAGE_FONTS),
+  body_font: oneOf(APP_PAGE_FONTS),
+  radius: oneOf(APP_THEME_RADII),
+  density: oneOf(APP_THEME_DENSITIES),
+  button_style: oneOf(APP_THEME_BUTTON_STYLES),
+  image_style: oneOf(APP_THEME_IMAGE_STYLES),
+  content_width: oneOf(APP_THEME_CONTENT_WIDTHS),
+};
+
 const SEO: FieldsSpec = {
   title: text(70),
   description: text(170),
@@ -327,6 +361,24 @@ export interface AppPageBooking {
   require_account?: false;
 }
 
+type AppPageFont = (typeof APP_PAGE_FONTS)[number];
+
+/** Apps F3 — style tokens of the page. Absent token = today's look. */
+export interface AppPageTheme {
+  primary_color?: string;
+  secondary_color?: string;
+  surface_color?: string;
+  text_color?: string;
+  accent_color?: string;
+  heading_font?: AppPageFont;
+  body_font?: AppPageFont;
+  radius?: (typeof APP_THEME_RADII)[number];
+  density?: (typeof APP_THEME_DENSITIES)[number];
+  button_style?: (typeof APP_THEME_BUTTON_STYLES)[number];
+  image_style?: (typeof APP_THEME_IMAGE_STYLES)[number];
+  content_width?: (typeof APP_THEME_CONTENT_WIDTHS)[number];
+}
+
 export interface AppPageDocument {
   schema_version: typeof APP_PAGE_SCHEMA_VERSION;
   mode?: AppPageMode;
@@ -340,6 +392,7 @@ export interface AppPageDocument {
     cover_url?: string;
   };
   seo?: { title?: string; description?: string; image_url?: string };
+  theme?: AppPageTheme;
   hero?: {
     eyebrow?: string;
     title?: string;
@@ -528,6 +581,7 @@ export function validateAppPage(
     'booking',
     'brand',
     'seo',
+    'theme',
     'hero',
     'blocks',
   ];
@@ -552,6 +606,8 @@ export function validateAppPage(
   checkColor(brand, 'primary_color', 'brand', errors);
   checkColor(brand, 'secondary_color', 'brand', errors);
   const seo = cleanFields(SEO, value['seo'], 'seo', errors);
+  const theme = cleanFields(THEME, value['theme'], 'theme', errors);
+  for (const key of APP_THEME_COLOR_KEYS) checkColor(theme, key, 'theme', errors);
   const hero = cleanFields(HERO, value['hero'], 'hero', errors);
 
   const catalog = APP_PAGE_BLOCKS[kind];
@@ -622,6 +678,7 @@ export function validateAppPage(
   if (Object.keys(booking).length) doc.booking = booking as AppPageBooking;
   if (Object.keys(brand).length) doc.brand = brand as AppPageDocument['brand'];
   if (Object.keys(seo).length) doc.seo = seo as AppPageDocument['seo'];
+  if (Object.keys(theme).length) doc.theme = theme as AppPageTheme;
   if (Object.keys(hero).length) doc.hero = hero as AppPageDocument['hero'];
   return { valid: true, errors: [], value: doc };
 }
