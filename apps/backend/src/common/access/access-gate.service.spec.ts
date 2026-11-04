@@ -23,6 +23,8 @@ describe('AccessGateService', () => {
     mode = {
       modeForStore: jest.fn().mockResolvedValue('audit'),
       modeForOrganization: jest.fn().mockResolvedValue('audit'),
+      planModeForStore: jest.fn().mockResolvedValue('audit'),
+      planModeForOrganization: jest.fn().mockResolvedValue('audit'),
     };
     audit = { record: jest.fn() };
     svc = new AccessGateService(prisma, mode, audit);
@@ -61,6 +63,40 @@ describe('AccessGateService', () => {
       route: '/admin/orders',
       mode: 'audit',
     });
+  });
+
+  it('store POST: layer plan usa el modo de plan; otras capas conservan el de industria', async () => {
+    prisma.stores.findUnique.mockResolvedValue({ industries: ['retail'] });
+    mode.modeForStore.mockResolvedValue('enforce');
+    mode.planModeForStore.mockResolvedValue('audit');
+    await svc.recordStoreEvents(user, {
+      events: [
+        { key: 'pos', decision: 'would_block', layer: 'plan', surface: 'sidebar' },
+        { key: 'orders', decision: 'would_hide', layer: 'industry', surface: 'sidebar' },
+      ],
+    } as any);
+    const [planCall, industryCall] = audit.record.mock.calls.map((c: any[]) => c[0]);
+    expect(planCall).toEqual(
+      expect.objectContaining({ layer: 'plan', mode: 'audit' }),
+    );
+    expect(industryCall).toEqual(
+      expect.objectContaining({ layer: 'industry', mode: 'enforce' }),
+    );
+  });
+
+  it('org POST: layer plan usa el modo de plan de la organización', async () => {
+    prisma.stores.findMany.mockResolvedValue([]);
+    mode.modeForOrganization.mockResolvedValue('audit');
+    mode.planModeForOrganization.mockResolvedValue('enforce');
+    await svc.recordOrganizationEvents(user, {
+      events: [
+        { key: 'pos', decision: 'would_block', layer: 'plan', surface: 'sidebar' },
+        { key: 'stores', decision: 'would_hide', layer: 'org', surface: 'sidebar' },
+      ],
+    } as any);
+    const [planCall, orgCall] = audit.record.mock.calls.map((c: any[]) => c[0]);
+    expect(planCall.mode).toBe('enforce');
+    expect(orgCall.mode).toBe('audit');
   });
 
   it('org POST: store_id null and industry = union of the org stores', async () => {

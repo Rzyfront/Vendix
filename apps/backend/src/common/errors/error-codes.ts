@@ -5923,6 +5923,14 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Este módulo no está disponible para la industria de tu tienda.',
   },
+  // Plan access matrix (plan_module_rules): the store's plan does not include
+  // the module. `details` = { module, current_plan, required_plans,
+  // upgrade_url }; the panel paints the module paywall from it.
+  PLAN_MODULE_NOT_INCLUDED: {
+    code: 'PLAN_MODULE_NOT_INCLUDED',
+    httpStatus: 403,
+    devMessage: 'Tu plan actual no incluye este módulo.',
+  },
   // A store without the `hospitality` industry gets 403 even through curl:
   // the menu is UX only, LodgingIndustryGuard is the real boundary.
   LODGING_INDUSTRY_001: {

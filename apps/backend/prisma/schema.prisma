@@ -12142,6 +12142,7 @@ model subscription_plans {
   invoice_from_subs       subscription_invoices[]         @relation("invoice_from_plan")
   invoice_to_subs         subscription_invoices[]         @relation("invoice_to_plan")
   redemption_consumptions redemption_consumptions[]
+  module_rules            plan_module_rules[]
   created_at              DateTime                        @default(now()) @db.Timestamp(6)
   updated_at              DateTime                        @default(now()) @db.Timestamp(6)
   created_by              Int?
@@ -12150,6 +12151,27 @@ model subscription_plans {
   @@index([plan_type, state])
   @@index([is_promotional, promo_priority])
   @@index([plan_group_code])
+}
+
+/// Matriz de accesos por plan (odd/tasks/planes-matriz-accesos.md). Una fila
+/// dice si el plan incluye (`exclusive`) o no (`blocked`) un modulo `panel_ui`.
+/// Semantica y matriz canonica: `common/access/plan-modules.ts`.
+model plan_module_rules {
+  id         Int                         @id @default(autoincrement())
+  plan_id    Int
+  module_key String                      @db.VarChar(64)
+  mode       plan_module_rule_mode_enum
+  created_at DateTime                    @default(now()) @db.Timestamp(6)
+  updated_at DateTime                    @default(now()) @updatedAt @db.Timestamp(6)
+  plan       subscription_plans          @relation(fields: [plan_id], references: [id], onDelete: Restrict)
+
+  @@unique([plan_id, module_key])
+  @@index([module_key])
+}
+
+enum plan_module_rule_mode_enum {
+  exclusive
+  blocked
 }
 
 model partner_plan_overrides {

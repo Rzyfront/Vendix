@@ -22,6 +22,10 @@ function accessGateStub() {
     orgPanelUi: signal<Record<string, boolean> | null>(null),
     report: jasmine.createSpy('report'),
     currentApp: () => 'STORE_ADMIN' as const,
+    planMode: signal<'audit' | 'enforce'>('audit'),
+    planBlocked: signal<readonly string[]>([]),
+    planOffers: signal<Record<string, any[]>>({}),
+    currentPlan: signal<any>(null),
   };
 }
 
@@ -933,5 +937,105 @@ describe('MenuFilterService.canSeeKey / applyAccessGate (apps-f4 S4)', () => {
     expect(gate.report).toHaveBeenCalledWith(
       jasmine.objectContaining({ decision: 'would_block', surface: 'vexi' }),
     );
+  });
+});
+
+/**
+ * planes-matriz-accesos: 4th layer `plan` in `canSeeKey` and its effect on the
+ * four surfaces (sidebar, url, apps_card, vexi). The plan never hides: sidebar
+ * and Apps keep the module with a lock; URL and Vexi refuse only with the plan
+ * flag on. Audit (default) lets everything through and records would_block.
+ */
+describe('MenuFilterService — capa plan (planes-matriz-accesos)', () => {
+  let service: MenuFilterService;
+  let gate: ReturnType<typeof accessGateStub>;
+  const EMPRESARIAL = {
+    code: 'empresarial-pro-monthly', name: 'Empresarial Pro', price: 89900, currency: 'COP', cycle: 'monthly',
+  };
+  const EMPRESARIAL_ANNUAL = { ...EMPRESARIAL, code: 'empresarial-pro-annual', price: 899000, cycle: 'annual' };
+
+  beforeEach(() => {
+    gate = accessGateStub();
+    gate.planBlocked.set(['invoicing', 'flows']);
+    gate.planOffers.set({ invoicing: [EMPRESARIAL, EMPRESARIAL_ANNUAL] });
+    gate.currentPlan.set({ code: 'vendix-impulsa', name: 'Vendix Impulsa', cycle: 'annual' });
+    const authFacade = {
+      isOwner: () => true,
+      isModuleVisible: () => true,
+      currentAppPanelUi: signal<Record<string, boolean> | null>(null),
+      storeSettings: signal<any>(null),
+      userIndustries: signal<string[]>(['retail']),
+      fiscalScope: signal('STORE'),
+      operatingScope: signal('STORE'),
+      activeFiscalAreas: signal<string[]>([]),
+      userStoreType: signal<string | null>('physical'),
+    };
+    TestBed.configureTestingModule({
+      providers: [
+        MenuFilterService,
+        { provide: AuthFacade, useValue: authFacade },
+        { provide: AccessGateService, useValue: gate },
+        { provide: SubscriptionAccessService, useValue: { canUseAI: () => () => true } },
+      ],
+    });
+    service = TestBed.inject(MenuFilterService);
+  });
+
+  it('canSeeKey niega por la capa plan solo las keys que el plan no incluye', () => {
+    expect(service.canSeeKey('invoicing')).toEqual(
+      jasmine.objectContaining({ allowed: false, layer: 'plan' }),
+    );
+    expect(service.canSeeKey('pos').allowed).toBeTrue();
+  });
+
+  it('auditoría (por defecto): las 4 superficies dejan pasar y registran would_block en la capa plan', () => {
+    for (const surface of ['sidebar', 'url', 'apps_card', 'vexi'] as const) {
+      gate.report.calls.reset();
+      expect(service.applyAccessGate(['invoicing'], true, surface)).toBeTrue();
+      expect(gate.report).toHaveBeenCalledOnceWith(
+        jasmine.objectContaining({ key: 'invoicing', layer: 'plan', decision: 'would_block', surface }),
+      );
+    }
+    expect(service.isPlanLocked(['invoicing'])).toBeFalse();
+  });
+
+  it('flag del plan encendido: sidebar y Apps siguen mostrando con candado; URL y Vexi bloquean', () => {
+    gate.planMode.set('enforce');
+    expect(service.applyAccessGate(['invoicing'], true, 'sidebar')).toBeTrue();
+    expect(service.applyAccessGate(['invoicing'], true, 'apps_card')).toBeTrue();
+    expect(service.applyAccessGate(['invoicing'], true, 'url')).toBeFalse();
+    expect(service.applyAccessGate(['invoicing'], true, 'vexi')).toBeFalse();
+    expect(gate.report).toHaveBeenCalledWith(
+      jasmine.objectContaining({ layer: 'plan', decision: 'blocked', surface: 'url' }),
+    );
+    expect(service.isPlanLocked(['invoicing'])).toBeTrue();
+    expect(service.isPlanLocked(['pos'])).toBeFalse();
+  });
+
+  it('el flag de industria no enciende la capa plan', () => {
+    gate.mode.set('enforce');
+    expect(service.applyAccessGate(['invoicing'], true, 'url')).toBeTrue();
+  });
+
+  it('un ítem con alguna key incluida en el plan no queda bloqueado', () => {
+    gate.planMode.set('enforce');
+    expect(service.applyAccessGate(['invoicing', 'pos'], true, 'url')).toBeTrue();
+    expect(service.planLockForKeys(['invoicing', 'pos'])).toBeNull();
+  });
+
+  it('el candado lleva familia, plan actual, ofertas y la URL de mejora en el mismo ciclo', () => {
+    const lock = service.planLockForKeys(['invoicing'])!;
+    expect(lock.family?.name).toBe('Facturación electrónica');
+    expect(lock.currentPlan?.name).toBe('Vendix Impulsa');
+    expect(lock.recommended?.code).toBe('empresarial-pro-annual');
+    expect(lock.upgradeUrl).toBe(
+      '/admin/subscription/plans?plan=empresarial-pro-annual&cycle=annual&from=invoicing',
+    );
+  });
+
+  it('dashboard y suscripción nunca quedan bajo la capa plan', () => {
+    gate.planMode.set('enforce');
+    expect(service.canSeeKey('dashboard').allowed).toBeTrue();
+    expect(service.planLockForKeys(['dashboard'])).toBeNull();
   });
 });

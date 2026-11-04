@@ -1,11 +1,13 @@
 import { Prisma } from '@prisma/client';
 import { PlansService } from './plans.service';
+import { PlanModuleRulesService } from '../../../../common/access/plan-module-rules.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 describe('PlansService', () => {
   let service: PlansService;
   let prisma: any;
   let tx: any;
+  let rulesCache: { invalidate: jest.Mock };
 
   beforeEach(() => {
     // `tx` is the transaction client handed to the $transaction callback. It
@@ -23,6 +25,9 @@ describe('PlansService', () => {
       store_subscriptions: {
         count: jest.fn().mockResolvedValue(0),
       },
+      plan_module_rules: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
     };
 
     prisma = {
@@ -37,7 +42,12 @@ describe('PlansService', () => {
       // Execute the callback with the tx client and ignore the isolation opts.
       $transaction: jest.fn((fn: any) => fn(tx)),
     };
-    service = new PlansService(prisma);
+    rulesCache = { invalidate: jest.fn() };
+    service = new PlansService(
+      prisma,
+      undefined,
+      rulesCache as unknown as PlanModuleRulesService,
+    );
   });
 
   function planFixture(overrides: Partial<any> = {}) {
@@ -519,6 +529,43 @@ describe('PlansService', () => {
       });
     });
 
+    it('borra las reglas de la matriz del ciclo removido ANTES del plan (FK RESTRICT)', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
+      tx.subscription_plans.findMany.mockResolvedValue([
+        planFixture({ id: 1, code: 'pro', billing_cycle: 'monthly' }),
+        planFixture({ id: 2, code: 'pro-annual', billing_cycle: 'annual' }),
+      ]);
+      tx.store_subscriptions.count.mockResolvedValue(0);
+
+      await service.update(1, {
+        pricings: [{ billing_cycle: 'monthly', price: 99000, is_default: true }],
+      } as any);
+
+      expect(tx.plan_module_rules.deleteMany).toHaveBeenCalledWith({
+        where: { plan_id: 2 },
+      });
+      expect(
+        tx.plan_module_rules.deleteMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(tx.subscription_plans.delete.mock.invocationCallOrder[0]);
+      expect(rulesCache.invalidate).toHaveBeenCalledTimes(1);
+    });
+
+    it('no toca reglas ni caché al archivar un ciclo referenciado', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
+      tx.subscription_plans.findMany.mockResolvedValue([
+        planFixture({ id: 1, code: 'pro', billing_cycle: 'monthly' }),
+        planFixture({ id: 2, code: 'pro-annual', billing_cycle: 'annual' }),
+      ]);
+      tx.store_subscriptions.count.mockResolvedValue(1);
+
+      await service.update(1, {
+        pricings: [{ billing_cycle: 'monthly', price: 99000, is_default: true }],
+      } as any);
+
+      expect(tx.plan_module_rules.deleteMany).not.toHaveBeenCalled();
+      expect(rulesCache.invalidate).not.toHaveBeenCalled();
+    });
+
     it('propagates feature_matrix to the whole group as a plain array', async () => {
       prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
 
@@ -657,13 +704,30 @@ describe('PlansService', () => {
   describe('remove', () => {
     it('deletes plan when it exists', async () => {
       prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
-      prisma.subscription_plans.delete.mockResolvedValue(planFixture());
+      tx.subscription_plans.delete.mockResolvedValue(planFixture());
 
       await service.remove(1);
 
-      expect(prisma.subscription_plans.delete).toHaveBeenCalledWith({
+      expect(tx.subscription_plans.delete).toHaveBeenCalledWith({
         where: { id: 1 },
       });
+    });
+
+    it('borra las reglas de la matriz antes del plan, dentro de la transacción', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
+      tx.subscription_plans.delete.mockResolvedValue(planFixture());
+
+      await service.remove(1);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.plan_module_rules.deleteMany).toHaveBeenCalledWith({
+        where: { plan_id: 1 },
+      });
+      expect(
+        tx.plan_module_rules.deleteMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(tx.subscription_plans.delete.mock.invocationCallOrder[0]);
+      expect(prisma.subscription_plans.delete).not.toHaveBeenCalled();
+      expect(rulesCache.invalidate).toHaveBeenCalledTimes(1);
     });
 
     it('throws SYS_NOT_FOUND_001 when plan missing', async () => {
@@ -676,7 +740,8 @@ describe('PlansService', () => {
       }
       expect(err).toBeTruthy();
       expect(err instanceof VendixHttpException).toBe(true);
-      expect(prisma.subscription_plans.delete).not.toHaveBeenCalled();
+      expect(tx.subscription_plans.delete).not.toHaveBeenCalled();
+      expect(tx.plan_module_rules.deleteMany).not.toHaveBeenCalled();
     });
   });
 

@@ -25,6 +25,7 @@ import { seedAIAgents } from './seeds/ai-agents.seed';
 import { seedPayrollSystemDefaults } from './seeds/payroll-system-defaults.seed';
 import { seedSubscriptionPlans } from './seeds/subscription-plans.seed';
 import { seedSubscriptionPlansProduction } from './seeds/subscription-plans-production.seed';
+import { seedPlanCommercialLines } from './seeds/plan-commercial-lines.seed';
 import { seedPqrAnonUser } from './seeds/pqr-anon-user.seed';
 
 /**
@@ -183,6 +184,12 @@ const seedModules = [
     fn: seedSubscriptionPlansProduction,
     description:
       'Canonical SaaS plans (starter / pro / enterprise) — idempotent across all environments',
+  },
+  {
+    name: 'Commercial Plan Lines + Plan Module Rules (dev)',
+    fn: seedPlanCommercialLines,
+    description:
+      'Impulsa / Emprendedor / Empresarial Pro / IA Business with §5.1 AI caps and the plan access matrix',
   },
   {
     name: 'PQR Anonymous User',

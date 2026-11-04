@@ -2,6 +2,7 @@ import { Body, Controller, Get, Post, Req } from '@nestjs/common';
 import { ResponseService } from '../../../common/responses/response.service';
 import { AccessGateService } from '../../../common/access/access-gate.service';
 import { AccessAuditBatchDto } from '../../../common/access/dto/access-audit-events.dto';
+import { PlanAccessService } from '../subscriptions/services/plan-access.service';
 import { SkipSubscriptionGate } from '../subscriptions/decorators/skip-subscription-gate.decorator';
 
 /**
@@ -14,11 +15,18 @@ export class StoreAccessGateController {
   constructor(
     private readonly accessGate: AccessGateService,
     private readonly responseService: ResponseService,
+    private readonly planAccess: PlanAccessService,
   ) {}
 
   @Get()
   async getState(@Req() req: any) {
-    const data = await this.accessGate.getStoreState(req.user);
+    // Plan layer (plan_module_rules): what the plan in force does not include
+    // and which plans do. Its own `mode` (separate Redis flag).
+    const [state, plan] = await Promise.all([
+      this.accessGate.getStoreState(req.user),
+      this.planAccess.storeState(req.user?.store_id),
+    ]);
+    const data = { ...state, plan };
     return this.responseService.success(data, 'Estado de la compuerta');
   }
 

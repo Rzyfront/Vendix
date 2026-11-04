@@ -175,9 +175,15 @@ export class AppsCatalogComponent {
    */
   private applyAccessGate(card: AppCard): AppCard {
     if (card.action.kind !== 'route') return card;
-    return this.menuFilter.applyRouteGate(card.action.route, true, 'apps_card')
-      ? card
-      : { ...card, action: { kind: 'disabled', label: 'No aplica a tu industria' } };
+    if (!this.menuFilter.applyRouteGate(card.action.route, true, 'apps_card')) {
+      return { ...card, action: { kind: 'disabled', label: 'No aplica a tu industria' } };
+    }
+    // Plan layer: the card stays usable (it opens the module paywall through
+    // the route guard) but says it belongs to a higher plan.
+    const keys = this.menuFilter.resolveGateKeysForRoute(card.action.route);
+    return this.menuFilter.isPlanLocked(keys)
+      ? { ...card, action: { ...card.action, label: 'Disponible en un plan superior' } }
+      : card;
   }
 
   constructor() {

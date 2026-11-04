@@ -1,6 +1,6 @@
 import { Component, OnInit, computed, inject, signal, DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 import {
   ButtonComponent,
@@ -15,6 +15,7 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 import { SubscriptionPlan } from '../../interfaces/store-subscription.interface';
 import { WompiCheckoutService } from '../../../../../../core/services/wompi-checkout.service';
 import { PricingCardSelectEvent } from '../../../../../../shared/components/pricing-card/pricing-card.component';
+import { planModuleFamily } from '../../../../../../shared/constants/plan-modules';
 
 type BillingCycle = 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'lifetime';
 
@@ -29,6 +30,39 @@ const CYCLE_LABEL: Record<BillingCycle, string> = {
   annual: 'Anual',
   lifetime: 'Pago único',
 };
+
+/** Query of the module paywall: `?plan=<code>&cycle=<cycle>&from=<module>`. */
+export interface CatalogPreselectQuery {
+  plan?: string | null;
+  cycle?: string | null;
+}
+
+/**
+ * Module paywall → plans page (planes-matriz-accesos §3). Picks the cycle to
+ * show and the plan to highlight: the requested cycle when the catalog has it,
+ * else the cycle of the requested plan, else the default (annual first). The
+ * plan is highlighted only if it exists in the chosen cycle. Without a query
+ * the result is the page's historical default and no highlight.
+ */
+export function resolveCatalogPreselection(
+  plans: Pick<SubscriptionPlan, 'code' | 'billing_cycle'>[],
+  query: CatalogPreselectQuery,
+): { cycle: BillingCycle | null; planCode: string | null } {
+  const present = new Set(plans.map((p) => p.billing_cycle as BillingCycle));
+  const cycles = CYCLE_ORDER.filter((c) => present.has(c));
+  const fallback = cycles.length
+    ? cycles.includes('annual') ? 'annual' : cycles[0]
+    : null;
+  const requested = plans.find((p) => p.code === query.plan) ?? null;
+  const cycle =
+    (cycles.find((c) => c === query.cycle) ??
+      (requested?.billing_cycle as BillingCycle | undefined) ??
+      fallback) ||
+    null;
+  const planCode =
+    requested && requested.billing_cycle === cycle ? requested.code : null;
+  return { cycle, planCode };
+}
 
 // S2.1 — Same reason → copy mapping as in checkout component.
 const COUPON_REASON_COPY: Record<string, string> = {
@@ -64,6 +98,19 @@ const COUPON_REASON_COPY: Record<string, string> = {
           Escala con confianza. Cambia o cancela cuando quieras.
         </p>
       </header>
+
+      @if (moduleName(); as name) {
+        <div
+          class="max-w-2xl mx-auto flex items-center gap-2 rounded-lg border border-border bg-surface px-4 py-3 text-sm text-text-secondary"
+          data-testid="plan-catalog-from-module"
+        >
+          <app-icon name="lock" [size]="16" />
+          <span>
+            Para usar <strong class="text-text-primary">{{ name }}</strong> necesitas uno de los planes
+            que lo incluyen.@if (highlightedPlan()) { Te marcamos el recomendado.}
+          </span>
+        </div>
+      }
 
       <!-- Billing cycle switcher -->
       @if (!loading() && availableCycles().length > 1) {
@@ -118,12 +165,20 @@ const COUPON_REASON_COPY: Record<string, string> = {
       @if (!loading() && plans().length > 0) {
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 items-stretch pt-2">
           @for (plan of visiblePlans(); track plan.id) {
-            <app-pricing-card
-              [plan]="plan"
-              [subscriptionStatus]="subscriptionStatus()"
-              ctaLabel="Seleccionar plan"
-              (select)="selectPlan($event)"
-            ></app-pricing-card>
+            <div
+              class="flex rounded-2xl"
+              [class.ring-2]="plan.code === highlightedPlan()"
+              [class.ring-primary]="plan.code === highlightedPlan()"
+              [attr.data-recommended]="plan.code === highlightedPlan() ? 'true' : null"
+            >
+              <app-pricing-card
+                class="flex-1"
+                [plan]="plan"
+                [subscriptionStatus]="subscriptionStatus()"
+                ctaLabel="Seleccionar plan"
+                (select)="selectPlan($event)"
+              ></app-pricing-card>
+            </div>
           }
         </div>
       }
@@ -188,6 +243,7 @@ const COUPON_REASON_COPY: Record<string, string> = {
 export class PlanCatalogComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
   private facade = inject(SubscriptionFacade);
   private subscriptionService = inject(StoreSubscriptionService);
   private toastService = inject(ToastService);
@@ -202,6 +258,17 @@ export class PlanCatalogComponent implements OnInit {
   readonly retryingPayment = signal(false);
 
   readonly selectedCycle = signal<BillingCycle | null>(null);
+
+  /** Module paywall query (`plan`, `cycle`, `from`); empty → page unchanged. */
+  private readonly preselectQuery: CatalogPreselectQuery & { from?: string | null } = {
+    plan: this.route.snapshot.queryParamMap.get('plan'),
+    cycle: this.route.snapshot.queryParamMap.get('cycle'),
+    from: this.route.snapshot.queryParamMap.get('from'),
+  };
+  readonly highlightedPlan = signal<string | null>(null);
+  readonly moduleName = signal<string | null>(
+    planModuleFamily(this.preselectQuery.from ?? '')?.name ?? null,
+  );
 
   readonly availableCycles = computed<BillingCycle[]>(() => {
     const present = new Set(this.plans().map(p => p.billing_cycle as BillingCycle));
@@ -267,9 +334,10 @@ export class PlanCatalogComponent implements OnInit {
         next: (res) => {
           if (res.success && res.data) {
             this.plans.set(res.data);
-            const cycles = this.availableCycles();
-            if (cycles.length > 0 && !this.selectedCycle()) {
-              this.selectedCycle.set(cycles.includes('annual') ? 'annual' : cycles[0]);
+            if (!this.selectedCycle()) {
+              const pick = resolveCatalogPreselection(res.data, this.preselectQuery);
+              if (pick.cycle) this.selectedCycle.set(pick.cycle);
+              this.highlightedPlan.set(pick.planCode);
             }
           }
           this.loading.set(false);

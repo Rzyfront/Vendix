@@ -29,7 +29,14 @@ import {
   AccessGateService,
   AccessLayer,
   AccessSurface,
+  CurrentPlan,
+  PlanOffer,
 } from './access-gate.service';
+import {
+  PLAN_MODULE_FAMILIES,
+  type PlanModuleFamily,
+  planModuleFamily,
+} from '../../shared/constants/plan-modules';
 import { canUserAccessDashboard } from '../utils/dashboard-access.util';
 import type {
   OrganizationOperatingScope,
@@ -142,6 +149,26 @@ export interface AccessVerdict {
   /** Industries the industry layer evaluated (store, or org union). */
   industries: string[];
 }
+
+/**
+ * Why the plan in force does not open a module, and where to buy it. Built
+ * from the gate state the backend sends (`plan.blocked`, `plan.required_plans`)
+ * — the same source as the API 403 — so the panel never keeps its own list.
+ */
+export interface PlanLock {
+  /** Key the lock is reported for (first denied key). */
+  key: string;
+  family: PlanModuleFamily | null;
+  currentPlan: CurrentPlan | null;
+  /** Sellable plans that include the module, cheapest first. */
+  offers: PlanOffer[];
+  /** The plan to preselect: same cycle as the current plan, else cheapest. */
+  recommended: PlanOffer | null;
+  /** `/admin/subscription/plans?plan=&cycle=&from=`. */
+  upgradeUrl: string;
+}
+
+export const PLAN_CATALOG_ROUTE = '/admin/subscription/plans';
 
 /**
  * Service for filtering menu items based on panel_ui configuration.
@@ -860,7 +887,11 @@ export class MenuFilterService {
         ) {
           return filtered;
         }
-        const auditOnlyItem: MenuItem = { ...item, _locked: locked };
+        const auditOnlyItem: MenuItem = {
+          ...item,
+          _locked: locked,
+          _planLocked: this.isPlanLocked(this.gateKeysFor(item)),
+        };
 
         // If it has children, recursively filter them (children can also be audit-only)
         if (item.children && item.children.length > 0) {
@@ -914,7 +945,11 @@ export class MenuFilterService {
           ) {
             return filtered;
           }
-          const filteredItem: MenuItem = { ...item, _locked: locked };
+          const filteredItem: MenuItem = {
+            ...item,
+            _locked: locked,
+            _planLocked: this.isPlanLocked(itemKeys),
+          };
 
           // Recursively filter children if present
           if (item.children && item.children.length > 0) {
@@ -1545,6 +1580,7 @@ export class MenuFilterService {
         !this.hiddenBySettings(settings).includes(key);
     }
     const industry = industryAllowsKey(key, industries);
+    const plan = !this.planDeniesKey(key);
 
     const layer: AccessLayer | null = !user
       ? 'user'
@@ -1554,7 +1590,9 @@ export class MenuFilterService {
           : 'store'
         : !industry
           ? 'industry'
-          : null;
+          : !plan
+            ? 'plan'
+            : null;
     return { allowed: layer === null, layer, industries };
   }
 
@@ -1579,6 +1617,23 @@ export class MenuFilterService {
     const verdicts = keys.map((key) => ({ key, ...this.canSeeKey(key, surface) }));
     if (verdicts.some((verdict) => verdict.allowed)) return true;
 
+    // Plan layer, own flag. It never hides: the sidebar and the Apps card keep
+    // the module visible with a lock (`isPlanLocked`); a URL or a Vexi
+    // navigation is refused only when the plan flag is on, and the caller
+    // opens the module paywall (`planLockForKeys`).
+    if (verdicts.every((verdict) => verdict.layer === 'plan')) {
+      const enforcePlan = this.accessGate.planMode() === 'enforce';
+      this.accessGate.report({
+        key: verdicts[0].key,
+        decision: enforcePlan ? 'blocked' : 'would_block',
+        layer: 'plan',
+        surface,
+        ...(route ? { route } : {}),
+      });
+      const shows = surface === 'sidebar' || surface === 'apps_card';
+      return shows || !enforcePlan;
+    }
+
     const industryDenied = verdicts.every(
       (verdict) => !industryAllowsKey(verdict.key, verdict.industries),
     );
@@ -1602,6 +1657,62 @@ export class MenuFilterService {
       ...(route ? { route } : {}),
     });
     return !block;
+  }
+
+  /** True when the plan in force does not include `key` (exempt keys never). */
+  planDeniesKey(key: string): boolean {
+    return this.accessGate.planBlocked().includes(key);
+  }
+
+  /**
+   * Plan lock for a set of keys (an item, a route): only when the plan denies
+   * EVERY key, as the other layers do. Independent of the mode: callers decide
+   * with `isPlanLocked` / `accessGate.planMode()`.
+   */
+  planLockForKeys(keys: string[]): PlanLock | null {
+    if (!keys.length || !keys.every((key) => this.planDeniesKey(key))) {
+      return null;
+    }
+    const key = keys.find((k) => planModuleFamily(k)) ?? keys[0];
+    const offers = [...(this.accessGate.planOffers()[key] ?? [])];
+    const currentPlan = this.accessGate.currentPlan();
+    const recommended =
+      offers.find((offer) => offer.cycle === currentPlan?.cycle) ??
+      offers[0] ??
+      null;
+    const params = new URLSearchParams();
+    if (recommended) {
+      params.set('plan', recommended.code);
+      params.set('cycle', recommended.cycle);
+    }
+    params.set('from', key);
+    return {
+      key,
+      family: planModuleFamily(key),
+      currentPlan,
+      offers,
+      recommended,
+      upgradeUrl: `${PLAN_CATALOG_ROUTE}?${params.toString()}`,
+    };
+  }
+
+  planLockForRoute(route: string, app: AccessGateApp = this.accessGate.currentApp()): PlanLock | null {
+    return this.planLockForKeys(this.resolveGateKeysForRoute(route, app));
+  }
+
+  /** Lock to paint on a menu item / card: plan denies all keys AND the flag is on. */
+  isPlanLocked(keys: string[]): boolean {
+    return (
+      this.accessGate.planMode() === 'enforce' && this.planLockForKeys(keys) !== null
+    );
+  }
+
+  /** Paywall family of a key, for copy outside the gate (e.g. plan catalog). */
+  planFamilyName(key: string | null | undefined): string | null {
+    if (!key) return null;
+    return (
+      PLAN_MODULE_FAMILIES.find((family) => family.keys.includes(key))?.name ?? null
+    );
   }
 
   /** Gate on a route: resolves its keys and applies `applyAccessGate`. */

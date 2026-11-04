@@ -12,7 +12,7 @@ export type AccessGateApp = 'STORE_ADMIN' | 'ORG_ADMIN';
 /** Surfaces that consult `canSeeKey` (apps-f4 S4). */
 export type AccessSurface = 'sidebar' | 'url' | 'apps_card' | 'vexi';
 
-export type AccessLayer = 'user' | 'store' | 'industry' | 'org';
+export type AccessLayer = 'user' | 'store' | 'industry' | 'org' | 'plan';
 
 export type AccessDecision = 'would_hide' | 'would_block' | 'hidden' | 'blocked';
 
@@ -24,10 +24,37 @@ export interface AccessAuditEvent {
   route?: string;
 }
 
+/** A sellable plan that includes a module (paywall offer). */
+export interface PlanOffer {
+  code: string;
+  name: string;
+  price: number;
+  currency: string;
+  cycle: string;
+}
+
+export interface CurrentPlan {
+  code: string;
+  name: string;
+  cycle: string | null;
+}
+
+/** Plan layer of the gate state (`plan_module_rules`). */
+export interface PlanGateState {
+  /** Own flag: `enforce` only when the backend plan key is on. */
+  mode?: AccessGateMode;
+  current_plan?: CurrentPlan | null;
+  /** Module keys the plan in force does not include. */
+  blocked?: string[];
+  /** Sellable plans that include each blocked key, cheapest first. */
+  required_plans?: Record<string, PlanOffer[]>;
+}
+
 interface AccessGateState {
   mode?: AccessGateMode;
   industries?: string[];
   org_panel_ui?: Record<string, boolean> | null;
+  plan?: PlanGateState | null;
 }
 
 /** Max wait for the gate state before a guard falls back to audit. */
@@ -60,6 +87,15 @@ export class AccessGateService {
   readonly industries = signal<string[] | null>(null);
   /** ORG_ADMIN ceiling, `organization_settings.panel_ui.ORG_ADMIN`. */
   readonly orgPanelUi = signal<Record<string, boolean> | null>(null);
+  /**
+   * Plan layer (odd/tasks/planes-matriz-accesos.md). Its mode is separate from
+   * the industry one: `audit` until the backend plan flag is on. Empty until
+   * loaded, so nothing is locked by default.
+   */
+  readonly planMode = signal<AccessGateMode>('audit');
+  readonly planBlocked = signal<readonly string[]>([]);
+  readonly planOffers = signal<Readonly<Record<string, PlanOffer[]>>>({});
+  readonly currentPlan = signal<CurrentPlan | null>(null);
 
   private loadedFor: string | null = null;
   private failedAt: number | null = null;
@@ -99,6 +135,7 @@ export class AccessGateService {
     this.mode.set('audit');
     this.industries.set(null);
     this.orgPanelUi.set(null);
+    this.resetPlan();
 
     const url = `${environment.apiUrl}/${this.prefix(app)}/access-gate`;
     const promise = firstValueFrom(
@@ -113,6 +150,7 @@ export class AccessGateService {
           Array.isArray(state?.industries) ? state.industries : null,
         );
         this.orgPanelUi.set(state?.org_panel_ui ?? null);
+        this.applyPlan(state?.plan ?? null);
         this.loadedFor = scopeKey;
         this.failedAt = null;
       })
@@ -120,6 +158,7 @@ export class AccessGateService {
         // Audit on any failure; retry after a short pause, not on every
         // navigation.
         this.mode.set('audit');
+        this.resetPlan();
         this.failedAt = Date.now();
       })
       .finally(() => {
@@ -127,6 +166,21 @@ export class AccessGateService {
       });
     this.loading = { scopeKey, promise };
     return promise;
+  }
+
+  private applyPlan(plan: PlanGateState | null): void {
+    this.planMode.set(plan?.mode === 'enforce' ? 'enforce' : 'audit');
+    this.planBlocked.set(
+      Array.isArray(plan?.blocked)
+        ? plan.blocked.filter((key): key is string => typeof key === 'string')
+        : [],
+    );
+    this.planOffers.set(plan?.required_plans ?? {});
+    this.currentPlan.set(plan?.current_plan ?? null);
+  }
+
+  private resetPlan(): void {
+    this.applyPlan(null);
   }
 
   /** Queues one event; identical events in the same session are sent once. */
