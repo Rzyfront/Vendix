@@ -22,13 +22,12 @@ import {
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { EcommerceComponent } from '../../../ecommerce/ecommerce.component';
-import { CrmMainPageComponent } from '../../../crm/pages/crm-main-page/crm-main-page.component';
 import { AppPageEditorComponent, AppPageEditorSection } from '../../components/app-page-editor/app-page-editor.component';
 import { BookingSettingsPanelComponent } from '../../components/booking-settings-panel.component';
-import { LandingSettingsPanelComponent } from '../../components/landing-settings-panel.component';
 import { ProductPageSettingsPanelComponent } from '../../components/product-page-settings-panel.component';
 import { ServicePageSettingsPanelComponent } from '../../components/service-page-settings-panel.component';
 import { StoreHomeSettingsPanelComponent } from '../../components/store-home-settings-panel.component';
+import { LandingBuilderPageComponent } from '../../landing-builder/landing-builder-page.component';
 import type { AppSettingsPanel } from '../../components/app-settings-panel';
 import type { AppKind, AppStatus, StoreAppDetail } from '../../interfaces/store-app.interface';
 import { StoreAppsService } from '../../services/store-apps.service';
@@ -58,7 +57,6 @@ const STATUS_BADGE: Record<AppStatus, { label: string; color: StickyHeaderBadgeC
 /** Per-app header icon and name of the settings tab. */
 const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>> = {
   store_home: { icon: 'home', settingsLabel: 'Configuración' },
-  landing: { icon: 'sparkles', settingsLabel: 'Oferta y dominio' },
   product_page: { icon: 'package', settingsLabel: 'Producto y dominio' },
   service_page: { icon: 'briefcase', settingsLabel: 'Servicios y dominio' },
   booking: { icon: 'bed-double', settingsLabel: 'Reservas y dominio' },
@@ -71,8 +69,11 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
  * Its detail (`GET /store/apps/:kind`) is only fetched here, on entering the
  * view; the catalog stays light. The header carries name, status, domain/URL
  * and the Publicar/Despublicar and Encender/Apagar actions; each app brings
- * its settings panel (the former modal content) and, for the landing, the
- * CRM landing editor from Clientes reused as it is.
+ * its settings panel (the former modal content).
+ *
+ * The landing (F6-A) is a whole view of its own, the page builder
+ * (`LandingBuilderPageComponent`): it carries its single sticky header,
+ * loads its own data and owns its actions, so this view only hosts it.
  */
 @Component({
   selector: 'app-app-detail',
@@ -80,9 +81,8 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
   imports: [
     RouterLink,
     StickyHeaderComponent,
-    CrmMainPageComponent,
     StoreHomeSettingsPanelComponent,
-    LandingSettingsPanelComponent,
+    LandingBuilderPageComponent,
     ProductPageSettingsPanelComponent,
     ServicePageSettingsPanelComponent,
     BookingSettingsPanelComponent,
@@ -91,6 +91,9 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    @if (kind() === 'landing') {
+      <app-landing-builder-page />
+    } @else {
     <div class="w-full" [attr.data-app-view]="kind()">
       @if (kind() === 'ecommerce') {
         <!-- The online store hosts its own sticky header (EcommerceComponent): here only a plain, non-sticky
@@ -185,13 +188,6 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
             </p>
           </section>
 
-          <!-- Contenido (landing: el editor de Clientes, sin reescribir) -->
-          @if (kind() === 'landing') {
-            <div [class.hidden]="tab() !== 'content'" data-tab="content">
-              <app-crm-main-page />
-            </div>
-          }
-
           <!-- Tienda en línea: la gestión de siempre, dentro de Apps -->
           @if (kind() === 'ecommerce') {
             <div [class.hidden]="tab() !== 'ecommerce'" data-tab="ecommerce">
@@ -212,7 +208,6 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
                class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
             @switch (kind()) {
               @case ('store_home') { <app-store-home-settings-panel #panel (changed)="loadDetail()" /> }
-              @case ('landing') { <app-landing-settings-panel #panel (changed)="loadDetail()" /> }
               @case ('product_page') { <app-product-page-settings-panel #panel (changed)="loadDetail()" /> }
               @case ('service_page') { <app-service-page-settings-panel #panel (changed)="loadDetail()" /> }
               @case ('booking') { <app-booking-settings-panel #panel (changed)="loadDetail()" /> }
@@ -226,6 +221,7 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
         }
       </div>
     </div>
+    }
   `,
 })
 export class AppDetailComponent {
@@ -297,7 +293,6 @@ export class AppDetailComponent {
       ];
     }
     return [
-      ...(kind === 'landing' ? [{ id: 'content', label: 'Contenido', icon: 'palette' }] : []),
       { id: 'settings', label: APP_VIEW[kind]?.settingsLabel ?? 'Configuración', icon: 'settings' },
       { id: 'general', label: 'Estado', icon: 'activity' },
     ];
@@ -316,7 +311,6 @@ export class AppDetailComponent {
     if (!app || !app.applies_to_store_industries || this.kind() === 'ecommerce') return [];
     const busy = this.switching() || (panel?.busy() ?? false);
     const published = app.status === 'published';
-    const isLanding = this.kind() === 'landing';
     const canUnpublish = published && (panel?.canUnpublish() ?? false);
     const actions: StickyHeaderActionButton[] = [];
 
@@ -328,10 +322,10 @@ export class AppDetailComponent {
     if (canUnpublish) {
       actions.push({ id: 'unpublish', label: 'Despublicar', variant: 'outline', icon: 'eye-off', disabled: busy });
     }
-    if (!published || (isLanding && !canUnpublish)) {
+    if (!published) {
       actions.push({
         id: 'publish',
-        label: isLanding ? 'Publicar en su dominio' : 'Publicar',
+        label: 'Publicar',
         variant: 'primary',
         icon: 'globe',
         disabled: busy || !(panel?.canPublish() ?? false),
@@ -345,8 +339,9 @@ export class AppDetailComponent {
       const kind = this.kind();
       untracked(() => {
         this.detail.set(null);
-        this.tab.set(kind === 'landing' ? 'content' : kind === 'ecommerce' ? 'ecommerce' : 'settings');
-        if (kind) this.loadDetail();
+        this.tab.set(kind === 'ecommerce' ? 'ecommerce' : 'settings');
+        // The landing builder loads its own data.
+        if (kind && kind !== 'landing') this.loadDetail();
       });
     });
   }

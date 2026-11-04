@@ -5,12 +5,11 @@ import { of } from 'rxjs';
 
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { EcommerceComponent } from '../../../ecommerce/ecommerce.component';
-import { CrmMainPageComponent } from '../../../crm/pages/crm-main-page/crm-main-page.component';
 import { BookingSettingsPanelComponent } from '../../components/booking-settings-panel.component';
-import { LandingSettingsPanelComponent } from '../../components/landing-settings-panel.component';
 import { ProductPageSettingsPanelComponent } from '../../components/product-page-settings-panel.component';
 import { ServicePageSettingsPanelComponent } from '../../components/service-page-settings-panel.component';
 import { StoreHomeSettingsPanelComponent } from '../../components/store-home-settings-panel.component';
+import { LandingBuilderPageComponent } from '../../landing-builder/landing-builder-page.component';
 import type { StoreAppDetail } from '../../interfaces/store-app.interface';
 import { StoreAppsService } from '../../services/store-apps.service';
 import { AppDetailComponent } from './app-detail.component';
@@ -33,11 +32,8 @@ class StubProductPagePanel extends StubPanel {}
 @Component({ selector: 'app-booking-settings-panel', standalone: true, template: '<p>panel reservas</p>' })
 class StubBookingPanel extends StubPanel {}
 
-@Component({ selector: 'app-landing-settings-panel', standalone: true, template: '<p>panel landing</p>' })
-class StubLandingPanel extends StubPanel {}
-
-@Component({ selector: 'app-crm-main-page', standalone: true, template: '<p data-testid="crm-editor">editor</p>' })
-class StubCrmMainPage {}
+@Component({ selector: 'app-landing-builder-page', standalone: true, template: '<p data-testid="landing-builder">builder</p>' })
+class StubLandingBuilder {}
 
 @Component({ selector: 'app-ecommerce', standalone: true, template: '<p data-testid="ecommerce-admin">gestión</p>' })
 class StubEcommerce {}
@@ -93,16 +89,15 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
     TestBed.overrideComponent(AppDetailComponent, {
       remove: {
         imports: [
-          CrmMainPageComponent,
+          LandingBuilderPageComponent,
           StoreHomeSettingsPanelComponent,
-          LandingSettingsPanelComponent,
           ProductPageSettingsPanelComponent,
           ServicePageSettingsPanelComponent,
           BookingSettingsPanelComponent,
           EcommerceComponent,
         ],
       },
-      add: { imports: [StubCrmMainPage, StubProductPagePanel, StubLandingPanel, StubBookingPanel, StubEcommerce] },
+      add: { imports: [StubLandingBuilder, StubProductPagePanel, StubBookingPanel, StubEcommerce] },
     });
   });
 
@@ -162,16 +157,14 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
     expect(component.actions().find((a) => a.id === 'publish')?.disabled).toBeTrue();
   });
 
-  it('landing: abre en Contenido con el editor de Clientes reutilizado', async () => {
+  it('landing (F6-A): monta solo el constructor de la landing, con su propia cabecera y sus datos', async () => {
     await render('landing', detail({ key: 'landing', name: 'Landing page', status: 'published' }));
 
-    expect(apps.get).toHaveBeenCalledOnceWith('landing');
-    expect(component.tab()).toBe('content');
-    expect(component.tabs().map((t) => t.id)).toEqual(['content', 'settings', 'general']);
-    expect(fixture.nativeElement.querySelector('[data-testid="crm-editor"]')).not.toBeNull();
-    // Publicada en el dominio de la tienda: se puede llevar a su dominio propio.
-    expect(actionIds()).toEqual(['publish']);
-    expect(component.actions()[0].label).toBe('Publicar en su dominio');
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('[data-testid="landing-builder"]')).not.toBeNull();
+    // Una sola barra: la de esta vista no se dibuja, y el constructor carga lo suyo.
+    expect(el.querySelector('app-sticky-header')).toBeNull();
+    expect(apps.get).not.toHaveBeenCalled();
   });
 
   it('apps con página propia: su pestaña de ajustes y luego Contenido, Operación, Marca y SEO, Estilo, Vista previa y Estado (apps-f2 S6, apps-f3 S1)', async () => {
