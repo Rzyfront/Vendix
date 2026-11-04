@@ -773,6 +773,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.partner_plan_overrides;
   }
 
+  get plan_module_rules() {
+    return this.baseClient.plan_module_rules;
+  }
+
   get platform_settings() {
     return this.baseClient.platform_settings;
   }
