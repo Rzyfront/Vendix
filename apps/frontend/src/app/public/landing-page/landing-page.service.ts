@@ -19,6 +19,8 @@ export interface LandingOffer {
 export interface LandingPagePublic {
   /** Hostname of the landing's own domain; the offer shows only there. */
   hostname: string;
+  /** Apps F5: the landing's own domain plus its aliases (lowercase). */
+  hostnames?: string[];
   offer: LandingOffer;
 }
 
@@ -38,7 +40,10 @@ export interface LandingLeadResponse {
  * stay as it is: no offer, same contact endpoint as before.
  */
 export function isOwnLandingHost(page: LandingPagePublic | null, host: string): boolean {
-  return !!page && page.hostname.toLowerCase() === host.toLowerCase();
+  if (!page) return false;
+  const target = host.toLowerCase();
+  const hosts = page.hostnames?.length ? page.hostnames : [page.hostname];
+  return hosts.some((h) => h.toLowerCase() === target);
 }
 
 /**

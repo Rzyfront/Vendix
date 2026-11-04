@@ -87,3 +87,21 @@ export interface LandingPageConfig {
   offer_description: string | null;
   offer_product_id: number | null;
 }
+
+/**
+ * Apps F5: own domains that also serve a published app (aliases), next to its
+ * Vendix subdomain. Backend `store_apps.config.custom_domain_aliases`.
+ */
+export interface AppDomainAlias {
+  domain_id: number;
+  previous_app_type: string | null;
+}
+
+/** Ids of the alias domains of an app, read defensively from its config. */
+export function appDomainAliasIds(config: unknown): number[] {
+  const raw = (config as { custom_domain_aliases?: unknown } | null)?.custom_domain_aliases;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((a) => (a as { domain_id?: unknown })?.domain_id)
+    .filter((id): id is number => typeof id === 'number');
+}

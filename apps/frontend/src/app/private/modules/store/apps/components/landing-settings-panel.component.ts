@@ -20,6 +20,7 @@ import {
   LandingPageConfig,
   ProductPageCustomDomain,
   StoreAppDetail,
+  appDomainAliasIds,
 } from '../interfaces/store-app.interface';
 import { StoreAppsService } from '../services/store-apps.service';
 import type { AppSettingsPanel } from './app-settings-panel';
@@ -141,6 +142,14 @@ interface PickedItem {
 
           <section>
             <h3 class="font-semibold text-[var(--color-text-primary)]">Dominio</h3>
+            <p class="mt-1 text-xs text-[var(--color-text-secondary)]" data-testid="app-domain-hint">
+              La dirección de Vendix queda siempre activa. Si eliges uno de tus dominios, se suma como alias.
+            </p>
+            @if (aliasHostnames().length) {
+              <p class="mt-2 text-sm" data-testid="app-domain-aliases">
+                También responde en: {{ aliasHostnames().join(', ') }}
+              </p>
+            }
             <label class="mt-2 flex items-start gap-2">
               <input type="radio" name="lp-domain" [checked]="customDomainId() === null" (change)="customDomainId.set(null)" />
               <span>
@@ -151,7 +160,7 @@ interface PickedItem {
             @for (d of customDomains(); track d.id) {
               <label class="mt-2 flex items-start gap-2">
                 <input type="radio" name="lp-domain" [checked]="customDomainId() === d.id" (change)="customDomainId.set(d.id)" />
-                <span>{{ d.hostname }} <span class="text-xs text-[var(--color-text-secondary)]">(tu dominio)</span></span>
+                <span>{{ d.hostname }} <span class="text-xs text-[var(--color-text-secondary)]">(sumar como alias)</span></span>
               </label>
             }
           </section>
@@ -191,6 +200,13 @@ export class LandingSettingsPanelComponent implements AppSettingsPanel {
   readonly description = signal('');
   readonly product = signal<PickedItem | null>(null);
   readonly customDomainId = signal<number | null>(null);
+  /** Own domains already serving this app as aliases (Apps F5). */
+  readonly aliasHostnames = computed(() => {
+    const domains = this.customDomains();
+    return appDomainAliasIds(this.detail()?.config).map(
+      (id) => domains.find((d) => d.id === id)?.hostname ?? `Dominio #${id}`,
+    );
+  });
   readonly query = signal('');
   readonly results = signal<Product[]>([]);
 

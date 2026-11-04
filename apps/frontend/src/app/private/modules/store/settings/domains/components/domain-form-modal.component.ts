@@ -8,6 +8,7 @@ import {
   SimpleChanges,
   ChangeDetectionStrategy,
   signal,
+  computed,
 } from '@angular/core';
 
 import {
@@ -34,6 +35,7 @@ import {
   DnsInstructions,
 } from '../domain.interface';
 import { environment } from '../../../../../../../environments/environment';
+import { storeAppTypeOptions } from '../../../../../../shared/constants/app-domain-app-types';
 
 @Component({
   selector: 'app-domain-form-modal',
@@ -70,11 +72,13 @@ export class DomainFormModalComponent implements OnInit, OnChanges {
     { value: 'ecommerce', label: 'E-commerce' },
   ];
 
-  appTypeOptions: SelectorOption[] = [
-    { value: 'STORE_ECOMMERCE', label: 'E-commerce' },
-    { value: 'STORE_LANDING', label: 'Landing de tienda' },
-    { value: 'STORE_ADMIN', label: 'Admin de tienda' },
-  ];
+  /**
+   * Apps F5: the store app types plus the app types of the apps. A domain
+   * that serves the online store or the admin is not offered the apps.
+   */
+  readonly appTypeOptions = computed<SelectorOption[]>(() =>
+    storeAppTypeOptions(this.domain()?.app_type),
+  );
 
   ownershipOptions: SelectorOption[] = [
     { value: 'vendix_subdomain', label: 'Subdominio Vendix' },

@@ -46,6 +46,10 @@ const PENDING_PROVISIONING_STATUSES = new Set([
   'propagating',
 ]);
 
+import {
+  APP_ONLY_APP_TYPE_OPTIONS,
+  appOnlyAppTypeLabel,
+} from '../../../../../shared/constants/app-domain-app-types';
 @Component({
   selector: 'app-store-domains',
   standalone: true,
@@ -309,6 +313,7 @@ readonly domains = signal<StoreDomain[]>([]);
         { value: 'STORE_ECOMMERCE', label: 'E-commerce' },
         { value: 'STORE_LANDING', label: 'Landing tienda' },
         { value: 'STORE_ADMIN', label: 'Admin tienda' },
+        ...APP_ONLY_APP_TYPE_OPTIONS,
       ]},
   ];
 
@@ -696,7 +701,7 @@ loadDomains(
       STORE_ECOMMERCE: 'E-commerce',
       STORE_LANDING: 'Landing tienda',
       STORE_ADMIN: 'Admin tienda'};
-    return labels[type] || type;
+    return labels[type] || appOnlyAppTypeLabel(type) || type;
   }
 
   getStatusLabel(status: string): string {
