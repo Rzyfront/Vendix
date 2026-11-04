@@ -2,7 +2,7 @@
 -- Tables affected: credit_installment_reminder_logs (new, empty); notification_type_enum (+1 value)
 -- Expected row changes: none (no backfill, no UPDATE/DELETE)
 -- Destructive operations: none
--- FK/cascade risk: logs cascade only from their own installment (log rows, no business data)
+-- FK/cascade risk: ON DELETE RESTRICT (igual que scheduled_order_reminder_logs): la fila de log nunca cascadea; borrar una cuota con recordatorios registrados queda bloqueado a propósito (nada en el código borra order_installments)
 -- Idempotency: IF NOT EXISTS / pg_constraint guards
 
 ALTER TYPE "notification_type_enum" ADD VALUE IF NOT EXISTS 'credit_installment_reminder';
@@ -46,6 +46,6 @@ BEGIN
     ALTER TABLE "credit_installment_reminder_logs"
       ADD CONSTRAINT "credit_installment_reminder_logs_installment_id_fkey"
       FOREIGN KEY ("installment_id") REFERENCES "order_installments"("id")
-      ON DELETE CASCADE ON UPDATE NO ACTION;
+      ON DELETE RESTRICT ON UPDATE NO ACTION;
   END IF;
 END $$;
