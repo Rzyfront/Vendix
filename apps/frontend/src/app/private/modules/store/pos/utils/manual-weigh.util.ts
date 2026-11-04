@@ -89,6 +89,24 @@ export function capturesInSaleUnit(
 }
 
 /**
+ * Unidad que nombra el precio de un producto de peso en la tarjeta del POS:
+ * la MISMA con la que se cobra. Con unidades declaradas, la principal; con
+ * escala de precio sobre el stock (kg sobre g), la unidad de captura; sin
+ * ninguna de las dos (peso legado: stock g, escala 1), la de la báscula, que
+ * es la que usa el modal de pesaje para cobrar.
+ */
+export function priceUnitLabel(
+  declaredPrincipalCode: string | null | undefined,
+  captureCode: string | null | undefined,
+  unitsPerCapture: number,
+  scaleDefaultCode: string,
+): string {
+  if (declaredPrincipalCode) return declaredPrincipalCode;
+  if (captureCode && unitsPerCapture > 1) return captureCode;
+  return scaleDefaultCode;
+}
+
+/**
  * Parsea lo digitado: tolera coma o punto decimal y espacios. `null` cuando
  * no hay un número positivo.
  */

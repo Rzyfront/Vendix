@@ -6,6 +6,7 @@ import {
   formatWeighAmount,
   ManualWeighUnit,
   parseWeighAmount,
+  priceUnitLabel,
   principalWeighAmount,
   rescaleExceedsWeighMax,
   scaleReadingToUnit,
@@ -242,5 +243,28 @@ describe('rescaleExceedsWeighMax (PR #1062 ronda 6, L1)', () => {
 
   it('sin tope (medida que no es masa) nunca excede', () => {
     expect(rescaleExceedsWeighMax(5000, 1000, units, null)).toBeNull();
+  });
+});
+
+describe('priceUnitLabel (product-sale-unit-consolidation, rótulo = unidad cobrada)', () => {
+  it('peso legado (stock g, escala 1, sin unidades declaradas) se rotula con la báscula: /kg, no /g', () => {
+    expect(priceUnitLabel(null, 'g', 1, 'kg')).toBe('kg');
+  });
+
+  it('con unidades declaradas manda la principal', () => {
+    expect(priceUnitLabel('kg', 'kg', 1000, 'kg')).toBe('kg');
+    expect(priceUnitLabel('lb', 'lb', 500, 'kg')).toBe('lb');
+  });
+
+  it('principal declarada igual al stock (g, escala 1) se cobra por g', () => {
+    expect(priceUnitLabel('g', 'g', 1, 'kg')).toBe('g');
+  });
+
+  it('escala sobre el stock sin unidades declaradas usa la unidad de captura', () => {
+    expect(priceUnitLabel(null, 'kg', 1000, 'lb')).toBe('kg');
+  });
+
+  it('sin unidad de stock cae a la unidad de la báscula', () => {
+    expect(priceUnitLabel(null, null, 1, 'lb')).toBe('lb');
   });
 });

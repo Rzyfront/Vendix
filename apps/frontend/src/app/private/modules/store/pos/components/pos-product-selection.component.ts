@@ -60,6 +60,7 @@ import { ManualWeighResult } from './pos-manual-weight-modal.component';
 import {
   capturesInSaleUnit,
   MAX_WEIGH_AMOUNT,
+  priceUnitLabel,
   weighMaxFor,
 } from '../utils/manual-weigh.util';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
@@ -1243,13 +1244,16 @@ export class PosProductSelectionComponent {
 
   /**
    * Unidad que nombra el precio de un producto de peso en la tarjeta: la
-   * principal del producto (la que cubre la escala del precio). Sin unidades
-   * declaradas (peso legado) cae a la unidad por defecto de la báscula.
+   * misma con la que se cobra (ver `priceUnitLabel`). Un peso legado con
+   * stock en g y escala 1 se cobra por la unidad de la báscula, no por g.
    */
   priceUnitSuffix(product: Product): string {
-    return (
-      this.saleUnitService.configFor(product).captureUnit?.code ??
-      this.defaultWeightUnit()
+    const config = this.saleUnitService.configFor(product);
+    return priceUnitLabel(
+      this.saleUnitService.saleUnitsFor(product)[0]?.code,
+      config.captureUnit?.code,
+      config.unitsPerCapture,
+      this.defaultWeightUnit(),
     );
   }
   readonly allowManualWeightEntry = signal(true);
