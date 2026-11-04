@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { sellableStockLevelsWhere } from '../helpers/pos-stock-scope.helper';
 
 /** One sellable `stock_levels` row reduced to what allocation needs. */
@@ -24,6 +25,25 @@ export interface StockAllocation {
   available: number;
   /** Units the sellable set cannot cover (`requested - allocated`, ≥ 0). */
   shortfall: number;
+  /**
+   * Locations the allocation was RESTRICTED to ("Bodega de la caja"), or
+   * `null`/absent when it ran over every sellable location. Non-blocking
+   * callers absorb a shortfall into `restricted_location_ids[0]` so an
+   * accepted oversell never lands outside the register's warehouse.
+   */
+  restricted_location_ids?: number[] | null;
+}
+
+/** Options for {@link SellableStockAllocator.allocateForLine}. */
+export interface AllocateForLineOpts {
+  /**
+   * Order the line belongs to. When given (and no explicit restriction), the
+   * allocator resolves the order's sale location under the POS
+   * `register_location` scope via {@link SellableStockAllocator.resolveOrderSaleLocationIds}.
+   */
+  orderId?: number | null;
+  /** Explicit restriction; `null` forces "no restriction". Wins over `orderId`. */
+  restrictToLocationIds?: number[] | null;
 }
 
 /**
@@ -59,6 +79,7 @@ export class SellableStockAllocator {
     variantId: number | undefined,
     tx?: Prisma.TransactionClient,
     includeLocationIds: number[] = [],
+    restrictToLocationIds: number[] | null = null,
   ): Promise<SellableStockLevel[]> {
     const db: any = tx ?? this.prisma;
     // `includeLocationIds` widens the set with locations the caller is already
@@ -71,7 +92,25 @@ export class SellableStockAllocator {
       product_variant_id: variantId ?? null,
     };
     const sellable = sellableStockLevelsWhere(storeId);
-    if (includeLocationIds.length > 0) {
+    if (restrictToLocationIds && restrictToLocationIds.length > 0) {
+      // "Bodega de la caja": only the restricted locations. A reservation is
+      // still honoured when it sits INSIDE the restriction, never outside it.
+      const restrictedSellable = {
+        ...sellable,
+        location_id: { in: restrictToLocationIds },
+      };
+      const includeInside = includeLocationIds.filter((id) =>
+        restrictToLocationIds.includes(id),
+      );
+      if (includeInside.length > 0) {
+        where.OR = [
+          restrictedSellable,
+          { location_id: { in: includeInside } },
+        ];
+      } else {
+        Object.assign(where, restrictedSellable);
+      }
+    } else if (includeLocationIds.length > 0) {
       where.OR = [sellable, { location_id: { in: includeLocationIds } }];
     } else {
       Object.assign(where, sellable);
@@ -133,6 +172,10 @@ export class SellableStockAllocator {
 
   /**
    * Convenience: read + allocate in one call.
+   *
+   * `opts.orderId` lets every order-bound caller (POS payment, order flow,
+   * tables, delivery commit) inherit the order's sale-location restriction
+   * from ONE place instead of re-deriving it per path.
    */
   async allocateForLine(
     storeId: number,
@@ -141,15 +184,102 @@ export class SellableStockAllocator {
     quantity: number,
     preferredLocationIds: number[] = [],
     tx?: Prisma.TransactionClient,
+    opts: AllocateForLineOpts = {},
   ): Promise<StockAllocation> {
+    const restricted =
+      opts.restrictToLocationIds !== undefined
+        ? opts.restrictToLocationIds
+        : opts.orderId != null
+          ? await this.resolveOrderSaleLocationIds(opts.orderId, tx)
+          : null;
     const levels = await this.getSellableLevels(
       storeId,
       productId,
       variantId,
       tx,
       preferredLocationIds,
+      restricted,
     );
-    return this.allocate(quantity, levels, preferredLocationIds);
+    const preferred = restricted
+      ? preferredLocationIds.filter((id) => restricted.includes(id))
+      : preferredLocationIds;
+    return {
+      ...this.allocate(quantity, levels, preferred),
+      restricted_location_ids: restricted,
+    };
+  }
+
+  /**
+   * Sale location of an order under the POS `register_location` scope
+   * ("Bodega de la caja"): `orders.origin_cash_session_id → register.location_id`.
+   *
+   * Returns `null` (no restriction — the pre-existing behaviour) when the
+   * store is on another scope, the order was not born in a cash session, or
+   * the register has no warehouse. Settings are read raw (no merge): an unset
+   * `pos_stock_scope` defaults to `main_location`, i.e. no restriction.
+   */
+  async resolveOrderSaleLocationIds(
+    orderId: number,
+    tx?: Prisma.TransactionClient,
+  ): Promise<number[] | null> {
+    // Memoized per transaction: every line of the same order resolves to the
+    // same answer, and a payment tx touches each order line several times
+    // (validation, reservation, commit). Outside a tx there is no cache.
+    if (!tx) return this.computeOrderSaleLocationIds(orderId, this.prisma);
+    let perTx = this.saleLocationCache.get(tx);
+    if (!perTx) {
+      perTx = new Map();
+      this.saleLocationCache.set(tx, perTx);
+    }
+    let pending = perTx.get(orderId);
+    if (!pending) {
+      pending = this.computeOrderSaleLocationIds(orderId, tx);
+      perTx.set(orderId, pending);
+    }
+    return pending;
+  }
+
+  private readonly saleLocationCache = new WeakMap<
+    object,
+    Map<number, Promise<number[] | null>>
+  >();
+
+  private async computeOrderSaleLocationIds(
+    orderId: number,
+    client: unknown,
+  ): Promise<number[] | null> {
+    const db: any = client;
+    const order = await db.orders.findFirst({
+      where: { id: orderId },
+      select: { store_id: true, origin_cash_session_id: true, channel: true },
+    });
+    if (!order) return null;
+
+    const settingsRow = await db.store_settings.findFirst({
+      where: { store_id: order.store_id },
+      select: { settings: true },
+    });
+    const scope = (settingsRow?.settings as any)?.inventory?.pos_stock_scope;
+    if (scope !== 'register_location') return null;
+
+    // The order's own origin wins. A POS order with no origin (a draft saved
+    // with no register open, later charged) takes the register of whoever is
+    // charging it now, so the restriction cannot be bypassed by saving first.
+    const actingUserId = RequestContextService.getUserId();
+    const sessionWhere = order.origin_cash_session_id
+      ? { id: order.origin_cash_session_id, store_id: order.store_id }
+      : order.channel === 'pos' && actingUserId
+        ? { store_id: order.store_id, opened_by: actingUserId, status: 'open' }
+        : null;
+    if (!sessionWhere) return null;
+
+    const session = await db.cash_register_sessions.findFirst({
+      where: sessionWhere,
+      orderBy: [{ opened_at: 'desc' }, { id: 'desc' }],
+      select: { register: { select: { location_id: true } } },
+    });
+    const locationId = session?.register?.location_id;
+    return locationId != null ? [locationId] : null;
   }
 
   /**

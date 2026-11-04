@@ -352,9 +352,10 @@ export class CreatePosPaymentDto {
 
   /**
    * ID de la sesión de caja abierta bajo la cual se procesa esta venta POS.
-   * Si se proporciona, `StockLevelManager.resolveSaleLocation` usa la location
-   * de la caja para descontar stock. Si se omite, se usa `store.default_location_id`.
-   * Controlado por el setting `pos.cash_register.require_session_for_sales`.
+   * Informativo: el backend toma la sesión del operador (`opened_by` + `open`)
+   * como `orders.origin_cash_session_id`. Con `inventory.pos_stock_scope =
+   * register_location` ("Bodega de la caja"), el stock se valida, reserva y
+   * descuenta SOLO de la bodega de esa caja (`SellableStockAllocator`).
    */
   @IsOptional()
   @IsInt()

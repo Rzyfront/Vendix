@@ -342,7 +342,7 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
     it('reserva por StockLevelManager en la ubicación vendible, con claim estricto', async () => {
       const tx = buildTx({});
       await add(tx, {});
-      expect(allocator.allocateForLine).toHaveBeenCalledWith(1, 5, undefined, 1, [], tx);
+      expect(allocator.allocateForLine).toHaveBeenCalledWith(1, 5, undefined, 1, [], tx, { orderId: 88 });
       // validate_availability=true y allow_negative_available=false: claim atómico estricto.
       expect(stockLevelManager.reserveStock).toHaveBeenCalledWith(5, undefined, 7, 1, 'order', 88, 9, true, tx, undefined, false, undefined, false);
     });

@@ -1387,6 +1387,26 @@ export class PosProductSelectionComponent {
         untracked(() => this.filterProducts());
       }
     });
+
+    // "Bodega de la caja": the backend scopes the grid to the warehouse of the
+    // operator's open register, so opening, switching or closing the register
+    // must refetch. Keyed on the open session id so unrelated session updates
+    // (totals, status polling) never retrigger; the first run is the initial
+    // load already issued above.
+    let lastRegisterSessionKey: number | null | undefined;
+    effect(() => {
+      const session = this.cashRegisterService.activeSession();
+      const key = session?.status === 'open' ? session.id : null;
+      if (lastRegisterSessionKey === undefined) {
+        lastRegisterSessionKey = key;
+        return;
+      }
+      if (key === lastRegisterSessionKey) return;
+      lastRegisterSessionKey = key;
+      if (this.productService.getPosStockScope() === 'register_location') {
+        untracked(() => this.loadProducts());
+      }
+    });
   }
 
   private initializeCategories(): void {

@@ -8,7 +8,7 @@ import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import {
-  InventoryScope,
+  PosStockScope,
   InventorySettings,
 } from '../../../../../core/models/store-settings.interface';
 import {
@@ -341,7 +341,7 @@ export class PosProductService {
    * decide UX flows (e.g. sourcing suggestion modal); stock filtering itself
    * is handled server-side.
    */
-  getPosStockScope(): InventoryScope {
+  getPosStockScope(): PosStockScope {
     const inventory = this.storeSettingsFacade.settings()?.inventory as
       | InventorySettings
       | undefined;

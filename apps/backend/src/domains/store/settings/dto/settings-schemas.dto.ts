@@ -174,15 +174,15 @@ export class InventorySettingsDto {
   costing_method?: 'cpp' | 'fifo';
 
   @ApiProperty({
-    enum: ['main_location', 'all_locations'],
+    enum: ['main_location', 'all_locations', 'register_location'],
     example: 'main_location',
     required: false,
     description:
-      'Scope used by POS when locating stock for sale. `main_location` restricts POS to the store default location; `all_locations` allows any active location.',
+      'Scope used by POS when locating stock for sale. `main_location` restricts POS to the store default location; `all_locations` allows any active location; `register_location` shows and sells only from the open cash register location.',
   })
   @IsOptional()
-  @IsIn(['main_location', 'all_locations'])
-  pos_stock_scope?: 'main_location' | 'all_locations';
+  @IsIn(['main_location', 'all_locations', 'register_location'])
+  pos_stock_scope?: 'main_location' | 'all_locations' | 'register_location';
 
   @ApiProperty({
     enum: ['main_location', 'all_locations'],

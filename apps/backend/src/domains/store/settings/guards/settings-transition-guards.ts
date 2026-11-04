@@ -113,3 +113,25 @@ export const SETTINGS_TRANSITION_GUARDS: SettingsTransitionGuard[] = [
     },
   },
 ];
+
+/**
+ * Invariantes de ESTADO (no de transición): combinaciones que el estado final
+ * de `store_settings` nunca puede tener, venga del camino que venga.
+ *
+ * - "Bodega de la caja" (`inventory.pos_stock_scope = register_location`) toma
+ *   el stock de la caja abierta: sin el módulo de caja no hay caja que abrir,
+ *   así que el POS no podría vender. Se rechaza tanto elegir el alcance con la
+ *   caja apagada como apagar la caja con el alcance elegido.
+ *
+ * Devuelve el código del primer invariante violado, o `null`.
+ */
+export function findSettingsStateViolation(
+  next: unknown,
+): ErrorCodeEntry | null {
+  const scope = readSettingsPath(next, 'inventory.pos_stock_scope');
+  const cashEnabled = readSettingsPath(next, 'pos.cash_register.enabled');
+  if (scope === 'register_location' && cashEnabled !== true) {
+    return ErrorCodes.POS_REGISTER_SCOPE_REQUIRES_CASH_001;
+  }
+  return null;
+}

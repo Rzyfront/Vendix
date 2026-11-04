@@ -686,6 +686,13 @@ export interface GeneralSettings {
 
 export type InventoryScope = 'main_location' | 'all_locations';
 
+/**
+ * POS-only scope. `register_location` pins the POS to the warehouse of the
+ * operator's open cash register (`cash_registers.location_id`): display,
+ * validation, reservation and delivery commit use ONLY that location.
+ */
+export type PosStockScope = InventoryScope | 'register_location';
+
 export interface InventorySettings {
   low_stock_threshold: number;
   out_of_stock_action: 'hide' | 'show' | 'disable' | 'allow_backorder';
@@ -705,9 +712,11 @@ export interface InventorySettings {
    * Scope used by POS when looking up stock for sale.
    * - `main_location`: POS only consumes stock from `stores.default_location_id`.
    * - `all_locations`: POS may consume stock from any active location of the store.
+   * - `register_location`: POS shows and sells only from the open register's
+   *   location; requires `pos.cash_register.enabled` and a register location.
    * Default: `main_location`.
    */
-  pos_stock_scope: InventoryScope;
+  pos_stock_scope: PosStockScope;
   /**
    * Scope used by low-stock alert evaluation.
    * - `main_location`: alerts only consider stock at `stores.default_location_id`.

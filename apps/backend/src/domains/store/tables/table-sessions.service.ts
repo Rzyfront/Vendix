@@ -1046,6 +1046,7 @@ export class TableSessionsService {
             item.quantity,
             [],
             tx,
+            { orderId: session.order_id },
           );
           let reserveSlices = allocation.slices;
           if (allocation.shortfall > 0) {
@@ -1076,6 +1077,7 @@ export class TableSessionsService {
             });
             const fallbackLocationId =
               allocation.slices[0]?.location_id ??
+              allocation.restricted_location_ids?.[0] ??
               (await this.stockLevelManager.getDefaultLocationForProduct(
                 item.product_id,
                 item.product_variant_id ?? undefined,

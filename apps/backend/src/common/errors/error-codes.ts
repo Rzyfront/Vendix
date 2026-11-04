@@ -7466,6 +7466,18 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Abre tu caja para registrar pagos.',
   },
+  CASH_REGISTER_LOCATION_REQUIRED_001: {
+    code: 'CASH_REGISTER_LOCATION_REQUIRED_001',
+    httpStatus: 409,
+    devMessage:
+      'Esta caja no tiene bodega asignada. Asígnale una bodega en Cajas para poder abrirla.',
+  },
+  POS_REGISTER_SCOPE_REQUIRES_CASH_001: {
+    code: 'POS_REGISTER_SCOPE_REQUIRES_CASH_001',
+    httpStatus: 400,
+    devMessage:
+      'Para usar "Bodega de la caja" activa primero el módulo de caja en los ajustes del POS.',
+  },
 
   // Reporte "Stock Bajo por Proveedor" (CP-low-stock-by-supplier).
   // 400 y no 404: el proveedor no existe o pertenece a otra tienda; la

@@ -2436,6 +2436,7 @@ export class OrderItemChangesService {
       required,
       [],
       tx,
+      { orderId: orderId },
     );
     let slices = allocation.slices;
     if (allocation.shortfall > 0) {
@@ -2471,6 +2472,7 @@ export class OrderItemChangesService {
       });
       const fallbackLocationId =
         allocation.slices[0]?.location_id ??
+        allocation.restricted_location_ids?.[0] ??
         (await this.stockLevelManager.getDefaultLocationForProduct(
           item.product_id,
           item.product_variant_id ?? undefined,

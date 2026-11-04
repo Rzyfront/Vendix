@@ -4761,8 +4761,11 @@ export class PosComponent {
     const crEnabled = cashRegisterSettings?.enabled === true;
     this.cashRegisterEnabled.set(crEnabled);
     this.cashRegisterService.setFeatureEnabled(crEnabled);
+    // "Bodega de la caja": the open register is the stock source, so a sale
+    // without the operator's own session is never possible under that scope.
     this.paymentService.setRequireSessionForSales(
-      cashRegisterSettings?.require_session_for_sales === true,
+      cashRegisterSettings?.require_session_for_sales === true ||
+        settings?.inventory?.pos_stock_scope === 'register_location',
     );
 
     if (crEnabled && !this.cashRegisterSessionInitialized) {

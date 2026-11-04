@@ -1,5 +1,6 @@
 import type {
   InventoryScope,
+  PosStockScope,
   StoreSettings,
 } from '../../../settings/interfaces/store-settings.interface';
 
@@ -27,6 +28,7 @@ export interface StoreScopeRef {
  */
 export type ResolvedInventoryScope =
   | { scope: 'main_location'; mainLocationId: number }
+  | { scope: 'register_location'; mainLocationId: number }
   | { scope: 'all_locations'; mainLocationId: null };
 
 /**
@@ -41,15 +43,29 @@ export type ResolvedInventoryScope =
  *      happen after the store bootstrap (see `store-bootstrap.helper.ts`), but
  *      we guard against it to avoid silently breaking sales.
  *
- * @param store    Store row (or narrowed select) carrying `default_location_id`.
- * @param settings Store settings already merged with hardcoded defaults.
+ *   3. `register_location` pins the scope to `registerLocationId` (the
+ *      location of the operator's open cash register). Without one (no open
+ *      session, or a register with no location) it degrades to
+ *      `main_location`: the sale itself is gated elsewhere (session + register
+ *      location are mandatory under this scope), this only drives display.
+ *
+ * @param store              Store row (or narrowed select) carrying `default_location_id`.
+ * @param settings           Store settings already merged with hardcoded defaults.
+ * @param registerLocationId Location of the operator's open register, if any.
  */
 export function resolvePosStockScope(
   store: StoreScopeRef,
   settings: StoreSettings,
+  registerLocationId?: number | null,
 ): ResolvedInventoryScope {
-  const configured: InventoryScope =
+  const configured: PosStockScope =
     settings.inventory?.pos_stock_scope ?? 'main_location';
+  if (configured === 'register_location') {
+    if (registerLocationId != null) {
+      return { scope: 'register_location', mainLocationId: registerLocationId };
+    }
+    return resolveScope(store, 'main_location');
+  }
   return resolveScope(store, configured);
 }
 
@@ -142,9 +158,9 @@ export function displayableStockLevelsWhere(
   scope: ResolvedInventoryScope,
 ) {
   const sellable = sellableStockLevelsWhere(storeId);
-  return scope.scope === 'main_location'
-    ? { ...sellable, location_id: scope.mainLocationId }
-    : sellable;
+  return scope.scope === 'all_locations'
+    ? sellable
+    : { ...sellable, location_id: scope.mainLocationId };
 }
 
 function resolveScope(

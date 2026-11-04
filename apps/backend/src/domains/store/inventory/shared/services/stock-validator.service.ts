@@ -573,6 +573,17 @@ export class StockValidatorService {
 
     const insufficient: InsufficientStockItem[] = [];
 
+    // "Bodega de la caja": an order born in a register with a warehouse, under
+    // `pos_stock_scope = register_location`, is validated ONLY against that
+    // warehouse — the same restriction reservation and commit apply.
+    const restrictedLocationIds =
+      opts.kind === 'product' && opts.orderId != null && opts.locationId == null
+        ? await this.sellableStockAllocator.resolveOrderSaleLocationIds(
+            opts.orderId,
+            opts.tx,
+          )
+        : null;
+
     for (const entry of aggregates.values()) {
       const product = productById.get(entry.product_id);
       // No podemos validar un producto que no existe; ese error es de otra
@@ -597,7 +608,9 @@ export class StockValidatorService {
       const scopedLevels =
         opts.locationId != null
           ? levels.filter((l) => l.location_id === opts.locationId)
-          : levels;
+          : restrictedLocationIds
+            ? levels.filter((l) => restrictedLocationIds.includes(l.location_id))
+            : levels;
 
       let available = scopedLevels.reduce(
         (sum, l) => sum + Math.max(0, l.quantity_available),
@@ -612,6 +625,9 @@ export class StockValidatorService {
             product_id: entry.product_id,
             product_variant_id: entry.product_variant_id,
             status: 'active',
+            ...(restrictedLocationIds && {
+              location_id: { in: restrictedLocationIds },
+            }),
           },
           _sum: { quantity: true },
         });

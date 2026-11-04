@@ -1478,5 +1478,87 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
         prismaMock.cash_register_sessions.findFirst,
       ).not.toHaveBeenCalled();
     });
+
+    const withRegisterScope = (cash_register: Record<string, unknown>) => {
+      (service as any).settingsService.getSettings.mockResolvedValue({
+        pos: { cash_register },
+        inventory: { pos_stock_scope: 'register_location' },
+      });
+    };
+
+    it('bodega de la caja: exige sesión propia aunque el switch de caja esté apagado', async () => {
+      withRegisterScope({ enabled: false });
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue(null);
+
+      await expect(service.assertSessionForSales(USER_ID)).rejects.toMatchObject({
+        errorCode: 'CASH_SESSION_REQUIRED_001',
+      });
+    });
+
+    it('bodega de la caja: sesión en una caja sin bodega lanza CASH_REGISTER_LOCATION_REQUIRED_001', async () => {
+      withRegisterScope({ enabled: true });
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue({
+        id: SESSION_ID,
+        opened_by: USER_ID,
+        register: { id: 3, location_id: null },
+      });
+
+      await expect(service.assertSessionForSales(USER_ID)).rejects.toMatchObject({
+        errorCode: 'CASH_REGISTER_LOCATION_REQUIRED_001',
+      });
+    });
+
+    it('bodega de la caja: sesión en caja con bodega no lanza', async () => {
+      withRegisterScope({ enabled: true });
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue({
+        id: SESSION_ID,
+        opened_by: USER_ID,
+        register: { id: 3, location_id: 2 },
+      });
+
+      await expect(service.assertSessionForSales(USER_ID)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('openSession — bodega de la caja', () => {
+    beforeEach(() => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue(null);
+    });
+
+    it('rechaza abrir una caja sin bodega con CASH_REGISTER_LOCATION_REQUIRED_001', async () => {
+      (service as any).settingsService.getSettings.mockResolvedValue({
+        pos: { cash_register: { enabled: true } },
+        inventory: { pos_stock_scope: 'register_location' },
+      });
+      prismaMock.cash_registers.findFirst.mockResolvedValue({
+        id: 3,
+        is_active: true,
+        location_id: null,
+      });
+
+      const promise = service.openSession({ cash_register_id: 3, opening_amount: 0 } as any);
+      await expect(promise).rejects.toMatchObject({
+        errorCode: 'CASH_REGISTER_LOCATION_REQUIRED_001',
+      });
+      await promise.catch((error: VendixHttpException) => {
+        expect(error.getResponse()).toMatchObject({
+          message:
+            'Esta caja no tiene bodega asignada. Asígnale una bodega en Cajas para poder abrirla.',
+        });
+      });
+      expect(prismaMock.cash_register_sessions.create).not.toHaveBeenCalled();
+    });
+
+    it('abre normalmente una caja sin bodega con otro alcance (sin regresión)', async () => {
+      prismaMock.cash_registers.findFirst.mockResolvedValue({
+        id: 3,
+        is_active: true,
+        location_id: null,
+      });
+
+      await service.openSession({ cash_register_id: 3, opening_amount: 0 } as any);
+
+      expect(prismaMock.cash_register_sessions.create).toHaveBeenCalled();
+    });
   });
 });
