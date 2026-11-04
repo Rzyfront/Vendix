@@ -221,6 +221,20 @@ describe('OrderTicketService — sección Crédito (QUI-979)', () => {
 
     expect(ticket.credit!.payments).toHaveSize(1);
   });
+
+  it('respeta la zona horaria de la tienda al formatear las fechas del crédito', () => {
+    // 22:30 UTC: 27/08 en Bogotá, pero ya 28/08 en Tokio.
+    const order = baseOrder({
+      payments: [payment({ created_at: '2026-08-27T22:30:00.000Z' })] as any,
+      order_installments: [installment({ id: 1 })] as any,
+    });
+
+    const bogota = service.toTicketData(order);
+    const tokyo = service.toTicketData(order, { timeZone: 'Asia/Tokyo' });
+
+    expect(bogota.credit!.payments[0].date_formatted).toBe('27/08/2026');
+    expect(tokyo.credit!.payments[0].date_formatted).toBe('28/08/2026');
+  });
 });
 
 describe('OrderTicketService — línea de PESO no se imprime como empaque', () => {
@@ -249,19 +263,5 @@ describe('OrderTicketService — línea de PESO no se imprime como empaque', () 
     const item = line({ stock_units_consumed: 50 });
     expect(service.hasPackageStockConsumption(item)).toBe(true);
     expect(service.packageMultiplier(item)).toBe(50);
-  });
-
-  it('respeta la zona horaria de la tienda al formatear las fechas del crédito', () => {
-    // 22:30 UTC: 27/08 en Bogotá, pero ya 28/08 en Tokio.
-    const order = baseOrder({
-      payments: [payment({ created_at: '2026-08-27T22:30:00.000Z' })] as any,
-      order_installments: [installment({ id: 1 })] as any,
-    });
-
-    const bogota = service.toTicketData(order);
-    const tokyo = service.toTicketData(order, { timeZone: 'Asia/Tokyo' });
-
-    expect(bogota.credit!.payments[0].date_formatted).toBe('27/08/2026');
-    expect(tokyo.credit!.payments[0].date_formatted).toBe('28/08/2026');
   });
 });
