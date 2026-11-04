@@ -86,7 +86,11 @@ describe('PurchaseOrdersService — configuración de unidades desde el POP (S13
     counts: { levels?: number } = {},
   ) {
     return {
-      product_variants: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
+      product_variants: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      },
       products: {
         findMany: jest.fn().mockResolvedValue([]),
         // Por SKU / código de barras no hay nada (producto nuevo); por id sí.
@@ -298,6 +302,116 @@ describe('PurchaseOrdersService — configuración de unidades desde el POP (S13
         pricing_type: 'unit',
       }),
     );
+  });
+
+  /** Lo que la orden escribió en `products.cost_price`, o `undefined`. */
+  const writtenCost = (tx: any) =>
+    tx.products.update.mock.calls
+      .map(([a]: any) => a.data.cost_price)
+      .find((c: unknown) => c !== undefined);
+
+  it('(g) existente que pasa de stock kg a g sin existencias: el costo por kg se lleva a costo por g', async () => {
+    const tx = mockTx({
+      id: PRODUCT_ID,
+      stock_uom_id: KG.id,
+      purchase_uom_id: KG.id,
+      pricing_type: 'weight',
+      cost_price: 17000,
+    });
+    await runCreate(tx, {
+      pricing_type: 'weight',
+      stock_uom_id: G.id,
+      purchase_uom_id: KG.id,
+      sale_uoms: KG_PRINCIPAL,
+    });
+    expect(writtenCost(tx)).toBe(17);
+    expect(tx.product_variants.updateMany).toHaveBeenCalledWith({
+      where: { product_id: PRODUCT_ID, cost_price: { not: null } },
+      data: { cost_price: { divide: 1000 } },
+    });
+  });
+
+  it("(g) con existencias y 'convert': convierte el stock Y el costo en la misma transacción", async () => {
+    const tx = mockTx(
+      { id: PRODUCT_ID, stock_uom_id: KG.id, purchase_uom_id: KG.id, pricing_type: 'weight', cost_price: 18333 },
+      { levels: 3 },
+    );
+    await runCreate(tx, {
+      pricing_type: 'weight',
+      stock_uom_id: G.id,
+      sale_uoms: KG_PRINCIPAL,
+      stock_uom_conversion: 'convert',
+    });
+    expect(stockLevelManager.convertStockUom).toHaveBeenCalledTimes(1);
+    expect(writtenCost(tx)).toBe(18.33);
+  });
+
+  it('(h) producto sin unidad de stock (recién creado por la compra) configurado g/kg: costo = costo de la línea ÷ factor', async () => {
+    const tx = mockTx({
+      id: PRODUCT_ID,
+      stock_uom_id: null,
+      purchase_uom_id: null,
+      pricing_type: 'unit',
+      cost_price: 24000,
+    });
+    await runCreate(tx, {
+      pricing_type: 'weight',
+      stock_uom_id: G.id,
+      purchase_uom_id: KG.id,
+      sale_uoms: KG_PRINCIPAL,
+    });
+    expect(writtenCost(tx)).toBe(24);
+    expect(tx.product_variants.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('(i) misma unidad de stock (g → g): la orden no toca el costo del producto', async () => {
+    const tx = mockTx({
+      id: PRODUCT_ID,
+      stock_uom_id: G.id,
+      purchase_uom_id: KG.id,
+      pricing_type: 'weight',
+      cost_price: 18,
+    });
+    await runCreate(tx, {
+      pricing_type: 'weight',
+      stock_uom_id: G.id,
+      purchase_uom_id: KG.id,
+      sale_uoms: KG_PRINCIPAL,
+    });
+    expect(writtenCost(tx)).toBeUndefined();
+    expect(tx.product_variants.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('(j) carga por SKU de un existente comprado en kg con stock en g: costo por g y precio por kg', async () => {
+    const tx = mockTx();
+    const weighed = {
+      id: PRODUCT_ID,
+      sku: 'LOMO-1',
+      name: 'Lomo ahumado',
+      store_id: STORE_ID,
+      state: 'active',
+      is_ingredient: false,
+      stock_uom_id: G.id,
+      purchase_uom_id: KG.id,
+      purchase_to_stock_factor: 1000,
+      price_unit_quantity: 1000,
+      pricing_type: 'weight',
+      cost_price: 17,
+      base_price: 30000,
+      profit_margin: 0,
+      weight: 0,
+      brand_id: null,
+      description: '',
+    };
+    tx.products.findFirst.mockImplementation(async ({ where }: any) =>
+      where?.id || where?.sku ? weighed : null,
+    );
+    await runCreate(tx, {}, true);
+    const write = tx.products.update.mock.calls
+      .map(([a]: any) => a.data)
+      .find((d: any) => d.cost_price !== undefined);
+    // 24.000 por kg = 24 por g; con margen 0 el precio por kg es el costo por kg.
+    expect(write).toEqual(expect.objectContaining({ cost_price: 24, base_price: 24000 }));
   });
 
   it('(f) recibir 10 kg con stock en g entra como 10000 unidades de stock', async () => {
