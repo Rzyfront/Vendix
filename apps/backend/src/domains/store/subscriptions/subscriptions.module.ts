@@ -12,6 +12,8 @@ import { StoreSubscriptionsController } from './controllers/store-subscriptions.
 import { SubscriptionCheckoutController } from './controllers/subscription-checkout.controller';
 import { AiAccessGuard } from './guards/ai-access.guard';
 import { StoreOperationsGuard } from './guards/store-operations.guard';
+import { PlanAccessGuard } from './guards/plan-access.guard';
+import { PlanAccessService } from './services/plan-access.service';
 import { SubscriptionBillingService } from './services/subscription-billing.service';
 import { SubscriptionPaymentService } from './services/subscription-payment.service';
 import { SubscriptionWebhookService } from './services/subscription-webhook.service';
@@ -73,6 +75,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
     SubscriptionStateService,
     AiAccessGuard,
     StoreOperationsGuard,
+    PlanAccessGuard,
+    PlanAccessService,
     SubscriptionGateConfig,
     SubscriptionBillingService,
     SubscriptionPaymentService,
@@ -117,6 +121,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
     SubscriptionStateService,
     AiAccessGuard,
     StoreOperationsGuard,
+    PlanAccessGuard,
+    PlanAccessService,
     SubscriptionGateConfig,
     SubscriptionBillingService,
     SubscriptionPaymentService,

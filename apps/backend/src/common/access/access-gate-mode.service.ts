@@ -8,6 +8,15 @@ export const accessGateEnforceStoreKey = (storeId: number) =>
   `access_gate:enforce:store:${storeId}`;
 
 /**
+ * Plan layer flag, separate from the industry one so switching either on never
+ * drags the other. `1` on the global key enforces every store; the store key
+ * enforces one store (gradual rollout after the audit week).
+ */
+export const PLAN_GATE_ENFORCE_ALL_KEY = 'access_gate:plan:enforce:all';
+export const planGateEnforceStoreKey = (storeId: number) =>
+  `access_gate:plan:enforce:store:${storeId}`;
+
+/**
  * apps-f4 flag: `enforce` only when a Redis key says so, otherwise `audit`.
  * No DB, no restart. Redis absent/down → `audit` (fail-open, warns once).
  */
@@ -34,6 +43,31 @@ export class AccessGateModeService {
   async modeForOrganization(): Promise<AccessGateMode> {
     try {
       const all = await this.redis.get(ACCESS_GATE_ENFORCE_ALL_KEY);
+      return all === '1' ? 'enforce' : 'audit';
+    } catch (error) {
+      this.warnOnce(error);
+      return 'audit';
+    }
+  }
+
+  /** Plan layer mode for one store (own flag, audit by default). */
+  async planModeForStore(storeId: number): Promise<AccessGateMode> {
+    try {
+      const [all, store] = await Promise.all([
+        this.redis.get(PLAN_GATE_ENFORCE_ALL_KEY),
+        this.redis.get(planGateEnforceStoreKey(storeId)),
+      ]);
+      return all === '1' || store === '1' ? 'enforce' : 'audit';
+    } catch (error) {
+      this.warnOnce(error);
+      return 'audit';
+    }
+  }
+
+  /** Plan layer mode for the organization panel: only the global key. */
+  async planModeForOrganization(): Promise<AccessGateMode> {
+    try {
+      const all = await this.redis.get(PLAN_GATE_ENFORCE_ALL_KEY);
       return all === '1' ? 'enforce' : 'audit';
     } catch (error) {
       this.warnOnce(error);

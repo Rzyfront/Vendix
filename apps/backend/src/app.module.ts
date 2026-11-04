@@ -20,6 +20,7 @@ import { PublicDomainsModule } from './domains/public/domains/public-domains.mod
 import { JobsModule } from './jobs/jobs.module';
 
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { PlanAccessGuard } from './domains/store/subscriptions/guards/plan-access.guard';
 import { JwtAuthGuard } from './domains/auth/guards/jwt-auth.guard';
 import { DomainScopeGuard } from './common/guards/domain-scope.guard';
 import { StoreOperationsGuard } from './domains/store/subscriptions/guards/store-operations.guard';
@@ -215,6 +216,15 @@ function resolveThrottleSetting(
     {
       provide: APP_GUARD,
       useClass: StoreOperationsGuard,
+    },
+    // Plan access matrix (plan_module_rules) — runs AFTER the subscription
+    // gate. Only API paths mapped in common/access/plan-modules.ts are
+    // evaluated. Audit by default (logs ACCESS_AUDIT layer='plan'); blocks
+    // with 403 PLAN_MODULE_NOT_INCLUDED only when the Redis key
+    // access_gate:plan:enforce:all (or :store:<id>) is '1'.
+    {
+      provide: APP_GUARD,
+      useClass: PlanAccessGuard,
     },
     {
       provide: APP_INTERCEPTOR,
