@@ -26,3 +26,7 @@ export {
 } from './tax-inclusive-math';
 export * from './money-compare';
 export * from './purchase-line-taxes';
+// Núcleo único de conversión de unidades de medida (S10/S11 de
+// `product-sale-unit-consolidation`): stock, precio por principal y reglas de
+// compatibilidad compartidas por editor, POS y backend.
+export * from './uom-conversion';
