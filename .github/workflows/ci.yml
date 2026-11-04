@@ -354,7 +354,6 @@ jobs:
           --include='**/store/settings/domains/components/domain-form-modal.component.spec.ts'
           --include='**/public/landing-page/landing-offer.component.spec.ts'
           --include='**/public/landing-page/landing-page.service.spec.ts'
-          # Apps F1-F5 + menú Finanzas (apps-vistas): specs nuevas.
           --include='**/core/guards/panel-ui.guard.spec.ts'
           --include='**/core/guards/store-dashboard.guard.spec.ts'
           --include='**/core/services/menu-filter.service.spec.ts'
