@@ -23,6 +23,20 @@ import {
   TaxBreakdownItem,
 } from 'src/common/interfaces/tax-breakdown.interface';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import {
+  ReturnLine,
+  ReturnSoldLine,
+  ReturnStockAllocator,
+} from './return-stock-units.util';
+
+/**
+ * Lo que `buildReturnAllocator` necesita del `tx`. Los delegados de Prisma son
+ * genéricos; el resultado se fija con los tipos de `return-stock-units.util`.
+ */
+interface ReturnAllocatorClient {
+  order_items: { findMany(args: object): Promise<ReturnSoldLine[]> };
+  return_order_items: { findMany(args: object): Promise<ReturnLine[]> };
+}
 
 @Injectable()
 export class ReturnOrdersService {
@@ -245,6 +259,31 @@ export class ReturnOrdersService {
         throw new BadRequestException('Only draft returns can be processed');
       }
 
+      // Líneas de la venta original: la devolución mueve las mismas unidades
+      // de stock que la venta descontó (`stock_units_consumed ?? quantity`),
+      // no la cantidad lógica de la línea (1 en una pesada de 0,180 kg). Las
+      // devoluciones ya procesadas de esa venta se descuentan primero.
+      const allocator = await this.buildReturnAllocator(tx, returnOrder);
+      const stockUnitsFor = (returnItem: ReturnLine): number => {
+        const { units, ambiguous, exhausted } = allocator.take(returnItem);
+        if (exhausted) {
+          this.logger.warn(
+            `Devolución #${returnOrder.id}: el producto ${returnItem.product_id}` +
+              ` (variante ${returnItem.product_variant_id ?? '—'}) ya se había devuelto por` +
+              ' completo en devoluciones anteriores de esta venta; no se mueve stock.',
+          );
+        }
+        if (ambiguous) {
+          this.logger.warn(
+            `Devolución #${returnOrder.id}: la línea del producto ${returnItem.product_id}` +
+              ` (variante ${returnItem.product_variant_id ?? '—'}) no se puede atribuir a una` +
+              ` línea vendida concreta (líneas de distinto tipo o tamaño); se mueven ${units}` +
+              ' unidades de stock, la atribución más conservadora.',
+          );
+        }
+        return units;
+      };
+
       // Process each item
       for (const item of items) {
         const returnItem = returnOrder.return_order_items.find(
@@ -259,6 +298,7 @@ export class ReturnOrdersService {
               tx,
               returnOrder,
               returnItem,
+              stockUnitsFor(returnItem),
               item.location_id,
             );
             break;
@@ -269,6 +309,7 @@ export class ReturnOrdersService {
               tx,
               returnOrder,
               returnItem,
+              stockUnitsFor(returnItem),
               item.location_id,
             );
             break;
@@ -279,6 +320,7 @@ export class ReturnOrdersService {
               tx,
               returnOrder,
               returnItem,
+              stockUnitsFor(returnItem),
               item.location_id,
             );
             break;
@@ -454,6 +496,70 @@ export class ReturnOrdersService {
   }
 
   /**
+   * Asignador de unidades de stock para la devolución: líneas de la orden de
+   * VENTA enlazada (con su snapshot y su peso) menos lo que ya movieron las
+   * devoluciones procesadas antes contra esa misma venta. Una devolución a
+   * proveedor (`purchase_order`) o sin orden no tiene líneas de venta: cada
+   * línea reingresa su cantidad, como siempre.
+   */
+  private async buildReturnAllocator(
+    tx: ReturnAllocatorClient,
+    returnOrder: {
+      id: number;
+      organization_id: number;
+      type: string;
+      related_order_id: number | null;
+      related_order_type: string | null;
+    },
+  ): Promise<ReturnStockAllocator> {
+    // Solo una devolución de VENTA tiene líneas de venta que atribuir. Una
+    // devolución a proveedor (`purchase_return`) con el mismo
+    // `related_order_id` que una venta del mismo producto leería esa venta y
+    // reingresaría unidades que nunca salieron por esta devolución.
+    if (
+      returnOrder.type !== 'sales_return' ||
+      !returnOrder.related_order_id ||
+      returnOrder.related_order_type === 'purchase_order'
+    ) {
+      return new ReturnStockAllocator([]);
+    }
+    const soldLines: ReturnSoldLine[] = await tx.order_items.findMany({
+      where: { order_id: returnOrder.related_order_id },
+      select: {
+        id: true,
+        product_id: true,
+        product_variant_id: true,
+        quantity: true,
+        stock_units_consumed: true,
+        weight: true,
+      },
+      orderBy: { id: 'asc' },
+    });
+    const allocator = new ReturnStockAllocator(soldLines);
+
+    const previous: ReturnLine[] = await tx.return_order_items.findMany({
+      where: {
+        return_order_id: { not: returnOrder.id },
+        // Solo devoluciones de CLIENTE de esta misma venta y organización:
+        // una devolución a proveedor de la orden de compra con el mismo id
+        // numérico no es "lo ya devuelto" de esta venta.
+        return_orders: {
+          organization_id: returnOrder.organization_id,
+          related_order_id: returnOrder.related_order_id,
+          type: return_order_type_enum.sales_return,
+          // `NOT` sobre una columna nullable descartaría también los NULL.
+          OR: [{ related_order_type: null }, { related_order_type: 'sales_order' }],
+          status: return_order_status_enum.processed,
+        },
+      },
+      select: { product_id: true, product_variant_id: true, quantity: true },
+      orderBy: [{ return_order_id: 'asc' }, { id: 'asc' }],
+    });
+    for (const line of previous) allocator.take(line);
+    return allocator;
+  }
+
+  /**
    * Bodega sobre la que se mueve el stock de una línea devuelta.
    *
    * Los tres manejadores leían `returnOrder.location_id`, que no es columna de
@@ -491,6 +597,7 @@ export class ReturnOrdersService {
     tx: any,
     returnOrder: any,
     returnItem: any,
+    stockUnits: number,
     locationId?: number,
   ) {
     const target_location_id = await this.resolveItemLocation(
@@ -504,7 +611,7 @@ export class ReturnOrdersService {
         product_id: returnItem.product_id,
         variant_id: returnItem.product_variant_id || undefined,
         location_id: target_location_id,
-        quantity_change: returnItem.quantity,
+        quantity_change: stockUnits,
         movement_type: 'return',
         reason: this.movementReason('reingreso', returnOrder, returnItem),
         create_movement: true,
@@ -517,6 +624,7 @@ export class ReturnOrdersService {
     tx: any,
     returnOrder: any,
     returnItem: any,
+    stockUnits: number,
     locationId?: number,
   ) {
     const target_location_id = await this.resolveItemLocation(
@@ -531,7 +639,7 @@ export class ReturnOrdersService {
         product_id: returnItem.product_id,
         variant_id: returnItem.product_variant_id || undefined,
         location_id: target_location_id,
-        quantity_change: -returnItem.quantity,
+        quantity_change: -stockUnits,
         movement_type: 'damage',
         reason: this.movementReason('baja', returnOrder, returnItem),
         create_movement: true,
@@ -545,6 +653,7 @@ export class ReturnOrdersService {
     tx: any,
     returnOrder: any,
     returnItem: any,
+    stockUnits: number,
     locationId?: number,
   ) {
     const target_location_id = await this.resolveItemLocation(
@@ -558,7 +667,7 @@ export class ReturnOrdersService {
         product_id: returnItem.product_id,
         variant_id: returnItem.product_variant_id || undefined,
         location_id: target_location_id,
-        quantity_change: returnItem.quantity,
+        quantity_change: stockUnits,
         movement_type: 'adjustment',
         reason: this.movementReason('reparación', returnOrder, returnItem),
         create_movement: true,

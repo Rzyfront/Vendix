@@ -1,4 +1,5 @@
 import { projectFinancialAccountInvoice } from './utils/split-invoice-projection.util';
+import { packagingStockUnits } from '../products/services/weight-stock-units.util';
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -3449,11 +3450,15 @@ export class InvoicingService {
             : null,
         // "Empaque por tarifa" snapshot propagated from the order line so the
         // invoice mirrors the order PDF (tier label + packaging units consumed).
+        // `invoice_items` no guarda el peso: en una línea de PESO el número es
+        // la pesada en unidades de stock (180 g), no un empaque, y copiarlo
+        // haría que el PDF, el detalle de factura y la unidad DIAN la lean como
+        // presentación ("× 180 unid/empaque"). Se omite, como antes.
         applied_price_tier_name:
           item.applied_price_tier_name_snapshot ?? null,
         stock_units_consumed:
           typeof item.stock_units_consumed === 'number'
-            ? item.stock_units_consumed
+            ? packagingStockUnits(item)
             : null,
         // Serial number(s) snapshot (CSV) copied from the order line so the
         // invoice carries the same serials at emission time (QUI-431).

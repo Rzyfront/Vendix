@@ -2292,6 +2292,14 @@ export class PosProductSelectionComponent {
         return;
       }
 
+      // Unidades de stock por unidad pesada, igual que el alta sin variante
+      // (`addWeightProductToCart`): sin esto la pesada con variante seguía
+      // contando 1. El servidor recalcula el número al cobrar.
+      const stockUnitsPerWeightUnit = await this.saleUnitService.stockUnitsPerUnit(
+        product,
+        unit,
+      );
+
       this.addingToCart.add(product.id);
       this.cartService
         .addToCart({
@@ -2300,6 +2308,7 @@ export class PosProductSelectionComponent {
           variant,
           weight,
           weight_unit: unit,
+          stock_units_per_weight_unit: stockUnitsPerWeightUnit,
           // PR #1062 ronda 4 — el tiquete dice lo pesado ("300 g").
           weighed_as: { code: captured.unitCode, amount: captured.amount },
         })
@@ -2729,7 +2738,7 @@ export class PosProductSelectionComponent {
         return;
       }
 
-      this.addWeightProductToCart(product, captured);
+      await this.addWeightProductToCart(product, captured);
       return;
     }
 
@@ -2970,13 +2979,13 @@ export class PosProductSelectionComponent {
       return;
     }
 
-    this.addWeightProductToCart(product, captured);
+    await this.addWeightProductToCart(product, captured);
   }
 
-  private addWeightProductToCart(
+  private async addWeightProductToCart(
     product: any,
     captured: ManualWeighResult,
-  ): void {
+  ): Promise<void> {
     this.addingToCart.add(product.id);
 
     // QUI-978 — el peso viaja en la unidad del precio (la principal):
@@ -2985,6 +2994,13 @@ export class PosProductSelectionComponent {
     const weight = captured.principalAmount;
     const unit = captured.principalCode;
     const totalPrice = product.final_price * weight;
+    // Unidades de stock por unidad pesada, para que el cobro descuente la
+    // pesada real (0,180 kg ⇒ 180 g) y no 1. Solo con unidad de stock
+    // declarada; sin ella queda null y el descuento sigue como siempre.
+    const stockUnitsPerWeightUnit = await this.saleUnitService.stockUnitsPerUnit(
+      product,
+      unit,
+    );
 
     this.cartService
       .addToCart({
@@ -2994,6 +3010,7 @@ export class PosProductSelectionComponent {
         weight_unit: unit,
         // PR #1062 ronda 4 — el tiquete dice lo pesado ("300 g").
         weighed_as: { code: captured.unitCode, amount: captured.amount },
+        stock_units_per_weight_unit: stockUnitsPerWeightUnit,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

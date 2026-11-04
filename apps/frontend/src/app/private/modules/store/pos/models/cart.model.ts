@@ -45,6 +45,13 @@ export interface CartItem {
   is_weight_product?: boolean;
   /** PR #1062 ronda 4 — unidad elegida al pesar, solo para el tiquete. */
   weighed_as?: WeighedAs | null;
+  /**
+   * Unidades de STOCK por cada unidad de `weight_unit` (kg con stock en g ⇒
+   * 1000), para descontar la pesada real y no 1 por línea. Solo existe si el
+   * producto declara unidad de stock; `null` = comportamiento histórico. Ver
+   * `resolveStockUnitsConsumed`.
+   */
+  stock_units_per_weight_unit?: number | null;
   // ===== QUI-648 · captura por unidad de venta =====
   // `quantity` vive SIEMPRE en la unidad mínima del producto (mm, g, ml,
   // unidad), igual que `order_items.quantity`. Estos tres campos son los que
@@ -352,6 +359,8 @@ export interface AddToCartRequest {
   weight_unit?: string;
   /** PR #1062 ronda 4 — unidad y cantidad elegidas ("300 g") para el tiquete. */
   weighed_as?: WeighedAs | null;
+  /** Ver `CartItem.stock_units_per_weight_unit`. */
+  stock_units_per_weight_unit?: number | null;
   /**
    * QUI-648 — la línea se capturó pesando. `quantity` ya viene convertido a la
    * unidad mínima (2,35 kg de un producto en gramos ⇒ 2350), así que la línea

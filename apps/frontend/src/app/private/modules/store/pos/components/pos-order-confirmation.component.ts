@@ -939,10 +939,15 @@ export class PosOrderConfirmationComponent {
       const weight_unit = item.weight_unit || 'kg';
       const is_weight_product = weight > 0;
       const stockUnitsConsumed = Number(item.stock_units_consumed || 0);
+      // En una línea de peso `stock_units_consumed` es la pesada en unidades
+      // de stock (180 g), no un empaque: derivarlo mostraría "×180".
       const unitsPerPackage =
         item.units_per_package != null
           ? Number(item.units_per_package)
-          : stockUnitsConsumed > 0 && quantity > 0 && stockUnitsConsumed !== quantity
+          : !is_weight_product &&
+              stockUnitsConsumed > 0 &&
+              quantity > 0 &&
+              stockUnitsConsumed !== quantity
             ? stockUnitsConsumed / quantity
             : null;
       // QUI-978 — la orden persistida trae la unidad elegida como snapshot.

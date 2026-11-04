@@ -730,3 +730,54 @@ describe('PosPaymentService.processPayment — sin sobreventa (INV_STOCK_INSUFFI
     expect(caught.stockShortages).toBeUndefined();
   });
 });
+
+describe('PosPaymentService.mapCartItemForPos — stock_units_consumed', () => {
+  const service = new PosPaymentService(
+    {} as any,
+    { getUserId: () => 1, getStoreIdOrThrow: () => 1 } as any,
+    { isEnabled: false, getRegisterId: () => null } as any,
+    {} as any,
+    {} as any,
+    {} as any,
+  );
+  const map = (item: Record<string, unknown>) =>
+    (service as any).mapCartItemForPos({
+      id: 'line-1',
+      product: { id: 7, name: 'Queso', sku: 'Q-1' },
+      unitPrice: 20000,
+      finalPrice: 20000,
+      totalPrice: 3600,
+      taxAmount: 0,
+      addedAt: new Date(),
+      ...item,
+    });
+
+  it('peso legado con stock en g: 0,180 kg viaja como 180 y quantity sigue en 1', () => {
+    const line = map({
+      quantity: 1,
+      weight: 0.18,
+      weight_unit: 'kg',
+      is_weight_product: true,
+      stock_units_per_weight_unit: 1000,
+    });
+    expect(line.quantity).toBe(1);
+    expect(line.weight).toBe(0.18);
+    expect(line.stock_units_consumed).toBe(180);
+    // El cobro no cambia: el peso sigue siendo el multiplicador monetario.
+    expect(line.total_price).toBe(3600);
+  });
+
+  it('unidad de venta (180 g, factor 1000) no infla stock_units_consumed', () => {
+    const line = map({
+      quantity: 180,
+      sale_unit_code: 'kg',
+      stock_units_per_sale_unit: 1000,
+    });
+    expect(line.stock_units_consumed).toBeNull();
+  });
+
+  it('presentación sigue enviando paquetes × empaque', () => {
+    const line = map({ quantity: 3, units_per_package: 12, is_package_unit: true });
+    expect(line.stock_units_consumed).toBe(36);
+  });
+});

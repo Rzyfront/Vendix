@@ -618,6 +618,38 @@ describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
     expect(line.weighed_as).toBeNull();
   });
 
+  it('repesar cambiando de unidad recalcula el factor a stock para la nueva unidad (no lo deja en null)', async () => {
+    const stockUnitsPerUnit = jasmine
+      .createSpy('stockUnitsPerUnit')
+      .and.callFake(async (_product: unknown, code: string) => (code === 'g' ? 1 : 1000));
+    (service as any).saleUnitService = { stockUnitsPerUnit };
+    service.cartState.set({
+      ...service.cartState(),
+      linkedOrderId: null,
+      linkedOrderNumber: null,
+      items: [
+        {
+          ...cartLine('weigh'),
+          is_weight_product: true,
+          weight: 0.18,
+          weight_unit: 'kg',
+          stock_units_per_weight_unit: 1000,
+        },
+      ],
+    });
+
+    service.updateCartItemWeight('weigh', 250, 'g').subscribe();
+    // Sincrónico: el factor de kg ya no vale para g.
+    expect(service.cartState().items[0].stock_units_per_weight_unit).toBeNull();
+
+    await Promise.resolve();
+    await Promise.resolve();
+    const line = service.cartState().items[0];
+    expect(stockUnitsPerUnit).toHaveBeenCalledWith(line.product, 'g');
+    expect(line.weight_unit).toBe('g');
+    expect(line.stock_units_per_weight_unit).toBe(1);
+  });
+
   it('sin reserva creada por el POS no cancela nada al quitar la línea', (done) => {
     seedCartWithOneItem();
 
