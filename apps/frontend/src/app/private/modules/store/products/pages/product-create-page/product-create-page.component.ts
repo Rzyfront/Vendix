@@ -5169,7 +5169,9 @@ export class ProductCreatePageComponent {
       is_featured: !isIngredientAny && !!neutral(formValue.is_featured, false),
       allow_pos_price_override: !!neutral(formValue.allow_pos_price_override, false),
       sku: formValue.sku || undefined,
-      barcode: formValue.barcode || undefined,
+      // Vaciar el campo debe borrar el código: el PATCH ignora `undefined`, así
+      // que se envía '' y el backend lo guarda como null (create y update).
+      barcode: formValue.barcode?.trim() ?? '',
       scale_code: this.resolveScaleCodePayload(formValue),
       track_inventory: !!formValue.track_inventory,
       requires_serial_numbers: !!formValue.requires_serial_numbers,
