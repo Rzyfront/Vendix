@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { PlansService } from './plans.service';
+import { PlanModuleRulesService } from '../../../../common/access/plan-module-rules.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 describe('PlansService', () => {
@@ -42,7 +43,11 @@ describe('PlansService', () => {
       $transaction: jest.fn((fn: any) => fn(tx)),
     };
     rulesCache = { invalidate: jest.fn() };
-    service = new PlansService(prisma, undefined, rulesCache);
+    service = new PlansService(
+      prisma,
+      undefined,
+      rulesCache as unknown as PlanModuleRulesService,
+    );
   });
 
   function planFixture(overrides: Partial<any> = {}) {
