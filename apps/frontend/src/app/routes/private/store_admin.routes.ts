@@ -37,6 +37,17 @@ export const storeAdminRoutes: Routes = [
         (c) => c.VexPageComponent,
       ),
   },
+  // F6-A: preview frame of the landing editor. Loaded only inside the
+  // editor's iframe, outside the admin layout, so the public landing renders
+  // at a real device width. It fetches nothing: the editor posts the draft.
+  {
+    path: 'admin/apps/landing/preview-frame',
+    canActivate: [AuthGuard],
+    loadComponent: () =>
+      import(
+        '../../private/modules/store/apps/landing-builder/landing-preview-frame.component'
+      ).then((c) => c.LandingPreviewFrameComponent),
+  },
   {
     path: 'admin',
     loadComponent: () =>
