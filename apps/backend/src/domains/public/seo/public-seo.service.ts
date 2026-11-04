@@ -268,8 +268,9 @@ Disallow: /
         ? `https://${baseDomain}`
         : base_url;
 
-    // /ayuda, /pqr and /legal/* exist in the SPA, but the CDN currently serves
-    // them with HTTP 404; restore them to the sitemap when the CDN is fixed.
+    // Only indexable pages belong here. /ayuda and /pqr render `noindex`; the
+    // /legal/* documents are `noindex` today: add them to the registry if they
+    // are switched to `index, follow`.
 
     // Generation/cache time is not an editorial modification date.
     return this.buildSitemapXml(canonicalBase, MARKETING_SITEMAP_PAGES);
