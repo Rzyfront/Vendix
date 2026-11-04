@@ -249,6 +249,8 @@ export class StorePrismaService extends BasePrismaService {
     'order_fulfillment_schedules',
     'order_fulfillment_changes',
     'scheduled_order_reminder_logs',
+    // Recordatorios de cuotas a crédito — `store_id` propio NOT NULL.
+    'credit_installment_reminder_logs',
     'product_option_groups',
     'product_options',
     'product_option_group_assignments',
@@ -2129,6 +2131,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get scheduled_order_reminder_logs() {
     return this.scoped_client.scheduled_order_reminder_logs;
+  }
+
+  get credit_installment_reminder_logs() {
+    return this.scoped_client.credit_installment_reminder_logs;
   }
 
   get product_option_groups() {
