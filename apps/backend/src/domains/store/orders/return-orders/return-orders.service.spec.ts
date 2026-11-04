@@ -15,6 +15,8 @@ describe('ReturnOrdersService.process — unidades de stock por línea devuelta'
       return_orders: {
         findUnique: jest.fn().mockResolvedValue({
           id: 99,
+          organization_id: 3,
+          type: 'sales_return',
           status: return_order_status_enum.draft,
           related_order_id: 500,
           related_order_type: 'sales_order',
@@ -71,7 +73,13 @@ describe('ReturnOrdersService.process — unidades de stock por línea devuelta'
       expect.objectContaining({
         where: expect.objectContaining({
           return_order_id: { not: 99 },
-          return_orders: { related_order_id: 500, status: return_order_status_enum.processed },
+          return_orders: {
+            organization_id: 3,
+            related_order_id: 500,
+            type: 'sales_return',
+            OR: [{ related_order_type: null }, { related_order_type: 'sales_order' }],
+            status: return_order_status_enum.processed,
+          },
         }),
       }),
     );

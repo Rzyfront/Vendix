@@ -506,6 +506,7 @@ export class ReturnOrdersService {
     tx: ReturnAllocatorClient,
     returnOrder: {
       id: number;
+      organization_id: number;
       related_order_id: number | null;
       related_order_type: string | null;
     },
@@ -533,8 +534,15 @@ export class ReturnOrdersService {
     const previous: ReturnLine[] = await tx.return_order_items.findMany({
       where: {
         return_order_id: { not: returnOrder.id },
+        // Solo devoluciones de CLIENTE de esta misma venta y organización:
+        // una devolución a proveedor de la orden de compra con el mismo id
+        // numérico no es "lo ya devuelto" de esta venta.
         return_orders: {
+          organization_id: returnOrder.organization_id,
           related_order_id: returnOrder.related_order_id,
+          type: return_order_type_enum.sales_return,
+          // `NOT` sobre una columna nullable descartaría también los NULL.
+          OR: [{ related_order_type: null }, { related_order_type: 'sales_order' }],
           status: return_order_status_enum.processed,
         },
       },
