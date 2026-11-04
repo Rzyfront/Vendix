@@ -10,16 +10,21 @@ describe('ReturnOrdersService.process — unidades de stock por línea devuelta'
     soldLines: unknown[];
     previous?: unknown[];
     returnItems: Array<{ id: number; product_id: number; quantity: number; product_variant_id?: number | null }>;
+    type?: 'sales_return' | 'purchase_return';
+    relatedOrderType?: string | null;
   }) => {
     const tx = {
       return_orders: {
         findUnique: jest.fn().mockResolvedValue({
           id: 99,
           organization_id: 3,
-          type: 'sales_return',
+          type: opts.type ?? 'sales_return',
           status: return_order_status_enum.draft,
           related_order_id: 500,
-          related_order_type: 'sales_order',
+          related_order_type:
+            opts.relatedOrderType === undefined
+              ? 'sales_order'
+              : opts.relatedOrderType,
           reason_id: null,
           return_order_items: opts.returnItems.map((item) => ({
             product_variant_id: null,
@@ -95,5 +100,20 @@ describe('ReturnOrdersService.process — unidades de stock por línea devuelta'
     });
     await service.process(99, [{ id: 10, action: 'write_off' }]);
     expect(moved()).toEqual([-3]);
+  });
+
+  it('devolución a proveedor con related_order_id de una venta NO toma sus líneas', async () => {
+    const { service, tx, moved } = build({
+      type: 'purchase_return',
+      relatedOrderType: null,
+      soldLines: [
+        { id: 1, product_id: 7, product_variant_id: null, quantity: 1, stock_units_consumed: 180, weight: '0.180' },
+      ],
+      returnItems: [{ id: 10, product_id: 7, quantity: 2 }],
+    });
+    await service.process(99, [{ id: 10, action: 'restock' }]);
+    // Sin líneas de venta atribuibles se mueve la cantidad lógica (2), no 180.
+    expect(tx.order_items.findMany).not.toHaveBeenCalled();
+    expect(moved()).toEqual([2]);
   });
 });

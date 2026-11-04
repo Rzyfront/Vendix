@@ -507,11 +507,17 @@ export class ReturnOrdersService {
     returnOrder: {
       id: number;
       organization_id: number;
+      type: string;
       related_order_id: number | null;
       related_order_type: string | null;
     },
   ): Promise<ReturnStockAllocator> {
+    // Solo una devolución de VENTA tiene líneas de venta que atribuir. Una
+    // devolución a proveedor (`purchase_return`) con el mismo
+    // `related_order_id` que una venta del mismo producto leería esa venta y
+    // reingresaría unidades que nunca salieron por esta devolución.
     if (
+      returnOrder.type !== 'sales_return' ||
       !returnOrder.related_order_id ||
       returnOrder.related_order_type === 'purchase_order'
     ) {
