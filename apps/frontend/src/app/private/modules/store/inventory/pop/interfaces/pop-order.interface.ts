@@ -141,6 +141,14 @@ export interface PurchaseOrderItemRequest {
   purchase_uom_id?: number | null;
   stock_uom_id?: number | null;
   /**
+   * S13d — configuración «Unidad de venta» (solo si se tocó la sección del
+   * modal). `sale_uoms: []` = pieza. Con `sale_uoms` presente el backend valida
+   * con las mismas reglas que el editor de producto.
+   */
+  sale_uoms?: Array<{ uom_id: number; is_principal?: boolean }>;
+  scale_code?: number | null;
+  stock_uom_conversion?: 'convert';
+  /**
    * Insumos desde compra: clasificación del producto nuevo (prebulk). El
    * backend crea el producto con `is_ingredient`/`is_sellable` y, junto con
    * las UoM, lo deja listo para consumo en recetas.
@@ -306,6 +314,20 @@ export function cartToPurchaseOrderRequest(
             item.prebulk_data.purchase_uom_id ?? requestItem.purchase_uom_id ?? null;
           requestItem.stock_uom_id =
             item.prebulk_data.stock_uom_id ?? requestItem.stock_uom_id ?? null;
+        }
+      }
+
+      // S13d: la sección «Unidad de venta» tocada manda todas las unidades
+      // (también en retail) y gana sobre lo anterior. Sin ella, nada cambia.
+      const saleUnit = item.sale_unit_config ?? item.prebulk_data?.sale_unit_config;
+      if (saleUnit) {
+        requestItem.sale_uoms = saleUnit.sale_uoms;
+        requestItem.scale_code = saleUnit.scale_code;
+        requestItem.pricing_type = saleUnit.pricing_type;
+        requestItem.stock_uom_id = saleUnit.stock_uom_id;
+        requestItem.purchase_uom_id = saleUnit.purchase_uom_id;
+        if (saleUnit.stock_uom_conversion === 'convert') {
+          requestItem.stock_uom_conversion = 'convert';
         }
       }
 

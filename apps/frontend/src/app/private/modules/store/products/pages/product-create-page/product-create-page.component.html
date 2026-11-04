@@ -262,98 +262,17 @@
 
             <!-- Row 2: Unidad de venta (sección única) | Impuestos -->
             @if (!isService) {
-              <div
-                id="sale-unit-section"
-                class="col-span-full rounded-xl border border-border bg-bg p-4 space-y-3"
-              >
-                <div class="flex items-center gap-2">
-                  <app-icon
-                    name="package"
-                    size="14"
-                    class="text-primary-600"
-                  ></app-icon>
-                  <p
-                    class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
-                  >
-                    Unidad de venta
-                  </p>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-                  <app-selector
-                    label="Unidad de venta"
-                    [options]="saleUnitPrincipalOptions()"
-                    [value]="saleUnitSelectorValue()"
-                    [searchable]="true"
-                    (valueChange)="onSaleUnitPrincipalChange($event)"
-                    placeholder="Elige la unidad en que vendes"
-                    helpText="El precio de arriba se expresa en esta unidad. Cambiarla convierte el precio."
-                  ></app-selector>
-
-                  @if (!saleUnitIsPiece()) {
-                    <app-multi-selector
-                      label="También se vende en"
-                      [options]="saleUnitAdditionalOptions()"
-                      [ngModel]="saleAdditionalIds()"
-                      [ngModelOptions]="{ standalone: true }"
-                      (ngModelChange)="onSaleAdditionalChange($event)"
-                      placeholder="Otras unidades (mayores o menores)"
-                      helpText="Solo unidades que se convierten exacto al inventario."
-                    ></app-multi-selector>
-                  }
-                </div>
-
-                <p class="text-sm text-text-primary font-medium">
-                  {{ saleUnitSummary() }}
-                </p>
-
-                @for (v of saleUnitViolations(); track v.code + (v.uom_code ?? '')) {
-                  <p class="text-xs text-red-600 flex items-start gap-1 px-1">
-                    <app-icon
-                      name="alert-triangle"
-                      size="12"
-                      class="mt-0.5 shrink-0"
-                    ></app-icon>
-                    {{ v.message }}
-                  </p>
-                }
-
-                @if (!saleUnitIsPiece()) {
-                  <button
-                    type="button"
-                    class="flex items-center gap-1 text-xs font-medium text-text-secondary hover:text-text-primary"
-                    [attr.aria-expanded]="saleAdvancedOpen()"
-                    (click)="saleAdvancedOpen.set(!saleAdvancedOpen())"
-                  >
-                    <app-icon
-                      name="chevron-down"
-                      size="14"
-                      [class.rotate-180]="saleAdvancedOpen()"
-                    ></app-icon>
-                    Avanzado
-                  </button>
-
-                  @if (saleAdvancedOpen()) {
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-                      <app-selector
-                        label="El inventario se cuenta en"
-                        [options]="saleUnitInventoryOptions()"
-                        [value]="saleUnitState().stockUomId"
-                        (valueChange)="onSaleInventoryChange($event)"
-                        helpText="Se deriva sola de la unidad de venta. Solo se ofrecen unidades que no dejan ventas en cero."
-                      ></app-selector>
-                      <app-selector
-                        label="Compra"
-                        [options]="salePurchaseOptions()"
-                        [value]="salePurchaseUomId()"
-                        (valueChange)="onSalePurchaseChange($event)"
-                        placeholder="Como la recibes del proveedor"
-                        helpText="Se precarga al recomprar."
-                      ></app-selector>
-                    </div>
-                  }
-                }
-              </div>
+              <app-sale-unit-section
+                class="col-span-full"
+                sectionId="sale-unit-section"
+                [(state)]="saleUnitState"
+                [(touched)]="saleUnitTouched"
+                [catalog]="uomOptions()"
+                [price]="saleUnitPrice()"
+                [confirmPrincipalChange]="confirmSaleUnitChange"
+                (committed)="onSaleUnitCommitted($event)"
+                (principalChanged)="onSaleUnitPrincipalChanged($event)"
+              ></app-sale-unit-section>
             }
 
             <div class="flex gap-2 items-end md:col-span-3">

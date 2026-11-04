@@ -3,7 +3,6 @@ import {
   Component,
   computed,
   effect,
-  linkedSignal,
   signal,
   inject,
   DestroyRef,
@@ -119,22 +118,23 @@ import { environment } from '../../../../../../../environments/environment';
 import { saleLessThanBaseValidator, uomDimensionMatchValidator, notBlankValidator } from '../../utils/product-validators';
 import { UomService, UnitOfMeasure, UomApiResponse } from '../../../inventory/services';
 import {
-  compatibleAdditionalUnits,
-  compatiblePurchaseUnits,
   emptySaleUnitState,
   fromProduct as saleUnitFromProduct,
-  inventoryCandidates,
   isMassPrincipal,
   PIECE,
-  principalOptionGroups,
   SaleUnitFormState,
+  SaleUnitPayload,
   SaleUnitPrincipal,
   SaleUnitProductLike,
-  stockUomOf,
   summaryText as saleUnitSummaryText,
   toPayload as saleUnitToPayload,
   violations as saleUnitViolations,
 } from '../../utils/sale-unit-form.util';
+import {
+  PrincipalChange,
+  PrincipalChangeGuard,
+  SaleUnitSectionComponent,
+} from '../../components/sale-unit-section/sale-unit-section.component';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import {
   PriceTiersService,
@@ -257,6 +257,7 @@ interface PriceTierOverrideRow {
     IconComponent,
     SelectorComponent,
     MultiSelectorComponent,
+    SaleUnitSectionComponent,
     TextareaComponent,
     ModalComponent,
     SettingToggleComponent,
@@ -992,25 +993,12 @@ export class ProductCreatePageComponent {
       : (this.uomOptions().find((u) => Number(u.id) === Number(id)) ?? null);
   }
 
-  /** Primer cambio de un producto legado: pasa a la forma canónica (D1). */
-  private beginSaleUnitEdit(): void {
-    if (this.saleUnitTouched()) return;
-    this.saleStockOverrideId.set(null);
-  }
-
   /**
    * Fija `pricing_type`, `stock_uom_id`, `purchase_uom_id` y
-   * `price_unit_quantity` desde el mapper, y refleja `sale_uoms` en las
-   * señales que ya leen el resto del editor.
+   * `price_unit_quantity` desde el payload de la sección, y refleja
+   * `sale_uoms` en las señales que ya lee el resto del editor.
    */
-  private commitSaleUnit(): void {
-    this.saleUnitTouched.set(true);
-    const payload = saleUnitToPayload(
-      this.saleUnitState(),
-      this.uomOptions(),
-      true,
-      this.saleUnitOriginal,
-    );
+  onSaleUnitCommitted(payload: SaleUnitPayload): void {
     this.productForm.patchValue(
       {
         pricing_type: payload.pricing_type,
@@ -1082,79 +1070,35 @@ export class ProductCreatePageComponent {
     this.formUpdateTrigger.update((t) => t + 1);
   }
 
-  /** Cambio de la unidad principal (S2): convierte el precio, nunca lo deja con otro significado. */
-  async onSaleUnitPrincipalChange(raw: string | number | null): Promise<void> {
-    if (raw == null || raw === '') return;
-    const next: SaleUnitPrincipal = raw === PIECE ? PIECE : Number(raw);
-    const current = this.saleUnitChoice();
-    if (next === current) return;
+  /** Cambio de la unidad principal (S2): confirma la conversión del precio antes de aplicarla. */
+  readonly confirmSaleUnitChange: PrincipalChangeGuard = async (current, next) => {
     const from = current === PIECE ? null : this.saleUnitById(current);
     const to = next === PIECE ? null : this.saleUnitById(next);
     const change = this.describeUnitRescale(from, to);
-    if (change && to) {
-      const confirmed = await this.dialogService.confirm({
-        title: 'Cambiar la unidad de venta',
-        message:
-          `El precio se expresa en la unidad de venta. ` +
-          `Antes: ${change.before}. Después: ${change.after}.` +
-          this.tierRescaleNotice(to.id),
-        confirmText: 'Cambiar y convertir el precio',
-        cancelText: 'Cancelar',
-        confirmVariant: 'primary',
-      });
-      if (!confirmed) {
-        this.saleUnitSelectorValue.set('');
-        setTimeout(() => this.saleUnitSelectorValue.set(current));
-        return;
-      }
-    }
-    this.beginSaleUnitEdit();
+    if (!change || !to) return true;
+    return this.dialogService.confirm({
+      title: 'Cambiar la unidad de venta',
+      message:
+        `El precio se expresa en la unidad de venta. ` +
+        `Antes: ${change.before}. Después: ${change.after}.` +
+        this.tierRescaleNotice(to.id),
+      confirmText: 'Cambiar y convertir el precio',
+      cancelText: 'Cancelar',
+      confirmVariant: 'primary',
+    });
+  };
+
+  /** La sección ya cambió la principal: lleva precios y tarifas a la nueva unidad. */
+  onSaleUnitPrincipalChanged(change: PrincipalChange): void {
+    const from =
+      change.from === PIECE ? null : this.saleUnitById(change.from);
+    const to = change.to === PIECE ? null : this.saleUnitById(change.to);
     if (from && to) this.rescalePricesToUnit(from, to);
-    this.saleUnitChoice.set(next);
-    this.saleStockOverrideId.set(null);
-    const allowed = new Set(
-      compatibleAdditionalUnits(next, this.uomOptions()).map((u) => Number(u.id)),
-    );
-    this.saleAdditionalIds.update((ids) => ids.filter((id) => allowed.has(id)));
-    const stock = stockUomOf(this.saleUnitState(), this.uomOptions());
-    const purchaseOk = compatiblePurchaseUnits(stock, this.uomOptions()).some(
-      (u) => Number(u.id) === this.salePurchaseUomId(),
-    );
-    if (!purchaseOk) this.salePurchaseUomId.set(null);
-    this.commitSaleUnit();
-  }
-
-  onSaleAdditionalChange(values: ReadonlyArray<string | number>): void {
-    this.beginSaleUnitEdit();
-    this.saleAdditionalIds.set(values.map((v) => Number(v)));
-    this.commitSaleUnit();
-  }
-
-  onSaleInventoryChange(raw: string | number | null): void {
-    if (raw == null || raw === '') return;
-    const id = Number(raw);
-    const derived = stockUomOf(
-      { ...this.saleUnitState(), stockOverrideUomId: null },
-      this.uomOptions(),
-    );
-    this.saleStockOverrideId.set(derived && Number(derived.id) === id ? null : id);
-    this.commitSaleUnit();
-  }
-
-  onSalePurchaseChange(raw: string | number | null): void {
-    this.beginSaleUnitEdit();
-    this.salePurchaseUomId.set(raw == null || raw === '' ? null : Number(raw));
-    this.commitSaleUnit();
   }
 
   /** Carga la sección desde un producto guardado, sin reescribir nada (S6). */
   private hydrateSaleUnit(source: SaleUnitProductLike): void {
-    const state = saleUnitFromProduct(source, this.uomOptions());
-    this.saleUnitChoice.set(state.principalUomId);
-    this.saleAdditionalIds.set(state.additionalUomIds);
-    this.saleStockOverrideId.set(state.stockOverrideUomId);
-    this.salePurchaseUomId.set(state.purchaseUomId);
-    this.saleUnitLegacy.set(state.legacy);
+    this.saleUnitState.set(saleUnitFromProduct(source, this.uomOptions()));
     this.saleUnitTouched.set(false);
     this.priceAnchors = { base_price: null, sale_price: null };
     this.tierPriceAnchors = new Map();
@@ -1162,11 +1106,7 @@ export class ProductCreatePageComponent {
 
   /** Vuelve la sección a "Pieza" (el producto deja de usar unidades de venta). */
   private resetSaleUnit(): void {
-    this.saleUnitChoice.set(PIECE);
-    this.saleAdditionalIds.set([]);
-    this.saleStockOverrideId.set(null);
-    this.salePurchaseUomId.set(null);
-    this.saleUnitLegacy.set(false);
+    this.saleUnitState.set(emptySaleUnitState());
     this.saleUnitTouched.set(false);
     this.saleUnitOriginal = null;
   }
@@ -1309,87 +1249,23 @@ export class ProductCreatePageComponent {
   );
 
   // ===== Sección "Unidad de venta" (S2-S7, S9, S10, S12, D1-D3) =====
-  /** Unidad principal elegida (`'piece'` = pieza). */
-  readonly saleUnitChoice = signal<SaleUnitPrincipal>(PIECE);
-  /** Unidades de venta adicionales ("También se vende en"). */
-  readonly saleAdditionalIds = signal<number[]>([]);
-  /** Unidad de inventario manual (Avanzado); `null` = derivada (D1). */
-  readonly saleStockOverrideId = signal<number | null>(null);
-  readonly salePurchaseUomId = signal<number | null>(null);
+  /** Estado de la sección (lo edita `app-sale-unit-section`, dos vías). */
+  readonly saleUnitState = signal<SaleUnitFormState>(emptySaleUnitState());
   /** El dueño tocó la sección: solo entonces se reescriben las unidades (D3). */
   readonly saleUnitTouched = signal(false);
-  private readonly saleUnitLegacy = signal(false);
   private saleUnitOriginal: SaleUnitProductLike | null = null;
   /** Producto por hidratar cuando llegue el catálogo de unidades. */
   private readonly saleUnitSource = signal<SaleUnitProductLike | null>(null);
-  /** Valor del selector principal; se puede reenviar al cancelar un cambio. */
-  readonly saleUnitSelectorValue = linkedSignal<string | number>(() =>
-    this.saleUnitChoice(),
-  );
-  readonly saleAdvancedOpen = signal(false);
 
-  readonly saleUnitState = computed<SaleUnitFormState>(() => {
-    const base: SaleUnitFormState = {
-      ...emptySaleUnitState(),
-      principalUomId: this.saleUnitChoice(),
-      additionalUomIds: this.saleAdditionalIds(),
-      stockOverrideUomId: this.saleStockOverrideId(),
-      purchaseUomId: this.salePurchaseUomId(),
-      legacy: this.saleUnitLegacy(),
-    };
-    return {
-      ...base,
-      stockUomId: stockUomOf(base, this.uomOptions())?.id ?? null,
-    };
-  });
+  readonly saleUnitChoice = computed<SaleUnitPrincipal>(
+    () => this.saleUnitState().principalUomId,
+  );
 
   /** Violaciones visibles: un producto legado sin tocar no se juzga (S6). */
   readonly saleUnitViolations = computed(() =>
-    !this.saleUnitTouched() && this.saleUnitLegacy()
+    !this.saleUnitTouched() && this.saleUnitState().legacy
       ? []
       : saleUnitViolations(this.saleUnitState(), this.uomOptions()),
-  );
-
-  readonly saleUnitPrincipalOptions = computed<SelectorOption[]>(() => [
-    { value: PIECE, label: 'Pieza / unidad', description: 'Conteo' },
-    ...principalOptionGroups(this.uomOptions()).flatMap((group) =>
-      group.options.map((o) => ({
-        value: o.value,
-        label: o.label,
-        description: o.eligible
-          ? group.label
-          : `${group.label} · su equivalencia no es exacta`,
-        disabled: !o.eligible,
-      })),
-    ),
-  ]);
-
-  readonly saleUnitAdditionalOptions = computed<MultiSelectorOption[]>(() => {
-    const state = this.saleUnitState();
-    return compatibleAdditionalUnits(
-      state.principalUomId,
-      this.uomOptions(),
-      state.stockOverrideUomId,
-    ).map((u) => ({ value: u.id, label: `${u.name} (${u.code})` }));
-  });
-
-  readonly saleUnitInventoryOptions = computed<SelectorOption[]>(() =>
-    inventoryCandidates(this.saleUnitState(), this.uomOptions()).map((u) => ({
-      value: u.id,
-      label: `${u.name} (${u.code})`,
-    })),
-  );
-
-  readonly salePurchaseOptions = computed<SelectorOption[]>(() =>
-    compatiblePurchaseUnits(
-      stockUomOf(this.saleUnitState(), this.uomOptions()),
-      this.uomOptions(),
-    ).map((u) => ({ value: u.id, label: `${u.name} (${u.code})` })),
-  );
-
-  /** Unidad de inventario en texto, para la sección. */
-  readonly saleUnitInventoryCode = computed(
-    () => stockUomOf(this.saleUnitState(), this.uomOptions())?.code ?? null,
   );
 
   /** Código de la unidad principal (rótulos de precio); `null` en pieza. */
@@ -1406,6 +1282,8 @@ export class ProductCreatePageComponent {
     ),
     { initialValue: this.productForm.get('base_price')!.value },
   );
+
+  readonly saleUnitPrice = computed(() => Number(this.basePriceValue() ?? 0));
 
   /** Resumen de una línea (S4, S7): misma frase en la sección y el lateral. */
   readonly saleUnitSummary = computed(() =>
@@ -1429,7 +1307,7 @@ export class ProductCreatePageComponent {
     const raw = this.pricingTypeValue();
     const pricing = typeof raw === 'object' && raw ? raw.value : raw;
     const effectiveWeight =
-      this.saleUnitTouched() || !this.saleUnitLegacy()
+      this.saleUnitTouched() || !this.saleUnitState().legacy
         ? isMassPrincipal(this.saleUnitState(), this.uomOptions())
         : pricing === 'weight';
     return effectiveWeight && !this.isPureIngredient();

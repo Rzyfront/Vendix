@@ -1,0 +1,89 @@
+<div
+  [attr.id]="sectionId()"
+  class="col-span-full rounded-xl border border-border bg-bg p-4 space-y-3"
+>
+  <div class="flex items-center gap-2">
+    <app-icon name="package" size="14" class="text-primary-600"></app-icon>
+    <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider">
+      Unidad de venta
+    </p>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+    <app-selector
+      label="Unidad de venta"
+      [options]="principalOptions()"
+      [value]="selectorValue()"
+      [searchable]="true"
+      (valueChange)="onPrincipalChange($event)"
+      placeholder="Elige la unidad en que vendes"
+      helpText="El precio se expresa en esta unidad. Cambiarla convierte el precio."
+    ></app-selector>
+
+    @if (!isPiece()) {
+      <app-multi-selector
+        label="También se vende en"
+        [options]="additionalOptions()"
+        [ngModel]="state().additionalUomIds"
+        [ngModelOptions]="{ standalone: true }"
+        (ngModelChange)="onAdditionalChange($event)"
+        placeholder="Otras unidades (mayores o menores)"
+        helpText="Solo unidades que se convierten exacto al inventario."
+      ></app-multi-selector>
+    }
+  </div>
+
+  <p class="text-sm text-text-primary font-medium">
+    {{ summary() }}
+  </p>
+
+  @for (v of violationList(); track v.code + (v.uom_code ?? '')) {
+    <p class="text-xs text-red-600 flex items-start gap-1 px-1">
+      <app-icon
+        name="alert-triangle"
+        size="12"
+        class="mt-0.5 shrink-0"
+      ></app-icon>
+      {{ v.message }}
+    </p>
+  }
+
+  @if (showFoldable()) {
+    <button
+      type="button"
+      class="flex items-center gap-1 text-xs font-medium text-text-secondary hover:text-text-primary"
+      [attr.aria-expanded]="advancedOpen()"
+      (click)="advancedOpen.set(!advancedOpen())"
+    >
+      <app-icon
+        name="chevron-down"
+        size="14"
+        [class.rotate-180]="advancedOpen()"
+      ></app-icon>
+      {{ advancedLabel() }}
+    </button>
+
+    @if (advancedOpen()) {
+      @if (!isPiece()) {
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
+          <app-selector
+            label="El inventario se cuenta en"
+            [options]="inventoryOptions()"
+            [value]="state().stockUomId"
+            (valueChange)="onInventoryChange($event)"
+            helpText="Se deriva sola de la unidad de venta. Solo se ofrecen unidades que no dejan ventas en cero."
+          ></app-selector>
+          <app-selector
+            label="Compra"
+            [options]="purchaseOptions()"
+            [value]="state().purchaseUomId"
+            (valueChange)="onPurchaseChange($event)"
+            placeholder="Como la recibes del proveedor"
+            helpText="Se precarga al recomprar."
+          ></app-selector>
+        </div>
+      }
+      <ng-content></ng-content>
+    }
+  }
+</div>

@@ -49,6 +49,14 @@ export interface PopProduct {
   requires_batch_tracking?: boolean;
   /** QUI-978 — UoM de compra persistida (el listado la trae; fallback del sufijo). */
   purchase_uom_id?: number | null;
+  /** S13c — unidades de venta persistidas: hidratan la sección «Unidad de venta» del modal. */
+  stock_uom_id?: number | null;
+  sale_uoms?: ReadonlyArray<{
+    uom_id: number | string;
+    is_principal?: boolean;
+  }> | null;
+  price_unit_quantity?: number | string | null;
+  scale_code?: number | null;
 }
 
 /**
@@ -126,6 +134,34 @@ export interface LotInfo {
 }
 
 /**
+ * S13d — configuración «Unidad de venta» que el modal del POP entrega cuando la
+ * persona tocó la sección. Mismos nombres que el ítem de la orden de compra
+ * (`PurchaseOrderItemDto`); `sale_uoms: []` significa «pieza». Sin tocar la
+ * sección no se emite nada (compatibilidad, S6).
+ */
+export interface PopSaleUnitConfig {
+  sale_uoms: Array<{ uom_id: number; is_principal?: boolean }>;
+  scale_code: number | null;
+  pricing_type: 'unit' | 'weight';
+  stock_uom_id: number | null;
+  purchase_uom_id: number | null;
+  /** Solo tras confirmar el diálogo «Convertir existencias» (S9). */
+  stock_uom_conversion?: 'convert';
+}
+
+/**
+ * QUI-648 — presentación con precio propio («Precio especial por
+ * presentación»). Campos `sale_unit_*` del ítem de compra.
+ */
+export interface PopSaleUnitTier {
+  sale_unit_name?: string;
+  sale_unit_units_per_package?: number;
+  sale_unit_price?: number;
+  sale_unit_profit_margin?: number;
+  sale_unit_is_default?: boolean;
+}
+
+/**
  * Pre-bulk product data (temporary products not in catalog)
  */
 export interface PreBulkData {
@@ -180,6 +216,13 @@ export interface PreBulkData {
    * retail o cuando ambas unidades comparten dimensión (el backend deriva).
    */
   contentPerPackage?: number;
+  /** S13d — sección «Unidad de venta» tocada en el modal. */
+  sale_unit_config?: PopSaleUnitConfig;
+  sale_unit_name?: string;
+  sale_unit_units_per_package?: number;
+  sale_unit_price?: number;
+  sale_unit_profit_margin?: number;
+  sale_unit_is_default?: boolean;
 }
 
 /**
@@ -323,6 +366,10 @@ export interface PopCartItem {
    * el backend puede derivar el factor por UoM (misma dimensión) o en retail.
    */
   contentPerPackage?: number;
+  /** S13d — configuración de «Unidad de venta» (solo si se tocó la sección). */
+  sale_unit_config?: PopSaleUnitConfig;
+  /** QUI-648 — presentación con precio propio (flujo configure). */
+  sale_unit_tier?: PopSaleUnitTier;
   addedAt: Date;
 }
 
@@ -488,6 +535,10 @@ export interface AddToPopCartRequest {
    */
   discount_amount?: number;
   contentPerPackage?: number;
+  /** S13d — configuración de «Unidad de venta» (solo si se tocó la sección). */
+  sale_unit_config?: PopSaleUnitConfig;
+  /** QUI-648 — presentación con precio propio (flujo configure). */
+  sale_unit_tier?: PopSaleUnitTier;
   /**
    * IVA cycle (F3 wiring): override de IVA por línea proveniente del escáner
    * de facturas. `tax_rate` es PORCENTAJE (19), no fracción — el escáner emite
@@ -519,6 +570,12 @@ export interface UpdatePopCartItemRequest {
   notes?: string;
   variant?: PopProductVariant | null;
   pricing_type?: 'unit' | 'weight';
+  /** Editar un ítem ya en el carrito conserva la configuración de unidades (S13c). */
+  purchase_uom_id?: number | null;
+  stock_uom_id?: number | null;
+  contentPerPackage?: number;
+  sale_unit_config?: PopSaleUnitConfig;
+  sale_unit_tier?: PopSaleUnitTier;
 }
 
 /**
@@ -561,6 +618,10 @@ export interface PopProductConfigResult {
    * orden. Undefined cuando el backend deriva el factor por UoM o en retail.
    */
   contentPerPackage?: number;
+  /** S13d — sección «Unidad de venta» tocada; ausente = comportamiento legado. */
+  sale_unit_config?: PopSaleUnitConfig;
+  /** QUI-648 — «Precio especial por presentación». */
+  sale_unit_tier?: PopSaleUnitTier;
 }
 
 /**

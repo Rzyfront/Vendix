@@ -5,6 +5,8 @@ import {
   input,
   output,
   signal,
+  effect,
+  untracked,
   DestroyRef,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -114,7 +116,10 @@ export interface PopUomCaptureResult {
         factor de la UoM.
       </p>
 
-      <!-- UoM selects (app-selector: tokens semánticos + dropdown accesible) -->
+      <!-- UoM selects (app-selector: tokens semánticos + dropdown accesible).
+           S13c: con la sección «Unidad de venta» activa las unidades salen de
+           ella y estos selectores no se muestran. -->
+      @if (!externalUnits()) {
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <div>
           <label class="block text-xs font-medium text-text-primary mb-1">
@@ -143,6 +148,7 @@ export interface PopUomCaptureResult {
           ></app-selector>
         </div>
       </div>
+      }
 
       <!-- Capacity preview (misma dimensión → factor derivado del catálogo) -->
       @if (unitCapacity(); as cap) {
@@ -299,6 +305,16 @@ export class PopUomCaptureComponent {
   /** Initial UoM FKs (e.g. persisted on the product). */
   readonly initialPurchaseUomId = input<number | null>(null);
   readonly initialStockUomId = input<number | null>(null);
+
+  /**
+   * S13c: unidades que manda la sección «Unidad de venta» del padre. Con valor
+   * (aunque sus ids sean null) los selectores se ocultan y estas unidades
+   * mandan; `null` = comportamiento de siempre (insumo).
+   */
+  readonly externalUnits = input<{
+    purchaseUomId: number | null;
+    stockUomId: number | null;
+  } | null>(null);
 
   /**
    * Initial canonical cost (per purchase UoM). The component will derive
@@ -459,6 +475,16 @@ export class PopUomCaptureComponent {
   // ----------------------------------------------------------------
 
   constructor() {
+    // S13c: sigue a la sección del padre (sin emitir: el padre ya las conoce).
+    effect(() => {
+      const ext = this.externalUnits();
+      if (!ext) return;
+      untracked(() => {
+        this.purchaseUomId.set(ext.purchaseUomId);
+        this.stockUomId.set(ext.stockUomId);
+      });
+    });
+
     // Load catalog once. Cached by UomService (shareReplay).
     this.uomService
       .getCatalog()
@@ -484,8 +510,9 @@ export class PopUomCaptureComponent {
    * in the prebulk/config modals.
    */
   initFromInputs(): void {
-    this.purchaseUomId.set(this.initialPurchaseUomId());
-    this.stockUomId.set(this.initialStockUomId());
+    const ext = this.externalUnits();
+    this.purchaseUomId.set(ext ? ext.purchaseUomId : this.initialPurchaseUomId());
+    this.stockUomId.set(ext ? ext.stockUomId : this.initialStockUomId());
     this.unitCost.set(this.initialUnitCost() || 0);
     this.quantity.set(this.initialQuantity() > 0 ? this.initialQuantity() : 1);
     // F1: cada apertura arranca sin contenido por envase (0 = sin capturar).

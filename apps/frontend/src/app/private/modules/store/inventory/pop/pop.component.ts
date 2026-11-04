@@ -90,6 +90,9 @@ import {
   AddToPopCartRequest,
   PopProductConfigResult,
   PopProductModalResult,
+  PopSaleUnitConfig,
+  PopSaleUnitTier,
+  UpdatePopCartItemRequest,
 } from './interfaces/pop-cart.interface';
 import { POP_USE_UNIFIED_MODAL } from './pop.config';
 import { toLocalDateString } from '../../../../../shared/utils/date.util';
@@ -326,6 +329,8 @@ const SHIPPING_METHOD_OPTIONS: SelectorOption[] = [
       [initialLotInfo]="editingCartItemLotInfo"
       [initialPricingType]="editingCartItemPricingType"
       [isEditing]="!!editingCartItemId()"
+      [initialSaleUnit]="editingCartItemSaleUnit"
+      [initialSaleTier]="editingCartItemSaleTier"
       (confirmed)="onConfigConfirmed($event)"
       (closed)="onConfigClosed()"
     ></app-pop-product-config-modal>
@@ -438,6 +443,20 @@ export class PopComponent implements OnInit, OnDestroy {
     const id = this.editingCartItemId();
     if (!id) return null;
     return this.popCartService.getItemById(id)?.lot_info || null;
+  }
+
+  /** S13c: configuración de «Unidad de venta» del ítem que se edita. */
+  get editingCartItemSaleUnit(): PopSaleUnitConfig | null {
+    const id = this.editingCartItemId();
+    if (!id) return null;
+    const item = this.popCartService.getItemById(id);
+    return item?.sale_unit_config ?? item?.prebulk_data?.sale_unit_config ?? null;
+  }
+
+  get editingCartItemSaleTier(): PopSaleUnitTier | null {
+    const id = this.editingCartItemId();
+    if (!id) return null;
+    return this.popCartService.getItemById(id)?.sale_unit_tier ?? null;
   }
 
   get editingCartItemPricingType(): 'unit' | 'weight' {
@@ -857,6 +876,39 @@ export class PopComponent implements OnInit, OnDestroy {
     this.onProductConfigured(result);
   }
 
+  /**
+   * S13d / QUI-648: campos de «Unidad de venta» que el modal entrega y el
+   * carrito transporta hasta la orden (ausentes si no se tocó la sección).
+   */
+  private saleUnitCartFields(
+    result: PopProductConfigResult,
+  ): Pick<AddToPopCartRequest, 'sale_unit_config' | 'sale_unit_tier'> {
+    return {
+      ...(result.sale_unit_config
+        ? { sale_unit_config: result.sale_unit_config }
+        : {}),
+      ...(result.sale_unit_tier ? { sale_unit_tier: result.sale_unit_tier } : {}),
+    };
+  }
+
+  /** S13c: editar un ítem del carrito conserva unidades y presentación. */
+  private unitUpdateFields(
+    result: PopProductConfigResult,
+  ): Partial<UpdatePopCartItemRequest> {
+    return {
+      ...(result.purchase_uom_id !== undefined
+        ? { purchase_uom_id: result.purchase_uom_id }
+        : {}),
+      ...(result.stock_uom_id !== undefined
+        ? { stock_uom_id: result.stock_uom_id }
+        : {}),
+      ...(result.contentPerPackage !== undefined
+        ? { contentPerPackage: result.contentPerPackage }
+        : {}),
+      ...this.saleUnitCartFields(result),
+    };
+  }
+
   private onProductConfigured(result: PopProductConfigResult): void {
     const product = this.configModalProduct();
     if (!product) return;
@@ -887,6 +939,7 @@ export class PopComponent implements OnInit, OnDestroy {
                   stock_uom_id: result.stock_uom_id,
                   // F1: contenido por envase (factor manual envase→stock).
                   contentPerPackage: result.contentPerPackage,
+                  ...this.saleUnitCartFields(result),
                 })
                 .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
             });
@@ -909,6 +962,7 @@ export class PopComponent implements OnInit, OnDestroy {
             lot_info: result.lot_info,
             variant: result.variant,
             pricing_type: result.pricing_type,
+            ...this.unitUpdateFields(result),
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: () => {
@@ -922,6 +976,7 @@ export class PopComponent implements OnInit, OnDestroy {
             unit_cost: result.unit_cost,
             lot_info: result.lot_info,
             pricing_type: result.pricing_type,
+            ...this.unitUpdateFields(result),
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: () => {
@@ -949,6 +1004,7 @@ export class PopComponent implements OnInit, OnDestroy {
             stock_uom_id: result.stock_uom_id,
             // F1: contenido por envase (factor manual envase→stock).
             contentPerPackage: result.contentPerPackage,
+            ...this.saleUnitCartFields(result),
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       });
@@ -985,6 +1041,7 @@ export class PopComponent implements OnInit, OnDestroy {
           stock_uom_id: result.stock_uom_id,
           // F1: contenido por envase (factor manual envase→stock).
           contentPerPackage: result.contentPerPackage,
+          ...this.saleUnitCartFields(result),
         })
         .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: () => {
@@ -3435,7 +3492,8 @@ export class PopComponent implements OnInit, OnDestroy {
     request.items.forEach((reqItem, i) => {
       const cartItem: any = state.items[i];
       if (!cartItem) return;
-      const source = cartItem.prebulk_data ?? cartItem;
+      const source =
+        cartItem.prebulk_data ?? cartItem.sale_unit_tier ?? cartItem;
       const name = String(source.sale_unit_name ?? '').trim();
       if (!name) return;
 
