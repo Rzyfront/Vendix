@@ -8,6 +8,10 @@ import {
   StoreAppDetailResponse,
   StoreAppsResponse,
 } from '../interfaces/store-app.interface';
+import type { ProductPageContext } from '../page-builder/product-page/product-page-builder';
+import type { BookingContext } from '../page-builder/booking/booking-builder';
+import type { ServicePageContext } from '../page-builder/service-page/service-page-builder';
+import type { StoreHomePublic } from '../../../../../public/store-home/store-home.service';
 import type { AppPageDocument, PageAppKind } from '../templates/app-page.types';
 
 /** URL segment of each app's `PATCH /store/apps/<segment>/page` (apps-f2 S7). */
@@ -71,6 +75,11 @@ export class StoreAppsService {
     );
   }
 
+  /** F6-B — the featured product and complements the page paints, for the builder preview. */
+  productPagePreviewContext(): Observable<{ data: ProductPageContext }> {
+    return this.http.get<{ data: ProductPageContext }>(`${this.apiUrl}/product_page/preview-context`);
+  }
+
   unpublishProductPage(): Observable<unknown> {
     return this.http.post(`${this.apiUrl}/product_page/unpublish`, {});
   }
@@ -79,6 +88,11 @@ export class StoreAppsService {
     return this.http.get<{ data: ProductPageCustomDomain[] }>(
       `${this.apiUrl}/product_page/custom-domains`,
     );
+  }
+
+  /** F6-B — the services and secondary products the page paints, for the builder preview. */
+  servicePagePreviewContext(): Observable<{ data: ServicePageContext }> {
+    return this.http.get<{ data: ServicePageContext }>(`${this.apiUrl}/service_page/preview-context`);
   }
 
   saveServicePageConfig(body: {
@@ -105,6 +119,11 @@ export class StoreAppsService {
     );
   }
 
+  /** F6-B — the room types and secondary products the page paints, for the builder preview. */
+  bookingPreviewContext(): Observable<{ data: BookingContext }> {
+    return this.http.get<{ data: BookingContext }>(`${this.apiUrl}/booking/preview-context`);
+  }
+
   saveBookingConfig(body: { product_ids: number[] }): Observable<unknown> {
     return this.http.patch(`${this.apiUrl}/booking/config`, body);
   }
@@ -128,6 +147,11 @@ export class StoreAppsService {
 
   saveStoreHomeConfig(body: { footer_text: string | null }): Observable<unknown> {
     return this.http.patch(`${this.apiUrl}/store-home/config`, body);
+  }
+
+  /** F6-B — what the store home paints besides its page (name, brand, footer, published apps), for the builder preview. */
+  storeHomePreviewContext(): Observable<{ data: StoreHomePublic }> {
+    return this.http.get<{ data: StoreHomePublic }>(`${this.apiUrl}/store-home/preview-context`);
   }
 
   /** Switches the store's `{tienda}-store` domain to the store home. */

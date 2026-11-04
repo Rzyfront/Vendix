@@ -69,7 +69,7 @@ describe('BookingAppService', () => {
       releaseAppDomains: jest.fn().mockResolvedValue(undefined),
       listCustomDomains: jest.fn().mockResolvedValue([]),
     };
-    service = new BookingAppService(prisma as any, domains as any);
+    service = new BookingAppService(prisma as any, domains as any, {} as any);
   });
 
   afterEach(() => jest.restoreAllMocks());

@@ -24,6 +24,13 @@ export class ServicePageAppController {
     private readonly appPage: AppPageService,
   ) {}
 
+  /** F6-B: services and secondary products for the editor preview. */
+  @Permissions('store:apps:read')
+  @Get('preview-context')
+  async previewContext() {
+    return this.responseService.success(await this.servicePage.previewContext());
+  }
+
   @Permissions('store:apps:read')
   @Get('custom-domains')
   async customDomains() {

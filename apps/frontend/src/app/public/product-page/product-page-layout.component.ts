@@ -16,13 +16,8 @@ import { CartService } from '../../private/modules/ecommerce/services/cart.servi
 import { StoreUiService } from '../../private/modules/ecommerce/services/store-ui.service';
 import { StoreSeoService } from '../../private/modules/ecommerce/services/store-seo';
 import { AuthModalComponent } from '../../private/layouts/store-ecommerce/components/auth-modal/auth-modal.component';
-import { IconComponent } from '../../shared/components/icon/icon.component';
-import {
-  effectiveMode,
-  modeSells,
-} from '../../private/modules/store/apps/templates/app-page.types';
-import { AppPageViewComponent } from '../app-page/app-page-view.component';
 import { ProductComplementsComponent } from './components/product-complements.component';
+import { ProductPageViewComponent, complementsTitleOf } from './product-page-view.component';
 import { ProductPageService } from './product-page.service';
 
 /**
@@ -38,59 +33,24 @@ import { ProductPageService } from './product-page.service';
   imports: [
     RouterModule,
     AuthModalComponent,
-    IconComponent,
     ProductComplementsComponent,
-    AppPageViewComponent,
+    ProductPageViewComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="flex min-h-screen flex-col bg-background">
-      <header class="sticky top-0 z-30 border-b border-border bg-surface/95 backdrop-blur">
-        <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-4">
-          <a [routerLink]="homeLink()" class="flex min-w-0 items-center gap-3">
-            @if (headerLogo()) {
-              <img [src]="headerLogo()" [alt]="storeName()" class="h-9 w-auto max-w-[8rem] object-contain" />
-            }
-            <span class="truncate text-base font-semibold text-text-primary">{{ storeName() }}</span>
-          </a>
-          @if (showCartLink()) {
-            <a
-              routerLink="/cart"
-              class="relative inline-flex h-10 w-10 items-center justify-center rounded-full text-text-primary hover:bg-surface-secondary"
-              [attr.aria-label]="'Carrito, ' + cartCount() + ' producto(s)'"
-            >
-              <app-icon name="shopping-cart" [size]="22" />
-              @if (cartCount() > 0) {
-                <span
-                  class="absolute -right-0.5 -top-0.5 min-w-[1.25rem] rounded-full bg-primary px-1 text-center text-xs font-semibold leading-5 text-white"
-                >
-                  {{ cartCount() }}
-                </span>
-              }
-            </a>
-          }
-        </div>
-      </header>
-
-      @if (page() && isFeaturedRoute()) {
-        <app-app-page-view kind="product_page" [page]="page()" part="hero" />
+    <app-product-page-view
+      [page]="page()"
+      [storeName]="storeName()"
+      [storeLogo]="storeLogo()"
+      [homeLink]="homeLink()"
+      [cartCount]="cartCount()"
+      [featuredRoute]="isFeaturedRoute()"
+    >
+      <router-outlet />
+      @if (showComplements()) {
+        <app-product-complements [productIds]="complementIds()" [title]="complementsTitle()" />
       }
-
-      <main class="flex-1" [attr.id]="page() ? 'app-page-main' : null">
-        <router-outlet />
-        @if (showComplements()) {
-          <app-product-complements [productIds]="complementIds()" [title]="complementsTitle()" />
-        }
-      </main>
-
-      @if (page() && isFeaturedRoute()) {
-        <app-app-page-view kind="product_page" [page]="page()" part="blocks" />
-      }
-
-      <footer class="border-t border-border py-6 text-center text-xs text-text-secondary">
-        {{ storeName() }} · Hecho con Vendix
-      </footer>
-    </div>
+    </app-product-page-view>
 
     <app-auth-modal
       [isOpen]="authModalOpen()"
@@ -134,23 +94,11 @@ export class ProductPageLayoutComponent {
   /** The owner's own page; `null` keeps the layout exactly as it was. */
   readonly page = computed(() => this.productPage.config()?.page ?? null);
 
-  readonly headerLogo = computed(() => this.page()?.brand?.logo_url || this.storeLogo());
-
-  /** Non-selling modes (or `show_cart: false`) hide the header cart link. */
-  readonly showCartLink = computed(() => {
-    const page = this.page();
-    if (!page) return true;
-    return modeSells(effectiveMode('product_page', page)) && page.sales?.show_cart !== false;
-  });
-
   private readonly complementsBlock = computed(() =>
     this.page()?.blocks.find((b) => b.type === 'complements'),
   );
 
-  readonly complementsTitle = computed(() => {
-    const title = this.complementsBlock()?.props['title'];
-    return typeof title === 'string' && title.trim() ? title.trim() : 'Complementa tu compra';
-  });
+  readonly complementsTitle = computed(() => complementsTitleOf(this.page()));
 
   readonly complementIds = computed(
     () => this.productPage.config()?.complement_product_ids ?? [],

@@ -8,6 +8,21 @@ export interface ServiceCategoryChip {
   count: number;
 }
 
+/** What a service card draws; the ecommerce catalog row and the editor's preview both satisfy it. */
+export type ServiceCardData = Pick<
+  EcommerceProduct,
+  | 'id'
+  | 'name'
+  | 'slug'
+  | 'description'
+  | 'final_price'
+  | 'image_url'
+  | 'service_duration_minutes'
+  | 'service_modality'
+  | 'requires_booking'
+  | 'categories'
+>;
+
 type ServiceLike = Pick<EcommerceProduct, 'id' | 'slug' | 'categories' | 'requires_booking'>;
 
 /** Categories of the listed services, in order of first appearance, with counts. */

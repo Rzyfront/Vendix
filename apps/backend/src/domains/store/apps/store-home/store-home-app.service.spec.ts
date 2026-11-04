@@ -6,6 +6,7 @@ import {
   DEFAULT_STORE_HOME_FOOTER,
   parseStoreHomeConfig,
   resolveStoreHomeBranding,
+  selectStoreHomeApps,
 } from './store-home.reader';
 
 /**
@@ -156,7 +157,7 @@ describe('StoreHomeAppService', () => {
       events as any,
       cache as any,
     );
-    service = new StoreHomeAppService(db as any, appDomains);
+    service = new StoreHomeAppService(db as any, appDomains, { read: jest.fn() } as any);
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -289,7 +290,53 @@ describe('StoreHomeAppService', () => {
   });
 });
 
+describe('StoreHomeAppService.previewContext (F6-B)', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('reads the preview data of the store in the request context, published or not', async () => {
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(7);
+    const config = { footer_text: 'Hola', page: { schema_version: 1, blocks: [] } };
+    const findFirst = jest.fn().mockResolvedValue({ id: 1, status: 'draft', config, domain_settings: null });
+    const data = { store_name: 'Roku', branding: {}, footer: { text: 'Hola', site_url: 'x' }, apps: [] };
+    const view = { read: jest.fn().mockResolvedValue(data) };
+    const service = new StoreHomeAppService({ store_apps: { findFirst } } as any, {} as any, view as any);
+
+    await expect(service.previewContext()).resolves.toBe(data);
+    expect(findFirst.mock.calls[0][0].where).toEqual({ store_id: 7, kind: 'store_home' });
+    expect(view.read).toHaveBeenCalledWith(7, config);
+  });
+
+  it('without a store in the context it refuses', async () => {
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(undefined as any);
+    const service = new StoreHomeAppService({} as any, {} as any, { read: jest.fn() } as any);
+    await expect(service.previewContext()).rejects.toThrow();
+  });
+});
+
 describe('store home reader', () => {
+  describe('selectStoreHomeApps (F6-B)', () => {
+    const apps = [
+      { kind: 'ecommerce', name: 'Tienda en línea', url: 'https://a' },
+      { kind: 'landing', name: 'Landing page', url: 'https://b' },
+      { kind: 'booking', name: 'Reservas', url: 'https://c' },
+    ];
+
+    it('without a choice shows every published app, in catalog order (as before)', () => {
+      expect(selectStoreHomeApps(apps, undefined)).toEqual(apps);
+    });
+
+    it('shows only the chosen apps, in the chosen order, skipping unpublished and repeated ones', () => {
+      expect(selectStoreHomeApps(apps, ['booking', 'service_page', 'ecommerce', 'booking']).map((a) => a.kind)).toEqual([
+        'booking',
+        'ecommerce',
+      ]);
+    });
+
+    it('an empty choice shows none', () => {
+      expect(selectStoreHomeApps(apps, [])).toEqual([]);
+    });
+  });
+
   it('uses the store brand first, then the organization, field by field', () => {
     expect(
       resolveStoreHomeBranding(

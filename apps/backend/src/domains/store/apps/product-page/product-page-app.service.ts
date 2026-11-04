@@ -23,6 +23,10 @@ import {
   PublishProductPageDto,
   UpdateProductPageConfigDto,
 } from './product-page.dto';
+import {
+  ProductPageViewData,
+  ProductPageViewService,
+} from './product-page-view.service';
 
 const APP_TYPE = 'STORE_PRODUCT_PAGE';
 
@@ -42,7 +46,19 @@ export class ProductPageAppService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly domains: AppDomainService,
+    private readonly view: ProductPageViewService,
   ) {}
+
+  /**
+   * F6-B — the catalog data the editor's preview paints besides the draft
+   * page: the same featured product and complements the public read returns,
+   * whatever the app's status (the owner previews before publishing).
+   */
+  async previewContext(): Promise<ProductPageViewData> {
+    const storeId = this.requireStoreId();
+    const row = await this.findRow(storeId);
+    return this.view.read(storeId, row?.config ?? null);
+  }
 
   async updateConfig(dto: UpdateProductPageConfigDto): Promise<void> {
     const storeId = this.requireStoreId();

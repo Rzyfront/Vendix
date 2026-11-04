@@ -123,6 +123,34 @@ describe('AppPageViewComponent (apps-f2 T3)', () => {
     expect(home.querySelector('a[href="mailto:a@b.co"]')).not.toBeNull();
   });
 
+  describe('F6-B: builder preview and WhatsApp', () => {
+    it('marks the hero and each section with data-block-id only when asked (public page untouched)', () => {
+      let el = render(page());
+      expect(el.querySelector('[data-block-id]')).toBeNull();
+      fixture = TestBed.createComponent(AppPageViewComponent);
+      fixture.componentRef.setInput('kind', 'product_page');
+      fixture.componentRef.setInput('page', page());
+      fixture.componentRef.setInput('blockIds', true);
+      fixture.detectChanges();
+      el = fixture.nativeElement as HTMLElement;
+      expect(Array.from(el.querySelectorAll('[data-block-id]')).map((n) => n.getAttribute('data-block-id'))).toEqual([
+        'hero',
+        'benefits',
+        'testimonials',
+        'cta',
+      ]);
+    });
+
+    it('shows the floating WhatsApp button only when turned on with a valid number', () => {
+      expect(render(page({ brand: { whatsapp_number: '+57 300 123 4567' } })).querySelector('[data-testid="app-page-whatsapp"]')).toBeNull();
+      const el = render(page({ brand: { whatsapp_number: '+57 300 123 4567', whatsapp_message: 'Hola, quiero info', whatsapp_floating: true } }));
+      const link = el.querySelector('[data-testid="app-page-whatsapp"]') as HTMLAnchorElement;
+      expect(link.getAttribute('href')).toBe('https://wa.me/573001234567?text=Hola%2C%20quiero%20info');
+      expect(render(page({ brand: { whatsapp_number: '12', whatsapp_floating: true } })).querySelector('[data-testid="app-page-whatsapp"]')).toBeNull();
+      expect(render(page({ brand: { whatsapp_number: '573001234567', whatsapp_floating: true } }), { part: 'hero' }).querySelector('[data-testid="app-page-whatsapp"]')).toBeNull();
+    });
+  });
+
   it('renders nothing without a page', () => {
     expect(render(null).textContent?.trim()).toBe('');
   });

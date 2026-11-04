@@ -20,7 +20,8 @@ export interface BuilderPropChange {
 /**
  * F6-A — field inspector of the builder (engine, app-agnostic). It renders the
  * fields the catalog declares for the selected block: text and long text with
- * a character counter, https links, and repeatable lists edited item by item
+ * a character counter, https links, whole numbers and yes/no switches (F6-B),
+ * and repeatable lists edited item by item
  * (add, remove, reorder). Lists are read with the catalog aliases and written
  * back with the canonical keys; blank items are dropped on write.
  */
@@ -84,15 +85,19 @@ export interface BuilderPropChange {
                       <label class="block">
                         <span class="mb-1 flex justify-between text-[11px] text-[var(--color-text-secondary)]">
                           <span>{{ sub.label }}</span>
-                          @if (sub.kind !== 'url') { <span>{{ (item[sub.key] ?? '').length }}/{{ sub.max }}</span> }
+                          @if (counter(sub); as max) { <span>{{ (item[sub.key] ?? '').length }}/{{ max }}</span> }
                         </span>
                         @if (sub.kind === 'textarea') {
                           <textarea rows="2" [attr.maxlength]="sub.max" [attr.placeholder]="sub.placeholder ?? null"
                                     class="w-full resize-y rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
                                     [value]="item[sub.key] ?? ''" (input)="setItem(b, field, i, sub.key, $any($event.target).value)"></textarea>
+                        } @else if (sub.kind === 'number') {
+                          <input type="number" step="1" [attr.min]="sub.min" [attr.max]="sub.max"
+                                 class="w-24 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
+                                 [value]="item[sub.key] ?? ''" (input)="setItem(b, field, i, sub.key, $any($event.target).value)" />
                         } @else {
-                          <input [type]="sub.kind === 'url' ? 'url' : 'text'" [attr.maxlength]="sub.kind === 'url' ? null : sub.max"
-                                 [attr.placeholder]="sub.placeholder ?? null"
+                          <input [type]="sub.kind === 'url' ? 'url' : 'text'" [attr.maxlength]="counter(sub)"
+                                 [attr.placeholder]="placeholder(sub)"
                                  class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
                                  [class.border-[var(--color-error,#dc2626)]]="urlError(item[sub.key], sub)"
                                  [value]="item[sub.key] ?? ''" (input)="setItem(b, field, i, sub.key, $any($event.target).value)" />
@@ -113,21 +118,36 @@ export interface BuilderPropChange {
                   <app-icon name="plus" [size]="13" /> Agregar {{ field.itemLabel.toLowerCase() }}
                 </button>
               </fieldset>
+            } @else if (field.kind === 'toggle') {
+              <label class="flex items-start gap-2.5" [attr.data-field]="field.key">
+                <input type="checkbox" class="mt-0.5 h-4 w-4 accent-[var(--color-primary)]"
+                       [checked]="flag(b, field.key)" (change)="setValue(b, field.key, $any($event.target).checked)" />
+                <span>
+                  <span class="block text-xs font-semibold text-[var(--color-text-primary)]">{{ field.label }}</span>
+                  @if (field.hint) {
+                    <span class="block text-[11px] text-[var(--color-text-secondary)]">{{ field.hint }}</span>
+                  }
+                </span>
+              </label>
             } @else {
               <label class="block" [attr.data-field]="field.key">
                 <span class="mb-1 flex justify-between text-xs font-semibold text-[var(--color-text-primary)]">
                   <span>{{ field.label }}</span>
-                  @if (field.kind !== 'url') {
-                    <span class="font-normal text-[var(--color-text-secondary)]">{{ text(b, field.key).length }}/{{ field.max }}</span>
+                  @if (counter(field); as max) {
+                    <span class="font-normal text-[var(--color-text-secondary)]">{{ text(b, field.key).length }}/{{ max }}</span>
                   }
                 </span>
                 @if (field.kind === 'textarea') {
                   <textarea rows="4" [attr.maxlength]="field.max" [attr.placeholder]="field.placeholder ?? null"
                             class="w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
                             [value]="text(b, field.key)" (input)="setText(b, field.key, $any($event.target).value)"></textarea>
+                } @else if (field.kind === 'number') {
+                  <input type="number" step="1" [attr.min]="field.min" [attr.max]="field.max"
+                         class="w-28 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+                         [value]="text(b, field.key)" (input)="setNumber(b, field.key, $any($event.target).value)" />
                 } @else {
-                  <input [type]="field.kind === 'url' ? 'url' : 'text'" [attr.maxlength]="field.kind === 'url' ? null : field.max"
-                         [attr.placeholder]="field.placeholder ?? null"
+                  <input [type]="field.kind === 'url' ? 'url' : 'text'" [attr.maxlength]="counter(field)"
+                         [attr.placeholder]="placeholder(field)"
                          class="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
                          [class.border-[var(--color-error,#dc2626)]]="urlError(text(b, field.key), field)"
                          [value]="text(b, field.key)" (input)="setText(b, field.key, $any($event.target).value)" />
@@ -177,6 +197,19 @@ export class BuilderInspectorComponent {
     return readListItems(field, block.props[field.key]);
   }
 
+  /** Character limit shown next to a text field; `null` for links, numbers and switches. */
+  counter(field: BuilderScalarFieldDef): number | null {
+    return field.kind === 'text' || field.kind === 'textarea' ? field.max : null;
+  }
+
+  placeholder(field: BuilderScalarFieldDef): string | null {
+    return 'placeholder' in field ? (field.placeholder ?? null) : null;
+  }
+
+  flag(block: BuilderBlock, key: string): boolean {
+    return block.props[key] === true;
+  }
+
   urlError(value: string | undefined, field: BuilderScalarFieldDef): boolean {
     if (field.kind !== 'url') return false;
     const v = (value ?? '').trim();
@@ -185,6 +218,16 @@ export class BuilderInspectorComponent {
 
   setText(block: BuilderBlock, key: string, value: string): void {
     this.propChange.emit({ blockId: block.id, key, value });
+  }
+
+  setValue(block: BuilderBlock, key: string, value: unknown): void {
+    this.propChange.emit({ blockId: block.id, key, value });
+  }
+
+  /** A whole number, or the key removed when the field is emptied. */
+  setNumber(block: BuilderBlock, key: string, raw: string): void {
+    const n = Number(raw);
+    this.propChange.emit({ blockId: block.id, key, value: raw.trim() === '' || !Number.isFinite(n) ? undefined : Math.trunc(n) });
   }
 
   setItem(block: BuilderBlock, field: BuilderListFieldDef, index: number, key: string, value: string): void {

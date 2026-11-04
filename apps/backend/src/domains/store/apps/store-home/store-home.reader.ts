@@ -90,3 +90,28 @@ export function resolveStoreHomeBranding(
     BRAND_FIELDS.map((field) => [field, pick(field)]),
   ) as unknown as StoreHomeBranding;
 }
+
+/** A link to one of the store's published apps, as the "Mis apps" block shows it. */
+export interface StoreHomeAppLink {
+  kind: string;
+  name: string;
+  url: string;
+}
+
+/**
+ * F6-B — the apps the "Mis apps" block shows: with `kinds` (the owner's
+ * choice), only those, in that order; without it, every published app in
+ * catalog order (the pre-F6-B behavior). Kinds that are not published are
+ * skipped, so a choice never shows an app that is off.
+ */
+export function selectStoreHomeApps(
+  apps: readonly StoreHomeAppLink[],
+  kinds: unknown,
+): StoreHomeAppLink[] {
+  if (!Array.isArray(kinds)) return [...apps];
+  return kinds
+    .filter((kind): kind is string => typeof kind === 'string')
+    .map((kind) => apps.find((app) => app.kind === kind))
+    .filter((app): app is StoreHomeAppLink => !!app)
+    .filter((app, index, list) => list.indexOf(app) === index);
+}

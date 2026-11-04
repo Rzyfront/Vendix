@@ -16,6 +16,7 @@ import {
   BookingPageConfig,
   parseBookingPageConfig,
 } from './booking-page.reader';
+import { BookingViewData, BookingViewService } from './booking-view.service';
 import { PublishBookingPageDto, UpdateBookingPageConfigDto } from './booking-page.dto';
 
 const APP_TYPE = 'STORE_BOOKING';
@@ -41,7 +42,18 @@ export class BookingAppService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly domains: AppDomainService,
+    private readonly view: BookingViewService,
   ) {}
+
+  /**
+   * F6-B — the data the editor's preview paints besides the draft page: the
+   * room types and secondary products, whatever the app's status.
+   */
+  async previewContext(): Promise<BookingViewData> {
+    const storeId = this.requireStoreId();
+    const row = await this.findRow(storeId);
+    return this.view.read(storeId, row?.config ?? null);
+  }
 
   async updateConfig(dto: UpdateBookingPageConfigDto): Promise<void> {
     const storeId = this.requireStoreId();

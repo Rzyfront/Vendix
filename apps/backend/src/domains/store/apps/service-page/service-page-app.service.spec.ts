@@ -71,7 +71,7 @@ describe('ServicePageAppService', () => {
       releaseAppDomains: jest.fn().mockResolvedValue(undefined),
       listCustomDomains: jest.fn().mockResolvedValue([]),
     };
-    service = new ServicePageAppService(prisma as any, domains as any);
+    service = new ServicePageAppService(prisma as any, domains as any, {} as any);
   });
 
   afterEach(() => jest.restoreAllMocks());

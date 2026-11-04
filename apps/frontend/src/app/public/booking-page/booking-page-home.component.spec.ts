@@ -6,6 +6,7 @@ import { HotelSearchComponent } from '../../private/modules/ecommerce/pages/hote
 import { StoreSeoService } from '../../private/modules/ecommerce/services/store-seo';
 import { ProductComplementsComponent } from '../product-page/components/product-complements.component';
 import { BookingPageHomeComponent } from './booking-page-home.component';
+import { BookingPageHomeViewComponent } from './booking-page-home-view.component';
 import { BookingPagePublicConfig, BookingPageService } from './booking-page.service';
 
 @Component({ selector: 'app-hotel-search', standalone: true, template: '<p data-testid="pms-search"></p>' })
@@ -56,7 +57,7 @@ describe('BookingPageHomeComponent (apps-module Fase 4)', () => {
         },
       ],
     });
-    TestBed.overrideComponent(BookingPageHomeComponent, {
+    TestBed.overrideComponent(BookingPageHomeViewComponent, {
       remove: { imports: [HotelSearchComponent, ProductComplementsComponent] },
       add: { imports: [SearchStub, ComplementsStub] },
     });
@@ -147,5 +148,27 @@ describe('BookingPageHomeComponent (apps-module Fase 4)', () => {
     const el = await render({ product_ids: [3], page: ownPage({ mode: 'booking' }) }, dates);
     expect(el.querySelector('[data-testid="booking-page-products"]')).toBeNull();
     expect(el.querySelector('[data-testid="pms-search"]')).not.toBeNull();
+  });
+
+  it('sin vista previa no marca secciones; con blockIds marca portada, buscador, check-in y productos y dibuja habitaciones y productos del editor', async () => {
+    const el = await render({ product_ids: [3], page: ownPage() }, dates);
+    expect(el.querySelector('[data-block-id]')).toBeNull();
+
+    const view = TestBed.createComponent(BookingPageHomeViewComponent);
+    view.componentRef.setInput('productIds', [3]);
+    view.componentRef.setInput('page', ownPage());
+    view.componentRef.setInput('blockIds', true);
+    view.componentRef.setInput('previewRooms', [
+      { id: 1, name: 'Suite', description: null, max_occupancy: 3, bed_config: '1 doble', image_url: null },
+    ]);
+    view.componentRef.setInput('previewProducts', [{ id: 3, name: 'Desayuno', image_url: null }]);
+    view.detectChanges();
+    const root = view.nativeElement as HTMLElement;
+    expect(Array.from(root.querySelectorAll('[data-block-id]')).map((e) => e.getAttribute('data-block-id'))).toEqual(
+      jasmine.arrayContaining(['hero', 'search', 'checkin_info', 'products']),
+    );
+    expect(root.querySelector('[data-testid="preview-rooms"]')?.textContent).toContain('Suite');
+    expect(root.querySelector('[data-testid="pms-search"]')).toBeNull();
+    expect(root.querySelector('[data-testid="preview-products"]')?.textContent).toContain('Desayuno');
   });
 });

@@ -8,6 +8,7 @@ import { AppDomainService } from '../shared/app-domain.service';
 import { buildAppSuffixHostname } from '../product-page/product-page-hostname';
 import { StoreHomeConfig, parseStoreHomeConfig } from './store-home.reader';
 import { UpdateStoreHomeConfigDto } from './store-home.dto';
+import { StoreHomeViewData, StoreHomeViewService } from './store-home-view.service';
 
 const APP_TYPE = 'STORE_HOME';
 /** What the primary domain served before the store home, when unknown. */
@@ -58,7 +59,19 @@ export class StoreHomeAppService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly domains: AppDomainService,
+    private readonly view: StoreHomeViewService,
   ) {}
+
+  /**
+   * F6-B — what the editor's preview paints besides the draft page: the same
+   * name, brand, footer and published apps the public read returns, whatever
+   * the app's status (the owner previews before publishing).
+   */
+  async previewContext(): Promise<StoreHomeViewData> {
+    const storeId = this.requireStoreId();
+    const row = await this.findRow(storeId);
+    return this.view.read(storeId, row?.config ?? null);
+  }
 
   async updateConfig(dto: UpdateStoreHomeConfigDto): Promise<void> {
     const storeId = this.requireStoreId();
