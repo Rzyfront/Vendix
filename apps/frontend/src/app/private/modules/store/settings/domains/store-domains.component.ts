@@ -29,6 +29,7 @@ import {
   FilterValues,
   CardComponent} from '../../../../../shared/components/index';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { StoreDomainsService } from './store-domains.service';
 import {
   StoreDomain,
@@ -534,14 +535,20 @@ loadDomains(
         .updateDomain(this.editing_domain.id, dto as UpdateStoreDomainDto)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
-          next: () => {
+          next: (response) => {
+            this.is_saving.set(false);
+            if (response?.success === false) {
+              this.toast_service.error(this.failureMessage(response, 'Error al actualizar el dominio'));
+              return;
+            }
             this.toast_service.success('Dominio actualizado correctamente');
             this.closeModal();
             this.loadDomains();
-            this.is_saving.set(false);
           },
-          error: () => {
-            this.toast_service.error('Error al actualizar el dominio');
+          error: (error) => {
+            this.toast_service.error(
+              parseApiError(error).userMessage || 'Error al actualizar el dominio',
+            );
             this.is_saving.set(false);
           }});
     } else {
@@ -550,6 +557,11 @@ loadDomains(
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (response) => {
+            if (response?.success === false) {
+              this.toast_service.error(this.failureMessage(response, 'Error al crear el dominio'));
+              this.is_saving.set(false);
+              return;
+            }
             this.toast_service.success('Dominio creado correctamente');
             this.closeModal();
             this.loadDomains();
@@ -562,11 +574,19 @@ loadDomains(
               ]);
             }
           },
-          error: () => {
-            this.toast_service.error('Error al crear el dominio');
+          error: (error) => {
+            this.toast_service.error(
+              parseApiError(error).userMessage || 'Error al crear el dominio',
+            );
             this.is_saving.set(false);
           }});
     }
+  }
+
+  /** A `success: false` body still carries the backend's reason in `error`. */
+  private failureMessage(response: unknown, fallback: string): string {
+    const reason = (response as { error?: unknown })?.error;
+    return typeof reason === 'string' && reason.trim() ? reason : fallback;
   }
 
   setAsPrimary(domain: StoreDomain): void {
