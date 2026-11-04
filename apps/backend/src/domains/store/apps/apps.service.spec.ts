@@ -6,7 +6,8 @@ import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { APP_KINDS, AppKind } from './apps.catalog';
 
 /**
- * Apps · Fase 0 (odd/tasks/apps-module.md, T5): read-only catalog.
+ * Apps · Fase 0 (odd/tasks/apps-module.md, T5) catalog, and the F1 light
+ * catalog, online store live state and on/off switch (apps-vistas-f1 S2/S3/S5).
  * The scoped Prisma client is mocked as an in-memory table that honours the
  * `where` the service sends, so a missing store filter would leak rows.
  */
@@ -26,9 +27,18 @@ describe('AppsService', () => {
   let service: AppsService;
   let rows: Row[];
   let industriesByStore: Record<number, string[]>;
+  let ecommerceDomain: { id: number; hostname: string; status: string } | null;
+  let storeSettings: Record<string, unknown> | null;
   let prismaMock: {
-    store_apps: { findMany: jest.Mock };
+    store_apps: {
+      findMany: jest.Mock;
+      findFirst: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+    };
     stores: { findUnique: jest.Mock };
+    domain_settings: { findFirst: jest.Mock };
+    store_settings: { findUnique: jest.Mock };
   };
 
   const ecommerceRow = (storeId: number): Row => ({
@@ -46,6 +56,8 @@ describe('AppsService', () => {
 
   beforeEach(async () => {
     rows = [];
+    ecommerceDomain = null;
+    storeSettings = null;
     industriesByStore = {
       [STORE_ID]: ['retail'],
       [OTHER_STORE_ID]: ['retail'],
@@ -70,6 +82,39 @@ describe('AppsService', () => {
                 return picked;
               }),
           ),
+        ),
+        findFirst: jest.fn().mockImplementation(({ where }) => {
+          const index = rows.findIndex(
+            (r) => r.store_id === where.store_id && r.kind === where.kind,
+          );
+          return Promise.resolve(
+            index === -1 ? null : { id: index, status: rows[index].status },
+          );
+        }),
+        create: jest.fn().mockImplementation(({ data }) => {
+          rows.push({
+            store_id: data.store_id,
+            kind: data.kind,
+            status: data.status,
+            config: data.config,
+            published_at: null,
+            domain_settings: null,
+          });
+          return Promise.resolve({});
+        }),
+        update: jest.fn().mockImplementation(({ where, data }) => {
+          rows[where.id] = { ...rows[where.id], status: data.status };
+          return Promise.resolve({});
+        }),
+      },
+      domain_settings: {
+        findFirst: jest.fn().mockImplementation(() =>
+          Promise.resolve(ecommerceDomain),
+        ),
+      },
+      store_settings: {
+        findUnique: jest.fn().mockImplementation(() =>
+          Promise.resolve(storeSettings ? { settings: storeSettings } : null),
         ),
       },
       stores: {
@@ -125,6 +170,7 @@ describe('AppsService', () => {
       description: expect.any(String),
       applies_to_store_industries: true,
       status: 'published',
+      enabled: true,
       domain: {
         id: 510,
         hostname: 'tienda10-shop.vendix.online',
@@ -228,5 +274,124 @@ describe('AppsService', () => {
     expect(error).toBeInstanceOf(VendixHttpException);
     expect((error as VendixHttpException).errorCode).toBe('SYS_FORBIDDEN_001');
     expect(prismaMock.store_apps.findMany).not.toHaveBeenCalled();
+  });
+
+  // ------------------------------------------------ apps-vistas-f1 (S2/S3/S5)
+
+  it('S2: the light catalog never selects config and runs a fixed number of queries', async () => {
+    rows.push(ecommerceRow(STORE_ID), {
+      store_id: STORE_ID,
+      kind: 'product_page',
+      status: 'draft',
+      config: { product_id: 7 },
+      published_at: null,
+      domain_settings: null,
+    });
+
+    const list = await service.list();
+
+    const select = prismaMock.store_apps.findMany.mock.calls[0][0].select;
+    expect(select).not.toHaveProperty('config');
+    expect(list.every((app) => !('config' in app))).toBe(true);
+    expect(prismaMock.store_apps.findMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.stores.findUnique).toHaveBeenCalledTimes(1);
+    expect(prismaMock.domain_settings.findFirst).toHaveBeenCalledTimes(1);
+    expect(prismaMock.store_settings.findUnique).toHaveBeenCalledTimes(1);
+    expect(list.find((a) => a.key === 'product_page')!.enabled).toBe(true);
+    expect(list.find((a) => a.key === 'landing')!.enabled).toBe(false);
+  });
+
+  it('S5: the online store card follows its active domain and the availability switch', async () => {
+    ecommerceDomain = { id: 77, hostname: 'tienda10.vendix.online', status: 'active' };
+
+    const open = (await service.list()).find((a) => a.key === 'ecommerce')!;
+    expect(open).toMatchObject({
+      status: 'published',
+      enabled: true,
+      domain: { id: 77, hostname: 'tienda10.vendix.online', status: 'active' },
+      public_url: 'https://tienda10.vendix.online',
+    });
+    expect(prismaMock.domain_settings.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { store_id: STORE_ID, app_type: 'STORE_ECOMMERCE', status: 'active' },
+      }),
+    );
+
+    storeSettings = { ecommerce: { general: { store_available: false } } };
+    const closed = (await service.list()).find((a) => a.key === 'ecommerce')!;
+    expect(closed).toMatchObject({ status: 'disabled', enabled: false, public_url: null });
+    expect(closed.domain?.hostname).toBe('tienda10.vendix.online');
+  });
+
+  it('S5: without an active ecommerce domain the stored row still answers', async () => {
+    rows.push(ecommerceRow(STORE_ID));
+    const ecommerce = (await service.list()).find((a) => a.key === 'ecommerce')!;
+    expect(ecommerce.status).toBe('published');
+    expect(ecommerce.domain?.id).toBe(510);
+  });
+
+  it('activate: a not installed app is created as draft and comes back enabled', async () => {
+    const detail = await service.activate('product_page');
+
+    expect(prismaMock.store_apps.create).toHaveBeenCalledWith({
+      data: { store_id: STORE_ID, kind: 'product_page', status: 'draft', config: {} },
+    });
+    expect(detail).toMatchObject({ key: 'product_page', status: 'draft', enabled: true });
+  });
+
+  it('activate: a disabled app goes back to draft; a published one is untouched', async () => {
+    rows.push({
+      store_id: STORE_ID,
+      kind: 'service_page',
+      status: 'disabled',
+      config: {},
+      published_at: null,
+      domain_settings: null,
+    });
+    expect((await service.activate('service_page')).status).toBe('draft');
+
+    rows.push({ ...rows[0], kind: 'landing', status: 'published' });
+    prismaMock.store_apps.update.mockClear();
+    expect((await service.activate('landing')).status).toBe('published');
+    expect(prismaMock.store_apps.update).not.toHaveBeenCalled();
+  });
+
+  it('activate: an app outside the store industries is rejected', async () => {
+    await expect(service.activate('booking')).rejects.toMatchObject({
+      errorCode: 'STORE_APPS_015',
+    });
+    expect(prismaMock.store_apps.create).not.toHaveBeenCalled();
+  });
+
+  it('deactivate: draft goes to disabled; published asks to unpublish first', async () => {
+    rows.push({
+      store_id: STORE_ID,
+      kind: 'store_home',
+      status: 'draft',
+      config: {},
+      published_at: null,
+      domain_settings: null,
+    });
+    expect(await service.deactivate('store_home')).toMatchObject({
+      status: 'disabled',
+      enabled: false,
+    });
+
+    rows.push({ ...rows[0], kind: 'landing', status: 'published' });
+    await expect(service.deactivate('landing')).rejects.toMatchObject({
+      errorCode: 'STORE_APPS_014',
+    });
+    expect(rows[1].status).toBe('published');
+  });
+
+  it('activate/deactivate never touch the online store', async () => {
+    await expect(service.activate('ecommerce')).rejects.toMatchObject({
+      errorCode: 'STORE_APPS_013',
+    });
+    await expect(service.deactivate('ecommerce')).rejects.toMatchObject({
+      errorCode: 'STORE_APPS_013',
+    });
+    expect(prismaMock.store_apps.create).not.toHaveBeenCalled();
+    expect(prismaMock.store_apps.update).not.toHaveBeenCalled();
   });
 });

@@ -7688,6 +7688,24 @@ export const ErrorCodes = {
     devMessage: 'Elige el producto de la oferta.',
   },
 
+  // Apps F1 (apps-vistas-f1): encender y apagar desde el catálogo.
+  STORE_APPS_013: {
+    code: 'STORE_APPS_013',
+    httpStatus: 400,
+    devMessage:
+      'La tienda en línea se enciende y se apaga en su propia vista, Tienda en línea.',
+  },
+  STORE_APPS_014: {
+    code: 'STORE_APPS_014',
+    httpStatus: 409,
+    devMessage: 'Despublica la app antes de apagarla.',
+  },
+  STORE_APPS_015: {
+    code: 'STORE_APPS_015',
+    httpStatus: 400,
+    devMessage: 'Esta app no aplica a la industria de tu tienda.',
+  },
+
   // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra
   // tienda como si no está asignada a quien no puede ver todas: no se revela
   // que existe.
