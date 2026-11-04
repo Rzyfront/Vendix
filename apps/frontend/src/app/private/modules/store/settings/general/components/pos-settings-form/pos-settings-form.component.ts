@@ -23,6 +23,7 @@ import { BadgeComponent } from '../../../../../../../shared/components/badge/bad
 import { TooltipComponent } from '../../../../../../../shared/components/tooltip/tooltip.component';
 import { ExpandableCardComponent } from '../../../../../../../shared/components/expandable-card/expandable-card.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import {
   PosSettings,
   BusinessHours,
@@ -52,6 +53,7 @@ import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
     TooltipComponent,
     ExpandableCardComponent,
     IconComponent,
+    ButtonComponent,
     VariableBarcodeFormatsModalComponent,
   ],
   templateUrl: './pos-settings-form.component.html',
@@ -87,6 +89,24 @@ export class PosSettingsForm implements OnInit {
   readonly variableBarcodesOn = signal(false);
   readonly variableBarcodesModalOpen = signal(false);
   readonly variableBarcodeFormats = signal<VariableBarcodeFormat[]>([]);
+  readonly activeVariableBarcodeFormats = computed(
+    () => this.variableBarcodeFormats().filter((f) => f.enabled).length,
+  );
+  /** Contador del botón: "2 activos", "1 activo de 3" o "Sin formatos configurados". */
+  readonly variableBarcodeFormatsLabel = computed(() => {
+    const total = this.variableBarcodeFormats().length;
+    if (total === 0) return 'Sin formatos configurados';
+    const active = this.activeVariableBarcodeFormats();
+    const text = `${active} activo${active === 1 ? '' : 's'}`;
+    return active === total ? text : `${text} de ${total}`;
+  });
+  /** Qué falta encender para que aparezca la configuración de etiquetas. */
+  readonly variableBarcodeMissingText = computed(() => {
+    const missing: string[] = [];
+    if (!this.scaleOn()) missing.push('«Habilitar Ventas por Peso»');
+    if (!this.barcodeScannerOn()) missing.push('«Lector de Código de Barras»');
+    return missing.join(' y ');
+  });
 
   private destroyRef = inject(DestroyRef);
   private authFacade = inject(AuthFacade);
