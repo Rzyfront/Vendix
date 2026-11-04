@@ -778,7 +778,7 @@ export class OrderStockCommitService {
       // Dispatch delivery: goods already left physically — deduct the
       // remainder from the intended location (floor 0) and raise an alert
       // instead of blocking.
-      const fallbackLocationId =
+      const candidateLocationId =
         line.location_id_override ??
         reservedLocationIds[0] ??
         slices[0]?.location_id ??
@@ -787,6 +787,13 @@ export class OrderStockCommitService {
           line.product_id,
           variant,
         ));
+      // "Bodega de la caja": an accepted oversell never lands outside the
+      // register's warehouse, even when an older reservation sits elsewhere.
+      const restricted = allocation.restricted_location_ids;
+      const fallbackLocationId =
+        restricted && !restricted.includes(candidateLocationId)
+          ? restricted[0]
+          : candidateLocationId;
       this.logger.warn(
         `[commit] Stock insuficiente al entregar (no bloqueante) — product ${line.product_id}` +
           `${variant ? ` variant ${variant}` : ''} disponible ${allocation.available} requerido ${qty} ` +

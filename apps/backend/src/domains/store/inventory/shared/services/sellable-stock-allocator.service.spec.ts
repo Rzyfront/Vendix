@@ -1,4 +1,5 @@
 import { SellableStockAllocator } from './sellable-stock-allocator.service';
+import { RequestContextService } from '../../../../../common/context/request-context.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 
 /**
@@ -207,11 +208,36 @@ describe('SellableStockAllocator — restricción por bodega de la caja', () => 
       build({ settings: settingsWith(undefined) }).allocator.resolveOrderSaleLocationIds(900),
     ).resolves.toBeNull();
     await expect(
-      build({ order: { store_id: 7, origin_cash_session_id: null } }).allocator.resolveOrderSaleLocationIds(900),
+      build({ order: { store_id: 7, origin_cash_session_id: null, channel: 'ecommerce' } }).allocator.resolveOrderSaleLocationIds(900),
     ).resolves.toBeNull();
     await expect(
       build({ session: { register: { location_id: null } } }).allocator.resolveOrderSaleLocationIds(900),
     ).resolves.toBeNull();
+  });
+
+  it('orden POS sin caja de origen (borrador cobrado después) toma la caja abierta de quien cobra', async () => {
+    jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(31);
+    const { allocator, prisma } = build({
+      order: { store_id: 7, origin_cash_session_id: null, channel: 'pos' },
+    });
+
+    await expect(allocator.resolveOrderSaleLocationIds(900)).resolves.toEqual([2]);
+    expect(prisma.cash_register_sessions.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { store_id: 7, opened_by: 31, status: 'open' },
+      }),
+    );
+  });
+
+  it('memoiza por transacción: una sola resolución por orden dentro del mismo tx', async () => {
+    const { prisma } = build({});
+    const allocator = new SellableStockAllocator({} as unknown as StorePrismaService);
+    const tx = prisma as any;
+
+    await allocator.resolveOrderSaleLocationIds(900, tx);
+    await allocator.resolveOrderSaleLocationIds(900, tx);
+
+    expect(prisma.orders.findFirst).toHaveBeenCalledTimes(1);
   });
 
   it('allocateForLine con orderId filtra stock_levels a la bodega de la caja', async () => {

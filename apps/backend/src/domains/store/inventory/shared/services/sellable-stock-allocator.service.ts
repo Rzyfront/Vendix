@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { sellableStockLevelsWhere } from '../helpers/pos-stock-scope.helper';
 
 /** One sellable `stock_levels` row reduced to what allocation needs. */
@@ -221,12 +222,38 @@ export class SellableStockAllocator {
     orderId: number,
     tx?: Prisma.TransactionClient,
   ): Promise<number[] | null> {
-    const db: any = tx ?? this.prisma;
+    // Memoized per transaction: every line of the same order resolves to the
+    // same answer, and a payment tx touches each order line several times
+    // (validation, reservation, commit). Outside a tx there is no cache.
+    if (!tx) return this.computeOrderSaleLocationIds(orderId, this.prisma);
+    let perTx = this.saleLocationCache.get(tx);
+    if (!perTx) {
+      perTx = new Map();
+      this.saleLocationCache.set(tx, perTx);
+    }
+    let pending = perTx.get(orderId);
+    if (!pending) {
+      pending = this.computeOrderSaleLocationIds(orderId, tx);
+      perTx.set(orderId, pending);
+    }
+    return pending;
+  }
+
+  private readonly saleLocationCache = new WeakMap<
+    object,
+    Map<number, Promise<number[] | null>>
+  >();
+
+  private async computeOrderSaleLocationIds(
+    orderId: number,
+    client: unknown,
+  ): Promise<number[] | null> {
+    const db: any = client;
     const order = await db.orders.findFirst({
       where: { id: orderId },
-      select: { store_id: true, origin_cash_session_id: true },
+      select: { store_id: true, origin_cash_session_id: true, channel: true },
     });
-    if (!order?.origin_cash_session_id) return null;
+    if (!order) return null;
 
     const settingsRow = await db.store_settings.findFirst({
       where: { store_id: order.store_id },
@@ -235,8 +262,20 @@ export class SellableStockAllocator {
     const scope = (settingsRow?.settings as any)?.inventory?.pos_stock_scope;
     if (scope !== 'register_location') return null;
 
+    // The order's own origin wins. A POS order with no origin (a draft saved
+    // with no register open, later charged) takes the register of whoever is
+    // charging it now, so the restriction cannot be bypassed by saving first.
+    const actingUserId = RequestContextService.getUserId();
+    const sessionWhere = order.origin_cash_session_id
+      ? { id: order.origin_cash_session_id, store_id: order.store_id }
+      : order.channel === 'pos' && actingUserId
+        ? { store_id: order.store_id, opened_by: actingUserId, status: 'open' }
+        : null;
+    if (!sessionWhere) return null;
+
     const session = await db.cash_register_sessions.findFirst({
-      where: { id: order.origin_cash_session_id, store_id: order.store_id },
+      where: sessionWhere,
+      orderBy: [{ opened_at: 'desc' }, { id: 'desc' }],
       select: { register: { select: { location_id: true } } },
     });
     const locationId = session?.register?.location_id;
