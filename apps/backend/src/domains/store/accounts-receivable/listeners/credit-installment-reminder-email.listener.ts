@@ -21,11 +21,25 @@ export class CreditInstallmentReminderEmailListener {
     const { subject, lines } = buildCreditReminderEmail(event);
     const html = lines.map((line) => `<p>${escapeHtml(line)}</p>`).join('');
     const text = lines.join('\n');
+    const label = `la cuota ${event.installment_number} de ${event.order_number}`;
     try {
-      await this.email.sendEmail(event.customer_email, subject, html, text);
+      // `sendEmail` atrapa sus propios errores y devuelve `{ success }`: sin
+      // leerlo, un correo fallido no dejaba rastro (el registro de dedupe ya
+      // está escrito y no se reintenta, así que el log es la única huella).
+      const result = await this.email.sendEmail(
+        event.customer_email,
+        subject,
+        html,
+        text,
+      );
+      if (!result?.success) {
+        this.logger.warn(
+          `No se pudo enviar el recordatorio de ${label}: ${result?.error ?? 'sin detalle del proveedor'}`,
+        );
+      }
     } catch (error) {
       this.logger.warn(
-        `No se pudo enviar el recordatorio de la cuota ${event.installment_number} de ${event.order_number}: ${(error as Error).message}`,
+        `No se pudo enviar el recordatorio de ${label}: ${(error as Error).message}`,
       );
     }
   }

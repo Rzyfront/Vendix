@@ -12,6 +12,14 @@ import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.ut
 import { ArQueryDto } from './dto/ar-query.dto';
 import { RegisterArPaymentDto } from './dto/register-ar-payment.dto';
 
+/**
+ * QUI-979 — marca de la fila de `ar_payments` que asienta la cuota inicial de
+ * una venta a crédito. Ese dinero ya entró como venta POS: la cartera lo lleva
+ * en su historial (abonado / saldo), pero NO es un cobro de cartera, y el KPI
+ * "cobrado este mes" del dashboard lo excluye por esta marca.
+ */
+export const AR_INITIAL_PAYMENT_REFERENCE = 'CREDIT_SALE_INITIAL_PAYMENT';
+
 @Injectable()
 export class AccountsReceivableService {
   private readonly logger = new Logger(AccountsReceivableService.name);
@@ -196,7 +204,16 @@ export class AccountsReceivableService {
           _count: true,
         }),
         this.prisma.ar_payments.aggregate({
-          where: { payment_date: { gte: start_of_month } },
+          where: {
+            payment_date: { gte: start_of_month },
+            // QUI-979 — la cuota inicial no es un cobro de cartera (ver
+            // AR_INITIAL_PAYMENT_REFERENCE). `OR` con `null` explícito: un
+            // `NOT reference = X` descartaría también las filas sin referencia.
+            OR: [
+              { reference: null },
+              { reference: { not: AR_INITIAL_PAYMENT_REFERENCE } },
+            ],
+          },
           _sum: { amount: true },
         }),
       ]);
@@ -597,6 +614,7 @@ export class AccountsReceivableService {
               amount: initialPaid,
               payment_date: link?.paid_at ?? new Date(),
               payment_method: method,
+              reference: AR_INITIAL_PAYMENT_REFERENCE,
               notes: 'Cuota inicial de la venta a crédito',
             },
           });

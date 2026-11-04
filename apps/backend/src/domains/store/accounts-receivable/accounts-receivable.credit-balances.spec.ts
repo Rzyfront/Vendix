@@ -1,4 +1,7 @@
-import { AccountsReceivableService } from './accounts-receivable.service';
+import {
+  AccountsReceivableService,
+  AR_INITIAL_PAYMENT_REFERENCE,
+} from './accounts-receivable.service';
 import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 
 jest.mock('../orders/order-flow/order-lifecycle-lock.util', () => ({
@@ -121,7 +124,36 @@ describe('AccountsReceivableService — saldos de crédito (QUI-979)', () => {
         payment_id: 11,
         amount: 20000,
         payment_method: 'Efectivo',
+        reference: AR_INITIAL_PAYMENT_REFERENCE,
       }),
+    });
+  });
+
+  it('dashboard: "cobrado este mes" excluye la cuota inicial (ya es venta POS)', async () => {
+    const empty = { _sum: { balance: null }, _count: 0 };
+    const prisma = {
+      accounts_receivable: { aggregate: jest.fn().mockResolvedValue(empty) },
+      ar_payments: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { amount: 50000 } }),
+      },
+    };
+    const service = new AccountsReceivableService(
+      prisma as any,
+      { emit: jest.fn() } as any,
+      { recordModuleCashMovement: jest.fn() } as any,
+    );
+
+    const result = await service.getDashboard();
+
+    expect(result.collected_this_month).toBe(50000);
+    expect(prisma.ar_payments.aggregate).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        OR: [
+          { reference: null },
+          { reference: { not: AR_INITIAL_PAYMENT_REFERENCE } },
+        ],
+      }),
+      _sum: { amount: true },
     });
   });
 

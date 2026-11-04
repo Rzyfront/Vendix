@@ -508,16 +508,6 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
   }
 
   /**
-   * Agrega `invoice_taxes` por `(tax_name, tax_rate)` sumando importes YA
-   * truncados — igual que `aggregateHeaderTaxes` del calculador.
-   *
-   * Igual que `aggregateTaxes` (filas de orden, donde desde C.6 la base se
-   * LEE de `item.total_price`), acá la base es CONOCIDA (`taxable_amount`
-   * persistido) y se suma directa: derivarla reintroduciría el céntimo que
-   * el truncado quiere evitar. La escala cruda de `rate` se preserva igual
-   * que allá (`invoice_taxes.tax_rate` es `Decimal(5,2)` en porcentaje).
-   */
-  /**
    * QUI-979 — sección Crédito de la tirilla POS.
    *
    * El cliente a crédito recibía el mismo papel que el de contado: el TOTAL y
@@ -681,7 +671,11 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           is_initial: false,
         });
       }
-      history.sort((a, b) => (a.sort_key < b.sort_key ? -1 : 1));
+      // Orden numérico dentro de la clave ("…-9" antes que "…-10"): la
+      // comparación de texto ponía el id 10 antes que el 9 en el mismo ms.
+      history.sort((a, b) =>
+        a.sort_key.localeCompare(b.sort_key, 'en', { numeric: true }),
+      );
       const last = history.length > 0 ? history[history.length - 1] : null;
 
       const pendingStates = new Set(['pending', 'partial', 'overdue']);
@@ -733,6 +727,16 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     }
   }
 
+  /**
+   * Agrega `invoice_taxes` por `(tax_name, tax_rate)` sumando importes YA
+   * truncados — igual que `aggregateHeaderTaxes` del calculador.
+   *
+   * Igual que `aggregateTaxes` (filas de orden, donde desde C.6 la base se
+   * LEE de `item.total_price`), acá la base es CONOCIDA (`taxable_amount`
+   * persistido) y se suma directa: derivarla reintroduciría el céntimo que
+   * el truncado quiere evitar. La escala cruda de `rate` se preserva igual
+   * que allá (`invoice_taxes.tax_rate` es `Decimal(5,2)` en porcentaje).
+   */
   private aggregateInvoiceTaxes(invoiceTaxes: any[]): Array<{
     name: string;
     rate: number;

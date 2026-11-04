@@ -59,7 +59,7 @@
                 step="1"
                 [value]="r.days_before"
                 [disabled]="!r.enabled"
-                (change)="onDaysChange(i, $any($event.target).value)"
+                (change)="onDaysChange(i, $any($event.target))"
               />
               <p class="field__hint">0 = el mismo día del vencimiento. Máximo {{ maxDaysBefore }}.</p>
             </div>

@@ -88,10 +88,21 @@ export class CreditRemindersSettingsForm {
     });
   }
 
-  /** Días de anticipación: entero 0–30; lo demás se ignora (el campo vuelve). */
-  onDaysChange(index: number, raw: unknown): void {
+  /**
+   * Días de anticipación: entero 0–30. Un valor inválido (45, -1, 2,5) o el
+   * campo vacío NO se guarda y el input vuelve al valor vigente: con `[value]`
+   * de una vía Angular no reescribe el DOM si el signal no cambió, así que sin
+   * esto la caja mostraría 45 mientras se guarda 3. Vacío no es 0: `Number('')`
+   * daría "el mismo día" sin que nadie lo pidiera.
+   */
+  onDaysChange(index: number, input: HTMLInputElement): void {
+    const current = this.value().reminders[index]?.days_before;
+    const raw = input.value.trim();
     const n = Number(raw);
-    if (!Number.isInteger(n) || n < 0 || n > MAX_DAYS_BEFORE) return;
+    if (raw === '' || !Number.isInteger(n) || n < 0 || n > MAX_DAYS_BEFORE) {
+      input.value = current == null ? '' : String(current);
+      return;
+    }
     this.emit({
       reminders: this.value().reminders.map((r, i) =>
         i === index ? { ...r, days_before: n } : r,
