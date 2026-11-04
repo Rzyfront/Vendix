@@ -429,14 +429,21 @@ jobs:
           fi
 
           # (g) Recien con la API nueva sirviendo: seeds y worker EN SERIE.
-          # Los seeds corren aqui (y no antes) para no sumar 512m a la ventana en
-          # que conviven dos APIs.
+          # Los seeds corren aqui (y no antes) para no sumar su memoria a la
+          # ventana en que conviven dos APIs.
+          #
+          # Heap explicito: con --memory=512m Node fija ~256 MB de heap y
+          # 'tsx' + el cliente Prisma ya rozaban ese techo; el release del
+          # 2026-11-04 lo cruzo en "Default Templates" (FATAL ERROR: Reached
+          # heap limit) y el worker nunca se reemplazo. 1024m con heap 768
+          # deja margen; aqui la API vieja ya se detuvo y el worker va despues.
           echo "🌱 Running production seeds in isolated container..."
           sudo docker run --rm \
-            --memory=512m \
+            --memory=1024m \
             --network=host \
             --env-file /opt/vendix/.env \
             -e DATABASE_URL="\$DATABASE_URL" \
+            -e NODE_OPTIONS="--max-old-space-size=768" \
             $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
             sh -c "npx --yes tsx prisma/seed-production.ts"
           echo "✅ Seeds completed!"
