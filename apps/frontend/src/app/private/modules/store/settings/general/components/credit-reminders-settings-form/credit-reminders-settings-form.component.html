@@ -1,0 +1,66 @@
+<div class="space-y-4">
+  <app-setting-toggle
+    [ngModel]="value().enabled"
+    (ngModelChange)="onEnabledChange($event)"
+    label="Recordatorios de cuotas"
+    description="Avisa antes de que venza cada cuota de una venta a crédito. Apagado: no se envía nada."
+  />
+
+  @if (value().enabled) {
+    <div class="space-y-2">
+      <h4 class="text-xs font-semibold text-text-primary uppercase">Recordatorios</h4>
+      <p class="text-xs text-text-secondary">
+        Se envían una sola vez por cuota, desde las 8:00 de la mañana. Las cuotas ya
+        pagadas no reciben aviso. El cliente necesita correo registrado.
+      </p>
+      @for (r of value().reminders; track $index; let i = $index) {
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+          <label class="flex items-center gap-2 font-medium">
+            <input
+              type="checkbox"
+              class="h-4 w-4"
+              [checked]="r.enabled"
+              (change)="onReminderChange(i, 'enabled', $any($event.target).checked)"
+            />
+            {{ reminderLabel(r.days_before) }}
+          </label>
+          <label class="flex items-center gap-2">
+            <span class="text-xs text-text-secondary">Días antes</span>
+            <input
+              type="number"
+              class="h-8 w-16 rounded-lg border border-border bg-surface px-2 text-sm text-right"
+              min="0"
+              [max]="maxDaysBefore"
+              step="1"
+              [value]="r.days_before"
+              [disabled]="!r.enabled"
+              (change)="onDaysChange(i, $any($event.target).value)"
+            />
+          </label>
+          <label class="flex items-center gap-2">
+            <input
+              type="checkbox"
+              class="h-4 w-4"
+              [checked]="r.notify_staff"
+              [disabled]="!r.enabled"
+              (change)="onReminderChange(i, 'notify_staff', $any($event.target).checked)"
+            />
+            Avisar al equipo
+          </label>
+          <label class="flex items-center gap-2">
+            <input
+              type="checkbox"
+              class="h-4 w-4"
+              [checked]="r.notify_customer"
+              [disabled]="!r.enabled"
+              (change)="onReminderChange(i, 'notify_customer', $any($event.target).checked)"
+            />
+            Avisar al cliente (correo)
+          </label>
+        </div>
+      } @empty {
+        <p class="text-xs text-text-secondary">Sin recordatorios configurados.</p>
+      }
+    </div>
+  }
+</div>

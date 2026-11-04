@@ -5,6 +5,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { PosSettingsForm } from '../components/pos-settings-form/pos-settings-form.component';
 import { ReceiptsSettingsForm } from '../components/receipts-settings-form/receipts-settings-form.component';
 import { ScheduledOrdersSettingsForm } from '../components/scheduled-orders-settings-form/scheduled-orders-settings-form.component';
+import { CreditRemindersSettingsForm } from '../components/credit-reminders-settings-form/credit-reminders-settings-form.component';
 import { PromotionsSettingsForm } from '../components/promotions-settings-form/promotions-settings-form.component';
 import { SettingsSectionComponent } from '../components/settings-section/settings-section.component';
 import { GeneralSettingsStore } from '../services/general-settings.store';
@@ -26,6 +27,7 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
     ReceiptsSettingsForm,
     PromotionsSettingsForm,
     ScheduledOrdersSettingsForm,
+    CreditRemindersSettingsForm,
   ],
   template: `
     <div class="settings-page">
@@ -79,6 +81,18 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
           [productOptions]="store.settings().product_options"
           (settingsChange)="store.onSectionChange('scheduled_orders', $event)"
           (productOptionsChange)="store.onSectionChange('product_options', $event)" />
+      </app-settings-section>
+
+      <!-- Ventas a crédito -->
+      <app-settings-section
+        anchorId="section-credit-reminders"
+        icon="calendar-clock"
+        iconTone="green"
+        title="Ventas a crédito"
+        hint="Recuerda a la tienda y al cliente las cuotas antes de que venzan.">
+        <app-credit-reminders-settings-form
+          [settings]="store.settings().credit_reminders"
+          (settingsChange)="store.onSectionChange('credit_reminders', $event)" />
       </app-settings-section>
 
       <!-- Recibos y Facturación — el título depende del estado real de emisión
