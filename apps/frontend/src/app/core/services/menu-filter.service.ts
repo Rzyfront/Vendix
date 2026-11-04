@@ -5,13 +5,31 @@ import { map } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { SubscriptionAccessService } from './subscription-access.service';
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
-import { getModulesHiddenByIndustries } from '../../shared/constants/industry-modules.constant';
 import {
+  INDUSTRY_METADATA,
+  StoreIndustry,
+  getModulesHiddenByIndustries,
+} from '../../shared/constants/industry-modules.constant';
+import {
+  MODULE_INDUSTRIES,
+  type ModuleIndustry,
+  industryAllowsKey,
+} from '../../shared/constants/module-industries';
+import {
+  MODULE_GATE_ROUTES,
   MODULE_ROUTES,
   MODULE_ROUTE_ALIASES,
+  ORG_MODULE_ROUTES,
   STORE_MODULE_BY_KEY,
   STORE_MODULE_CATALOG,
 } from '../../shared/constants/store-module-catalog.constant';
+import {
+  AccessDecision,
+  AccessGateApp,
+  AccessGateService,
+  AccessLayer,
+  AccessSurface,
+} from './access-gate.service';
 import { canUserAccessDashboard } from '../utils/dashboard-access.util';
 import type {
   OrganizationOperatingScope,
@@ -105,6 +123,18 @@ export interface ModuleVisibilityDiagnosis {
 }
 
 /**
+ * Verdict of the access gate for one `panel_ui` key (apps-f4 S4):
+ * `canSeeKey(key) = user(key) ∧ store(key) ∧ industryAllows(key)`.
+ */
+export interface AccessVerdict {
+  allowed: boolean;
+  /** First layer that denies, `null` when allowed. */
+  layer: AccessLayer | null;
+  /** Industries the industry layer evaluated (store, or org union). */
+  industries: string[];
+}
+
+/**
  * Service for filtering menu items based on panel_ui configuration.
  * Provides both observable and synchronous filtering methods.
  */
@@ -114,6 +144,7 @@ export interface ModuleVisibilityDiagnosis {
 export class MenuFilterService {
   private authFacade = inject(AuthFacade);
   private subscriptionAccess = inject(SubscriptionAccessService);
+  private accessGate = inject(AccessGateService);
 
   /**
    * True when the current store has at least one PQR. The store-admin layout
@@ -131,7 +162,7 @@ export class MenuFilterService {
    * (`STORE_MODULE_CATALOG`) para que el guard y el redirect de B.1 funcionen
    * ANTES de que el layout se monte (los guards corren antes de la creación de
    * componentes). El layout lo sobreescribe con su árbol real (con
-   * `alwaysVisible`, badges, etc.) al montarse vía `registerMenuTree`.
+   * ítems audit-only, badges, etc.) al montarse vía `registerMenuTree`.
    */
   private menuTree: MenuItem[] | null = null;
 
@@ -140,6 +171,8 @@ export class MenuFilterService {
 
   /** Caché del índice ruta → keys panel_ui. */
   private routeKeysIndexCache: Record<string, string[]> | null = null;
+  private gateRouteIndexCache: Record<string, string[]> | null = null;
+  private orgRouteIndexCache: Record<string, string[]> | null = null;
 
   /**
    * Emits whenever an authorization prefilter flips, so `filterMenuItems`
@@ -401,7 +434,7 @@ export class MenuFilterService {
    */
   filterMenuItems(menuItems: MenuItem[]): Observable<MenuItem[]> {
     // Register the tree so `currentMenuTree()`/`firstActiveModuleRoute()`
-    // reflect the real sidebar (with alwaysVisible/badges) once mounted.
+    // reflect the real sidebar (with audit-only items/badges) once mounted.
     this.menuTree = menuItems;
     return combineLatest([
       this.authFacade.getVisibleModules$(),
@@ -650,7 +683,7 @@ export class MenuFilterService {
       requiresFiscalArea: undefined,
       action: undefined,
       children: undefined,
-      alwaysVisible: false,
+      accessAuditOnly: false,
       fiscalReadFallback: undefined,
       _fiscalReadFallbackActive: true,
     };
@@ -700,7 +733,7 @@ export class MenuFilterService {
   /**
    * Recursively filter menu items based on visible modules.
    * Handles nested children (submenus) and preserves structure.
-   * Items marked with alwaysVisible are always shown if their parent is visible.
+   * Audit-only items (`accessAuditOnly`, formerly `alwaysVisible`) stay shown in audit mode if their parent is visible.
    *
    * @param items - Menu items to filter
    * @param visibleModules - Array of visible module keys
@@ -741,20 +774,25 @@ export class MenuFilterService {
       }
       const locked = scopeOutcome === 'lock';
 
-      // Case 1: Item marked as alwaysVisible (skip panel_ui filtering)
-      // Used for dynamic data like stores that should always show if parent is visible
-      if (item.alwaysVisible) {
+      // Case 1: item that skipped every panel_ui layer before apps-f4 (it was
+      // `alwaysVisible`). It now carries its real key and goes through the
+      // access gate, but in audit mode it stays visible: the gate verdict is
+      // only recorded (S2). The enforce flag can only hide it by industry.
+      if (item.accessAuditOnly) {
+        if (!this.applyAccessGate(this.moduleKeysFor(item), true, 'sidebar', item.route)) {
+          return filtered;
+        }
         if (
           item.requiresFeature &&
           !this.subscriptionAccess.canUseAI(item.requiresFeature)()
         ) {
           return filtered;
         }
-        const alwaysVisibleItem: MenuItem = { ...item, _locked: locked };
+        const auditOnlyItem: MenuItem = { ...item, _locked: locked };
 
-        // If it has children, recursively filter them (children can also be alwaysVisible)
+        // If it has children, recursively filter them (children can also be audit-only)
         if (item.children && item.children.length > 0) {
-          alwaysVisibleItem.children = this.filterItemsRecursive(
+          auditOnlyItem.children = this.filterItemsRecursive(
             item.children,
             visibleModules,
             operatingScope,
@@ -765,12 +803,12 @@ export class MenuFilterService {
           );
           // A group with every child hidden is an empty header (e.g.
           // "Configuración" for a receptionist, H0.5): drop it.
-          if (alwaysVisibleItem.children.length === 0) {
+          if (auditOnlyItem.children.length === 0) {
             return filtered;
           }
         }
 
-        filtered.push(alwaysVisibleItem);
+        filtered.push(auditOnlyItem);
         return filtered;
       }
 
@@ -786,9 +824,17 @@ export class MenuFilterService {
       if (moduleKey) {
         // Only include if this specific module (or any key in array) is visible
         const itemKeys = Array.isArray(moduleKey) ? moduleKey : [moduleKey];
-        const isVisible = item._fiscalReadFallbackActive
+        const legacyVisible = item._fiscalReadFallbackActive
           ? itemKeys.some((key) => fallbackModuleKeys.has(key))
           : this.isModuleKeyVisible(moduleKey, visibleModules);
+        // apps-f4 S4: same gate as the URL guard, the Apps card and Vexi.
+        // Audit mode never hides beyond `legacyVisible`; it only records.
+        const isVisible = this.applyAccessGate(
+          itemKeys,
+          legacyVisible,
+          'sidebar',
+          item.route,
+        );
         if (isVisible) {
           if (
             item.requiresFeature &&
@@ -815,7 +861,7 @@ export class MenuFilterService {
         }
         // If moduleKey exists but is NOT in visibleModules, the item is hidden
       }
-      // Case 3: Item without mapping and without alwaysVisible (defensive fallback)
+      // Case 3: Item without mapping and not audit-only (defensive fallback)
       // Only include if it has visible children
       else if (item.children && item.children.length > 0) {
         const filteredChildren = this.filterItemsRecursive(
@@ -1266,7 +1312,7 @@ export class MenuFilterService {
     return this.menuTree ?? this.catalogMenuTree();
   }
 
-  /** El layout registra su árbol real (con `alwaysVisible`, badges, etc.). */
+  /** El layout registra su árbol real (con ítems audit-only, badges, etc.). */
   registerMenuTree(items: MenuItem[]): void {
     this.menuTree = items;
   }
@@ -1332,6 +1378,206 @@ export class MenuFilterService {
     return bestKeys;
   }
 
+  /**
+   * Keys that govern a route for the access gate (apps-f4 S3): the enforced
+   * pre-F4 index plus `MODULE_GATE_ROUTES` for STORE_ADMIN, or
+   * `ORG_MODULE_ROUTES` for ORG_ADMIN. Longest prefix wins, as in
+   * `resolveKeysForRoute`, which keeps answering with the enforced index only.
+   */
+  resolveGateKeysForRoute(
+    path: string,
+    app: AccessGateApp = this.accessGate.currentApp(),
+  ): string[] {
+    const index =
+      app === 'ORG_ADMIN'
+        ? (this.orgRouteIndexCache ??= this.buildIndex(ORG_MODULE_ROUTES))
+        : (this.gateRouteIndexCache ??= this.buildGateRouteIndex());
+    return this.longestPrefixKeys(path, index);
+  }
+
+  private buildGateRouteIndex(): Record<string, string[]> {
+    const index = this.buildIndex(MODULE_GATE_ROUTES);
+    for (const [route, keys] of Object.entries(this.buildRouteKeysIndex())) {
+      (index[route] ??= []).push(...keys.filter((key) => !index[route].includes(key)));
+    }
+    return index;
+  }
+
+  private buildIndex(routesByKey: Record<string, string[]>): Record<string, string[]> {
+    const index: Record<string, string[]> = {};
+    for (const [key, routes] of Object.entries(routesByKey)) {
+      for (const route of routes) (index[route] ??= []).push(key);
+    }
+    return index;
+  }
+
+  private longestPrefixKeys(
+    path: string,
+    index: Record<string, string[]>,
+  ): string[] {
+    const clean = (path.split('?')[0] || '/').replace(/\/+$/, '') || '/';
+    let bestLength = -1;
+    let bestKeys: string[] = [];
+    for (const [route, keys] of Object.entries(index)) {
+      const normalized = route.replace(/\/+$/, '');
+      if (clean === normalized || clean.startsWith(`${normalized}/`)) {
+        if (normalized.length > bestLength) {
+          bestLength = normalized.length;
+          bestKeys = keys;
+        }
+      }
+    }
+    return bestKeys;
+  }
+
+  /**
+   * The access gate, one key (apps-f4 S4):
+   * `canSeeKey(key) = user(key) ∧ store(key) ∧ industryAllows(key)`.
+   *
+   * - user: the per-user `panel_ui` (opt-out keys honored). The owner passes,
+   *   as today.
+   * - store: STORE_ADMIN ceiling `store_settings.panel_ui.STORE_ADMIN` (plus the
+   *   kitchen-mode setting); ORG_ADMIN ceiling
+   *   `organization_settings.panel_ui.ORG_ADMIN` (S5). Only an explicit
+   *   `false` denies until the F5 backfill. On a URL the owner passes it, as
+   *   the pre-F4 guard did.
+   * - industry: positive map `MODULE_INDUSTRIES` over the store industries, or
+   *   the union of the organization stores in ORG_ADMIN (S6). The owner is NOT
+   *   exempt from this layer.
+   *
+   * Pure verdict: it neither hides nor logs. `applyAccessGate` decides what a
+   * surface does with it according to the mode.
+   */
+  canSeeKey(key: string, surface: AccessSurface = 'sidebar'): AccessVerdict {
+    const app = this.accessGate.currentApp();
+    const isOwner = this.authFacade.isOwner();
+    const industries = this.gateIndustries(app);
+
+    const user = isOwner || this.isUserModuleVisible(key);
+    let store: boolean;
+    if (app === 'ORG_ADMIN') {
+      store = this.accessGate.orgPanelUi()?.[key] !== false;
+    } else if (isOwner && surface === 'url') {
+      store = true;
+    } else {
+      const settings = this.authFacade.storeSettings();
+      const storePanel = settings?.panel_ui?.STORE_ADMIN as
+        | Record<string, boolean>
+        | undefined;
+      store =
+        storePanel?.[key] !== false &&
+        !this.hiddenBySettings(settings).includes(key);
+    }
+    const industry = industryAllowsKey(key, industries);
+
+    const layer: AccessLayer | null = !user
+      ? 'user'
+      : !store
+        ? app === 'ORG_ADMIN'
+          ? 'org'
+          : 'store'
+        : !industry
+          ? 'industry'
+          : null;
+    return { allowed: layer === null, layer, industries };
+  }
+
+  /**
+   * Applies the gate on one surface and returns whether it may show or open
+   * the module. `legacyAllowed` is the pre-F4 verdict of that surface.
+   *
+   * - The gate never widens access: `legacyAllowed=false` stays `false`.
+   * - Audit mode: returns `legacyAllowed` and records what the gate would hide
+   *   or block (`would_hide` / `would_block`).
+   * - Enforce mode (flag on for the store): additionally hides/blocks when the
+   *   industry layer denies every key, owner included, and records `hidden` /
+   *   `blocked`. User and store layers stay in audit until F5.
+   */
+  applyAccessGate(
+    keys: string[],
+    legacyAllowed: boolean,
+    surface: AccessSurface,
+    route?: string,
+  ): boolean {
+    if (!legacyAllowed || !keys.length) return legacyAllowed;
+    const verdicts = keys.map((key) => ({ key, ...this.canSeeKey(key, surface) }));
+    if (verdicts.some((verdict) => verdict.allowed)) return true;
+
+    const industryDenied = verdicts.every(
+      (verdict) => !industryAllowsKey(verdict.key, verdict.industries),
+    );
+    const block = industryDenied && this.accessGate.mode() === 'enforce';
+    const reported = industryDenied
+      ? verdicts[0]
+      : (verdicts.find((verdict) => verdict.layer !== 'industry') ?? verdicts[0]);
+    const hides = surface === 'sidebar' || surface === 'apps_card';
+    const decision: AccessDecision = block
+      ? hides
+        ? 'hidden'
+        : 'blocked'
+      : hides
+        ? 'would_hide'
+        : 'would_block';
+    this.accessGate.report({
+      key: reported.key,
+      decision,
+      layer: industryDenied ? 'industry' : (reported.layer ?? 'user'),
+      surface,
+      ...(route ? { route } : {}),
+    });
+    return !block;
+  }
+
+  /** Gate on a route: resolves its keys and applies `applyAccessGate`. */
+  applyRouteGate(
+    route: string,
+    legacyAllowed: boolean,
+    surface: AccessSurface,
+  ): boolean {
+    return this.applyAccessGate(
+      this.resolveGateKeysForRoute(route),
+      legacyAllowed,
+      surface,
+      route,
+    );
+  }
+
+  /**
+   * «No disponible en tu industria» notice naming the real industries of the
+   * module (the pre-F4 toast always said "construcción").
+   */
+  industryBlockMessage(keys: string[]): string {
+    const rule = keys
+      .map((key) => MODULE_INDUSTRIES[key])
+      .find(
+        (value): value is readonly ModuleIndustry[] =>
+          value !== undefined && value !== 'all',
+      );
+    if (!rule) {
+      return 'No disponible en tu industria.';
+    }
+    const labels = rule.map((industry) =>
+      (INDUSTRY_METADATA[industry as StoreIndustry]?.label ?? industry).toLowerCase(),
+    );
+    const list =
+      labels.length > 1
+        ? `${labels.slice(0, -1).join(', ')} ${/^h?o/i.test(labels[labels.length - 1]) ? 'u' : 'o'} ${labels[labels.length - 1]}`
+        : labels[0];
+    return `No disponible en tu industria. Este módulo aplica solo a tiendas de ${list}.`;
+  }
+
+  /** Industries the gate evaluates: backend state first, then the session. */
+  private gateIndustries(app: AccessGateApp): string[] {
+    const loaded = this.accessGate.industries();
+    if (loaded) return loaded;
+    if (app === 'ORG_ADMIN') return [];
+    const settings = this.authFacade.storeSettings();
+    const fromSettings = settings?.general?.industries as string[] | undefined;
+    if (fromSettings?.length) return fromSettings;
+    const fromLogin = this.authFacade.userIndustries();
+    return Array.isArray(fromLogin) ? fromLogin : [];
+  }
+
   private buildRouteKeysIndex(): Record<string, string[]> {
     const index: Record<string, string[]> = {};
     for (const [key, route] of Object.entries(MODULE_ROUTES)) {
@@ -1383,13 +1629,14 @@ export class MenuFilterService {
         (!this.matchesFiscalScope(item, this.authFacade.fiscalScope()) ||
           !this.matchesFiscalArea(item, this.authFacade.activeFiscalAreas()))
       ) {
-        // Never let an alwaysVisible ORG invoicing item become the default
+        // Never let an audit-only ORG invoicing item become the default
         // redirect to emission while its only eligible surface is reception.
         if (this.diagnose(item).visible) return item.fiscalReadFallback.route;
         continue;
       }
-      if (item.alwaysVisible) {
-        // alwaysVisible se renderiza sin importar panel_ui (filter Case 1);
+      if (item.accessAuditOnly) {
+        // Ítem audit-only (antes `alwaysVisible`): se renderiza sin importar
+        // panel_ui en modo auditoría (filter Case 1);
         // solo lo detienen los prefiltros de autorización y la suscripción.
         if (
           this.passesAuthorizationGates(item) &&

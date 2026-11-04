@@ -9,7 +9,8 @@ import { BadgeComponent } from '../../../../shared/components/badge/badge.compon
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
 import { StoreApp } from './interfaces/store-app.interface';
 import { StoreAppsService } from './services/store-apps.service';
-import { toAppCard } from './utils/app-card.util';
+import { AppCard, toAppCard } from './utils/app-card.util';
+import { MenuFilterService } from '../../../../core/services/menu-filter.service';
 
 /**
  * `/admin/apps` — catalog of the store's web apps (odd/tasks/apps-module.md
@@ -144,6 +145,7 @@ export class AppsCatalogComponent {
   private readonly appsService = inject(StoreAppsService);
   private readonly authFacade = inject(AuthFacade);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly menuFilter = inject(MenuFilterService);
 
   readonly apps = signal<StoreApp[]>([]);
   readonly loading = signal(true);
@@ -163,8 +165,20 @@ export class AppsCatalogComponent {
   );
 
   readonly cards = computed(() =>
-    this.apps().map((app) => toAppCard(app, this.storeType())),
+    this.apps().map((app) => this.applyAccessGate(toAppCard(app, this.storeType()))),
   );
+
+  /**
+   * apps-f4 S4: the card consults the same `canSeeKey` gate as the sidebar
+   * and the URL guard. Audit mode only records (`would_hide`); with the flag
+   * on, an app whose view the store industry cannot open is disabled.
+   */
+  private applyAccessGate(card: AppCard): AppCard {
+    if (card.action.kind !== 'route') return card;
+    return this.menuFilter.applyRouteGate(card.action.route, true, 'apps_card')
+      ? card
+      : { ...card, action: { kind: 'disabled', label: 'No aplica a tu industria' } };
+  }
 
   constructor() {
     this.load();

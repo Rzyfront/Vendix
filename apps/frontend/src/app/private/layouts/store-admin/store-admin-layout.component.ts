@@ -72,7 +72,7 @@ import { map, distinctUntilChanged, skip, switchMap, filter, startWith } from 'r
     <div class="admin-layout-shell flex">
       <!-- Sidebar -->
       <!-- A.4: terminal garantizado. El árbol del sidebar marca varias entradas
-           con alwaysVisible, pero si el usuario no tiene NINGÚN módulo activo
+           audit-only (accessAuditOnly), pero si el usuario no tiene NINGÚN módulo activo
            filteredMenuItems() es vacío y el sidebar quedaría en blanco. Aquí se
            muestra la pantalla de "sin módulos" y se evita una barra vacía. -->
       @if (filteredMenuItems().length > 0 || sidebarShimmer()) {
@@ -887,55 +887,64 @@ export class StoreAdminLayoutComponent {
           label: 'Resumen',
           icon: 'circle',
           route: '/admin/analytics/overview',
-          alwaysVisible: true,
+          panelUiKey: 'analytics_overview',
+          accessAuditOnly: true,
         },
         {
           label: 'Ventas',
           icon: 'circle',
           route: '/admin/analytics/sales',
-          alwaysVisible: true,
+          panelUiKey: 'analytics_sales',
+          accessAuditOnly: true,
         },
         {
           label: 'Inventario',
           icon: 'circle',
           route: '/admin/analytics/inventory',
-          alwaysVisible: true,
+          panelUiKey: 'analytics_inventory',
+          accessAuditOnly: true,
         },
         {
           label: 'Productos',
           icon: 'circle',
           route: '/admin/analytics/products',
-          alwaysVisible: true,
+          panelUiKey: 'analytics_products',
+          accessAuditOnly: true,
         },
         {
           label: 'Compras',
           icon: 'shopping-cart',
           route: '/admin/analytics/purchases',
-          alwaysVisible: true,
+          panelUiKey: 'analytics_purchases',
+          accessAuditOnly: true,
         },
         {
           label: 'Clientes',
           icon: 'circle',
           route: '/admin/analytics/customers',
-          alwaysVisible: true,
+          panelUiKey: 'analytics_customers',
+          accessAuditOnly: true,
         },
         {
           label: 'Reseñas',
           icon: 'star',
           route: '/admin/analytics/reviews',
-          alwaysVisible: true,
+          panelUiKey: 'analytics_reviews',
+          accessAuditOnly: true,
         },
         {
           label: 'Financiero',
           icon: 'circle',
           route: '/admin/analytics/financial',
-          alwaysVisible: true,
+          panelUiKey: 'analytics_financial',
+          accessAuditOnly: true,
         },
         {
           label: 'Pagos',
           icon: 'circle',
           route: '/admin/analytics/payments',
-          alwaysVisible: true,
+          panelUiKey: 'analytics_payments',
+          accessAuditOnly: true,
         },
         {
           label: 'Despachos',
@@ -959,67 +968,78 @@ export class StoreAdminLayoutComponent {
           label: 'Resumen',
           icon: 'circle',
           route: '/admin/reports/overview',
-          alwaysVisible: true,
+          panelUiKey: 'reports_overview',
+          accessAuditOnly: true,
         },
         {
           label: 'Ventas',
           icon: 'circle',
           route: '/admin/reports/sales',
-          alwaysVisible: true,
+          panelUiKey: 'reports_sales',
+          accessAuditOnly: true,
         },
         {
           label: 'Inventario',
           icon: 'circle',
           route: '/admin/reports/inventory',
-          alwaysVisible: true,
+          panelUiKey: 'reports_inventory',
+          accessAuditOnly: true,
         },
         {
           label: 'Productos',
           icon: 'circle',
           route: '/admin/reports/products',
-          alwaysVisible: true,
+          panelUiKey: 'reports_products',
+          accessAuditOnly: true,
         },
         {
           label: 'Compras',
           icon: 'circle',
           route: '/admin/reports/purchases',
-          alwaysVisible: true,
+          panelUiKey: 'reports_purchases',
+          accessAuditOnly: true,
         },
         {
           label: 'Clientes',
           icon: 'circle',
           route: '/admin/reports/customers',
-          alwaysVisible: true,
+          panelUiKey: 'reports_customers',
+          accessAuditOnly: true,
         },
         {
           label: 'Reseñas',
           icon: 'circle',
           route: '/admin/reports/reviews',
-          alwaysVisible: true,
+          panelUiKey: 'reports_reviews',
+          accessAuditOnly: true,
         },
         {
           label: 'Financiero',
           icon: 'circle',
           route: '/admin/reports/financial',
-          alwaysVisible: true,
+          panelUiKey: 'reports_financial',
+          accessAuditOnly: true,
         },
         {
           label: 'Pagos',
           icon: 'circle',
           route: '/admin/reports/payments',
-          alwaysVisible: true,
+          panelUiKey: 'reports_payments',
+          accessAuditOnly: true,
         },
         {
           label: 'Contabilidad',
           icon: 'circle',
           route: '/admin/reports/accounting',
-          alwaysVisible: true,
+          panelUiKey: 'reports_accounting',
+          accessAuditOnly: true,
         },
         {
           label: 'Nómina',
           icon: 'circle',
           route: '/admin/reports/payroll',
-          alwaysVisible: true,
+          panelUiKey: 'reports_payroll',
+          accessAuditOnly: true,
         },
         {
           label: 'Despachos',
@@ -1114,7 +1134,7 @@ export class StoreAdminLayoutComponent {
           label: 'Videos de Capacitación',
           icon: 'video',
           route: '/admin/help/videos',
-          alwaysVisible: true,
+          accessAuditOnly: true,
           panelUiKey: 'help_videos',
         },
       ],
@@ -1136,7 +1156,8 @@ export class StoreAdminLayoutComponent {
     {
       label: 'Configuración',
       icon: 'settings',
-      alwaysVisible: true,
+      panelUiKey: 'settings',
+      accessAuditOnly: true,
       children: [
         {
           label: 'General',
@@ -1179,17 +1200,15 @@ export class StoreAdminLayoutComponent {
           route: '/admin/settings/security',
         },
         {
-          // `alwaysVisible` because "Agentes IA" deliberately has NO
-          // `panel_ui` key: the agents are not a module an admin curates per
-          // user, they are a store-wide capability. Without this flag the
-          // entry falls into the filter's "no mapping, no children" branch
-          // and is dropped outright. Its real gate is
-          // `passesAuthorizationGates` (owner/admin), which runs before every
-          // case.
+          // apps-f4 S2: key `settings_ai_agents` (new, not offered in the
+          // panel editor yet) and audit-only, so it stays visible as before.
+          // Its real gate is still `passesAuthorizationGates` (owner/admin),
+          // which runs before every case.
           label: 'Agentes IA',
           icon: 'bot',
           route: '/admin/settings/ai-agents',
-          alwaysVisible: true,
+          panelUiKey: 'settings_ai_agents',
+          accessAuditOnly: true,
         },
         {
           label: 'Dominios',
