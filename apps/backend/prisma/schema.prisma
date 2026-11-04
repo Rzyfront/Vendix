@@ -10844,7 +10844,9 @@ model service_providers {
   updated_at   DateTime? @default(now()) @db.Timestamp(6)
 
   store      stores                @relation(fields: [store_id], references: [id])
-  employee   employees?            @relation(fields: [employee_id], references: [id])
+  // Explicit actions: the DB FK is RESTRICT/CASCADE (20260328160000); an
+  // implicit optional relation would make Prisma diff it to SET NULL.
+  employee   employees?            @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
   user       users?                @relation("service_providers_user", fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   services   provider_services[]
   schedules  provider_schedules[]

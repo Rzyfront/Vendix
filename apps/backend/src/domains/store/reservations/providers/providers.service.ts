@@ -37,7 +37,14 @@ export class ProvidersService {
     return {
       state: 'active' as const,
       store_users: { some: { store_id: storeId } },
-      user_roles: { some: { roles: { name: { not: 'customer' } } } },
+      // The staff role must apply to THIS store (or org-wide, store_id null):
+      // a staff member of another store who is only a customer here is out.
+      user_roles: {
+        some: {
+          OR: [{ store_id: null }, { store_id: storeId }],
+          roles: { name: { not: 'customer' } },
+        },
+      },
     };
   }
 
@@ -94,6 +101,11 @@ export class ProvidersService {
   }
 
   async create(dto: CreateProviderDto) {
+    if (dto.user_id != null && dto.employee_id != null) {
+      throw new BadRequestException(
+        'Envía user_id o employee_id, no ambos',
+      );
+    }
     if (dto.user_id != null) {
       return this.createForUser(dto.user_id, dto);
     }
@@ -129,16 +141,24 @@ export class ProvidersService {
     }
 
     const fullName = `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim();
-    return this.prisma.service_providers.create({
-      data: {
-        store_id: this.storeId,
-        user_id: userId,
-        display_name: dto.display_name || fullName || null,
-        avatar_url: dto.avatar_url,
-        bio: dto.bio,
-      },
-      include: this.PROVIDER_INCLUDE,
-    });
+    try {
+      return await this.prisma.service_providers.create({
+        data: {
+          store_id: this.storeId,
+          user_id: userId,
+          display_name: dto.display_name || fullName || null,
+          avatar_url: dto.avatar_url,
+          bio: dto.bio,
+        },
+        include: this.PROVIDER_INCLUDE,
+      });
+    } catch (error: any) {
+      // Concurrent double-submit: the (store_id, user_id) unique index wins.
+      if (error?.code === 'P2002') {
+        throw new ConflictException('El usuario ya es un proveedor de servicios');
+      }
+      throw error;
+    }
   }
 
   /** Legacy path: provider backed by a payroll employee (kept for back-compat). */

@@ -34,7 +34,12 @@ describe('ProvidersService — proveedores como usuarios de tienda', () => {
   const staffWhere = {
     state: 'active',
     store_users: { some: { store_id: STORE_ID } },
-    user_roles: { some: { roles: { name: { not: 'customer' } } } },
+    user_roles: {
+      some: {
+        OR: [{ store_id: null }, { store_id: STORE_ID }],
+        roles: { name: { not: 'customer' } },
+      },
+    },
   };
 
   it('crea el proveedor por user_id con el nombre del usuario por defecto', async () => {
@@ -82,6 +87,21 @@ describe('ProvidersService — proveedores como usuarios de tienda', () => {
 
     await expect(service.create({ user_id: 31 } as any)).rejects.toBeInstanceOf(ConflictException);
     expect(prisma.service_providers.create).not.toHaveBeenCalled();
+  });
+
+  it('user_id y employee_id a la vez responde 400 (no ignora ninguno en silencio)', async () => {
+    const promise = service.create({ user_id: 31, employee_id: 4 } as any);
+    await expect(promise).rejects.toBeInstanceOf(BadRequestException);
+    await expect(promise).rejects.toThrow('Envía user_id o employee_id, no ambos');
+    expect(prisma.service_providers.create).not.toHaveBeenCalled();
+  });
+
+  it('alta concurrente: el P2002 del índice único se traduce a 409', async () => {
+    prisma.users.findFirst.mockResolvedValue({ id: 31, first_name: 'Ana', last_name: 'Ruiz' });
+    prisma.service_providers.create.mockRejectedValueOnce(
+      Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }),
+    );
+    await expect(service.create({ user_id: 31 } as any)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('sin user_id ni employee_id responde 400 con mensaje claro', async () => {
