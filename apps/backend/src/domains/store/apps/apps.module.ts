@@ -11,6 +11,7 @@ import { ServicePageAppController } from './service-page/service-page-app.contro
 import { ServicePageAppService } from './service-page/service-page-app.service';
 import { ServicePagePublicController } from './service-page/service-page-public.controller';
 import { AppDomainService } from './shared/app-domain.service';
+import { AppPageService } from './shared/app-page.service';
 import { LodgingReservationsModule } from '../hospitality/reservations/reservations.module';
 import { BookingAppController } from './booking/booking-app.controller';
 import { BookingAppService } from './booking/booking-app.service';
@@ -54,6 +55,7 @@ import { LandingLeadService } from './landing/landing-lead.service';
   providers: [
     AppsService,
     AppDomainService,
+    AppPageService,
     ProductPageAppService,
     ServicePageAppService,
     BookingAppService,

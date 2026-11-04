@@ -3,6 +3,11 @@ import {
   PublishedPageItem,
   secondaryProductsWhere,
 } from '../service-page/service-page.reader';
+import {
+  AppPageDocument,
+  carryPage,
+  readAppPage,
+} from '../shared/app-page.contract';
 
 /** Most products in the secondary amenities block. */
 export const MAX_BOOKING_PRODUCTS = 8;
@@ -19,6 +24,8 @@ export interface BookingPageConfig {
    * `app_type` that domain had before, so unpublishing gives it back.
    */
   custom_domain_previous_app_type?: string | null;
+  /** Apps F2: the app's own page (`app-page.contract.ts`), kept as stored. */
+  page?: unknown;
 }
 
 /** Parses the stored JSON defensively. */
@@ -29,6 +36,7 @@ export function parseBookingPageConfig(raw: unknown): BookingPageConfig {
       : {};
   const previous = obj.custom_domain_previous_app_type;
   return {
+    ...carryPage(raw),
     product_ids: Array.isArray(obj.product_ids)
       ? obj.product_ids.filter(
           (id): id is number => typeof id === 'number' && Number.isInteger(id),
@@ -42,6 +50,8 @@ export function parseBookingPageConfig(raw: unknown): BookingPageConfig {
 export interface PublishedBookingPage {
   /** Secondary products still sold online, in the owner's order. */
   products: PublishedPageItem[];
+  /** Apps F2: the page the owner saved, or `null` (page as before F2). */
+  page: AppPageDocument | null;
 }
 
 /**
@@ -80,5 +90,6 @@ export async function readPublishedBookingPage(
     products: config.product_ids
       .map((id) => byId.get(id))
       .filter((p): p is PublishedPageItem => !!p),
+    page: readAppPage('booking', app.config),
   };
 }

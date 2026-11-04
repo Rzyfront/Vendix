@@ -2,8 +2,13 @@ import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { AppPageService } from '../shared/app-page.service';
 import { BookingAppService } from './booking-app.service';
-import { PublishBookingPageDto, UpdateBookingPageConfigDto } from './booking-page.dto';
+import {
+  PublishBookingPageDto,
+  UpdateBookingPageConfigDto,
+  UpdateBookingPagePageDto,
+} from './booking-page.dto';
 
 /**
  * Apps · booking (Fase 4): owner/admin configuration of the hotel booking
@@ -16,6 +21,7 @@ export class BookingAppController {
   constructor(
     private readonly booking: BookingAppService,
     private readonly responseService: ResponseService,
+    private readonly appPage: AppPageService,
   ) {}
 
   @Permissions('store:apps:read')
@@ -44,5 +50,13 @@ export class BookingAppController {
   async unpublish() {
     await this.booking.unpublish();
     return this.responseService.success(null, 'Página de reservas despublicada');
+  }
+
+  /** Apps F2: the app's own page (hero, its own sections, brand and SEO). */
+  @Permissions('store:apps:manage')
+  @Patch('page')
+  async updatePage(@Body() dto: UpdateBookingPagePageDto) {
+    const page = await this.appPage.save('booking', dto.page);
+    return this.responseService.success({ page }, 'Página de reservas: contenido guardado');
   }
 }

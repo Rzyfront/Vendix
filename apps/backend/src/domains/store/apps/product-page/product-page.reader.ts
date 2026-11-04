@@ -1,5 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import {
+  AppPageDocument,
+  carryPage,
+  readAppPage,
+} from '../shared/app-page.contract';
 
 /** Most complements a page shows; keeps the block and the sitemap small. */
 export const MAX_COMPLEMENTS = 8;
@@ -13,6 +18,8 @@ export interface ProductPageConfig {
    * `app_type` that domain had before, so unpublishing gives it back.
    */
   custom_domain_previous_app_type?: string | null;
+  /** Apps F2: the app's own page (`app-page.contract.ts`), kept as stored. */
+  page?: unknown;
 }
 
 /**
@@ -52,6 +59,7 @@ export function parseProductPageConfig(raw: unknown): ProductPageConfig {
     : [];
   const previous = obj.custom_domain_previous_app_type;
   return {
+    ...carryPage(raw),
     product_id: productId,
     complement_product_ids: complements,
     custom_domain_previous_app_type:
@@ -62,6 +70,8 @@ export function parseProductPageConfig(raw: unknown): ProductPageConfig {
 export interface PublishedProductPage {
   product: { id: number; slug: string; name: string; updated_at: Date | null };
   complements: { id: number; slug: string; updated_at: Date | null }[];
+  /** Apps F2: the page the owner saved, or `null` (page as before F2). */
+  page: AppPageDocument | null;
 }
 
 /**
@@ -98,5 +108,6 @@ export async function readPublishedProductPage(
       .map((id) => byId.get(id))
       .filter((row): row is NonNullable<typeof row> => !!row)
       .map(({ id, slug, updated_at }) => ({ id, slug, updated_at })),
+    page: readAppPage('product_page', app.config),
   };
 }
