@@ -29,6 +29,7 @@ import { OrgExogenousModule } from './exogenous/org-exogenous.module';
 import { OrgIcaModule } from './taxes/org-ica.module';
 import { OrgAccountsReceivableModule } from './accounts-receivable/org-accounts-receivable.module';
 import { OrgAccountsPayableModule } from './accounts-payable/org-accounts-payable.module';
+import { OrgAccessGateModule } from './access-gate/org-access-gate.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { OrgAccountsPayableModule } from './accounts-payable/org-accounts-payabl
     OrgIcaModule,
     OrgAccountsReceivableModule,
     OrgAccountsPayableModule,
+    OrgAccessGateModule,
   ],
 })
 export class OrganizationDomainModule {}

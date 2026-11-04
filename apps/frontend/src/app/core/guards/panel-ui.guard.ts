@@ -4,6 +4,7 @@ import { MenuFilterService, PANEL_UI_NO_ACCESS_ROUTE, PANEL_UI_TERMINAL_ROUTE } 
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { ToastService } from '../../shared/components/toast/toast.service';
+import { AccessGateService } from '../services/access-gate.service';
 
 /**
  * CanActivate que cierra el bypass de panel_ui en URL directa (A.4 / ADR-4).
@@ -24,17 +25,21 @@ import { ToastService } from '../../shared/components/toast/toast.service';
  * navegador nunca entre en bucle de redirect; el layout muestra la pantalla
  * de "sin módulos habilitados" cuando el sidebar queda vacío.
  *
- * ⚠️ Owner bypass: el rol `owner` ve TODO el panel sin importar
- * `user_settings.config.panel_ui`. La regla ya vive en el filtro (case 7),
- * pero se duplica acá para que ni siquiera entre al chequeo por URL directa
- * y al `firstActiveModuleRedirectGuard`. Coherente con `mergePanelUiSoft`.
+ * ⚠️ Owner: el rol `owner` pasa las capas de usuario y tienda sin importar
+ * `user_settings.config.panel_ui` (como el filtro, case 7, y
+ * `mergePanelUiSoft`). Desde apps-f4 (S4) ya NO salta la industria: en
+ * auditoría la compuerta registra y deja pasar; con el flag encendido bloquea.
  *
  * ⚠️ No-access: `PANEL_UI_NO_ACCESS_ROUTE` también se deja pasar siempre;
  * es el terminal del caso "usuario sin módulos activos" (bug C1(2)).
  */
-export const panelUiGuard: CanActivateFn = (_route, state): boolean => {
+export const panelUiGuard: CanActivateFn = async (
+  _route,
+  state,
+): Promise<boolean> => {
   const authFacade = inject(AuthFacade);
   const menuFilter = inject(MenuFilterService);
+  const accessGate = inject(AccessGateService);
   const router = inject(Router);
   const toast = inject(ToastService);
 
@@ -44,60 +49,104 @@ export const panelUiGuard: CanActivateFn = (_route, state): boolean => {
   if (state.url === PANEL_UI_TERMINAL_ROUTE) return true;
   if (state.url === PANEL_UI_NO_ACCESS_ROUTE) return true;
 
-  // El owner ve todo sin importar `panel_ui` (mirror del case 7 del filtro).
-  if (authFacade.isOwner()) return true;
+  // apps-f4: el modo (auditoría / flag encendido) y las industrias vienen del
+  // backend. Nunca espera más de 1,5 s; si falla, queda en auditoría.
+  await accessGate.ensureLoaded('STORE_ADMIN');
 
   const tree = menuFilter.currentMenuTree();
-  const keys = menuFilter.resolveKeysForRoute(state.url);
-  // Ruta sin módulo `panel_ui` (p. ej. el shell /admin, una ruta de detalle
-  // sin gobernante propio) → no la gobierna este guard.
-  if (!keys.length) return true;
-
-  // A.2 (ADR-02, ERR-03): la industria también cierra la URL directa. Sin
-  // esto, teclear /admin/orders/contracts en una tienda sin `construction`
-  // entraba aunque el sidebar lo ocultara — el mismo bypass que A.4 cerró
-  // para panel_ui. El mensaje es el de ERR-03, no el ERR-10 de panel_ui:
-  // el bloqueo es estructural (giro de la tienda), no un toggle pedible al
-  // admin. El owner conserva su bypass global (return true de arriba),
-  // coherente con el case 7 del filtro; la frontera real anti-manipulación
-  // es el backend (`ConstructionIndustryGuard`, 403).
-  const hiddenByIndustry = keys.some((key) => {
-    const diagnosis = menuFilter.diagnoseModule(
-      key,
-      tree.length ? tree : undefined,
-    );
-    return diagnosis.blockedBy === 'industry';
-  });
-
-  if (hiddenByIndustry) {
-    toast.info(
-      'No disponible en tu industria. Este módulo aplica solo a tiendas de construcción.',
-    );
+  const redirect = (): boolean => {
     const target = menuFilter.firstActiveModuleRoute(tree);
     if (target === state.url) return true; // terminal: nada más activo
     router.navigateByUrl(target);
     return false;
+  };
+
+  // Finanzas: a fiscal entry whose wizard stage is not complete has no
+  // operable screen, for the owner too. Same rule as the sidebar filter
+  // (`FISCAL_STAGE_ROUTE_GATES`); the wizard and setup screens stay open.
+  const fiscalStageBlock = menuFilter.fiscalStageBlockForUrl(state.url);
+  if (fiscalStageBlock) {
+    toast.info(fiscalStageBlock.detail);
+    return redirect();
   }
 
-  const hiddenByPanel = keys.some((key) => {
-    const diagnosis = menuFilter.diagnoseModule(
-      key,
-      tree.length ? tree : undefined,
-    );
-    return (
-      diagnosis.blockedBy === 'user_panel_ui' ||
-      diagnosis.blockedBy === 'store_panel_ui'
-    );
-  });
+  // ── Veredicto pre-F4 (lo que se aplica en auditoría) ──────────────────
+  // El owner sigue pasando las capas de usuario y tienda en URL, como hoy.
+  // La industria ya no lo exime: se evalúa abajo en la compuerta (S4).
+  if (!authFacade.isOwner()) {
+    // Índice pre-F4: las rutas que F4 añade (`MODULE_GATE_ROUTES`) solo
+    // alimentan la auditoría y no bloquean.
+    const keys = menuFilter.resolveKeysForRoute(state.url);
+    // Ruta sin módulo `panel_ui` en el índice vigente → no la bloquea.
+    if (keys.length) {
+      // A.2 (ADR-02, ERR-03): la industria también cierra la URL directa.
+      // El mensaje es el de ERR-03, no el ERR-10 de panel_ui: el bloqueo es
+      // estructural (giro de la tienda), no un toggle pedible al admin.
+      const hiddenByIndustry = keys.filter((key) => {
+        const diagnosis = menuFilter.diagnoseModule(
+          key,
+          tree.length ? tree : undefined,
+        );
+        return diagnosis.blockedBy === 'industry';
+      });
+      if (hiddenByIndustry.length) {
+        toast.info(menuFilter.industryBlockMessage(hiddenByIndustry));
+        return redirect();
+      }
 
-  if (!hiddenByPanel) return true;
+      const hiddenByPanel = keys.some((key) => {
+        const diagnosis = menuFilter.diagnoseModule(
+          key,
+          tree.length ? tree : undefined,
+        );
+        return (
+          diagnosis.blockedBy === 'user_panel_ui' ||
+          diagnosis.blockedBy === 'store_panel_ui'
+        );
+      });
+      if (hiddenByPanel) {
+        toast.info(
+          'Ese módulo no está disponible para tu usuario. Si crees que deberías tenerlo, pídele a tu administrador que lo active.',
+        );
+        return redirect();
+      }
+    }
+  }
 
-  toast.info(
-    'Ese módulo no está disponible para tu usuario. Si crees que deberías tenerlo, pídele a tu administrador que lo active.',
-  );
-  const target = menuFilter.firstActiveModuleRoute(tree);
-  if (target === state.url) return true; // terminal: nada más activo
-  router.navigateByUrl(target);
+  // ── Compuerta F4: canSeeKey sobre el índice completo de rutas ─────────
+  // Auditoría: registra lo que bloquearía y deja pasar. Flag encendido en la
+  // tienda: bloquea por industria, owner incluido.
+  const gateKeys = menuFilter.resolveGateKeysForRoute(state.url, 'STORE_ADMIN');
+  // Llegar aquí significa que el veredicto pre-F4 deja pasar.
+  if (menuFilter.applyAccessGate(gateKeys, true, 'url', state.url)) {
+    return true;
+  }
+  toast.info(menuFilter.industryBlockMessage(gateKeys));
+  return redirect();
+};
+
+/**
+ * apps-f4 S5: `panelUiGuard` del panel de organización. Antes de F4 ORG_ADMIN
+ * no tenía guard de URL, así que el veredicto previo es "deja pasar": en
+ * auditoría solo registra lo que bloquearía la compuerta (usuario, techo
+ * `organization_settings.panel_ui.ORG_ADMIN` e industria derivada de las
+ * tiendas). Con el flag global encendido bloquea solo por industria.
+ */
+export const orgPanelUiGuard: CanActivateFn = async (
+  _route,
+  state,
+): Promise<boolean> => {
+  const menuFilter = inject(MenuFilterService);
+  const accessGate = inject(AccessGateService);
+  const router = inject(Router);
+  const toast = inject(ToastService);
+
+  await accessGate.ensureLoaded('ORG_ADMIN');
+  const keys = menuFilter.resolveGateKeysForRoute(state.url, 'ORG_ADMIN');
+  if (menuFilter.applyAccessGate(keys, true, 'url', state.url)) return true;
+
+  toast.info(menuFilter.industryBlockMessage(keys));
+  if (state.url !== '/admin/dashboard') router.navigateByUrl('/admin/dashboard');
   return false;
 };
 

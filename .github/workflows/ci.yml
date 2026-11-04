@@ -341,6 +341,23 @@ jobs:
           --include='**/integrations/meta-whatsapp/services/meta-whatsapp-config.service.spec.ts'
           --include='**/integrations/meta-whatsapp/meta-whatsapp-config.component.spec.ts'
           --include='**/integrations/channels/embedded-signup-flow.spec.ts'
+          --include='**/store/apps/**/*.spec.ts'
+          --include='**/store/settings/domains/components/domain-form-modal.component.spec.ts'
+          --include='**/public/landing-page/landing-offer.component.spec.ts'
+          --include='**/public/landing-page/landing-page.service.spec.ts'
+          --include='**/core/guards/panel-ui.guard.spec.ts'
+          --include='**/core/guards/store-dashboard.guard.spec.ts'
+          --include='**/core/services/menu-filter.service.spec.ts'
+          --include='**/private/layouts/store-admin/apps-menu.util.spec.ts'
+          --include='**/private/layouts/store-admin/store-admin-menu-items.spec.ts'
+          --include='**/public/app-page/app-page-view.component.spec.ts'
+          --include='**/public/booking-page/booking-page-home.component.spec.ts'
+          --include='**/public/product-page/product-page-layout.component.spec.ts'
+          --include='**/public/service-page/service-page-home.component.spec.ts'
+          --include='**/public/store-home/store-home.component.spec.ts'
+          --include='**/public/dynamic-landing/**/*.spec.ts'
+          --include='**/routes/private/route-gate-coverage.spec.ts'
+          --include='**/shared/constants/module-industries.spec.ts'
 
   mobile:
     name: Mobile

@@ -128,6 +128,13 @@ export interface Product {
   scanned_price_tier_id?: number | null;
 }
 
+/** Resultado de buscar un producto por su código de balanza. */
+export type ScaleCodeLookupResult =
+  | { status: 'found'; product: Product }
+  | { status: 'not_found' }
+  | { status: 'not_weight'; product: Product }
+  | { status: 'multiple'; count: number };
+
 export interface ProductTaxAssignment {
   product_id: number;
   tax_category_id: number;
@@ -958,6 +965,49 @@ export class PosProductService {
       map((response) => this.firstTransformedProduct(response)),
       catchError((error: any) => {
         return of(null);
+      }),
+    );
+  }
+
+  /**
+   * Etiqueta de balanza etiquetadora: busca el producto de peso por su
+   * `scale_code`. Devuelve el producto solo si hay exactamente uno y es de
+   * `pricing_type = weight`; en cualquier otro caso (o error) `null`.
+   */
+  getWeightProductByScaleCode(scaleCode: number): Observable<Product | null> {
+    // Misma petición y mapeo que el probador; aquí se aplanan los motivos.
+    return this.lookupWeightProductByScaleCode(scaleCode).pipe(
+      map((result) => (result.status === 'found' ? result.product : null)),
+      catchError(() => of(null)),
+    );
+  }
+
+  /**
+   * Igual que `getWeightProductByScaleCode`, pero sin aplanar los motivos: lo usa
+   * el probador de formatos de etiqueta para decirle al admin qué corregir. Los
+   * errores HTTP se propagan (el probador los muestra con "Reintentar").
+   */
+  lookupWeightProductByScaleCode(
+    scaleCode: number,
+  ): Observable<ScaleCodeLookupResult> {
+    const params = new HttpParams()
+      .set('scale_code', String(scaleCode))
+      .set('is_lodging', 'false');
+    return this.http.get<any>(this.apiUrl, { params }).pipe(
+      map((response): ScaleCodeLookupResult => {
+        const dataRoot = response?.success ? response.data : response;
+        const list = Array.isArray(dataRoot)
+          ? dataRoot
+          : Array.isArray(dataRoot?.data)
+            ? dataRoot.data
+            : [];
+        if (list.length === 0) return { status: 'not_found' };
+        if (list.length > 1) return { status: 'multiple', count: list.length };
+        const product = (this.transformProducts(list)[0] as Product) ?? null;
+        if (!product) return { status: 'not_found' };
+        return product.pricing_type === 'weight'
+          ? { status: 'found', product }
+          : { status: 'not_weight', product };
       }),
     );
   }

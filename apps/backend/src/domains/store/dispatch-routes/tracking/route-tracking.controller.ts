@@ -19,9 +19,12 @@ import { ResponseService } from '@common/responses/response.service';
 import { RouteTrackingService } from './route-tracking.service';
 import { RouteTrackingSseService } from './route-tracking-sse.service';
 import { PublishPositionsDto } from './dto/publish-positions.dto';
+import { IndustryModuleGuard } from '../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../common/decorators/industry-module.decorator';
 
 @Controller('store/dispatch-routes')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('orders_dispatch_routes')
 export class RouteTrackingController {
   constructor(
     private readonly trackingService: RouteTrackingService,

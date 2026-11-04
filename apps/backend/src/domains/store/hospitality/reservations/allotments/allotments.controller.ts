@@ -14,10 +14,13 @@ import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingAllotmentsService } from './allotments.service';
 import { CreateAllotmentDto, UpdateAllotmentDto } from './allotment.dto';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H2.5) — allotments for agencies and companies (Tarifas → Cupos). */
 @Controller('store/hospitality/allotments')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingAllotmentsController {
   constructor(
     private readonly allotmentsService: LodgingAllotmentsService,

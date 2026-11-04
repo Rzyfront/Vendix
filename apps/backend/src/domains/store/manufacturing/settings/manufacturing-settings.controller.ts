@@ -4,10 +4,13 @@ import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { ManufacturingSettingsService } from './manufacturing-settings.service';
 import { UpdateManufacturingSettingsDto } from '../dto';
+import { IndustryModuleGuard } from '../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../common/decorators/industry-module.decorator';
 
 /** Configuración de planta. Los errores se propagan al filtro global. */
 @Controller('store/manufacturing/settings')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('manufacturing_settings')
 export class ManufacturingSettingsController {
   constructor(
     private readonly settingsService: ManufacturingSettingsService,

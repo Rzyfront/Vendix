@@ -36,6 +36,7 @@ export interface PaginatedResponse<T> {
   };
 }
 
+import { APP_ONLY_APP_TYPE_OPTIONS } from '../../../../../shared/constants/app-domain-app-types';
 @Injectable({
   providedIn: 'root',
 })
@@ -193,14 +194,21 @@ export class OrganizationDomainsService {
    * App type options for dropdown
    * Domain app type is the runtime router target for custom domains.
    */
-  getAppTypeOptions(): Array<{ value: AppType; label: string }> {
-    return [
+  getAppTypeOptions(forStore = false): Array<{ value: AppType; label: string }> {
+    const options = [
       { value: AppType.STORE_ECOMMERCE, label: 'E-commerce' },
       { value: AppType.STORE_LANDING, label: 'Landing de Tienda' },
       { value: AppType.STORE_ADMIN, label: 'Admin de Tienda' },
       { value: AppType.ORG_LANDING, label: 'Landing de Organización' },
       { value: AppType.ORG_ADMIN, label: 'Admin de Organización' },
     ];
+    // Apps F5: the app types of the apps only apply to store domains.
+    return forStore
+      ? [
+          ...options,
+          ...APP_ONLY_APP_TYPE_OPTIONS.map((o) => ({ value: o.value as AppType, label: o.label })),
+        ]
+      : options;
   }
 
   /**

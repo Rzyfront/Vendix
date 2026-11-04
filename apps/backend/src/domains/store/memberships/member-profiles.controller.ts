@@ -14,6 +14,8 @@ import { MemberProfilesService } from './member-profiles.service';
 import { UpsertMemberProfileDto } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Store-scoped member profiles (generalized membership core). One profile per
@@ -23,7 +25,8 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  *   - PUT  :customerId → store:memberships:update (upsert)
  */
 @Controller('store/memberships/member-profiles')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('memberships_members')
 export class MemberProfilesController {
   constructor(
     private readonly service: MemberProfilesService,

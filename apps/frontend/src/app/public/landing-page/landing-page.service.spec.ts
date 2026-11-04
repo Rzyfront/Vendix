@@ -35,6 +35,15 @@ describe('LandingPageService (apps-module Fase 6)', () => {
     expect(isOwnLandingHost(null, 'roku-landing.vendix.online')).toBeFalse();
   });
 
+  it('Apps F5: la oferta también aplica en los alias de la landing', () => {
+    const withAlias: LandingPagePublic = {
+      ...page('roku-landing.vendix.online'),
+      hostnames: ['roku-landing.vendix.online', 'promo.roku.com'],
+    };
+    expect(isOwnLandingHost(withAlias, 'Promo.Roku.com')).toBeTrue();
+    expect(isOwnLandingHost(withAlias, 'roku-store.vendix.online')).toBeFalse();
+  });
+
   it('en el dominio propio expone la landing publicada', () => {
     const host = window.location.hostname;
     service.load().subscribe();

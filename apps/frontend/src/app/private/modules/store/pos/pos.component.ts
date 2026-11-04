@@ -99,6 +99,7 @@ import { PosCartModalComponent } from './components/pos-cart-modal.component';
 import { PosOrderCreateResult } from './models/order.model';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
 import { HttpClient } from '@angular/common/http';
+import { resolveVariableBarcode } from '../../../../shared/utils/variable-barcode.util';
 import { StoreSettingsFacade } from '../../../../core/store/store-settings/store-settings.facade';
 import { KitchenTicketPrintService } from '../restaurant-ops/kds/services/kitchen-ticket-print.service';
 import { DispatchTicketPrintService } from '../dispatch-ticket/services/dispatch-ticket-print.service';
@@ -1990,6 +1991,43 @@ export class PosComponent {
   }
 
   /**
+   * Etiqueta de balanza (peso variable): solo se intenta cuando el barcode
+   * exacto no encontró nada y la tienda activó balanza + etiquetas variables.
+   * Cualquier fallo cae al toast histórico de "Producto no encontrado".
+   */
+  private tryVariableBarcodeFallback(
+    code: string,
+    child: PosProductSelectionComponent,
+  ): void {
+    const notFound = () =>
+      this.toastService.warning(`Producto no encontrado: ${code}`);
+    const pos = this.settingsFacade.pos();
+    const variable = pos?.barcode_scanner?.variable_barcodes;
+    if (!variable?.enabled || !pos?.scale?.enabled) {
+      notFound();
+      return;
+    }
+    const resolved = resolveVariableBarcode(code, variable.formats ?? []);
+    if (!resolved.ok) {
+      notFound();
+      return;
+    }
+    this.productService
+      .getWeightProductByScaleCode(resolved.productCode)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((weightProduct: Product | null) => {
+        if (!weightProduct) {
+          notFound();
+          return;
+        }
+        void child.addWeightProductWithKnownWeight(
+          weightProduct,
+          resolved.weightKg,
+        );
+      });
+  }
+
+  /**
    * Handle a completed barcode scan: resolve the product/variant by barcode and
    * route it through the product-selection child's existing add-to-cart flow.
    *
@@ -2028,7 +2066,7 @@ export class PosComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((product: Product | null) => {
         if (!product) {
-          this.toastService.warning(`Producto no encontrado: ${code}`);
+          this.tryVariableBarcodeFallback(code, child);
           return;
         }
 

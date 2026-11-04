@@ -7,6 +7,9 @@
 #   ./apply-spa-rewrite.sh apply      valida la distribución, publica la función y la asocia al comportamiento (*)
 #   ./apply-spa-rewrite.sh verify     compara los códigos HTTP actuales contra la línea base
 #   ./apply-spa-rewrite.sh rollback   quita la asociación (deja la distribución como estaba)
+#     Ojo: si la función ya estaba asociada y solo se publicó código nuevo, 'rollback' quita TODA la
+#     reescritura SPA. Para deshacer solo el código, publica la versión anterior de spa-rewrite.js
+#     (git) con 'test' + 'apply'.
 set -euo pipefail
 
 DIST_ID="${DIST_ID:-E1I27OYFJX7VYJ}"
@@ -82,6 +85,11 @@ print("%s:%s" % (r["statusCode"], r["headers"]["location"]["value"]) if r else o
 /pricing 301:https://vendix.online/pricing www.vendix.online
 /precios /index.html tienda-demo.vendix.online
 /precios /index.html midominio.com
+/ 301:https://mesura.beauty/ www.mesura.beauty
+/productos/labial-rojo 301:https://mesura.beauty/productos/labial-rojo www.mesura.beauty
+/ /index.html mesura.beauty
+/ /index.html www.tienda.vendix.online
+/.well-known/acme-challenge/x /.well-known/acme-challenge/x www.mesura.beauty
 CASES
   return $fail
 }

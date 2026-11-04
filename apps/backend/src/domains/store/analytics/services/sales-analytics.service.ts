@@ -1305,6 +1305,7 @@ export class SalesAnalyticsService {
       productId: number | null;
       lineScale: number | null;
       stockUnitsConsumed: number | null;
+      weight: number | null;
       presentationName: string | null;
     }> = [];
 
@@ -1404,6 +1405,7 @@ export class SalesAnalyticsService {
             // que seguir diciendo lo que dijo entonces.
             lineScale: item.price_unit_quantity ?? null,
             stockUnitsConsumed: item.stock_units_consumed ?? null,
+            weight: item.weight != null ? Number(item.weight) : null,
             presentationName: item.applied_price_tier_name_snapshot ?? null,
           });
         }
@@ -1437,6 +1439,7 @@ export class SalesAnalyticsService {
       productId: number | null;
       lineScale: number | null;
       stockUnitsConsumed: number | null;
+      weight: number | null;
       presentationName: string | null;
     }>,
   ): Promise<void> {
@@ -1461,6 +1464,7 @@ export class SalesAnalyticsService {
         saleUnitCode: info?.saleUnitCodeForScale(scale) ?? null,
         presentationName: context.presentationName,
         stockUnitsConsumed: context.stockUnitsConsumed,
+        weight: context.weight,
       });
 
       context.row.quantity = display.value;

@@ -10,6 +10,8 @@ import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingVatExemptServicesService } from './vat-exempt-services.service';
 import { VatExemptServicesQueryDto } from './vat-exempt-services.dto';
 import { entryPermitLabel } from '../guests/lodging-vat-exemption';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 const COUNTRY_NAMES = new Intl.DisplayNames(['es'], { type: 'region' });
 
@@ -25,7 +27,8 @@ function countryLabel(code: string | null): string | null {
 
 /** Hospitality Suite (H3.9) — "Servicios exentos" report. */
 @Controller('store/hospitality/reports/vat-exempt-services')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingVatExemptServicesController {
   constructor(
     private readonly vatExemptServices: LodgingVatExemptServicesService,

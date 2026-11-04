@@ -32,7 +32,13 @@ export interface MenuItem {
   children?: MenuItem[];
   badge?: string;
   action?: (item: MenuItem) => void;
-  alwaysVisible?: boolean;
+  /**
+   * apps-f4 S2: the item carries its real `panelUiKey` and goes through the
+   * access gate, but it skipped every panel_ui layer before F4 (it was
+   * `alwaysVisible`). In audit mode it stays visible and the gate verdict is
+   * only recorded; F5 removes the flag after the backfill.
+   */
+  accessAuditOnly?: boolean;
   requiresFeature?: string;
   /**
    * Clave de panel_ui cuando el nodo viene del catálogo (no del sidebar):

@@ -400,7 +400,10 @@ ${entries}
   ): Promise<PublishedLandingPage | null> {
     if (!context.store_id) return null;
     const page = await readPublishedLandingPage(this.globalPrisma, context.store_id);
-    return page && context.base_url === `https://${page.hostname}` ? page : null;
+    return page &&
+      page.hostnames.some((host) => context.base_url === `https://${host}`)
+      ? page
+      : null;
   }
 
   /** Apps · landing page: `/`, then the offer product's detail. */

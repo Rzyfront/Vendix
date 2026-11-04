@@ -24,7 +24,12 @@ export interface CrmBlock {
   id: string;
   type: CrmBlockType;
   props: Record<string, any>;
+  /** F6-A: hidden by the owner; kept in the draft, never rendered publicly. */
+  hidden?: boolean;
 }
+
+/** F6-A: same closed font catalog as the app pages (backend `APP_PAGE_FONTS`). */
+export type CrmLandingFont = 'system' | 'inter' | 'poppins' | 'playfair' | 'montserrat' | 'lora';
 
 export interface CrmLandingTheme {
   primary_color?: string;
@@ -33,11 +38,26 @@ export interface CrmLandingTheme {
   whatsapp_message?: string;
   border_radius?: 'rounded-lg' | 'rounded-2xl' | 'rounded-full';
   enable_whatsapp_float?: boolean;
+  /** F6-A: optional typography and logo (https). Absent = as before. */
+  font_heading?: CrmLandingFont;
+  font_body?: CrmLandingFont;
+  logo_url?: string;
+}
+
+/** F6-A: limits mirror the backend contract (`crm-blocks.contract.ts`). */
+export const MAX_LANDING_SEO_TITLE = 70;
+export const MAX_LANDING_SEO_DESCRIPTION = 160;
+
+export interface CrmLandingSeo {
+  title?: string;
+  description?: string;
+  image_url?: string;
 }
 
 export interface CrmLandingDocument {
   schema_version: typeof CRM_LANDING_SCHEMA_VERSION;
   theme?: CrmLandingTheme;
+  seo?: CrmLandingSeo;
   blocks: CrmBlock[];
 }
 

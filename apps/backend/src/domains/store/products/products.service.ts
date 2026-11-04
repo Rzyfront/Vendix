@@ -1157,6 +1157,42 @@ export class ProductsService {
     }
   }
 
+  /**
+   * Unicidad por tienda del código de balanza (PLU) entre productos NO
+   * archivados. Mismo patrón que `assertBarcodeUnique`: lectura scopeada por
+   * StorePrismaService + índice único parcial
+   * `products_store_id_scale_code_active_key` como respaldo en la base.
+   * `null` / `undefined` no se restringen (limpiar el código siempre es válido).
+   */
+  private async assertScaleCodeUnique(
+    scaleCode: number | null | undefined,
+    options: { excludeProductId?: number } = {},
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (scaleCode === null || scaleCode === undefined) return;
+
+    const prisma = tx || this.prisma;
+    const conflict = await prisma.products.findFirst({
+      where: {
+        scale_code: scaleCode,
+        state: { not: ProductState.ARCHIVED },
+        ...(options.excludeProductId && { NOT: { id: options.excludeProductId } }),
+      },
+      select: { id: true, name: true },
+    });
+    if (conflict) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_SCALE_CODE_DUP_001,
+        `El código de balanza ${scaleCode} ya está en uso por el producto "${conflict.name}"`,
+        {
+          scale_code: scaleCode,
+          product_id: conflict.id,
+          product_name: conflict.name,
+        },
+      );
+    }
+  }
+
   async create(createProductDto: CreateProductDto) {
     // Fase 1: pure-ingredient sanitization. Idempotent.
     let sanitizedDto = this.sanitizeIngredientPayload(createProductDto);
@@ -1232,6 +1268,7 @@ export class ProductsService {
 
       // Verificar unicidad del código de barras (producto y variantes) a
       // nivel de tienda antes de crear.
+      await this.assertScaleCodeUnique(sanitizedDto.scale_code);
       await this.assertBarcodeUnique(sanitizedDto.barcode);
       if (sanitizedDto.variants && sanitizedDto.variants.length > 0) {
         const seenBarcodes = new Set<string>();
@@ -1898,6 +1935,7 @@ export class ProductsService {
       include_inactive,
       pos_optimized,
       barcode,
+      scale_code,
       category_id,
       without_category,
       without_brand,
@@ -1950,6 +1988,10 @@ export class ProductsService {
           },
         ],
       }),
+      // Búsqueda exacta por código de balanza (POS, etiquetas de peso variable).
+      // Store-scoped por StorePrismaService; el estado ya excluye archivados
+      // salvo que el caller pida otro explícitamente.
+      ...(scale_code !== undefined && { scale_code }),
       // B.1 (ADR-02): wrap — smart AND×OR, o frase legacy completa cuando
       // el gate lo decide (stopwords, kill-switch, o query con vocales
       // acentuadas/ç que el fold del tokenizer volvería inmatcheable en
@@ -3394,6 +3436,7 @@ export class ProductsService {
             active_promotion: activePromotion,
             sku: product.sku,
             barcode: product.barcode,
+            scale_code: product.scale_code,
             cost_price: product.cost_price,
             profit_margin: product.profit_margin,
             min_stock_level: product.min_stock_level,
@@ -3617,6 +3660,7 @@ export class ProductsService {
           active_promotion: activePromotion,
           sku: product.sku,
           barcode: product.barcode,
+          scale_code: product.scale_code,
           cost_price: product.cost_price,
           profit_margin: product.profit_margin,
           min_stock_level: product.min_stock_level,
@@ -3926,6 +3970,7 @@ export class ProductsService {
       // bloque explícito en create, pero el form de edición lo lee de ESTE
       // mapeo de detalle al recargar; sin exponerlo aquí parecía "no guardarse".
       barcode: product.barcode,
+      scale_code: product.scale_code,
       cost_price: product.cost_price,
       profit_margin: product.profit_margin,
       min_stock_level: product.min_stock_level,
@@ -4320,6 +4365,12 @@ export class ProductsService {
       // nivel de tienda antes de actualizar, excluyendo la fila actual.
       if (sanitizedDto.barcode !== undefined) {
         await this.assertBarcodeUnique(sanitizedDto.barcode, {
+          excludeProductId: id,
+        });
+      }
+      // Código de balanza: igual que el barcode, solo si el DTO lo trae.
+      if (sanitizedDto.scale_code !== undefined) {
+        await this.assertScaleCodeUnique(sanitizedDto.scale_code, {
           excludeProductId: id,
         });
       }

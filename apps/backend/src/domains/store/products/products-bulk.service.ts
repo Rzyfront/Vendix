@@ -190,6 +190,7 @@ export class ProductsBulkService {
     'Plantilla Preconsulta ID': 'preconsultation_template_id',
     'Tiempo Preparación (min)': 'preparation_time_minutes',
     'Tipo Precio': 'pricing_type',
+    'Código Balanza': 'scale_code',
     'Impuestos IDs': 'tax_category_ids',
     // Códigos del catálogo global de unidades (mm, m, g, kg, unit...).
     'Unidad de stock': 'stock_uom_code',
@@ -340,6 +341,12 @@ export class ProductsBulkService {
     'maneja lotes': 'requires_batch_tracking',
     lotes: 'requires_batch_tracking',
     'tipo precio': 'pricing_type',
+    'codigo balanza': 'scale_code',
+    'código balanza': 'scale_code',
+    'codigo de balanza': 'scale_code',
+    'código de balanza': 'scale_code',
+    'scale code': 'scale_code',
+    scale_code: 'scale_code',
     'impuestos ids': 'tax_category_ids',
     impuestos: 'tax_category_ids',
     'tax category ids': 'tax_category_ids',
@@ -392,6 +399,26 @@ export class ProductsBulkService {
   private normalizeNullableBooleanValue(value: any): boolean | string {
     if (value === this.NULL_MARKER) return this.NULL_MARKER;
     return this.normalizeBooleanValue(value);
+  }
+
+  /**
+   * Código de balanza (PLU): entero 1..999999. Excel lo entrega como number o
+   * como texto ("003"); cualquier otra cosa (decimales, notación científica,
+   * fuera de rango) es un error de celda y la fila se rechaza.
+   */
+  private coerceScaleCodeCell(raw: unknown): { value?: number; error?: string } {
+    const invalid =
+      'El código de balanza debe ser un entero entre 1 y 999999';
+    let n: number;
+    if (typeof raw === 'number') {
+      n = raw;
+    } else {
+      const text = String(raw).replace(/\s/g, '');
+      if (!/^\d+$/.test(text)) return { error: invalid };
+      n = Number(text);
+    }
+    if (!Number.isInteger(n) || n < 1 || n > 999999) return { error: invalid };
+    return { value: n };
   }
 
   /**
@@ -501,6 +528,23 @@ export class ProductsBulkService {
                 typeof val === 'number' && Number.isInteger(val)
                   ? val.toFixed(0)
                   : strVal;
+              hasData = true;
+              return;
+            }
+
+            if (key === 'scale_code') {
+              const coerced = this.coerceScaleCodeCell(val);
+              if (coerced.error) {
+                const cellErrors = product[this.CELL_ERRORS_KEY] ?? [];
+                cellErrors.push({
+                  code: 'INVALID_SCALE_CODE',
+                  message: coerced.error,
+                  field: 'scale_code',
+                });
+                product[this.CELL_ERRORS_KEY] = cellErrors;
+              } else if (coerced.value !== undefined) {
+                product.scale_code = coerced.value;
+              }
               hasData = true;
               return;
             }
@@ -1127,6 +1171,16 @@ export class ProductsBulkService {
     );
     const seenBarcodes = new Map<string, { row: number; sku: string }>();
 
+    // 5b'. Códigos de balanza: una consulta sobre el set del archivo (solo
+    // productos no archivados de la tienda, igual que el índice único parcial).
+    const scaleCodeOwners = await this.loadScaleCodeOwners(
+      products
+        .map((p) => p.scale_code)
+        .filter((c): c is number => typeof c === 'number'),
+      storeId,
+    );
+    const seenScaleCodes = new Map<number, { row: number; sku: string }>();
+
     // 5c. Variantes: una sola consulta con los SKU de variante del archivo.
     const fileVariantSkus = new Set<string>();
     for (const p of products) {
@@ -1177,6 +1231,10 @@ export class ProductsBulkService {
           typeof product.barcode === 'string' &&
           product.barcode !== this.NULL_MARKER
             ? product.barcode
+            : undefined,
+        scale_code:
+          typeof product.scale_code === 'number'
+            ? product.scale_code
             : undefined,
         product_type: 'physical',
         base_price: parsedBasePrice ?? 0,
@@ -1426,6 +1484,35 @@ export class ProductsBulkService {
         }
       }
 
+      // Código de balanza: duplicado en el archivo y choque con otro producto
+      // no archivado de la tienda (misma regla que `assertScaleCodeUnique` en
+      // el commit). Mismo SKU + mismo código = OK.
+      if (item.scale_code !== undefined) {
+        const skuLower = item.sku ? item.sku.toLowerCase() : '';
+        const first = seenScaleCodes.get(item.scale_code);
+        if (first && first.sku !== skuLower) {
+          item.errors.push({
+            code: 'DUPLICATE_SCALE_CODE_IN_BATCH',
+            message: `Código de balanza duplicado en el archivo (primera aparición en fila ${first.row})`,
+            field: 'scale_code',
+          });
+        } else if (!first) {
+          seenScaleCodes.set(item.scale_code, {
+            row: item.row_number,
+            sku: skuLower,
+          });
+        }
+
+        const scaleOwner = scaleCodeOwners.get(item.scale_code);
+        if (scaleOwner && scaleOwner.product_id !== item.existing_product_id) {
+          item.errors.push({
+            code: 'SCALE_CODE_IN_USE',
+            message: `El código de balanza ${item.scale_code} ya está en uso por el producto "${scaleOwner.product_name}" de esta tienda`,
+            field: 'scale_code',
+          });
+        }
+      }
+
       // Resolve brand (dry-run - no creation)
       if (product.brand_id) {
         const brandVal = product.brand_id.toString().trim();
@@ -1551,6 +1638,7 @@ export class ProductsBulkService {
         'name',
         'sku',
         'barcode',
+        'scale_code',
         'description',
         'base_price',
         'state',
@@ -1970,6 +2058,34 @@ export class ProductsBulkService {
   }
 
   /**
+   * Resuelve qué producto no archivado de la tienda ya usa cada código de
+   * balanza del archivo: una consulta, no una por fila.
+   */
+  private async loadScaleCodeOwners(
+    codes: number[],
+    storeId: number,
+  ): Promise<Map<number, { product_id: number; product_name: string }>> {
+    const owners = new Map<number, { product_id: number; product_name: string }>();
+    const unique = Array.from(new Set(codes));
+    if (unique.length === 0) return owners;
+
+    const rows = await this.prisma.products.findMany({
+      where: {
+        store_id: storeId,
+        scale_code: { in: unique },
+        state: { not: 'archived' },
+      },
+      select: { id: true, scale_code: true, name: true },
+    });
+    for (const r of rows) {
+      if (r.scale_code !== null && r.scale_code !== undefined) {
+        owners.set(r.scale_code, { product_id: r.id, product_name: r.name });
+      }
+    }
+    return owners;
+  }
+
+  /**
    * Resuelve a quién pertenece cada barcode del archivo dentro de la tienda
    * (producto, variante o presentación): una consulta por tabla, no por fila.
    */
@@ -2187,6 +2303,7 @@ export class ProductsBulkService {
       'Categorías',
       'Impuestos IDs',
       'Tipo Precio',
+      'Código Balanza',
       'Disponible Ecommerce',
       'Destacado',
       'Permite Cambiar Precio POS',
@@ -2415,6 +2532,7 @@ export class ProductsBulkService {
               Categorías: 'Alimentos, Orgánicos',
               'Impuestos IDs': '',
               'Tipo Precio': 'peso',
+              'Código Balanza': 3,
               'Disponible Ecommerce': 'sí',
               Destacado: 'no',
               'Permite Cambiar Precio POS': 'sí',
@@ -2675,6 +2793,7 @@ export class ProductsBulkService {
               .filter(Boolean)
               .join(', ') ?? '',
           'Tipo Precio': p.pricing_type === 'weight' ? 'peso' : 'unidad',
+          'Código Balanza': p.scale_code ?? '',
           'Disponible Ecommerce': p.available_for_ecommerce ? 'sí' : 'no',
           Destacado: p.is_featured ? 'sí' : 'no',
           'Permite Cambiar Precio POS': p.allow_pos_price_override ? 'sí' : 'no',
@@ -3176,7 +3295,12 @@ export class ProductsBulkService {
           (productData as any)[this.CELL_ERRORS_KEY] as
             | { field?: string; message: string }[]
             | undefined
-        )?.find((e) => e.field === 'barcode' || e.field === 'stock_quantity');
+        )?.find(
+          (e) =>
+            e.field === 'barcode' ||
+            e.field === 'scale_code' ||
+            e.field === 'stock_quantity',
+        );
         if (barcodeCellError) {
           throw new BadRequestException(barcodeCellError.message);
         }
@@ -3958,6 +4082,7 @@ export class ProductsBulkService {
       base_price: product.base_price,
       sku: product.sku,
       barcode: resolveValue(product.barcode) ?? undefined,
+      scale_code: resolveValue(product.scale_code) ?? undefined,
       description: resolveValue(product.description),
       slug: product.slug || generateSlug(product.name),
       store_id: storeId,
@@ -4140,6 +4265,7 @@ export class ProductsBulkService {
     } = this.mapToCreateProductDto(product, 0);
     const defaults: Record<string, any> = {
       barcode: null,
+      scale_code: null,
       description: null,
       brand_id: null,
       category_ids: [],
@@ -4307,6 +4433,10 @@ export class ProductsBulkService {
 
     if (product.barcode !== undefined) {
       dto.barcode = resolveValue(product.barcode);
+    }
+
+    if (product.scale_code !== undefined) {
+      dto.scale_code = resolveValue(product.scale_code);
     }
 
     if (product.description !== undefined) {

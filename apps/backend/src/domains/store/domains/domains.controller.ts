@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { VendixHttpException } from '../../../common/errors/vendix-http.exception';
 import { ResponseService } from '../../../common/responses/response.service';
 import { DomainRegistrationGuard } from '../../../common/services/rate-limit/domain-registration.guard';
 import { StoreDomainsService } from './domains.service';
@@ -40,6 +41,9 @@ export class StoreDomainsController {
         'Dominio creado exitosamente',
       );
     } catch (error) {
+      // Business rules (e.g. STORE_APPS_016/017) keep their code and status,
+      // so the modal shows why instead of a 200 it reads as success.
+      if (error instanceof VendixHttpException) throw error;
       return this.response_service.error(
         'Error al crear el dominio',
         error.message,
@@ -225,6 +229,9 @@ export class StoreDomainsController {
         'Dominio actualizado exitosamente',
       );
     } catch (error) {
+      // Business rules (e.g. STORE_APPS_016/017) keep their code and status,
+      // so the modal shows why instead of a 200 it reads as success.
+      if (error instanceof VendixHttpException) throw error;
       return this.response_service.error(
         'Error al actualizar el dominio',
         error.message,

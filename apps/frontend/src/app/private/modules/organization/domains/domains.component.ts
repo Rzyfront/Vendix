@@ -23,6 +23,7 @@ import {
 import { OrganizationDomainsService } from './services/organization-domains.service';
 import { OrganizationStoresService } from '../stores/services/organization-stores.service';
 import { environment } from '../../../../../environments/environment';
+import { appOnlyAppTypeLabel } from '../../../../shared/constants/app-domain-app-types';
 
 import {
   DomainCreateModalComponent,
@@ -921,7 +922,7 @@ private loadInitialData(): void {
       STORE_LANDING: 'Landing Tienda',
       ORG_ADMIN: 'Admin Org',
       ORG_LANDING: 'Landing Org'};
-    return typeMap[type] || type || 'N/A';
+    return typeMap[type] || appOnlyAppTypeLabel(type) || type || 'N/A';
   }
 
   formatOwnership(ownership: string): string {

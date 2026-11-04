@@ -5,10 +5,13 @@ import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingRoomChargesService } from './room-charges.service';
 import { CreateRoomChargeDto, InHouseRoomsQueryDto } from './room-charges.dto';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H3.6) — charge a POS sale or a table bill to a room. */
 @Controller('store/hospitality/room-charges')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingRoomChargesController {
   constructor(
     private readonly roomChargesService: LodgingRoomChargesService,

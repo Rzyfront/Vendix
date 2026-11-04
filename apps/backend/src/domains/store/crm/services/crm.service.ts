@@ -98,6 +98,7 @@ export class CrmService {
       where: { id: existing.id, store_id: storeId },
       data: { enabled: false },
     });
+    await this.syncLandingApp(storeId, false);
 
     return this.getLanding();
   }
@@ -167,6 +168,7 @@ export class CrmService {
         published_at: new Date(),
       },
     });
+    await this.syncLandingApp(storeId, true);
 
     try {
       const settings = await this.settingsService.getSettings();
@@ -185,6 +187,62 @@ export class CrmService {
     }
 
     return this.getLanding();
+  }
+
+  /**
+   * Keeps the Apps card of the landing (`store_apps(landing)`) in step with
+   * the landing itself (apps-vistas-f1 S4), so publishing or switching it off
+   * here is what Apps shows.
+   *
+   * Only the landing that lives on the store domain is synced (row without
+   * its own domain, as the Fase 0 backfill left it). A landing published on
+   * its own domain (`{tienda}-landing` or a custom one) is owned by
+   * `LandingPageAppService`, which also releases that domain; it is not
+   * touched here.
+   *
+   * A failed sync never undoes the landing action: it is logged and the card
+   * catches up on the next publish or deactivation.
+   */
+  private async syncLandingApp(storeId: number, live: boolean): Promise<void> {
+    try {
+      const row = await this.prisma.store_apps.findFirst({
+        where: { store_id: storeId, kind: 'landing' },
+        select: { id: true, status: true, domain_settings_id: true },
+      });
+      if (row?.domain_settings_id) return;
+
+      if (live) {
+        if (!row) {
+          await this.prisma.store_apps.create({
+            data: {
+              store_id: storeId,
+              kind: 'landing',
+              status: 'published',
+              published_at: new Date(),
+              config: {},
+            },
+          });
+        } else if (row.status !== 'published') {
+          await this.prisma.store_apps.update({
+            where: { id: row.id },
+            data: {
+              status: 'published',
+              published_at: new Date(),
+              updated_at: new Date(),
+            },
+          });
+        }
+      } else if (row?.status === 'published') {
+        await this.prisma.store_apps.update({
+          where: { id: row.id },
+          data: { status: 'disabled', updated_at: new Date() },
+        });
+      }
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[Crm] No se pudo sincronizar store_apps(landing): ${(err as Error)?.message}`,
+      );
+    }
   }
 
   private requireStoreId(): number {

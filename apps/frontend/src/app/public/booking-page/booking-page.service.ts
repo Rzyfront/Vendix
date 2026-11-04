@@ -4,11 +4,14 @@ import { Observable, of } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { TenantFacade } from '../../core/store';
+import type { AppPageDocument } from '../../private/modules/store/apps/templates/app-page.types';
 
 /** Public config of the store's booking page (`GET /ecommerce/booking-page`). */
 export interface BookingPagePublicConfig {
   /** Secondary "para tu estadía" block: amenities and products. */
   product_ids: number[];
+  /** The owner's own page (apps-f2); absent when never saved. */
+  page?: AppPageDocument;
 }
 
 /** Backend `booking-checkin.ts`: what the page offers for the online check-in. */

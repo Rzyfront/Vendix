@@ -10,12 +10,15 @@ import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { dateOnlyToDb } from '../stay-dates';
 import { LodgingPickupRow, LodgingPickupService } from './pickup.service';
 import { LodgingPickupQueryDto } from './pickup.dto';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 const WEEKDAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 
 /** Hospitality Suite (H7.3) — pickup of the last 7 and 30 days and projected occupancy. */
 @Controller('store/hospitality/reports/pickup')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingPickupController {
   constructor(
     private readonly pickup: LodgingPickupService,

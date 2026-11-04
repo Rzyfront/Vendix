@@ -24,6 +24,8 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Store-scoped CRUD for the Recipes / BOM domain of the Restaurant Suite.
@@ -52,7 +54,8 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  * Dejando propagar la excepción, el filtro global emite el estado real.
  */
 @Controller('store/recipes')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('restaurant_ops_recipes')
 export class RecipesController {
   constructor(
     private readonly recipesService: RecipesService,

@@ -19,7 +19,7 @@ const baseTree = (): MenuItem[] => [
       {
         label: 'Landing de captación',
         icon: 'sparkles',
-        route: '/admin/customers/crm',
+        route: '/admin/apps/landing',
         panelUiKey: 'customers_crm',
       },
     ],
@@ -51,7 +51,7 @@ describe('applyAppsMenu (apps-module T7/T9)', () => {
     expect(apps.children?.map((c) => [c.label, c.route, c.panelUiKey])).toEqual([
       ['Todas las apps', '/admin/apps', 'apps'],
       ['Tienda en línea', '/admin/ecommerce', undefined],
-      [LANDING_APP_LABEL, '/admin/customers/crm', 'customers_crm'],
+      [LANDING_APP_LABEL, '/admin/apps/landing', 'customers_crm'],
     ]);
   });
 

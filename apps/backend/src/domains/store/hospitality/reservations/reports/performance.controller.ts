@@ -10,10 +10,13 @@ import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { dateOnlyToDb } from '../stay-dates';
 import { LodgingPerformanceRow, LodgingPerformanceService } from './performance.service';
 import { LodgingPerformanceQueryDto } from './performance.dto';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H7.2) — occupancy, ADR and RevPAR by day and month. */
 @Controller('store/hospitality/reports/performance')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingPerformanceController {
   constructor(
     private readonly performance: LodgingPerformanceService,

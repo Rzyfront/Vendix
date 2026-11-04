@@ -152,6 +152,52 @@
             </app-tooltip>
           </div>
         </div>
+
+        @if (scaleOn() && barcodeScannerOn()) {
+          <div class="setting-cell">
+            <app-setting-toggle
+              [formControl]="variableBarcodesEnabledControl"
+              label="Etiquetas de balanza (código de barras de peso variable)"
+              description="Escanea la etiqueta de tu balanza etiquetadora y el producto entra con su peso"
+              (changed)="onFieldChange()"
+            ></app-setting-toggle>
+            @if (variableBarcodesOn()) {
+              <div class="formats-entry">
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="openVariableBarcodeFormats()"
+                >
+                  <app-icon slot="icon" name="scan-line" size="14"></app-icon>
+                  Configurar formatos de etiqueta
+                </app-button>
+                <span
+                  class="formats-entry__count"
+                  [class.formats-entry__count--empty]="activeVariableBarcodeFormats() === 0"
+                >
+                  {{ variableBarcodeFormatsLabel() }}
+                </span>
+              </div>
+              @if (activeVariableBarcodeFormats() === 0) {
+                <p class="formats-entry__hint">
+                  Sin un formato activo el POS no reconoce las etiquetas de la balanza.
+                </p>
+              }
+            } @else {
+              <p class="formats-entry__hint">
+                Activa este interruptor para configurar los formatos de etiqueta.
+              </p>
+            }
+          </div>
+        } @else {
+          <div class="setting-cell">
+            <p class="formats-entry__hint">
+              <strong>Etiquetas de balanza:</strong> para leer el código que imprime tu
+              balanza etiquetadora, activa {{ variableBarcodeMissingText() }}. Ahí aparece
+              el botón «Configurar formatos de etiqueta».
+            </p>
+          </div>
+        }
       </div>
     </div>
 
@@ -896,3 +942,9 @@
   </div>
   }
 </div>
+
+<app-variable-barcode-formats-modal
+  [(isOpen)]="variableBarcodesModalOpen"
+  [formats]="variableBarcodeFormats()"
+  (save)="onVariableBarcodeFormatsSaved($event)"
+></app-variable-barcode-formats-modal>

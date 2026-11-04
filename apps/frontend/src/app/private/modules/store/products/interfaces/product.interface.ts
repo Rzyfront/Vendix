@@ -61,6 +61,8 @@ export interface Product {
   };
   state: ProductState;
   pricing_type?: 'unit' | 'weight';
+  /** Código del producto en la balanza etiquetadora (1..999999). */
+  scale_code?: number | null;
   product_type?: 'physical' | 'service' | 'prepared';
   service_duration_minutes?: number;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
@@ -387,6 +389,8 @@ export interface CreateProductDto {
   };
   state?: ProductState;
   pricing_type?: 'unit' | 'weight';
+  /** Código del producto en la balanza etiquetadora (1..999999). */
+  scale_code?: number | null;
   product_type?: 'physical' | 'service' | 'prepared';
   service_duration_minutes?: number;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
@@ -499,6 +503,8 @@ export interface UpdateProductDto {
   };
   state?: ProductState;
   pricing_type?: 'unit' | 'weight';
+  /** Código del producto en la balanza etiquetadora (1..999999). */
+  scale_code?: number | null;
   product_type?: 'physical' | 'service' | 'prepared';
   service_duration_minutes?: number;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';

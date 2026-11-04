@@ -816,7 +816,7 @@ export class DomainEditModalComponent implements OnInit, OnChanges {
       .getDomainOwnershipOptions()
       .map((opt) => ({ value: opt.value, label: opt.label }));
     this.appTypeOptions = this.domainsService
-      .getAppTypeOptions()
+      .getAppTypeOptions(!!this.domain()?.store_id)
       .map((opt) => ({ value: opt.value, label: opt.label }));
   }
 

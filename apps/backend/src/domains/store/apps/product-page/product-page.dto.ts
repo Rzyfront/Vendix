@@ -1,3 +1,4 @@
+import { IsAppPage } from '../shared/app-page.dto';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -32,4 +33,14 @@ export class PublishProductPageDto {
   @IsInt()
   @Min(1)
   custom_domain_id?: number;
+}
+
+/**
+ * PATCH /store/apps/product_page/page — Apps F2: the product page's own page (hero,
+ * sections of its own catalog, brand and SEO). The blocks this app accepts
+ * are listed in `shared/app-page.contract.ts` (`APP_PAGE_BLOCKS.product_page`).
+ */
+export class UpdateProductPagePageDto {
+  @IsAppPage('product_page')
+  page!: Record<string, unknown>;
 }

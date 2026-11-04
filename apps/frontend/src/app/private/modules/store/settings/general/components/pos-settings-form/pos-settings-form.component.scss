@@ -62,6 +62,34 @@
   }
 }
 
+// Entrada a los formatos de etiqueta de balanza: un botón real, no una pista.
+.formats-entry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding-inline: 0.375rem;
+}
+
+.formats-entry__count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-success-700);
+
+  &--empty {
+    color: var(--color-warning-700);
+  }
+}
+
+.formats-entry__hint {
+  margin-top: 0.375rem;
+  padding-inline: 0.375rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+}
+
 // ─── Campos que no son toggle ──────────────────────────
 // Un label, el control y una pista de una línea que dice qué cambia el valor.
 

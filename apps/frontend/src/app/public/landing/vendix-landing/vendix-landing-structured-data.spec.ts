@@ -21,7 +21,9 @@ describe('buildVendixStructuredData', () => {
     expect(org['description']).toContain('Software colombiano');
     expect(org['address']['addressLocality']).toBe('Riohacha');
     expect(org['address']['addressCountry']).toBe('CO');
-    expect(org['address']['streetAddress']).toBeUndefined();
+    expect(org['address']['streetAddress']).toBe('Calle 14H 26 13, barrio Jorge Pérez');
+    expect(org['legalName']).toBe('QUICKSS SOLUCIONES RÁPIDAS DE SOFTWARE S.A.S.');
+    expect(org['taxID']).toBe('902056589-9');
     expect(org['areaServed']).toBe('CO');
   });
 

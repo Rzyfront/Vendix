@@ -180,6 +180,7 @@ export function getDefaultStoreSettings(): StoreSettings {
       },
       barcode_scanner: {
         enabled: false,
+        variable_barcodes: { enabled: false, formats: [] },
       },
       customer_queue: {
         enabled: false,
@@ -628,10 +629,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       enabled: false,
     },
 
-    // Módulo Apps (apps-module D3/T8) — apagado por defecto: con `false` el
-    // menú lateral queda exactamente como antes del módulo.
+    // Módulo Apps (apps-module D3/T8; apps-vistas-f1 S1) — estándar, encendido
+    // por defecto. El interruptor se conserva: con `false` el menú lateral queda
+    // exactamente como antes del módulo (garantía de rollback).
     apps: {
-      enabled: false,
+      enabled: true,
     },
 
     // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & UI

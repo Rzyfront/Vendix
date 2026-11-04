@@ -10,13 +10,13 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs/operators';
-import { HotelSearchComponent } from '../../private/modules/ecommerce/pages/hotel-booking/hotel-search.component';
 import {
   StoreSeoService,
   plainDescription,
 } from '../../private/modules/ecommerce/services/store-seo';
 import { IconComponent } from '../../shared/components/icon/icon.component';
-import { ProductComplementsComponent } from '../product-page/components/product-complements.component';
+import { withPageSeo } from '../app-page/app-page-seo';
+import { BookingPageHomeViewComponent } from './booking-page-home-view.component';
 import { BookingPageService } from './booking-page.service';
 import { defaultBookingSearch } from './booking-page.util';
 
@@ -34,7 +34,7 @@ import { defaultBookingSearch } from './booking-page.util';
 @Component({
   selector: 'app-booking-page-home',
   standalone: true,
-  imports: [HotelSearchComponent, IconComponent, ProductComplementsComponent],
+  imports: [IconComponent, BookingPageHomeViewComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (state() === 'loading') {
@@ -51,53 +51,33 @@ import { defaultBookingSearch } from './booking-page.util';
         </p>
       </section>
     } @else {
-      <section class="mx-auto w-full max-w-4xl px-4 pt-8" data-testid="booking-page-hero">
-        <p class="text-2xl font-bold text-text-primary md:text-3xl">{{ heading() }}</p>
-        <p class="mt-1 text-sm text-text-secondary">
-          Elige tus fechas, mira las habitaciones disponibles con su tarifa y su política de cancelación, y reserva en línea.
-        </p>
-      </section>
-
-      @if (hasSearch()) {
-        <app-hotel-search />
-      }
-
-      <section class="mx-auto w-full max-w-4xl px-4 pb-6" data-testid="booking-page-checkin-info">
-        <div class="flex items-start gap-3 rounded-lg border border-border p-3 text-sm">
-          <app-icon name="clipboard-check" [size]="20" class="mt-0.5 shrink-0 text-text-secondary" />
-          <p class="text-text-secondary">
-            <strong class="text-text-primary">Check-in en línea.</strong>
-            Cuando tu reserva esté confirmada, en «Tu reserva» podrás registrar a los huéspedes y sus documentos antes de llegar.
-          </p>
-        </div>
-      </section>
-
-      @if (productIds().length > 0) {
-        <div class="border-t border-border bg-surface-secondary/40" data-testid="booking-page-products">
-          <app-product-complements [productIds]="productIds()" title="Para tu estadía" [compact]="true" />
-        </div>
-      }
+      <app-booking-page-home-view
+        [productIds]="productIds()"
+        [page]="page()"
+        [storeName]="storeSeo.storeName()"
+        [hasSearch]="hasSearch()"
+      />
     }
   `,
 })
 export class BookingPageHomeComponent {
   private readonly bookingPage = inject(BookingPageService);
-  private readonly storeSeo = inject(StoreSeoService);
+  protected readonly storeSeo = inject(StoreSeoService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly state = signal<'loading' | 'ready' | 'unavailable'>('loading');
   readonly productIds = computed(() => this.bookingPage.config()?.product_ids ?? []);
+
+  /** The owner's own page; `null` keeps the page exactly as it was (apps-f2 S5). */
+  readonly page = computed(() => this.bookingPage.config()?.page ?? null);
+
   /** The search screen reads its dates from the URL once, on creation. */
   readonly hasSearch = toSignal(
     this.route.queryParamMap.pipe(map((q) => !!q.get('arrival_date') && !!q.get('departure_date'))),
     { initialValue: false },
   );
-  readonly heading = computed(() => {
-    const name = this.storeSeo.storeName();
-    return name ? `Reserva en ${name}` : 'Reserva tu habitación';
-  });
 
   constructor() {
     this.bookingPage
@@ -123,7 +103,8 @@ export class BookingPageHomeComponent {
     effect(() => {
       const name = this.storeSeo.storeName();
       if (!name || this.state() !== 'ready') return;
-      this.storeSeo.apply(this, {
+      const page = this.page();
+      this.storeSeo.apply(this, withPageSeo({
         title: `Reservas | ${name}`,
         description: plainDescription(
           null,
@@ -138,7 +119,7 @@ export class BookingPageHomeComponent {
           name,
           url: `${this.storeSeo.origin}/`,
         },
-      });
+      }, page));
     });
     this.destroyRef.onDestroy(() => this.storeSeo.release(this));
   }

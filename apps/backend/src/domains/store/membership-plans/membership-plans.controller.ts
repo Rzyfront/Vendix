@@ -21,6 +21,8 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Store-scoped CRUD for membership plans (generalized membership core).
@@ -32,7 +34,8 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  *   - DELETE          → store:membership_plans:delete (soft when referenced, else hard)
  */
 @Controller('store/memberships/plans')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('memberships_plans')
 export class MembershipPlansController {
   constructor(
     private readonly membershipPlansService: MembershipPlansService,

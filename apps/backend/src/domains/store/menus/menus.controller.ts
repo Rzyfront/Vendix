@@ -19,6 +19,8 @@ import {
   MenuQueryDto,
   UpdateMenuDto,
 } from './dto';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Store-scoped CRUD for Menus (Restaurant Suite — Fase G).
@@ -35,7 +37,8 @@ import {
  *  read/create/update/delete → store:menus:read|create|update|delete
  */
 @Controller('store/menus')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('restaurant_ops_menus')
 export class MenusController {
   constructor(
     private readonly menusService: MenusService,

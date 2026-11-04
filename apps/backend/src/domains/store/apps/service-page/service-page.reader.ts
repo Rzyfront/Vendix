@@ -1,6 +1,15 @@
 import { Prisma } from '@prisma/client';
+import {
+  AppDomainAlias,
+  parseAppDomainAliases,
+} from '../shared/app-domain-aliases';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { sellableProductsWhere } from '../product-page/product-page.reader';
+import {
+  AppPageDocument,
+  carryPage,
+  readAppPage,
+} from '../shared/app-page.contract';
 
 /** Most services the owner can feature at the top of the page. */
 export const MAX_FEATURED_SERVICES = 12;
@@ -21,6 +30,13 @@ export interface ServicePageConfig {
    * `app_type` that domain had before, so unpublishing gives it back.
    */
   custom_domain_previous_app_type?: string | null;
+  /** Apps F2: the app's own page (`app-page.contract.ts`), kept as stored. */
+  page?: unknown;
+  /**
+   * Apps F5: the store's own domains that also serve this app, besides its
+   * primary Vendix subdomain (`shared/app-domain-aliases.ts`).
+   */
+  custom_domain_aliases?: AppDomainAlias[];
 }
 
 /**
@@ -69,10 +85,12 @@ export function parseServicePageConfig(raw: unknown): ServicePageConfig {
       : {};
   const previous = obj.custom_domain_previous_app_type;
   return {
+    ...carryPage(raw),
     featured_service_ids: intList(obj.featured_service_ids),
     product_ids: intList(obj.product_ids),
     custom_domain_previous_app_type:
       typeof previous === 'string' ? previous : null,
+    custom_domain_aliases: parseAppDomainAliases(raw),
   };
 }
 
@@ -87,6 +105,8 @@ export interface PublishedServicePage {
   services: PublishedPageItem[];
   featured_service_ids: number[];
   products: PublishedPageItem[];
+  /** Apps F2: the page the owner saved, or `null` (page as before F2). */
+  page: AppPageDocument | null;
 }
 
 /**
@@ -153,5 +173,6 @@ export async function readPublishedServicePage(
     products: config.product_ids
       .map((id) => productsById.get(id))
       .filter((p): p is PublishedPageItem => !!p),
+    page: readAppPage('service_page', app.config),
   };
 }

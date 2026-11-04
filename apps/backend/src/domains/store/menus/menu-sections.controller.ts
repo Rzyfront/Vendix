@@ -20,6 +20,8 @@ import {
   SortMenuSectionsDto,
   UpdateMenuSectionDto,
 } from './dto';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Sections and items nested under `/api/store/menus/:menuId/sections`.
@@ -29,7 +31,8 @@ import {
  * old sort_order. Idempotent.
  */
 @Controller('store/menus/:menuId/sections')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('restaurant_ops_menus')
 export class MenuSectionsController {
   constructor(
     private readonly sectionsService: MenuSectionsService,

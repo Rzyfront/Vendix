@@ -24,6 +24,16 @@ const cases = [
   ['/no-existe.js', 'vendix.online', {}, '/no-existe.js'],
   ['/.well-known/apple-app-site-association', 'www.vendix.online', {}, '/.well-known/apple-app-site-association'],
   ['/legal/privacidad', null, {}, '/index.html'],
+  // www de dominio propio de tienda → apex (el backend solo conoce el apex; en www la tienda sale en blanco).
+  ['/', 'www.mesura.beauty', {}, '301 https://mesura.beauty/'],
+  ['/productos/labial-rojo', 'WWW.Mesura.Beauty', { utm_source: { value: 'ig' } }, '301 https://mesura.beauty/productos/labial-rojo?utm_source=ig'],
+  ['/main-ABC.js', 'www.gorrerolicor.online', {}, '301 https://gorrerolicor.online/main-ABC.js'],
+  ['/.well-known/acme-challenge/x', 'www.mesura.beauty', {}, '/.well-known/acme-challenge/x'],
+  ['/', 'mesura.beauty', {}, '/index.html'],
+  ['/', 'tienda.mesura.beauty', {}, '/index.html'],
+  // Subdominios de vendix.online no se tocan (solo www.vendix.online, arriba).
+  ['/', 'www.tienda.vendix.online', {}, '/index.html'],
+  ['/', 'www.', {}, '/index.html'],
 ];
 
 for (const [uri, host, qs, expected] of cases) {

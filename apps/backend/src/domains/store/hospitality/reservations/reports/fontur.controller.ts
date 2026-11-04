@@ -9,6 +9,8 @@ import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingFonturService } from './fontur.service';
 import { LodgingFonturQueryDto } from './fontur.dto';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 
@@ -20,7 +22,8 @@ function civilDate(date: string): string {
 
 /** Hospitality Suite (H4.4) — base of the quarterly Fontur contribution. */
 @Controller('store/hospitality/reports/fontur')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingFonturController {
   constructor(
     private readonly fontur: LodgingFonturService,

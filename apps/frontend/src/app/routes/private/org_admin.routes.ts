@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { AuthGuard } from '../../core/guards/auth.guard';
 import { fiscalManagementGuard } from '../../core/guards/fiscal-management.guard';
 import { onboardingGuard } from '../../core/guards/onboarding.guard';
+import { orgPanelUiGuard } from '../../core/guards/panel-ui.guard';
 
 export const orgAdminRoutes: Routes = [
   {
@@ -15,7 +16,9 @@ export const orgAdminRoutes: Routes = [
     // (including sibling→sibling SPA nav where the parent `admin` stays
     // mounted and its canActivate would NOT re-fire). This is what makes the
     // owner onboarding truly unavoidable, not just on hard reload.
-    canActivateChild: [onboardingGuard],
+    // orgPanelUiGuard (apps-f4 S5): access gate + ORG_ADMIN panel_ui ceiling.
+    // Audit mode: it only records; it blocks only with the global flag on.
+    canActivateChild: [onboardingGuard, orgPanelUiGuard],
     children: [
       {
         path: '',

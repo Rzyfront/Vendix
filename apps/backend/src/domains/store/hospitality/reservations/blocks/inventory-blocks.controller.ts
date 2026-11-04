@@ -5,6 +5,8 @@ import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingInventoryBlocksService } from './inventory-blocks.service';
 import { CreateInventoryBlockDto } from './inventory-block.dto';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /**
  * Hospitality Suite (H5.3) — maintenance/owner-use blocks. The manager edits
@@ -12,7 +14,8 @@ import { CreateInventoryBlockDto } from './inventory-block.dto';
  * shows the active blocks.
  */
 @Controller('store/hospitality/blocks')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingInventoryBlocksController {
   constructor(
     private readonly blocksService: LodgingInventoryBlocksService,

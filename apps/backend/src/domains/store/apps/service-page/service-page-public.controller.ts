@@ -36,6 +36,8 @@ export class ServicePagePublicController {
       service_ids: page.services.map((s) => s.id),
       featured_service_ids: page.featured_service_ids,
       product_ids: page.products.map((p) => p.id),
+      // Apps F2: only when the owner saved a page (pre-F2 response otherwise).
+      ...(page.page ? { page: page.page } : {}),
     });
   }
 }

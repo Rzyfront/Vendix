@@ -22,13 +22,16 @@ import {
   ReplaceFormulaItemsDto,
   UpdateFormulaDto,
 } from '../dto';
+import { IndustryModuleGuard } from '../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../common/decorators/industry-module.decorator';
 
 /**
  * Fórmulas de manufactura (recetas con código/versión/estado).
  * Sin try/catch: las excepciones llegan al filtro global con su status real.
  */
 @Controller('store/manufacturing/formulas')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('manufacturing_formulas')
 export class FormulasController {
   constructor(
     private readonly formulasService: FormulasService,

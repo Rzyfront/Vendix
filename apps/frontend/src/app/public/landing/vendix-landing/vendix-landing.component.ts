@@ -31,7 +31,8 @@ import {
 import { VexiToolTraceComponent } from '../../../shared/components/vexi-dock/vexi-tool-trace.component';
 import type { ToolStep } from '../../../core/store/vexi/vexi.actions';
 import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
-import { environment } from '../../../../environments/environment';
+import { CommercialConsentService } from './commercial-consent/commercial-consent.service';
+import { CommercialConsentBannerComponent } from './commercial-consent/commercial-consent-banner.component';
 import { SectorGuidesComponent } from '../guides/sector-guides.component';
 import { SECTOR_GUIDES_ENABLED } from '../guides/sector-guides.config';
 import {
@@ -264,15 +265,6 @@ const DEMO_ORIGINS = [
   'https://fonts.gstatic.com',
 ];
 
-const COMMERCIAL_CAMPAIGN_PARAMS = [
-  'utm_source',
-  'utm_medium',
-  'utm_campaign',
-  'utm_term',
-  'utm_content',
-  'gclid',
-];
-
 @Component({
   selector: 'app-vendix-landing',
   standalone: true,
@@ -286,6 +278,7 @@ const COMMERCIAL_CAMPAIGN_PARAMS = [
     VexiAvatarComponent,
     VexiToolTraceComponent,
     SectorGuidesComponent,
+    CommercialConsentBannerComponent,
   ],
   templateUrl: './vendix-landing.component.html',
   styleUrls: ['./vendix-landing.component.scss'],
@@ -315,6 +308,7 @@ export class VendixLandingComponent implements OnInit {
   private router = inject(Router);
   private publicPlansService = inject(PublicPlansService);
   private tenantFacade = inject(TenantFacade);
+  readonly commercialConsent = inject(CommercialConsentService);
 
   // State Signals (Zoneless compliant)
   readonly tenantConfig = signal<any>(null);
@@ -539,7 +533,7 @@ export class VendixLandingComponent implements OnInit {
       feature2: {
         icon: 'clock',
         title: 'Reserva en Línea',
-        desc: 'Tus clientes reservan, cancelan o reprograman desde tu tienda en línea, y las inasistencias se marcan solas.',
+        desc: 'Tus clientes reservan, cancelan o reprograman desde tu tienda en línea, y las citas confirmadas a las que no llegan quedan marcadas como inasistencia al día siguiente.',
       },
       image: 'assets/images/industries/services',
     },
@@ -809,7 +803,8 @@ export class VendixLandingComponent implements OnInit {
   );
 
   ngOnInit(): void {
-    this.initializeCommercialAnalytics();
+    // GA4 solo se carga tras «Aceptar» (SEO-TECH-06); fuera de la portada no mide.
+    this.destroyRef.onDestroy(this.commercialConsent.attach());
     // Tenant config listener
     this.tenantConfig.set({
       branding: {
@@ -837,69 +832,6 @@ export class VendixLandingComponent implements OnInit {
       this.destroyRef.onDestroy(() =>
         this.document.getElementById('vendix-jsonld')?.remove(),
       );
-    }
-  }
-
-  private initializeCommercialAnalytics(): void {
-    const measurementId = environment.commercialAnalyticsId;
-    if (!this.isBrowser || !measurementId) return;
-    if (
-      !['vendix.online', 'www.vendix.online'].includes(window.location.hostname) ||
-      window.location.pathname !== '/'
-    ) return;
-
-    // Analytics must never become a dependency of the landing or app startup.
-    try {
-      const disableKey = `ga-disable-${measurementId}`;
-      const analyticsWindow = window as unknown as Window &
-        Record<string, unknown> & {
-          dataLayer?: unknown[];
-          gtag?: (...args: unknown[]) => void;
-        };
-      analyticsWindow[disableKey] = false;
-      this.destroyRef.onDestroy(() => {
-        analyticsWindow[disableKey] = true;
-      });
-      analyticsWindow.dataLayer ??= [];
-      analyticsWindow.gtag ??= function () {
-        analyticsWindow.dataLayer!.push(arguments);
-      };
-
-      if (!document.getElementById('vendix-commercial-analytics')) {
-        analyticsWindow.gtag('js', new Date());
-        const script = document.createElement('script');
-        script.id = 'vendix-commercial-analytics';
-        script.async = true;
-        script.src = `https://www.googletagmanager.com/gtag/js?id=${measurementId}`;
-        document.head.appendChild(script);
-      }
-
-      // Keep only campaign parameters so GA4 can attribute the visit; any other
-      // query param is dropped to avoid leaking tokens or personal data.
-      const params = new URLSearchParams(window.location.search);
-      const campaignQuery = COMMERCIAL_CAMPAIGN_PARAMS.filter((key) =>
-        params.has(key),
-      )
-        .map((key) => `${key}=${encodeURIComponent(params.get(key)!)}`)
-        .join('&');
-      const pageLocation =
-        window.location.origin + '/' + (campaignQuery ? `?${campaignQuery}` : '');
-
-      analyticsWindow.gtag('config', measurementId, {
-        send_page_view: false,
-        page_location: pageLocation,
-        page_referrer: document.referrer.split(/[?#]/)[0],
-        cookie_domain: window.location.hostname,
-        allow_google_signals: false,
-        allow_ad_personalization_signals: false,
-      });
-      analyticsWindow.gtag('event', 'page_view', {
-        send_to: measurementId,
-        page_location: pageLocation,
-        page_title: 'Vendix — Web comercial',
-      });
-    } catch {
-      // A blocked tag must not prevent rendering, pricing or navigation.
     }
   }
 

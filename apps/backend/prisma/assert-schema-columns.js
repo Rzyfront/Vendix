@@ -97,6 +97,11 @@ const REQUIRED_COLUMNS = [
   // producto; sin ella se cae el catálogo, el POS y el editor.
   'products.usage_nature',
 
+  // --- Código de balanza (migración 20261108090000) -----------------------
+  // Prisma lo selecciona en toda lectura de producto; sin la columna se cae
+  // el catálogo, el POS y el editor.
+  'products.scale_code',
+
   // --- Alcance fiscal (lo que cubría el guard anterior, ahora del lado DB) -
   'organizations.fiscal_scope',
   'accounting_entities.fiscal_scope',

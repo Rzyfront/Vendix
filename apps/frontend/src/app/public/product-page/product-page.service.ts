@@ -4,11 +4,14 @@ import { Observable, of } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { TenantFacade } from '../../core/store';
+import type { AppPageDocument } from '../../private/modules/store/apps/templates/app-page.types';
 
 /** Public config of the store's product page (`GET /ecommerce/product-page`). */
 export interface ProductPagePublicConfig {
   product: { id: number; slug: string; name: string };
   complement_product_ids: number[];
+  /** The owner's own page (apps-f2); absent when never saved. */
+  page?: AppPageDocument;
 }
 
 /**

@@ -23,10 +23,13 @@ import {
 } from './dto/split-order.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /** One physical order, independently payable financial accounts. */
 @Controller('store/orders')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('restaurant_ops_tables')
 export class SplitOrderController {
   constructor(
     private readonly splitOrderService: SplitOrderService,
