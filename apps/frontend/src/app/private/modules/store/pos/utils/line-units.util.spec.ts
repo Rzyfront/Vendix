@@ -7,6 +7,7 @@ import {
   resolvePriceUnitQuantity,
   resolveSaleQuantity,
   resolveSaleUnitSnapshot,
+  resolveStockUnitsConsumed,
 } from './line-units.util';
 
 /**
@@ -242,5 +243,78 @@ describe('resolveSaleUnitSnapshot · peso legado (PR #1062 ronda 4, punto 2)', (
         weighed_as: { code: 'g', amount: 300 },
       }),
     ).toBe(0.3);
+  });
+});
+
+describe('resolveStockUnitsConsumed — unidades de stock que viajan al cobro', () => {
+  it('peso legado 0,180 kg con stock en g (factor 1000) descuenta 180, no 1', () => {
+    expect(
+      resolveStockUnitsConsumed({
+        quantity: 1,
+        weight: 0.18,
+        weight_unit: 'kg',
+        is_weight_product: true,
+        stock_units_per_weight_unit: 1000,
+      }),
+    ).toBe(180);
+  });
+
+  it('respeta el factor de la unidad de stock: 2,5 kg con stock en kg ⇒ 3 (redondeo a Int)', () => {
+    expect(
+      resolveStockUnitsConsumed({
+        quantity: 1,
+        weight: 2.5,
+        weight_unit: 'kg',
+        is_weight_product: true,
+        stock_units_per_weight_unit: 1,
+      }),
+    ).toBe(3);
+  });
+
+  it('pesado en g con stock en g (factor 1) descuenta los gramos', () => {
+    expect(
+      resolveStockUnitsConsumed({
+        quantity: 1,
+        weight: 180,
+        weight_unit: 'g',
+        is_weight_product: true,
+        stock_units_per_weight_unit: 1,
+      }),
+    ).toBe(180);
+  });
+
+  it('peso legado SIN unidad de stock declarada queda null (histórico, decisión pendiente)', () => {
+    expect(
+      resolveStockUnitsConsumed({
+        quantity: 1,
+        weight: 0.18,
+        weight_unit: 'kg',
+        is_weight_product: true,
+      }),
+    ).toBeNull();
+  });
+
+  it('unidad de venta: 180 g ya están en unidad mínima — no infla a 180 000', () => {
+    expect(
+      resolveStockUnitsConsumed({
+        quantity: 180,
+        sale_unit_code: 'kg',
+        stock_units_per_sale_unit: 1000,
+      }),
+    ).toBeNull();
+  });
+
+  it('presentación real: 2 rollos de 20 000 mm ⇒ 40 000', () => {
+    expect(
+      resolveStockUnitsConsumed({
+        quantity: 2,
+        units_per_package: 20000,
+        is_package_unit: true,
+      }),
+    ).toBe(40000);
+  });
+
+  it('línea por pieza ⇒ null (el backend usa quantity)', () => {
+    expect(resolveStockUnitsConsumed({ quantity: 4 })).toBeNull();
   });
 });

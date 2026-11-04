@@ -3816,6 +3816,59 @@ describe('PaymentsService', () => {
         expect(mismatchCalls).toHaveLength(0);
       });
     });
+
+    describe('buildOrderItemSnapshot — stock_units_consumed de la línea de PESO legado', () => {
+      const params = (item: Record<string, unknown>, tierSnap: unknown = null) => ({
+        item,
+        productName: 'Queso costeño',
+        itemType: 'physical',
+        quantity: 1,
+        lineUnits: 0.18,
+        catalogUnitPrice: 20000,
+        catalogFinalPrice: 20000,
+        costPrice: null,
+        unitBasePrice: 20000,
+        finalUnitPrice: 20000,
+        isPriceOverridden: false,
+        productId: 10,
+        storeId: 3,
+        userId: 42,
+        tierSnap,
+        taxInfo: { total_rate: 0, total_tax_amount: 0, taxes: [] },
+      });
+
+      it('0,180 kg con 180 unidades de stock persiste 180 (no cae a quantity = 1)', () => {
+        const row = (service as any).buildOrderItemSnapshot(
+          params({ weight: 0.18, weight_unit: 'kg', stock_units_consumed: 180 }),
+        );
+        expect(row.quantity).toBe(1);
+        expect(row.stock_units_consumed).toBe(180);
+      });
+
+      it('sin el número en el payload la línea de peso queda null (histórico)', () => {
+        const row = (service as any).buildOrderItemSnapshot(
+          params({ weight: 0.18, weight_unit: 'kg', stock_units_consumed: null }),
+        );
+        expect(row.stock_units_consumed).toBeNull();
+      });
+
+      it('la presentación de la tarifa sigue mandando', () => {
+        const row = (service as any).buildOrderItemSnapshot(
+          params(
+            { weight: 0.18, stock_units_consumed: 180 },
+            { tier_id: 1, tier_name: 'Bulto', stock_units_consumed: 50 },
+          ),
+        );
+        expect(row.stock_units_consumed).toBe(50);
+      });
+
+      it('una línea por pieza ignora el número del payload', () => {
+        const row = (service as any).buildOrderItemSnapshot(
+          params({ stock_units_consumed: 180000 }),
+        );
+        expect(row.stock_units_consumed).toBeNull();
+      });
+    });
   });
 
   /**

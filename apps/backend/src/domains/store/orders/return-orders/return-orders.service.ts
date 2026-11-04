@@ -23,6 +23,10 @@ import {
   TaxBreakdownItem,
 } from 'src/common/interfaces/tax-breakdown.interface';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import {
+  resolveReturnStockUnits,
+  ReturnSoldLine,
+} from './return-stock-units.util';
 
 @Injectable()
 export class ReturnOrdersService {
@@ -245,6 +249,11 @@ export class ReturnOrdersService {
         throw new BadRequestException('Only draft returns can be processed');
       }
 
+      // Líneas de la venta original: la devolución mueve las mismas unidades
+      // de stock que la venta descontó (`stock_units_consumed ?? quantity`),
+      // no la cantidad lógica de la línea (1 en una pesada de 0,180 kg).
+      const soldLines = await this.loadSoldLines(tx, returnOrder);
+
       // Process each item
       for (const item of items) {
         const returnItem = returnOrder.return_order_items.find(
@@ -259,6 +268,7 @@ export class ReturnOrdersService {
               tx,
               returnOrder,
               returnItem,
+              resolveReturnStockUnits(returnItem, soldLines),
               item.location_id,
             );
             break;
@@ -269,6 +279,7 @@ export class ReturnOrdersService {
               tx,
               returnOrder,
               returnItem,
+              resolveReturnStockUnits(returnItem, soldLines),
               item.location_id,
             );
             break;
@@ -279,6 +290,7 @@ export class ReturnOrdersService {
               tx,
               returnOrder,
               returnItem,
+              resolveReturnStockUnits(returnItem, soldLines),
               item.location_id,
             );
             break;
@@ -454,6 +466,33 @@ export class ReturnOrdersService {
   }
 
   /**
+   * Líneas de la orden de VENTA a la que apunta la devolución, con el snapshot
+   * de unidades de stock descontadas. Una devolución a proveedor
+   * (`purchase_order`) o sin orden no tiene líneas de venta: lista vacía y
+   * cada línea reingresa su cantidad, como siempre.
+   */
+  private async loadSoldLines(
+    tx: any,
+    returnOrder: any,
+  ): Promise<ReturnSoldLine[]> {
+    if (
+      !returnOrder.related_order_id ||
+      returnOrder.related_order_type === 'purchase_order'
+    ) {
+      return [];
+    }
+    return tx.order_items.findMany({
+      where: { order_id: returnOrder.related_order_id },
+      select: {
+        product_id: true,
+        product_variant_id: true,
+        quantity: true,
+        stock_units_consumed: true,
+      },
+    });
+  }
+
+  /**
    * Bodega sobre la que se mueve el stock de una línea devuelta.
    *
    * Los tres manejadores leían `returnOrder.location_id`, que no es columna de
@@ -491,6 +530,7 @@ export class ReturnOrdersService {
     tx: any,
     returnOrder: any,
     returnItem: any,
+    stockUnits: number,
     locationId?: number,
   ) {
     const target_location_id = await this.resolveItemLocation(
@@ -504,7 +544,7 @@ export class ReturnOrdersService {
         product_id: returnItem.product_id,
         variant_id: returnItem.product_variant_id || undefined,
         location_id: target_location_id,
-        quantity_change: returnItem.quantity,
+        quantity_change: stockUnits,
         movement_type: 'return',
         reason: this.movementReason('reingreso', returnOrder, returnItem),
         create_movement: true,
@@ -517,6 +557,7 @@ export class ReturnOrdersService {
     tx: any,
     returnOrder: any,
     returnItem: any,
+    stockUnits: number,
     locationId?: number,
   ) {
     const target_location_id = await this.resolveItemLocation(
@@ -531,7 +572,7 @@ export class ReturnOrdersService {
         product_id: returnItem.product_id,
         variant_id: returnItem.product_variant_id || undefined,
         location_id: target_location_id,
-        quantity_change: -returnItem.quantity,
+        quantity_change: -stockUnits,
         movement_type: 'damage',
         reason: this.movementReason('baja', returnOrder, returnItem),
         create_movement: true,
@@ -545,6 +586,7 @@ export class ReturnOrdersService {
     tx: any,
     returnOrder: any,
     returnItem: any,
+    stockUnits: number,
     locationId?: number,
   ) {
     const target_location_id = await this.resolveItemLocation(
@@ -558,7 +600,7 @@ export class ReturnOrdersService {
         product_id: returnItem.product_id,
         variant_id: returnItem.product_variant_id || undefined,
         location_id: target_location_id,
-        quantity_change: returnItem.quantity,
+        quantity_change: stockUnits,
         movement_type: 'adjustment',
         reason: this.movementReason('reparación', returnOrder, returnItem),
         create_movement: true,

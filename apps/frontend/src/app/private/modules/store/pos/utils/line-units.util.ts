@@ -1,3 +1,5 @@
+import { stockUnitsForWeighAmount } from './manual-weigh.util';
+
 /**
  * Cuántas "unidades de precio" cobra una línea del carrito — QUI-648.
  *
@@ -70,6 +72,12 @@ export interface LineUnitsInput {
    * `weight` en la principal.
    */
   weighed_as?: WeighedAs | null;
+  /**
+   * Línea de peso legado: unidades de STOCK por cada unidad de `weight_unit`
+   * (kg con stock en g ⇒ 1000). Solo se anota cuando el producto declara su
+   * unidad de stock (`stock_uom`); `null` = sin unidad de stock conocida.
+   */
+  stock_units_per_weight_unit?: number | null;
 }
 
 /** Unidad y cantidad elegidas al pesar (puede diferir de la principal). */
@@ -181,4 +189,35 @@ export function formatSaleQuantity(item: LineUnitsInput): string {
     ? item.weight_unit || 'kg'
     : item.sale_unit_code;
   return unit ? `${text} ${unit}` : text;
+}
+
+/**
+ * Unidades de STOCK que consume la línea, o `null` cuando son las mismas que
+ * `quantity` (el backend cae a `stock_units_consumed ?? quantity`). Es lo que
+ * viaja en `stock_units_consumed` del cobro.
+ *
+ *  - PESO legado: `quantity` es 1 y el peso es solo el multiplicador
+ *    monetario; sin esto el inventario descontaba 1 por pesada. Se convierte
+ *    `weight` a unidades de stock con el factor de la unidad de stock
+ *    declarada del producto (0,180 kg con stock en g ⇒ 180), con el mismo
+ *    redondeo que el modal de pesado. Sin factor conocido devuelve `null` y
+ *    la línea conserva el comportamiento histórico: qué unidad de stock tiene
+ *    un producto de peso SIN `stock_uom` es una decisión pendiente (las
+ *    compras lo cargan 1:1 en kg; ver REPORTE-PESO-LEGADO.md).
+ *  - PRESENTACIÓN (empaque > 1): `quantity` cuenta paquetes ⇒ paquetes × empaque.
+ *  - Unidad de VENTA (`stock_units_per_sale_unit > 1`, "3 m"): `quantity` YA
+ *    está en la unidad mínima (3000 mm, ver el encabezado). Multiplicarla otra
+ *    vez por el factor inflaba el número ×1000 (180 g ⇒ 180 000) y el motor de
+ *    promociones lo leía como 180 000 paquetes. No hay nada que convertir.
+ */
+export function resolveStockUnitsConsumed(item: LineUnitsInput): number | null {
+  const weight = Number(item.weight ?? 0) || 0;
+  if (item.is_weight_product && weight > 0) {
+    const factor = Number(item.stock_units_per_weight_unit ?? 0);
+    if (!Number.isFinite(factor) || factor <= 0) return null;
+    return stockUnitsForWeighAmount(weight, factor, 1);
+  }
+  const packSize = resolveLinePackSize(item);
+  if (packSize > 1) return (Number(item.quantity ?? 0) || 0) * packSize;
+  return null;
 }

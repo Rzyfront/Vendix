@@ -332,6 +332,39 @@ export class PosSaleUnitService {
   }
 
   /**
+   * Peso legado — unidades de STOCK que equivalen a 1 `unitCode` (la unidad
+   * en la que viaja `weight`): kg con stock en g ⇒ 1000; g con stock en g ⇒ 1.
+   * Sale del catálogo (`factor_to_base` de las dos, misma dimensión), igual
+   * que `weighModalUnits`.
+   *
+   * `null` cuando el producto NO declara `stock_uom_id`, el catálogo no ubica
+   * alguna de las dos o las dimensiones difieren: no se inventa una unidad de
+   * stock y la línea sigue descontando como siempre (`quantity`).
+   */
+  async stockUnitsPerUnit(
+    product: any,
+    unitCode: string | null | undefined,
+  ): Promise<number | null> {
+    const stockId = Number(product?.stock_uom_id ?? 0);
+    const code = String(unitCode ?? '').trim().toLowerCase();
+    if (!Number.isFinite(stockId) || stockId <= 0 || !code) return null;
+    let catalog: UnitOfMeasure[] = [];
+    try {
+      catalog = await this.ensureCatalog();
+    } catch {
+      return null;
+    }
+    const stock = catalog.find((u) => Number(u.id) === stockId);
+    const unit = catalog.find((u) => String(u.code).toLowerCase() === code);
+    if (!stock || !unit || String(stock.dimension) !== String(unit.dimension)) {
+      return null;
+    }
+    const factor =
+      (Number(unit.factor_to_base) || 0) / (Number(stock.factor_to_base) || 0);
+    return Number.isFinite(factor) && factor > 0 ? factor : null;
+  }
+
+  /**
    * PR #1062 error 2 — lectura de báscula (en `scaleUnitCode`, la unidad
    * configurada del equipo) expresada en `targetCode` (principal o unidad de
    * la línea). Sin catálogo o sin equivalencia, la lectura queda intacta.

@@ -54,6 +54,7 @@ import { PosSerialSelectionModalComponent } from '../../pos-serial-selection-mod
 import { SerialNumbersService } from '../../../../serial-numbers/services/serial-numbers.service';
 import { PosCashRegisterService } from '../../../services/pos-cash-register.service';
 import { CartItem } from '../../../models/cart.model';
+import { resolveStockUnitsConsumed } from '../../../utils/line-units.util';
 import {
   COD_FREE_CREDIT_NOTICE,
   shouldSwitchCodToFreeCredit,
@@ -248,14 +249,10 @@ export class PosPaymentStepComponent implements OnInit {
   private readonly serialChoices = new Map<string, { productId: string; variantId: number | null; quantity: number; serialIds: number[]; serialNumbers: string[] }>();
 
   private serialQuantity(item: CartItem): number {
-    // Mirrors PosPaymentService.mapCartItemForPos.stock_units_consumed and the
-    // backend OrderStockCommitService quantity, including pack/stock-unit tiers.
-    const factor = Number(item.units_per_package) > 1
-      ? Number(item.units_per_package)
-      : Number(item.stock_units_per_sale_unit) > 1
-        ? Number(item.stock_units_per_sale_unit)
-        : 1;
-    return item.quantity * factor;
+    // Mismo número que `stock_units_consumed` del cobro y que el commit de
+    // inventario del backend (`stock_units_consumed ?? quantity`). La unidad
+    // de venta ya trae `quantity` en unidad mínima: no se multiplica.
+    return resolveStockUnitsConsumed(item) ?? item.quantity;
   }
 
   private needsImmediateSerialCapture(submit: PaymentSubmit): boolean {

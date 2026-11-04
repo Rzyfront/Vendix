@@ -1578,10 +1578,16 @@ export class PosCartService {
     const totalPrice = item.finalPrice * newWeight;
     const taxMultiplier = newWeight;
 
+    // El factor a stock se calculó para la unidad del alta; si el repesado
+    // cambia de unidad deja de valer y la línea vuelve al histórico.
+    const unitChanged =
+      unitCode !== undefined && unitCode !== (item.weight_unit ?? undefined);
+
     updatedItems[itemIndex] = {
       ...item,
       weight: newWeight,
       ...(unitCode !== undefined ? { weight_unit: unitCode } : {}),
+      ...(unitChanged ? { stock_units_per_weight_unit: null } : {}),
       // Repesar reemplaza la unidad elegida: sin ella, el tiquete usa el peso.
       weighed_as: weighedAs,
       totalPrice,
@@ -2766,6 +2772,9 @@ export class PosCartService {
         weight: isWeightProduct ? weight : undefined,
         weight_unit: isWeightProduct ? (request.weight_unit || 'kg') : undefined,
         weighed_as: isWeightProduct ? (request.weighed_as ?? null) : undefined,
+        stock_units_per_weight_unit: isWeightProduct
+          ? (request.stock_units_per_weight_unit ?? null)
+          : undefined,
         is_weight_product: isWeightProduct,
         // QUI-648 — la escala en la que el cajero capturó y en la que se muestra
         // la línea. `quantity` sigue viviendo en la unidad mínima. Solo se

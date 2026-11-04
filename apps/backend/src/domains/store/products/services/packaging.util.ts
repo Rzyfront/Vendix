@@ -48,6 +48,32 @@ export function resolveStockUnitsConsumed(
 }
 
 /**
+ * Unidades de stock que consume una línea de PESO legado (`weight > 0`).
+ *
+ * En ese camino `order_items.quantity` vale 1 y el peso es solo el
+ * multiplicador monetario; sin este snapshot la validación, el commit de
+ * inventario (`stock_units_consumed ?? quantity`), las capas de costo y las
+ * devoluciones descontaban **1 unidad por línea** pesara lo que pesara.
+ *
+ * La conversión peso → unidades de stock la hace el POS, que es quien conoce
+ * la unidad de stock declarada del producto (`stock_uom` y su
+ * `factor_to_base`): 0,180 kg de un producto con stock en gramos llegan como
+ * 180. El servidor solo acepta el número si es un entero ≥ 0 (el stock es
+ * `Int`); cualquier otra cosa —o una línea que no es de peso— devuelve `null`
+ * y la línea sigue con el comportamiento histórico (`quantity`).
+ */
+export function resolveWeightLineStockUnits(item: {
+  weight?: number | string | null;
+  stock_units_consumed?: number | string | null;
+}): number | null {
+  const weight = Number(item.weight ?? 0);
+  if (!Number.isFinite(weight) || weight <= 0) return null;
+  if (item.stock_units_consumed == null) return null;
+  const units = Number(item.stock_units_consumed);
+  return Number.isInteger(units) && units >= 0 ? units : null;
+}
+
+/**
  * Unidades de stock que mueve una PORCIÓN de una línea ya vendida.
  *
  * Mover 1 bulto de 50 mueve 50 unidades, no 1: la línea de venta guardó cuántas

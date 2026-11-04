@@ -56,7 +56,10 @@ import {
   resolvePriceUnitScale,
   resolvePriceUnits,
 } from '../products/services/price-unit.util';
-import { resolvePackSize } from '../products/services/packaging.util';
+import {
+  resolvePackSize,
+  resolveWeightLineStockUnits,
+} from '../products/services/packaging.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
 import { pickCostPrice } from '../orders/utils/resolve-cost-price';
@@ -3268,7 +3271,14 @@ export class PaymentsService {
           ),
           quantity: Number(item.quantity || 0),
           applied_price_tier_id: item.applied_price_tier_id ?? null,
-          stock_units_consumed: item.stock_units_consumed ?? null,
+          // El motor lee `stock_units_consumed` como "vendido por
+          // presentación" y lo usa como contador de tramos. En una línea de
+          // PESO es la pesada en unidades de stock (180 g), no paquetes: se
+          // omite para que la línea siga contando 1, como siempre.
+          stock_units_consumed:
+            Number(item.weight || 0) > 0
+              ? null
+              : (item.stock_units_consumed ?? null),
         })),
     };
 
@@ -4699,7 +4709,13 @@ export class PaymentsService {
       // usa el variant *Checked* y rechaza el scalar FK directo — exige la
       // relación. Por eso lo asignamos abajo como `applied_price_tier: { connect }`.
       applied_price_tier_name_snapshot: params.tierSnap?.tier_name ?? null,
-      stock_units_consumed: params.tierSnap?.stock_units_consumed ?? null,
+      // La presentación de la tarifa manda; si no hay, una línea de PESO legado
+      // persiste las unidades de stock que calculó el POS (0,180 kg ⇒ 180 g).
+      // Sin esto la validación, el commit de inventario, las capas de costo y
+      // las devoluciones leían `quantity` = 1 para cualquier pesada.
+      stock_units_consumed:
+        params.tierSnap?.stock_units_consumed ??
+        resolveWeightLineStockUnits(params.item),
       // QUI-648 — escala del precio al momento de vender. Solo se guarda
       // cuando realmente hay escala: `null` es "una unidad de stock = una
       // unidad de precio", que es todo el catálogo histórico.
