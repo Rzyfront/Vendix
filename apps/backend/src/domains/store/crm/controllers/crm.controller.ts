@@ -8,6 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { CrmService } from '../services/crm.service';
+import { CrmPublicService } from '../services/crm-public.service';
 import { ActivateCrmDto, UpdateCrmLandingDto } from '../dto/crm.dto';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
@@ -18,6 +19,7 @@ import { ResponseService } from '@common/responses/response.service';
 export class CrmController {
   constructor(
     private readonly crmService: CrmService,
+    private readonly crmPublicService: CrmPublicService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -25,6 +27,14 @@ export class CrmController {
   @Get('landing')
   async getLanding() {
     const result = await this.crmService.getLanding();
+    return this.responseService.success(result);
+  }
+
+  /** F6-A: real store data (products, ecommerce base) for the editor preview. */
+  @Permissions('store:crm:read')
+  @Get('landing/preview-context')
+  async getPreviewContext() {
+    const result = await this.crmPublicService.getPreviewContext();
     return this.responseService.success(result);
   }
 

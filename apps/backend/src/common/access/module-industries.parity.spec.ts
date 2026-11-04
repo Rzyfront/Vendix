@@ -6,10 +6,10 @@ import {
   VERTICAL_MODULE_KEYS,
 } from './module-industries';
 
-// Three byte-identical copies (no executable shared package between runtimes).
+// Two byte-identical copies (no executable shared package between runtimes).
+// The backend one is canonical; the frontend one is its mirror.
 const REPO_ROOT = join(__dirname, '../../../../..');
 const COPIES = [
-  { name: 'shared-types', path: 'libs/shared-types/module-industries.ts' },
   {
     name: 'backend',
     path: 'apps/backend/src/common/access/module-industries.ts',
@@ -21,7 +21,7 @@ const COPIES = [
 ];
 
 describe('module-industries — parity and map invariants', () => {
-  it('the three copies are byte-identical', () => {
+  it('the two copies are byte-identical', () => {
     const [canonical, ...rest] = COPIES.map((c) =>
       readFileSync(join(REPO_ROOT, c.path)),
     );

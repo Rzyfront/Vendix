@@ -141,14 +141,11 @@ export function getModulesHiddenByIndustries(
     (acc, industry) => acc.concat(INDUSTRY_HIDDEN_MODULES[industry] ?? []),
     [],
   );
-  const knownSet = new Set(allKnown);
-
-  const candidateKeys = allKnown.filter((key) => knownSet.has(key));
-  if (candidateKeys.length === 0) {
+  if (allKnown.length === 0) {
     return [];
   }
 
-  return candidateKeys.filter((key) =>
+  return allKnown.filter((key) =>
     industries.every((industry) => {
       const list = INDUSTRY_HIDDEN_MODULES[industry as StoreIndustry];
       return Array.isArray(list) && list.includes(key);

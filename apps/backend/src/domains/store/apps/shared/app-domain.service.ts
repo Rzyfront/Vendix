@@ -218,7 +218,7 @@ export class AppDomainService {
         (candidate) => taken.has(candidate) && !own.has(candidate),
       );
       if (!hostname) {
-        throw new VendixHttpException(ErrorCodes.STORE_APPS_005);
+        throw new VendixHttpException(ErrorCodes.STORE_APPS_018);
       }
       const reusable = own.get(hostname);
       if (reusable !== undefined) {
@@ -258,6 +258,26 @@ export class AppDomainService {
       } catch (error) {
         if (!isUniqueViolation(error)) throw error;
         taken.add(hostname);
+        // A concurrent publish of this same app may have just created this
+        // exact hostname: adopt it instead of leaving a second subdomain
+        // (the -2) next to it, orphaned from the app.
+        const raced = await this.prisma.domain_settings.findFirst({
+          where: {
+            hostname,
+            store_id: storeId,
+            app_type: appType,
+            ownership: 'vendix_subdomain',
+          },
+          select: { id: true, hostname: true },
+        });
+        if (raced) {
+          this.events.emit('domain.activated', {
+            domainId: raced.id,
+            hostname: raced.hostname,
+            store_id: storeId,
+          });
+          return raced;
+        }
         continue;
       }
       this.events.emit('domain.activated', {
@@ -268,7 +288,7 @@ export class AppDomainService {
       });
       return created;
     }
-    throw new VendixHttpException(ErrorCodes.STORE_APPS_005);
+    throw new VendixHttpException(ErrorCodes.STORE_APPS_018);
   }
 
   /**

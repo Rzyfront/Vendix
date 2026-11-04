@@ -11,6 +11,10 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { interval } from 'rxjs';
+import {
+  APP_ONLY_APP_TYPE_OPTIONS,
+  appOnlyAppTypeLabel,
+} from '../../../../../shared/constants/app-domain-app-types';
 
 
 import {
@@ -47,10 +51,6 @@ const PENDING_PROVISIONING_STATUSES = new Set([
   'propagating',
 ]);
 
-import {
-  APP_ONLY_APP_TYPE_OPTIONS,
-  appOnlyAppTypeLabel,
-} from '../../../../../shared/constants/app-domain-app-types';
 @Component({
   selector: 'app-store-domains',
   standalone: true,

@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
+import type { LandingPreviewContext } from '../../apps/landing-builder/landing-preview';
 import { CrmApiResponse, CrmLandingState } from '../models/crm.model';
 
 /**
@@ -53,5 +54,10 @@ export class CrmService {
     return this.http.get<
       CrmApiResponse<{ status: string; error?: string }>
     >(`${this.apiUrl}/generation/${jobId}`);
+  }
+
+  /** F6-A: real store data the landing preview shows (products, store link). */
+  getPreviewContext(): Observable<CrmApiResponse<LandingPreviewContext>> {
+    return this.http.get<CrmApiResponse<LandingPreviewContext>>(`${this.apiUrl}/landing/preview-context`);
   }
 }
