@@ -508,3 +508,52 @@ describe('NotificationsEventsListener — recordatorio de cuota de crédito (cam
     );
   });
 });
+
+describe('NotificationsEventsListener.handleBookingStarted — proveedor como usuario', () => {
+  function build(provider: any) {
+    const notificationsService = {
+      sendToUser: jest.fn().mockResolvedValue({}),
+      createAndBroadcast: jest.fn().mockResolvedValue({}),
+    } as any;
+    const globalPrisma = {
+      service_providers: { findUnique: jest.fn().mockResolvedValue(provider) },
+    } as any;
+    const listener = new NotificationsEventsListener(
+      notificationsService,
+      globalPrisma,
+      {} as any,
+      {} as any,
+      { refreshAndBroadcastQueue: jest.fn() } as any,
+      { emit: jest.fn() } as any,
+      { deliver: jest.fn() } as any,
+    );
+    return { listener, notificationsService };
+  }
+
+  const event = {
+    store_id: 1,
+    booking_id: 42,
+    booking_number: 'BKG-1',
+    customer_name: 'Juan',
+    service_name: 'Corte',
+    provider_id: 9,
+    date: '2026-11-04',
+    start_time: '10:00',
+  };
+
+  it('avisa al usuario del proveedor (user_id directo)', async () => {
+    const { listener, notificationsService } = build({ user_id: 31, employee: null });
+    await listener.handleBookingStarted(event);
+    expect(notificationsService.sendToUser).toHaveBeenCalledWith(
+      1, 31, 'booking_attending', 'Tu turno: Juan', expect.any(String), expect.any(Object),
+    );
+  });
+
+  it('proveedor legado de empleado: avisa al usuario del empleado', async () => {
+    const { listener, notificationsService } = build({ user_id: null, employee: { user_id: 40 } });
+    await listener.handleBookingStarted(event);
+    expect(notificationsService.sendToUser).toHaveBeenCalledWith(
+      1, 40, 'booking_attending', expect.any(String), expect.any(String), expect.any(Object),
+    );
+  });
+});

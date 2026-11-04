@@ -1149,10 +1149,15 @@ export class NotificationsEventsListener {
         const provider =
           await this.global_prisma.service_providers.findUnique({
             where: { id: event.provider_id },
-            include: { employee: { select: { user_id: true } } },
+            select: {
+              user_id: true,
+              employee: { select: { user_id: true } },
+            },
           });
+        // User-backed providers carry `user_id`; legacy employee-backed ones
+        // resolve through the employee's login.
         provider_user_id =
-          (provider as any)?.employee?.user_id ?? null;
+          provider?.user_id ?? provider?.employee?.user_id ?? null;
       } catch (err: any) {
         this.logger.error(
           `[handleBookingStarted] Failed to resolve provider user: ${err.message}`,

@@ -46,6 +46,16 @@ export class ProvidersController {
     );
   }
 
+  @Get('available-users')
+  @Permissions('store:reservations:read')
+  async getAvailableUsers() {
+    const result = await this.providersService.getAvailableUsers();
+    return this.responseService.success(
+      result,
+      'Usuarios disponibles obtenidos exitosamente',
+    );
+  }
+
   @Get('available-employees')
   @Permissions('store:reservations:read')
   async getAvailableEmployees() {

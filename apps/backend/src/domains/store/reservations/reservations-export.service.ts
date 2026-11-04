@@ -61,6 +61,7 @@ export class ReservationsExportService {
           select: {
             display_name: true,
             employee: { select: { first_name: true } },
+            user: { select: { first_name: true } },
           },
         },
         customer: {
@@ -86,6 +87,7 @@ export class ReservationsExportService {
         service_name: b.product?.name ?? '',
         provider_name:
           b.provider?.display_name?.trim() ||
+          b.provider?.user?.first_name?.trim() ||
           b.provider?.employee?.first_name?.trim() ||
           '',
         customer_first_name: b.customer?.first_name?.trim() ?? '',
