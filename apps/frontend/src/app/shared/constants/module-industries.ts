@@ -1,16 +1,16 @@
 /**
  * MODULE_INDUSTRIES — positive map `panel_ui key → industries that enable it`.
  *
- * Canonical source (apps-f4 S1). It lives in `libs/shared-types` and is copied
- * BYTE FOR BYTE to the two runtimes, because the repo has no executable package
- * shared between Nest and Angular (no path mapping; see
+ * Canonical source (apps-f4 S1). The backend copy is the canonical one and is
+ * copied BYTE FOR BYTE to the frontend, because the repo has no executable
+ * package shared between Nest and Angular (no path mapping; see
  * `common/validators/password-policy.parity.spec.ts`):
  *
  *   - apps/backend/src/common/access/module-industries.ts
  *   - apps/frontend/src/app/shared/constants/module-industries.ts
  *
  * `apps/backend/src/common/access/module-industries.parity.spec.ts` fails if
- * any copy drifts. Edit this file, then copy it over both mirrors.
+ * the frontend mirror drifts. Edit this file, then copy it over the mirror.
  *
  * Rules:
  *   - Every key known to the panel (catalog, sidebar, routes) has an entry.
