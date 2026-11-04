@@ -16,11 +16,14 @@
 //
 // Como corre en viewer-request (antes de la caché), todas las rutas
 // reescritas comparten la entrada de caché de /index.html.
-// Redirecciones 301 solo en el host comercial (la función también corre en la
-// distribución de dominios propios de las tiendas, que no se tocan):
+// Redirecciones 301 (la función corre en las dos distribuciones: vendix.online
+// y la de dominios propios de las tiendas):
 //  - www.vendix.online → vendix.online (decisión del 22-oct: apex sin www).
-//  - alias de páginas comerciales → URL canónica (SEO-TECH-14).
-// La query se conserva.
+//  - alias de páginas comerciales → URL canónica (SEO-TECH-14), solo en vendix.online.
+//  - www.<dominio propio> → <dominio propio>: el backend solo registra el apex,
+//    así que en www la tienda no resuelve y sale en blanco. Los subdominios de
+//    vendix.online (www.tienda.vendix.online) no se tocan.
+// El path y la query se conservan.
 var MARKETING_HOST = 'vendix.online';
 var MARKETING_ORIGIN = 'https://vendix.online';
 var MARKETING_ALIASES = {
@@ -39,6 +42,10 @@ function queryString(qs) {
     }
   }
   return parts.length ? '?' + parts.join('&') : '';
+}
+
+function endsWith(value, suffix) {
+  return value.length >= suffix.length && value.substring(value.length - suffix.length) === suffix;
 }
 
 function redirect(location) {
@@ -79,6 +86,9 @@ function handler(event) {
   }
   if (host === MARKETING_HOST && MARKETING_ALIASES[uri]) {
     return redirect(MARKETING_ORIGIN + MARKETING_ALIASES[uri] + queryString(request.querystring));
+  }
+  if (host.indexOf('www.') === 0 && host.length > 4 && !endsWith(host, '.' + MARKETING_HOST)) {
+    return redirect('https://' + host.substring(4) + uri + queryString(request.querystring));
   }
 
   for (var i = 0; i < SPA_PREFIXES.length; i++) {
