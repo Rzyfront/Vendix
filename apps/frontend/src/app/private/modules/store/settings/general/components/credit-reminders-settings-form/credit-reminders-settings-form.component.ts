@@ -1,7 +1,12 @@
 import { Component, computed, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
-import { SettingToggleComponent } from '../../../../../../../shared/components/index';
+import {
+  BadgeComponent,
+  IconComponent,
+  SettingToggleComponent,
+  TooltipComponent,
+} from '../../../../../../../shared/components/index';
 import {
   CreditReminderRule,
   CreditRemindersSettings,
@@ -34,8 +39,10 @@ export const MAX_DAYS_BEFORE = 30;
 @Component({
   selector: 'app-credit-reminders-settings-form',
   standalone: true,
-  imports: [FormsModule, SettingToggleComponent],
+  imports: [FormsModule, SettingToggleComponent, BadgeComponent, TooltipComponent, IconComponent],
   templateUrl: './credit-reminders-settings-form.component.html',
+  // Reutiliza los estilos de bloque de Punto de Venta: esta sección vive dentro de él.
+  styleUrl: '../pos-settings-form/pos-settings-form.component.scss',
 })
 export class CreditRemindersSettingsForm {
   readonly settings = input<CreditRemindersSettings | undefined>();
