@@ -1,4 +1,4 @@
-import { Component, signal, computed, inject, DestroyRef } from '@angular/core';
+import { Component, signal, computed, effect, inject, DestroyRef } from '@angular/core';
 import {
   FormsModule,
   FormBuilder,
@@ -41,6 +41,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { LocationsService } from '../inventory/services/locations.service';
 import { InventoryLocation } from '../inventory/interfaces';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
+import { StoreSettingsFacade } from '../../../../core/store/store-settings/store-settings.facade';
 
 @Component({
   selector: 'app-cash-registers',
@@ -344,20 +345,36 @@ import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler
             helperText="Monto sugerido al abrir esta caja"
           ></app-input>
 
-          <!-- Bodega (override opcional) -->
+          <!-- Bodega: override opcional, u obligatoria con "Bodega de la caja" -->
           <div class="space-y-1">
-            <app-selector
-              formControlName="location_id"
-              label="Bodega (override opcional)"
-              [options]="location_options()"
-              [placeholder]="location_placeholder()"
-              size="md"
-              helpText="Deja vacío para usar la bodega principal de la tienda."
-            />
-            <p class="text-xs text-text-secondary">
-              Útil si esta caja descuenta stock de una bodega distinta a la
-              principal de la tienda.
-            </p>
+            @if (is_register_scope()) {
+              <app-selector
+                formControlName="location_id"
+                label="Bodega de la caja"
+                [options]="location_options()"
+                placeholder="Seleccionar bodega..."
+                [required]="true"
+                size="md"
+                helpText="Obligatoria: esta caja muestra y vende solo el stock de esta bodega."
+              />
+              <p class="text-xs text-text-secondary">
+                La tienda usa «Bodega de la caja»: sin bodega asignada, la caja
+                no se puede abrir.
+              </p>
+            } @else {
+              <app-selector
+                formControlName="location_id"
+                label="Bodega (override opcional)"
+                [options]="location_options()"
+                [placeholder]="location_placeholder()"
+                size="md"
+                helpText="Deja vacío para usar la bodega principal de la tienda."
+              />
+              <p class="text-xs text-text-secondary">
+                Útil si esta caja descuenta stock de una bodega distinta a la
+                principal de la tienda.
+              </p>
+            }
           </div>
         </form>
 
@@ -418,6 +435,14 @@ export class CashRegistersComponent {
   private readonly toast_service = inject(ToastService);
   private readonly dialog_service = inject(DialogService);
   private readonly report_print_service = inject(CashSessionReportPrintService);
+  private readonly store_settings_facade = inject(StoreSettingsFacade);
+
+  /** `inventory.pos_stock_scope === 'register_location'` ("Bodega de la caja"). */
+  readonly is_register_scope = computed(
+    () =>
+      (this.store_settings_facade.settings() as any)?.inventory
+        ?.pos_stock_scope === 'register_location',
+  );
 
   // Tabs configuration
   readonly tabs: ScrollableTab[] = [
@@ -844,6 +869,18 @@ export class CashRegistersComponent {
       default_opening_amount: [0, [Validators.min(0)]],
       location_id: new FormControl<number | null>(null),
     });
+
+    // "Bodega de la caja": the warehouse becomes mandatory for every register.
+    effect(() => {
+      const control = this.register_form.get('location_id')!;
+      if (this.is_register_scope()) {
+        control.setValidators(Validators.required);
+      } else {
+        control.clearValidators();
+      }
+      control.updateValueAndValidity({ emitEvent: false });
+    });
+
     this.loadRegisters();
     this.loadSessions();
     this.loadLocations();
@@ -949,7 +986,15 @@ export class CashRegistersComponent {
   }
 
   onSaveRegister(): void {
-    if (!this.register_form.valid) return;
+    if (!this.register_form.valid) {
+      this.register_form.markAllAsTouched();
+      if (this.register_form.get('location_id')?.hasError('required')) {
+        this.toast_service.warning(
+          'Asigna una bodega a la caja: la tienda usa «Bodega de la caja».',
+        );
+      }
+      return;
+    }
     this.is_saving_register.set(true);
 
     const raw = this.register_form.value as {

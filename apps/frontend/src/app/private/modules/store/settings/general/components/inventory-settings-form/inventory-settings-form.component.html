@@ -94,11 +94,20 @@
       </div>
 
       <div class="flex items-start">
-        <app-alert-banner variant="warning" icon="alert-triangle">
-          Este alcance define qu&eacute; existencias se <strong>muestran</strong>, no de d&oacute;nde
-          sale la mercanc&iacute;a: al vender, el sistema puede consumir stock de cualquier
-          bodega vendible. Cuarentena, aver&iacute;as y la bodega central nunca entran.
-        </app-alert-banner>
+        @if (isRegisterScope()) {
+          <app-alert-banner variant="info" icon="info">
+            Con <strong>Bodega de la caja</strong> la venta se descuenta <strong>solo</strong> de la
+            bodega de la caja abierta: si ah&iacute; no hay unidades, la venta se bloquea (o queda en
+            negativo si permites sobreventa). Activa el m&oacute;dulo de caja en los ajustes del POS y
+            asigna una bodega a cada caja en <strong>Cajas</strong>.
+          </app-alert-banner>
+        } @else {
+          <app-alert-banner variant="warning" icon="alert-triangle">
+            Este alcance define qu&eacute; existencias se <strong>muestran</strong>, no de d&oacute;nde
+            sale la mercanc&iacute;a: al vender, el sistema puede consumir stock de cualquier
+            bodega vendible. Cuarentena, aver&iacute;as y la bodega central nunca entran.
+          </app-alert-banner>
+        }
       </div>
     </div>
   </div>
