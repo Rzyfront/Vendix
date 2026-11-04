@@ -137,7 +137,9 @@ export class DomainGeneratorHelper {
    * NOT fall back to the schema default `VENDIX_LANDING` (which must only be
    * used by Vendix core domains).
    *
-   * - STORE        → STORE_LANDING
+   * - STORE        → STORE_HOME (the store home, entry to the admin panel
+   *                  after login; `STORE_LANDING` stays valid, just not the
+   *                  default for new stores)
    * - ORGANIZATION → ORG_LANDING
    * - ECOMMERCE    → STORE_ECOMMERCE
    *
@@ -147,7 +149,7 @@ export class DomainGeneratorHelper {
   appTypeForContext(context: DomainContext): app_type_enum {
     const appTypes: Record<DomainContext, app_type_enum> = {
       [DomainContext.ORGANIZATION]: 'ORG_LANDING',
-      [DomainContext.STORE]: 'STORE_LANDING',
+      [DomainContext.STORE]: 'STORE_HOME',
       [DomainContext.ECOMMERCE]: 'STORE_ECOMMERCE',
     };
 
