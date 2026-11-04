@@ -17,8 +17,9 @@ Pasos para reproducir (inferidos): 1) Configuración → horario de la tienda. 2
 
 | ID | Specs | Tarea | Ruta | Estado | Commit |
 | --- | --- | --- | --- | --- | --- |
-| T0 | S1–S4 | Mapa del flujo de disponibilidad (explorador `sonnet`, Mapping trigger: flujo desconocido que cruza settings, servicios, proveedores y POS) | delegado | en curso | — |
-| T1 | por definir tras T0 | Reproducir y corregir | por definir | pendiente | — |
+| T0 | S1–S4 | Mapa del flujo de disponibilidad (explorador `sonnet`, Mapping trigger: flujo desconocido que cruza settings, servicios, proveedores y POS) | delegado | hecho | — |
+| T1 | S1 | Migración que borra el índice único heredado (provider_id, day_of_week) | inline | hecho; RED/GREEN en DB temporal | 0b9a98e1a |
+| T2 | S2, S3 | POS sin horarios / sin persona de servicio tras el fix | inline | pendiente: confirmar en prod tras el deploy (asignación persona↔servicio "test") | — |
 
 ## Log
 
@@ -26,3 +27,5 @@ Pasos para reproducir (inferidos): 1) Configuración → horario de la tienda. 2
 - L2: rama creada desde `origin/develop` (`e918bb983`). Mirror Engram pendiente (herramienta no disponible en la sesión).
 - L3 (2026-11-04): T0 hecho (explorador sonnet: el contrato editor↔DTO cuadra; disponibilidad = horario de tienda (settings.pos.business_hours) ∩ bloques de la persona; sin hallazgo estático). Repro por API en tech-bogota: empleado 4 + proveedor 4 + servicio 833 + horario jueves 08-12/14-18 → `GET availability/833` 2026-11-05 devuelve slots 09:00… con el proveedor y `for-service` lo lista. Backend OK. Nike (tienda 10): proveedor 1 (servicio 967) con bloques dom–vie, sin sábado; horario tienda completo. No reproducido aún: falta la pantalla exacta (Playwright MCP sin conexión).
 - L4 (2026-11-04, usuario): "publica la rama y has la misma prueba en produccion … depronto mi local esta desactualizad" → plan aprobado, solo lectura en prod. Rama publicada (`03672d5de`). origin/main = origin/develop (0 commits de diferencia). Prod `tech-bogota` (solo login + GET): `pos.business_hours` completo (lun–dom), `availability.working_days` [1..5]; 0 personas de servicio; la consulta de productos tipo servicio devolvió 0. No reproducible en prod con solo lectura: la tienda no tiene personas de servicio.
+- L5 (2026-11-04, usuario): capturas de prod (vendix.online, Nike): con dos bloques por día (8–12, 2–6) → "Los bloques del horario están duplicados o tienen un formato inválido. Revisa los bloques de cada día e inténtalo de nuevo."; con un bloque (9–6) → "Horario guardado"; POS "Agendar test" (2m por cita) → "No hay horarios disponibles para este día." / "actuliza mi local depronto esta desactualizado" / "cambiate a la rama de reseva".
+- L6: causa S1 verificada: `20260328160000_provider_first_scheduling` crea `provider_schedules_provider_id_day_of_week_key` con CREATE UNIQUE INDEX; `20260719000000_add_multi_block_schedules` solo lo borra si aparece en information_schema.table_constraints (no lista índices sueltos) → sobrevive y el segundo bloque del día da P2002 → 400 de `provider-schedule.service.ts`. RED: replay de ambas migraciones en DB temporal `vx_probe_ix` → INSERT de dos bloques el mismo día falla con ese índice. GREEN: + migración 20261111090000 (dos veces) → índice eliminado, dos bloques insertan, duplicado real (día, block_order) sigue rechazado. DB temporal borrada. Local ya no tenía el índice (no-op). Local = prod en código (origin/main y origin/develop con árbol idéntico).
