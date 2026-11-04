@@ -372,6 +372,8 @@ export function validateVariableBarcodeLayout(
   if (!nums.every((n) => Number.isInteger(n) && n >= 0 && n <= 13)) {
     return 'Las posiciones, largos y decimales deben ser números enteros entre 0 y 13';
   }
+  // Con 0 dígitos ningún prefijo es válido y el formato no reconoce nada.
+  if (format.prefix_length < 1) return 'El prefijo necesita al menos 1 dígito';
   if (format.product_code_length < 1) return 'El código de producto debe tener al menos 1 dígito';
   if (format.value_length < 1) return 'El peso debe tener al menos 1 dígito';
   const spans: Array<{ name: string; start: number; end: number }> = [
@@ -475,6 +477,11 @@ export interface VariableBarcodeFormatPair {
   b: string;
   /** Prefijos que se pisan entre ambos formatos. */
   prefixes: string[];
+  /**
+   * Los dos tienen el mismo peso máximo (o ninguno lo tiene). Si difieren,
+   * solo dan el mismo resultado hasta el menor de los dos máximos.
+   */
+  sameMaxWeight: boolean;
 }
 
 export interface VariableBarcodeOverlaps {
@@ -487,7 +494,9 @@ export interface VariableBarcodeOverlaps {
 /**
  * Compara los formatos activos de dos en dos. Dos prefijos se pisan cuando uno
  * empieza por el otro ("2" y "21"). Si además leen código y peso de la misma
- * forma (Rongta 7 y 9: 3 decimales en kg = gramos), son equivalentes.
+ * forma (Rongta 7 y 9: 3 decimales en kg = gramos), son equivalentes. Un peso
+ * máximo distinto no los vuelve ambiguos (por encima del menor solo lee uno),
+ * así que siguen siendo equivalentes y `sameMaxWeight` avisa la diferencia.
  */
 export function analyzeVariableBarcodeOverlaps(
   formats: VariableBarcodeFormat[],
@@ -514,7 +523,12 @@ export function analyzeVariableBarcodeOverlaps(
         }
       }
       if (!shared.size) continue;
-      const pair = { a: a.id, b: b.id, prefixes: [...shared] };
+      const pair = {
+        a: a.id,
+        b: b.id,
+        prefixes: [...shared],
+        sameMaxWeight: (a.max_weight_kg ?? null) === (b.max_weight_kg ?? null),
+      };
       if (signature(a) === signature(b)) result.equivalent.push(pair);
       else result.conflicts.push(pair);
     }

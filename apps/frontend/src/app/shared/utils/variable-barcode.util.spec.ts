@@ -218,19 +218,38 @@ describe('variable-barcode.util', () => {
     const d = fmt('rongta_27');
     const e = fmt('rongta_17');
     expect(analyzeVariableBarcodeOverlaps([a, b])).toEqual({
-      equivalent: [{ a: a.id, b: b.id, prefixes: ['21'] }],
+      equivalent: [{ a: a.id, b: b.id, prefixes: ['21'], sameMaxWeight: true }],
       conflicts: [],
     });
     expect(analyzeVariableBarcodeOverlaps([a, c]).conflicts.length).toBe(1);
     // "2" (1 dígito) se pisa con "21" y "27".
     expect(analyzeVariableBarcodeOverlaps([a, d, e]).conflicts).toEqual([
-      { a: a.id, b: d.id, prefixes: ['21'] },
-      { a: d.id, b: e.id, prefixes: ['27'] },
+      { a: a.id, b: d.id, prefixes: ['21'], sameMaxWeight: true },
+      { a: d.id, b: e.id, prefixes: ['27'], sameMaxWeight: true },
     ]);
     expect(analyzeVariableBarcodeOverlaps([a, { ...b, enabled: false }])).toEqual({
       equivalent: [],
       conflicts: [],
     });
+  });
+
+  it('analyzeVariableBarcodeOverlaps marca el peso máximo distinto sin volverlo choque', () => {
+    const a = { ...fmt('rongta_07'), max_weight_kg: 15 };
+    const b = fmt('rongta_09');
+    expect(analyzeVariableBarcodeOverlaps([a, b])).toEqual({
+      equivalent: [{ a: a.id, b: b.id, prefixes: ['21'], sameMaxWeight: false }],
+      conflicts: [],
+    });
+    expect(
+      analyzeVariableBarcodeOverlaps([a, { ...b, max_weight_kg: 15 }]).equivalent[0].sameMaxWeight,
+    ).toBe(true);
+  });
+
+  it('validateVariableBarcodeLayout exige al menos 1 dígito de prefijo', () => {
+    expect(validateVariableBarcodeLayout({ ...fmt('rongta_07'), prefix_length: 0 })).toBe(
+      'El prefijo necesita al menos 1 dígito',
+    );
+    expect(validateVariableBarcodeLayout({ ...fmt('rongta_27'), prefix_length: 1 })).toBeNull();
   });
 
   it('weightUnitToKg convierte unidades de peso y rechaza otras', () => {

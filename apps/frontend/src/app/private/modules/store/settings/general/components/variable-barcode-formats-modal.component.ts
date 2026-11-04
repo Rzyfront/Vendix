@@ -273,6 +273,7 @@ type LookupState =
                   type="button"
                   class="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold text-[var(--color-text-secondary)]"
                   [attr.aria-expanded]="isAdvancedOpen(v.format.id)"
+                  [attr.aria-controls]="'advanced-' + v.format.id"
                   (click)="toggleAdvanced(v.format.id)"
                 >
                   <span class="flex items-center gap-1">
@@ -285,7 +286,7 @@ type LookupState =
                   ></app-icon>
                 </button>
                 @if (isAdvancedOpen(v.format.id)) {
-                  <div class="px-3 pb-3 space-y-3">
+                  <div [id]="'advanced-' + v.format.id" class="px-3 pb-3 space-y-3">
                     <p class="text-xs text-[var(--color-text-muted)]">
                       Cambia esto solo si tu balanza imprime un diseño distinto a la plantilla.
                       @if (v.preset && !v.customized) {
@@ -377,66 +378,69 @@ type LookupState =
             <app-variable-barcode-diagram [segments]="testSegments()"></app-variable-barcode-diagram>
           }
 
-          @if (testResult(); as r) {
-            @if (r.ok) {
-              <p class="text-sm font-medium text-[var(--color-success-700)]">
-                Formato «{{ r.formatName }}»: código de balanza {{ r.scaleCodeText }} · peso
-                {{ r.weightText }} kg
-              </p>
+          <!-- Se anuncia al lector de pantalla en cuanto cambia el resultado. -->
+          <div class="space-y-3" aria-live="polite">
+            @if (testResult(); as r) {
+              @if (r.ok) {
+                <p class="text-sm font-medium text-[var(--color-success-700)]">
+                  Formato «{{ r.formatName }}»: código de balanza {{ r.scaleCodeText }} · peso
+                  {{ r.weightText }} kg
+                </p>
 
-              @switch (lookupStatus()) {
-                @case ('loading') {
-                  <p class="flex items-center gap-1 text-sm text-[var(--color-text-muted)]">
-                    <app-icon name="loader-2" size="14" class="animate-spin"></app-icon>
-                    Buscando el producto con código de balanza {{ r.scaleCodeText }}…
-                  </p>
-                }
-                @case ('error') {
-                  <div class="flex flex-wrap items-center gap-2">
-                    <p class="text-sm font-medium text-[var(--color-error)]">
-                      No se pudo consultar el producto. Revisa la conexión e intenta de nuevo.
+                @switch (lookupStatus()) {
+                  @case ('loading') {
+                    <p class="flex items-center gap-1 text-sm text-[var(--color-text-muted)]">
+                      <app-icon name="loader-2" size="14" class="animate-spin"></app-icon>
+                      Buscando el producto con código de balanza {{ r.scaleCodeText }}…
                     </p>
-                    <app-button variant="outline" size="sm" (clicked)="retryLookup()">
-                      <app-icon slot="icon" name="refresh-cw" size="14"></app-icon>
-                      Reintentar
-                    </app-button>
-                  </div>
-                }
-                @case ('done') {
-                  @if (lookupView(); as lv) {
-                    @if (lv.kind === 'found') {
-                      <div
-                        class="rounded-md border border-[var(--color-success-300)] bg-[var(--color-success-50)] p-3 text-sm space-y-1"
-                      >
-                        <p class="flex items-center gap-1 font-semibold">
-                          <app-icon name="check-circle" size="14"></app-icon>
-                          {{ lv.name }}
-                        </p>
-                        <p>Peso: {{ r.weightText }} kg</p>
-                        <p>Precio: {{ lv.price | currency }} {{ lv.priceUnitText }}</p>
-                        @if (lv.total !== null) {
-                          <p class="font-semibold">Total estimado: {{ lv.total | currency }}</p>
-                          <p class="text-xs text-[var(--color-text-muted)]">
-                            Estimado con el precio base; en el POS pueden aplicar promociones o
-                            tarifas.
+                  }
+                  @case ('error') {
+                    <div class="flex flex-wrap items-center gap-2">
+                      <p class="text-sm font-medium text-[var(--color-error)]">
+                        No se pudo consultar el producto. Revisa la conexión e intenta de nuevo.
+                      </p>
+                      <app-button variant="outline" size="sm" (clicked)="retryLookup()">
+                        <app-icon slot="icon" name="refresh-cw" size="14"></app-icon>
+                        Reintentar
+                      </app-button>
+                    </div>
+                  }
+                  @case ('done') {
+                    @if (lookupView(); as lv) {
+                      @if (lv.kind === 'found') {
+                        <div
+                          class="rounded-md border border-[var(--color-success-300)] bg-[var(--color-success-50)] p-3 text-sm space-y-1"
+                        >
+                          <p class="flex items-center gap-1 font-semibold">
+                            <app-icon name="check-circle" size="14"></app-icon>
+                            {{ lv.name }}
                           </p>
-                        } @else {
-                          <p class="text-xs text-[var(--color-warning-700)]">
-                            No se puede estimar el total: la unidad de venta del producto no es de
-                            peso. Revísala en la ficha del producto.
-                          </p>
-                        }
-                      </div>
-                    } @else {
-                      <p class="text-sm font-medium text-[var(--color-error)]">{{ lv.message }}</p>
+                          <p>Peso: {{ r.weightText }} kg</p>
+                          <p>Precio: {{ lv.price | currency }} {{ lv.priceUnitText }}</p>
+                          @if (lv.total !== null) {
+                            <p class="font-semibold">Total estimado: {{ lv.total | currency }}</p>
+                            <p class="text-xs text-[var(--color-text-muted)]">
+                              Estimado con el precio base; en el POS pueden aplicar promociones o
+                              tarifas.
+                            </p>
+                          } @else {
+                            <p class="text-xs text-[var(--color-warning-700)]">
+                              No se puede estimar el total: la unidad de venta del producto no es de
+                              peso. Revísala en la ficha del producto.
+                            </p>
+                          }
+                        </div>
+                      } @else {
+                        <p class="text-sm font-medium text-[var(--color-error)]">{{ lv.message }}</p>
+                      }
                     }
                   }
                 }
+              } @else {
+                <p class="text-sm font-medium text-[var(--color-error)]">{{ r.reasonText }}</p>
               }
-            } @else {
-              <p class="text-sm font-medium text-[var(--color-error)]">{{ r.reasonText }}</p>
             }
-          }
+          </div>
         </section>
       </div>
 
@@ -518,11 +522,14 @@ export class VariableBarcodeFormatsModalComponent {
 
   readonly activeCount = computed(() => this.draft().filter((f) => f.enabled).length);
 
+  /** Equivalencias y choques entre los formatos activos del borrador. */
+  private readonly overlaps = computed(() => analyzeVariableBarcodeOverlaps(this.draft()));
+
   readonly formatViews = computed<FormatView[]>(() => {
     const list = this.draft();
     const prefixTexts = this.prefixText();
     const weights = this.maxWeightText();
-    const overlaps = analyzeVariableBarcodeOverlaps(list);
+    const overlaps = this.overlaps();
     const nameOf = (id: string) => list.find((f) => f.id === id)?.name || 'otro formato';
 
     return list.map((format) => {
@@ -535,10 +542,24 @@ export class VariableBarcodeFormatsModalComponent {
       const notices: FormatView['notices'] = [];
       for (const pair of overlaps.equivalent) {
         if (pair.a !== format.id && pair.b !== format.id) continue;
-        const other = nameOf(pair.a === format.id ? pair.b : pair.a);
+        const otherId = pair.a === format.id ? pair.b : pair.a;
+        const other = nameOf(otherId);
+        const prefixes = pair.prefixes.join(', ');
+        if (pair.sameMaxWeight) {
+          notices.push({
+            tone: 'warning',
+            text: `Equivale a «${other}»: mismo prefijo (${prefixes}) y misma lectura. Dan el mismo resultado; deja activo solo uno.`,
+          });
+          continue;
+        }
+        // Con máximos distintos solo coinciden hasta el menor de los dos.
+        const mine = format.max_weight_kg ?? null;
+        const theirs = list.find((f) => f.id === otherId)?.max_weight_kg ?? null;
+        const kg = (w: number | null) => (w === null ? 'sin límite' : `${w.toLocaleString('es-CO')} kg`);
+        const lower = Math.min(mine ?? Infinity, theirs ?? Infinity);
         notices.push({
           tone: 'warning',
-          text: `Equivale a «${other}»: mismo prefijo (${pair.prefixes.join(', ')}) y misma lectura. Dan el mismo resultado; deja activo solo uno.`,
+          text: `Equivale a «${other}»: mismo prefijo (${prefixes}) y misma lectura, pero distinto peso máximo (este: ${kg(mine)}; «${other}»: ${kg(theirs)}). Hasta ${kg(lower)} dan el mismo resultado y por encima solo lo lee uno; deja activo solo uno con el máximo que quieras.`,
         });
       }
       for (const pair of overlaps.conflicts) {
@@ -546,7 +567,7 @@ export class VariableBarcodeFormatsModalComponent {
         const other = nameOf(pair.a === format.id ? pair.b : pair.a);
         notices.push({
           tone: 'error',
-          text: `Choca con «${other}»: los dos reconocen el prefijo ${pair.prefixes.join(', ')} pero lo leen distinto. El POS rechazará esas etiquetas como ambiguas; desactiva uno o cambia su prefijo.`,
+          text: `Choca con «${other}»: los dos reconocen el prefijo ${pair.prefixes.join(', ')} pero leen el código o el peso distinto. Las etiquetas que caigan en los dos formatos se rechazan por ambiguas. Para poder guardar, cambia el prefijo de uno o desactiva uno de los dos.`,
         });
       }
 
@@ -565,12 +586,16 @@ export class VariableBarcodeFormatsModalComponent {
     });
   });
 
+  /**
+   * Errores que impiden guardar. Cada choque entre dos formatos cuenta una
+   * sola vez, aunque el aviso salga en los dos.
+   */
   readonly errorCount = computed(
     () =>
       this.formatViews().reduce(
         (n, v) => n + (v.prefixError ? 1 : 0) + (v.maxWeightError ? 1 : 0) + (v.layoutError ? 1 : 0),
         0,
-      ),
+      ) + this.overlaps().conflicts.length,
   );
 
   private readonly resolved = computed(() => {
@@ -710,6 +735,19 @@ export class VariableBarcodeFormatsModalComponent {
 
   remove(id: string): void {
     this.draft.update((list) => list.filter((f) => f.id !== id));
+    // Sin dejar estado huérfano del formato eliminado.
+    const without = (m: Record<string, string>) => {
+      const { [id]: _omit, ...rest } = m;
+      return rest;
+    };
+    this.prefixText.update(without);
+    this.maxWeightText.update(without);
+    this.advancedOpen.update((set) => {
+      if (!set.has(id)) return set;
+      const next = new Set(set);
+      next.delete(id);
+      return next;
+    });
   }
 
   patch(id: string, changes: Partial<VariableBarcodeFormat>): void {
@@ -829,6 +867,9 @@ export class VariableBarcodeFormatsModalComponent {
   }
 
   private prefixErrorOf(f: VariableBarcodeFormat, text: string): string | null {
+    // Con largo 0 el error ya sale en "Ajuste avanzado" ("El prefijo necesita
+    // al menos 1 dígito"); no se repite ni se cuenta dos veces.
+    if (f.prefix_length < 1) return null;
     const parsed = parsePrefixList(text, f.prefix_length, MAX_PREFIXES);
     if (parsed.invalid.length) {
       const list = parsed.invalid.map((p) => `«${p}»`).join(', ');
