@@ -67,6 +67,12 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
           [settings]="store.settings().pos"
           [settingsLoaded]="store.settingsLoaded()"
           (settingsChange)="store.onSectionChange('pos', $event)" />
+        <!-- Ventas a crédito: recordatorios de cuotas (sección credit_reminders) -->
+        <app-credit-reminders-settings-form
+          id="section-credit-reminders"
+          class="mt-6 block"
+          [settings]="store.settings().credit_reminders"
+          (settingsChange)="store.onSectionChange('credit_reminders', $event)" />
       </app-settings-section>
 
       <!-- Pedidos programados y Adiciones -->
@@ -81,18 +87,6 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
           [productOptions]="store.settings().product_options"
           (settingsChange)="store.onSectionChange('scheduled_orders', $event)"
           (productOptionsChange)="store.onSectionChange('product_options', $event)" />
-      </app-settings-section>
-
-      <!-- Ventas a crédito -->
-      <app-settings-section
-        anchorId="section-credit-reminders"
-        icon="calendar-clock"
-        iconTone="green"
-        title="Ventas a crédito"
-        hint="Recuerda a la tienda y al cliente las cuotas antes de que venzan.">
-        <app-credit-reminders-settings-form
-          [settings]="store.settings().credit_reminders"
-          (settingsChange)="store.onSectionChange('credit_reminders', $event)" />
       </app-settings-section>
 
       <!-- Recibos y Facturación — el título depende del estado real de emisión
