@@ -3837,18 +3837,11 @@ describe('PaymentsService', () => {
         taxInfo: { total_rate: 0, total_tax_amount: 0, taxes: [] },
       });
 
-      it('0,180 kg con 180 unidades de stock persiste 180 (no cae a quantity = 1)', () => {
+      it('el snapshot ya no confía en el número del cliente: lo calcula el servidor', () => {
         const row = (service as any).buildOrderItemSnapshot(
           params({ weight: 0.18, weight_unit: 'kg', stock_units_consumed: 180 }),
         );
         expect(row.quantity).toBe(1);
-        expect(row.stock_units_consumed).toBe(180);
-      });
-
-      it('sin el número en el payload la línea de peso queda null (histórico)', () => {
-        const row = (service as any).buildOrderItemSnapshot(
-          params({ weight: 0.18, weight_unit: 'kg', stock_units_consumed: null }),
-        );
         expect(row.stock_units_consumed).toBeNull();
       });
 
@@ -3867,6 +3860,67 @@ describe('PaymentsService', () => {
           params({ stock_units_consumed: 180000 }),
         );
         expect(row.stock_units_consumed).toBeNull();
+      });
+    });
+
+    describe('applyWeightStockUnits — el servidor calcula las unidades de stock de la pesada', () => {
+      const KG = { code: 'kg', dimension: 'mass', factor_to_base: '1000' };
+      const G = { code: 'g', dimension: 'mass', factor_to_base: '1' };
+      const txWith = (stockUom: unknown) => ({
+        products: {
+          findMany: jest.fn().mockResolvedValue([{ id: 10, stock_uom: stockUom }]),
+        },
+        units_of_measure: { findMany: jest.fn().mockResolvedValue([KG, G]) },
+      });
+      const apply = async (
+        tx: unknown,
+        item: Record<string, unknown>,
+        tierSnap: unknown = null,
+      ) => {
+        const snapshot: Record<string, unknown> = { stock_units_consumed: null };
+        await (service as any).applyWeightStockUnits(tx, snapshot, item, 10, tierSnap);
+        return snapshot.stock_units_consumed;
+      };
+
+      it('0,180 kg con stock en g persiste 180 aunque el cliente no lo mande', async () => {
+        await expect(apply(txWith(G), { weight: 0.18, weight_unit: 'kg' })).resolves.toBe(180);
+      });
+
+      it('stock en kg: 0,180 kg persiste 1, nunca 0 (aunque el cliente mande 0)', async () => {
+        await expect(
+          apply(txWith(KG), { weight: 0.18, weight_unit: 'kg', stock_units_consumed: 0 }),
+        ).resolves.toBe(1);
+      });
+
+      it('stock en kg: 0,4 ⇒ 1 y 0,5 ⇒ 1', async () => {
+        await expect(apply(txWith(KG), { weight: 0.4, weight_unit: 'kg' })).resolves.toBe(1);
+        await expect(apply(txWith(KG), { weight: 0.5, weight_unit: 'kg' })).resolves.toBe(1);
+      });
+
+      it('producto de peso SIN stock_uom: null (histórico, decisión pendiente)', async () => {
+        await expect(
+          apply(txWith(null), { weight: 0.18, weight_unit: 'kg', stock_units_consumed: 180 }),
+        ).resolves.toBeNull();
+      });
+
+      it('la presentación de la tarifa sigue mandando y no consulta nada', async () => {
+        const tx = txWith(G);
+        const snapshot: Record<string, unknown> = { stock_units_consumed: 50 };
+        await (service as any).applyWeightStockUnits(
+          tx,
+          snapshot,
+          { weight: 0.18, weight_unit: 'kg' },
+          10,
+          { tier_id: 1, tier_name: 'Bulto', stock_units_consumed: 50 },
+        );
+        expect(snapshot.stock_units_consumed).toBe(50);
+        expect(tx.products.findMany).not.toHaveBeenCalled();
+      });
+
+      it('una línea por pieza no se toca', async () => {
+        const tx = txWith(G);
+        await expect(apply(tx, { stock_units_consumed: 180000 })).resolves.toBeNull();
+        expect(tx.products.findMany).not.toHaveBeenCalled();
       });
     });
   });

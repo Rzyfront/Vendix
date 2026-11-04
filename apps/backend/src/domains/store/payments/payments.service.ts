@@ -56,10 +56,11 @@ import {
   resolvePriceUnitScale,
   resolvePriceUnits,
 } from '../products/services/price-unit.util';
+import { resolvePackSize } from '../products/services/packaging.util';
 import {
-  resolvePackSize,
-  resolveWeightLineStockUnits,
-} from '../products/services/packaging.util';
+  resolveCommittedStockUnits,
+  resolveWeightLinesStockUnits,
+} from '../products/services/weight-stock-units.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
 import { pickCostPrice } from '../orders/utils/resolve-cost-price';
@@ -1462,11 +1463,10 @@ export class PaymentsService {
 
           const product = stockProductById.get(item.product_id);
 
-          const requiredStock =
-            typeof item.stock_units_consumed === 'number' &&
-            item.stock_units_consumed > 0
-              ? item.stock_units_consumed
-              : item.quantity;
+          // Misma fórmula que el commit de inventario
+          // (`stock_units_consumed ?? quantity`): validar una cosa y descontar
+          // otra dejaba pasar o bloquear ventas por el número equivocado.
+          const requiredStock = resolveCommittedStockUnits(item);
 
           stockDemandLines.push({
             product_id: item.product_id,
@@ -4446,6 +4446,7 @@ export class PaymentsService {
       storeId: dtoStoreId,
       userId: user?.id ?? null,
     });
+    await this.applyWeightStockUnits(tx, snapshot, item, product.id, tierSnap);
     // Snapshot congelado de las adiciones en la línea (nested create). Solo
     // se agrega con adiciones: las líneas de hoy no cambian de forma.
     if (lineOptions.snapshots.length) {
@@ -4454,6 +4455,36 @@ export class PaymentsService {
       };
     }
     return snapshot;
+  }
+
+  /**
+   * PESO legado: el servidor convierte la pesada a la unidad de stock del
+   * producto (0,180 kg con stock en g ⇒ 180) y la deja en
+   * `stock_units_consumed`, que leen validación, commit de inventario, capas
+   * de costo, anulaciones y devoluciones. Nunca persiste 0 con peso > 0 (piso
+   * de 1 con advertencia). El número del cliente solo se contrasta. La
+   * presentación de la tarifa, si existe, sigue mandando; sin `stock_uom` el
+   * producto conserva el histórico (`null` ⇒ 1 por pesada).
+   */
+  private async applyWeightStockUnits(
+    tx: Parameters<typeof resolveWeightLinesStockUnits>[0],
+    snapshot: Record<string, unknown>,
+    item: {
+      weight?: number | string | null;
+      weight_unit?: string | null;
+      stock_units_consumed?: number | string | null;
+    },
+    productId: number,
+    tierSnap?: PosTierSnapshot | null,
+  ): Promise<void> {
+    if (!(Number(item.weight || 0) > 0)) return;
+    if (tierSnap?.stock_units_consumed != null) return;
+    const [units] = await resolveWeightLinesStockUnits(
+      tx,
+      [{ ...item, product_id: productId }],
+      this.logger,
+    );
+    snapshot.stock_units_consumed = units;
   }
 
   /**
@@ -4709,13 +4740,10 @@ export class PaymentsService {
       // usa el variant *Checked* y rechaza el scalar FK directo — exige la
       // relación. Por eso lo asignamos abajo como `applied_price_tier: { connect }`.
       applied_price_tier_name_snapshot: params.tierSnap?.tier_name ?? null,
-      // La presentación de la tarifa manda; si no hay, una línea de PESO legado
-      // persiste las unidades de stock que calculó el POS (0,180 kg ⇒ 180 g).
-      // Sin esto la validación, el commit de inventario, las capas de costo y
-      // las devoluciones leían `quantity` = 1 para cualquier pesada.
-      stock_units_consumed:
-        params.tierSnap?.stock_units_consumed ??
-        resolveWeightLineStockUnits(params.item),
+      // La presentación de la tarifa manda. Una línea de PESO de catálogo
+      // recibe sus unidades de stock en `buildPosOrderItem`, calculadas por el
+      // servidor (`resolveWeightLinesStockUnits`).
+      stock_units_consumed: params.tierSnap?.stock_units_consumed ?? null,
       // QUI-648 — escala del precio al momento de vender. Solo se guarda
       // cuando realmente hay escala: `null` es "una unidad de stock = una
       // unidad de precio", que es todo el catálogo histórico.

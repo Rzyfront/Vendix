@@ -48,6 +48,7 @@ import {
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
+import { resolveWeightLinesStockUnits } from '../products/services/weight-stock-units.util';
 import {
   groupRatesByProductId,
   resolveLineUnits,
@@ -677,6 +678,14 @@ export class OrdersService {
       createOrderDto.items,
       context,
     );
+    // PESO legado: unidades de stock de cada pesada, calculadas por el
+    // servidor con la unidad de stock del producto (nunca 0 con peso > 0).
+    // La presentación de la tarifa manda; esto solo llena las pesadas.
+    const weightStockUnits = await resolveWeightLinesStockUnits(
+      this.prisma,
+      createOrderDto.items,
+      this.logger,
+    );
 
     // ERR-07 / DB-14 — invariante "prepared + variantes exige variante".
     // Resuelve los productos una sola vez (batch) y aplica el check. El
@@ -918,7 +927,7 @@ export class OrdersService {
               ? [{
                   product_id: item.product_id,
                   product_variant_id: item.product_variant_id,
-                  quantity: Math.max(0, Number(tierSnapshots[index]?.stock_units_consumed ?? 0)) || item.quantity,
+                  quantity: Math.max(0, Number(tierSnapshots[index]?.stock_units_consumed ?? weightStockUnits[index] ?? 0)) || item.quantity,
                   product_name: item.product_name,
                 }]
               : [],
@@ -1050,7 +1059,9 @@ export class OrdersService {
                     applied_price_tier_name_snapshot:
                       tierSnap?.tier_name ?? null,
                     stock_units_consumed:
-                      tierSnap?.stock_units_consumed ?? null,
+                      tierSnap?.stock_units_consumed ??
+                      weightStockUnits[index] ??
+                      null,
                     // Escala del precio al momento de vender: sin este
                     // snapshot el total deja de ser reproducible en cuanto el
                     // producto cambie de "por metro" a "por rollo".
@@ -3182,6 +3193,14 @@ export class OrdersService {
       dto.items,
       ctx,
     );
+    // PESO legado: unidades de stock de cada pesada, calculadas por el
+    // servidor con la unidad de stock del producto (nunca 0 con peso > 0).
+    // La presentación de la tarifa manda; esto solo llena las pesadas.
+    const weightStockUnits = await resolveWeightLinesStockUnits(
+      this.prisma,
+      dto.items,
+      this.logger,
+    );
 
     // Precio por N unidades: misma corrección que en el create, antes de que
     // los totales de abajo lean `item.total_price`.
@@ -3387,7 +3406,7 @@ export class OrdersService {
             ? [{
                 product_id: item.product_id,
                 product_variant_id: item.product_variant_id,
-                quantity: Math.max(0, Number(tierSnapshots[index]?.stock_units_consumed ?? 0)) || item.quantity,
+                quantity: Math.max(0, Number(tierSnapshots[index]?.stock_units_consumed ?? weightStockUnits[index] ?? 0)) || item.quantity,
                 product_name: item.product_name,
               }]
             : [],
@@ -3487,7 +3506,8 @@ export class OrdersService {
             // Multi-tarifa snapshot
             applied_price_tier_id: tierSnap?.tier_id ?? null,
             applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
-            stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
+            stock_units_consumed:
+              tierSnap?.stock_units_consumed ?? weightStockUnits[index] ?? null,
             price_unit_quantity: priceUnits.priceUnitByIndex[index] ?? null,
             order_item_options: this.toKeptOrderItemOptionsCreate(
               keptByIndex.get(index),
@@ -3785,6 +3805,14 @@ export class OrdersService {
       this.prisma,
       dto.items,
       context,
+    );
+    // PESO legado: unidades de stock de cada pesada, calculadas por el
+    // servidor con la unidad de stock del producto (nunca 0 con peso > 0).
+    // La presentación de la tarifa manda; esto solo llena las pesadas.
+    const weightStockUnits = await resolveWeightLinesStockUnits(
+      this.prisma,
+      dto.items,
+      this.logger,
     );
 
     // 6) F4 — la compuerta de IVA corre en el paso 11, sobre el impuesto que
@@ -4834,7 +4862,8 @@ export class OrdersService {
                 : item.item_type || (item.product_id ? 'physical' : 'custom'),
             applied_price_tier_id: tierSnap?.tier_id ?? null,
             applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
-            stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
+            stock_units_consumed:
+              tierSnap?.stock_units_consumed ?? weightStockUnits[index] ?? null,
             price_unit_quantity: priceUnits.priceUnitByIndex[index] ?? null,
             order_item_options: this.toKeptOrderItemOptionsCreate(
               keptByIndex.get(index),

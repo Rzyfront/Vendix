@@ -3,7 +3,6 @@ import {
   resolvePackSize,
   resolveRefundStockUnits,
   resolveStockUnitsConsumed,
-  resolveWeightLineStockUnits,
 } from './packaging.util';
 
 /**
@@ -128,45 +127,6 @@ describe('packaging.util', () => {
       expect(resolveRefundStockUnits(1, 3, 100)).toBe(
         resolveLineStockUnits(1, 3, 100),
       );
-    });
-  });
-
-  describe('resolveWeightLineStockUnits (peso legado)', () => {
-    it('0,180 kg con stock en gramos consume 180 unidades, no 1', () => {
-      expect(
-        resolveWeightLineStockUnits({ weight: 0.18, stock_units_consumed: 180 }),
-      ).toBe(180);
-    });
-
-    it('acepta 0 (pesada que redondea a cero unidades de stock)', () => {
-      expect(
-        resolveWeightLineStockUnits({ weight: 0.0004, stock_units_consumed: 0 }),
-      ).toBe(0);
-    });
-
-    it('ignora null: la línea sigue con `quantity` (histórico)', () => {
-      expect(
-        resolveWeightLineStockUnits({ weight: 0.18, stock_units_consumed: null }),
-      ).toBeNull();
-      expect(resolveWeightLineStockUnits({ weight: 0.18 })).toBeNull();
-    });
-
-    it('rechaza decimales y negativos: el stock es Int', () => {
-      expect(
-        resolveWeightLineStockUnits({ weight: 0.18, stock_units_consumed: 180.5 }),
-      ).toBeNull();
-      expect(
-        resolveWeightLineStockUnits({ weight: 0.18, stock_units_consumed: -3 }),
-      ).toBeNull();
-    });
-
-    it('una línea que no es de peso no toma el número del payload', () => {
-      expect(
-        resolveWeightLineStockUnits({ weight: 0, stock_units_consumed: 50 }),
-      ).toBeNull();
-      expect(
-        resolveWeightLineStockUnits({ stock_units_consumed: 50 }),
-      ).toBeNull();
     });
   });
 });
