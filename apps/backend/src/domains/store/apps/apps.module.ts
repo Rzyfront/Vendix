@@ -19,6 +19,7 @@ import { BookingAppController } from './booking/booking-app.controller';
 import { BookingAppService } from './booking/booking-app.service';
 import { BookingCheckinService } from './booking/booking-checkin.service';
 import { BookingPublicController } from './booking/booking-public.controller';
+import { BookingViewService } from './booking/booking-view.service';
 import { StoreHomeAppController } from './store-home/store-home-app.controller';
 import { StoreHomeAppService } from './store-home/store-home-app.service';
 import { StoreHomePublicController } from './store-home/store-home-public.controller';
@@ -64,6 +65,7 @@ import { LandingLeadService } from './landing/landing-lead.service';
     ServicePageAppService,
     ServicePageViewService,
     BookingAppService,
+    BookingViewService,
     BookingCheckinService,
     StoreHomeAppService,
     StoreHomeViewService,

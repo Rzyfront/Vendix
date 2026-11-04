@@ -9,6 +9,7 @@ import {
   StoreAppsResponse,
 } from '../interfaces/store-app.interface';
 import type { ProductPageContext } from '../page-builder/product-page/product-page-builder';
+import type { BookingContext } from '../page-builder/booking/booking-builder';
 import type { ServicePageContext } from '../page-builder/service-page/service-page-builder';
 import type { StoreHomePublic } from '../../../../../public/store-home/store-home.service';
 import type { AppPageDocument, PageAppKind } from '../templates/app-page.types';
@@ -116,6 +117,11 @@ export class StoreAppsService {
     return this.http.get<{ data: ProductPageCustomDomain[] }>(
       `${this.apiUrl}/service_page/custom-domains`,
     );
+  }
+
+  /** F6-B — the room types and secondary products the page paints, for the builder preview. */
+  bookingPreviewContext(): Observable<{ data: BookingContext }> {
+    return this.http.get<{ data: BookingContext }>(`${this.apiUrl}/booking/preview-context`);
   }
 
   saveBookingConfig(body: { product_ids: number[] }): Observable<unknown> {

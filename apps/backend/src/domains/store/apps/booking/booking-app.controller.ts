@@ -24,6 +24,13 @@ export class BookingAppController {
     private readonly appPage: AppPageService,
   ) {}
 
+  /** F6-B: room types and secondary products for the editor preview. */
+  @Permissions('store:apps:read')
+  @Get('preview-context')
+  async previewContext() {
+    return this.responseService.success(await this.booking.previewContext());
+  }
+
   @Permissions('store:apps:read')
   @Get('custom-domains')
   async customDomains() {

@@ -2,6 +2,8 @@ import { DOCUMENT } from '@angular/common';
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 
+import { BookingPageViewComponent } from '../../../../../public/booking-page/booking-page-view.component';
+import { BookingPageHomeViewComponent } from '../../../../../public/booking-page/booking-page-home-view.component';
 import { ProductPageViewComponent } from '../../../../../public/product-page/product-page-view.component';
 import { ServicePageHomeViewComponent } from '../../../../../public/service-page/service-page-home-view.component';
 import { ServicePageViewComponent } from '../../../../../public/service-page/service-page-view.component';
@@ -9,6 +11,7 @@ import { StoreHomeViewComponent } from '../../../../../public/store-home/store-h
 import { BUILDER_PREVIEW_CHANNEL, readFrameMessage } from '../builder/builder-preview';
 import type { PageAppKind } from '../templates';
 import type { AppPagePreviewPayload } from './page-builder.types';
+import { BookingContext, BookingSettings, bookingPreview } from './booking/booking-builder';
 import { ProductPageContext, ProductPageSettings, productPagePreview } from './product-page/product-page-builder';
 import { ProductPagePreviewBodyComponent } from './product-page/product-page-preview-body.component';
 import { ServicePageContext, ServicePageSettings, servicePagePreview } from './service-page/service-page-builder';
@@ -28,7 +31,7 @@ const SELECTED_STYLE = `[data-preview-selected="true"]{outline:2px solid var(--c
 @Component({
   selector: 'app-app-page-preview-frame',
   standalone: true,
-  imports: [StoreHomeViewComponent, ProductPageViewComponent, ProductPagePreviewBodyComponent, ServicePageViewComponent, ServicePageHomeViewComponent],
+  imports: [StoreHomeViewComponent, ProductPageViewComponent, ProductPagePreviewBodyComponent, ServicePageViewComponent, ServicePageHomeViewComponent, BookingPageHomeViewComponent, BookingPageViewComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (payload(); as p) {
@@ -56,6 +59,20 @@ const SELECTED_STYLE = `[data-preview-selected="true"]{outline:2px solid var(--c
                 [blockIds]="true"
               />
             </app-service-page-view>
+          }
+        }
+        @case ('booking') {
+          @if (booking(); as view) {
+            <app-booking-page-view [page]="view.page" [storeName]="view.storeName || 'Hotel'" [storeLogo]="view.storeLogoUrl">
+              <app-booking-page-home-view
+                [productIds]="view.productIds"
+                [page]="view.page"
+                [storeName]="view.storeName"
+                [previewRooms]="view.rooms"
+                [previewProducts]="view.products"
+                [blockIds]="true"
+              />
+            </app-booking-page-view>
           }
         }
       }
@@ -96,6 +113,13 @@ export class AppPagePreviewFrameComponent {
     const p = this.payload();
     return p?.kind === 'service_page'
       ? servicePagePreview(p as AppPagePreviewPayload<ServicePageSettings | null, ServicePageContext | null>)
+      : null;
+  });
+
+  readonly booking = computed(() => {
+    const p = this.payload();
+    return p?.kind === 'booking'
+      ? bookingPreview(p as AppPagePreviewPayload<BookingSettings | null, BookingContext | null>)
       : null;
   });
 
