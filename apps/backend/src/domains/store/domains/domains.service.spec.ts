@@ -162,9 +162,11 @@ describe('StoreDomainsService', () => {
         .mockResolvedValueOnce({ id: 5 }) // published check
         .mockResolvedValueOnce({ id: 5, domain_settings_id: 40, config: {} }); // alias list
 
-      const result = await update({ app_type: 'STORE_BOOKING', is_primary: true });
+      // The modal sends the domain_type it had; an app domain is never `ecommerce`.
+      const result = await update({ app_type: 'STORE_BOOKING', domain_type: 'ecommerce', is_primary: true });
 
       expect(result.app_type).toBe('STORE_BOOKING');
+      expect(result.domain_type).toBe('store');
       // No "single active domain per app type" sweep for an app.
       expect(prisma.domain_settings.updateMany).not.toHaveBeenCalled();
       expect(globalPrisma.store_apps.update).toHaveBeenCalledWith({

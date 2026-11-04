@@ -114,6 +114,7 @@ export class DomainsService implements OnModuleInit {
     provided?: string,
     appType?: string,
   ): string {
+    if (isAppOnlyAppType(appType)) return 'store';
     if (provided) return provided;
     if (appType === 'STORE_ECOMMERCE') return 'ecommerce';
     if (STORE_APP_TYPES.includes(appType || '')) return 'store';
@@ -706,8 +707,9 @@ export class DomainsService implements OnModuleInit {
       nextAppType: app_type,
     });
 
+    // Apps F5: an app domain is never `ecommerce` (see inferDomainType).
     const domain_type =
-      updateData.domain_type ||
+      (isAppOnlyAppType(app_type) ? 'store' : updateData.domain_type) ||
       this.inferDomainType(
         existing_record.hostname,
         !!existing_record.store_id,

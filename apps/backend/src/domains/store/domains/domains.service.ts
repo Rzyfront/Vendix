@@ -192,6 +192,9 @@ export class StoreDomainsService {
   }
 
   private inferDomainType(appType: string, provided?: string): string {
+    // Apps F5: an app domain is never `ecommerce`; the online store, tables
+    // and product links look their domain up by `domain_type = 'ecommerce'`.
+    if (isAppOnlyAppType(appType)) return 'store';
     if (provided) return provided;
     return appType === 'STORE_ECOMMERCE' ? 'ecommerce' : 'store';
   }
@@ -586,7 +589,9 @@ export class StoreDomainsService {
       update_domain_dto.domain_type ||
       this.inferDomainType(app_type, existing_domain.domain_type);
 
-    if (update_domain_dto.domain_type !== undefined) {
+    if (isAppOnlyAppType(app_type)) {
+      update_data.domain_type = 'store';
+    } else if (update_domain_dto.domain_type !== undefined) {
       update_data.domain_type = update_domain_dto.domain_type as any;
     }
 
