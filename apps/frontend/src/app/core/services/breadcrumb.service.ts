@@ -938,12 +938,6 @@ export class BreadcrumbService {
       parent: 'Clientes',
       icon: 'users',
     },
-    {
-      path: '/admin/customers/crm',
-      title: 'Landing de captación',
-      parent: 'Clientes',
-      icon: 'sparkles',
-    },
     // CRM screens: listed before `:id` so they never read as a customer.
     {
       path: '/admin/customers/inbox',
@@ -1040,6 +1034,27 @@ export class BreadcrumbService {
       title: 'Resumen de Ventas',
       parent: 'Ventas',
       icon: 'bar-chart',
+    },
+
+    // Apps (apps-vistas-f1): the landing lives here since F1; static
+    // entries before `:kind` so they win the match.
+    {
+      path: '/admin/apps',
+      title: 'Apps',
+      parent: 'Tienda',
+      icon: 'app-window',
+    },
+    {
+      path: '/admin/apps/landing',
+      title: 'Landing page',
+      parent: 'Apps',
+      icon: 'sparkles',
+    },
+    {
+      path: '/admin/apps/:kind',
+      title: 'App',
+      parent: 'Apps',
+      icon: 'app-window',
     },
 
     // E-commerce

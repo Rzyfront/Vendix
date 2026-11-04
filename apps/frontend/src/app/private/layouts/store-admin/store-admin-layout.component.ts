@@ -843,10 +843,12 @@ export class StoreAdminLayoutComponent {
         },
         {
           // Internal module `crm` (QUI-719); visible name frees "CRM" for the
-          // customer CRM. Same panel_ui key as before.
+          // customer CRM. Same panel_ui key as before. Since apps-vistas-f1
+          // (S4) its view lives in Apps; with Apps on, `applyAppsMenu` moves
+          // this entry out of Clientes (with Apps off it stays here).
           label: 'Landing de captación',
           icon: 'sparkles',
-          route: '/admin/customers/crm',
+          route: '/admin/apps/landing',
           panelUiKey: 'customers_crm',
         },
       ],

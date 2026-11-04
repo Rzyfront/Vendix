@@ -50,6 +50,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   settings_price_tiers: '/admin/price-tiers',
 
   ecommerce: '/admin/ecommerce',
+  // Apps catalog and every app view `/admin/apps/:kind` (apps-vistas-f1 S3).
   apps: '/admin/apps',
 
   // Órdenes
@@ -92,7 +93,10 @@ export const MODULE_ROUTES: Record<string, string> = {
   customers_segments: '/admin/customers/segments',
   customers_reviews: '/admin/customers/reviews',
   customers_data_collection: '/admin/data-collection',
-  customers_crm: '/admin/customers/crm',
+  // Landing de captación: its view is the landing app since apps-vistas-f1
+  // (S4). Longest prefix wins, so `/admin/apps/landing` is governed by
+  // `customers_crm` and every other `/admin/apps/:kind` by `apps`.
+  customers_crm: '/admin/apps/landing',
 
   // Marketing
   marketing: '/admin/marketing/promotions',
