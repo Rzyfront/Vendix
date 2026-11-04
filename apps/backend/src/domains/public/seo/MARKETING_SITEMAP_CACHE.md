@@ -1,6 +1,6 @@
 # Marketing sitemap: registro y actualización editorial de caché
 
-El registro MARKETING_SITEMAP_PAGES en apps/backend/src/domains/public/seo/marketing-sitemap.registry.ts es la fuente del XML y de su versión. Contiene la portada y /pricing (indexables desde el 2-nov-2026, cuando la CloudFront Function dejó de devolver 404). No añadir /ayuda ni /pqr (noindex); /legal/* solo si pasan a index.
+El registro MARKETING_SITEMAP_PAGES en apps/backend/src/domains/public/seo/marketing-sitemap.registry.ts es la fuente del XML y de su versión. Contiene la portada, /pricing, /legal/terminos y /legal/privacidad (indexables desde que la CloudFront Function dejó de devolver 404 el 2-nov-2026). No añadir /ayuda ni /pqr (noindex) ni /legal/cookies mientras no tenga documento activo.
 
 ## Publicar, retirar o editar una página
 

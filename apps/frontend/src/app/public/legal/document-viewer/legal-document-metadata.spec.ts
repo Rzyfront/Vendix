@@ -26,12 +26,17 @@ describe('Legal document marketing metadata', () => {
     expect(title.getTitle()).toBe('Documento no disponible | Vendix');
     expect(link.hasAttribute('href')).toBeFalse();
   });
-  it('sets legal metadata with a clean self canonical, retaining noindex until hosting is corrected', () => {
+  it('sets legal metadata with a clean self canonical and makes an available document indexable', () => {
     const { lifecycle, link, title, meta } = setup('https://www.vendix.online/legal/terminos?a=1#pagos');
     lifecycle.update(legal, true);
     expect(title.getTitle()).toBe('Términos | Vendix');
     expect(meta.getTag('name="description"')?.content).toBe('Condiciones vigentes');
     expect(link.href).toBe('https://vendix.online/legal/terminos');
+    expect(meta.getTag('name="robots"')?.content).toBe('index, follow');
+  });
+  it('keeps an unavailable document noindex', () => {
+    const { lifecycle, meta } = setup('https://vendix.online/legal/cookies');
+    lifecycle.update(null, true);
     expect(meta.getTag('name="robots"')?.content).toBe('noindex, follow');
   });
   it('treats blank content as unavailable', () => {

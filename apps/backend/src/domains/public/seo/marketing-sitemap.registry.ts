@@ -14,6 +14,10 @@ export const MARKETING_SITEMAP_PAGES: readonly MarketingSitemapPage[] = [
   // /pricing: canonical approved on 2026-10-22; served with HTTP 200 since the
   // CloudFront Function (2026-11-02) and rendered as `index, follow`.
   { path: '/pricing', priority: '0.9', changefreq: 'weekly', editorialRevision: 1 },
+  // Legal documents with current text (privacy v1.1 and terms v2.2, 2026-11-02),
+  // indexable per the 2026-10-22 decision. /legal/cookies has no active document.
+  { path: '/legal/terminos', priority: '0.3', changefreq: 'monthly', editorialRevision: 1 },
+  { path: '/legal/privacidad', priority: '0.3', changefreq: 'monthly', editorialRevision: 1 },
 ];
 
 export function marketingSitemapVersion(

@@ -45,10 +45,12 @@ describe('PublicSeoService (VENDIX_LANDING)', () => {
     expect(locs).toEqual([
       'https://vendix.online/',
       'https://vendix.online/pricing',
+      'https://vendix.online/legal/terminos',
+      'https://vendix.online/legal/privacidad',
     ]);
     const document = new DOMParser().parseFromString(xml, 'application/xml');
     expect(document.documentElement.namespaceURI).toBe('http://www.sitemaps.org/schemas/sitemap/0.9');
-    expect(document.getElementsByTagName('loc').length).toBe(2);
+    expect(document.getElementsByTagName('loc').length).toBe(4);
     expect(document.getElementsByTagName('parsererror').length).toBe(0);
     expect(findMany).not.toHaveBeenCalled();
   });

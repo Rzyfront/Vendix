@@ -268,9 +268,8 @@ Disallow: /
         ? `https://${baseDomain}`
         : base_url;
 
-    // Only indexable pages belong here. /ayuda and /pqr render `noindex`; the
-    // /legal/* documents are `noindex` today: add them to the registry if they
-    // are switched to `index, follow`.
+    // Only indexable pages belong here (registry): /ayuda and /pqr render
+    // `noindex`; /legal/cookies has no active document.
 
     // Generation/cache time is not an editorial modification date.
     return this.buildSitemapXml(canonicalBase, MARKETING_SITEMAP_PAGES);
