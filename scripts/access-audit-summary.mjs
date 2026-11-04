@@ -26,7 +26,10 @@ const bump = (map, key, row) => {
 };
 
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
-for await (const line of rl) {
+// Nest colors its console output: strip ANSI escapes before parsing.
+const ANSI = /\x1b\[[0-9;]*m/g;
+for await (const rawLine of rl) {
+  const line = rawLine.replace(ANSI, '');
   const at = line.indexOf(MARKER);
   if (at === -1) continue;
   let event;
