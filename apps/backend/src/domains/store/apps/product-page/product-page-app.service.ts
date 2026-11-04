@@ -9,7 +9,10 @@ import {
   AppDomainService,
   appDomainState,
 } from '../shared/app-domain.service';
-import { buildProductPageHostname } from './product-page-hostname';
+import {
+  buildProductPageHostname,
+  isHostnameVariant,
+} from './product-page-hostname';
 import {
   MAX_COMPLEMENTS,
   ProductPageConfig,
@@ -120,6 +123,16 @@ export class ProductPageAppService {
       dto.custom_domain_id,
       (storeSlug, baseDomain, isTaken) =>
         buildProductPageHostname(storeSlug, product[0].slug, baseDomain, isTaken),
+      // Reactivate the earlier subdomain only while it names this product.
+      (hostname, storeSlug, baseDomain) => {
+        const natural = buildProductPageHostname(
+          storeSlug,
+          product[0].slug,
+          baseDomain,
+          () => false,
+        );
+        return natural !== null && isHostnameVariant(hostname, natural);
+      },
     );
     config.custom_domain_previous_app_type = null;
     config.custom_domain_aliases = published.aliases;

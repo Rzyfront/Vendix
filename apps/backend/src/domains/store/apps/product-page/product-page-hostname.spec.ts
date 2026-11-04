@@ -1,5 +1,6 @@
 import {
   buildAppSuffixHostname,
+  isHostnameVariant,
   buildProductPageHostname,
   cleanHostnameSlug,
 } from './product-page-hostname';
@@ -88,5 +89,36 @@ describe('buildAppSuffixHostname', () => {
     const label = host.split('.')[0];
     expect(label.length).toBeLessThanOrEqual(63);
     expect(label.endsWith('-service')).toBe(true);
+  });
+});
+
+describe('Apps F5: never fail because the name is taken', () => {
+  it('after -2..-50 it falls back to a random -v{5} suffix', () => {
+    const host = buildAppSuffixHostname('roku', 'landing', 'vendix.online', (h) =>
+      /^roku-landing(-\d+)?\.vendix\.online$/.test(h),
+    );
+    expect(host).toMatch(/^roku-landing-v[a-z0-9]{5}\.vendix\.online$/);
+  });
+});
+
+describe('isHostnameVariant', () => {
+  const natural = 'roku-bolso.vendix.online';
+
+  it('accepts the natural name and its collision suffixes', () => {
+    expect(isHostnameVariant(natural, natural)).toBe(true);
+    expect(isHostnameVariant('roku-bolso-3.vendix.online', natural)).toBe(true);
+    expect(isHostnameVariant('roku-bolso-vab12c.vendix.online', natural)).toBe(true);
+  });
+
+  it('rejects another product, another base domain or a longer slug', () => {
+    expect(isHostnameVariant('roku-cafe.vendix.online', natural)).toBe(false);
+    expect(isHostnameVariant('roku-bolso.otro.com', natural)).toBe(false);
+    expect(isHostnameVariant('roku-bolso-rojo.vendix.online', natural)).toBe(false);
+  });
+
+  it('accepts a label trimmed at 63 characters', () => {
+    const long = buildProductPageHostname('roku', 'a'.repeat(80), 'vendix.online', () => false)!;
+    const second = buildProductPageHostname('roku', 'a'.repeat(80), 'vendix.online', (h) => h === long)!;
+    expect(isHostnameVariant(second, long)).toBe(true);
   });
 });

@@ -33,6 +33,39 @@ const STORE_HOME_DOMAIN_APP_TYPES = ['STORE_LANDING', 'STORE_HOME'];
 
 const CUSTOM_OWNERSHIPS = ['custom_domain', 'custom_subdomain'] as const;
 
+/** Hostnames tried when concurrent publishes keep taking the next name. */
+const MAX_CREATE_ATTEMPTS = 5;
+
+/**
+ * Builds the app's Vendix hostname from the store slug and base domain;
+ * `isTaken` says whether a candidate is used by someone else.
+ */
+export type HostnameBuilder = (
+  storeSlug: string,
+  baseDomain: string,
+  isTaken: (hostname: string) => boolean,
+) => string | null;
+
+/**
+ * Whether the app's earlier subdomain may be reactivated as-is. Apps with a
+ * fixed suffix always keep it; the product page only while it names the
+ * same product.
+ */
+export type ReusePrevious = (
+  hostname: string,
+  storeSlug: string,
+  baseDomain: string,
+) => boolean;
+
+/** Postgres unique violation surfaced by Prisma (`P2002`). */
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === 'P2002'
+  );
+}
+
 export interface AppCustomDomainView {
   id: number;
   hostname: string;
@@ -120,24 +153,30 @@ export class AppDomainService {
   }
 
   /**
-   * Activates a Vendix subdomain for the app. `buildHostname` receives the
-   * store slug, the base domain and an `isTaken` check that ignores this
-   * store's own earlier subdomains of the same app, so reactivation reuses
-   * the existing row (S5.4) instead of burning `-2`.
+   * Activates a Vendix subdomain for the app and never fails because a name
+   * is taken (Apps F5, Rafael's rule):
+   *
+   * 1. the app's own earlier subdomain (`previous`, usually the disabled one
+   *    an unpublish left) is reactivated when `canReusePrevious` accepts it,
+   *    so republishing never creates a second domain or leaves an orphan;
+   * 2. otherwise `buildHostname` picks a free hostname. Its `isTaken` check
+   *    ignores this store's own earlier subdomains of the same app, so an
+   *    old row with that name is reactivated instead of burning `-2`;
+   * 3. a hostname another request took meanwhile (unique violation) is
+   *    marked as taken and the next free one is tried.
    */
   async activateVendixHostname(
     storeId: number,
     appType: PublishedAppType,
-    buildHostname: (
-      storeSlug: string,
-      baseDomain: string,
-      isTaken: (hostname: string) => boolean,
-    ) => string | null,
+    buildHostname: HostnameBuilder,
+    previous: AppDomainRef | null = null,
+    canReusePrevious: ReusePrevious = () => true,
   ): Promise<{ id: number; hostname: string }> {
     const store = await this.prisma.stores.findUnique({
       where: { id: storeId },
       select: { slug: true, organization_id: true },
     });
+    const storeSlug = store?.slug ?? '';
     const baseDomain = DomainConfigService.getBaseDomain();
     const taken = new Set(
       (
@@ -159,44 +198,92 @@ export class AppDomainService {
         })
       ).map((d) => [d.hostname.toLowerCase(), d.id] as [string, number]),
     );
-    const hostname = buildHostname(
-      store?.slug ?? '',
-      baseDomain,
-      (candidate) => taken.has(candidate) && !own.has(candidate),
-    );
-    if (!hostname) {
-      throw new VendixHttpException(ErrorCodes.STORE_APPS_005);
-    }
-    const reusable = own.get(hostname);
-    if (reusable !== undefined) {
-      return this.setDomainStatus(reusable, 'active');
+
+    if (
+      previous &&
+      previous.ownership === 'vendix_subdomain' &&
+      own.get(previous.hostname.toLowerCase()) === previous.id &&
+      canReusePrevious(previous.hostname, storeSlug, baseDomain)
+    ) {
+      const reactivated = await this.reactivate(previous.id);
+      if (reactivated) return reactivated;
+      own.delete(previous.hostname.toLowerCase());
+      taken.add(previous.hostname.toLowerCase());
     }
 
-    const created = await this.prisma.domain_settings.create({
-      data: {
-        hostname,
-        store_id: storeId,
-        organization_id: store?.organization_id ?? null,
-        app_type: appType,
-        // `store`, not `ecommerce`: the ecommerce, tables and product links
-        // look up the store's ecommerce domain by `domain_type = 'ecommerce'`,
-        // and an app domain must never be picked as the online store.
-        domain_type: 'store',
-        is_primary: false,
-        ownership: 'vendix_subdomain',
-        status: 'active',
-        ssl_status: 'issued',
-        config: {},
-      },
-      select: { id: true, hostname: true, organization_id: true, store_id: true },
-    });
-    this.events.emit('domain.activated', {
-      domainId: created.id,
-      hostname: created.hostname,
-      organization_id: created.organization_id,
-      store_id: created.store_id,
-    });
-    return created;
+    for (let attempt = 0; attempt < MAX_CREATE_ATTEMPTS; attempt++) {
+      const hostname = buildHostname(
+        storeSlug,
+        baseDomain,
+        (candidate) => taken.has(candidate) && !own.has(candidate),
+      );
+      if (!hostname) {
+        throw new VendixHttpException(ErrorCodes.STORE_APPS_005);
+      }
+      const reusable = own.get(hostname);
+      if (reusable !== undefined) {
+        const reactivated = await this.reactivate(reusable);
+        if (reactivated) return reactivated;
+        own.delete(hostname);
+        taken.add(hostname);
+        continue;
+      }
+
+      let created: {
+        id: number;
+        hostname: string;
+        organization_id: number | null;
+        store_id: number | null;
+      };
+      try {
+        created = await this.prisma.domain_settings.create({
+          data: {
+            hostname,
+            store_id: storeId,
+            organization_id: store?.organization_id ?? null,
+            app_type: appType,
+            // `store`, not `ecommerce`: the ecommerce, tables and product
+            // links look up the store's ecommerce domain by
+            // `domain_type = 'ecommerce'`, and an app domain must never be
+            // picked as the online store.
+            domain_type: 'store',
+            is_primary: false,
+            ownership: 'vendix_subdomain',
+            status: 'active',
+            ssl_status: 'issued',
+            config: {},
+          },
+          select: { id: true, hostname: true, organization_id: true, store_id: true },
+        });
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+        taken.add(hostname);
+        continue;
+      }
+      this.events.emit('domain.activated', {
+        domainId: created.id,
+        hostname: created.hostname,
+        organization_id: created.organization_id,
+        store_id: created.store_id,
+      });
+      return created;
+    }
+    throw new VendixHttpException(ErrorCodes.STORE_APPS_005);
+  }
+
+  /**
+   * Activates one of the app's own subdomains; `null` when another active
+   * domain took the same hostname while this one was disabled.
+   */
+  private async reactivate(
+    id: number,
+  ): Promise<{ id: number; hostname: string } | null> {
+    try {
+      return await this.setDomainStatus(id, 'active');
+    } catch (error) {
+      if (isUniqueViolation(error)) return null;
+      throw error;
+    }
   }
 
   /**
@@ -255,7 +342,8 @@ export class AppDomainService {
     appType: PublishedAppType,
     state: AppDomainState,
     customDomainId: number | null | undefined,
-    buildHostname: Parameters<AppDomainService['activateVendixHostname']>[2],
+    buildHostname: HostnameBuilder,
+    canReusePrevious: ReusePrevious = () => true,
   ): Promise<PublishedAppDomains> {
     if (customDomainId) {
       await this.findTakeableCustomDomain(storeId, customDomainId);
@@ -265,6 +353,8 @@ export class AppDomainService {
       storeId,
       appType,
       buildHostname,
+      state.primary,
+      canReusePrevious,
     );
     let aliases = [...state.aliases];
 
@@ -381,13 +471,13 @@ export class AppDomainService {
   }
 
   /**
-   * The store's primary `{tienda}-store` domain (Fase 5, store home). It is
-   * never created here: the store home only changes the `app_type` of the
-   * domain the store already has, so the URL stays the same.
+   * The store's primary `{tienda}-store` domain (Fase 5, store home), or
+   * `null` when the store has none active. The store home only changes the
+   * `app_type` of that domain, so the URL stays the same.
    */
   async findStoreHomeDomain(
     storeId: number,
-  ): Promise<{ id: number; hostname: string; app_type: string }> {
+  ): Promise<{ id: number; hostname: string; app_type: string } | null> {
     const domain = await this.prisma.domain_settings.findFirst({
       where: {
         store_id: storeId,
@@ -399,10 +489,7 @@ export class AppDomainService {
       select: { id: true, hostname: true, app_type: true },
       orderBy: { id: 'asc' },
     });
-    if (!domain) {
-      throw new VendixHttpException(ErrorCodes.STORE_APPS_010);
-    }
-    return { ...domain, app_type: String(domain.app_type) };
+    return domain ? { ...domain, app_type: String(domain.app_type) } : null;
   }
 
   /**
