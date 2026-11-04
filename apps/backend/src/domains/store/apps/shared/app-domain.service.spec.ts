@@ -93,6 +93,21 @@ describe('AppDomainService', () => {
     expect(domain.hostname).toBe('roku-service-2.vendix.online');
   });
 
+  it('adopts the hostname a concurrent publish just created instead of burning -2', async () => {
+    prisma.domain_settings.create.mockRejectedValueOnce({ code: 'P2002' });
+    prisma.domain_settings.findFirst.mockResolvedValue({
+      id: 77, hostname: 'roku-service.vendix.online',
+    });
+
+    const domain = await service.activateVendixHostname(STORE_ID, 'STORE_SERVICE_PAGE', build);
+
+    expect(domain.id).toBe(77);
+    expect(domain.hostname).toBe('roku-service.vendix.online');
+    // One attempt: the loser of the race adopts the winner's subdomain.
+    expect(prisma.domain_settings.create).toHaveBeenCalledTimes(1);
+    expect(events.emit).toHaveBeenCalledWith('domain.activated', expect.anything());
+  });
+
   it('never takes the online store or admin domain', async () => {
     prisma.domain_settings.findFirst.mockResolvedValue({
       id: 9, hostname: 'shop.roku.com', app_type: 'STORE_ECOMMERCE', status: 'active',
