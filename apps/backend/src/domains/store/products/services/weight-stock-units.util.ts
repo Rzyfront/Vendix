@@ -22,6 +22,8 @@
  *    producto pendiente; aquí no se inventan gramos.
  */
 
+import { toStockUnitsByFactor } from '@common/money-kernel/uom-conversion';
+
 /** Unidad del catálogo, tal como la necesita la conversión. */
 export interface WeightUomFactor {
   code: string;
@@ -92,8 +94,9 @@ export function convertWeightToStockUnits(
   ) {
     return null;
   }
-  const raw = Number(((weight * weightUnitFactor) / stockUnitFactor).toFixed(6));
-  const rounded = Math.round(raw);
+  // Fórmula única del núcleo de conversión (`@common/money-kernel/uom-conversion`).
+  const rounded = toStockUnitsByFactor(weight, weightUnitFactor, stockUnitFactor);
+  if (rounded == null) return null;
   if (rounded < 1) return { units: 1, floored: true };
   return { units: rounded, floored: false };
 }

@@ -50,6 +50,8 @@ import { AccountsPayableService } from '../../accounts-payable/accounts-payable.
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import {
   differsByAtLeastCents,
+  roundUomMoney,
+  uomRatio,
   resolvePurchaseLineTaxes,
   resolvePurchaseLineDiscount,
   type PurchaseLineTaxInput,
@@ -74,6 +76,14 @@ import { SettingsService } from '../../settings/settings.service';
 import { CostPreviewDto } from './dto/cost-preview.dto';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 import { resolvePackSize } from '../../products/services/packaging.util';
+import { syncProductSaleUoms } from '../../products/services/sale-uoms-sync.util';
+import {
+  assertSaleUomsValid,
+  assertScaleCodeUnique,
+  assertStockUomEligible,
+  derivePurchaseToStockFactor,
+  resolveStockUomChange,
+} from '../../products/services/product-uom-config.util';
 import {
   resolvePricedUnits,
   resolveTierPricingCostAnchor,
@@ -1528,8 +1538,18 @@ export class PurchaseOrdersService {
       (existingProduct as { price_unit_quantity?: number | null } | null)
         ?.price_unit_quantity,
     );
-    if (cost > 0 && (!item.base_price || item.base_price === 0)) {
-      basePrice = cost * basePriceScale * (1 + margin / 100);
+    // `cost` vale por unidad de COMPRA (lo que dice la línea), pero
+    // `products.cost_price` vale por unidad de STOCK: costo de ventas,
+    // valorización y stock inicial lo multiplican por cantidades de stock.
+    // Un existente comprado en kg con stock en g recibía el costo del kilo
+    // como costo del gramo (×1000) y, por la escala de arriba, un precio
+    // ×1000. Se usa la MISMA aritmética de la recepción.
+    const productCost = existingProduct
+      ? PurchaseOrdersService.applyUoMConversion(existingProduct, 1, cost)
+          .stockUnitCost
+      : cost;
+    if (productCost > 0 && (!item.base_price || item.base_price === 0)) {
+      basePrice = productCost * basePriceScale * (1 + margin / 100);
     }
 
     // Resolve Brand: derive a deterministic slug (mirrors the categories
@@ -1651,7 +1671,7 @@ export class PurchaseOrdersService {
         brand_id: brandId !== undefined ? brandId : existingProduct.brand_id,
         base_price: basePrice > 0 ? basePrice : existingProduct.base_price,
         profit_margin: margin > 0 ? margin : existingProduct.profit_margin,
-        cost_price: cost > 0 ? cost : existingProduct.cost_price,
+        cost_price: productCost > 0 ? productCost : existingProduct.cost_price,
         description: item.product_description || existingProduct.description,
       };
 
@@ -2245,6 +2265,28 @@ export class PurchaseOrdersService {
               tx,
               preload,
             );
+          }
+
+          // S13d — configuración de unidades del producto (principal +
+          // adicionales, inventario, compra, escala y código de balanza) con las
+          // MISMAS reglas del editor. Solo corre si la línea trae `sale_uoms`
+          // (aunque sea `[]`); sin él la línea queda como siempre. Va ANTES de la
+          // presentación QUI-648 porque su costo-ancla lee `price_unit_quantity`.
+          if (
+            finalProductId &&
+            (item as any).sale_uoms !== undefined &&
+            orderType !== 'ingredient'
+          ) {
+            await this.persistSaleUomConfigToProduct(
+              finalProductId,
+              item,
+              tx,
+              finalVariantId
+                ? undefined
+                : this.resolveLineTaxes(item, createPurchaseOrderDto)
+                    .unit_price_net,
+            );
+            preload.products.delete(finalProductId);
           }
 
           // Unidad de venta (QUI-648): configurar en qué presentación se venderá
@@ -3954,6 +3996,194 @@ export class PurchaseOrdersService {
       where: { id: productId },
       data: { has_multiple_price_tiers: true },
     });
+  }
+
+  /**
+   * S13d — deja en el producto (nuevo o existente) la configuración de
+   * unidades que trae la línea del POP, validada con exactamente las reglas del
+   * editor (`product-uom-config.util`, compartido con `ProductsService`):
+   *
+   *   - `sale_uoms` presente (incluso `[]` = pieza simple); una sola principal,
+   *     sin duplicados, catálogo activo, misma dimensión y enteras sobre el stock.
+   *   - `pricing_type` debe ser el que impone la principal (peso ⇔ masa).
+   *   - `price_unit_quantity` = escala entera principal/stock.
+   *   - Cambiar la unidad de stock de un producto con datos exige
+   *     `stock_uom_conversion: 'convert'` y la convierte con
+   *     `StockLevelManager.convertStockUom` en la misma transacción.
+   *   - Con stock y compra declarados, el factor compra→stock sale del catálogo
+   *     (o del contenido por envase manual) y es el que usa la recepción.
+   *
+   * Todo corre dentro de la transacción de la orden: si algo falla, no queda
+   * nada a medias.
+   */
+  private async persistSaleUomConfigToProduct(
+    productId: number,
+    item: {
+      sale_uoms?: Array<{ uom_id: number; is_principal?: boolean }> | null;
+      pricing_type?: string;
+      stock_uom_id?: number | null;
+      purchase_uom_id?: number | null;
+      purchase_to_stock_factor?: number | null;
+      scale_code?: number | null;
+      stock_uom_conversion?: string | null;
+    },
+    tx: any,
+    lineUnitCostNet?: number,
+  ): Promise<void> {
+    const product = await tx.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        stock_uom_id: true,
+        purchase_uom_id: true,
+        pricing_type: true,
+        cost_price: true,
+      },
+    });
+    if (!product) return;
+
+    const effectiveStockUomId =
+      item.stock_uom_id !== undefined
+        ? item.stock_uom_id
+        : product.stock_uom_id;
+    // `null` explícito borra la unidad de compra (pieza simple), igual que el
+    // editor; solo `undefined` conserva la persistida.
+    const effectivePurchaseUomId =
+      item.purchase_uom_id !== undefined
+        ? item.purchase_uom_id
+        : product.purchase_uom_id;
+    const uomFkTouched =
+      item.stock_uom_id !== undefined || item.purchase_uom_id !== undefined;
+    const requestedPricingType =
+      item.pricing_type !== undefined
+        ? normalizePricingType(item.pricing_type)
+        : undefined;
+
+    if (item.stock_uom_id !== undefined) {
+      await assertStockUomEligible(tx, item.stock_uom_id);
+    }
+    const principalScale = await assertSaleUomsValid(
+      tx,
+      item.sale_uoms,
+      effectiveStockUomId,
+      requestedPricingType ?? product.pricing_type,
+    );
+    if (item.scale_code !== undefined) {
+      await assertScaleCodeUnique(tx, item.scale_code, {
+        excludeProductId: productId,
+      });
+    }
+
+    const pendingUomConversion = await resolveStockUomChange(tx, {
+      product_id: productId,
+      existing_stock_uom_id: product.stock_uom_id,
+      new_stock_uom_id: item.stock_uom_id,
+      stock_uom_conversion: item.stock_uom_conversion,
+    });
+    const derivedFactor = uomFkTouched
+      ? await derivePurchaseToStockFactor(
+          tx,
+          effectiveStockUomId,
+          effectivePurchaseUomId,
+          item.purchase_to_stock_factor,
+        )
+      : undefined;
+
+    // `cost_price` (producto y variantes) vale por UNIDAD DE STOCK: si la
+    // línea cambia esa unidad, el costo se lleva a la nueva en la misma
+    // escritura. `convertStockUom` convierte existencias y capas, no esta
+    // columna, y sin existencias ni siquiera corre.
+    //   - De una unidad declarada a otra (kg → g): costo ÷ razón exacta.
+    //   - De ninguna a una con factor de compra (el producto que la compra
+    //     acaba de crear nació con el costo de la línea por unidad de compra):
+    //     costo neto de la línea ÷ factor compra→stock.
+    let stockUnitCost: number | undefined;
+    let variantCostDivisor: number | undefined;
+    const stockUomChanged =
+      item.stock_uom_id != null &&
+      product.stock_uom_id != null &&
+      Number(item.stock_uom_id) !== Number(product.stock_uom_id);
+    if (stockUomChanged) {
+      const units = await tx.units_of_measure.findMany({
+        where: {
+          id: { in: [Number(product.stock_uom_id), Number(item.stock_uom_id)] },
+        },
+      });
+      const from = units.find(
+        (u: { id: number }) => u.id === Number(product.stock_uom_id),
+      );
+      const to = units.find(
+        (u: { id: number }) => u.id === Number(item.stock_uom_id),
+      );
+      const ratio = from && to ? uomRatio(from, to) : null;
+      if (ratio != null && ratio > 0 && ratio !== 1) {
+        variantCostDivisor = ratio;
+        if (product.cost_price != null) {
+          stockUnitCost = roundUomMoney(Number(product.cost_price) / ratio);
+        }
+      }
+    } else if (
+      product.stock_uom_id == null &&
+      item.stock_uom_id != null &&
+      derivedFactor != null &&
+      Number(derivedFactor) > 0 &&
+      Number(derivedFactor) !== 1 &&
+      lineUnitCostNet != null &&
+      lineUnitCostNet > 0
+    ) {
+      stockUnitCost = roundUomMoney(lineUnitCostNet / Number(derivedFactor));
+    }
+
+    // La conversión va PRIMERO y en la misma transacción: si algo no divide
+    // exacto, el producto no llega a cambiar de unidad.
+    if (pendingUomConversion) {
+      await this.stockLevelManager.convertStockUom({
+        product_id: productId,
+        from_uom_id: pendingUomConversion.from,
+        to_uom_id: pendingUomConversion.to,
+        user_id: RequestContextService.getUserId(),
+        tx,
+      });
+    }
+
+    const data: Record<string, unknown> = {
+      ...(item.stock_uom_id !== undefined
+        ? { stock_uom_id: item.stock_uom_id }
+        : {}),
+      ...(item.purchase_uom_id !== undefined
+        ? { purchase_uom_id: item.purchase_uom_id }
+        : {}),
+      ...(requestedPricingType !== undefined
+        ? { pricing_type: requestedPricingType }
+        : {}),
+      // Sin principal (pieza simple) el precio vuelve a ser por 1 unidad, como
+      // el payload del editor (`price_unit_quantity: 1`): un producto que venía
+      // por kg no puede quedar con la escala 1000.
+      ...(principalScale !== null
+        ? { price_unit_quantity: principalScale }
+        : (item.sale_uoms ?? []).length === 0
+          ? { price_unit_quantity: 1 }
+          : {}),
+      ...(item.scale_code !== undefined ? { scale_code: item.scale_code } : {}),
+      ...(derivedFactor !== undefined
+        ? { purchase_to_stock_factor: derivedFactor }
+        : {}),
+      ...(stockUnitCost !== undefined ? { cost_price: stockUnitCost } : {}),
+    };
+    if (Object.keys(data).length > 0) {
+      await tx.products.update({
+        where: { id: productId },
+        data: { ...data, updated_at: new Date() },
+      });
+    }
+    if (variantCostDivisor !== undefined) {
+      await tx.product_variants.updateMany({
+        where: { product_id: productId, cost_price: { not: null } },
+        data: { cost_price: { divide: variantCostDivisor } },
+      });
+    }
+
+    await syncProductSaleUoms(tx, productId, item.sale_uoms ?? []);
   }
 
   /**

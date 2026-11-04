@@ -1,3 +1,4 @@
+import { toStockUnitsByFactor } from '@money-kernel/uom-conversion';
 import {
   Component,
   ElementRef,
@@ -59,6 +60,7 @@ import { ManualWeighResult } from './pos-manual-weight-modal.component';
 import {
   capturesInSaleUnit,
   MAX_WEIGH_AMOUNT,
+  priceUnitLabel,
   weighMaxFor,
 } from '../utils/manual-weigh.util';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
@@ -550,7 +552,7 @@ function isMultiTokenQuery(query: string): boolean {
                     }
                     @if (product.pricing_type === 'weight') {
                       <span class="text-[10px] font-normal text-slate-500">
-                        /{{ defaultWeightUnit() }}
+                        /{{ priceUnitSuffix(product) }}
                       </span>
                     }
                     @if (product.has_multiple_price_tiers === true) {
@@ -814,7 +816,7 @@ function isMultiTokenQuery(query: string): boolean {
                             @if (product.pricing_type === 'weight') {
                               <span
                                 class="text-[10px] font-normal text-slate-500"
-                                >/{{ defaultWeightUnit() }}</span
+                                >/{{ priceUnitSuffix(product) }}</span
                               >
                             }
                           </span>
@@ -833,7 +835,7 @@ function isMultiTokenQuery(query: string): boolean {
                           @if (product.pricing_type === 'weight') {
                             <span
                               class="text-[10px] font-normal text-slate-500"
-                              >/{{ defaultWeightUnit() }}</span
+                              >/{{ priceUnitSuffix(product) }}</span
                             >
                           }
                         </span>
@@ -1239,6 +1241,21 @@ export class PosProductSelectionComponent {
   // Scale/weight settings from store
   readonly scaleEnabled = signal(false);
   readonly defaultWeightUnit = signal<'kg' | 'g' | 'lb'>('kg');
+
+  /**
+   * Unidad que nombra el precio de un producto de peso en la tarjeta: la
+   * misma con la que se cobra (ver `priceUnitLabel`). Un peso legado con
+   * stock en g y escala 1 se cobra por la unidad de la báscula, no por g.
+   */
+  priceUnitSuffix(product: Product): string {
+    const config = this.saleUnitService.configFor(product);
+    return priceUnitLabel(
+      this.saleUnitService.saleUnitsFor(product)[0]?.code,
+      config.captureUnit?.code,
+      config.unitsPerCapture,
+      this.defaultWeightUnit(),
+    );
+  }
   readonly allowManualWeightEntry = signal(true);
   readonly lowStockThreshold = signal(10);
   readonly allowNegativeStock = computed(() => this.cartService.allowNegativeStock());
@@ -3098,7 +3115,7 @@ export class PosProductSelectionComponent {
         unitCode: principal.code,
         principalAmount: amount,
         principalCode: principal.code,
-        stockQuantity: Math.max(0, Math.round(amount * principal.factorToBase)),
+        stockQuantity: toStockUnitsByFactor(amount, principal.factorToBase, 1) ?? 0,
         unitFactor: principal.factorToBase,
       };
     }
@@ -3124,7 +3141,7 @@ export class PosProductSelectionComponent {
         unitCode: principal.code,
         principalAmount: amount,
         principalCode: principal.code,
-        stockQuantity: Math.max(0, Math.round(amount * principal.factorToBase)),
+        stockQuantity: toStockUnitsByFactor(amount, principal.factorToBase, 1) ?? 0,
         unitFactor: principal.factorToBase,
       };
     }

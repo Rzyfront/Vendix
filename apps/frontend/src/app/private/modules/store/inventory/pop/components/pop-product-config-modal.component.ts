@@ -8,8 +8,9 @@ import {
   inject,
   viewChild,
   DestroyRef,
+  untracked,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 
 import {
   FormBuilder,
@@ -19,7 +20,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { forkJoin, of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { catchError, startWith } from 'rxjs/operators';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import {
   ScrollableTabsComponent,
@@ -32,7 +33,19 @@ import { InputComponent } from '../../../../../../shared/components/input/input.
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { ProductsService } from '../../../products/services/products.service';
-import { UomService } from '../../services/uom.service';
+import { UomService, UnitOfMeasure } from '../../services/uom.service';
+import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
+import { SaleUnitSectionComponent } from '../../../products/components/sale-unit-section/sale-unit-section.component';
+import {
+  emptySaleUnitState,
+  fromProduct as saleUnitFromProduct,
+  isMassPrincipal,
+  PIECE,
+  SaleUnitFormState,
+  SaleUnitPayload,
+  toPayload as saleUnitToPayload,
+  violations as saleUnitViolations,
+} from '../../../products/utils/sale-unit-form.util';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
@@ -43,6 +56,8 @@ import {
   LotInfo,
   PopProductConfigResult,
   PopProductModalResult,
+  PopSaleUnitConfig,
+  PopSaleUnitTier,
   PreBulkData,
 } from '../interfaces/pop-cart.interface';
 import {
@@ -70,6 +85,7 @@ export type { PopProductConfigResult };
     InputComponent,
     TextareaComponent,
     PopUomCaptureComponent,
+    SaleUnitSectionComponent,
   ],
   template: `
     <app-modal
@@ -180,12 +196,27 @@ export type { PopProductConfigResult };
                     placeholder="Ej: MAN-001"
                     [required]="true"
                   ></app-input>
-                  <app-input
-                    label="Código de Barras"
-                    formControlName="barcode"
-                    placeholder="Escanea o escribe el código"
-                    tooltipText="Código de barras físico del producto (EAN, UPC). Al pistolear con el escáner se rellena automáticamente."
-                  ></app-input>
+                  <!-- S12: con unidad principal de masa el código de barras se
+                       reemplaza por el código de balanza. -->
+                  @if (scaleCodeVisible()) {
+                    <app-input
+                      label="Código de balanza"
+                      type="number"
+                      placeholder="Ej. 3"
+                      [ngModel]="saleScaleCode()"
+                      [ngModelOptions]="{ standalone: true }"
+                      (ngModelChange)="onScaleCodeChange($event)"
+                      [error]="scaleCodeError()"
+                      tooltipText="Número del producto en la balanza etiquetadora (columna Código del PLU)."
+                    ></app-input>
+                  } @else {
+                    <app-input
+                      label="Código de Barras"
+                      formControlName="barcode"
+                      placeholder="Escanea o escribe el código"
+                      tooltipText="Código de barras físico del producto (EAN, UPC). Al pistolear con el escáner se rellena automáticamente."
+                    ></app-input>
+                  }
                   <div class="md:col-span-2">
                     <app-input
                       label="Descripción corta"
@@ -216,7 +247,7 @@ export type { PopProductConfigResult };
                 @if (!isIngredient()) {
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <app-input
-                      label="Precio de Venta"
+                      [label]="salePriceLabel()"
                       [currency]="true"
                       formControlName="basePrice"
                       prefix="$"
@@ -285,45 +316,7 @@ export type { PopProductConfigResult };
               ></app-setting-toggle>
             }
 
-            <!-- Sale UoM selector. Excluyente con la captura de consumo:
-                 se muestra solo para producto retail (no insumo) en ambos
-                 modos. Insumo → bloque app-pop-uom-capture (abajo). -->
-            @if (!ingredientMode() && showSaleConfig()) {
-              <div>
-                <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Unidad de medida</label
-                >
-                <div class="flex gap-2">
-                  <button
-                    class="flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-all"
-                    [class]="
-                      selectedPricingType() === 'unit'
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border bg-surface text-text-secondary hover:border-primary/50'
-                    "
-                    (click)="selectedPricingType.set('unit')"
-                  >
-                    Unidad
-                  </button>
-                  <button
-                    class="flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-all"
-                    [class]="
-                      selectedPricingType() === 'weight'
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border bg-surface text-text-secondary hover:border-primary/50'
-                    "
-                    (click)="selectedPricingType.set('weight')"
-                  >
-                    Peso (kg)
-                  </button>
-                </div>
-              </div>
-            }
-
-            <!-- Unidad de venta (QUI-648). Compro en una presentación y vendo en
-                 otra: bulto de 50 kg vendido por bulto y por kilo. Alcanza a
-                 retail, ferretería y distribuidora — a diferencia del bloque de
-                 insumo, NO se gatea por restaurante. -->
+            <!-- Variantes: la presentación con precio propio no se combina. -->
             @if (saleUnitBlockedByVariants()) {
               <div
                 class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-start gap-2"
@@ -342,72 +335,108 @@ export type { PopProductConfigResult };
               </div>
             }
 
-            @if (canConfigureSaleUnit()) {
-              <div class="rounded-lg border border-border p-3 space-y-3">
-                <div>
-                  <p class="text-sm font-medium text-text-primary">
-                    Unidad de venta adicional
-                  </p>
-                  <p class="text-xs text-text-secondary">
-                    Opcional. Define en qué presentación se venderá además de la
-                    unidad principal. El stock siempre se descuenta en la unidad
-                    mínima.
-                  </p>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <app-input
-                    label="Nombre de la presentación"
-                    placeholder="Ej: Bulto 50 kg"
-                    [ngModel]="saleUnitName()"
-                    [ngModelOptions]="{ standalone: true }"
-                    (ngModelChange)="saleUnitName.set($event)"
-                    customWrapperClass="!mt-0"
-                  ></app-input>
-                  <app-input
-                    label="Unidades de stock que consume"
-                    type="number"
-                    [min]="2"
-                    placeholder="Ej: 50"
-                    [ngModel]="saleUnitFactor()"
-                    [ngModelOptions]="{ standalone: true }"
-                    (ngModelChange)="saleUnitFactor.set($event)"
-                    customWrapperClass="!mt-0"
-                  ></app-input>
-                </div>
-                @if (saleUnitName()) {
-                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <app-input
-                      label="Precio de la presentación"
-                      [currency]="true"
-                      [ngModel]="saleUnitPrice()"
-                      [ngModelOptions]="{ standalone: true }"
-                      (ngModelChange)="onSaleUnitPriceChange($event)"
-                      customWrapperClass="!mt-0"
-                    ></app-input>
-                    <app-input
-                      label="Margen (%)"
-                      type="number"
-                      [ngModel]="saleUnitMargin()"
-                      [ngModelOptions]="{ standalone: true }"
-                      (ngModelChange)="onSaleUnitMarginChange($event)"
-                      [disabled]="saleUnitPackageCost() <= 0"
-                      [error]="
-                        saleUnitPackageCost() <= 0
-                          ? 'Define el costo para calcular el margen'
-                          : ''
-                      "
-                      customWrapperClass="!mt-0"
-                    ></app-input>
+            <!-- S13: sección «Unidad de venta» compartida con el editor de
+                 producto (reemplaza el toggle Unidad/Peso). Solo productos
+                 vendibles; el insumo conserva su bloque de captura. El bloque
+                 QUI-648 entra por proyección dentro del plegable. -->
+            @if (!ingredientMode() && showSaleConfig()) {
+              <app-sale-unit-section
+                [(state)]="saleUnitState"
+                [(touched)]="saleUnitTouched"
+                [catalog]="saleCatalog()"
+                [price]="saleSummaryPrice()"
+                [foldableAlways]="canConfigureSaleUnit()"
+                [advancedLabel]="canConfigureSaleUnit() ? 'Avanzado y presentaciones' : 'Avanzado'"
+                (committed)="onSaleUnitCommitted($event)"
+              >
+                @if (canConfigureSaleUnit()) {
+                  <div class="rounded-lg border border-border p-3 space-y-3">
+                    <div>
+                      <p class="text-sm font-medium text-text-primary">
+                        Precio especial por presentación
+                      </p>
+                      <p class="text-xs text-text-secondary">
+                        Opcional. Define en qué presentación se venderá además
+                        de la unidad principal (bulto, rollo, caja). El stock
+                        siempre se descuenta en la unidad mínima.
+                      </p>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <app-input
+                        label="Nombre de la presentación"
+                        placeholder="Ej: Bulto 50 kg"
+                        [ngModel]="saleUnitName()"
+                        [ngModelOptions]="{ standalone: true }"
+                        (ngModelChange)="saleUnitName.set($event)"
+                        customWrapperClass="!mt-0"
+                      ></app-input>
+                      <app-input
+                        label="Unidades de stock que consume"
+                        type="number"
+                        [min]="2"
+                        placeholder="Ej: 50"
+                        [ngModel]="saleUnitFactor()"
+                        [ngModelOptions]="{ standalone: true }"
+                        (ngModelChange)="saleUnitFactor.set($event)"
+                        customWrapperClass="!mt-0"
+                      ></app-input>
+                    </div>
+                    @if (saleUnitName()) {
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <app-input
+                          label="Precio de la presentación"
+                          [currency]="true"
+                          [ngModel]="saleUnitPrice()"
+                          [ngModelOptions]="{ standalone: true }"
+                          (ngModelChange)="onSaleUnitPriceChange($event)"
+                          customWrapperClass="!mt-0"
+                        ></app-input>
+                        <app-input
+                          label="Margen (%)"
+                          type="number"
+                          [ngModel]="saleUnitMargin()"
+                          [ngModelOptions]="{ standalone: true }"
+                          (ngModelChange)="onSaleUnitMarginChange($event)"
+                          [disabled]="saleUnitPackageCost() <= 0"
+                          [error]="
+                            saleUnitPackageCost() <= 0
+                              ? 'Define el costo para calcular el margen'
+                              : ''
+                          "
+                          customWrapperClass="!mt-0"
+                        ></app-input>
+                      </div>
+                      <app-setting-toggle
+                        label="Usar como presentación por defecto"
+                        description="Se usará en tienda online, POS y cotizaciones. En el POS se puede elegir otra por línea."
+                        [ngModel]="saleUnitIsDefault()"
+                        [ngModelOptions]="{ standalone: true }"
+                        (changed)="saleUnitIsDefault.set($event)"
+                      ></app-setting-toggle>
+                    }
                   </div>
-                  <app-setting-toggle
-                    label="Usar como presentación por defecto"
-                    description="Se usará en tienda online, POS y cotizaciones. En el POS se puede elegir otra por línea."
-                    [ngModel]="saleUnitIsDefault()"
-                    [ngModelOptions]="{ standalone: true }"
-                    (changed)="saleUnitIsDefault.set($event)"
-                  ></app-setting-toggle>
                 }
-              </div>
+              </app-sale-unit-section>
+
+              <!-- S12: en configurar no hay código de barras; con principal de
+                   masa se ofrece el código de balanza bajo la sección. -->
+              @if (configureMode() && scaleCodeVisible()) {
+                <app-input
+                  label="Código de balanza"
+                  type="number"
+                  placeholder="Ej. 3"
+                  [ngModel]="saleScaleCode()"
+                  [ngModelOptions]="{ standalone: true }"
+                  (ngModelChange)="onScaleCodeChange($event)"
+                  [disabled]="scaleCodeLocked()"
+                  [error]="scaleCodeError()"
+                  [helperText]="
+                    scaleCodeLocked()
+                      ? 'Define la unidad de venta (por ejemplo kg) en la sección de arriba para asignarlo.'
+                      : 'Número del producto en la balanza etiquetadora (columna Código del PLU).'
+                  "
+                ></app-input>
+              }
             }
 
             <!-- Fase 3+5: UoM-aware cost capture (shared sub-component, bidirectional).
@@ -422,6 +451,7 @@ export type { PopProductConfigResult };
                 [isIngredient]="ingredientMode()"
                 [initialPurchaseUomId]="purchaseUomId()"
                 [initialStockUomId]="stockUomId()"
+                [externalUnits]="ingredientMode() ? null : sectionUnits()"
                 [initialUnitCost]="initialUnitCost()"
                 [initialQuantity]="configureMode() ? 1 : createQuantity()"
                 (changed)="onUomCaptureChanged($event)"
@@ -828,6 +858,12 @@ export class PopProductConfigModalComponent {
   readonly initialLotInfo = input<LotInfo | null>(null);
   readonly initialPricingType = input<'unit' | 'weight'>('unit');
   readonly isEditing = input(false);
+  /**
+   * S13c: configuración que el ítem del carrito ya trae (editar un ítem
+   * conserva los cambios de unidades y la presentación con precio propio).
+   */
+  readonly initialSaleUnit = input<PopSaleUnitConfig | null>(null);
+  readonly initialSaleTier = input<PopSaleUnitTier | null>(null);
 
   /**
    * Unified-modal mode (Fase 5).
@@ -987,7 +1023,7 @@ export class PopProductConfigModalComponent {
    * Campos que viajan al ítem de compra. Sin nombre no se envía nada: el backend
    * usa `sale_unit_name` como interruptor de todo el bloque.
    */
-  protected saleUnitPayload(): Record<string, unknown> {
+  protected saleUnitPayload(): PopSaleUnitTier {
     const name = this.saleUnitName().trim();
     if (!name || !this.canConfigureSaleUnit()) return {};
     return {
@@ -998,6 +1034,249 @@ export class PopProductConfigModalComponent {
       sale_unit_is_default: this.saleUnitIsDefault(),
     };
   }
+  // ─── Sección «Unidad de venta» (S13, compartida con el editor) ────────────
+  /** Estado de la sección; lo edita `app-sale-unit-section` (dos vías). */
+  readonly saleUnitState = signal<SaleUnitFormState>(emptySaleUnitState());
+  /** Solo una sección tocada reescribe unidades (S6, D3). */
+  readonly saleUnitTouched = signal(false);
+  readonly saleScaleCode = signal<number | string | null>(null);
+  /** El diálogo «Convertir existencias» (S9) ya fue aceptado para esta configuración. */
+  private readonly stockConversionConfirmed = signal(false);
+  private readonly dialogService = inject(DialogService);
+
+  /** Catálogo tipado para el mapper (misma fuente que el editor). */
+  readonly saleCatalog = computed<readonly UnitOfMeasure[]>(() => this.uomCatalog());
+
+  private readonly basePriceControl = toSignal(
+    this.identityForm.get('basePrice')!.valueChanges.pipe(
+      startWith(this.identityForm.get('basePrice')!.value),
+    ),
+    { initialValue: this.identityForm.get('basePrice')!.value },
+  );
+
+  /** Precio que muestra el resumen de la sección. */
+  readonly saleSummaryPrice = computed<number>(() =>
+    this.createMode()
+      ? Number(this.basePriceControl() ?? 0)
+      : Number(this.product()?.price ?? 0),
+  );
+
+  /** Código de la unidad principal elegida; `null` si es pieza o no hay catálogo. */
+  private readonly salePrincipalCode = computed<string | null>(() => {
+    const id = this.saleUnitState().principalUomId;
+    if (id === 'piece') return null;
+    return this.uomCatalog().find((u) => u.id === id)?.code ?? null;
+  });
+
+  /** El rótulo del precio de venta nombra la unidad principal ("Precio por kg"). */
+  readonly salePriceLabel = computed(() => {
+    const code =
+      !this.ingredientMode() && this.showSaleConfig()
+        ? this.salePrincipalCode()
+        : null;
+    return code ? `Precio por ${code}` : 'Precio de Venta';
+  });
+
+  /**
+   * S12 — con principal de masa se reemplaza el código de barras por el código
+   * de balanza. Un producto legado sin tocar se juzga por su `pricing_type`.
+   */
+  readonly scaleCodeVisible = computed<boolean>(() => {
+    if (this.ingredientMode() || !this.showSaleConfig()) return false;
+    const state = this.saleUnitState();
+    return this.saleUnitTouched() || !state.legacy
+      ? isMassPrincipal(state, this.saleCatalog())
+      : this.product()?.pricing_type === 'weight';
+  });
+
+  /** Un legado sin tocar no puede fijar el código sin definir antes la unidad. */
+  readonly scaleCodeLocked = computed(
+    () => this.saleUnitState().legacy && !this.saleUnitTouched(),
+  );
+
+  /** Entero 1..999999 o `null` (vacío); `undefined` si es inválido. */
+  private parsedScaleCode(): number | null | undefined {
+    const raw = this.saleScaleCode();
+    if (raw === null || raw === undefined || raw === '') return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 1 && n <= 999999 ? n : undefined;
+  }
+
+  readonly scaleCodeError = computed(() =>
+    this.scaleCodeVisible() && this.parsedScaleCode() === undefined
+      ? 'Debe ser un número entero entre 1 y 999999'
+      : '',
+  );
+
+  /**
+   * Unidades de compra/inventario que `app-pop-uom-capture` toma de la sección:
+   * las elegidas si se tocó; si no, las persistidas del producto (S6).
+   */
+  readonly sectionUnits = computed<{
+    purchaseUomId: number | null;
+    stockUomId: number | null;
+  }>(() => {
+    if (this.saleUnitTouched()) {
+      const s = this.saleUnitState();
+      return { purchaseUomId: s.purchaseUomId, stockUomId: s.stockUomId };
+    }
+    const p = this.product();
+    return {
+      purchaseUomId: p?.purchase_uom_id ?? null,
+      stockUomId: p?.stock_uom_id ?? null,
+    };
+  });
+
+  /** Violaciones del núcleo: bloquean confirmar una sección tocada. */
+  private readonly saleSectionInvalid = computed(
+    () =>
+      !this.ingredientMode() &&
+      this.showSaleConfig() &&
+      this.saleUnitTouched() &&
+      saleUnitViolations(this.saleUnitState(), this.saleCatalog()).length > 0,
+  );
+
+  onSaleUnitCommitted(payload: SaleUnitPayload): void {
+    this.selectedPricingType.set(payload.pricing_type);
+    this.stockConversionConfirmed.set(false);
+    // En una compra la cantidad y el costo se escriben en la unidad de compra.
+    // Sin ella el backend recibe 1:1 en la unidad de inventario: «10» a $15.000
+    // entraría como 10 g a $15.000 cada uno. Por defecto se compra en la unidad
+    // principal (siempre válida: misma dimensión y múltiplo entero del stock).
+    const state = this.saleUnitState();
+    if (state.purchaseUomId == null && state.principalUomId !== PIECE) {
+      this.saleUnitState.set({
+        ...state,
+        purchaseUomId: Number(state.principalUomId),
+      });
+    }
+  }
+
+  onScaleCodeChange(value: number | string | null): void {
+    this.saleScaleCode.set(value);
+    // Un producto ya configurado vuelve idéntico (mismas unidades) con el código nuevo.
+    if (!this.saleUnitState().legacy) this.saleUnitTouched.set(true);
+  }
+
+  /** Configuración S13d: solo con la sección tocada; `undefined` = comportamiento legado. */
+  private buildSaleUnitConfig(): PopSaleUnitConfig | undefined {
+    if (
+      this.ingredientMode() ||
+      !this.showSaleConfig() ||
+      !this.saleUnitTouched()
+    ) {
+      return undefined;
+    }
+    const payload = saleUnitToPayload(
+      this.saleUnitState(),
+      this.saleCatalog(),
+      true,
+    );
+    const scale = this.scaleCodeVisible() ? this.parsedScaleCode() : null;
+    return {
+      sale_uoms: payload.sale_uoms,
+      scale_code: scale ?? null,
+      pricing_type: payload.pricing_type,
+      stock_uom_id: payload.stock_uom_id,
+      purchase_uom_id: payload.purchase_uom_id,
+      ...(this.stockConversionConfirmed()
+        ? { stock_uom_conversion: 'convert' as const }
+        : {}),
+    };
+  }
+
+  private createSaleConfigField(): { sale_unit_config?: PopSaleUnitConfig } {
+    const config = this.buildSaleUnitConfig();
+    return config ? { sale_unit_config: config } : {};
+  }
+
+  /** Campos de «Unidad de venta» para el resultado configure. */
+  private configureSaleFields(): {
+    sale_unit_config?: PopSaleUnitConfig;
+    sale_unit_tier?: PopSaleUnitTier;
+  } {
+    const config = this.buildSaleUnitConfig();
+    const tier = this.saleUnitPayload();
+    return {
+      ...(config ? { sale_unit_config: config } : {}),
+      ...(Object.keys(tier).length > 0 ? { sale_unit_tier: tier } : {}),
+    };
+  }
+
+  /**
+   * S9: producto existente cuya unidad de inventario cambia → hay que confirmar
+   * la conversión de existencias antes de enviar `stock_uom_conversion`.
+   */
+  private stockConversionTarget(): { from: UnitOfMeasure; to: UnitOfMeasure } | null {
+    const product = this.product();
+    const config = this.buildSaleUnitConfig();
+    if (!product?.id || !config || config.stock_uom_id == null) return null;
+    const persisted = product.stock_uom_id;
+    if (persisted == null || Number(persisted) === Number(config.stock_uom_id)) {
+      return null;
+    }
+    const from = this.uomCatalog().find((u) => u.id === Number(persisted));
+    const to = this.uomCatalog().find((u) => u.id === Number(config.stock_uom_id));
+    return from && to ? { from, to } : null;
+  }
+
+  private async askStockConversion(
+    target: { from: UnitOfMeasure; to: UnitOfMeasure },
+  ): Promise<void> {
+    const ratio =
+      target.from.dimension === target.to.dimension
+        ? Number(target.from.factor_to_base) / Number(target.to.factor_to_base)
+        : null;
+    const times =
+      ratio != null && Number.isFinite(ratio)
+        ? ` (×${Number(ratio.toFixed(6)).toLocaleString('es-CO')})`
+        : '';
+    const confirmed = await this.dialogService.confirm({
+      title: 'Convertir existencias',
+      message:
+        `Este producto cuenta su inventario en ${target.from.code}. ` +
+        `Al guardar la compra, las existencias se convertirán a ${target.to.code}${times} sin perder ni crear unidades.`,
+      confirmText: 'Convertir existencias',
+      cancelText: 'Cancelar',
+      confirmVariant: 'primary',
+    });
+    if (!confirmed) return;
+    this.stockConversionConfirmed.set(true);
+    this.onConfirm();
+  }
+
+  /**
+   * Carga la sección desde el producto (o desde la configuración del ítem del
+   * carrito que se edita). Con el catálogo vacío no se hidrata: se reintenta al
+   * llegar el catálogo.
+   */
+  private hydrateSaleSection(): void {
+    const catalog = this.uomCatalog();
+    if (catalog.length === 0 || this.saleUnitTouched()) return;
+    const cartConfig = this.initialSaleUnit();
+    if (cartConfig) {
+      this.saleUnitState.set(
+        saleUnitFromProduct(
+          {
+            pricing_type: cartConfig.pricing_type,
+            stock_uom_id: cartConfig.stock_uom_id,
+            purchase_uom_id: cartConfig.purchase_uom_id,
+            sale_uoms: cartConfig.sale_uoms,
+          },
+          catalog,
+        ),
+      );
+      this.saleScaleCode.set(cartConfig.scale_code);
+      this.saleUnitTouched.set(true);
+      return;
+    }
+    const p = this.product();
+    this.saleUnitState.set(
+      this.createMode() || !p ? emptySaleUnitState() : saleUnitFromProduct(p, catalog),
+    );
+    this.saleScaleCode.set(p?.scale_code ?? null);
+  }
+
   /** Live create quantity (read from the form, kept in sync). */
   readonly createQuantity = signal<number>(1);
   /**
@@ -1073,14 +1352,7 @@ export class PopProductConfigModalComponent {
    * call. We store the rows for the unit-aware UI; the service handles
    * caching across modal instances.
    */
-  protected readonly uomCatalog = signal<Array<{
-    id: number;
-    code: string;
-    name: string;
-    dimension: string;
-    factor_to_base: number | string;
-    is_active: boolean;
-  }>>([]);
+  protected readonly uomCatalog = signal<UnitOfMeasure[]>([]);
   /**
    * Fase 3: per-modal UoM selection. Defaults are derived from the
    * product (if it has stock_uom_id/purchase_uom_id) and stay editable
@@ -1223,12 +1495,25 @@ export class PopProductConfigModalComponent {
       }
     });
 
+    // Re-inicializa sólo al abrir o cuando cambian las entradas del padre. El
+    // cuerpo lee y escribe estado interno (selectedPricingType, saleUnitState,
+    // uomCatalog…): rastrearlo haría que elegir una unidad en la sección
+    // reiniciara el formulario completo.
     effect(() => {
-      if (this.isOpen()) {
+      const open = this.isOpen();
+      this.product();
+      this.mode();
+      this.initialVariant();
+      this.initialPricingType();
+      this.initialSaleUnit();
+      this.initialSaleTier();
+      this.suggestedUnitCostNet();
+      if (!open) return;
+      untracked(() => {
         this.resetState();
         this.loadUoMCatalog();
         this.initializeIngredientUoMDefaults();
-      }
+      });
     });
 
     // Seed the shared UoM-capture sub-component from its inputs once it is
@@ -1238,9 +1523,24 @@ export class PopProductConfigModalComponent {
     // product's persisted UoMs resolved by initializeIngredientUoMDefaults().
     effect(() => {
       const cap = this.uomCapture();
-      if (this.isOpen() && cap) {
+      if (!this.isOpen() || !cap) return;
+      if (this.ingredientMode()) {
+        // Insumo: re-siembra cuando llegan los defaults asíncronos del catálogo.
         cap.initFromInputs();
+      } else {
+        // Con la sección, `externalUnits` cambia al elegir unidades y la captura
+        // ya las sincroniza sola; re-sembrar borraría el costo y la cantidad.
+        untracked(() => cap.initFromInputs());
       }
+    });
+
+    // S13c: con la sección activa, la compra y el inventario salen de ella (no
+    // de los selectores de `app-pop-uom-capture`, que quedan ocultos).
+    effect(() => {
+      if (!this.isOpen() || this.ingredientMode() || !this.showSaleConfig()) return;
+      const units = this.sectionUnits();
+      this.purchaseUomId.set(units.purchaseUomId);
+      this.stockUomId.set(units.stockUomId);
     });
 
     // Scan-to-fill: a barcode scan (gated by barcode_scanner.enabled) automatically fills
@@ -1300,6 +1600,7 @@ export class PopProductConfigModalComponent {
     this.capturedQuantity.set(null);
     // F1: limpiar el contenido por envase capturado.
     this.capturedContentPerPackage.set(null);
+    this.hydrateSaleSection();
     const p: any = this.product();
     if (!p) return;
     const ingredientFlow =
@@ -1495,6 +1796,8 @@ export class PopProductConfigModalComponent {
 
   canConfirm(): boolean {
     if (this.creatingVariants()) return false;
+    if (this.saleSectionInvalid()) return false;
+    if (this.scaleCodeError()) return false;
     if (this.createMode()) {
       // Create mode: identity form must be valid; if ingredient, both UoMs
       // are mandatory. Variant management is hidden in create mode.
@@ -1536,6 +1839,15 @@ export class PopProductConfigModalComponent {
   onConfirm(): void {
     if (!this.canConfirm()) return;
 
+    // S9: cambiar la unidad de inventario de un producto existente exige confirmar.
+    if (this.configureMode() && !this.stockConversionConfirmed()) {
+      const target = this.stockConversionTarget();
+      if (target) {
+        void this.askStockConversion(target);
+        return;
+      }
+    }
+
     // ----------------------------------------------------------------
     // CREATE mode (Fase 5) — absorbs the prebulk-modal flow.
     // ----------------------------------------------------------------
@@ -1575,6 +1887,8 @@ export class PopProductConfigModalComponent {
         // `prebulk_data` completo; `pop.component` lo mapea a los campos
         // `sale_unit_*` del ítem de compra.
         ...this.saleUnitPayload(),
+        // S13d: «Unidad de venta» tocada (ausente = comportamiento legado).
+        ...this.createSaleConfigField(),
         // F1: contenido por envase (solo insumo, caso count→masa/volumen).
         // Viaja dentro de prebulkData porque el carrito copia `prebulk_data`
         // completo; `pop.component` lo mapea a `purchase_to_stock_factor`.
@@ -1691,7 +2005,7 @@ export class PopProductConfigModalComponent {
               purchase_uom_id: this.purchaseUomId(),
               stock_uom_id: this.stockUomId(),
               contentPerPackage: this.resolvedContentPerPackage(),
-              ...this.saleUnitPayload(),
+              ...this.configureSaleFields(),
             });
 
             this.creatingVariants.set(false);
@@ -1730,7 +2044,7 @@ export class PopProductConfigModalComponent {
           purchase_uom_id: this.purchaseUomId(),
           stock_uom_id: this.stockUomId(),
           contentPerPackage: this.resolvedContentPerPackage(),
-          ...this.saleUnitPayload(),
+          ...this.configureSaleFields(),
         });
       } else {
         this.confirmed.emit({
@@ -1745,7 +2059,7 @@ export class PopProductConfigModalComponent {
           purchase_uom_id: this.purchaseUomId(),
           stock_uom_id: this.stockUomId(),
           contentPerPackage: this.resolvedContentPerPackage(),
-          ...this.saleUnitPayload(),
+          ...this.configureSaleFields(),
         });
       }
     } else {
@@ -1760,7 +2074,7 @@ export class PopProductConfigModalComponent {
         purchase_uom_id: this.purchaseUomId(),
         stock_uom_id: this.stockUomId(),
         contentPerPackage: this.resolvedContentPerPackage(),
-        ...this.saleUnitPayload(),
+        ...this.configureSaleFields(),
       });
     }
 
@@ -1917,6 +2231,18 @@ export class PopProductConfigModalComponent {
     this.isSellable.set(true);
     this.createQuantity.set(1);
 
+    // S13: la sección arranca limpia en cada apertura y se hidrata del producto.
+    this.saleUnitState.set(emptySaleUnitState());
+    this.saleUnitTouched.set(false);
+    this.saleScaleCode.set(null);
+    this.stockConversionConfirmed.set(false);
+    const tier = this.initialSaleTier();
+    this.saleUnitName.set(tier?.sale_unit_name ?? '');
+    this.saleUnitFactor.set(tier?.sale_unit_units_per_package ?? null);
+    this.saleUnitPrice.set(tier?.sale_unit_price ?? null);
+    this.saleUnitMargin.set(tier?.sale_unit_profit_margin ?? null);
+    this.saleUnitIsDefault.set(tier?.sale_unit_is_default === true);
+
     // Pre-fill pricing type
     this.selectedPricingType.set(
       this.initialPricingType() || this.product()?.pricing_type || 'unit',
@@ -1928,6 +2254,8 @@ export class PopProductConfigModalComponent {
     // al comprador sobre cómo se está vendiendo.
     this.showSaleConfig.set(
       this.selectedPricingType() === 'weight' ||
+        this.initialSaleUnit() != null ||
+        this.initialSaleTier() != null ||
         (this.product() as any)?.has_multiple_price_tiers === true ||
         // QUI-978: con UoMs persistidas, el bloque nace abierto para que la
         // precarga de initializeIngredientUoMDefaults quede visible.

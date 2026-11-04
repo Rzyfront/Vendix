@@ -927,6 +927,13 @@ export class PopCartService {
       stock_uom_id: request.stock_uom_id ?? null,
       // Contenido por envase (factor manual count→masa/volumen) — flujo configure.
       ...(isPrebulk ? {} : { contentPerPackage: request.contentPerPackage }),
+      // S13d / QUI-648: configuración de «Unidad de venta» del modal (flujo configure).
+      ...(!isPrebulk && request.sale_unit_config
+        ? { sale_unit_config: request.sale_unit_config }
+        : {}),
+      ...(!isPrebulk && request.sale_unit_tier
+        ? { sale_unit_tier: request.sale_unit_tier }
+        : {}),
       addedAt: new Date(),
     };
     this.recalculateItemTotals(
@@ -986,6 +993,10 @@ export class PopCartService {
       notes: request.notes || existingItem.notes,
       contentPerPackage:
         request.contentPerPackage ?? existingItem.contentPerPackage,
+      purchase_uom_id: request.purchase_uom_id ?? existingItem.purchase_uom_id,
+      stock_uom_id: request.stock_uom_id ?? existingItem.stock_uom_id,
+      sale_unit_config: request.sale_unit_config ?? existingItem.sale_unit_config,
+      sale_unit_tier: request.sale_unit_tier ?? existingItem.sale_unit_tier,
     };
     this.recalculateItemTotals(
       merged,
@@ -1021,6 +1032,18 @@ export class PopCartService {
       unit_cost: request.unit_cost ?? item.unit_cost,
       lot_info: request.lot_info ?? item.lot_info,
       notes: request.notes ?? item.notes,
+      // S13c: editar un ítem del carrito conserva los cambios de unidades.
+      purchase_uom_id:
+        request.purchase_uom_id !== undefined
+          ? request.purchase_uom_id
+          : item.purchase_uom_id,
+      stock_uom_id:
+        request.stock_uom_id !== undefined
+          ? request.stock_uom_id
+          : item.stock_uom_id,
+      contentPerPackage: request.contentPerPackage ?? item.contentPerPackage,
+      sale_unit_config: request.sale_unit_config ?? item.sale_unit_config,
+      sale_unit_tier: request.sale_unit_tier ?? item.sale_unit_tier,
     };
 
     // Update variant if provided

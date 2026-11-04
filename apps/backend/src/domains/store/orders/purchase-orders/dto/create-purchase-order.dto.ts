@@ -23,6 +23,7 @@ import {
 import { IsIn } from 'class-validator';
 import { Type, Transform, TransformFnParams } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
+import { SaleUomDto } from '../../../products/dto';
 import {
   purchase_order_status_enum,
   purchase_order_type_enum,
@@ -500,6 +501,47 @@ export class PurchaseOrderItemDto {
   @IsString()
   @IsOptional()
   pricing_type?: string;
+
+  /**
+   * S13d — unidades de venta del producto (principal + adicionales), la misma
+   * forma y las mismas reglas que el editor de producto. Presente (incluso
+   * vacío = pieza simple) ⇒ el producto, nuevo o existente, queda con esta
+   * configuración validada. Ausente ⇒ comportamiento histórico intacto.
+   */
+  @ApiProperty({
+    description:
+      'Sale units of the product (principal + additional), same shape and rules as the product editor. Present (even empty) applies and validates the unit configuration on the product.',
+    required: false,
+    type: [SaleUomDto],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SaleUomDto)
+  sale_uoms?: SaleUomDto[];
+
+  @ApiProperty({
+    description:
+      'Scale (PLU) code of the product. Integer 1..999999, unique per store among non-archived products. null clears it.',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(999999)
+  @Type(() => Number)
+  scale_code?: number | null;
+
+  @ApiProperty({
+    description:
+      "Explicit authorization to convert stock, cost layers, batches and recipes when stock_uom_id changes on a product that already operates. Same contract as the product editor.",
+    required: false,
+    enum: ['convert'],
+  })
+  @IsOptional()
+  @IsIn(['convert'])
+  stock_uom_conversion?: 'convert';
 
   @ApiProperty({ description: 'Tax category IDs (for new products)' })
   @IsArray()

@@ -1,3 +1,7 @@
+import {
+  asIntegerRatio,
+  toStockUnitsByFactor,
+} from '@money-kernel/uom-conversion';
 import { Component, input, output, inject, DestroyRef, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
@@ -2053,7 +2057,7 @@ private stationBookingService = inject(PosStationBookingService);
           return;
         }
       }
-      quantity = Math.round(amount * factor);
+      quantity = toStockUnitsByFactor(amount, factor, 1) ?? 0;
     } else {
       const units = await this.saleUnitService.weighModalUnits(
         item.product,
@@ -2086,12 +2090,23 @@ private stationBookingService = inject(PosStationBookingService);
       quantity = captured.stockQuantity;
       newUnit = captured.unitCode;
       const chosen = units.find((u) => u.code === captured.unitCode);
-      newFactor = Math.max(1, Math.round(chosen?.factorToBase ?? factor));
+      // Núcleo único: la unidad elegida debe ser un entero de stock. Una
+      // unidad menor que el stock (g con stock en kg) no se redondea a 1.
+      const chosenFactor = asIntegerRatio(chosen?.factorToBase ?? factor);
+      if (chosenFactor == null) {
+        this.toastService.warning(
+          `No se puede vender en ${captured.unitCode}: el inventario se cuenta en ${
+            this.saleUnitService.configFor(item.product)?.stockUnit?.code ?? 'otra unidad'
+          }.`,
+        );
+        return;
+      }
+      newFactor = chosenFactor;
     }
 
     if (quantity <= 0) {
       this.toastService.warning(
-        `La cantidad mínima es ${1 / newFactor} ${newUnit}.`,
+        `La cantidad mínima es ${Number((1 / newFactor).toFixed(6))} ${newUnit}.`,
       );
       return;
     }

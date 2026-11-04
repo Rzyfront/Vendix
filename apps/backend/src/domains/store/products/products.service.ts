@@ -58,6 +58,13 @@ import {
 } from './services/sale-uoms-sync.util';
 import { assertProductSaleValid } from './services/product-sale.util';
 import {
+  assertSaleUomsValid as assertSaleUomsValidShared,
+  assertScaleCodeUnique as assertScaleCodeUniqueShared,
+  assertStockUomEligible as assertStockUomEligibleShared,
+  derivePurchaseToStockFactor as derivePurchaseToStockFactorShared,
+  resolveStockUomChange,
+} from './services/product-uom-config.util';
+import {
   applyUsageNatureRules,
   effectiveUsageNature,
   NEVER_SELLABLE_WHERE,
@@ -436,53 +443,11 @@ export class ProductsService {
     purchase_uom_id: number | null | undefined,
     manual_factor?: number | null,
   ): Promise<number | undefined> {
-    if (
-      stock_uom_id === undefined ||
-      stock_uom_id === null ||
-      purchase_uom_id === undefined ||
-      purchase_uom_id === null
-    ) {
-      return undefined;
-    }
-
-    const uoms = await this.prisma.units_of_measure.findMany({
-      where: { id: { in: [stock_uom_id, purchase_uom_id] } },
-    });
-
-    const stockUom = uoms.find((u) => u.id === stock_uom_id);
-    const purchaseUom = uoms.find((u) => u.id === purchase_uom_id);
-
-    if (!stockUom || !purchaseUom) {
-      throw new VendixHttpException(
-        ErrorCodes.PROD_VALIDATE_001,
-        'Unidad de medida no encontrada en el catálogo',
-        { stock_uom_id, purchase_uom_id },
-      );
-    }
-
-    // Cross-dimension "contenido por envase": compra `count` (envase) → stock
-    // `mass`/`volume` (contenido). El factor es manual; se respeta sin validar
-    // misma-dimensión (no es derivable del catálogo).
-    const isCrossDimensionPackaging =
-      purchaseUom.dimension === 'count' &&
-      (stockUom.dimension === 'mass' || stockUom.dimension === 'volume');
-    if (
-      manual_factor != null &&
-      Number.isInteger(manual_factor) &&
-      manual_factor >= 1 &&
-      isCrossDimensionPackaging
-    ) {
-      return manual_factor;
-    }
-
-    if (stockUom.dimension !== purchaseUom.dimension) {
-      throw new BadRequestException(
-        `Las unidades de stock (${stockUom.code}) y compra (${purchaseUom.code}) deben pertenecer a la misma dimensión para poder convertirse`,
-      );
-    }
-
-    return Math.round(
-      Number(purchaseUom.factor_to_base) / Number(stockUom.factor_to_base),
+    return derivePurchaseToStockFactorShared(
+      this.prisma,
+      stock_uom_id,
+      purchase_uom_id,
+      manual_factor,
     );
   }
 
@@ -499,26 +464,7 @@ export class ProductsService {
   private async assertStockUomEligible(
     stock_uom_id: number | null | undefined,
   ): Promise<void> {
-    if (stock_uom_id === undefined || stock_uom_id === null) return;
-
-    const uom = await this.prisma.units_of_measure.findFirst({
-      where: { id: stock_uom_id },
-      select: { code: true, name: true, is_stock_eligible: true, is_active: true },
-    });
-    if (!uom || !uom.is_active) {
-      throw new VendixHttpException(
-        ErrorCodes.PROD_VALIDATE_001,
-        'Unidad de medida no encontrada en el catálogo',
-        { stock_uom_id },
-      );
-    }
-    if (!uom.is_stock_eligible) {
-      throw new VendixHttpException(
-        ErrorCodes.PROD_UOM_NOT_STOCK_ELIGIBLE,
-        `${uom.name} (${uom.code}) no puede ser la unidad de stock porque su factor de conversión no es entero. Úsala como unidad de compra o define el stock en una unidad exacta.`,
-        { stock_uom_id, code: uom.code },
-      );
-    }
+    return assertStockUomEligibleShared(this.prisma, stock_uom_id);
   }
 
   /**
@@ -545,85 +491,14 @@ export class ProductsService {
   private async assertSaleUomsValid(
     sale_uoms: SaleUomRow[] | null | undefined,
     stock_uom_id: number | null | undefined,
+    pricing_type?: string | null,
   ): Promise<number | null> {
-    if (!sale_uoms || sale_uoms.length === 0) return null;
-
-    if (stock_uom_id === undefined || stock_uom_id === null) {
-      throw new VendixHttpException(
-        ErrorCodes.PROD_VALIDATE_001,
-        'Para declarar unidades de venta el producto debe tener unidad de stock',
-        { sale_uoms },
-      );
-    }
-
-    const uomIds = sale_uoms.map((row) => row.uom_id);
-    if (new Set(uomIds).size !== uomIds.length) {
-      throw new VendixHttpException(
-        ErrorCodes.PROD_VALIDATE_001,
-        'Las unidades de venta no pueden repetirse',
-        { uom_ids: uomIds },
-      );
-    }
-
-    const principals = sale_uoms.filter((row) => row.is_principal === true);
-    if (principals.length !== 1) {
-      throw new VendixHttpException(
-        ErrorCodes.PROD_VALIDATE_001,
-        'Debe haber exactamente una unidad de venta principal',
-        { principals: principals.length },
-      );
-    }
-
-    const uoms = await this.prisma.units_of_measure.findMany({
-      where: { id: { in: [stock_uom_id, ...uomIds] } },
-    });
-
-    const stockUom = uoms.find((u) => u.id === stock_uom_id);
-    if (!stockUom || !stockUom.is_active) {
-      throw new VendixHttpException(
-        ErrorCodes.PROD_VALIDATE_001,
-        'Unidad de medida no encontrada en el catálogo',
-        { stock_uom_id },
-      );
-    }
-
-    for (const uom_id of uomIds) {
-      const uom = uoms.find((u) => u.id === uom_id);
-      if (!uom || !uom.is_active) {
-        throw new VendixHttpException(
-          ErrorCodes.PROD_VALIDATE_001,
-          'Unidad de medida no encontrada en el catálogo',
-          { uom_id },
-        );
-      }
-      if (uom.dimension !== stockUom.dimension) {
-        throw new VendixHttpException(
-          ErrorCodes.PROD_VALIDATE_001,
-          `La unidad de venta (${uom.code}) debe pertenecer a la misma dimensión que la de stock (${stockUom.code}) para poder convertirse`,
-          { uom_id, stock_uom_id },
-        );
-      }
-      if (Number(uom.factor_to_base) < Number(stockUom.factor_to_base)) {
-        throw new VendixHttpException(
-          ErrorCodes.PROD_VALIDATE_001,
-          `La unidad de venta (${uom.code}) no puede ser menor que la de stock (${stockUom.code}): el stock se cuenta en enteros de ${stockUom.code}`,
-          { uom_id, stock_uom_id },
-        );
-      }
-    }
-
-    const principalUom = uoms.find((u) => u.id === principals[0].uom_id)!;
-    const ratio =
-      Number(principalUom.factor_to_base) / Number(stockUom.factor_to_base);
-    const scale = Math.round(ratio);
-    if (!(scale >= 1) || Math.abs(ratio - scale) > 1e-6) {
-      throw new VendixHttpException(
-        ErrorCodes.PROD_VALIDATE_001,
-        `La unidad principal (${principalUom.code}) debe equivaler a un número entero de ${stockUom.code}: el precio se expresa en ella`,
-        { uom_id: principalUom.id, stock_uom_id },
-      );
-    }
-    return scale;
+    return assertSaleUomsValidShared(
+      this.prisma,
+      sale_uoms,
+      stock_uom_id,
+      pricing_type,
+    );
   }
 
   async generateDescription(dto: GenerateProductDescriptionDto) {
@@ -1169,28 +1044,7 @@ export class ProductsService {
     options: { excludeProductId?: number } = {},
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    if (scaleCode === null || scaleCode === undefined) return;
-
-    const prisma = tx || this.prisma;
-    const conflict = await prisma.products.findFirst({
-      where: {
-        scale_code: scaleCode,
-        state: { not: ProductState.ARCHIVED },
-        ...(options.excludeProductId && { NOT: { id: options.excludeProductId } }),
-      },
-      select: { id: true, name: true },
-    });
-    if (conflict) {
-      throw new VendixHttpException(
-        ErrorCodes.PROD_SCALE_CODE_DUP_001,
-        `El código de balanza ${scaleCode} ya está en uso por el producto "${conflict.name}"`,
-        {
-          scale_code: scaleCode,
-          product_id: conflict.id,
-          product_name: conflict.name,
-        },
-      );
-    }
+    return assertScaleCodeUniqueShared(tx || this.prisma, scaleCode, options);
   }
 
   async create(createProductDto: CreateProductDto) {
@@ -1410,6 +1264,7 @@ export class ProductsService {
       const principalScale = await this.assertSaleUomsValid(
         sale_uoms,
         sanitizedDto.stock_uom_id,
+        sanitizedDto.pricing_type,
       );
       if (principalScale !== null) {
         productData.price_unit_quantity = principalScale;
@@ -4580,6 +4435,7 @@ export class ProductsService {
       let principalScale = await this.assertSaleUomsValid(
         sale_uoms,
         effectiveStockUomId,
+        sanitizedDto.pricing_type ?? existingProduct.pricing_type,
       );
 
       // QUI-978 — cambiar (o quitar) la unidad de stock sin reenviar
@@ -4613,44 +4469,12 @@ export class ProductsService {
       // escritos en la unidad vieja. Se exige el flag explícito porque una
       // conversión silenciosa multiplicaría el inventario por mil sin que
       // nadie lo pidiera.
-      const stockUomChanged =
-        sanitizedDto.stock_uom_id !== undefined &&
-        existingProduct.stock_uom_id != null &&
-        Number(sanitizedDto.stock_uom_id) !==
-          Number(existingProduct.stock_uom_id);
-      let pendingUomConversion: {
-        from: number;
-        to: number;
-      } | null = null;
-      if (stockUomChanged) {
-        const [levels, layers, batches, recipeLines] = await Promise.all([
-          this.prisma.stock_levels.count({
-            where: { product_id: id, NOT: { quantity_on_hand: 0 } },
-          }),
-          this.prisma.inventory_cost_layers.count({
-            where: { product_id: id, NOT: { quantity_remaining: 0 } },
-          }),
-          this.prisma.inventory_batches.count({
-            where: { product_id: id, NOT: { quantity: 0 } },
-          }),
-          this.prisma.recipe_items.count({
-            where: { component_product_id: id },
-          }),
-        ]);
-        const hasData = levels + layers + batches + recipeLines > 0;
-        if (hasData) {
-          if (sanitizedDto.stock_uom_conversion !== 'convert') {
-            throw new VendixHttpException(
-              ErrorCodes.PROD_UOM_CONVERSION_REQUIRED,
-              `El producto tiene existencias, costos, lotes o recetas expresados en su unidad actual. Envía "stock_uom_conversion": "convert" para convertirlos, o deja la unidad como está.`,
-            );
-          }
-          pendingUomConversion = {
-            from: Number(existingProduct.stock_uom_id),
-            to: Number(sanitizedDto.stock_uom_id),
-          };
-        }
-      }
+      const pendingUomConversion = await resolveStockUomChange(this.prisma, {
+        product_id: id,
+        existing_stock_uom_id: existingProduct.stock_uom_id,
+        new_stock_uom_id: sanitizedDto.stock_uom_id,
+        stock_uom_conversion: sanitizedDto.stock_uom_conversion,
+      });
       delete (sanitizedDto as any).stock_uom_conversion;
       delete (productData as any).stock_uom_conversion;
       const derivedFactor = uomFkTouched

@@ -107,15 +107,33 @@
                 customWrapperClass="!mt-0"
               ></app-input>
 
-              <app-input
-                label="Código de barras"
-                formControlName="barcode"
-                placeholder="Escanea o escribe el código"
-                [error]="getErrorMessage('barcode')"
-                tooltipText="Código escaneable (EAN/UPC) único en la tienda."
-                customWrapperClass="!mt-0"
-                (focusin)="scanTarget.set({ kind: 'product' })"
-              ></app-input>
+              <!-- S12: con unidad principal de masa el código de barras se
+                   reemplaza por el código de balanza (no se borra el guardado). -->
+              @if (showScaleCode()) {
+                <app-input
+                  label="Código de balanza"
+                  type="number"
+                  formControlName="scale_code"
+                  placeholder="Ej. 3"
+                  [error]="getErrorMessage('scale_code')"
+                  [helperText]="
+                    variableBarcodesEnabled()
+                      ? 'Número del producto en la balanza etiquetadora (columna Código del PLU)'
+                      : 'Activa las etiquetas de balanza en Ajustes → POS para usarlo'
+                  "
+                  customWrapperClass="!mt-0"
+                ></app-input>
+              } @else {
+                <app-input
+                  label="Código de barras"
+                  formControlName="barcode"
+                  placeholder="Escanea o escribe el código"
+                  [error]="getErrorMessage('barcode')"
+                  tooltipText="Código escaneable (EAN/UPC) único en la tienda."
+                  customWrapperClass="!mt-0"
+                  (focusin)="scanTarget.set({ kind: 'product' })"
+                ></app-input>
+              }
 
               <app-input
                 label="Slug (URL)"
@@ -126,20 +144,6 @@
                 customWrapperClass="!mt-0"
               ></app-input>
             </div>
-
-            @if (showScaleCode()) {
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
-                <app-input
-                  label="Código de balanza"
-                  type="number"
-                  formControlName="scale_code"
-                  placeholder="Ej. 3"
-                  [error]="getErrorMessage('scale_code')"
-                  helperText="Número del producto en la balanza etiquetadora (columna Código del PLU)"
-                  customWrapperClass="!mt-0"
-                ></app-input>
-              </div>
-            }
 
             <!-- Row 2: Descripción (full width) -->
             <div
@@ -216,8 +220,8 @@
             <!-- Row 1: Costo | Margen | Precio Base -->
             <app-input
               [label]="
-                productForm.get('pricing_type')?.value === 'weight'
-                  ? 'Costo por kg'
+                saleUnitPrincipalCode()
+                  ? 'Costo por ' + saleUnitPrincipalCode()
                   : 'Precio de Costo'
               "
               [currency]="true"
@@ -242,8 +246,8 @@
 
             <app-input
               [label]="
-                productForm.get('pricing_type')?.value === 'weight'
-                  ? 'Precio por kg (PVP)'
+                saleUnitPrincipalCode()
+                  ? 'Precio por ' + saleUnitPrincipalCode() + ' (PVP)'
                   : 'Precio Base (PVP)'
               "
               [currency]="true"
@@ -256,17 +260,22 @@
               customWrapperClass="!mt-0"
             ></app-input>
 
-            <!-- Row 2: Tipo de Venta | Impuestos | Precio Final -->
-            <app-selector
-              label="Tipo de Venta"
-              [options]="pricingTypeOptions"
-              formControlName="pricing_type"
-              placeholder="Seleccionar tipo"
-              tooltipText="Define si el producto se vende por unidad o por peso (kg). Afecta cómo se interpretan los precios."
-            >
-            </app-selector>
+            <!-- Row 2: Unidad de venta (sección única) | Impuestos -->
+            @if (!isService) {
+              <app-sale-unit-section
+                class="col-span-full"
+                sectionId="sale-unit-section"
+                [(state)]="saleUnitState"
+                [(touched)]="saleUnitTouched"
+                [catalog]="uomOptions()"
+                [price]="saleUnitPrice()"
+                [confirmPrincipalChange]="confirmSaleUnitChange"
+                (committed)="onSaleUnitCommitted($event)"
+                (principalChanged)="onSaleUnitPrincipalChanged($event)"
+              ></app-sale-unit-section>
+            }
 
-            <div class="flex gap-2 items-end md:col-span-2">
+            <div class="flex gap-2 items-end md:col-span-3">
               <app-multi-selector
                 class="flex-1"
                 label="Impuestos Aplicables"
@@ -1119,7 +1128,7 @@
                  Deja de ser exclusivo del insumo: una ferretería mide su cable
                  en milímetros y lo cobra por metro sin que el cable sea insumo
                  de nada. El insumo conserva su embudo compra → stock. -->
-            @if (!isService) {
+            @if (!isService && isPureIngredient()) {
               <div
                 class="md:col-span-2 w-full rounded-xl border border-border bg-bg p-4 space-y-3 mt-1"
               >
@@ -1135,7 +1144,7 @@
                       @if (isIngredient() && storeSupportsIngredients()) {
                         Unidad de medida del insumo
                       } @else {
-                        Unidad de medida y escala de precio
+                        Unidad de medida
                       }
                     </p>
                   </div>
@@ -1220,74 +1229,7 @@
                         (valueChange)="onStockUomChange()"
                       ></app-selector>
 
-                      @if (selectedStockUom(); as stockUom) {
-                        <app-selector
-                          formControlName="price_unit_quantity"
-                          label="El precio de venta es"
-                          [helpText]="
-                            principalPriceScale() != null
-                              ? 'Lo fija la unidad principal de venta.'
-                              : 'El precio que escribes arriba cubre esta cantidad de ' +
-                                stockUom.code + '.'
-                          "
-                          [options]="priceScaleOptions()"
-                          placeholder="Por unidad"
-                          (valueChange)="onPriceUnitQuantityChange()"
-                        ></app-selector>
-                      }
                     </div>
-
-                    <!-- QUI-978 — en qué unidades se puede vender. Solo con
-                         stock: misma dimensión, una principal (el precio se
-                         expresa en ella). -->
-                    @if (selectedStockUom()) {
-                      <div
-                        class="rounded-xl border border-border bg-bg p-3 space-y-2"
-                      >
-                        <p
-                          class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
-                        >
-                          Unidades de venta
-                        </p>
-                        <p class="text-xs text-text-muted">
-                          Márcalas todas: en el POS se podrá pesar en
-                          cualquiera. La principal es en la que se pide el peso
-                          y sobre la que se calcula el precio.
-                        </p>
-                        <div
-                          class="grid grid-cols-1 sm:grid-cols-2 gap-2"
-                        >
-                          @for (u of saleUomOptions(); track u.id) {
-                            <app-setting-toggle
-                              [label]="u.name + ' (' + u.code + ')'"
-                              [description]="saleUomHint(u)"
-                              [ngModel]="isSaleUomChecked(u.id)"
-                              [ngModelOptions]="{ standalone: true }"
-                              (changed)="toggleSaleUom(u.id, $event)"
-                            ></app-setting-toggle>
-                          }
-                        </div>
-                        @if (saleUomIds().length > 0) {
-                          <app-selector
-                            label="Unidad principal"
-                            helpText="El precio que escribes arriba se expresa en esta unidad. Cambiarla convierte el precio."
-                            [options]="principalSaleUomOptions()"
-                            [value]="principalSelectorValue()"
-                            (valueChange)="setPrincipalSaleUom($event)"
-                            placeholder="Elige la principal"
-                          ></app-selector>
-                        }
-                      </div>
-                    }
-
-                    <!-- Explica con los números del producto qué va a pasar al
-                         venderlo, y ofrece ejemplos por industria mientras el
-                         producto todavía no declara unidad. -->
-                    <app-sale-config-hint
-                      [config]="saleConfigInput()"
-                      [showExamples]="!selectedStockUom()"
-                      (exampleSelected)="applySaleConfigExample($event)"
-                    ></app-sale-config-hint>
                   }
 
                   @if (productForm.errors?.['uomDimensionMismatch']) {
@@ -2383,28 +2325,22 @@
                 {{ formatStatus(productForm.get("state")?.value) }}
               </span>
             </div>
-            <!-- Tipo de venta -->
-            <div class="flex items-center justify-between">
-              <span class="text-xs text-text-secondary">Tipo de venta</span>
+            @if (!isService) {
+            <!-- Unidad de venta (S7): mismo resumen que la sección del editor -->
+            <div class="flex items-start justify-between gap-3">
+              <span class="text-xs text-text-secondary shrink-0">Unidad de venta</span>
               <div
-                class="flex items-center gap-1.5 text-xs font-medium text-text-primary"
+                class="flex items-start gap-1.5 text-xs font-medium text-text-primary text-right"
               >
                 <app-icon
-                  [name]="
-                    productForm.get('pricing_type')?.value === 'weight'
-                      ? 'weight'
-                      : 'hash'
-                  "
+                  [name]="saleUnitIsPiece() ? 'hash' : 'package'"
                   size="13"
-                  class="text-primary-600"
+                  class="text-primary-600 mt-0.5 shrink-0"
                 ></app-icon>
-                {{
-                  productForm.get("pricing_type")?.value === "weight"
-                    ? "Por peso (kg)"
-                    : "Por unidad"
-                }}
+                {{ saleUnitSummary() }}
               </div>
             </div>
+            }
             <!-- Variantes -->
             <div class="flex items-center justify-between">
               <span class="text-xs text-text-secondary">Variantes</span>
