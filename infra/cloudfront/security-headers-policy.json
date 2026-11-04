@@ -1,5 +1,5 @@
 {
-  "Comment": "Vendix SEO-TECH-22: HSTS (1 anio, sin subdominios ni preload), nosniff y Referrer-Policy. Sin X-Frame-Options ni CSP a proposito.",
+  "Comment": "Vendix SEO-TECH-22: HSTS 1 anio (sin subdominios ni preload), nosniff y Referrer-Policy. Sin X-Frame ni CSP.",
   "Name": "vendix-security-headers",
   "SecurityHeadersConfig": {
     "StrictTransportSecurity": {
