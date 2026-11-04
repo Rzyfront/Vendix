@@ -29,7 +29,7 @@ describe('toAppCard (apps-module T6)', () => {
     expect(card.statusVariant).toBe('success');
     expect(card.hostname).toBe('roku-shop.vendix.online');
     expect(card.publicUrl).toBe('https://roku-shop.vendix.online');
-    expect(card.action).toEqual({ kind: 'route', label: 'Administrar', route: '/admin/ecommerce' });
+    expect(card.action).toEqual({ kind: 'route', label: 'Administrar', route: '/admin/apps/ecommerce' });
   });
 
   it('Tienda en línea en una tienda física: no disponible para el tipo de tienda', () => {

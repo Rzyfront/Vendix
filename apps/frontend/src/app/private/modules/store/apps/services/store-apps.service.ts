@@ -8,6 +8,15 @@ import {
   StoreAppDetailResponse,
   StoreAppsResponse,
 } from '../interfaces/store-app.interface';
+import type { AppPageDocument, PageAppKind } from '../templates/app-page.types';
+
+/** URL segment of each app's `PATCH /store/apps/<segment>/page` (apps-f2 S7). */
+export const PAGE_SEGMENTS: Record<PageAppKind, string> = {
+  product_page: 'product_page',
+  service_page: 'service_page',
+  booking: 'booking',
+  store_home: 'store-home',
+};
 
 /**
  * Client of the Apps catalog (`GET /store/apps`, permission `store:apps:read`)
@@ -35,6 +44,17 @@ export class StoreAppsService {
   /** Switches a draft app off (`disabled`); a published app is unpublished first. */
   deactivate(kind: AppKind): Observable<StoreAppDetailResponse> {
     return this.http.post<StoreAppDetailResponse>(`${this.apiUrl}/${kind}/deactivate`, {});
+  }
+
+  /** Saves the app's own page (`config.page`); it never publishes (apps-f2 S3). */
+  savePage(
+    kind: PageAppKind,
+    page: AppPageDocument,
+  ): Observable<{ success: boolean; data: { page: AppPageDocument } }> {
+    return this.http.patch<{ success: boolean; data: { page: AppPageDocument } }>(
+      `${this.apiUrl}/${PAGE_SEGMENTS[kind]}/page`,
+      { page },
+    );
   }
 
   saveProductPageConfig(body: {

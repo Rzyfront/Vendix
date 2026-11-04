@@ -4,6 +4,7 @@ import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/route
 import { of } from 'rxjs';
 
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { EcommerceComponent } from '../../../ecommerce/ecommerce.component';
 import { CrmMainPageComponent } from '../../../crm/pages/crm-main-page/crm-main-page.component';
 import { BookingSettingsPanelComponent } from '../../components/booking-settings-panel.component';
 import { LandingSettingsPanelComponent } from '../../components/landing-settings-panel.component';
@@ -29,11 +30,17 @@ abstract class StubPanel {
 @Component({ selector: 'app-product-page-settings-panel', standalone: true, template: '<p>panel producto</p>' })
 class StubProductPagePanel extends StubPanel {}
 
+@Component({ selector: 'app-booking-settings-panel', standalone: true, template: '<p>panel reservas</p>' })
+class StubBookingPanel extends StubPanel {}
+
 @Component({ selector: 'app-landing-settings-panel', standalone: true, template: '<p>panel landing</p>' })
 class StubLandingPanel extends StubPanel {}
 
 @Component({ selector: 'app-crm-main-page', standalone: true, template: '<p data-testid="crm-editor">editor</p>' })
 class StubCrmMainPage {}
+
+@Component({ selector: 'app-ecommerce', standalone: true, template: '<p data-testid="ecommerce-admin">gestión</p>' })
+class StubEcommerce {}
 
 const detail = (over: Partial<StoreAppDetail> = {}): StoreAppDetail => ({
   key: 'product_page',
@@ -92,9 +99,10 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
           ProductPageSettingsPanelComponent,
           ServicePageSettingsPanelComponent,
           BookingSettingsPanelComponent,
+          EcommerceComponent,
         ],
       },
-      add: { imports: [StubCrmMainPage, StubProductPagePanel, StubLandingPanel] },
+      add: { imports: [StubCrmMainPage, StubProductPagePanel, StubLandingPanel, StubBookingPanel, StubEcommerce] },
     });
   });
 
@@ -164,6 +172,45 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
     // Publicada en el dominio de la tienda: se puede llevar a su dominio propio.
     expect(actionIds()).toEqual(['publish']);
     expect(component.actions()[0].label).toBe('Publicar en su dominio');
+  });
+
+  it('apps con página propia: su pestaña de ajustes y luego Contenido, Operación, Marca y SEO, Vista previa y Estado (apps-f2 S6)', async () => {
+    await render('product-page', detail());
+
+    expect(component.tabs().map((t) => t.id)).toEqual(['settings', 'content', 'operation', 'brand', 'preview', 'general']);
+    expect(component.tabs().map((t) => t.label)).toEqual([
+      'Producto y dominio', 'Contenido', 'Operación', 'Marca y SEO', 'Vista previa', 'Estado',
+    ]);
+    component.setTab('operation');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-section="operation"]')).not.toBeNull();
+    component.setTab('general');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-tab="editor"]').classList).toContain('hidden');
+  });
+
+  it('cada app con página propia usa el mismo editor con sus propias secciones', async () => {
+    await render('booking', detail({ key: 'booking', name: 'Booking' }));
+
+    component.setTab('content');
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Servicios del alojamiento');
+    expect(text).not.toContain('Beneficios');
+  });
+
+  it('Tienda en línea: cabecera sin acciones de publicar/encender y la gestión de siempre en su pestaña (apps-f2 S1)', async () => {
+    await render('ecommerce', detail({ key: 'ecommerce', name: 'Tienda en línea', status: 'published' }));
+
+    expect(apps.get).toHaveBeenCalledOnceWith('ecommerce');
+    expect(component.actions()).toEqual([]);
+    expect(component.tabs().map((t) => t.id)).toEqual(['ecommerce', 'general']);
+    expect(component.tab()).toBe('ecommerce');
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid="ecommerce-admin"]')).not.toBeNull();
+    expect(el.querySelector('app-sticky-header')).toBeNull();
+    expect(el.querySelector('[data-testid="ecommerce-header"]')?.textContent).toContain('Tienda en línea');
+    expect(el.querySelector('app-app-page-editor')).toBeNull();
   });
 
   it('una app que no aplica a la industria no ofrece acciones', async () => {

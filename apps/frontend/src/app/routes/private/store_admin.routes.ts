@@ -719,7 +719,9 @@ export const storeAdminRoutes: Routes = [
       // Apps (odd/tasks/apps-module.md T6; apps-vistas-f1 S3-S5). The catalog
       // only lists; each app opens its own reloadable view `/admin/apps/:kind`,
       // governed by panelUiGuard through MODULE_ROUTES (`apps`, and
-      // `customers_crm` for the landing). The online store keeps its view.
+      // `customers_crm` for the landing). `/admin/apps/ecommerce` hosts the
+      // online store inside Apps (apps-f2 S1) and is governed by the
+      // `ecommerce` key (MODULE_ROUTE_ALIASES); `/admin/ecommerce` is intact.
       {
         path: 'apps',
         children: [
@@ -731,7 +733,6 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.AppsCatalogComponent,
               ),
           },
-          { path: 'ecommerce', pathMatch: 'full', redirectTo: '/admin/ecommerce' },
           {
             path: ':kind',
             canActivate: [appKindGuard],

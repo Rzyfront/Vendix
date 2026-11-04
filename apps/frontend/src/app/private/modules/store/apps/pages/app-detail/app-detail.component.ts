@@ -21,7 +21,9 @@ import {
   StickyHeaderTab,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { EcommerceComponent } from '../../../ecommerce/ecommerce.component';
 import { CrmMainPageComponent } from '../../../crm/pages/crm-main-page/crm-main-page.component';
+import { AppPageEditorComponent, AppPageEditorSection } from '../../components/app-page-editor/app-page-editor.component';
 import { BookingSettingsPanelComponent } from '../../components/booking-settings-panel.component';
 import { LandingSettingsPanelComponent } from '../../components/landing-settings-panel.component';
 import { ProductPageSettingsPanelComponent } from '../../components/product-page-settings-panel.component';
@@ -30,9 +32,20 @@ import { StoreHomeSettingsPanelComponent } from '../../components/store-home-set
 import type { AppSettingsPanel } from '../../components/app-settings-panel';
 import type { AppKind, AppStatus, StoreAppDetail } from '../../interfaces/store-app.interface';
 import { StoreAppsService } from '../../services/store-apps.service';
+import { isPageAppKind } from '../../templates/app-page.types';
 import { APPS_ROUTE, appKindFromSlug } from '../../utils/app-routes.util';
 
-type AppDetailTab = 'content' | 'settings' | 'general';
+type AppDetailTab =
+  | 'content'
+  | 'settings'
+  | 'general'
+  | 'operation'
+  | 'brand'
+  | 'preview'
+  | 'ecommerce';
+
+/** Tabs the shared page editor draws (apps-f2 S6); they all share one draft. */
+const EDITOR_SECTIONS: readonly AppPageEditorSection[] = ['content', 'operation', 'brand', 'preview'];
 
 const STATUS_BADGE: Record<AppStatus, { label: string; color: StickyHeaderBadgeColor }> = {
   published: { label: 'Publicada', color: 'green' },
@@ -48,6 +61,7 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
   product_page: { icon: 'package', settingsLabel: 'Producto y dominio' },
   service_page: { icon: 'briefcase', settingsLabel: 'Servicios y dominio' },
   booking: { icon: 'bed-double', settingsLabel: 'Reservas y dominio' },
+  ecommerce: { icon: 'shopping-bag', settingsLabel: 'Tienda en línea' },
 };
 
 /**
@@ -71,10 +85,36 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
     ProductPageSettingsPanelComponent,
     ServicePageSettingsPanelComponent,
     BookingSettingsPanelComponent,
+    AppPageEditorComponent,
+    EcommerceComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="w-full" [attr.data-app-view]="kind()">
+      @if (kind() === 'ecommerce') {
+        <!-- The online store hosts its own sticky header (EcommerceComponent): here only a plain, non-sticky
+             Apps header, so two sticky headers never stack. It has no publish/on/off actions (backend STORE_APPS_013). -->
+        <header class="border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-3 md:px-6" data-testid="ecommerce-header">
+          <a [routerLink]="catalogRoute" class="text-xs font-semibold text-[var(--color-primary)] hover:underline">← Apps</a>
+          <div class="mt-1 flex flex-wrap items-center gap-2">
+            <h1 class="text-lg font-semibold text-[var(--color-text-primary)]">{{ title() }}</h1>
+            @if (badge(); as b) {
+              <span class="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-xs text-[var(--color-text-secondary)]"
+                    data-testid="ecommerce-badge">{{ b.label }}</span>
+            }
+          </div>
+          <p class="text-xs text-[var(--color-text-secondary)]" data-testid="ecommerce-domain">{{ subtitle() }}</p>
+          <nav class="mt-2 flex gap-1" role="tablist" aria-label="Secciones de la app">
+            @for (t of tabs(); track t.id) {
+              <button type="button" role="tab" [attr.aria-selected]="tab() === t.id" (click)="setTab(t.id)"
+                      class="rounded-lg px-3 py-1.5 text-sm"
+                      [class]="tab() === t.id ? 'bg-[var(--color-primary)] text-[var(--color-text-on-primary,#fff)]' : 'text-[var(--color-text-primary)] hover:bg-[var(--color-background)]'">
+                {{ t.label }}
+              </button>
+            }
+          </nav>
+        </header>
+      } @else {
       <app-sticky-header
         [title]="title()"
         [subtitle]="subtitle()"
@@ -90,6 +130,7 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
         (actionClicked)="onAction($event)"
         (tabChanged)="setTab($event)"
       />
+      }
 
       <div class="mx-auto w-full max-w-6xl px-3 py-4 md:px-6">
         @if (loading() && !detail()) {
@@ -150,7 +191,22 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
             </div>
           }
 
+          <!-- Tienda en línea: la gestión de siempre, dentro de Apps -->
+          @if (kind() === 'ecommerce') {
+            <div [class.hidden]="tab() !== 'ecommerce'" data-tab="ecommerce">
+              <app-ecommerce />
+            </div>
+          }
+
+          <!-- Editor compartido de las páginas propias (Contenido, Operación, Marca y SEO, Vista previa) -->
+          @if (pageKind(); as pk) {
+            <div [class.hidden]="!editorSection()" data-tab="editor">
+              <app-app-page-editor [kind]="pk" [detail]="app" [section]="editorSection() ?? 'content'" />
+            </div>
+          }
+
           <!-- Configuración: el contenido de los antiguos modales -->
+          @if (kind() !== 'ecommerce') {
           <div [class.hidden]="tab() !== 'settings'" data-tab="settings"
                class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
             @switch (kind()) {
@@ -161,6 +217,7 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
               @case ('booking') { <app-booking-settings-panel #panel (changed)="loadDetail()" /> }
             }
           </div>
+          }
         } @else {
           <p class="text-sm text-[var(--color-text-secondary)]">
             Esta app no existe. <a [routerLink]="catalogRoute" class="text-[var(--color-primary)] hover:underline">Ver todas las apps</a>.
@@ -189,6 +246,20 @@ export class AppDetailComponent {
   readonly error = signal<string | null>(null);
   readonly tab = signal<AppDetailTab>('settings');
 
+  /** The app's kind when it has an own page (apps-f2), else `null`. */
+  readonly pageKind = computed(() => {
+    const kind = this.kind();
+    return isPageAppKind(kind) ? kind : null;
+  });
+
+  /** Section the shared editor shows for the active tab; `null` when another tab is active. */
+  readonly editorSection = computed<AppPageEditorSection | null>(() => {
+    const tab = this.tab();
+    return this.pageKind() && (EDITOR_SECTIONS as readonly string[]).includes(tab)
+      ? (tab as AppPageEditorSection)
+      : null;
+  });
+
   /** The settings panel of the current app (always mounted, maybe hidden). */
   readonly panel = viewChild<AppSettingsPanel>('panel');
 
@@ -207,6 +278,22 @@ export class AppDetailComponent {
   readonly tabs = computed<StickyHeaderTab[]>(() => {
     const kind = this.kind();
     if (!kind) return [];
+    if (kind === 'ecommerce') {
+      return [
+        { id: 'ecommerce', label: 'Tienda en línea', icon: 'shopping-bag' },
+        { id: 'general', label: 'Estado', icon: 'activity' },
+      ];
+    }
+    if (isPageAppKind(kind)) {
+      return [
+        { id: 'settings', label: APP_VIEW[kind]?.settingsLabel ?? 'Configuración', icon: 'settings' },
+        { id: 'content', label: 'Contenido', icon: 'layout-list' },
+        { id: 'operation', label: 'Operación', icon: 'sliders-horizontal' },
+        { id: 'brand', label: 'Marca y SEO', icon: 'palette' },
+        { id: 'preview', label: 'Vista previa', icon: 'eye' },
+        { id: 'general', label: 'Estado', icon: 'activity' },
+      ];
+    }
     return [
       ...(kind === 'landing' ? [{ id: 'content', label: 'Contenido', icon: 'palette' }] : []),
       { id: 'settings', label: APP_VIEW[kind]?.settingsLabel ?? 'Configuración', icon: 'settings' },
@@ -223,7 +310,8 @@ export class AppDetailComponent {
   readonly actions = computed<StickyHeaderActionButton[]>(() => {
     const app = this.detail();
     const panel = this.panel();
-    if (!app || !app.applies_to_store_industries) return [];
+    // The online store cannot be switched on/off or published from here (STORE_APPS_013).
+    if (!app || !app.applies_to_store_industries || this.kind() === 'ecommerce') return [];
     const busy = this.switching() || (panel?.busy() ?? false);
     const published = app.status === 'published';
     const isLanding = this.kind() === 'landing';
@@ -255,14 +343,14 @@ export class AppDetailComponent {
       const kind = this.kind();
       untracked(() => {
         this.detail.set(null);
-        this.tab.set(kind === 'landing' ? 'content' : 'settings');
+        this.tab.set(kind === 'landing' ? 'content' : kind === 'ecommerce' ? 'ecommerce' : 'settings');
         if (kind) this.loadDetail();
       });
     });
   }
 
   setTab(id: string): void {
-    if (id === 'content' || id === 'settings' || id === 'general') this.tab.set(id);
+    if (this.tabs().some((t) => t.id === id)) this.tab.set(id as AppDetailTab);
   }
 
   onAction(id: string): void {

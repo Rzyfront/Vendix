@@ -5,7 +5,7 @@ import type { AppKind } from '../interfaces/store-app.interface';
 /** Base route of the Apps module. */
 export const APPS_ROUTE = '/admin/apps';
 
-/** The online store keeps its own view, unchanged (apps-vistas-f1 S5). */
+/** The online store keeps its own standalone route, unchanged (apps-vistas-f1 S5). */
 export const ECOMMERCE_ADMIN_ROUTE = '/admin/ecommerce';
 
 /**
@@ -21,8 +21,12 @@ export const APP_SLUGS: Record<AppKind, string> = {
   booking: 'booking',
 };
 
-/** Apps whose view is `/admin/apps/:slug` (the online store has its own). */
+/**
+ * Apps whose view is `/admin/apps/:slug`. The online store (apps-f2 S1) hosts
+ * the existing `EcommerceComponent` there; `/admin/ecommerce` keeps working.
+ */
 export const APPS_WITH_VIEW: readonly AppKind[] = [
+  'ecommerce',
   'store_home',
   'landing',
   'product_page',
@@ -36,9 +40,9 @@ export function appKindFromSlug(slug: string | null | undefined): AppKind | null
   return match ?? null;
 }
 
-/** Route that manages an app: its view, or `/admin/ecommerce` for the online store. */
+/** Route that manages an app: its view `/admin/apps/:slug` (the online store included). */
 export function appViewRoute(kind: AppKind): string {
-  return kind === 'ecommerce' ? ECOMMERCE_ADMIN_ROUTE : `${APPS_ROUTE}/${APP_SLUGS[kind]}`;
+  return `${APPS_ROUTE}/${APP_SLUGS[kind]}`;
 }
 
 /** Unknown slug → back to the catalog instead of an empty view. */

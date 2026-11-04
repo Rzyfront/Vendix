@@ -1045,6 +1045,12 @@ export class BreadcrumbService {
       icon: 'app-window',
     },
     {
+      path: '/admin/apps/ecommerce',
+      title: 'Tienda en línea',
+      parent: 'Apps',
+      icon: 'shopping-bag',
+    },
+    {
       path: '/admin/apps/landing',
       title: 'Landing page',
       parent: 'Apps',

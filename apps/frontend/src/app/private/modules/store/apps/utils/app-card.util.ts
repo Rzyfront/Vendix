@@ -3,7 +3,7 @@ import { AppKind, AppStatus, StoreApp } from '../interfaces/store-app.interface'
 import { appViewRoute } from './app-routes.util';
 
 export type AppCardAction =
-  /** Opens the app's own view: `/admin/apps/:kind`, or `/admin/ecommerce` for the online store. */
+  /** Opens the app's own view: `/admin/apps/:kind` (the online store included, apps-f2 S1). */
   | { kind: 'route'; label: string; route: string }
   | { kind: 'disabled'; label: string };
 
@@ -44,7 +44,8 @@ const STORE_TYPES_WITHOUT_ECOMMERCE = ['physical', 'popup', 'kiosko'];
  * Card view of one app of `GET /store/apps` (apps-module S4/T6, apps-vistas-f1).
  *
  * Every card navigates to the app's own view: no app is managed from a modal
- * (S6). The online store goes to its view of today, `/admin/ecommerce` (S5).
+ * (S6). The online store opens inside Apps, `/admin/apps/ecommerce`; its old
+ * `/admin/ecommerce` route keeps working.
  * The action respects the same rules as the sidebar: a store type that hides
  * `ecommerce` gets an explanation instead of a silent gap, and an app that
  * does not apply to the store industries says so.

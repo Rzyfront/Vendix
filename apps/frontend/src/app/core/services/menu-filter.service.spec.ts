@@ -691,6 +691,16 @@ describe('MenuFilterService — apps-module (keys opt-out y catálogo Apps)', ()
     }
   });
 
+  it('apps-f2 S1: /admin/apps/ecommerce lo gobierna `ecommerce`; el resto de /admin/apps/:kind, `apps`', () => {
+    expect(service.resolveKeysForRoute('/admin/apps/ecommerce')).toEqual(['ecommerce']);
+    expect(service.resolveKeysForRoute('/admin/apps/booking')).toEqual(['apps']);
+    expect(service.resolveKeysForRoute('/admin/apps/landing')).toEqual(['customers_crm']);
+    expect(service.resolveKeysForRoute('/admin/apps')).toEqual(['apps']);
+    // /admin/ecommerce intacta, y Vexi/el catálogo siguen con la ruta canónica.
+    expect(service.resolveKeysForRoute('/admin/ecommerce')).toEqual(['ecommerce']);
+    expect(MODULE_ROUTES['ecommerce']).toBe('/admin/ecommerce');
+  });
+
   it('T0: un panel_ui guardado sin las keys nuevas sigue viendo Bandeja, Pipeline, Tareas y Segmentos', async () => {
     expect(await routes(clientes())).toEqual([
       '/admin/customers/all', '/admin/customers/inbox', '/admin/customers/pipeline',

@@ -212,6 +212,18 @@ export const MODULE_ROUTES: Record<string, string> = {
   help_videos: '/admin/help/videos',
 };
 
+/**
+ * Extra routes governed by a module key besides its canonical `MODULE_ROUTES`
+ * entry. Only the route-to-key index of the URL guard reads them (longest
+ * prefix wins); Vexi navigation and the catalog keep the canonical route.
+ *
+ * `/admin/apps/ecommerce` hosts the online store inside Apps (apps-f2 S1), so
+ * it answers to `ecommerce`, not to `apps`.
+ */
+export const MODULE_ROUTE_ALIASES: Record<string, string[]> = {
+  ecommerce: ['/admin/apps/ecommerce'],
+};
+
 function flatten(
   modules: AppModule[],
   parentKey: string | undefined,

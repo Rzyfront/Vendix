@@ -8,6 +8,7 @@ import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
 import { getModulesHiddenByIndustries } from '../../shared/constants/industry-modules.constant';
 import {
   MODULE_ROUTES,
+  MODULE_ROUTE_ALIASES,
   STORE_MODULE_BY_KEY,
   STORE_MODULE_CATALOG,
 } from '../../shared/constants/store-module-catalog.constant';
@@ -1335,6 +1336,9 @@ export class MenuFilterService {
     const index: Record<string, string[]> = {};
     for (const [key, route] of Object.entries(MODULE_ROUTES)) {
       (index[route] ??= []).push(key);
+    }
+    for (const [key, routes] of Object.entries(MODULE_ROUTE_ALIASES)) {
+      for (const route of routes) (index[route] ??= []).push(key);
     }
     return index;
   }
