@@ -5916,6 +5916,13 @@ export const ErrorCodes = {
     devMessage:
       'Este servicio pertenece a un tipo de habitación; edítalo desde Hotelería',
   },
+  // apps-f4: IndustryModuleGuard. Only thrown in `enforce` mode (Redis flag
+  // `access_gate:enforce:*`); in `audit` mode the request passes and is logged.
+  MODULE_INDUSTRY_001: {
+    code: 'MODULE_INDUSTRY_001',
+    httpStatus: 403,
+    devMessage: 'Este módulo no está disponible para la industria de tu tienda.',
+  },
   // A store without the `hospitality` industry gets 403 even through curl:
   // the menu is UX only, LodgingIndustryGuard is the real boundary.
   LODGING_INDUSTRY_001: {

@@ -48,9 +48,12 @@ import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 @Controller('store/dispatch-notes')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('orders_dispatch_notes')
 export class DispatchNotesController {
   private static readonly RECEIPT_SCAN_ALLOWED_MIMETYPES = [
     'image/jpeg',

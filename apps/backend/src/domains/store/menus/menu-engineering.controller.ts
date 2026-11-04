@@ -3,6 +3,8 @@ import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { MenuEngineeringService } from './menu-engineering.service';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Menu Engineering analytics (Restaurant Suite — Fase G).
@@ -12,7 +14,8 @@ import { MenuEngineeringService } from './menu-engineering.service';
  * to product.cost_price when not.
  */
 @Controller('store/menus/engineering-report')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('restaurant_ops_menus')
 export class MenuEngineeringController {
   constructor(
     private readonly engineeringService: MenuEngineeringService,

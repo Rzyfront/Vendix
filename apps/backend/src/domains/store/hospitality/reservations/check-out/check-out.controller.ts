@@ -7,10 +7,13 @@ import { CurrentUser } from '../../../../auth/decorators/current-user.decorator'
 import { FolioUser } from '../folio/folio.service';
 import { FOLIO_VERIFY_PERMISSION, LodgingCheckOutService } from './check-out.service';
 import { CheckOutDto } from './check-out.dto';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H3.7) — check-out with payment and the folio invoice. */
 @Controller('store/hospitality/reservations/:id')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingCheckOutController {
   constructor(
     private readonly lodgingCheckOutService: LodgingCheckOutService,

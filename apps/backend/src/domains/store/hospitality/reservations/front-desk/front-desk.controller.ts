@@ -4,10 +4,13 @@ import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingFrontDeskService } from './lodging-front-desk.service';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H3.3) — front desk board of the store business day. */
 @Controller('store/hospitality/front-desk')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingFrontDeskController {
   constructor(
     private readonly lodgingFrontDeskService: LodgingFrontDeskService,

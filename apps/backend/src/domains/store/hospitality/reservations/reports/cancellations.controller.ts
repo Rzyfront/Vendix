@@ -11,12 +11,15 @@ import { dateOnlyToDb } from '../stay-dates';
 import { LodgingCancellationsService } from './cancellations.service';
 import { LodgingCancellationsQueryDto } from './cancellations.dto';
 import { LODGING_CHANNEL_LABELS } from './reservation-channel';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 const TYPE_LABELS = { cancelled: 'Cancelación', no_show: 'No se presentó' } as const;
 
 /** Hospitality Suite (H7.4) — no-shows and cancellations by channel with their penalties. */
 @Controller('store/hospitality/reports/cancellations')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingCancellationsController {
   constructor(
     private readonly cancellations: LodgingCancellationsService,

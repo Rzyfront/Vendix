@@ -12,10 +12,13 @@ import {
   FolioVatExemptionDto,
   VoidFolioChargeDto,
 } from './folio.dto';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H3.4) — guest folio: nights, manual charges, voids and payments. */
 @Controller('store/hospitality/reservations/:id/folio')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingFolioController {
   constructor(
     private readonly lodgingFolioService: LodgingFolioService,

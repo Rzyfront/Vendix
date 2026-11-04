@@ -5,10 +5,13 @@ import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingDepositsService } from './deposits.service';
 import { CollectDepositDto, DepositLinkDto } from './deposits.dto';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H3.5) — reservation deposits (customer advance, D3). */
 @Controller('store/hospitality/reservations/:id/deposits')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingDepositsController {
   constructor(
     private readonly lodgingDepositsService: LodgingDepositsService,

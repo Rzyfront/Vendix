@@ -20,9 +20,12 @@ import {
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 @Controller('store/dispatch-routes')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('orders_dispatch_routes')
 export class DispatchRoutesController {
   constructor(
     private readonly dispatchRoutesService: DispatchRoutesService,

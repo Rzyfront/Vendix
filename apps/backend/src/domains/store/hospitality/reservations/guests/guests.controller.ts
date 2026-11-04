@@ -15,10 +15,13 @@ import { PermissionsGuard } from '../../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../../auth/decorators/permissions.decorator';
 import { LodgingGuestsService } from './guests.service';
 import { LodgingGuestDto } from './guest.dto';
+import { IndustryModuleGuard } from '../../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../../common/decorators/industry-module.decorator';
 
 /** Hospitality Suite (H3.1) — guest register of a reservation (holder and companions). */
 @Controller('store/hospitality/reservations/:reservationId/guests')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('hospitality_reservations')
 export class LodgingGuestsController {
   constructor(
     private readonly guestsService: LodgingGuestsService,

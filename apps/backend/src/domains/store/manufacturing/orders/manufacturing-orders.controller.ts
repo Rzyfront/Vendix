@@ -19,6 +19,8 @@ import {
   ManufacturingOrderQueryDto,
   UpdateManufacturingOrderDto,
 } from '../dto';
+import { IndustryModuleGuard } from '../../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../../common/decorators/industry-module.decorator';
 
 /**
  * Órdenes de producción de manufactura.
@@ -26,7 +28,8 @@ import {
  * Sin try/catch: las excepciones llegan al filtro global con su status real.
  */
 @Controller('store/manufacturing/orders')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('manufacturing_orders')
 export class ManufacturingOrdersController {
   constructor(
     private readonly ordersService: ManufacturingOrdersService,

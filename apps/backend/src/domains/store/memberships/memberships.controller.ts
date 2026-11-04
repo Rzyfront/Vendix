@@ -25,6 +25,8 @@ import {
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { RequestContextService } from 'src/common/context/request-context.service';
+import { IndustryModuleGuard } from '../../../common/guards/industry-module.guard';
+import { IndustryModule } from '../../../common/decorators/industry-module.decorator';
 
 /**
  * Store-scoped memberships (generalized membership core).
@@ -36,7 +38,8 @@ import { RequestContextService } from 'src/common/context/request-context.servic
  *   - POST :id/renew (charge) → store:memberships:update
  */
 @Controller('store/memberships')
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, IndustryModuleGuard)
+@IndustryModule('memberships_members')
 export class MembershipsController {
   constructor(
     private readonly service: MembershipsService,
