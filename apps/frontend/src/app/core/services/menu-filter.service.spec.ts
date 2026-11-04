@@ -525,32 +525,33 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
 
   it('shows only a received-documents route when fiscal area is inactive and the exact reader permission is present', async () => {
     const result = await filteredOnce();
-    expect(result[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal', '/admin/invoicing/received-documents']);
+    // Operación fiscal needs an active area (Finanzas stage gate), so only the inbox remains.
+    expect(result[0]?.children?.map((child) => child.route)).toEqual(['/admin/invoicing/received-documents']);
     expect(service.diagnose(buildTree()[0].children![1]).visible).toBe(true);
     expect(service.isMenuItemVisible(buildTree()[0].children![1])).toBe(true);
-    expect(result[0].children?.[1]).toEqual(jasmine.objectContaining({ label: 'Facturación', _fiscalReadFallbackActive: true, accessAuditOnly: false }) as any);
-    expect(result[0].children?.[1]?.requiresFiscalArea).toBeUndefined();
-    expect(result[0].children?.[1]?.requiredFiscalScope).toBeUndefined();
+    expect(result[0].children?.[0]).toEqual(jasmine.objectContaining({ label: 'Facturación', _fiscalReadFallbackActive: true, accessAuditOnly: false }) as any);
+    expect(result[0].children?.[0]?.requiresFiscalArea).toBeUndefined();
+    expect(result[0].children?.[0]?.requiredFiscalScope).toBeUndefined();
   });
 
   it('hides the fallback when permission is absent, even if panel_ui is enabled', async () => {
     permissions$.next([]);
     const result = await filteredOnce();
-    expect(result[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal']);
+    expect(result[0]?.children?.map((child) => child.route)).toBeUndefined();
     expect(service.diagnose(buildTree()[0].children![1]).blockedBy).toBe('permission');
   });
 
   it('requires raw per-user panel_ui true and preserves the store-wide ceiling', async () => {
     panelUi$.next({ invoicing: false, accounting: true, fiscal_operations: true });
     panelUiState.set({ invoicing: false, accounting: true, fiscal_operations: true });
-    expect((await filteredOnce())[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal']);
+    expect((await filteredOnce())[0]?.children?.map((child) => child.route)).toBeUndefined();
     expect(service.diagnose(buildTree()[0].children![1]).blockedBy).toBe('user_panel_ui');
 
     panelUi$.next({ invoicing: true, accounting: true, fiscal_operations: true });
     panelUiState.set({ invoicing: true, accounting: true, fiscal_operations: true });
     settingsState.set({ panel_ui: { STORE_ADMIN: { invoicing: false } } });
     settings$.next({ panel_ui: { STORE_ADMIN: { invoicing: false } } });
-    expect((await filteredOnce())[0]?.children?.map((child) => child.route)).toEqual(['/admin/fiscal']);
+    expect((await filteredOnce())[0]?.children?.map((child) => child.route)).toBeUndefined();
     expect(service.diagnose(buildTree()[0].children![1]).blockedBy).toBe('store_panel_ui');
   });
 
@@ -580,7 +581,7 @@ describe('MenuFilterService fiscal read fallback for received documents', () => 
     await firstValueFrom(service.filterMenuItems(buildTree()).pipe(take(1)));
     permissions$.next([]);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(observed[observed.length - 1]).toEqual(['/admin/fiscal']);
+    expect(observed[observed.length - 1]).toEqual([]);
     expect(observed.some((routes) => routes.includes('/admin/accounting'))).toBe(false);
     subscription.unsubscribe();
   });

@@ -137,3 +137,127 @@ export function fiscalAreaHasPendingSignal(
     signals.legal_person,
   ].some(Boolean);
 }
+
+/**
+ * Wizard stages already done for the active fiscal status: the union of every
+ * area's `wizard.completed_steps` plus every required step of an area that is
+ * already ACTIVE/LOCKED. An area can be activated outside the wizard (backfill,
+ * the invoicing activation flow), so its activation implies its stages even
+ * when `completed_steps` was never written.
+ */
+export function completedFiscalSteps(
+  status: FiscalStatusBlock | null | undefined,
+  activeAreas: readonly FiscalArea[],
+): ReadonlySet<FiscalWizardStepId> {
+  const done = new Set<FiscalWizardStepId>();
+  FISCAL_AREAS.forEach((area) =>
+    status?.[area]?.wizard?.completed_steps?.forEach((step) => done.add(step)),
+  );
+  activeAreas.forEach((area) =>
+    REQUIRED_STEPS_BY_AREA[area].forEach((step) => done.add(step)),
+  );
+  return done;
+}
+
+/**
+ * What a fiscal entry of the Finanzas group needs before it is shown and its
+ * URL opens: a fiscal area ACTIVE/LOCKED (`'any'` = at least one), or one
+ * wizard stage completed.
+ */
+export type FiscalStageRequirement =
+  | { area: FiscalArea | 'any' }
+  | { step: FiscalWizardStepId };
+
+export interface FiscalStageRouteGate {
+  /** Route of the sidebar leaf; it also gates every URL below it. */
+  route: string;
+  requires: FiscalStageRequirement;
+  /**
+   * URLs below `route` that configure the stage itself, so they must stay
+   * reachable before it is complete (the wizard, the invoicing activation and
+   * the screens the wizard sends the owner to).
+   */
+  setupRoutes?: string[];
+  /** Read-only surface a permissioned reader keeps while the stage is missing. */
+  readFallback?: { permission: string; route: string };
+}
+
+/**
+ * Single source of the "stage of the fiscal wizard → Finanzas entry" rule.
+ * `MenuFilterService` applies it to the sidebar leaf with the same route and
+ * `panelUiGuard` applies it to the URL, so an entry hidden from the menu does
+ * not open by typing its route either. Gastos is deliberately absent: it is
+ * always available.
+ */
+export const FISCAL_STAGE_ROUTE_GATES: readonly FiscalStageRouteGate[] = [
+  {
+    route: '/admin/fiscal',
+    requires: { area: 'any' },
+    setupRoutes: ['/admin/fiscal/wizard', '/admin/fiscal/activation'],
+  },
+  { route: '/admin/taxes', requires: { step: 'default_taxes' } },
+  {
+    route: '/admin/invoicing',
+    requires: { area: 'invoicing' },
+    setupRoutes: [
+      '/admin/invoicing/activation',
+      '/admin/invoicing/dian-config',
+      '/admin/invoicing/resolutions',
+    ],
+    readFallback: {
+      permission: 'invoicing:received:read',
+      route: '/admin/invoicing/received-documents',
+    },
+  },
+  { route: '/admin/accounting', requires: { area: 'accounting' } },
+  { route: '/admin/payroll', requires: { area: 'payroll' } },
+];
+
+function isUnder(path: string, route: string): boolean {
+  return path === route || path.startsWith(`${route}/`);
+}
+
+/** Gate whose route is the exact route of a sidebar leaf. */
+export function fiscalStageGateForRoute(
+  route: string | undefined,
+): FiscalStageRouteGate | null {
+  if (!route) return null;
+  return FISCAL_STAGE_ROUTE_GATES.find((gate) => gate.route === route) ?? null;
+}
+
+/** Gate covering a URL (query and fragment ignored), or null. */
+export function fiscalStageGateForUrl(url: string): FiscalStageRouteGate | null {
+  const path = url.split(/[?#]/)[0];
+  return FISCAL_STAGE_ROUTE_GATES.find((gate) => isUnder(path, gate.route)) ?? null;
+}
+
+/** True when the URL is one of the gate's setup screens. */
+export function isFiscalStageSetupUrl(
+  gate: FiscalStageRouteGate,
+  url: string,
+): boolean {
+  const path = url.split(/[?#]/)[0];
+  return (gate.setupRoutes ?? []).some((route) => isUnder(path, route));
+}
+
+/** True when the URL is inside the gate's read-only fallback surface. */
+export function isFiscalStageReadFallbackUrl(
+  gate: FiscalStageRouteGate,
+  url: string,
+): boolean {
+  if (!gate.readFallback) return false;
+  return isUnder(url.split(/[?#]/)[0], gate.readFallback.route);
+}
+
+export function isFiscalStageReady(
+  requires: FiscalStageRequirement,
+  activeAreas: readonly FiscalArea[],
+  status: FiscalStatusBlock | null | undefined,
+): boolean {
+  if ('area' in requires) {
+    return requires.area === 'any'
+      ? activeAreas.length > 0
+      : activeAreas.includes(requires.area);
+  }
+  return completedFiscalSteps(status, activeAreas).has(requires.step);
+}

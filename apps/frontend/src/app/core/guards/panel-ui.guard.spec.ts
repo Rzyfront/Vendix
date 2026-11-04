@@ -47,7 +47,9 @@ describe('panelUiGuard', () => {
       'resolveGateKeysForRoute',
       'applyAccessGate',
       'industryBlockMessage',
+      'fiscalStageBlockForUrl',
     ]);
+    menuFilter.fiscalStageBlockForUrl.and.returnValue(null);
     accessGate = jasmine.createSpyObj('AccessGateService', ['ensureLoaded']);
     accessGate.ensureLoaded.and.resolveTo();
     menuFilter.resolveGateKeysForRoute.and.returnValue([]);
@@ -174,6 +176,34 @@ describe('panelUiGuard', () => {
     });
 
     const result = await runGuard('/admin/accounting');
+
+    expect(result).toBeTrue();
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  it('Finanzas: bloquea la URL de una etapa fiscal sin completar, también al owner', async () => {
+    authFacade.isOwner.and.returnValue(true);
+    const detail =
+      'Esta sección aparece cuando completes la etapa «Impuestos» de la configuración fiscal.';
+    menuFilter.fiscalStageBlockForUrl.and.returnValue({
+      visible: false,
+      blockedBy: 'fiscal_area',
+      detail,
+      fixPath: '/admin/fiscal/wizard',
+    });
+
+    const result = await runGuard('/admin/taxes');
+
+    expect(menuFilter.fiscalStageBlockForUrl).toHaveBeenCalledWith('/admin/taxes');
+    expect(result).toBeFalse();
+    expect(toast.info).toHaveBeenCalledWith(detail);
+    expect(router.navigateByUrl).toHaveBeenCalledWith('/admin/dashboard');
+  });
+
+  it('Finanzas: deja pasar la URL fiscal cuando su etapa está lista', async () => {
+    authFacade.isOwner.and.returnValue(true);
+
+    const result = await runGuard('/admin/taxes');
 
     expect(result).toBeTrue();
     expect(toast.info).not.toHaveBeenCalled();

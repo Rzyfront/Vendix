@@ -35,7 +35,16 @@ import type {
   OrganizationOperatingScope,
   OrganizationFiscalScope,
 } from '../models/organization.model';
-import type { FiscalArea } from '../models/fiscal-status.model';
+import {
+  FISCAL_STEP_LABELS,
+  fiscalStageGateForRoute,
+  fiscalStageGateForUrl,
+  isFiscalStageReadFallbackUrl,
+  isFiscalStageReady,
+  isFiscalStageSetupUrl,
+  type FiscalArea,
+  type FiscalStageRouteGate,
+} from '../models/fiscal-status.model';
 
 /**
  * Terminal garantizado de la cadena de fallback "primer módulo activo".
@@ -642,9 +651,72 @@ export class MenuFilterService {
     ) {
       return false;
     }
+    if (!this.matchesFiscalStage(item, activeFiscalAreas)) return false;
     if (!item.requiresFiscalArea) return true;
     if (item.requiresFiscalArea === 'any') return activeFiscalAreas.length > 0;
     return activeFiscalAreas.includes(item.requiresFiscalArea);
+  }
+
+  /**
+   * Store-panel Finanzas entries appear only once their stage of the fiscal
+   * wizard is complete (`FISCAL_STAGE_ROUTE_GATES`, shared with
+   * `panelUiGuard`). ORG_ADMIN items (`requiredFiscalScope: 'ORGANIZATION'`)
+   * keep their own rules.
+   */
+  private storeFiscalStageGate(item: MenuItem): FiscalStageRouteGate | null {
+    if (item.requiredFiscalScope === 'ORGANIZATION') return null;
+    return fiscalStageGateForRoute(item.route);
+  }
+
+  private matchesFiscalStage(
+    item: MenuItem,
+    activeFiscalAreas: FiscalArea[],
+  ): boolean {
+    const gate = this.storeFiscalStageGate(item);
+    if (!gate) return true;
+    // The wizard status is read only for stage gates, so filters and mocks
+    // that never touch one do not depend on it.
+    const status = 'step' in gate.requires ? this.authFacade.fiscalStatus() : null;
+    return isFiscalStageReady(gate.requires, activeFiscalAreas, status);
+  }
+
+  /**
+   * URL verdict of the fiscal stage gate for `panelUiGuard`. Returns the reason
+   * when the URL belongs to a Finanzas entry whose wizard stage is missing, or
+   * null when it may open (no gate, stage ready, setup screen of that stage, or
+   * the read-only fallback for a reader holding its permission). Applies to the
+   * owner too: an unconfigured stage has no operable screen for anyone.
+   */
+  fiscalStageBlockForUrl(url: string): ModuleVisibilityDiagnosis | null {
+    const gate = fiscalStageGateForUrl(url);
+    if (!gate || isFiscalStageSetupUrl(gate, url)) return null;
+    const activeAreas = this.authFacade.activeFiscalAreas() ?? [];
+    const status = 'step' in gate.requires ? this.authFacade.fiscalStatus() : null;
+    if (isFiscalStageReady(gate.requires, activeAreas, status)) return null;
+    if (
+      gate.readFallback &&
+      isFiscalStageReadFallbackUrl(gate, url) &&
+      this.authFacade.hasPermission(gate.readFallback.permission)
+    ) {
+      return null;
+    }
+    return { visible: false, blockedBy: 'fiscal_area', ...this.fiscalStageMessage(gate) };
+  }
+
+  private fiscalStageMessage(
+    gate: FiscalStageRouteGate,
+  ): Pick<ModuleVisibilityDiagnosis, 'detail' | 'fixPath'> {
+    if ('step' in gate.requires) {
+      return {
+        detail: `Esta sección aparece cuando completes la etapa «${FISCAL_STEP_LABELS[gate.requires.step]}» de la configuración fiscal.`,
+        fixPath: '/admin/fiscal/wizard',
+      };
+    }
+    return {
+      detail:
+        'Esta sección aparece cuando termines de activar su área en la configuración fiscal.',
+      fixPath: '/admin/fiscal/wizard',
+    };
   }
 
   private fallbackPanelKeys(
@@ -1034,6 +1106,10 @@ export class MenuFilterService {
             'La facturación electrónica ya está activa, así que este asistente de activación ya no se ofrece. Usa el módulo Facturación.',
           fixPath: '/admin/invoicing',
         };
+      }
+      const stageGate = this.storeFiscalStageGate(menuItem);
+      if (stageGate && !this.matchesFiscalStage(menuItem, this.authFacade.activeFiscalAreas())) {
+        return { visible: false, blockedBy: 'fiscal_area', ...this.fiscalStageMessage(stageGate) };
       }
       return {
         visible: false,

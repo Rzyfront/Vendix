@@ -61,6 +61,15 @@ export const panelUiGuard: CanActivateFn = async (
     return false;
   };
 
+  // Finanzas: a fiscal entry whose wizard stage is not complete has no
+  // operable screen, for the owner too. Same rule as the sidebar filter
+  // (`FISCAL_STAGE_ROUTE_GATES`); the wizard and setup screens stay open.
+  const fiscalStageBlock = menuFilter.fiscalStageBlockForUrl(state.url);
+  if (fiscalStageBlock) {
+    toast.info(fiscalStageBlock.detail);
+    return redirect();
+  }
+
   // ── Veredicto pre-F4 (lo que se aplica en auditoría) ──────────────────
   // El owner sigue pasando las capas de usuario y tienda en URL, como hoy.
   // La industria ya no lo exime: se evalúa abajo en la compuerta (S4).
