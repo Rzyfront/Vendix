@@ -1,4 +1,8 @@
 import { Prisma } from '@prisma/client';
+import {
+  AppDomainAlias,
+  parseAppDomainAliases,
+} from '../shared/app-domain-aliases';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { sellableProductsWhere } from '../product-page/product-page.reader';
 import {
@@ -28,6 +32,11 @@ export interface ServicePageConfig {
   custom_domain_previous_app_type?: string | null;
   /** Apps F2: the app's own page (`app-page.contract.ts`), kept as stored. */
   page?: unknown;
+  /**
+   * Apps F5: the store's own domains that also serve this app, besides its
+   * primary Vendix subdomain (`shared/app-domain-aliases.ts`).
+   */
+  custom_domain_aliases?: AppDomainAlias[];
 }
 
 /**
@@ -81,6 +90,7 @@ export function parseServicePageConfig(raw: unknown): ServicePageConfig {
     product_ids: intList(obj.product_ids),
     custom_domain_previous_app_type:
       typeof previous === 'string' ? previous : null,
+    custom_domain_aliases: parseAppDomainAliases(raw),
   };
 }
 

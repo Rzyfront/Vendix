@@ -117,6 +117,11 @@ export class StoreHomeAppService {
     }
     if (domain) await this.domains.clearSeoCache(domain.hostname);
     config.domain_previous_app_type = null;
+    // Apps F5: own domains pointed to the store home from the domains modal.
+    for (const alias of config.custom_domain_aliases ?? []) {
+      await this.domains.releaseAlias(storeId, APP_TYPE, alias);
+    }
+    config.custom_domain_aliases = [];
 
     await this.prisma.store_apps.update({
       where: { id: row.id },

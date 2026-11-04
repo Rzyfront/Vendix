@@ -7,6 +7,13 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
 import { DomainConfigService } from '@common/config/domain.config';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
+import {
+  AppDomainAlias,
+  PROTECTED_APP_TYPES,
+  parseAppDomainAliases,
+  withAlias,
+  withoutAlias,
+} from './app-domain-aliases';
 
 /** `app_type` values an app publishes on (plan S1/S5). */
 export type PublishedAppType =
@@ -24,8 +31,6 @@ export type PublishedAppType =
  */
 const STORE_HOME_DOMAIN_APP_TYPES = ['STORE_LANDING', 'STORE_HOME'];
 
-/** Custom domains that serve these apps are never taken over by an app. */
-const PROTECTED_APP_TYPES = ['STORE_ECOMMERCE', 'STORE_ADMIN'];
 const CUSTOM_OWNERSHIPS = ['custom_domain', 'custom_subdomain'] as const;
 
 export interface AppCustomDomainView {
@@ -39,6 +44,40 @@ export interface AppDomainRef {
   id: number;
   hostname: string;
   ownership: string;
+}
+
+/** What an app row knows about its domains (Apps F5). */
+export interface AppDomainState {
+  /** `store_apps.domain_settings`: the primary domain. */
+  primary: AppDomainRef | null;
+  published: boolean;
+  /**
+   * Before F5 an app could be published with a custom domain as its only
+   * (primary) domain; this is the `app_type` that domain had before.
+   */
+  legacyPreviousAppType: string | null;
+  aliases: AppDomainAlias[];
+}
+
+/** Builds the {@link AppDomainState} of an app row and its parsed config. */
+export function appDomainState(
+  row: { status: string; domain_settings: AppDomainRef | null },
+  config: {
+    custom_domain_previous_app_type?: string | null;
+    custom_domain_aliases?: AppDomainAlias[];
+  },
+): AppDomainState {
+  return {
+    primary: row.domain_settings,
+    published: row.status === 'published',
+    legacyPreviousAppType: config.custom_domain_previous_app_type ?? null,
+    aliases: config.custom_domain_aliases ?? [],
+  };
+}
+
+export interface PublishedAppDomains {
+  primary: { id: number; hostname: string };
+  aliases: AppDomainAlias[];
 }
 
 /**
@@ -202,6 +241,129 @@ export class AppDomainService {
   }
 
   /**
+   * Apps F5: publishes the app on its Vendix subdomain (always, the primary
+   * domain) and, when `customDomainId` is given, adds that custom domain as
+   * an alias. Existing aliases are kept. When the subdomain changes (product
+   * page with another product) the old one is disabled; a pre-F5 publication
+   * whose primary was a custom domain keeps that domain as an alias.
+   *
+   * The custom domain is validated before anything changes, so a rejected
+   * publish leaves the current publication untouched.
+   */
+  async publishOnDomains(
+    storeId: number,
+    appType: PublishedAppType,
+    state: AppDomainState,
+    customDomainId: number | null | undefined,
+    buildHostname: Parameters<AppDomainService['activateVendixHostname']>[2],
+  ): Promise<PublishedAppDomains> {
+    if (customDomainId) {
+      await this.findTakeableCustomDomain(storeId, customDomainId);
+    }
+
+    const primary = await this.activateVendixHostname(
+      storeId,
+      appType,
+      buildHostname,
+    );
+    let aliases = [...state.aliases];
+
+    const previous = state.published ? state.primary : null;
+    if (previous && previous.id !== primary.id) {
+      if (previous.ownership === 'vendix_subdomain') {
+        await this.setDomainStatus(previous.id, 'disabled');
+        await this.clearSeoCache(previous.hostname);
+      } else {
+        const legacy = await this.prisma.domain_settings.findFirst({
+          where: { id: previous.id, store_id: storeId },
+          select: { app_type: true, status: true },
+        });
+        if (
+          legacy &&
+          legacy.status !== 'disabled' &&
+          String(legacy.app_type) === appType
+        ) {
+          aliases = withAlias(aliases, {
+            domain_id: previous.id,
+            previous_app_type: state.legacyPreviousAppType,
+          });
+        }
+      }
+    }
+
+    if (customDomainId) {
+      const taken = await this.takeOverCustomDomain(
+        storeId,
+        customDomainId,
+        appType,
+      );
+      // Already serving this app: keep the app_type recorded the first time.
+      if (taken.previousAppType !== null) {
+        aliases = [
+          ...withoutAlias(aliases, customDomainId),
+          { domain_id: customDomainId, previous_app_type: taken.previousAppType },
+        ];
+      } else {
+        // It already served this app type before (e.g. a store landing on a
+        // custom domain): record that, so releasing it changes nothing.
+        aliases = withAlias(aliases, {
+          domain_id: customDomainId,
+          previous_app_type: appType,
+        });
+      }
+      await this.clearSeoCache(taken.domain.hostname);
+    }
+
+    return { primary, aliases };
+  }
+
+  /**
+   * Apps F5: unpublishing releases the primary domain and every alias. A
+   * domain someone pointed to another app in the meantime is left alone.
+   */
+  async releaseAppDomains(
+    storeId: number,
+    appType: PublishedAppType,
+    state: AppDomainState,
+  ): Promise<void> {
+    await this.releaseDomain(state.primary, state.legacyPreviousAppType);
+    for (const alias of state.aliases) {
+      await this.releaseAlias(storeId, appType, alias);
+    }
+  }
+
+  /**
+   * An alias recovers the app it served before; without a known previous
+   * app it is disabled (kept, never deleted). An alias that already served
+   * this app type before is left as it is.
+   */
+  async releaseAlias(
+    storeId: number,
+    appType: string,
+    alias: AppDomainAlias,
+  ): Promise<void> {
+    const domain = await this.prisma.domain_settings.findFirst({
+      where: { id: alias.domain_id, store_id: storeId },
+      select: { id: true, hostname: true, app_type: true, status: true },
+    });
+    if (
+      !domain ||
+      domain.status === 'disabled' ||
+      String(domain.app_type) !== appType
+    ) {
+      return;
+    }
+    if (alias.previous_app_type === appType) {
+      // It served this app type before the app took it: leave it as it was.
+    } else if (alias.previous_app_type) {
+      await this.setAppType(domain, alias.previous_app_type);
+    } else {
+      await this.setDomainStatus(domain.id, 'disabled');
+    }
+    await this.clearSeoCache(domain.hostname);
+  }
+
+  /**
    * Gives the app's domain back: a Vendix subdomain is disabled (kept for
    * republishing), a custom domain recovers the app it served before.
    */
@@ -259,6 +421,29 @@ export class AppDomainService {
       domainId: domain.id,
       hostname: domain.hostname,
     });
+  }
+
+  /**
+   * Apps F5: clears the SEO cache of the app's primary host and of every
+   * alias recorded in its config (`rawConfig` = `store_apps.config`).
+   */
+  async clearAppSeoCache(
+    storeId: number,
+    primaryHostname: string,
+    rawConfig: unknown,
+  ): Promise<void> {
+    const ids = parseAppDomainAliases(rawConfig).map((a) => a.domain_id);
+    const aliases = ids.length
+      ? await this.prisma.domain_settings.findMany({
+          where: { id: { in: ids }, store_id: storeId },
+          select: { hostname: true },
+        })
+      : [];
+    await Promise.all(
+      [primaryHostname, ...aliases.map((a) => a.hostname)].map((host) =>
+        this.clearSeoCache(host),
+      ),
+    );
   }
 
   /** The sitemap and robots of an app's host are cached for an hour. */

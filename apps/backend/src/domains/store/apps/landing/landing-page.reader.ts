@@ -1,4 +1,8 @@
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import {
+  AppDomainAlias,
+  parseAppDomainAliases,
+} from '../shared/app-domain-aliases';
 import { sellableProductsWhere } from '../product-page/product-page.reader';
 
 /** Longest offer title the landing shows. */
@@ -25,6 +29,11 @@ export interface LandingPageConfig {
    * `app_type` that domain had before, so unpublishing gives it back.
    */
   custom_domain_previous_app_type?: string | null;
+  /**
+   * Apps F5: the store's own domains that also serve this app, besides its
+   * primary Vendix subdomain (`shared/app-domain-aliases.ts`).
+   */
+  custom_domain_aliases?: AppDomainAlias[];
 }
 
 function text(value: unknown, max: number): string | null {
@@ -51,6 +60,7 @@ export function parseLandingPageConfig(raw: unknown): LandingPageConfig {
         : null,
     custom_domain_previous_app_type:
       typeof previous === 'string' ? previous : null,
+    custom_domain_aliases: parseAppDomainAliases(raw),
   };
 }
 
@@ -63,8 +73,13 @@ export interface PublishedLandingOffer {
 }
 
 export interface PublishedLandingPage {
-  /** Hostname of the landing's own domain; the offer shows only there. */
+  /** Hostname of the landing's own (primary) domain. */
   hostname: string;
+  /**
+   * Apps F5: the primary hostname plus its active aliases. The landing and
+   * its offer show on any of them, never on `{tienda}-store`.
+   */
+  hostnames: string[];
   offer: PublishedLandingOffer;
 }
 
@@ -123,8 +138,24 @@ export async function readPublishedLandingPage(
         })
       : null;
 
+  const aliasIds = (config.custom_domain_aliases ?? []).map((a) => a.domain_id);
+  const aliases = aliasIds.length
+    ? await prisma.domain_settings.findMany({
+        where: {
+          id: { in: aliasIds },
+          store_id: storeId,
+          app_type: 'STORE_LANDING',
+          status: 'active',
+        },
+        select: { hostname: true },
+        orderBy: { id: 'asc' },
+      })
+    : [];
+  const hostname = app.domain_settings.hostname.toLowerCase();
+
   return {
-    hostname: app.domain_settings.hostname.toLowerCase(),
+    hostname,
+    hostnames: [hostname, ...aliases.map((a) => a.hostname.toLowerCase())],
     offer: resolveLandingOffer(config, product),
   };
 }

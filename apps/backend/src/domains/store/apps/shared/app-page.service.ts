@@ -65,7 +65,11 @@ export class AppPageService {
         },
       });
       if (row.status === 'published' && row.domain_settings) {
-        await this.domains.clearSeoCache(row.domain_settings.hostname);
+        await this.domains.clearAppSeoCache(
+        storeId,
+        row.domain_settings.hostname,
+        row.config,
+      );
       }
     } else {
       await this.prisma.store_apps.create({

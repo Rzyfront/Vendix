@@ -134,4 +134,72 @@ describe('AppDomainService', () => {
     );
     expect(events.emit).toHaveBeenCalledWith('domain.updated', expect.anything());
   });
+
+  describe('Apps F5: primary subdomain plus aliases', () => {
+    const empty = { primary: null, published: false, legacyPreviousAppType: null, aliases: [] };
+
+    it('a rejected custom domain changes nothing, not even the subdomain', async () => {
+      prisma.domain_settings.findFirst.mockResolvedValue(null);
+      await expect(
+        service.publishOnDomains(STORE_ID, 'STORE_SERVICE_PAGE', empty, 999, build),
+      ).rejects.toMatchObject({ errorCode: ErrorCodes.STORE_APPS_005.code });
+      expect(prisma.domain_settings.create).not.toHaveBeenCalled();
+      expect(prisma.domain_settings.update).not.toHaveBeenCalled();
+    });
+
+    it('a new subdomain (another featured product) disables the old one', async () => {
+      const old = { id: 30, hostname: 'roku-cafe.vendix.online', ownership: 'vendix_subdomain' };
+      const result = await service.publishOnDomains(
+        STORE_ID,
+        'STORE_SERVICE_PAGE',
+        { ...empty, primary: old, published: true },
+        undefined,
+        build,
+      );
+      expect(result.primary.id).toBe(50);
+      expect(prisma.domain_settings.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 30 }, data: expect.objectContaining({ status: 'disabled' }) }),
+      );
+      expect(cache.del).toHaveBeenCalledWith('seo:sitemap:roku-cafe.vendix.online');
+    });
+
+    it('releasing an alias without a known previous app type disables it, never deletes it', async () => {
+      prisma.domain_settings.findFirst.mockResolvedValue({
+        id: 9, hostname: 'citas.roku.com', app_type: 'STORE_SERVICE_PAGE', status: 'active',
+      });
+      await service.releaseAlias(STORE_ID, 'STORE_SERVICE_PAGE', { domain_id: 9, previous_app_type: null });
+      expect(prisma.domain_settings.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 9, store_id: STORE_ID } }),
+      );
+      expect(prisma.domain_settings.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 9 }, data: expect.objectContaining({ status: 'disabled' }) }),
+      );
+      expect(events.emit).toHaveBeenCalledWith('domain.disabled', expect.anything());
+    });
+
+    it('releasing an alias gives it back its previous app type', async () => {
+      prisma.domain_settings.findFirst.mockResolvedValue({
+        id: 9, hostname: 'citas.roku.com', app_type: 'STORE_SERVICE_PAGE', status: 'active',
+      });
+      await service.releaseAlias(STORE_ID, 'STORE_SERVICE_PAGE', {
+        domain_id: 9,
+        previous_app_type: 'STORE_LANDING',
+      });
+      expect(prisma.domain_settings.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 9 }, data: expect.objectContaining({ app_type: 'STORE_LANDING' }) }),
+      );
+    });
+
+    it('clearAppSeoCache clears the primary host and every alias host', async () => {
+      prisma.domain_settings.findMany.mockResolvedValue([{ hostname: 'citas.roku.com' }]);
+      await service.clearAppSeoCache(STORE_ID, 'roku-service.vendix.online', {
+        custom_domain_aliases: [{ domain_id: 9, previous_app_type: null }],
+      });
+      expect(prisma.domain_settings.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: [9] }, store_id: STORE_ID } }),
+      );
+      expect(cache.del).toHaveBeenCalledWith('seo:sitemap:roku-service.vendix.online');
+      expect(cache.del).toHaveBeenCalledWith('seo:sitemap:citas.roku.com');
+    });
+  });
 });

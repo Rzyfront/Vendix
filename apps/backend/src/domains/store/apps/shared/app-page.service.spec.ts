@@ -18,7 +18,7 @@ describe('AppPageService', () => {
   }
 
   let apps: AppRow[];
-  let domains: { clearSeoCache: jest.Mock };
+  let domains: { clearAppSeoCache: jest.Mock };
   let service: AppPageService;
 
   const page = {
@@ -47,7 +47,7 @@ describe('AppPageService', () => {
         }),
       },
     };
-    domains = { clearSeoCache: jest.fn(async () => undefined) };
+    domains = { clearAppSeoCache: jest.fn(async () => undefined) };
     service = new AppPageService(prisma as any, domains as any);
     jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
   });
@@ -96,7 +96,12 @@ describe('AppPageService', () => {
         page: expect.objectContaining({ mode: 'sales' }),
       }),
     );
-    expect(domains.clearSeoCache).toHaveBeenCalledWith('crema.vendix.online');
+    // Apps F5: the primary host and its aliases (read from the stored config).
+    expect(domains.clearAppSeoCache).toHaveBeenCalledWith(
+      expect.any(Number),
+      'crema.vendix.online',
+      expect.objectContaining({ product_id: 4 }),
+    );
   });
 
   it('rejects an invalid page and writes nothing', async () => {
