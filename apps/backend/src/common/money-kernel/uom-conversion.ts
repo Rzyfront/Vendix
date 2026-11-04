@@ -82,7 +82,15 @@ export function uomRatio(from: UomRef, to: UomRef): number | null {
  */
 export function integerRatio(unit: UomRef, stock: UomRef): number | null {
   const ratio = uomRatio(unit, stock);
-  if (ratio == null) return null;
+  return ratio == null ? null : asIntegerRatio(ratio);
+}
+
+/**
+ * Una razón ya calculada (unidades de stock por unidad de venta) como entero
+ * ≥ 1, o `null` si no lo es. Para quien ya tiene el factor relativo (POS).
+ */
+export function asIntegerRatio(ratio: number): number | null {
+  if (!Number.isFinite(ratio)) return null;
   const n = Math.round(ratio);
   return n >= 1 && Math.abs(ratio - n) <= INTEGER_RATIO_TOLERANCE ? n : null;
 }

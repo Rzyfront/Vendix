@@ -1,5 +1,6 @@
 import {
   UomRef,
+  asIntegerRatio,
   chargeForAmount,
   convertAmount,
   integerRatio,
@@ -90,6 +91,9 @@ describe('uom-conversion — matriz de conversión (S11)', () => {
     expect(integerRatio(g, kg)).toBeNull(); // menor que el inventario
     expect(integerRatio(gal, ml)).toBeNull(); // 3785,41 ml
     expect(integerRatio(doc, unit)).toBe(12);
+    expect(asIntegerRatio(500)).toBe(500);
+    expect(asIntegerRatio(0.001)).toBeNull(); // g con stock en kg
+    expect(asIntegerRatio(25.4)).toBeNull();
   });
 
   it('pricing_type se deriva de la dimensión de la principal', () => {
