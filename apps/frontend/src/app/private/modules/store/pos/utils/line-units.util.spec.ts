@@ -8,6 +8,7 @@ import {
   resolveSaleQuantity,
   resolveSaleUnitSnapshot,
   resolveStockUnitsConsumed,
+  resolvePromotionTierQuantity,
 } from './line-units.util';
 
 /**
@@ -316,5 +317,57 @@ describe('resolveStockUnitsConsumed — unidades de stock que viajan al cobro', 
 
   it('línea por pieza ⇒ null (el backend usa quantity)', () => {
     expect(resolveStockUnitsConsumed({ quantity: 4 })).toBeNull();
+  });
+});
+
+describe('resolveStockUnitsConsumed — ronda 2: nunca 0 y mismos números que el servidor', () => {
+  const weighed = (weight: number, factor: number) =>
+    resolveStockUnitsConsumed({
+      quantity: 1,
+      weight,
+      weight_unit: 'kg',
+      is_weight_product: true,
+      stock_units_per_weight_unit: factor,
+    });
+
+  it('stock en kg: 0,180 / 0,4 / 0,5 kg ⇒ 1, nunca 0', () => {
+    expect(weighed(0.18, 1)).toBe(1);
+    expect(weighed(0.4, 1)).toBe(1);
+    expect(weighed(0.5, 1)).toBe(1);
+  });
+
+  it('0,9995 kg con stock en g ⇒ 1000 (sin error de coma flotante)', () => {
+    expect(weighed(0.9995, 1000)).toBe(1000);
+  });
+
+  it('peso máximo 999 kg con stock en g ⇒ 999 000', () => {
+    expect(weighed(999, 1000)).toBe(999000);
+  });
+
+  it('0 g no es pesada: null', () => {
+    expect(weighed(0, 1000)).toBeNull();
+  });
+});
+
+describe('resolvePromotionTierQuantity — tramos del carrito alineados con el backend', () => {
+  it('unidad de venta: 180 g cuentan 180, no 180 000', () => {
+    expect(
+      resolvePromotionTierQuantity({ quantity: 180, sale_unit_code: 'kg', stock_units_per_sale_unit: 1000 }),
+    ).toBe(180);
+  });
+
+  it('presentación: 3 cajas de 12 cuentan 36', () => {
+    expect(resolvePromotionTierQuantity({ quantity: 3, units_per_package: 12, is_package_unit: true })).toBe(36);
+  });
+
+  it('pesada: cuenta 1 (el cotizador no recibe sus gramos)', () => {
+    expect(
+      resolvePromotionTierQuantity({
+        quantity: 1,
+        weight: 0.18,
+        is_weight_product: true,
+        stock_units_per_weight_unit: 1000,
+      }),
+    ).toBe(1);
   });
 });

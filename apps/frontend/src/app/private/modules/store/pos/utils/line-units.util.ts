@@ -1,4 +1,3 @@
-import { stockUnitsForWeighAmount } from './manual-weigh.util';
 
 /**
  * Cuántas "unidades de precio" cobra una línea del carrito — QUI-648.
@@ -193,17 +192,18 @@ export function formatSaleQuantity(item: LineUnitsInput): string {
 
 /**
  * Unidades de STOCK que consume la línea, o `null` cuando son las mismas que
- * `quantity` (el backend cae a `stock_units_consumed ?? quantity`). Es lo que
- * viaja en `stock_units_consumed` del cobro.
+ * `quantity` (el backend cae a `stock_units_consumed ?? quantity`). Viaja en
+ * `stock_units_consumed` del cobro, pero en una línea de PESO el servidor lo
+ * recalcula con la unidad de stock del producto y solo lo usa para contrastar:
+ * aquí sirve para mostrar y para contar seriales, con la misma regla.
  *
  *  - PESO legado: `quantity` es 1 y el peso es solo el multiplicador
- *    monetario; sin esto el inventario descontaba 1 por pesada. Se convierte
- *    `weight` a unidades de stock con el factor de la unidad de stock
- *    declarada del producto (0,180 kg con stock en g ⇒ 180), con el mismo
- *    redondeo que el modal de pesado. Sin factor conocido devuelve `null` y
- *    la línea conserva el comportamiento histórico: qué unidad de stock tiene
- *    un producto de peso SIN `stock_uom` es una decisión pendiente (las
- *    compras lo cargan 1:1 en kg; ver REPORTE-PESO-LEGADO.md).
+ *    monetario. Se convierte `weight` a la unidad de stock declarada
+ *    (0,180 kg con stock en g ⇒ 180). Nunca 0 con peso > 0: si redondea a 0
+ *    (stock en kg y pesada < 0,5 kg) se cuenta 1. Sin factor conocido
+ *    devuelve `null` y la línea conserva el histórico (1 por pesada; qué
+ *    unidad de stock tiene un producto de peso SIN `stock_uom` es una
+ *    decisión de producto pendiente).
  *  - PRESENTACIÓN (empaque > 1): `quantity` cuenta paquetes ⇒ paquetes × empaque.
  *  - Unidad de VENTA (`stock_units_per_sale_unit > 1`, "3 m"): `quantity` YA
  *    está en la unidad mínima (3000 mm, ver el encabezado). Multiplicarla otra
@@ -215,9 +215,25 @@ export function resolveStockUnitsConsumed(item: LineUnitsInput): number | null {
   if (item.is_weight_product && weight > 0) {
     const factor = Number(item.stock_units_per_weight_unit ?? 0);
     if (!Number.isFinite(factor) || factor <= 0) return null;
-    return stockUnitsForWeighAmount(weight, factor, 1);
+    // Mismo cálculo que el servidor (`weight-stock-units.util.ts`): el
+    // `toFixed(6)` evita que 0,9995 × 1000 = 999,4999… redondee a 999.
+    const converted = Math.round(Number((weight * factor).toFixed(6)));
+    return Number.isFinite(converted) ? Math.max(1, converted) : null;
   }
   const packSize = resolveLinePackSize(item);
   if (packSize > 1) return (Number(item.quantity ?? 0) || 0) * packSize;
   return null;
+}
+
+/**
+ * Cantidad con la que la línea acumula tramos de promoción, la misma que
+ * cuenta el backend (`payments.service.ts`, cotizador): paquetes × empaque en
+ * una presentación; `quantity` en el resto. Una línea con unidad de venta ya
+ * trae `quantity` en unidad mínima (no se vuelve a multiplicar) y una pesada
+ * cuenta 1 (el cotizador no recibe sus unidades de stock).
+ */
+export function resolvePromotionTierQuantity(item: LineUnitsInput): number {
+  const quantity = Number(item.quantity ?? 0) || 0;
+  const packSize = resolveLinePackSize(item);
+  return packSize > 1 ? quantity * packSize : quantity;
 }
