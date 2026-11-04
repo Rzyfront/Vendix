@@ -975,21 +975,9 @@ export class PosProductService {
    * `pricing_type = weight`; en cualquier otro caso (o error) `null`.
    */
   getWeightProductByScaleCode(scaleCode: number): Observable<Product | null> {
-    const params = new HttpParams()
-      .set('scale_code', String(scaleCode))
-      .set('is_lodging', 'false');
-    return this.http.get<any>(this.apiUrl, { params }).pipe(
-      map((response) => {
-        const dataRoot = response?.success ? response.data : response;
-        const list = Array.isArray(dataRoot)
-          ? dataRoot
-          : Array.isArray(dataRoot?.data)
-            ? dataRoot.data
-            : [];
-        if (list.length !== 1) return null;
-        const product = (this.transformProducts(list)[0] as Product) ?? null;
-        return product && product.pricing_type === 'weight' ? product : null;
-      }),
+    // Misma petición y mapeo que el probador; aquí se aplanan los motivos.
+    return this.lookupWeightProductByScaleCode(scaleCode).pipe(
+      map((result) => (result.status === 'found' ? result.product : null)),
       catchError(() => of(null)),
     );
   }
