@@ -7,6 +7,7 @@ import { AppsService } from './apps.service';
 import { ProductPageAppController } from './product-page/product-page-app.controller';
 import { ProductPageAppService } from './product-page/product-page-app.service';
 import { ProductPagePublicController } from './product-page/product-page-public.controller';
+import { ProductPageViewService } from './product-page/product-page-view.service';
 import { ServicePageAppController } from './service-page/service-page-app.controller';
 import { ServicePageAppService } from './service-page/service-page-app.service';
 import { ServicePagePublicController } from './service-page/service-page-public.controller';
@@ -58,6 +59,7 @@ import { LandingLeadService } from './landing/landing-lead.service';
     AppDomainService,
     AppPageService,
     ProductPageAppService,
+    ProductPageViewService,
     ServicePageAppService,
     BookingAppService,
     BookingCheckinService,

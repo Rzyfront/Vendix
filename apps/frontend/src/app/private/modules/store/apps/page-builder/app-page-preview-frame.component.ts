@@ -2,10 +2,13 @@ import { DOCUMENT } from '@angular/common';
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 
+import { ProductPageViewComponent } from '../../../../../public/product-page/product-page-view.component';
 import { StoreHomeViewComponent } from '../../../../../public/store-home/store-home-view.component';
 import { BUILDER_PREVIEW_CHANNEL, readFrameMessage } from '../builder/builder-preview';
 import type { PageAppKind } from '../templates';
 import type { AppPagePreviewPayload } from './page-builder.types';
+import { ProductPageContext, ProductPageSettings, productPagePreview } from './product-page/product-page-builder';
+import { ProductPagePreviewBodyComponent } from './product-page/product-page-preview-body.component';
 import { StoreHomeContext, StoreHomeSettings, storeHomePreview } from './store-home/store-home-builder';
 
 /** Outline of the section selected in the editor. */
@@ -22,13 +25,20 @@ const SELECTED_STYLE = `[data-preview-selected="true"]{outline:2px solid var(--c
 @Component({
   selector: 'app-app-page-preview-frame',
   standalone: true,
-  imports: [StoreHomeViewComponent],
+  imports: [StoreHomeViewComponent, ProductPageViewComponent, ProductPagePreviewBodyComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (payload(); as p) {
       @switch (p.kind) {
         @case ('store_home') {
           <app-store-home-view [home]="storeHome()" [fallback]="fallback()" [blockIds]="true" />
+        }
+        @case ('product_page') {
+          @if (productPage(); as view) {
+            <app-product-page-view [page]="view.page" [storeName]="view.storeName || 'Tienda'" [storeLogo]="view.storeLogoUrl" [blockIds]="true">
+              <app-product-page-preview-body [preview]="view" />
+            </app-product-page-view>
+          }
         }
       }
     }
@@ -54,6 +64,13 @@ export class AppPagePreviewFrameComponent {
     const p = this.payload();
     return p?.kind === 'store_home'
       ? storeHomePreview(p as AppPagePreviewPayload<StoreHomeSettings | null, StoreHomeContext | null>)
+      : null;
+  });
+
+  readonly productPage = computed(() => {
+    const p = this.payload();
+    return p?.kind === 'product_page'
+      ? productPagePreview(p as AppPagePreviewPayload<ProductPageSettings | null, ProductPageContext | null>)
       : null;
   });
 

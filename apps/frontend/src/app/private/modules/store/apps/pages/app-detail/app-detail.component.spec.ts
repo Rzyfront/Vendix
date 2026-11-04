@@ -10,6 +10,7 @@ import { ProductPageSettingsPanelComponent } from '../../components/product-page
 import { ServicePageSettingsPanelComponent } from '../../components/service-page-settings-panel.component';
 import { StoreHomeSettingsPanelComponent } from '../../components/store-home-settings-panel.component';
 import { LandingBuilderPageComponent } from '../../landing-builder/landing-builder-page.component';
+import { ProductPageBuilderPageComponent } from '../../page-builder/product-page/product-page-builder-page.component';
 import { StoreHomeBuilderPageComponent } from '../../page-builder/store-home/store-home-builder-page.component';
 import type { StoreAppDetail } from '../../interfaces/store-app.interface';
 import { StoreAppsService } from '../../services/store-apps.service';
@@ -27,8 +28,8 @@ abstract class StubPanel {
   readonly load = jasmine.createSpy('load');
 }
 
-@Component({ selector: 'app-product-page-settings-panel', standalone: true, template: '<p>panel producto</p>' })
-class StubProductPagePanel extends StubPanel {}
+@Component({ selector: 'app-service-page-settings-panel', standalone: true, template: '<p>panel servicios</p>' })
+class StubServicePagePanel extends StubPanel {}
 
 @Component({ selector: 'app-booking-settings-panel', standalone: true, template: '<p>panel reservas</p>' })
 class StubBookingPanel extends StubPanel {}
@@ -39,12 +40,15 @@ class StubLandingBuilder {}
 @Component({ selector: 'app-store-home-builder-page', standalone: true, template: '<p data-testid="store-home-builder">builder</p>' })
 class StubStoreHomeBuilder {}
 
+@Component({ selector: 'app-product-page-builder-page', standalone: true, template: '<p data-testid="product-page-builder">builder</p>' })
+class StubProductPageBuilder {}
+
 @Component({ selector: 'app-ecommerce', standalone: true, template: '<p data-testid="ecommerce-admin">gestión</p>' })
 class StubEcommerce {}
 
 const detail = (over: Partial<StoreAppDetail> = {}): StoreAppDetail => ({
-  key: 'product_page',
-  name: 'Product page',
+  key: 'service_page',
+  name: 'Service page',
   description: '',
   applies_to_store_industries: true,
   status: 'draft',
@@ -95,6 +99,7 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
         imports: [
           LandingBuilderPageComponent,
           StoreHomeBuilderPageComponent,
+          ProductPageBuilderPageComponent,
           StoreHomeSettingsPanelComponent,
           ProductPageSettingsPanelComponent,
           ServicePageSettingsPanelComponent,
@@ -102,22 +107,22 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
           EcommerceComponent,
         ],
       },
-      add: { imports: [StubLandingBuilder, StubStoreHomeBuilder, StubProductPagePanel, StubBookingPanel, StubEcommerce] },
+      add: { imports: [StubLandingBuilder, StubStoreHomeBuilder, StubProductPageBuilder, StubServicePagePanel, StubBookingPanel, StubEcommerce] },
     });
   });
 
   it('abre la vista de la app y trae su detalle al entrar, sin modal', async () => {
-    await render('product-page', detail());
+    await render('service-page', detail());
 
-    expect(apps.get).toHaveBeenCalledOnceWith('product_page');
-    expect(component.title()).toBe('Product page');
+    expect(apps.get).toHaveBeenCalledOnceWith('service_page');
+    expect(component.title()).toBe('Service page');
     const el = fixture.nativeElement as HTMLElement;
-    expect(el.textContent).toContain('panel producto');
+    expect(el.textContent).toContain('panel servicios');
     expect(el.querySelector('app-modal')).toBeNull();
   });
 
   it('borrador: ofrece Apagar y Publicar; Publicar lo hace el panel', async () => {
-    await render('product-page', detail({ status: 'draft' }));
+    await render('service-page', detail({ status: 'draft' }));
 
     expect(actionIds()).toEqual(['deactivate', 'publish']);
     component.onAction('publish');
@@ -125,7 +130,7 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
   });
 
   it('publicada: ofrece Despublicar y no Publicar', async () => {
-    await render('product-page', detail({ status: 'published' }));
+    await render('service-page', detail({ status: 'published' }));
     panel().canUnpublish.set(true);
 
     expect(actionIds()).toEqual(['unpublish']);
@@ -134,29 +139,29 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
   });
 
   it('no instalada: Encender la deja en borrador y recarga el panel', async () => {
-    await render('product-page', detail({ status: 'not_installed', enabled: false }));
+    await render('service-page', detail({ status: 'not_installed', enabled: false }));
     expect(actionIds()).toEqual(['activate', 'publish']);
 
     apps.activate.and.returnValue(of({ success: true, data: detail({ status: 'draft' }) }));
     component.onAction('activate');
 
-    expect(apps.activate).toHaveBeenCalledWith('product_page');
+    expect(apps.activate).toHaveBeenCalledWith('service_page');
     expect(component.badge()?.label).toBe('Borrador');
     expect(panel().load).toHaveBeenCalled();
   });
 
   it('Apagar llama a deactivate', async () => {
-    await render('product-page', detail({ status: 'draft' }));
+    await render('service-page', detail({ status: 'draft' }));
     apps.deactivate.and.returnValue(of({ success: true, data: detail({ status: 'disabled', enabled: false }) }));
 
     component.onAction('deactivate');
 
-    expect(apps.deactivate).toHaveBeenCalledWith('product_page');
+    expect(apps.deactivate).toHaveBeenCalledWith('service_page');
     expect(actionIds()).toEqual(['activate', 'publish']);
   });
 
   it('Publicar queda deshabilitado mientras el panel no puede publicar', async () => {
-    await render('product-page', detail({ status: 'draft' }));
+    await render('service-page', detail({ status: 'draft' }));
     panel().canPublish.set(false);
 
     expect(component.actions().find((a) => a.id === 'publish')?.disabled).toBeTrue();
@@ -181,12 +186,21 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
     expect(apps.get).not.toHaveBeenCalled();
   });
 
+  it('página de producto (F6-B): monta solo su constructor, con su propia cabecera y sus datos', async () => {
+    await render('product-page', detail({ key: 'product_page', name: 'Página de producto', status: 'published' }));
+
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('[data-testid="product-page-builder"]')).not.toBeNull();
+    expect(el.querySelector('app-sticky-header')).toBeNull();
+    expect(apps.get).not.toHaveBeenCalled();
+  });
+
   it('apps con página propia: su pestaña de ajustes y luego Contenido, Operación, Marca y SEO, Estilo, Vista previa y Estado (apps-f2 S6, apps-f3 S1)', async () => {
-    await render('product-page', detail());
+    await render('service-page', detail());
 
     expect(component.tabs().map((t) => t.id)).toEqual(['settings', 'content', 'operation', 'brand', 'style', 'preview', 'general']);
     expect(component.tabs().map((t) => t.label)).toEqual([
-      'Producto y dominio', 'Contenido', 'Operación', 'Marca y SEO', 'Estilo', 'Vista previa', 'Estado',
+      'Servicios y dominio', 'Contenido', 'Operación', 'Marca y SEO', 'Estilo', 'Vista previa', 'Estado',
     ]);
     component.setTab('operation');
     fixture.detectChanges();
@@ -224,7 +238,7 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
   });
 
   it('una app que no aplica a la industria no ofrece acciones', async () => {
-    await render('product-page', detail({ applies_to_store_industries: false }));
+    await render('service-page', detail({ applies_to_store_industries: false }));
 
     expect(component.actions()).toEqual([]);
     expect(fixture.nativeElement.querySelector('[data-testid="app-not-applicable"]')).not.toBeNull();

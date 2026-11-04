@@ -24,6 +24,13 @@ export class ProductPageAppController {
     private readonly appPage: AppPageService,
   ) {}
 
+  /** F6-B: featured product and complements for the editor preview. */
+  @Permissions('store:apps:read')
+  @Get('preview-context')
+  async previewContext() {
+    return this.responseService.success(await this.productPage.previewContext());
+  }
+
   @Permissions('store:apps:read')
   @Get('custom-domains')
   async customDomains() {

@@ -65,6 +65,8 @@ describe('ProductPageLayoutComponent (apps-f2 T3)', () => {
     expect(el.querySelector('app-app-page-view')).toBeNull();
     expect(el.querySelector('app-product-complements')?.textContent).toContain('Complementa tu compra');
     expect(el.querySelector('main')?.hasAttribute('id')).toBeFalse();
+    // F6-B: the editor marks sections with data-block-id; the public page never does.
+    expect(el.querySelector('[data-block-id]')).toBeNull();
   });
 
   it('with a page: hero on the featured product, complements title, and blocks below', async () => {
@@ -84,6 +86,7 @@ describe('ProductPageLayoutComponent (apps-f2 T3)', () => {
     expect(el.querySelector('app-product-complements')?.textContent).toContain('Lleva también');
     expect(el.querySelector('[data-block="faq"]')).not.toBeNull();
     expect(el.querySelector('a[href="/cart"]')).not.toBeNull();
+    expect(el.querySelector('[data-block-id]')).toBeNull();
   });
 
   it('info mode hides the header cart; a disabled complements block hides the section', async () => {

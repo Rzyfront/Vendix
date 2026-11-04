@@ -8,6 +8,7 @@ import {
   StoreAppDetailResponse,
   StoreAppsResponse,
 } from '../interfaces/store-app.interface';
+import type { ProductPageContext } from '../page-builder/product-page/product-page-builder';
 import type { StoreHomePublic } from '../../../../../public/store-home/store-home.service';
 import type { AppPageDocument, PageAppKind } from '../templates/app-page.types';
 
@@ -70,6 +71,11 @@ export class StoreAppsService {
       `${this.apiUrl}/product_page/publish`,
       customDomainId ? { custom_domain_id: customDomainId } : {},
     );
+  }
+
+  /** F6-B — the featured product and complements the page paints, for the builder preview. */
+  productPagePreviewContext(): Observable<{ data: ProductPageContext }> {
+    return this.http.get<{ data: ProductPageContext }>(`${this.apiUrl}/product_page/preview-context`);
   }
 
   unpublishProductPage(): Observable<unknown> {
