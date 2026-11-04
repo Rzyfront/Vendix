@@ -262,20 +262,118 @@ export const PLAN_MODULE_API_ROUTES: Readonly<Record<string, readonly string[]>>
   fiscal_operations: ['/api/store/fiscal', '/api/organization/fiscal'],
 };
 
+// ── Sale flow: the plan layer never blocks a sale ─────────────────────────
+
 /**
- * Prefixes other modules consume, so the API layer never gates them even when
- * they sit under a gated prefix. The screens of these modules stay locked in
- * the panel; only the shared endpoints stay reachable:
+ * API prefixes a sale calls between opening the cart and closing the payment
+ * (POS, «Cobrar» on an order, storefront checkout) that sit under a gated
+ * prefix of `PLAN_MODULE_API_ROUTES`. Sale endpoints outside gated prefixes
+ * (orders, payments, customers, cash registers, stock…) are never evaluated by
+ * the plan layer and are not listed here. Full sale path inventory:
+ * docs/access/venta-endpoints.md.
+ *
+ * A sale is NEVER blocked by the module paywall: these prefixes are exempt
+ * (see `PLAN_GATE_EXEMPT_API_PREFIXES`) and `isSaleFlow` is the single place
+ * that decides "this is a sale" for the backend guard, the frontend
+ * interceptor and the tests. Add the prefix here the day a sale starts calling
+ * a new endpoint under a gated prefix; `plan-modules.sale-flow.spec.ts` fails
+ * if the POS or the checkout calls one that is missing.
+ */
+export const SALE_FLOW_API_PREFIXES: readonly string[] = [
+  // Cart: withholding the customer suffers, previewed on every cart change.
+  '/api/store/withholding-tax/preview',
+  // POS fiscal status (polling after payment) and its retry emission.
+  '/api/store/invoicing/pos',
+  // POS holder warning: emission status on mount, holder check per customer.
+  '/api/store/invoicing/dian-config/emission-status',
+  '/api/store/invoicing/holder-check',
+  // POS confirmation modal lists the DIAN configs (the list only, not CRUD).
+  '/api/store/invoicing/dian-config$',
+  // Order detail «Cobrar»: UVT threshold on mount, invoice notes after paying,
+  // «Facturar» and the invoice PDF.
+  '/api/store/invoicing/uvt-threshold',
+  '/api/store/invoicing/orders/:id/emit',
+  '/api/store/invoicing/:id/notes',
+  '/api/store/invoicing/:id/pdf$',
+  // POS split bill: invoice per financial account.
+  '/api/store/invoicing/financial-accounts/:id/emit',
+];
+
+/**
+ * Panel and storefront routes where a sale is in progress (cart open, payment
+ * running). While the user is on one of them the frontend never opens the
+ * module paywall, whatever endpoint answered `PLAN_MODULE_NOT_INCLUDED`.
+ */
+export const SALE_FLOW_UI_ROUTES: readonly string[] = [
+  '/admin/pos',
+  '/admin/orders/:id',
+  '/cart',
+  '/checkout',
+];
+
+function normalizePath(raw: string | null | undefined): string {
+  if (!raw) return '';
+  let path = String(raw);
+  const scheme = path.indexOf('://');
+  if (scheme >= 0) {
+    const slash = path.indexOf('/', scheme + 3);
+    path = slash >= 0 ? path.slice(slash) : '/';
+  }
+  return path.split('?')[0].split('#')[0].replace(/\/+$/, '').toLowerCase();
+}
+
+/**
+ * Whole-segment prefix match. In a pattern, `:id` matches one numeric segment
+ * and a trailing `$` makes the match exact (no sub-paths).
+ */
+function matchesPrefix(path: string, prefix: string): boolean {
+  if (!prefix.includes(':') && !prefix.endsWith('$')) {
+    return path === prefix || path.startsWith(`${prefix}/`);
+  }
+  const exact = prefix.endsWith('$');
+  const wanted = (exact ? prefix.slice(0, -1) : prefix).split('/');
+  const actual = path.split('/');
+  if (exact ? actual.length !== wanted.length : actual.length < wanted.length) {
+    return false;
+  }
+  return wanted.every((segment, i) =>
+    segment === ':id' ? /^\d+$/.test(actual[i]) : segment === actual[i],
+  );
+}
+
+/**
+ * THE decision "this request belongs to a sale". True when the API path is a
+ * sale endpoint, or when the UI route is a screen where a sale is in progress.
+ * Accepts absolute URLs (`https://host/api/...`) and strips query and hash.
+ */
+export function isSaleFlow(context: {
+  apiPath?: string | null;
+  uiRoute?: string | null;
+}): boolean {
+  const apiPath = normalizePath(context.apiPath);
+  if (apiPath && SALE_FLOW_API_PREFIXES.some((prefix) => matchesPrefix(apiPath, prefix))) {
+    return true;
+  }
+  const uiRoute = normalizePath(context.uiRoute);
+  return (
+    !!uiRoute && SALE_FLOW_UI_ROUTES.some((prefix) => matchesPrefix(uiRoute, prefix))
+  );
+}
+
+/**
+ * Prefixes the API layer never gates even when they sit under a gated prefix.
+ * The screens of these modules stay locked in the panel; only the shared
+ * endpoints stay reachable:
+ *   - every sale endpoint (`SALE_FLOW_API_PREFIXES`).
  *   - `invoicing/scan-draft`: purchase-invoice OCR (purchase orders).
- *   - `invoicing/pos`: the POS reads the fiscal status before a sale.
  *   - `accounting/chart-of-accounts`: shared account lookups (forms, wizard).
  *   - `payroll/employees`: service providers (reservations).
  * `taxes` (product tax categories) and `accounts-receivable/payable` (payment
  * collector) are not in the map at all for the same reason.
  */
 export const PLAN_GATE_EXEMPT_API_PREFIXES: readonly string[] = [
+  ...SALE_FLOW_API_PREFIXES,
   '/api/store/invoicing/scan-draft',
-  '/api/store/invoicing/pos',
   '/api/store/accounting/chart-of-accounts',
   '/api/organization/accounting/chart-of-accounts',
   '/api/store/payroll/employees',
@@ -284,17 +382,13 @@ export const PLAN_GATE_EXEMPT_API_PREFIXES: readonly string[] = [
   '/api/organization/access-gate',
 ];
 
-function matchesPrefix(path: string, prefix: string): boolean {
-  return path === prefix || path.startsWith(`${prefix}/`);
-}
-
-/** Module key governing an API path, or `null` when the plan layer skips it. */
-export function planModuleForApiPath(rawPath: string | null | undefined): string | null {
-  if (!rawPath) return null;
-  const path = rawPath.split('?')[0].split('#')[0].replace(/\/+$/, '').toLowerCase();
-  if (PLAN_GATE_EXEMPT_API_PREFIXES.some((prefix) => matchesPrefix(path, prefix))) {
-    return null;
-  }
+/**
+ * Module key whose prefix covers an API path, ignoring the exemptions. Used by
+ * the guard to audit a sale endpoint that sits under a module the plan lacks.
+ */
+export function mappedPlanModuleForApiPath(rawPath: string | null | undefined): string | null {
+  const path = normalizePath(rawPath);
+  if (!path) return null;
   let best: string | null = null;
   let bestLength = -1;
   for (const [key, prefixes] of Object.entries(PLAN_MODULE_API_ROUTES)) {
@@ -306,6 +400,16 @@ export function planModuleForApiPath(rawPath: string | null | undefined): string
     }
   }
   return best;
+}
+
+/** Module key governing an API path, or `null` when the plan layer skips it. */
+export function planModuleForApiPath(rawPath: string | null | undefined): string | null {
+  const path = normalizePath(rawPath);
+  if (!path) return null;
+  if (PLAN_GATE_EXEMPT_API_PREFIXES.some((prefix) => matchesPrefix(path, prefix))) {
+    return null;
+  }
+  return mappedPlanModuleForApiPath(path);
 }
 
 // ── Paywall copy ──────────────────────────────────────────────────────────

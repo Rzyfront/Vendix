@@ -1,5 +1,9 @@
 import { PlanAccessGuard } from './plan-access.guard';
 import { VendixHttpException } from '../../../../common/errors';
+import {
+  PLAN_MODULE_API_ROUTES,
+  SALE_FLOW_API_PREFIXES,
+} from '../../../../common/access/plan-modules';
 
 describe('PlanAccessGuard', () => {
   const CURRENT = { code: 'vendix-impulsa', name: 'Vendix Impulsa', cycle: 'monthly' };
@@ -38,13 +42,17 @@ describe('PlanAccessGuard', () => {
     return { guard, planAccess, mode, audit };
   };
 
-  const ctx = (url: string, user: any = { id: 3, store_id: 7, organization_id: 9, roles: ['owner'] }) =>
+  const ctx = (
+    url: string,
+    user: any = { id: 3, store_id: 7, organization_id: 9, roles: ['owner'] },
+    method = 'GET',
+  ) =>
     ({
       getType: () => 'http',
       getHandler: () => undefined,
       getClass: () => undefined,
       switchToHttp: () => ({
-        getRequest: () => ({ method: 'GET', originalUrl: url, url, user }),
+        getRequest: () => ({ method, originalUrl: url, url, user }),
       }),
     }) as any;
 
@@ -133,5 +141,57 @@ describe('PlanAccessGuard', () => {
     await expect(failing.guard.canActivate(ctx('/api/store/invoicing'))).resolves.toBe(true);
     const anon = build({ storeBlocked: ['invoicing'], mode: 'enforce' });
     await expect(anon.guard.canActivate(ctx('/api/store/invoicing', null))).resolves.toBe(true);
+  });
+
+  describe('sale flow (venta blindada): never 403', () => {
+    // A store whose plan does not include accounting (Impulsa / Emprendedor).
+    const NO_ACCOUNTING = [
+      'accounting',
+      'accounting_withholding_tax',
+      'invoicing',
+      'invoicing_invoices',
+    ];
+
+    it('POST /api/store/withholding-tax/preview passes in enforce and records would_block', async () => {
+      const { guard, audit, planAccess } = build({ storeBlocked: NO_ACCOUNTING, mode: 'enforce' });
+      await expect(
+        guard.canActivate(ctx('/api/store/withholding-tax/preview', undefined, 'POST')),
+      ).resolves.toBe(true);
+      expect(planAccess.denial).not.toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: 'accounting_withholding_tax',
+          decision: 'would_block',
+          layer: 'plan',
+          mode: 'enforce',
+          route: 'POST /api/store/withholding-tax/preview',
+        }),
+      );
+    });
+
+    it('the rest of withholding-tax stays gated in enforce', async () => {
+      const { guard } = build({ storeBlocked: NO_ACCOUNTING, mode: 'enforce' });
+      await expect(
+        guard.canActivate(ctx('/api/store/withholding-tax/concepts')),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+    });
+
+    it.each(SALE_FLOW_API_PREFIXES.filter((p) => p.startsWith('/api/store/')))(
+      'sale prefix %s passes in enforce for a plan without its module',
+      async (prefix) => {
+        const blocked = Object.keys(PLAN_MODULE_API_ROUTES);
+        const { guard, audit } = build({ storeBlocked: blocked, mode: 'enforce' });
+        const concrete = prefix.replace(/:id/g, '41').replace(/\$$/, '');
+        await expect(guard.canActivate(ctx(concrete, undefined, 'POST'))).resolves.toBe(true);
+        if (!prefix.endsWith('$')) {
+          await expect(
+            guard.canActivate(ctx(`${concrete}/x`, undefined, 'POST')),
+          ).resolves.toBe(true);
+        }
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({ decision: 'would_block', mode: 'enforce' }),
+        );
+      },
+    );
   });
 });

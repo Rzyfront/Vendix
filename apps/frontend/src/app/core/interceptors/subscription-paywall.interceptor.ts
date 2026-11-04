@@ -11,6 +11,7 @@ import {
   PlanModuleDenialDetails,
   PlanPaywallService,
 } from '../services/plan-paywall.service';
+import { isSaleFlow } from '../../shared/constants/plan-modules';
 
 /**
  * Error codes that should trigger the paywall modal.
@@ -114,7 +115,16 @@ export const subscriptionPaywallInterceptor: HttpInterceptorFn = (req, next) => 
         // Plan layer (planes-matriz-accesos): the module is not in the plan.
         // Its own paywall (module, plans that include it, «Ver planes y
         // mejorar»), once per module per session. Re-thrown like the rest.
+        // Never during a sale (`isSaleFlow`: sale endpoint or a screen with a
+        // sale in progress): a paywall must not cover a cart or a payment.
+        // The backend already recorded the refusal in its access audit.
         if (code === 'PLAN_MODULE_NOT_INCLUDED') {
+          if (isSaleFlow({ apiPath: req.url, uiRoute: router.url })) {
+            console.warn(
+              `[plan-gate] PLAN_MODULE_NOT_INCLUDED during a sale, paywall skipped: ${req.method} ${req.url.split('?')[0]}`,
+            );
+            return throwError(() => err);
+          }
           if (!router.url.startsWith(PLANS_ROUTE)) {
             try {
               planPaywall.showFromApi(body?.details as unknown as PlanModuleDenialDetails);

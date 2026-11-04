@@ -358,6 +358,7 @@ jobs:
           --include='**/core/guards/panel-ui.guard.spec.ts'
           --include='**/core/guards/store-dashboard.guard.spec.ts'
           --include='**/core/services/menu-filter.service.spec.ts'
+          --include='**/core/interceptors/subscription-paywall.plan-sale.spec.ts'
           --include='**/private/layouts/store-admin/apps-menu.util.spec.ts'
           --include='**/private/layouts/store-admin/store-admin-menu-items.spec.ts'
           --include='**/public/app-page/app-page-view.component.spec.ts'

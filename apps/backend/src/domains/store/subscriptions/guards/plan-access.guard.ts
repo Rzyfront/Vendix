@@ -6,7 +6,11 @@ import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 import { AccessAuditLogger } from '../../../../common/access/access-audit.logger';
 import { AccessGateModeService } from '../../../../common/access/access-gate-mode.service';
 import { AccessGateMode } from '../../../../common/access/access-audit.types';
-import { planModuleForApiPath } from '../../../../common/access/plan-modules';
+import {
+  isSaleFlow,
+  mappedPlanModuleForApiPath,
+  planModuleForApiPath,
+} from '../../../../common/access/plan-modules';
 import { CurrentPlan, PlanAccessService } from '../services/plan-access.service';
 
 interface GateUser {
@@ -29,6 +33,10 @@ interface GateUser {
  * - `enforce` (Redis `access_gate:plan:enforce:all|store:<id>` = '1'): records
  *   `blocked` and throws `403 PLAN_MODULE_NOT_INCLUDED` with
  *   `{ module, current_plan, required_plans, upgrade_url }`.
+ * - Sale flow (`isSaleFlow`, plan-modules.ts): NEVER 403. A sale endpoint
+ *   under a module the plan lacks is let through in every mode and recorded
+ *   as `would_block` with the real mode, so `would_block` + `enforce` in the
+ *   audit log reads "a sale used a module outside the plan".
  * - Super admin passes. Any internal failure lets the request through.
  */
 @Injectable()
@@ -52,7 +60,10 @@ export class PlanAccessGuard implements CanActivate {
       .switchToHttp()
       .getRequest<Request & { user?: GateUser }>();
     const path = String(req?.originalUrl ?? req?.url ?? '');
-    const moduleKey = planModuleForApiPath(path);
+    const saleFlow = isSaleFlow({ apiPath: path });
+    const moduleKey = saleFlow
+      ? mappedPlanModuleForApiPath(path)
+      : planModuleForApiPath(path);
     if (!moduleKey) return true;
 
     const user = req.user;
@@ -86,7 +97,7 @@ export class PlanAccessGuard implements CanActivate {
       return true;
     }
 
-    const enforce = mode === 'enforce';
+    const enforce = mode === 'enforce' && !saleFlow;
     this.auditLogger.record({
       source: 'backend',
       surface: 'api',
@@ -102,6 +113,7 @@ export class PlanAccessGuard implements CanActivate {
       mode,
     });
     if (!enforce) return true;
+    // Never reached on a sale: `enforce` is false whenever `saleFlow` is true.
 
     const details = await this.planAccess.denial(moduleKey, current);
     throw new VendixHttpException(
