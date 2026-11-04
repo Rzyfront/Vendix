@@ -25,7 +25,7 @@ export interface Booking {
   order?: { id: number; order_number: string };
   provider_id?: number;
   station_id?: number;
-  provider?: { id: number; display_name?: string; avatar_url?: string; employee?: { first_name: string; last_name: string } };
+  provider?: { id: number; display_name?: string; avatar_url?: string; user?: { first_name: string | null; last_name: string | null } | null; employee?: { first_name: string; last_name: string } | null };
   checked_in_at?: string;
   confirmation_requested_at?: string;
   confirmation_deadline?: string;
@@ -249,16 +249,28 @@ export interface AvailabilityOverviewQuery {
   slot_minutes?: number;
 }
 
+export type AvailableProviderUser = ProviderUser;
+
+export interface ProviderUser {
+  id: number;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  avatar_url: string | null;
+}
+
 export interface ServiceProvider {
   id: number;
   store_id: number;
-  employee_id: number;
+  employee_id: number | null;
+  user_id: number | null;
   is_active: boolean;
   display_name?: string;
   avatar_url?: string;
   bio?: string;
   sort_order: number;
-  employee?: { id: number; first_name: string; last_name: string; position?: string };
+  employee?: { id: number; first_name: string; last_name: string; position?: string } | null;
+  user?: ProviderUser | null;
   services?: ProviderServiceAssignment[];
   schedules?: ProviderSchedule[];
   exceptions?: ProviderException[];

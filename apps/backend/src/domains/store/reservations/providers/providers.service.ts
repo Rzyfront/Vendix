@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ConflictException,
@@ -17,6 +18,36 @@ export class ProvidersService {
     return context!.store_id!;
   }
 
+  /** Public projection of the store user behind a provider. */
+  static readonly PROVIDER_USER_SELECT = {
+    id: true,
+    first_name: true,
+    last_name: true,
+    email: true,
+    avatar_url: true,
+  } as const;
+
+  /**
+   * A store user that may provide services: active, linked to the store, and
+   * holding at least one role that is NOT `customer` — the same predicate as
+   * `StoreUsersService.staffLookup` (ecommerce customers are also
+   * `store_users` rows, so `state: 'active'` alone would let them in).
+   */
+  private staffUserWhere(storeId: number) {
+    return {
+      state: 'active' as const,
+      store_users: { some: { store_id: storeId } },
+      // The staff role must apply to THIS store (or org-wide, store_id null):
+      // a staff member of another store who is only a customer here is out.
+      user_roles: {
+        some: {
+          OR: [{ store_id: null }, { store_id: storeId }],
+          roles: { name: { not: 'customer' } },
+        },
+      },
+    };
+  }
+
   private readonly PROVIDER_INCLUDE = {
     employee: {
       select: {
@@ -27,6 +58,7 @@ export class ProvidersService {
         status: true,
       },
     },
+    user: { select: ProvidersService.PROVIDER_USER_SELECT },
     services: {
       include: {
         product: {
@@ -69,10 +101,72 @@ export class ProvidersService {
   }
 
   async create(dto: CreateProviderDto) {
+    if (dto.user_id != null && dto.employee_id != null) {
+      throw new BadRequestException(
+        'Envía user_id o employee_id, no ambos',
+      );
+    }
+    if (dto.user_id != null) {
+      return this.createForUser(dto.user_id, dto);
+    }
+    if (dto.employee_id == null) {
+      throw new BadRequestException(
+        'Selecciona el usuario de la tienda que prestará el servicio',
+      );
+    }
+    return this.createForEmployee(dto.employee_id, dto);
+  }
+
+  /**
+   * Provider backed by a store user (any non-customer user of the store).
+   * `display_name` defaults to the user's full name.
+   */
+  private async createForUser(userId: number, dto: CreateProviderDto) {
+    const user = await this.prisma.users.findFirst({
+      where: { id: userId, ...this.staffUserWhere(this.storeId) },
+      select: { id: true, first_name: true, last_name: true },
+    });
+    if (!user) {
+      throw new NotFoundException(
+        'El usuario no pertenece a esta tienda o es un cliente',
+      );
+    }
+
+    const existing = await this.prisma.service_providers.findFirst({
+      where: { store_id: this.storeId, user_id: userId },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new ConflictException('El usuario ya es un proveedor de servicios');
+    }
+
+    const fullName = `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim();
+    try {
+      return await this.prisma.service_providers.create({
+        data: {
+          store_id: this.storeId,
+          user_id: userId,
+          display_name: dto.display_name || fullName || null,
+          avatar_url: dto.avatar_url,
+          bio: dto.bio,
+        },
+        include: this.PROVIDER_INCLUDE,
+      });
+    } catch (error: any) {
+      // Concurrent double-submit: the (store_id, user_id) unique index wins.
+      if (error?.code === 'P2002') {
+        throw new ConflictException('El usuario ya es un proveedor de servicios');
+      }
+      throw error;
+    }
+  }
+
+  /** Legacy path: provider backed by a payroll employee (kept for back-compat). */
+  private async createForEmployee(employeeId: number, dto: CreateProviderDto) {
     // Verify employee exists and belongs to store
     const employee = await this.prisma.employees.findFirst({
       where: {
-        id: dto.employee_id,
+        id: employeeId,
         employee_stores: {
           some: { store_id: this.storeId, status: 'active' },
         },
@@ -81,13 +175,13 @@ export class ProvidersService {
 
     if (!employee) {
       throw new NotFoundException(
-        `Empleado #${dto.employee_id} no encontrado en esta tienda`,
+        `Empleado #${employeeId} no encontrado en esta tienda`,
       );
     }
 
     // Check if provider already exists for this employee
     const existing = await this.prisma.service_providers.findFirst({
-      where: { store_id: this.storeId, employee_id: dto.employee_id },
+      where: { store_id: this.storeId, employee_id: employeeId },
     });
 
     if (existing) {
@@ -99,7 +193,7 @@ export class ProvidersService {
     return this.prisma.service_providers.create({
       data: {
         store_id: this.storeId,
-        employee_id: dto.employee_id,
+        employee_id: employeeId,
         display_name:
           dto.display_name || `${employee.first_name} ${employee.last_name}`,
         avatar_url: dto.avatar_url,
@@ -186,8 +280,32 @@ export class ProvidersService {
         employee: {
           select: { id: true, first_name: true, last_name: true },
         },
+        user: { select: ProvidersService.PROVIDER_USER_SELECT },
       },
       orderBy: [{ sort_order: 'asc' }, { display_name: 'asc' }],
+    });
+  }
+
+  /**
+   * Store users (non-customers) not yet linked as providers of this store —
+   * backs the "Agregar proveedor" picker.
+   */
+  async getAvailableUsers() {
+    const linked = await this.prisma.service_providers.findMany({
+      where: { store_id: this.storeId, user_id: { not: null } },
+      select: { user_id: true },
+    });
+    const linkedIds = linked
+      .map((p) => p.user_id)
+      .filter((id): id is number => id != null);
+
+    return this.prisma.users.findMany({
+      where: {
+        ...this.staffUserWhere(this.storeId),
+        ...(linkedIds.length > 0 && { id: { notIn: linkedIds } }),
+      },
+      select: ProvidersService.PROVIDER_USER_SELECT,
+      orderBy: [{ first_name: 'asc' }, { last_name: 'asc' }],
     });
   }
 
@@ -199,7 +317,9 @@ export class ProvidersService {
         select: { employee_id: true },
       });
 
-    const linkedIds = existingProviderEmployeeIds.map((p) => p.employee_id);
+    const linkedIds = existingProviderEmployeeIds
+      .map((p) => p.employee_id)
+      .filter((id): id is number => id != null);
 
     // employees is org-scoped automatically by StorePrismaService middleware.
     // Filter by store assignment via employee_stores junction table.

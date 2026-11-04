@@ -8,6 +8,7 @@ datasource db {
 }
 
 model users {
+  service_providers_as_user service_providers[] @relation("service_providers_user")
   service_reminder_logs_customer service_reminder_logs[] @relation("service_reminder_logs_customer_id_fkey")
   invoice_resolutions_archived invoice_resolutions[] @relation("invoice_resolutions_archived_by")
   financial_split_creations order_financial_splits[] @relation("financial_split_creator")
@@ -10830,7 +10831,10 @@ model proximity_notification_log {
 model service_providers {
   id           Int       @id @default(autoincrement())
   store_id     Int
-  employee_id  Int
+  /// Legacy link: providers created from a payroll employee. New providers use `user_id`.
+  employee_id  Int?
+  /// Store user (non-customer) who provides the service.
+  user_id      Int?
   is_active    Boolean   @default(true)
   display_name String?   @db.VarChar(100)
   avatar_url   String?   @db.Text
@@ -10840,7 +10844,10 @@ model service_providers {
   updated_at   DateTime? @default(now()) @db.Timestamp(6)
 
   store      stores                @relation(fields: [store_id], references: [id])
-  employee   employees             @relation(fields: [employee_id], references: [id])
+  // Explicit actions: the DB FK is RESTRICT/CASCADE (20260328160000); an
+  // implicit optional relation would make Prisma diff it to SET NULL.
+  employee   employees?            @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  user       users?                @relation("service_providers_user", fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   services   provider_services[]
   schedules  provider_schedules[]
   exceptions provider_exceptions[]
@@ -10851,6 +10858,7 @@ model service_providers {
   booking_reschedule_requests_provider_store_fkey booking_reschedule_requests[] @relation("booking_reschedule_requests_provider_store_fkey")
 
   @@unique([store_id, employee_id])
+  @@unique([store_id, user_id])
   @@unique([store_id, id])
   @@index([store_id, is_active])
 }

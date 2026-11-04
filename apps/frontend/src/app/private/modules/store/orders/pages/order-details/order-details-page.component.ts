@@ -1,3 +1,4 @@
+import { ProviderNamePipe } from '../../../../../../shared/pipes/provider-name/provider-name.pipe';
 import { SplitAccountsPanelComponent } from '../../../restaurant-ops/tables/components/split-accounts-panel/split-accounts-panel.component';
 import type {
   SplitFinancialAccount,
@@ -1064,7 +1065,7 @@ export interface InvoiceCardView {
 @Component({
   selector: 'app-order-details-page',
   standalone: true,
-  imports: [
+  imports: [ProviderNamePipe, 
     SplitAccountsPanelComponent,
     RouterModule,
     ReactiveFormsModule,

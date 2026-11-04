@@ -51,7 +51,7 @@
         @if (booking()!.provider) {
           <div class="info-row">
             <app-icon name="user-circle" [size]="16"></app-icon>
-            <span>{{ booking()!.provider?.display_name || (booking()!.provider?.employee?.first_name + ' ' + booking()!.provider?.employee?.last_name) }}</span>
+            <span>{{ booking()!.provider | providerName }}</span>
           </div>
         }
         <div class="info-row muted">

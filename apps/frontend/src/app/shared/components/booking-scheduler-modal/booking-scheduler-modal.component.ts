@@ -1,3 +1,6 @@
+import { SlicePipe } from '@angular/common';
+import { ProviderNamePipe } from '../../pipes/provider-name/provider-name.pipe';
+import { providerDisplayName } from '../../utils/provider-display-name';
 import {
   Component,
   computed,
@@ -29,9 +32,13 @@ interface ProviderOption {
   display_name?: string;
   avatar_url?: string | null;
   employee?: {
-    first_name: string;
-    last_name?: string;
-  };
+    first_name?: string | null;
+    last_name?: string | null;
+  } | null;
+  user?: {
+    first_name?: string | null;
+    last_name?: string | null;
+  } | null;
 }
 
 interface AvailabilitySlotOption {
@@ -129,7 +136,7 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 @Component({
   selector: 'app-booking-scheduler-modal',
   standalone: true,
-  imports: [
+  imports: [ProviderNamePipe, SlicePipe, 
     FormsModule,
     IconComponent,
     ButtonComponent,
@@ -540,11 +547,11 @@ const WEEK_DAYS_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
                   [class]="providerId() === p.id ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : 'border-border bg-surface hover:border-primary/40'"
                 >
                   <div class="w-9 h-9 rounded-full bg-violet-100 text-violet-700 flex items-center justify-center flex-shrink-0 font-bold text-xs">
-                    {{ (p.display_name || p.employee?.first_name || 'E').slice(0, 2).toUpperCase() }}
+                    {{ (p | providerName | slice: 0 : 2).toUpperCase() || 'E' }}
                   </div>
                   <div class="min-w-0 flex-1">
                     <h5 class="text-xs font-bold text-text-primary truncate">
-                      {{ p.display_name || (p.employee?.first_name + ' ' + (p.employee?.last_name || '')) }}
+                      {{ p | providerName }}
                     </h5>
                     <p class="text-[10px] text-emerald-600 font-medium flex items-center gap-1">
                       <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
@@ -932,7 +939,7 @@ export class BookingSchedulerModalComponent {
     const id = this.providerId();
     if (!id) return '';
     const p = this.providers().find((item) => item.id === id);
-    return p?.display_name || p?.employee?.first_name || '';
+    return providerDisplayName(p);
   });
 
   readonly stationId = computed<number | null>(() => {

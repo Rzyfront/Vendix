@@ -1,3 +1,4 @@
+import { providerDisplayName } from '../../../../../../shared/utils/provider-display-name';
 import { Component, input, output, signal, computed, inject, DestroyRef } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { HttpClient, HttpParams } from '@angular/common/http';
@@ -1205,11 +1206,11 @@ export class ReservationFormModalComponent {
   }
 
   getProviderDisplayName(provider: any): string {
-    return provider.display_name || `${provider.employee?.first_name || ''} ${provider.employee?.last_name || ''}`.trim() || 'Proveedor';
+    return providerDisplayName(provider) || 'Proveedor';
   }
 
   getProviderInitials(provider: any): string {
-    const name = provider.display_name || `${provider.employee?.first_name || ''} ${provider.employee?.last_name || ''}`.trim();
+    const name = providerDisplayName(provider);
     if (!name) return '?';
     const parts = name.split(' ');
     return parts.map((p: string) => p[0]).slice(0, 2).join('').toUpperCase();

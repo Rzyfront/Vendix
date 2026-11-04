@@ -82,6 +82,7 @@ export class ServiceStationsService {
               display_name: true,
               is_active: true,
               employee: { select: { first_name: true, last_name: true } },
+              user: { select: { first_name: true, last_name: true } },
             },
           })
         : [],

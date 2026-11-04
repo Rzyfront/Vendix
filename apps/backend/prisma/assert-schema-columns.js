@@ -191,6 +191,9 @@ const REQUIRED_COLUMNS = [
   // CRM PR 10 (migración 20261106100500): toda lectura de crm_campaigns/crm_messages las selecciona.
   'crm_campaigns.template_variables',
   'crm_messages.subject',
+  // Proveedores de servicio como usuarios de tienda (migración 20261112090000):
+  // crear un proveedor persiste `user_id`.
+  'service_providers.user_id',
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */

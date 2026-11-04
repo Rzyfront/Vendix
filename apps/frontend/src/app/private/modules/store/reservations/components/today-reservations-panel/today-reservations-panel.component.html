@@ -51,8 +51,8 @@
               @if (booking.product?.service_duration_minutes) {
                 · {{ booking.product?.service_duration_minutes }}min
               }
-              @if (booking.provider?.display_name || booking.provider?.employee?.first_name) {
-                · {{ booking.provider?.display_name || booking.provider?.employee?.first_name }}
+              @if (booking.provider | providerName) {
+                · {{ booking.provider | providerName }}
               }
             </p>
           </div>

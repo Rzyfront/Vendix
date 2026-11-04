@@ -96,7 +96,7 @@
             </div>
             <div class="info-card-content">
               <span class="info-label">Proveedor</span>
-              <span class="info-value">{{ b.provider.display_name || (b.provider.employee?.first_name + ' ' + b.provider.employee?.last_name) }}</span>
+              <span class="info-value">{{ b.provider | providerName }}</span>
             </div>
           </div>
         }
@@ -282,7 +282,7 @@
                   class="date-chip"
                   [class.selected]="rescheduleProviderId() === p.id"
                   (click)="selectRescheduleProvider(p.id)">
-                  {{ p.display_name || p.employee?.first_name }}
+                  {{ p | providerName }}
                 </button>
               }
             </div>

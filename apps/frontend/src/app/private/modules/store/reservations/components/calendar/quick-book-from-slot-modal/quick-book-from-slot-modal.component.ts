@@ -1,3 +1,4 @@
+import { ProviderNamePipe } from '../../../../../../../shared/pipes/provider-name/provider-name.pipe';
 import { Component, input, output, signal, computed, inject, DestroyRef } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { HttpClient, HttpParams } from '@angular/common/http';
@@ -19,7 +20,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 @Component({
   selector: 'app-quick-book-from-slot-modal',
   standalone: true,
-  imports: [FormsModule, ModalComponent, ButtonComponent, IconComponent, SpinnerComponent, StepsLineComponent,
+  imports: [ProviderNamePipe, FormsModule, ModalComponent, ButtonComponent, IconComponent, SpinnerComponent, StepsLineComponent,
     DecimalPipe,
   ],
   templateUrl: './quick-book-from-slot-modal.component.html',

@@ -767,14 +767,10 @@
                         <app-icon name="clock" [size]="12"></app-icon>
                         {{ booking.start_time }} – {{ booking.end_time }}
                       </span>
-                      @if (booking.provider?.employee?.first_name || booking.provider?.display_name) {
+                      @if (booking.provider | providerName) {
                         <span class="flex items-center gap-1">
                           <app-icon name="user" [size]="12"></app-icon>
-                          {{
-                            booking.provider?.employee?.first_name
-                              ? ((booking.provider?.employee?.first_name || '') + ' ' + (booking.provider?.employee?.last_name || ''))
-                              : booking.provider?.display_name
-                          }}
+                          {{ booking.provider | providerName }}
                         </span>
                       } @else {
                         <span class="flex items-center gap-1 text-gray-400">

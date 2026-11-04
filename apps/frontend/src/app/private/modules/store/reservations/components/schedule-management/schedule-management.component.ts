@@ -12,7 +12,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { finalize, forkJoin } from 'rxjs';
 import { ReservationsService } from '../../services/reservations.service';
-import { ServiceProvider } from '../../interfaces/reservation.interface';
+import { AvailableProviderUser, ServiceProvider } from '../../interfaces/reservation.interface';
 import {
   IconComponent,
   ToastService,
@@ -40,14 +40,12 @@ import {
   ServiceStationsService,
   ServiceStation,
 } from '../service-stations/service-stations.service';
+import {
+  providerDisplayName,
+  providerSubtitle,
+} from '../../../../../../shared/utils/provider-display-name';
+import { ProviderNamePipe } from '../../../../../../shared/pipes/provider-name/provider-name.pipe';
 import { STATION_TYPES_META } from '../service-stations/service-stations-page.component';
-
-interface AvailableEmployee {
-  id: number;
-  first_name: string;
-  last_name: string;
-  position?: string;
-}
 
 interface BookableService {
   id: number;
@@ -76,6 +74,7 @@ interface BookableService {
     WeeklyScheduleEditorComponent,
     ExceptionsManagerComponent,
     DecimalPipe,
+    ProviderNamePipe,
   ],
   templateUrl: './schedule-management.component.html',
   styleUrls: ['./schedule-management.component.scss'],
@@ -107,76 +106,25 @@ export class ScheduleManagementComponent {
     return this.providers().filter(
       (p) =>
         (p.display_name || '').toLowerCase().includes(query) ||
-        (p.employee?.first_name || '').toLowerCase().includes(query) ||
-        (p.employee?.last_name || '').toLowerCase().includes(query),
+        providerDisplayName(p).toLowerCase().includes(query) ||
+        (p.user?.email || '').toLowerCase().includes(query),
     );
   });
 
   // Add provider flow
   showAddForm = signal(false);
-  availableEmployees = signal<AvailableEmployee[]>([]);
-  selectedEmployeeId = signal<string | number | null>(null);
+  availableUsers = signal<AvailableProviderUser[]>([]);
+  selectedUserId = signal<string | number | null>(null);
   addingProvider = signal(false);
 
-  // Quick-create employee inline form (shown when no employees exist
-  // or when the user clicks "+ Nuevo empleado" inside the modal)
-  showEmployeeForm = signal(false);
-  creatingEmployee = signal(false);
-  newEmployee = signal({
-    first_name: '',
-    last_name: '',
-    document_type: 'CC',
-    document_number: '',
-    // base_salary required by CreateEmployeeDto (@IsNumber + @Min(0))
-    // and required for booking quick-create. Global ValidationPipe has
-    // whitelist + forbidNonWhitelisted, so missing this field returns
-    // 400 Bad Request before reaching the controller. Default to 0 so
-    // the form can submit immediately and the operator can adjust later.
-    base_salary: 0,
-    position: '',
-    hire_date: new Date().toISOString().split('T')[0],
-    contract_type: 'service' as
-      | 'indefinite'
-      | 'fixed_term'
-      | 'service'
-      | 'apprentice',
-    // Contact channels — both optional but exposed in the inline form.
-    // Backend DTO now declares @IsOptional @IsEmail email and
-    // @IsOptional @IsString @MaxLength(20) phone so the previous 400
-    // 'property email should not exist' is resolved at the source.
-    email: '',
-    phone: '',
-  });
-  newEmployeeValid = computed(() => {
-    const e = this.newEmployee();
-    // Mirror the backend CreateEmployeeDto requirements:
-    // - first_name, last_name >= 2 chars
-    // - document_number required, min 4 chars (any Colombian doc type)
-    // - base_salary >= 0 per @Min(0)
-    // - email required + valid format (matches @IsEmail)
-    // - phone required, max 20 chars (matches @MaxLength(20))
-    // Email format check is intentionally simple — same regex the
-    // input[type=email] uses natively. If we got fancier we'd
-    // import validators from a lib (eg. validator.js).
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return (
-      e.first_name.trim().length >= 2 &&
-      e.last_name.trim().length >= 2 &&
-      e.document_number.trim().length >= 4 &&
-      Number.isFinite(e.base_salary) &&
-      e.base_salary >= 0 &&
-      emailRegex.test(e.email.trim()) &&
-      e.phone.trim().length >= 7 &&
-      e.phone.trim().length <= 20
-    );
-  });
-
-  employeeOptions = computed(() =>
-    this.availableEmployees().map(emp => ({
-      value: emp.id,
-      label: `${emp.first_name} ${emp.last_name}`,
-      description: emp.position || '',
-    })),
+  userOptions = computed(() =>
+    this.availableUsers().map((u) => {
+      const name = `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim();
+      return {
+        value: u.id,
+        label: [name, u.email].filter(Boolean).join(' — ') || `Usuario #${u.id}`,
+      };
+    }),
   );
 
   // Service management
@@ -237,10 +185,9 @@ export class ScheduleManagementComponent {
       key: 'display_name',
       label: 'Nombre',
       priority: 0,
-      transform: (val: any, item?: any) =>
-        val || `${item?.employee?.first_name || ''} ${item?.employee?.last_name || ''}`.trim(),
+      transform: (val: any, item?: any) => val || providerDisplayName(item),
     },
-    { key: 'employee.position', label: 'Cargo', priority: 1, transform: (val: any) => val || 'Sin cargo' },
+    { key: 'employee.position', label: 'Cargo', priority: 1, transform: (val: any, item?: any) => val || providerSubtitle(item) || 'Sin cargo' },
     {
       key: 'is_active',
       label: 'Estado',
@@ -267,10 +214,9 @@ export class ScheduleManagementComponent {
   // Provider card config (mobile)
   providerCardConfig: ItemListCardConfig = {
     titleKey: 'display_name',
-    titleTransform: (item: any) =>
-      item.display_name || `${item.employee?.first_name || ''} ${item.employee?.last_name || ''}`.trim(),
+    titleTransform: (item: any) => providerDisplayName(item),
     subtitleKey: 'employee.position',
-    subtitleTransform: (item: any) => item.employee?.position || 'Sin cargo',
+    subtitleTransform: (item: any) => providerSubtitle(item) || 'Sin cargo',
     avatarFallbackIcon: 'user',
     avatarShape: 'circle',
     badgeKey: 'is_active',
@@ -397,148 +343,36 @@ export class ScheduleManagementComponent {
 
   startAddProvider(): void {
     this.showAddForm.set(true);
-    this.selectedEmployeeId.set(null);
+    this.selectedUserId.set(null);
     this.reservationsService
-      .getAvailableEmployees()
+      .getAvailableUsers()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (employees) => this.availableEmployees.set(employees),
-        error: () => this.toastService.error('Error al cargar empleados disponibles'),
+        next: (users) => this.availableUsers.set(users),
+        error: () => this.toastService.error('Error al cargar usuarios disponibles'),
       });
   }
 
   cancelAddProvider(): void {
     this.showAddForm.set(false);
-    this.selectedEmployeeId.set(null);
-    this.showEmployeeForm.set(false);
-  }
-
-  /**
-   * Toggle the inline "new employee" form inside the add-provider modal.
-   */
-  toggleEmployeeForm(): void {
-    this.showEmployeeForm.update((v) => !v);
-  }
-
-  /**
-   * Patch a single field of the new-employee form. Defined as a method
-   * (not an inline arrow in the template) because Angular's template
-   * parser does not support `(field) => ({ ...field, ... })` with the
-   * spread operator — see GitHub issue #50326.
-   */
-  patchNewEmployee<K extends keyof ReturnType<typeof this.newEmployee>>(
-    field: K,
-    value: ReturnType<typeof this.newEmployee>[K],
-  ): void {
-    this.newEmployee.update((e) => ({ ...e, [field]: value }));
-  }
-
-  /**
-   * Create the employee via backend, refresh the available list, and
-   * auto-select the new employee so the user only has to click "Agregar"
-   * to finish creating the provider.
-   */
-  submitNewEmployee(): void {
-    if (!this.newEmployeeValid()) {
-      this.toastService.error('Nombre y apellido son obligatorios');
-      return;
-    }
-    this.creatingEmployee.set(true);
-    this.reservationsService
-      .createQuickEmployee(this.newEmployee())
-      .pipe(
-        takeUntilDestroyed(this.destroyRef),
-        finalize(() => this.creatingEmployee.set(false)),
-      )
-      .subscribe({
-        next: (created) => {
-          this.toastService.success(
-            `Empleado ${created.first_name} ${created.last_name} creado`,
-          );
-          // Append to list and select it
-          const next = [
-            ...this.availableEmployees(),
-            {
-              id: created.id,
-              first_name: created.first_name,
-              last_name: created.last_name,
-              position: created.position,
-            },
-          ];
-          this.availableEmployees.set(next);
-          this.selectedEmployeeId.set(created.id);
-          this.showEmployeeForm.set(false);
-          this.resetNewEmployee();
-        },
-        error: (err) => {
-          // Backend returns structured validation errors at
-          // err.error.details.validationErrors (array of strings) when
-          // the ValidationPipe rejects. The default Nest message
-          // ('Validation failed') is uninformative for operators, so
-          // we surface the specific field-level messages.
-          //
-          // Fallback ladder:
-          //   1. err.error.details.validationErrors (array of human
-          //      messages from the Spanish DTO annotations)
-          //   2. err.error.message?.message (legacy single-message path)
-          //   3. err.error.message (top-level)
-          //   4. Generic fallback
-          const details = err?.error?.details?.validationErrors;
-          const legacy = err?.error?.message?.message;
-          const topLevel = err?.error?.message;
-          let msg: string;
-          if (Array.isArray(details) && details.length > 0) {
-            msg = details.join(' • ');
-          } else if (Array.isArray(legacy)) {
-            msg = legacy.join(' • ');
-          } else if (typeof legacy === 'string') {
-            msg = legacy;
-          } else if (typeof topLevel === 'string') {
-            msg = topLevel;
-          } else {
-            msg = 'Error al crear empleado. Verifica los datos e intenta de nuevo.';
-          }
-          this.toastService.error(msg);
-        },
-      });
-  }
-
-  resetNewEmployee(): void {
-    this.newEmployee.set({
-      first_name: '',
-      last_name: '',
-      document_type: 'CC',
-      document_number: '',
-      // base_salary required by CreateEmployeeDto — must reset to 0
-      // to keep the type aligned with the signal declaration above.
-      base_salary: 0,
-      position: '',
-      hire_date: new Date().toISOString().split('T')[0],
-      contract_type: 'service' as
-        | 'indefinite'
-        | 'fixed_term'
-        | 'service'
-        | 'apprentice',
-      email: '',
-      phone: '',
-    });
+    this.selectedUserId.set(null);
   }
 
   addProvider(): void {
-    const employeeId = Number(this.selectedEmployeeId());
-    if (!employeeId) {
-      this.toastService.error('Selecciona un empleado');
+    const userId = Number(this.selectedUserId());
+    if (!userId) {
+      this.toastService.error('Selecciona un usuario');
       return;
     }
 
-    const employee = this.availableEmployees().find((e) => e.id === employeeId);
-    const displayName = employee
-      ? `${employee.first_name} ${employee.last_name}`
+    const user = this.availableUsers().find((u) => u.id === userId);
+    const displayName = user
+      ? `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() || undefined
       : undefined;
 
     this.addingProvider.set(true);
     this.reservationsService
-      .createProvider({ employee_id: employeeId, display_name: displayName })
+      .createProvider({ user_id: userId, display_name: displayName })
       .pipe(
         takeUntilDestroyed(this.destroyRef),
         finalize(() => this.addingProvider.set(false)),
@@ -547,7 +381,7 @@ export class ScheduleManagementComponent {
         next: (provider) => {
           this.toastService.success('Proveedor creado exitosamente');
           this.showAddForm.set(false);
-          this.selectedEmployeeId.set(null);
+          this.selectedUserId.set(null);
           this.loadProviders();
           this.selectProvider(provider);
         },
@@ -636,10 +470,7 @@ export class ScheduleManagementComponent {
   }
 
   getInitials(provider: ServiceProvider): string {
-    const name =
-      provider.display_name ||
-      `${provider.employee?.first_name ?? ''} ${provider.employee?.last_name ?? ''}`;
-    return name
+    return providerDisplayName(provider)
       .split(' ')
       .filter(Boolean)
       .map((w) => w[0])
@@ -686,11 +517,12 @@ export class ScheduleManagementComponent {
     return provider.services.some((s) => s.product_id === productId);
   }
 
+  getProviderSubtitle(provider: ServiceProvider): string {
+    return providerSubtitle(provider);
+  }
+
   getProviderDisplayName(provider: ServiceProvider): string {
-    return (
-      provider.display_name ||
-      `${provider.employee?.first_name ?? ''} ${provider.employee?.last_name ?? ''}`.trim()
-    );
+    return providerDisplayName(provider);
   }
 
   // --- Stations Management ---

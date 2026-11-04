@@ -1,3 +1,4 @@
+import { providerDisplayName } from '../../../../../../shared/utils/provider-display-name';
 import { Booking } from '../../interfaces/reservation.interface';
 
 /**
@@ -42,9 +43,5 @@ export function bookingCustomerName(booking: Booking | null | undefined): string
 
 /** Provider display name, or '' when the booking has no provider. */
 export function bookingProviderName(booking: Booking | null | undefined): string {
-  return (
-    booking?.provider?.display_name?.trim() ||
-    booking?.provider?.employee?.first_name?.trim() ||
-    ''
-  );
+  return providerDisplayName(booking?.provider);
 }

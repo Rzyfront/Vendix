@@ -1751,6 +1751,14 @@ export class OrdersService {
           include: {
             provider: {
               include: {
+                user: {
+                  select: {
+                    id: true,
+                    first_name: true,
+                    last_name: true,
+                    avatar_url: true,
+                  },
+                },
                 employee: {
                   select: {
                     id: true,

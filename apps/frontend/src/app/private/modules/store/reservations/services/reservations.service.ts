@@ -20,7 +20,7 @@ import {
   CreateRescheduleRequestDto,
   DecideRescheduleRequestDto,
 } from '../interfaces/reservation.interface';
-import { RescheduleRequest } from '../interfaces/reservation.interface';
+import { AvailableProviderUser, RescheduleRequest } from '../interfaces/reservation.interface';
 
 // Re-export so consumers (reschedule-requests-page, reschedule-requests-panel)
 // can import the type from the service module. The interface lives in
@@ -446,33 +446,6 @@ export class ReservationsService {
       .pipe(map((response) => response.data || response));
   }
 
-  /**
-   * Quick-create an employee from the "Agregar Proveedor" modal.
-   * Backend route: POST /store/payroll/employees
-   *
-   * `base_salary` is REQUIRED by CreateEmployeeDto
-   * (@IsNumber + @Min(0) + @Type Number) — omitting it causes the
-   * global ValidationPipe (whitelist + forbidNonWhitelisted) to
-   * return 400 Bad Request before the controller is reached, so
-   * the type here marks it as required.
-   */
-  createQuickEmployee(dto: {
-    first_name: string;
-    last_name: string;
-    document_type?: string;
-    document_number?: string;
-    hire_date: string;
-    contract_type: 'indefinite' | 'fixed_term' | 'service' | 'apprentice';
-    base_salary: number;
-    position?: string;
-    email?: string;
-    phone?: string;
-  }): Observable<{ id: number; first_name: string; last_name: string; position?: string }> {
-    return this.http
-      .post<any>(`${environment.apiUrl}/store/payroll/employees`, dto)
-      .pipe(map((response) => response.data || response));
-  }
-
   getCalendar(dateFrom: string, dateTo: string, productId?: number): Observable<Record<string, Booking[]>> {
     let params = new HttpParams()
       .set('date_from', dateFrom)
@@ -623,7 +596,7 @@ export class ReservationsService {
     );
   }
 
-  createProvider(dto: { employee_id: number; display_name?: string; avatar_url?: string; bio?: string }): Observable<ServiceProvider> {
+  createProvider(dto: { user_id: number; display_name?: string; avatar_url?: string; bio?: string }): Observable<ServiceProvider> {
     return this.http.post<any>(`${this.apiUrl}/providers`, dto).pipe(
       map((response) => response.data || response),
     );
@@ -635,8 +608,8 @@ export class ReservationsService {
     );
   }
 
-  getAvailableEmployees(): Observable<{ id: number; first_name: string; last_name: string; position?: string }[]> {
-    return this.http.get<any>(`${this.apiUrl}/providers/available-employees`).pipe(
+  getAvailableUsers(): Observable<AvailableProviderUser[]> {
+    return this.http.get<any>(`${this.apiUrl}/providers/available-users`).pipe(
       map((response) => response.data || response),
     );
   }
