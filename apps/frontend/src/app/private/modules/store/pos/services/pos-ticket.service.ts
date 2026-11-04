@@ -182,6 +182,44 @@ interface ClientTicketRefundsSection {
   net_total: number;
 }
 
+/**
+ * QUI-979 — espejo estructural de `TicketCreditSection`
+ * (`orders/services/order-ticket.service.ts`, mismo paso).
+ *
+ * Vive acá —y NO como import— porque la flecha de dependencias es
+ * `orders → pos` de una sola vía: el renderer del tiquete cliente no conoce
+ * el dominio `Order`. Tampoco va en `ticket.model.ts`: la sección es
+ * opcional y aditiva, y ese contrato lo consumen llamadores que nunca
+ * venden a crédito. `readCreditSection` la lee con un cast local + guardas
+ * de runtime; un payload parcial o malformado imprime el tiquete sin
+ * sección en vez de romper el papel.
+ */
+interface ClientTicketCreditPayment {
+  date_formatted: string;
+  amount: number;
+  method: string;
+  is_initial: boolean;
+}
+
+interface ClientTicketCreditPending {
+  number: number;
+  state: string;
+  due_date_formatted: string;
+  balance: number;
+}
+
+interface ClientTicketCreditSection {
+  is_installments: boolean;
+  total: number;
+  paid_total: number;
+  balance: number;
+  installments_total: number;
+  installments_paid: number;
+  last_payment: { amount: number; date_formatted: string } | null;
+  payments: ClientTicketCreditPayment[];
+  pending_installments: ClientTicketCreditPending[];
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -283,6 +321,78 @@ export class PosTicketService {
       ? Number(raw.net_total)
       : ticketData.total - refundedTotal;
     return { lines, refunded_total: refundedTotal, net_total: netTotal };
+  }
+
+  /**
+   * QUI-979 — lee la sección Crédito opcional que
+   * `OrderTicketService.toTicketData` adjunta (`CreditAwareTicketData`) con
+   * un cast estructural local: importar ese tipo invertiría la flecha
+   * `orders → pos`.
+   *
+   * A diferencia de reembolsos, la sección puede existir sin líneas (crédito
+   * sin abonos todavía: total + saldo + calendario valen el papel). Solo
+   * exige totales finitos; arreglos parciales se sanean a vacíos y un
+   * payload malformado devuelve `undefined` — el tiquete sale idéntico al
+   * histórico. Nunca lanza: un tiquete sin sección vale más que ningún
+   * tiquete.
+   */
+  private readCreditSection(
+    ticketData: TicketData,
+  ): ClientTicketCreditSection | undefined {
+    const raw = (
+      ticketData as TicketData & { credit?: Partial<ClientTicketCreditSection> }
+    ).credit;
+    if (!raw || typeof raw !== 'object') return undefined;
+    const total = Number(raw.total);
+    const paidTotal = Number(raw.paid_total);
+    const balance = Number(raw.balance);
+    if (
+      !Number.isFinite(total) ||
+      !Number.isFinite(paidTotal) ||
+      !Number.isFinite(balance)
+    ) {
+      return undefined;
+    }
+    const payments = (Array.isArray(raw.payments) ? raw.payments : []).filter(
+      (p): p is ClientTicketCreditPayment =>
+        !!p && Number.isFinite(Number((p as ClientTicketCreditPayment).amount)),
+    );
+    const pending = (
+      Array.isArray(raw.pending_installments) ? raw.pending_installments : []
+    ).filter(
+      (p): p is ClientTicketCreditPending =>
+        !!p && Number.isFinite(Number((p as ClientTicketCreditPending).number)),
+    );
+    const lastPayment =
+      raw.last_payment &&
+      typeof raw.last_payment === 'object' &&
+      Number.isFinite(Number(raw.last_payment.amount))
+        ? {
+            amount: Number(raw.last_payment.amount),
+            date_formatted: String(raw.last_payment.date_formatted ?? ''),
+          }
+        : null;
+    return {
+      is_installments: raw.is_installments === true,
+      total,
+      paid_total: paidTotal,
+      balance,
+      installments_total: Number(raw.installments_total) || 0,
+      installments_paid: Number(raw.installments_paid) || 0,
+      last_payment: lastPayment,
+      payments: payments.map((p) => ({
+        date_formatted: String(p.date_formatted ?? ''),
+        amount: Number(p.amount),
+        method: String(p.method ?? 'Abono'),
+        is_initial: p.is_initial === true,
+      })),
+      pending_installments: pending.map((p) => ({
+        number: Number(p.number),
+        state: String(p.state ?? ''),
+        due_date_formatted: String(p.due_date_formatted ?? ''),
+        balance: Number(p.balance ?? 0),
+      })),
+    };
   }
 
   /**
@@ -804,6 +914,95 @@ export class PosTicketService {
             <td style="text-align: right; padding: 2px;">${this.currencyService.format(refundsSection.net_total)}</td>
           </tr>
         </table>
+      </div>
+    `;
+    }
+
+    // QUI-979 — sección Crédito ADITIVA del tiquete cliente. El TOTAL de
+    // arriba queda INTACTO (los documentos originales no se reescriben); sin
+    // sección `readCreditSection` devuelve `undefined` y el render sale
+    // idéntico al de antes. Va después de Reembolsos: el saldo por pagar es
+    // el bloque accionable y va último, igual que en el backend.
+    const creditSection = this.readCreditSection(ticketData);
+    if (creditSection) {
+      const quotaNote =
+        creditSection.installments_total > 0
+          ? ` (Cuotas ${creditSection.installments_paid} de ${creditSection.installments_total})`
+          : '';
+      const historyRows = creditSection.payments
+        .map(
+          (p) => `
+          <tr>
+            <td style="width: 30%; padding: 2px; vertical-align: top; overflow-wrap: anywhere;">${p.date_formatted}</td>
+            <td style="width: 38%; padding: 2px; vertical-align: top; overflow-wrap: anywhere;">${p.method}${p.is_initial ? ' (inicial)' : ''}</td>
+            <td style="width: 32%; text-align: right; padding: 2px; overflow-wrap: anywhere;">${this.currencyService.format(p.amount)}</td>
+          </tr>
+        `,
+        )
+        .join('');
+      const stateLabel = (state: string): string =>
+        state === 'partial' ? ' (parcial)' : state === 'overdue' ? ' (vencida)' : '';
+      const pendingRows = creditSection.pending_installments
+        .map(
+          (p) => `
+          <tr>
+            <td style="width: 34%; padding: 2px; vertical-align: top; overflow-wrap: anywhere;">Cuota ${p.number}${stateLabel(p.state)}</td>
+            <td style="width: 33%; text-align: center; padding: 2px; overflow-wrap: anywhere;">${p.due_date_formatted}</td>
+            <td style="width: 33%; text-align: right; padding: 2px; overflow-wrap: anywhere;">${this.currencyService.format(p.balance)}</td>
+          </tr>
+        `,
+        )
+        .join('');
+      html += `
+      <hr style="border: 1px dashed #000; margin: 10px 0;">
+      <div style="margin-bottom: 15px;">
+        <p style="margin: 2px 0; font-size: 12px; font-weight: bold;">CRÉDITO</p>
+        <table style="width: 100%; table-layout: fixed; font-size: 12px; border-collapse: collapse;">
+          <tr>
+            <td style="text-align: left; padding: 2px;">Total del crédito:</td>
+            <td style="text-align: right; padding: 2px;">${this.currencyService.format(creditSection.total)}</td>
+          </tr>
+          <tr>
+            <td style="text-align: left; padding: 2px;">Abonado:${quotaNote}</td>
+            <td style="text-align: right; padding: 2px;">${this.currencyService.format(creditSection.paid_total)}</td>
+          </tr>
+          <tr style="font-weight: bold; border-top: 1px solid #000;">
+            <td style="text-align: left; padding: 2px;">Saldo pendiente:</td>
+            <td style="text-align: right; padding: 2px;">${this.currencyService.format(creditSection.balance)}</td>
+          </tr>
+          ${
+            creditSection.last_payment
+              ? `
+          <tr>
+            <td style="text-align: left; padding: 2px;">Último abono:</td>
+            <td style="text-align: right; padding: 2px;">${this.currencyService.format(creditSection.last_payment.amount)} · ${creditSection.last_payment.date_formatted}</td>
+          </tr>
+          `
+              : ''
+          }
+        </table>
+        ${
+          historyRows
+            ? `
+        <table style="width: 100%; table-layout: fixed; font-size: 11px; border-collapse: collapse; margin-top: 4px;">
+          <tbody>
+            ${historyRows}
+          </tbody>
+        </table>
+        `
+            : ''
+        }
+        ${
+          pendingRows
+            ? `
+        <table style="width: 100%; table-layout: fixed; font-size: 11px; border-collapse: collapse; margin-top: 4px;">
+          <tbody>
+            ${pendingRows}
+          </tbody>
+        </table>
+        `
+            : ''
+        }
       </div>
     `;
     }

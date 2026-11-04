@@ -16,6 +16,8 @@ const NOTIFICATION_TYPES = [
   // y el web push de cada tipo desde Configuración → Notificaciones.
   'ap_installment_due_soon',
   'ap_installment_overdue',
+  // Recordatorio de cuota de venta a crédito: campana apagable por usuario.
+  'credit_installment_reminder',
   // T9 — listo de cocina: el mesero puede apagar/encender la campana
   // desde Configuración → Notificaciones, igual que el resto.
   'kitchen_ticket_ready',

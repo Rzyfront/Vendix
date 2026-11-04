@@ -147,6 +147,7 @@ export class NotificationsDropdownComponent {
       case 'new_order':
       case 'order_status_change':
       case 'payment_received':
+      case 'credit_installment_reminder':
         return d?.order_id
           ? `/admin/orders/${d.order_id}`
           : '/admin/orders/sales';
@@ -255,6 +256,7 @@ export class NotificationsDropdownComponent {
       new_review: 'star',
       layaway_payment_received: 'credit-card',
       layaway_payment_reminder: 'clock',
+      credit_installment_reminder: 'calendar-clock',
       layaway_overdue: 'alert-triangle',
       layaway_completed: 'check-circle',
       layaway_cancelled: 'x-circle',

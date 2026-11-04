@@ -177,6 +177,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     // ADITIVA en `custom_variables` — los totales originales quedan intactos.
     // Nunca lanza: ver el método.
     await this.attachRefundsSection(storeId, orderId, model);
+    // QUI-979: sección Crédito (total/abonado/saldo + historial + cuotas
+    // pendientes), ADITIVA en `custom_variables` con el mismo contrato: sin
+    // crédito, el modelo sale byte-idéntico. Nunca lanza: ver el método.
+    await this.attachCreditSection(storeId, orderId, model, tz);
     return model;
   }
 
@@ -496,6 +500,226 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
               ? new Date(r.processed_at).toISOString()
               : null,
           })),
+        },
+      };
+    } catch {
+      // Ver docblock: la tirilla sin sección es el fallback.
+    }
+  }
+
+  /**
+   * QUI-979 — sección Crédito de la tirilla POS.
+   *
+   * El cliente a crédito recibía el mismo papel que el de contado: el TOTAL y
+   * nada más. Esta sección es ADITIVA y vive en
+   * `model.custom_variables.credit` — jamás toca `model.totals`,
+   * `model.items` ni `model.taxes`. Sin crédito (contado) o con la orden
+   * cancelada, el modelo sale byte-idéntico al de antes (cero regresión en
+   * el papel): la presencia del dato ES el gate, igual que `refunds`.
+   *
+   * Fuentes (todas del lado orden, el que el POS mantiene en cada carril):
+   * - `orders`: obligación (`total_with_interest ?? grand_total`) y saldo
+   *   vivo (`remaining_balance`). El abonado es DERIVADO (`total − saldo`)
+   *   para que las tres cifras cuadren siempre en el papel, incluso con
+   *   condonaciones (que bajan el saldo sin pago).
+   * - `order_installments`: «Cuota X de Y» (X = pagadas) y el calendario de
+   *   pendientes con vencimiento. Crédito libre (`free`, sin cuotas): solo
+   *   total/abonado/saldo + historial.
+   * - Historial = abonos POS (`payments` succeeded: inicial + abonos de caja)
+   *   ∪ abonos del módulo CxC (`ar_payments` sin `payment_id`). Los abonos
+   *   POS también generan fila `ar_payments` (listener), así que los de CxC
+   *   se filtran por `payment_id IS NULL` para no duplicar.
+   *
+   * Lectura pura, nunca lanza: si falla, la tirilla sale sin la sección como
+   * siempre. Un recibo sin sección vale más que ningún recibo.
+   */
+  private async attachCreditSection(
+    storeId: number,
+    orderId: number,
+    model: StandardPrintDataModel,
+    tz: string,
+  ): Promise<void> {
+    try {
+      const order = await this.prisma.orders.findFirst({
+        where: { id: orderId, store_id: storeId },
+        select: {
+          state: true,
+          payment_form: true,
+          credit_type: true,
+          grand_total: true,
+          total_paid: true,
+          remaining_balance: true,
+          total_with_interest: true,
+        },
+      });
+      // Gate de formato: `payment_form === '2'` es crédito en todo el
+      // codebase (vocabulario DIAN: '1' contado, '2' crédito). La orden
+      // cancelada no debe saldo (cuotas y CxC se anulan en la anulación),
+      // así que tampoco publica sección.
+      if (!order || order.payment_form !== '2' || order.state === 'cancelled') {
+        return;
+      }
+
+      const total = Number(
+        order.total_with_interest ?? order.grand_total ?? 0,
+      );
+      const balance = Math.max(Number(order.remaining_balance ?? 0), 0);
+      // Derivado, no sumado: condonaciones y redondeos ya viven en el saldo.
+      const paidTotal = Math.max(
+        Math.round((total - balance) * 100) / 100,
+        0,
+      );
+
+      const installments = await this.prisma.order_installments.findMany({
+        where: { order_id: orderId },
+        orderBy: { installment_number: 'asc' },
+      });
+      // Las `cancelled` no cuentan ni en X ni en Y: solo existen tras la
+      // anulación de la orden, y la orden anulada ya retornó arriba. Si
+      // alguna sobreviviera, excluirla mantiene «X de Y» significativo.
+      const live = installments.filter((i) => i.state !== 'cancelled');
+      const paidCount = live.filter((i) => i.state === 'paid').length;
+
+      const [posPayments, arRows] = await Promise.all([
+        this.prisma.payments.findMany({
+          where: { order_id: orderId, state: 'succeeded' },
+          select: {
+            id: true,
+            amount: true,
+            paid_at: true,
+            created_at: true,
+            gateway_response: true,
+            store_payment_method: {
+              select: {
+                display_name: true,
+                system_payment_method: {
+                  select: { display_name: true, name: true },
+                },
+              },
+            },
+          },
+          orderBy: { id: 'asc' },
+        }),
+        this.prisma.accounts_receivable.findMany({
+          where: {
+            source_id: orderId,
+            store_id: storeId,
+            source_type: { in: ['credit_sale', 'order'] },
+          },
+          select: { id: true },
+        }),
+      ]);
+      const arOnlyPayments =
+        arRows.length > 0
+          ? await this.prisma.ar_payments.findMany({
+              where: {
+                accounts_receivable_id: { in: arRows.map((r) => r.id) },
+                payment_id: null,
+              },
+              select: {
+                id: true,
+                amount: true,
+                payment_date: true,
+                payment_method: true,
+              },
+              orderBy: { id: 'asc' },
+            })
+          : [];
+
+      const history: Array<{
+        sort_key: string;
+        date: string | null;
+        date_formatted: string;
+        amount: number;
+        amount_formatted: string;
+        method: string;
+        is_initial: boolean;
+      }> = [];
+      for (const p of posPayments) {
+        const at = p.paid_at ?? p.created_at;
+        const gateway =
+          p.gateway_response &&
+          typeof p.gateway_response === 'object' &&
+          !Array.isArray(p.gateway_response)
+            ? (p.gateway_response as Record<string, any>)
+            : null;
+        const metadata =
+          gateway && typeof gateway.metadata === 'object' && gateway.metadata
+            ? gateway.metadata
+            : {};
+        history.push({
+          sort_key: `${at ? new Date(at).getTime() : 0}-${p.id}`,
+          date: at ? new Date(at).toISOString() : null,
+          date_formatted: at ? formatStoreDate(new Date(at), tz) : '—',
+          amount: Number(p.amount ?? 0),
+          amount_formatted: this.formatOrderMoney(Number(p.amount ?? 0)),
+          method:
+            this.resolvePaymentLegLabel(p) ??
+            (metadata.is_credit_payment ? 'Abono' : 'Pago'),
+          is_initial: metadata.is_initial_credit_payment === true,
+        });
+      }
+      for (const p of arOnlyPayments) {
+        const at = p.payment_date;
+        history.push({
+          sort_key: `${at ? new Date(at).getTime() : 0}-ar${p.id}`,
+          date: at ? new Date(at).toISOString() : null,
+          date_formatted: at ? formatStoreDate(new Date(at), tz) : '—',
+          amount: Number(p.amount ?? 0),
+          amount_formatted: this.formatOrderMoney(Number(p.amount ?? 0)),
+          method: (p.payment_method ?? '').trim() || 'Abono',
+          is_initial: false,
+        });
+      }
+      // Orden numérico dentro de la clave ("…-9" antes que "…-10"): la
+      // comparación de texto ponía el id 10 antes que el 9 en el mismo ms.
+      history.sort((a, b) =>
+        a.sort_key.localeCompare(b.sort_key, 'en', { numeric: true }),
+      );
+      const last = history.length > 0 ? history[history.length - 1] : null;
+
+      const pendingStates = new Set(['pending', 'partial', 'overdue']);
+      const pending = live
+        .filter((i) => pendingStates.has(i.state))
+        .map((i) => ({
+          number: i.installment_number,
+          state: i.state,
+          due_date: i.due_date ? new Date(i.due_date).toISOString() : null,
+          due_date_formatted: i.due_date
+            ? formatStoreDate(new Date(i.due_date), tz)
+            : '—',
+          amount: Number(i.amount ?? 0),
+          amount_formatted: this.formatOrderMoney(Number(i.amount ?? 0)),
+          balance: Number(i.remaining_balance ?? 0),
+          balance_formatted: this.formatOrderMoney(
+            Number(i.remaining_balance ?? 0),
+          ),
+        }));
+
+      model.custom_variables = {
+        ...(model.custom_variables ?? {}),
+        credit: {
+          is_installments: order.credit_type === 'installments',
+          total,
+          total_formatted: this.formatOrderMoney(total),
+          paid_total: paidTotal,
+          paid_total_formatted: this.formatOrderMoney(paidTotal),
+          balance,
+          balance_formatted: this.formatOrderMoney(balance),
+          installments_total: live.length,
+          installments_paid: paidCount,
+          last_payment: last
+            ? {
+                amount: last.amount,
+                amount_formatted: last.amount_formatted,
+                date: last.date,
+                date_formatted: last.date_formatted,
+              }
+            : null,
+          payments: history.map(
+            ({ sort_key: _sk, ...rest }) => rest,
+          ),
+          pending_installments: pending,
         },
       };
     } catch {

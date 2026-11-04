@@ -464,3 +464,112 @@ describe('PosTicketService — gateway batch copies', () => {
     expect(warn).toHaveBeenCalled();
   });
 });
+
+describe('PosTicketService — sección Crédito legacy (QUI-979)', () => {
+  const createRenderService = (): PosTicketService => {
+    const service = Object.create(PosTicketService.prototype) as any;
+    service.currencyService = {
+      currentCurrency: () => ({ code: 'COP' }),
+      loadCurrency: async () => undefined,
+      loading: () => false,
+      format: (n: number) => `$${Number(n || 0).toLocaleString('es-CO')}`,
+    };
+    service.authFacade = {
+      printsVatBreakdown: () => false,
+      fiscalData: () => ({}),
+      userOrganization: () => null,
+    };
+    service.documentPrint = {
+      resolveConfig: () => ({
+        format: 'thermal_80',
+        widthMm: 80,
+        contentWidthMm: 72,
+        isRoll: true,
+        copies: 1,
+      }),
+    };
+    service.storeConfig = {
+      name: '',
+      address: '',
+      phone: '',
+      email: '',
+      taxId: '',
+      id: 0,
+      logo: '',
+    };
+    return service as PosTicketService;
+  };
+
+  const baseTicket = (over: any = {}): TicketData =>
+    ({
+      id: 'POS-0007',
+      orderId: 7,
+      date: new Date('2026-08-27T14:15:00.000Z'),
+      items: [],
+      subtotal: 100000,
+      tax: 0,
+      discount: 0,
+      total: 100000,
+      paymentMethod: 'Efectivo',
+      ...over,
+    }) as TicketData;
+
+  const creditSection = {
+    is_installments: true,
+    total: 100000,
+    paid_total: 20000,
+    balance: 80000,
+    installments_total: 4,
+    installments_paid: 1,
+    last_payment: { amount: 20000, date_formatted: '10/09/2026' },
+    payments: [
+      {
+        date_formatted: '27/08/2026',
+        amount: 20000,
+        method: 'Efectivo',
+        is_initial: true,
+      },
+    ],
+    pending_installments: [
+      {
+        number: 2,
+        state: 'partial',
+        due_date_formatted: '15/10/2026',
+        balance: 10000,
+      },
+    ],
+  };
+
+  it('sin sección: el render no menciona CRÉDITO', async () => {
+    const html = await createRenderService().generateTicketHTML(baseTicket());
+
+    expect(html).not.toContain('CRÉDITO');
+    expect(html).not.toContain('Saldo pendiente');
+  });
+
+  it('con sección: pinta totales, cuotas, historial y calendario', async () => {
+    const html = await createRenderService().generateTicketHTML(
+      baseTicket({ credit: creditSection }),
+    );
+
+    expect(html).toContain('CRÉDITO');
+    expect(html).toContain('Total del crédito:');
+    expect(html).toContain('Abonado: (Cuotas 1 de 4)');
+    expect(html).toContain('Saldo pendiente:');
+    expect(html).toContain('Último abono:');
+    expect(html).toContain('Efectivo (inicial)');
+    expect(html).toContain('Cuota 2 (parcial)');
+    expect(html).toContain('15/10/2026');
+    // El TOTAL de la venta queda intacto.
+    expect(html).toContain('TOTAL:');
+  });
+
+  it('payload malformado: sin sección en vez de romper el papel', async () => {
+    const html = await createRenderService().generateTicketHTML(
+      baseTicket({ credit: { total: NaN, payments: 'x' } }),
+    );
+
+    expect(html).not.toContain('CRÉDITO');
+    expect(html).toContain('TOTAL:');
+  });
+});

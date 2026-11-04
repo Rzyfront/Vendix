@@ -583,6 +583,7 @@ export class GeneralSettingsStore {
         'promotions',
         'scheduled_orders',
         'product_options',
+        'credit_reminders',
       ];
       const currentSettings = this.settings();
       const sanitizedSettings = knownSections.reduce((acc, key) => {

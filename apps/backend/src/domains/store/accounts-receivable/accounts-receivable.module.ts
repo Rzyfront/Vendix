@@ -5,6 +5,9 @@ import { ArAgingService } from './services/ar-aging.service';
 import { ArCollectionService } from './services/ar-collection.service';
 import { PaymentAgreementService } from './services/payment-agreement.service';
 import { ArEventsListener } from './listeners/ar-events.listener';
+import { CreditInstallmentRemindersJob } from './jobs/credit-installment-reminders.job';
+import { CreditInstallmentReminderEmailListener } from './listeners/credit-installment-reminder-email.listener';
+import { EmailModule } from '../../../email/email.module';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
@@ -17,7 +20,8 @@ import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
 import { createReceivablesPayablesTools } from '../../../ai-engine/tools/domains/receivables-payables.tools';
 
 @Module({
-  imports: [PrismaModule, ResponseModule, AccountsPayableModule, CashRegistersModule],
+  // EmailModule: recordatorio de cuota al cliente por correo.
+  imports: [PrismaModule, ResponseModule, AccountsPayableModule, CashRegistersModule, EmailModule],
   controllers: [AccountsReceivableController],
   providers: [
     AccountsReceivableService,
@@ -25,6 +29,8 @@ import { createReceivablesPayablesTools } from '../../../ai-engine/tools/domains
     ArCollectionService,
     PaymentAgreementService,
     ArEventsListener,
+    CreditInstallmentRemindersJob,
+    CreditInstallmentReminderEmailListener,
   ],
   exports: [AccountsReceivableService],
 })

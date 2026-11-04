@@ -1197,6 +1197,7 @@ model stores {
   order_fulfillment_schedules      order_fulfillment_schedules[]
   order_fulfillment_changes        order_fulfillment_changes[]
   scheduled_order_reminder_logs    scheduled_order_reminder_logs[]
+  credit_installment_reminder_logs credit_installment_reminder_logs[]
   product_option_groups            product_option_groups[]
   product_options                  product_options[]
   product_option_group_assignments product_option_group_assignments[]
@@ -1958,6 +1959,8 @@ model order_installments {
   updated_at         DateTime                     @updatedAt
 
   orders orders @relation(fields: [order_id], references: [id])
+
+  reminder_logs credit_installment_reminder_logs[]
 
   @@index([order_id])
   @@index([due_date, state])
@@ -5010,6 +5013,8 @@ enum notification_type_enum {
   booking_reminder
   scheduled_order_reminder
   scheduled_order_rescheduled
+  /// Recordatorio de cuota de venta a crédito (CreditInstallmentRemindersJob).
+  credit_installment_reminder
   booking_rescheduled
   /// Appointment redesign phase 2 — fired when a customer requests a
   /// reschedule that requires admin approval (settings.reservations.
@@ -14770,6 +14775,23 @@ model scheduled_order_reminder_logs {
   schedule order_fulfillment_schedules @relation(fields: [schedule_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([schedule_id, rule_key, channel])
+  @@index([store_id])
+}
+
+/// Dedupe de recordatorios de cuotas a crédito: una fila por (cuota, regla, canal).
+model credit_installment_reminder_logs {
+  id             Int       @id @default(autoincrement())
+  store_id       Int
+  installment_id Int
+  /// Clave de la regla, ej. "3d" para 3 días antes.
+  rule_key       String    @db.VarChar(30)
+  channel        String    @db.VarChar(20)
+  sent_at        DateTime? @default(now()) @db.Timestamp(6)
+
+  store       stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  installment order_installments @relation(fields: [installment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([installment_id, rule_key, channel])
   @@index([store_id])
 }
 

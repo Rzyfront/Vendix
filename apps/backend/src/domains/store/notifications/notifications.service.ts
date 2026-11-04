@@ -385,6 +385,8 @@ export class NotificationsService {
       // `notification_subscriptions.in_app`) y el toggle no existía en la UI.
       'ap_installment_due_soon',
       'ap_installment_overdue',
+      // Recordatorio de cuota de venta a crédito (`CreditInstallmentRemindersJob`).
+      'credit_installment_reminder',
       // Billing-warning detection — opt-in bell row for "no recurring credential
       // persisted" and "automatic charge failed" paths. The
       // `SubscriptionPaymentBillingWarningListener` emits both via

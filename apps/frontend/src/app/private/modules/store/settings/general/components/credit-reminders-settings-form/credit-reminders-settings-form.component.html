@@ -1,0 +1,97 @@
+<!-- Ventas a crédito: mismo lenguaje visual que los bloques de Punto de Venta
+     (block-head, setting-cell, panel interno y field__*). -->
+<div>
+  <div class="block-head">
+    <h4 class="block-title">Ventas a crédito</h4>
+    <p class="block-subtitle">
+      Recuerda a la tienda y al cliente las cuotas antes de que venzan.
+    </p>
+  </div>
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div class="setting-cell">
+      <app-setting-toggle
+        [ngModel]="value().enabled"
+        (ngModelChange)="onEnabledChange($event)"
+        label="Recordatorios de cuotas"
+        description="Avisa antes de que venza cada cuota de una venta a crédito"
+      ></app-setting-toggle>
+      <div class="setting-cell__meta">
+        <app-badge variant="info" size="xsm" badgeStyle="outline">
+          Envía correos
+        </app-badge>
+        <app-tooltip
+          content="Con «3 días antes», una cuota que vence el 10/12 avisa el 07/12 desde las 8:00 de la mañana. Cada aviso sale una sola vez y las cuotas ya pagadas no reciben nada."
+          position="top"
+          size="sm"
+          color="default"
+        >
+          <span class="help-chip">
+            <app-icon name="info" size="12"></app-icon>
+            Ejemplo
+          </span>
+        </app-tooltip>
+      </div>
+    </div>
+  </div>
+
+  @if (value().enabled) {
+    <div class="mt-4 p-4 rounded-lg border border-border bg-muted/30 space-y-4">
+      @for (r of value().reminders; track $index; let i = $index) {
+        <div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="setting-cell">
+              <app-setting-toggle
+                [ngModel]="r.enabled"
+                (ngModelChange)="onReminderChange(i, 'enabled', $event)"
+                [label]="reminderLabel(r.days_before)"
+                description="Activa o pausa este recordatorio"
+              ></app-setting-toggle>
+            </div>
+            <div class="field">
+              <label class="field__label" [for]="'credit-days-' + i">Días antes del vencimiento</label>
+              <input
+                [id]="'credit-days-' + i"
+                type="number"
+                class="field__control"
+                min="0"
+                [max]="maxDaysBefore"
+                step="1"
+                [value]="r.days_before"
+                [disabled]="!r.enabled"
+                (change)="onDaysChange(i, $any($event.target))"
+              />
+              <p class="field__hint">0 = el mismo día del vencimiento. Máximo {{ maxDaysBefore }}.</p>
+            </div>
+          </div>
+
+          @if (r.enabled) {
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
+              <div class="setting-cell">
+                <app-setting-toggle
+                  [ngModel]="r.notify_staff"
+                  (ngModelChange)="onReminderChange(i, 'notify_staff', $event)"
+                  label="Avisar al equipo"
+                  description="Notificación en la campana de la tienda"
+                ></app-setting-toggle>
+              </div>
+              <div class="setting-cell">
+                <app-setting-toggle
+                  [ngModel]="r.notify_customer"
+                  (ngModelChange)="onReminderChange(i, 'notify_customer', $event)"
+                  label="Avisar al cliente"
+                  description="Correo con la cuota, la fecha, el valor y el saldo"
+                ></app-setting-toggle>
+              </div>
+            </div>
+          }
+        </div>
+      } @empty {
+        <p class="field__hint">Sin recordatorios configurados.</p>
+      }
+      <p class="field__hint">
+        El cliente necesita correo registrado para recibir el aviso.
+      </p>
+    </div>
+  }
+</div>

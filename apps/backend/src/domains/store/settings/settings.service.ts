@@ -108,6 +108,8 @@ export const KNOWN_SECTIONS = [
   // Pedidos programados y adiciones (venta por encargo). Sección + DTO, ver `invoicing`.
   'scheduled_orders',
   'product_options',
+  // Recordatorios de cuotas de venta a crédito. Sección + DTO, ver `scheduled_orders`.
+  'credit_reminders',
   // `app` is intentionally accepted here because the service maps it to
   // branding via updateStoreBranding(); the migrator strips persisted `app`
   // afterwards. The legacy alias should not break update calls.
