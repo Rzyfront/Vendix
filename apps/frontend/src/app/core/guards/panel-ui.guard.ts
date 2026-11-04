@@ -5,6 +5,7 @@ import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { ToastService } from '../../shared/components/toast/toast.service';
 import { AccessGateService } from '../services/access-gate.service';
+import { PlanPaywallService } from '../services/plan-paywall.service';
 
 /**
  * CanActivate que cierra el bypass de panel_ui en URL directa (A.4 / ADR-4).
@@ -42,6 +43,7 @@ export const panelUiGuard: CanActivateFn = async (
   const accessGate = inject(AccessGateService);
   const router = inject(Router);
   const toast = inject(ToastService);
+  const paywall = inject(PlanPaywallService);
 
   // Compuertas de escape: la ruta terminal y la ruta "sin acceso" nunca se
   // bloquean. Sin esto, el `firstActiveModuleRedirectGuard` o el propio
@@ -121,6 +123,15 @@ export const panelUiGuard: CanActivateFn = async (
   if (menuFilter.applyAccessGate(gateKeys, true, 'url', state.url)) {
     return true;
   }
+  // Plan layer (planes-matriz-accesos §3): the module is not in the plan →
+  // module paywall, once per module family and session; later attempts get a
+  // short notice. Inside the app the user stays where they were; on a first
+  // load they land on the first active module (the dashboard is never gated).
+  const planLock = menuFilter.planLockForKeys(gateKeys);
+  if (planLock) {
+    if (!paywall.show(planLock)) toast.info(paywall.notice(planLock));
+    return router.navigated ? false : redirect();
+  }
   toast.info(menuFilter.industryBlockMessage(gateKeys));
   return redirect();
 };
@@ -140,12 +151,19 @@ export const orgPanelUiGuard: CanActivateFn = async (
   const accessGate = inject(AccessGateService);
   const router = inject(Router);
   const toast = inject(ToastService);
+  const paywall = inject(PlanPaywallService);
 
   await accessGate.ensureLoaded('ORG_ADMIN');
   const keys = menuFilter.resolveGateKeysForRoute(state.url, 'ORG_ADMIN');
   if (menuFilter.applyAccessGate(keys, true, 'url', state.url)) return true;
 
-  toast.info(menuFilter.industryBlockMessage(keys));
+  // Plan layer: the organization has no plans page, so a notice is enough.
+  const planLock = menuFilter.planLockForKeys(keys);
+  toast.info(
+    planLock
+      ? paywall.notice(planLock)
+      : menuFilter.industryBlockMessage(keys),
+  );
   if (state.url !== '/admin/dashboard') router.navigateByUrl('/admin/dashboard');
   return false;
 };

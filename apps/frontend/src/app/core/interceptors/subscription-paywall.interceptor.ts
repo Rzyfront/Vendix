@@ -7,6 +7,10 @@ import {
   SubscriptionAccessService,
 } from '../services/subscription-access.service';
 import { StoreAvailabilityService } from '../services/store-availability.service';
+import {
+  PlanModuleDenialDetails,
+  PlanPaywallService,
+} from '../services/plan-paywall.service';
 
 /**
  * Error codes that should trigger the paywall modal.
@@ -80,6 +84,7 @@ export const subscriptionPaywallInterceptor: HttpInterceptorFn = (req, next) => 
   const access = inject(SubscriptionAccessService);
   const router = inject(Router);
   const storeAvailability = inject(StoreAvailabilityService);
+  const planPaywall = inject(PlanPaywallService);
   return next(req).pipe(
     catchError((err: unknown) => {
       if (err instanceof HttpErrorResponse) {
@@ -102,6 +107,20 @@ export const subscriptionPaywallInterceptor: HttpInterceptorFn = (req, next) => 
             storeAvailability.reopen();
           } catch {
             // Swallow — never block error propagation.
+          }
+          return throwError(() => err);
+        }
+
+        // Plan layer (planes-matriz-accesos): the module is not in the plan.
+        // Its own paywall (module, plans that include it, «Ver planes y
+        // mejorar»), once per module per session. Re-thrown like the rest.
+        if (code === 'PLAN_MODULE_NOT_INCLUDED') {
+          if (!router.url.startsWith(PLANS_ROUTE)) {
+            try {
+              planPaywall.showFromApi(body?.details as unknown as PlanModuleDenialDetails);
+            } catch {
+              // Swallow — never block error propagation.
+            }
           }
           return throwError(() => err);
         }
