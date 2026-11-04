@@ -212,8 +212,11 @@ function createSmoke(opts = {}) {
   async function checkHeaders() {
     const res = await get(base + '/', { method: 'HEAD' });
     const h = name => res.headers.get(name);
-    for (const name of ['strict-transport-security', 'x-content-type-options', 'referrer-policy', 'x-frame-options', 'content-security-policy']) {
-      add('seguridad', 'cabecera ' + name, h(name) ? 'OK' : (name === 'content-security-policy' ? 'AVISO' : 'FALLA'), h(name) || 'ausente', { rec: res.rec });
+    // x-frame-options y CSP se omiten a propósito (infra/cloudfront/README-security-headers.md):
+    // un DENY/SAMEORIGIN rompería el checkout de Wompi y las tiendas embebidas. Su ausencia es AVISO.
+    const optional = ['x-frame-options', 'content-security-policy'];
+    for (const name of ['strict-transport-security', 'x-content-type-options', 'referrer-policy', ...optional]) {
+      add('seguridad', 'cabecera ' + name, h(name) ? 'OK' : (optional.includes(name) ? 'AVISO' : 'FALLA'), h(name) || 'ausente', { rec: res.rec });
     }
     add('cache', 'HTML con revalidación', /max-age=0|no-cache/.test(h('cache-control') || '') ? 'OK' : 'AVISO', h('cache-control') || 'ausente');
   }

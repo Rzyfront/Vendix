@@ -4,7 +4,7 @@ Herramientas de solo lectura, Node 20+ sin dependencias.
 
 ## seo-smoke.cjs
 
-Sondea una URL pública (landing o tienda) y reporta OK / FALLA / AVISO por control: redirección http→https y alias www, status real (200 en rutas conocidas, 404 en desconocidas), canonical, robots, H1 y texto sin JavaScript, `robots.txt`, `sitemap.xml`, cabeceras de seguridad y caché.
+Sondea una URL pública (landing o tienda) y reporta OK / FALLA / AVISO por control: redirección http→https y alias www, status real (200 en rutas conocidas, 404 en desconocidas), canonical, robots, H1 y texto sin JavaScript, `robots.txt`, `sitemap.xml`, cabeceras de seguridad y caché. `x-frame-options` y `content-security-policy` ausentes dan AVISO, no FALLA: se omiten a propósito para no romper el checkout de Wompi ni las tiendas embebidas (ver `infra/cloudfront/README-security-headers.md`).
 
 Controles con id (solo `vendix.online` los dos primeros):
 
@@ -37,7 +37,7 @@ El JSON trae, por petición: `url`, `httpStatus`, `location`, `ms`, `bytes`, `ok
 
 1. Revisar en el artefacto (retención 30 días) que los controles estén en OK de forma sostenida.
 2. Gradual: poner la variable `SEO_SMOKE_ENFORCE` en el workflow con los ids estables.
-3. Total: crear la variable de repositorio `SEO_SMOKE_MODE=enforce`. Los controles legacy (soft 404 de rutas desconocidas, cabeceras) fallan hoy en producción, así que conviene corregirlos antes.
+3. Total: crear la variable de repositorio `SEO_SMOKE_MODE=enforce`. Los controles legacy (soft 404 de rutas desconocidas) fallan hoy en producción, así que conviene corregirlos antes.
 
 El workflow `.github/workflows/seo-smoke.yml` corre cada 6 h y bajo demanda; no usa secretos.
 

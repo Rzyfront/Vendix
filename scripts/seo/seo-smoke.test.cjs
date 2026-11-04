@@ -159,3 +159,13 @@ test('parseArgs: default report, flag, env y modo inválido', () => {
   assert.equal(parseArgs(['https://a.co'], {}).base, 'https://a.co');
   assert.throws(() => parseArgs(['--mode', 'x'], {}));
 });
+
+test('cabeceras: x-frame-options ausente es AVISO (omitida a propósito por Wompi y tiendas embebidas); HSTS ausente sigue siendo FALLA', async () => {
+  const r = await exec(site({ [BASE + '/']: { status: 200, headers: { 'content-type': 'text/html', 'x-frame-options': '' }, body: page('/', true) } }));
+  const xfo = r.results.find(x => x.check === 'cabecera x-frame-options');
+  assert.equal(xfo.status, 'AVISO');
+  assert.equal(xfo.observed, 'ausente');
+  assert.equal(r.results.find(x => x.check === 'cabecera strict-transport-security').status, 'OK');
+  const noHsts = await exec(site({ [BASE + '/']: { status: 200, headers: { 'content-type': 'text/html', 'strict-transport-security': '' }, body: page('/', true) } }));
+  assert.equal(noHsts.results.find(x => x.check === 'cabecera strict-transport-security').status, 'FALLA');
+});
