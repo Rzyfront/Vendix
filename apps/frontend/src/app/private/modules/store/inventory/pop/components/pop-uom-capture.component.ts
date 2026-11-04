@@ -104,7 +104,7 @@ export interface PopUomCaptureResult {
         <p
           class="text-[10px] text-muted uppercase font-bold tracking-wider"
         >
-          Unidad de medida del insumo
+          {{ isIngredient() ? 'Unidad de medida del insumo' : 'Costo y cantidad de compra' }}
         </p>
       </div>
 
