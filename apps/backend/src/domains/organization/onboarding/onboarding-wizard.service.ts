@@ -4,7 +4,8 @@ import {
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, domain_settings } from '@prisma/client';
+import { ensureDefaultStoreHomeApp } from '../../store/apps/store-home/store-home-default';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { EmailService } from '../../../email/email.service';
@@ -654,7 +655,7 @@ export class OnboardingWizardService {
       data: {
         hostname,
         store_id: storeId,
-        // app_type EXPLÍCITO: dominio `-store` → STORE_LANDING. Sin esto caería
+        // app_type EXPLÍCITO: dominio `-store` → STORE_HOME. Sin esto caería
         // en el default VENDIX_LANDING del schema (reservado a dominios core).
         app_type: this.domainGeneratorHelper.appTypeForContext(
           DomainContext.STORE,
@@ -1385,122 +1386,139 @@ export class OnboardingWizardService {
         },
       });
 
-      if (existingStoreDomain) {
-        // Update existing store domain - branding lives in store_settings now
-        await this.prismaService.domain_settings.updateMany({
-          where: { id: existingStoreDomain.id },
-          data: {
-            app_type: 'STORE_LANDING',
-            config: {}, // Branding lives in store_settings, not here
-            is_primary: true,
-            status: 'active',
-            updated_at: new Date(),
-          },
-        });
-        storeDomainRecord = await this.prismaService.domain_settings.findFirst({
-          where: { id: existingStoreDomain.id },
-        });
-      } else {
-        // Generate new store domain hostname
-        const existingDomains =
-          await this.prismaService.domain_settings.findMany({
-            select: { hostname: true },
-          });
-        const existingHostnames: Set<string> = new Set(
-          existingDomains.map((d) => d.hostname as string),
-        );
-        const storeHostname = this.domainGeneratorHelper.generateUnique(
-          store.slug,
-          DomainContext.STORE,
-          existingHostnames,
-        );
+      // El dominio `-store` por defecto nace como Inicio de tienda (STORE_HOME),
+      // la portada que lleva al panel tras el login, y su fila de store_apps
+      // queda publicada en la misma transacción: o se crea todo o nada. Los
+      // reintentos del wizard reusan el dominio y la fila (sin duplicados).
+      const storeAppType = this.domainGeneratorHelper.appTypeForContext(
+        DomainContext.STORE,
+      );
+      storeDomainRecord = await this.prismaService.$transaction(
+        async (tx: Prisma.TransactionClient) => {
+          let record: domain_settings | null = null;
 
-        // Ensure only one active domain of this type
-        await this.prismaService.domain_settings.updateMany({
-          where: {
-            store_id: store.id,
-            domain_type: 'store',
-            status: 'active',
-          },
-          data: {
-            status: 'disabled',
-            is_primary: false,
-            updated_at: new Date(),
-          },
-        });
-
-        // Create new store domain with branding config
-        // Check if hostname already exists (to handle retries/back navigation)
-        const collidingDomain =
-          await this.prismaService.domain_settings.findFirst({
-            where: {
-              hostname: storeHostname,
-              status: {
-                notIn: [
-                  'disabled',
-                  'failed_ownership',
-                  'failed_certificate',
-                  'failed_alias',
-                ],
+          if (existingStoreDomain) {
+            // Update existing store domain - branding lives in store_settings now
+            await tx.domain_settings.updateMany({
+              where: { id: existingStoreDomain.id },
+              data: {
+                app_type: storeAppType,
+                config: {}, // Branding lives in store_settings, not here
+                is_primary: true,
+                status: 'active',
+                updated_at: new Date(),
               },
-            },
-          });
-
-        if (collidingDomain && collidingDomain.store_id === store.id) {
-          // Domain exists and belongs to this store -> Update it
-          await this.prismaService.domain_settings.updateMany({
-            where: { id: collidingDomain.id },
-            data: {
-              app_type: 'STORE_LANDING',
-              config: {}, // Branding lives in store_settings, not here
-              is_primary: true,
-              ownership: 'vendix_subdomain',
-              status: 'active',
-              updated_at: new Date(),
-            },
-          });
-          storeDomainRecord =
-            await this.prismaService.domain_settings.findFirst({
-              where: { id: collidingDomain.id },
             });
-        } else {
-          // Create new store domain
-          let finalHostname = storeHostname;
-
-          // If collision exists (but belongs to someone else), regenerate!
-          if (collidingDomain) {
-            const latestDomains =
+            record = await tx.domain_settings.findFirst({
+              where: { id: existingStoreDomain.id },
+            });
+          } else {
+            // Generate new store domain hostname
+            const existingDomains =
               await this.prismaService.domain_settings.findMany({
                 select: { hostname: true },
               });
-            const latestHostnames: Set<string> = new Set(
-              latestDomains.map((d) => d.hostname as string),
+            const existingHostnames: Set<string> = new Set(
+              existingDomains.map((d) => d.hostname as string),
             );
-
-            finalHostname = this.domainGeneratorHelper.generateUnique(
+            const storeHostname = this.domainGeneratorHelper.generateUnique(
               store.slug,
               DomainContext.STORE,
-              latestHostnames,
+              existingHostnames,
             );
+
+            // Ensure only one active domain of this type
+            await tx.domain_settings.updateMany({
+              where: {
+                store_id: store.id,
+                domain_type: 'store',
+                status: 'active',
+              },
+              data: {
+                status: 'disabled',
+                is_primary: false,
+                updated_at: new Date(),
+              },
+            });
+
+            // Create new store domain with branding config
+            // Check if hostname already exists (to handle retries/back navigation)
+            const collidingDomain =
+              await this.prismaService.domain_settings.findFirst({
+                where: {
+                  hostname: storeHostname,
+                  status: {
+                    notIn: [
+                      'disabled',
+                      'failed_ownership',
+                      'failed_certificate',
+                      'failed_alias',
+                    ],
+                  },
+                },
+              });
+
+            if (collidingDomain && collidingDomain.store_id === store.id) {
+              // Domain exists and belongs to this store -> Update it
+              await tx.domain_settings.updateMany({
+                where: { id: collidingDomain.id },
+                data: {
+                  app_type: storeAppType,
+                  config: {}, // Branding lives in store_settings, not here
+                  is_primary: true,
+                  ownership: 'vendix_subdomain',
+                  status: 'active',
+                  updated_at: new Date(),
+                },
+              });
+              record = await tx.domain_settings.findFirst({
+                where: { id: collidingDomain.id },
+              });
+            } else {
+              // Create new store domain
+              let finalHostname = storeHostname;
+
+              // If collision exists (but belongs to someone else), regenerate!
+              if (collidingDomain) {
+                const latestDomains =
+                  await this.prismaService.domain_settings.findMany({
+                    select: { hostname: true },
+                  });
+                const latestHostnames: Set<string> = new Set(
+                  latestDomains.map((d) => d.hostname as string),
+                );
+
+                finalHostname = this.domainGeneratorHelper.generateUnique(
+                  store.slug,
+                  DomainContext.STORE,
+                  latestHostnames,
+                );
+              }
+
+              record = await tx.domain_settings.create({
+                data: {
+                  hostname: finalHostname,
+                  store_id: store.id,
+                  app_type: storeAppType,
+                  domain_type: 'store',
+                  config: {}, // Branding lives in store_settings, not here
+                  is_primary: true,
+                  ownership: 'vendix_subdomain',
+                  status: 'active',
+                  ssl_status: 'none',
+                  created_at: new Date(),
+                  updated_at: new Date(),
+                },
+              });
+            }
           }
 
-          storeDomainRecord = await this.prismaService.domain_settings.create({
-            data: {
-              hostname: finalHostname,
-              store_id: store.id,
-              app_type: 'STORE_LANDING',
-              domain_type: 'store',
-              config: {}, // Branding lives in store_settings, not here
-              is_primary: true,
-              ownership: 'vendix_subdomain',
-              status: 'active',
-              ssl_status: 'none',
-              created_at: new Date(),
-              updated_at: new Date(),
-            },
-          });
-        }
-      }
+          if (record) {
+            await ensureDefaultStoreHomeApp(tx, store.id, record.id);
+          }
+          return record;
+        },
+      );
     }
 
     // 4. Handle Custom Domain (Optional)

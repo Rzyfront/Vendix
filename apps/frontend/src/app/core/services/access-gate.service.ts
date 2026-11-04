@@ -34,6 +34,8 @@ interface AccessGateState {
 const LOAD_TIMEOUT_MS = 1500;
 const FLUSH_DELAY_MS = 2000;
 const MAX_EVENTS_PER_REQUEST = 50;
+/** After a failed load, wait this long before asking the backend again. */
+const RETRY_AFTER_FAILURE_MS = 30_000;
 
 /**
  * Access gate state and audit sink (apps-f4 S4/S5/S8).
@@ -60,7 +62,8 @@ export class AccessGateService {
   readonly orgPanelUi = signal<Record<string, boolean> | null>(null);
 
   private loadedFor: string | null = null;
-  private loading: Promise<void> | null = null;
+  private failedAt: number | null = null;
+  private loading: { scopeKey: string; promise: Promise<void> } | null = null;
   private readonly seen = new Set<string>();
   private queue: AccessAuditEvent[] = [];
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -80,14 +83,25 @@ export class AccessGateService {
   ensureLoaded(app: AccessGateApp = this.currentApp()): Promise<void> {
     const scopeKey = this.scopeKey(app);
     if (this.loadedFor === scopeKey) return Promise.resolve();
-    if (this.loading) return this.loading;
+    // A load in flight only answers for its own scope: a store switch (or a
+    // move to the organization panel) must not read another scope's state.
+    if (this.loading?.scopeKey === scopeKey) return this.loading.promise;
+    // A failing backend used to be asked again on every navigation, each time
+    // holding the guard up to `LOAD_TIMEOUT_MS`. One failure is enough for a
+    // short while, still in audit.
+    if (
+      this.failedAt !== null &&
+      Date.now() - this.failedAt < RETRY_AFTER_FAILURE_MS
+    ) {
+      return Promise.resolve();
+    }
 
     this.mode.set('audit');
     this.industries.set(null);
     this.orgPanelUi.set(null);
 
     const url = `${environment.apiUrl}/${this.prefix(app)}/access-gate`;
-    this.loading = firstValueFrom(
+    const promise = firstValueFrom(
       this.http
         .get<{ data?: AccessGateState } & AccessGateState>(url)
         .pipe(timeout(LOAD_TIMEOUT_MS)),
@@ -100,15 +114,19 @@ export class AccessGateService {
         );
         this.orgPanelUi.set(state?.org_panel_ui ?? null);
         this.loadedFor = scopeKey;
+        this.failedAt = null;
       })
       .catch(() => {
-        // Audit on any failure; retry on the next navigation.
+        // Audit on any failure; retry after a short pause, not on every
+        // navigation.
         this.mode.set('audit');
+        this.failedAt = Date.now();
       })
       .finally(() => {
-        this.loading = null;
+        if (this.loading?.promise === promise) this.loading = null;
       });
-    return this.loading;
+    this.loading = { scopeKey, promise };
+    return promise;
   }
 
   /** Queues one event; identical events in the same session are sent once. */

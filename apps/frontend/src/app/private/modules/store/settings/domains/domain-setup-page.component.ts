@@ -12,6 +12,7 @@ import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { interval } from 'rxjs';
+import { appOnlyAppTypeLabel } from '../../../../../shared/constants/app-domain-app-types';
 import {
   ButtonComponent,
   IconComponent,
@@ -49,7 +50,6 @@ interface DomainNextStep {
   className: string;
 }
 
-import { appOnlyAppTypeLabel } from '../../../../../shared/constants/app-domain-app-types';
 @Component({
   selector: 'app-domain-setup-page',
   standalone: true,

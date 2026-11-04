@@ -31,6 +31,7 @@ import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
 import { PwaCacheService } from '@common/services/pwa-cache.service';
+import { ensureDefaultStoreHomeApp } from '../../store/apps/store-home/store-home-default';
 
 // Aggregated store dashboards tolerate 1-2 min of staleness → short TTL (ms).
 const STORE_DASHBOARD_CACHE_TTL_MS = 120_000;
@@ -909,12 +910,13 @@ export class StoresService {
     });
 
     // Create domain settings for the store with standardized branding
-    await client.domain_settings.create({
+    const domain = await client.domain_settings.create({
       data: {
         hostname,
         store_id: storeId,
-        // El app_type de un dominio `-store` es STORE_LANDING (nunca el default
-        // VENDIX_LANDING del schema). Se deriva del contexto vía el helper.
+        // El app_type de un dominio `-store` es STORE_HOME (Inicio de tienda,
+        // nunca el default VENDIX_LANDING del schema). Se deriva del contexto
+        // vía el helper.
         app_type: this.domainGeneratorHelper.appTypeForContext(
           DomainContext.STORE,
         ),
@@ -929,7 +931,18 @@ export class StoresService {
         created_at: new Date(),
         updated_at: new Date(),
       },
+      select: { id: true },
     });
+
+    // La tienda nace con Inicio de tienda publicado en ese dominio, dentro de
+    // la misma transacción que la tienda: o se crea todo o nada. `store_apps`
+    // no está en el scope de organización: sin tx se usa el cliente base (el
+    // store_id viene de la tienda recién creada).
+    await ensureDefaultStoreHomeApp(
+      tx ?? this.prisma.withoutScope(),
+      storeId,
+      domain.id,
+    );
   }
 
   /**

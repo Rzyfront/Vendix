@@ -7730,6 +7730,16 @@ export const ErrorCodes = {
       'Este dominio sirve la tienda en línea o el panel de administración; no se puede asignar a una app.',
   },
 
+  // Apps F5: no free Vendix subdomain for the app (every numeric and random
+  // candidate was taken by another store). Not a custom-domain problem, which
+  // is STORE_APPS_005.
+  STORE_APPS_018: {
+    code: 'STORE_APPS_018',
+    httpStatus: 409,
+    devMessage:
+      'No se pudo generar un subdominio libre para esta app; intenta publicarla de nuevo.',
+  },
+
   // Bandeja CRM (PLAN-CRM §4.3). 404 tanto si la conversación es de otra
   // tienda como si no está asignada a quien no puede ver todas: no se revela
   // que existe.
