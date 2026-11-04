@@ -8,6 +8,7 @@ import {
   inject,
   viewChild,
   DestroyRef,
+  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 
@@ -1494,12 +1495,25 @@ export class PopProductConfigModalComponent {
       }
     });
 
+    // Re-inicializa sólo al abrir o cuando cambian las entradas del padre. El
+    // cuerpo lee y escribe estado interno (selectedPricingType, saleUnitState,
+    // uomCatalog…): rastrearlo haría que elegir una unidad en la sección
+    // reiniciara el formulario completo.
     effect(() => {
-      if (this.isOpen()) {
+      const open = this.isOpen();
+      this.product();
+      this.mode();
+      this.initialVariant();
+      this.initialPricingType();
+      this.initialSaleUnit();
+      this.initialSaleTier();
+      this.suggestedUnitCostNet();
+      if (!open) return;
+      untracked(() => {
         this.resetState();
         this.loadUoMCatalog();
         this.initializeIngredientUoMDefaults();
-      }
+      });
     });
 
     // Seed the shared UoM-capture sub-component from its inputs once it is
@@ -1509,8 +1523,14 @@ export class PopProductConfigModalComponent {
     // product's persisted UoMs resolved by initializeIngredientUoMDefaults().
     effect(() => {
       const cap = this.uomCapture();
-      if (this.isOpen() && cap) {
+      if (!this.isOpen() || !cap) return;
+      if (this.ingredientMode()) {
+        // Insumo: re-siembra cuando llegan los defaults asíncronos del catálogo.
         cap.initFromInputs();
+      } else {
+        // Con la sección, `externalUnits` cambia al elegir unidades y la captura
+        // ya las sincroniza sola; re-sembrar borraría el costo y la cantidad.
+        untracked(() => cap.initFromInputs());
       }
     });
 
