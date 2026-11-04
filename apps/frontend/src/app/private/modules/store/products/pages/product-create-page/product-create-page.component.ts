@@ -118,6 +118,8 @@ import { environment } from '../../../../../../../environments/environment';
 import { saleLessThanBaseValidator, uomDimensionMatchValidator, notBlankValidator } from '../../utils/product-validators';
 import { UomService, UnitOfMeasure, UomApiResponse } from '../../../inventory/services';
 import {
+  costPerPrincipal,
+  costPerStockUnit,
   emptySaleUnitState,
   fromProduct as saleUnitFromProduct,
   isMassPrincipal,
@@ -775,9 +777,13 @@ export class ProductCreatePageComponent {
    * el ida y vuelta kg → g → kg deriva de aquí y no del valor ya redondeado
    * a centavos. Se descarta al cambiar el stock (sus escalas son otras).
    */
-  private priceAnchors: Record<'base_price' | 'sale_price', PriceAnchor | null> = {
+  private priceAnchors: Record<
+    'base_price' | 'sale_price' | 'cost_price',
+    PriceAnchor | null
+  > = {
     base_price: null,
     sale_price: null,
+    cost_price: null,
   };
 
   /** Mismo ancla, por tarifa de cliente (`tier.id`), para `override_price`. */
@@ -1040,12 +1046,16 @@ export class ProductCreatePageComponent {
     };
   }
 
-  /** Lleva los precios (base, oferta y tarifas fijas) a la nueva unidad principal. */
+  /**
+   * Lleva los precios (base, oferta y tarifas fijas) y el costo a la nueva
+   * unidad principal. El costo se muestra por principal: reescalarlo mantiene
+   * intacto el costo por unidad de inventario que se guarda.
+   */
   private rescalePricesToUnit(from: UnitOfMeasure, to: UnitOfMeasure): void {
     const fromScale = Number(from.factor_to_base);
     const toScale = Number(to.factor_to_base);
     if (from.dimension !== to.dimension || fromScale === toScale) return;
-    for (const field of ['base_price', 'sale_price'] as const) {
+    for (const field of ['base_price', 'sale_price', 'cost_price'] as const) {
       const ctrl = this.productForm.get(field);
       const value = Number(ctrl?.value ?? 0);
       if (!ctrl || !(value > 0)) continue;
@@ -1100,7 +1110,7 @@ export class ProductCreatePageComponent {
   private hydrateSaleUnit(source: SaleUnitProductLike): void {
     this.saleUnitState.set(saleUnitFromProduct(source, this.uomOptions()));
     this.saleUnitTouched.set(false);
-    this.priceAnchors = { base_price: null, sale_price: null };
+    this.priceAnchors = { base_price: null, sale_price: null, cost_price: null };
     this.tierPriceAnchors = new Map();
   }
 
@@ -3038,7 +3048,12 @@ export class ProductCreatePageComponent {
       // mano — ver `resolveSlugForSubmit()`.
       slug: product.slug ? ProductUtils.generateSlug(product.slug) : '',
       description: product.description,
-      cost_price: product.cost_price || 0,
+      // cost_price se guarda por unidad de inventario; el editor lo muestra
+      // por la unidad principal, igual que el precio.
+      cost_price: costPerPrincipal(
+        Number(product.cost_price || 0),
+        (product as any).price_unit_quantity,
+      ),
       profit_margin: product.profit_margin || 0,
       base_price: product.base_price,
       is_on_sale: product.is_on_sale || false,
@@ -3194,7 +3209,10 @@ export class ProductCreatePageComponent {
           v.price_override !== undefined && v.price_override !== null
             ? Number(v.price_override)
             : Number(product.base_price),
-        cost_price: Number(v.cost_price || product.cost_price || 0),
+        cost_price: costPerPrincipal(
+          Number(v.cost_price || product.cost_price || 0),
+          (product as any).price_unit_quantity,
+        ),
         profit_margin: Number(v.profit_margin || product.profit_margin || 0),
         is_on_sale: !!v.is_on_sale,
         sale_price: Number(v.sale_price || 0),
@@ -5066,7 +5084,10 @@ export class ProductCreatePageComponent {
       name: formValue.name,
       slug: this.resolveSlugForSubmit(formValue.slug),
       description: formValue.description || undefined,
-      cost_price: Number(formValue.cost_price),
+      cost_price: costPerStockUnit(
+        Number(formValue.cost_price),
+        formValue.price_unit_quantity,
+      ),
       profit_margin: Number(formValue.profit_margin),
       base_price: Number(neutral(formValue.base_price, 0)),
       is_on_sale: !!neutral(formValue.is_on_sale, false),
@@ -5230,7 +5251,10 @@ export class ProductCreatePageComponent {
           name: v.name,
           // Same price as the product = no own price: null keeps it inherited.
           price_override: variantPriceOverrideToSend(v.price, formValue.base_price),
-          cost_price: Number(v.cost_price),
+          cost_price: costPerStockUnit(
+            Number(v.cost_price),
+            formValue.price_unit_quantity,
+          ),
           profit_margin: Number(v.profit_margin),
           is_on_sale: !!v.is_on_sale,
           sale_price: Number(v.sale_price),
@@ -6083,9 +6107,12 @@ export class ProductCreatePageComponent {
       : base;
   }
 
-  /** Whole-package acquisition cost = product cost_price * packSize. */
+  /** Whole-package acquisition cost = costo por unidad de inventario × packSize. */
   getRowPackageCost(row: PriceTierOverrideRow): number {
-    const cost = Number(this.productForm.get('cost_price')?.value || 0);
+    const cost = costPerStockUnit(
+      Number(this.productForm.get('cost_price')?.value || 0),
+      this.productForm.get('price_unit_quantity')?.value,
+    );
     return cost * this.getRowPackSize(row);
   }
 

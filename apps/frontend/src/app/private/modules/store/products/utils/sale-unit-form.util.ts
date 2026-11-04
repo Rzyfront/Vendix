@@ -466,3 +466,31 @@ export function isFractionalPrincipal(
   const principal = principalUnit(state, catalog);
   return principal != null && isMeasurableDimension(principal.dimension);
 }
+
+// ===== Costo: inventario ↔ unidad principal =====
+
+function validScale(priceUnitQuantity: number | null | undefined): number {
+  const scale = Number(priceUnitQuantity);
+  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+/**
+ * `cost_price` se persiste por unidad de INVENTARIO: lo escriben así la
+ * recepción de compras y el costeo, y así lo multiplican el costo de ventas y
+ * la valoración. El editor lo muestra y calcula el margen por la unidad
+ * principal, igual que el precio (`price_unit_quantity` unidades de inventario).
+ */
+export function costPerPrincipal(
+  costPerStockUnit: number,
+  priceUnitQuantity: number | null | undefined,
+): number {
+  return Math.round(costPerStockUnit * validScale(priceUnitQuantity) * 100) / 100;
+}
+
+/** Inverso de `costPerPrincipal`, a 2 decimales como la columna `cost_price`. */
+export function costPerStockUnit(
+  costPerPrincipalUnit: number,
+  priceUnitQuantity: number | null | undefined,
+): number {
+  return Math.round((costPerPrincipalUnit / validScale(priceUnitQuantity)) * 100) / 100;
+}

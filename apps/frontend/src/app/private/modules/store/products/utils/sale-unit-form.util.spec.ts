@@ -2,6 +2,8 @@ import { UnitOfMeasure } from '../../inventory/services/uom.service';
 import {
   compatibleAdditionalUnits,
   compatiblePurchaseUnits,
+  costPerPrincipal,
+  costPerStockUnit,
   fromProduct,
   inventoryCandidates,
   isMassPrincipal,
@@ -347,6 +349,34 @@ describe('sale-unit-form util', () => {
       expect(isMassPrincipal(state({ principalUomId: LB.id }), CATALOG)).toBeTrue();
       expect(isMassPrincipal(state({ principalUomId: L.id }), CATALOG)).toBeFalse();
       expect(isMassPrincipal(state({}), CATALOG)).toBeFalse();
+    });
+  });
+
+  describe('costo: inventario ↔ unidad principal', () => {
+    // `cost_price` se persiste por unidad de inventario (recepción y costeo);
+    // el editor lo muestra y lo calcula por la unidad principal, como el precio.
+    it('muestra el costo por kg de un producto con inventario en g', () => {
+      expect(costPerPrincipal(18, 1000)).toBe(18000);
+      expect(costPerPrincipal(18.33, 1000)).toBe(18330);
+      expect(costPerPrincipal(18.5, 500)).toBe(9250);
+    });
+
+    it('guarda el costo por g a partir del costo por kg (2 decimales, como la columna)', () => {
+      expect(costPerStockUnit(18000, 1000)).toBe(18);
+      expect(costPerStockUnit(18333, 1000)).toBe(18.33);
+      expect(costPerStockUnit(9250, 500)).toBe(18.5);
+    });
+
+    it('un producto sin escala (pieza o legado) conserva el costo tal cual', () => {
+      expect(costPerPrincipal(2894, 1)).toBe(2894);
+      expect(costPerStockUnit(2894, 1)).toBe(2894);
+      expect(costPerPrincipal(2894, 0)).toBe(2894);
+      expect(costPerStockUnit(2894, Number.NaN)).toBe(2894);
+      expect(costPerStockUnit(2894, null)).toBe(2894);
+    });
+
+    it('ida y vuelta sin deriva', () => {
+      expect(costPerPrincipal(costPerStockUnit(18000, 1000), 1000)).toBe(18000);
     });
   });
 });
