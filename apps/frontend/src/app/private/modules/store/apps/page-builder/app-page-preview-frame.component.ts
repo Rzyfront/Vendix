@@ -3,12 +3,15 @@ import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, injec
 import { ActivatedRoute } from '@angular/router';
 
 import { ProductPageViewComponent } from '../../../../../public/product-page/product-page-view.component';
+import { ServicePageHomeViewComponent } from '../../../../../public/service-page/service-page-home-view.component';
+import { ServicePageViewComponent } from '../../../../../public/service-page/service-page-view.component';
 import { StoreHomeViewComponent } from '../../../../../public/store-home/store-home-view.component';
 import { BUILDER_PREVIEW_CHANNEL, readFrameMessage } from '../builder/builder-preview';
 import type { PageAppKind } from '../templates';
 import type { AppPagePreviewPayload } from './page-builder.types';
 import { ProductPageContext, ProductPageSettings, productPagePreview } from './product-page/product-page-builder';
 import { ProductPagePreviewBodyComponent } from './product-page/product-page-preview-body.component';
+import { ServicePageContext, ServicePageSettings, servicePagePreview } from './service-page/service-page-builder';
 import { StoreHomeContext, StoreHomeSettings, storeHomePreview } from './store-home/store-home-builder';
 
 /** Outline of the section selected in the editor. */
@@ -25,7 +28,7 @@ const SELECTED_STYLE = `[data-preview-selected="true"]{outline:2px solid var(--c
 @Component({
   selector: 'app-app-page-preview-frame',
   standalone: true,
-  imports: [StoreHomeViewComponent, ProductPageViewComponent, ProductPagePreviewBodyComponent],
+  imports: [StoreHomeViewComponent, ProductPageViewComponent, ProductPagePreviewBodyComponent, ServicePageViewComponent, ServicePageHomeViewComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (payload(); as p) {
@@ -38,6 +41,21 @@ const SELECTED_STYLE = `[data-preview-selected="true"]{outline:2px solid var(--c
             <app-product-page-view [page]="view.page" [storeName]="view.storeName || 'Tienda'" [storeLogo]="view.storeLogoUrl" [blockIds]="true">
               <app-product-page-preview-body [preview]="view" />
             </app-product-page-view>
+          }
+        }
+        @case ('service_page') {
+          @if (servicePage(); as view) {
+            <app-service-page-view [page]="view.page" [storeName]="view.storeName || 'Tienda'" [storeLogo]="view.storeLogoUrl">
+              <app-service-page-home-view
+                [services]="view.services"
+                [featuredIds]="view.featuredIds"
+                [productIds]="view.productIds"
+                [page]="view.page"
+                [storeName]="view.storeName"
+                [previewProducts]="view.products"
+                [blockIds]="true"
+              />
+            </app-service-page-view>
           }
         }
       }
@@ -71,6 +89,13 @@ export class AppPagePreviewFrameComponent {
     const p = this.payload();
     return p?.kind === 'product_page'
       ? productPagePreview(p as AppPagePreviewPayload<ProductPageSettings | null, ProductPageContext | null>)
+      : null;
+  });
+
+  readonly servicePage = computed(() => {
+    const p = this.payload();
+    return p?.kind === 'service_page'
+      ? servicePagePreview(p as AppPagePreviewPayload<ServicePageSettings | null, ServicePageContext | null>)
       : null;
   });
 

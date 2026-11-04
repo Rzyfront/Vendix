@@ -9,6 +9,7 @@ import {
   StoreAppsResponse,
 } from '../interfaces/store-app.interface';
 import type { ProductPageContext } from '../page-builder/product-page/product-page-builder';
+import type { ServicePageContext } from '../page-builder/service-page/service-page-builder';
 import type { StoreHomePublic } from '../../../../../public/store-home/store-home.service';
 import type { AppPageDocument, PageAppKind } from '../templates/app-page.types';
 
@@ -86,6 +87,11 @@ export class StoreAppsService {
     return this.http.get<{ data: ProductPageCustomDomain[] }>(
       `${this.apiUrl}/product_page/custom-domains`,
     );
+  }
+
+  /** F6-B — the services and secondary products the page paints, for the builder preview. */
+  servicePagePreviewContext(): Observable<{ data: ServicePageContext }> {
+    return this.http.get<{ data: ServicePageContext }>(`${this.apiUrl}/service_page/preview-context`);
   }
 
   saveServicePageConfig(body: {

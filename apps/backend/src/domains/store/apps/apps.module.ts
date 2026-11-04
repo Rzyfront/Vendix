@@ -11,6 +11,7 @@ import { ProductPageViewService } from './product-page/product-page-view.service
 import { ServicePageAppController } from './service-page/service-page-app.controller';
 import { ServicePageAppService } from './service-page/service-page-app.service';
 import { ServicePagePublicController } from './service-page/service-page-public.controller';
+import { ServicePageViewService } from './service-page/service-page-view.service';
 import { AppDomainService } from './shared/app-domain.service';
 import { AppPageService } from './shared/app-page.service';
 import { LodgingReservationsModule } from '../hospitality/reservations/reservations.module';
@@ -61,6 +62,7 @@ import { LandingLeadService } from './landing/landing-lead.service';
     ProductPageAppService,
     ProductPageViewService,
     ServicePageAppService,
+    ServicePageViewService,
     BookingAppService,
     BookingCheckinService,
     StoreHomeAppService,

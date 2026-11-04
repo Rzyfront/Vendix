@@ -3,6 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { of } from 'rxjs';
 import { ServicePageHomeComponent } from './service-page-home.component';
+import { ServicePageHomeViewComponent } from './service-page-home-view.component';
 import { ServicePagePublicConfig, ServicePageService } from './service-page.service';
 import { CatalogService, EcommerceProduct } from '../../private/modules/ecommerce/services/catalog.service';
 import { StoreSeoService } from '../../private/modules/ecommerce/services/store-seo';
@@ -90,7 +91,7 @@ describe('ServicePageHomeComponent (apps-module Fase 3)', () => {
         { provide: ServicePageService, useValue: {} },
       ],
     });
-    TestBed.overrideComponent(ServicePageHomeComponent, {
+    TestBed.overrideComponent(ServicePageHomeViewComponent, {
       remove: { imports: [CurrencyPipe, ProductComplementsComponent] },
       add: { imports: [StubCurrencyPipe, StubComplementsComponent] },
     });
@@ -196,5 +197,24 @@ describe('ServicePageHomeComponent (apps-module Fase 3)', () => {
     expect(button.textContent).toContain('Ver servicio');
     button.click();
     expect(router.navigate).toHaveBeenCalledWith(['/products', 's-10']);
+  });
+
+  it('sin vista previa no marca secciones; con blockIds marca portada, servicios y productos (solo el editor)', async () => {
+    catalog.getProducts.and.returnValue(of({ data: [service(10, 'Limpieza')] } as any));
+    await render({ service_ids: [10], featured_service_ids: [], product_ids: [7], page: ownPage() });
+    expect((fixture.nativeElement as HTMLElement).querySelector('[data-block-id]')).toBeNull();
+
+    const view = TestBed.createComponent(ServicePageHomeViewComponent);
+    view.componentRef.setInput('services', [service(10, 'Limpieza')]);
+    view.componentRef.setInput('productIds', [7]);
+    view.componentRef.setInput('page', ownPage());
+    view.componentRef.setInput('blockIds', true);
+    view.componentRef.setInput('previewProducts', [{ id: 7, name: 'Crema', image_url: null }]);
+    view.detectChanges();
+    const root = view.nativeElement as HTMLElement;
+    expect(Array.from(root.querySelectorAll('[data-block-id]')).map((e) => e.getAttribute('data-block-id'))).toEqual(
+      jasmine.arrayContaining(['hero', 'services', 'faq', 'products']),
+    );
+    expect(root.querySelector('[data-testid="preview-products"]')?.textContent).toContain('Crema');
   });
 });

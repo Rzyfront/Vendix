@@ -29,6 +29,7 @@ import { ServicePageSettingsPanelComponent } from '../../components/service-page
 import { StoreHomeSettingsPanelComponent } from '../../components/store-home-settings-panel.component';
 import { LandingBuilderPageComponent } from '../../landing-builder/landing-builder-page.component';
 import { ProductPageBuilderPageComponent } from '../../page-builder/product-page/product-page-builder-page.component';
+import { ServicePageBuilderPageComponent } from '../../page-builder/service-page/service-page-builder-page.component';
 import { StoreHomeBuilderPageComponent } from '../../page-builder/store-home/store-home-builder-page.component';
 import type { AppSettingsPanel } from '../../components/app-settings-panel';
 import type { AppKind, AppStatus, StoreAppDetail } from '../../interfaces/store-app.interface';
@@ -58,7 +59,7 @@ const STATUS_BADGE: Record<AppStatus, { label: string; color: StickyHeaderBadgeC
 
 /** Per-app header icon and name of the settings tab. */
 /** F6-B — apps whose whole view is a page builder of their own (`page-builder/<app>/`). */
-const OWN_BUILDER_KINDS: ReadonlySet<string> = new Set<AppKind>(['store_home', 'product_page']);
+const OWN_BUILDER_KINDS: ReadonlySet<string> = new Set<AppKind>(['store_home', 'product_page', 'service_page']);
 
 const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>> = {
   store_home: { icon: 'home', settingsLabel: 'Configuración' },
@@ -90,6 +91,7 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
     LandingBuilderPageComponent,
     StoreHomeBuilderPageComponent,
     ProductPageBuilderPageComponent,
+    ServicePageBuilderPageComponent,
     ProductPageSettingsPanelComponent,
     ServicePageSettingsPanelComponent,
     BookingSettingsPanelComponent,
@@ -104,6 +106,7 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
       @switch (kind()) {
         @case ('store_home') { <app-store-home-builder-page /> }
         @case ('product_page') { <app-product-page-builder-page /> }
+        @case ('service_page') { <app-service-page-builder-page /> }
       }
     } @else {
     <div class="w-full" [attr.data-app-view]="kind()">

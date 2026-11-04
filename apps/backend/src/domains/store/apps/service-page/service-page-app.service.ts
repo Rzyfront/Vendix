@@ -17,6 +17,10 @@ import {
   secondaryProductsWhere,
 } from './service-page.reader';
 import {
+  ServicePageViewData,
+  ServicePageViewService,
+} from './service-page-view.service';
+import {
   PublishServicePageDto,
   UpdateServicePageConfigDto,
 } from './service-page.dto';
@@ -37,7 +41,19 @@ export class ServicePageAppService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly domains: AppDomainService,
+    private readonly view: ServicePageViewService,
   ) {}
+
+  /**
+   * F6-B — the catalog data the editor's preview paints besides the draft
+   * page: the same services and secondary products the public read selects,
+   * whatever the app's status (the owner previews before publishing).
+   */
+  async previewContext(): Promise<ServicePageViewData> {
+    const storeId = this.requireStoreId();
+    const row = await this.findRow(storeId);
+    return this.view.read(storeId, row?.config ?? null);
+  }
 
   async updateConfig(dto: UpdateServicePageConfigDto): Promise<void> {
     const storeId = this.requireStoreId();
