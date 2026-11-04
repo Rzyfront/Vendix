@@ -1,5 +1,12 @@
 import {
+  analyzeVariableBarcodeOverlaps,
+  buildExampleBarcode,
   createFormatFromPreset,
+  describeVariableBarcode,
+  parsePrefixList,
+  positionsLabel,
+  validateVariableBarcodeLayout,
+  weightUnitToKg,
   isValidEan13,
   parseVariableBarcode,
   resolveVariableBarcode,
@@ -135,5 +142,101 @@ describe('variable-barcode.util', () => {
       ok: false,
       reason: 'prefix',
     });
+  });
+
+  it('describeVariableBarcode segmenta los 13 dígitos con posiciones en base 1', () => {
+    const segs = describeVariableBarcode(fmt('rongta_07'), '2100003001801');
+    expect(segs.map((x) => [x.kind, x.digits, x.positions])).toEqual([
+      ['prefix', '21', '1–2'],
+      ['product', '00003', '3–7'],
+      ['weight', '00180', '8–12'],
+      ['check', '1', '13'],
+    ]);
+  });
+
+  it('describeVariableBarcode marca huecos sin uso y usa marcadores sin código', () => {
+    const f = { ...fmt('rongta_07'), product_code_length: 4, value_start: 8, value_length: 4 };
+    const segs = describeVariableBarcode(f);
+    expect(segs.map((x) => [x.kind, x.digits, x.positions])).toEqual([
+      ['prefix', 'PP', '1–2'],
+      ['product', 'CCCC', '3–6'],
+      ['unused', '00', '7–8'],
+      ['weight', 'WWWW', '9–12'],
+      ['check', 'K', '13'],
+    ]);
+    expect(describeVariableBarcode({ ...f, value_length: 6 })).toEqual([]);
+  });
+
+  it('positionsLabel convierte índices base 0 a posiciones base 1', () => {
+    expect(positionsLabel(2, 5)).toBe('3–7');
+    expect(positionsLabel(12, 1)).toBe('13');
+  });
+
+  it('validateVariableBarcodeLayout aplica la regla del backend', () => {
+    expect(validateVariableBarcodeLayout(fmt('rongta_07'))).toBeNull();
+    expect(validateVariableBarcodeLayout(fmt('rongta_27'))).toBeNull();
+    expect(validateVariableBarcodeLayout({ ...fmt('rongta_07'), value_length: 6 })).toBe(
+      'El peso llega a la posición 13 y solo hay 12 de datos (la 13 es el dígito de control)',
+    );
+    expect(validateVariableBarcodeLayout({ ...fmt('rongta_07'), product_code_start: 1 })).toBe(
+      'El prefijo y el código de producto se pisan en la posición 2',
+    );
+    expect(validateVariableBarcodeLayout({ ...fmt('rongta_07'), value_start: 5 })).toBe(
+      'El código de producto y el peso se pisan en las posiciones 6–7',
+    );
+    expect(validateVariableBarcodeLayout({ ...fmt('rongta_07'), product_code_length: 0 })).toBe(
+      'El código de producto debe tener al menos 1 dígito',
+    );
+  });
+
+  it('parsePrefixList informa los prefijos inválidos en vez de descartarlos', () => {
+    expect(parsePrefixList('21, 22, 2a, 123, 21', 2)).toEqual({
+      prefixes: ['21', '22'],
+      invalid: ['2a', '123'],
+      truncated: false,
+    });
+    const many = Array.from({ length: 21 }, (_, i) => String(10 + i)).join(',');
+    expect(parsePrefixList(many, 2).truncated).toBe(true);
+  });
+
+  it('buildExampleBarcode arma un EAN-13 válido que el parser lee igual', () => {
+    for (const p of VARIABLE_BARCODE_PRESETS) {
+      const f = fmt(p.preset);
+      const code = buildExampleBarcode(f, 1234, 1.25);
+      expect(code).not.toBeNull();
+      expect(isValidEan13(code!)).toBe(true);
+      const r = parseVariableBarcode(code!, f);
+      expect(r).toEqual({ ok: true, prefix: f.prefixes[0], productCode: 1234, weightKg: 1.25 });
+    }
+    expect(buildExampleBarcode(fmt('rongta_07'), 123456, 1)).toBeNull();
+  });
+
+  it('analyzeVariableBarcodeOverlaps distingue equivalentes de conflictos', () => {
+    const a = fmt('rongta_07');
+    const b = fmt('rongta_09');
+    const c = { ...fmt('rongta_07'), value_decimals: 2 };
+    const d = fmt('rongta_27');
+    const e = fmt('rongta_17');
+    expect(analyzeVariableBarcodeOverlaps([a, b])).toEqual({
+      equivalent: [{ a: a.id, b: b.id, prefixes: ['21'] }],
+      conflicts: [],
+    });
+    expect(analyzeVariableBarcodeOverlaps([a, c]).conflicts.length).toBe(1);
+    // "2" (1 dígito) se pisa con "21" y "27".
+    expect(analyzeVariableBarcodeOverlaps([a, d, e]).conflicts).toEqual([
+      { a: a.id, b: d.id, prefixes: ['21'] },
+      { a: d.id, b: e.id, prefixes: ['27'] },
+    ]);
+    expect(analyzeVariableBarcodeOverlaps([a, { ...b, enabled: false }])).toEqual({
+      equivalent: [],
+      conflicts: [],
+    });
+  });
+
+  it('weightUnitToKg convierte unidades de peso y rechaza otras', () => {
+    expect(weightUnitToKg('kg')).toBe(1);
+    expect(weightUnitToKg('g')).toBe(0.001);
+    expect(weightUnitToKg(null)).toBe(1);
+    expect(weightUnitToKg('und')).toBeNull();
   });
 });
