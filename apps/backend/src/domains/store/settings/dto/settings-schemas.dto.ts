@@ -18,6 +18,7 @@ import {
   ValidateIf,
   Equals,
   ArrayMinSize,
+  ArrayMaxSize,
   Validate,
   ValidatorConstraint,
   ValidatorConstraintInterface,
