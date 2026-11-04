@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { packagingStockUnits } from '../../store/products/services/weight-stock-units.util';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { OrganizationOrderQueryDto } from './dto/organization-order-query.dto';
 import { Prisma } from '@prisma/client';
@@ -517,9 +518,11 @@ export class OrganizationOrdersService {
         applied_price_tier_name:
           (item as { applied_price_tier_name_snapshot?: string | null })
             .applied_price_tier_name_snapshot ?? null,
-        stock_units_consumed:
-          (item as { stock_units_consumed?: number | null })
-            .stock_units_consumed ?? null,
+        // En una línea de PESO es la pesada en unidades de stock, no un
+        // empaque: el PDF no debe imprimir "× 180 unid/empaque".
+        stock_units_consumed: packagingStockUnits(
+          item as { weight?: unknown; stock_units_consumed?: number | null },
+        ),
         // Serial number(s) snapshot (CSV) for serialized products (QUI-431).
         serial_numbers_snapshot:
           (item as { serial_numbers_snapshot?: string | null })
