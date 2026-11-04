@@ -440,8 +440,8 @@ export class CashRegistersComponent {
   /** `inventory.pos_stock_scope === 'register_location'` ("Bodega de la caja"). */
   readonly is_register_scope = computed(
     () =>
-      (this.store_settings_facade.settings() as any)?.inventory
-        ?.pos_stock_scope === 'register_location',
+      this.store_settings_facade.settings()?.inventory?.pos_stock_scope ===
+      'register_location',
   );
 
   // Tabs configuration
