@@ -7,6 +7,7 @@ import {
   type TicketBatchPrintResult,
 } from '../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../services/order-ticket.service';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import {
   OrdersBulkPrintService,
   describeBulkPrintOutcome,
@@ -52,6 +53,7 @@ describe('OrdersBulkPrintService — formatos mezclados y errores', () => {
           },
         },
         { provide: PosTicketService, useValue: posTicket },
+        { provide: StoreSettingsFacade, useValue: { timezone: () => 'America/Bogota' } },
       ],
     });
     return { service: TestBed.inject(OrdersBulkPrintService), posTicket };

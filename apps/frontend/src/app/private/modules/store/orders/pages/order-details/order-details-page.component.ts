@@ -5035,7 +5035,10 @@ export class OrderDetailsPageComponent {
   private buildTicketData(orderData: Order): TicketData {
     const user = this.authFacade.getCurrentUser();
     const cashier = user ? `${user.first_name} ${user.last_name}` : undefined;
-    return this.orderTicketService.toTicketData(orderData, { cashier });
+    return this.orderTicketService.toTicketData(orderData, {
+      cashier,
+      timeZone: this.settingsFacade.timezone(),
+    });
   }
 
   // ── Bug 4: order → dispatch note → route traceability ──────
