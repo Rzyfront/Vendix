@@ -373,9 +373,13 @@ export class AppDomainService {
           legacy.status !== 'disabled' &&
           String(legacy.app_type) === appType
         ) {
+          // Legacy (pre-F5) publish: the custom domain already served this
+          // app and no previous type was recorded. Record the current type so
+          // releasing it leaves the customer's verified domain untouched,
+          // exactly as before F5, instead of disabling it.
           aliases = withAlias(aliases, {
             domain_id: previous.id,
-            previous_app_type: state.legacyPreviousAppType,
+            previous_app_type: state.legacyPreviousAppType ?? appType,
           });
         }
       }
@@ -443,12 +447,12 @@ export class AppDomainService {
     ) {
       return;
     }
-    if (alias.previous_app_type === appType) {
-      // It served this app type before the app took it: leave it as it was.
-    } else if (alias.previous_app_type) {
-      await this.setAppType(domain, alias.previous_app_type);
+    if (!alias.previous_app_type || alias.previous_app_type === appType) {
+      // It served this app type before the app took it (or the record is
+      // legacy and has no previous type): leave it as it was. A verified
+      // customer domain is never disabled by unpublishing an app.
     } else {
-      await this.setDomainStatus(domain.id, 'disabled');
+      await this.setAppType(domain, alias.previous_app_type);
     }
     await this.clearSeoCache(domain.hostname);
   }

@@ -163,7 +163,7 @@ describe('AppDomainService', () => {
       expect(cache.del).toHaveBeenCalledWith('seo:sitemap:roku-cafe.vendix.online');
     });
 
-    it('releasing an alias without a known previous app type disables it, never deletes it', async () => {
+    it('releasing a legacy alias (no previous app type) leaves the verified custom domain untouched', async () => {
       prisma.domain_settings.findFirst.mockResolvedValue({
         id: 9, hostname: 'citas.roku.com', app_type: 'STORE_SERVICE_PAGE', status: 'active',
       });
@@ -171,10 +171,12 @@ describe('AppDomainService', () => {
       expect(prisma.domain_settings.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 9, store_id: STORE_ID } }),
       );
-      expect(prisma.domain_settings.update).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 9 }, data: expect.objectContaining({ status: 'disabled' }) }),
+      // Never disable a customer's verified domain: before F5 unpublishing an
+      // app did not touch it, and that is the behaviour to keep.
+      expect(prisma.domain_settings.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'disabled' }) }),
       );
-      expect(events.emit).toHaveBeenCalledWith('domain.disabled', expect.anything());
+      expect(cache.del).toHaveBeenCalledWith('seo:sitemap:citas.roku.com');
     });
 
     it('releasing an alias gives it back its previous app type', async () => {
