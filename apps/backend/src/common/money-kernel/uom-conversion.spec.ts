@@ -120,6 +120,10 @@ describe('uom-conversion — validateProductUoms (S5, S10)', () => {
     const violations = validateProductUoms({ stock: kg, principal: kg });
     expect(violations.map((v) => v.code)).toEqual(['MEASURED_STOCK_NOT_BASE']);
     expect(violations[0].message).toContain('debe contarse en g');
+    expect(codes({ stock: kg, principal: kg, additional: [g] })).toEqual([
+      'SMALLER_THAN_STOCK',
+      'MEASURED_STOCK_NOT_BASE',
+    ]);
   });
 
   it('principal medible con inventario en la base es válido para volumen y longitud', () => {

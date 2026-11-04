@@ -190,6 +190,7 @@ export type UomViolationCode =
   | 'STOCK_REQUIRED'
   | 'DUPLICATE_SALE_UNIT'
   | 'DIMENSION_MISMATCH'
+  | 'SMALLER_THAN_STOCK'
   | 'NOT_INTEGER_MULTIPLE'
   | 'MEASURED_STOCK_NOT_BASE'
   | 'PRICING_TYPE_MISMATCH'
@@ -241,7 +242,7 @@ export function validateProductUoms(config: ProductUomConfig): UomViolation[] {
       violations.push({
         code: 'STOCK_REQUIRED',
         message:
-          'Para vender en unidades de medida el producto debe tener unidad de inventario.',
+          'Para declarar unidades de venta el producto debe tener unidad de stock',
       });
       return violations;
     }
@@ -251,7 +252,7 @@ export function validateProductUoms(config: ProductUomConfig): UomViolation[] {
       if (seen.some((other) => sameUnit(other, unit))) {
         violations.push({
           code: 'DUPLICATE_SALE_UNIT',
-          message: `La unidad ${label(unit)} está repetida en las unidades de venta.`,
+          message: 'Las unidades de venta no pueden repetirse',
           uom_code: unit.code,
         });
         continue;
@@ -261,15 +262,27 @@ export function validateProductUoms(config: ProductUomConfig): UomViolation[] {
       if (String(unit.dimension) !== String(stock.dimension)) {
         violations.push({
           code: 'DIMENSION_MISMATCH',
-          message: `${label(unit)} no se puede convertir a ${label(stock)}: miden cosas distintas (peso, volumen, longitud o conteo).`,
+          message: `La unidad de venta (${unit.code}) debe pertenecer a la misma dimensión que la de stock (${stock.code}) para poder convertirse`,
+          uom_code: unit.code,
+        });
+        continue;
+      }
+      if (factorOf(unit) < factorOf(stock)) {
+        violations.push({
+          code: 'SMALLER_THAN_STOCK',
+          message: `La unidad de venta (${unit.code}) no puede ser menor que la de stock (${stock.code}): el stock se cuenta en enteros de ${stock.code}`,
           uom_code: unit.code,
         });
         continue;
       }
       if (integerRatio(unit, stock) == null) {
+        const isPrincipal =
+          config.principal != null && sameUnit(config.principal, unit);
         violations.push({
           code: 'NOT_INTEGER_MULTIPLE',
-          message: `${label(unit)} debe equivaler a un número entero de ${stock.code}: el inventario se cuenta en enteros de ${stock.code}.`,
+          message: isPrincipal
+            ? `La unidad principal (${unit.code}) debe equivaler a un número entero de ${stock.code}: el precio se expresa en ella`
+            : `La unidad de venta (${unit.code}) debe equivaler a un número entero de ${stock.code}: el stock se cuenta en enteros de ${stock.code}`,
           uom_code: unit.code,
         });
       }
@@ -285,7 +298,7 @@ export function validateProductUoms(config: ProductUomConfig): UomViolation[] {
       const base = baseUnitCodeFor(principal.dimension) ?? 'su unidad mínima';
       violations.push({
         code: 'MEASURED_STOCK_NOT_BASE',
-        message: `Se vende por ${principal.code} en fracciones (por ejemplo 0,245 ${principal.code}), así que el inventario debe contarse en ${base}; contado en ${stock.code} una venta pequeña descontaría 0.`,
+        message: `Se vende por ${principal.code} en fracciones (por ejemplo 0,245 ${principal.code}), así que el stock debe contarse en ${base}; contado en ${stock.code} una venta pequeña descontaría 0`,
         uom_code: stock.code,
       });
     }
@@ -319,13 +332,13 @@ export function validateProductUoms(config: ProductUomConfig): UomViolation[] {
       if (ratio == null) {
         violations.push({
           code: 'PURCHASE_DIMENSION_MISMATCH',
-          message: `La unidad de compra ${label(purchase)} y la de inventario ${label(stock)} deben medir lo mismo para poder convertirse.`,
+          message: `Las unidades de stock (${stock.code}) y compra (${purchase.code}) deben pertenecer a la misma dimensión para poder convertirse`,
           uom_code: purchase.code,
         });
       } else if (Math.round(ratio) < 1) {
         violations.push({
           code: 'PURCHASE_SMALLER_THAN_STOCK',
-          message: `La unidad de compra ${label(purchase)} no puede ser menor que la de inventario ${label(stock)}.`,
+          message: `La unidad de compra (${purchase.code}) no puede ser menor que la de stock (${stock.code})`,
           uom_code: purchase.code,
         });
       }

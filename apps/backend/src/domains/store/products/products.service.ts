@@ -37,6 +37,12 @@ import {
   extractTypedRates,
 } from '../taxes/utils/final-price.util';
 import { generateSlug } from '@common/utils/slug.util';
+import {
+  integerRatio,
+  uomRatio,
+  validateProductUoms,
+  type UomRef,
+} from '@common/money-kernel/uom-conversion';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
   InventoryAdjustmentsService,
@@ -475,15 +481,28 @@ export class ProductsService {
       return manual_factor;
     }
 
-    if (stockUom.dimension !== purchaseUom.dimension) {
-      throw new BadRequestException(
-        `Las unidades de stock (${stockUom.code}) y compra (${purchaseUom.code}) deben pertenecer a la misma dimensión para poder convertirse`,
-      );
+    // Núcleo único (`@common/money-kernel/uom-conversion`): misma dimensión y
+    // compra ≥ stock. Una compra menor que el stock (g con stock en kg) daba
+    // factor 0 y cada recepción entraba en cero.
+    const [violation] = validateProductUoms({
+      stock: stockUom as UomRef,
+      principal: null,
+      purchase: purchaseUom as UomRef,
+    });
+    if (violation?.code === 'PURCHASE_DIMENSION_MISMATCH') {
+      throw new BadRequestException(violation.message);
+    }
+    if (violation) {
+      throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_001, violation.message, {
+        violation_code: violation.code,
+        stock_uom_id,
+        purchase_uom_id,
+      });
     }
 
-    return Math.round(
-      Number(purchaseUom.factor_to_base) / Number(stockUom.factor_to_base),
-    );
+    // Compra de factor no entero (galón → ml) se redondea al recibir: así se
+    // documenta en `assertStockUomEligible`.
+    return Math.round(uomRatio(purchaseUom as UomRef, stockUom as UomRef)!);
   }
 
   /**
@@ -545,6 +564,7 @@ export class ProductsService {
   private async assertSaleUomsValid(
     sale_uoms: SaleUomRow[] | null | undefined,
     stock_uom_id: number | null | undefined,
+    pricing_type?: string | null,
   ): Promise<number | null> {
     if (!sale_uoms || sale_uoms.length === 0) return null;
 
@@ -596,34 +616,35 @@ export class ProductsService {
           { uom_id },
         );
       }
-      if (uom.dimension !== stockUom.dimension) {
-        throw new VendixHttpException(
-          ErrorCodes.PROD_VALIDATE_001,
-          `La unidad de venta (${uom.code}) debe pertenecer a la misma dimensión que la de stock (${stockUom.code}) para poder convertirse`,
-          { uom_id, stock_uom_id },
-        );
-      }
-      if (Number(uom.factor_to_base) < Number(stockUom.factor_to_base)) {
-        throw new VendixHttpException(
-          ErrorCodes.PROD_VALIDATE_001,
-          `La unidad de venta (${uom.code}) no puede ser menor que la de stock (${stockUom.code}): el stock se cuenta en enteros de ${stockUom.code}`,
-          { uom_id, stock_uom_id },
-        );
-      }
     }
 
+    // Reglas de compatibilidad del núcleo único (S5, S10 de
+    // `product-sale-unit-consolidation`): misma dimensión, cada unidad entera
+    // del stock, stock en la base si la principal se vende en fracciones y
+    // `pricing_type` acorde a la principal (solo si viene).
     const principalUom = uoms.find((u) => u.id === principals[0].uom_id)!;
-    const ratio =
-      Number(principalUom.factor_to_base) / Number(stockUom.factor_to_base);
-    const scale = Math.round(ratio);
-    if (!(scale >= 1) || Math.abs(ratio - scale) > 1e-6) {
+    const additional = sale_uoms
+      .filter((row) => row.is_principal !== true)
+      .map((row) => uoms.find((u) => u.id === row.uom_id)! as UomRef);
+    const [violation] = validateProductUoms({
+      stock: stockUom as UomRef,
+      principal: principalUom as UomRef,
+      additional,
+      pricing_type: pricing_type ?? null,
+    });
+    if (violation) {
       throw new VendixHttpException(
         ErrorCodes.PROD_VALIDATE_001,
-        `La unidad principal (${principalUom.code}) debe equivaler a un número entero de ${stockUom.code}: el precio se expresa en ella`,
-        { uom_id: principalUom.id, stock_uom_id },
+        violation.message,
+        {
+          violation_code: violation.code,
+          uom_code: violation.uom_code,
+          stock_uom_id,
+        },
       );
     }
-    return scale;
+
+    return integerRatio(principalUom as UomRef, stockUom as UomRef)!;
   }
 
   async generateDescription(dto: GenerateProductDescriptionDto) {
@@ -1410,6 +1431,7 @@ export class ProductsService {
       const principalScale = await this.assertSaleUomsValid(
         sale_uoms,
         sanitizedDto.stock_uom_id,
+        sanitizedDto.pricing_type,
       );
       if (principalScale !== null) {
         productData.price_unit_quantity = principalScale;
@@ -4580,6 +4602,7 @@ export class ProductsService {
       let principalScale = await this.assertSaleUomsValid(
         sale_uoms,
         effectiveStockUomId,
+        sanitizedDto.pricing_type ?? existingProduct.pricing_type,
       );
 
       // QUI-978 — cambiar (o quitar) la unidad de stock sin reenviar
@@ -4640,9 +4663,42 @@ export class ProductsService {
         const hasData = levels + layers + batches + recipeLines > 0;
         if (hasData) {
           if (sanitizedDto.stock_uom_conversion !== 'convert') {
+            // S9 — el editor arma la confirmación "Convertir existencias" con
+            // estos datos; el mensaje no expone el contrato JSON.
+            const units = await this.prisma.units_of_measure.findMany({
+              where: {
+                id: {
+                  in: [
+                    Number(existingProduct.stock_uom_id),
+                    Number(sanitizedDto.stock_uom_id),
+                  ],
+                },
+              },
+            });
+            const fromUom = units.find(
+              (u) => u.id === Number(existingProduct.stock_uom_id),
+            );
+            const toUom = units.find(
+              (u) => u.id === Number(sanitizedDto.stock_uom_id),
+            );
+            const factor =
+              fromUom && toUom
+                ? uomRatio(fromUom as UomRef, toUom as UomRef)
+                : null;
             throw new VendixHttpException(
               ErrorCodes.PROD_UOM_CONVERSION_REQUIRED,
-              `El producto tiene existencias, costos, lotes o recetas expresados en su unidad actual. Envía "stock_uom_conversion": "convert" para convertirlos, o deja la unidad como está.`,
+              `El producto ya tiene inventario contado en ${fromUom?.code ?? 'su unidad actual'}. Confirma la conversión a ${toUom?.code ?? 'la nueva unidad'} para guardar, o deja la unidad como está.`,
+              {
+                from_uom_code: fromUom?.code ?? null,
+                from_uom_name: fromUom?.name ?? null,
+                to_uom_code: toUom?.code ?? null,
+                to_uom_name: toUom?.name ?? null,
+                factor: factor != null ? Number(factor.toFixed(9)) : null,
+                stock_levels: levels,
+                cost_layers: layers,
+                batches,
+                recipe_items: recipeLines,
+              },
             );
           }
           pendingUomConversion = {

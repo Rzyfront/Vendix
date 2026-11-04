@@ -2766,6 +2766,137 @@ describe('ProductsService', () => {
       });
     });
 
+    // product-sale-unit-consolidation S5/S9/S10 — reglas del núcleo
+    // `@money-kernel/uom-conversion` en el guardado del producto.
+    describe('unidad de venta consolidada — compatibilidad (S5, S10)', () => {
+      const gram = { id: 1, code: 'g', name: 'Gramo', dimension: 'mass', factor_to_base: 1, is_active: true, is_stock_eligible: true };
+      const kilo = { id: 3, code: 'kg', name: 'Kilogramo', dimension: 'mass', factor_to_base: 1000, is_active: true, is_stock_eligible: true };
+      const pound = { id: 7, code: 'lb', name: 'Libra', dimension: 'mass', factor_to_base: 500, is_active: true, is_stock_eligible: true };
+      const ml = { id: 4, code: 'ml', name: 'Mililitro', dimension: 'volume', factor_to_base: 1, is_active: true, is_stock_eligible: true };
+      const liter = { id: 5, code: 'L', name: 'Litro', dimension: 'volume', factor_to_base: 1000, is_active: true, is_stock_eligible: true };
+      const gallon = { id: 12, code: 'gal', name: 'Galón', dimension: 'volume', factor_to_base: 3785.411784, is_active: true, is_stock_eligible: false };
+
+      it('principal kg con inventario g, también g y lb, por peso ⇒ guarda escala 1000', async () => {
+        primeUpdatePath();
+        mockPrismaService.units_of_measure.findFirst.mockResolvedValueOnce(gram);
+        mockPrismaService.units_of_measure.findMany.mockResolvedValueOnce([gram, kilo, pound]);
+
+        await service.update(existingProduct.id, {
+          pricing_type: 'weight',
+          stock_uom_id: 1,
+          sale_uoms: [{ uom_id: 3, is_principal: true }, { uom_id: 1 }, { uom_id: 7 }],
+        } as UpdateProductDto);
+
+        expect(mockPrismaService.products.update).toHaveBeenCalledWith({
+          where: { id: existingProduct.id },
+          data: expect.objectContaining({ price_unit_quantity: 1000 }),
+        });
+      });
+
+      it('S5(b) LOMO AHUMADO: inventario kg con principal kg se rechaza (etiqueta de 0,245 kg daría 0)', async () => {
+        primeUpdatePath();
+        mockPrismaService.units_of_measure.findFirst.mockResolvedValueOnce(kilo);
+        mockPrismaService.units_of_measure.findMany.mockResolvedValueOnce([kilo]);
+
+        await expect(
+          service.update(existingProduct.id, {
+            pricing_type: 'weight',
+            stock_uom_id: 3,
+            sale_uoms: [{ uom_id: 3, is_principal: true }],
+          } as UpdateProductDto),
+        ).rejects.toThrow(/el stock debe contarse en g/);
+        expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+      });
+
+      it('S5(a): principal de peso con pricing_type unit se rechaza', async () => {
+        primeUpdatePath();
+        mockPrismaService.units_of_measure.findFirst.mockResolvedValueOnce(gram);
+        mockPrismaService.units_of_measure.findMany.mockResolvedValueOnce([gram, kilo]);
+
+        await expect(
+          service.update(existingProduct.id, {
+            pricing_type: 'unit',
+            stock_uom_id: 1,
+            sale_uoms: [{ uom_id: 3, is_principal: true }],
+          } as UpdateProductDto),
+        ).rejects.toThrow(/debe venderse por peso/);
+        expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+      });
+
+      it('S10: una unidad adicional que no es un entero del inventario se rechaza (galón sobre ml)', async () => {
+        primeUpdatePath();
+        mockPrismaService.units_of_measure.findFirst.mockResolvedValueOnce(ml);
+        mockPrismaService.units_of_measure.findMany.mockResolvedValueOnce([ml, liter, gallon]);
+
+        await expect(
+          service.update(existingProduct.id, {
+            pricing_type: 'unit',
+            stock_uom_id: 4,
+            sale_uoms: [{ uom_id: 5, is_principal: true }, { uom_id: 12 }],
+          } as UpdateProductDto),
+        ).rejects.toThrow(/La unidad de venta \(gal\) debe equivaler a un número entero de ml/);
+        expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+      });
+
+      it('S10: la unidad de compra no puede ser menor que la de stock', async () => {
+        primeUpdatePath();
+        mockPrismaService.units_of_measure.findFirst.mockResolvedValueOnce(kilo);
+        mockPrismaService.units_of_measure.findMany.mockResolvedValueOnce([kilo, gram]);
+
+        await expect(
+          service.update(existingProduct.id, {
+            stock_uom_id: 3,
+            purchase_uom_id: 1,
+          } as UpdateProductDto),
+        ).rejects.toThrow(/La unidad de compra \(g\) no puede ser menor que la de stock \(kg\)/);
+        expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('S9 — cambiar la unidad de stock con datos explica qué se convierte', () => {
+      it('el 400 PROD_UOM_CONVERSION_REQUIRED trae unidades y conteos legibles', async () => {
+        const gram = { id: 1, code: 'g', name: 'Gramo', dimension: 'mass', factor_to_base: 1, is_active: true, is_stock_eligible: true };
+        const kilo = { id: 3, code: 'kg', name: 'Kilogramo', dimension: 'mass', factor_to_base: 1000, is_active: true, is_stock_eligible: true };
+        primeUpdatePath();
+        mockPrismaService.products.findFirst.mockReset();
+        mockPrismaService.products.findFirst.mockResolvedValueOnce({
+          ...existingProduct,
+          stock_uom_id: 3,
+        });
+        mockPrismaService.units_of_measure.findFirst.mockResolvedValueOnce(gram);
+        mockPrismaService.product_sale_uoms.findMany.mockResolvedValueOnce([]);
+        mockPrismaService.units_of_measure.findMany.mockResolvedValue([gram, kilo]);
+        (mockPrismaService as any).stock_levels.count = jest.fn().mockResolvedValue(1);
+        (mockPrismaService as any).inventory_cost_layers = { count: jest.fn().mockResolvedValue(2) };
+        (mockPrismaService as any).inventory_batches = { count: jest.fn().mockResolvedValue(0) };
+        (mockPrismaService as any).recipe_items = { count: jest.fn().mockResolvedValue(0) };
+
+        let thrown: any;
+        try {
+          await service.update(existingProduct.id, { stock_uom_id: 1 } as UpdateProductDto);
+        } catch (error) {
+          thrown = error;
+        }
+        mockPrismaService.units_of_measure.findMany.mockReset();
+
+        expect(thrown?.errorCode).toBe('PROD_UOM_CONVERSION_REQUIRED');
+        const body = thrown.getResponse();
+        expect(body.details).toEqual({
+          from_uom_code: 'kg',
+          from_uom_name: 'Kilogramo',
+          to_uom_code: 'g',
+          to_uom_name: 'Gramo',
+          factor: 1000,
+          stock_levels: 1,
+          cost_layers: 2,
+          batches: 0,
+          recipe_items: 0,
+        });
+        expect(body.message).not.toContain('stock_uom_conversion');
+        expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+      });
+    });
+
     it('persiste las neutralizaciones del sanitizer de insumo puro', async () => {
       primeUpdatePath();
 
