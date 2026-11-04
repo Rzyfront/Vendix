@@ -24,6 +24,10 @@ import {
 } from '../invoicing/utils/dian-email-subject.util';
 import { tryResolveTenantFiscalIdentity } from '../../../common/helpers/fiscal-identity.helper';
 import { AppointmentQueueService } from '../reservations/appointment-queue/appointment-queue.service';
+import {
+  formatReminderDate,
+  formatReminderMoney,
+} from '../accounts-receivable/listeners/credit-reminder-email.util';
 import { writeInvoiceDeliveryEvent } from '../invoicing/delivery/invoice-delivery-events.writer';
 // Entrega PRIMARIA normativa. `InvoiceDeliveryService.deliver()` es el único
 // lugar del sistema que arma el `.zip` del Anexo Técnico 1.9 §9.1 (PDF
@@ -1079,12 +1083,12 @@ export class NotificationsEventsListener {
     const when =
       event.days_before === 0
         ? 'vence hoy'
-        : `vence el ${event.due_date} (en ${event.days_before} ${event.days_before === 1 ? 'día' : 'días'})`;
+        : `vence el ${formatReminderDate(event.due_date)} (en ${event.days_before} ${event.days_before === 1 ? 'día' : 'días'})`;
     await this.notifications_service.createAndBroadcast(
       event.store_id,
       'credit_installment_reminder',
       'Cuota de crédito por vencer',
-      `Cuota ${event.installment_number} de ${event.installments_total} de ${event.order_number}${event.customer_name ? ` (${event.customer_name})` : ''} ${when}: $${event.installment_balance.toLocaleString('es-CO')}`,
+      `Cuota ${event.installment_number} de ${event.installments_total} de ${event.order_number}${event.customer_name ? ` (${event.customer_name})` : ''} ${when}: ${formatReminderMoney(event.installment_balance)}`,
       {
         order_id: event.order_id,
         order_number: event.order_number,
