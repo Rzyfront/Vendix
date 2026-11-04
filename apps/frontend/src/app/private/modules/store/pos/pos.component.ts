@@ -1657,12 +1657,17 @@ export class PosComponent {
     }
 
     // 8. Buscar la instancia visible de catálogo (desktop o móvil) y enfocar con el carácter inicial
-    const children = this.productSelectionList();
-    const targetChild = children.find((c) => c?.isVisible()) ?? children[0];
+    const targetChild = this.visibleProductSelection();
     if (targetChild) {
       event.preventDefault();
       targetChild.focusSearch(event.key);
     }
+  }
+
+  /** Instancia visible del catálogo (desktop o móvil); la primera si ninguna lo está. */
+  private visibleProductSelection(): PosProductSelectionComponent | undefined {
+    const children = this.productSelectionList();
+    return children.find((c) => c?.isVisible()) ?? children[0];
   }
 
   private hasAnyModalOpen(): boolean {
@@ -2020,6 +2025,7 @@ export class PosComponent {
           notFound();
           return;
         }
+        this.visibleProductSelection()?.showScannedProduct(weightProduct.name);
         void child.addWeightProductWithKnownWeight(
           weightProduct,
           resolved.weightKg,
@@ -2044,11 +2050,10 @@ export class PosComponent {
    * Stock validation, variant mapping and toasts are all owned by the child's
    * methods; we never reimplement cart logic here.
    *
-   * Note: the POS search box (`searchQuery`) lives inside the
-   * PosProductSelectionComponent child, not the root, so it is not reset here.
-   * The scanner only suppresses the terminating Enter, so a scan does not leave
-   * residue in that input unless it happens to be focused; reaching across the
-   * component boundary to clear it is out of scope.
+   * The scanner's digits land in the catalog search box (type-to-search focuses
+   * it on the first key) and find nothing. Once the scan resolves to a product,
+   * the visible catalog shows that product by name instead; the text stays
+   * selected so the next scan replaces it.
    */
   private handleBarcodeScan(code: string): void {
     // Defensive gate: scans$ already only fires when enabled, but guard anyway.
@@ -2069,6 +2074,8 @@ export class PosComponent {
           this.tryVariableBarcodeFallback(code, child);
           return;
         }
+
+        this.visibleProductSelection()?.showScannedProduct(product.name);
 
         const variants = product.product_variants ?? [];
 
@@ -4719,25 +4726,18 @@ export class PosComponent {
           this.allowBookingsWithoutPayment.set(policy);
         }
       });
-    // CP-POS-SVC-PERF-001 / Annotation-4 — refresh the reservation
-    // policy directly via /api/store/settings on every POS open. The
-    // NgRx `selectStoreSettings` snapshot carries the value captured
-    // at login time, which can drift out of sync if the operator
-    // toggled the policy from another tab/session. This HTTP call
-    // always sees the latest server-side value.
-    this.http
-      .get<any>(`${environment.apiUrl}/store/settings`)
+    // Re-read the store settings on every POS open. The NgRx
+    // `selectStoreSettings` snapshot is captured at login and persisted, so
+    // changes made later from another tab/session (scanner, scale, variable
+    // barcodes, cash register, reservations policy…) would otherwise need a
+    // re-login. `getSettings` publishes the fresh payload into the store; the
+    // subscription above applies it and the scanner/scale signals follow.
+    this.settingsService
+      .getSettings({ forceRefresh: true })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (resp: any) => {
-          const settings = resp?.data ?? resp;
-          const policy = settings?.reservations?.allow_bookings_without_payment;
-          if (typeof policy === 'boolean') {
-            this.allowBookingsWithoutPayment.set(policy);
-          }
-        },
         error: () => {
-          /* best-effort: signal keeps its prior value */
+          /* best-effort: the login snapshot stays in place */
         },
       });
   }

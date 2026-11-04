@@ -193,6 +193,21 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       el.setSelectionRange(len, len);
     }
   }
+
+  /**
+   * Reemplaza el texto desde el padre aunque el input tenga el foco (el guard
+   * de foco de `writeValue` lo ignoraría) y descarta la búsqueda con debounce
+   * pendiente del texto anterior. Con `select` el texto queda seleccionado,
+   * así lo siguiente que se teclee lo reemplaza en vez de sumarse.
+   */
+  setValue(next: string, options: { select?: boolean } = {}): void {
+    const el = this.hostRef.nativeElement?.querySelector?.('input') as HTMLInputElement | null;
+    if (el) el.value = next;
+    this.value.set(next);
+    this.onChange(next);
+    this.searchSubject$.next(next);
+    if (options.select) el?.select();
+  }
 // ControlValueAccessor implementation
   writeValue(value: string): void {
     const next = value || '';

@@ -1922,6 +1922,19 @@ export class PosProductSelectionComponent {
     }
   }
 
+  /**
+   * Tras un escaneo resuelto, el buscador muestra el producto que entró al
+   * carrito en lugar de los dígitos que tecleó el lector (que no encuentran
+   * nada). El texto queda seleccionado: el siguiente escaneo lo reemplaza.
+   */
+  showScannedProduct(name: string): void {
+    const query = name?.trim();
+    if (!query) return;
+    this.searchInput()?.setValue(query, { select: true });
+    this.searchQuery.set(query);
+    this.searchSubject$.next(query);
+  }
+
   isVisible(): boolean {
     const el = this.hostRef.nativeElement as HTMLElement;
     return !!(
