@@ -1737,6 +1737,9 @@ describe('PaymentsService', () => {
         update: jest.fn().mockResolvedValue({}),
       },
       order_item_taxes: { update: jest.fn().mockResolvedValue({}) },
+      // El cobro de una orden adoptada exige que sus adiciones ya estén
+      // agendadas (`assertAdoptedOptionsScheduled`); sin adiciones, 0.
+      order_item_options: { count: jest.fn().mockResolvedValue(0) },
     });
 
     afterEach(() => jest.restoreAllMocks());
