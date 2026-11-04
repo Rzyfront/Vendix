@@ -16,6 +16,9 @@ import {
 
 export type InventoryScope = 'main_location' | 'all_locations';
 
+/** POS-only scope: `register_location` = "Bodega de la caja". */
+export type PosStockScope = InventoryScope | 'register_location';
+
 export type OutOfStockAction = 'hide' | 'show' | 'disable' | 'allow_backorder';
 
 export interface InventorySettings {
@@ -29,7 +32,7 @@ export interface InventorySettings {
    */
   allow_ingredient_overuse: boolean;
   costing_method: 'cpp' | 'fifo';
-  pos_stock_scope: InventoryScope;
+  pos_stock_scope: PosStockScope;
   low_stock_alerts_scope: InventoryScope;
 }
 
@@ -59,11 +62,13 @@ const COSTING_EFFECTS: Record<'cpp' | 'fifo', string> = {
   fifo: 'Las salidas consumen primero las capas de costo más antiguas, así el costo de venta refleja lo que pagaste por esas unidades concretas. Necesita capas de costo cargadas: un producto sin capas sale marcado como dato parcial en el informe de valoración.',
 };
 
-const POS_SCOPE_EFFECTS: Record<InventoryScope, string> = {
+const POS_SCOPE_EFFECTS: Record<PosStockScope, string> = {
   main_location:
     'El POS muestra las existencias de la bodega principal. Es lo recomendado cuando atiendes desde un solo punto: el vendedor ve el número que puede tocar.',
   all_locations:
     'El POS muestra las existencias sumadas de todas las bodegas vendibles. El vendedor ve más stock del que tiene a mano, y puede prometer unidades que están en otra sede.',
+  register_location:
+    'Cada caja muestra y vende solo el stock de la bodega que tiene asignada. Para vender hay que abrir una caja, y cada caja necesita una bodega. Ideal para separar puntos de venta dentro de la misma tienda.',
 };
 
 const ALERT_SCOPE_EFFECTS: Record<InventoryScope, string> = {
@@ -111,7 +116,7 @@ export class InventorySettingsForm {
     // DEFAULTS más abajo) — nunca se trata como `false`.
     allow_ingredient_overuse: new FormControl(true),
     costing_method: new FormControl('cpp'),
-    pos_stock_scope: new FormControl<InventoryScope>('main_location'),
+    pos_stock_scope: new FormControl<PosStockScope>('main_location'),
     low_stock_alerts_scope: new FormControl<InventoryScope>('main_location'),
   });
 
@@ -131,6 +136,10 @@ export class InventorySettingsForm {
 
   readonly costingEffect = computed(
     () => COSTING_EFFECTS[this.currentValue().costing_method] ?? COSTING_EFFECTS.cpp,
+  );
+
+  readonly isRegisterScope = computed(
+    () => this.currentValue().pos_stock_scope === 'register_location',
   );
 
   readonly posScopeEffect = computed(
@@ -181,6 +190,12 @@ export class InventorySettingsForm {
       label: 'Todas las bodegas',
       description: 'El POS muestra el stock sumado de las bodegas vendibles.',
     },
+    {
+      value: 'register_location',
+      label: 'Bodega de la caja',
+      description:
+        'Cada caja muestra y vende solo el stock de su bodega. Requiere el módulo de caja activo.',
+    },
   ];
 
   lowStockAlertsScopes: SelectorOption[] = [
@@ -221,8 +236,8 @@ export class InventorySettingsForm {
     return this.form.get('costing_method') as FormControl<string>;
   }
 
-  get posStockScopeControl(): FormControl<InventoryScope> {
-    return this.form.get('pos_stock_scope') as FormControl<InventoryScope>;
+  get posStockScopeControl(): FormControl<PosStockScope> {
+    return this.form.get('pos_stock_scope') as FormControl<PosStockScope>;
   }
 
   get lowStockAlertsScopeControl(): FormControl<InventoryScope> {

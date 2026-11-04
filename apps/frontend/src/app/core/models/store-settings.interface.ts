@@ -380,6 +380,9 @@ export interface GeneralSettings {
 
 export type InventoryScope = 'main_location' | 'all_locations';
 
+/** POS-only scope: `register_location` = "Bodega de la caja" (stock of the open register's warehouse). */
+export type PosStockScope = InventoryScope | 'register_location';
+
 export interface InventorySettings {
   low_stock_threshold: number;
   out_of_stock_action: 'hide' | 'show' | 'disable' | 'allow_backorder';
@@ -399,7 +402,7 @@ export interface InventorySettings {
    * - `all_locations`: POS may consume stock from any active location of the store.
    * Default: `main_location`.
    */
-  pos_stock_scope: InventoryScope;
+  pos_stock_scope: PosStockScope;
   /**
    * Scope used by low-stock alert evaluation.
    * - `main_location`: alerts only consider stock at the main location.

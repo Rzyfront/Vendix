@@ -1,4 +1,5 @@
 import {
+  findSettingsStateViolation,
   SETTINGS_TRANSITION_GUARDS,
   readSettingsPath,
   SettingsTransitionGuardDeps,
@@ -76,5 +77,25 @@ describe('SETTINGS_TRANSITION_GUARDS — pos.cash_register.enabled', () => {
     expect(result.blocked).toBe(true);
     expect(result.detail).toContain('3 sesiones abiertas');
     expect(result.detail).toContain('"Caja Principal" y "Caja 2"');
+  });
+});
+
+describe('findSettingsStateViolation — bodega de la caja', () => {
+  const state = (scope: string, enabled: boolean) => ({
+    inventory: { pos_stock_scope: scope },
+    pos: { cash_register: { enabled } },
+  });
+
+  it('register_location con el módulo de caja apagado es inválido', () => {
+    expect(findSettingsStateViolation(state('register_location', false))).toBe(
+      ErrorCodes.POS_REGISTER_SCOPE_REQUIRES_CASH_001,
+    );
+  });
+
+  it('register_location con caja encendida, y los demás alcances, son válidos', () => {
+    expect(findSettingsStateViolation(state('register_location', true))).toBeNull();
+    expect(findSettingsStateViolation(state('main_location', false))).toBeNull();
+    expect(findSettingsStateViolation(state('all_locations', false))).toBeNull();
+    expect(findSettingsStateViolation({})).toBeNull();
   });
 });

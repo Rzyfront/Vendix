@@ -250,6 +250,7 @@ export async function reserveSessionLineStock(
     quantity,
     [],
     tx,
+    { orderId },
   );
   let slices = allocation.slices;
   if (allocation.shortfall > 0) {
@@ -273,6 +274,7 @@ export async function reserveSessionLineStock(
     }
     const fallbackLocationId =
       allocation.slices[0]?.location_id ??
+      allocation.restricted_location_ids?.[0] ??
       (await deps.stockLevelManager.getDefaultLocationForProduct(productId, variantId ?? undefined, tx));
     slices = deps.sellableStockAllocator.absorbShortfall(allocation, fallbackLocationId);
   }

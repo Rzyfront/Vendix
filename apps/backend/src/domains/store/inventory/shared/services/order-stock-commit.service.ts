@@ -741,6 +741,9 @@ export class OrderStockCommitService {
     // Spread the line across the store's sellable locations. Blocking is now
     // driven by the TOTAL sellable availability, never by how that total
     // happens to be distributed between warehouses.
+    // "Bodega de la caja": an order sale (not a dispatch-note delivery, whose
+    // physical origin is the dispatch location) inherits the order's sale
+    // location restriction, so the commit never spills into another warehouse.
     const allocation = await this.allocator.allocateForLine(
       storeId,
       line.product_id,
@@ -748,6 +751,9 @@ export class OrderStockCommitService {
       qty,
       preferredLocationIds,
       tx,
+      reservationRefType === 'order' && opts.movementType === 'sale'
+        ? { orderId: reservationRefId }
+        : {},
     );
 
     let slices: StockAllocationSlice[] = allocation.slices;
@@ -772,14 +778,22 @@ export class OrderStockCommitService {
       // Dispatch delivery: goods already left physically — deduct the
       // remainder from the intended location (floor 0) and raise an alert
       // instead of blocking.
-      const fallbackLocationId =
+      const candidateLocationId =
         line.location_id_override ??
         reservedLocationIds[0] ??
         slices[0]?.location_id ??
+        allocation.restricted_location_ids?.[0] ??
         (await this.stockLevelManager.getDefaultLocationForProduct(
           line.product_id,
           variant,
         ));
+      // "Bodega de la caja": an accepted oversell never lands outside the
+      // register's warehouse, even when an older reservation sits elsewhere.
+      const restricted = allocation.restricted_location_ids;
+      const fallbackLocationId =
+        restricted && !restricted.includes(candidateLocationId)
+          ? restricted[0]
+          : candidateLocationId;
       this.logger.warn(
         `[commit] Stock insuficiente al entregar (no bloqueante) — product ${line.product_id}` +
           `${variant ? ` variant ${variant}` : ''} disponible ${allocation.available} requerido ${qty} ` +

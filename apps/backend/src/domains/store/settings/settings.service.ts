@@ -41,6 +41,7 @@ import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { assertCanChangeOverbooking } from '../hospitality/unit-types/overbooking-permission';
 import {
   SETTINGS_TRANSITION_GUARDS,
+  findSettingsStateViolation,
   readSettingsPath,
   type SettingsTransitionGuardDeps,
 } from './guards/settings-transition-guards';
@@ -208,6 +209,11 @@ export class SettingsService {
         result.detail,
         result.metadata,
       );
+    }
+
+    const violation = findSettingsStateViolation(next);
+    if (violation) {
+      throw new VendixHttpException(violation);
     }
   }
 

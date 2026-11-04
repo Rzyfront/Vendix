@@ -1,4 +1,5 @@
 import { SellableStockAllocator } from './sellable-stock-allocator.service';
+import { RequestContextService } from '../../../../../common/context/request-context.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 
 /**
@@ -158,5 +159,122 @@ describe('SellableStockAllocator.getSellableLevels', () => {
       { inventory_locations: expect.objectContaining({ store_id: 7 }) },
       { location_id: { in: [42] } },
     ]);
+  });
+});
+
+/**
+ * "Bodega de la caja" (`pos_stock_scope = register_location`): la línea de una
+ * orden nacida en una caja con bodega se reparte SOLO en esa bodega.
+ */
+describe('SellableStockAllocator — restricción por bodega de la caja', () => {
+  const ORDER = { store_id: 7, origin_cash_session_id: 55 };
+  const settingsWith = (scope?: string) => ({
+    settings: scope ? { inventory: { pos_stock_scope: scope } } : {},
+  });
+
+  function build(opts: {
+    order?: any;
+    settings?: any;
+    session?: any;
+    levels?: Array<{ location_id: number; quantity_available: number }>;
+  }) {
+    const findMany = jest.fn().mockResolvedValue(opts.levels ?? []);
+    const prisma = {
+      orders: { findFirst: jest.fn().mockResolvedValue(opts.order ?? ORDER) },
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue(opts.settings ?? settingsWith('register_location')),
+      },
+      cash_register_sessions: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(opts.session ?? { register: { location_id: 2 } }),
+      },
+      stock_levels: { findMany },
+    };
+    const allocator = new SellableStockAllocator(prisma as unknown as StorePrismaService);
+    return { allocator, findMany, prisma };
+  }
+
+  it('resuelve la bodega de la caja de la orden bajo register_location', async () => {
+    const { allocator } = build({});
+    await expect(allocator.resolveOrderSaleLocationIds(900)).resolves.toEqual([2]);
+  });
+
+  it('sin restricción con otro alcance, sin sesión de origen o caja sin bodega', async () => {
+    await expect(
+      build({ settings: settingsWith('main_location') }).allocator.resolveOrderSaleLocationIds(900),
+    ).resolves.toBeNull();
+    await expect(
+      build({ settings: settingsWith(undefined) }).allocator.resolveOrderSaleLocationIds(900),
+    ).resolves.toBeNull();
+    await expect(
+      build({ order: { store_id: 7, origin_cash_session_id: null, channel: 'ecommerce' } }).allocator.resolveOrderSaleLocationIds(900),
+    ).resolves.toBeNull();
+    await expect(
+      build({ session: { register: { location_id: null } } }).allocator.resolveOrderSaleLocationIds(900),
+    ).resolves.toBeNull();
+  });
+
+  it('orden POS sin caja de origen (borrador cobrado después) toma la caja abierta de quien cobra', async () => {
+    jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(31);
+    const { allocator, prisma } = build({
+      order: { store_id: 7, origin_cash_session_id: null, channel: 'pos' },
+    });
+
+    await expect(allocator.resolveOrderSaleLocationIds(900)).resolves.toEqual([2]);
+    expect(prisma.cash_register_sessions.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { store_id: 7, opened_by: 31, status: 'open' },
+      }),
+    );
+  });
+
+  it('memoiza por transacción: una sola resolución por orden dentro del mismo tx', async () => {
+    const { prisma } = build({});
+    const allocator = new SellableStockAllocator({} as unknown as StorePrismaService);
+    const tx = prisma as any;
+
+    await allocator.resolveOrderSaleLocationIds(900, tx);
+    await allocator.resolveOrderSaleLocationIds(900, tx);
+
+    expect(prisma.orders.findFirst).toHaveBeenCalledTimes(1);
+  });
+
+  it('allocateForLine con orderId filtra stock_levels a la bodega de la caja', async () => {
+    const { allocator, findMany } = build({
+      levels: [{ location_id: 2, quantity_available: 3 }],
+    });
+
+    const result = await allocator.allocateForLine(7, 100, undefined, 5, [], undefined, {
+      orderId: 900,
+    });
+
+    const where = findMany.mock.calls[0][0].where;
+    expect(where.location_id).toEqual({ in: [2] });
+    expect(where.inventory_locations).toMatchObject({ store_id: 7, is_active: true });
+    // Nunca derrama a otra bodega: 3 en la caja, faltan 2.
+    expect(result.slices).toEqual([{ location_id: 2, quantity: 3 }]);
+    expect(result.shortfall).toBe(2);
+    expect(result.restricted_location_ids).toEqual([2]);
+  });
+
+  it('una reserva FUERA de la bodega de la caja no amplía el conjunto', async () => {
+    const { allocator, findMany } = build({});
+
+    await allocator.allocateForLine(7, 100, undefined, 5, [9], undefined, { orderId: 900 });
+
+    const where = findMany.mock.calls[0][0].where;
+    expect(where.OR).toBeUndefined();
+    expect(where.location_id).toEqual({ in: [2] });
+  });
+
+  it('sin orderId ni restricción, el comportamiento es el de siempre (no regresión)', async () => {
+    const { allocator, findMany, prisma } = build({});
+
+    const result = await allocator.allocateForLine(7, 100, undefined, 5);
+
+    expect(prisma.orders.findFirst).not.toHaveBeenCalled();
+    expect(findMany.mock.calls[0][0].where.location_id).toBeUndefined();
+    expect(result.restricted_location_ids).toBeNull();
   });
 });

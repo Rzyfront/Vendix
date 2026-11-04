@@ -231,12 +231,21 @@ export class SessionsService {
   async assertSessionForSales(userId?: number): Promise<void> {
     const settings = await this.settingsService.getSettings();
     const cashRegister = (settings as any)?.pos?.cash_register;
-    if (!cashRegister?.enabled) {
+    // "Bodega de la caja": the register IS the stock source, so a charge
+    // without the operator's own session (on a register with a warehouse)
+    // has no location to draw from — required regardless of the switch.
+    const registerScope = isRegisterLocationScope(settings);
+    if (!cashRegister?.enabled && !registerScope) {
       return;
     }
     const session = userId ? await this.getActiveSession(userId) : null;
     if (!session) {
       throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    }
+    if (registerScope && session.register?.location_id == null) {
+      throw new VendixHttpException(
+        ErrorCodes.CASH_REGISTER_LOCATION_REQUIRED_001,
+      );
     }
   }
 
@@ -306,6 +315,17 @@ export class SessionsService {
     });
     if (!register) {
       throw new NotFoundException('Caja registradora no encontrada o inactiva');
+    }
+
+    // "Bodega de la caja": a register without a warehouse cannot sell under
+    // this scope, so it cannot be opened either (fail before any money moves).
+    if (register.location_id == null) {
+      const settings = await this.settingsService.getSettings();
+      if (isRegisterLocationScope(settings)) {
+        throw new VendixHttpException(
+          ErrorCodes.CASH_REGISTER_LOCATION_REQUIRED_001,
+        );
+      }
     }
 
     // Create session + opening_balance movement in transaction. Las validaciones
@@ -2129,4 +2149,12 @@ export class SessionsService {
       // Don't throw — saving the summary is best-effort, don't break the stream
     }
   }
+}
+
+/** `inventory.pos_stock_scope === 'register_location'` ("Bodega de la caja"). */
+function isRegisterLocationScope(settings: unknown): boolean {
+  return (
+    (settings as { inventory?: { pos_stock_scope?: string } } | null)?.inventory
+      ?.pos_stock_scope === 'register_location'
+  );
 }
