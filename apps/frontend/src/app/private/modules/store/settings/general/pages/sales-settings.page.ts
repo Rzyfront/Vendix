@@ -5,6 +5,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { PosSettingsForm } from '../components/pos-settings-form/pos-settings-form.component';
 import { ReceiptsSettingsForm } from '../components/receipts-settings-form/receipts-settings-form.component';
 import { ScheduledOrdersSettingsForm } from '../components/scheduled-orders-settings-form/scheduled-orders-settings-form.component';
+import { CreditRemindersSettingsForm } from '../components/credit-reminders-settings-form/credit-reminders-settings-form.component';
 import { PromotionsSettingsForm } from '../components/promotions-settings-form/promotions-settings-form.component';
 import { SettingsSectionComponent } from '../components/settings-section/settings-section.component';
 import { GeneralSettingsStore } from '../services/general-settings.store';
@@ -26,6 +27,7 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
     ReceiptsSettingsForm,
     PromotionsSettingsForm,
     ScheduledOrdersSettingsForm,
+    CreditRemindersSettingsForm,
   ],
   template: `
     <div class="settings-page">
@@ -65,6 +67,12 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
           [settings]="store.settings().pos"
           [settingsLoaded]="store.settingsLoaded()"
           (settingsChange)="store.onSectionChange('pos', $event)" />
+        <!-- Ventas a crédito: recordatorios de cuotas (sección credit_reminders) -->
+        <app-credit-reminders-settings-form
+          id="section-credit-reminders"
+          class="mt-6 block"
+          [settings]="store.settings().credit_reminders"
+          (settingsChange)="store.onSectionChange('credit_reminders', $event)" />
       </app-settings-section>
 
       <!-- Pedidos programados y Adiciones -->

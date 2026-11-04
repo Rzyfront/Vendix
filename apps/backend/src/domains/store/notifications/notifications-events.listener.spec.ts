@@ -451,3 +451,60 @@ describe('NotificationsEventsListener — CRM SMS spend cap', () => {
     );
   });
 });
+
+describe('NotificationsEventsListener — recordatorio de cuota de crédito (campana)', () => {
+  const baseEvent = {
+    store_id: 10,
+    installment_id: 5,
+    installment_number: 2,
+    installments_total: 6,
+    order_id: 42,
+    order_number: 'POS-0042',
+    channel: 'staff' as const,
+    due_date: '2026-12-03',
+    installment_balance: 166666.5,
+    customer_name: 'Ana Pérez',
+  };
+
+  function build() {
+    const notificationsService = { createAndBroadcast: jest.fn().mockResolvedValue({}) } as any;
+    const listener = new NotificationsEventsListener(
+      notificationsService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+    );
+    return { listener, notificationsService };
+  }
+
+  it('muestra la fecha como DD/MM/AAAA y los días de anticipación', async () => {
+    const { listener, notificationsService } = build();
+
+    await listener.handleCreditInstallmentReminder({ ...baseEvent, days_before: 3 });
+
+    expect(notificationsService.createAndBroadcast).toHaveBeenCalledWith(
+      10,
+      'credit_installment_reminder',
+      'Cuota de crédito por vencer',
+      'Cuota 2 de 6 de POS-0042 (Ana Pérez) vence el 03/12/2026 (en 3 días): $166.666,5',
+      { order_id: 42, order_number: 'POS-0042', installment_id: 5 },
+    );
+  });
+
+  it('el mismo día dice "vence hoy"', async () => {
+    const { listener, notificationsService } = build();
+
+    await listener.handleCreditInstallmentReminder({ ...baseEvent, days_before: 0 });
+
+    expect(notificationsService.createAndBroadcast).toHaveBeenCalledWith(
+      10,
+      'credit_installment_reminder',
+      'Cuota de crédito por vencer',
+      'Cuota 2 de 6 de POS-0042 (Ana Pérez) vence hoy: $166.666,5',
+      expect.any(Object),
+    );
+  });
+});

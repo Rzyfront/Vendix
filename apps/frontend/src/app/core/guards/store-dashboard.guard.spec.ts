@@ -46,7 +46,7 @@ describe('storeDashboardGuard (QUI-860)', () => {
         { provide: AuthFacade, useValue: authFacade },
         {
           provide: AccessGateService,
-          useValue: { mode: () => 'audit', industries: () => null, orgPanelUi: () => null, report: () => undefined },
+          useValue: { mode: () => 'audit', industries: () => null, orgPanelUi: () => null, report: () => undefined, planMode: () => 'audit', planBlocked: () => [], planOffers: () => ({}), currentPlan: () => null },
         },
       ],
     });

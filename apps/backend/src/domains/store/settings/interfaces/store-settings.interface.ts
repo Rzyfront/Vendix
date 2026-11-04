@@ -604,6 +604,9 @@ export interface StoreSettings {
   // Adiciones de producto (grupos de opciones con destino de componente)
   product_options?: ProductOptionsSettings;
 
+  // Recordatorios de cuotas de venta a crédito (CreditInstallmentRemindersJob)
+  credit_reminders?: CreditRemindersSettings;
+
   // Secciones existentes
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -1355,6 +1358,24 @@ export interface ScheduledOrdersSettings {
   max_days_ahead: number;
   fulfillment_types: Array<'pickup' | 'delivery'>;
   reminders: ScheduledOrderReminderRule[];
+}
+
+/** Regla de recordatorio de cuota a crédito: N días antes del vencimiento. */
+export interface CreditReminderRule {
+  /** 0 = el mismo día del vencimiento. */
+  days_before: number;
+  enabled: boolean;
+  notify_staff: boolean;
+  notify_customer: boolean;
+}
+
+/**
+ * Recordatorios de cuotas de venta a crédito. Apagado por defecto: ninguna
+ * tienda recibe ni envía avisos hasta activarlo en Configuración → Venta.
+ */
+export interface CreditRemindersSettings {
+  enabled: boolean;
+  reminders: CreditReminderRule[];
 }
 
 /** Adiciones de producto. Apagadas por defecto. */

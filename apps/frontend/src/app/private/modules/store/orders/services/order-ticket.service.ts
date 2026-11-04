@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { Order, OrderItem } from '../interfaces/order.interface';
 import { TicketData, TicketItem } from '../../pos/models/ticket.model';
 import { customerDisplayName } from '../../../../../shared/utils/customer-display-name.util';
+import { formatStoreDate } from '../../../../../shared/utils/date.util';
 
 /**
  * Cashier name printed when the caller does not know who sold the order.
@@ -51,6 +52,64 @@ export interface RefundAwareTicketData extends TicketData {
 }
 
 /**
+ * QUI-979 — un abono del historial de la sección Crédito. Espejo del
+ * `payments[]` que el provider backend (`pos-sale-ticket`) publica en
+ * `custom_variables.credit`: mismos nombres, misma semántica. Los abonos
+ * del módulo CxC (sin pago POS) solo existen en el carril backend — el
+ * `findOne` que alimenta este mapper no trae `ar_payments`, así que el
+ * tiquete cliente muestra los abonos POS (inicial + caja) y deja el
+ * historial completo a la reimpresión backend. Los totales (total /
+ * abonado / saldo) sí salen del ledger de la orden y cuadran en ambos
+ * carriles.
+ */
+export interface TicketCreditPayment {
+  date_formatted: string;
+  amount: number;
+  method: string;
+  is_initial: boolean;
+}
+
+/**
+ * QUI-979 — una cuota pendiente del calendario de la sección Crédito.
+ * Espejo de `pending_installments[]` del provider backend.
+ */
+export interface TicketCreditPending {
+  number: number;
+  state: string;
+  due_date_formatted: string;
+  balance: number;
+}
+
+/**
+ * QUI-979 — sección Crédito del tiquete cliente. `paid_total` es derivado
+ * (`total − saldo`), igual que en el backend: las tres cifras cuadran
+ * siempre, incluso con condonaciones. El `total` (grand_total) queda
+ * INTACTO: los documentos originales no se reescriben.
+ */
+export interface TicketCreditSection {
+  is_installments: boolean;
+  total: number;
+  paid_total: number;
+  balance: number;
+  installments_total: number;
+  installments_paid: number;
+  last_payment: { amount: number; date_formatted: string } | null;
+  payments: TicketCreditPayment[];
+  pending_installments: TicketCreditPending[];
+}
+
+/**
+ * QUI-979 — `TicketData` con sección Crédito. Subtipo aditivo: los
+ * llamadores que esperan `TicketData` (o `RefundAwareTicketData`) siguen
+ * compilando y el renderer la ignora hasta que pinte la sección. Sin
+ * crédito, `toTicketData` NO escribe la clave y el payload sale
+ * byte-idéntico al de antes.
+ */
+export interface CreditAwareTicketData extends RefundAwareTicketData {
+  credit?: TicketCreditSection;
+}
+
+/**
  * Maps the `Order` domain object onto the `TicketData` contract consumed by
  * `PosTicketService`. Extracted from `OrderDetailsPageComponent` so the order
  * detail page and the bulk print flow share one mapping instead of two that
@@ -74,7 +133,10 @@ export class OrderTicketService {
    * that would name the operator running the printer instead of the seller,
    * stamping a false statement on every ticket in the batch.
    */
-  toTicketData(order: Order, options?: { cashier?: string }): RefundAwareTicketData {
+  toTicketData(
+    order: Order,
+    options?: { cashier?: string; timeZone?: string },
+  ): CreditAwareTicketData {
     const items: TicketItem[] = (order.order_items || []).map((item) => ({
       id: String(item.id || '0'),
       name: item.product_name || 'Producto',
@@ -173,7 +235,13 @@ export class OrderTicketService {
         ? { lines: refundLines, refunded_total: refundedTotal, net_total: total - refundedTotal }
         : undefined;
 
-    const ticket: RefundAwareTicketData = {
+    // QUI-979 — sección Crédito desde el ledger de la orden
+    // (`payment_form === '2'`, vocabulario DIAN: '1' contado, '2' crédito).
+    // La orden cancelada no debe saldo, así que no publica sección. Sin
+    // crédito `credit` queda `undefined` y el payload sale byte-idéntico.
+    const credit = this.buildCreditSection(order, options?.timeZone);
+
+    const ticket: CreditAwareTicketData = {
       id: order.order_number || 'N/A',
       orderId: order.id,
       date: new Date(order.created_at || Date.now()),
@@ -210,8 +278,78 @@ export class OrderTicketService {
       // Spread condicional: sin reembolsos la clave NO existe en el payload
       // (cero regresión); con reembolsos viaja la sección refund-aware.
       ...(refunds ? { refunds } : {}),
+      // QUI-979 — mismo contrato para el crédito: sin crédito la clave NO
+      // existe (cero regresión en el tiquete de contado).
+      ...(credit ? { credit } : {}),
     };
     return ticket;
+  }
+
+  /**
+   * QUI-979 — construye la sección Crédito o `undefined` (contado,
+   * cancelada, o payload sin ledger). Espejo de `attachCreditSection` del
+   * provider backend: mismos nombres, misma semántica; el historial solo
+   * trae abonos POS (ver `TicketCreditPayment`).
+   */
+  private buildCreditSection(order: Order, timeZone?: string): TicketCreditSection | undefined {
+    if (order.payment_form !== '2' || order.state === 'cancelled') {
+      return undefined;
+    }
+    const tz = timeZone || 'America/Bogota';
+    const total = Number(order.total_with_interest ?? order.grand_total ?? 0);
+    const balance = Math.max(Number(order.remaining_balance ?? 0), 0);
+    // Derivado, no sumado: condonaciones y redondeos ya viven en el saldo.
+    const paidTotal = Math.max(Math.round((total - balance) * 100) / 100, 0);
+
+    const installments = (order.order_installments || []).filter(
+      (i) => i.state !== 'cancelled',
+    );
+    const paidCount = installments.filter((i) => i.state === 'paid').length;
+
+    const payments: TicketCreditPayment[] = (order.payments || [])
+      .filter((p) => p.state === 'succeeded')
+      .map((p) => {
+        const metadata = (p.gateway_response?.metadata ?? {}) as Record<string, unknown>;
+        const at = p.created_at;
+        return {
+          date_formatted: at ? formatStoreDate(at, tz) : '—',
+          amount: Number(p.amount) || 0,
+          method:
+            p.store_payment_method?.display_name?.trim() ||
+            p.store_payment_method?.system_payment_method?.display_name?.trim() ||
+            (metadata['is_credit_payment'] === true ? 'Abono' : 'Pago'),
+          is_initial: metadata['is_initial_credit_payment'] === true,
+          _at: at ? new Date(at).getTime() : 0,
+          _id: p.id,
+        };
+      })
+      .sort((a, b) => a._at - b._at || a._id - b._id)
+      .map(({ _at: _a, _id: _i, ...rest }) => rest);
+    const last = payments.length > 0 ? payments[payments.length - 1] : null;
+
+    const pendingStates = new Set(['pending', 'partial', 'overdue']);
+    const pending: TicketCreditPending[] = installments
+      .filter((i) => pendingStates.has(i.state))
+      .map((i) => ({
+        number: i.installment_number,
+        state: i.state,
+        due_date_formatted: i.due_date ? formatStoreDate(i.due_date, tz) : '—',
+        balance: Number(i.remaining_balance ?? 0),
+      }));
+
+    return {
+      is_installments: order.credit_type === 'installments',
+      total,
+      paid_total: paidTotal,
+      balance,
+      installments_total: installments.length,
+      installments_paid: paidCount,
+      last_payment: last
+        ? { amount: last.amount, date_formatted: last.date_formatted }
+        : null,
+      payments,
+      pending_installments: pending,
+    };
   }
 
   /**

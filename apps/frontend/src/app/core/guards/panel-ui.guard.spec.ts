@@ -14,6 +14,24 @@ import {
   PANEL_UI_TERMINAL_ROUTE,
 } from '../services/menu-filter.service';
 import { AuthFacade } from '../store/auth/auth.facade';
+import { PlanPaywallService } from '../services/plan-paywall.service';
+import type { PlanLock } from '../services/menu-filter.service';
+
+const INVOICING_LOCK: PlanLock = {
+  key: 'invoicing',
+  family: {
+    id: 'invoicing',
+    name: 'Facturación electrónica',
+    value: 'Factura electrónica DIAN.',
+    keys: ['invoicing'],
+  },
+  currentPlan: { code: 'vendix-impulsa', name: 'Vendix Impulsa', cycle: 'monthly' },
+  offers: [
+    { code: 'empresarial-pro-monthly', name: 'Empresarial Pro', price: 89900, currency: 'COP', cycle: 'monthly' },
+  ],
+  recommended: null,
+  upgradeUrl: '/admin/subscription/plans?plan=empresarial-pro-monthly&cycle=monthly&from=invoicing',
+} as unknown as PlanLock;
 
 const ERR_10 =
   'Ese módulo no está disponible para tu usuario. Si crees que deberías tenerlo, pídele a tu administrador que lo active.';
@@ -36,6 +54,7 @@ describe('panelUiGuard', () => {
   let toast: jasmine.SpyObj<ToastService>;
   let authFacade: jasmine.SpyObj<AuthFacade>;
   let accessGate: jasmine.SpyObj<AccessGateService>;
+  let paywall: jasmine.SpyObj<PlanPaywallService>;
   let router: Router;
 
   beforeEach(() => {
@@ -48,8 +67,12 @@ describe('panelUiGuard', () => {
       'applyAccessGate',
       'industryBlockMessage',
       'fiscalStageBlockForUrl',
+      'planLockForKeys',
     ]);
     menuFilter.fiscalStageBlockForUrl.and.returnValue(null);
+    menuFilter.planLockForKeys.and.returnValue(null);
+    paywall = jasmine.createSpyObj('PlanPaywallService', ['show', 'notice']);
+    paywall.notice.and.returnValue('Facturación electrónica no está incluido en tu plan. Disponible en Empresarial Pro.');
     accessGate = jasmine.createSpyObj('AccessGateService', ['ensureLoaded']);
     accessGate.ensureLoaded.and.resolveTo();
     menuFilter.resolveGateKeysForRoute.and.returnValue([]);
@@ -80,6 +103,7 @@ describe('panelUiGuard', () => {
         { provide: ToastService, useValue: toast },
         { provide: AuthFacade, useValue: authFacade },
         { provide: AccessGateService, useValue: accessGate },
+        { provide: PlanPaywallService, useValue: paywall },
       ],
     });
 
@@ -272,6 +296,42 @@ describe('panelUiGuard', () => {
     expect(router.navigateByUrl).toHaveBeenCalledWith('/admin/dashboard');
   });
 
+  it('plan: módulo fuera del plan con el flag encendido abre el paywall y no muestra el aviso de industria', async () => {
+    menuFilter.resolveGateKeysForRoute.and.returnValue(['invoicing']);
+    menuFilter.applyAccessGate.and.returnValue(false);
+    menuFilter.planLockForKeys.and.returnValue(INVOICING_LOCK);
+    paywall.show.and.returnValue(true);
+
+    const result = await runGuard('/admin/invoicing');
+
+    expect(result).toBeFalse();
+    expect(paywall.show).toHaveBeenCalledOnceWith(INVOICING_LOCK);
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  it('plan: el segundo intento en la sesión solo avisa (un paywall por módulo)', async () => {
+    menuFilter.resolveGateKeysForRoute.and.returnValue(['invoicing']);
+    menuFilter.applyAccessGate.and.returnValue(false);
+    menuFilter.planLockForKeys.and.returnValue(INVOICING_LOCK);
+    paywall.show.and.returnValue(false);
+
+    const result = await runGuard('/admin/invoicing');
+
+    expect(result).toBeFalse();
+    expect(toast.info).toHaveBeenCalledWith(
+      'Facturación electrónica no está incluido en tu plan. Disponible en Empresarial Pro.',
+    );
+  });
+
+  it('plan: el dashboard nunca se bloquea (la compuerta deja pasar)', async () => {
+    menuFilter.resolveGateKeysForRoute.and.returnValue(['dashboard']);
+    menuFilter.applyAccessGate.and.returnValue(true);
+    menuFilter.planLockForKeys.and.returnValue(INVOICING_LOCK);
+
+    await expectAsync(runGuard('/admin/dashboard')).toBeResolvedTo(true);
+    expect(paywall.show).not.toHaveBeenCalled();
+  });
+
   it('S4: un bloqueo pre-F4 no pasa por la compuerta (no la amplía)', async () => {
     menuFilter.resolveKeysForRoute.and.returnValue(['pos']);
     menuFilter.diagnoseModule.and.returnValue(hidden);
@@ -294,7 +354,9 @@ describe('orgPanelUiGuard (apps-f4 S5)', () => {
       'resolveGateKeysForRoute',
       'applyAccessGate',
       'industryBlockMessage',
+      'planLockForKeys',
     ]);
+    menuFilter.planLockForKeys.and.returnValue(null);
     accessGate = jasmine.createSpyObj('AccessGateService', ['ensureLoaded']);
     toast = jasmine.createSpyObj('ToastService', ['info']);
     accessGate.ensureLoaded.and.resolveTo();
@@ -306,6 +368,10 @@ describe('orgPanelUiGuard (apps-f4 S5)', () => {
         { provide: MenuFilterService, useValue: menuFilter },
         { provide: AccessGateService, useValue: accessGate },
         { provide: ToastService, useValue: toast },
+        {
+          provide: PlanPaywallService,
+          useValue: { notice: () => 'Facturación electrónica no está incluido en tu plan.' },
+        },
       ],
     });
     router = TestBed.inject(Router);
@@ -336,6 +402,17 @@ describe('orgPanelUiGuard (apps-f4 S5)', () => {
 
     expect(result).toBeFalse();
     expect(toast.info).toHaveBeenCalled();
+    expect(router.navigateByUrl).toHaveBeenCalledWith('/admin/dashboard');
+  });
+
+  it('plan: la organización sin el módulo en ninguna tienda recibe el aviso del plan y vuelve al dashboard', async () => {
+    menuFilter.applyAccessGate.and.returnValue(false);
+    menuFilter.planLockForKeys.and.returnValue(INVOICING_LOCK);
+
+    const result = await run('/admin/invoicing');
+
+    expect(result).toBeFalse();
+    expect(toast.info).toHaveBeenCalledWith('Facturación electrónica no está incluido en tu plan.');
     expect(router.navigateByUrl).toHaveBeenCalledWith('/admin/dashboard');
   });
 });

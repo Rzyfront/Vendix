@@ -69,6 +69,7 @@ import {
   type TicketBatchPrintResult,
 } from '../../pos/services/pos-ticket.service';
 import { OrderTicketService } from '../services/order-ticket.service';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import { OrdersBulkService } from './orders-bulk.service';
 import type {
   BulkPrintOutcome,
@@ -187,6 +188,7 @@ export class OrdersBulkPrintService {
   private readonly bulkService = inject(OrdersBulkService);
   private readonly orderTicket = inject(OrderTicketService);
   private readonly posTicket = inject(PosTicketService);
+  private readonly storeSettings = inject(StoreSettingsFacade);
 
   private readonly renderProgressState = signal<BulkPrintRenderProgress>(
     IDLE_RENDER_PROGRESS,
@@ -251,7 +253,10 @@ export class OrdersBulkPrintService {
     // El mapper no recibe `cashier`: en el masivo `getCurrentUser()` nombraría
     // al operador que imprime, no a quien vendió. Un tiquete que afirma un hecho
     // falso ×300 es peor que uno que dice 'Administrador'.
-    const tickets = orders.map((order) => this.orderTicket.toTicketData(order));
+    const timeZone = this.storeSettings.timezone();
+    const tickets = orders.map((order) =>
+      this.orderTicket.toTicketData(order, { timeZone }),
+    );
 
     this.renderProgressState.set({ done: 0, total: tickets.length });
 

@@ -52,6 +52,53 @@ interface ComposerRefundsSection {
   }>;
 }
 
+/**
+ * QUI-979 — espejo estructural de `custom_variables.credit`, que el provider
+ * `pos-sale-ticket` publica en la reimpresión. El compositor la lee con un
+ * cast local porque `StandardPrintDataModel.custom_variables` es
+ * `Record<string, any>` y el contrato vive en el provider, no en el modelo
+ * (mismo criterio que `refunds`).
+ */
+interface ComposerCreditPayment {
+  date: string | null;
+  date_formatted: string;
+  amount: number;
+  amount_formatted?: string;
+  method: string;
+  is_initial: boolean;
+}
+
+interface ComposerCreditPending {
+  number: number;
+  state: string;
+  due_date: string | null;
+  due_date_formatted: string;
+  amount: number;
+  amount_formatted?: string;
+  balance: number;
+  balance_formatted?: string;
+}
+
+interface ComposerCreditSection {
+  is_installments: boolean;
+  total: number;
+  total_formatted?: string;
+  paid_total: number;
+  paid_total_formatted?: string;
+  balance: number;
+  balance_formatted?: string;
+  installments_total: number;
+  installments_paid: number;
+  last_payment: {
+    amount: number;
+    amount_formatted?: string;
+    date: string | null;
+    date_formatted: string;
+  } | null;
+  payments: ComposerCreditPayment[];
+  pending_installments: ComposerCreditPending[];
+}
+
 @Injectable()
 export class PrintLayoutComposerService {
   constructor(private readonly compiler: PrintTemplateCompilerService) {}
@@ -112,6 +159,45 @@ export class PrintLayoutComposerService {
           rendered.splice(footerIdx, 0, refundsEntry);
         } else {
           rendered.push(refundsEntry);
+        }
+      }
+    }
+
+    // QUI-979 — sección Crédito ADITIVA en la reimpresión. Solo
+    // `pos-sale-ticket` publica `custom_variables.credit`, así que la
+    // presencia del dato ES el gate de formato — ningún otro documento
+    // cambia, y sin crédito la salida queda byte-idéntica (sección ausente,
+    // cero CSS nuevo). Se inserta después de Reembolsos cuando existe (el
+    // saldo por pagar es el bloque accionable y va último), si no justo
+    // después de los totales; sin totales, antes del pie; sin pie, al final.
+    // La ruta `custom_template` no la recibe: esa plantilla es diseño total
+    // de la tienda.
+    const creditHtml = this.renderCreditSection(data);
+    if (creditHtml) {
+      const creditEntry = {
+        section: { type: 'credit_section' },
+        html: creditHtml,
+      };
+      const refundsIdx = rendered.findIndex(
+        (r) => r.section?.type === 'refunds_section',
+      );
+      if (refundsIdx >= 0) {
+        rendered.splice(refundsIdx + 1, 0, creditEntry);
+      } else {
+        const totalsIdx = rendered.findIndex(
+          (r) => r.section?.type === 'totals_summary',
+        );
+        if (totalsIdx >= 0) {
+          rendered.splice(totalsIdx + 1, 0, creditEntry);
+        } else {
+          const footerIdx = rendered.findIndex(
+            (r) => r.section?.type === 'footer',
+          );
+          if (footerIdx >= 0) {
+            rendered.splice(footerIdx, 0, creditEntry);
+          } else {
+            rendered.push(creditEntry);
+          }
         }
       }
     }
@@ -1235,6 +1321,111 @@ export class PrintLayoutComposerService {
             <td class="total-val">${esc(netFormatted)}</td>
           </tr>
         </table>
+      </div>
+    `;
+  }
+
+  /**
+   * QUI-979 — pintado de la sección Crédito en la reimpresión de
+   * `pos_sale_ticket`.
+   *
+   * Lee `custom_variables.credit` y NO toca `totals`, `items` ni `taxes`: el
+   * TOTAL impreso arriba es el de la venta y queda intacto — el «Total del
+   * crédito» de esta sección es la obligación (con intereses cuando aplica).
+   * Sin la llave `credit` devuelve `''` y la salida queda byte-idéntica.
+   *
+   * Solo reusa clases CSS existentes (`section-label`, `print-table`,
+   * `totals-table`, `total-label`, `total-val`, `item-sub`) y cero colores
+   * inline: en rollo térmico el bloque `[tirilla-80mm-negro]` no alcanza
+   * atributos `style`, así que un color inline viajaría al papel como trama.
+   *
+   * Geometría (vendix-print-geometry): sin anchos fijos — la sección hereda
+   * el del wrapper `.vx-print-root`; nombres largos con `anywhere`, nunca
+   * `overflow: hidden` (corta en silencio).
+   */
+  private renderCreditSection(data: StandardPrintDataModel): string {
+    const credit = (data.custom_variables as any)?.credit as
+      | ComposerCreditSection
+      | undefined;
+    if (!credit) return '';
+
+    const money = (formatted: unknown, raw: unknown): string =>
+      typeof formatted === 'string' && formatted
+        ? formatted
+        : `$${Number(raw || 0).toLocaleString('es-CO')}`;
+    const esc = (v: unknown): string => this.compiler.escapeHtml(v);
+
+    const installmentsTotal = Number(credit.installments_total || 0);
+    const installmentsPaid = Number(credit.installments_paid || 0);
+    const quotaNote =
+      installmentsTotal > 0
+        ? ` <small class="item-sub">(Cuotas ${esc(installmentsPaid)} de ${esc(installmentsTotal)})</small>`
+        : '';
+
+    const last = credit.last_payment;
+    const lastLine = last
+      ? `<tr data-element-id="cr_last" data-section-id="sec_credit" data-token="custom_variables.credit.last_payment">
+            <td class="total-label">Último abono:</td>
+            <td class="total-val">${esc(money(last.amount_formatted, last.amount))} <small class="item-sub">${esc(last.date_formatted ?? '')}</small></td>
+          </tr>`
+      : '';
+
+    const payments = Array.isArray(credit.payments) ? credit.payments : [];
+    const historyLines = payments
+      .map((p, idx) => {
+        const initial = p.is_initial ? ' (inicial)' : '';
+        return `<div><small class="item-sub" data-element-id="cr_pay_${idx}" data-section-id="sec_credit" data-token="custom_variables.credit.payments">${esc(p.date_formatted ?? '')} · ${esc(p.method ?? 'Abono')}${esc(initial)}: ${esc(money(p.amount_formatted, p.amount))}</small></div>`;
+      })
+      .join('');
+
+    const pending = Array.isArray(credit.pending_installments)
+      ? credit.pending_installments
+      : [];
+    const stateLabel = (state: unknown): string =>
+      state === 'partial'
+        ? ' (parcial)'
+        : state === 'overdue'
+          ? ' (vencida)'
+          : '';
+    const pendingRows = pending
+      .map(
+        (p) => `<tr data-element-id="cr_inst_${p.number}" data-section-id="sec_credit" data-token="custom_variables.credit.pending_installments">
+          <td>Cuota ${esc(p.number)}${esc(stateLabel(p.state))}</td>
+          <td style="text-align: center;">${esc(p.due_date_formatted ?? '')}</td>
+          <td style="text-align: right;">${esc(money(p.balance_formatted, p.balance))}</td>
+        </tr>`,
+      )
+      .join('');
+    const pendingTable =
+      pendingRows.length > 0
+        ? `<table class="print-table">
+          <thead>
+            <tr><th style="text-align: left;">Cuota pendiente</th><th style="text-align: center;">Vence</th><th style="text-align: right;">Saldo</th></tr>
+          </thead>
+          <tbody>${pendingRows}</tbody>
+        </table>`
+        : '';
+
+    return `
+      <div class="print-section section-credit" data-section-id="sec_credit">
+        <div class="section-label">CRÉDITO</div>
+        <table class="totals-table">
+          <tr data-element-id="cr_total" data-section-id="sec_credit" data-token="custom_variables.credit">
+            <td class="total-label">Total del crédito:</td>
+            <td class="total-val">${esc(money(credit.total_formatted, credit.total))}</td>
+          </tr>
+          <tr data-element-id="cr_paid" data-section-id="sec_credit" data-token="custom_variables.credit">
+            <td class="total-label">Abonado:</td>
+            <td class="total-val">${esc(money(credit.paid_total_formatted, credit.paid_total))}${quotaNote}</td>
+          </tr>
+          <tr data-element-id="cr_balance" data-section-id="sec_credit" data-token="custom_variables.credit">
+            <td class="total-label">Saldo pendiente:</td>
+            <td class="total-val">${esc(money(credit.balance_formatted, credit.balance))}</td>
+          </tr>
+          ${lastLine}
+        </table>
+        ${historyLines}
+        ${pendingTable}
       </div>
     `;
   }

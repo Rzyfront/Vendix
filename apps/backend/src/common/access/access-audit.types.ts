@@ -12,7 +12,13 @@ export const ACCESS_AUDIT_DECISIONS = [
   'hidden',
   'blocked',
 ] as const;
-export const ACCESS_AUDIT_LAYERS = ['industry', 'store', 'user', 'org'] as const;
+export const ACCESS_AUDIT_LAYERS = [
+  'industry',
+  'store',
+  'user',
+  'org',
+  'plan',
+] as const;
 export const ACCESS_GATE_MODES = ['audit', 'enforce'] as const;
 
 export type AccessAuditSource = (typeof ACCESS_AUDIT_SOURCES)[number];

@@ -68,7 +68,16 @@ export class AccessGateService {
     const mode = user.store_id
       ? await this.modeService.modeForStore(user.store_id)
       : 'audit';
-    return this.write(user, body, industries, mode, user.store_id ?? null);
+    const planMode = user.store_id
+      ? await this.modeService.planModeForStore(user.store_id)
+      : 'audit';
+    return this.write(
+      user,
+      body,
+      industries,
+      { mode, planMode },
+      user.store_id ?? null,
+    );
   }
 
   async recordOrganizationEvents(
@@ -80,14 +89,15 @@ export class AccessGateService {
       ? await resolveOrganizationIndustries(this.globalPrisma, orgId)
       : normalizeModuleIndustries([]);
     const mode = await this.modeService.modeForOrganization();
-    return this.write(user, body, industries, mode, null);
+    const planMode = await this.modeService.planModeForOrganization();
+    return this.write(user, body, industries, { mode, planMode }, null);
   }
 
   private write(
     user: AccessGateIdentity,
     body: AccessAuditBatchDto,
     industries: string[],
-    mode: AccessGateMode,
+    modes: { mode: AccessGateMode; planMode: AccessGateMode },
     storeId: number | null,
   ): { recorded: number } {
     for (const event of body.events) {
@@ -103,7 +113,9 @@ export class AccessGateService {
         decision: event.decision,
         layer: event.layer,
         route: event.route ?? null,
-        mode,
+        // La capa plan tiene su propio modo: con el de industria, un evento
+        // plan quedaría como "enforce" aunque el plan siga en auditoría.
+        mode: event.layer === 'plan' ? modes.planMode : modes.mode,
       });
     }
     return { recorded: body.events.length };

@@ -116,6 +116,12 @@ export interface MenuItem {
    * treat this as read-only — it is not meant to be set by config sites.
    */
   _locked?: boolean;
+  /**
+   * Internal flag set by `MenuFilterService` when the plan in force does not
+   * include the module and the plan flag is on. The item stays visible and
+   * navigable with a lock: the route guard opens the module paywall.
+   */
+  _planLocked?: boolean;
 }
 
 @Component({
@@ -230,6 +236,14 @@ export interface MenuItem {
                   @if (item.badge) {
                     <span class="badge">{{ item.badge }}</span>
                   }
+                  @if (item._planLocked) {
+                    <app-icon
+                      name="lock"
+                      [size]="14"
+                      class="menu-plan-lock flex-shrink-0 text-text-secondary"
+                      title="No incluido en tu plan"
+                    ></app-icon>
+                  }
                 </a>
               } @else {
                 <button (click)="toggleSubmenu(item.label)" class="menu-item">
@@ -241,6 +255,14 @@ export interface MenuItem {
                   <span class="menu-text">{{ item.label }}</span>
                   @if (item.badge) {
                     <span class="badge">{{ item.badge }}</span>
+                  }
+                  @if (item._planLocked) {
+                    <app-icon
+                      name="lock"
+                      [size]="14"
+                      class="menu-plan-lock flex-shrink-0 text-text-secondary"
+                      title="No incluido en tu plan"
+                    ></app-icon>
                   }
                   <app-icon
                     name="chevron-right"
@@ -286,6 +308,14 @@ export interface MenuItem {
                           <span>{{ child.label }}</span>
                           @if (child.badge) {
                             <span class="badge">{{ child.badge }}</span>
+                          }
+                          @if (child._planLocked) {
+                            <app-icon
+                              name="lock"
+                              [size]="12"
+                              class="menu-plan-lock flex-shrink-0 text-text-secondary"
+                              title="No incluido en tu plan"
+                            ></app-icon>
                           }
                         </a>
                       }

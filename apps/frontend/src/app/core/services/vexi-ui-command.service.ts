@@ -289,6 +289,21 @@ export class VexiUiCommandService {
     // apps-f4 S4: same canSeeKey gate as the sidebar and the URL guard.
     // Audit mode only records; with the flag on the industry layer blocks.
     if (!this.menuFilter.applyRouteGate(entry.route, true, 'vexi')) {
+      // Plan layer: the module exists for this store but not in its plan.
+      const planLock = this.menuFilter.planLockForRoute(entry.route);
+      if (planLock) {
+        const plans = [...new Set(planLock.offers.map((offer) => offer.name))];
+        return JSON.stringify({
+          status: 'blocked',
+          target: entry.label,
+          blocked_by: 'plan',
+          detail: `${planLock.family?.name ?? entry.label} no está incluido en el plan ${planLock.currentPlan?.name ?? 'actual'}.`,
+          available_in: plans,
+          upgrade_url: planLock.upgradeUrl,
+          next_step:
+            'No navegues al módulo. Explícale que su plan no lo incluye, en qué planes está disponible, y ofrécele abrir «Ver planes y mejorar».',
+        });
+      }
       return JSON.stringify({
         status: 'blocked',
         target: entry.label,

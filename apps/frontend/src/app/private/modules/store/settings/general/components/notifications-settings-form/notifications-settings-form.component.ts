@@ -109,6 +109,12 @@ const SUBSCRIPTION_META: Readonly<Record<string, SubscriptionMeta>> = {
     trigger: 'Cuando un cliente califica un producto o la tienda.',
     icon: 'star',
   },
+  credit_installment_reminder: {
+    label: 'Cuota de crédito por vencer',
+    trigger:
+      'Cuando una cuota de una venta a crédito entra en un recordatorio de Configuración → Venta → Ventas a crédito.',
+    icon: 'calendar-clock',
+  },
   ap_installment_due_soon: {
     label: 'Pago a proveedor por vencer',
     trigger:
@@ -200,6 +206,7 @@ export class NotificationsSettingsForm implements OnInit {
     new_customer: true,
     payment_received: true,
     new_review: true,
+    credit_installment_reminder: true,
     ap_installment_due_soon: true,
     ap_installment_overdue: true,
   });

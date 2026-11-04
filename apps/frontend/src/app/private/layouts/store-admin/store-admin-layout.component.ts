@@ -36,6 +36,7 @@ import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-mo
 import { VexiDockComponent } from '../../../shared/components/vexi-dock/vexi-dock.component';
 import { PullToRefreshDirective } from '../../../shared/directives/pull-to-refresh.directive';
 import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-outlet.component';
+import { PlanPaywallOutletComponent } from '../../../core/components/plan-paywall-outlet.component';
 import { WeeklyReportBannerComponent } from '../../modules/store/weekly-report/components/weekly-report-banner/weekly-report-banner.component';
 import { WeeklyReportStoriesComponent } from '../../modules/store/weekly-report/components/weekly-report-stories/weekly-report-stories.component';
 import { WeeklyReportSnapshot } from '../../modules/store/weekly-report/interfaces/weekly-report.interface';
@@ -63,6 +64,7 @@ import { map, distinctUntilChanged, skip, switchMap, filter, startWith } from 'r
     FiscalObligationBannerComponent,
     PaywallOutletComponent,
     FiscalGateOutletComponent,
+    PlanPaywallOutletComponent,
     WeeklyReportBannerComponent,
     WeeklyReportStoriesComponent,
     ArrivalBannerComponent,
@@ -258,6 +260,7 @@ import { map, distinctUntilChanged, skip, switchMap, filter, startWith } from 'r
 
     <!-- F4 — Gate "no responsable de IVA" (driven by interceptor + form gate) -->
     <app-fiscal-gate-outlet />
+    <app-plan-paywall-outlet />
 
     <!-- Vexi: chat al tocar, voz en tiempo real al mantener presionado.
          Tres condiciones deciden si llega a montarse (ver showVexiDock): un

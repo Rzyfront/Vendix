@@ -24,6 +24,10 @@ import {
 } from '../invoicing/utils/dian-email-subject.util';
 import { tryResolveTenantFiscalIdentity } from '../../../common/helpers/fiscal-identity.helper';
 import { AppointmentQueueService } from '../reservations/appointment-queue/appointment-queue.service';
+import {
+  formatReminderDate,
+  formatReminderMoney,
+} from '../accounts-receivable/listeners/credit-reminder-email.util';
 import { writeInvoiceDeliveryEvent } from '../invoicing/delivery/invoice-delivery-events.writer';
 // Entrega PRIMARIA normativa. `InvoiceDeliveryService.deliver()` es el único
 // lugar del sistema que arma el `.zip` del Anexo Técnico 1.9 §9.1 (PDF
@@ -1057,6 +1061,39 @@ export class NotificationsEventsListener {
       'Pedido programado próximo',
       `Pedido ${event.order_number}${event.customer_name ? ` de ${event.customer_name}` : ''} para el ${event.local_date} ${event.local_start}–${event.local_end} (en ${anticipation})`,
       { schedule_id: event.schedule_id, order_id: event.order_id, order_number: event.order_number },
+    );
+  }
+
+  /** Ventas a crédito: recordatorio de cuota al equipo (campana), una vez por regla. */
+  @OnEvent('credit_installment.reminder')
+  async handleCreditInstallmentReminder(event: {
+    store_id: number;
+    installment_id: number;
+    installment_number: number;
+    installments_total: number;
+    order_id: number;
+    order_number: string;
+    channel: 'staff' | 'customer';
+    days_before: number;
+    due_date: string;
+    installment_balance: number;
+    customer_name: string | null;
+  }) {
+    if (event.channel !== 'staff') return;
+    const when =
+      event.days_before === 0
+        ? 'vence hoy'
+        : `vence el ${formatReminderDate(event.due_date)} (en ${event.days_before} ${event.days_before === 1 ? 'día' : 'días'})`;
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'credit_installment_reminder',
+      'Cuota de crédito por vencer',
+      `Cuota ${event.installment_number} de ${event.installments_total} de ${event.order_number}${event.customer_name ? ` (${event.customer_name})` : ''} ${when}: ${formatReminderMoney(event.installment_balance)}`,
+      {
+        order_id: event.order_id,
+        order_number: event.order_number,
+        installment_id: event.installment_id,
+      },
     );
   }
 
