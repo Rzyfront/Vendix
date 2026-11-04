@@ -31,7 +31,11 @@ export type BuilderScalarFieldDef =
       placeholder?: string;
       hint?: string;
     }
-  | { key: string; label: string; kind: 'url'; placeholder?: string; hint?: string };
+  | { key: string; label: string; kind: 'url'; placeholder?: string; hint?: string }
+  /** F6-B: a whole number within `min`..`max` (e.g. a 1-5 rating). Stored as a number. */
+  | { key: string; label: string; kind: 'number'; min: number; max: number; hint?: string }
+  /** F6-B: a yes/no switch (e.g. show the price). Stored as a boolean; block fields only, not list items. */
+  | { key: string; label: string; kind: 'toggle'; hint?: string };
 
 /**
  * A repeatable list of items (benefits, testimonials, questions, photos).
@@ -76,6 +80,22 @@ export interface BuilderBlockDef {
    * does not read as broken.
    */
   liveData?: string;
+  /**
+   * F6-B: the block is not part of the page's block list but edited like one
+   * (e.g. the cover of the app pages, `page.hero`). It sits first, cannot be
+   * moved, hidden, duplicated or removed, and does not count toward
+   * `maxBlocks`.
+   */
+  virtual?: boolean;
+  /**
+   * F6-B: the public page draws this section at a fixed place (before or
+   * after the free sections), whatever its position in the list. It cannot be
+   * moved and free sections cannot pass it, so the outline never promises an
+   * order the page does not have.
+   */
+  pinned?: 'start' | 'end';
+  /** F6-B: `false` when removing the block would not take it off the page (only hiding does). */
+  removable?: boolean;
 }
 
 /** The blocks one app type offers. */

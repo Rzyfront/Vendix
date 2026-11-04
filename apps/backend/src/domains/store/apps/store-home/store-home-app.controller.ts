@@ -1,4 +1,4 @@
-import { Body, Controller, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
@@ -22,6 +22,13 @@ export class StoreHomeAppController {
     private readonly responseService: ResponseService,
     private readonly appPage: AppPageService,
   ) {}
+
+  /** F6-B: name, brand, footer and published apps for the editor preview. */
+  @Permissions('store:apps:read')
+  @Get('preview-context')
+  async previewContext() {
+    return this.responseService.success(await this.storeHome.previewContext());
+  }
 
   @Permissions('store:apps:manage')
   @Patch('config')

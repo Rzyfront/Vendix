@@ -15,6 +15,13 @@ export interface StoreHomeBranding {
   accent_color: string | null;
 }
 
+/** Public link of one published app of the store («Mis apps»). */
+export interface StoreHomeAppLink {
+  kind: string;
+  name: string;
+  url: string;
+}
+
 /** `GET /ecommerce/store-home`: only the brand and the footer, never products. */
 export interface StoreHomePublic {
   store_name: string | null;
@@ -23,7 +30,7 @@ export interface StoreHomePublic {
   /** The owner's own page (apps-f2); absent when never saved. */
   page?: AppPageDocument;
   /** Published apps of the store; only when the `apps` block is enabled. */
-  apps?: { kind: string; name: string; url: string }[];
+  apps?: StoreHomeAppLink[];
 }
 
 /** Store home of the store resolved from the domain (Apps · STORE_HOME). */

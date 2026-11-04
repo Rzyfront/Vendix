@@ -8,6 +8,7 @@ import {
   StoreAppDetailResponse,
   StoreAppsResponse,
 } from '../interfaces/store-app.interface';
+import type { StoreHomePublic } from '../../../../../public/store-home/store-home.service';
 import type { AppPageDocument, PageAppKind } from '../templates/app-page.types';
 
 /** URL segment of each app's `PATCH /store/apps/<segment>/page` (apps-f2 S7). */
@@ -128,6 +129,11 @@ export class StoreAppsService {
 
   saveStoreHomeConfig(body: { footer_text: string | null }): Observable<unknown> {
     return this.http.patch(`${this.apiUrl}/store-home/config`, body);
+  }
+
+  /** F6-B — what the store home paints besides its page (name, brand, footer, published apps), for the builder preview. */
+  storeHomePreviewContext(): Observable<{ data: StoreHomePublic }> {
+    return this.http.get<{ data: StoreHomePublic }>(`${this.apiUrl}/store-home/preview-context`);
   }
 
   /** Switches the store's `{tienda}-store` domain to the store home. */

@@ -29,9 +29,48 @@ export function addBlockBlocker(
 ): string | null {
   const def = blockDef(catalog, type);
   if (!def) return 'Esta sección no existe en el catálogo de la app.';
-  if (blocks.length >= catalog.maxBlocks) return `Máximo ${catalog.maxBlocks} secciones por página.`;
+  if (countedBlocks(catalog, blocks) >= catalog.maxBlocks) return `Máximo ${catalog.maxBlocks} secciones por página.`;
   if (def.single && blocks.some((b) => b.type === type)) return 'Ya está en la página: solo puede haber una.';
   return null;
+}
+
+/** Blocks that count toward `maxBlocks` (virtual ones, like a cover, do not). */
+export function countedBlocks(catalog: BuilderCatalog, blocks: readonly BuilderBlock[]): number {
+  return blocks.filter((b) => !blockDef(catalog, b.type)?.virtual).length;
+}
+
+/** Whether the block keeps its place (virtual or pinned): it cannot be moved. */
+export function isFixedBlock(catalog: BuilderCatalog, block: BuilderBlock): boolean {
+  const def = blockDef(catalog, block.type);
+  return !!def && (!!def.virtual || !!def.pinned);
+}
+
+/**
+ * F6-B — the blocks in the order the public page draws them: virtual blocks
+ * first, then those pinned to the start, the free ones, and those pinned to
+ * the end. Pinned blocks follow the catalog order; free ones keep theirs.
+ * A catalog without virtual or pinned blocks (the landing) keeps the list as
+ * it is.
+ */
+export function arrangeBlocks(catalog: BuilderCatalog, blocks: readonly BuilderBlock[]): BuilderBlock[] {
+  const rank = (block: BuilderBlock): number => {
+    const def = blockDef(catalog, block.type);
+    if (def?.virtual) return 0;
+    if (def?.pinned === 'start') return 1;
+    if (def?.pinned === 'end') return 3;
+    return 2;
+  };
+  const order = (block: BuilderBlock): number => catalog.blocks.findIndex((d) => d.type === block.type);
+  return blocks
+    .map((block, index) => ({ block, index }))
+    .sort((a, b) => {
+      const byRank = rank(a.block) - rank(b.block);
+      if (byRank !== 0) return byRank;
+      // Free blocks keep their own order; fixed ones take the catalog's.
+      if (rank(a.block) === 2) return a.index - b.index;
+      return order(a.block) - order(b.block) || a.index - b.index;
+    })
+    .map(({ block }) => block);
 }
 
 /** A short id unique within `blocks` (`type_n`). */

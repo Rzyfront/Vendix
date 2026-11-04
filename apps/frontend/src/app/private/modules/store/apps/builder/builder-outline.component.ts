@@ -2,7 +2,7 @@ import { CdkDrag, CdkDragDrop, CdkDragHandle, CdkDragPlaceholder, CdkDropList } 
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { addBlockBlocker, blockDef, blockSummary, catalogForMode } from './builder-blocks';
+import { addBlockBlocker, blockDef, blockSummary, catalogForMode, countedBlocks, isFixedBlock } from './builder-blocks';
 import type { BuilderBlock, BuilderCatalog, BuilderOperationMode } from './builder.types';
 
 /**
@@ -23,7 +23,7 @@ import type { BuilderBlock, BuilderCatalog, BuilderOperationMode } from './build
         <div class="flex items-center justify-between gap-2 px-3 pb-2 pt-3">
           <div>
             <h2 class="text-sm font-semibold text-[var(--color-text-primary)]">Secciones</h2>
-            <p class="text-[11px] text-[var(--color-text-secondary)]">{{ blocks().length }} de {{ catalog().maxBlocks }} · arrastra para ordenar</p>
+            <p class="text-[11px] text-[var(--color-text-secondary)]">{{ count() }} de {{ catalog().maxBlocks }} · arrastra para ordenar</p>
           </div>
           <button type="button" data-testid="builder-add"
                   class="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-text-on-primary,#fff)] disabled:opacity-50"
@@ -46,7 +46,7 @@ import type { BuilderBlock, BuilderCatalog, BuilderOperationMode } from './build
           <ol cdkDropList class="min-h-0 flex-1 space-y-1 overflow-y-auto px-2 pb-3" (cdkDropListDropped)="onDrop($event)"
               aria-label="Secciones de la página">
             @for (block of blocks(); track block.id; let i = $index; let first = $first; let last = $last) {
-              <li cdkDrag [cdkDragData]="block.id" [attr.data-block-id]="block.id"
+              <li cdkDrag [cdkDragData]="block.id" [cdkDragDisabled]="fixed(block)" [attr.data-block-id]="block.id"
                   class="group rounded-lg border bg-[var(--color-surface)] transition-colors"
                   [class.border-[var(--color-primary)]]="selectedId() === block.id"
                   [class.ring-1]="selectedId() === block.id"
@@ -54,10 +54,16 @@ import type { BuilderBlock, BuilderCatalog, BuilderOperationMode } from './build
                   [class.border-[var(--color-border)]]="selectedId() !== block.id">
                 <div *cdkDragPlaceholder class="h-12 rounded-lg border-2 border-dashed border-[var(--color-primary)] opacity-60"></div>
                 <div class="flex items-center gap-1.5 py-1.5 pl-1 pr-1.5">
-                  <button type="button" cdkDragHandle class="cursor-grab rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] active:cursor-grabbing"
-                          [attr.aria-label]="'Arrastrar ' + label(block)">
-                    <app-icon name="grip-vertical" [size]="14" />
-                  </button>
+                  @if (fixed(block)) {
+                    <span class="rounded p-1 text-[var(--color-text-secondary)]" [attr.title]="fixedHint(block)" data-testid="builder-fixed">
+                      <app-icon name="pin" [size]="14" />
+                    </span>
+                  } @else {
+                    <button type="button" cdkDragHandle class="cursor-grab rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] active:cursor-grabbing"
+                            [attr.aria-label]="'Arrastrar ' + label(block)">
+                      <app-icon name="grip-vertical" [size]="14" />
+                    </button>
+                  }
                   <button type="button" class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left"
                           [class.opacity-50]="block.hidden" (click)="select.emit(block.id)"
                           [attr.aria-pressed]="selectedId() === block.id" data-testid="builder-select">
@@ -82,28 +88,34 @@ import type { BuilderBlock, BuilderCatalog, BuilderOperationMode } from './build
                   } @else {
                     <div class="flex shrink-0 items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
                          [class.md:opacity-100]="selectedId() === block.id">
-                      <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] disabled:opacity-30"
-                              [disabled]="first" (click)="move.emit({ from: i, to: i - 1 })" aria-label="Subir sección" title="Subir (Alt+↑)">
-                        <app-icon name="chevron-up" [size]="14" />
-                      </button>
-                      <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] disabled:opacity-30"
-                              [disabled]="last" (click)="move.emit({ from: i, to: i + 1 })" aria-label="Bajar sección" title="Bajar (Alt+↓)">
-                        <app-icon name="chevron-down" [size]="14" />
-                      </button>
-                      <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] disabled:opacity-30"
-                              [disabled]="!!duplicateBlocker(block)" [attr.title]="duplicateBlocker(block) ?? 'Duplicar'"
-                              (click)="duplicate.emit(block.id)" aria-label="Duplicar sección" data-testid="builder-duplicate">
-                        <app-icon name="copy" [size]="14" />
-                      </button>
-                      <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)]"
-                              (click)="toggleHidden.emit(block.id)" [attr.aria-label]="block.hidden ? 'Mostrar sección' : 'Ocultar sección'"
-                              [attr.title]="block.hidden ? 'Mostrar' : 'Ocultar'" data-testid="builder-toggle-hidden">
-                        <app-icon [name]="block.hidden ? 'eye' : 'eye-off'" [size]="14" />
-                      </button>
-                      <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] hover:text-[var(--color-error,#dc2626)]"
-                              (click)="confirmingDelete.set(block.id)" aria-label="Eliminar sección" title="Eliminar" data-testid="builder-remove">
-                        <app-icon name="trash-2" [size]="14" />
-                      </button>
+                      @if (!fixed(block)) {
+                        <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] disabled:opacity-30"
+                                [disabled]="first || fixedAt(i - 1)" (click)="move.emit({ from: i, to: i - 1 })" aria-label="Subir sección" title="Subir (Alt+↑)">
+                          <app-icon name="chevron-up" [size]="14" />
+                        </button>
+                        <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] disabled:opacity-30"
+                                [disabled]="last || fixedAt(i + 1)" (click)="move.emit({ from: i, to: i + 1 })" aria-label="Bajar sección" title="Bajar (Alt+↓)">
+                          <app-icon name="chevron-down" [size]="14" />
+                        </button>
+                      }
+                      @if (!virtual(block)) {
+                        <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] disabled:opacity-30"
+                                [disabled]="!!duplicateBlocker(block)" [attr.title]="duplicateBlocker(block) ?? 'Duplicar'"
+                                (click)="duplicate.emit(block.id)" aria-label="Duplicar sección" data-testid="builder-duplicate">
+                          <app-icon name="copy" [size]="14" />
+                        </button>
+                        <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)]"
+                                (click)="toggleHidden.emit(block.id)" [attr.aria-label]="block.hidden ? 'Mostrar sección' : 'Ocultar sección'"
+                                [attr.title]="block.hidden ? 'Mostrar' : 'Ocultar'" data-testid="builder-toggle-hidden">
+                          <app-icon [name]="block.hidden ? 'eye' : 'eye-off'" [size]="14" />
+                        </button>
+                      }
+                      @if (removable(block)) {
+                        <button type="button" class="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-background)] hover:text-[var(--color-error,#dc2626)]"
+                                (click)="confirmingDelete.set(block.id)" aria-label="Eliminar sección" title="Eliminar" data-testid="builder-remove">
+                          <app-icon name="trash-2" [size]="14" />
+                        </button>
+                      }
                     </div>
                   }
                 </div>
@@ -177,7 +189,9 @@ export class BuilderOutlineComponent {
   readonly category = signal('all');
   readonly confirmingDelete = signal<string | null>(null);
 
-  readonly full = computed(() => this.blocks().length >= this.catalog().maxBlocks);
+  /** Sections that count toward the limit (a virtual cover does not). */
+  readonly count = computed(() => countedBlocks(this.catalog(), this.blocks()));
+  readonly full = computed(() => this.count() >= this.catalog().maxBlocks);
   readonly categoryChips = computed(() => [{ id: 'all', label: 'Todas' }, ...this.catalog().categories]);
   readonly visibleCatalog = computed(() => {
     const term = this.query().trim().toLowerCase();
@@ -195,6 +209,31 @@ export class BuilderOutlineComponent {
 
   icon(block: BuilderBlock): string {
     return blockDef(this.catalog(), block.type)?.icon ?? 'layers';
+  }
+
+  /** F6-B: virtual and pinned blocks keep their place: no drag, no arrows. */
+  fixed(block: BuilderBlock): boolean {
+    return isFixedBlock(this.catalog(), block);
+  }
+
+  fixedAt(index: number): boolean {
+    const block = this.blocks()[index];
+    return !!block && this.fixed(block);
+  }
+
+  virtual(block: BuilderBlock): boolean {
+    return !!blockDef(this.catalog(), block.type)?.virtual;
+  }
+
+  removable(block: BuilderBlock): boolean {
+    const def = blockDef(this.catalog(), block.type);
+    return !def?.virtual && def?.removable !== false;
+  }
+
+  fixedHint(block: BuilderBlock): string {
+    const def = blockDef(this.catalog(), block.type);
+    if (def?.virtual) return 'Siempre va arriba';
+    return def?.pinned === 'end' ? 'La página la muestra al final' : 'La página la muestra en este lugar';
   }
 
   summary(block: BuilderBlock): string {

@@ -63,3 +63,15 @@ export function ratingOf(item: BlockItem): number {
 }
 
 export const STAR_SLOTS = [1, 2, 3, 4, 5] as const;
+
+/**
+ * F6-B — `wa.me` link of a WhatsApp number (digits with country code; spaces,
+ * dashes and parentheses ignored) and its first message; `null` without a
+ * valid number.
+ */
+export function whatsappHref(number: string | undefined, message?: string): string | null {
+  const digits = (number ?? '').replace(/[^0-9]/g, '');
+  if (digits.length < 7 || digits.length > 15) return null;
+  const text = (message ?? '').trim();
+  return `https://wa.me/${digits}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
+}

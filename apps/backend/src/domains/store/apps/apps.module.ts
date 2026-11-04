@@ -20,6 +20,7 @@ import { BookingPublicController } from './booking/booking-public.controller';
 import { StoreHomeAppController } from './store-home/store-home-app.controller';
 import { StoreHomeAppService } from './store-home/store-home-app.service';
 import { StoreHomePublicController } from './store-home/store-home-public.controller';
+import { StoreHomeViewService } from './store-home/store-home-view.service';
 import { CrmModule } from '../crm/crm.module';
 import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
 import { LandingPageAppController } from './landing/landing-page-app.controller';
@@ -61,6 +62,7 @@ import { LandingLeadService } from './landing/landing-lead.service';
     BookingAppService,
     BookingCheckinService,
     StoreHomeAppService,
+    StoreHomeViewService,
     LandingPageAppService,
     LandingLeadService,
     // Default CRM pipeline for the landing leads (same helper as the CRM).

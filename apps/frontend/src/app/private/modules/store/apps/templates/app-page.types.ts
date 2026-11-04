@@ -88,6 +88,10 @@ export interface AppPageBrand {
   secondary_color?: string;
   font_family?: AppPageFont;
   cover_url?: string;
+  /** F6-B: WhatsApp number with country code, its first message and the floating button. */
+  whatsapp_number?: string;
+  whatsapp_message?: string;
+  whatsapp_floating?: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -48,6 +48,16 @@ export const storeAdminRoutes: Routes = [
         '../../private/modules/store/apps/landing-builder/landing-preview-frame.component'
       ).then((c) => c.LandingPreviewFrameComponent),
   },
+  // F6-B: preview frame of the app page builders (store home, product page,
+  // service page, booking), same rules as the landing frame above.
+  {
+    path: 'admin/apps/page-preview/:kind',
+    canActivate: [AuthGuard],
+    loadComponent: () =>
+      import(
+        '../../private/modules/store/apps/page-builder/app-page-preview-frame.component'
+      ).then((c) => c.AppPagePreviewFrameComponent),
+  },
   {
     path: 'admin',
     loadComponent: () =>

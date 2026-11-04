@@ -10,6 +10,7 @@ import { ProductPageSettingsPanelComponent } from '../../components/product-page
 import { ServicePageSettingsPanelComponent } from '../../components/service-page-settings-panel.component';
 import { StoreHomeSettingsPanelComponent } from '../../components/store-home-settings-panel.component';
 import { LandingBuilderPageComponent } from '../../landing-builder/landing-builder-page.component';
+import { StoreHomeBuilderPageComponent } from '../../page-builder/store-home/store-home-builder-page.component';
 import type { StoreAppDetail } from '../../interfaces/store-app.interface';
 import { StoreAppsService } from '../../services/store-apps.service';
 import { AppDetailComponent } from './app-detail.component';
@@ -34,6 +35,9 @@ class StubBookingPanel extends StubPanel {}
 
 @Component({ selector: 'app-landing-builder-page', standalone: true, template: '<p data-testid="landing-builder">builder</p>' })
 class StubLandingBuilder {}
+
+@Component({ selector: 'app-store-home-builder-page', standalone: true, template: '<p data-testid="store-home-builder">builder</p>' })
+class StubStoreHomeBuilder {}
 
 @Component({ selector: 'app-ecommerce', standalone: true, template: '<p data-testid="ecommerce-admin">gestión</p>' })
 class StubEcommerce {}
@@ -90,6 +94,7 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
       remove: {
         imports: [
           LandingBuilderPageComponent,
+          StoreHomeBuilderPageComponent,
           StoreHomeSettingsPanelComponent,
           ProductPageSettingsPanelComponent,
           ServicePageSettingsPanelComponent,
@@ -97,7 +102,7 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
           EcommerceComponent,
         ],
       },
-      add: { imports: [StubLandingBuilder, StubProductPagePanel, StubBookingPanel, StubEcommerce] },
+      add: { imports: [StubLandingBuilder, StubStoreHomeBuilder, StubProductPagePanel, StubBookingPanel, StubEcommerce] },
     });
   });
 
@@ -163,6 +168,15 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
     const el: HTMLElement = fixture.nativeElement;
     expect(el.querySelector('[data-testid="landing-builder"]')).not.toBeNull();
     // Una sola barra: la de esta vista no se dibuja, y el constructor carga lo suyo.
+    expect(el.querySelector('app-sticky-header')).toBeNull();
+    expect(apps.get).not.toHaveBeenCalled();
+  });
+
+  it('inicio de tienda (F6-B): monta solo su constructor, con su propia cabecera y sus datos', async () => {
+    await render('store-home', detail({ key: 'store_home', name: 'Inicio de tienda', status: 'published' }));
+
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('[data-testid="store-home-builder"]')).not.toBeNull();
     expect(el.querySelector('app-sticky-header')).toBeNull();
     expect(apps.get).not.toHaveBeenCalled();
   });

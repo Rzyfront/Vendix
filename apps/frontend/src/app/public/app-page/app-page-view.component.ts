@@ -16,6 +16,7 @@ import {
   ratingOf,
   safeColor,
   safeUrl,
+  whatsappHref,
 } from './app-page-view.util';
 import { hasTheme, themeStyle } from './app-page-theme';
 
@@ -152,6 +153,7 @@ interface PlaceholderView {
         [style.background-size]="'cover'"
         [style.background-position]="'center'"
         data-testid="app-page-hero"
+        [attr.data-block-id]="blockIds() ? 'hero' : null"
       >
         @if (!h.image_url && coverCss()) {
           <div class="pointer-events-none absolute inset-0 bg-black/40"></div>
@@ -197,7 +199,7 @@ interface PlaceholderView {
     @if (showBlocks()) {
       @for (item of views(); track item.block.id) {
         @if (item.placeholder; as ph) {
-          <section class="mx-auto w-full max-w-6xl px-4 py-6" data-testid="app-page-placeholder">
+          <section class="mx-auto w-full max-w-6xl px-4 py-6" data-testid="app-page-placeholder" [attr.data-block-id]="blockIds() ? item.block.id : null">
             <div class="rounded-xl border-2 border-dashed border-border px-4 py-6 text-center text-sm text-text-secondary">
               Aquí va: {{ ph.label }}
             </div>
@@ -206,6 +208,7 @@ interface PlaceholderView {
           <section
             class="ap-section mx-auto w-full max-w-6xl px-4 py-8 md:py-10"
             [attr.data-block]="item.block.type"
+            [attr.data-block-id]="blockIds() ? item.block.id : null"
             [attr.aria-labelledby]="titleOf(item.block) ? 'ap-' + item.block.id : null"
           >
             @switch (item.block.type) {
@@ -422,6 +425,20 @@ interface PlaceholderView {
       }
     }
 
+    @if (showBlocks() && whatsappUrl(); as wa) {
+      <a
+        [href]="wa"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:shadow-xl"
+        data-testid="app-page-whatsapp"
+        aria-label="Escríbenos por WhatsApp"
+      >
+        <svg viewBox="0 0 24 24" class="h-5 w-5 fill-current" aria-hidden="true"><path d="M17.5 14.4c-.3-.1-1.7-.8-2-.9-.3-.1-.5-.1-.7.1-.2.3-.8.9-.9 1.1-.2.2-.3.2-.6.1-.3-.1-1.2-.4-2.3-1.4-.9-.8-1.4-1.7-1.6-2-.2-.3 0-.5.1-.6l.4-.5c.1-.2.2-.3.3-.5.1-.2 0-.4 0-.5l-.9-2.2c-.2-.6-.5-.5-.7-.5h-.6c-.2 0-.5.1-.8.4-.3.3-1 1-1 2.4s1.1 2.8 1.2 3c.1.2 2.1 3.2 5.1 4.5.7.3 1.3.5 1.7.6.7.2 1.4.2 1.9.1.6-.1 1.7-.7 1.9-1.4.2-.7.2-1.3.2-1.4-.1-.1-.3-.2-.6-.3zM12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2z"/></svg>
+        WhatsApp
+      </a>
+    }
+
     <ng-template #head let-b="b">
       @if (titleOf(b)) {
         <h2 [id]="'ap-' + b.id" class="ap-heading mb-6 text-xl font-bold text-text-primary md:text-2xl">{{ titleOf(b) }}</h2>
@@ -438,6 +455,12 @@ export class AppPageViewComponent {
   readonly part = input<'hero' | 'blocks' | 'all'>('all');
   /** Admin preview: shows a placeholder where an existing section goes. */
   readonly preview = input(false);
+  /**
+   * F6-B: marks the hero and each section with `data-block-id`, so the
+   * editor's preview frame can select and highlight them. Off on the public
+   * page (no extra attributes).
+   */
+  readonly blockIds = input(false);
   /** Element id the hero and cta buttons scroll to (the page's main content). */
   readonly mainId = input('app-page-main');
 
@@ -465,6 +488,13 @@ export class AppPageViewComponent {
   readonly coverCss = computed(() => {
     const url = safeUrl(this.page()?.brand?.cover_url);
     return url ? `url("${url.replace(/["()\s\\]/g, (c) => '%' + c.charCodeAt(0).toString(16))}")` : null;
+  });
+
+  /** F6-B: the floating WhatsApp button, only when the owner turned it on with a number. */
+  readonly whatsappUrl = computed(() => {
+    const brand = this.page()?.brand;
+    if (!brand?.whatsapp_floating) return null;
+    return whatsappHref(brand.whatsapp_number, brand.whatsapp_message);
   });
 
   readonly hero = computed(() => {

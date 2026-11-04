@@ -28,6 +28,7 @@ import { ProductPageSettingsPanelComponent } from '../../components/product-page
 import { ServicePageSettingsPanelComponent } from '../../components/service-page-settings-panel.component';
 import { StoreHomeSettingsPanelComponent } from '../../components/store-home-settings-panel.component';
 import { LandingBuilderPageComponent } from '../../landing-builder/landing-builder-page.component';
+import { StoreHomeBuilderPageComponent } from '../../page-builder/store-home/store-home-builder-page.component';
 import type { AppSettingsPanel } from '../../components/app-settings-panel';
 import type { AppKind, AppStatus, StoreAppDetail } from '../../interfaces/store-app.interface';
 import { StoreAppsService } from '../../services/store-apps.service';
@@ -55,6 +56,9 @@ const STATUS_BADGE: Record<AppStatus, { label: string; color: StickyHeaderBadgeC
 };
 
 /** Per-app header icon and name of the settings tab. */
+/** F6-B — apps whose whole view is a page builder of their own (`page-builder/<app>/`). */
+const OWN_BUILDER_KINDS: ReadonlySet<string> = new Set<AppKind>(['store_home']);
+
 const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>> = {
   store_home: { icon: 'home', settingsLabel: 'Configuración' },
   product_page: { icon: 'package', settingsLabel: 'Producto y dominio' },
@@ -83,6 +87,7 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
     StickyHeaderComponent,
     StoreHomeSettingsPanelComponent,
     LandingBuilderPageComponent,
+    StoreHomeBuilderPageComponent,
     ProductPageSettingsPanelComponent,
     ServicePageSettingsPanelComponent,
     BookingSettingsPanelComponent,
@@ -93,6 +98,10 @@ const APP_VIEW: Partial<Record<AppKind, { icon: string; settingsLabel: string }>
   template: `
     @if (kind() === 'landing') {
       <app-landing-builder-page />
+    } @else if (ownBuilder()) {
+      @switch (kind()) {
+        @case ('store_home') { <app-store-home-builder-page /> }
+      }
     } @else {
     <div class="w-full" [attr.data-app-view]="kind()">
       @if (kind() === 'ecommerce') {
@@ -237,6 +246,8 @@ export class AppDetailComponent {
     { initialValue: appKindFromSlug(this.route.snapshot.paramMap.get('kind')) },
   );
 
+  /** The app has a page builder view of its own (F6-B). */
+  readonly ownBuilder = computed(() => OWN_BUILDER_KINDS.has(this.kind() ?? ''));
   readonly detail = signal<StoreAppDetail | null>(null);
   readonly loading = signal(false);
   readonly switching = signal(false);
@@ -340,8 +351,8 @@ export class AppDetailComponent {
       untracked(() => {
         this.detail.set(null);
         this.tab.set(kind === 'ecommerce' ? 'ecommerce' : 'settings');
-        // The landing builder loads its own data.
-        if (kind && kind !== 'landing') this.loadDetail();
+        // The page builders (landing, F6-B apps) load their own data.
+        if (kind && kind !== 'landing' && !OWN_BUILDER_KINDS.has(kind)) this.loadDetail();
       });
     });
   }

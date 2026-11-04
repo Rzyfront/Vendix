@@ -172,8 +172,8 @@ const CTA: FieldsSpec = {
 };
 
 /**
- * Block catalog of each app: block type → its props. One block per type per
- * page; the order of `blocks[]` is the order of the page. Blocks marked
+ * Block catalog of each app: block type → its props. The order of `blocks[]`
+ * is the order of the page; only `SINGLE_APP_PAGE_BLOCKS` are one per page. Blocks marked
  * "existing" stand for a section the public page already renders (their
  * props only retitle it and `enabled: false` hides it).
  */
@@ -268,8 +268,16 @@ export const APP_PAGE_BLOCKS: Record<PageAppKind, Record<string, FieldsSpec>> =
       products: { title: TITLE },
     },
     store_home: {
-      /** Cards to the store's published apps (automatic). */
-      apps: { title: TITLE, subtitle: SUBTITLE },
+      /**
+       * Cards to the store's published apps (automatic). F6-B: `kinds` picks
+       * which published apps show and in which order; absent = all of them,
+       * in catalog order (the pre-F6-B behavior).
+       */
+      apps: {
+        title: TITLE,
+        subtitle: SUBTITLE,
+        kinds: { kind: 'text_list', max: 12, itemMax: 40 },
+      },
       highlights: CARDS,
       contact: {
         title: TITLE,
@@ -295,7 +303,26 @@ const BRAND: FieldsSpec = {
   secondary_color: text(7),
   font_family: oneOf(APP_PAGE_FONTS),
   cover_url: url,
+  /** F6-B: WhatsApp contact (digits with country code), its first message and the floating button. */
+  whatsapp_number: text(20),
+  whatsapp_message: text(200),
+  whatsapp_floating: bool,
 };
+
+/**
+ * F6-B — block types a page may hold only once: the sections the public
+ * layout draws itself (`existing` in the frontend templates), read with
+ * `blocks.find(type)`. Every other block (content written by the owner) may
+ * repeat, so the editor can duplicate it.
+ */
+export const SINGLE_APP_PAGE_BLOCKS: Record<PageAppKind, readonly string[]> = {
+  product_page: ['complements'],
+  service_page: ['services', 'products'],
+  booking: ['search', 'checkin_info', 'products'],
+  store_home: ['apps'],
+};
+
+const WHATSAPP_RE = /^\+?[0-9]{7,15}$/;
 
 const THEME: FieldsSpec = {
   primary_color: text(7),
@@ -390,6 +417,9 @@ export interface AppPageDocument {
     secondary_color?: string;
     font_family?: (typeof APP_PAGE_FONTS)[number];
     cover_url?: string;
+    whatsapp_number?: string;
+    whatsapp_message?: string;
+    whatsapp_floating?: boolean;
   };
   seo?: { title?: string; description?: string; image_url?: string };
   theme?: AppPageTheme;
@@ -605,6 +635,12 @@ export function validateAppPage(
   const brand = cleanFields(BRAND, value['brand'], 'brand', errors);
   checkColor(brand, 'primary_color', 'brand', errors);
   checkColor(brand, 'secondary_color', 'brand', errors);
+  if (
+    typeof brand['whatsapp_number'] === 'string' &&
+    !WHATSAPP_RE.test(brand['whatsapp_number'].replace(/[\s()-]/g, ''))
+  ) {
+    errors.push('brand.whatsapp_number debe ser un número con indicativo, solo dígitos.');
+  }
   const seo = cleanFields(SEO, value['seo'], 'seo', errors);
   const theme = cleanFields(THEME, value['theme'], 'theme', errors);
   for (const key of APP_THEME_COLOR_KEYS) checkColor(theme, key, 'theme', errors);
@@ -646,7 +682,7 @@ export function validateAppPage(
         );
         return;
       }
-      if (types.has(type)) {
+      if (types.has(type) && SINGLE_APP_PAGE_BLOCKS[kind].includes(type)) {
         errors.push(`${path}.type "${type}" está repetido.`);
       }
       types.add(type);

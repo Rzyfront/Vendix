@@ -138,7 +138,8 @@ describe('app page contract', () => {
       brand: { primary_color: 'red', logo_url: 'http://x.co/logo.png' },
       blocks: [
         { id: 'x', type: 'testimonials', props: { items: [{ rating: 6 }] } },
-        { id: 'x', type: 'testimonials', props: {} },
+        { id: 'x', type: 'search', props: {} },
+        { id: 'y', type: 'search', props: {} },
       ],
     });
     expect(result.valid).toBe(false);
@@ -153,8 +154,67 @@ describe('app page contract', () => {
       'brand.primary_color debe ser un color #RRGGBB.',
       'blocks[0].props.items[0].rating debe ser un entero entre 1 y 5.',
       'blocks[1].id está repetido.',
-      'blocks[1].type "testimonials" está repetido.',
+      'blocks[2].type "search" está repetido.',
     ]);
+  });
+
+  describe('F6-B: page builder', () => {
+    it('lets a content section repeat (duplicate) with its own id', () => {
+      const result = validateAppPage('service_page', {
+        schema_version: 1,
+        blocks: [
+          { id: 'faq', type: 'faq', props: { title: 'Preguntas' } },
+          { id: 'faq_2', type: 'faq', props: { title: 'Más preguntas' } },
+        ],
+      });
+      expect(result.valid).toBe(true);
+      expect(result.value?.blocks.map((b) => b.id)).toEqual(['faq', 'faq_2']);
+    });
+
+    it('keeps the sections the layout draws itself (existing) single', () => {
+      const result = validateAppPage('store_home', {
+        schema_version: 1,
+        blocks: [
+          { id: 'apps', type: 'apps', props: {} },
+          { id: 'apps_2', type: 'apps', props: {} },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(['blocks[1].type "apps" está repetido.']);
+    });
+
+    it('accepts the WhatsApp contact in brand and rejects a number that is not one', () => {
+      const ok = validateAppPage('product_page', {
+        schema_version: 1,
+        brand: { whatsapp_number: '+57 300 123 4567', whatsapp_message: 'Hola', whatsapp_floating: true },
+        blocks: [],
+      });
+      expect(ok.valid).toBe(true);
+      expect(ok.value?.brand).toEqual({
+        whatsapp_number: '+57 300 123 4567',
+        whatsapp_message: 'Hola',
+        whatsapp_floating: true,
+      });
+      const bad = validateAppPage('product_page', {
+        schema_version: 1,
+        brand: { whatsapp_number: 'llámame', whatsapp_floating: 'sí' },
+        blocks: [],
+      });
+      expect(bad.valid).toBe(false);
+      expect(bad.errors).toEqual([
+        'brand.whatsapp_floating debe ser verdadero o falso.',
+        'brand.whatsapp_number debe ser un número con indicativo, solo dígitos.',
+      ]);
+    });
+
+    it('store home: the apps block keeps the chosen apps and their order', () => {
+      const result = validateAppPage('store_home', {
+        schema_version: 1,
+        blocks: [{ id: 'apps', type: 'apps', props: { kinds: ['booking', ' landing ', ''] } }],
+      });
+      expect(result.valid).toBe(true);
+      expect(result.value?.blocks[0].props).toEqual({ kinds: ['booking', 'landing'] });
+    });
   });
 
   it('reads a stored page that no longer validates as no page (pre-F2 render)', () => {
