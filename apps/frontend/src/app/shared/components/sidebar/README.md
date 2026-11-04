@@ -60,7 +60,7 @@ interface MenuItem {
   children?: MenuItem[];
   badge?: string;
   action?: (item: MenuItem) => void;
-  alwaysVisible?: boolean; // Ignora filtro de panel_ui
+  accessAuditOnly?: boolean; // apps-f4: visible como antes; la compuerta solo registra
 }
 ```
 
@@ -70,5 +70,5 @@ interface MenuItem {
 - Los submenus usan comportamiento accordion exclusivo (solo uno abierto a la vez).
 - La navegacion de submenus auto-navega al primer hijo con ruta valida.
 - El slot `<ng-content select="[slot=footer]"></ng-content>` permite inyectar contenido en el footer.
-- `alwaysVisible: true` en un MenuItem hace que se ignore el filtro de `panel_ui` (para datos dinamicos como tiendas).
+- `accessAuditOnly: true` (antes `alwaysVisible`) mantiene el item visible ignorando `panel_ui`; lleva su `panelUiKey` real y la compuerta de accesos (apps-f4) solo registra su veredicto hasta F5.
 - El scroll del body se bloquea cuando el drawer mobile esta abierto.

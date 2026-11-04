@@ -779,7 +779,7 @@ export class MenuFilterService {
       // access gate, but in audit mode it stays visible: the gate verdict is
       // only recorded (S2). The enforce flag can only hide it by industry.
       if (item.accessAuditOnly) {
-        if (!this.applyAccessGate(this.moduleKeysFor(item), true, 'sidebar', item.route)) {
+        if (!this.applyAccessGate(this.gateKeysFor(item), true, 'sidebar', item.route)) {
           return filtered;
         }
         if (
@@ -1663,11 +1663,26 @@ export class MenuFilterService {
 
   /** Normalizes `moduleKeyMap`'s `string | string[] | undefined` to an array. */
   private moduleKeysFor(item: MenuItem): string[] {
+    // apps-f4: `accessAuditOnly` items (the pre-F4 `alwaysVisible` ones) got
+    // their real `panelUiKey` only for the audit gate. Every pre-F4 path
+    // (item lookup by key, diagnose, fiscal fallback) keeps resolving them by
+    // label, as before; otherwise `findItemByModuleKey('accounting')` would
+    // land on a different item and change the URL guard verdict.
+    if (item.accessAuditOnly) return this.labelKeysFor(item);
     // QUI-XXX (c1-b): los nodos del catálogo llevan `panelUiKey` y el
     // `moduleKeyMap` está indexado por label del sidebar. Si una clave
     // viene del catálogo, no del sidebar, usar el label devuelve `[]` y el
     // árbol se vuelve infiltrable. La clave explícita gana siempre.
     if (item.panelUiKey) return [item.panelUiKey];
+    return this.labelKeysFor(item);
+  }
+
+  /** Keys the apps-f4 access gate evaluates: the explicit key wins. */
+  private gateKeysFor(item: MenuItem): string[] {
+    return item.panelUiKey ? [item.panelUiKey] : this.labelKeysFor(item);
+  }
+
+  private labelKeysFor(item: MenuItem): string[] {
     const mapped = this.moduleKeyMap[item.label];
     if (!mapped) return [];
     return Array.isArray(mapped) ? mapped : [mapped];

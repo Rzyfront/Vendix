@@ -899,6 +899,31 @@ describe('MenuFilterService.canSeeKey / applyAccessGate (apps-f4 S4)', () => {
     );
   });
 
+  it('B1: un ítem accessAuditOnly sigue resolviéndose por su label en los caminos pre-F4', () => {
+    // Pre-F4 «Contabilidad» de Reportes (sin key) mapeaba a `accounting` y,
+    // por ir antes que Fiscal, era el ítem que el guard diagnosticaba.
+    const tree: MenuItem[] = [
+      {
+        label: 'Reportes', icon: '',
+        children: [{
+          label: 'Contabilidad', icon: '', route: '/admin/reports/accounting',
+          panelUiKey: 'reports_accounting', accessAuditOnly: true,
+        }],
+      },
+      {
+        label: 'Fiscal', icon: '',
+        children: [{
+          label: 'Contabilidad', icon: '', route: '/admin/accounting',
+          panelUiKey: 'accounting', requiredFiscalScope: 'STORE',
+        }],
+      },
+    ];
+    const found = service.findItemByModuleKey(tree, 'accounting');
+    expect(found?.route).toBe('/admin/reports/accounting');
+    userKeys = [];
+    expect(service.diagnose(found!).blockedBy).toBe('user_panel_ui');
+  });
+
   it('applyRouteGate resuelve la key de una ruta nueva solo-auditoría', () => {
     expect(service.resolveGateKeysForRoute('/admin/restaurant-ops/recipes')).toContain(
       'restaurant_ops_recipes',
