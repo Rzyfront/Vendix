@@ -1328,7 +1328,6 @@ export interface ScheduledOrdersSettings {
   reminders: ScheduledOrderReminderRule[];
 }
 
-/** Adiciones de producto. Apagadas por defecto. */
 /** Regla de recordatorio de cuota a crédito: N días antes del vencimiento. */
 export interface CreditReminderRule {
   /** 0 = el mismo día del vencimiento. */
@@ -1347,6 +1346,7 @@ export interface CreditRemindersSettings {
   reminders: CreditReminderRule[];
 }
 
+/** Adiciones de producto. Apagadas por defecto. */
 export interface ProductOptionsSettings {
   enabled: boolean;
 }
