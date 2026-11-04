@@ -1060,6 +1060,39 @@ export class NotificationsEventsListener {
     );
   }
 
+  /** Ventas a crédito: recordatorio de cuota al equipo (campana), una vez por regla. */
+  @OnEvent('credit_installment.reminder')
+  async handleCreditInstallmentReminder(event: {
+    store_id: number;
+    installment_id: number;
+    installment_number: number;
+    installments_total: number;
+    order_id: number;
+    order_number: string;
+    channel: 'staff' | 'customer';
+    days_before: number;
+    due_date: string;
+    installment_balance: number;
+    customer_name: string | null;
+  }) {
+    if (event.channel !== 'staff') return;
+    const when =
+      event.days_before === 0
+        ? 'vence hoy'
+        : `vence el ${event.due_date} (en ${event.days_before} ${event.days_before === 1 ? 'día' : 'días'})`;
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'credit_installment_reminder',
+      'Cuota de crédito por vencer',
+      `Cuota ${event.installment_number} de ${event.installments_total} de ${event.order_number}${event.customer_name ? ` (${event.customer_name})` : ''} ${when}: $${event.installment_balance.toLocaleString('es-CO')}`,
+      {
+        order_id: event.order_id,
+        order_number: event.order_number,
+        installment_id: event.installment_id,
+      },
+    );
+  }
+
   @OnEvent('booking.rescheduled')
   async handleBookingRescheduled(event: {
     store_id: number;

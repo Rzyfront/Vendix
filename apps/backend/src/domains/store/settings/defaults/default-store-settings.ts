@@ -561,6 +561,16 @@ export function getDefaultStoreSettings(): StoreSettings {
       enabled: false,
     },
 
+    // Recordatorios de cuotas a crédito - apagados por defecto. Al activarlos
+    // el formulario siembra estas mismas reglas.
+    credit_reminders: {
+      enabled: false,
+      reminders: [
+        { days_before: 3, enabled: true, notify_staff: true, notify_customer: true },
+        { days_before: 0, enabled: true, notify_staff: true, notify_customer: false },
+      ],
+    },
+
     // Membership - gym/membership suite behavior toggles. Ambient access
     // validation is opt-in (false by default) and only surfaced for `gym`.
     // Capacity (aforo) control and its auto-leveling are also opt-in.

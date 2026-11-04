@@ -33,6 +33,7 @@ import {
   PromotionsSettingsDto,
   ScheduledOrdersSettingsDto,
   ProductOptionsSettingsDto,
+  CreditRemindersSettingsDto,
 } from './settings-schemas.dto';
 import { EcommerceSettingsDto } from '../../ecommerce/dto/ecommerce-settings.dto';
 
@@ -253,6 +254,12 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => ScheduledOrdersSettingsDto)
   scheduled_orders?: ScheduledOrdersSettingsDto;
+
+  @ApiProperty({ type: CreditRemindersSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreditRemindersSettingsDto)
+  credit_reminders?: CreditRemindersSettingsDto;
 
   @ApiProperty({ type: ProductOptionsSettingsDto, required: false })
   @IsOptional()

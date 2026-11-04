@@ -2239,6 +2239,43 @@ export class ScheduledOrdersSettingsDto {
   reminders?: ScheduledOrderReminderRuleDto[];
 }
 
+/** Regla de recordatorio de cuota a crédito: N días antes del vencimiento. */
+export class CreditReminderRuleDto {
+  @ApiProperty({ example: 3, description: 'Días antes del vencimiento (0 = el mismo día)' })
+  @IsInt()
+  @Min(0)
+  @Max(30)
+  days_before: number;
+
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  enabled: boolean;
+
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  notify_staff: boolean;
+
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  notify_customer: boolean;
+}
+
+/** Espejo de `store_settings.settings.credit_reminders`. Se edita como un todo. */
+export class CreditRemindersSettingsDto {
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @ApiProperty({ type: [CreditReminderRuleDto], required: false })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => CreditReminderRuleDto)
+  reminders?: CreditReminderRuleDto[];
+}
+
 /** Espejo de `store_settings.settings.product_options`. */
 export class ProductOptionsSettingsDto {
   @ApiProperty({ example: false, required: false })
