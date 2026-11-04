@@ -87,6 +87,7 @@ describe('AccountsReceivableService — saldos de crédito (QUI-979)', () => {
   it('crédito con inicial: paid = inicial, saldo = financiado, historial enlazado al pago POS', async () => {
     const initial = {
       id: 11,
+      amount: 20000,
       paid_at: new Date('2026-08-27T14:15:00.000Z'),
       gateway_response: { metadata: { is_initial_credit_payment: true } },
       store_payment_method: {
@@ -305,4 +306,63 @@ describe('AccountsReceivableService — saldos de crédito (QUI-979)', () => {
       }),
     });
   });
+
+  it('hotel con anticipo (sin marca): original = saldo, paid = 0, sin fila de historial', async () => {
+    const advance = {
+      id: 21,
+      amount: 300000,
+      paid_at: new Date('2026-08-27T14:15:00.000Z'),
+      gateway_response: { payment_type: 'direct' },
+      store_payment_method: null,
+    };
+    const { service, tx } = setupCreate(
+      orderRow({
+        grand_total: 1000000,
+        total_paid: 300000,
+        remaining_balance: 700000,
+        total_with_interest: null,
+      }),
+      [advance],
+    );
+    lifecycleLock.mockResolvedValue({ id: 42, state: 'created' });
+
+    await service.createCreditSaleFromEvent({
+      order_id: 42,
+      store_id: 7,
+      total_amount: 700000,
+    });
+
+    expect(tx.accounts_receivable.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        original_amount: 700000,
+        paid_amount: 0,
+        balance: 700000,
+      }),
+    });
+    expect(tx.ar_payments.create).not.toHaveBeenCalled();
+  });
+
+  it('hotel con anticipo: un abono de 400000 deja saldo 300000 en estado partial', async () => {
+    const { service, tx } = setupPayment({
+      ...creditAr,
+      original_amount: 700000,
+      paid_amount: 0,
+      balance: 700000,
+      status: 'open',
+    });
+    lifecycleLock.mockResolvedValue({ id: 42, state: 'created' });
+
+    await service.registerPayment(55, { amount: 400000 } as any, 9);
+
+    expect(tx.accounts_receivable.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          paid_amount: 400000,
+          balance: 300000,
+          status: 'partial',
+        }),
+      }),
+    );
+  });
+
 });

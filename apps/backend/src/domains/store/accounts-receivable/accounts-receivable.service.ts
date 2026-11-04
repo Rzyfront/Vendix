@@ -537,21 +537,53 @@ export class AccountsReceivableService {
         select: { due_date: true },
       });
       // QUI-979: la CxC nace de la obligación REAL, no del grand_total
-      // crudo. `createOrderInstallments` (misma tx de la venta, ya
-      // commiteada al emitir el evento) dejó `total_paid` (cuota inicial),
-      // `remaining_balance` (financiado + interés) y `total_with_interest`.
-      // Antes: original = grand_total con paid = 0 — con inicial o con
-      // interés la cuenta NUNCA cerraba (saldo fantasma) por más abonos
-      // fraccionados que entraran, y el tiquete heredaba ese saldo.
-      const obligation =
-        order.total_with_interest != null
-          ? Number(order.total_with_interest)
-          : Number(data.total_amount ?? order.grand_total ?? 0);
-      const initialPaid = Number(order.total_paid ?? 0);
+      // crudo. Invariante para TODO emisor (POS, check-out de hotel,
+      // facturación one-shot): `original_amount = paid_amount + balance`.
+      // La cuota inicial sale SOLO de los pagos marcados con
+      // `metadata.is_initial_credit_payment` (los escribe el POS); un anticipo
+      // de folio u otro pago `succeeded` sin marca ya está descontado del
+      // `remaining_balance` y NO es parte de la CxC (si no, abonar el saldo
+      // la cerraría con deuda viva). En el POS
+      // `inicial + remaining_balance = total_with_interest`.
+      const succeeded = await tx.payments.findMany({
+        where: { order_id: scopedOrder.id, state: 'succeeded' },
+        select: {
+          id: true,
+          amount: true,
+          paid_at: true,
+          gateway_response: true,
+          store_payment_method: {
+            select: {
+              display_name: true,
+              system_payment_method: { select: { display_name: true } },
+            },
+          },
+        },
+        orderBy: { id: 'asc' },
+      });
+      const isInitial = (row: (typeof succeeded)[number]): boolean => {
+        const gateway = row.gateway_response;
+        if (!gateway || typeof gateway !== 'object' || Array.isArray(gateway)) {
+          return false;
+        }
+        const metadata = (gateway as Prisma.JsonObject).metadata;
+        return (
+          !!metadata &&
+          typeof metadata === 'object' &&
+          !Array.isArray(metadata) &&
+          (metadata as Prisma.JsonObject).is_initial_credit_payment === true
+        );
+      };
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      const initialRows = succeeded.filter(isInitial);
+      const initialPaid = round2(
+        initialRows.reduce((sum, row) => sum + Number(row.amount), 0),
+      );
       const openingBalance = Math.max(
-        Number(order.remaining_balance ?? obligation),
+        Number(order.remaining_balance ?? data.total_amount ?? order.grand_total ?? 0),
         0,
       );
+      const obligation = round2(initialPaid + openingBalance);
       const created = await tx.accounts_receivable.create({
         data: {
           store_id: scopedOrder.store_id,
@@ -571,54 +603,25 @@ export class AccountsReceivableService {
         },
       });
       // La cuota inicial también deja su rastro en el historial (`paid_amount`
-      // sin fila huérfana): enlazada al pago POS (`payment_id`) para que el
-      // historial del tiquete no la duplique (ese carril excluye las filas
-      // con `payment_id` del tramo CxC). Sin pago identificable y sin filas
-      // succeeded, igual se registra (no hay nada que duplicar); con filas
-      // pero sin marca, se omite antes que duplicar.
-      if (initialPaid > 0) {
-        const succeeded = await tx.payments.findMany({
-          where: { order_id: scopedOrder.id, state: 'succeeded' },
-          select: {
-            id: true,
-            paid_at: true,
-            gateway_response: true,
-            store_payment_method: {
-              select: {
-                display_name: true,
-                system_payment_method: { select: { display_name: true } },
-              },
-            },
+      // sin fila huérfana): una fila por pago marcado, enlazada al pago POS
+      // (`payment_id`) para que el historial del tiquete no la duplique (ese
+      // carril excluye las filas con `payment_id` del tramo CxC).
+      for (const row of initialRows) {
+        const method =
+          row.store_payment_method?.display_name?.trim() ||
+          row.store_payment_method?.system_payment_method?.display_name?.trim() ||
+          'Cuota inicial';
+        await tx.ar_payments.create({
+          data: {
+            accounts_receivable_id: created.id,
+            payment_id: row.id,
+            amount: Number(row.amount),
+            payment_date: row.paid_at ?? new Date(),
+            payment_method: method,
+            reference: AR_INITIAL_PAYMENT_REFERENCE,
+            notes: 'Cuota inicial de la venta a crédito',
           },
-          orderBy: { id: 'asc' },
         });
-        const isInitial = (row: (typeof succeeded)[number]): boolean => {
-          const gateway = row.gateway_response as Record<string, any> | null;
-          return (
-            !!gateway &&
-            typeof gateway === 'object' &&
-            (gateway as any).metadata?.is_initial_credit_payment === true
-          );
-        };
-        const link =
-          succeeded.find(isInitial) ?? (succeeded.length === 1 ? succeeded[0] : null);
-        if (link || succeeded.length === 0) {
-          const method =
-            link?.store_payment_method?.display_name?.trim() ||
-            link?.store_payment_method?.system_payment_method?.display_name?.trim() ||
-            'Cuota inicial';
-          await tx.ar_payments.create({
-            data: {
-              accounts_receivable_id: created.id,
-              payment_id: link?.id ?? null,
-              amount: initialPaid,
-              payment_date: link?.paid_at ?? new Date(),
-              payment_method: method,
-              reference: AR_INITIAL_PAYMENT_REFERENCE,
-              notes: 'Cuota inicial de la venta a crédito',
-            },
-          });
-        }
       }
       return created;
     });
