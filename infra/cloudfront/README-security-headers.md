@@ -24,7 +24,7 @@ Todas con `Override: true`, para que no dependan de lo que devuelva S3. No cambi
 - **Tiendas con dominio propio.** Si una tienda con dominio propio pasa por esta distribución, también recibirá HSTS de 1 año **para su dominio**. Comprobar que ese dominio tiene certificado válido y se renueva solo.
 - **Asociación a todos los comportamientos.** El script aborta sin cambios si algún comportamiento ya tiene otra Response Headers Policy.
 - El despliegue de CloudFront tarda de 3 a 15 min; el rollback tarda lo mismo.
-- No se había comprobado si la distribución de dominios propios (`E3I95HVZBIX74T`, según el runbook de TECH-03) comparte el origen: si hay que cubrirla, se corre el script otra vez con `DIST_ID=E3I95HVZBIX74T`.
+- **Distribución de dominios propios (`E3I95HVZBIX74T`).** Es la distribución SaaS multi-tenant (`ConnectionMode: tenant-only`): cada dominio de cliente entra como *distribution tenant* con su propio certificado ACM pedido por el backend con validación DNS (`domain-root-provisioning.service.ts`, `acm.service.ts`). La policy se asoció también aquí el 2026-11-03 (5/5 comportamientos, incluidos los 4 que van a `vendix-backend-api`). Antes de hacerlo se comprobó que los 3 tenants activos tienen certificado `AMAZON_ISSUED`, `RenewalEligibility: ELIGIBLE` y su CNAME de validación publicado, es decir, se renuevan solos. **Si algún día se asocia un dominio con certificado importado o de renovación manual, quitarlo de esta distribución o revisar HSTS antes:** un certificado vencido con HSTS deja a los visitantes sin forma de saltarse el aviso.
 
 ## Plan para subir HSTS después
 
@@ -55,7 +55,9 @@ for u in https://vendix.online/ https://www.vendix.online/ https://vendix-pit-an
   echo "== $u"; curl -sI "$u" | grep -iE '^(strict-transport-security|x-content-type-options|referrer-policy)'
 done
 curl -sI https://vendix.online/ | grep -i strict-transport-security   # max-age=31536000, sin includeSubDomains
-node docs/seo/herramientas/seo-smoke.cjs https://vendix.online          # bloque [seguridad]
+node scripts/seo/seo-smoke.cjs https://vendix.online --mode report    # bloque [seguridad]
 ```
+
+El smoke llega con SEO-TECH-15 (PR #1066, rama `claude/tech15-smoke-seo`). Mientras no esté en develop, se corre desde esa rama: `git show origin/claude/tech15-smoke-seo:scripts/seo/seo-smoke.cjs > /tmp/seo-smoke.cjs && node /tmp/seo-smoke.cjs https://vendix.online`. Ojo: hoy marca `x-frame-options` ausente como FALLA, pero se dejó fuera a propósito (ver arriba).
 
 Revisar también a mano que el checkout (Wompi) y la carga de imágenes de las tiendas sigan funcionando. La API (`api.vendix.online`, nginx/Express) no pasa por CloudFront y se trata aparte.
