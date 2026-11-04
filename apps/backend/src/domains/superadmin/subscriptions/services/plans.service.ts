@@ -7,6 +7,7 @@ import {
   isAIFeatureKey,
 } from '../../../store/subscriptions/types/access.types';
 import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
+import { PlanModuleRulesService } from '../../../../common/access/plan-module-rules.service';
 import {
   CreatePlanDto,
   UpdatePlanDto,
@@ -28,6 +29,8 @@ export class PlansService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     @Optional() private readonly toolRegistry?: AIToolRegistry,
+    // AccessModule es @Global: se resuelve sin importarlo en el módulo.
+    @Optional() private readonly planModuleRules?: PlanModuleRulesService,
   ) {}
 
   /**
@@ -765,7 +768,8 @@ export class PlansService {
       updated_at: new Date(),
     };
 
-    return this.prisma.$transaction(
+    let removedPlan = false;
+    const result = await this.prisma.$transaction(
       async (tx) => {
         // 0. Auto-heal a legacy row whose plan_group_code is NULL. `groupCode`
         //    already falls back to `existing.code`, but the row itself stays
@@ -895,7 +899,13 @@ export class PlansService {
                 },
               });
             } else {
+              // plan_module_rules.plan_id es ON DELETE RESTRICT: sus reglas
+              // se borran primero, en la misma transacción.
+              await tx.plan_module_rules.deleteMany({
+                where: { plan_id: row.id },
+              });
               await tx.subscription_plans.delete({ where: { id: row.id } });
+              removedPlan = true;
             }
           }
 
@@ -966,6 +976,9 @@ export class PlansService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+    // Un plan borrado deja la caché de la matriz (TTL 60 s) con reglas viejas.
+    if (removedPlan) this.planModuleRules?.invalidate();
+    return result;
   }
 
   async archive(id: number) {
@@ -996,7 +1009,12 @@ export class PlansService {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
     }
 
-    await this.prisma.subscription_plans.delete({ where: { id } });
+    // Las reglas de la matriz (FK RESTRICT) caen antes que el plan, atómico.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.plan_module_rules.deleteMany({ where: { plan_id: id } });
+      await tx.subscription_plans.delete({ where: { id } });
+    });
+    this.planModuleRules?.invalidate();
   }
 
   /**

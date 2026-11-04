@@ -47,7 +47,15 @@ for await (const rawLine of rl) {
   const decision = String(event.decision ?? '');
   const source = String(event.source ?? '');
   const surface = String(event.surface ?? '');
-  bump(byTriple, `${key}|${industry}|${decision}`, { key, industry, decision });
+  const layer = String(event.layer ?? '');
+  const mode = String(event.mode ?? '');
+  bump(byTriple, `${key}|${industry}|${decision}|${layer}|${mode}`, {
+    key,
+    industry,
+    decision,
+    layer,
+    mode,
+  });
   bump(bySurface, `${source}|${surface}`, { source, surface });
 }
 
@@ -72,8 +80,8 @@ if (asJson) {
   };
   console.log(`ACCESS_AUDIT events: ${total}${invalid ? ` (unparseable: ${invalid})` : ''}\n`);
   if (total) {
-    console.log('By key x industry x decision');
-    table(triples, ['key', 'industry', 'decision', 'count']);
+    console.log('By key x industry x decision x layer x mode');
+    table(triples, ['key', 'industry', 'decision', 'layer', 'mode', 'count']);
     console.log('\nBy source / surface');
     table(surfaces, ['source', 'surface', 'count']);
   }
