@@ -90,6 +90,101 @@ export interface AppPageBrand {
   cover_url?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Apps F3 — style tokens (`page.theme`). Closed catalogs mirror the backend.
+// ---------------------------------------------------------------------------
+
+export type AppThemeRadius = 'none' | 'small' | 'medium' | 'large';
+export type AppThemeDensity = 'compact' | 'comfortable' | 'spacious';
+export type AppThemeButtonStyle = 'solid' | 'outline';
+export type AppThemeImageStyle = 'square' | 'rounded';
+export type AppThemeContentWidth = 'narrow' | 'normal' | 'wide';
+
+/** Style tokens of a page. Every token is optional: a missing one keeps today's look. */
+export interface AppPageTheme {
+  primary_color?: string;
+  secondary_color?: string;
+  surface_color?: string;
+  text_color?: string;
+  accent_color?: string;
+  heading_font?: AppPageFont;
+  body_font?: AppPageFont;
+  radius?: AppThemeRadius;
+  density?: AppThemeDensity;
+  button_style?: AppThemeButtonStyle;
+  image_style?: AppThemeImageStyle;
+  content_width?: AppThemeContentWidth;
+}
+
+export type AppThemeColorKey =
+  | 'primary_color'
+  | 'secondary_color'
+  | 'surface_color'
+  | 'text_color'
+  | 'accent_color';
+
+export const APP_THEME_COLORS: readonly { key: AppThemeColorKey; label: string; hint: string }[] = [
+  { key: 'primary_color', label: 'Principal', hint: 'Botones y llamados a la acción.' },
+  { key: 'secondary_color', label: 'Secundario', hint: 'Degradado de la portada.' },
+  { key: 'surface_color', label: 'Fondo', hint: 'Fondo de la página.' },
+  { key: 'text_color', label: 'Texto', hint: 'Títulos y párrafos.' },
+  { key: 'accent_color', label: 'Acento', hint: 'Estrellas, enlaces y detalles.' },
+];
+
+export type AppThemeOptionKey = 'radius' | 'density' | 'button_style' | 'image_style' | 'content_width';
+
+/** The closed choices of each non-color token, with their editor labels. */
+export const APP_THEME_OPTIONS: readonly {
+  key: AppThemeOptionKey;
+  label: string;
+  values: readonly { value: string; label: string }[];
+}[] = [
+  {
+    key: 'radius',
+    label: 'Esquinas',
+    values: [
+      { value: 'none', label: 'Rectas' },
+      { value: 'small', label: 'Suaves' },
+      { value: 'medium', label: 'Redondeadas' },
+      { value: 'large', label: 'Muy redondeadas' },
+    ],
+  },
+  {
+    key: 'density',
+    label: 'Espaciado',
+    values: [
+      { value: 'compact', label: 'Compacta' },
+      { value: 'comfortable', label: 'Cómoda' },
+      { value: 'spacious', label: 'Amplia' },
+    ],
+  },
+  {
+    key: 'button_style',
+    label: 'Botones',
+    values: [
+      { value: 'solid', label: 'Sólido' },
+      { value: 'outline', label: 'Contorno' },
+    ],
+  },
+  {
+    key: 'image_style',
+    label: 'Imágenes',
+    values: [
+      { value: 'square', label: 'Esquinas rectas' },
+      { value: 'rounded', label: 'Redondeadas' },
+    ],
+  },
+  {
+    key: 'content_width',
+    label: 'Ancho del contenido',
+    values: [
+      { value: 'narrow', label: 'Angosto' },
+      { value: 'normal', label: 'Normal' },
+      { value: 'wide', label: 'Amplio' },
+    ],
+  },
+];
+
 export interface AppPageSeo {
   title?: string;
   description?: string;
@@ -112,6 +207,8 @@ export interface AppPageDocument {
   booking?: AppPageBooking;
   brand?: AppPageBrand;
   seo?: AppPageSeo;
+  /** Apps F3: style tokens. Absent = the page looks exactly as before F3. */
+  theme?: AppPageTheme;
   hero?: AppPageHero;
   blocks: AppPageBlock[];
 }
@@ -149,6 +246,20 @@ export interface BlockDef {
    */
   existing?: boolean;
   fields: FieldDef[];
+}
+
+/**
+ * Apps F3 — one ready-made page of an app: the base or a variant. Variants are
+ * data only: same block catalog and same contract as the base, with another
+ * order, emphasis and default `theme`.
+ */
+export interface AppPageVariant {
+  /** `base` for the app's base page; a slug for the variants. */
+  id: string;
+  name: string;
+  description: string;
+  /** Hero, blocks and theme to use. Mode, sales, booking, brand and SEO are kept. */
+  page: AppPageDocument;
 }
 
 /** One app's template: its own blocks and its preconfigured base page. */

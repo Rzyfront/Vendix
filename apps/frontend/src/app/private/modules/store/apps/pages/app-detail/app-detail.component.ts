@@ -41,11 +41,12 @@ type AppDetailTab =
   | 'general'
   | 'operation'
   | 'brand'
+  | 'style'
   | 'preview'
   | 'ecommerce';
 
 /** Tabs the shared page editor draws (apps-f2 S6); they all share one draft. */
-const EDITOR_SECTIONS: readonly AppPageEditorSection[] = ['content', 'operation', 'brand', 'preview'];
+const EDITOR_SECTIONS: readonly AppPageEditorSection[] = ['content', 'operation', 'brand', 'style', 'preview'];
 
 const STATUS_BADGE: Record<AppStatus, { label: string; color: StickyHeaderBadgeColor }> = {
   published: { label: 'Publicada', color: 'green' },
@@ -290,6 +291,7 @@ export class AppDetailComponent {
         { id: 'content', label: 'Contenido', icon: 'layout-list' },
         { id: 'operation', label: 'Operación', icon: 'sliders-horizontal' },
         { id: 'brand', label: 'Marca y SEO', icon: 'palette' },
+        { id: 'style', label: 'Estilo', icon: 'paintbrush' },
         { id: 'preview', label: 'Vista previa', icon: 'eye' },
         { id: 'general', label: 'Estado', icon: 'activity' },
       ];

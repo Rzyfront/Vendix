@@ -174,16 +174,19 @@ describe('AppDetailComponent (apps-vistas-f1 S3/S4/S6)', () => {
     expect(component.actions()[0].label).toBe('Publicar en su dominio');
   });
 
-  it('apps con página propia: su pestaña de ajustes y luego Contenido, Operación, Marca y SEO, Vista previa y Estado (apps-f2 S6)', async () => {
+  it('apps con página propia: su pestaña de ajustes y luego Contenido, Operación, Marca y SEO, Estilo, Vista previa y Estado (apps-f2 S6, apps-f3 S1)', async () => {
     await render('product-page', detail());
 
-    expect(component.tabs().map((t) => t.id)).toEqual(['settings', 'content', 'operation', 'brand', 'preview', 'general']);
+    expect(component.tabs().map((t) => t.id)).toEqual(['settings', 'content', 'operation', 'brand', 'style', 'preview', 'general']);
     expect(component.tabs().map((t) => t.label)).toEqual([
-      'Producto y dominio', 'Contenido', 'Operación', 'Marca y SEO', 'Vista previa', 'Estado',
+      'Producto y dominio', 'Contenido', 'Operación', 'Marca y SEO', 'Estilo', 'Vista previa', 'Estado',
     ]);
     component.setTab('operation');
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('[data-section="operation"]')).not.toBeNull();
+    component.setTab('style');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-section="style"]')).not.toBeNull();
     component.setTab('general');
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('[data-tab="editor"]').classList).toContain('hidden');

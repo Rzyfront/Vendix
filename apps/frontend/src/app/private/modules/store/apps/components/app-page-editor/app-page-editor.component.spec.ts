@@ -8,7 +8,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { AppPageViewComponent } from '../../../../../../public/app-page/app-page-view.component';
 import type { StoreAppDetail } from '../../interfaces/store-app.interface';
 import { StoreAppsService } from '../../services/store-apps.service';
-import { APP_PAGE_TEMPLATES, AppPageDocument, PageAppKind, clonePage } from '../../templates';
+import { APP_PAGE_TEMPLATES, APP_PAGE_VARIANTS, AppPageDocument, PageAppKind, clonePage } from '../../templates';
 import { AppPageEditorComponent, AppPageEditorSection } from './app-page-editor.component';
 
 @Component({ selector: 'app-app-page-view', standalone: true, template: '<p data-testid="view-stub"></p>' })
@@ -316,5 +316,118 @@ describe('AppPageEditorComponent (apps-f2 S1/S3/S4/S6)', () => {
     setSection('content');
 
     expect(component.draft().mode).toBe('info');
+  });
+
+  describe('apps-f3 · plantillas y estilo', () => {
+    const select = (testid: string, value: string) => {
+      const box = el().querySelector<HTMLSelectElement>(`[data-testid="${testid}"]`)!;
+      box.value = value;
+      box.dispatchEvent(new Event('change'));
+      fixture.detectChanges();
+    };
+
+    it('Contenido muestra la galería con la base y las dos variantes de la app, con sus secciones', () => {
+      render('service_page');
+      const cards = Array.from(el().querySelectorAll('[data-testid="template-gallery"] [data-template]'));
+      expect(cards.map((c) => c.getAttribute('data-template'))).toEqual(['base', 'beauty', 'professional']);
+      expect(cards[1].textContent).toContain('Belleza cálida');
+      expect(cards[2].textContent).toContain('Profesional sobrio');
+      // Sample of the template: its visible sections in its own order.
+      expect(cards[2].querySelector('[data-testid="template-sample"]')?.textContent).toContain('1. Servicios');
+      expect(el().querySelector('[data-testid="reset-base"]')).not.toBeNull();
+    });
+
+    it('Usar plantilla pide confirmación explícita y reemplaza portada, secciones y estilo, sin tocar modo, marca ni SEO', async () => {
+      render('product_page');
+      component.setMode('info');
+      component.draft.update((p) => ({ ...p, brand: { logo_url: 'https://cdn.x.co/l.png' }, seo: { title: 'Mía' } }));
+      const boutique = APP_PAGE_VARIANTS.product_page[1];
+
+      click('[data-testid="use-template-boutique"]');
+      await fixture.whenStable();
+
+      const [args] = dialog.confirm.calls.mostRecent().args;
+      expect(args.message).toContain('Reemplaza la portada, las secciones y el estilo');
+      expect(args.message).toContain('No publica');
+      expect(component.draft().blocks).toEqual(boutique.page.blocks);
+      expect(component.draft().theme).toEqual(boutique.page.theme);
+      expect(component.draft().hero).toEqual(boutique.page.hero);
+      expect(component.draft().mode).toBe('info');
+      expect(component.draft().brand).toEqual({ logo_url: 'https://cdn.x.co/l.png' });
+      expect(component.draft().seo).toEqual({ title: 'Mía' });
+      expect(apps.savePage).not.toHaveBeenCalled();
+    });
+
+    it('Usar plantilla cancelado no toca el borrador', async () => {
+      render('product_page');
+      const before = clonePage(component.draft());
+      dialog.confirm.and.resolveTo(false);
+
+      await component.useVariant(APP_PAGE_VARIANTS.product_page[2]);
+
+      expect(component.draft()).toEqual(before);
+    });
+
+    it('Estilo edita el tema con controles y la vista previa en vivo recibe el borrador', () => {
+      render('booking', detail({ key: 'booking' }), 'style');
+      expect(el().querySelector('[data-section="style"]')).not.toBeNull();
+      expect(el().querySelector('[data-testid="theme-none"]')).not.toBeNull();
+      expect(el().querySelector('[data-testid="style-preview"] [data-testid="view-stub"]')).not.toBeNull();
+
+      select('theme-density', 'compact');
+      select('theme-button_style', 'outline');
+      select('theme-heading_font', 'lora');
+      type(el().querySelector<HTMLInputElement>('[data-testid="theme-surface_color"]')!, '#FAF5EE');
+      type(el().querySelector<HTMLInputElement>('[data-testid="theme-text_color"]')!, 'rojo');
+
+      expect(component.draft().theme).toEqual({
+        density: 'compact',
+        button_style: 'outline',
+        heading_font: 'lora',
+        surface_color: '#FAF5EE',
+      });
+      const preview = fixture.debugElement.query((d) => d.componentInstance instanceof StubPageView);
+      expect((preview.componentInstance as StubPageView).page()).toBe(component.draft());
+
+      select('theme-density', '');
+      expect(component.draft().theme?.density).toBeUndefined();
+    });
+
+    it('un estilo rápido cambia solo el tema y Quitar estilo deja la página como hoy', () => {
+      render('store_home', detail({ key: 'store_home' }), 'style');
+      const blocks = clonePage(component.draft()).blocks;
+
+      click('[data-testid="theme-preset-editorial"]');
+      expect(component.draft().theme).toEqual(APP_PAGE_VARIANTS.store_home[1].page.theme!);
+      expect(component.draft().blocks).toEqual(blocks);
+      expect(el().querySelectorAll('[data-testid="theme-contrast"] [data-ok="true"]').length).toBeGreaterThan(0);
+      expect(el().querySelector('[data-testid="theme-contrast-warning"]')).toBeNull();
+
+      click('[data-testid="theme-clear"]');
+      expect(component.draft().theme).toBeUndefined();
+      expect(component.draft()).toEqual(APP_PAGE_TEMPLATES.store_home.page);
+    });
+
+    it('avisa cuando los colores elegidos se leen mal', () => {
+      render('product_page', detail(), 'style');
+      type(el().querySelector<HTMLInputElement>('[data-testid="theme-surface_color"]')!, '#FFFFFF');
+      type(el().querySelector<HTMLInputElement>('[data-testid="theme-text_color"]')!, '#DDDDDD');
+
+      expect(el().querySelector('[data-contrast="text"]')?.getAttribute('data-ok')).toBe('false');
+      expect(el().querySelector('[data-testid="theme-contrast-warning"]')).not.toBeNull();
+    });
+
+    it('guardar envía el tema dentro de la página', () => {
+      render('product_page', detail(), 'style');
+      select('theme-radius', 'large');
+      apps.savePage.and.returnValue(of({ success: true, data: { page: component.draft() } }));
+
+      click('[data-testid="save-page"]');
+
+      expect(apps.savePage).toHaveBeenCalledOnceWith(
+        'product_page',
+        jasmine.objectContaining({ theme: { radius: 'large' } }),
+      );
+    });
   });
 });

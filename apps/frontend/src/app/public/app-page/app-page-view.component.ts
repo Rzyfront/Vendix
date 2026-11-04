@@ -17,6 +17,7 @@ import {
   safeColor,
   safeUrl,
 } from './app-page-view.util';
+import { hasTheme, themeStyle } from './app-page-theme';
 
 interface PlaceholderView {
   id: string;
@@ -31,6 +32,11 @@ interface PlaceholderView {
  *
  * Brand colors and font are scoped to the host (CSS custom properties), so
  * nothing leaks to the rest of the page.
+ *
+ * Apps F3: `page.theme` adds style tokens on the same host (`themeStyle`).
+ * The `ap-*` marker classes below only get rules under `:host(.ap-themed)`
+ * and every rule falls back to today's value, so a page without `theme`
+ * renders exactly as before.
  */
 @Component({
   selector: 'app-app-page-view',
@@ -38,6 +44,9 @@ interface PlaceholderView {
   imports: [NgTemplateOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
+    '[class.ap-themed]': 'themed()',
+    '[class.ap-outline]': 'outlineButtons()',
+    '[style]': 'themeVars()',
     '[style.--ap-primary]': 'primary()',
     '[style.--ap-secondary]': 'secondary()',
     '[style.font-family]': 'font()',
@@ -49,14 +58,81 @@ interface PlaceholderView {
       }
       .ap-accent-bg {
         background-color: var(--ap-primary, var(--color-primary));
-        color: #fff;
+        color: var(--ap-on-primary, #fff);
       }
       .ap-accent-text {
-        color: var(--ap-primary, var(--color-primary));
+        color: var(--ap-accent, var(--ap-primary, var(--color-primary)));
       }
       .ap-accent-soft {
-        background-color: color-mix(in srgb, var(--ap-primary, var(--color-primary)) 10%, transparent);
+        background-color: color-mix(
+          in srgb,
+          var(--ap-accent, var(--ap-primary, var(--color-primary))) 10%,
+          transparent
+        );
+        color: var(--ap-accent, var(--ap-primary, var(--color-primary)));
+      }
+      /* ---- Apps F3: style tokens, only under a theme ---- */
+      :host(.ap-themed) {
+        background-color: var(--ap-surface, transparent);
+        color: var(--ap-text, inherit);
+      }
+      :host(.ap-themed) .ap-heading {
+        font-family: var(--ap-heading-font, inherit);
+      }
+      :host(.ap-themed) .ap-wrap {
+        max-width: var(--ap-max-width, 72rem);
+      }
+      :host(.ap-themed) .ap-section {
+        max-width: var(--ap-max-width, 72rem);
+        padding-top: var(--ap-section-py, 2rem);
+        padding-bottom: var(--ap-section-py, 2rem);
+      }
+      @media (min-width: 768px) {
+        :host(.ap-themed) .ap-section {
+          padding-top: var(--ap-section-py-md, 2.5rem);
+          padding-bottom: var(--ap-section-py-md, 2.5rem);
+        }
+      }
+      :host(.ap-themed) .ap-grid {
+        gap: var(--ap-gap, 1rem);
+      }
+      :host(.ap-themed) .ap-card {
+        border-radius: var(--ap-radius-card, 1rem);
+        padding: var(--ap-card-padding, 1.25rem);
+      }
+      :host(.ap-themed) .ap-round {
+        border-radius: var(--ap-radius-card, 1rem);
+      }
+      /* The page's own palette wins over a panel decoration (e.g. the admin
+         "aura" preset paints a gradient on every .bg-surface). */
+      :host(.ap-themed) .ap-card,
+      :host(.ap-themed) .ap-round {
+        background-image: none;
+      }
+      :host(.ap-themed) .ap-cta-box {
+        border-radius: var(--ap-radius-card, 1.5rem);
+      }
+      :host(.ap-themed) .ap-btn {
+        border-radius: var(--ap-radius-button, 9999px);
+      }
+      :host(.ap-themed) .ap-img {
+        border-radius: var(--ap-radius-image, 0.75rem);
+      }
+      :host(.ap-themed) .ap-img-hero {
+        border-radius: var(--ap-radius-image, 1rem);
+      }
+      :host(.ap-themed) .ap-hero-fallback .ap-on-fill {
+        color: var(--ap-on-primary, #fff);
+      }
+      :host(.ap-outline) .ap-btn-primary {
+        background-color: transparent;
         color: var(--ap-primary, var(--color-primary));
+        box-shadow: inset 0 0 0 2px currentColor;
+      }
+      :host(.ap-outline) .ap-btn-light {
+        background-color: transparent;
+        color: inherit;
+        box-shadow: inset 0 0 0 2px currentColor;
       }
       .ap-hero-fallback {
         background: linear-gradient(
@@ -81,15 +157,15 @@ interface PlaceholderView {
           <div class="pointer-events-none absolute inset-0 bg-black/40"></div>
         }
         <div
-          class="relative mx-auto grid w-full max-w-6xl items-center gap-8 px-4 py-12 md:py-16"
+          class="ap-wrap relative mx-auto grid w-full max-w-6xl items-center gap-8 px-4 py-12 md:py-16"
           [class.md:grid-cols-2]="!!h.image_url"
         >
-          <div [class]="h.image_url ? 'text-text-primary' : 'text-white'">
+          <div class="ap-on-fill" [class]="h.image_url ? 'text-text-primary' : 'text-white'">
             @if (h.eyebrow) {
               <p class="mb-2 text-xs font-semibold uppercase tracking-wider" [class.ap-accent-text]="!!h.image_url" data-testid="hero-eyebrow">{{ h.eyebrow }}</p>
             }
             @if (h.title) {
-              <h1 class="text-3xl font-bold leading-tight md:text-5xl" data-testid="hero-title">{{ h.title }}</h1>
+              <h1 class="ap-heading text-3xl font-bold leading-tight md:text-5xl" data-testid="hero-title">{{ h.title }}</h1>
             }
             @if (h.subtitle) {
               <p class="mt-4 max-w-xl text-base opacity-90 md:text-lg" data-testid="hero-subtitle">{{ h.subtitle }}</p>
@@ -97,8 +173,8 @@ interface PlaceholderView {
             @if (h.button_label) {
               <button
                 type="button"
-                class="mt-6 inline-flex min-h-11 items-center justify-center rounded-full px-6 py-3 text-sm font-semibold"
-                [class]="h.image_url ? 'ap-accent-bg' : 'bg-white text-gray-900'"
+                class="ap-btn mt-6 inline-flex min-h-11 items-center justify-center rounded-full px-6 py-3 text-sm font-semibold"
+                [class]="h.image_url ? 'ap-accent-bg ap-btn-primary' : 'ap-btn-light bg-white text-gray-900'"
                 data-testid="hero-button"
                 (click)="scrollToMain()"
               >
@@ -111,7 +187,7 @@ interface PlaceholderView {
               [src]="h.image_url"
               [alt]="h.title || 'Imagen principal'"
               loading="lazy"
-              class="w-full rounded-2xl object-cover shadow-sm md:max-h-96"
+              class="ap-img-hero w-full rounded-2xl object-cover shadow-sm md:max-h-96"
             />
           }
         </div>
@@ -128,17 +204,17 @@ interface PlaceholderView {
           </section>
         } @else {
           <section
-            class="mx-auto w-full max-w-6xl px-4 py-8 md:py-10"
+            class="ap-section mx-auto w-full max-w-6xl px-4 py-8 md:py-10"
             [attr.data-block]="item.block.type"
             [attr.aria-labelledby]="titleOf(item.block) ? 'ap-' + item.block.id : null"
           >
             @switch (item.block.type) {
               @case ('benefits') {
                 <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
-                <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div class="ap-grid grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   @for (card of items(item.block); track $index) {
-                    <article class="rounded-2xl border border-border bg-surface p-5">
-                      <h3 class="text-base font-semibold text-text-primary">{{ card['title'] }}</h3>
+                    <article class="ap-card rounded-2xl border border-border bg-surface p-5">
+                      <h3 class="ap-heading text-base font-semibold text-text-primary">{{ card['title'] }}</h3>
                       @if (card['text']) {
                         <p class="mt-2 text-sm text-text-secondary">{{ card['text'] }}</p>
                       }
@@ -148,10 +224,10 @@ interface PlaceholderView {
               }
               @case ('highlights') {
                 <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
-                <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div class="ap-grid grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   @for (card of items(item.block); track $index) {
-                    <article class="rounded-2xl border border-border bg-surface p-5">
-                      <h3 class="text-base font-semibold text-text-primary">{{ card['title'] }}</h3>
+                    <article class="ap-card rounded-2xl border border-border bg-surface p-5">
+                      <h3 class="ap-heading text-base font-semibold text-text-primary">{{ card['title'] }}</h3>
                       @if (card['text']) {
                         <p class="mt-2 text-sm text-text-secondary">{{ card['text'] }}</p>
                       }
@@ -161,12 +237,12 @@ interface PlaceholderView {
               }
               @case ('how_it_works') {
                 <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
-                <ol class="grid gap-4 md:grid-cols-3">
+                <ol class="ap-grid grid gap-4 md:grid-cols-3">
                   @for (step of items(item.block); track $index) {
-                    <li class="flex gap-4 rounded-2xl border border-border bg-surface p-5">
+                    <li class="flex gap-4 ap-card rounded-2xl border border-border bg-surface p-5">
                       <span class="ap-accent-bg flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold">{{ $index + 1 }}</span>
                       <div>
-                        <h3 class="text-base font-semibold text-text-primary">{{ step['title'] }}</h3>
+                        <h3 class="ap-heading text-base font-semibold text-text-primary">{{ step['title'] }}</h3>
                         @if (step['text']) {
                           <p class="mt-1 text-sm text-text-secondary">{{ step['text'] }}</p>
                         }
@@ -177,7 +253,7 @@ interface PlaceholderView {
               }
               @case ('specifications') {
                 <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
-                <dl class="grid overflow-hidden rounded-2xl border border-border bg-surface sm:grid-cols-2">
+                <dl class="ap-round grid overflow-hidden rounded-2xl border border-border bg-surface sm:grid-cols-2">
                   @for (row of items(item.block); track $index) {
                     <div class="grid grid-cols-2 gap-2 border-b border-border px-4 py-3 text-sm last:border-b-0">
                       <dt class="font-medium text-text-primary">{{ row['label'] }}</dt>
@@ -188,24 +264,24 @@ interface PlaceholderView {
               }
               @case ('gallery') {
                 <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
-                <div class="grid grid-cols-2 gap-3 md:grid-cols-3">
+                <div class="ap-grid grid grid-cols-2 gap-3 md:grid-cols-3">
                   @for (url of images(item.block); track $index) {
-                    <img [src]="url" [alt]="titleOf(item.block) || 'Imagen de la galería'" loading="lazy" class="aspect-square w-full rounded-xl object-cover" />
+                    <img [src]="url" [alt]="titleOf(item.block) || 'Imagen de la galería'" loading="lazy" class="ap-img aspect-square w-full rounded-xl object-cover" />
                   }
                 </div>
               }
               @case ('testimonials') {
                 <div class="mb-6 flex flex-wrap items-baseline gap-3">
                   @if (titleOf(item.block)) {
-                    <h2 [id]="'ap-' + item.block.id" class="text-xl font-bold text-text-primary md:text-2xl">{{ titleOf(item.block) }}</h2>
+                    <h2 [id]="'ap-' + item.block.id" class="ap-heading text-xl font-bold text-text-primary md:text-2xl">{{ titleOf(item.block) }}</h2>
                   }
                   @if (text(item.block, 'rating_summary')) {
                     <span class="ap-accent-soft rounded-full px-3 py-1 text-sm font-semibold" data-testid="rating-summary">★ {{ text(item.block, 'rating_summary') }}</span>
                   }
                 </div>
-                <div class="grid gap-4 md:grid-cols-3">
+                <div class="ap-grid grid gap-4 md:grid-cols-3">
                   @for (t of items(item.block); track $index) {
-                    <figure class="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-5">
+                    <figure class="flex flex-col gap-3 ap-card rounded-2xl border border-border bg-surface p-5">
                       @if (stars(t) > 0) {
                         <div class="ap-accent-text text-base" role="img" [attr.aria-label]="stars(t) + ' de 5 estrellas'" data-testid="stars">
                           @for (n of starSlots; track n) {
@@ -226,10 +302,10 @@ interface PlaceholderView {
               }
               @case ('shipping_warranty') {
                 <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
-                <div class="grid gap-4 md:grid-cols-3">
+                <div class="ap-grid grid gap-4 md:grid-cols-3">
                   @for (part of shippingParts(item.block); track part.label) {
-                    <article class="rounded-2xl border border-border bg-surface p-5">
-                      <h3 class="text-base font-semibold text-text-primary">{{ part.label }}</h3>
+                    <article class="ap-card rounded-2xl border border-border bg-surface p-5">
+                      <h3 class="ap-heading text-base font-semibold text-text-primary">{{ part.label }}</h3>
                       <p class="mt-2 text-sm text-text-secondary">{{ part.text }}</p>
                     </article>
                   }
@@ -237,7 +313,7 @@ interface PlaceholderView {
               }
               @case ('faq') {
                 <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
-                <div class="mx-auto max-w-3xl divide-y divide-border rounded-2xl border border-border bg-surface">
+                <div class="ap-round mx-auto max-w-3xl divide-y divide-border rounded-2xl border border-border bg-surface">
                   @for (q of items(item.block); track $index) {
                     <details class="group px-5 py-4">
                       <summary class="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-semibold text-text-primary">
@@ -250,9 +326,9 @@ interface PlaceholderView {
                 </div>
               }
               @case ('cta') {
-                <div class="ap-accent-bg rounded-3xl px-6 py-10 text-center md:py-14" data-testid="cta">
+                <div class="ap-accent-bg ap-cta-box rounded-3xl px-6 py-10 text-center md:py-14" data-testid="cta">
                   @if (titleOf(item.block)) {
-                    <h2 [id]="'ap-' + item.block.id" class="text-2xl font-bold md:text-3xl">{{ titleOf(item.block) }}</h2>
+                    <h2 [id]="'ap-' + item.block.id" class="ap-heading text-2xl font-bold md:text-3xl">{{ titleOf(item.block) }}</h2>
                   }
                   @if (text(item.block, 'text')) {
                     <p class="mx-auto mt-3 max-w-xl text-sm opacity-90 md:text-base">{{ text(item.block, 'text') }}</p>
@@ -260,7 +336,7 @@ interface PlaceholderView {
                   @if (text(item.block, 'button_label')) {
                     <button
                       type="button"
-                      class="mt-6 inline-flex min-h-11 items-center justify-center rounded-full bg-white px-6 py-3 text-sm font-semibold text-gray-900"
+                      class="ap-btn ap-btn-light mt-6 inline-flex min-h-11 items-center justify-center rounded-full bg-white px-6 py-3 text-sm font-semibold text-gray-900"
                       data-testid="cta-button"
                       (click)="scrollToMain()"
                     >
@@ -271,14 +347,14 @@ interface PlaceholderView {
               }
               @case ('team') {
                 <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
-                <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div class="ap-grid grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   @for (m of items(item.block); track $index) {
-                    <article class="flex gap-4 rounded-2xl border border-border bg-surface p-4">
+                    <article class="ap-round flex gap-4 rounded-2xl border border-border bg-surface p-4">
                       @if (url(m['photo_url']); as photo) {
                         <img [src]="photo" [alt]="m['name']" loading="lazy" class="h-16 w-16 shrink-0 rounded-full object-cover" />
                       }
                       <div class="min-w-0">
-                        <h3 class="text-base font-semibold text-text-primary">{{ m['name'] }}</h3>
+                        <h3 class="ap-heading text-base font-semibold text-text-primary">{{ m['name'] }}</h3>
                         @if (m['role']) {
                           <p class="ap-accent-text text-xs font-medium">{{ m['role'] }}</p>
                         }
@@ -292,9 +368,9 @@ interface PlaceholderView {
               }
               @case ('policies') {
                 <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
-                <dl class="grid gap-4 md:grid-cols-2">
+                <dl class="ap-grid grid gap-4 md:grid-cols-2">
                   @for (part of policyParts(item.block); track part.label) {
-                    <div class="rounded-2xl border border-border bg-surface p-5">
+                    <div class="ap-card rounded-2xl border border-border bg-surface p-5">
                       <dt class="text-sm font-semibold text-text-primary">{{ part.label }}</dt>
                       <dd class="mt-1 text-sm text-text-secondary">{{ part.text }}</dd>
                     </div>
@@ -311,7 +387,7 @@ interface PlaceholderView {
               }
               @case ('location') {
                 <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
-                <div class="rounded-2xl border border-border bg-surface p-5 text-sm">
+                <div class="ap-card rounded-2xl border border-border bg-surface p-5 text-sm">
                   @if (text(item.block, 'address')) {
                     <p class="font-medium text-text-primary">{{ text(item.block, 'address') }}</p>
                   }
@@ -325,7 +401,7 @@ interface PlaceholderView {
               }
               @case ('contact') {
                 <ng-container *ngTemplateOutlet="head; context: { b: item.block }" />
-                <div class="grid gap-3 rounded-2xl border border-border bg-surface p-5 text-sm sm:grid-cols-2">
+                <div class="ap-card grid gap-3 rounded-2xl border border-border bg-surface p-5 text-sm sm:grid-cols-2">
                   @if (text(item.block, 'phone'); as phone) {
                     <p><span class="block text-xs text-text-secondary">Teléfono</span><a [href]="'tel:' + phone" class="ap-accent-text font-semibold">{{ phone }}</a></p>
                   }
@@ -348,7 +424,7 @@ interface PlaceholderView {
 
     <ng-template #head let-b="b">
       @if (titleOf(b)) {
-        <h2 [id]="'ap-' + b.id" class="mb-6 text-xl font-bold text-text-primary md:text-2xl">{{ titleOf(b) }}</h2>
+        <h2 [id]="'ap-' + b.id" class="ap-heading mb-6 text-xl font-bold text-text-primary md:text-2xl">{{ titleOf(b) }}</h2>
       }
     </ng-template>
   `,
@@ -370,9 +446,22 @@ export class AppPageViewComponent {
   readonly showHero = computed(() => this.part() !== 'blocks');
   readonly showBlocks = computed(() => this.part() !== 'hero');
 
-  readonly primary = computed(() => safeColor(this.page()?.brand?.primary_color));
-  readonly secondary = computed(() => safeColor(this.page()?.brand?.secondary_color));
-  readonly font = computed(() => fontStack(this.page()?.brand?.font_family));
+  /** Apps F3: whether the page carries style tokens (`page.theme`). */
+  readonly themed = computed(() => hasTheme(this.page()));
+  readonly outlineButtons = computed(() => this.page()?.theme?.button_style === 'outline');
+  /** CSS custom properties of the theme; `null` (nothing bound) without theme. */
+  readonly themeVars = computed(() => themeStyle(this.page()));
+
+  /** The theme's color wins over the brand's; without theme the brand's, as before. */
+  readonly primary = computed(
+    () => safeColor(this.page()?.theme?.primary_color) ?? safeColor(this.page()?.brand?.primary_color),
+  );
+  readonly secondary = computed(
+    () => safeColor(this.page()?.theme?.secondary_color) ?? safeColor(this.page()?.brand?.secondary_color),
+  );
+  readonly font = computed(
+    () => fontStack(this.page()?.theme?.body_font) ?? fontStack(this.page()?.brand?.font_family),
+  );
   readonly coverCss = computed(() => {
     const url = safeUrl(this.page()?.brand?.cover_url);
     return url ? `url("${url.replace(/["()\s\\]/g, (c) => '%' + c.charCodeAt(0).toString(16))}")` : null;

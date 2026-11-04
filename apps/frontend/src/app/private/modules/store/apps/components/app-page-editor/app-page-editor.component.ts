@@ -17,28 +17,37 @@ import { DialogService } from '../../../../../../shared/components/dialog/dialog
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { AppPageViewComponent } from '../../../../../../public/app-page/app-page-view.component';
+import { contrastChecks } from '../../../../../../public/app-page/app-page-theme';
 import type { StoreAppDetail } from '../../interfaces/store-app.interface';
 import { StoreAppsService } from '../../services/store-apps.service';
 import {
   APP_PAGE_FONTS,
   APP_PAGE_MODE_OPTIONS,
   APP_PAGE_TEMPLATES,
+  APP_PAGE_VARIANTS,
+  APP_THEME_COLORS,
+  APP_THEME_OPTIONS,
   AppPageBlock,
   AppPageDocument,
   AppPageFont,
   AppPageMode,
+  AppPageTheme,
+  AppPageVariant,
+  AppThemeColorKey,
+  AppThemeOptionKey,
   BlockDef,
   HERO_FIELDS,
   PageAppKind,
   SEO_FIELDS,
   ScalarFieldDef,
+  applyVariant,
   clonePage,
   effectiveMode,
   modeBooks,
   modeSells,
 } from '../../templates';
 
-export type AppPageEditorSection = 'content' | 'operation' | 'brand' | 'preview';
+export type AppPageEditorSection = 'content' | 'operation' | 'brand' | 'style' | 'preview';
 
 /** Where a scalar field lives inside the draft page. */
 type FieldTarget =
@@ -63,8 +72,12 @@ const APP_LABEL: Record<PageAppKind, string> = {
  * knows how to edit a `FieldDef`.
  *
  * It holds the draft in a signal and renders one section at a time
- * (`section`: Contenido, Operación, Marca y SEO, Vista previa) so the draft
- * survives tab changes. Saving persists `config.page` and never publishes.
+ * (`section`: Contenido, Operación, Marca y SEO, Estilo, Vista previa) so the
+ * draft survives tab changes. Saving persists `config.page` and never publishes.
+ *
+ * Apps F3: Contenido opens with the template gallery (base + two variants
+ * per app, `APP_PAGE_VARIANTS`) and Estilo edits `page.theme` next to a live
+ * preview of the draft.
  */
 @Component({
   selector: 'app-app-page-editor',
@@ -105,6 +118,39 @@ const APP_LABEL: Record<PageAppKind, string> = {
         @case ('content') {
           <div class="space-y-4" data-section="content">
             <p class="text-sm text-[var(--color-text-secondary)]">{{ template().summary }}</p>
+
+            <!-- Plantillas (apps-f3 S2) -->
+            <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4" data-testid="template-gallery">
+              <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Plantillas</h3>
+              <p class="mb-3 text-xs text-[var(--color-text-secondary)]">
+                Cambian el orden de las secciones, sus textos y el estilo. No publican ni tocan tu producto, tus servicios, tu dominio ni la tienda en línea.
+              </p>
+              <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+                @for (variant of variants(); track variant.id) {
+                  <article class="flex flex-col rounded-lg border border-[var(--color-border)] p-3" [attr.data-template]="variant.id">
+                    <div class="mb-2 flex h-6 items-center gap-1" aria-hidden="true">
+                      @for (color of swatches(variant); track $index) {
+                        <span class="h-5 w-5 rounded-full border border-[var(--color-border)]" [style.background-color]="color"></span>
+                      } @empty {
+                        <span class="text-[11px] text-[var(--color-text-secondary)]">Colores de tu marca</span>
+                      }
+                    </div>
+                    <h4 class="text-sm font-semibold text-[var(--color-text-primary)]">{{ variant.name }}</h4>
+                    <p class="mt-0.5 text-xs text-[var(--color-text-secondary)]">{{ variant.description }}</p>
+                    <ol class="mt-2 flex-1 space-y-0.5 text-[11px] text-[var(--color-text-secondary)]" data-testid="template-sample">
+                      @for (label of sample(variant); track $index) {
+                        <li>{{ $index + 1 }}. {{ label }}</li>
+                      }
+                    </ol>
+                    <button type="button" (click)="useVariant(variant)" [attr.data-testid]="'use-template-' + variant.id"
+                            class="mt-3 inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-background)]">
+                      <app-icon name="layout-template" [size]="14" />
+                      Usar plantilla
+                    </button>
+                  </article>
+                }
+              </div>
+            </div>
 
             <!-- Portada -->
             <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
@@ -288,6 +334,114 @@ const APP_LABEL: Record<PageAppKind, string> = {
           </div>
         }
 
+        @case ('style') {
+          <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]" data-section="style">
+            <div class="space-y-4">
+              <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Estilos rápidos</h3>
+                <p class="mb-3 text-xs text-[var(--color-text-secondary)]">Solo cambian el aspecto; tus secciones y textos se quedan igual.</p>
+                <div class="flex flex-wrap gap-2">
+                  @for (variant of styledVariants(); track variant.id) {
+                    <button type="button" (click)="applyThemePreset(variant)" [attr.data-testid]="'theme-preset-' + variant.id"
+                            class="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-background)]">
+                      <span class="h-3 w-3 rounded-full" [style.background-color]="variant.page.theme?.primary_color" aria-hidden="true"></span>
+                      {{ variant.name }}
+                    </button>
+                  }
+                  <button type="button" (click)="clearTheme()" [disabled]="!hasThemeDraft()" data-testid="theme-clear"
+                          class="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-background)] disabled:opacity-50">
+                    <app-icon name="rotate-ccw" [size]="14" />
+                    Quitar estilo
+                  </button>
+                </div>
+                @if (!hasThemeDraft()) {
+                  <p class="mt-2 text-xs text-[var(--color-text-secondary)]" data-testid="theme-none">Sin estilo propio: la página se ve como hoy.</p>
+                }
+              </div>
+
+              <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <h3 class="mb-3 text-sm font-semibold text-[var(--color-text-primary)]">Colores</h3>
+                <div class="space-y-3">
+                  @for (color of themeColors; track color.key) {
+                    <div class="text-sm">
+                      <span class="block text-xs font-medium text-[var(--color-text-secondary)]">{{ color.label }} · {{ color.hint }}</span>
+                      <div class="mt-1 flex items-center gap-2">
+                        <input type="color" class="h-9 w-12 cursor-pointer rounded border border-[var(--color-border)] bg-transparent p-0.5"
+                               [value]="themeColor(color.key) || '#000000'" (input)="onThemeColor(color.key, $event)" [attr.aria-label]="'Color ' + color.label" />
+                        <input type="text" [class]="inputClass" maxlength="7" placeholder="Como hoy"
+                               [value]="themeColor(color.key)" (input)="onThemeColor(color.key, $event)" [attr.data-testid]="'theme-' + color.key" />
+                      </div>
+                    </div>
+                  }
+                </div>
+              </div>
+
+              <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <h3 class="mb-3 text-sm font-semibold text-[var(--color-text-primary)]">Tipografía y forma</h3>
+                <div class="space-y-3">
+                  <label class="block text-sm">
+                    <span class="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">Títulos</span>
+                    <select [class]="inputClass" (change)="onThemeSelect('heading_font', $event)" data-testid="theme-heading_font">
+                      <option value="" [selected]="!theme().heading_font">Como hoy</option>
+                      @for (font of fonts; track font.value) {
+                        <option [value]="font.value" [selected]="theme().heading_font === font.value">{{ font.label }}</option>
+                      }
+                    </select>
+                  </label>
+                  <label class="block text-sm">
+                    <span class="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">Texto</span>
+                    <select [class]="inputClass" (change)="onThemeSelect('body_font', $event)" data-testid="theme-body_font">
+                      <option value="" [selected]="!theme().body_font">Como hoy</option>
+                      @for (font of fonts; track font.value) {
+                        <option [value]="font.value" [selected]="theme().body_font === font.value">{{ font.label }}</option>
+                      }
+                    </select>
+                  </label>
+                  @for (option of themeOptions; track option.key) {
+                    <label class="block text-sm">
+                      <span class="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]">{{ option.label }}</span>
+                      <select [class]="inputClass" (change)="onThemeSelect(option.key, $event)" [attr.data-testid]="'theme-' + option.key">
+                        <option value="" [selected]="!themeValue(option.key)">Como hoy</option>
+                        @for (choice of option.values; track choice.value) {
+                          <option [value]="choice.value" [selected]="themeValue(option.key) === choice.value">{{ choice.label }}</option>
+                        }
+                      </select>
+                    </label>
+                  }
+                </div>
+              </div>
+
+              @if (contrast().length) {
+                <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4" data-testid="theme-contrast">
+                  <h3 class="mb-2 text-sm font-semibold text-[var(--color-text-primary)]">Legibilidad</h3>
+                  <ul class="space-y-1 text-xs">
+                    @for (check of contrast(); track check.id) {
+                      <li class="flex items-center justify-between gap-2" [attr.data-contrast]="check.id" [attr.data-ok]="check.ok">
+                        <span class="text-[var(--color-text-primary)]">{{ check.label }}</span>
+                        <span [class]="check.ok ? 'text-[var(--color-success)]' : 'font-semibold text-[var(--color-error)]'">
+                          {{ check.ratio }}:1 {{ check.ok ? '· Bien' : '· Poco contraste' }}
+                        </span>
+                      </li>
+                    }
+                  </ul>
+                  @if (lowContrast()) {
+                    <p class="mt-2 text-xs text-[var(--color-error)]" data-testid="theme-contrast-warning">
+                      Algunos textos pueden leerse mal. Recomendamos al menos 4.5:1.
+                    </p>
+                  }
+                </div>
+              }
+            </div>
+
+            <div class="space-y-2">
+              <p class="text-xs text-[var(--color-text-secondary)]">Vista previa en vivo: así se verá al guardar.</p>
+              <div class="max-h-[75vh] overflow-auto rounded-xl border border-[var(--color-border)] bg-white" data-testid="style-preview">
+                <app-app-page-view [kind]="kind()" [page]="draft()" [preview]="true" />
+              </div>
+            </div>
+          </div>
+        }
+
         @case ('preview') {
           <div class="space-y-3" data-section="preview">
             @if (detail().public_url; as url) {
@@ -440,6 +594,8 @@ export class AppPageEditorComponent {
   protected readonly seoFields = SEO_FIELDS;
   protected readonly modeOptions = APP_PAGE_MODE_OPTIONS;
   protected readonly fonts = APP_PAGE_FONTS;
+  protected readonly themeColors = APP_THEME_COLORS;
+  protected readonly themeOptions = APP_THEME_OPTIONS;
   protected readonly maxBlocks = MAX_BLOCKS;
   protected readonly heroTarget: FieldTarget = { g: 'hero' };
   protected readonly seoTarget: FieldTarget = { g: 'seo' };
@@ -473,6 +629,15 @@ export class AppPageEditorComponent {
     () => this.draft().booking?.source ?? (this.kind() === 'booking' ? 'rooms' : 'agenda'),
   );
   readonly brand = computed(() => this.draft().brand ?? {});
+
+  // ---- Apps F3: templates and style --------------------------------------
+  readonly variants = computed(() => APP_PAGE_VARIANTS[this.kind()]);
+  /** Variants that bring a style (every one but the base). */
+  readonly styledVariants = computed(() => this.variants().filter((v) => !!v.page.theme));
+  readonly theme = computed<AppPageTheme>(() => this.draft().theme ?? {});
+  readonly hasThemeDraft = computed(() => Object.keys(this.theme()).length > 0);
+  readonly contrast = computed(() => contrastChecks(this.draft().theme, this.draft().brand));
+  readonly lowContrast = computed(() => this.contrast().some((c) => !c.ok));
   readonly missingBlocks = computed<BlockDef[]>(() => {
     const present = new Set(this.blocks().map((b) => b.type));
     return this.template().blocks.filter((def) => !present.has(def.type));
@@ -509,6 +674,80 @@ export class AppPageEditorComponent {
       cancelText: 'Cancelar',
     });
     if (ok) this.draft.set(clonePage(this.template().page));
+  }
+
+  // ---- templates (apps-f3 S2) -------------------------------------------
+
+  /** Palette of a template; empty for the base (it uses the brand colors). */
+  swatches(variant: AppPageVariant): string[] {
+    const t = variant.page.theme;
+    if (!t) return [];
+    return [t.primary_color, t.secondary_color, t.accent_color, t.surface_color, t.text_color].filter(
+      (c): c is string => !!c,
+    );
+  }
+
+  /** Visible sections of a template, in its order (the gallery's preview). */
+  sample(variant: AppPageVariant): string[] {
+    return variant.page.blocks
+      .filter((b) => b.enabled)
+      .map((b) => this.defOf(b.type)?.label ?? b.type);
+  }
+
+  async useVariant(variant: AppPageVariant): Promise<void> {
+    const ok = await this.dialog.confirm({
+      title: `Usar la plantilla «${variant.name}»`,
+      message:
+        'Reemplaza la portada, las secciones y el estilo que tienes ahora en el editor. ' +
+        'Conserva el modo de operación, la marca y el SEO. No publica ni cambia tu producto, tus servicios, tu dominio ni la tienda en línea, ' +
+        'y no se guarda hasta que pulses Guardar.',
+      confirmText: 'Usar plantilla',
+      cancelText: 'Cancelar',
+    });
+    if (ok) this.draft.set(applyVariant(this.draft(), variant));
+  }
+
+  // ---- style (apps-f3 S1) ----------------------------------------------
+
+  private setTheme(key: keyof AppPageTheme, value: string | undefined): void {
+    this.update((page) => {
+      const theme: Record<string, unknown> = { ...(page.theme ?? {}) };
+      if (value === undefined) delete theme[key];
+      else theme[key] = value;
+      if (Object.keys(theme).length) page.theme = theme as AppPageTheme;
+      else delete page.theme;
+    });
+  }
+
+  themeColor(key: AppThemeColorKey): string {
+    return this.theme()[key] ?? '';
+  }
+
+  themeValue(key: AppThemeOptionKey): string {
+    return this.theme()[key] ?? '';
+  }
+
+  /** Only a valid `#RRGGBB` (or an empty box, "como hoy") reaches the draft. */
+  onThemeColor(key: AppThemeColorKey, event: Event): void {
+    const value = (event.target as HTMLInputElement).value.trim();
+    if (!value) this.setTheme(key, undefined);
+    else if (HEX_COLOR.test(value)) this.setTheme(key, value);
+  }
+
+  onThemeSelect(key: AppThemeOptionKey | 'heading_font' | 'body_font', event: Event): void {
+    const value = (event.target as HTMLSelectElement).value;
+    this.setTheme(key, value || undefined);
+  }
+
+  /** The style of a template, without touching sections or texts. */
+  applyThemePreset(variant: AppPageVariant): void {
+    const theme = variant.page.theme;
+    if (!theme) return;
+    this.update((page) => (page.theme = { ...theme }));
+  }
+
+  clearTheme(): void {
+    this.update((page) => delete page.theme);
   }
 
   save(): void {
