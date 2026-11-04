@@ -1,7 +1,7 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
-import { StoreHomeSettingsModalComponent } from './store-home-settings-modal.component';
+import { StoreHomeSettingsPanelComponent } from './store-home-settings-panel.component';
 import { StoreAppsService } from '../services/store-apps.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import type { StoreAppDetail } from '../interfaces/store-app.interface';
@@ -12,6 +12,7 @@ const detail = (over: Partial<StoreAppDetail> = {}): StoreAppDetail => ({
   description: '',
   applies_to_store_industries: true,
   status: 'not_installed',
+  enabled: false,
   domain: null,
   public_url: null,
   published_at: null,
@@ -19,16 +20,15 @@ const detail = (over: Partial<StoreAppDetail> = {}): StoreAppDetail => ({
   ...over,
 });
 
-describe('StoreHomeSettingsModalComponent (apps-module Fase 5)', () => {
-  let fixture: ComponentFixture<StoreHomeSettingsModalComponent>;
-  let component: StoreHomeSettingsModalComponent;
+describe('StoreHomeSettingsPanelComponent (apps-module Fase 5)', () => {
+  let fixture: ComponentFixture<StoreHomeSettingsPanelComponent>;
+  let component: StoreHomeSettingsPanelComponent;
   let apps: jasmine.SpyObj<StoreAppsService>;
 
   const open = async (d: StoreAppDetail) => {
     apps.get.and.returnValue(of({ success: true, data: d }));
-    fixture = TestBed.createComponent(StoreHomeSettingsModalComponent);
+    fixture = TestBed.createComponent(StoreHomeSettingsPanelComponent);
     component = fixture.componentInstance;
-    component.isOpen.set(true);
     fixture.detectChanges();
     await fixture.whenStable();
   };
@@ -45,7 +45,7 @@ describe('StoreHomeSettingsModalComponent (apps-module Fase 5)', () => {
     apps.unpublishStoreHome.and.returnValue(of({}));
 
     TestBed.configureTestingModule({
-      imports: [StoreHomeSettingsModalComponent],
+      imports: [StoreHomeSettingsPanelComponent],
       providers: [
         provideZonelessChangeDetection(),
         { provide: StoreAppsService, useValue: apps },
@@ -95,14 +95,15 @@ describe('StoreHomeSettingsModalComponent (apps-module Fase 5)', () => {
     fixture.detectChanges();
     const el = fixture.nativeElement as HTMLElement;
     expect(el.textContent).toContain('https://roku-store.vendix.online');
-    expect(el.querySelector('[data-testid="store-home-publish"]')).toBeNull();
+    // The view header offers Despublicar, not Publicar, for a published app.
+    expect(component.canUnpublish()).toBeTrue();
 
     component.unpublish();
 
     expect(apps.unpublishStoreHome).toHaveBeenCalled();
   });
 
-  it('un error del servidor se muestra sin cerrar el modal', async () => {
+  it('un error del servidor se muestra en el panel', async () => {
     await open(detail());
     apps.publishStoreHome.and.returnValue(
       throwError(() => ({ error: { message: 'La tienda no tiene activo su dominio principal' } })),
@@ -112,6 +113,5 @@ describe('StoreHomeSettingsModalComponent (apps-module Fase 5)', () => {
 
     expect(component.error()).toBeTruthy();
     expect(component.busy()).toBeFalse();
-    expect(component.isOpen()).toBeTrue();
   });
 });

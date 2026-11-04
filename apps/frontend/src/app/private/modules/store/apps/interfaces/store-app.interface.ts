@@ -24,6 +24,8 @@ export interface StoreApp {
   description: string;
   applies_to_store_industries: boolean;
   status: AppStatus;
+  /** "Encendida": `draft` or `published` (apps-vistas-f1 S2). */
+  enabled: boolean;
   domain: StoreAppDomain | null;
   public_url: string | null;
   published_at: string | null;
@@ -35,7 +37,7 @@ export interface StoreAppsResponse {
   message?: string;
 }
 
-/** GET /store/apps/:kind — the list item plus the app's own config. */
+/** GET /store/apps/:kind — the list item plus the app's own config (only in its view). */
 export interface StoreAppDetail extends StoreApp {
   config: Record<string, unknown>;
 }

@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
+  AppKind,
   ProductPageCustomDomain,
   StoreAppDetailResponse,
   StoreAppsResponse,
@@ -24,6 +25,16 @@ export class StoreAppsService {
 
   get(kind: string): Observable<StoreAppDetailResponse> {
     return this.http.get<StoreAppDetailResponse>(`${this.apiUrl}/${kind}`);
+  }
+
+  /** Switches an app on (`draft`); apps-vistas-f1 S3. */
+  activate(kind: AppKind): Observable<StoreAppDetailResponse> {
+    return this.http.post<StoreAppDetailResponse>(`${this.apiUrl}/${kind}/activate`, {});
+  }
+
+  /** Switches a draft app off (`disabled`); a published app is unpublished first. */
+  deactivate(kind: AppKind): Observable<StoreAppDetailResponse> {
+    return this.http.post<StoreAppDetailResponse>(`${this.apiUrl}/${kind}/deactivate`, {});
   }
 
   saveProductPageConfig(body: {
@@ -109,7 +120,7 @@ export class StoreAppsService {
     return this.http.post(`${this.apiUrl}/store-home/unpublish`, {});
   }
 
-  /** Offer of the landing page (Fase 6); the landing content stays in "Landing de captación". */
+  /** Offer of the landing page (Fase 6); its content is the CRM landing, edited in the same view. */
   saveLandingConfig(body: {
     offer_mode: 'info' | 'product';
     offer_title: string | null;

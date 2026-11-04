@@ -3,21 +3,16 @@ import {
   Component,
   DestroyRef,
   computed,
-  effect,
   inject,
-  model,
   output,
   signal,
-  untracked,
 } from '@angular/core';
-import { RouterLink } from '@angular/router';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { forkJoin, of } from 'rxjs';
 import { catchError, debounceTime, distinctUntilChanged, map, switchMap } from 'rxjs/operators';
 
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { ProductsService } from '../../products/services/products.service';
 import type { Product } from '../../products/interfaces/product.interface';
@@ -27,13 +22,12 @@ import {
   StoreAppDetail,
 } from '../interfaces/store-app.interface';
 import { StoreAppsService } from '../services/store-apps.service';
+import type { AppSettingsPanel } from './app-settings-panel';
 
 /** Same limits as the backend (`landing-page.reader.ts`). */
 export const MAX_OFFER_TITLE = 120;
 export const MAX_OFFER_DESCRIPTION = 400;
 
-/** Route of the existing landing editor ("Landing de captación"), unchanged. */
-export const LANDING_EDITOR_ROUTE = '/admin/customers/crm';
 
 interface PickedItem {
   id: number;
@@ -49,17 +43,14 @@ interface PickedItem {
  * (published landing content, product sold online).
  */
 @Component({
-  selector: 'app-landing-settings-modal',
+  selector: 'app-landing-settings-panel',
   standalone: true,
-  imports: [ModalComponent, IconComponent, RouterLink],
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <app-modal
-      [(isOpen)]="isOpen"
-      title="Landing page"
-      subtitle="Tu landing de captación en su propio dominio, con una oferta y los leads directo al CRM."
-      size="lg"
-    >
+    <section class="space-y-4" data-panel="landing">
+      <p class="text-sm text-[var(--color-text-secondary)]">Tu landing de captación en su propio dominio, con una oferta y los leads directo al CRM.</p>
+
       @if (loading()) {
         <p class="text-sm text-[var(--color-text-secondary)]">Cargando…</p>
       } @else {
@@ -76,8 +67,7 @@ interface PickedItem {
               </p>
             }
             <p class="mt-1 text-xs text-[var(--color-text-secondary)]">
-              El contenido de la landing se crea y se edita en
-              <a [routerLink]="editorRoute" class="text-[var(--color-primary)] hover:underline" (click)="isOpen.set(false)">Landing de captación</a>.
+              El contenido de la landing se crea y se edita en la pestaña Contenido de esta vista.
               Cada contacto llega al Pipeline del CRM con el origen, la oferta y la fecha.
             </p>
           </div>
@@ -172,34 +162,24 @@ interface PickedItem {
         </div>
       }
 
-      <div slot="footer" class="flex flex-wrap justify-end gap-2">
-        @if (hasOwnDomain()) {
-          <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm"
-                  [disabled]="busy()" (click)="unpublish()" data-testid="landing-unpublish">Despublicar</button>
-        }
+      <div class="flex flex-wrap justify-end gap-2 border-t border-[var(--color-border)] pt-4">
         <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm"
                 [disabled]="busy() || loading()" (click)="save(false)" data-testid="landing-save">Guardar</button>
-        <button type="button" class="rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-[var(--color-text-on-primary)] disabled:opacity-50"
-                [disabled]="busy() || loading()" (click)="save(true)" data-testid="landing-publish">
-          {{ hasOwnDomain() ? 'Guardar y volver a publicar' : 'Publicar' }}
-        </button>
       </div>
-    </app-modal>
+    </section>
   `,
 })
-export class LandingSettingsModalComponent {
+export class LandingSettingsPanelComponent implements AppSettingsPanel {
   private readonly appsService = inject(StoreAppsService);
   private readonly productsService = inject(ProductsService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
-  readonly isOpen = model(false);
-  /** Emitted after a save, publish or unpublish, so the catalog reloads. */
+  /** Emitted after a save, publish or unpublish, so the view header reloads. */
   readonly changed = output<void>();
 
   readonly maxTitle = MAX_OFFER_TITLE;
   readonly maxDescription = MAX_OFFER_DESCRIPTION;
-  readonly editorRoute = LANDING_EDITOR_ROUTE;
 
   readonly loading = signal(false);
   readonly busy = signal(false);
@@ -227,17 +207,23 @@ export class LandingSettingsModalComponent {
     if (status === 'published') {
       return this.hasOwnDomain()
         ? 'Publicada en su dominio'
-        : 'Publicada en Landing de captación, sin dominio propio';
+        : 'Publicada en el dominio de la tienda, sin dominio propio';
     }
     if (status === 'draft') return 'Borrador';
     if (status === 'disabled') return 'Despublicada';
     return 'Sin configurar';
   });
 
+  /** {@link AppSettingsPanel}: the view header publishes through these. */
+  readonly canPublish = computed(() => !this.loading());
+  readonly canUnpublish = computed(() => this.hasOwnDomain());
+
+  publish(): void {
+    this.save(true);
+  }
+
   constructor() {
-    effect(() => {
-      if (this.isOpen()) untracked(() => this.load());
-    });
+    this.load();
 
     toObservable(this.query)
       .pipe(
@@ -312,7 +298,7 @@ export class LandingSettingsModalComponent {
       });
   }
 
-  private load(): void {
+  load(): void {
     this.loading.set(true);
     this.error.set(null);
     forkJoin({

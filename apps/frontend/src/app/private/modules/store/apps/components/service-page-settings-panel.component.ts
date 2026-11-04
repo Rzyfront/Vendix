@@ -3,12 +3,9 @@ import {
   Component,
   DestroyRef,
   computed,
-  effect,
   inject,
-  model,
   output,
   signal,
-  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { forkJoin, of } from 'rxjs';
@@ -16,7 +13,6 @@ import { catchError, debounceTime, distinctUntilChanged, map, switchMap } from '
 
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { ProductsService } from '../../products/services/products.service';
 import type { Product } from '../../products/interfaces/product.interface';
@@ -26,6 +22,7 @@ import {
   StoreAppDetail,
 } from '../interfaces/store-app.interface';
 import { StoreAppsService } from '../services/store-apps.service';
+import type { AppSettingsPanel } from './app-settings-panel';
 
 /** Same limits as the backend (`service-page.reader.ts`). */
 export const MAX_FEATURED_SERVICES = 12;
@@ -46,17 +43,14 @@ type SearchTarget = 'service' | 'product';
  * explains them before the user hits them.
  */
 @Component({
-  selector: 'app-service-page-settings-modal',
+  selector: 'app-service-page-settings-panel',
   standalone: true,
-  imports: [ModalComponent, IconComponent],
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <app-modal
-      [(isOpen)]="isOpen"
-      title="Página de servicios"
-      subtitle="Tus servicios con reserva en línea, en su propio dominio."
-      size="lg"
-    >
+    <section class="space-y-4" data-panel="service-page">
+      <p class="text-sm text-[var(--color-text-secondary)]">Tus servicios con reserva en línea, en su propio dominio.</p>
+
       @if (loading()) {
         <p class="text-sm text-[var(--color-text-secondary)]">Cargando…</p>
       } @else {
@@ -169,29 +163,20 @@ type SearchTarget = 'service' | 'product';
         </div>
       }
 
-      <div slot="footer" class="flex flex-wrap justify-end gap-2">
-        @if (isPublished()) {
-          <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm"
-                  [disabled]="busy()" (click)="unpublish()" data-testid="service-page-unpublish">Despublicar</button>
-        }
+      <div class="flex flex-wrap justify-end gap-2 border-t border-[var(--color-border)] pt-4">
         <button type="button" class="rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm"
                 [disabled]="busy() || loading()" (click)="save(false)">Guardar</button>
-        <button type="button" class="rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-[var(--color-text-on-primary)] disabled:opacity-50"
-                [disabled]="busy() || loading()" (click)="save(true)" data-testid="service-page-publish">
-          {{ isPublished() ? 'Guardar y volver a publicar' : 'Publicar' }}
-        </button>
       </div>
-    </app-modal>
+    </section>
   `,
 })
-export class ServicePageSettingsModalComponent {
+export class ServicePageSettingsPanelComponent implements AppSettingsPanel {
   private readonly appsService = inject(StoreAppsService);
   private readonly productsService = inject(ProductsService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
-  readonly isOpen = model(false);
-  /** Emitted after a save, publish or unpublish, so the catalog reloads. */
+  /** Emitted after a save, publish or unpublish, so the view header reloads. */
   readonly changed = output<void>();
 
   readonly maxServices = MAX_FEATURED_SERVICES;
@@ -228,10 +213,16 @@ export class ServicePageSettingsModalComponent {
     }
   });
 
+  /** {@link AppSettingsPanel}: the view header publishes through these. */
+  readonly canPublish = computed(() => !this.loading());
+  readonly canUnpublish = computed(() => this.isPublished());
+
+  publish(): void {
+    this.save(true);
+  }
+
   constructor() {
-    effect(() => {
-      if (this.isOpen()) untracked(() => this.load());
-    });
+    this.load();
 
     toObservable(computed(() => ({ term: this.searchTerm(), target: this.searchTarget() })))
       .pipe(
@@ -335,7 +326,7 @@ export class ServicePageSettingsModalComponent {
       });
   }
 
-  private load(): void {
+  load(): void {
     this.loading.set(true);
     this.error.set(null);
     forkJoin({

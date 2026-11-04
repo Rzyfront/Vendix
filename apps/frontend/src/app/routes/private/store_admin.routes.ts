@@ -10,6 +10,7 @@ import { manageUsersGuard } from '../../core/guards/manage-users.guard';
 import { aiAgentsSettingsGuard } from '../../core/guards/vexi-settings.guard';
 import { vexAccessGuard } from '../../core/guards/vex-access.guard';
 import { storeDashboardGuard } from '../../core/guards/store-dashboard.guard'; // QUI-418
+import { appKindGuard } from '../../private/modules/store/apps/utils/app-routes.util';
 import {
   panelUiGuard,
   firstActiveModuleRedirectGuard,
@@ -603,14 +604,9 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.SegmentsComponent,
               ),
           },
-          // Landing de captación (QUI-719; módulo interno `crm`)
-          {
-            path: 'crm',
-            loadChildren: () =>
-              import(
-                '../../private/modules/store/crm/crm.routes'
-              ).then((m) => m.crmRoutes),
-          },
+          // Landing de captación (QUI-719): vive en Apps desde apps-vistas-f1
+          // (S4). La ruta vieja queda como redirect para enlaces guardados.
+          { path: 'crm', pathMatch: 'full', redirectTo: '/admin/apps/landing' },
           {
             path: ':id',
             loadComponent: () =>
@@ -720,15 +716,31 @@ export const storeAdminRoutes: Routes = [
             (c) => c.EcommerceComponent,
           ),
       },
-      // Apps catalog (odd/tasks/apps-module.md T6). Read-only: the sidebar only
-      // links it with apps.enabled, the page shows a notice when the flag is
-      // off, and the API itself requires store:apps:read.
+      // Apps (odd/tasks/apps-module.md T6; apps-vistas-f1 S3-S5). The catalog
+      // only lists; each app opens its own reloadable view `/admin/apps/:kind`,
+      // governed by panelUiGuard through MODULE_ROUTES (`apps`, and
+      // `customers_crm` for the landing). The online store keeps its view.
       {
         path: 'apps',
-        loadComponent: () =>
-          import('../../private/modules/store/apps/apps-catalog.component').then(
-            (c) => c.AppsCatalogComponent,
-          ),
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            loadComponent: () =>
+              import('../../private/modules/store/apps/apps-catalog.component').then(
+                (c) => c.AppsCatalogComponent,
+              ),
+          },
+          { path: 'ecommerce', pathMatch: 'full', redirectTo: '/admin/ecommerce' },
+          {
+            path: ':kind',
+            canActivate: [appKindGuard],
+            loadComponent: () =>
+              import('../../private/modules/store/apps/pages/app-detail/app-detail.component').then(
+                (c) => c.AppDetailComponent,
+              ),
+          },
+        ],
       },
       // Settings Routes
       {
