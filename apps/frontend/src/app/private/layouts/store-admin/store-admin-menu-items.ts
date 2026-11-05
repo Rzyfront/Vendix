@@ -175,6 +175,21 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
     ],
   },
   {
+    // Administración (flujos-documental S6). Industry `administration`,
+    // always enforced: stores without it keep these two entries visible with
+    // a lock (`_planLocked` rendering) and the URL opens the industry paywall.
+    label: 'Flujos',
+    icon: 'git-branch',
+    route: '/admin/workflows',
+    panelUiKey: 'flows',
+  },
+  {
+    label: 'Documentos',
+    icon: 'folder-open',
+    route: '/admin/documents',
+    panelUiKey: 'documents',
+  },
+  {
     label: 'Órdenes',
     icon: 'cart',
     children: [

@@ -6,6 +6,7 @@ import { AuthFacade } from '../store/auth/auth.facade';
 import { ToastService } from '../../shared/components/toast/toast.service';
 import { AccessGateService } from '../services/access-gate.service';
 import { PlanPaywallService } from '../services/plan-paywall.service';
+import { IndustryPaywallService } from '../services/industry-paywall.service';
 
 /**
  * CanActivate que cierra el bypass de panel_ui en URL directa (A.4 / ADR-4).
@@ -44,6 +45,7 @@ export const panelUiGuard: CanActivateFn = async (
   const router = inject(Router);
   const toast = inject(ToastService);
   const paywall = inject(PlanPaywallService);
+  const industryPaywall = inject(IndustryPaywallService);
 
   // Compuertas de escape: la ruta terminal y la ruta "sin acceso" nunca se
   // bloquean. Sin esto, el `firstActiveModuleRedirectGuard` o el propio
@@ -130,6 +132,12 @@ export const panelUiGuard: CanActivateFn = async (
   const planLock = menuFilter.planLockForKeys(gateKeys);
   if (planLock) {
     if (!paywall.show(planLock)) toast.info(paywall.notice(planLock));
+    return router.navigated ? false : redirect();
+  }
+  // Industry layer on an always-enforced module (`flows`, `documents`): the
+  // industry paywall explains it and, for the owner, links to the settings.
+  if (menuFilter.isIndustryLocked(gateKeys)) {
+    industryPaywall.show(gateKeys[0]);
     return router.navigated ? false : redirect();
   }
   toast.info(menuFilter.industryBlockMessage(gateKeys));

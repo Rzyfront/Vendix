@@ -125,6 +125,14 @@ describe('apps-f4 S3: cobertura de rutas del panel con key', () => {
       .toEqual([]);
   });
 
+  it('flujos-documental S6: las rutas de Flujos y Documentos están registradas y resuelven su key', () => {
+    const urls = adminUrls(storeAdminRoutes);
+    expect(urls).toContain('/admin/workflows');
+    expect(urls).toContain('/admin/documents');
+    expect(service.resolveGateKeysForRoute('/admin/workflows/instances/12', 'STORE_ADMIN')).toContain('flows');
+    expect(service.resolveGateKeysForRoute('/admin/documents', 'STORE_ADMIN')).toContain('documents');
+  });
+
   it('una ruta inventada no resuelve key (el test detecta huecos)', () => {
     expect(service.resolveGateKeysForRoute('/admin/zz-no-existe', 'STORE_ADMIN')).toEqual([]);
   });
