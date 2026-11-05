@@ -4854,6 +4854,12 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      name: 'store:integrations:api_keys',
+      description: 'Crear, listar y revocar las API keys de la tienda',
+      path: '/api/store/integrations/api-keys',
+      method: 'POST',
+    },
+    {
       name: 'store:work_groups:manage',
       description: 'Administrar grupos de trabajo y sus miembros',
       path: '/api/store/work-groups',
@@ -5227,6 +5233,8 @@ export async function seedPermissionsAndRoles(
       p.name !== 'store:workflows:design' &&
       p.name !== 'store:workflows:manage' &&
       p.name !== 'store:work_groups:manage' &&
+      // API keys: credenciales de integración, solo owner/admin (§5.5).
+      p.name !== 'store:integrations:api_keys' &&
       // Documentos recibidos en el espacio de organización requieren un rol
       // ORG_ADMIN; el gerente conserva únicamente los tres permisos de tienda.
       !p.name.startsWith('organization:invoicing:received:') &&

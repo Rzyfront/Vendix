@@ -22,6 +22,12 @@ export interface RequestContext {
   email?: string;
   request_id?: string;
   /**
+   * How the request authenticated. Absent = a normal JWT session. `api_key`
+   * = a store API key (`/api/v1`); `api_key_id` identifies it for audit.
+   */
+  auth_source?: 'jwt' | 'api_key';
+  api_key_id?: number;
+  /**
    * The caller's raw bearer token.
    *
    * Carried so the AI api-bridge can replay a `GET` over internal HTTP as the

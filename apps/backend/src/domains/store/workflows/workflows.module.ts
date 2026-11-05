@@ -106,6 +106,10 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
     WorkGroupsService,
     WorkflowRequirementsService,
     WorkflowMetricsService,
+    // Reused by the `/api/v1/workflows` API-key surface (domains/api-v1).
+    WorkflowDefinitionsService,
+    WorkflowInstancesService,
+    WorkflowInboxService,
   ],
 })
 export class WorkflowsModule implements OnModuleInit {

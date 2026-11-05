@@ -248,6 +248,8 @@ export class StorePrismaService extends BasePrismaService {
     // Operación de Flujos (bloque 8): ambas llevan `store_id` propio NOT NULL.
     'workflow_instance_comments',
     'workflow_public_links',
+    // API keys por tienda (bloque 13): `store_id` propio NOT NULL.
+    'store_api_keys',
     'crm_messages',
     'crm_tags',
     'crm_customer_tags',
@@ -1941,6 +1943,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get workflow_instance_events() {
     return this.scoped_client.workflow_instance_events;
+  }
+
+  get store_api_keys() {
+    return this.scoped_client.store_api_keys;
   }
 
   get workflow_outbox() {

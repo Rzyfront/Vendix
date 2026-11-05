@@ -11,6 +11,8 @@ model users {
   workflow_definitions_created workflow_definitions[] @relation("workflow_definitions_created_by")
   workflow_instance_comments   workflow_instance_comments[]
   workflow_public_links        workflow_public_links[]
+  store_api_keys_created       store_api_keys[] @relation("store_api_keys_created_by")
+  store_api_keys_acting        store_api_keys[] @relation("store_api_keys_acting_user")
   workflow_definitions_updated workflow_definitions[] @relation("workflow_definitions_updated_by")
   workflow_versions_published  workflow_versions[]
   work_group_memberships       work_group_members[]
@@ -648,6 +650,7 @@ model organizations {
   workflow_definitions workflow_definitions[]
   workflow_instance_comments workflow_instance_comments[]
   workflow_public_links workflow_public_links[]
+  store_api_keys        store_api_keys[]
   work_groups          work_groups[]
   workflow_instances   workflow_instances[]
   workflow_tasks       workflow_tasks[]
@@ -963,6 +966,7 @@ model stores {
   workflow_outbox            workflow_outbox[]
   workflow_instance_comments workflow_instance_comments[]
   workflow_public_links      workflow_public_links[]
+  store_api_keys             store_api_keys[]
   stored_files               stored_files[]
   dossiers                   dossiers[]
   dossier_items              dossier_items[]
@@ -15777,4 +15781,31 @@ model workflow_public_links {
   created_by   users                @relation(fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([store_id, definition_id, is_active])
+}
+
+/// API key de tienda para `/api/v1/*`. Solo se guarda el sha256 de la clave; el
+/// secreto completo se muestra una vez al crearla. Actúa como `acting_user_id`
+/// con los permisos de ese usuario intersectados con `scopes`.
+model store_api_keys {
+  id                 Int       @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int
+  name               String    @db.VarChar(120)
+  prefix             String    @db.VarChar(16)
+  key_hash           String    @unique @db.Char(64)
+  scopes             String[]  @default([])
+  created_by_user_id Int
+  acting_user_id     Int
+  last_used_at       DateTime? @db.Timestamp(6)
+  last_used_ip       String?   @db.VarChar(64)
+  expires_at         DateTime? @db.Timestamp(6)
+  revoked_at         DateTime? @db.Timestamp(6)
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store        stores        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by   users         @relation("store_api_keys_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  acting_user  users         @relation("store_api_keys_acting_user", fields: [acting_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([store_id])
 }

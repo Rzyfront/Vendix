@@ -40,6 +40,14 @@ export const ErrorCodes = {
   OPT_SELECTION_INVALID: { code: 'OPT_SELECTION_INVALID', httpStatus: 400, devMessage: 'Las adiciones elegidas no cumplen las reglas del producto.' },
   OPT_DRAFT_LINE_LOCKED: { code: 'OPT_DRAFT_LINE_LOCKED', httpStatus: 409, devMessage: 'Esta línea del borrador tiene adiciones y no se puede cambiar aquí: quítala y vuelve a agregarla con sus adiciones.' },
   OPT_DRAFT_ADD_LOCKED: { code: 'OPT_DRAFT_ADD_LOCKED', httpStatus: 409, devMessage: 'Este pedido ya está guardado: no se le pueden agregar productos con adiciones. Cóbralo o cancélalo y registra las adiciones en un pedido nuevo.' },
+  // API keys por tienda (/api/v1)
+  API_KEY_INVALID: { code: 'API_KEY_INVALID', httpStatus: 401, devMessage: 'API key inválida o expirada.' },
+  API_KEY_NOT_FOUND: { code: 'API_KEY_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la API key.' },
+  API_KEY_LIMIT_REACHED: { code: 'API_KEY_LIMIT_REACHED', httpStatus: 409, devMessage: 'Alcanzaste el máximo de 20 API keys activas. Revoca una para crear otra.' },
+  API_KEY_SCOPE_INVALID: { code: 'API_KEY_SCOPE_INVALID', httpStatus: 400, devMessage: 'Los alcances de la API key no son válidos.' },
+  API_KEY_FORBIDDEN: { code: 'API_KEY_FORBIDDEN', httpStatus: 403, devMessage: 'Esta API key no tiene permiso para esta operación.' },
+  API_KEY_ACTING_USER_INVALID: { code: 'API_KEY_ACTING_USER_INVALID', httpStatus: 400, devMessage: 'El usuario con el que actúa la API key no pertenece a esta tienda.' },
+  API_KEY_RATE_LIMITED: { code: 'API_KEY_RATE_LIMITED', httpStatus: 429, devMessage: 'Demasiadas solicitudes con esta API key. Intenta de nuevo en un minuto.' },
   // Flujos (vendix.workflow/v1)
   WORKFLOW_STALE: { code: 'WORKFLOW_STALE', httpStatus: 409, devMessage: 'Esta solicitud cambió; recarga.' },
   WORKFLOW_NOT_FOUND: { code: 'WORKFLOW_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la solicitud.' },
