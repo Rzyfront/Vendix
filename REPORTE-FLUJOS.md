@@ -142,3 +142,9 @@ Se probó el seed real contra la copia. En producción entran cuando corran los 
 - **Fallo preexistente, ajeno a este cambio**: `default-panel-ui.service.spec.ts` reclama que `orders_scheduled` no tiene default.
 
 Risk: items 1 (migraciones), 2 (permisos, API keys, formulario público, aislamiento por tienda), 4 (concurrencia del motor) y 5 (seeds de permisos en el deploy).
+
+## Limpieza y artefactos externos
+
+- Se eliminaron la copia scratch `vendix_flujos`, el Redis desechable y los temporales de `/tmp/flujos-scratch`. Solo queda `extra/`, el `@aws-sdk/client-sns` que usa el `node_modules` de este worktree.
+- La verificación en vivo subió **un objeto de prueba** de 45 bytes al bucket S3 configurado en el `.env` de desarrollo. No se borró porque es una operación remota en un bucket compartido. Clave: `organizations/tech-solutions-2/stores/tech-bogota-3/workflows/1/7bfb48de-a441-4d0b-b40d-1239aad5535b.pdf`.
+- Gate `pr-code-review`: 78/100 en la primera ronda y **89/100 (APPROVE)** tras la ronda 1 (`2ae41473c`).
