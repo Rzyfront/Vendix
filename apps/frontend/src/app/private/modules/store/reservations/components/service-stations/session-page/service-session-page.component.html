@@ -139,7 +139,11 @@
           </div>
         }
 
-        @if (!isClosed()) {
+        @if (!isClosed() && accountLocked()) {
+          <p class="text-xs text-[var(--color-text-secondary)] flex items-center gap-1.5">
+            <app-icon name="lock" [size]="13" /> La cuenta ya fue cobrada: no admite nuevos ítems.
+          </p>
+        } @else if (!isClosed()) {
           <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-2.5">
             <span class="text-xs font-bold text-[var(--color-text-primary)] flex items-center gap-1.5">
               <app-icon name="plus-circle" [size]="14" class="text-[var(--color-primary)]" /> Agregar producto o servicio
@@ -210,7 +214,7 @@
                 </div>
                 <div class="flex items-center gap-3">
                   <span class="font-mono font-bold text-xs text-[var(--color-text-primary)]">{{ lineTotalWithTax(item) | currency }}</span>
-                  @if (!isClosed()) {
+                  @if (!isClosed() && !accountLocked()) {
                     <app-button variant="ghost" size="sm" (clicked)="removeItem(item.id)" ariaLabel="Eliminar ítem">
                       <app-icon name="trash-2" [size]="13" class="text-[var(--color-error)]" />
                     </app-button>

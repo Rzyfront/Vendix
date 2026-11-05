@@ -47,6 +47,7 @@ import {
   StationServiceOption,
 } from '../service-stations.service';
 import { DepositPanelComponent } from './components/deposit-panel/deposit-panel.component';
+import { storePaymentMethodRows } from '../open-session-deposit/deposit-payment-methods.util';
 import {
   addMinutesIso,
   computeStationClock,
@@ -73,6 +74,7 @@ interface SessionOrderItem {
 interface SessionOrder {
   id: number;
   order_number: string;
+  state?: string;
   grand_total: number | string;
   subtotal_amount: number | string;
   tax_amount?: number | string | null;
@@ -263,6 +265,11 @@ export class ServiceSessionPageComponent {
     return !!status && CLOSED_STATUSES.includes(status);
   });
   readonly isPaused = computed(() => this.session()?.status === 'paused');
+  /** Once the order leaves draft (it was paid) the backend rejects adding or removing items (STATION_006). */
+  readonly accountLocked = computed(() => {
+    const state = this.order()?.state;
+    return !!state && state !== 'draft';
+  });
 
   readonly clock = computed(() => {
     const current = this.session();
@@ -1004,7 +1011,7 @@ export class ServiceSessionPageComponent {
       .getStorePaymentMethods({ state: PaymentMethodState.ENABLED, limit: 50 })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => this.payMethods.set(Array.isArray(res?.data) ? res.data : []),
+        next: (res) => this.payMethods.set(storePaymentMethodRows(res)),
         error: () => this.payMethods.set([]),
       });
   }

@@ -10,6 +10,16 @@ export interface DepositMethodChoice {
   label: string;
 }
 
+/**
+ * `PaymentMethodsService.getStorePaymentMethods` unwraps the envelope and emits the bare
+ * array, although it is typed as a paginated object: accept both shapes.
+ */
+export function storePaymentMethodRows(res: unknown): StorePaymentMethod[] {
+  if (Array.isArray(res)) return res as StorePaymentMethod[];
+  const data = (res as { data?: unknown } | null)?.data;
+  return Array.isArray(data) ? (data as StorePaymentMethod[]) : [];
+}
+
 export function toDepositMethodChoices(rows: StorePaymentMethod[] | null | undefined): DepositMethodChoice[] {
   const choices: DepositMethodChoice[] = [];
   for (const row of rows ?? []) {

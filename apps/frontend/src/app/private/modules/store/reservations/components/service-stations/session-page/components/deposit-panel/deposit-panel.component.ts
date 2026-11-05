@@ -29,6 +29,7 @@ import {
   DepositMethodChoice,
   defaultDepositMethod,
   newDepositRequestId,
+  storePaymentMethodRows,
   toDepositMethodChoices,
   toDepositMethodOptions,
 } from '../../../open-session-deposit/deposit-payment-methods.util';
@@ -281,7 +282,7 @@ export class DepositPanelComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          this.choices.set(toDepositMethodChoices(Array.isArray(res?.data) ? res.data : []));
+          this.choices.set(toDepositMethodChoices(storePaymentMethodRows(res)));
           this.loadingMethods.set(false);
           done();
         },

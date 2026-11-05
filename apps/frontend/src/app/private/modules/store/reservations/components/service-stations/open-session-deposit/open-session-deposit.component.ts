@@ -10,6 +10,7 @@ import {
   DepositMethodChoice,
   defaultDepositMethod,
   newDepositRequestId,
+  storePaymentMethodRows,
   toDepositMethodChoices,
   toDepositMethodOptions,
 } from './deposit-payment-methods.util';
@@ -141,7 +142,7 @@ export class OpenSessionDepositComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          const choices = toDepositMethodChoices(Array.isArray(res?.data) ? res.data : []);
+          const choices = toDepositMethodChoices(storePaymentMethodRows(res));
           this.choices.set(choices);
           if (this.methodId() == null) this.methodId.set(defaultDepositMethod(choices)?.id ?? null);
           this.loading.set(false);
