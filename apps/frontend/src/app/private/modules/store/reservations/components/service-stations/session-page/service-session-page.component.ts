@@ -181,6 +181,9 @@ export class ServiceSessionPageComponent {
   readonly order = signal<SessionOrder | null>(null);
   readonly stations = signal<ServiceStation[]>([]);
   readonly services = signal<StationServiceOption[]>([]);
+  /** The recurring-service check in requestClose needs the service catalog, so ?close=1 waits for both loads. */
+  private readonly servicesLoaded = signal(false);
+  private autoClosePending = false;
   readonly budget = signal<BudgetCeiling | null>(null);
   readonly budgetAmount = signal<number | null>(null);
   readonly proposals = signal<SessionProposal[]>([]);
@@ -379,6 +382,11 @@ export class ServiceSessionPageComponent {
   private loadAll(id: number): void {
     this.loading.set(true);
     this.loadError.set(null);
+    // "Finalizar" on the overview card lands here with ?close=1; consumed once, never re-fired by retry().
+    this.autoClosePending = this.route.snapshot.queryParamMap.get('close') === '1';
+    if (this.autoClosePending) {
+      void this.router.navigate([], { relativeTo: this.route, queryParams: { close: null }, queryParamsHandling: 'merge', replaceUrl: true });
+    }
     this.api
       .getSession(id)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -390,10 +398,7 @@ export class ServiceSessionPageComponent {
             return;
           }
           this.applySession(full);
-          // "Finalizar" on the overview card lands here with ?close=1.
-          if (this.route.snapshot.queryParamMap.get('close') === '1' && !this.isClosed()) {
-            void this.requestClose();
-          }
+          this.maybeAutoClose();
         },
         error: (error: unknown) => {
           this.loading.set(false);
@@ -408,7 +413,17 @@ export class ServiceSessionPageComponent {
     this.api
       .getServiceOptions()
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (services) => this.services.set(services ?? []), error: () => {} });
+      .subscribe({
+        next: (services) => {
+          this.services.set(services ?? []);
+          this.servicesLoaded.set(true);
+          this.maybeAutoClose();
+        },
+        error: () => {
+          this.servicesLoaded.set(true);
+          this.maybeAutoClose();
+        },
+      });
     this.api
       .getSellableProducts()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -459,6 +474,12 @@ export class ServiceSessionPageComponent {
   retry(): void {
     const id = this.sessionId();
     if (id) this.loadAll(id);
+  }
+
+  private maybeAutoClose(): void {
+    if (!this.autoClosePending || !this.servicesLoaded() || !this.session() || this.isClosed()) return;
+    this.autoClosePending = false;
+    void this.requestClose();
   }
 
   // ---------- Header ----------
