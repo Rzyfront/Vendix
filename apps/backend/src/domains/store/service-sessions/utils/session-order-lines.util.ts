@@ -15,9 +15,10 @@ import { priceToCents, quoteBlocks, RateWindow } from '../../../../common/utils/
  * se extrae la base; sumadas → se agregan encima) y se persiste la BASE. `tax_amount_item`
  * es por unidad; `order_item_taxes` lleva el total de línea por tasa.
  */
-export function buildSessionTaxedLine(publishedUnitPrice: number, quantity: number, rows: FullTaxRow[]) {
+export function buildSessionTaxedLine(publishedUnitPrice: number, quantity: number, rows: FullTaxRow[], priceIncludesTax = false) {
   const lineUnits = resolveLineUnits({ quantity, price_unit_quantity: null });
-  const resolved = resolveLineTotals(publishedUnitPrice, rows);
+  // A gross price (tax already inside) is split as if every row were inclusive; each stored row keeps its real flag.
+  const resolved = resolveLineTotals(publishedUnitPrice, priceIncludesTax ? rows.map((row) => ({ ...row, is_inclusive: true })) : rows);
   return {
     unit_price: new Prisma.Decimal(roundMoney2(resolved.base)),
     total_price: new Prisma.Decimal(roundMoney2(resolved.base * lineUnits)),
@@ -40,6 +41,11 @@ export function buildSessionTaxedLine(publishedUnitPrice: number, quantity: numb
         }
       : {}),
   };
+}
+
+/** Line whose gross is already fixed (a frozen booking quote): its total is exactly `gross`, whatever the rows' flags. */
+export function buildSessionGrossTaxedLine(gross: number, quantity: number, rows: FullTaxRow[]) {
+  return buildSessionTaxedLine(gross, quantity, rows, true);
 }
 
 export interface SessionOrderTotals {

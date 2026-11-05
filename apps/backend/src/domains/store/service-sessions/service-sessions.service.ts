@@ -7,6 +7,7 @@ import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 import { resolveFullTaxRowsByProductId } from '../orders/utils/catalog-line-pricing.util';
 import {
   addSessionExtensionLine,
+  buildSessionGrossTaxedLine,
   buildSessionTaxedLine,
   computeSessionOrderTotals,
   ensureSessionRentalLine,
@@ -340,7 +341,10 @@ export class ServiceSessionsService {
     const isRentalProduct = !!product.rental_pricing_mode;
     // Product line price: the variant/catalog price, or for `station_rate` the window-aware quote (qty 1).
     let productUnitPrice = catalogUnitPrice(product, variant);
-    if (isRentalProduct && product.rental_pricing_mode === 'station_rate') {
+    const isStationRate = isRentalProduct && product.rental_pricing_mode === 'station_rate';
+    // A frozen booking quote is a gross (station tax already inside), not a published price.
+    let productPriceIsGross = false;
+    if (isStationRate) {
       if (!snapshotHasTimeRate(rentalSnapshot)) {
         throw new VendixHttpException(ErrorCodes.STATION_009, 'La estación no tiene tarifa por tiempo configurada.');
       }
@@ -349,6 +353,7 @@ export class ServiceSessionsService {
       const frozenCents = booking ? toCents(booking.quoted_amount) : 0;
       if (booking && frozenCents > 0) {
         productUnitPrice = centsToAmount(frozenCents);
+        productPriceIsGross = true;
       } else {
         const quoteStart = booking && bookingAllocation?.start_at ? bookingAllocation.start_at : startAt;
         const quoteMinutes = booking
@@ -361,6 +366,19 @@ export class ServiceSessionsService {
       }
     }
     const productLineName = variant ? `${product.name} - ${variant.name || variant.sku}` : product.name;
+    // H-2: a station_rate rental is taxed with the station's rental tax (the one its quote used), never the product's.
+    const productLinePricing = async (tx: Prisma.TransactionClient) => {
+      if (isStationRate) {
+        const rows = await this.shippingTax.taxRowsForCategory(tx, {
+          tax_category_id: station.rental_tax_category_id ?? null,
+          tax_is_inclusive: station.rental_tax_is_inclusive ?? true,
+          store_id: storeId,
+        });
+        return productPriceIsGross ? buildSessionGrossTaxedLine(productUnitPrice, 1, rows) : buildSessionTaxedLine(productUnitPrice, 1, rows);
+      }
+      const taxRows = await resolveFullTaxRowsByProductId(tx, [product.id]);
+      return buildSessionTaxedLine(productUnitPrice, 1, taxRows.get(product.id) ?? []);
+    };
     // D5 `at_start`: the rental is charged on its own order, paid before or while the session runs.
     const rentalOwnOrder = rentalSnapshot?.charge_timing === 'at_start' && (isRentalProduct || snapshotHasTimeRate(rentalSnapshot));
 
@@ -463,7 +481,7 @@ export class ServiceSessionsService {
         // The rental product line goes to the rental order (at_start) or is already on the booking's order.
         if (product && !bookingHoldsRental && !(rentalOwnOrder && isRentalProduct)) {
           // El servicio entra con SU impuesto (incluido o sumado según se configuró).
-          const taxRows = await resolveFullTaxRowsByProductId(tx, [product.id]);
+          const pricing = await productLinePricing(tx);
           await tx.order_items.create({
             data: {
               order_id: orderId,
@@ -475,7 +493,7 @@ export class ServiceSessionsService {
               item_type: 'service',
               ...(isRentalProduct ? { service_line_kind: RENTAL_LINE_KIND } : {}),
               updated_at: now,
-              ...buildSessionTaxedLine(productUnitPrice, 1, taxRows.get(product.id) ?? []),
+              ...pricing,
             },
           });
           await this.recalcOrderTotals(tx, orderId, now);
@@ -515,7 +533,7 @@ export class ServiceSessionsService {
         const createdRentalId = rentalOrder.id;
         rentalOrderId = createdRentalId;
         if (isRentalProduct) {
-          const taxRows = await resolveFullTaxRowsByProductId(tx, [product.id]);
+          const pricing = await productLinePricing(tx);
           await tx.order_items.create({
             data: {
               order_id: createdRentalId,
@@ -527,7 +545,7 @@ export class ServiceSessionsService {
               item_type: 'service',
               service_line_kind: RENTAL_LINE_KIND,
               updated_at: now,
-              ...buildSessionTaxedLine(productUnitPrice, 1, taxRows.get(product.id) ?? []),
+              ...pricing,
             },
           });
         } else if (snapshotHasTimeRate(rentalSnapshot)) {

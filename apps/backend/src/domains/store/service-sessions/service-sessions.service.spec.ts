@@ -1769,6 +1769,53 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
         expect(Number(itemsFor(200)[0].unit_price)).toBe(95000);
       });
 
+      // H-2: a station_rate rental is taxed with the STATION's rental tax (the one that priced the quote), never the product's.
+      const stationTax19Exclusive = () => {
+        shippingTax.taxRowsForCategory.mockResolvedValue([{ tax_rate_id: 31, name: 'IVA 19%', rate: 0.19, tax_type: 'iva', is_inclusive: false }]);
+        tx.product_tax_assignments.findMany.mockResolvedValue([
+          { product_id: 10, is_inclusive: true, tax_categories: { tax_type: 'iva', tax_rates: [{ id: 5, name: 'IVA producto 5%', rate: 0.05 }] } },
+        ]);
+      };
+
+      it('H-2: la cotización congelada (bruto) se cobra exacta, gravada con el IVA sumado de la estación y no con el del producto', async () => {
+        stub({ ...STATION, rental_tax_category_id: 8, rental_tax_is_inclusive: false }, stationRateProduct);
+        stationTax19Exclusive();
+        prisma.bookings.findFirst.mockResolvedValue(bookingRow({ quoted_amount: '119000.00' }));
+        prisma.service_allocations.findFirst.mockResolvedValue(allocationRow(115));
+        prisma.service_sessions.findFirst.mockResolvedValue(null);
+        await service.open({ booking_id: 7 } as any);
+        const [line] = itemsFor(200);
+        expect(Number(line.unit_price)).toBe(100000);
+        expect(Number(line.tax_amount_item)).toBe(19000);
+        expect(Number(line.final_unit_price)).toBe(119000);
+        // The stored row keeps the station's real flag (added on top), not the inclusive one used to split the gross.
+        expect(line.order_item_taxes.create).toEqual([expect.objectContaining({ tax_rate_id: 31, tax_amount: 19000, is_inclusive: false })]);
+        expect(shippingTax.taxRowsForCategory).toHaveBeenCalledWith(tx, { tax_category_id: 8, tax_is_inclusive: false, store_id: 1 });
+      });
+
+      it('H-2: un walk-in station_rate at_start lleva a la orden de alquiler el precio por bloques más el IVA sumado de la estación', async () => {
+        stub({ ...STATION, rental_charge_timing: 'at_start', rental_tax_category_id: 8, rental_tax_is_inclusive: false }, stationRateProduct);
+        stationTax19Exclusive();
+        prisma.product_variants.findFirst.mockResolvedValue({ ...VARIANT, price_override: 1, service_duration_minutes: 120 });
+        await service.open({ station_id: 3, product_id: 10, product_variant_id: 77 } as any);
+        const [line] = itemsFor(201);
+        expect(line).toMatchObject({ product_id: 10, service_line_kind: 'rental' });
+        expect(Number(line.unit_price)).toBe(80000);
+        expect(Number(line.tax_amount_item)).toBe(15200);
+        expect(Number(line.final_unit_price)).toBe(95200);
+        expect(line.order_item_taxes.create).toEqual([expect.objectContaining({ tax_rate_id: 31, is_inclusive: false })]);
+      });
+
+      it('regresión: un producto fixed_price sigue gravado con el impuesto del producto', async () => {
+        stub({ ...STATION, rental_tax_category_id: 8, rental_tax_is_inclusive: false });
+        stationTax19Exclusive();
+        await service.open({ station_id: 3, product_id: 10, product_variant_id: 77 } as any);
+        const [line] = itemsFor(200);
+        expect(line.order_item_taxes.create).toEqual([expect.objectContaining({ tax_rate_id: 5, is_inclusive: true })]);
+        expect(Number(line.final_unit_price)).toBe(300000);
+        expect(shippingTax.taxRowsForCategory).not.toHaveBeenCalled();
+      });
+
       it('regresión: un walk-in station_rate sigue exigiendo el múltiplo del bloque al cotizar', async () => {
         stub(STATION, stationRateProduct);
         prisma.product_variants.findFirst.mockResolvedValue({ ...VARIANT, service_duration_minutes: 45 });
