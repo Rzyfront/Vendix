@@ -209,6 +209,61 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
       expect(tx.service_allocations.create).toHaveBeenCalledWith({ data: expect.objectContaining({ station_id: 8 }), select: { id: true } });
     });
 
+    describe('estación preferida del proveedor (S10, D3)', () => {
+      const withPreferred = (preferredId: number | null) => {
+        const ctx = build();
+        ctx.tx.service_providers.findFirst.mockResolvedValue({ id: PROVIDER_ID, default_station_id: preferredId });
+        return ctx;
+      };
+
+      it('usa la estación preferida del proveedor antes que la asignación automática, con los mismos filtros', async () => {
+        const { coordinator, tx } = withPreferred(8);
+        tx.service_stations.findFirst.mockResolvedValue({ id: 8 });
+        tx.service_stations.findMany.mockResolvedValue([station(4, 0)]);
+        const result = await coordinator.allocateBooking(tx, { ...baseInput, stationId: undefined, excludeBookingId: BOOKING_ID });
+
+        expect(result).toMatchObject({ id: 900, station_id: 8, provider_id: PROVIDER_ID });
+        expect(tx.service_stations.findMany).not.toHaveBeenCalled();
+        const where = tx.service_stations.findFirst.mock.calls[0][0].where;
+        expect(where).toMatchObject({
+          id: 8,
+          store_id: STORE_ID,
+          status: 'active',
+          capacity: 1,
+          service_station_services_station_fkey: { some: { product_id: 5 } },
+          service_station_providers_station_fkey: { some: { provider_id: PROVIDER_ID } },
+          service_allocations_station_fkey: { none: expect.objectContaining({ start_at: expect.any(Object), end_at: expect.any(Object) }) },
+        });
+        expect(tx.service_allocations.create).toHaveBeenCalledWith({ data: expect.objectContaining({ station_id: 8 }), select: { id: true } });
+      });
+
+      it('cae a la asignación automática cuando la preferida no sirve (no presta el servicio u ocupada)', async () => {
+        const { coordinator, tx } = withPreferred(8);
+        tx.service_stations.findFirst.mockResolvedValueOnce(null);
+        tx.service_stations.findMany.mockResolvedValue([station(4, 0)]);
+        const result = await coordinator.allocateBooking(tx, { ...baseInput, stationId: undefined, excludeBookingId: BOOKING_ID });
+
+        expect(result).toMatchObject({ id: 900, station_id: 4 });
+        expect(tx.service_stations.findMany).toHaveBeenCalledTimes(1);
+      });
+
+      it('sin estación preferida el comportamiento no cambia', async () => {
+        const { coordinator, tx } = withPreferred(null);
+        tx.service_stations.findMany.mockResolvedValue([station(4, 0)]);
+        const result = await coordinator.allocateBooking(tx, { ...baseInput, stationId: undefined, excludeBookingId: BOOKING_ID });
+
+        expect(result).toMatchObject({ station_id: 4 });
+        // Only the later station load uses findFirst; no preference probe.
+        expect(tx.service_stations.findFirst).toHaveBeenCalledTimes(1);
+      });
+
+      it('con estación indicada la preferida del proveedor se ignora', async () => {
+        const { coordinator, tx } = withPreferred(8);
+        const result = await coordinator.allocateBooking(tx, { ...baseInput, excludeBookingId: BOOKING_ID });
+        expect(result).toMatchObject({ station_id: STATION_ID });
+      });
+    });
+
     it('una reserva sin estación y sin ninguna elegible mantiene STATION_012', async () => {
       const { coordinator, tx } = build();
       await expect(coordinator.allocateBooking(tx, { ...baseInput, stationId: undefined })).rejects.toMatchObject({ errorCode: 'STATION_012' });

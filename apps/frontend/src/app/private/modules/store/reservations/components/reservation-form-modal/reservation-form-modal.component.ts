@@ -967,6 +967,12 @@ export class ReservationFormModalComponent {
     if (this.selectedStation() && !this.compatibleStations().some((station) => station.id === this.selectedStation()?.id)) {
       this.selectStation(null);
     }
+    // S10: the provider's preferred station is preselected (still editable) when it can serve
+    // this service; the backend falls back to auto-assignment if it is busy at booking time.
+    const preferredStationId = provider?.default_station_id as number | null | undefined;
+    if (this.requiresStation() && preferredStationId && !this.selectedStation()) {
+      this.selectStation(preferredStationId);
+    }
     // Load provider schedule for time validation
     if (provider?.id) {
       this.reservationsService.getProviderSchedule(provider.id).subscribe({

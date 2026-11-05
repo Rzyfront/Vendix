@@ -643,6 +643,143 @@ describe('AvailabilityService — horarios nocturnos (S21)', () => {
       expect(slots.every((s) => s.start_time >= '08:00' && s.start_time < '12:00')).toBe(true);
     });
 
+    it('S11: a free_booking station WITH linked providers still emits provider-less slots', async () => {
+      const { service } = buildService({
+        product: stationProduct,
+        storeHours: nightStore,
+        stations: [station],
+        stationSchedules: stationNight,
+        providers: ana,
+        stationProviders: [{ station_id: 3, provider_id: 5 }],
+        schedules: [],
+      });
+      const slots = await service.getAvailableSlots(10, FRIDAY, FRIDAY);
+      expect(slots.find((s) => s.start_time === '23:00')).toMatchObject({
+        station_id: 3,
+        total_available: 1,
+        available_providers: [],
+        is_booked: false,
+      });
+    });
+
+    it('S11: a free_booking station with providers still lists the available professionals alongside', async () => {
+      const { service } = buildService({
+        product: stationProduct,
+        storeHours: nightStore,
+        stations: [station],
+        stationSchedules: stationNight,
+        providers: ana,
+        stationProviders: [{ station_id: 3, provider_id: 5 }],
+        schedules: nightProvider,
+      });
+      const slots = await service.getAvailableSlots(10, FRIDAY, FRIDAY);
+      expect(slots.find((s) => s.start_time === '23:00')).toMatchObject({
+        station_id: 3,
+        total_available: 1,
+        available_providers: [{ id: 5, display_name: 'Ana', avatar_url: null }],
+      });
+    });
+
+    it('S11: a free_booking station with providers keeps its provider slots when a provider is chosen', async () => {
+      const { service } = buildService({
+        product: stationProduct,
+        storeHours: nightStore,
+        stations: [station],
+        stationSchedules: stationNight,
+        providers: ana,
+        stationProviders: [{ station_id: 3, provider_id: 5 }],
+        schedules: nightProvider,
+      });
+      const slots = await service.getAvailableSlots(10, FRIDAY, FRIDAY, { provider_id: 5 });
+      expect(slots.find((s) => s.start_time === '23:00')).toMatchObject({
+        station_id: 3,
+        total_available: 1,
+        available_providers: [{ id: 5, display_name: 'Ana', avatar_url: null }],
+      });
+    });
+
+    it('S11: provider_required with a station that has providers emits only provider slots (unchanged)', async () => {
+      const { service } = buildService({
+        product: { requires_station: true, booking_mode: 'provider_required' },
+        storeHours: nightStore,
+        stations: [station],
+        stationSchedules: stationNight,
+        providers: ana,
+        stationProviders: [{ station_id: 3, provider_id: 5 }],
+        schedules: nightProvider,
+      });
+      const slots = await service.getAvailableSlots(10, FRIDAY, FRIDAY);
+      const late = slots.find((s) => s.start_time === '23:00');
+      expect(late?.available_providers).toEqual([{ id: 5, display_name: 'Ana', avatar_url: null }]);
+    });
+
+    describe('S10: online booking with the provider preferred station', () => {
+      const cava4 = { id: 4, name: 'Cava 4', capacity: 1 };
+      const twoStationsNight = [
+        ...stationNight,
+        { station_id: 4, weekday: 5, start_time: '20:00', end_time: '03:00', is_active: true },
+      ];
+      const anaPrefers4 = [{ id: 5, display_name: 'Ana', avatar_url: null, default_station_id: 4 }];
+      const linked = [
+        { station_id: 3, provider_id: 5 },
+        { station_id: 4, provider_id: 5 },
+      ];
+      const build = (allocations: any[] = [], providers: any[] = anaPrefers4) =>
+        buildService({
+          product: { requires_station: true, booking_mode: 'provider_required' },
+          storeHours: nightStore,
+          stations: [station, cava4],
+          stationSchedules: twoStationsNight,
+          providers,
+          stationProviders: linked,
+          schedules: nightProvider,
+          allocations,
+        });
+      const at2300 = (slots: Array<{ start_time: string; station_id?: number }>) =>
+        slots.filter((s) => s.start_time === '23:00').map((s) => s.station_id);
+
+      it('offers only the preferred station when the provider is chosen and it is free', async () => {
+        const { service } = build();
+        const slots = await service.getAvailableSlots(10, FRIDAY, FRIDAY, { provider_id: 5, prefer_provider_station: true });
+        expect(at2300(slots)).toEqual([4]);
+      });
+
+      it('falls back to every compatible station when the preferred one is busy', async () => {
+        const busy4 = {
+          station_id: 4,
+          provider_id: null,
+          start_at: new Date('2026-11-14T04:00:00.000Z'), // 23:00 Bogota Friday
+          end_at: new Date('2026-11-14T05:00:00.000Z'),
+        };
+        const { service } = build([busy4]);
+        const slots = await service.getAvailableSlots(10, FRIDAY, FRIDAY, { provider_id: 5, prefer_provider_station: true });
+        expect(at2300(slots)).toEqual([3, 4]);
+        expect(slots.find((s) => s.start_time === '23:00' && s.station_id === 3)).toMatchObject({ is_booked: false });
+      });
+
+      it('keeps every station when the provider has no preferred station', async () => {
+        const { service } = build([], ana);
+        const slots = await service.getAvailableSlots(10, FRIDAY, FRIDAY, { provider_id: 5, prefer_provider_station: true });
+        expect(at2300(slots)).toEqual([3, 4]);
+      });
+
+      it('keeps every station without the option (admin agenda stays editable)', async () => {
+        const { service } = build();
+        const slots = await service.getAvailableSlots(10, FRIDAY, FRIDAY, { provider_id: 5 });
+        expect(at2300(slots)).toEqual([3, 4]);
+      });
+    });
+
+    it('S11: a bookable service with no provider and no station keeps offering slots', async () => {
+      const { service } = buildService({
+        product: { requires_station: false, booking_mode: 'free_booking' },
+        storeHours: [{ day_of_week: 1, start_time: '08:00', end_time: '10:00' }],
+      });
+      const slots = await service.getAvailableSlots(10, '2026-11-16', '2026-11-16');
+      expect(slots.map((s) => s.start_time)).toEqual(['08:00', '09:00']);
+      expect(slots.every((s) => s.available_providers.length === 0 && !s.station_id)).toBe(true);
+    });
+
     it('still returns [] for a station without providers when the service requires a provider', async () => {
       const { service } = buildService({
         product: { requires_station: true, booking_mode: 'provider_required' },

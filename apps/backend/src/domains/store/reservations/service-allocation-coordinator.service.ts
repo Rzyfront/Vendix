@@ -90,7 +90,10 @@ export class ServiceAllocationCoordinator {
     if (startAt <= now || endAt <= startAt) throw new VendixHttpException(ErrorCodes.STATION_009);
 
     // Sin estación elegida: se asigna una elegible; si no hay, el error de siempre.
-    const stationId = input.stationId ?? await this.pickStation(tx, { storeId: input.storeId, productId: input.productId, providerId: input.providerId, startAt, endAt });
+    // S10 (D3): the provider's preferred station goes first; if unusable, today's auto-assignment.
+    const stationId = input.stationId
+      ?? await this.preferredStation(tx, { storeId: input.storeId, productId: input.productId, providerId: input.providerId, startAt, endAt })
+      ?? await this.pickStation(tx, { storeId: input.storeId, productId: input.productId, providerId: input.providerId, startAt, endAt });
     if (!stationId) throw new VendixHttpException(ErrorCodes.STATION_012);
 
     const station = await tx.service_stations.findFirst({
@@ -286,6 +289,46 @@ export class ServiceAllocationCoordinator {
     }
     if (linked.count !== 1) throw new VendixHttpException(ErrorCodes.STATION_001);
     return { id: allocation.id, station_id: stationId, provider_id: input.providerId ?? null, start_at: startAt, end_at: endAt, end_time: endTimeOut, end_date: endDateOut, is_open_ended: isOpenEnded };
+  }
+
+  /**
+   * S10: estación preferida del proveedor (`service_providers.default_station_id`), solo si
+   * hoy sirve con los MISMOS filtros que `pickStation` (activa, de la tienda, presta el
+   * servicio, vinculada al proveedor y libre en [startAt, endAt)). `null` si no hay
+   * preferida o no sirve: el llamador cae a `pickStation`. No toca `pickStation` (walk-ins).
+   */
+  private async preferredStation(
+    tx: Prisma.TransactionClient,
+    input: { storeId: number; productId: number; providerId?: number | null; startAt: Date; endAt: Date },
+  ): Promise<number | null> {
+    if (!input.providerId) return null;
+    const provider = await tx.service_providers.findFirst({
+      where: { id: input.providerId, store_id: input.storeId },
+      // Cast: `default_station_id` joins the generated client with migration 20261115090000.
+      select: { default_station_id: true } as Prisma.service_providersSelect,
+    }) as { default_station_id?: number | null } | null;
+    const preferredId = provider?.default_station_id;
+    if (!preferredId) return null;
+    const usable = await tx.service_stations.findFirst({
+      where: {
+        id: preferredId,
+        store_id: input.storeId,
+        status: 'active',
+        capacity: 1,
+        service_station_services_station_fkey: { some: { product_id: input.productId } },
+        service_station_providers_station_fkey: { some: { provider_id: input.providerId } },
+        service_allocations_station_fkey: {
+          none: {
+            state: { in: ACTIVE_STATES },
+            start_at: { lt: input.endAt },
+            end_at: { gt: input.startAt },
+            OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }],
+          },
+        },
+      },
+      select: { id: true },
+    });
+    return usable?.id ?? null;
   }
 
   /**

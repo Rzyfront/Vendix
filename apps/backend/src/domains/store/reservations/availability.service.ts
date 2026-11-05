@@ -1,7 +1,7 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { stationChargesOnline } from '../service-stations/station-online-charge.util';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { booking_status_enum, booking_mode_enum } from '@prisma/client';
+import { Prisma, booking_status_enum, booking_mode_enum } from '@prisma/client';
 import { BusinessHoursService } from './business-hours/business-hours.service';
 import {
   resolveStoreTimezone,
@@ -64,9 +64,17 @@ export class AvailabilityService {
     product_id: number,
     date_from: string,
     date_to: string,
-    options: { provider_id?: number; product_variant_id?: number; station_id?: number; include_booked?: boolean; prisma?: StorePrismaService } = {},
+    options: {
+      provider_id?: number;
+      product_variant_id?: number;
+      station_id?: number;
+      include_booked?: boolean;
+      /** S10: online booking — with a provider chosen, offer only their preferred station where it is free. */
+      prefer_provider_station?: boolean;
+      prisma?: StorePrismaService;
+    } = {},
   ): Promise<AvailabilitySlot[]> {
-    const { provider_id, product_variant_id, station_id, include_booked } = options;
+    const { provider_id, product_variant_id, station_id, include_booked, prefer_provider_station } = options;
     const queryPrisma = options.prisma ?? this.prisma;
     // 1. Obtener producto con duracion y booking_mode
     const product = await queryPrisma.products.findFirst({
@@ -132,6 +140,7 @@ export class AvailabilityService {
         provider_id,
         station_id,
         include_booked,
+        prefer_provider_station,
       }, queryPrisma, stationWorkingDays ?? [1, 2, 3, 4, 5]);
     }
 
@@ -408,11 +417,11 @@ export class AvailabilityService {
     dateTo: string,
     duration: number,
     buffer: number,
-    options: { provider_id?: number; station_id?: number; include_booked?: boolean },
+    options: { provider_id?: number; station_id?: number; include_booked?: boolean; prefer_provider_station?: boolean },
     prisma: StorePrismaService = this.prisma,
     workingDays: number[] = [1, 2, 3, 4, 5],
   ): Promise<AvailabilitySlot[]> {
-    const { provider_id, station_id, include_booked } = options;
+    const { provider_id, station_id, include_booked, prefer_provider_station } = options;
     const stationServices = await prisma.service_station_services.findMany({
       where: { store_id: product.store_id, product_id: product.id },
       select: { station_id: true },
@@ -446,17 +455,23 @@ export class AvailabilityService {
             .filter((id) => !provider_id || id === provider_id),
         },
       },
-      select: { id: true, display_name: true, avatar_url: true },
-    });
+      // Cast: `default_station_id` joins the generated client with migration 20261115090000.
+      select: { id: true, display_name: true, avatar_url: true, default_station_id: true } as Prisma.service_providersSelect,
+    }) as Array<{ id: number; display_name: string | null; avatar_url: string | null; default_station_id?: number | null }>;
     // A13: a station without providers (e.g. a cava) has its own online slots unless
     // the service demands a provider. A provider filter always needs providers.
+    // S11: with `free_booking` a station that HAS linked providers must still offer
+    // provider-less slots (the professional is optional); its provider slots are added
+    // on top so the customer can still pick one.
+    const isFreeBooking = product.booking_mode === booking_mode_enum.free_booking;
     const stationOnlyIds = new Set<number>(
       product.booking_mode === booking_mode_enum.provider_required || provider_id
         ? []
         : stations
-            .filter((station) => !stationProviders.some((row) => row.station_id === station.id))
+            .filter((station) => isFreeBooking || !stationProviders.some((row) => row.station_id === station.id))
             .map((station) => station.id),
     );
+    const stationsWithProviders = new Set<number>(stationProviders.map((row) => row.station_id));
     if (!providers.length && stationOnlyIds.size === 0) return [];
 
     const compatibleProviders = new Map<number, typeof providers>();
@@ -614,7 +629,7 @@ export class AvailabilityService {
               emit(slot, null, stationBusy);
             }
           }
-          continue;
+          if (!(isFreeBooking && stationsWithProviders.has(station.id))) continue;
         }
 
         for (const provider of compatibleProviders.get(station.id) ?? []) {
@@ -650,9 +665,26 @@ export class AvailabilityService {
         }
       }
     }
-    return [...slotMap.values()]
+    const result = [...slotMap.values()]
       .map((slot) => ({ ...slot, is_booked: slot.total_available === 0 }))
       .sort((a, b) => a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time) || (a.station_id ?? 0) - (b.station_id ?? 0));
+    const preferredId = prefer_provider_station && provider_id
+      ? providers.find((provider) => provider.id === provider_id)?.default_station_id
+      : null;
+    return preferredId ? this.keepPreferredStation(result, preferredId) : result;
+  }
+
+  /**
+   * S10 (D3): where the provider's preferred station is free at a time, that time offers only
+   * it (the station is chosen for the customer); where it is busy or absent, every compatible
+   * station stays, as before.
+   */
+  private keepPreferredStation(slots: AvailabilitySlot[], preferredId: number): AvailabilitySlot[] {
+    const timeKey = (slot: AvailabilitySlot) => `${slot.date}|${slot.start_time}|${slot.end_time}`;
+    const preferredFree = new Set(
+      slots.filter((slot) => slot.station_id === preferredId && !slot.is_booked).map(timeKey),
+    );
+    return slots.filter((slot) => !preferredFree.has(timeKey(slot)) || slot.station_id === preferredId);
   }
 
   /**

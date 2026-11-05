@@ -687,7 +687,7 @@ export class ReservationsService {
     );
   }
 
-  updateProvider(id: number, dto: { display_name?: string; avatar_url?: string; bio?: string; is_active?: boolean; sort_order?: number }): Observable<ServiceProvider> {
+  updateProvider(id: number, dto: { display_name?: string; avatar_url?: string; bio?: string; is_active?: boolean; sort_order?: number; default_station_id?: number | null }): Observable<ServiceProvider> {
     return this.http.patch<any>(`${this.apiUrl}/providers/${id}`, dto).pipe(
       map((response) => response.data || response),
     );

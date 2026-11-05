@@ -136,6 +136,8 @@ export class EcommerceReservationsController {
         provider_id: providerId ? parseInt(providerId, 10) : undefined,
         product_variant_id: query.product_variant_id,
         station_id: query.station_id,
+        // S10: the chosen provider's preferred station is picked for the customer when free.
+        prefer_provider_station: true,
       },
     );
     return { success: true, data: slots };

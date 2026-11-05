@@ -354,6 +354,8 @@ export interface ServiceProvider {
   avatar_url?: string;
   bio?: string;
   sort_order: number;
+  /** Preferred station (S10): booking with this provider tries it first. */
+  default_station_id?: number | null;
   employee?: { id: number; first_name: string; last_name: string; position?: string } | null;
   user?: ProviderUser | null;
   services?: ProviderServiceAssignment[];
