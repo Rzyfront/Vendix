@@ -11,7 +11,7 @@ const documents = readdirSync(directory)
     parsePlaybookMarkdown(readFileSync(join(directory, file), 'utf8'), file),
   );
 
-describe('22 executable pure process verifiers, synthetic domain happy/sad', () => {
+describe('23 executable pure process verifiers, synthetic domain happy/sad', () => {
   it('binds exactly one versioned verifier to each approved process', () => {
     expect(Object.keys(PLAYBOOK_VERIFIERS).sort()).toEqual(
       documents.map((d) => `${d.id}:v1`).sort(),

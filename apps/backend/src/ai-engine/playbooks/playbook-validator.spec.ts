@@ -37,6 +37,7 @@ const names = [
   'reporte-ventas-margen',
   'ajustar-inventario-conteo',
   'conciliar-banco',
+  'disenar-flujo',
 ].sort();
 const release = (): PlaybookDocument[] =>
   readdirSync(content)
@@ -113,11 +114,11 @@ const endpoints: CatalogEntry[] = [
 const catalog = () => ({ tools: realRegistry().getAll(), endpoints });
 
 describe('release playbook contract against real factories (no business execution)', () => {
-  it('publishes exactly the approved 22 processes, IDs, versions, happy/sad and pure verifiers', () => {
+  it('publishes exactly the approved 23 processes, IDs, versions, happy/sad and pure verifiers', () => {
     const docs = release();
     expect(docs.map((d) => d.id).sort()).toEqual(names);
     const result = validatePlaybookCatalog(docs, catalog());
-    expect(result.playbooks).toHaveLength(22);
+    expect(result.playbooks).toHaveLength(23);
     expect(
       result.playbooks.find((d) => d.id === 'crear-producto-inventario')
         ?.contract.mode,

@@ -559,6 +559,23 @@ export class WorkflowDefinitionsService {
     organizationId: number,
     definition: unknown,
   ): Promise<WorkflowValidationResult> {
+    return validateWorkflowDefinition(
+      definition,
+      await this.buildValidationContext(db, storeId, organizationId),
+    );
+  }
+
+  /** Role and group keys the validator accepts for this store (also read by the AI tools). */
+  async validationContext(): Promise<WorkflowValidationContext> {
+    const { store_id, organization_id } = this.ctx();
+    return this.buildValidationContext(this.prisma, store_id, organization_id);
+  }
+
+  private async buildValidationContext(
+    db: WorkflowTx,
+    storeId: number,
+    organizationId: number,
+  ): Promise<WorkflowValidationContext> {
     const [roles, groups, members, storeUsers] = await Promise.all([
       db.roles.findMany({
         where: {
@@ -586,12 +603,11 @@ export class WorkflowDefinitionsService {
       }),
     ]);
     const withMembers = new Set<number>(members.map((m: any) => m.work_group_id));
-    const ctx: WorkflowValidationContext = {
+    return {
       roleKeys: [...new Set<string>(roles.map((r: any) => r.name))],
       groupKeys: groups.filter((g: any) => withMembers.has(g.id)).map((g: any) => g.key),
       userIds: storeUsers.map((u: any) => u.user_id),
       publishedTemplateKeys: [],
     };
-    return validateWorkflowDefinition(definition, ctx);
   }
 }

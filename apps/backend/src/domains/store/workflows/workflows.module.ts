@@ -1,4 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import { createWorkflowsTools } from '../../../ai-engine/tools/domains/workflows.tools';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { resolveStoreTimezone } from '../../../common/utils/store-timezone.util';
+import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { DocumentsModule } from '../documents/documents.module';
@@ -34,6 +40,7 @@ import { WorkflowInboxController } from './inbox/workflow-inbox.controller';
 import { WorkflowInboxService } from './inbox/workflow-inbox.service';
 import { WorkflowCommentsService } from './instances/workflow-comments.service';
 import { WorkflowPublicLinksService } from './public-link/workflow-public-links.service';
+import { WorkflowMetricsService } from './metrics/workflow-metrics.service';
 import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
 
 /**
@@ -45,7 +52,13 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
  * `upload` y `file_field` reales; `issued_document` / `signature` llegan en tareas documentales posteriores.
  */
 @Module({
-  imports: [PrismaModule, NotificationsModule, EmailModule, ResponseModule, DocumentsModule],
+  imports: [
+    PrismaModule,
+    NotificationsModule,
+    EmailModule,
+    ResponseModule,
+    DocumentsModule,
+  ],
   controllers: [
     WorkflowDefinitionsController,
     WorkflowInstancesController,
@@ -60,6 +73,7 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
     WorkflowDefinitionsService,
     WorkflowSimulatorService,
     WorkflowInstancesService,
+    WorkflowMetricsService,
     WorkflowFilesService,
     WorkflowCommentsService,
     WorkflowInboxService,
@@ -83,6 +97,55 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
       useClass: DossierWorkflowRequirementsService,
     },
   ],
-  exports: [WorkflowEngineService, WorkGroupsService, WorkflowRequirementsService],
+  exports: [
+    WorkflowEngineService,
+    WorkGroupsService,
+    WorkflowRequirementsService,
+    WorkflowMetricsService,
+  ],
 })
-export class WorkflowsModule {}
+export class WorkflowsModule implements OnModuleInit {
+  constructor(
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly definitions: WorkflowDefinitionsService,
+    private readonly instances: WorkflowInstancesService,
+    private readonly metrics: WorkflowMetricsService,
+    private readonly prisma: StorePrismaService,
+    private readonly globalPrisma: GlobalPrismaService,
+  ) {}
+
+  /**
+   * Block 11 — AI tools (propose → confirm → execute; they never publish).
+   * Decentralized registration in the owning module, like the other domains.
+   */
+  onModuleInit(): void {
+    this.toolRegistry.registerMany(
+      createWorkflowsTools({
+        definitions: this.definitions,
+        instances: this.instances,
+        metrics: this.metrics,
+        findInstanceIdByReference: async (reference) => {
+          const store_id = RequestContextService.getContext()?.store_id;
+          if (!store_id) return null;
+          const row = await this.prisma.workflow_instances.findFirst({
+            where: {
+              store_id,
+              reference: { equals: reference, mode: 'insensitive' },
+            },
+            select: { id: true },
+          });
+          return row?.id ?? null;
+        },
+        storeTimezone: (store_id) =>
+          resolveStoreTimezone(this.prisma, store_id),
+        storeIndustries: async (store_id) => {
+          const store = await this.globalPrisma.stores.findUnique({
+            where: { id: store_id },
+            select: { industries: true },
+          });
+          return store?.industries ?? null;
+        },
+      }),
+    );
+  }
+}
