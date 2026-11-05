@@ -3893,10 +3893,13 @@ export class ProductsService {
       allow_pos_price_override: product.allow_pos_price_override,
       // Service-specific fields
       service_duration_minutes: product.service_duration_minutes,
+      service_duration_unit: product.service_duration_unit,
       service_modality: product.service_modality,
       service_pricing_type: product.service_pricing_type,
       requires_booking: product.requires_booking,
       requires_station: product.requires_station,
+      // The edit form patches it: leaving it out reset a station rental to "none" on save.
+      rental_pricing_mode: product.rental_pricing_mode,
       is_recurring: product.is_recurring,
       recurrence_interval_days: product.recurrence_interval_days,
       service_instructions: product.service_instructions,

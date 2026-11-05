@@ -1272,6 +1272,38 @@ describe('ProductsService', () => {
 
       await expect(service.findOne(999)).rejects.toThrow(VendixHttpException);
     });
+
+    // The edit form patches both fields from this read: a missing one shows "No es un
+    // alquiler" / minutes, and saving the form would silently overwrite the stored value.
+    it('returns the rental pricing mode and the duration unit of a station service', async () => {
+      mockPrismaService.products.findFirst.mockResolvedValue({
+        id: 7,
+        store_id: 1,
+        name: 'Alquiler Sala',
+        base_price: 0,
+        state: ProductState.ACTIVE,
+        product_type: 'service',
+        requires_station: true,
+        service_duration_minutes: 120,
+        service_duration_unit: 'hour',
+        rental_pricing_mode: 'station_rate',
+        stock_levels: [],
+        product_variants: [],
+        product_images: [],
+        product_categories: [],
+        _count: { product_variants: 0, product_images: 0, reviews: 0 },
+      });
+
+      const result = await service.findOne(7);
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          service_duration_minutes: 120,
+          service_duration_unit: 'hour',
+          rental_pricing_mode: 'station_rate',
+        }),
+      );
+    });
   });
 
   describe('update', () => {
