@@ -677,19 +677,34 @@ export class ServiceStationsPageComponent implements OnInit {
     this.checkinProviderAvailability().filter((entry) => entry.status !== 'available' && entry.status !== 'inactive'),
   );
 
+  /** Station staff still loading: the check-in waits so a staffed station is never opened without its specialist. */
+  readonly checkinProvidersLoading = signal(false);
+  /**
+   * A specialist is mandatory only where the station has active staff assigned. Rooms and
+   * cavas usually have none, and the API opens those sessions without a provider.
+   */
+  readonly checkinNeedsProvider = computed(() => this.checkinProviderAvailability().some((entry) => entry.status !== 'inactive'));
+
   private loadCheckinProviderAvailability(): void {
     const stationId = Number(this.checkinStationId() || 0);
     this.checkinProviderAvailability.set([]);
+    this.checkinProvidersLoading.set(false);
     if (!stationId) return;
+    this.checkinProvidersLoading.set(true);
     const plannedEnd = new Date(Date.now() + (Number(this.checkinDurationMinutes()) || 45) * 60000).toISOString();
     this.stationsApi.getProviderAvailability(stationId, plannedEnd).subscribe({
       next: (list) => {
         if (Number(this.checkinStationId()) !== stationId) return;
+        this.checkinProvidersLoading.set(false);
         this.checkinProviderAvailability.set(list);
         const chosen = Number(this.checkinProviderId() || 0);
         if (chosen && !list.some((p) => p.provider_id === chosen && p.status === 'available')) this.checkinProviderId.set(null);
       },
-      error: () => this.checkinProviderAvailability.set([]),
+      error: () => {
+        if (Number(this.checkinStationId()) !== stationId) return;
+        this.checkinProvidersLoading.set(false);
+        this.checkinProviderAvailability.set([]);
+      },
     });
   }
 
@@ -1889,7 +1904,11 @@ export class ServiceStationsPageComponent implements OnInit {
       this.toastService.error('Selecciona el servicio de la atención.');
       return;
     }
-    if (!this.checkinProviderId()) {
+    if (this.checkinProvidersLoading()) {
+      this.toastService.error('Espera a que cargue el personal de la estación.');
+      return;
+    }
+    if (this.checkinNeedsProvider() && !this.checkinProviderId()) {
       this.checkinProviderError.set(true);
       this.toastService.error('Seleccione una persona de servicio.');
       return;

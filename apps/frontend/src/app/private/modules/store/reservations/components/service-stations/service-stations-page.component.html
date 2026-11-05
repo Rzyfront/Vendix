@@ -961,6 +961,11 @@
         </div>
       }
 
+      @if (!checkinNeedsProvider() && !checkinProvidersLoading()) {
+        <p class="text-xs text-[var(--color-text-secondary)]">
+          Esta estación no tiene personal asignado: la atención se abre sin especialista.
+        </p>
+      } @else {
       <div>
         <app-selector
           label="Técnico / Especialista Asignado"
@@ -985,6 +990,7 @@
           </div>
         }
       </div>
+      }
 
       @if (checkinShowNotes()) {
       <app-textarea

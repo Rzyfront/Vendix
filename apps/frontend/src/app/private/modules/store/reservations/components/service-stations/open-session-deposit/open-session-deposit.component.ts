@@ -27,10 +27,17 @@ export function openDepositError(
   customerId: number | null | undefined,
   deposit: OpenSessionDepositValue | null,
 ): string | null {
-  if (!station || station.deposit_policy !== 'required') return null;
-  if (!customerId) return 'Esta estación exige anticipo: identifica al cliente antes de abrir la atención.';
-  const required = Number(station.deposit_amount ?? 0);
-  if (!deposit || deposit.amount < required) return 'Esta estación exige un anticipo mínimo: registra el monto y el medio de pago.';
+  if (!station || !station.deposit_policy || station.deposit_policy === 'none') return null;
+  if (station.deposit_policy === 'required') {
+    if (!customerId) return 'Esta estación exige anticipo: identifica al cliente antes de abrir la atención.';
+    const required = Number(station.deposit_amount ?? 0);
+    if (!deposit || deposit.amount < required) return 'Esta estación exige un anticipo mínimo: registra el monto y el medio de pago.';
+    return null;
+  }
+  // Optional deposit: the amount comes prefilled, and the API only takes it from a known customer (SERVICE_DEPOSIT_002).
+  if (deposit && deposit.amount > 0 && !customerId) {
+    return 'Identifica al cliente para recibir el anticipo, o vacía el monto para abrir sin anticipo.';
+  }
   return null;
 }
 

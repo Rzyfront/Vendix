@@ -85,6 +85,8 @@ interface SessionOrder {
 }
 
 type SessionDetail = ServiceSessionRow & {
+  /** `GET /service-sessions/:id` returns the subjects as a list; the overview row carries `subject`. */
+  subjects?: ServiceSessionRow['subject'][] | null;
   next_reservation?: NextReservation | null;
   station_type?: string | null;
   /** Consumable deposit of the session; null when the station has none. */
@@ -629,20 +631,25 @@ export class ServiceSessionPageComponent {
 
   // ---------- Customer helpers (same metadata contract as the overview) ----------
 
+  private readonly subjectRow = computed(() => {
+    const current = this.session();
+    return current?.subject ?? current?.subjects?.[0] ?? null;
+  });
+
   customerName(): string {
-    const subject = this.session()?.subject;
+    const subject = this.subjectRow();
     const meta = subject?.metadata as Record<string, unknown> | undefined;
     if (meta && meta['customer_name']) return String(meta['customer_name']);
     return subject?.label || 'Cliente General';
   }
 
   customerPhone(): string | null {
-    const meta = this.session()?.subject?.metadata as Record<string, unknown> | undefined;
+    const meta = this.subjectRow()?.metadata as Record<string, unknown> | undefined;
     return meta && meta['customer_phone'] ? String(meta['customer_phone']) : null;
   }
 
   customerDoc(): string | null {
-    const meta = this.session()?.subject?.metadata as Record<string, unknown> | undefined;
+    const meta = this.subjectRow()?.metadata as Record<string, unknown> | undefined;
     return meta && meta['customer_document'] ? String(meta['customer_document']) : null;
   }
 
