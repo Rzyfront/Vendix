@@ -239,6 +239,32 @@
         </div>
       }
 
+      <!-- Prepay link ("cobro para reservar") -->
+      @if (canRequestPrepay()) {
+        <div class="deposit-block">
+          <div class="deposit-head">
+            <span class="info-label">
+              <app-icon name="credit-card" [size]="13"></app-icon>
+              Cobro para reservar
+            </span>
+          </div>
+          @if (prepayLinkUrl(); as link) {
+            @if (prepayAmount() != null) {
+              <p class="deposit-hint">{{ prepayAmount() | currency }} por pagar con este enlace.</p>
+            }
+            <div class="deposit-link-row">
+              <input class="deposit-link-input" readonly [value]="link" (focus)="$any($event.target).select()" aria-label="Enlace de pago para reservar" />
+              <button class="btn-ghost-sm" (click)="copyPrepayLink()"><app-icon name="copy" [size]="14"></app-icon> Copiar</button>
+              <button class="btn-ghost-sm" (click)="sharePrepayLink()"><app-icon name="share-2" [size]="14"></app-icon> Compartir</button>
+            </div>
+          }
+          <button class="btn-ghost-sm" [disabled]="prepayBusy()" (click)="generatePrepayLink()">
+            <app-icon name="link" [size]="14"></app-icon>
+            {{ prepayLinkUrl() ? 'Generar nuevo enlace' : 'Cobrar para reservar' }}
+          </button>
+        </div>
+      }
+
       <!-- Notes section -->
       <div class="notes-section">
         @if (editing()) {

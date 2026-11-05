@@ -4,7 +4,7 @@ import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { interval } from 'rxjs';
+import { interval, switchMap } from 'rxjs';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -39,7 +39,13 @@ import {
 } from '../../../../settings/payments/interfaces/payment-methods.interface';
 import { ServiceRegistryService } from '../../service-reminders-page/service-registry.service';
 import type { ServiceSessionRow } from '../service-stations-page.component';
-import { ServiceStation, ServiceStationsService, SessionDeposit, StationServiceOption } from '../service-stations.service';
+import {
+  ServiceStation,
+  ServiceStationsService,
+  SessionAccountPart,
+  SessionDeposit,
+  StationServiceOption,
+} from '../service-stations.service';
 import { DepositPanelComponent } from './components/deposit-panel/deposit-panel.component';
 import {
   addMinutesIso,
@@ -81,6 +87,19 @@ type SessionDetail = ServiceSessionRow & {
   station_type?: string | null;
   /** Consumable deposit of the session; null when the station has none. */
   deposit?: SessionDeposit | null;
+  /** S11: rental order of an `at_start` session; null when the rental lives in the single account. */
+  rental?: SessionAccountPart | null;
+  /** S11: consumption order (the session account). */
+  consumption?: SessionAccountPart | null;
+  /** S11: what is still to collect across the rental and the consumption orders. */
+  to_collect?: number;
+  order_id?: number | null;
+  settled_at?: string | null;
+  /** Copy of the station rental rate taken when the session opened (S10); null billing mode = legacy session. */
+  rental_billing_mode?: string | null;
+  rental_block_minutes?: number | null;
+  rental_block_price?: number | string | null;
+  rate_windows_snapshot?: unknown;
 };
 
 interface BudgetCeiling {
@@ -221,6 +240,9 @@ export class ServiceSessionPageComponent {
   readonly payMethods = signal<StorePaymentMethod[]>([]);
   readonly paying = signal(false);
   readonly preparingCharge = signal(false);
+  /** S11: set while the pay modal collects the rental order instead of the consumption order. */
+  readonly rentalPayOrder = signal<SessionOrder | null>(null);
+  readonly preparingRental = signal(false);
   readonly payError = signal<unknown>(null);
 
   readonly station = computed<ServiceStation | null>(() => {
@@ -296,6 +318,18 @@ export class ServiceSessionPageComponent {
     return !!order && this.balanceCents() > 0 && this.balanceCents() < toCents(order.grand_total);
   });
 
+  /** Order the pay modal collects: the rental order while collecting the rental, else the session account. */
+  private readonly payTarget = computed(() => this.rentalPayOrder() ?? this.order());
+  readonly payBalance = computed(() => {
+    const target = this.payTarget();
+    return target ? toCents(target.remaining_balance ?? target.grand_total) / 100 : 0;
+  });
+  readonly payHasPartial = computed(() => {
+    const target = this.payTarget();
+    const balanceCents = Math.round(this.payBalance() * 100);
+    return !!target && balanceCents > 0 && balanceCents < toCents(target.grand_total);
+  });
+
   readonly canCloseWithBalance = computed(() => {
     const permissions = this.authFacade.userPermissions();
     const roles = this.authFacade.userRoles();
@@ -357,6 +391,84 @@ export class ServiceSessionPageComponent {
     { minutes: 30, label: '+30 min' },
     { minutes: 60, label: '+1 h' },
   ];
+
+  // ---------- Rental + consumption split (S11) ----------
+
+  readonly rental = computed(() => this.session()?.rental ?? null);
+  readonly rentalPaid = computed(() => {
+    const part = this.rental();
+    return !!part && part.remaining <= 0;
+  });
+  /** Total still to collect: both orders when the session has a rental order, else the account balance. */
+  readonly accountDue = computed(() => {
+    const current = this.session();
+    return current?.rental && current.to_collect != null ? Number(current.to_collect) || 0 : this.balance();
+  });
+  readonly canCollectRental = computed(() => {
+    const part = this.rental();
+    return !!part && part.remaining > 0 && !this.isClosed();
+  });
+
+  // ---------- Extension price preview (S10) ----------
+
+  /**
+   * How the backend will bill an extension, derived from the session rental snapshot:
+   * `priced` only for `planned` billing with a time rate and no rate windows (windows change
+   * the price per block and are not replicated here, so no price is shown for them).
+   */
+  private readonly extendBilling = computed<
+    | { kind: 'priced'; blockMinutes: number; blockPrice: number }
+    | { kind: 'free' }
+    | { kind: 'elapsed' }
+    | { kind: 'unknown' }
+  >(() => {
+    const current = this.session();
+    if (!current) return { kind: 'unknown' };
+    const blockMinutes = Number(current.rental_block_minutes) || 0;
+    const blockPrice = Number(current.rental_block_price) || 0;
+    const hasRate = blockMinutes > 0 && blockPrice > 0;
+    if (!current.rental_billing_mode || !hasRate) return { kind: 'free' };
+    if (current.rental_billing_mode !== 'planned') return { kind: 'elapsed' };
+    if (!current.order_id) return { kind: 'free' };
+    const windows = Array.isArray(current.rate_windows_snapshot) ? current.rate_windows_snapshot : [];
+    return windows.length ? { kind: 'unknown' } : { kind: 'priced', blockMinutes, blockPrice };
+  });
+
+  /** Price the backend adds for `minutes` more; null when it cannot be derived reliably. */
+  private extensionPrice(minutes: number): number | null {
+    const billing = this.extendBilling();
+    if (billing.kind !== 'priced' || !(minutes > 0)) return null;
+    const blocks = Math.max(1, Math.ceil(minutes / billing.blockMinutes));
+    return (Math.round(billing.blockPrice * 100) * blocks) / 100;
+  }
+
+  readonly extendQuickQuotes = computed(() =>
+    this.extendQuickOptions.map((option) => {
+      const price = this.extensionPrice(option.minutes);
+      return { ...option, price: price == null ? null : this.currencyService.format(price) };
+    }),
+  );
+
+  /** Price of the custom end time, for the "Extender hasta esa hora" button. */
+  readonly customExtendQuote = computed<string | null>(() => {
+    const current = this.session();
+    const iso = storeWallTimeToIso(this.customEnd(), this.timezone() || 'America/Bogota');
+    if (!current?.planned_end_at || !iso) return null;
+    const minutes = (Date.parse(iso) - Date.parse(current.planned_end_at)) / 60_000;
+    const price = this.extensionPrice(minutes);
+    return price == null ? null : this.currencyService.format(price);
+  });
+
+  readonly extendNote = computed<string | null>(() => {
+    switch (this.extendBilling().kind) {
+      case 'free':
+        return 'Sin cobro adicional.';
+      case 'elapsed':
+        return 'El tiempo se cobra al cerrar, según lo transcurrido.';
+      default:
+        return null;
+    }
+  });
 
   readonly intakeAnswers = computed(() => this.session()?.intake?.answers ?? []);
 
@@ -814,6 +926,7 @@ export class ServiceSessionPageComponent {
   openCharge(): void {
     const current = this.session();
     if (!current || this.preparingCharge()) return;
+    this.rentalPayOrder.set(null);
     this.preparingCharge.set(true);
     this.api
       .prepareCharge(current.id)
@@ -845,6 +958,41 @@ export class ServiceSessionPageComponent {
       });
   }
 
+  /** S11: collects the rental order of an `at_start` session through the same pay modal. */
+  openRentalCharge(): void {
+    const current = this.session();
+    if (!current || this.preparingRental()) return;
+    this.preparingRental.set(true);
+    this.api
+      .prepareRentalCharge(current.id)
+      .pipe(
+        switchMap((prepared) => this.ordersApi.getOrderById(String(prepared.order_id))),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (rentalOrder) => {
+          this.preparingRental.set(false);
+          const asSessionOrder = rentalOrder as unknown as SessionOrder;
+          this.rentalPayOrder.set({
+            ...asSessionOrder,
+            remaining_balance: asSessionOrder.remaining_balance ?? this.rental()?.remaining ?? asSessionOrder.grand_total,
+          });
+          this.payError.set(null);
+          this.loadPayMethods();
+          this.showPayModal.set(true);
+        },
+        error: (error: unknown) => {
+          this.preparingRental.set(false);
+          this.toast.error(this.errorText(error, 'No fue posible preparar el cobro del alquiler.'));
+        },
+      });
+  }
+
+  closePayModal(): void {
+    this.showPayModal.set(false);
+    this.rentalPayOrder.set(null);
+  }
+
   private loadPayMethods(): void {
     if (this.payMethods().length) return;
     this.paymentMethodsApi
@@ -857,10 +1005,10 @@ export class ServiceSessionPageComponent {
   }
 
   /** The order modal reads totals, number and payments; the session order carries them. */
-  readonly payOrder = computed(() => this.order() as unknown as Order | null);
+  readonly payOrder = computed(() => this.payTarget() as unknown as Order | null);
 
   onPaymentSubmitted(submit: PaymentSubmit): void {
-    const order = this.order();
+    const order = this.payTarget();
     if (!order) return;
     if (submit.storePaymentMethodId == null) {
       this.toast.error('Selecciona un método de pago válido');
@@ -885,8 +1033,8 @@ export class ServiceSessionPageComponent {
       }));
     }
     // A partly paid account is charged by the typed amount, not by the full total.
-    if (this.hasPartialPayment()) dto.amount = submit.amount;
-    if (isTipPolicyActive(this.storeSettings.tipPolicy()) && submit.tip != null && submit.tip > 0) {
+    if (this.payHasPartial()) dto.amount = submit.amount;
+    if (!this.rentalPayOrder() && isTipPolicyActive(this.storeSettings.tipPolicy()) && submit.tip != null && submit.tip > 0) {
       dto.tip_amount = submit.tip;
       if (submit.tipType != null) dto.tip_type = submit.tipType;
       if (submit.tipValue != null) dto.tip_value = submit.tipValue;
@@ -900,7 +1048,7 @@ export class ServiceSessionPageComponent {
       .subscribe({
         next: (res) => {
           this.paying.set(false);
-          this.showPayModal.set(false);
+          this.closePayModal();
           const change = res.payment?.change ? ` — Cambio: ${this.currencyService.format(res.payment.change)}` : '';
           this.toast.success(`Pago registrado exitosamente${change}`);
           this.refreshSession();

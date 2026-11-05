@@ -106,16 +106,56 @@ export interface SessionDeposit {
   settled_at: string | null;
 }
 
-/** GET /store/service-sessions/:id/settlement. */
-export interface SessionSettlementPreview {
+export type LeftoverAction = 'refund' | 'credit';
+
+/** GET /store/service-sessions/:id/settlement while the session is not settled yet. */
+export interface SessionSettlementOpen {
+  already_settled: false;
+  session_id: number;
+  order_id: number;
+  settled_at: null;
+  currency: string;
+  leftover_policy: StationLeftoverPolicy;
   consumption: number | string;
-  reservation_fee?: number | string | null;
-  deposit_applied: number | string;
+  deposit_received: number | string;
+  deposit_balance: number | string;
+  /** "Gastos de reserva" charged to complete the minimum spend. */
+  fee: number | string;
+  invoice_total: number | string;
+  paid: number | string;
+  /** Deposit applied to the account. */
+  apply: number | string;
+  to_collect: number | string;
   leftover: number | string;
-  amount_due: number | string;
+  /** What the cashier may do with the leftover; empty when it is not refundable. */
+  leftover_actions: LeftoverAction[];
 }
 
-export type LeftoverAction = 'refund' | 'credit';
+/** Same endpoint once the session was settled (read-only snapshot). */
+export interface SessionSettlementDone {
+  already_settled: true;
+  session_id: number;
+  order_id: number;
+  settled_at: string;
+  invoice_total: number | string;
+  paid: number | string;
+  remaining_to_collect: number | string;
+  deposit: SessionDeposit | null;
+}
+
+export type SessionSettlementPreview = SessionSettlementOpen | SessionSettlementDone;
+
+/** POST /store/service-sessions/:id/settle (the settled snapshot on a replay). */
+export type SettleSessionResult =
+  | {
+      settled_at: string;
+      invoice_total: number | string;
+      fee: number | string;
+      applied: number | string;
+      leftover: { amount: number | string; action: LeftoverAction | null };
+      remaining_to_collect: number | string;
+    }
+  | SessionSettlementDone;
 
 /** POST /store/service-sessions/:id/settle. */
 export interface SettleSessionInput {
@@ -123,6 +163,14 @@ export interface SettleSessionInput {
   refund_method?: string;
   store_payment_method_id?: number;
   request_id: string;
+}
+
+/** Rental or consumption order of a session, as returned by GET /store/service-sessions/:id (S11). */
+export interface SessionAccountPart {
+  order_id: number;
+  total: number;
+  paid: number;
+  remaining: number;
 }
 
 export interface ServiceStation {
@@ -407,6 +455,13 @@ export class ServiceStationsService {
       .pipe(map((r) => this.unwrap(r)));
   }
 
+  /** S11: opens (or finds) the rental order of an `at_start` session so it can be collected. */
+  prepareRentalCharge(sessionId: number): Observable<{ order_id: number }> {
+    return this.http
+      .post<{ data?: { order_id: number } } | { order_id: number }>(`${environment.apiUrl}/store/service-sessions/${sessionId}/rental/prepare-charge`, {})
+      .pipe(map((r) => this.unwrap(r)));
+  }
+
   /** Personal asignado a la estación con su disponibilidad para atender ahora. */
   getProviderAvailability(stationId: number, plannedEndAt: string): Observable<ProviderAvailability[]> {
     const params = new HttpParams().set('station_id', String(stationId)).set('planned_end_at', plannedEndAt);
@@ -540,9 +595,9 @@ export class ServiceStationsService {
       .pipe(map((r) => this.unwrap(r)));
   }
 
-  settleDeposit(sessionId: number, body: SettleSessionInput): Observable<unknown> {
+  settleDeposit(sessionId: number, body: SettleSessionInput): Observable<SettleSessionResult> {
     return this.http
-      .post<{ data?: unknown } | unknown>(`${environment.apiUrl}/store/service-sessions/${sessionId}/settle`, body)
+      .post<{ data?: SettleSessionResult } | SettleSessionResult>(`${environment.apiUrl}/store/service-sessions/${sessionId}/settle`, body)
       .pipe(map((r) => this.unwrap(r)));
   }
 }

@@ -318,6 +318,13 @@ export class ReservationsService {
       .pipe(map((response) => response.data || response));
   }
 
+  /** Payment link of the station's "cobro para reservar" (full or partial rental charge); errors are RENTAL_PREPAY_001..005. */
+  openPrepayLink(id: number): Observable<{ payment_path: string; payment_url: string | null; payment_request_id: number; amount: number; expires_at: string | null }> {
+    return this.http
+      .post<any>(`${this.apiUrl}/${id}/prepay-link`, {})
+      .pipe(map((response) => response.data || response));
+  }
+
   /** What happens with the deposit of a booking that did not show up (S17). */
   decideDeposit(id: number, body: DepositDecisionInput): Observable<{ action: DepositDecisionAction }> {
     return this.http

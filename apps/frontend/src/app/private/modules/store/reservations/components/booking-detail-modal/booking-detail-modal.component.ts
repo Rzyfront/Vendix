@@ -224,6 +224,22 @@ export class BookingDetailModalComponent {
   depositLinkUrl = signal<string | null>(null);
   depositLinkBusy = signal(false);
 
+  // "Cobrar para reservar" (S15): payment link of the station's prepay.
+  prepayLinkUrl = signal<string | null>(null);
+  prepayAmount = signal<number | null>(null);
+  prepayBusy = signal(false);
+
+  /**
+   * A station booking that can still be prepaid: pending or confirmed, with no deposit link waiting
+   * for payment. Whether the station charges a prepay, or it is already paid, is answered by the backend.
+   */
+  canRequestPrepay = computed(() => {
+    const b = this.booking();
+    if (!b || !(b.station_id || b.product?.requires_station)) return false;
+    if (b.status !== 'pending' && b.status !== 'confirmed') return false;
+    return !this.pendingDepositRequest();
+  });
+
   /** Money is on the booking: cancelling it or a no-show needs an explicit decision. */
   hasDepositBalance = computed(() => (this.deposit()?.balance ?? 0) > 0);
 
@@ -606,6 +622,8 @@ export class BookingDetailModalComponent {
 
   private loadDeposit(b: Booking): void {
     this.depositLinkUrl.set(null);
+    this.prepayLinkUrl.set(null);
+    this.prepayAmount.set(null);
     this.deposit.set(b.deposit ?? null);
     if (!b.product?.requires_station && !b.station_id) return;
     this.reservationsService
@@ -669,6 +687,43 @@ export class BookingDetailModalComponent {
       navigator.share({ title: 'Pago del anticipo', url }).catch(() => undefined);
     } else {
       this.copyDepositLink();
+    }
+  }
+
+  generatePrepayLink(): void {
+    const b = this.booking();
+    if (!b || this.prepayBusy()) return;
+    this.prepayBusy.set(true);
+    this.reservationsService
+      .openPrepayLink(b.id)
+      .pipe(finalize(() => this.prepayBusy.set(false)), takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.prepayLinkUrl.set(bookingPaymentUrl(result));
+          this.prepayAmount.set(result.amount ?? null);
+          this.toastService.success('Enlace de pago generado');
+        },
+        // RENTAL_PREPAY_001..005 carry their own Spanish message.
+        error: (err) => this.toastService.error(extractApiErrorMessage(err) || 'No fue posible generar el enlace de pago.'),
+      });
+  }
+
+  copyPrepayLink(): void {
+    const url = this.prepayLinkUrl();
+    if (!url) return;
+    navigator.clipboard
+      .writeText(url)
+      .then(() => this.toastService.success('Enlace copiado'))
+      .catch(() => this.toastService.error('No se pudo copiar el enlace'));
+  }
+
+  sharePrepayLink(): void {
+    const url = this.prepayLinkUrl();
+    if (!url) return;
+    if (navigator.share) {
+      navigator.share({ title: 'Pago para reservar', url }).catch(() => undefined);
+    } else {
+      this.copyPrepayLink();
     }
   }
 

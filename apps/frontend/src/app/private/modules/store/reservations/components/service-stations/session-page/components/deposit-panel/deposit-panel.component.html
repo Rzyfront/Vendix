@@ -87,6 +87,10 @@
     </div>
   } @else if (previewError(); as errorMessage) {
     <p class="p-3 rounded-xl text-sm text-[var(--color-error)] bg-[var(--color-background)] border border-[var(--color-border)]" role="alert">{{ errorMessage }}</p>
+  } @else if (previewSettled()) {
+    <p class="p-3 rounded-xl text-sm text-[var(--color-text-primary)] bg-[var(--color-background)] border border-[var(--color-border)]" role="status">
+      El anticipo ya fue liquidado. Por cobrar: <strong class="font-mono">{{ previewDue() | currency }}</strong>.
+    </p>
   } @else if (preview()) {
     <div class="space-y-3">
       <dl class="rounded-xl border border-[var(--color-border)] divide-y divide-[var(--color-border)]/60 text-sm">
@@ -118,7 +122,7 @@
         <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
           <app-selector
             label="Qué hacer con el sobrante"
-            [options]="leftoverOptions"
+            [options]="leftoverOptions()"
             [ngModel]="leftoverAction()"
             (ngModelChange)="leftoverAction.set($event === 'refund' ? 'refund' : 'credit')"
           />
@@ -145,6 +149,6 @@
   }
   <div slot="footer" class="flex items-center justify-end gap-2.5">
     <app-button variant="secondary" (clicked)="showSettle.set(false)">Cancelar</app-button>
-    <app-button variant="primary" [disabled]="!preview()" [loading]="settling()" (clicked)="submitSettle()">Liquidar</app-button>
+    <app-button variant="primary" [disabled]="previewSettled() || !preview()" [loading]="settling()" (clicked)="submitSettle()">Liquidar</app-button>
   </div>
 </app-modal>

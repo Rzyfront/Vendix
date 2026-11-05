@@ -20,6 +20,7 @@ import {
   LeftoverAction,
   ServiceStationsService,
   SessionDeposit,
+  SessionSettlementOpen,
   SessionSettlementPreview,
   StationDepositExhaustedPolicy,
   StationLeftoverPolicy,
@@ -132,20 +133,34 @@ export class DepositPanelComponent {
   readonly settling = signal(false);
   private settleRequestId = newDepositRequestId();
 
-  readonly leftoverOptions: SelectorOption[] = [
-    { value: 'credit', label: 'Dejar como saldo a favor' },
-    { value: 'refund', label: 'Devolver' },
-  ];
+  private static readonly LEFTOVER_OPTIONS: Record<LeftoverAction, SelectorOption> = {
+    credit: { value: 'credit', label: 'Dejar como saldo a favor' },
+    refund: { value: 'refund', label: 'Devolver' },
+  };
 
-  readonly previewLeftover = computed(() => Number(this.preview()?.leftover) || 0);
-  readonly previewDue = computed(() => Number(this.preview()?.amount_due) || 0);
-  readonly previewConsumption = computed(() => Number(this.preview()?.consumption) || 0);
-  readonly previewApplied = computed(() => Number(this.preview()?.deposit_applied) || 0);
-  readonly previewFee = computed(() => Number(this.preview()?.reservation_fee) || 0);
-  /** Under "refund or credit" the cashier decides what happens with the leftover. */
-  readonly choosesLeftover = computed(
-    () => this.deposit().leftover_policy === 'refund_or_credit' && this.previewLeftover() > 0,
+  /** The preview while the session is not settled; null for a settled snapshot. */
+  private readonly openPreview = computed<SessionSettlementOpen | null>(() => {
+    const value = this.preview();
+    return value && !value.already_settled ? value : null;
+  });
+  readonly previewSettled = computed(() => !!this.preview()?.already_settled);
+  readonly previewLeftover = computed(() => Number(this.openPreview()?.leftover) || 0);
+  readonly previewDue = computed(() => {
+    const value = this.preview();
+    if (!value) return 0;
+    return Number(value.already_settled ? value.remaining_to_collect : value.to_collect) || 0;
+  });
+  readonly previewConsumption = computed(() => Number(this.openPreview()?.consumption) || 0);
+  readonly previewApplied = computed(() => Number(this.openPreview()?.apply) || 0);
+  /** "Gastos de reserva": shown only when the minimum spend left something to charge. */
+  readonly previewFee = computed(() => Number(this.openPreview()?.fee) || 0);
+  /** What the backend allows doing with the leftover (refund and/or credit). */
+  readonly leftoverActions = computed<LeftoverAction[]>(() => this.openPreview()?.leftover_actions ?? []);
+  readonly leftoverOptions = computed<SelectorOption[]>(() =>
+    this.leftoverActions().map((action) => DepositPanelComponent.LEFTOVER_OPTIONS[action]),
   );
+  /** The cashier decides about the leftover only when there is one and the backend offers an action. */
+  readonly choosesLeftover = computed(() => this.previewLeftover() > 0 && this.leftoverActions().length > 0);
 
   // ---------- Recharge ----------
 
@@ -206,6 +221,10 @@ export class DepositPanelComponent {
       .subscribe({
         next: (preview) => {
           this.preview.set(preview);
+          if (!preview.already_settled) {
+            const actions = preview.leftover_actions ?? [];
+            this.leftoverAction.set(actions.includes('credit') || !actions.length ? 'credit' : actions[0]);
+          }
           this.loadingPreview.set(false);
         },
         error: (error: unknown) => {
@@ -216,7 +235,7 @@ export class DepositPanelComponent {
   }
 
   submitSettle(): void {
-    if (!this.preview()) return;
+    if (!this.openPreview()) return;
     const refund = this.choosesLeftover() && this.leftoverAction() === 'refund';
     const choice = this.choices().find((c) => c.id === this.refundMethodId());
     if (refund && !choice) {

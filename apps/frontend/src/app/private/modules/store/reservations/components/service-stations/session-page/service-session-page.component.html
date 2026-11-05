@@ -112,9 +112,32 @@
           </div>
           <div class="text-right">
             <span class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)] block">Saldo por cobrar</span>
-            <span class="font-mono font-black text-lg text-[var(--color-text-primary)]">{{ balance() | currency }}</span>
+            <span class="font-mono font-black text-lg text-[var(--color-text-primary)]">{{ accountDue() | currency }}</span>
           </div>
         </div>
+
+        @if (current.rental; as rentalPart) {
+          <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 flex flex-wrap items-center justify-between gap-2 text-xs" data-testid="rental-split">
+            <p class="text-[var(--color-text-primary)]">
+              <span class="font-semibold">Alquiler</span>
+              <span class="font-mono">{{ rentalPart.total | currency }}</span>
+              @if (rentalPaid()) {
+                <span class="text-[var(--color-text-secondary)]">(pagado)</span>
+              } @else {
+                <span class="text-[var(--color-text-secondary)]">(por cobrar <span class="font-mono">{{ rentalPart.remaining | currency }}</span>)</span>
+              }
+              <span class="text-[var(--color-text-secondary)]"> · </span>
+              <span class="font-semibold">Consumos</span>
+              <span class="font-mono">{{ (current.consumption?.total ?? 0) | currency }}</span>
+              <span class="text-[var(--color-text-secondary)]"> · </span>
+              <span class="font-semibold">Por cobrar</span>
+              <span class="font-mono">{{ accountDue() | currency }}</span>
+            </p>
+            @if (canCollectRental()) {
+              <app-button variant="outline" size="sm" [loading]="preparingRental()" (clicked)="openRentalCharge()">Cobrar alquiler</app-button>
+            }
+          </div>
+        }
 
         @if (!isClosed()) {
           <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-2.5">
@@ -331,10 +354,15 @@
         Mueve la hora de fin. Nada se extiende ni se cierra solo; si hay otra reserva en la estación, el sistema te lo avisa.
       </p>
       <div class="flex flex-wrap gap-2">
-        @for (option of extendQuickOptions; track option.minutes) {
-          <app-button variant="outline" size="md" [disabled]="extending()" (clicked)="extendBy(option.minutes)">{{ option.label }}</app-button>
+        @for (option of extendQuickQuotes(); track option.minutes) {
+          <app-button variant="outline" size="md" [disabled]="extending()" (clicked)="extendBy(option.minutes)">
+            {{ option.label }}@if (option.price; as quote) { · +{{ quote }}}
+          </app-button>
         }
       </div>
+      @if (extendNote(); as note) {
+        <p class="text-xs text-[var(--color-text-secondary)]">{{ note }}</p>
+      }
       <div class="space-y-1.5">
         <label class="text-xs font-bold text-[var(--color-text-primary)]" for="extend-custom-end">Hora de fin personalizada</label>
         <input
@@ -348,7 +376,9 @@
     </div>
     <div slot="footer" class="flex flex-wrap items-center justify-end gap-2.5">
       <app-button variant="outline" [disabled]="extending()" (clicked)="showExtendModal.set(false)">Cancelar</app-button>
-      <app-button variant="primary" [loading]="extending()" (clicked)="extendToCustom()">Extender hasta esa hora</app-button>
+      <app-button variant="primary" [loading]="extending()" (clicked)="extendToCustom()">
+        Extender hasta esa hora@if (customExtendQuote(); as quote) { · +{{ quote }}}
+      </app-button>
     </div>
   </app-modal>
 
@@ -391,12 +421,12 @@
       [isOpen]="showPayModal()"
       [order]="payOrder()"
       [paymentMethods]="payMethods()"
-      [manualPaymentPending]="hasPartialPayment()"
-      [remainingBalance]="balance()"
+      [manualPaymentPending]="payHasPartial()"
+      [remainingBalance]="payBalance()"
       [isProcessing]="paying()"
       [paymentError]="payError()"
-      (isOpenChange)="showPayModal.set($event)"
-      (closed)="showPayModal.set(false)"
+      (isOpenChange)="$event ? showPayModal.set(true) : closePayModal()"
+      (closed)="closePayModal()"
       (paymentSubmitted)="onPaymentSubmitted($event)"
     />
   }
