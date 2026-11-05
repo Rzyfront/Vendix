@@ -1504,6 +1504,21 @@ export class ProductCreatePageComponent {
   );
 
   /**
+   * "Tarifa por tiempo de la estación" sin modo de reserva elegido deja el servicio
+   * sin disponibilidad en línea: se preselecciona "Reserva libre" y la persona
+   * puede cambiarla.
+   */
+  private readonly presetStationRateBookingMode = this.productForm
+    .get('rental_pricing_mode')!
+    .valueChanges.pipe(takeUntilDestroyed())
+    .subscribe((mode) => {
+      const bookingMode = this.productForm.get('booking_mode');
+      if (mode === 'station_rate' && bookingMode && !bookingMode.value) {
+        bookingMode.setValue('free_booking');
+      }
+    });
+
+  /**
    * Categorías de impuestos seleccionadas en el formulario, para pintar sus chips
    * interactivos de inclusión / adición.
    */

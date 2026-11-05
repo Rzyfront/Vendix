@@ -255,8 +255,8 @@ export function formatBlock(minutes: number, unit: RentalBlockUnit): string {
 export class StationRentalFormComponent {
   /** Two-way bound form value. */
   readonly value = model.required<StationRentalRules>();
-  /** Booking duration mode of the station rules form; `fixed` nudges "planned" billing. */
-  readonly bookingDurationMode = input<StationBookingDurationMode>('fixed');
+  /** Booking duration mode of the station rules form; `fixed` nudges "planned" billing; a new station starts `free`. */
+  readonly bookingDurationMode = input<StationBookingDurationMode>('free');
 
   readonly unitOptions: SelectorOption[] = [
     { value: 'minute', label: 'Minutos' },

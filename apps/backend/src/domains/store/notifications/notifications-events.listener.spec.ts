@@ -593,3 +593,51 @@ describe('NotificationsEventsListener.handleBookingStarted — proveedor como us
     );
   });
 });
+
+describe('NotificationsEventsListener.handleOrderStatusChanged', () => {
+  function build() {
+    const notificationsService = {
+      createAndBroadcast: jest.fn().mockResolvedValue({}),
+    } as any;
+    const listener = new NotificationsEventsListener(
+      notificationsService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+      { deliver: jest.fn() } as any,
+    );
+    return { listener, notificationsService };
+  }
+
+  it('does not notify when old_state equals new_state', async () => {
+    const { listener, notificationsService } = build();
+    await listener.handleOrderStatusChanged({
+      store_id: 1,
+      order_id: 10,
+      order_number: 'SVC-1',
+      old_state: 'created',
+      new_state: 'created',
+    } as any);
+    expect(notificationsService.createAndBroadcast).not.toHaveBeenCalled();
+  });
+
+  it('still notifies a real transition', async () => {
+    const { listener, notificationsService } = build();
+    await listener.handleOrderStatusChanged({
+      store_id: 1,
+      order_id: 10,
+      order_number: 'SVC-1',
+      old_state: 'created',
+      new_state: 'finished',
+    } as any);
+    expect(notificationsService.createAndBroadcast).toHaveBeenCalledWith(
+      1,
+      'order_status_change',
+      'Estado de Orden Actualizado',
+      'Orden #SVC-1: created → finished',
+      { order_id: 10, order_number: 'SVC-1' },
+    );
+  });
+});

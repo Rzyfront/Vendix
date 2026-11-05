@@ -20,6 +20,10 @@ import {
 import { validateWeeklyBlocks } from '../../../common/utils/schedule-window.util';
 import { StationListQueryDto } from './dto/station-list-query.dto';
 import { ACTIVE_ALLOCATION_STATES, NEXT_RESERVATION_SELECT, toNextReservation } from '../service-sessions/utils/next-reservation.util';
+import {
+  assertDurationFitsBlocks,
+  assertStationFitsLinkedServices,
+} from './station-duration-block.util';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 
 @Injectable()
@@ -232,6 +236,8 @@ export class ServiceStationsService {
           rental_tax_is_inclusive: dto.rental_tax_is_inclusive ?? true,
           intake_template_id: dto.intake_template_id ?? null,
           ...this.depositRulesData(dto),
+          // A new station books free-length by default; an explicit value wins.
+          booking_duration_mode: dto.booking_duration_mode ?? 'free',
         },
       });
       return this.findOne(station.id);
@@ -256,6 +262,14 @@ export class ServiceStationsService {
       throw new BadRequestException('Indica el monto del anticipo para esta estación.');
     }
     this.assertPrepayCoherent(current, dto);
+    // A new block must keep every station_rate service linked here a whole number of blocks.
+    if (dto.rental_block_minutes) {
+      await assertStationFitsLinkedServices(this.prisma, this.storeId, {
+        id,
+        name: dto.name?.trim() || current.name,
+        rental_block_minutes: dto.rental_block_minutes,
+      });
+    }
     try {
       await this.prisma.service_stations.updateMany({
         where: { id, store_id: this.storeId },
@@ -364,11 +378,15 @@ export class ServiceStationsService {
    * lista completa de UNA estación).
    */
   async setProductStations(productId: number, dto: SetProductStationsDto) {
-    await this.assertServiceProduct(productId);
+    const product = await this.assertServiceProduct(productId);
     const ids = dto.station_ids;
     if (ids.length) {
-      const count = await this.prisma.service_stations.count({ where: { id: { in: ids }, store_id: this.storeId } });
-      if (count !== ids.length) throw new NotFoundException('Una o más estaciones no pertenecen a esta tienda');
+      const stations = await this.prisma.service_stations.findMany({
+        where: { id: { in: ids }, store_id: this.storeId },
+        select: { id: true, name: true, rental_block_minutes: true },
+      });
+      if (stations.length !== ids.length) throw new NotFoundException('Una o más estaciones no pertenecen a esta tienda');
+      assertDurationFitsBlocks(product, stations);
     }
     await this.prisma.$transaction(async (tx: any) => {
       await tx.service_station_services.deleteMany({
@@ -387,12 +405,13 @@ export class ServiceStationsService {
   private async assertServiceProduct(productId: number) {
     const product = await this.prisma.products.findFirst({
       where: { id: productId, store_id: this.storeId },
-      select: { product_type: true },
+      select: { product_type: true, service_duration_minutes: true, rental_pricing_mode: true },
     });
     if (!product) throw new NotFoundException('Servicio no encontrado');
     if (product.product_type !== 'service') {
       throw new BadRequestException('Las estaciones solo pueden asignarse a productos de tipo servicio');
     }
+    return product;
   }
 
   async setServices(id: number, dto: SetStationServicesDto) {
@@ -401,7 +420,7 @@ export class ServiceStationsService {
     const products = ids.length
       ? await this.prisma.products.findMany({
           where: { id: { in: ids }, store_id: this.storeId },
-          select: { id: true, product_type: true },
+          select: { id: true, product_type: true, service_duration_minutes: true, rental_pricing_mode: true },
         })
       : [];
     if (products.length !== ids.length) {
@@ -409,6 +428,9 @@ export class ServiceStationsService {
     }
     if (products.some((product) => product.product_type !== 'service')) {
       throw new BadRequestException('Las estaciones solo pueden asignarse a productos de tipo servicio');
+    }
+    for (const product of products) {
+      assertDurationFitsBlocks(product, [station]);
     }
 
     await this.prisma.$transaction(async (tx: any) => {
