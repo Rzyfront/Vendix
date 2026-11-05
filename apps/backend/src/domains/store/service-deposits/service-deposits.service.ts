@@ -392,7 +392,9 @@ export class ServiceDepositsService {
         currency,
         state: 'succeeded',
         paid_at: now,
-        transaction_id: `SVC-${ref}-DEPOSIT-${appliedCount.length + 1}`,
+        // `payments.transaction_id` is unique table-wide and booking/session ids come from separate sequences,
+        // so a booking-only apply (no-show retain) gets its own prefix. Still deterministic per logical payment.
+        transaction_id: `${input.session_id ? 'SVC' : 'RSV'}-${ref}-DEPOSIT-${appliedCount.length + 1}`,
         gateway_response: {
           service_deposit: {
             booking_id: input.booking_id ?? null,

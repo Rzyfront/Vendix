@@ -257,6 +257,19 @@ describe('ServiceDepositsService', () => {
       expect((await service.balanceOf({ bookingId: 70 })).balance).toBe(150000);
     });
 
+    it('the payment reference of a booking-only apply is namespaced, so it never equals the session one with the same number', async () => {
+      const booking = build({ orderGrand: 250000 });
+      await receive(booking.service, booking.tx);
+      await booking.service.applyToOrderInTx(booking.tx, { store_id: 3, order_id: 500, booking_id: 70, user_id: 42 });
+      const session = build({ orderGrand: 250000 });
+      await receive(session.service, session.tx);
+      await session.service.applyToOrderInTx(session.tx, { store_id: 3, order_id: 500, booking_id: 70, session_id: 70, user_id: 42 });
+      expect(booking.payments[0].transaction_id).toBe('RSV-70-DEPOSIT-1');
+      // Session settle keeps its format (a retry computes the same id).
+      expect(session.payments[0].transaction_id).toBe('SVC-70-DEPOSIT-1');
+      expect(booking.payments[0].transaction_id).not.toBe(session.payments[0].transaction_id);
+    });
+
     it('is capped by the deposit balance when the order is bigger', async () => {
       const { service, tx } = build({ orderGrand: 900000, walletBalance: 0 });
       await receive(service, tx);

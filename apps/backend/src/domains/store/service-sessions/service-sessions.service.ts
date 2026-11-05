@@ -58,6 +58,8 @@ import { SellableStockAllocator } from '../inventory/shared/services/sellable-st
 
 const ACTIVE_ALLOCATIONS = ACTIVE_ALLOCATION_STATES;
 const ACTIVE_SESSION_STATUSES = ['open', 'paused'];
+/** Rental-order states that can still be cancelled with the session (nothing shipped, nothing finished). */
+const OPEN_RENTAL_ORDER_STATES = ['draft', 'created', 'pending_payment'] as const;
 const ITEM_SESSION_STATUSES = ['open', 'in_progress', 'paused'];
 /** Reintentos de un walk-in sin estación cuando otra atención le gana la estación elegida. */
 const MAX_WALK_IN_PICK_RETRIES = 3;
@@ -330,11 +332,21 @@ export class ServiceSessionsService {
       if (!snapshotHasTimeRate(rentalSnapshot)) {
         throw new VendixHttpException(ErrorCodes.STATION_009, 'La estación no tiene tarifa por tiempo configurada.');
       }
-      const quoteMinutes = booking ? plannedMinutes : (variant?.service_duration_minutes ?? product.service_duration_minutes ?? 0);
-      if (!quoteMinutes || quoteMinutes <= 0 || quoteMinutes % rentalSnapshot.block_minutes !== 0) {
-        throw new VendixHttpException(ErrorCodes.STATION_009, 'La duración debe ser un múltiplo del bloque de tarifa de la estación.');
+      // A booking is charged at its frozen quote: the block-multiple rule applied when it was quoted, not at
+      // check-in (arriving late must not break it). Without a frozen amount, re-quote the booked span.
+      const frozenCents = booking ? toCents(booking.quoted_amount) : 0;
+      if (booking && frozenCents > 0) {
+        productUnitPrice = centsToAmount(frozenCents);
+      } else {
+        const quoteStart = booking && bookingAllocation?.start_at ? bookingAllocation.start_at : startAt;
+        const quoteMinutes = booking
+          ? Math.round((plannedEnd.getTime() - quoteStart.getTime()) / 60_000)
+          : (variant?.service_duration_minutes ?? product.service_duration_minutes ?? 0);
+        if (!quoteMinutes || quoteMinutes <= 0 || quoteMinutes % rentalSnapshot.block_minutes !== 0) {
+          throw new VendixHttpException(ErrorCodes.STATION_009, 'La duración debe ser un múltiplo del bloque de tarifa de la estación.');
+        }
+        productUnitPrice = priceRentalBlocks(rentalSnapshot, quoteStart, quoteMinutes / rentalSnapshot.block_minutes, tz).totalCents / 100;
       }
-      productUnitPrice = priceRentalBlocks(rentalSnapshot, startAt, quoteMinutes / rentalSnapshot.block_minutes, tz).totalCents / 100;
     }
     const productLineName = variant ? `${product.name} - ${variant.name || variant.sku}` : product.name;
     // D5 `at_start`: the rental is charged on its own order, paid before or while the session runs.
@@ -352,13 +364,26 @@ export class ServiceSessionsService {
         const order = await tx.orders.findFirst({ where: { id: orderId, store_id: storeId }, select: { id: true, state: true, service_session_id: true } });
         // A booking order that already holds the rental line (paid online) is the RENTAL order of the
         // session (S11): it never takes `service_session_id`, and the consumption gets its own order.
-        bookingHoldsRental = !!order && !!(await tx.order_items.findFirst({
-          where: { order_id: orderId, service_line_kind: RENTAL_LINE_KIND, cancelled_at: null },
-          select: { id: true },
-        }));
+        // The reservation writers (admin booking, prepay link, checkout) create the line through the orders
+        // service without a kind, so a line of the booked rental product also counts as the rental line.
+        const rentalLine = order
+          ? await tx.order_items.findFirst({
+              where: {
+                order_id: orderId,
+                cancelled_at: null,
+                OR: [{ service_line_kind: RENTAL_LINE_KIND }, ...(isRentalProduct ? [{ product_id: productId, service_line_kind: null }] : [])],
+              },
+              select: { id: true, service_line_kind: true },
+            })
+          : null;
+        bookingHoldsRental = !!rentalLine;
         if (bookingHoldsRental) {
+          // A rental order takes nothing else, so any live state is valid (paid online, or `created` by a prepay link).
           if (order!.state === 'cancelled' || order!.service_session_id) {
             throw new VendixHttpException(ErrorCodes.STATION_006, 'La orden vinculada no está disponible para esta atención.');
+          }
+          if (rentalLine!.service_line_kind !== RENTAL_LINE_KIND) {
+            await tx.order_items.updateMany({ where: { id: rentalLine!.id, order_id: orderId }, data: { service_line_kind: RENTAL_LINE_KIND } });
           }
           rentalOrderId = orderId;
           orderId = null;
@@ -1154,6 +1179,16 @@ export class ServiceSessionsService {
           if (order.state === 'draft') {
             await this.stockLevelManager.releaseReservationsByReference('order', existing.order_id, 'cancelled', tx);
             await tx.orders.updateMany({ where: { id: existing.order_id, store_id: storeId, state: 'draft' }, data: { state: 'cancelled', updated_at: new Date() } });
+          }
+        }
+        // S11/S17: the rental order is cancelled with the session only while nothing was paid on it and it is
+        // still open; a rental with a payment stays as it is (the refund/credit flows own that money).
+        if (dto.action !== 'close' && rentalOrderId) {
+          const rental = await lockOrderLifecycle(tx, rentalOrderId, storeId);
+          const rentalTotals = await tx.orders.findFirst({ where: { id: rentalOrderId, store_id: storeId }, select: { total_paid: true } });
+          if ((OPEN_RENTAL_ORDER_STATES as readonly string[]).includes(rental.state) && toCents(rentalTotals?.total_paid) === 0) {
+            await this.stockLevelManager.releaseReservationsByReference('order', rentalOrderId, 'cancelled', tx);
+            await tx.orders.updateMany({ where: { id: rentalOrderId, store_id: storeId, state: { in: [...OPEN_RENTAL_ORDER_STATES] } }, data: { state: 'cancelled', updated_at: new Date() } });
           }
         }
         if (existing.booking_id) {
