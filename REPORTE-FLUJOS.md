@@ -138,7 +138,7 @@ La revisión independiente pedía ≥ 89. Se cerró lo siguiente, cada punto con
 
 | # | Historia de usuario | Qué ve la persona | Commit |
 |---|---|---|---|
-| A1 | Como dueño de una tienda que deja de ser Administración, quiero que mis API keys dejen de operar Flujos, para que el módulo quede cerrado también por API. | Con una key válida, `GET`/`POST /api/v1/workflows/*` responden 403 `MODULE_INDUSTRY_001`. En una tienda `administration` todo sigue respondiendo 200/201. | `100ca502b` |
+| A1 | Como dueño de una tienda que deja de ser Administración, quiero que mis API keys dejen de operar Flujos, para que el módulo quede cerrado también por API. | Con una key válida, `GET`/`POST /api/v1/workflows/*` responden 403 `MODULE_INDUSTRY_001`. En una tienda `administration` todo sigue respondiendo 200/201. | `b0bc47670` |
 | M1 | Como operador, quiero que una tarea en segundo plano que tumba al worker se marque como muerta, para que no se reintente para siempre. | La fila abandonada en `processing` con 6 intentos pasa a `dead`, conserva su `last_error` y no se vuelve a tomar. Si era una acción, el historial muestra `action_failed`. | `3b372bcb2`, `5061f527a` |
 | M2 | Como responsable de una tarea vencida, quiero recibir mi recordatorio aunque haya cientos de solicitudes vencidas sin aviso configurado, para no perder el plazo. | Con 205 solicitudes vencidas sin `on_overdue`, la siguiente con recordatorio lo recibe al minuto siguiente. | `9d200f217` |
 | A2 (parcial) | Como responsable legal, quiero que un archivo bajo `legal_hold` o con retención vigente no se pueda borrar, para conservar la evidencia. | El borrado responde 409 `DOCUMENT_RETAINED`, y la fila y el objeto en S3 siguen ahí. Con la retención vencida y sin hold, sí se borra. | `5b600f4bf` |
