@@ -6105,6 +6105,7 @@ export const ErrorCodes = {
   STATION_BOOKING_008: { code: 'STATION_BOOKING_008', httpStatus: 400, devMessage: 'Para reservar con anticipo identifica al cliente.' },
   STATION_BOOKING_009: { code: 'STATION_BOOKING_009', httpStatus: 400, devMessage: 'Faltan datos para la decisión del anticipo.' },
   STATION_BOOKING_010: { code: 'STATION_BOOKING_010', httpStatus: 409, devMessage: 'Esta estación cobra anticipo: reserva desde el flujo de reservas, no desde el carrito.' },
+  STATION_BOOKING_011: { code: 'STATION_BOOKING_011', httpStatus: 400, devMessage: 'Una serie recurrente no se permite en estaciones con cobro para reservar o anticipo obligatorio.' },
   LODGING_BOOKING_FIND_001: {
     code: 'LODGING_BOOKING_FIND_001',
     httpStatus: 404,

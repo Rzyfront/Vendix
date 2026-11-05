@@ -166,10 +166,7 @@ export class BookingSeriesService {
       (s) => s && (s.booking_prepay_mode !== 'none' || s.deposit_policy === 'required'),
     );
     if (blocked) {
-      throw new VendixHttpException(
-        ErrorCodes.STATION_BOOKING_001,
-        'Una serie recurrente no se permite en estaciones con cobro para reservar o anticipo obligatorio.',
-      );
+      throw new VendixHttpException(ErrorCodes.STATION_BOOKING_011);
     }
   }
 

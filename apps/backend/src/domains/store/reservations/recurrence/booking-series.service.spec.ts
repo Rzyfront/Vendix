@@ -118,7 +118,7 @@ describe('BookingSeriesService', () => {
     ])('refuses a series on a station with %s (A18)', async (_n, station) => {
       const { service, prisma, reservations } = build({ station: { id: 3, ...station }, requiresStation: true });
       await expect(service.create(baseDto({ station_id: 3 }))).rejects.toMatchObject({
-        errorCode: ErrorCodes.STATION_BOOKING_001.code,
+        errorCode: ErrorCodes.STATION_BOOKING_011.code,
       });
       expect(prisma.booking_series.create).not.toHaveBeenCalled();
       expect(reservations.create).not.toHaveBeenCalled();
