@@ -6127,6 +6127,8 @@ export const ErrorCodes = {
   STATION_BOOKING_015: { code: 'STATION_BOOKING_015', httpStatus: 409, devMessage: 'La reserva no tiene un cobro pendiente por registrar.' },
   STATION_BOOKING_016: { code: 'STATION_BOOKING_016', httpStatus: 400, devMessage: 'El método de pago o la cuenta no son válidos para este cobro.' },
   STATION_BOOKING_017: { code: 'STATION_BOOKING_017', httpStatus: 409, devMessage: 'Esa opción no está permitida para cancelar esta reserva.' },
+  STATION_BOOKING_018: { code: 'STATION_BOOKING_018', httpStatus: 400, devMessage: 'Lo pagado se devuelve por el mismo medio con que pagó el cliente: no elijas un medio de devolución.' },
+  STATION_BOOKING_019: { code: 'STATION_BOOKING_019', httpStatus: 409, devMessage: 'La cancelación de esta reserva ya empezó con otra opción: repítela con la misma opción.' },
   // Station rental "cobro para reservar" (T15, S1)
   RENTAL_PREPAY_001: { code: 'RENTAL_PREPAY_001', httpStatus: 400, devMessage: 'Esta estación no cobra para reservar.' },
   RENTAL_PREPAY_002: { code: 'RENTAL_PREPAY_002', httpStatus: 400, devMessage: 'La reserva no tiene un valor cotizado para calcular el cobro.' },

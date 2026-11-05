@@ -1335,6 +1335,7 @@ export class ReservationFormModalComponent {
       ? {
           store_payment_method_id: this.prepayMethodId() as number,
           ...(this.prepayAccountId() != null ? { bank_account_id: this.prepayAccountId() as number } : {}),
+          request_id: crypto.randomUUID(),
         }
       : null;
 

@@ -7555,8 +7555,18 @@ export class OrderFlowService {
    * insumos consumidos al fire y `waste` los deja como merma. La decisión se
    * valida ANTES del claim para no dejar la orden en `cancelled` sin
    * decisión registrada. `force` aplica la misma ramificación.
+   *
+   * `options.keepGatewayFunds` (llamadores internos, nunca HTTP): las piernas
+   * de pasarela no se reversan por API porque el dinero se queda en la tienda
+   * (saldo a favor o retención de una reserva cancelada). Por defecto, igual
+   * que siempre.
    */
-  async cancelOrder(orderId: number, dto: CancelOrderDto, force = false) {
+  async cancelOrder(
+    orderId: number,
+    dto: CancelOrderDto,
+    force = false,
+    options: { keepGatewayFunds?: boolean } = {},
+  ) {
     const order = await this.getOrder(orderId);
     assertNoActiveFinancialSplit(order);
     await this.assertNoOpenTableForDraft(order);
@@ -8082,7 +8092,7 @@ export class OrderFlowService {
     if (nonCashRefunds.length > 0) {
       try {
         await this.refundFlowService!.completeCancellationNonCashRefunds(
-          order, nonCashRefunds,
+          order, nonCashRefunds, { keepGatewayFunds: options.keepGatewayFunds === true },
         );
       } catch (error) {
         this.logger.error(

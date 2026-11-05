@@ -19,6 +19,7 @@ import { PaymentMethodState, StorePaymentMethod } from '../../../../settings/pay
 import {
   DepositMethodChoice,
   defaultDepositMethod,
+  newDepositRequestId,
   storePaymentMethodRows,
   toDepositMethodChoices,
 } from '../../service-stations/open-session-deposit/deposit-payment-methods.util';
@@ -125,6 +126,8 @@ export class RegisterPrepayDialogComponent {
   readonly accountId = signal<number | null>(null);
   readonly amount = signal<number | null>(null);
   readonly reference = signal('');
+  /** Idempotency key of this open: a double click or a retry reaches the backend as the same payment. */
+  private requestId = '';
 
   readonly remaining = computed(() => this.prepay()?.remaining ?? 0);
 
@@ -153,6 +156,7 @@ export class RegisterPrepayDialogComponent {
   });
 
   onOpen(): void {
+    this.requestId = newDepositRequestId();
     this.errorMessage.set(null);
     this.submitting.set(false);
     this.reference.set('');
@@ -189,6 +193,7 @@ export class RegisterPrepayDialogComponent {
     const body: RegisterPrepayPaymentInput = {
       store_payment_method_id: methodId,
       amount: Number(this.amount()),
+      request_id: this.requestId,
       ...(this.accountId() != null ? { bank_account_id: this.accountId() as number } : {}),
       ...(this.reference().trim() ? { reference: this.reference().trim() } : {}),
     };

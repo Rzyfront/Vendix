@@ -18,7 +18,8 @@ import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ServiceAllocationCoordinator } from './service-allocation-coordinator.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
-import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
+import { RentalPrepayService, prepayCancelReason } from './rental-prepay/rental-prepay.service';
+import { resolveEffectiveRefundChannel } from '../orders/order-flow/services/refund-channel.util';
 import { buildPaymentReceivedEvents } from '../payments/utils/payment-received-event.util';
 import { buildOrderSaleTaxPayload } from '../payments/utils/order-sale-tax-payload.util';
 import {
@@ -527,6 +528,7 @@ export class ReservationDepositsService {
           amount: true,
           paid_at: true,
           transfer_submitted_at: true,
+          confirmed_by_user_id: true,
         },
       });
       if (!request || request.status === 'awaiting_confirmation') continue;
@@ -583,6 +585,7 @@ export class ReservationDepositsService {
       paid_at: Date | null;
       payment_link_id: number | null;
       transfer_submitted_at: Date | null;
+      confirmed_by_user_id?: number | null;
     },
   ): Promise<void> {
     try {
@@ -593,6 +596,8 @@ export class ReservationDepositsService {
         amount: Number(request.amount),
         method: request.transfer_submitted_at ? 'transfer' : request.payment_link_id ? 'wompi' : 'manual',
         paid_at: request.paid_at ?? new Date(),
+        // The drawer of whoever confirmed the transfer, as the first settlement would have used (S14).
+        confirmed_by_user_id: request.confirmed_by_user_id ?? null,
       });
     } catch (err: unknown) {
       this.logger.error(
@@ -742,15 +747,19 @@ export class ReservationDepositsService {
    * mandatory (409 STATION_BOOKING_012) and follows the deposit window rule (`isRefundable`): before it
    * the money is refunded or credited, after it only retained (409 STATION_BOOKING_017 otherwise).
    *
-   * - refund: `OrderFlowService.cancelOrder` cancels the rental order and records the refund of every
-   *   received leg (cash leaves the drawer), then the booking closes.
-   * - credit / retain: the order is cancelled the same way, the received amount is taken in as a
-   *   deposit of the booking (`receiveInTx`, same ledger as any deposit) and then released as the
-   *   customer's credit (`moveLeftoverAndClose`) or billed as "Gastos de reserva" (`decide('retain')`).
+   * - refund: `OrderFlowService.cancelOrder` cancels the rental order and returns every received leg
+   *   by its own method (cash leaves the drawer, a gateway is reversed). No refund method is chosen
+   *   here (400 STATION_BOOKING_018) unless the booking also holds a deposit balance.
+   * - credit / retain: the order is cancelled keeping the gateway funds (`keepGatewayFunds`), then each
+   *   received leg is taken in as a deposit of the booking with its own method and amount (cash nets to
+   *   zero in the drawer of whoever cancels) and the balance is released as the customer's credit or
+   *   billed as "Gastos de reserva". A leg paid with the customer's credit goes back to that credit with
+   *   the order cancel and is not taken in again.
    *
    * The order flow owns its own transaction, so the order cancel runs first and the ledger plus
-   * `closeBookingInTx` run together in the second one. Every step is idempotent (a cancelled order is
-   * skipped, the ledger row is keyed by `request_id`), so a retry resumes where it stopped.
+   * `closeBookingInTx` run after it. The cancel reason (`prepayCancelReason`) records the action: a retry
+   * finds the order cancelled by this flow, skips the cancel and the window rule, and resumes the same
+   * action (another one answers 409 STATION_BOOKING_019). Ledger rows are keyed per payment.
    */
   private async cancelWithPrepay(
     storeId: number,
@@ -769,59 +778,87 @@ export class ReservationDepositsService {
 
     const action = options.leftover_action;
     if (!action) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_012);
-    const allocation = await this.stationRulesOfBooking(this.prisma, storeId, bookingId);
-    const refundable = this.isRefundable(allocation);
-    if (refundable ? action === 'retain' : action !== 'retain') {
-      throw new VendixHttpException(ErrorCodes.STATION_BOOKING_017);
+    // The order was already cancelled by this flow: the money moved under that decision.
+    const resumed = received.orderState === 'cancelled';
+    if (resumed && received.cancelledAction !== action) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_019);
+    if (!resumed) {
+      const allocation = await this.stationRulesOfBooking(this.prisma, storeId, bookingId);
+      const refundable = this.isRefundable(allocation);
+      if (refundable ? action === 'retain' : action !== 'retain') {
+        throw new VendixHttpException(ErrorCodes.STATION_BOOKING_017);
+      }
     }
     if (action !== 'refund' && !booking.customer_id) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_008);
-
-    // Single cash gate (S14): returning money is a cash-flow movement of the user who cancels (the order
-    // cancel records the refund in that user's session), so they need their own open session when the register is on.
-    if (received.orderState !== 'cancelled') {
-      await this.assertCashGate();
+    const ledger = await this.deposits.balanceOf({ bookingId });
+    // The paid legs go back by their own method; a chosen method would be ignored (B2).
+    if (action === 'refund' && options.refund_method && ledger.balance <= 0) {
+      throw new VendixHttpException(ErrorCodes.STATION_BOOKING_018);
     }
+
+    // Single cash gate (S14): the order cancel and the ledger intake are cash-flow movements of the user
+    // who cancels, so they need their own open session when the register is on.
+    if (!resumed || action !== 'refund') await this.assertCashGate();
     const requestId = options.request_id ?? `cancel-prepay:${bookingId}`;
-    if (received.orderState !== 'cancelled') {
+    if (!resumed) {
       const orderFlow = this.lazy(OrderFlowService);
       if (!orderFlow) throw new VendixHttpException(ErrorCodes.RENTAL_PREPAY_004);
-      await orderFlow.cancelOrder(received.orderId, { reason: `Reserva ${booking.booking_number} cancelada` });
+      await orderFlow.cancelOrder(
+        received.orderId,
+        { reason: prepayCancelReason(booking.booking_number, action) },
+        false,
+        { keepGatewayFunds: action !== 'refund' },
+      );
     }
 
     if (action === 'refund') {
-      const ledger = await this.deposits.balanceOf({ bookingId });
       if (ledger.balance > 0) {
         await this.moveLeftoverAndClose(storeId, booking, 'refund', 'cancelled', {
           request_id: requestId,
           refund_method: options.refund_method,
         });
       } else {
-        const linkIds = await this.prisma.$transaction((tx) => this.closeBookingInTx(tx, storeId, bookingId, 'cancelled'));
-        await prepay.deactivateLinks(linkIds);
+        await this.closeAfterPrepay(storeId, bookingId);
       }
       return { closed: true };
     }
 
     const userId = RequestContextService.getUserId() ?? null;
-    const taken = await this.prisma.$transaction((tx) =>
-      this.deposits.receiveInTx(tx, {
-        store_id: storeId,
-        customer_id: booking.customer_id,
-        booking_id: bookingId,
-        amount: received.receivedCents / 100,
-        method: received.methodType ?? 'bank_transfer',
-        store_payment_method_id: null,
-        request_id: `${requestId}:received`,
-        user_id: userId,
-      }),
-    );
-    if (taken.created) this.deposits.announceReceived(taken.event);
+    const intake = received.legs.filter((leg) => resolveEffectiveRefundChannel('original_payment', leg.methodType) !== 'store_credit');
+    const announced = await this.prisma.$transaction(async (tx) => {
+      const events: Array<Parameters<ServiceDepositsService['announceReceived']>[0]> = [];
+      for (const leg of intake) {
+        const taken = await this.deposits.receiveInTx(tx, {
+          store_id: storeId,
+          customer_id: booking.customer_id,
+          booking_id: bookingId,
+          amount: leg.cents / 100,
+          method: leg.methodType ?? 'bank_transfer',
+          store_payment_method_id: leg.storePaymentMethodId,
+          request_id: `cancel-prepay:${bookingId}:received:${leg.paymentId}`,
+          user_id: userId,
+        });
+        if (taken.created) events.push(taken.event);
+      }
+      return events;
+    });
+    for (const event of announced) this.deposits.announceReceived(event);
+    // Only legs paid with the customer's credit: the order cancel already returned them to it.
+    if (!intake.length && ledger.balance <= 0) {
+      await this.closeAfterPrepay(storeId, bookingId);
+      return { closed: true };
+    }
     if (action === 'credit') {
       await this.moveLeftoverAndClose(storeId, booking, 'credit', 'cancelled', { request_id: requestId });
       return { closed: true };
     }
     await this.decide(bookingId, { action: 'retain', request_id: requestId });
     return { closed: true, emitted: true };
+  }
+
+  /** Closes the booking whose money already left with the order cancel. */
+  private async closeAfterPrepay(storeId: number, bookingId: number): Promise<void> {
+    const linkIds = await this.prisma.$transaction((tx) => this.closeBookingInTx(tx, storeId, bookingId, 'cancelled'));
+    await this.lazy(RentalPrepayService)?.deactivateLinks(linkIds);
   }
 
   /** Refund / credit the whole balance and close the booking, atomically; events after commit. */

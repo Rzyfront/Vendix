@@ -473,6 +473,23 @@ describe('ReservationDepositsService', () => {
       expect(deposits.completePendingInTx).toHaveBeenCalledWith(tx, { deposit_id: 3, store_id: 1, user_id: null });
     });
 
+    it('A2: the retry settles in the drawer of whoever confirmed the transfer', async () => {
+      const { service, tx, deposits } = build();
+      tx.service_deposits.findMany.mockResolvedValue(overdue);
+      tx.payment_requests.findFirst.mockResolvedValue({
+        id: 9,
+        status: 'paid',
+        payment_link_id: null,
+        purpose: 'service_deposit',
+        amount: 400000,
+        paid_at: new Date(),
+        transfer_submitted_at: new Date(),
+        confirmed_by_user_id: 42,
+      });
+      await service.expireOverdueHolds();
+      expect(deposits.completePendingInTx).toHaveBeenCalledWith(tx, { deposit_id: 3, store_id: 1, user_id: 42 });
+    });
+
     it('is idempotent: a booking already claimed by another tick is not released twice', async () => {
       const { service, tx, coordinator, links } = build();
       tx.service_deposits.findMany.mockResolvedValue(overdue);
@@ -641,7 +658,8 @@ describe('ReservationDepositsService', () => {
 
   describe('S3: cancelar con cobro para reservar (cancelWithPrepay)', () => {
     const confirmedBooking = { id: 77, status: 'confirmed', customer_id: 1, booking_number: 'BKG-1' };
-    const paid = { orderId: 900, orderState: 'finished', receivedCents: 7500000, methodType: 'cash' };
+    const cashLeg = { paymentId: 501, cents: 7500000, methodType: 'cash', storePaymentMethodId: 3 };
+    const paid = { orderId: 900, orderState: 'finished', receivedCents: 7500000, methodType: 'cash', legs: [cashLeg], cancelledAction: null };
 
     it('sin decisión responde 409 STATION_BOOKING_012 y no cancela nada', async () => {
       const { service, tx, deposits } = build({ booking: confirmedBooking, received: paid });
@@ -681,7 +699,7 @@ describe('ReservationDepositsService', () => {
       const cancelOrder = jest.fn().mockResolvedValue({});
       (orderFlow as any).cancelOrder = cancelOrder;
       const result = await service.cancelWithDeposit(77, { leftover_action: 'refund', request_id: 'c-9' });
-      expect(cancelOrder).toHaveBeenCalledWith(900, expect.objectContaining({ reason: expect.any(String) }));
+      expect(cancelOrder).toHaveBeenCalledWith(900, expect.objectContaining({ reason: expect.any(String) }), false, { keepGatewayFunds: false });
       expect(tx.bookings.update).toHaveBeenCalledWith({ where: { id: 77 }, data: expect.objectContaining({ status: 'cancelled' }) });
       expect(prepay.cancelOpenRequestsInTx).toHaveBeenCalled();
       expect(deposits.refundInTx).not.toHaveBeenCalled();
@@ -699,12 +717,84 @@ describe('ReservationDepositsService', () => {
     });
 
     it('doble envío: con la orden ya cancelada no se vuelve a cancelar ni a pasar por la compuerta', async () => {
-      const { service, orderFlow, sessions } = build({ booking: confirmedBooking, received: { ...paid, orderState: 'cancelled' }, balance: 0 });
+      const { service, orderFlow, sessions } = build({
+        booking: confirmedBooking,
+        received: { ...paid, orderState: 'cancelled', cancelledAction: 'refund' },
+        balance: 0,
+      });
       const cancelOrder = jest.fn();
       (orderFlow as any).cancelOrder = cancelOrder;
       await service.cancelWithDeposit(77, { leftover_action: 'refund', request_id: 'c-9' });
       expect(cancelOrder).not.toHaveBeenCalled();
       expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+    });
+    it('B4: cancelOrder lleva el marcador de la acción y conserva los fondos de pasarela solo en saldo a favor o retención', async () => {
+      const credit = build({ booking: confirmedBooking, received: paid });
+      const creditCancel = jest.fn().mockResolvedValue({});
+      (credit.orderFlow as any).cancelOrder = creditCancel;
+      await credit.service.cancelWithDeposit(77, { leftover_action: 'credit', request_id: 'c-11' });
+      expect(creditCancel).toHaveBeenCalledWith(900, { reason: 'Reserva BKG-1 cancelada (saldo a favor)' }, false, { keepGatewayFunds: true });
+
+      const refund = build({ booking: confirmedBooking, received: paid, balance: 0 });
+      const refundCancel = jest.fn().mockResolvedValue({});
+      (refund.orderFlow as any).cancelOrder = refundCancel;
+      await refund.service.cancelWithDeposit(77, { leftover_action: 'refund', request_id: 'c-12' });
+      expect(refundCancel).toHaveBeenCalledWith(900, { reason: 'Reserva BKG-1 cancelada (devolución)' }, false, { keepGatewayFunds: false });
+    });
+
+    it('B4: piernas mixtas entran una por una con su medio y su monto; la pierna de saldo a favor no vuelve a entrar', async () => {
+      const legs = [
+        { paymentId: 501, cents: 5000000, methodType: 'cash', storePaymentMethodId: 3 },
+        { paymentId: 502, cents: 2500000, methodType: 'bank_transfer', storePaymentMethodId: 4 },
+        { paymentId: 503, cents: 1000000, methodType: 'wallet', storePaymentMethodId: 5 },
+      ];
+      const { service, orderFlow, deposits } = build({ booking: confirmedBooking, received: { ...paid, receivedCents: 8500000, legs } });
+      (orderFlow as any).cancelOrder = jest.fn().mockResolvedValue({});
+      await service.cancelWithDeposit(77, { leftover_action: 'credit', request_id: 'c-13' });
+      expect(deposits.receiveInTx).toHaveBeenCalledTimes(2);
+      expect(deposits.receiveInTx).toHaveBeenNthCalledWith(1, expect.anything(), expect.objectContaining({
+        amount: 50000, method: 'cash', store_payment_method_id: 3, request_id: 'cancel-prepay:77:received:501',
+      }));
+      expect(deposits.receiveInTx).toHaveBeenNthCalledWith(2, expect.anything(), expect.objectContaining({
+        amount: 25000, method: 'bank_transfer', store_payment_method_id: 4, request_id: 'cancel-prepay:77:received:502',
+      }));
+      expect(deposits.releaseInTx).toHaveBeenCalled();
+    });
+
+    it('B4: reintento tras cancelar la orden con saldo a favor retoma el ingreso (fuera de ventana incluso) y cierra la reserva', async () => {
+      const { service, orderFlow, deposits, tx } = build({
+        booking: confirmedBooking,
+        received: { ...paid, orderState: 'cancelled', cancelledAction: 'credit' },
+        allocation: { id: 1, state: 'confirmed', start_at: new Date(Date.now() + 3_600_000), expires_at: null, station: station() },
+      });
+      const cancelOrder = jest.fn();
+      (orderFlow as any).cancelOrder = cancelOrder;
+      const result = await service.cancelWithDeposit(77, { leftover_action: 'credit', request_id: 'otro-dialogo' });
+      expect(cancelOrder).not.toHaveBeenCalled();
+      expect(deposits.receiveInTx).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ request_id: 'cancel-prepay:77:received:501' }));
+      expect(deposits.releaseInTx).toHaveBeenCalled();
+      expect(tx.bookings.update).toHaveBeenCalledWith({ where: { id: 77 }, data: expect.objectContaining({ status: 'cancelled' }) });
+      expect(result).toMatchObject({ closed: true });
+    });
+
+    it('B4: reintento con otra opción distinta a la que canceló la orden responde 409 STATION_BOOKING_019 y no mueve dinero', async () => {
+      const { service, deposits, tx } = build({
+        booking: confirmedBooking,
+        received: { ...paid, orderState: 'cancelled', cancelledAction: 'refund' },
+      });
+      await expect(service.cancelWithDeposit(77, { leftover_action: 'credit' })).rejects.toMatchObject(code('STATION_BOOKING_019'));
+      expect(deposits.receiveInTx).not.toHaveBeenCalled();
+      expect(tx.bookings.update).not.toHaveBeenCalled();
+    });
+
+    it('B2: devolver un cobro sin anticipo con medio elegido responde 400 STATION_BOOKING_018 antes de cancelar la orden', async () => {
+      const { service, orderFlow } = build({ booking: confirmedBooking, received: paid, balance: 0 });
+      const cancelOrder = jest.fn();
+      (orderFlow as any).cancelOrder = cancelOrder;
+      await expect(
+        service.cancelWithDeposit(77, { leftover_action: 'refund', refund_method: 'cash' }),
+      ).rejects.toMatchObject(code('STATION_BOOKING_018'));
+      expect(cancelOrder).not.toHaveBeenCalled();
     });
   });
 

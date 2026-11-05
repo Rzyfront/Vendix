@@ -84,6 +84,8 @@ export interface RegisterPrepayPaymentInput {
   bank_account_id?: number;
   amount?: number;
   reference?: string;
+  /** One per dialog open: a double submit registers a single payment. */
+  request_id?: string;
 }
 
 export type CancelLeftoverAction = 'refund' | 'credit' | 'retain';

@@ -86,12 +86,18 @@ interface DecisionOption {
           </div>
 
           @if (action() === 'refund') {
-            <app-selector
-              label="Medio de devolución"
-              [ngModel]="refundMethod()"
-              (ngModelChange)="refundMethod.set($event)"
-              [options]="refundMethodOptions"
-            ></app-selector>
+            @if (refundsByPaymentMethod()) {
+              <p class="text-xs text-[var(--color-text-secondary)]">
+                Se devuelve por el mismo medio con que pagó el cliente; el efectivo sale de tu caja si la caja está activa.
+              </p>
+            } @else {
+              <app-selector
+                label="Medio de devolución"
+                [ngModel]="refundMethod()"
+                (ngModelChange)="refundMethod.set($event)"
+                [options]="refundMethodOptions"
+              ></app-selector>
+            }
           }
 
           @if (action() === 'reschedule') {
@@ -184,8 +190,11 @@ export class BookingDepositDialogComponent {
 
   readonly moneyOnBooking = computed(() => (this.prepaySource() ? this.prepayPaid() : (this.deposit()?.balance ?? 0)));
 
+  /** Cancelling a paid charge returns each payment by its own method: there is no method to choose. */
+  readonly refundsByPaymentMethod = computed(() => this.view() === 'cancel' && this.prepaySource());
+
   private readonly prepayCancelOptions: DecisionOption[] = [
-    { value: 'refund', label: 'Devolver', hint: 'Se cancela el cobro y se devuelve el dinero al cliente; sale de tu caja si la caja está activa.', icon: 'banknote' },
+    { value: 'refund', label: 'Devolver', hint: 'Se cancela el cobro y se devuelve el dinero al cliente por el mismo medio con que pagó.', icon: 'banknote' },
     { value: 'credit', label: 'Dejar saldo a favor', hint: 'Lo pagado queda en la cuenta del cliente para su próxima compra.', icon: 'wallet' },
     { value: 'retain', label: 'Retener', hint: 'Se factura como "Gastos de reserva" y la reserva queda como no asistida. Solo aplica si la cancelación es tardía.', icon: 'check-circle' },
   ];
@@ -227,7 +236,7 @@ export class BookingDepositDialogComponent {
     if (!booking || !this.canSubmit()) return;
     this.submitting.set(true);
     this.errorMessage.set(null);
-    const refund = this.action() === 'refund' ? this.refundMethod() : undefined;
+    const refund = this.action() === 'refund' && !this.refundsByPaymentMethod() ? this.refundMethod() : undefined;
 
     if (this.view() === 'cancel') {
       this.reservationsService

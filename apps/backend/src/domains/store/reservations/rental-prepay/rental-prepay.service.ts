@@ -111,6 +111,11 @@ interface RegisterPrepayArgs {
   gateway: Record<string, unknown>;
   /** In person: refuse (STATION_BOOKING_015) a payment above what the order still owes. */
   rejectIfExceedsRemaining?: boolean;
+  /**
+   * In person: the most the order may hold once this payment lands (paid + pending charge read by the
+   * caller). Checked under the order lock, so two concurrent submits never pay the charge twice (B1).
+   */
+  maxSettledCents?: number;
   /** Online: tell the admin when the hold was already released. */
   alertLatePayment?: boolean;
   /** Runs inside the payment transaction, after the payment row exists. */
@@ -118,6 +123,43 @@ interface RegisterPrepayArgs {
 }
 
 const PAYABLE_STATUSES: string[] = ['pending', 'confirmed'];
+
+/** What the administrator chose for the money of a cancelled booking (S3). */
+export type PrepayCancelAction = 'refund' | 'credit' | 'retain';
+
+const PREPAY_CANCEL_LABELS: Record<PrepayCancelAction, string> = {
+  refund: 'devolución',
+  credit: 'saldo a favor',
+  retain: 'retención',
+};
+
+/**
+ * Reason the booking cancel writes on its rental order. It is also the marker a retry reads back
+ * (`receivedCharge`): only an order cancelled by this flow still has money waiting for the booking.
+ */
+export function prepayCancelReason(bookingNumber: string, action: PrepayCancelAction): string {
+  return `Reserva ${bookingNumber} cancelada (${PREPAY_CANCEL_LABELS[action]})`;
+}
+
+/** The action recorded by `prepayCancelReason` in the order's `_flow_metadata`, or null. */
+export function prepayCancelActionOf(internalNotes: string | null | undefined, bookingNumber: string): PrepayCancelAction | null {
+  let reason: unknown;
+  try {
+    reason = JSON.parse(internalNotes ?? '')?._flow_metadata?.cancellation_reason;
+  } catch {
+    return null;
+  }
+  const actions = Object.keys(PREPAY_CANCEL_LABELS) as PrepayCancelAction[];
+  return actions.find((action) => reason === prepayCancelReason(bookingNumber, action)) ?? null;
+}
+
+/** One received payment of the rental order, with its own method (credit/retain take each in alone). */
+export interface ReceivedChargeLeg {
+  paymentId: number;
+  cents: number;
+  methodType: string | null;
+  storePaymentMethodId: number | null;
+}
 const ORDER_SETTLED_MESSAGE = 'La orden de esta reserva ya está pagada: no hay saldo por cobrar.';
 
 function rentalPrepayDescription(stationName: string): string {
@@ -399,15 +441,21 @@ export class RentalPrepayService {
    */
   async registerInPerson(
     bookingId: number,
-    dto: { store_payment_method_id: number; bank_account_id?: number; amount?: number; reference?: string },
+    dto: { store_payment_method_id: number; bank_account_id?: number; amount?: number; reference?: string; request_id?: string },
   ): Promise<{ paid_amount: number; fully_paid: boolean }> {
     const storeId = this.requireStoreId();
     const userId = RequestContextService.getUserId() ?? null;
     const booking = await this.loadBookingForPayment(storeId, bookingId);
     if (!booking) throw new VendixHttpException(ErrorCodes.RENTAL_PREPAY_005);
-    if (!PAYABLE_STATUSES.includes(booking.status)) throw new VendixHttpException(ErrorCodes.RENTAL_PREPAY_004);
+    const transactionId = `SVC-RENTAL-IP-${bookingId}-${dto.request_id ?? randomUUID().slice(0, 8)}`;
     const block = await this.summary(bookingId);
+    // A retry of the same dialog (same key) answers with what is already registered, never pays twice.
+    if (dto.request_id && (await this.prisma.payments.findFirst({ where: { transaction_id: transactionId }, select: { id: true } }))) {
+      return this.inPersonState(block);
+    }
+    if (!PAYABLE_STATUSES.includes(booking.status)) throw new VendixHttpException(ErrorCodes.RENTAL_PREPAY_004);
     const remainingCents = block ? toCents(block.remaining) : 0;
+    const paidCents = block ? toCents(block.paid_amount) : 0;
     if (remainingCents <= 0) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_015);
     const amountCents = dto.amount != null ? toCents(dto.amount) : remainingCents;
     if (amountCents <= 0 || amountCents > remainingCents) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_016);
@@ -467,11 +515,12 @@ export class RentalPrepayService {
       booking,
       amount,
       accountingMethod: methodType,
-      transactionId: `SVC-RENTAL-IP-${bookingId}-${randomUUID().slice(0, 8)}`,
+      transactionId,
       storePaymentMethodId: method.id,
       bankAccountId,
       gateway: { in_person: true, method: methodType, ...(dto.reference?.trim() ? { reference: dto.reference.trim() } : {}) },
       rejectIfExceedsRemaining: true,
+      maxSettledCents: paidCents + remainingCents,
       inTx: async (tx, ctx) => {
         if (cashSessionId != null && movements) {
           await movements.recordSaleMovement(
@@ -484,9 +533,18 @@ export class RentalPrepayService {
       },
     });
     for (const linkId of linkIds) await this.deactivateWompiLink(linkId);
+    // The same key won the race in another request: answer with the registered state.
+    if (result.duplicate && dto.request_id) return this.inPersonState(await this.summary(bookingId));
     if (!result.registered) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_015);
     const after = await this.summary(bookingId);
     return { paid_amount: after?.paid_amount ?? Number(amount), fully_paid: result.fullyPaid };
+  }
+
+  /** Response of an in-person payment already registered (idempotent retry). */
+  private inPersonState(block: BookingPrepayBlock | null): { paid_amount: number; fully_paid: boolean } {
+    const paidCents = block ? toCents(block.paid_amount) : 0;
+    const totalCents = block ? toCents(block.order_total) : 0;
+    return { paid_amount: paidCents / 100, fully_paid: !!block && totalCents - paidCents <= 0 };
   }
 
   /**
@@ -548,34 +606,66 @@ export class RentalPrepayService {
    * Money received on the booking's rental order (S3): net of refunds for a live order, or the sum of
    * what was received when the order was already cancelled (a cancel that stopped half-way resumes).
    */
+  /**
+   * Money received on the booking's rental order, one leg per payment (S3). A live order counts its
+   * collected payments. A cancelled order counts only when this flow cancelled it (the
+   * `prepayCancelReason` marker): its collected legs (now `cancelled`, `paid_at` kept) still wait for the
+   * ledger and `cancelledAction` is the decision already applied. An order cancelled by hand already
+   * returned its money, so there is nothing left to decide.
+   */
   async receivedCharge(
     storeId: number,
     bookingId: number,
-  ): Promise<{ orderId: number; orderState: string; receivedCents: number; methodType: string | null } | null> {
-    const booking = await this.prisma.bookings.findFirst({ where: { id: bookingId, store_id: storeId }, select: { order_id: true } });
+  ): Promise<{
+    orderId: number;
+    orderState: string;
+    receivedCents: number;
+    methodType: string | null;
+    legs: ReceivedChargeLeg[];
+    cancelledAction: PrepayCancelAction | null;
+  } | null> {
+    const booking = await this.prisma.bookings.findFirst({
+      where: { id: bookingId, store_id: storeId },
+      select: { order_id: true, booking_number: true },
+    });
     if (!booking?.order_id) return null;
     const order = await this.prisma.orders.findFirst({
       where: { id: booking.order_id, store_id: storeId },
       select: {
         id: true,
         state: true,
+        internal_notes: true,
         payments: {
+          orderBy: { id: 'asc' },
           select: {
+            id: true,
             amount: true,
             state: true,
+            paid_at: true,
+            store_payment_method_id: true,
             store_payment_method: { select: { system_payment_method: { select: { type: true } } } },
           },
         },
       },
     });
     if (!order) return null;
-    const live = order.state !== 'cancelled';
-    const counted = live ? ['succeeded', 'captured', 'partially_refunded'] : ['succeeded', 'captured', 'partially_refunded', 'refunded'];
-    const rows = order.payments.filter((payment) => counted.includes(payment.state));
-    const receivedCents = rows.reduce((sum, payment) => sum + toCents(payment.amount), 0);
+    const cancelledAction = order.state === 'cancelled' ? prepayCancelActionOf(order.internal_notes, booking.booking_number) : null;
+    if (order.state === 'cancelled' && !cancelledAction) return null;
+    const rows = order.payments.filter((payment) =>
+      cancelledAction ? payment.state === 'cancelled' && payment.paid_at != null : ['succeeded', 'captured', 'partially_refunded'].includes(payment.state),
+    );
+    const legs: ReceivedChargeLeg[] = rows
+      .map((payment) => ({
+        paymentId: payment.id,
+        cents: toCents(payment.amount),
+        methodType: payment.store_payment_method?.system_payment_method?.type ?? null,
+        storePaymentMethodId: payment.store_payment_method_id ?? null,
+      }))
+      .filter((leg) => leg.cents > 0);
+    const receivedCents = legs.reduce((sum, leg) => sum + leg.cents, 0);
     if (receivedCents <= 0) return null;
-    const methodType = rows.find((row) => row.store_payment_method?.system_payment_method?.type)?.store_payment_method?.system_payment_method?.type ?? null;
-    return { orderId: order.id, orderState: order.state, receivedCents, methodType };
+    const methodType = legs.find((leg) => leg.methodType)?.methodType ?? null;
+    return { orderId: order.id, orderState: order.state, receivedCents, methodType, legs, cancelledAction };
   }
 
   /**
@@ -786,7 +876,9 @@ export class RentalPrepayService {
    * hands a fully paid order to the invoice emitter and announces `booking.rental_prepay_paid`.
    * `inTx` runs inside the same transaction after the payment exists (cash movement, request cancel).
    */
-  private async registerPrepayPayment(args: RegisterPrepayArgs): Promise<{ registered: boolean; fullyPaid: boolean }> {
+  private async registerPrepayPayment(
+    args: RegisterPrepayArgs,
+  ): Promise<{ registered: boolean; fullyPaid: boolean; duplicate?: boolean }> {
     const { storeId, booking, amount, accountingMethod: method } = args;
     const bookingId = booking.id;
     const orderId = booking.order_id ?? (await this.createRentalOrder(booking));
@@ -794,7 +886,7 @@ export class RentalPrepayService {
     const outcome = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND store_id = ${storeId} FOR UPDATE`;
       const duplicate = await tx.payments.findFirst({ where: { transaction_id: args.transactionId }, select: { id: true } });
-      if (duplicate) return null;
+      if (duplicate) return { duplicate: true as const };
       const order = await tx.orders.findUnique({
         where: { id: orderId },
         include: { payments: { select: { amount: true, state: true } } },
@@ -802,9 +894,14 @@ export class RentalPrepayService {
       if (!order) return null;
       // A cancelled rental order takes no payment and is never invoiced (the session was cancelled under it).
       if (order.state === 'cancelled') return { cancelledOrder: true as const };
-      const remainingCents = toCents(order.grand_total) - toCents(getSettledOrderAmount(order));
+      const settledCents = toCents(getSettledOrderAmount(order));
+      const remainingCents = toCents(order.grand_total) - settledCents;
       // An in-person charge never pays more than the order still owes (a double submit finds nothing left).
       if (args.rejectIfExceedsRemaining && toCents(amount) > remainingCents) {
+        throw new VendixHttpException(ErrorCodes.STATION_BOOKING_015);
+      }
+      // Nor more than the charge it was read against: a concurrent submit already paid it (B1).
+      if (args.maxSettledCents != null && settledCents + toCents(amount) > args.maxSettledCents) {
         throw new VendixHttpException(ErrorCodes.STATION_BOOKING_015);
       }
       const nextRemaining = Math.max(0, remainingCents - toCents(amount));
@@ -871,6 +968,7 @@ export class RentalPrepayService {
       return { cancelledOrder: false as const, order, payment, fullyPaid: nextRemaining === 0, slotConfirmed, sale_share };
     });
     if (!outcome) return { registered: false, fullyPaid: false };
+    if ('duplicate' in outcome) return { registered: false, fullyPaid: false, duplicate: true };
     if (outcome.cancelledOrder) {
       await this.alertAdmin(
         storeId,

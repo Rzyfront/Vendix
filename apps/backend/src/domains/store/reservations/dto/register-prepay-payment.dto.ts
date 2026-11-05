@@ -1,4 +1,4 @@
-import { IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsInt, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
 /** Body of `POST store/reservations/:id/prepay-payment`: the prepay collected in person (S2). */
@@ -29,4 +29,10 @@ export class RegisterPrepayPaymentDto {
   @IsString()
   @MaxLength(120)
   reference?: string;
+
+  /** Idempotency key of the dialog (one per open): a double submit registers one payment. */
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9-]{8,64}$/, { message: 'La llave del cobro no es válida' })
+  request_id?: string;
 }
