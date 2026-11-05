@@ -255,6 +255,7 @@ export class ServiceStationsService {
     if (touchesDeposit && policy !== 'none' && (amount === null || amount === undefined)) {
       throw new BadRequestException('Indica el monto del anticipo para esta estación.');
     }
+    this.assertPrepayCoherent(current, dto);
     try {
       await this.prisma.service_stations.updateMany({
         where: { id, store_id: this.storeId },
@@ -301,7 +302,50 @@ export class ServiceStationsService {
       ...(dto.open_end_block_minutes !== undefined && { open_end_block_minutes: dto.open_end_block_minutes }),
       ...(dto.cancel_refund_hours !== undefined && { cancel_refund_hours: dto.cancel_refund_hours }),
       ...(dto.reservation_fee_tax_category_id !== undefined && { reservation_fee_tax_category_id: dto.reservation_fee_tax_category_id }),
+      ...(dto.rental_block_unit !== undefined && { rental_block_unit: dto.rental_block_unit }),
+      ...(dto.rental_billing_mode !== undefined && { rental_billing_mode: dto.rental_billing_mode }),
+      ...(dto.rental_charge_timing !== undefined && { rental_charge_timing: dto.rental_charge_timing }),
+      ...this.prepayData(dto),
     };
+  }
+
+  /**
+   * Charge-to-book columns (S17). A mode in the body rewrites both values, so a
+   * partial rule never keeps the other kind and `none`/`full` keep neither.
+   */
+  private prepayData(dto: Partial<StationDepositRulesDto>) {
+    if (dto.booking_prepay_mode === 'partial') {
+      return {
+        booking_prepay_mode: dto.booking_prepay_mode,
+        booking_prepay_percent: dto.booking_prepay_percent ?? null,
+        booking_prepay_amount: dto.booking_prepay_amount ?? null,
+      };
+    }
+    if (dto.booking_prepay_mode !== undefined) {
+      return { booking_prepay_mode: dto.booking_prepay_mode, booking_prepay_percent: null, booking_prepay_amount: null };
+    }
+    return {
+      ...(dto.booking_prepay_percent !== undefined && { booking_prepay_percent: dto.booking_prepay_percent }),
+      ...(dto.booking_prepay_amount !== undefined && { booking_prepay_amount: dto.booking_prepay_amount }),
+    };
+  }
+
+  /** On update without a mode, loose percent/amount must fit the stored mode (the DTO checks the rest). */
+  private assertPrepayCoherent(
+    current: { booking_prepay_mode?: string | null; booking_prepay_percent?: unknown; booking_prepay_amount?: unknown },
+    dto: Partial<StationDepositRulesDto>,
+  ): void {
+    if (dto.booking_prepay_mode !== undefined) return;
+    if (dto.booking_prepay_percent === undefined && dto.booking_prepay_amount === undefined) return;
+    const percent = dto.booking_prepay_percent !== undefined ? dto.booking_prepay_percent : current.booking_prepay_percent;
+    const amount = dto.booking_prepay_amount !== undefined ? dto.booking_prepay_amount : current.booking_prepay_amount;
+    const mode = current.booking_prepay_mode ?? 'none';
+    const ok = mode === 'partial' ? (percent != null) !== (amount != null) : percent == null && amount == null;
+    if (!ok) {
+      throw new BadRequestException(
+        'El cobro parcial lleva un porcentaje o un monto (solo uno); el total o ninguno no llevan ninguno de los dos.',
+      );
+    }
   }
 
   /** Estaciones de la tienda que prestan este servicio. */
@@ -449,6 +493,12 @@ export class ServiceStationsService {
       await tx.service_station_schedules.deleteMany({ where: { store_id: this.storeId, station_id: id } });
       await tx.service_station_services.deleteMany({ where: { store_id: this.storeId, station_id: id } });
       await tx.service_station_providers.deleteMany({ where: { store_id: this.storeId, station_id: id } });
+      // Both FKs are RESTRICT: rate windows are config of this station; a series keeps its history without it.
+      await tx.service_station_rate_windows.deleteMany({ where: { store_id: this.storeId, station_id: id } });
+      await tx.booking_series.updateMany({
+        where: { store_id: this.storeId, station_id: id },
+        data: { station_id: null },
+      });
       await tx.service_stations.delete({ where: { store_id_id: { store_id: this.storeId, id } } });
     });
     return station;

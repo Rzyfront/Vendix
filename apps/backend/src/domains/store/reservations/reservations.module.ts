@@ -31,6 +31,8 @@ import { PaymentRequestsModule } from '../payment-requests/payment-requests.modu
 import { ReservationDepositsService } from './reservation-deposits.service';
 import { ServiceDepositPaidListener } from './listeners/service-deposit-paid.listener';
 import { ServiceDepositHoldExpiryJob } from './jobs/service-deposit-hold-expiry.job';
+import { BookingSeriesController } from './recurrence/booking-series.controller';
+import { BookingSeriesService } from './recurrence/booking-series.service';
 
 @Module({
   imports: [
@@ -48,6 +50,7 @@ import { ServiceDepositHoldExpiryJob } from './jobs/service-deposit-hold-expiry.
   ],
   controllers: [
     ProvidersController,
+    BookingSeriesController,
     ReservationsController,
     StationAvailabilityController,
     BusinessHoursController,
@@ -63,6 +66,7 @@ import { ServiceDepositHoldExpiryJob } from './jobs/service-deposit-hold-expiry.
     ProviderAvailabilityService,
     AutoNoShowJob,
     ReservationDepositsService,
+    BookingSeriesService,
     ServiceDepositPaidListener,
     ServiceDepositHoldExpiryJob,
   ],

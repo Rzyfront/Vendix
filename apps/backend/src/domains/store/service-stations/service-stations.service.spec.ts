@@ -70,6 +70,8 @@ describe('ServiceStationsService.destroy', () => {
       service_station_schedules: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       service_station_services: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       service_station_providers: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      service_station_rate_windows: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      booking_series: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
       service_stations: { delete: jest.fn().mockResolvedValue({ id: 2 }) },
     };
     prisma = {
@@ -118,6 +120,20 @@ describe('ServiceStationsService.destroy', () => {
     expect(tx.booking_reschedule_requests.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: { requested_station_id: null } }),
     );
+  });
+
+  it('borra las ventanas de tarifa y suelta las series antes de borrar la estación (FKs RESTRICT)', async () => {
+    await run(() => service.destroy(2));
+    expect(tx.service_station_rate_windows.deleteMany).toHaveBeenCalledWith({
+      where: { store_id: 10, station_id: 2 },
+    });
+    expect(tx.booking_series.updateMany).toHaveBeenCalledWith({
+      where: { store_id: 10, station_id: 2 },
+      data: { station_id: null },
+    });
+    const deleteOrder = tx.service_stations.delete.mock.invocationCallOrder[0];
+    expect(tx.service_station_rate_windows.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(deleteOrder);
+    expect(tx.booking_series.updateMany.mock.invocationCallOrder[0]).toBeLessThan(deleteOrder);
   });
 });
 
@@ -377,6 +393,57 @@ describe('ServiceStationsService — reglas de anticipo (S1)', () => {
     const data = prisma.service_stations.updateMany.mock.calls[0][0].data;
     expect(data).toEqual(expect.objectContaining({ deposit_policy: 'none', deposit_amount: null }));
     expect(data).not.toHaveProperty('hold_minutes');
+  });
+
+  it('create persiste unidad, modo y momento del cobro y el cobro parcial por porcentaje', async () => {
+    await run(() => service.create({
+      name: 'Cancha 1', intake_template_id: 5, rental_block_unit: 'hour', rental_billing_mode: 'planned',
+      rental_charge_timing: 'at_start', booking_prepay_mode: 'partial', booking_prepay_percent: 30,
+    } as any));
+    expect(prisma.service_stations.create.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      rental_block_unit: 'hour', rental_billing_mode: 'planned', rental_charge_timing: 'at_start',
+      booking_prepay_mode: 'partial', booking_prepay_percent: 30, booking_prepay_amount: null,
+    }));
+  });
+
+  it('create sin reglas de alquiler no agrega esas columnas al insert', async () => {
+    await run(() => service.create({ name: 'Bahía 1', intake_template_id: 5 } as any));
+    const data = prisma.service_stations.create.mock.calls[0][0].data;
+    for (const key of ['rental_block_unit', 'rental_billing_mode', 'rental_charge_timing', 'booking_prepay_mode', 'booking_prepay_percent', 'booking_prepay_amount']) {
+      expect(data).not.toHaveProperty(key);
+    }
+  });
+
+  it('update a cobro total borra porcentaje y monto', async () => {
+    current.booking_prepay_mode = 'partial';
+    current.booking_prepay_percent = 30;
+    await run(() => service.update(2, { booking_prepay_mode: 'full' } as any));
+    expect(prisma.service_stations.updateMany.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      booking_prepay_mode: 'full', booking_prepay_percent: null, booking_prepay_amount: null,
+    }));
+  });
+
+  it('update de parcial por porcentaje a parcial por monto borra el porcentaje guardado', async () => {
+    current.booking_prepay_mode = 'partial';
+    current.booking_prepay_percent = 30;
+    await run(() => service.update(2, { booking_prepay_mode: 'partial', booking_prepay_amount: 50000 } as any));
+    expect(prisma.service_stations.updateMany.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      booking_prepay_percent: null, booking_prepay_amount: 50000,
+    }));
+  });
+
+  it('update rechaza un porcentaje suelto cuando la estación no cobra parcial', async () => {
+    current.booking_prepay_mode = 'none';
+    await expect(run(() => service.update(2, { booking_prepay_percent: 30 } as any)))
+      .rejects.toThrow('El cobro parcial lleva un porcentaje o un monto');
+    expect(prisma.service_stations.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('update rechaza dejar el cobro parcial sin porcentaje ni monto', async () => {
+    current.booking_prepay_mode = 'partial';
+    current.booking_prepay_amount = 50000;
+    await expect(run(() => service.update(2, { booking_prepay_amount: null } as any)))
+      .rejects.toThrow('El cobro parcial lleva un porcentaje o un monto');
   });
 
   it('update solo de nombre no valida categorías nuevas ni anticipo', async () => {

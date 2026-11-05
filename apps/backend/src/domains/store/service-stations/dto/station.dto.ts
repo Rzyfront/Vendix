@@ -57,6 +57,35 @@ function IsRentalBlockPair(validationOptions?: ValidationOptions) {
 export const DEPOSIT_AMOUNT_MAX = 9_999_999_999.99;
 
 /**
+ * Charge-to-book coherence (S17): `partial` takes exactly one of percent or amount;
+ * `none` and `full` take neither (null clears them). Without a mode in the body
+ * (update) the service checks against the stored mode.
+ */
+function IsPrepayModeCoherent(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'IsPrepayModeCoherent',
+      target: object.constructor,
+      propertyName,
+      options: {
+        message: 'El cobro parcial lleva un porcentaje o un monto (solo uno); el total o ninguno no llevan ninguno de los dos',
+        ...validationOptions,
+      },
+      validator: {
+        validate(_value: unknown, args: ValidationArguments) {
+          const dto = args.object as StationDepositRulesDto;
+          const hasPercent = dto.booking_prepay_percent != null;
+          const hasAmount = dto.booking_prepay_amount != null;
+          if (dto.booking_prepay_mode === 'partial') return hasPercent !== hasAmount;
+          if (dto.booking_prepay_mode === 'none' || dto.booking_prepay_mode === 'full') return !hasPercent && !hasAmount;
+          return true;
+        },
+      },
+    });
+  };
+}
+
+/**
  * Deposit and booking rules of a station (S1). Shared by create and update so both
  * validate the same way. `deposit_amount` is required whenever the policy is set to
  * something other than `none`; on update the service also checks the stored policy.
@@ -119,6 +148,43 @@ export class StationDepositRulesDto {
   @IsInt()
   @Min(1)
   reservation_fee_tax_category_id?: number | null;
+
+  /** Unit the rental block is shown in (minutes stay the stored measure). */
+  @IsOptional()
+  @IsIn(['minute', 'hour', 'day'])
+  rental_block_unit?: 'minute' | 'hour' | 'day';
+
+  /** elapsed = charge the time used; planned = charge the booked time even if it ends early. */
+  @IsOptional()
+  @IsIn(['elapsed', 'planned'])
+  rental_billing_mode?: 'elapsed' | 'planned';
+
+  /** at_start = charge the rental when the session opens; at_end = at checkout. */
+  @IsOptional()
+  @IsIn(['at_start', 'at_end'])
+  rental_charge_timing?: 'at_start' | 'at_end';
+
+  /** Charge to book a rental: none, the full quote or part of it. */
+  @IsOptional()
+  @IsIn(['none', 'full', 'partial'])
+  @IsPrepayModeCoherent()
+  booking_prepay_mode?: 'none' | 'full' | 'partial';
+
+  /** Share of the quote charged to book (partial mode). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(99.99)
+  booking_prepay_percent?: number | null;
+
+  /** Fixed amount charged to book (partial mode). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(DEPOSIT_AMOUNT_MAX)
+  booking_prepay_amount?: number | null;
 }
 
 export class CreateServiceStationDto extends StationDepositRulesDto {

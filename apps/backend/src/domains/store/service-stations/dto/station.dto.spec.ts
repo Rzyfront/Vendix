@@ -109,3 +109,42 @@ describe('Station DTOs — reglas de anticipo (S1)', () => {
     });
   });
 });
+
+describe('Station DTOs — reglas de alquiler y cobro para reservar (S17)', () => {
+  const rulesErrorsOf = (cls: typeof CreateServiceStationDto | typeof UpdateServiceStationDto, body: Record<string, unknown>) =>
+    validateSync(plainToInstance(cls, body)).map((error) => error.property);
+
+  describe.each([
+    ['CreateServiceStationDto', CreateServiceStationDto, { name: 'Cancha 1' }],
+    ['UpdateServiceStationDto', UpdateServiceStationDto, {}],
+  ] as const)('%s', (_label, cls, base) => {
+    it.each([
+      ['unidad, modo y momento del cobro', { rental_block_unit: 'hour', rental_billing_mode: 'planned', rental_charge_timing: 'at_start' }],
+      ['sin cobro para reservar', { booking_prepay_mode: 'none' }],
+      ['cobro total', { booking_prepay_mode: 'full' }],
+      ['cobro total limpiando valores', { booking_prepay_mode: 'full', booking_prepay_percent: null, booking_prepay_amount: null }],
+      ['cobro parcial por porcentaje', { booking_prepay_mode: 'partial', booking_prepay_percent: 30 }],
+      ['cobro parcial por monto', { booking_prepay_mode: 'partial', booking_prepay_amount: 50000 }],
+      ['porcentaje con dos decimales', { booking_prepay_mode: 'partial', booking_prepay_percent: 12.5 }],
+    ])('acepta %s', (_case, body) => {
+      expect(rulesErrorsOf(cls, { ...base, ...body })).toEqual([]);
+    });
+
+    it.each([
+      ['unidad inválida', { rental_block_unit: 'week' }, 'rental_block_unit'],
+      ['modo de cobro inválido', { rental_billing_mode: 'x' }, 'rental_billing_mode'],
+      ['momento de cobro inválido', { rental_charge_timing: 'x' }, 'rental_charge_timing'],
+      ['cobro para reservar inválido', { booking_prepay_mode: 'x' }, 'booking_prepay_mode'],
+      ['parcial sin porcentaje ni monto', { booking_prepay_mode: 'partial' }, 'booking_prepay_mode'],
+      ['parcial con porcentaje y monto', { booking_prepay_mode: 'partial', booking_prepay_percent: 30, booking_prepay_amount: 50000 }, 'booking_prepay_mode'],
+      ['total con porcentaje', { booking_prepay_mode: 'full', booking_prepay_percent: 30 }, 'booking_prepay_mode'],
+      ['ninguno con monto', { booking_prepay_mode: 'none', booking_prepay_amount: 50000 }, 'booking_prepay_mode'],
+      ['porcentaje cero', { booking_prepay_mode: 'partial', booking_prepay_percent: 0 }, 'booking_prepay_percent'],
+      ['porcentaje de 100', { booking_prepay_mode: 'partial', booking_prepay_percent: 100 }, 'booking_prepay_percent'],
+      ['porcentaje con tres decimales', { booking_prepay_mode: 'partial', booking_prepay_percent: 12.345 }, 'booking_prepay_percent'],
+      ['monto cero', { booking_prepay_mode: 'partial', booking_prepay_amount: 0 }, 'booking_prepay_amount'],
+    ])('rechaza %s', (_case, body, property) => {
+      expect(rulesErrorsOf(cls, { ...base, ...body })).toContain(property);
+    });
+  });
+});
