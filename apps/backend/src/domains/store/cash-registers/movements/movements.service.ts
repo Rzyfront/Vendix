@@ -33,6 +33,8 @@ import { shouldRecordCashMovement } from './cash-movement-policy.util';
  */
 export const REFUND_CASH_MOVEMENT_KEY = 'refund_cash_movement_v1';
 export const REFUND_CASH_MOVEMENT_SOURCE = 'refund.cash_movement';
+/** `source_type` of booking/session deposit money (S14): traced in the drawer, never a sale. */
+export const SERVICE_DEPOSIT_MOVEMENT_SOURCE = 'service_deposit';
 /** B18: outbox refund row with no actor to book it to. */
 export const REFUND_NO_ACTOR_PREFIX = 'PENDING_REVIEW_NO_ACTOR';
 export const DEFERRED_SALE_CASH_MOVEMENT_KEY = 'deferred_sale_cash_movement_v1';

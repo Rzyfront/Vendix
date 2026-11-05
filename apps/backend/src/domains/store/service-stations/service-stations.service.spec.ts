@@ -548,6 +548,7 @@ describe('ServiceStationsService — defaults y múltiplo del bloque (S7-h, S7-f
   });
 
   it('update rechaza un cambio de bloque que deja un servicio station_rate vinculado fuera de múltiplo', async () => {
+    current.rental_block_minutes = 15;
     prisma.service_station_services.findMany.mockResolvedValue([
       { product: { service_duration_minutes: 45, rental_pricing_mode: 'station_rate' } },
     ]);
@@ -555,6 +556,16 @@ describe('ServiceStationsService — defaults y múltiplo del bloque (S7-h, S7-f
       errorCode: 'STATION_017',
     });
     expect(prisma.service_stations.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('update que reenvía el mismo bloque guardado no lo revalida: una fila heredada no bloquea editar el nombre', async () => {
+    prisma.service_station_services.findMany.mockResolvedValue([
+      { product: { service_duration_minutes: 45, rental_pricing_mode: 'station_rate' } },
+    ]);
+    await run(() => service.update(2, { name: 'Sala 1b', rental_block_minutes: 30 } as any));
+    const blockChecks = prisma.service_station_services.findMany.mock.calls.filter((c: any[]) => c[0]?.where?.product);
+    expect(blockChecks).toHaveLength(0);
+    expect(prisma.service_stations.updateMany).toHaveBeenCalled();
   });
 
   it('update sin cambio de bloque no consulta los servicios vinculados', async () => {

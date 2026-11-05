@@ -4180,10 +4180,16 @@ export class ProductsService {
         sanitizedDto.rental_pricing_mode !== undefined
           ? sanitizedDto.rental_pricing_mode
           : existingProduct.rental_pricing_mode;
+      // Only a change is checked: the form resends both fields on every save
+      // and a legacy misaligned service must stay editable.
       if (
         isStationService &&
-        (sanitizedDto.service_duration_minutes !== undefined ||
-          sanitizedDto.rental_pricing_mode !== undefined)
+        ((sanitizedDto.service_duration_minutes !== undefined &&
+          sanitizedDto.service_duration_minutes !==
+            existingProduct.service_duration_minutes) ||
+          (sanitizedDto.rental_pricing_mode !== undefined &&
+            sanitizedDto.rental_pricing_mode !==
+              existingProduct.rental_pricing_mode))
       ) {
         await assertProductFitsLinkedStations(
           this.prisma as any,

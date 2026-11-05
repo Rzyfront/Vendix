@@ -852,6 +852,19 @@ describe('ProductsService', () => {
       expect(mockPrismaService.products.update).toHaveBeenCalled();
     });
 
+    it('update que reenvía la misma duración y modo guardados no revalida el múltiplo (fila heredada)', async () => {
+      primeUpdate(existingStationService({ rental_pricing_mode: 'station_rate', service_duration_minutes: 45 }));
+      mockPrismaService.service_station_services.findMany.mockResolvedValue([
+        { station: { name: 'Sala 1', rental_block_minutes: 30 } },
+      ]);
+      await service.update(1, {
+        name: 'Nuevo nombre',
+        service_duration_minutes: 45,
+        rental_pricing_mode: 'station_rate',
+      } as UpdateProductDto);
+      expect(mockPrismaService.products.update).toHaveBeenCalled();
+    });
+
     it('update de un servicio que no es station_rate no valida el múltiplo', async () => {
       primeUpdate(existingStationService({ rental_pricing_mode: 'fixed_price' }));
       mockPrismaService.service_station_services.findMany.mockResolvedValue([

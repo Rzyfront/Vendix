@@ -6,7 +6,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { WalletBalanceService } from '../wallet/services/wallet-balance.service';
-import { MovementsService } from '../cash-registers/movements/movements.service';
+import { MovementsService, SERVICE_DEPOSIT_MOVEMENT_SOURCE } from '../cash-registers/movements/movements.service';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale-share.util';
 import { getSettledOrderAmount } from '../payments/services/payment-validator.service';
@@ -743,7 +743,7 @@ export class ServiceDepositsService {
       amount: data.amount,
       payment_method: data.method,
       include_non_cash: true,
-      source_type: 'service_deposit',
+      source_type: SERVICE_DEPOSIT_MOVEMENT_SOURCE,
       source_id: data.deposit_id,
       reference: data.reference,
       notes: direction === 'in' ? 'Anticipo consumible' : 'Devolución de anticipo consumible',

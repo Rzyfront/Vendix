@@ -29,7 +29,7 @@ import { OrderHistoryService } from '../orders/order-history/order-history.servi
 import { ServiceAllocationCoordinator } from './service-allocation-coordinator.service';
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { assertSaleNatureProducts } from '../products/services/product-usage-nature.util';
-import { ReservationDepositsService } from './reservation-deposits.service';
+import { ReservationDepositsService, type BookingCancelActor } from './reservation-deposits.service';
 import { RentalQuoteService } from '../service-stations/rental-quote/rental-quote.service';
 import type { RentalQuote } from '../service-stations/rental-quote/rental-quote.service';
 import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
@@ -1172,9 +1172,9 @@ export class ReservationsService {
   /**
    * Cancela una reserva (pending|confirmed -> cancelled)
    */
-  async cancel(id: number, options: CancelBookingDto = {}) {
+  async cancel(id: number, options: CancelBookingDto = {}, actor: BookingCancelActor = 'staff') {
     // A booking with a deposit settles it (A1) before it is cancelled; without one this is a no-op.
-    const closed = await this.reservationDeposits?.cancelWithDeposit(id, options);
+    const closed = await this.reservationDeposits?.cancelWithDeposit(id, options, actor);
     // No money to decide: the open "cobro para reservar" request (and its Wompi link) goes with the booking.
     if (!closed) await this.cancelOpenPrepayRequests(id);
     const booking = closed ? await this.findOne(id) : await this.transition(id, 'cancelled');

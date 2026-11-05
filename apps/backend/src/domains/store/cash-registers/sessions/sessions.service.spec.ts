@@ -865,6 +865,28 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(summary.non_cash_total).toBe(30000);
     });
 
+    it('un anticipo de reserva con tarjeta queda fuera de las ventas del cierre (no es una venta)', async () => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue(
+        OPEN_SESSION,
+      );
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        { type: 'sale', amount: 30000, payment_method: 'card' },
+        { type: 'sale', amount: 400000, payment_method: 'card', source_type: 'service_deposit', source_id: 3 },
+        { type: 'refund', amount: 400000, payment_method: 'card', source_type: 'service_deposit', source_id: 4 },
+        { type: 'cash_in', amount: 20000, payment_method: 'cash', source_type: 'service_deposit', source_id: 5 },
+      ]);
+
+      const summary = await service.getCashSummary(SESSION_ID);
+
+      expect(summary.sales_total).toBe(30000);
+      expect(summary.sales_count).toBe(1);
+      expect(summary.non_cash_total).toBe(30000);
+      expect(summary.sales_by_method).toEqual([{ method: 'card', count: 1, total: 30000 }]);
+      // The cash deposit still counts in the drawer, as before.
+      expect(summary.cash_in).toBe(20000);
+      expect(summary.expected_cash_total).toBe(OPENING_AMOUNT + 20000);
+    });
+
     it('suma en Decimal exacto, sin error de punto flotante (B21)', async () => {
       prismaMock.cash_register_sessions.findFirst.mockResolvedValue({
         ...OPEN_SESSION,

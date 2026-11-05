@@ -1223,6 +1223,25 @@ describe('CheckoutService - promotions and coupons', () => {
           expect.objectContaining({ where: { id: 57, store_id: 1, order_id: null } }),
         );
       });
+
+      it('con reserva, el invitado se resuelve solo por correo: el teléfono no busca ni reescribe otra cuenta', async () => {
+        mockServiceProducts();
+        const { reservations } = mockBookingLinking();
+        reservations.create.mockResolvedValue({ id: 57 });
+        mockOrderCreate(10000);
+        storePrisma.store_settings.findUnique.mockResolvedValue({
+          settings: { ecommerce: { checkout: { allow_guest_booking: true } } },
+        });
+        const resolve = (service as any).customersService.resolveGuestCustomerForCheckout;
+        resolve.mockResolvedValue({ customer_id: 77, was_created: true });
+
+        await service.checkout({ ...guestDto } as any);
+
+        expect(resolve).toHaveBeenCalledWith(
+          1,
+          expect.objectContaining({ email: 'ana@example.com', phone: null }),
+        );
+      });
     });
 
     it('booking extra SIN estación no aborta: mantiene log-and-continue', async () => {
@@ -2244,6 +2263,21 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(data.customer_alias).toBeNull();
       expect(result.customer_id).toBe(77);
       expect(result.customer_alias).toBeNull();
+    });
+
+    it('checkout sin reservas: el invitado se sigue resolviendo con su teléfono (como siempre)', async () => {
+      const resolve = (service as any).customersService.resolveGuestCustomerForCheckout;
+      resolve.mockResolvedValue({ customer_id: 77, was_created: false, was_updated: false });
+      mockOrderCreate(10000);
+      await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+        guest_customer: { first_name: 'Juan', email: 'juan@example.com', phone: '3001234567' },
+      } as any);
+      expect(resolve).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({ email: 'juan@example.com', phone: '3001234567' }),
+      );
     });
 
     it('whatsappCheckout: guest solo-nombre también persiste el alias', async () => {

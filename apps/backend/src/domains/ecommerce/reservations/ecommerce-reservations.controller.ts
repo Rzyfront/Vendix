@@ -611,7 +611,8 @@ export class EcommerceReservationsController {
       );
     }
 
-    const result = await this.reservationsService.cancel(id);
+    // A paid booking is the store's decision: the customer gets STATION_BOOKING_020 (D7).
+    const result = await this.reservationsService.cancel(id, {}, 'customer');
     return { success: true, data: result };
   }
 

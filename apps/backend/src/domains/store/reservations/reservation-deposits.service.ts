@@ -59,6 +59,9 @@ export interface BookingDepositBlock {
  * Nothing here charges or closes anything on its own (D4): every money movement
  * is an explicit action of the administrator.
  */
+/** Who cancels a booking: staff decides what happens with collected money; a customer cannot (D7). */
+export type BookingCancelActor = 'staff' | 'customer';
+
 @Injectable()
 export class ReservationDepositsService {
   private readonly logger = new Logger(ReservationDepositsService.name);
@@ -575,6 +578,16 @@ export class ReservationDepositsService {
     return released;
   }
 
+  /** The user when they still have an open cash session in the store, otherwise null. */
+  private async userWithOpenDrawer(store_id: number, userId: number | null): Promise<number | null> {
+    if (!userId) return null;
+    const session = await this.prisma.cash_register_sessions.findFirst({
+      where: { store_id, status: 'open', opened_by: userId },
+      select: { id: true },
+    });
+    return session ? userId : null;
+  }
+
   /** Settles a paid deposit request again; a failure waits for the next tick. */
   private async retrySettlement(
     store_id: number,
@@ -596,8 +609,9 @@ export class ReservationDepositsService {
         amount: Number(request.amount),
         method: request.transfer_submitted_at ? 'transfer' : request.payment_link_id ? 'wompi' : 'manual',
         paid_at: request.paid_at ?? new Date(),
-        // The drawer of whoever confirmed the transfer, as the first settlement would have used (S14).
-        confirmed_by_user_id: request.confirmed_by_user_id ?? null,
+        // The drawer of whoever confirmed the transfer, as the first settlement would have used (S14). A
+        // closed drawer would fail this retry on every tick: then it settles without a cash movement.
+        confirmed_by_user_id: await this.userWithOpenDrawer(store_id, request.confirmed_by_user_id ?? null),
       });
     } catch (err: unknown) {
       this.logger.error(
@@ -695,9 +709,10 @@ export class ReservationDepositsService {
   async cancelWithDeposit(
     bookingId: number,
     options: { leftover_action?: 'refund' | 'credit' | 'retain'; refund_method?: string; request_id?: string },
+    actor: BookingCancelActor = 'staff',
   ): Promise<{ closed: true; emitted?: boolean } | null> {
     const store_id = this.requireStoreId();
-    const prepayClosed = await this.cancelWithPrepay(store_id, bookingId, options);
+    const prepayClosed = await this.cancelWithPrepay(store_id, bookingId, options, actor);
     if (prepayClosed) return prepayClosed;
     const [balance, pendingCount] = await Promise.all([
       this.deposits.balanceOf({ bookingId }),
@@ -765,6 +780,7 @@ export class ReservationDepositsService {
     storeId: number,
     bookingId: number,
     options: { leftover_action?: 'refund' | 'credit' | 'retain'; refund_method?: string; request_id?: string },
+    actor: BookingCancelActor,
   ): Promise<{ closed: true; emitted?: boolean } | null> {
     const prepay = this.lazy(RentalPrepayService);
     if (!prepay) return null;
@@ -775,6 +791,9 @@ export class ReservationDepositsService {
     if (!booking || !DECIDABLE_STATUSES.includes(booking.status)) return null;
     const received = await prepay.receivedCharge(storeId, bookingId);
     if (!received) return null;
+    // Collected money is the store's decision (refund, credit or retain) and moves through a staff drawer:
+    // the customer cannot cancel it alone (D7).
+    if (actor === 'customer') throw new VendixHttpException(ErrorCodes.STATION_BOOKING_020);
 
     const action = options.leftover_action;
     if (!action) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_012);

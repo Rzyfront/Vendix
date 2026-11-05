@@ -1206,10 +1206,16 @@ describe('ReservationsService — station deposits', () => {
     });
   });
 
+  it('cancel by the customer forwards who cancels to the deposit rules', async () => {
+    const { service, deposits } = build();
+    await service.cancel(77, {}, 'customer');
+    expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, {}, 'customer');
+  });
+
   it('cancel: without a deposit the booking is cancelled by the state machine as always', async () => {
     const { service, prisma, deposits, emits } = build();
     const result = await service.cancel(77);
-    expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, {});
+    expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, {}, 'staff');
     expect(result.status).toBe('cancelled');
     expect(prisma.bookings.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'cancelled' }) }),
@@ -1224,7 +1230,7 @@ describe('ReservationsService — station deposits', () => {
       return { closed: true };
     });
     const result = await service.cancel(77, { leftover_action: 'refund' });
-    expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, { leftover_action: 'refund' });
+    expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, { leftover_action: 'refund' }, 'staff');
     expect(result.status).toBe('cancelled');
     expect(prisma.bookings.update).not.toHaveBeenCalled();
     expect(emits.map((e) => e.name)).toContain('booking.cancelled');

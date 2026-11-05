@@ -262,8 +262,9 @@ export class ServiceStationsService {
       throw new BadRequestException('Indica el monto del anticipo para esta estación.');
     }
     this.assertPrepayCoherent(current, dto);
-    // A new block must keep every station_rate service linked here a whole number of blocks.
-    if (dto.rental_block_minutes) {
+    // A new block must keep every station_rate service linked here a whole number of blocks. The form
+    // resends the stored block on every save: only a change is checked, so legacy rows stay editable.
+    if (dto.rental_block_minutes && dto.rental_block_minutes !== current.rental_block_minutes) {
       await assertStationFitsLinkedServices(this.prisma, this.storeId, {
         id,
         name: dto.name?.trim() || current.name,

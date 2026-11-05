@@ -474,7 +474,7 @@ describe('ReservationDepositsService', () => {
     });
 
     it('A2: the retry settles in the drawer of whoever confirmed the transfer', async () => {
-      const { service, tx, deposits } = build();
+      const { service, tx, prisma, deposits } = build();
       tx.service_deposits.findMany.mockResolvedValue(overdue);
       tx.payment_requests.findFirst.mockResolvedValue({
         id: 9,
@@ -486,8 +486,30 @@ describe('ReservationDepositsService', () => {
         transfer_submitted_at: new Date(),
         confirmed_by_user_id: 42,
       });
+      prisma.cash_register_sessions = { findFirst: jest.fn().mockResolvedValue({ id: 5 }) };
       await service.expireOverdueHolds();
       expect(deposits.completePendingInTx).toHaveBeenCalledWith(tx, { deposit_id: 3, store_id: 1, user_id: 42 });
+    });
+
+    it('A2: if whoever confirmed no longer has an open drawer, the retry settles without a cash movement', async () => {
+      const { service, tx, prisma, deposits } = build();
+      tx.service_deposits.findMany.mockResolvedValue(overdue);
+      tx.payment_requests.findFirst.mockResolvedValue({
+        id: 9,
+        status: 'paid',
+        payment_link_id: null,
+        purpose: 'service_deposit',
+        amount: 400000,
+        paid_at: new Date(),
+        transfer_submitted_at: new Date(),
+        confirmed_by_user_id: 42,
+      });
+      prisma.cash_register_sessions = { findFirst: jest.fn().mockResolvedValue(null) };
+      await service.expireOverdueHolds();
+      expect(prisma.cash_register_sessions.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { store_id: 1, status: 'open', opened_by: 42 } }),
+      );
+      expect(deposits.completePendingInTx).toHaveBeenCalledWith(tx, { deposit_id: 3, store_id: 1, user_id: null });
     });
 
     it('is idempotent: a booking already claimed by another tick is not released twice', async () => {
@@ -666,6 +688,21 @@ describe('ReservationDepositsService', () => {
       await expect(service.cancelWithDeposit(77, {})).rejects.toMatchObject(code('STATION_BOOKING_012'));
       expect(tx.bookings.update).not.toHaveBeenCalled();
       expect(deposits.receiveInTx).not.toHaveBeenCalled();
+    });
+
+    it('cliente: una reserva con cobro recibido no se cancela sola: 409 STATION_BOOKING_020 sin mover nada', async () => {
+      const { service, tx, deposits, orderFlow } = build({ booking: confirmedBooking, received: paid });
+      const cancelOrder = jest.fn();
+      (orderFlow as any).cancelOrder = cancelOrder;
+      await expect(service.cancelWithDeposit(77, {}, 'customer')).rejects.toMatchObject(code('STATION_BOOKING_020'));
+      expect(cancelOrder).not.toHaveBeenCalled();
+      expect(deposits.receiveInTx).not.toHaveBeenCalled();
+      expect(tx.bookings.update).not.toHaveBeenCalled();
+    });
+
+    it('cliente: sin cobro recibido la reserva sigue el camino de siempre', async () => {
+      const { service } = build({ booking: confirmedBooking, received: null, balance: 0 });
+      await expect(service.cancelWithDeposit(77, {}, 'customer')).resolves.toBeNull();
     });
 
     it('ventana tardía solo admite retain: refund responde STATION_BOOKING_017', async () => {

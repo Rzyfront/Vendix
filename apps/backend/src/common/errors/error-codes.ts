@@ -6129,6 +6129,7 @@ export const ErrorCodes = {
   STATION_BOOKING_017: { code: 'STATION_BOOKING_017', httpStatus: 409, devMessage: 'Esa opción no está permitida para cancelar esta reserva.' },
   STATION_BOOKING_018: { code: 'STATION_BOOKING_018', httpStatus: 400, devMessage: 'Lo pagado se devuelve por el mismo medio con que pagó el cliente: no elijas un medio de devolución.' },
   STATION_BOOKING_019: { code: 'STATION_BOOKING_019', httpStatus: 409, devMessage: 'La cancelación de esta reserva ya empezó con otra opción: repítela con la misma opción.' },
+  STATION_BOOKING_020: { code: 'STATION_BOOKING_020', httpStatus: 409, devMessage: 'Esta reserva ya está pagada: para cancelarla, comunícate con la tienda.' },
   // Station rental "cobro para reservar" (T15, S1)
   RENTAL_PREPAY_001: { code: 'RENTAL_PREPAY_001', httpStatus: 400, devMessage: 'Esta estación no cobra para reservar.' },
   RENTAL_PREPAY_002: { code: 'RENTAL_PREPAY_002', httpStatus: 400, devMessage: 'La reserva no tiene un valor cotizado para calcular el cobro.' },

@@ -25,6 +25,7 @@ import {
   REFUND_CASH_MOVEMENT_KEY,
   REFUND_CASH_MOVEMENT_SOURCE,
   ORDER_CANCELLED_MOVEMENT_REFERENCE,
+  SERVICE_DEPOSIT_MOVEMENT_SOURCE,
 } from '../movements/movements.service';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
@@ -1804,6 +1805,8 @@ export class SessionsService {
 
       switch (m.type) {
         case 'sale': {
+          // A non-cash booking deposit sits in the drawer for traceability (S14) but is not a sale.
+          if (m.source_type === SERVICE_DEPOSIT_MOVEMENT_SOURCE) break;
           const method = m.payment_method || 'unknown';
           const bucket = by_method.get(method) ?? { count: 0, total: new Prisma.Decimal(0) };
           bucket.count++;

@@ -55,3 +55,23 @@ describe('EcommerceReservationsController - cotización pública de alquiler', (
     expect(rentalQuote.quote).not.toHaveBeenCalled();
   });
 });
+
+describe('EcommerceReservationsController - cancelar desde Mis reservas', () => {
+  it('cancela como cliente: las reglas de dinero saben que no decide la tienda', async () => {
+    const reservations = {
+      findOne: jest.fn().mockResolvedValue({ id: 77, customer_id: 1, status: 'confirmed' }),
+      cancel: jest.fn().mockResolvedValue({ id: 77, status: 'cancelled' }),
+    };
+    const controller = new EcommerceReservationsController(
+      {} as any,
+      reservations as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    const result = await controller.cancelBooking(77, { user: { id: 1 } });
+    expect(reservations.cancel).toHaveBeenCalledWith(77, {}, 'customer');
+    expect(result).toEqual({ success: true, data: { id: 77, status: 'cancelled' } });
+  });
+});
