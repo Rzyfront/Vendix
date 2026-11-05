@@ -159,6 +159,14 @@
 
       <!-- Date + Channel (always visible when service is selected) -->
       @if (selectedService()) {
+        @if (!posMode() && !isFreeBooking()) {
+          <app-booking-series-form
+            [base]="seriesBase()"
+            [(repeating)]="repeating"
+            (created)="onSeriesCreated($event)"
+          />
+        }
+
         @if (requiresStation()) {
           <div class="form-section mt-4">
             <div class="section-header">
@@ -734,7 +742,7 @@
         <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
       </app-button>
     }
-    @if (currentStep() === confirmStep()) {
+    @if (currentStep() === confirmStep() && !repeating()) {
       <app-button
         variant="primary"
         size="sm"

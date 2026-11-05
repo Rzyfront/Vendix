@@ -53,6 +53,35 @@ export interface StationRules {
   reservation_fee_tax_category_id: number | null;
 }
 
+/** Rental rate and "cobro para reservar" rules of a station (S1, phase 3). */
+export type RentalBlockUnit = 'minute' | 'hour' | 'day';
+export type RentalBillingMode = 'elapsed' | 'planned';
+export type RentalChargeTiming = 'at_start' | 'at_end';
+export type BookingPrepayMode = 'none' | 'full' | 'partial';
+
+export interface StationRentalRules {
+  /** Stored measure of the block, always in minutes (1-1440); null with a null price = no rental rate. */
+  rental_block_minutes: number | null;
+  rental_block_price: number | null;
+  /** Display unit only: minutes stay the stored value, day = 1440. */
+  rental_block_unit: RentalBlockUnit;
+  rental_billing_mode: RentalBillingMode;
+  rental_charge_timing: RentalChargeTiming;
+  booking_prepay_mode: BookingPrepayMode;
+  /** Partial mode takes exactly one of percent or amount; none/full send both null. */
+  booking_prepay_percent: number | null;
+  booking_prepay_amount: number | null;
+}
+
+/** One rate window of a station (GET/PUT store/service-stations/:id/rate-windows). */
+export interface StationRateWindow {
+  /** 0 = domingo ... 6 = sábado. */
+  weekday: number;
+  start_time: string;
+  end_time: string;
+  block_price: number;
+}
+
 /** Method + payment method row used by every deposit request (open, recharge, refund). */
 export interface DepositPaymentInput {
   amount: number;
@@ -120,6 +149,14 @@ export interface ServiceStation {
   open_end_block_minutes?: number;
   cancel_refund_hours?: number | null;
   reservation_fee_tax_category_id?: number | null;
+  rental_block_minutes?: number | null;
+  rental_block_price?: number | string | null;
+  rental_block_unit?: RentalBlockUnit;
+  rental_billing_mode?: RentalBillingMode;
+  rental_charge_timing?: RentalChargeTiming;
+  booking_prepay_mode?: BookingPrepayMode;
+  booking_prepay_percent?: number | string | null;
+  booking_prepay_amount?: number | string | null;
   status: 'active' | 'inactive';
   /** Present when the station is occupied; the page falls back to the sessions list when absent. */
   active_session?: StationActiveSession | null;
@@ -263,11 +300,11 @@ export class ServiceStationsService {
       .pipe(map((response) => this.unwrap(response)));
   }
 
-  create(body: { name: string; capacity: number; station_type?: StationType; track_time?: boolean; target_minutes?: number | null; intake_template_id?: number | null; rental_tax_category_id?: number | null; rental_tax_is_inclusive?: boolean } & Partial<StationRules>): Observable<ServiceStation> {
+  create(body: { name: string; capacity: number; station_type?: StationType; track_time?: boolean; target_minutes?: number | null; intake_template_id?: number | null; rental_tax_category_id?: number | null; rental_tax_is_inclusive?: boolean } & Partial<StationRules> & Partial<StationRentalRules>): Observable<ServiceStation> {
     return this.http.post<{ data?: ServiceStation } | ServiceStation>(this.base, body).pipe(map((r) => this.unwrap(r)));
   }
 
-  update(id: number, body: Partial<Pick<ServiceStation, 'name' | 'capacity' | 'status' | 'station_type' | 'track_time' | 'target_minutes' | 'intake_template_id' | 'rental_tax_category_id' | 'rental_tax_is_inclusive'>> & Partial<StationRules>): Observable<ServiceStation> {
+  update(id: number, body: Partial<Pick<ServiceStation, 'name' | 'capacity' | 'status' | 'station_type' | 'track_time' | 'target_minutes' | 'intake_template_id' | 'rental_tax_category_id' | 'rental_tax_is_inclusive'>> & Partial<StationRules> & Partial<StationRentalRules>): Observable<ServiceStation> {
     return this.http.patch<{ data?: ServiceStation } | ServiceStation>(`${this.base}/${id}`, body).pipe(map((r) => this.unwrap(r)));
   }
 
@@ -293,6 +330,19 @@ export class ServiceStationsService {
 
   setSchedules(id: number, schedules: StationSchedule[]): Observable<StationSchedule[]> {
     return this.http.put<{ data?: StationSchedule[] } | StationSchedule[]>(`${this.base}/${id}/schedules`, { schedules }).pipe(map((r) => this.unwrap(r)));
+  }
+
+  getRateWindows(id: number): Observable<StationRateWindow[]> {
+    return this.http
+      .get<{ data?: StationRateWindow[] } | StationRateWindow[]>(`${this.base}/${id}/rate-windows`)
+      .pipe(map((r) => this.unwrap(r).map((w) => ({ ...w, block_price: Number(w.block_price) }))));
+  }
+
+  /** Replaces every window of the station. */
+  setRateWindows(id: number, windows: StationRateWindow[]): Observable<StationRateWindow[]> {
+    return this.http
+      .put<{ data?: StationRateWindow[] } | StationRateWindow[]>(`${this.base}/${id}/rate-windows`, { windows })
+      .pipe(map((r) => this.unwrap(r)));
   }
 
   getExceptions(id: number): Observable<StationException[]> {

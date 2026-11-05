@@ -29,6 +29,41 @@ import { AvailableProviderUser, RescheduleRequest } from '../interfaces/reservat
 // from two paths. Use `export type` for `isolatedModules: true` (TS 5+).
 export type { RescheduleRequest };
 
+/** Recurring bookings (S19): body of POST store/reservations/series[/preview]. */
+export interface BookingSeriesInput {
+  customer_id?: number;
+  product_id: number;
+  product_variant_id?: number;
+  station_id?: number;
+  provider_id?: number;
+  frequency: 'daily' | 'weekly';
+  interval_count?: number;
+  /** First occurrence, YYYY-MM-DD. */
+  start_date: string;
+  start_time: string;
+  /** end_time <= start_time ends the next day. */
+  end_time: string;
+  occurrences: number;
+  skip_conflicts?: boolean;
+  notes?: string;
+  channel?: string;
+}
+
+export interface BookingSeriesPreviewRow {
+  index: number;
+  date: string;
+  end_date: string | null;
+  status: 'ok' | 'conflict';
+  code?: string;
+  message?: string;
+}
+
+export interface BookingSeriesResult {
+  series_id: number;
+  created: Array<{ index: number; booking_id: number; booking_number: string; date: string }>;
+  conflicts: Array<{ index: number; date: string; code: string; message: string }>;
+}
+
 export interface PaginatedResponse<T> {
   data: T[];
   meta: {
@@ -241,6 +276,23 @@ export class ReservationsService {
     return this.http.post<any>(this.apiUrl, dto).pipe(
       map((response) => response.data || response),
     );
+  }
+
+  previewBookingSeries(dto: BookingSeriesInput): Observable<BookingSeriesPreviewRow[]> {
+    return this.http
+      .post<any>(`${this.apiUrl}/series/preview`, dto)
+      .pipe(map((response) => response.data || response));
+  }
+
+  createBookingSeries(dto: BookingSeriesInput): Observable<BookingSeriesResult> {
+    return this.http.post<any>(`${this.apiUrl}/series`, dto).pipe(map((response) => response.data || response));
+  }
+
+  /** Each occurrence is a normal booking: this only cancels in bulk; one date cancels with cancelReservation. */
+  cancelBookingSeries(seriesId: number, from = 0): Observable<unknown> {
+    return this.http
+      .post<any>(`${this.apiUrl}/series/${seriesId}/cancel`, { from })
+      .pipe(map((response) => response.data || response));
   }
 
   confirmReservation(id: number): Observable<Booking> {

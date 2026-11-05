@@ -84,6 +84,15 @@ import {
   stationRulesFrom,
   stationRulesPayload,
 } from './station-rules-form/station-rules-form.component';
+import {
+  DEFAULT_RENTAL_RULES,
+  StationRentalFormComponent,
+  stationRentalError,
+  stationRentalFrom,
+  stationRentalPayload,
+  stationRentalSummary,
+} from './station-rental-form/station-rental-form.component';
+import { StationRateWindowsComponent } from './station-rate-windows/station-rate-windows.component';
 import { OpenSessionDepositComponent, OpenSessionDepositValue, openDepositError } from './open-session-deposit/open-session-deposit.component';
 
 /** El selector de impuesto trabaja con `number`; `null` es «Sin impuesto». */
@@ -306,6 +315,8 @@ export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
     ServiceRemindersPageComponent,
     CustomerSelectComponent,
     StationRulesFormComponent,
+    StationRentalFormComponent,
+    StationRateWindowsComponent,
     OpenSessionDepositComponent,
   ],
   templateUrl: './service-stations-page.component.html',
@@ -354,6 +365,8 @@ export class ServiceStationsPageComponent implements OnInit {
   // Reglas de uso y anticipo (S1): un valor por formulario, con el impuesto de Gastos de reserva.
   readonly newRules = signal(DEFAULT_STATION_RULES);
   readonly editRules = signal(DEFAULT_STATION_RULES);
+  readonly newRental = signal(DEFAULT_RENTAL_RULES);
+  readonly editRental = signal(DEFAULT_RENTAL_RULES);
   readonly newRulesTaxOptions = computed(() =>
     this.buildTaxSelectorOptions(this.newRules().reservation_fee_tax_category_id),
   );
@@ -1150,7 +1163,9 @@ export class ServiceStationsPageComponent implements OnInit {
   }
 
   stationTypeSubtitle(station: ServiceStation): string {
-    return stationTypeLabel(this.getStationType(station));
+    const rule = stationRentalSummary(station, (amount) => this.currencyService.format(amount));
+    const label = stationTypeLabel(this.getStationType(station));
+    return rule ? `${label} · ${rule}` : label;
   }
 
   /** The account now lives in its own page; "Finalizar" lands there with the close flow open. */
@@ -1341,6 +1356,7 @@ export class ServiceStationsPageComponent implements OnInit {
     this.newTaxCategoryId.set(null);
     this.newTaxIsInclusive.set(true);
     this.newRules.set(DEFAULT_STATION_RULES);
+    this.newRental.set(DEFAULT_RENTAL_RULES);
     this.loadIntakeTemplates();
     this.loadTaxOptions();
     this.showCreateModal.set(true);
@@ -1409,7 +1425,7 @@ export class ServiceStationsPageComponent implements OnInit {
       this.toastService.error('Elige la plantilla de la estación (o diséñala con el botón de arriba).');
       return;
     }
-    const rulesError = stationRulesError(this.newRules());
+    const rulesError = stationRulesError(this.newRules()) ?? stationRentalError(this.newRental());
     if (rulesError) {
       this.toastService.error(rulesError);
       return;
@@ -1426,6 +1442,7 @@ export class ServiceStationsPageComponent implements OnInit {
       rental_tax_category_id: this.newTaxCategoryId(),
       rental_tax_is_inclusive: this.newTaxIsInclusive(),
       ...stationRulesPayload(this.newRules()),
+      ...stationRentalPayload(this.newRental()),
     }).subscribe({
       next: (station) => {
         this.saving.set(false);
@@ -2070,6 +2087,7 @@ export class ServiceStationsPageComponent implements OnInit {
     this.editTaxCategoryId.set(station.rental_tax_category_id ?? null);
     this.editTaxIsInclusive.set(station.rental_tax_is_inclusive !== false);
     this.editRules.set(stationRulesFrom(station));
+    this.editRental.set(stationRentalFrom(station));
     this.loadIntakeTemplates();
     this.loadTaxOptions();
     this.selectedConfigTab.set('details');
@@ -2086,7 +2104,7 @@ export class ServiceStationsPageComponent implements OnInit {
       this.toastService.error('El nombre es obligatorio.');
       return;
     }
-    const rulesError = stationRulesError(this.editRules());
+    const rulesError = stationRulesError(this.editRules()) ?? stationRentalError(this.editRental());
     if (rulesError) {
       this.toastService.error(rulesError);
       return;
@@ -2102,6 +2120,7 @@ export class ServiceStationsPageComponent implements OnInit {
         rental_tax_category_id: this.editTaxCategoryId(),
         rental_tax_is_inclusive: this.editTaxIsInclusive(),
         ...stationRulesPayload(this.editRules()),
+        ...stationRentalPayload(this.editRental()),
       }),
       'Datos guardados.',
       station.id,

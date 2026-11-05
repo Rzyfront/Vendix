@@ -16,6 +16,8 @@ import {
 } from '../../../../../../shared/components';
 import { ToastService } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
+import { SeriesBase, SeriesFormComponent, seriesSummary } from './series-form/series-form.component';
+import { BookingSeriesResult } from '../../services/reservations.service';
 import { AvailabilitySlot, Booking, CreateBookingDto } from '../../interfaces/reservation.interface';
 import { ServiceStationsService, ServiceStation } from '../service-stations/service-stations.service';
 import { CalendarDayViewComponent, FreeSlot } from '../calendar/calendar-day-view/calendar-day-view.component';
@@ -37,6 +39,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
     InputComponent,
     SelectorComponent,
     CalendarDayViewComponent,
+    SeriesFormComponent,
     DecimalPipe,
   ],
   templateUrl: './reservation-form-modal.component.html',
@@ -121,6 +124,27 @@ export class ReservationFormModalComponent {
   // Notes & Submit
   notes = signal('');
   submitting = signal(false);
+
+  // Repetir (S19): when on, the series form creates the bookings instead of the single "Crear Reserva".
+  repeating = signal(false);
+  readonly seriesBase = computed<SeriesBase | null>(() => {
+    const service = this.selectedService();
+    const customer = this.selectedCustomer();
+    const end = this.endTime() || this.getEndTime();
+    if (!service || !customer || !this.selectedDate() || !this.startTime() || !end) return null;
+    return {
+      customer_id: customer.id,
+      product_id: service.id,
+      product_variant_id: this.selectedVariant()?.id || undefined,
+      station_id: this.requiresStation() ? this.selectedStation()?.id : undefined,
+      provider_id: this.selectedProvider()?.id || undefined,
+      start_date: this.selectedDate(),
+      start_time: this.startTime(),
+      end_time: end,
+      notes: this.notes() || undefined,
+      channel: this.selectedChannel(),
+    };
+  });
 
   // Channel options
   readonly channelOptions = [
@@ -524,6 +548,7 @@ export class ReservationFormModalComponent {
     this.selectedCustomer.set(null);
     this.notes.set('');
     this.submitting.set(false);
+    this.repeating.set(false);
     this.directBooking.set(false);
     this.providerScheduleBlocks.set([]);
     this.topCustomers.set([]);
@@ -1148,6 +1173,13 @@ export class ReservationFormModalComponent {
         this.submitting.set(false);
       },
     });
+  }
+
+  onSeriesCreated(result: BookingSeriesResult): void {
+    const message = seriesSummary(result);
+    if (result.conflicts.length > 0) this.toastService.warning(message);
+    else this.toastService.success(message);
+    this.created.emit(this.selectedCustomer());
   }
 
   goDirectBooking(): void {

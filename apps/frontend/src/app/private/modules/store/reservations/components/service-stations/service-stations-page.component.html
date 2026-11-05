@@ -570,6 +570,11 @@
         [taxOptions]="newRulesTaxOptions()"
         [taxLoading]="loadingTaxOptions()"
       />
+
+      <app-station-rental-form
+        [(value)]="newRental"
+        [bookingDurationMode]="newRules().booking_duration_mode"
+      />
     </div>
 
     <div slot="footer" class="flex items-center justify-end gap-2.5">
@@ -1141,6 +1146,19 @@
               [taxOptions]="editRulesTaxOptions()"
               [taxLoading]="loadingTaxOptions()"
             />
+
+            <app-station-rental-form
+              [(value)]="editRental"
+              [bookingDurationMode]="editRules().booking_duration_mode"
+            />
+
+            <!-- Tarifa por franja: solo con una tarifa de bloque ya guardada -->
+            @if (station.rental_block_minutes && station.rental_block_price != null) {
+              <app-station-rate-windows
+                [stationId]="station.id"
+                [blockPrice]="+station.rental_block_price"
+              />
+            }
 
             <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div class="flex items-center gap-3">
