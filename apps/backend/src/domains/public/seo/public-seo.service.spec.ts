@@ -1,4 +1,4 @@
-import { PublicSeoService } from './public-seo.service';
+import { PublicSeoService, SITEMAP_MAX_URLS } from './public-seo.service';
 import { DomainConfigService } from '@common/config/domain.config';
 import { DOMParser } from '@xmldom/xmldom';
 import * as marketingRegistry from './marketing-sitemap.registry';
@@ -105,6 +105,7 @@ describe('PublicSeoService (VENDIX_LANDING)', () => {
       },
       select: { slug: true, updated_at: true },
       orderBy: { updated_at: 'desc' },
+      take: SITEMAP_MAX_URLS - 4,
     });
     expect(get).toHaveBeenCalledWith('seo:sitemap:tienda.example');
   });
@@ -225,6 +226,29 @@ describe('PublicSeoService (VENDIX_LANDING)', () => {
     expect(cacheStore.get('seo:sitemap:tienda-b.example')).toBe(xmlB);
     expect(await service.generateSitemap('tienda-b.example')).toBe(xmlB);
     expect(findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('caps a large store at the 50,000-URL sitemap limit and stays under 50 MB', async () => {
+    resolveDomain.mockResolvedValue({ app: 'STORE_ECOMMERCE', store_id: 9 });
+    const limit = SITEMAP_MAX_URLS - 4;
+    const updated_at = new Date('2026-10-01T00:00:00Z');
+    // The mock honours `take` like the database would, over a catalog larger than the limit.
+    findMany.mockImplementation(async ({ take }: { take: number }) =>
+      Array.from({ length: Math.min(take, SITEMAP_MAX_URLS + 500) }, (_, i) => ({
+        slug: `producto-con-nombre-largo-de-prueba-${i}`,
+        updated_at,
+      })),
+    );
+
+    const started = Date.now();
+    const xml = await service.generateSitemap('tienda-grande.example');
+    const elapsedMs = Date.now() - started;
+
+    expect(findMany.mock.calls[0][0]).toMatchObject({ take: limit, orderBy: { updated_at: 'desc' } });
+    expect(xml.match(/<loc>/g)).toHaveLength(SITEMAP_MAX_URLS);
+    expect(Buffer.byteLength(xml, 'utf8')).toBeLessThan(50 * 1024 * 1024);
+    // Measured, not asserted tightly: building 50,000 entries is a plain string join.
+    expect(elapsedMs).toBeLessThan(10_000);
   });
 
   it('store robots.txt blocks search, price/sort params and private or token pages', async () => {
