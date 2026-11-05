@@ -162,7 +162,7 @@ describe('WorkflowWebhooksService', () => {
 
   describe('límite de 10 endpoints activos por tienda', () => {
     it('el 11.º activo falla; desactivar uno libera cupo; reactivar respeta el tope', async () => {
-      const made = [];
+      const made: Awaited<ReturnType<typeof create>>[] = [];
       for (let i = 0; i < 10; i++)
         made.push(await create({ url: `https://h${i}.example.com/x` }));
       expect(await code(create({ url: 'https://h10.example.com/x' }))).toBe(
