@@ -29,6 +29,8 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
     station?: Record<string, unknown>;
     daily?: { start_time: string; end_time: string };
     dailyWeekday?: number;
+    storeDaily?: { start_time: string; end_time: string } | null;
+    stationRows?: any[];
   } = {}) {
     const { requiresStation = true, legacyOverlapId = BOOKING_ID, duration = 60 } = options;
     const dailyWeekday = options.dailyWeekday ?? weekday;
@@ -51,7 +53,7 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
       service_providers: { findFirst: jest.fn().mockResolvedValue({ id: PROVIDER_ID }) },
       product_variants: { findFirst: jest.fn() },
       service_station_schedules: {
-        findMany: jest.fn().mockResolvedValue([{ weekday: dailyWeekday, ...daily }]),
+        findMany: jest.fn().mockResolvedValue(options.stationRows ?? [{ weekday: dailyWeekday, ...daily }]),
       },
       service_station_exceptions: { findMany: jest.fn().mockResolvedValue([]) },
       store_settings: {
@@ -83,7 +85,11 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
     const businessHours: any = {
       loadStoreWindows: jest
         .fn()
-        .mockResolvedValue(new Map([[dailyWeekday, [daily]]])),
+        .mockResolvedValue(
+          options.storeDaily === null
+            ? new Map()
+            : new Map([[dailyWeekday, [options.storeDaily ?? daily]]]),
+        ),
     };
     const coordinator = new ServiceAllocationCoordinator(prisma, businessHours);
     return { coordinator, tx };
@@ -236,22 +242,75 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
       expect(result).toMatchObject({ id: 900, end_date: null });
     });
 
-    it('rejects a booking that runs past the overnight block close with STATION_002', async () => {
+    it('rejects a booking that runs past the overnight block close with STATION_016', async () => {
       const { coordinator, tx } = build({ ...noLegacy, daily: overnight });
       await expect(
         coordinator.allocateBooking(tx, { ...baseInput, startTime: '23:00', endTime: '04:00', endDate: addDay(date) }),
       ).rejects.toMatchObject({ errorCode: 'STATION_009' });
       await expect(
         coordinator.allocateBooking(tx, { ...baseInput, startTime: '02:30', endTime: '03:30' }),
-      ).rejects.toMatchObject({ errorCode: 'STATION_002' });
+      ).rejects.toMatchObject({ errorCode: 'STATION_016' });
       expect(tx.service_allocations.create).not.toHaveBeenCalled();
+    });
+
+    describe('el horario propio de la estación manda (S8, D2)', () => {
+      const stationNight = { start_time: '22:00', end_time: '02:00' };
+      const storeCloses2359 = { start_time: '08:00', end_time: '23:59' };
+
+      it('allows 22:00-01:00 on a station with its own overnight schedule although the store closes 23:59', async () => {
+        const { coordinator, tx } = build({ ...noLegacy, daily: stationNight, storeDaily: storeCloses2359, duration: 180 });
+        const result = await coordinator.allocateBooking(tx, { ...baseInput, startTime: '22:00', endTime: '01:00' });
+
+        expect(result).toMatchObject({ id: 900, end_time: '01:00', end_date: addDay(date) });
+        expect(tx.service_allocations.create).toHaveBeenCalledTimes(1);
+      });
+
+      it('a station with its own schedule is bookable at night even when the store never configured hours (legacy 08-18 does not apply)', async () => {
+        const { coordinator, tx } = build({ ...noLegacy, daily: stationNight, storeDaily: null, duration: 180 });
+        const result = await coordinator.allocateBooking(tx, { ...baseInput, startTime: '22:00', endTime: '01:00' });
+
+        expect(result).toMatchObject({ id: 900, end_time: '01:00', end_date: addDay(date) });
+        expect(tx.service_allocations.create).toHaveBeenCalledTimes(1);
+      });
+
+      it('a station without its own schedule is out of hours: STATION_016, never STATION_002', async () => {
+        const { coordinator, tx } = build({ ...noLegacy, daily: stationNight, storeDaily: storeCloses2359, duration: 180, stationRows: [] });
+        await expect(
+          coordinator.allocateBooking(tx, { ...baseInput, startTime: '22:00', endTime: '01:00' }),
+        ).rejects.toMatchObject({ errorCode: 'STATION_016' });
+        expect(tx.service_allocations.create).not.toHaveBeenCalled();
+      });
+
+      it('outside the station schedule answers STATION_016', async () => {
+        const { coordinator, tx } = build({ ...noLegacy, daily: stationNight, storeDaily: storeCloses2359, duration: 60 });
+        await expect(
+          coordinator.allocateBooking(tx, { ...baseInput, startTime: '12:00', endTime: '13:00' }),
+        ).rejects.toMatchObject({ errorCode: 'STATION_016' });
+      });
+
+      it('a station exception inside the booking answers STATION_016', async () => {
+        const { coordinator, tx } = build({ ...noLegacy });
+        tx.service_station_exceptions.findMany.mockResolvedValue([{ id: 1 }]);
+        await expect(coordinator.allocateBooking(tx, baseInput)).rejects.toMatchObject({ errorCode: 'STATION_016' });
+      });
+
+      it('a real overlap still answers STATION_002', async () => {
+        const { coordinator, tx } = build({ ...noLegacy });
+        tx.service_allocations.findMany.mockResolvedValue([{ station_id: STATION_ID, provider_id: null }]);
+        await expect(coordinator.allocateBooking(tx, baseInput)).rejects.toMatchObject({ errorCode: 'STATION_002' });
+      });
+
+      it('a normal daytime booking is unchanged', async () => {
+        const { coordinator, tx } = build({ ...noLegacy });
+        await expect(coordinator.allocateBooking(tx, baseInput)).resolves.toMatchObject({ id: 900, end_date: null });
+      });
     });
 
     it('keeps rejecting a daytime booking that exceeds the window', async () => {
       const { coordinator, tx } = build(noLegacy);
       await expect(
         coordinator.allocateBooking(tx, { ...baseInput, startTime: '17:30', endTime: '18:30' }),
-      ).rejects.toMatchObject({ errorCode: 'STATION_002' });
+      ).rejects.toMatchObject({ errorCode: 'STATION_016' });
     });
 
     it('free duration mode accepts multiples of the rental block only', async () => {

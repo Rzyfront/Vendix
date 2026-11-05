@@ -479,6 +479,7 @@ export class AvailabilityService {
     const stationSchedules = await prisma.service_station_schedules.findMany({
       where: { store_id: product.store_id, station_id: { in: stationIds }, is_active: true },
     });
+    const stationsWithSchedule = new Set(stationSchedules.map((row) => row.station_id));
     const stationExceptions = await prisma.service_station_exceptions.findMany({
       where: {
         store_id: product.store_id,
@@ -540,16 +541,20 @@ export class AvailabilityService {
     for (const date of dates) {
       const dateStr = this.formatDate(date);
       const weekday = date.getUTCDay();
-      if (!workingDays.includes(weekday)) continue;
       const storeCoverage = coverageForDate(storeHours, weekday);
-      if (!storeCoverage.length) continue;
       for (const station of stations) {
+        // D2: a station that has its own schedule is governed by it, even where the store hours
+        // (configured or the legacy working-days fallback) do not cover it; same as the validator.
+        const ownScheduleGoverns = stationsWithSchedule.has(station.id);
+        if (!ownScheduleGoverns && (!workingDays.includes(weekday) || !storeCoverage.length)) continue;
         const stationBlocks = stationSchedules.filter((row) => row.station_id === station.id && row.weekday === weekday);
         if (!stationBlocks.length) continue;
         // Exceptions are instants: overlap is decided per slot below.
         const stationDayExceptions = stationExceptions.filter((exception) => exception.station_id === station.id);
         const stationWindows = stationBlocks.flatMap((block) =>
-          intersectSpans(windowSpan({ start_time: block.start_time, end_time: block.end_time }), storeCoverage),
+          ownScheduleGoverns
+            ? [windowSpan({ start_time: block.start_time, end_time: block.end_time })]
+            : intersectSpans(windowSpan({ start_time: block.start_time, end_time: block.end_time }), storeCoverage),
         );
         if (!stationWindows.length) continue;
 
@@ -620,7 +625,9 @@ export class AvailabilityService {
             for (const providerBlock of providerBlocks) {
               const effectiveStart = providerException?.custom_start_time ?? providerBlock.start_time;
               const effectiveEnd = providerException?.custom_end_time ?? providerBlock.end_time;
-              const providerWindows = intersectSpans(windowSpan({ start_time: effectiveStart, end_time: effectiveEnd }), storeCoverage);
+              const providerWindows = ownScheduleGoverns
+                ? [windowSpan({ start_time: effectiveStart, end_time: effectiveEnd })]
+                : intersectSpans(windowSpan({ start_time: effectiveStart, end_time: effectiveEnd }), storeCoverage);
               for (const providerWindow of providerWindows) {
                 const window: Span = {
                   startMin: Math.max(stationWindow.startMin, providerWindow.startMin),

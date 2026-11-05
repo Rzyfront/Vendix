@@ -147,10 +147,10 @@ export class ServiceAllocationCoordinator {
       : (input.endDate && input.endDate !== input.date ? input.endDate : bookingEndDateFor(input.date, input.startTime, endTime));
     if (isOpenEnded) {
       const covering = coverageForDate(stationWindows, weekday).find((span) => startMinutes >= span.startMin && startMinutes < span.endMin);
-      if (!covering) throw new VendixHttpException(ErrorCodes.STATION_002);
+      if (!covering) throw new VendixHttpException(ErrorCodes.STATION_016);
       const blockMinutes = station.open_end_block_minutes ?? DEFAULT_OPEN_END_BLOCK_MINUTES;
       const endMinute = Math.min(covering.endMin - buffer, startMinutes + blockMinutes);
-      if (endMinute <= startMinutes) throw new VendixHttpException(ErrorCodes.STATION_002);
+      if (endMinute <= startMinutes) throw new VendixHttpException(ErrorCodes.STATION_016);
       const dayOffset = Math.floor(endMinute / 1440);
       const minuteOfDay = endMinute % 1440;
       endTimeOut = `${String(Math.floor(minuteOfDay / 60)).padStart(2, '0')}:${String(minuteOfDay % 60).padStart(2, '0')}`;
@@ -165,10 +165,15 @@ export class ServiceAllocationCoordinator {
     const serviceSpan = bookingMinuteSpan({ date: input.date, end_date: endDateOut, start_time: input.startTime, end_time: endTimeOut }, input.date);
     const bufferedEndMin = serviceSpan.endMin + buffer;
     if (!coversSpan(stationWindows, weekday, serviceSpan.startMin, bufferedEndMin) || stationExceptions.length > 0) {
-      throw new VendixHttpException(ErrorCodes.STATION_002);
+      throw new VendixHttpException(ErrorCodes.STATION_016);
     }
-    if (storeWindows.size > 0) {
-      if (!coversSpan(storeWindows, weekday, serviceSpan.startMin, bufferedEndMin)) throw new VendixHttpException(ErrorCodes.STATION_002);
+    // D2: a station with its own schedule is governed by it, even where the store hours
+    // (configured or the legacy working-days fallback) do not cover it, e.g. a Saturday
+    // 22:00-02:00 block while the store closes 23:59.
+    if (stationRows.length > 0) {
+      // Own schedule already validated above.
+    } else if (storeWindows.size > 0) {
+      if (!coversSpan(storeWindows, weekday, serviceSpan.startMin, bufferedEndMin)) throw new VendixHttpException(ErrorCodes.STATION_016);
     } else {
       const storeSettings = await tx.store_settings.findUnique({ where: { store_id: input.storeId }, select: { settings: true } });
       const rawWorkingDays = (storeSettings?.settings as any)?.availability?.working_days;
@@ -176,7 +181,7 @@ export class ServiceAllocationCoordinator {
         ? rawWorkingDays as number[]
         : [1, 2, 3, 4, 5];
       const fallbackWindow = workingDays.includes(weekday) && serviceSpan.startMin >= 8 * 60 && bufferedEndMin <= 18 * 60;
-      if (!fallbackWindow) throw new VendixHttpException(ErrorCodes.STATION_002);
+      if (!fallbackWindow) throw new VendixHttpException(ErrorCodes.STATION_016);
     }
 
     if (input.providerId) {
