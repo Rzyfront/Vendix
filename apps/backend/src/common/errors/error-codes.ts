@@ -5483,6 +5483,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Closing a station session with a pending balance requires an identified customer on the order',
   },
+  STATION_016: {
+    code: 'STATION_016',
+    httpStatus: 409,
+    devMessage: 'The requested interval is outside the station or store opening hours',
+  },
   SERVICE_BOOKING_001: {
     code: 'SERVICE_BOOKING_001',
     httpStatus: 409,

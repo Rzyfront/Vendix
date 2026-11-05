@@ -358,7 +358,7 @@ export class EcommerceReservationsController {
     // cruzamos con `products.is_eligible_for_home_service` para que el
     // selector "¿Dónde se realiza el servicio?" reaccione al PRODUCTO
     // (no solo a la tienda). Ejemplo: "Corte de cabello" → true,
-    // "Tintura" → false → solo se permite "En el local del técnico".
+    // "Tintura" → false → solo se permite "En el establecimiento".
     let offerHomeServiceForProduct = offerHomeService;
     const productId = parseInt(productIdRaw ?? '', 10);
     if (offerHomeService && !isNaN(productId) && productId > 0) {
@@ -459,7 +459,7 @@ export class EcommerceReservationsController {
       const eligible = !!product?.is_eligible_for_home_service;
       if (!eligible) {
         throw new BadRequestException(
-          'Este servicio no está disponible a domicilio. Por favor elige "En el local del técnico".',
+          'Este servicio no está disponible a domicilio. Por favor elige "En el establecimiento".',
         );
       }
     }

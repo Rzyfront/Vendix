@@ -560,7 +560,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   STATION_011: 'El apartado de tu reserva venció. Vuelve a elegir el horario.',
   STATION_012: 'Este servicio se reserva con una estación: elige un horario con estación disponible.',
   STATION_013: 'La atención incluye campos que no pertenecen al formulario de recepción del servicio.',
+  STATION_009: 'La duración o el horario elegido no es válido para esta estación (o ya pasó). Revisa la hora de inicio y de fin.',
   STATION_014: 'Para usar el QR público, configura y activa un dominio en Configuración > Dominios.',
+  STATION_016: 'Ese horario está fuera del horario de atención. Elige un horario dentro de la jornada de la estación.',
 
   // Customer History
   CUST_HISTORY_001: 'Historial del cliente no encontrado.',

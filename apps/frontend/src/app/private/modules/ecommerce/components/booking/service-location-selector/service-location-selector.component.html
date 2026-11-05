@@ -21,7 +21,7 @@
       (click)="pickShop()"
     >
       <app-icon name="store" [size]="16"></app-icon>
-      En el local del técnico
+      En el establecimiento
       @if (effectiveServiceLocation() === 'shop' && storeAddress(); as addr) {
         <span class="service-location__toggle-hint">
           {{ formatAddressLine(addr) }}
