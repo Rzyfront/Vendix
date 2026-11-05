@@ -452,7 +452,10 @@ export class FakeWorkflowDb {
         .filter(
           (r) =>
             (r.status === 'pending' && r.available_at.getTime() <= now) ||
-            (r.status === 'processing' && r.available_at.getTime() <= now - 600_000),
+            (r.status === 'processing' &&
+              (!text.includes('attempts < ') ||
+                r.attempts < Number(/attempts < (\d+)/.exec(text)![1])) &&
+              r.available_at.getTime() <= now - 600_000),
         )
         .sort((a, b) => a.available_at - b.available_at || a.id - b.id)
         .slice(0, values[1] ?? 20);

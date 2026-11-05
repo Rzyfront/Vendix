@@ -31,6 +31,9 @@ export {
 /** A `processing` row older than this was abandoned by a dead worker. */
 const STALE_PROCESSING_MINUTES = 10;
 const NOTIFICATION_TYPE = 'workflow_task';
+/** `last_error` of a row buried while `processing` that had none recorded. */
+export const OUTBOX_ABANDONED_ERROR =
+  'Abandoned while processing after the last attempt (worker died)';
 
 export interface ClaimedOutboxRow {
   id: number;
@@ -83,8 +86,14 @@ export class WorkflowOutboxDispatcher {
   }
 
   async dispatchBatch(limit = OUTBOX_BATCH, now = new Date()): Promise<DispatchSummary> {
+    const buried = await this.buryExhaustedStale(now);
     const rows = await this.claim(limit);
-    const summary: DispatchSummary = { claimed: rows.length, done: 0, retried: 0, dead: 0 };
+    const summary: DispatchSummary = {
+      claimed: rows.length,
+      done: 0,
+      retried: 0,
+      dead: buried,
+    };
     const orgByStore = new Map<number, number>();
     for (const row of rows) {
       try {
@@ -103,6 +112,58 @@ export class WorkflowOutboxDispatcher {
     return summary;
   }
 
+  /**
+   * A `processing` row is abandoned when its worker died mid-attempt, so
+   * `fail()` never ran. If that was already the last attempt it goes to `dead`
+   * here (keeping its `last_error`) instead of being reclaimed forever: a row
+   * that kills the worker must not loop. CAS per row on `status` +
+   * `available_at`, so a concurrent claim or completion wins cleanly.
+   */
+  private async buryExhaustedStale(now: Date): Promise<number> {
+    const cutoff = new Date(now.getTime() - STALE_PROCESSING_MINUTES * 60_000);
+    const where = {
+      status: 'processing',
+      available_at: { lte: cutoff },
+      attempts: { gte: OUTBOX_MAX_ATTEMPTS },
+    };
+    const db = this.prisma.withoutScope();
+    const stale = await db.workflow_outbox.findMany({
+      where,
+      select: {
+        id: true,
+        store_id: true,
+        instance_id: true,
+        kind: true,
+        payload: true,
+        attempts: true,
+        last_error: true,
+      },
+    });
+    let buried = 0;
+    for (const r of stale) {
+      const lastError = r.last_error ?? OUTBOX_ABANDONED_ERROR;
+      const { count } = await db.workflow_outbox.updateMany({
+        where: { ...where, id: r.id },
+        data: { status: 'dead', last_error: lastError },
+      });
+      if (count === 0) continue;
+      buried++;
+      this.logger.warn(
+        `Outbox ${r.id} (${r.kind}) DEAD: abandoned while processing at attempt ${r.attempts}`,
+      );
+      const row: ClaimedOutboxRow = {
+        id: Number(r.id),
+        store_id: r.store_id,
+        instance_id: r.instance_id,
+        kind: r.kind,
+        payload: r.payload as Record<string, any>,
+        attempts: r.attempts,
+      };
+      await this.afterDead(row, new Error(lastError));
+    }
+    return buried;
+  }
+
   private async claim(limit: number): Promise<ClaimedOutboxRow[]> {
     const rows = await this.prisma.$queryRaw<Array<ClaimedOutboxRow & { id: bigint }>>(
       Prisma.sql`
@@ -114,6 +175,7 @@ export class WorkflowOutboxDispatcher {
           SELECT id FROM workflow_outbox
           WHERE (status = 'pending' AND available_at <= now())
              OR (status = 'processing'
+                 AND attempts < ${Prisma.raw(String(OUTBOX_MAX_ATTEMPTS))}
                  AND available_at <= now() - ${Prisma.raw(`interval '${STALE_PROCESSING_MINUTES} minutes'`)})
           ORDER BY available_at, id
           LIMIT ${limit}::int

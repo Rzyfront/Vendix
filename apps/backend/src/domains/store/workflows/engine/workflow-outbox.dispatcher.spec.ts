@@ -4,7 +4,9 @@ import { seedPeople, seedWorkGroup } from '../../../../testing/workflows/workflo
 import { WorkGroupsService } from '../work-groups.service';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import {
+  OUTBOX_ABANDONED_ERROR,
   OUTBOX_BACKOFF_MINUTES,
+  OUTBOX_MAX_ATTEMPTS,
   WorkflowOutboxDispatcher,
 } from './workflow-outbox.dispatcher';
 
@@ -13,6 +15,7 @@ describe('WorkflowOutboxDispatcher', () => {
   let dispatcher: WorkflowOutboxDispatcher;
   const engine = { tick: jest.fn() };
   const notifications = { sendToUser: jest.fn() };
+  const actions = { execute: jest.fn(), recordFailure: jest.fn() };
   const mailer = { send: jest.fn() };
   const MIN = 60_000;
   const past = () => new Date(Date.now() - MIN);
@@ -33,6 +36,8 @@ describe('WorkflowOutboxDispatcher', () => {
     engine.tick.mockReset().mockResolvedValue({ action: 'advanced' });
     notifications.sendToUser.mockReset().mockResolvedValue({ id: 1 });
     mailer.send.mockReset().mockResolvedValue('sent');
+    actions.execute.mockReset();
+    actions.recordFailure.mockReset();
     const prisma = db.asStorePrisma();
     dispatcher = new WorkflowOutboxDispatcher(
       prisma,
@@ -41,7 +46,7 @@ describe('WorkflowOutboxDispatcher', () => {
       notifications as any,
       mailer as any,
       { deliver: jest.fn() } as any,
-      { execute: jest.fn(), recordFailure: jest.fn() } as any,
+      actions as any,
     );
   });
 
@@ -112,6 +117,71 @@ describe('WorkflowOutboxDispatcher', () => {
     const s = await dispatcher.dispatchBatch();
     expect(s.done).toBe(1);
     expect(row().attempts).toBe(2);
+  });
+
+  describe('fila que tumba al worker (abandonada en processing con los intentos agotados)', () => {
+    const stale = () => new Date(Date.now() - 11 * MIN);
+
+    it('pasa a dead conservando last_error y no se vuelve a reclamar', async () => {
+      enqueue('advance', { instance_id: 1 }, {
+        status: 'processing', available_at: stale(), attempts: OUTBOX_MAX_ATTEMPTS, last_error: 'boom previo',
+      });
+      const s = await dispatcher.dispatchBatch();
+      expect(s).toMatchObject({ claimed: 0, done: 0, retried: 0, dead: 1 });
+      expect(engine.tick).not.toHaveBeenCalled();
+      expect(row()).toMatchObject({ status: 'dead', attempts: OUTBOX_MAX_ATTEMPTS, last_error: 'boom previo' });
+      // siguientes vueltas del cron: nada que hacer
+      expect(await dispatcher.dispatchBatch()).toMatchObject({ claimed: 0, dead: 0 });
+      expect(row().attempts).toBe(OUTBOX_MAX_ATTEMPTS);
+    });
+
+    it('sin last_error previo deja constancia de que el worker murió', async () => {
+      enqueue('advance', { instance_id: 1 }, {
+        status: 'processing', available_at: stale(), attempts: OUTBOX_MAX_ATTEMPTS + 2, last_error: null,
+      });
+      await dispatcher.dispatchBatch();
+      expect(row()).toMatchObject({ status: 'dead', last_error: OUTBOX_ABANDONED_ERROR });
+    });
+
+    it('una acción enterrada así deja action_failed en el historial, como un dead normal', async () => {
+      enqueue('action', { instance_id: 1 }, {
+        status: 'processing', available_at: stale(), attempts: OUTBOX_MAX_ATTEMPTS, last_error: 'timeout',
+      });
+      await dispatcher.dispatchBatch();
+      expect(actions.execute).not.toHaveBeenCalled();
+      expect(actions.recordFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ id: row().id, kind: 'action' }), 'timeout',
+      );
+    });
+
+    it('con intentos restantes o aún no abandonada (< 10 min) no se entierra', async () => {
+      enqueue('advance', { instance_id: 1 }, {
+        status: 'processing', available_at: stale(), attempts: OUTBOX_MAX_ATTEMPTS - 1,
+      });
+      enqueue('advance', { instance_id: 1 }, {
+        status: 'processing', available_at: new Date(Date.now() - 2 * MIN), attempts: OUTBOX_MAX_ATTEMPTS,
+      });
+      const s = await dispatcher.dispatchBatch();
+      expect(s).toMatchObject({ claimed: 1, done: 1, dead: 0 });
+      expect(row(0)).toMatchObject({ status: 'done', attempts: OUTBOX_MAX_ATTEMPTS });
+      expect(row(1)).toMatchObject({ status: 'processing', attempts: OUTBOX_MAX_ATTEMPTS });
+    });
+
+    it('el reclamo SQL excluye por sí mismo las processing con los intentos agotados', async () => {
+      const raw = jest.spyOn(db as any, 'raw');
+      // Sin el paso de entierro (simula que otro worker lo ganó): el reclamo no la toma.
+      jest.spyOn(dispatcher as any, 'buryExhaustedStale').mockResolvedValue(0);
+      enqueue('advance', { instance_id: 1 }, {
+        status: 'processing', available_at: stale(), attempts: OUTBOX_MAX_ATTEMPTS,
+      });
+      expect((await dispatcher.dispatchBatch()).claimed).toBe(0);
+      expect(row().status).toBe('processing');
+      const claimSql = String(raw.mock.calls[0][0]);
+      expect(claimSql).toContain('UPDATE workflow_outbox');
+      expect(claimSql).toMatch(
+        new RegExp(`status = 'processing'\\s+AND attempts < ${OUTBOX_MAX_ATTEMPTS}\\b`),
+      );
+    });
   });
 
   describe('correo', () => {
