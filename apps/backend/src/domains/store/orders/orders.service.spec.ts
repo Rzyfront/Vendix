@@ -5603,7 +5603,8 @@ describe('OrdersService', () => {
           expect(line.tax_amount_item).toBe(9500);
           expect(line.final_unit_price).toBe(59500);
           expect(line.order_item_taxes.create).toHaveLength(1);
-          expect(line.order_item_taxes.create[0]).toMatchObject({ tax_rate_id: 31, tax_type: 'iva' });
+          // The stored row keeps the station's flag (added on top): it was resolved inclusive only to split the gross quote.
+          expect(line.order_item_taxes.create[0]).toMatchObject({ tax_rate_id: 31, tax_type: 'iva', is_inclusive: false });
           expect(line.order_item_taxes.create[0].tax_amount.toNumber()).toBe(9500);
           expect(header.tax_amount).toBe(9500);
           expect(header.grand_total).toBe(59500);

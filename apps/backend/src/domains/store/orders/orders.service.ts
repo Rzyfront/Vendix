@@ -137,6 +137,8 @@ type ResolvedLineTax = {
    * que `calculateProductTaxes` (A.3).
    */
   is_inclusive: boolean;
+  /** Flag persisted on the line tax when it differs from the one used to price it (a gross quote split as inclusive). */
+  stored_is_inclusive?: boolean;
 };
 
 /**
@@ -6544,7 +6546,9 @@ export class OrdersService {
           rate: row.rate,
           is_compound: false,
           tax_type: row.tax_type ?? null,
+          // The quote is a gross: priced as inclusive so the line totals it, stored with the station's real flag.
           is_inclusive: true,
+          stored_is_inclusive: row.is_inclusive,
         })),
       );
     }
@@ -6675,14 +6679,15 @@ export class OrdersService {
           ? Number(item.final_unit_price)
           : resolved.final_unit_price,
       line_tax_total: resolved.line_tax_total,
-      taxes: resolved.taxes.map((t) => ({
+      // `resolved.taxes` is index-aligned with `rates`.
+      taxes: resolved.taxes.map((t, i) => ({
         tax_rate_id: t.tax_rate_id,
         tax_name: t.tax_name,
         tax_rate: t.tax_rate,
         tax_amount: t.tax_amount,
         tax_type: t.tax_type,
         is_compound: t.is_compound,
-        is_inclusive: t.is_inclusive,
+        is_inclusive: stationRentalRates?.[i]?.stored_is_inclusive ?? t.is_inclusive,
       })),
       source: resolved.source,
     };
