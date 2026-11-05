@@ -31,6 +31,7 @@ export interface ListInstancesInput {
 }
 
 const OPEN = ['open', 'claimed'];
+export const COMMENTS_IN_DETAIL = 50;
 type Json = Record<string, any>;
 
 /** Read model of Flujos instances (writes live in `WorkflowEngineService`). */
@@ -117,6 +118,16 @@ export class WorkflowInstancesService {
         { id: { in: [...ids] } },
       ],
     };
+  }
+
+  /**
+   * Store scope plus the participation rule of the caller, ready to `AND` into
+   * a `workflow_instances` where. Shared by the board so it never diverges.
+   */
+  async visibleWhere(): Promise<Json[]> {
+    const c = this.ctx();
+    const visible = await this.visibility(c);
+    return [{ store_id: c.store_id }, ...(visible ? [visible] : [])];
   }
 
   /** Whether the current caller may see the instance (same rule as `get`). */
@@ -225,7 +236,7 @@ export class WorkflowInstancesService {
       });
     if (!instance) throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_FOUND);
 
-    const [def, version, taskRows, eventRows] = await Promise.all([
+    const [def, version, taskRows, eventRows, commentRows] = await Promise.all([
       this.prisma.workflow_definitions.findFirst({
         where: { id: instance.definition_id, store_id: c.store_id },
         select: { id: true, key: true, name: true },
@@ -248,6 +259,11 @@ export class WorkflowInstancesService {
         where: { store_id: c.store_id, instance_id: id },
         orderBy: { seq: 'asc' },
       }),
+      this.prisma.workflow_instance_comments.findMany({
+        where: { store_id: c.store_id, instance_id: id },
+        orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+        take: COMMENTS_IN_DETAIL,
+      }),
     ]);
     const definition = version?.definition as WorkflowDefinitionV1 | undefined;
     const stage = definition ? findStage(definition, instance.current_stage_key) : undefined;
@@ -257,6 +273,7 @@ export class WorkflowInstancesService {
     const userIds = new Set<number>();
     for (const t of taskRows) if (t.assignee_user_id) userIds.add(t.assignee_user_id);
     for (const e of eventRows) if (e.actor_type === 'user' && e.actor_id) userIds.add(e.actor_id);
+    for (const m of commentRows) userIds.add(m.author_user_id);
     if (instance.started_by_type === 'user' && instance.started_by_id) {
       userIds.add(instance.started_by_id);
     }
@@ -368,6 +385,12 @@ export class WorkflowInstancesService {
         actor_name: e.actor_id ? (users.get(e.actor_id) ?? null) : null,
         payload: e.payload ?? {},
         occurred_at: e.occurred_at,
+      })),
+      comments: [...commentRows].reverse().map((m: any) => ({
+        id: m.id,
+        body: m.body,
+        author: { id: m.author_user_id, name: users.get(m.author_user_id) ?? null },
+        created_at: m.created_at,
       })),
       pending_requirements: pending,
       dossier,

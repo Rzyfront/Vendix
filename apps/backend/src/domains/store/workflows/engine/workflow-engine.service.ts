@@ -6,6 +6,7 @@ import { WorkflowAdvanceService } from './workflow-advance.service';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import {
   CompleteTaskInput,
+  StartPublicWorkflowInput,
   StartWorkflowInput,
   WorkflowActor,
   WorkflowCommandResult,
@@ -63,6 +64,25 @@ export class WorkflowEngineService {
     }
   }
 
+
+  /**
+   * Public form submission (actor `public`). Only `WorkflowPublicFormService`
+   * calls it, after resolving the link; the start service re-checks the link.
+   */
+  async startPublic(input: StartPublicWorkflowInput): Promise<WorkflowCommandResult> {
+    const ctx = this.loader.context();
+    try {
+      return await this.prisma.$transaction((tx: WorkflowTx) =>
+        this.starter.executePublic(tx, ctx, input),
+      );
+    } catch (e) {
+      if (e instanceof WorkflowIdempotencyConflict) {
+        const prev = await this.events.replay(this.prisma, e.idempotencyKey);
+        if (prev) return prev;
+      }
+      throw e;
+    }
+  }
 
   // ---- completeTask ------------------------------------------------------
 

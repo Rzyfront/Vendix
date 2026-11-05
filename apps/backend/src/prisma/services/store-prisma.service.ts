@@ -245,6 +245,9 @@ export class StorePrismaService extends BasePrismaService {
     'stored_files',
     'dossiers',
     'dossier_items',
+    // Operación de Flujos (bloque 8): ambas llevan `store_id` propio NOT NULL.
+    'workflow_instance_comments',
+    'workflow_public_links',
     'crm_messages',
     'crm_tags',
     'crm_customer_tags',
@@ -1954,6 +1957,14 @@ export class StorePrismaService extends BasePrismaService {
 
   get dossier_items() {
     return this.scoped_client.dossier_items;
+  }
+
+  get workflow_instance_comments() {
+    return this.scoped_client.workflow_instance_comments;
+  }
+
+  get workflow_public_links() {
+    return this.scoped_client.workflow_public_links;
   }
 
   get crm_conversations() {

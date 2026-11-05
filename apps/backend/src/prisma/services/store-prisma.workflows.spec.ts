@@ -23,6 +23,9 @@ const WORKFLOW_MODELS = [
   'stored_files',
   'dossiers',
   'dossier_items',
+  // Operación de Flujos (bloque 8)
+  'workflow_instance_comments',
+  'workflow_public_links',
 ] as const;
 
 describe('StorePrismaService · aislamiento de Flujos', () => {

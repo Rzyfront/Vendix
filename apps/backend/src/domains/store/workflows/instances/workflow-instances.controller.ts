@@ -30,6 +30,11 @@ import {
 import { HARD_MAX_FILE_BYTES } from '../../documents/documents.constants';
 import { UploadWorkflowFileDto } from '../dto/upload-workflow-file.dto';
 import { WorkflowFilesService } from '../files/workflow-files.service';
+import {
+  CreateWorkflowCommentDto,
+  WorkflowCommentsQueryDto,
+} from '../dto/workflow-operation.dto';
+import { WorkflowCommentsService } from './workflow-comments.service';
 import { WorkflowInstancesService } from './workflow-instances.service';
 
 /** Instances: start, list/detail (read model) and admin commands. */
@@ -42,6 +47,7 @@ export class WorkflowInstancesController {
     private readonly instances: WorkflowInstancesService,
     private readonly responseService: ResponseService,
     private readonly workflowFiles: WorkflowFilesService,
+    private readonly comments: WorkflowCommentsService,
   ) {}
 
   @Post()
@@ -75,6 +81,27 @@ export class WorkflowInstancesController {
   @Permissions('store:workflows:read', 'store:workflows:start', 'store:workflows:task')
   async get(@Param('id', ParseIntPipe) id: number) {
     return this.responseService.success(await this.instances.get(id));
+  }
+
+  @Get(':id/comments')
+  @Permissions('store:workflows:read', 'store:workflows:start', 'store:workflows:task')
+  async listComments(
+    @Param('id', ParseIntPipe) id: number,
+    @Query() query: WorkflowCommentsQueryDto,
+  ) {
+    return this.responseService.success(await this.comments.list(id, query));
+  }
+
+  @Post(':id/comments')
+  @Permissions('store:workflows:read', 'store:workflows:start', 'store:workflows:task')
+  async addComment(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateWorkflowCommentDto,
+  ) {
+    return this.responseService.created(
+      await this.comments.add(id, dto.body),
+      'Comentario agregado',
+    );
   }
 
   @Post(':id/cancel')

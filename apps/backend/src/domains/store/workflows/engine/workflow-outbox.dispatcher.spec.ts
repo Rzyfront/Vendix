@@ -13,6 +13,7 @@ describe('WorkflowOutboxDispatcher', () => {
   let dispatcher: WorkflowOutboxDispatcher;
   const engine = { tick: jest.fn() };
   const notifications = { sendToUser: jest.fn() };
+  const mailer = { send: jest.fn() };
   const MIN = 60_000;
   const past = () => new Date(Date.now() - MIN);
   const row = (i = 0) => db.table('workflow_outbox')[i];
@@ -31,12 +32,14 @@ describe('WorkflowOutboxDispatcher', () => {
     });
     engine.tick.mockReset().mockResolvedValue({ action: 'advanced' });
     notifications.sendToUser.mockReset().mockResolvedValue({ id: 1 });
+    mailer.send.mockReset().mockResolvedValue('sent');
     const prisma = db.asStorePrisma();
     dispatcher = new WorkflowOutboxDispatcher(
       prisma,
       engine as any,
       new WorkflowAssignmentService(new WorkGroupsService(prisma)),
       notifications as any,
+      mailer as any,
     );
   });
 
@@ -107,5 +110,52 @@ describe('WorkflowOutboxDispatcher', () => {
     const s = await dispatcher.dispatchBatch();
     expect(s.done).toBe(1);
     expect(row().attempts).toBe(2);
+  });
+
+  describe('correo', () => {
+    const notifyRow = () =>
+      enqueue('notify', { title: 'FLU-000001 · Compra', message: 'Tienes una tarea', user_ids: [1, 4, 5] });
+
+    it('envía el correo después de la notificación in-app, una vez por persona, con asunto "<referencia> · <etapa>"', async () => {
+      const def = { schema: 'vendix.workflow/v1', key: 'p', name: 'P', fields: [], stages: [{ key: 'a', name: 'Aprobación', type: 'approval' }] };
+      db.insert('workflow_versions', { id: 7, store_id: 1, definition_id: 1, version: 1, definition: def });
+      db.table('workflow_instances')[0].version_id = 7;
+      notifyRow();
+      const order: string[] = [];
+      notifications.sendToUser.mockImplementation(async (_s: number, u: number) => void order.push(`app${u}`));
+      mailer.send.mockImplementation(async (m: any) => (order.push(`mail${m.userId}`), 'sent'));
+      await dispatcher.dispatchBatch();
+      expect(order).toEqual(['app1', 'app4', 'app5', 'mail1', 'mail4', 'mail5']);
+      expect(mailer.send).toHaveBeenCalledWith({
+        storeId: 1, userId: 4, instanceId: 1, subject: 'FLU-000001 · Aprobación', message: 'Tienes una tarea',
+      });
+      expect(row()).toMatchObject({ status: 'done' });
+    });
+
+    it('un fallo de correo reintenta por backoff solo lo pendiente: nadie recibe el mismo canal dos veces', async () => {
+      notifyRow();
+      mailer.send.mockImplementation(async (m: any) => (m.userId === 4 ? 'failed' : 'sent'));
+      const first = await dispatcher.dispatchBatch();
+      expect(first).toMatchObject({ retried: 1, done: 0 });
+      expect(row()).toMatchObject({ status: 'pending', last_error: expect.stringContaining('4') });
+      expect(row().payload.delivered).toEqual({ in_app: [1, 4, 5], email: [1, 5] });
+      row().available_at = past();
+      mailer.send.mockClear();
+      notifications.sendToUser.mockClear();
+      mailer.send.mockResolvedValue('sent');
+      const second = await dispatcher.dispatchBatch();
+      expect(second).toMatchObject({ done: 1 });
+      expect(notifications.sendToUser).not.toHaveBeenCalled();
+      expect(mailer.send.mock.calls.map((c) => c[0].userId)).toEqual([4]);
+      expect(row().payload.delivered.email.sort()).toEqual([1, 4, 5]);
+    });
+
+    it('sin dirección de correo (skipped) la fila termina sin reintentos; exclude_user_ids no recibe nada', async () => {
+      enqueue('notify', { title: 't', message: 'm', user_ids: [1, 4], exclude_user_ids: [1] });
+      mailer.send.mockResolvedValue('skipped');
+      expect(await dispatcher.dispatchBatch()).toMatchObject({ done: 1, retried: 0 });
+      expect(notifications.sendToUser.mock.calls.map((c) => c[1])).toEqual([4]);
+      expect(mailer.send.mock.calls.map((c) => c[0].userId)).toEqual([4]);
+    });
   });
 });

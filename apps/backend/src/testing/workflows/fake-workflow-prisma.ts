@@ -23,6 +23,8 @@ const SCOPED = new Set([
   'stored_files',
   'dossiers',
   'dossier_items',
+  'workflow_instance_comments',
+  'workflow_public_links',
   'store_users',
 ]);
 
@@ -32,6 +34,7 @@ const UNIQUES: Record<string, string[][]> = {
     ['store_id', 'idempotency_key'],
   ],
   workflow_task_votes: [['task_id', 'user_id']],
+  workflow_public_links: [['token_hash']],
   workflow_instances: [['store_id', 'reference']],
   workflow_definitions: [['store_id', 'key']],
   workflow_versions: [['definition_id', 'version']],
@@ -107,6 +110,7 @@ const DEFAULTS: Record<string, Row> = {
     added_by_id: null,
   },
   work_group_members: { is_lead: false, is_available: true },
+  workflow_public_links: { is_active: true, expires_at: null, last_used_at: null },
   work_groups: { is_active: true },
 };
 
@@ -114,6 +118,9 @@ const DEFAULTS: Record<string, Row> = {
 const TIMESTAMPS: Record<string, string[]> = {
   workflow_definitions: ['created_at', 'updated_at'],
   workflow_instances: ['created_at'],
+  workflow_tasks: ['created_at'],
+  workflow_instance_comments: ['created_at'],
+  workflow_public_links: ['created_at'],
   workflow_versions: ['published_at'],
   workflow_instance_events: ['occurred_at'],
   stored_files: ['created_at'],
@@ -267,7 +274,17 @@ export class FakeWorkflowDb {
           (o: Row) => Object.entries(o) as [string, string][],
         );
         rows = [...rows].sort((a, b) => {
-          for (const [k, dir] of keys) {
+          for (const [k, spec] of keys as [string, any][]) {
+            // `{ sort, nulls }` like Prisma; plain nulls sort last on asc, first on desc.
+            const dir = typeof spec === 'string' ? spec : spec.sort;
+            const nulls = typeof spec === 'string' ? undefined : spec.nulls;
+            const an = a[k] === null || a[k] === undefined;
+            const bn = b[k] === null || b[k] === undefined;
+            if (an || bn) {
+              if (an && bn) continue;
+              const nullFirst = nulls ? nulls === 'first' : dir === 'desc';
+              return an === nullFirst ? -1 : 1;
+            }
             const c = cmp(a[k], b[k]) * (dir === 'desc' ? -1 : 1);
             if (c !== 0) return c;
           }
@@ -287,6 +304,21 @@ export class FakeWorkflowDb {
       findMany: async (args: Row = {}) => {
         await tick();
         return find(args).map((r) => project(r, args));
+      },
+      groupBy: async (args: Row) => {
+        await tick();
+        const groups = new Map<string, Row>();
+        for (const r of find({ where: args.where })) {
+          const id = JSON.stringify(args.by.map((k: string) => r[k]));
+          let g = groups.get(id);
+          if (!g) {
+            g = Object.fromEntries(args.by.map((k: string) => [k, r[k]]));
+            g._count = { _all: 0 };
+            groups.set(id, g);
+          }
+          g._count._all += 1;
+        }
+        return [...groups.values()];
       },
       count: async (args: Row = {}) => {
         await tick();

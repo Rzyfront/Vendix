@@ -94,6 +94,8 @@ export interface WorkflowNotifyPayload {
   def?: WorkflowAssigneeDef;
   task_ids?: number[];
   user_ids?: number[];
+  /** Recipients to leave out (e.g. the author of a comment). */
+  exclude_user_ids?: number[];
 }
 
 export interface WorkflowLoaded {
@@ -155,4 +157,16 @@ export interface WorkflowCommandResult {
   replayed: boolean;
   from_stage_key: string | null;
   to_stage_key: string | null;
+}
+
+/**
+ * Public submission of a start form. Only `WorkflowPublicFormService` builds
+ * it; the engine re-checks the link inside the transaction.
+ */
+export interface StartPublicWorkflowInput {
+  linkId: number;
+  definitionId: number;
+  values: Record<string, unknown>;
+  contact: { name: string; email?: string | null; phone?: string | null };
+  idempotencyKey: string;
 }

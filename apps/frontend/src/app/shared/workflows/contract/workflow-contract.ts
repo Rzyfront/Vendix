@@ -285,7 +285,10 @@ export interface WorkflowStageDef {
   on_exit?: WorkflowActionDef[];
 }
 
-export type WorkflowTriggerDef = { kind: "manual" };
+export type WorkflowTriggerDef =
+  | { kind: "manual" }
+  /** Public form by link: `stage`, when present, must be the start stage. */
+  | { kind: "public_form"; stage?: string };
 
 export type WorkflowSubjectType =
   | "none"
@@ -352,7 +355,21 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
         type: "object",
         additionalProperties: false,
         required: ["kind"],
-        properties: { kind: { const: "manual" } },
+        oneOf: [
+          {
+            additionalProperties: false,
+            required: ["kind"],
+            properties: { kind: { const: "manual" } },
+          },
+          {
+            additionalProperties: false,
+            required: ["kind"],
+            properties: {
+              kind: { const: "public_form" },
+              stage: { $ref: "#/$defs/key" },
+            },
+          },
+        ],
       },
     },
     start_roles: { type: "array", items: { $ref: "#/$defs/key" } },

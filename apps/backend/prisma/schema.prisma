@@ -9,6 +9,8 @@ datasource db {
 
 model users {
   workflow_definitions_created workflow_definitions[] @relation("workflow_definitions_created_by")
+  workflow_instance_comments   workflow_instance_comments[]
+  workflow_public_links        workflow_public_links[]
   workflow_definitions_updated workflow_definitions[] @relation("workflow_definitions_updated_by")
   workflow_versions_published  workflow_versions[]
   work_group_memberships       work_group_members[]
@@ -644,6 +646,8 @@ model order_events {
 
 model organizations {
   workflow_definitions workflow_definitions[]
+  workflow_instance_comments workflow_instance_comments[]
+  workflow_public_links workflow_public_links[]
   work_groups          work_groups[]
   workflow_instances   workflow_instances[]
   workflow_tasks       workflow_tasks[]
@@ -957,6 +961,8 @@ model stores {
   workflow_task_votes        workflow_task_votes[]
   workflow_instance_events   workflow_instance_events[]
   workflow_outbox            workflow_outbox[]
+  workflow_instance_comments workflow_instance_comments[]
+  workflow_public_links      workflow_public_links[]
   stored_files               stored_files[]
   dossiers                   dossiers[]
   dossier_items              dossier_items[]
@@ -15419,6 +15425,7 @@ model workflow_definitions {
   published_version workflow_versions?   @relation("workflow_definition_published", fields: [published_version_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   versions          workflow_versions[]  @relation("workflow_definition_versions")
   instances         workflow_instances[]
+  public_links      workflow_public_links[]
 
   @@unique([store_id, key])
   @@index([store_id, status])
@@ -15526,6 +15533,7 @@ model workflow_instances {
   tasks        workflow_tasks[]
   events       workflow_instance_events[]
   dossier      dossiers?
+  comments     workflow_instance_comments[]
 
   @@unique([store_id, reference])
   @@index([store_id, definition_id, status, current_stage_key])
@@ -15724,4 +15732,49 @@ model dossier_items {
 
   @@index([dossier_id, requirement_key])
   @@index([store_id, file_id])
+}
+
+// ---------------------------------------------------------------------------
+// Operación de Flujos (odd/tasks/flujos-documental.md, bloque 8)
+// Migración aditiva: prisma/migrations/20261113120000_workflows_operation
+// ---------------------------------------------------------------------------
+
+/// Comentarios de una solicitud (≤ 2000 caracteres).
+model workflow_instance_comments {
+  id              Int      @id @default(autoincrement())
+  organization_id Int
+  store_id        Int
+  instance_id     Int
+  author_user_id  Int
+  body            String   @db.VarChar(2000)
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+
+  organization organizations      @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store        stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  instance     workflow_instances @relation(fields: [instance_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  author       users              @relation(fields: [author_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([instance_id, created_at])
+  @@index([store_id])
+}
+
+/// Enlace público de un flujo (formulario por enlace). Solo se guarda el hash del token.
+model workflow_public_links {
+  id                 Int       @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int
+  definition_id      Int
+  token_hash         String    @unique @db.Char(64)
+  is_active          Boolean   @default(true)
+  expires_at         DateTime? @db.Timestamp(6)
+  created_by_user_id Int
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+  last_used_at       DateTime? @db.Timestamp(6)
+
+  organization organizations        @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store        stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  definition   workflow_definitions @relation(fields: [definition_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by   users                @relation(fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([store_id, definition_id, is_active])
 }

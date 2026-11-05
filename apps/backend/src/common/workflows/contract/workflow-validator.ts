@@ -465,13 +465,26 @@ function run(input: unknown, ctx: WorkflowValidationContext, c: Collector) {
       !Array.isArray(input["triggers"]) ||
       !input["triggers"].every(
         (t) =>
-          isObj(t) && t["kind"] === "manual" && Object.keys(t).length === 1,
+          isObj(t) &&
+          (t["kind"] === "manual"
+            ? Object.keys(t).length === 1
+            : t["kind"] === "public_form" &&
+              Object.keys(t).every((k) => k === "kind" || k === "stage") &&
+              (t["stage"] === undefined || isStr(t["stage"]))),
       )
     ) {
       c.err(
         "SHAPE_INVALID",
         "triggers",
-        'Por ahora el único disparador permitido es {"kind":"manual"}.',
+        'Los disparadores permitidos son {"kind":"manual"} y {"kind":"public_form"}.',
+      );
+    } else if (
+      input["triggers"].filter((t) => t["kind"] === "public_form").length > 1
+    ) {
+      c.err(
+        "SHAPE_INVALID",
+        "triggers",
+        "Solo puede haber un disparador de formulario público.",
       );
     }
   }
@@ -501,6 +514,43 @@ function run(input: unknown, ctx: WorkflowValidationContext, c: Collector) {
   const fields = checkFields(input["fields"], c);
   const stages = checkStages(input["stages"], fields, ctx, c);
   checkGraph(stages, c);
+  checkPublicFormTrigger(input, c);
+}
+
+/** `public_form`: the start stage must be a `form` stage filled by the initiator. */
+function checkPublicFormTrigger(input: Json, c: Collector) {
+  const triggers = input["triggers"];
+  if (!Array.isArray(triggers) || !Array.isArray(input["stages"])) return;
+  const index = triggers.findIndex(
+    (t) => isObj(t) && t["kind"] === "public_form",
+  );
+  if (index < 0) return;
+  const path = `triggers[${index}]`;
+  const trigger = triggers[index] as Json;
+  const stages = (input["stages"] as unknown[]).filter(isObj);
+  const start = stages.find((s) => s["start"] === true);
+  if (!start) return;
+  if (trigger["stage"] !== undefined && trigger["stage"] !== start["key"]) {
+    c.err(
+      "SHAPE_INVALID",
+      `${path}.stage`,
+      "El formulario público debe apuntar a la etapa inicial del flujo.",
+    );
+    return;
+  }
+  const assignee = start["assignee"];
+  if (
+    start["type"] !== "form" ||
+    !isObj(assignee) ||
+    assignee["kind"] !== "initiator"
+  ) {
+    c.err(
+      "SHAPE_INVALID",
+      path,
+      "El formulario público exige que la etapa inicial sea de tipo formulario y que la complete quien inicia la solicitud.",
+      isStr(start["key"]) ? start["key"] : undefined,
+    );
+  }
 }
 
 /* ------------------------------------------------------------------ */

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseIntPipe,
@@ -26,6 +27,7 @@ import {
   ValidateWorkflowDto,
   WorkflowDefinitionsQueryDto,
 } from '../dto/workflow-definition.dto';
+import { WorkflowPublicLinksService } from '../public-link/workflow-public-links.service';
 import { WorkflowDefinitionsService } from './workflow-definitions.service';
 import { WorkflowSimulatorService } from './workflow-simulator.service';
 
@@ -37,6 +39,7 @@ export class WorkflowDefinitionsController {
   constructor(
     private readonly definitions: WorkflowDefinitionsService,
     private readonly simulator: WorkflowSimulatorService,
+    private readonly publicLinks: WorkflowPublicLinksService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -145,6 +148,29 @@ export class WorkflowDefinitionsController {
     return this.responseService.success(
       await this.definitions.export(id, { version: query.version }),
     );
+  }
+
+  /** State of the public form link (the raw token is never recoverable). */
+  @Get(':id/public-link')
+  @Permissions('store:workflows:design')
+  async publicLink(@Param('id', ParseIntPipe) id: number) {
+    return this.responseService.success(await this.publicLinks.status(id));
+  }
+
+  /** Creates (or rotates) the link; the token is returned this once. */
+  @Post(':id/public-link')
+  @Permissions('store:workflows:design')
+  async createPublicLink(@Param('id', ParseIntPipe) id: number) {
+    return this.responseService.created(
+      await this.publicLinks.create(id),
+      'Enlace público creado',
+    );
+  }
+
+  @Delete(':id/public-link')
+  @Permissions('store:workflows:design')
+  async revokePublicLink(@Param('id', ParseIntPipe) id: number) {
+    return this.responseService.success(await this.publicLinks.revoke(id), 'Enlace revocado');
   }
 
   @Post(':id/archive')

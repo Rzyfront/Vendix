@@ -2,11 +2,13 @@ import { Module } from '@nestjs/common';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { DocumentsModule } from '../documents/documents.module';
+import { EmailModule } from '../../../email/email.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WorkflowAdvanceService } from './engine/workflow-advance.service';
 import { WorkflowAssignmentService } from './engine/workflow-assignment.service';
 import { WorkflowCompleteService } from './engine/workflow-complete.service';
 import { WorkflowRequirementsService } from './engine/workflow-engine.types';
+import { WorkflowEmailService } from './engine/workflow-email.service';
 import { WorkflowEngineService } from './engine/workflow-engine.service';
 import { WorkflowEventsService } from './engine/workflow-events.service';
 import { WorkflowLoaderService } from './engine/workflow-loader.service';
@@ -26,21 +28,30 @@ import { WorkflowInstancesController } from './instances/workflow-instances.cont
 import { WorkflowInstancesService } from './instances/workflow-instances.service';
 import { DocumentFilesController } from './files/document-files.controller';
 import { WorkflowFilesService } from './files/workflow-files.service';
+import { WorkflowBoardController } from './board/workflow-board.controller';
+import { WorkflowBoardService } from './board/workflow-board.service';
+import { WorkflowInboxController } from './inbox/workflow-inbox.controller';
+import { WorkflowInboxService } from './inbox/workflow-inbox.service';
+import { WorkflowCommentsService } from './instances/workflow-comments.service';
+import { WorkflowPublicLinksService } from './public-link/workflow-public-links.service';
 import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
 
 /**
  * Flujos: motor (start / completeTask / claim / transition / cancel / tick),
- * grupos de trabajo, despachador de outbox y temporizadores. Controladores (bloque 4):
+ * grupos de trabajo, despachador de outbox y temporizadores. Operación (bloque 8): bandeja `inbox`, tablero `board`, comentarios, enlace público y correo.
+ * Controladores (bloque 4):
  * `store/workflows/{definitions,instances,tasks}` y `store/work-groups`.
  * `WorkflowRequirementsService` se evalúa contra el expediente de la instancia (`DocumentsModule`):
  * `upload` y `file_field` reales; `issued_document` / `signature` llegan en tareas documentales posteriores.
  */
 @Module({
-  imports: [PrismaModule, NotificationsModule, ResponseModule, DocumentsModule],
+  imports: [PrismaModule, NotificationsModule, EmailModule, ResponseModule, DocumentsModule],
   controllers: [
     WorkflowDefinitionsController,
     WorkflowInstancesController,
     WorkflowTasksController,
+    WorkflowInboxController,
+    WorkflowBoardController,
     WorkGroupsController,
     DocumentFilesController,
   ],
@@ -50,6 +61,11 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
     WorkflowSimulatorService,
     WorkflowInstancesService,
     WorkflowFilesService,
+    WorkflowCommentsService,
+    WorkflowInboxService,
+    WorkflowBoardService,
+    WorkflowPublicLinksService,
+    WorkflowEmailService,
     WorkflowLoaderService,
     WorkflowEventsService,
     WorkflowReferenceService,

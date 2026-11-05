@@ -496,3 +496,38 @@ describe('formatWorkflowIssues', () => {
     expect(formatWorkflowIssues(validateWorkflowDefinition(ex() as WorkflowDefinitionV1))).toEqual([]);
   });
 });
+
+describe('trigger public_form', () => {
+  const startKey = (d: any) => d.stages.find((s: any) => s.start).key;
+
+  it('is valid on the start form stage filled by the initiator (stage optional)', () => {
+    expect(run((d) => (d.triggers = [{ kind: 'manual' }, { kind: 'public_form' }])).valid).toBe(true);
+    expect(
+      run((d) => (d.triggers = [{ kind: 'public_form', stage: startKey(d) }])).valid,
+    ).toBe(true);
+  });
+
+  it('rejects a stage that is not the start stage', () => {
+    const r = run((d) => (d.triggers = [{ kind: 'public_form', stage: 'jefe' }]));
+    expect(r.valid).toBe(false);
+    expect(r.errors.find((e) => e.path === 'triggers[0].stage')?.code).toBe('SHAPE_INVALID');
+  });
+
+  it('rejects a start stage that is not a form of the initiator', () => {
+    const r = run((d) => {
+      d.triggers = [{ kind: 'public_form' }];
+      stage(d, startKey(d)).assignee = { kind: 'role', role_key: 'manager' };
+    }, { roleKeys: ['manager'] });
+    expect(r.errors.some((e) => e.path === 'triggers[0]' && e.code === 'SHAPE_INVALID')).toBe(true);
+  });
+
+  it('rejects two public_form triggers and unknown keys', () => {
+    expect(
+      has(run((d) => (d.triggers = [{ kind: 'public_form' }, { kind: 'public_form' }])), 'SHAPE_INVALID'),
+    ).toBe(true);
+    expect(
+      has(run((d) => (d.triggers = [{ kind: 'public_form', extra: 1 }])), 'SHAPE_INVALID'),
+    ).toBe(true);
+    expect(has(run((d) => (d.triggers = [{ kind: 'webhook' }])), 'SHAPE_INVALID')).toBe(true);
+  });
+});

@@ -1,14 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
-import { WorkflowDefinitionV1, startStage } from '@common/workflows/contract';
+import {
+  WorkflowDefinitionV1,
+  resolveTransition,
+  startStage,
+  validateFormValues,
+} from '@common/workflows/contract';
 import { DossiersService } from '../../documents/dossiers.service';
 import {
+  StartPublicWorkflowInput,
   StartWorkflowInput,
   WorkflowActor,
   WorkflowCommandResult,
   WorkflowInstanceRow,
   WorkflowTx,
 } from './workflow-engine.types';
+import { WorkflowAdvanceService } from './workflow-advance.service';
 import { WorkflowEventsService } from './workflow-events.service';
 import {
   WorkflowCallContext,
@@ -26,6 +33,7 @@ export class WorkflowStartService {
     private readonly events: WorkflowEventsService,
     private readonly references: WorkflowReferenceService,
     private readonly dossiers: DossiersService,
+    private readonly advancer: WorkflowAdvanceService,
   ) {}
 
   async execute(
@@ -111,6 +119,139 @@ export class WorkflowStartService {
       replayed: false,
       from_stage_key: null,
       to_stage_key: stage.key,
+    };
+  }
+
+  /**
+   * Public form submission: starts the instance as actor `public` and completes
+   * the start form in the same transaction, so it lands in the next stage. The
+   * link is re-verified here (active, not expired, same store and flow), which
+   * keeps this path closed to anyone who does not hold a valid link.
+   */
+  async executePublic(
+    tx: WorkflowTx,
+    ctx: WorkflowCallContext,
+    input: StartPublicWorkflowInput,
+  ): Promise<WorkflowCommandResult> {
+    const prev = await this.events.replay(tx, input.idempotencyKey);
+    if (prev) return prev;
+
+    const link = await tx.workflow_public_links.findFirst({
+      where: {
+        id: input.linkId,
+        store_id: ctx.store_id,
+        definition_id: input.definitionId,
+        is_active: true,
+      },
+    });
+    if (!link || (link.expires_at && new Date(link.expires_at).getTime() <= Date.now())) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_PUBLIC_NOT_FOUND);
+    }
+    const def = await tx.workflow_definitions.findFirst({
+      where: { id: input.definitionId, store_id: ctx.store_id },
+    });
+    if (!def || def.status !== 'active' || !def.published_version_id) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_PUBLIC_NOT_FOUND);
+    }
+    const definition = await this.loader.loadDefinition(tx, def.published_version_id);
+    const stage = startStage(definition);
+    const trigger = (definition.triggers ?? []).some((t) => t.kind === 'public_form');
+    if (!stage || !trigger || stage.type !== 'form') {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_PUBLIC_NOT_FOUND);
+    }
+
+    // Public uploads are out of scope: file fields are never accepted here.
+    const fileKeys = new Set(
+      definition.fields.filter((f) => f.type === 'file').map((f) => f.key),
+    );
+    const submitted = Object.fromEntries(
+      Object.entries(input.values ?? {}).filter(([k]) => !fileKeys.has(k)),
+    );
+    const form = validateFormValues(definition, stage, submitted);
+    if (!form.ok) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_FORM_INVALID, undefined, {
+        errors: form.errors,
+      });
+    }
+    const now = new Date();
+    const reference = await this.references.next(tx, ctx.store_id);
+    const title = `${definition.name} · ${input.contact.name}`.slice(0, 200);
+    const enter = this.stages.applyActions(stage.on_enter, form.values, { reference, title });
+    const data = enter.data;
+    const transition = resolveTransition(stage, 'submit', data, definition.fields);
+    if (!transition) throw new VendixHttpException(ErrorCodes.WORKFLOW_NO_TRANSITION);
+    if (transition.require_comment) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_COMMENT_REQUIRED);
+    }
+    const actor: WorkflowActor = { type: 'public', id: null };
+    const patch = this.stages.stagePatch(stage, now, 0);
+    const created = (await tx.workflow_instances.create({
+      data: {
+        organization_id: ctx.organization_id,
+        store_id: ctx.store_id,
+        definition_id: def.id,
+        version_id: def.published_version_id,
+        reference,
+        title,
+        data,
+        started_by_type: actor.type,
+        started_by_id: null,
+        row_version: 0,
+        ...patch,
+        status: patch.status ?? 'active',
+      },
+    })) as WorkflowInstanceRow;
+    await this.dossiers.createForInstance(tx, created);
+    await this.events.append(tx, {
+      store_id: ctx.store_id,
+      instance_id: created.id,
+      type: 'started',
+      to_stage_key: stage.key,
+      actor,
+      payload: {
+        reference,
+        definition_key: def.key,
+        version_id: def.published_version_id,
+        via: 'public_form',
+        contact: {
+          name: input.contact.name,
+          email: input.contact.email ?? null,
+          phone: input.contact.phone ?? null,
+        },
+      },
+      idempotencyKey: input.idempotencyKey,
+    });
+    for (const payload of enter.notifies) {
+      await this.events.enqueue(tx, {
+        store_id: ctx.store_id,
+        instance_id: created.id,
+        kind: 'notify',
+        payload: payload as unknown as Record<string, unknown>,
+      });
+    }
+    const updated = await this.advancer.advance({
+      tx,
+      instance: created,
+      definition,
+      fromStage: stage,
+      toStageKey: transition.to,
+      data,
+      actor,
+      expectedRowVersion: created.row_version,
+      runExitHooks: true,
+      event: { type: 'submitted', payload: { outcome: 'submit', via: 'public_form' } },
+    });
+    await tx.workflow_public_links.updateMany({
+      where: { id: link.id, store_id: ctx.store_id },
+      data: { last_used_at: now },
+    });
+    return {
+      instance: updated,
+      task: null,
+      advanced: true,
+      replayed: false,
+      from_stage_key: stage.key,
+      to_stage_key: transition.to,
     };
   }
 

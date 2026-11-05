@@ -6,6 +6,8 @@ import { INDUSTRY_MODULE_KEY } from '../../../common/decorators/industry-module.
 import { ResponseService } from '../../../common/responses/response.service';
 import { WorkflowDefinitionsController } from './definitions/workflow-definitions.controller';
 import { WorkflowInstancesController } from './instances/workflow-instances.controller';
+import { WorkflowBoardController } from './board/workflow-board.controller';
+import { WorkflowInboxController } from './inbox/workflow-inbox.controller';
 import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
 import { WorkGroupsController } from './work-groups.controller';
 
@@ -32,11 +34,18 @@ const EXPECTED: Array<[any, string, string | string[], string, string]> = [
   [WorkflowDefinitionsController, 'versions', R, 'GET', ':id/versions'],
   [WorkflowDefinitionsController, 'version', R, 'GET', ':id/versions/:version'],
   [WorkflowDefinitionsController, 'export', D, 'GET', ':id/export'],
+  [WorkflowDefinitionsController, 'publicLink', D, 'GET', ':id/public-link'],
+  [WorkflowDefinitionsController, 'createPublicLink', D, 'POST', ':id/public-link'],
+  [WorkflowDefinitionsController, 'revokePublicLink', D, 'DELETE', ':id/public-link'],
   [WorkflowDefinitionsController, 'archive', D, 'POST', ':id/archive'],
   [WorkflowDefinitionsController, 'unarchive', D, 'POST', ':id/unarchive'],
   [WorkflowInstancesController, 'start', S, 'POST', '/'],
   [WorkflowInstancesController, 'list', [R, S, T], 'GET', '/'],
   [WorkflowInstancesController, 'get', [R, S, T], 'GET', ':id'],
+  [WorkflowInstancesController, 'listComments', [R, S, T], 'GET', ':id/comments'],
+  [WorkflowInstancesController, 'addComment', [R, S, T], 'POST', ':id/comments'],
+  [WorkflowInboxController, 'list', T, 'GET', '/'],
+  [WorkflowBoardController, 'get', R, 'GET', ':definitionId'],
   [WorkflowInstancesController, 'cancel', M, 'POST', ':id/cancel'],
   [WorkflowInstancesController, 'forceTransition', M, 'POST', ':id/force-transition'],
   [WorkflowInstancesController, 'uploadFile', T, 'POST', ':id/files'],
@@ -56,6 +65,8 @@ describe('controladores de Flujos', () => {
     WorkflowDefinitionsController,
     WorkflowInstancesController,
     WorkflowTasksController,
+    WorkflowInboxController,
+    WorkflowBoardController,
     WorkGroupsController,
   ])('%p usa PermissionsGuard + IndustryModuleGuard y el módulo "flows"', (ctrl) => {
     expect(Reflect.getMetadata('__guards__', ctrl)).toEqual([PermissionsGuard, IndustryModuleGuard]);
@@ -66,6 +77,8 @@ describe('controladores de Flujos', () => {
     expect(Reflect.getMetadata('path', WorkflowDefinitionsController)).toBe('store/workflows/definitions');
     expect(Reflect.getMetadata('path', WorkflowInstancesController)).toBe('store/workflows/instances');
     expect(Reflect.getMetadata('path', WorkflowTasksController)).toBe('store/workflows/tasks');
+    expect(Reflect.getMetadata('path', WorkflowInboxController)).toBe('store/workflows/inbox');
+    expect(Reflect.getMetadata('path', WorkflowBoardController)).toBe('store/workflows/board');
     expect(Reflect.getMetadata('path', WorkGroupsController)).toBe('store/work-groups');
   });
 
@@ -102,7 +115,7 @@ describe('controladores de Flujos', () => {
       completeTask: jest.fn().mockResolvedValue({ instance: { id: 1 } }),
     };
     const responses = new ResponseService();
-    const instances = new WorkflowInstancesController(engine as any, {} as any, responses, {} as any);
+    const instances = new WorkflowInstancesController(engine as any, {} as any, responses, {} as any, {} as any);
     const tasks = new WorkflowTasksController(engine as any, responses);
     beforeEach(() => jest.clearAllMocks());
 

@@ -67,6 +67,11 @@ export const ErrorCodes = {
   WORKFLOW_INVALID: { code: 'WORKFLOW_INVALID', httpStatus: 422, devMessage: 'La definición del flujo tiene errores; corrígelos para publicar.' },
   WORKFLOW_VERSION_NOT_FOUND: { code: 'WORKFLOW_VERSION_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró esa versión del flujo.' },
   WORKFLOW_IDEMPOTENCY_KEY_REQUIRED: { code: 'WORKFLOW_IDEMPOTENCY_KEY_REQUIRED', httpStatus: 400, devMessage: 'Falta el encabezado Idempotency-Key (máximo 80 caracteres).' },
+  // Operación de Flujos (bloque 8)
+  WORKFLOW_PUBLIC_NOT_FOUND: { code: 'WORKFLOW_PUBLIC_NOT_FOUND', httpStatus: 404, devMessage: 'Este enlace no existe o ya no está disponible.' },
+  WORKFLOW_PUBLIC_LINK_UNAVAILABLE: { code: 'WORKFLOW_PUBLIC_LINK_UNAVAILABLE', httpStatus: 422, devMessage: 'Este flujo no puede publicarse como formulario por enlace.' },
+  WORKFLOW_PUBLIC_CONSENT_REQUIRED: { code: 'WORKFLOW_PUBLIC_CONSENT_REQUIRED', httpStatus: 422, devMessage: 'Debes aceptar el aviso de privacidad para enviar el formulario.' },
+  WORKFLOW_PUBLIC_PAYLOAD_TOO_LARGE: { code: 'WORKFLOW_PUBLIC_PAYLOAD_TOO_LARGE', httpStatus: 413, devMessage: 'El formulario enviado es demasiado grande.' },
   // Documental D1 (flujos-documental S5)
   DOCUMENT_TOO_LARGE: { code: 'DOCUMENT_TOO_LARGE', httpStatus: 413, devMessage: 'El archivo supera el tamaño máximo permitido.' },
   DOCUMENT_TYPE_NOT_ALLOWED: { code: 'DOCUMENT_TYPE_NOT_ALLOWED', httpStatus: 415, devMessage: 'Este tipo de archivo no está permitido.' },

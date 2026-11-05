@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
+import { WorkflowDefinitionV1, findStage } from '@common/workflows/contract';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
+import { WorkflowEmailService } from './workflow-email.service';
 import { WorkflowEngineService } from './workflow-engine.service';
 import {
   WorkflowInstanceRow,
@@ -51,6 +53,7 @@ export class WorkflowOutboxDispatcher {
     private readonly engine: WorkflowEngineService,
     private readonly assignment: WorkflowAssignmentService,
     private readonly notifications: NotificationsService,
+    private readonly mailer: WorkflowEmailService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -167,15 +170,36 @@ export class WorkflowOutboxDispatcher {
     );
   }
 
+  /**
+   * In-app first, then e-mail. Per-recipient delivery is recorded in
+   * `payload.delivered` after each send, so a retry (backoff) only repeats what
+   * did not go out: nobody gets the same channel twice. A failed e-mail makes the
+   * row fail (retry by backoff) once all other recipients were attended.
+   */
   private async notify(row: ClaimedOutboxRow): Promise<void> {
     if (!row.instance_id) return;
-    const payload = row.payload as WorkflowNotifyPayload;
+    const payload = row.payload as WorkflowNotifyPayload & {
+      delivered?: { in_app?: number[]; email?: number[] };
+    };
     const instance = (await this.prisma.workflow_instances.findFirst({
       where: { id: row.instance_id, store_id: row.store_id },
     })) as WorkflowInstanceRow | null;
     if (!instance) return;
-    const users = await this.assignment.resolveUserIds(this.prisma, payload, instance);
+    const resolved = await this.assignment.resolveUserIds(this.prisma, payload, instance);
+    const excluded = new Set(payload.exclude_user_ids ?? []);
+    const users = resolved.filter((u) => !excluded.has(u));
+    const delivered = {
+      in_app: [...(payload.delivered?.in_app ?? [])],
+      email: [...(payload.delivered?.email ?? [])],
+    };
+    const save = () =>
+      this.prisma.withoutScope().workflow_outbox.updateMany({
+        where: { id: row.id },
+        data: { payload: { ...row.payload, delivered } },
+      });
+
     for (const userId of users) {
+      if (delivered.in_app.includes(userId)) continue;
       await this.notifications.sendToUser(
         row.store_id,
         userId,
@@ -188,6 +212,34 @@ export class WorkflowOutboxDispatcher {
           url: `/admin/workflows/instances/${instance.id}`,
         },
       );
+      delivered.in_app.push(userId);
+    }
+    await save();
+
+    const version = await this.prisma.workflow_versions.findFirst({
+      where: { id: instance.version_id, store_id: row.store_id },
+      select: { definition: true },
+    });
+    const stage = version
+      ? findStage(version.definition as WorkflowDefinitionV1, instance.current_stage_key)
+      : undefined;
+    const subject = `${instance.reference} · ${stage?.name ?? instance.title}`;
+    const failed: number[] = [];
+    for (const userId of users) {
+      if (delivered.email.includes(userId)) continue;
+      const result = await this.mailer.send({
+        storeId: row.store_id,
+        userId,
+        instanceId: instance.id,
+        subject,
+        message: payload.message,
+      });
+      if (result === 'failed') failed.push(userId);
+      else delivered.email.push(userId);
+    }
+    await save();
+    if (failed.length > 0) {
+      throw new Error(`E-mail not delivered to users: ${failed.join(',')}`);
     }
   }
 }

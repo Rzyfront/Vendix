@@ -10,6 +10,7 @@ import { EcommerceReservationsModule } from './reservations/ecommerce-reservatio
 import { EcommerceCustomerQueueModule } from './customer-queue/ecommerce-customer-queue.module';
 import { EcommerceInvoiceDataModule } from './invoice-data/ecommerce-invoice-data.module';
 import { EcommerceDataCollectionModule } from './data-collection/ecommerce-data-collection.module';
+import { EcommerceWorkflowsPublicModule } from './workflows-public/ecommerce-workflows-public.module';
 import { EcommerceTablesModule } from './tables/ecommerce-tables.module';
 import { EcommercePromotionsModule } from './promotions/ecommerce-promotions.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
@@ -42,6 +43,7 @@ import { EcommerceHospitalityModule } from './hospitality/ecommerce-hospitality.
     EcommerceCustomerQueueModule,
     EcommerceInvoiceDataModule,
     EcommerceDataCollectionModule,
+    EcommerceWorkflowsPublicModule,
     EcommerceTablesModule,
     EcommercePromotionsModule,
     GeocodingModule,

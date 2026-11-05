@@ -15,6 +15,11 @@ import { WorkflowTickService } from '../../domains/store/workflows/engine/workfl
 import { DossiersService } from '../../domains/store/documents/dossiers.service';
 import { StoredFilesService } from '../../domains/store/documents/stored-files.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { WorkflowCommentsService } from '../../domains/store/workflows/instances/workflow-comments.service';
+import { WorkflowInboxService } from '../../domains/store/workflows/inbox/workflow-inbox.service';
+import { WorkflowBoardService } from '../../domains/store/workflows/board/workflow-board.service';
+import { WorkflowPublicLinksService } from '../../domains/store/workflows/public-link/workflow-public-links.service';
+import { WorkflowPublicFormService } from '../../domains/ecommerce/workflows-public/workflow-public-form.service';
 import { WorkflowFilesService } from '../../domains/store/workflows/files/workflow-files.service';
 import { WorkflowInstancesService } from '../../domains/store/workflows/instances/workflow-instances.service';
 import { WorkGroupsService } from '../../domains/store/workflows/work-groups.service';
@@ -43,7 +48,7 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
   const advancer = new WorkflowAdvanceService(stages, events);
   const dossiers = new DossiersService(prisma);
   const requirements = new DossierWorkflowRequirementsService(dossiers);
-  const starter = new WorkflowStartService(loader, stages, events, references, dossiers);
+  const starter = new WorkflowStartService(loader, stages, events, references, dossiers, advancer);
   // S3 and audit are mocks: specs assert on `s3.uploadFile` / `deleteFile` / `getPresignedUrl`.
   const s3 = {
     uploadFile: jest.fn(async (_b: Buffer, key: string) => key),
@@ -87,6 +92,11 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     storedFiles,
     instances,
   );
+  const comments = new WorkflowCommentsService(prisma, instances, events);
+  const inbox = new WorkflowInboxService(prisma);
+  const board = new WorkflowBoardService(prisma, instances, requirements);
+  const publicLinks = new WorkflowPublicLinksService(prisma);
+  const publicForm = new WorkflowPublicFormService(prisma, engine);
   let ctx: TestCtx = { store_id: 1, organization_id: 1, user_id: 1 };
   const scoped = new AsyncLocalStorage<TestCtx>();
   jest.spyOn(RequestContextService, 'getContext').mockImplementation(
@@ -102,6 +112,11 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     storedFiles,
     workflowFiles,
     instances,
+    comments,
+    inbox,
+    board,
+    publicLinks,
+    publicForm,
     s3,
     audit,
     assignment,
@@ -233,6 +248,38 @@ export function purchaseDefinition(
       },
       { key: 'done', name: 'Aprobada', type: 'end', outcome: 'completed' },
       { key: 'rejected', name: 'Rechazada', type: 'end', outcome: 'rejected' },
+    ],
+    ...overrides,
+  } as WorkflowDefinitionV1;
+}
+
+/** Public form: formulario (initiator) → revisión (manager) → listo / cerrado. */
+export function publicFormDefinition(overrides: Partial<WorkflowDefinitionV1> = {}): WorkflowDefinitionV1 {
+  return {
+    schema: 'vendix.workflow/v1',
+    key: 'pqr',
+    name: 'Solicitud de servicio',
+    description: 'Cuéntanos qué necesitas.',
+    triggers: [{ kind: 'public_form' }],
+    fields: [
+      { key: 'asunto', type: 'text', label: 'Asunto', required: true },
+      { key: 'tipo', type: 'select', label: 'Tipo', options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }] },
+      { key: 'adjunto', type: 'file', label: 'Adjunto' },
+    ],
+    stages: [
+      {
+        key: 'formulario', name: 'Formulario', type: 'form', start: true,
+        assignee: { kind: 'initiator' },
+        form: { fields: ['asunto', 'tipo', 'adjunto'] },
+        transitions: [{ on: 'submit', to: 'revision' }],
+      },
+      {
+        key: 'revision', name: 'Revisión', type: 'approval',
+        assignee: { kind: 'role', role_key: 'manager' },
+        transitions: [{ on: 'approve', to: 'listo' }, { on: 'reject', to: 'cerrado' }],
+      },
+      { key: 'listo', name: 'Listo', type: 'end', outcome: 'completed' },
+      { key: 'cerrado', name: 'Cerrado', type: 'end', outcome: 'rejected' },
     ],
     ...overrides,
   } as WorkflowDefinitionV1;
