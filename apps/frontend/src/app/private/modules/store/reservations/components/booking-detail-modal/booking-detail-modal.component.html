@@ -179,6 +179,63 @@
         </div>
       }
 
+
+      <!-- Deposit block (S15 / S17) -->
+      @if (deposit(); as dep) {
+        <div class="deposit-block">
+          <div class="deposit-head">
+            <span class="info-label">
+              <app-icon name="wallet" [size]="13"></app-icon>
+              Anticipo
+            </span>
+            @if (dep.balance > 0) {
+              <span class="deposit-badge paid">Pagado</span>
+            } @else if (pendingDepositRequest()) {
+              <span class="deposit-badge pending">Esperando pago</span>
+            }
+          </div>
+          <div class="deposit-figures">
+            @if (dep.required != null) {
+              <span>Requerido <strong>{{ dep.required | currency }}</strong></span>
+            }
+            <span>Recibido <strong>{{ dep.received | currency }}</strong></span>
+            @if (dep.balance !== dep.received) {
+              <span>Saldo <strong>{{ dep.balance | currency }}</strong></span>
+            }
+          </div>
+
+          @if (pendingDepositRequest(); as pending) {
+            <p class="deposit-hint">
+              {{ pending.amount | currency }} por pagar.
+              @if (pending.expires_at) {
+                Apartada hasta {{ pending.expires_at | date:'dd/MM HH:mm' }}; si no se paga, se libera.
+              }
+            </p>
+            @if (depositLinkUrl(); as link) {
+              <div class="deposit-link-row">
+                <input class="deposit-link-input" readonly [value]="link" (focus)="$any($event.target).select()" aria-label="Enlace de pago" />
+                <button class="btn-ghost-sm" (click)="copyDepositLink()"><app-icon name="copy" [size]="14"></app-icon> Copiar</button>
+                <button class="btn-ghost-sm" (click)="shareDepositLink()"><app-icon name="share-2" [size]="14"></app-icon> Compartir</button>
+              </div>
+            }
+            <button class="btn-ghost-sm" [disabled]="depositLinkBusy()" (click)="generateDepositLink()">
+              <app-icon name="refresh-cw" [size]="14"></app-icon>
+              Generar nuevo enlace
+            </button>
+          }
+
+          @if (dep.decision_due_at && hasDepositBalance()) {
+            <p class="deposit-hint warn">El cliente no llegó: decide qué pasa con el anticipo.</p>
+          }
+          @if (canDecideDeposit()) {
+            <button class="btn-ghost-sm" (click)="depositDialog.set('decide')">
+              <app-icon name="wallet" [size]="14"></app-icon>
+              Decidir anticipo
+            </button>
+          }
+        </div>
+      }
+
       <!-- Notes section -->
       <div class="notes-section">
         @if (editing()) {
@@ -366,7 +423,7 @@
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
         } @else if (f.status === 'pending') {
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
-          <button class="btn-footer danger-outline" (click)="cancelled.emit(f)">
+          <button class="btn-footer danger-outline" (click)="requestCancel(f)">
             <app-icon name="x" [size]="15"></app-icon>
             Cancelar
           </button>
@@ -382,7 +439,7 @@
           </button>
         } @else if (f.status === 'confirmed') {
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
-          <button class="btn-footer danger-outline" (click)="cancelled.emit(f)">
+          <button class="btn-footer danger-outline" (click)="requestCancel(f)">
             <app-icon name="x" [size]="15"></app-icon>
             Cancelar
           </button>
@@ -419,7 +476,7 @@
           }
         } @else if (f.status === 'arriving' || f.status === 'attending') {
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
-          <button class="btn-footer danger-outline" (click)="cancelled.emit(f)">
+          <button class="btn-footer danger-outline" (click)="requestCancel(f)">
             <app-icon name="x" [size]="15"></app-icon>
             Cancelar
           </button>
@@ -456,4 +513,13 @@
       </div>
     </ng-container>
   }
+
+  <app-booking-deposit-dialog
+    [isOpen]="depositDialog() !== null"
+    [booking]="booking()"
+    [deposit]="deposit()"
+    [mode]="depositDialog() ?? 'decide'"
+    (closed)="depositDialog.set(null)"
+    (done)="onDepositDialogDone()"
+  ></app-booking-deposit-dialog>
 </app-modal>

@@ -36,6 +36,55 @@ export interface Booking {
   data_collection_submissions?: any[];
   metadata_snapshot?: any;
   consultation_notes?: any[];
+  /** Recurring series the booking belongs to (S19) and its position (0-based); absent for a single booking. */
+  series_id?: number | null;
+  series_index?: number | null;
+  /** Deposit block of the detail endpoint and of the create answer; null when the booking never had one (S15). */
+  deposit?: BookingDeposit | null;
+  /** Path of the payment page (`/pagar/:token`) returned when a `link` deposit was created. */
+  payment_path?: string | null;
+}
+
+/** `deposit` block of a booking (field names mirror `BookingDepositBlock` of the backend). */
+export interface BookingDeposit {
+  required: number | null;
+  received: number;
+  balance: number;
+  pending_request: {
+    payment_request_id: number;
+    amount: number;
+    status: string;
+    expires_at: string | null;
+  } | null;
+  decision_due_at: string | null;
+}
+
+/** Deposit taken with an admin booking: `desk` = received now, `link` = payment page + held slot. */
+export interface BookingDepositInput {
+  amount: number;
+  mode: 'desk' | 'link';
+  method?: string;
+  store_payment_method_id?: number;
+  request_id: string;
+}
+
+export type DepositRefundMethod = 'cash' | 'bank_transfer' | 'card' | 'wompi';
+export type DepositDecisionAction = 'retain' | 'reschedule' | 'refund' | 'credit';
+
+export interface CancelBookingInput {
+  leftover_action?: 'refund' | 'credit';
+  refund_method?: DepositRefundMethod;
+}
+
+export interface DepositDecisionInput {
+  action: DepositDecisionAction;
+  /** Idempotency key: one per dialog open. */
+  request_id: string;
+  refund_method?: DepositRefundMethod;
+  store_payment_method_id?: number;
+  new_date?: string;
+  new_start_time?: string;
+  new_end_time?: string;
 }
 
 export type BookingStatus = 'pending' | 'confirmed' | 'arriving' | 'attending' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
@@ -128,6 +177,7 @@ export interface CreateBookingDto {
   station_id?: number;
   skip_availability_check?: boolean;
   skip_order_creation?: boolean;
+  deposit?: BookingDepositInput;
 }
 
 export interface RescheduleBookingDto {

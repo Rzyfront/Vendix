@@ -182,7 +182,9 @@ export class ReservationListComponent {
         key: 'product',
         label: 'Servicio',
         icon: 'package',
-        transform: (v: any) => v?.name || '-',
+        // A booking of a recurring series (S19) carries its position; each date still cancels on its own.
+        transform: (v: any, item?: any) =>
+          `${v?.name || '-'}${item?.series_id ? ` · Serie ${(item.series_index ?? 0) + 1}` : ''}`,
         infoIconTransform: (v: any) => v?.is_consultation ? 'stethoscope' : undefined,
         infoIconVariantTransform: (v: any) => v?.is_consultation ? 'primary' : undefined,
       },

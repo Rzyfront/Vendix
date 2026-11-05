@@ -1574,6 +1574,37 @@ export class ProductCreatePageComponent {
     },
   );
 
+  /** Display unit of the service duration (S2): minutes are what the backend stores, the unit only changes how it is typed. */
+  serviceDurationUnitOptions: SelectorOption[] = [
+    { value: 'minute', label: 'Minutos' },
+    { value: 'hour', label: 'Horas' },
+    { value: 'day', label: 'Días' },
+  ];
+
+  // 'none' = an ordinary service that only uses the station (sent as null): never a rental by default.
+  rentalPricingModeOptions: SelectorOption[] = [
+    { value: 'none', label: 'No es un alquiler' },
+    { value: 'fixed_price', label: 'Precio fijo del pase' },
+    { value: 'station_rate', label: 'Tarifa por tiempo de la estación' },
+  ];
+
+  private static readonly DURATION_UNIT_MINUTES: Record<string, number> = { minute: 1, hour: 60, day: 1440 };
+
+  /** Shown amount (in the chosen unit) to stored minutes. */
+  private durationToMinutes(amount: unknown, unit: unknown): number | undefined {
+    const value = Number(amount);
+    if (!amount || !Number.isFinite(value) || value <= 0) return undefined;
+    return Math.round(value * (ProductCreatePageComponent.DURATION_UNIT_MINUTES[String(unit)] ?? 1));
+  }
+
+  /** Stored minutes to the amount shown in its unit; falls back to minutes when the unit does not divide evenly. */
+  private durationForDisplay(minutes: number | null | undefined, unit: string | null | undefined): { amount: number | null; unit: string } {
+    if (!minutes) return { amount: null, unit: 'minute' };
+    const factor = ProductCreatePageComponent.DURATION_UNIT_MINUTES[unit ?? 'minute'] ?? 1;
+    if (factor > 1 && minutes % factor === 0) return { amount: minutes / factor, unit: unit as string };
+    return { amount: minutes, unit: 'minute' };
+  }
+
   serviceModalityOptions: SelectorOption[] = [
     { value: 'in_person', label: 'Presencial' },
     { value: 'virtual', label: 'Virtual' },
@@ -1621,6 +1652,8 @@ export class ProductCreatePageComponent {
       this.productForm.patchValue({
         track_inventory: true,
         service_duration_minutes: null,
+        service_duration_unit: 'minute',
+        rental_pricing_mode: 'none',
         service_modality: null,
         service_pricing_type: null,
         requires_booking: false,
@@ -2723,6 +2756,8 @@ export class ProductCreatePageComponent {
         pricing_type: ['unit' as const],
         product_type: ['physical' as const],
         service_duration_minutes: [null],
+        service_duration_unit: ['minute'],
+        rental_pricing_mode: ['none'],
         service_modality: [null],
         service_pricing_type: [null],
         requires_booking: [false],
@@ -3079,7 +3114,11 @@ export class ProductCreatePageComponent {
       pricing_type:
         (product.pricing_type as any)?.value || product.pricing_type || 'unit',
       product_type: product.product_type || 'physical',
-      service_duration_minutes: product.service_duration_minutes || null,
+      ...(() => {
+        const shown = this.durationForDisplay(product.service_duration_minutes, product.service_duration_unit);
+        return { service_duration_minutes: shown.amount, service_duration_unit: shown.unit };
+      })(),
+      rental_pricing_mode: product.rental_pricing_mode || 'none',
       service_modality: product.service_modality || null,
       service_pricing_type: product.service_pricing_type || null,
       requires_booking: product.requires_booking || false,
@@ -5147,9 +5186,18 @@ export class ProductCreatePageComponent {
         : undefined,
       // Service-specific fields
       ...(isServiceType && {
-        service_duration_minutes: formValue.service_duration_minutes
-          ? Number(formValue.service_duration_minutes)
+        // The form shows the duration in its unit; the backend stores minutes and keeps the unit for display.
+        service_duration_minutes: this.durationToMinutes(
+          formValue.service_duration_minutes,
+          formValue.service_duration_unit,
+        ),
+        service_duration_unit: formValue.service_duration_minutes
+          ? formValue.service_duration_unit || 'minute'
           : undefined,
+        rental_pricing_mode:
+          formValue.requires_station && formValue.rental_pricing_mode && formValue.rental_pricing_mode !== 'none'
+            ? formValue.rental_pricing_mode
+            : null,
         service_modality: formValue.service_modality || undefined,
         service_pricing_type: formValue.service_pricing_type || undefined,
         requires_booking: !!formValue.requires_booking,

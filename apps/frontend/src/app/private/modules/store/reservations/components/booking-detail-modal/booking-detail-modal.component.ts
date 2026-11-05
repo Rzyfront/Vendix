@@ -3,21 +3,24 @@ import { ProviderNamePipe } from '../../../../../../shared/pipes/provider-name/p
 import {Component, input, output, signal, computed, inject, effect, DestroyRef} from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CurrencyPipe, DatePipe, NgClass } from '@angular/common';
+import { DatePipe, NgClass } from '@angular/common';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ModalComponent, IconComponent, SpinnerComponent, TooltipComponent } from '../../../../../../shared/components';
 import { ToastService } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
 import { DataCollectionSubmissionsService } from '../../../data-collection/services/data-collection-submissions.service';
-import { Booking, BookingStatus, AvailabilitySlot, ProviderDateInfo, ServiceProvider } from '../../interfaces/reservation.interface';
+import { Booking, BookingDeposit, BookingStatus, AvailabilitySlot, ProviderDateInfo, ServiceProvider } from '../../interfaces/reservation.interface';
+import { BookingDepositDialogComponent } from './booking-deposit-dialog/booking-deposit-dialog.component';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { finalize } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 
 @Component({
   selector: 'app-booking-detail-modal',
   standalone: true,
-  imports: [ProviderNamePipe, FormsModule, ModalComponent, IconComponent, SpinnerComponent, TooltipComponent,
+  imports: [ProviderNamePipe, FormsModule, ModalComponent, IconComponent, SpinnerComponent, TooltipComponent, BookingDepositDialogComponent,
     CurrencyPipe,
     DatePipe,
     NgClass,
@@ -212,13 +215,36 @@ export class BookingDetailModalComponent {
     return 'Iniciar Consulta';
   });
 
+  // Deposit (S15 / S17): loaded from the detail endpoint, which carries the `deposit` block.
+  deposit = signal<BookingDeposit | null>(null);
+  depositDialog = signal<'cancel' | 'decide' | null>(null);
+  depositLinkUrl = signal<string | null>(null);
+  depositLinkBusy = signal(false);
+
+  /** Money is on the booking: cancelling it or a no-show needs an explicit decision. */
+  hasDepositBalance = computed(() => (this.deposit()?.balance ?? 0) > 0);
+
+  /** The deposit is still unpaid: the slot is held until `expires_at`. */
+  pendingDepositRequest = computed(() => this.deposit()?.pending_request ?? null);
+
+  /** "Decidir anticipo": a paid deposit on a booking that already should have started (or the cron deferred it). */
+  canDecideDeposit = computed(() => {
+    const b = this.booking();
+    const dep = this.deposit();
+    if (!b || !dep || dep.balance <= 0) return false;
+    if (!['pending', 'confirmed', 'arriving', 'attending'].includes(b.status)) return false;
+    return !!dep.decision_due_at || this.hasStarted(b);
+  });
+
   private bookingEffect = effect(() => {
     const b = this.booking();
     if (b?.id) {
       this.loadSubmission(b.id);
+      this.loadDeposit(b);
     } else {
       this.submission.set(null);
       this.prediagnosisHtml.set('');
+      this.deposit.set(null);
     }
   });
 
@@ -571,6 +597,76 @@ export class BookingDetailModalComponent {
       },
       error: () => this.submission.set(null),
     });
+  }
+
+  // --- Deposit (S15 / S17) ---
+
+  private loadDeposit(b: Booking): void {
+    this.depositLinkUrl.set(null);
+    this.deposit.set(b.deposit ?? null);
+    if (!b.product?.requires_station && !b.station_id) return;
+    this.reservationsService
+      .getReservation(b.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (detail) => this.deposit.set(detail?.deposit ?? null),
+        error: () => this.deposit.set(b.deposit ?? null),
+      });
+  }
+
+  /** Date-only strings are read as local calendar parts, never through `new Date('YYYY-MM-DD')` (UTC shift). */
+  private hasStarted(b: Booking): boolean {
+    const [y, m, d] = (b.date ?? '').slice(0, 10).split('-').map(Number);
+    const [hh, mm] = (b.start_time ?? '').split(':').map(Number);
+    if (!y || !m || !d || Number.isNaN(hh) || Number.isNaN(mm)) return false;
+    return new Date(y, m - 1, d, hh, mm).getTime() <= Date.now();
+  }
+
+  /** Cancel asks what happens with the deposit first when there is money on the booking. */
+  requestCancel(b: Booking): void {
+    if (this.hasDepositBalance()) this.depositDialog.set('cancel');
+    else this.cancelled.emit(b);
+  }
+
+  onDepositDialogDone(): void {
+    this.depositDialog.set(null);
+    // The parent closes this modal and reloads its lists on `rescheduled`.
+    this.rescheduled.emit();
+  }
+
+  generateDepositLink(): void {
+    const b = this.booking();
+    if (!b || this.depositLinkBusy()) return;
+    this.depositLinkBusy.set(true);
+    this.reservationsService
+      .rotateDepositLink(b.id)
+      .pipe(finalize(() => this.depositLinkBusy.set(false)), takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.depositLinkUrl.set(`${window.location.origin}${result.payment_path}`);
+          this.toastService.success('Enlace de pago generado');
+        },
+        error: (err) => this.toastService.error(extractApiErrorMessage(err)),
+      });
+  }
+
+  copyDepositLink(): void {
+    const url = this.depositLinkUrl();
+    if (!url) return;
+    navigator.clipboard
+      .writeText(url)
+      .then(() => this.toastService.success('Enlace copiado'))
+      .catch(() => this.toastService.error('No se pudo copiar el enlace'));
+  }
+
+  shareDepositLink(): void {
+    const url = this.depositLinkUrl();
+    if (!url) return;
+    if (navigator.share) {
+      navigator.share({ title: 'Pago del anticipo', url }).catch(() => undefined);
+    } else {
+      this.copyDepositLink();
+    }
   }
 
   copyIntakeLink() {

@@ -7,6 +7,9 @@ import {
   BookingStats,
   BookingQuery,
   CreateBookingDto,
+  CancelBookingInput,
+  DepositDecisionAction,
+  DepositDecisionInput,
   RescheduleBookingDto,
   AvailabilitySlot,
   ServiceProvider,
@@ -301,10 +304,25 @@ export class ReservationsService {
     );
   }
 
-  cancelReservation(id: number): Observable<Booking> {
-    return this.http.patch<any>(`${this.apiUrl}/${id}/cancel`, {}).pipe(
+  /** The optional body only matters for a booking with a deposit (A1); without it the booking is cancelled as always. */
+  cancelReservation(id: number, body: CancelBookingInput = {}): Observable<Booking> {
+    return this.http.patch<any>(`${this.apiUrl}/${id}/cancel`, body).pipe(
       map((response) => response.data || response),
     );
+  }
+
+  /** Fresh payment link of a booking whose deposit request is still pending (S15). */
+  rotateDepositLink(id: number): Observable<{ payment_path: string; payment_request_id: number }> {
+    return this.http
+      .post<any>(`${this.apiUrl}/${id}/deposit-link`, {})
+      .pipe(map((response) => response.data || response));
+  }
+
+  /** What happens with the deposit of a booking that did not show up (S17). */
+  decideDeposit(id: number, body: DepositDecisionInput): Observable<{ action: DepositDecisionAction }> {
+    return this.http
+      .post<any>(`${this.apiUrl}/${id}/deposit-decision`, body)
+      .pipe(map((response) => response.data || response));
   }
 
   completeReservation(id: number): Observable<Booking> {

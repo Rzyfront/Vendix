@@ -596,8 +596,46 @@
     </div>
   }
 
+  <!-- Payment link handed over after creating a booking with a link deposit (S15) -->
+  @if (linkedBooking(); as linked) {
+    <div class="step-content fade-in">
+      <div class="deposit-panel">
+        <div class="deposit-panel-title">
+          <app-icon name="check-circle" [size]="18"></app-icon>
+          Reserva #{{ linked.booking_number }} apartada
+        </div>
+        @if (holdExpiresAt(); as expires) {
+          <p class="deposit-panel-hint">
+            Apartada hasta {{ expires | date: 'dd/MM HH:mm' }} &middot; Esperando anticipo
+            @if (linked.deposit?.pending_request; as pending) {
+              de {{ pending.amount | currency }}
+            }
+            . Si no se paga a tiempo, se libera.
+          </p>
+        }
+        @if (paymentUrl(); as url) {
+          <input class="deposit-link-input" readonly [value]="url" (focus)="$any($event.target).select()" aria-label="Enlace de pago" />
+          <div class="deposit-actions">
+            <app-button variant="outline" size="sm" (clicked)="copyPaymentLink()">
+              <app-icon slot="icon" name="copy" [size]="16"></app-icon>
+              Copiar
+            </app-button>
+            <app-button variant="outline" size="sm" (clicked)="sharePaymentLink()">
+              <app-icon slot="icon" name="share-2" [size]="16"></app-icon>
+              Compartir
+            </app-button>
+            <app-button variant="ghost" size="sm" [loading]="rotatingLink()" (clicked)="generatePaymentLink()">
+              <app-icon slot="icon" name="refresh-cw" [size]="16"></app-icon>
+              Generar nuevo enlace
+            </app-button>
+          </div>
+        }
+      </div>
+    </div>
+  }
+
   <!-- Confirmation Step -->
-  @if (currentStep() === confirmStep()) {
+  @if (currentStep() === confirmStep() && !linkedBooking()) {
     <div class="step-content fade-in">
       <div class="confirmation-summary">
         <!-- Service -->
@@ -718,13 +756,58 @@
             }
           </div>
         }
+
+        @if (requiresStation() && selectedStation() && depositPolicy() !== 'none') {
+          <div class="deposit-panel">
+            <div class="deposit-panel-title">
+              <app-icon name="wallet" [size]="16"></app-icon>
+              Anticipo {{ depositPolicy() === 'required' ? 'obligatorio' : 'opcional' }}
+            </div>
+            @if (depositPolicy() === 'optional') {
+              <div class="deposit-modes" role="radiogroup" aria-label="Cobro del anticipo">
+                <button type="button" role="radio" class="deposit-mode" [class.active]="depositMode() === 'none'" [attr.aria-checked]="depositMode() === 'none'" (click)="depositMode.set('none')">Sin anticipo</button>
+                <button type="button" role="radio" class="deposit-mode" [class.active]="depositMode() === 'desk'" [attr.aria-checked]="depositMode() === 'desk'" (click)="depositMode.set('desk')">Cobrar ahora</button>
+                <button type="button" role="radio" class="deposit-mode" [class.active]="depositMode() === 'link'" [attr.aria-checked]="depositMode() === 'link'" (click)="depositMode.set('link')">Enviar enlace</button>
+              </div>
+            } @else {
+              <div class="deposit-modes" role="radiogroup" aria-label="Cobro del anticipo">
+                <button type="button" role="radio" class="deposit-mode" [class.active]="depositMode() === 'desk'" [attr.aria-checked]="depositMode() === 'desk'" (click)="depositMode.set('desk')">Cobrar ahora</button>
+                <button type="button" role="radio" class="deposit-mode" [class.active]="depositMode() === 'link'" [attr.aria-checked]="depositMode() === 'link'" (click)="depositMode.set('link')">Enviar enlace</button>
+              </div>
+            }
+            @if (depositMode() !== 'none') {
+              <app-input
+                label="Monto del anticipo"
+                [currency]="true"
+                [ngModel]="depositAmount()"
+                (ngModelChange)="depositAmount.set($event)"
+                [required]="true"
+              ></app-input>
+              @if (depositMinimum() > 0) {
+                <p class="deposit-panel-hint">Mínimo de la estación: {{ depositMinimum() | currency }}.</p>
+              }
+              @if (depositMode() === 'desk') {
+                <app-selector
+                  label="Medio de pago"
+                  [ngModel]="depositMethod()"
+                  (ngModelChange)="depositMethod.set($event)"
+                  [options]="depositMethodOptions"
+                ></app-selector>
+              } @else {
+                <p class="deposit-panel-hint">
+                  Se aparta la estación mientras el cliente paga ({{ selectedStation()?.hold_minutes ?? 30 }} min). Al crear la reserva recibes el enlace.
+                </p>
+              }
+            }
+          </div>
+        }
       </div>
     </div>
   }
 
   <!-- Footer -->
   <div slot="footer" class="modal-footer">
-    @if (currentStep() > 0) {
+    @if (currentStep() > 0 && !linkedBooking()) {
       <app-button variant="ghost" size="sm" (clicked)="prevStep()">
         <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
         Atrás
@@ -742,11 +825,17 @@
         <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
       </app-button>
     }
-    @if (currentStep() === confirmStep() && !repeating()) {
+    @if (linkedBooking()) {
+      <app-button variant="primary" size="sm" (clicked)="finishLinked()">
+        <app-icon slot="icon" name="check" [size]="16"></app-icon>
+        Listo
+      </app-button>
+    }
+    @if (currentStep() === confirmStep() && !repeating() && !linkedBooking()) {
       <app-button
         variant="primary"
         size="sm"
-        [disabled]="submitting()"
+        [disabled]="submitting() || depositInvalid()"
         [loading]="submitting()"
         (clicked)="submit()"
       >
