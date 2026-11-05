@@ -171,18 +171,18 @@ export class ServiceStationsService {
   async getPublicUrl(id: number): Promise<string> {
     const station = await this.findOne(id);
     // app_type is the source of truth for app selection (domain_type is
-    // legacy). Same fallback as the session access URL: any active ecommerce
-    // domain first (primary preferred), then any primary active domain — the
-    // /estacion page also ships in the landing app, so either host works.
-    const domain = await this.prisma.domain_settings.findFirst({
-      where: { store_id: this.storeId, app_type: 'STORE_ECOMMERCE', status: 'active' },
-      orderBy: [{ is_primary: 'desc' }, { updated_at: 'desc' }],
-      select: { hostname: true },
-    }) ?? await this.prisma.domain_settings.findFirst({
-      where: { store_id: this.storeId, is_primary: true, status: 'active' },
-      orderBy: { updated_at: 'desc' },
-      select: { hostname: true },
-    });
+    // legacy). Only the apps that route /estacion may host the QR: an active
+    // ecommerce domain first, then an active landing domain (primary preferred
+    // in both). Any other host (e.g. the store admin) would print a broken QR.
+    let domain: { hostname: string | null } | null = null;
+    for (const appType of ['STORE_ECOMMERCE', 'STORE_LANDING'] as const) {
+      domain = await this.prisma.domain_settings.findFirst({
+        where: { store_id: this.storeId, app_type: appType, status: 'active' },
+        orderBy: [{ is_primary: 'desc' }, { updated_at: 'desc' }],
+        select: { hostname: true },
+      });
+      if (domain?.hostname) break;
+    }
     if (!domain?.hostname) {
       throw new VendixHttpException(
         ErrorCodes.STATION_014,

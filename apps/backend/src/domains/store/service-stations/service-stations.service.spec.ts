@@ -41,13 +41,29 @@ describe('ServiceStationsService.getPublicUrl', () => {
     expect(url).toContain('https://all-in-one-shop.vendix.com/estacion/');
   });
 
-  it('cae al dominio principal activo de otra app cuando no hay ecommerce', async () => {
+  it('cae al dominio landing activo cuando no hay ecommerce (S12)', async () => {
     prisma.domain_settings.findFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ hostname: 'tienda.vendix.com' });
     const url = await run(() => service.getPublicUrl(2));
-    expect(url).toContain('https://tienda.vendix.com/estacion/');
+    expect(url).toBe('https://tienda.vendix.com/estacion/11111111-2222-3333-4444-555555555555');
     expect(prisma.domain_settings.findFirst).toHaveBeenCalledTimes(2);
+    expect(prisma.domain_settings.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { store_id: 10, app_type: 'STORE_LANDING', status: 'active' },
+      }),
+    );
+  });
+
+  it('nunca resuelve un host que no sirve /estacion: sin ecommerce ni landing lanza STATION_014 (S12)', async () => {
+    // A primary admin domain must not be used: the admin app has no /estacion route.
+    prisma.domain_settings.findFirst.mockImplementation(async (args: any) =>
+      args?.where?.app_type ? null : { hostname: 'admin.tienda.vendix.com' },
+    );
+    await expect(run(() => service.getPublicUrl(2))).rejects.toMatchObject({ errorCode: 'STATION_014' });
+    for (const [args] of prisma.domain_settings.findFirst.mock.calls) {
+      expect(['STORE_ECOMMERCE', 'STORE_LANDING']).toContain(args.where.app_type);
+    }
   });
 
   it('lanza STATION_014 guiando a configuración cuando no hay dominio activo', async () => {

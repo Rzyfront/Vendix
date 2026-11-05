@@ -459,6 +459,10 @@ export class ServiceStationsPageComponent implements OnInit {
   readonly qrDataUrl = signal<string | null>(null);
   readonly qrPublicUrl = signal<string | null>(null);
   readonly qrLoading = signal(false);
+  /** Why the QR could not be built (shown inside the modal, not only as a toast). */
+  readonly qrError = signal<string | null>(null);
+  /** True when the failure is the missing public domain (STATION_014). */
+  readonly qrNeedsDomain = signal(false);
 
   // Create station form
   readonly newName = signal('');
@@ -1163,6 +1167,8 @@ export class ServiceStationsPageComponent implements OnInit {
     this.qrStation.set(station);
     this.qrDataUrl.set(null);
     this.qrPublicUrl.set(null);
+    this.qrError.set(null);
+    this.qrNeedsDomain.set(false);
     this.qrLoading.set(true);
     this.showQrModal.set(true);
 
@@ -1180,10 +1186,24 @@ export class ServiceStationsPageComponent implements OnInit {
       });
       this.qrDataUrl.set(dataUrl);
     } catch (error) {
-      this.toastService.error(extractApiErrorMessage(error) || 'Error al generar el código QR de la estación.');
+      const body = (error as { error?: { error_code?: string } } | null)?.error;
+      this.qrNeedsDomain.set(body?.error_code === 'STATION_014');
+      this.qrError.set(
+        extractApiErrorMessage(error) || 'No se pudo generar el código QR de la estación.',
+      );
     } finally {
       this.qrLoading.set(false);
     }
+  }
+
+  retryQr(): void {
+    const station = this.qrStation();
+    if (station) void this.openQrModal(station);
+  }
+
+  goToDomains(): void {
+    this.showQrModal.set(false);
+    void this.router.navigate(['/admin/settings/domains']);
   }
 
   async copyQrLink(): Promise<void> {

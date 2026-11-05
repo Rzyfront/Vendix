@@ -1296,8 +1296,19 @@
           <div class="text-[11px] font-mono text-[var(--color-text-primary)] break-all select-all">{{ qrStation()?.public_id || 'ID no generado' }}</div>
         </div>
       } @else {
-        <div class="py-8 text-center text-xs text-[var(--color-text-secondary)]">
-          No se pudo generar el código QR. Verifica la conexión.
+        <div class="py-6 flex flex-col items-center gap-3 text-center">
+          <p class="text-sm text-[var(--color-text-primary)]">
+            {{ qrError() || 'No se pudo generar el código QR de la estación.' }}
+          </p>
+          @if (qrNeedsDomain()) {
+            <app-button variant="primary" size="sm" (clicked)="goToDomains()">
+              Ir a Configuración &gt; Dominios
+            </app-button>
+          } @else {
+            <app-button variant="secondary" size="sm" (clicked)="retryQr()">
+              Reintentar
+            </app-button>
+          }
         </div>
       }
     </div>
