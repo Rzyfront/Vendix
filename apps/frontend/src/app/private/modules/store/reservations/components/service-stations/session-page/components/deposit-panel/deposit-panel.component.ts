@@ -92,7 +92,8 @@ export class DepositPanelComponent {
   readonly isSettled = computed(() => !!this.deposit().settled_at);
   readonly canAct = computed(() => !this.isSettled() && !this.readOnly());
 
-  readonly isExhausted = computed(() => this.available() <= 0);
+  // An optional deposit never received is not "exhausted": there is nothing to recharge.
+  readonly isExhausted = computed(() => this.received() > 0 && this.available() <= 0);
   readonly isLow = computed(() => {
     if (this.isExhausted()) return false;
     const received = this.received();
