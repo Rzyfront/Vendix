@@ -35,4 +35,14 @@ Se sigue con los bloques 11 en adelante, en orden, y cada uno se cierra entero. 
 
 ## Bloque 14 — OCR/validación IA, plantillas desde PDF base, generación IA de plantillas, retención
 
-No iniciado. Dos de sus cuatro partes (plantillas desde PDF base con coordenadas y generación IA de plantillas) dependen de las plantillas del Bloque 9. Las otras dos (OCR/validación IA con procedencia y revisión humana; políticas de retención y purga con `legal_hold`) son independientes. Se priorizó cerrar con calidad la revisión del PR (verificador independiente, corrección del bloqueante y re-verificación en vivo) en vez de abrir un bloque que no podía cerrarse entero. Siguiente PR: OCR + retención, y el resto cuando se decida el 9.
+Actualizado el 2026-11-05 tras la ronda 2 de correcciones del PR #1099.
+
+**Cerrado en este PR (parcial):** el borrado de archivos respeta `legal_hold` y `retention_until`. `StoredFilesService.discard` rechaza con 409 `DOCUMENT_RETAINED` una fila bajo `legal_hold` o con la retención vigente, dentro de una transacción, y en ese caso no borra el objeto de S3 (`5b600f4bf`).
+
+**Fuera de este PR. Es una decisión de alcance, no un bloqueo técnico:**
+
+- **OCR/validación IA con procedencia** (tabla de resultados con `source`/`model`/`confidence`/`file_id`, sin mezclarse con los campos humanos, y con revisión humana). No depende del 9; se aplazó por alcance. La revisión del PR lo acepta fuera solo si Rafael lo deja por escrito.
+- **Políticas de retención y purga automática** (quién fija `retention_until`, el job de purga y la UI de `legal_hold`). Hoy solo existe la protección del borrado.
+- **Plantillas desde PDF base y generación IA de plantillas.** Dependen del Bloque 9 (render).
+
+**Decisión que necesito de Rafael:** confirmar que OCR, la purga y las plantillas desde PDF base van en el siguiente PR. Si no, decir cuál de ellas debe entrar en este.
