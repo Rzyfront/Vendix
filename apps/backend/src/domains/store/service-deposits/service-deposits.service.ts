@@ -8,6 +8,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { WalletBalanceService } from '../wallet/services/wallet-balance.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
+import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale-share.util';
 import { getSettledOrderAmount } from '../payments/services/payment-validator.service';
 import type {
   PaymentReceivedEventOrder,
@@ -173,6 +174,40 @@ export class ServiceDepositsService {
 
   // --------------------------------------------------------------- receive
 
+  /**
+   * An idempotency key belongs to ONE booking (or session). A retry of the same
+   * target passes; a key already used by another target is a stale form and is
+   * rejected before any money or payment request is created (M-2a).
+   */
+  async assertRequestFreeInTx(
+    tx: Tx,
+    input: { store_id: number; request_id: string; booking_id?: number | null; session_id?: number | null },
+  ): Promise<void> {
+    const existing = await tx.service_deposits.findFirst({
+      where: { store_id: input.store_id, request_id: input.request_id },
+      select: { id: true, booking_id: true, session_id: true },
+    });
+    if (existing) this.assertSameTarget(existing, input);
+  }
+
+  private assertSameTarget(
+    existing: { booking_id: number | null; session_id: number | null },
+    input: { booking_id?: number | null; session_id?: number | null },
+  ): void {
+    const same =
+      input.booking_id != null
+        ? existing.booking_id === input.booking_id
+        : input.session_id != null
+          ? existing.session_id === input.session_id
+          : true;
+    if (!same) {
+      throw new VendixHttpException(
+        ErrorCodes.SERVICE_DEPOSIT_004,
+        'Este anticipo ya quedó registrado en otra reserva. Vuelve a abrir el formulario para registrar uno nuevo.',
+      );
+    }
+  }
+
   /** One completed `received` row and its wallet credit. Idempotent by `request_id`. */
   async receiveInTx(
     tx: Tx,
@@ -180,9 +215,12 @@ export class ServiceDepositsService {
   ): Promise<{ created: boolean; deposit: { id: number }; event: ServiceDepositReceivedEvent | null }> {
     const duplicate = await tx.service_deposits.findFirst({
       where: { store_id: input.store_id, request_id: input.request_id },
-      select: { id: true },
+      select: { id: true, booking_id: true, session_id: true },
     });
-    if (duplicate) return { created: false, deposit: { id: duplicate.id }, event: null };
+    if (duplicate) {
+      this.assertSameTarget(duplicate, input);
+      return { created: false, deposit: { id: duplicate.id }, event: null };
+    }
 
     const customer_id = this.assertCustomer(input.customer_id);
     this.assertTarget(input);
@@ -234,9 +272,12 @@ export class ServiceDepositsService {
   ): Promise<{ created: boolean; deposit: { id: number } }> {
     const duplicate = await tx.service_deposits.findFirst({
       where: { store_id: input.store_id, request_id: input.request_id },
-      select: { id: true },
+      select: { id: true, booking_id: true, session_id: true },
     });
-    if (duplicate) return { created: false, deposit: { id: duplicate.id } };
+    if (duplicate) {
+      this.assertSameTarget(duplicate, input);
+      return { created: false, deposit: { id: duplicate.id } };
+    }
 
     const customer_id = this.assertCustomer(input.customer_id);
     this.assertTarget(input);
@@ -447,11 +488,19 @@ export class ServiceDepositsService {
       amount,
     });
 
+    // A partial application must carry ITS share of the sale: with the whole order totals the
+    // entry (DR partial amount, CR full sale) never balances and is dropped silently (H-1).
+    const sale_share = await resolvePaymentReceivedSaleFields(tx, {
+      order_id: order.id,
+      payment_id: payment.id,
+      amount,
+    });
     const paymentInput: PaymentReceivedEventPaymentInput = {
       id: payment.id,
       amount,
       currency,
       accounting_method: 'wallet',
+      sale_share,
     };
     return {
       applied: true,

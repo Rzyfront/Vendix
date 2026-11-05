@@ -62,6 +62,7 @@ describe('ReservationDepositsService', () => {
       },
       payment_requests: {
         findFirst: jest.fn().mockResolvedValue({ id: 9, status: 'pending', payment_link_id: null, expires_at: null }),
+        findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       orders: {
@@ -79,6 +80,7 @@ describe('ReservationDepositsService', () => {
     const deposits: any = {
       balanceOf: jest.fn().mockResolvedValue({ received: opts.balance ?? 400000, balance: opts.balance ?? 400000 }),
       receiveInTx: jest.fn().mockResolvedValue({ created: true, deposit: { id: 1 }, event: received }),
+      assertRequestFreeInTx: jest.fn().mockResolvedValue(undefined),
       createPendingInTx: jest.fn().mockResolvedValue({ created: true, deposit: { id: 3 } }),
       completePendingInTx: jest.fn().mockResolvedValue({ claimed: true, event: received }),
       refundInTx: jest.fn().mockResolvedValue({ created: true, deposit: { id: 4 }, amount: 400000, event: { deposit_id: 4 } }),
@@ -188,6 +190,32 @@ describe('ReservationDepositsService', () => {
       );
       expect(deposits.receiveInTx).not.toHaveBeenCalled();
       expect(result).toMatchObject({ mode: 'link', publicToken: 'tok-1', event: null });
+    });
+  });
+
+  describe('M-2a: the deposit key is tied to the booking', () => {
+    it('link mode: a key used by another booking is rejected before the slot, the request or the row are touched', async () => {
+      const { service, tx, deposits, paymentRequests } = build();
+      deposits.assertRequestFreeInTx.mockRejectedValueOnce({ errorCode: 'SERVICE_DEPOSIT_004' });
+      await expect(service.startInTx(tx, { ...startArgs, deposit: link })).rejects.toMatchObject({ errorCode: 'SERVICE_DEPOSIT_004' });
+      expect(deposits.assertRequestFreeInTx).toHaveBeenCalledWith(tx, { store_id: 1, request_id: 'req-1', booking_id: 77 });
+      expect(paymentRequests.createInTx).not.toHaveBeenCalled();
+      expect(deposits.createPendingInTx).not.toHaveBeenCalled();
+      expect(tx.service_allocations.updateMany).not.toHaveBeenCalled();
+      expect(tx.bookings.update).not.toHaveBeenCalled();
+    });
+
+    it('desk mode: a key used by another booking never confirms the booking', async () => {
+      const { service, tx, deposits } = build();
+      deposits.receiveInTx.mockRejectedValueOnce({ errorCode: 'SERVICE_DEPOSIT_004' });
+      await expect(service.startInTx(tx, { ...startArgs, deposit: { ...link, mode: 'desk' } })).rejects.toMatchObject({ errorCode: 'SERVICE_DEPOSIT_004' });
+      expect(tx.bookings.update).not.toHaveBeenCalled();
+    });
+
+    it('a retry of the same booking (key free for it) still opens the link as before', async () => {
+      const { service, tx, paymentRequests } = build();
+      await expect(service.startInTx(tx, { ...startArgs, deposit: link })).resolves.toMatchObject({ mode: 'link', publicToken: 'tok-1' });
+      expect(paymentRequests.createInTx).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -481,10 +509,49 @@ describe('ReservationDepositsService', () => {
       tx.service_deposits.findMany.mockResolvedValue([{ id: 3, payment_request_id: 9 }]);
       await expect(service.cancelWithDeposit(77, {})).resolves.toBeNull();
       expect(tx.payment_requests.updateMany).toHaveBeenCalledWith({
-        where: { id: 9, status: { in: ['pending', 'awaiting_confirmation'] } },
+        where: { id: 9, status: 'pending' },
         data: expect.objectContaining({ status: 'cancelled' }),
       });
       expect(deposits.refundInTx).not.toHaveBeenCalled();
+    });
+
+    it('M-5: a transfer receipt awaiting confirmation blocks the cancel with 409 and nothing is cancelled', async () => {
+      const { service, tx, deposits } = build({ balance: 0 });
+      tx.service_deposits.count.mockResolvedValue(1);
+      tx.service_deposits.findMany.mockResolvedValue([{ id: 3, payment_request_id: 9 }]);
+      tx.payment_requests.findMany.mockResolvedValue([{ id: 9 }]);
+      const error: any = await service.cancelWithDeposit(77, {}).catch((e) => e);
+      expect(error.errorCode).toBe('SERVICE_DEPOSIT_010');
+      expect(error.getStatus()).toBe(409);
+      expect(error.getResponse().message).toBe(
+        'El cliente envió un comprobante que está por confirmar. Confírmalo o recházalo en Reservas → Cobros antes de cancelar.',
+      );
+      expect(tx.payment_requests.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ id: { in: [9] }, status: 'awaiting_confirmation' }) }),
+      );
+      expect(tx.payment_requests.updateMany).not.toHaveBeenCalled();
+      expect(tx.service_deposits.updateMany).not.toHaveBeenCalled();
+      expect(deposits.refundInTx).not.toHaveBeenCalled();
+    });
+
+    it('M-5: with a balance too, a receipt awaiting confirmation blocks the cancel before the booking is closed', async () => {
+      const { service, tx, coordinator } = build({ booking: { id: 77, status: 'confirmed', customer_id: 1 } });
+      tx.service_deposits.count.mockResolvedValue(1);
+      tx.service_deposits.findMany.mockResolvedValue([{ id: 3, payment_request_id: 9 }]);
+      tx.payment_requests.findMany.mockResolvedValue([{ id: 9 }]);
+      await expect(service.cancelWithDeposit(77, {})).rejects.toMatchObject({ errorCode: 'SERVICE_DEPOSIT_010' });
+      expect(tx.payment_requests.updateMany).not.toHaveBeenCalled();
+      expect(coordinator.releaseBooking).not.toHaveBeenCalled();
+      expect(tx.bookings.update).not.toHaveBeenCalled();
+    });
+
+    it('M-5: an invalid booking status leaves the unpaid requests untouched (the state machine answers)', async () => {
+      const { service, tx } = build({ balance: 0, booking: { id: 77, status: 'completed', customer_id: 1 } });
+      tx.service_deposits.count.mockResolvedValue(1);
+      tx.service_deposits.findMany.mockResolvedValue([{ id: 3, payment_request_id: 9 }]);
+      await expect(service.cancelWithDeposit(77, {})).resolves.toBeNull();
+      expect(tx.payment_requests.updateMany).not.toHaveBeenCalled();
+      expect(tx.service_deposits.updateMany).not.toHaveBeenCalled();
     });
 
     it('before the window the leftover is credited by default and the booking is closed in the same transaction', async () => {
@@ -538,6 +605,51 @@ describe('ReservationDepositsService', () => {
       expect(tx.bookings.update).toHaveBeenCalledWith({ where: { id: 77 }, data: expect.objectContaining({ status: 'cancelled' }) });
       expect(deposits.announceRefunded).toHaveBeenCalled();
       expect(emits.map((e) => e.name)).toContain('booking.cancelled');
+    });
+
+    it('the booking.cancelled and booking.no_show events carry what the notification listener prints', async () => {
+      const booking = {
+        id: 77,
+        status: 'confirmed',
+        customer_id: 1,
+        booking_number: 'BKG-1',
+        customer: { first_name: 'Ana', last_name: 'Pérez' },
+        product: { name: 'Cava 3' },
+        date: new Date('2026-11-20T00:00:00.000Z'),
+        start_time: '14:00',
+      };
+      const expected = {
+        store_id: 1,
+        booking_id: 77,
+        booking_number: 'BKG-1',
+        customer_name: 'Ana Pérez',
+        service_name: 'Cava 3',
+        date: '2026-11-20',
+        start_time: '14:00',
+      };
+      const refund = build({ booking });
+      await refund.service.decide(77, { ...base, action: 'refund', refund_method: 'cash' });
+      expect(refund.emits.find((e) => e.name === 'booking.cancelled')?.payload).toEqual(expected);
+
+      const retain = build({ booking });
+      await retain.service.decide(77, { ...base, action: 'retain' });
+      expect(retain.emits.find((e) => e.name === 'booking.no_show')?.payload).toEqual(expected);
+
+      const bare = build({ booking: { id: 77, status: 'confirmed', customer_id: 1, booking_number: 'BKG-1' } });
+      await bare.service.decide(77, { ...base, action: 'credit' });
+      expect(bare.emits.find((e) => e.name === 'booking.cancelled')?.payload).toMatchObject({
+        customer_name: 'Cliente',
+        service_name: 'Servicio',
+      });
+    });
+
+    it('H-1: the retained fee payment.received uses the sale share of the applied payment, not the order totals', async () => {
+      const { service, deposits, emits } = build({ booking: { id: 77, status: 'confirmed', customer_id: 1, booking_number: 'BKG-1' } });
+      const applied = await deposits.applyToOrderInTx();
+      applied.payment_received.payment.sale_share = { subtotal_amount: 336000, tax_amount: 64000, discount_amount: 0, tip_amount: 0 };
+      deposits.applyToOrderInTx.mockResolvedValueOnce(applied);
+      await service.decide(77, { ...base, action: 'retain' });
+      expect(emits.find((e) => e.name === 'payment.received')?.payload).toMatchObject({ subtotal_amount: 336000, tax_amount: 64000 });
     });
 
     it('credit leaves the leftover as wallet credit and cancels the booking', async () => {

@@ -269,6 +269,12 @@ export class ReservationDepositsService {
       userId: number | null;
     },
   ): Promise<{ publicToken: string; paymentRequestId: number; expiresAt: Date }> {
+    // A key already used by another booking is rejected before any write or payment request (M-2a).
+    await this.deposits.assertRequestFreeInTx(tx, {
+      store_id: args.storeId,
+      request_id: args.requestId,
+      booking_id: args.bookingId,
+    });
     const expiresAt = new Date(Date.now() + args.holdMinutes * 60_000);
     await tx.service_allocations.updateMany({
       where: { store_id: args.storeId, booking_id: args.bookingId, state: { in: ['held', 'confirmed'] } },
@@ -616,17 +622,35 @@ export class ReservationDepositsService {
     });
   }
 
-  /** Cancels the unpaid deposit rows and requests of a booking being closed. */
+  /**
+   * Cancels the unpaid deposit rows and requests of a booking being closed.
+   * A transfer receipt waiting for confirmation is real money in the bank: it is
+   * never cancelled here (`markPaid` would refuse it afterwards) and it blocks the
+   * close with 409 until the administrator confirms or rejects it (A9, M-5).
+   */
   private async cancelPendingInTx(tx: Tx, storeId: number, bookingId: number) {
     const pending = await tx.service_deposits.findMany({
       where: { store_id: storeId, booking_id: bookingId, kind: 'received', status: 'pending' },
       select: { id: true, payment_request_id: true },
     });
+    const requestIds = pending.map((row) => row.payment_request_id).filter((id): id is number => id != null);
+    if (requestIds.length) {
+      const awaiting = await tx.payment_requests.findMany({
+        where: { id: { in: requestIds }, status: 'awaiting_confirmation' },
+        select: { id: true },
+      });
+      if (awaiting.length) {
+        throw new VendixHttpException(
+          ErrorCodes.SERVICE_DEPOSIT_010,
+          'El cliente envió un comprobante que está por confirmar. Confírmalo o recházalo en Reservas → Cobros antes de cancelar.',
+        );
+      }
+    }
     for (const row of pending) {
       await tx.service_deposits.updateMany({ where: { id: row.id, status: 'pending' }, data: { status: 'cancelled', updated_at: new Date() } });
       if (row.payment_request_id) {
         await tx.payment_requests.updateMany({
-          where: { id: row.payment_request_id, status: { in: ['pending', 'awaiting_confirmation'] } },
+          where: { id: row.payment_request_id, status: 'pending' },
           data: { status: 'cancelled', updated_at: new Date() },
         });
       }
@@ -651,7 +675,10 @@ export class ReservationDepositsService {
     ]);
     if (balance.balance <= 0 && pendingCount === 0) return null;
     if (balance.balance <= 0) {
-      // Only an unpaid request: cancel it with the booking.
+      // Only an unpaid request: cancel it with the booking, but only when the booking can be cancelled
+      // (otherwise the state machine answers and the requests stay as they were).
+      const current = await this.prisma.bookings.findFirst({ where: { id: bookingId, store_id }, select: { status: true } });
+      if (!current || !DECIDABLE_STATUSES.includes(current.status)) return null;
       await this.prisma.$transaction((tx) => this.cancelPendingInTx(tx, store_id, bookingId));
       return null;
     }
@@ -723,7 +750,16 @@ export class ReservationDepositsService {
     const store_id = this.requireStoreId();
     const booking = await this.prisma.bookings.findFirst({
       where: { id: bookingId, store_id },
-      select: { id: true, status: true, customer_id: true, booking_number: true },
+      select: {
+        id: true,
+        status: true,
+        customer_id: true,
+        booking_number: true,
+        date: true,
+        start_time: true,
+        customer: { select: { first_name: true, last_name: true } },
+        product: { select: { name: true } },
+      },
     });
     if (!booking) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_005);
     if (!DECIDABLE_STATUSES.includes(booking.status)) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_006);
@@ -860,11 +896,29 @@ export class ReservationDepositsService {
     }
   }
 
+  /** Same payload shape as `ReservationsService.cancel` / `noShow`: the listener prints every field. */
   private emitClosed(
     event: 'booking.cancelled' | 'booking.no_show',
     storeId: number,
-    booking: { id: number; booking_number: string },
+    booking: {
+      id: number;
+      booking_number: string;
+      date?: Date | string | null;
+      start_time?: string | null;
+      customer?: { first_name: string | null; last_name: string | null } | null;
+      product?: { name: string | null } | null;
+    },
   ) {
-    this.eventEmitter.emit(event, { store_id: storeId, booking_id: booking.id, booking_number: booking.booking_number });
+    this.eventEmitter.emit(event, {
+      store_id: storeId,
+      booking_id: booking.id,
+      booking_number: booking.booking_number,
+      customer_name:
+        `${booking.customer?.first_name ?? ''} ${booking.customer?.last_name ?? ''}`.trim() || 'Cliente',
+      service_name: booking.product?.name ?? 'Servicio',
+      date:
+        booking.date instanceof Date ? booking.date.toISOString().split('T')[0] : String(booking.date ?? '').split('T')[0],
+      start_time: booking.start_time,
+    });
   }
 }

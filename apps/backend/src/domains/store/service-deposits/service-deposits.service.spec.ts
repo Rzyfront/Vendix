@@ -30,7 +30,7 @@ const match = (row: any, where: any): boolean =>
  * Store 3, customer 9, a cava booking 70 with a $400.000 cash deposit.
  * The wallet of the customer holds `walletBalance`.
  */
-function build(options: { walletBalance?: number; orderGrand?: number; orderPaid?: number } = {}) {
+function build(options: { walletBalance?: number; orderGrand?: number; orderPaid?: number; orderTax?: number } = {}) {
   const rows: Row[] = [];
   const wallet = { id: 60, store_id: 3, customer_id: 9, balance: options.walletBalance ?? 0, held_balance: 0 };
   const order = {
@@ -41,7 +41,11 @@ function build(options: { walletBalance?: number; orderGrand?: number; orderPaid
     order_number: 'SVC-500',
     currency: 'COP',
     grand_total: new Prisma.Decimal(options.orderGrand ?? 250000),
-    subtotal_amount: new Prisma.Decimal(options.orderGrand ?? 250000),
+    subtotal_amount: new Prisma.Decimal((options.orderGrand ?? 250000) - (options.orderTax ?? 0)),
+    tax_amount: new Prisma.Decimal(options.orderTax ?? 0),
+    discount_amount: new Prisma.Decimal(0),
+    shipping_cost: new Prisma.Decimal(0),
+    shipping_tax_amount: new Prisma.Decimal(0),
     tip_amount: new Prisma.Decimal(0),
     total_paid: new Prisma.Decimal(options.orderPaid ?? 0),
     payments: [] as Array<{ amount: Prisma.Decimal; state: string }>,
@@ -74,6 +78,10 @@ function build(options: { walletBalance?: number; orderGrand?: number; orderPaid
       update: jest.fn(async (args: any) => orderUpdates.push(args)),
     },
     payments: {
+      // Other settled payments of the order (the one being applied is excluded by id).
+      findMany: jest.fn(async ({ where }: any) =>
+        payments.filter((p) => p.id !== where?.id?.not).map((p) => ({ amount: p.amount })),
+      ),
       create: jest.fn(async ({ data }: any) => {
         const payment = { id: 900 + payments.length, ...data };
         payments.push(payment);
@@ -183,6 +191,44 @@ describe('ServiceDepositsService', () => {
       expect(walletBalance.creditInTransaction).toHaveBeenCalledTimes(1);
     });
 
+    it('M-2a: the same request_id on ANOTHER booking is rejected with 409 and writes nothing', async () => {
+      const { service, tx, rows, walletBalance, movements } = build();
+      await receive(service, tx);
+      walletBalance.creditInTransaction.mockClear();
+      movements.recordModuleCashMovement.mockClear();
+
+      const error = await errorOf(receive(service, tx, { booking_id: 71 }));
+
+      expect(error.errorCode).toBe('SERVICE_DEPOSIT_004');
+      expect(error.getStatus()).toBe(409);
+      expect((error.getResponse() as any).message).toBe(
+        'Este anticipo ya quedó registrado en otra reserva. Vuelve a abrir el formulario para registrar uno nuevo.',
+      );
+      expect(rows).toHaveLength(1);
+      expect(walletBalance.creditInTransaction).not.toHaveBeenCalled();
+      expect(movements.recordModuleCashMovement).not.toHaveBeenCalled();
+    });
+
+    it('M-2a: a pending deposit with the request_id of another booking or session is rejected too', async () => {
+      const { service, tx, rows } = build();
+      await service.createPendingInTx(tx, { store_id: 3, customer_id: 9, booking_id: 70, amount: 400000, method: 'wompi', payment_request_id: 5, request_id: 'dep-p', user_id: 42 });
+      await expect(
+        service.createPendingInTx(tx, { store_id: 3, customer_id: 9, booking_id: 71, amount: 400000, method: 'wompi', payment_request_id: 6, request_id: 'dep-p', user_id: 42 }),
+      ).rejects.toMatchObject({ errorCode: 'SERVICE_DEPOSIT_004' });
+      await expect(
+        service.createPendingInTx(tx, { store_id: 3, customer_id: 9, session_id: 8, amount: 400000, method: 'wompi', payment_request_id: 6, request_id: 'dep-p', user_id: 42 }),
+      ).rejects.toMatchObject({ errorCode: 'SERVICE_DEPOSIT_004' });
+      expect(rows).toHaveLength(1);
+    });
+
+    it('M-2a: assertRequestFreeInTx lets a free key or a retry of the same booking pass', async () => {
+      const { service, tx } = build();
+      await receive(service, tx);
+      await expect(service.assertRequestFreeInTx(tx, { store_id: 3, request_id: 'new', booking_id: 70 })).resolves.toBeUndefined();
+      await expect(service.assertRequestFreeInTx(tx, { store_id: 3, request_id: 'dep-1', booking_id: 70 })).resolves.toBeUndefined();
+      await expect(service.assertRequestFreeInTx(tx, { store_id: 3, request_id: 'dep-1', booking_id: 71 })).rejects.toMatchObject({ errorCode: 'SERVICE_DEPOSIT_004' });
+    });
+
     it('rejects a deposit without an identified customer', async () => {
       const { service, tx, rows } = build();
       const error = await errorOf(receive(service, tx, { customer_id: null }));
@@ -255,6 +301,29 @@ describe('ServiceDepositsService', () => {
         order: expect.objectContaining({ id: 500, store_id: 3 }),
       });
       expect((await service.balanceOf({ bookingId: 70 })).balance).toBe(150000);
+    });
+
+    it('H-1: a partial application carries the proportional sale share, so the journal entry balances', async () => {
+      const { service, tx } = build({ orderGrand: 500000, orderTax: 80000 });
+      await receive(service, tx);
+
+      const result = await service.applyToOrderInTx(tx, { store_id: 3, order_id: 500, booking_id: 70, session_id: 8, user_id: 42 });
+
+      expect(result.amount).toBe(400000);
+      const share = result.payment_received!.payment.sale_share!;
+      expect(share).toMatchObject({ subtotal_amount: 336000, tax_amount: 64000, discount_amount: 0, tip_amount: 0 });
+      // DR 400.000 = CR net + tax of the portion
+      expect(share.subtotal_amount + share.tax_amount).toBe(400000);
+    });
+
+    it('H-1: the full application keeps the order totals as its sale share', async () => {
+      const { service, tx } = build({ orderGrand: 250000, orderTax: 40000 });
+      await receive(service, tx);
+
+      const result = await service.applyToOrderInTx(tx, { store_id: 3, order_id: 500, booking_id: 70, session_id: 8, user_id: 42 });
+
+      expect(result.amount).toBe(250000);
+      expect(result.payment_received!.payment.sale_share).toMatchObject({ subtotal_amount: 210000, tax_amount: 40000 });
     });
 
     it('the payment reference of a booking-only apply is namespaced, so it never equals the session one with the same number', async () => {
