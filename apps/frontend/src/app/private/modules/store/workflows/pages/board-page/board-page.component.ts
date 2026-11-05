@@ -1,7 +1,7 @@
 import { CdkDropListGroup } from '@angular/cdk/drag-drop';
 import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import {
   AlertBannerComponent,
@@ -57,6 +57,8 @@ const NO_SOURCES: ReadonlySet<string> = new Set<string>();
         variant="glass"
         [showBackButton]="true"
         backRoute="/admin/workflows"
+        [actions]="headerActions"
+        (actionClicked)="onHeaderAction($event)"
       />
 
       <app-card [responsive]="true" overflow="visible">
@@ -122,8 +124,13 @@ const NO_SOURCES: ReadonlySet<string> = new Set<string>();
 export class BoardPageComponent implements OnInit {
   private readonly api = inject(WorkflowsApiService);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+
+  readonly headerActions = [
+    { id: 'analytics', label: 'Analítica', icon: 'bar-chart-3', variant: 'outline' as const },
+  ];
 
   private definitionId = 0;
   readonly board = signal<BoardData | null>(null);
@@ -160,6 +167,10 @@ export class BoardPageComponent implements OnInit {
 
   allowedFrom(stageKey: string): ReadonlySet<string> {
     return this.sources().get(stageKey) ?? NO_SOURCES;
+  }
+
+  onHeaderAction(id: string): void {
+    if (id === 'analytics') this.router.navigate(['/admin/workflows', this.definitionId, 'analytics']);
   }
 
   ngOnInit(): void {

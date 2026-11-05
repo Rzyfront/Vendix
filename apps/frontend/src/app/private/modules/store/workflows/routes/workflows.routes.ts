@@ -21,12 +21,23 @@ export const workflowsRoutes: Routes = [
   {
     path: 'inbox',
     loadComponent: () =>
-      import('../pages/inbox-page/inbox-page.component').then((c) => c.InboxPageComponent),
+      import('../pages/inbox-page/inbox-page.component').then(
+        (c) => c.InboxPageComponent,
+      ),
   },
   {
     path: ':id/board',
     loadComponent: () =>
-      import('../pages/board-page/board-page.component').then((c) => c.BoardPageComponent),
+      import('../pages/board-page/board-page.component').then(
+        (c) => c.BoardPageComponent,
+      ),
+  },
+  {
+    path: ':id/analytics',
+    loadComponent: () =>
+      import('../pages/analytics-page/analytics-page.component').then(
+        (c) => c.AnalyticsPageComponent,
+      ),
   },
   {
     path: ':id/edit',

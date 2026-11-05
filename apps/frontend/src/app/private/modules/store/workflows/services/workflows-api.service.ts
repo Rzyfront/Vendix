@@ -27,6 +27,7 @@ import {
   WorkflowInstanceRow,
 } from '../interfaces/workflow.interfaces';
 import {
+  AnalyticsQuery,
   BoardData,
   BoardQuery,
   InboxQuery,
@@ -34,6 +35,7 @@ import {
   InstanceComment,
   PublicLinkCreated,
   PublicLinkStatus,
+  WorkflowAnalytics,
 } from '../interfaces/workflow-ops.interfaces';
 
 export interface DefinitionQuery {
@@ -256,6 +258,22 @@ export class WorkflowsApiService {
         params: this.params(query),
       })
       .pipe(map((res) => res.data));
+  }
+
+  getAnalytics(definitionId: number, query: AnalyticsQuery = {}): Observable<WorkflowAnalytics> {
+    return this.http
+      .get<ApiResponse<WorkflowAnalytics>>(`${this.base}/analytics/${definitionId}`, {
+        params: this.params({ ...query, format: 'json' }),
+      })
+      .pipe(map((res) => res.data));
+  }
+
+  /** The XLSX of the same range, built by the backend from the same dataset. */
+  exportAnalytics(definitionId: number, query: AnalyticsQuery = {}): Observable<Blob> {
+    return this.http.get(`${this.base}/analytics/${definitionId}`, {
+      params: this.params({ ...query, format: 'xlsx' }),
+      responseType: 'blob',
+    });
   }
 
   addComment(instanceId: number, body: string): Observable<InstanceComment> {

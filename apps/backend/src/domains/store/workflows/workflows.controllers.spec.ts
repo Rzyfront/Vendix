@@ -9,6 +9,7 @@ import { WorkflowInstancesController } from './instances/workflow-instances.cont
 import { WorkflowBoardController } from './board/workflow-board.controller';
 import { WorkflowInboxController } from './inbox/workflow-inbox.controller';
 import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
+import { WorkflowAnalyticsController } from './metrics/workflow-analytics.controller';
 import { WorkGroupsController } from './work-groups.controller';
 
 const R = 'store:workflows:read';
@@ -46,6 +47,7 @@ const EXPECTED: Array<[any, string, string | string[], string, string]> = [
   [WorkflowInstancesController, 'addComment', [R, S, T], 'POST', ':id/comments'],
   [WorkflowInboxController, 'list', T, 'GET', '/'],
   [WorkflowBoardController, 'get', R, 'GET', ':definitionId'],
+  [WorkflowAnalyticsController, 'get', R, 'GET', ':definitionId'],
   [WorkflowInstancesController, 'cancel', M, 'POST', ':id/cancel'],
   [WorkflowInstancesController, 'forceTransition', M, 'POST', ':id/force-transition'],
   [WorkflowInstancesController, 'uploadFile', T, 'POST', ':id/files'],
@@ -67,6 +69,7 @@ describe('controladores de Flujos', () => {
     WorkflowTasksController,
     WorkflowInboxController,
     WorkflowBoardController,
+    WorkflowAnalyticsController,
     WorkGroupsController,
   ])('%p usa PermissionsGuard + IndustryModuleGuard y el módulo "flows"', (ctrl) => {
     expect(Reflect.getMetadata('__guards__', ctrl)).toEqual([PermissionsGuard, IndustryModuleGuard]);
@@ -79,6 +82,7 @@ describe('controladores de Flujos', () => {
     expect(Reflect.getMetadata('path', WorkflowTasksController)).toBe('store/workflows/tasks');
     expect(Reflect.getMetadata('path', WorkflowInboxController)).toBe('store/workflows/inbox');
     expect(Reflect.getMetadata('path', WorkflowBoardController)).toBe('store/workflows/board');
+    expect(Reflect.getMetadata('path', WorkflowAnalyticsController)).toBe('store/workflows/analytics');
     expect(Reflect.getMetadata('path', WorkGroupsController)).toBe('store/work-groups');
   });
 

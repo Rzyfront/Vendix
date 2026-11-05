@@ -7,6 +7,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -40,4 +41,11 @@ export class WorkflowCommentsQueryDto {
 
 export class CreateWorkflowCommentDto {
   @IsString() @IsNotEmpty() @MaxLength(2000) body!: string;
+}
+
+export class WorkflowAnalyticsQueryDto {
+  /** Store-local calendar dates, `YYYY-MM-DD`. */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) from?: string;
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) to?: string;
+  @IsOptional() @IsIn(['json', 'xlsx']) format?: 'json' | 'xlsx' = 'json';
 }

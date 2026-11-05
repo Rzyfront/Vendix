@@ -379,6 +379,14 @@ export class WorkflowsPageComponent implements OnInit {
         this.router.navigate(['/admin/workflows', row.id, 'board']),
     },
     {
+      label: 'Analítica',
+      icon: 'bar-chart-3',
+      variant: 'info',
+      show: (row: WorkflowDefinitionRow) => row.status === 'published',
+      action: (row: WorkflowDefinitionRow) =>
+        this.router.navigate(['/admin/workflows', row.id, 'analytics']),
+    },
+    {
       label: 'Enlace público',
       icon: 'link',
       variant: 'info',

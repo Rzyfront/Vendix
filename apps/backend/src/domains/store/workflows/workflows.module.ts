@@ -41,6 +41,8 @@ import { WorkflowInboxService } from './inbox/workflow-inbox.service';
 import { WorkflowCommentsService } from './instances/workflow-comments.service';
 import { WorkflowPublicLinksService } from './public-link/workflow-public-links.service';
 import { WorkflowMetricsService } from './metrics/workflow-metrics.service';
+import { WorkflowAnalyticsService } from './metrics/workflow-analytics.service';
+import { WorkflowAnalyticsController } from './metrics/workflow-analytics.controller';
 import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
 
 /**
@@ -65,6 +67,7 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
     WorkflowTasksController,
     WorkflowInboxController,
     WorkflowBoardController,
+    WorkflowAnalyticsController,
     WorkGroupsController,
     DocumentFilesController,
   ],
@@ -74,6 +77,7 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
     WorkflowSimulatorService,
     WorkflowInstancesService,
     WorkflowMetricsService,
+    WorkflowAnalyticsService,
     WorkflowFilesService,
     WorkflowCommentsService,
     WorkflowInboxService,

@@ -90,3 +90,61 @@ export interface PublicLinkCreated {
   url_path: string;
   token: string;
 }
+
+/** KPIs of one flow (block 12). The same dataset feeds the screen and the XLSX. */
+export interface AnalyticsKpis {
+  started: number;
+  completed: number;
+  rejected: number;
+  cancelled: number;
+  active: number;
+  overdue: number;
+  cycle_avg_hours: number | null;
+  cycle_p90_hours: number | null;
+  /** 0..1 */
+  on_time_rate: number | null;
+}
+
+export interface AnalyticsStage {
+  stage_key: string;
+  name: string;
+  wip: number;
+  entered: number;
+  exited: number;
+  avg_hours: number | null;
+  p90_hours: number | null;
+  overdue_now: number;
+  on_time_rate: number | null;
+  reject_rate: number | null;
+}
+
+export interface AnalyticsPerson {
+  user_id: number;
+  name: string;
+  tasks_done: number;
+  on_time_rate: number | null;
+  avg_hours: number | null;
+}
+
+export interface AnalyticsDay {
+  date: string;
+  started: number;
+  completed: number;
+}
+
+export interface WorkflowAnalytics {
+  definition: { id: number; name: string };
+  range: { from: string; to: string; timezone: string };
+  kpis: AnalyticsKpis;
+  stages: AnalyticsStage[];
+  people: AnalyticsPerson[];
+  bottleneck_stage_key: string | null;
+  insufficient_data: boolean;
+  daily: AnalyticsDay[];
+  truncated: boolean;
+}
+
+export interface AnalyticsQuery {
+  from?: string;
+  to?: string;
+}
