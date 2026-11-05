@@ -22,12 +22,15 @@ const baseRow = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+const PDF_BYTES = Buffer.from('%PDF-1.7\n');
+
 const file = (over: Partial<Express.Multer.File> = {}) =>
   ({
     mimetype: 'image/png',
     size: 1000,
     originalname: 'comprobante 1.png',
-    buffer: Buffer.from('x'),
+    buffer: PNG_BYTES,
     ...over,
   }) as Express.Multer.File;
 
@@ -144,6 +147,21 @@ describe('PaymentRequestsPublicService', () => {
         service.submitTransfer('t', file({ mimetype: 'application/zip' }), {}),
       ).rejects.toMatchObject({ errorCode: 'PAYMENT_REQUEST_RECEIPT_TYPE' });
       expect(s3.uploadFile).not.toHaveBeenCalled();
+    });
+
+    it('rejects bytes that are not an image or PDF even when the name and type say PNG', async () => {
+      prisma.payment_requests.findFirst.mockResolvedValue(baseRow());
+      await expect(
+        service.submitTransfer('t', file({ buffer: Buffer.from('not an image <script>alert(1)</script>') }), {}),
+      ).rejects.toMatchObject({ errorCode: 'PAYMENT_REQUEST_RECEIPT_TYPE' });
+      expect(s3.uploadFile).not.toHaveBeenCalled();
+      expect(prisma.payment_requests.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('stores the receipt with the content type its bytes prove, not the declared one', async () => {
+      prisma.payment_requests.findFirst.mockResolvedValue(baseRow());
+      await service.submitTransfer('t', file({ buffer: PDF_BYTES }), {});
+      expect(s3.uploadFile).toHaveBeenCalledWith(PDF_BYTES, expect.any(String), 'application/pdf');
     });
 
     it('rejects a file over 5 MB', async () => {

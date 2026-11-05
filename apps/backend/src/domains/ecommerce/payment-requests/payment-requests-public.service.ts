@@ -15,6 +15,7 @@ import {
   toPublicPaymentMethod,
 } from '../checkout/utils/online-payment-methods.util';
 import { StartWompiDto, SubmitTransferDto } from './dto/payment-requests-public.dto';
+import { SniffedBinaryMime, sniffBinaryMime } from '@common/utils/file-signature.util';
 
 export const RECEIPT_MAX_BYTES = 5 * 1024 * 1024;
 const RECEIPT_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
@@ -129,6 +130,11 @@ export class PaymentRequestsPublicService {
     if (size > RECEIPT_MAX_BYTES) {
       throw new VendixHttpException(ErrorCodes.PAYMENT_REQUEST_RECEIPT_SIZE);
     }
+    // The declared type comes from the file name: the bytes must prove an image or PDF.
+    const contentType = sniffBinaryMime(file.buffer);
+    if (!contentType) {
+      throw new VendixHttpException(ErrorCodes.PAYMENT_REQUEST_RECEIPT_TYPE);
+    }
 
     let method_id: number | null = null;
     if (dto.method_id) {
@@ -144,7 +150,7 @@ export class PaymentRequestsPublicService {
       method_id = method.id;
     }
 
-    const key = await this.uploadReceipt(file);
+    const key = await this.uploadReceipt(file, contentType);
     const now = new Date();
     const claimed = await this.prisma.payment_requests.updateMany({
       where: { id: row.id, status: 'pending' },
@@ -263,7 +269,7 @@ export class PaymentRequestsPublicService {
   }
 
   /** Same key convention as checkout receipts, under `/payment-requests`. The key is stored, never a URL. */
-  private async uploadReceipt(file: Express.Multer.File): Promise<string> {
+  private async uploadReceipt(file: Express.Multer.File, contentType: SniffedBinaryMime): Promise<string> {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     const store = await this.prisma.stores.findUnique({
@@ -287,7 +293,7 @@ export class PaymentRequestsPublicService {
     const leaf = (file.originalname ?? '').split(/[\\/]/).pop() ?? '';
     const safe = leaf.replace(/[^a-zA-Z0-9._-]/g, '_') || 'receipt';
     const key = `${base}/payment-requests/${year}/${month}/${randomUUID()}-${safe}`;
-    await this.s3.uploadFile(file.buffer, key, file.mimetype);
+    await this.s3.uploadFile(file.buffer, key, contentType);
     return key;
   }
 }
