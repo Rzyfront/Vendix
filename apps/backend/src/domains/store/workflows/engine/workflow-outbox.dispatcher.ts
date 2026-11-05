@@ -18,8 +18,10 @@ import { WorkflowEmailService } from './workflow-email.service';
 import { WorkflowEngineService } from './workflow-engine.service';
 import {
   WorkflowInstanceRow,
+  WorkflowNonRetryableError,
   WorkflowNotifyPayload,
 } from './workflow-engine.types';
+import { storeAllowsFlows } from './workflow-industry';
 
 export {
   OUTBOX_BACKOFF_MINUTES,
@@ -128,7 +130,8 @@ export class WorkflowOutboxDispatcher {
     now: Date,
   ): Promise<'retried' | 'dead'> {
     const message = ((error as Error)?.message ?? String(error)).slice(0, 1000);
-    const dead = row.attempts >= OUTBOX_MAX_ATTEMPTS;
+    const dead =
+      row.attempts >= OUTBOX_MAX_ATTEMPTS || error instanceof WorkflowNonRetryableError;
     const delayMin =
       OUTBOX_BACKOFF_MINUTES[Math.min(row.attempts, OUTBOX_BACKOFF_MINUTES.length) - 1];
     await this.prisma.withoutScope().workflow_outbox.updateMany({
@@ -182,6 +185,12 @@ export class WorkflowOutboxDispatcher {
    */
   private async startFromEvent(row: ClaimedOutboxRow): Promise<void> {
     const p = row.payload;
+    if (!(await storeAllowsFlows(this.prisma.withoutScope() as never, row.store_id))) {
+      this.logger.warn(
+        `start_instance ${row.id} skipped: store ${row.store_id} no longer has the administration industry`,
+      );
+      return;
+    }
     try {
       await this.engine.startSystem({
         definitionId: Number(p.definition_id),

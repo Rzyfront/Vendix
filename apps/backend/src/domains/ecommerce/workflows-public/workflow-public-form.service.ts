@@ -10,6 +10,7 @@ import {
   submissionKey,
   PUBLIC_FORM_UNAVAILABLE_MESSAGES,
 } from '../../store/workflows/public-link/workflow-public-link.rules';
+import { storeAllowsFlows } from '../../store/workflows/engine/workflow-industry';
 import { SubmitPublicWorkflowFormDto } from './dto/submit-public-workflow-form.dto';
 
 /** The values of a public form are small: anything bigger is abuse. */
@@ -119,6 +120,7 @@ export class WorkflowPublicFormService {
       throw notFound();
     }
     const db = this.prisma.withoutScope();
+    if (!(await storeAllowsFlows(db as never, storeId))) throw notFound();
     const link = await db.workflow_public_links.findFirst({
       where: { token_hash: hashPublicToken(token), store_id: storeId, is_active: true },
     });

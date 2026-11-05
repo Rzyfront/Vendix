@@ -47,7 +47,12 @@ export class WorkflowTimersCron {
         ],
       },
       select: { id: true, store_id: true, organization_id: true },
-      orderBy: { stage_due_at: 'asc' },
+      // Never-reminded first, then oldest stamp: a failing instance (stamped
+      // below) goes to the back instead of starving the batch.
+      orderBy: [
+        { stage_last_reminded_at: { sort: 'asc', nulls: 'first' } },
+        { stage_due_at: 'asc' },
+      ],
       take: limit,
     });
     let ticked = 0;
@@ -65,6 +70,17 @@ export class WorkflowTimersCron {
         ticked++;
       } catch (e) {
         this.logger.warn(`Tick ${row.id} failed: ${(e as Error)?.message}`);
+        // Push it back by the reminder granularity so it cannot block others.
+        try {
+          await this.prisma.withoutScope().workflow_instances.updateMany({
+            where: { id: row.id, store_id: row.store_id, status: 'active' },
+            data: { stage_last_reminded_at: now },
+          });
+        } catch (stampError) {
+          this.logger.error(
+            `Could not defer failing tick ${row.id}: ${(stampError as Error)?.message}`,
+          );
+        }
       }
     }
     return ticked;

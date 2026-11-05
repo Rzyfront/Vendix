@@ -98,7 +98,12 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
   const board = new WorkflowBoardService(prisma, instances, requirements);
   const publicLinks = new WorkflowPublicLinksService(prisma);
   const publicForm = new WorkflowPublicFormService(prisma, engine);
-  let ctx: TestCtx = { store_id: 1, organization_id: 1, user_id: 1 };
+  let ctx: TestCtx = {
+    store_id: 1,
+    organization_id: 1,
+    user_id: 1,
+    permissions: ['store:workflows:task'],
+  };
   const scoped = new AsyncLocalStorage<TestCtx>();
   jest.spyOn(RequestContextService, 'getContext').mockImplementation(
     () => ({ is_super_admin: false, is_owner: false, ...(scoped.getStore() ?? RequestContextService.asyncLocalStorage.getStore() ?? ctx) }) as any,
@@ -135,8 +140,8 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
 
 /** Two stores, roles owner/manager, six users in store 1 (u1..u6), one in store 2. */
 export function seedPeople(db: FakeWorkflowDb) {
-  db.insert('stores', { id: 1, organization_id: 1 });
-  db.insert('stores', { id: 2, organization_id: 1 });
+  db.insert('stores', { id: 1, organization_id: 1, industries: ['administration'] });
+  db.insert('stores', { id: 2, organization_id: 1, industries: ['administration'] });
   db.insert('roles', { id: 1, name: 'owner', organization_id: null, store_id: null });
   db.insert('roles', { id: 2, name: 'manager', organization_id: null, store_id: null });
   for (const id of [1, 2, 3, 4, 5, 6]) db.insert('store_users', { id, store_id: 1, user_id: id });

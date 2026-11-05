@@ -431,6 +431,90 @@ describe('WorkflowEngineService', () => {
     });
   });
 
+  describe('idempotencia: clave por origen', () => {
+    const storedKeys = () =>
+      kit.db
+        .table('workflow_instance_events')
+        .map((e) => e.idempotency_key)
+        .filter(Boolean);
+
+    it('la misma clave cruda de dos usuarios no colisiona: cada uno obtiene lo suyo', async () => {
+      const a = await kit.engine.start({
+        definitionKey: 'purchase',
+        data: { reason: 'secreto-de-A' },
+        idempotencyKey: 'shared',
+      });
+      kit.as({ user_id: 6 });
+      const b = await kit.engine.start({ definitionKey: 'purchase', idempotencyKey: 'shared' });
+      expect(b.replayed).toBe(false);
+      expect(b.instance.id).not.toBe(a.instance.id);
+      expect(kit.db.table('workflow_instances')).toHaveLength(2);
+      expect(storedKeys()).toHaveLength(2);
+      expect(new Set(storedKeys()).size).toBe(2);
+      expect(a.instance.id).toBe(1);
+    });
+
+    it('una clave guardada de otro actor (p. ej. adivinada del sistema) se rechaza sin filtrar la solicitud', async () => {
+      const a = await kit.engine.start({
+        definitionKey: 'purchase',
+        data: { reason: 'secreto-de-A' },
+        idempotencyKey: 'k-a',
+      });
+      // El evento de A, consultado con la clave de A pero como otro actor.
+      const stored = storedKeys()[0] as string;
+      const events = (kit.engine as any).events;
+      let err: VendixHttpException | undefined;
+      try {
+        await events.replay(kit.prisma, stored, {
+          actor: { type: 'user', id: 6 },
+          types: ['started', 'submitted'],
+        });
+      } catch (e) {
+        err = e as VendixHttpException;
+      }
+      expect(err?.errorCode).toBe('WORKFLOW_IDEMPOTENCY_KEY_CONFLICT');
+      expect(JSON.stringify([err?.message, (err as any)?.details])).not.toContain('secreto-de-A');
+      expect(a.instance.id).toBe(1);
+    });
+
+    it('una clave de iniciar usada para completar una tarea (otro tipo de comando) → 409', async () => {
+      const { task } = await startPurchase(0, 'cmd-k');
+      expect(await codeOf(submit(task.id, 5000, 0, 'cmd-k'))).toBe(
+        'WORKFLOW_IDEMPOTENCY_KEY_CONFLICT',
+      );
+      expect(events(1).filter((e) => e.type === 'task_completed')).toHaveLength(0);
+    });
+
+    it('el mismo usuario que repite su clave recibe el resultado original', async () => {
+      const a = await kit.engine.start({ definitionKey: 'purchase', idempotencyKey: 'mine' });
+      const b = await kit.engine.start({ definitionKey: 'purchase', idempotencyKey: 'mine' });
+      expect(b.replayed).toBe(true);
+      expect(b.instance.id).toBe(a.instance.id);
+    });
+
+    it('las claves del sistema no pueden colisionar con las del cliente', async () => {
+      const raw = 'action_executed:1';
+      const a = await kit.engine.start({ definitionKey: 'purchase', idempotencyKey: raw });
+      expect(storedKeys()[0]).not.toBe(raw);
+      expect(storedKeys()[0]).toMatch(/^u:1:[0-9a-f]{64}$/);
+      expect(storedKeys()[0].length).toBeLessThanOrEqual(80);
+      expect(a.instance.id).toBe(1);
+    });
+  });
+
+  describe('permiso de tarea (falla cerrado)', () => {
+    it('sin permisos (lista vacía) no se puede tomar ni completar; con el permiso sí; el dueño no lo necesita', async () => {
+      const { task } = await startPurchase(0);
+      kit.as({ permissions: [] });
+      expect(await codeOf(kit.engine.claimTask(task.id))).toBe('WORKFLOW_TASK_FORBIDDEN');
+      expect(await codeOf(submit(task.id, 5000, 0))).toBe('WORKFLOW_TASK_FORBIDDEN');
+      kit.as({ permissions: ['store:crm_tasks:manage'] });
+      expect(await codeOf(submit(task.id, 5000, 0))).toBe('WORKFLOW_TASK_FORBIDDEN');
+      kit.as({ permissions: [], is_owner: true });
+      expect(await codeOf(submit(task.id, 5000, 0))).toBeUndefined();
+    });
+  });
+
   describe('administración', () => {
     it('transition forzada: evento forced, tareas cerradas y nueva tarea', async () => {
       const { instance } = await startPurchase(0);

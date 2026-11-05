@@ -16,6 +16,13 @@ import {
   WorkflowTaskRow,
   WorkflowTx,
 } from './workflow-engine.types';
+import {
+  COMPLETE_EVENT_TYPES,
+  START_EVENT_TYPES,
+  publicIdempotencyKey,
+  systemIdempotencyKey,
+  userIdempotencyKey,
+} from './workflow-idempotency';
 import { WorkflowEventsService } from './workflow-events.service';
 import {
   WorkflowCallContext,
@@ -49,16 +56,25 @@ export class WorkflowEngineService {
 
   // ---- start -------------------------------------------------------------
 
-  async start(input: StartWorkflowInput): Promise<WorkflowCommandResult> {
+  async start(raw: StartWorkflowInput): Promise<WorkflowCommandResult> {
     const ctx = this.loader.context();
     const actor = this.userActor(ctx);
+    const input = {
+      ...raw,
+      idempotencyKey: raw.idempotencyKey
+        ? userIdempotencyKey(ctx.user_id, raw.idempotencyKey)
+        : undefined,
+    };
     try {
       return await this.prisma.$transaction((tx: WorkflowTx) =>
         this.starter.execute(tx, ctx, actor, input),
       );
     } catch (e) {
       if (e instanceof WorkflowIdempotencyConflict) {
-        const prev = await this.events.replay(this.prisma, e.idempotencyKey);
+        const prev = await this.events.replay(this.prisma, e.idempotencyKey, {
+          actor: actor,
+          types: START_EVENT_TYPES,
+        });
         if (prev) return prev;
       }
       throw e;
@@ -70,15 +86,19 @@ export class WorkflowEngineService {
    * Public form submission (actor `public`). Only `WorkflowPublicFormService`
    * calls it, after resolving the link; the start service re-checks the link.
    */
-  async startPublic(input: StartPublicWorkflowInput): Promise<WorkflowCommandResult> {
+  async startPublic(raw: StartPublicWorkflowInput): Promise<WorkflowCommandResult> {
     const ctx = this.loader.context();
+    const input = { ...raw, idempotencyKey: publicIdempotencyKey(raw.idempotencyKey) };
     try {
       return await this.prisma.$transaction((tx: WorkflowTx) =>
         this.starter.executePublic(tx, ctx, input),
       );
     } catch (e) {
       if (e instanceof WorkflowIdempotencyConflict) {
-        const prev = await this.events.replay(this.prisma, e.idempotencyKey);
+        const prev = await this.events.replay(this.prisma, e.idempotencyKey, {
+          actor: { type: 'public', id: null },
+          types: START_EVENT_TYPES,
+        });
         if (prev) return prev;
       }
       throw e;
@@ -89,15 +109,19 @@ export class WorkflowEngineService {
    * Start from a business event (actor `system`). Only the outbox dispatcher
    * calls it, inside the store context of the `start_instance` row.
    */
-  async startSystem(input: StartSystemWorkflowInput): Promise<WorkflowCommandResult> {
+  async startSystem(raw: StartSystemWorkflowInput): Promise<WorkflowCommandResult> {
     const ctx = this.loader.context();
+    const input = { ...raw, idempotencyKey: systemIdempotencyKey(raw.idempotencyKey) };
     try {
       return await this.prisma.$transaction((tx: WorkflowTx) =>
         this.starter.executeSystem(tx, ctx, input),
       );
     } catch (e) {
       if (e instanceof WorkflowIdempotencyConflict) {
-        const prev = await this.events.replay(this.prisma, e.idempotencyKey);
+        const prev = await this.events.replay(this.prisma, e.idempotencyKey, {
+          actor: { type: 'system', id: null },
+          types: START_EVENT_TYPES,
+        });
         if (prev) return prev;
       }
       throw e;
@@ -106,16 +130,25 @@ export class WorkflowEngineService {
 
   // ---- completeTask ------------------------------------------------------
 
-  async completeTask(input: CompleteTaskInput): Promise<WorkflowCommandResult> {
+  async completeTask(raw: CompleteTaskInput): Promise<WorkflowCommandResult> {
     const ctx = this.loader.context();
     const actor = this.userActor(ctx);
+    const input = {
+      ...raw,
+      idempotencyKey: raw.idempotencyKey
+        ? userIdempotencyKey(ctx.user_id, raw.idempotencyKey)
+        : undefined,
+    };
     try {
       return await this.prisma.$transaction((tx: WorkflowTx) =>
         this.completer.execute(tx, ctx, actor, input),
       );
     } catch (e) {
       if (e instanceof WorkflowIdempotencyConflict) {
-        const prev = await this.events.replay(this.prisma, e.idempotencyKey);
+        const prev = await this.events.replay(this.prisma, e.idempotencyKey, {
+          actor: actor,
+          types: COMPLETE_EVENT_TYPES,
+        });
         if (prev) return prev;
       }
       throw e;

@@ -29,6 +29,12 @@ export interface EnqueueInput {
   available_at?: Date;
 }
 
+export interface ReplayExpectation {
+  actor: WorkflowActor;
+  /** Event types the original command can have written. */
+  types: string[];
+}
+
 /** Append-only history (`seq`) and the transactional outbox. */
 @Injectable()
 export class WorkflowEventsService {
@@ -106,16 +112,29 @@ export class WorkflowEventsService {
     });
   }
 
-  /** Original result for an idempotency key, or null when never used. */
+  /**
+   * Original result for a (namespaced) idempotency key, or null when never
+   * used. The stored event must belong to the same caller and the same kind of
+   * command; otherwise the key was used by someone else / for something else
+   * and the request is rejected without revealing anything about it.
+   */
   async replay(
     db: WorkflowTx,
     key: string,
+    expect: ReplayExpectation,
   ): Promise<WorkflowCommandResult | null> {
     const storeId = RequestContextService.getStoreId();
     const ev = await db.workflow_instance_events.findFirst({
       where: { idempotency_key: key, store_id: storeId },
     });
     if (!ev) return null;
+    if (
+      ev.actor_type !== expect.actor.type ||
+      (ev.actor_id ?? null) !== (expect.actor.id ?? null) ||
+      !expect.types.includes(ev.type)
+    ) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_IDEMPOTENCY_KEY_CONFLICT);
+    }
     const instance = await db.workflow_instances.findFirst({
       where: { id: ev.instance_id, store_id: storeId },
     });

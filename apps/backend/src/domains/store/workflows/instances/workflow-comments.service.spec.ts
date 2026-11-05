@@ -25,7 +25,7 @@ describe('WorkflowCommentsService', () => {
     seedDefinition(kit.db, purchaseDefinition());
     kit.db.insert('users', { id: 4, first_name: 'Ana', last_name: 'Ruiz' });
     kit.db.insert('users', { id: 2, first_name: 'Luis', last_name: 'Mora' });
-    kit.as({ user_id: 4, permissions: [] });
+    kit.as({ user_id: 4, permissions: ['store:workflows:task'] });
     const s = await kit.engine.start({ definitionKey: 'purchase', idempotencyKey: 'k' });
     const task = kit.db.table('workflow_tasks').find((t) => t.status === 'open')!;
     await kit.engine.completeTask({

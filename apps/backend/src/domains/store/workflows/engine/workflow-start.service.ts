@@ -21,6 +21,7 @@ import {
   WorkflowTx,
 } from './workflow-engine.types';
 import { WorkflowAdvanceService } from './workflow-advance.service';
+import { START_EVENT_TYPES } from './workflow-idempotency';
 import { WorkflowEventsService } from './workflow-events.service';
 import {
   WorkflowCallContext,
@@ -85,7 +86,10 @@ export class WorkflowStartService {
     input: StartWorkflowInput,
   ): Promise<WorkflowCommandResult> {
     if (input.idempotencyKey) {
-      const prev = await this.events.replay(tx, input.idempotencyKey);
+      const prev = await this.events.replay(tx, input.idempotencyKey, {
+        actor,
+        types: START_EVENT_TYPES,
+      });
       if (prev) return prev;
     }
     const def = await tx.workflow_definitions.findFirst({
@@ -181,7 +185,10 @@ export class WorkflowStartService {
     ctx: WorkflowCallContext,
     input: StartPublicWorkflowInput,
   ): Promise<WorkflowCommandResult> {
-    const prev = await this.events.replay(tx, input.idempotencyKey);
+    const prev = await this.events.replay(tx, input.idempotencyKey, {
+      actor: { type: 'public', id: null },
+      types: START_EVENT_TYPES,
+    });
     if (prev) return prev;
 
     const link = await tx.workflow_public_links.findFirst({
@@ -322,7 +329,10 @@ export class WorkflowStartService {
     ctx: WorkflowCallContext,
     input: StartSystemWorkflowInput,
   ): Promise<WorkflowCommandResult> {
-    const prev = await this.events.replay(tx, input.idempotencyKey);
+    const prev = await this.events.replay(tx, input.idempotencyKey, {
+      actor: { type: 'system', id: null },
+      types: START_EVENT_TYPES,
+    });
     if (prev) return prev;
 
     const def = await tx.workflow_definitions.findFirst({

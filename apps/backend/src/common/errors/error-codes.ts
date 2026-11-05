@@ -83,6 +83,7 @@ export const ErrorCodes = {
   WORKFLOW_INVALID: { code: 'WORKFLOW_INVALID', httpStatus: 422, devMessage: 'La definición del flujo tiene errores; corrígelos para publicar.' },
   WORKFLOW_VERSION_NOT_FOUND: { code: 'WORKFLOW_VERSION_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró esa versión del flujo.' },
   WORKFLOW_IDEMPOTENCY_KEY_REQUIRED: { code: 'WORKFLOW_IDEMPOTENCY_KEY_REQUIRED', httpStatus: 400, devMessage: 'Falta el encabezado Idempotency-Key (máximo 80 caracteres).' },
+  WORKFLOW_IDEMPOTENCY_KEY_CONFLICT: { code: 'WORKFLOW_IDEMPOTENCY_KEY_CONFLICT', httpStatus: 409, devMessage: 'Esta clave de idempotencia ya se usó para otra operación.' },
   // Operación de Flujos (bloque 8)
   WORKFLOW_PUBLIC_NOT_FOUND: { code: 'WORKFLOW_PUBLIC_NOT_FOUND', httpStatus: 404, devMessage: 'Este enlace no existe o ya no está disponible.' },
   WORKFLOW_PUBLIC_LINK_UNAVAILABLE: { code: 'WORKFLOW_PUBLIC_LINK_UNAVAILABLE', httpStatus: 422, devMessage: 'Este flujo no puede publicarse como formulario por enlace.' },

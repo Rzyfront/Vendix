@@ -102,6 +102,24 @@ describe('WorkflowPublicFormService', () => {
   });
 
   describe('POST', () => {
+    it('si la tienda perdió la industria administration, GET y POST responden 404 WORKFLOW_PUBLIC_NOT_FOUND sin crear nada', async () => {
+      kit.db.table('stores').find((st) => st.id === 1)!.industries = ['retail'];
+      expect(await codeOf(kit.publicForm.get(token))).toBe('WORKFLOW_PUBLIC_NOT_FOUND');
+      expect(await codeOf(kit.publicForm.submit(token, body()))).toBe('WORKFLOW_PUBLIC_NOT_FOUND');
+      expect(instances()).toHaveLength(0);
+    });
+
+    it('el reintento de la misma persona (mismo submission_id) devuelve la misma referencia y la clave se guarda con prefijo p:', async () => {
+      const b = body();
+      const one = await kit.publicForm.submit(token, b);
+      const two = await kit.publicForm.submit(token, b);
+      expect(two).toEqual(one);
+      expect(instances()).toHaveLength(1);
+      const keys = kit.db.table('workflow_instance_events').map((e) => e.idempotency_key).filter(Boolean);
+      expect(keys).toHaveLength(1);
+      expect(keys[0]).toMatch(/^p:[0-9a-f]{64}$/);
+    });
+
     it('inicia como actor public y aterriza en la etapa siguiente con su tarea, expediente y eventos', async () => {
       const r = await kit.publicForm.submit(token, body());
       expect(r).toEqual({ reference: 'FLU-000001' });
@@ -139,7 +157,7 @@ describe('WorkflowPublicFormService', () => {
       expect(other.reference).toBe('FLU-000002');
       expect(instances()).toHaveLength(2);
       // the key is sha256(token + submission): a different link never collides
-      expect(kit.db.table('workflow_instance_events')[0].idempotency_key).toHaveLength(64);
+      expect(kit.db.table('workflow_instance_events')[0].idempotency_key).toMatch(/^p:[0-9a-f]{64}$/);
     });
 
     it('valida el formulario: errores por campo y nada queda creado', async () => {

@@ -130,6 +130,9 @@ export class WorkflowIdempotencyConflict extends Error {
   }
 }
 
+/** Permanent failure: the outbox must not retry it (it ends `dead`). */
+export class WorkflowNonRetryableError extends Error {}
+
 export interface StartWorkflowInput {
   definitionId?: number;
   definitionKey?: string;

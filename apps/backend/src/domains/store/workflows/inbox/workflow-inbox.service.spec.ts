@@ -12,7 +12,7 @@ describe('WorkflowInboxService', () => {
 
   /** Starts as `userId`, submits the form with `amount` and returns the instance id. */
   async function request(userId: number, amount: number | null, key: string) {
-    kit.as({ user_id: userId, permissions: [] });
+    kit.as({ user_id: userId, permissions: ['store:workflows:task'] });
     const s = await kit.engine.start({ definitionKey: 'purchase', idempotencyKey: `s-${key}` });
     if (amount === null) return s.instance.id;
     const task = kit.db.table('workflow_tasks').find((t) => t.instance_id === s.instance.id && t.status === 'open')!;

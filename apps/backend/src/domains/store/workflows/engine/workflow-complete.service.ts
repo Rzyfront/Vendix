@@ -14,6 +14,7 @@ import {
   WorkflowRequirementsService,
   WorkflowTx,
 } from './workflow-engine.types';
+import { COMPLETE_EVENT_TYPES } from './workflow-idempotency';
 import { WorkflowEventsService } from './workflow-events.service';
 import {
   WorkflowCallContext,
@@ -41,7 +42,10 @@ export class WorkflowCompleteService {
     input: CompleteTaskInput,
   ): Promise<WorkflowCommandResult> {
     if (input.idempotencyKey) {
-      const prev = await this.events.replay(tx, input.idempotencyKey);
+      const prev = await this.events.replay(tx, input.idempotencyKey, {
+        actor,
+        types: COMPLETE_EVENT_TYPES,
+      });
       if (prev) return prev;
     }
     // 1. Task + instance (store scoped).
@@ -256,10 +260,13 @@ export class WorkflowCompleteService {
     };
   }
 
-  /** The route guard is the authority; this also covers non-HTTP callers. */
+  /**
+   * Fails closed: without the task permission (an empty list included) the
+   * caller is rejected. System/public paths never go through this check.
+   */
   assertTaskPermission(ctx: WorkflowCallContext) {
     if (ctx.is_owner || ctx.is_super_admin) return;
-    if (ctx.permissions.length > 0 && !ctx.permissions.includes(TASK_PERMISSION)) {
+    if (!ctx.permissions.includes(TASK_PERMISSION)) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_TASK_FORBIDDEN);
     }
   }

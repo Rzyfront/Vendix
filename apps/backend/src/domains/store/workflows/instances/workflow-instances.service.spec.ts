@@ -25,7 +25,7 @@ describe('WorkflowInstancesService', () => {
   let C: number; // started by u6, still in the request form
 
   async function startAs(userId: number, amount: number | null) {
-    kit.as({ user_id: userId, permissions: [] });
+    kit.as({ user_id: userId, permissions: ['store:workflows:task'] });
     const s = await kit.engine.start({ definitionKey: 'purchase', idempotencyKey: `s-${userId}` });
     if (amount === null) return s.instance.id;
     const task = kit.db.table('workflow_tasks').find((t) => t.instance_id === s.instance.id && t.status === 'open')!;
@@ -86,7 +86,7 @@ describe('WorkflowInstancesService', () => {
     });
 
     it('quien participó sigue viéndola; quien no, deja de verla al cerrarse la etapa', async () => {
-      kit.as({ user_id: 2, permissions: [] });
+      kit.as({ user_id: 2, permissions: ['store:workflows:task'] });
       const task = kit.db.table('workflow_tasks').find((t) => t.instance_id === A && t.status === 'open')!;
       const inst = kit.db.table('workflow_instances').find((i) => i.id === A)!;
       await kit.engine.completeTask({ taskId: task.id, outcome: 'approve', expectedRowVersion: inst.row_version, idempotencyKey: 'ap' });

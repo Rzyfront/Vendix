@@ -2,6 +2,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { FakeWorkflowDb } from '../../../../testing/workflows/fake-workflow-prisma';
 import { seedPeople } from '../../../../testing/workflows/workflow-test-kit';
+import { WorkflowNonRetryableError } from './workflow-engine.types';
 import { WorkflowOutboxDispatcher } from './workflow-outbox.dispatcher';
 
 describe('WorkflowOutboxDispatcher · webhook / start_instance / action', () => {
@@ -158,6 +159,30 @@ describe('WorkflowOutboxDispatcher · webhook / start_instance / action', () => 
     });
     expect(await dispatcher.dispatchBatch()).toMatchObject({ done: 1 });
     expect(actions.recordFailure).not.toHaveBeenCalled();
+  });
+
+  it('start_instance: si la tienda ya no tiene la industria administration se omite (fila done, sin reintento ni inicio)', async () => {
+    db.table('stores').find((st) => st.id === 1)!.industries = ['retail'];
+    enqueue('start_instance', {
+      definition_id: 4,
+      event: 'order.created',
+      event_context: {},
+      idempotency_key: 'k',
+    });
+    expect(await dispatcher.dispatchBatch()).toMatchObject({ done: 1, retried: 0 });
+    expect(engine.startSystem).not.toHaveBeenCalled();
+    expect(row().status).toBe('done');
+  });
+
+  it('action con error no reintentable (permiso del publicador) va directo a dead y deja action_failed', async () => {
+    actions.execute.mockRejectedValue(new WorkflowNonRetryableError('sin permiso'));
+    enqueue('action', { action: 'vendix.crm_task.create', map_resolved: { title: 'x' } });
+    expect(await dispatcher.dispatchBatch()).toMatchObject({ dead: 1, retried: 0 });
+    expect(row()).toMatchObject({ status: 'dead', attempts: 1 });
+    expect(actions.recordFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ id: row().id }),
+      'sin permiso',
+    );
   });
 
   it('un webhook muerto no pasa por action_failed', async () => {

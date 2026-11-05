@@ -5,17 +5,23 @@ import {
 } from '@common/workflows/contract';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { CrmTasksService } from '../../customers/crm/tasks/crm-tasks.service';
+import {
+  CRM_TASKS_PERMISSION,
+  CrmTasksService,
+} from '../../customers/crm/tasks/crm-tasks.service';
 import { resolveUserStorePermissions } from '../../../../common/utils/user-store-permissions.util';
 import { PurchaseOrdersService } from '../../orders/purchase-orders/purchase-orders.service';
 import { CreatePurchaseOrderDto } from '../../orders/purchase-orders/dto/create-purchase-order.dto';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import { WorkflowEventsService } from './workflow-events.service';
+import { systemIdempotencyKey } from './workflow-idempotency';
 import {
   WorkflowIdempotencyConflict,
   WorkflowInstanceRow,
+  WorkflowNonRetryableError,
   WorkflowTx,
 } from './workflow-engine.types';
+import { storeAllowsFlows } from './workflow-industry';
 
 export interface ActionOutboxRow {
   id: number;
@@ -25,6 +31,17 @@ export interface ActionOutboxRow {
 }
 
 const DAY_MS = 86_400_000;
+/** Same permission the HTTP route of each operation requires. */
+const PURCHASE_ORDER_CREATE_PERMISSION = 'store:orders:purchase_orders:create';
+
+/** The publisher must really hold what the route would ask of a person. */
+function requirePermission(held: string[], needed: string, what: string) {
+  if (!held.includes(needed)) {
+    throw new WorkflowNonRetryableError(
+      `El publicador del flujo ya no tiene el permiso ${needed} necesario para ${what}.`,
+    );
+  }
+}
 const POSITIVE_INT = /^\d{1,12}$/;
 
 function positiveInt(raw: unknown, name: string): number {
@@ -73,6 +90,12 @@ export class WorkflowActionsExecutor {
       where: { id: row.instance_id, store_id: row.store_id },
     })) as WorkflowInstanceRow | null;
     if (!instance) return;
+    if (!(await storeAllowsFlows(this.prisma.withoutScope() as never, row.store_id))) {
+      this.logger.warn(
+        `Action ${row.id} skipped: store ${row.store_id} no longer has the administration industry`,
+      );
+      return;
+    }
 
     let createdId: number | undefined = row.payload.created_id;
     if (createdId === undefined) {
@@ -133,7 +156,7 @@ export class WorkflowActionsExecutor {
           to_stage_key: instance.current_stage_key,
           actor: { type: 'system', id: null },
           payload,
-          idempotencyKey: `${type}:${row.id}`,
+          idempotencyKey: systemIdempotencyKey(`${type}:${row.id}`),
         }),
       );
     } catch (e) {
@@ -198,6 +221,11 @@ export class WorkflowActionsExecutor {
       userId,
       instance.store_id,
     );
+    requirePermission(
+      poPermissions,
+      PURCHASE_ORDER_CREATE_PERMISSION,
+      'crear la orden de compra',
+    );
     const created = await this.asUser(instance, userId, poPermissions, () =>
       this.purchaseOrders.create(dto),
     );
@@ -254,6 +282,7 @@ export class WorkflowActionsExecutor {
       userId,
       instance.store_id,
     );
+    requirePermission(permissions, CRM_TASKS_PERMISSION, 'crear la tarea CRM');
     const created = await this.asUser(instance, userId, permissions, () =>
       this.crmTasks.create(dto as never),
     );

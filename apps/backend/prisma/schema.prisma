@@ -15766,6 +15766,13 @@ model workflow_instance_comments {
   @@index([store_id])
 }
 
+// ATENCIÓN: existe un índice único PARCIAL solo en SQL (migración
+// 20261113120000_workflows_operation):
+//   CREATE UNIQUE INDEX "workflow_public_links_one_active_per_definition"
+//   ON "workflow_public_links"("definition_id") WHERE "is_active" = true;
+// Garantiza un solo enlace público activo por flujo. Prisma no lo modela (el
+// `where` de índices es una preview que este repo no habilita), así que un
+// `prisma migrate dev` puede proponer eliminarlo: NO aceptar ese DROP INDEX.
 /// Enlace público de un flujo (formulario por enlace). Solo se guarda el hash del token.
 model workflow_public_links {
   id                 Int       @id @default(autoincrement())

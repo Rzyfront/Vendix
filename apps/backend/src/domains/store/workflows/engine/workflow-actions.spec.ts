@@ -6,6 +6,7 @@ import {
   seedPeople,
 } from '../../../../testing/workflows/workflow-test-kit';
 import { WorkflowActionsExecutor } from './workflow-actions.executor';
+import { WorkflowNonRetryableError } from './workflow-engine.types';
 
 // The executor acts with the publisher's REAL store permissions.
 const mockPublisherPermissions = jest.fn<Promise<string[]>, unknown[]>();
@@ -14,6 +15,12 @@ jest.mock('../../../../common/utils/user-store-permissions.util', () => ({
     mockPublisherPermissions(...args),
 }));
 
+
+/** Exactly what the HTTP routes of both actions require. */
+const PUBLISHER_PERMISSIONS = [
+  'store:orders:purchase_orders:create',
+  'store:crm_tasks:manage',
+];
 
 const PO = {
   action: 'vendix.purchase_order.create_draft',
@@ -226,7 +233,7 @@ describe('WorkflowActionsExecutor', () => {
 
   beforeEach(async () => {
     mockPublisherPermissions.mockReset();
-    mockPublisherPermissions.mockResolvedValue(['store:crm_tasks:create']);
+    mockPublisherPermissions.mockResolvedValue(PUBLISHER_PERMISSIONS);
     kit = buildWorkflowKit();
     seedPeople(kit.db);
     seedDefinition(kit.db, flow([]));
@@ -345,14 +352,14 @@ describe('WorkflowActionsExecutor', () => {
     expect(due).toBeLessThanOrEqual(Date.now() + 3 * 86_400_000);
     expect(seen[0].ctx).toMatchObject({
       user_id: 1,
-      permissions: ['store:crm_tasks:create'],
+      permissions: PUBLISHER_PERMISSIONS,
     });
     expect(actionEvents('action_executed')[0].payload.created_id).toBe(77);
   });
 
   it('Tarea CRM: asigna a otro con el ver-todo que el publicador SÍ tiene', async () => {
     mockPublisherPermissions.mockResolvedValue([
-      'store:crm_tasks:create',
+      ...PUBLISHER_PERMISSIONS,
       'store:crm_inbox:assign',
     ]);
     await inStore(() =>
@@ -368,7 +375,7 @@ describe('WorkflowActionsExecutor', () => {
   });
 
   it('Tarea CRM: nunca concede un permiso que el publicador no tiene', async () => {
-    mockPublisherPermissions.mockResolvedValue(['store:crm_tasks:create']);
+    mockPublisherPermissions.mockResolvedValue(PUBLISHER_PERMISSIONS);
     await inStore(() =>
       executor.execute(
         outboxRow('vendix.crm_task.create', {
@@ -442,6 +449,40 @@ describe('WorkflowActionsExecutor', () => {
       executor.execute({ ...row, store_id: 1, instance_id: 999 }),
     );
     expect(crmTasks.create).not.toHaveBeenCalled();
+  });
+
+  it('OC: sin el permiso de la ruta (store:orders:purchase_orders:create) falla sin llamar al servicio y sin reintento', async () => {
+    mockPublisherPermissions.mockResolvedValue(['store:crm_tasks:manage']);
+    const err = await inStore(() =>
+      executor.execute(outboxRow('vendix.purchase_order.create_draft', PO_MAP)),
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(WorkflowNonRetryableError);
+    expect(String(err.message)).toContain('store:orders:purchase_orders:create');
+    expect(purchaseOrders.create).not.toHaveBeenCalled();
+    expect(actionEvents('action_executed')).toHaveLength(0);
+  });
+
+  it('Tarea CRM: sin store:crm_tasks:manage falla sin llamar al servicio y sin reintento', async () => {
+    mockPublisherPermissions.mockResolvedValue([]);
+    const err = await inStore(() =>
+      executor.execute(outboxRow('vendix.crm_task.create', { title: 'T' })),
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(WorkflowNonRetryableError);
+    expect(String(err.message)).toContain('store:crm_tasks:manage');
+    expect(crmTasks.create).not.toHaveBeenCalled();
+  });
+
+  it('si la tienda perdió la industria administration la acción se omite (sin efecto, sin error)', async () => {
+    kit.db.table('stores').find((s) => s.id === 1)!.industries = ['retail'];
+    await inStore(() =>
+      executor.execute(outboxRow('vendix.crm_task.create', { title: 'T' })),
+    );
+    await inStore(() =>
+      executor.execute(outboxRow('vendix.purchase_order.create_draft', PO_MAP)),
+    );
+    expect(crmTasks.create).not.toHaveBeenCalled();
+    expect(purchaseOrders.create).not.toHaveBeenCalled();
+    expect(actionEvents()).toHaveLength(0);
   });
 
   it('una acción desconocida en el outbox falla (nunca ejecuta algo no catalogado)', async () => {

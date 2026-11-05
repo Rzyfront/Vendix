@@ -128,4 +128,24 @@ describe('WorkflowTimersCron', () => {
     jest.spyOn(kit.engine, 'tick').mockRejectedValueOnce(new Error('boom'));
     expect(await cron.runOnce(new Date())).toBe(0);
   });
+
+  it('una instancia cuyo tick siempre falla se aplaza y no deja sin turno a las demás', async () => {
+    await startOverdue({ remind_every_hours: 12 });
+    await kit.engine.start({ definitionKey: 'slow' });
+    const [first, second] = kit.db.table('workflow_instances');
+    second.stage_due_at = new Date(Date.now() - HOUR / 2); // vence después: iría segunda
+    const realTick = kit.engine.tick.bind(kit.engine);
+    const ticked: number[] = [];
+    jest.spyOn(kit.engine, 'tick').mockImplementation((async (id: number, o: any) => {
+      ticked.push(id);
+      if (id === first.id) throw new Error('boom');
+      return realTick(id, o);
+    }) as any);
+    const now = new Date();
+    // Lote de 1: la primera falla; en la siguiente corrida ya no bloquea.
+    await cron.runOnce(now, 1);
+    expect(first.stage_last_reminded_at).toEqual(now);
+    await cron.runOnce(new Date(now.getTime() + HOUR + 1), 1);
+    expect(ticked).toEqual([first.id, second.id]);
+  });
 });
