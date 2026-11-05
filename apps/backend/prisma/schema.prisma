@@ -309,6 +309,8 @@ model users {
   crm_created_notes          crm_notes[]                  @relation("crm_notes_created_by")
   crm_created_campaigns      crm_campaigns[]              @relation("crm_campaigns_created_by")
 
+  service_deposits_customer service_deposits[] @relation("service_deposits_customer")
+
   @@index([email_verified])
   @@index([state])
   @@index([document_number])
@@ -1137,6 +1139,8 @@ model stores {
   lodging_guests                 lodging_guests[]
   lodging_folios                 lodging_folios[]
   lodging_deposits               lodging_deposits[]
+  service_deposits               service_deposits[]
+  payment_requests               payment_requests[]
   lodging_room_charges           lodging_room_charges[]
   lodging_housekeeping_tasks     lodging_housekeeping_tasks[]
   lodging_inventory_blocks       lodging_inventory_blocks[]
@@ -1591,6 +1595,8 @@ model order_items {
   sale_unit_code_snapshot          String?                  @db.VarChar(20)
   sale_quantity_snapshot           Decimal?                 @db.Decimal(18, 6)
   item_type                        String?                  @default("physical") @db.VarChar(20)
+  /// Línea propia de una atención de estación: rental = alquiler, reservation_fee = "Gastos de reserva". NULL = línea normal.
+  service_line_kind                String?                  @db.VarChar(24)
   // Multi-tarifa snapshot (Phase 1: price tiers).
   // applied_price_tier_id keeps a soft FK with ON DELETE SET NULL so
   // historical line items survive tier deletion; the name snapshot
@@ -2046,6 +2052,7 @@ model payments {
   cash_register_movements cash_register_movements[]
   // Hospitality Suite (H3.5) — the deposit applied to a folio with this payment.
   lodging_deposit         lodging_deposits?
+  service_deposit         service_deposits?
 
   @@index([gateway_reference])
   @@index([order_id])
@@ -3608,6 +3615,8 @@ model tax_categories {
   // .remove` rechaza el borrado mientras alguna la use.
   shipping_rates          shipping_rates[]
   service_stations_rental_tax service_stations[] @relation("service_stations_rental_tax_category")
+
+  service_stations_reservation_fee service_stations[] @relation("service_stations_reservation_fee_tax_category")
 
   @@index([organization_id])
 }
@@ -10718,6 +10727,12 @@ model bookings {
   date                      DateTime                      @db.Date
   start_time                String                        @db.VarChar(5)
   end_time                  String                        @db.VarChar(5)
+  /// Día en que termina la reserva (S21). NULL = el mismo día de `date`; si end_time <= start_time termina al día siguiente.
+  end_date                  DateTime?                     @db.Date
+  /// Reserva sin hora de fin (D9): ocupa hasta el cierre de la estación o `open_end_block_minutes`.
+  is_open_ended             Boolean                       @default(false)
+  /// No asistencia con anticipo pagado: el administrador debe decidir (S17) antes de esta fecha.
+  deposit_decision_due_at   DateTime?                     @db.Timestamptz(6)
   status                    booking_status_enum           @default(pending)
   channel                   order_channel_enum            @default(pos)
   notes                     String?                       @db.Text
@@ -10777,6 +10792,8 @@ model bookings {
 
   service_allocations_booking_fkey service_allocations[] @relation("service_allocations_booking_fkey")
   service_sessions_booking_fkey service_sessions[] @relation("service_sessions_booking_fkey")
+
+  service_deposits_booking_fkey service_deposits[] @relation("service_deposits_booking_fkey")
 
   @@unique([store_id, booking_number])
   @@unique([store_id, id])
@@ -11221,6 +11238,7 @@ model wallet_transactions {
   wallet wallets @relation(fields: [wallet_id], references: [id])
   // Hospitality Suite (H3.5) — the deposit movement behind this wallet row.
   lodging_deposit lodging_deposits?
+  service_deposit service_deposits?
 
   @@index([wallet_id, created_at])
   @@index([reference_type, reference_id])
@@ -11382,6 +11400,8 @@ model payment_links {
   lodging_deposit  lodging_deposits?
   // Hospitality Suite (H6.6) — the online reservation payment this link collects.
   lodging_reservation_payment lodging_reservation_payments?
+  // Estaciones (fase 2) — the payment request whose Wompi option this link collects.
+  payment_request payment_requests?
 
   @@index([store_id, status])
   @@index([store_id, created_at])
@@ -14294,6 +14314,25 @@ model service_stations {
   rental_tax_category tax_categories? @relation("service_stations_rental_tax_category", fields: [rental_tax_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   /// Modo del impuesto del alquiler: true = incluido en el precio del bloque (default), false = agregado encima.
   rental_tax_is_inclusive Boolean @default(true)
+  /// Anticipo consumible (S1/S8/S9): none = sin anticipo, optional = se puede pedir, required = obligatorio para abrir o reservar.
+  deposit_policy station_deposit_policy_enum @default(none)
+  /// Monto mínimo del anticipo (p. ej. 400.000 en una cava). NULL cuando deposit_policy = none.
+  deposit_amount Decimal? @db.Decimal(12, 2)
+  /// Qué pasa cuando el consumo supera el anticipo: recharge = bloquea hasta recargar, overflow = se cobra la diferencia al final.
+  deposit_exhausted_policy station_deposit_exhausted_enum @default(overflow)
+  /// Qué pasa con el sobrante: refund_or_credit = se devuelve o queda como saldo, minimum_spend = línea fija "Gastos de reserva" (D12).
+  leftover_policy station_leftover_policy_enum @default(refund_or_credit)
+  /// Minutos que dura un apartado sin pagar (D11).
+  hold_minutes Int @default(30)
+  /// Bloque que ocupa una reserva sin hora de fin cuando la estación no tiene cierre antes (D9).
+  open_end_block_minutes Int @default(360)
+  /// Horas antes del inicio hasta las que una cancelación devuelve el anticipo (A1). NULL = siempre decide el administrador.
+  cancel_refund_hours Int?
+  /// fixed = inicio y fin; free = solo inicio (S1).
+  booking_duration_mode station_booking_duration_enum @default(fixed)
+  /// Impuesto de la línea "Gastos de reserva" (siempre incluido). NULL = sin impuesto hasta que el contador defina A3.
+  reservation_fee_tax_category_id Int?
+  reservation_fee_tax_category tax_categories? @relation("service_stations_reservation_fee_tax_category", fields: [reservation_fee_tax_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   intake_template_id Int?
   intake_template data_collection_templates? @relation("station_intake_template", fields: [intake_template_id], references: [id], onDelete: SetNull, onUpdate: Cascade)
   public_id  String   @unique @default(dbgenerated("gen_random_uuid()")) @db.Uuid
@@ -14315,6 +14354,7 @@ model service_stations {
   @@index([store_id, status], map: "service_stations_store_status_idx")
   @@index([intake_template_id])
   @@index([rental_tax_category_id])
+  @@index([reservation_fee_tax_category_id])
   @@map("service_stations")
 }
 
@@ -14414,6 +14454,13 @@ model service_sessions {
   status      service_session_status_enum @default(open)
   opened_at   DateTime @default(now()) @db.Timestamptz(6)
   closed_at   DateTime? @db.Timestamptz(6)
+  /// Copia de las reglas de anticipo de la estación al abrir (NULL = atención anterior a la fase 2).
+  deposit_policy station_deposit_policy_enum?
+  deposit_required_amount Decimal? @db.Decimal(12, 2)
+  deposit_exhausted_policy station_deposit_exhausted_enum?
+  leftover_policy station_leftover_policy_enum?
+  /// Liquidación del anticipo hecha (S12); después no se aceptan consumos nuevos.
+  settled_at DateTime? @db.Timestamptz(6)
   created_at  DateTime @default(now()) @db.Timestamptz(6)
   updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz(6)
   station service_stations @relation("service_sessions_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_station_fkey")
@@ -14434,6 +14481,8 @@ model service_sessions {
   service_budgets_session_store_fkey service_budgets[] @relation("service_budgets_session_store_fkey")
   service_change_proposals_session_id_fkey service_change_proposals[] @relation("service_change_proposals_session_id_fkey")
   service_change_proposals_session_store_fkey service_change_proposals[] @relation("service_change_proposals_session_store_fkey")
+
+  service_deposits_session_fkey service_deposits[] @relation("service_deposits_session_fkey")
 
   @@index([store_id, status], map: "service_sessions_store_status_idx")
   @@index([booking_id], map: "service_sessions_booking_idx")
@@ -15310,4 +15359,116 @@ model crm_message_templates {
   social_channel social_channels @relation(fields: [social_channel_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([social_channel_id, name, language])
+}
+
+enum station_deposit_policy_enum {
+  none
+  optional
+  required
+}
+
+enum station_deposit_exhausted_enum {
+  recharge
+  overflow
+}
+
+enum station_leftover_policy_enum {
+  refund_or_credit
+  minimum_spend
+}
+
+enum station_booking_duration_enum {
+  fixed
+  free
+}
+
+enum service_deposit_kind_enum {
+  received
+  applied
+  refunded
+  released
+}
+
+enum service_deposit_status_enum {
+  pending
+  completed
+  cancelled
+}
+
+enum payment_request_status_enum {
+  pending
+  awaiting_confirmation
+  paid
+  expired
+  cancelled
+}
+
+/// Libro del anticipo consumible de una reserva o atención de estación (S1, S4, S5, S8, S9, S12, S17).
+/// Saldo = received - applied - refunded (solo filas completed). El dinero vive en la billetera del cliente (2805).
+model service_deposits {
+  id                      Int                         @id @default(autoincrement())
+  store_id                Int
+  booking_id              Int?
+  session_id              Int?
+  customer_id             Int
+  kind                    service_deposit_kind_enum
+  status                  service_deposit_status_enum @default(completed)
+  amount                  Decimal                     @db.Decimal(12, 2)
+  method                  String?                     @db.VarChar(30)
+  store_payment_method_id Int?
+  payment_request_id      Int?                        @unique
+  wallet_transaction_id   Int?                        @unique
+  payment_id              Int?                        @unique
+  request_id              String                      @db.VarChar(64)
+  created_by_user_id      Int?
+  created_at              DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime                    @default(now()) @updatedAt @db.Timestamptz(6)
+
+  store              stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  booking            bookings?            @relation("service_deposits_booking_fkey", fields: [store_id, booking_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_deposits_booking_fkey")
+  session            service_sessions?    @relation("service_deposits_session_fkey", fields: [store_id, session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_deposits_session_fkey")
+  customer           users                @relation("service_deposits_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payment_request    payment_requests?    @relation(fields: [payment_request_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  wallet_transaction wallet_transactions? @relation(fields: [wallet_transaction_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payment            payments?            @relation(fields: [payment_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, request_id])
+  @@index([store_id, booking_id])
+  @@index([store_id, session_id])
+  @@index([customer_id])
+  @@map("service_deposits")
+}
+
+/// Solicitud de pago pública (S15): una página de Vendix con los medios en línea de la tienda
+/// (Wompi, transferencias). Solo se guarda el hash del token.
+model payment_requests {
+  id                               Int                         @id @default(autoincrement())
+  store_id                         Int
+  public_token_hash                String                      @unique @db.VarChar(64)
+  purpose                          String                      @db.VarChar(30)
+  amount                           Decimal                     @db.Decimal(12, 2)
+  currency                         String                      @default("COP") @db.VarChar(10)
+  description                      String                      @db.Text
+  status                           payment_request_status_enum @default(pending)
+  expires_at                       DateTime?                   @db.Timestamptz(6)
+  payment_link_id                  Int?                        @unique
+  transfer_store_payment_method_id Int?
+  transfer_receipt_s3_key          String?                     @db.Text
+  transfer_reference               String?                     @db.VarChar(120)
+  transfer_submitted_at            DateTime?                   @db.Timestamptz(6)
+  confirmed_by_user_id             Int?
+  confirmed_at                     DateTime?                   @db.Timestamptz(6)
+  rejection_reason                 String?                     @db.Text
+  paid_at                          DateTime?                   @db.Timestamptz(6)
+  created_by_user_id               Int?
+  created_at                       DateTime                    @default(now()) @db.Timestamptz(6)
+  updated_at                       DateTime                    @default(now()) @updatedAt @db.Timestamptz(6)
+
+  store           stores            @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payment_link    payment_links?    @relation(fields: [payment_link_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  service_deposit service_deposits?
+
+  @@index([store_id, status])
+  @@index([store_id, created_at])
+  @@map("payment_requests")
 }

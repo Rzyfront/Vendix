@@ -90,6 +90,9 @@ export class StorePrismaService extends BasePrismaService {
     'service_proposal_decisions',
     'service_change_proposals',
     'service_budgets',
+    // Estaciones fase 2: anticipo consumible y solicitudes de pago
+    'service_deposits',
+    'payment_requests',
     'service_progress_events',
     'service_session_tokens',
     'service_subjects',
@@ -1638,6 +1641,8 @@ export class StorePrismaService extends BasePrismaService {
   get service_session_tokens() { return this.scoped_client.service_session_tokens; }
   get service_progress_events() { return this.scoped_client.service_progress_events; }
   get service_budgets() { return this.scoped_client.service_budgets; }
+  get service_deposits() { return this.scoped_client.service_deposits; }
+  get payment_requests() { return this.scoped_client.payment_requests; }
   get service_change_proposals() { return this.scoped_client.service_change_proposals; }
   get service_proposal_decisions() { return this.scoped_client.service_proposal_decisions; }
   get service_contact_attempts() { return this.scoped_client.service_contact_attempts; }
