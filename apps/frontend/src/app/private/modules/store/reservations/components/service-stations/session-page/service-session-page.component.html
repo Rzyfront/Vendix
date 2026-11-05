@@ -94,6 +94,10 @@
         </div>
       }
 
+      @if (current.deposit; as deposit) {
+        <app-deposit-panel [sessionId]="current.id" [deposit]="deposit" [readOnly]="isClosed()" (changed)="refreshSession()" />
+      }
+
       <!-- Account -->
       <div class="p-4 rounded-2xl bg-[var(--color-surface)] border-2 border-[var(--color-border)] shadow-sm space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[var(--color-border)]">

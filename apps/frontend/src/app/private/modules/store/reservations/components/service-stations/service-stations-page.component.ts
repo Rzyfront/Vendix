@@ -77,6 +77,14 @@ import {
 import { forkJoin, of } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 import { ServiceRemindersPageComponent } from '../service-reminders-page/service-reminders-page.component';
+import {
+  DEFAULT_STATION_RULES,
+  StationRulesFormComponent,
+  stationRulesError,
+  stationRulesFrom,
+  stationRulesPayload,
+} from './station-rules-form/station-rules-form.component';
+import { OpenSessionDepositComponent, OpenSessionDepositValue, openDepositError } from './open-session-deposit/open-session-deposit.component';
 
 /** El selector de impuesto trabaja con `number`; `null` es «Sin impuesto». */
 function toTaxCategoryId(value: unknown): number | null {
@@ -297,6 +305,8 @@ export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
     DynamicFieldComponent,
     ServiceRemindersPageComponent,
     CustomerSelectComponent,
+    StationRulesFormComponent,
+    OpenSessionDepositComponent,
   ],
   templateUrl: './service-stations-page.component.html',
   styleUrl: './service-stations-page.component.scss',
@@ -341,6 +351,15 @@ export class ServiceStationsPageComponent implements OnInit {
   readonly newTaxIsInclusive = signal(true);
   readonly editTaxCategoryId = signal<number | null>(null);
   readonly editTaxIsInclusive = signal(true);
+  // Reglas de uso y anticipo (S1): un valor por formulario, con el impuesto de Gastos de reserva.
+  readonly newRules = signal(DEFAULT_STATION_RULES);
+  readonly editRules = signal(DEFAULT_STATION_RULES);
+  readonly newRulesTaxOptions = computed(() =>
+    this.buildTaxSelectorOptions(this.newRules().reservation_fee_tax_category_id),
+  );
+  readonly editRulesTaxOptions = computed(() =>
+    this.buildTaxSelectorOptions(this.editRules().reservation_fee_tax_category_id),
+  );
   readonly newTaxSelectorOptions = computed(() => this.buildTaxSelectorOptions(null));
   readonly editTaxSelectorOptions = computed(() =>
     this.buildTaxSelectorOptions(this.selectedStation()?.rental_tax_category_id ?? null),
@@ -479,6 +498,8 @@ export class ServiceStationsPageComponent implements OnInit {
   readonly checkinBudgetAmount = signal<number | null>(null);
   /** Productos que entran a la cuenta desde el ingreso (además del servicio). */
   readonly checkinLines = signal<CheckinLine[]>([]);
+  /** Anticipo del ingreso (S4): monto, medio y request_id; null mientras la estación no lo pide. */
+  readonly checkinDeposit = signal<OpenSessionDepositValue | null>(null);
   private checkinLineSeq = 0;
 
   // access_url recién emitido por sesión; viaja a la página de la atención al abrirla
@@ -1319,6 +1340,7 @@ export class ServiceStationsPageComponent implements OnInit {
     this.newIntakeTemplateId.set(0);
     this.newTaxCategoryId.set(null);
     this.newTaxIsInclusive.set(true);
+    this.newRules.set(DEFAULT_STATION_RULES);
     this.loadIntakeTemplates();
     this.loadTaxOptions();
     this.showCreateModal.set(true);
@@ -1387,6 +1409,11 @@ export class ServiceStationsPageComponent implements OnInit {
       this.toastService.error('Elige la plantilla de la estación (o diséñala con el botón de arriba).');
       return;
     }
+    const rulesError = stationRulesError(this.newRules());
+    if (rulesError) {
+      this.toastService.error(rulesError);
+      return;
+    }
     this.saving.set(true);
     this.stationsApi.create({
       name,
@@ -1398,6 +1425,7 @@ export class ServiceStationsPageComponent implements OnInit {
       intake_template_id: templateId,
       rental_tax_category_id: this.newTaxCategoryId(),
       rental_tax_is_inclusive: this.newTaxIsInclusive(),
+      ...stationRulesPayload(this.newRules()),
     }).subscribe({
       next: (station) => {
         this.saving.set(false);
@@ -1484,6 +1512,7 @@ export class ServiceStationsPageComponent implements OnInit {
     // Limpiar campos de presupuesto e insumos iniciales
     this.checkinBudgetAmount.set(null);
     this.checkinLines.set([]);
+    this.checkinDeposit.set(null);
 
     // Asegurar carga de catálogo de productos para el selector de insumos
     // Catálogo vendible con variantes para las líneas de "Agregar producto"
@@ -1938,6 +1967,16 @@ export class ServiceStationsPageComponent implements OnInit {
       },
     };
 
+    // Anticipo (S4): solo viaja si la estación lo pide y el cajero registró monto y medio.
+    const deposit = station && station.deposit_policy && station.deposit_policy !== 'none' ? this.checkinDeposit() : null;
+    const depositError = openDepositError(station, this.checkinCustomer()?.id, deposit);
+    if (depositError) {
+      this.saving.set(false);
+      this.toastService.error(depositError);
+      return;
+    }
+    if (deposit) payload.deposit = deposit;
+
     const budgetVal = this.checkinShowBudget() ? this.checkinBudgetAmount() : null;
     const initialLines = (this.checkinShowProducts() ? this.checkinLines() : [])
       .filter((line) => line.product_id)
@@ -2030,6 +2069,7 @@ export class ServiceStationsPageComponent implements OnInit {
     this.editIntakeTemplateId.set(station.intake_template_id ?? 0);
     this.editTaxCategoryId.set(station.rental_tax_category_id ?? null);
     this.editTaxIsInclusive.set(station.rental_tax_is_inclusive !== false);
+    this.editRules.set(stationRulesFrom(station));
     this.loadIntakeTemplates();
     this.loadTaxOptions();
     this.selectedConfigTab.set('details');
@@ -2046,6 +2086,11 @@ export class ServiceStationsPageComponent implements OnInit {
       this.toastService.error('El nombre es obligatorio.');
       return;
     }
+    const rulesError = stationRulesError(this.editRules());
+    if (rulesError) {
+      this.toastService.error(rulesError);
+      return;
+    }
     this.runSave(
       this.stationsApi.update(station.id, {
         name,
@@ -2056,6 +2101,7 @@ export class ServiceStationsPageComponent implements OnInit {
         target_minutes: this.editTrackTime() ? this.positiveMinutes(this.editTargetMinutes()) : null,
         rental_tax_category_id: this.editTaxCategoryId(),
         rental_tax_is_inclusive: this.editTaxIsInclusive(),
+        ...stationRulesPayload(this.editRules()),
       }),
       'Datos guardados.',
       station.id,

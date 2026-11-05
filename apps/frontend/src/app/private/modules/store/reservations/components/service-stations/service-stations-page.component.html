@@ -564,6 +564,12 @@
           </div>
         }
       </section>
+
+      <app-station-rules-form
+        [(value)]="newRules"
+        [taxOptions]="newRulesTaxOptions()"
+        [taxLoading]="loadingTaxOptions()"
+      />
     </div>
 
     <div slot="footer" class="flex items-center justify-end gap-2.5">
@@ -800,6 +806,13 @@
         />
       </div>
       }
+
+      <!-- Anticipo de la estación (solo si la estación lo pide) -->
+      <app-open-session-deposit
+        [station]="selectedCheckinStation()"
+        [customerIdentified]="!!checkinCustomer()?.id"
+        [(value)]="checkinDeposit"
+      />
 
       <!-- Servicio inicial: sus datos y campos de recepción quedan guardados en esta atención -->
       <div class="grid grid-cols-1 gap-3" [class.sm:grid-cols-2]="checkinTracksTime()">
@@ -1122,6 +1135,12 @@
                 </div>
               }
             </section>
+
+            <app-station-rules-form
+              [(value)]="editRules"
+              [taxOptions]="editRulesTaxOptions()"
+              [taxLoading]="loadingTaxOptions()"
+            />
 
             <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div class="flex items-center gap-3">

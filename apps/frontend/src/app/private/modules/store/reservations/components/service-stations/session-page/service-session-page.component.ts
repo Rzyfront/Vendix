@@ -39,7 +39,8 @@ import {
 } from '../../../../settings/payments/interfaces/payment-methods.interface';
 import { ServiceRegistryService } from '../../service-reminders-page/service-registry.service';
 import type { ServiceSessionRow } from '../service-stations-page.component';
-import { ServiceStation, ServiceStationsService, StationServiceOption } from '../service-stations.service';
+import { ServiceStation, ServiceStationsService, SessionDeposit, StationServiceOption } from '../service-stations.service';
+import { DepositPanelComponent } from './components/deposit-panel/deposit-panel.component';
 import {
   addMinutesIso,
   computeStationClock,
@@ -78,6 +79,8 @@ interface SessionOrder {
 type SessionDetail = ServiceSessionRow & {
   next_reservation?: NextReservation | null;
   station_type?: string | null;
+  /** Consumable deposit of the session; null when the station has none. */
+  deposit?: SessionDeposit | null;
 };
 
 interface BudgetCeiling {
@@ -149,6 +152,7 @@ function toCents(value: number | string | null | undefined): number {
     SelectorComponent,
     CustomerSelectComponent,
     OrderPaymentModalComponent,
+    DepositPanelComponent,
   ],
   templateUrl: './service-session-page.component.html',
 })
@@ -441,8 +445,8 @@ export class ServiceSessionPageComponent {
     if (full.access_url && !this.accessUrl()) this.showAccessUrl(full.access_url);
   }
 
-  /** Reloads only the session and its order (after items, payment or extend). */
-  private refreshSession(): void {
+  /** Reloads only the session and its order (after items, payment, extend or a deposit change). */
+  refreshSession(): void {
     const id = this.sessionId();
     if (!id) return;
     this.api

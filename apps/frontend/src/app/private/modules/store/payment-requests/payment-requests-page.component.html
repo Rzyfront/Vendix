@@ -1,0 +1,73 @@
+<div class="w-full overflow-x-hidden">
+  <app-sticky-header
+    title="Solicitudes de pago"
+    subtitle="Anticipos y cobros enviados por enlace, con el comprobante de cada transferencia"
+    icon="receipt"
+    variant="glass"
+    [tabs]="tabs"
+    [activeTab]="status()"
+    tabsAriaLabel="Estado de la solicitud"
+    (tabChanged)="onTabChange($event)"
+  />
+
+  <div class="px-4 pt-5 pb-24 md:pb-8 max-w-[1360px] mx-auto space-y-4">
+    <div class="stats-container">
+      <app-stats
+        title="Pendientes"
+        [value]="pendingCount() ?? '—'"
+        smallText="Esperando el pago del cliente"
+        iconName="clock"
+        iconBgColor="bg-primary/10"
+        iconColor="text-primary"
+      />
+      <app-stats
+        title="En revisión"
+        [value]="reviewCount() ?? '—'"
+        smallText="Con comprobante por confirmar"
+        iconName="receipt"
+        iconBgColor="bg-primary/10"
+        iconColor="text-primary"
+      />
+      <app-stats
+        [title]="statusLabel()"
+        [value]="total()"
+        smallText="En esta pestaña"
+        iconName="list"
+        iconBgColor="bg-primary/10"
+        iconColor="text-primary"
+      />
+    </div>
+
+    <app-card [responsive]="true" [padding]="false">
+      <div class="px-2 pb-2 pt-3 md:p-4">
+        <app-responsive-data-view
+          [data]="rows()"
+          [columns]="columns"
+          [actions]="actions"
+          [cardConfig]="cardConfig"
+          [loading]="loading()"
+          emptyIcon="receipt"
+          emptyMessage="No hay solicitudes en este estado"
+          (rowClick)="openDetail($event)"
+        />
+        @if (totalPages() > 1) {
+          <app-pagination
+            [currentPage]="page()"
+            [totalPages]="totalPages()"
+            [total]="total()"
+            [limit]="20"
+            infoStyle="range"
+            (pageChange)="onPageChange($event)"
+          />
+        }
+      </div>
+    </app-card>
+  </div>
+</div>
+
+<app-payment-request-detail-modal
+  [(isOpen)]="showDetail"
+  [request]="selected()"
+  [canManage]="canManage()"
+  (changed)="onChanged()"
+/>
