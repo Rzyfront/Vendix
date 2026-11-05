@@ -703,10 +703,9 @@ import {
                 type="button"
                 class="action-btn save-btn w-full"
                 (click)="chargeToStation.emit()"
-                [disabled]="!cartState()?.items?.length"
               >
                 <app-icon name="warehouse" [size]="16"></app-icon>
-                <span>Cargar a estación</span>
+                <span>{{ cartState()?.items?.length ? 'Cargar a estación' : 'Abrir estación' }}</span>
               </button>
             }
 

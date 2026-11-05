@@ -8,9 +8,44 @@ import {
   IsBoolean,
   Matches,
   MaxLength,
+  ValidateIf,
+  ValidateNested,
+  IsNumber,
+  Min,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { order_channel_enum } from '@prisma/client';
+import { order_channel_enum, payment_methods_type_enum } from '@prisma/client';
+
+/**
+ * Deposit taken with an admin booking of a station (S15). `desk` = the money is
+ * received now; `link` = a payment page is opened and the slot is held (D11).
+ */
+export class BookingDepositDto {
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'El anticipo debe tener máximo 2 decimales' })
+  @Min(0.01, { message: 'El anticipo debe ser mayor a cero' })
+  @Max(9_999_999_999.99)
+  amount: number;
+
+  @IsIn(['desk', 'link'], { message: 'El anticipo se recibe en caja o por enlace de pago' })
+  mode: 'desk' | 'link';
+
+  /** Canonical method of a desk deposit: cash, bank_transfer, card... Defaults to cash. */
+  @IsOptional()
+  @IsIn(Object.values(payment_methods_type_enum), { message: 'El método de pago no es válido' })
+  method?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  store_payment_method_id?: number;
+
+  /** Idempotency key of this deposit. */
+  @IsString()
+  @MaxLength(100)
+  request_id: string;
+}
 
 export class CreateBookingDto {
   /**
@@ -38,11 +73,23 @@ export class CreateBookingDto {
   })
   start_time: string;
 
+  /** Required unless `is_open_ended`. `end_time <= start_time` ends the next day (S21). */
+  @ValidateIf((o: CreateBookingDto) => !o.is_open_ended)
   @IsString()
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
     message: 'end_time debe tener formato HH:mm',
   })
   end_time: string;
+
+  /** Day the booking ends (`YYYY-MM-DD`). Defaults to D+1 when it crosses midnight. */
+  @IsOptional()
+  @IsDateString()
+  end_date?: string;
+
+  /** Booking without an end (D9): station services only. */
+  @IsOptional()
+  @IsBoolean()
+  is_open_ended?: boolean;
 
   @IsOptional()
   @IsEnum(order_channel_enum)
@@ -118,4 +165,10 @@ export class CreateBookingDto {
   @IsString()
   @MaxLength(64)
   cart_item_id?: string;
+
+  /** Deposit to take with the booking (stations that charge one, S15). */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BookingDepositDto)
+  deposit?: BookingDepositDto;
 }

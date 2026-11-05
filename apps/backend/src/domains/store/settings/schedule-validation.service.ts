@@ -3,6 +3,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { BusinessHours, BusinessHoursBlock } from './interfaces/store-settings.interface';
 import { mergeStoreSettingsWithDefaults } from './defaults/default-store-settings';
+import { isClockTime, windowSpan } from '@common/utils/schedule-window.util';
 
 export interface ScheduleValidationResult {
   isWithinBusinessHours: boolean;
@@ -116,6 +117,23 @@ export class ScheduleValidationService {
         currentDay: this.getCurrentDayNameSpanish(currentDayName),
         currentTime,
         message: 'No hay horario configurado para hoy',
+      };
+    }
+
+    // S21 / A5: a block belongs to the day it starts, so right after midnight
+    // the store may still be open through yesterday's overnight block.
+    const yesterdayHours = businessHours[dayNames[(day + 6) % 7]] as
+      | BusinessHours
+      | undefined;
+    const spill = this.findOvernightSpill(yesterdayHours, curMinutes);
+    if (spill) {
+      return {
+        isWithinBusinessHours: true,
+        currentDay: this.getCurrentDayNameSpanish(currentDayName),
+        currentTime,
+        openTime: spill.open,
+        closeTime: spill.close,
+        message: `Horario de atención: ${spill.open} - ${spill.close} (desde el día anterior)`,
       };
     }
 
@@ -356,7 +374,35 @@ export class ScheduleValidationService {
     const openMinutes = openH * 60 + openM;
     const closeMinutes = closeH * 60 + closeM;
 
+    // Overnight block (close <= open, S21): today only covers [open, 24:00);
+    // the part after midnight is matched through `findOvernightSpill` the next day.
+    if (closeMinutes <= openMinutes) {
+      return curMinutes >= openMinutes;
+    }
     return curMinutes >= openMinutes && curMinutes <= closeMinutes;
+  }
+
+  /**
+   * Block of `yesterday` that crosses midnight and still covers `curMinutes`
+   * (minutes since 00:00 today, inclusive of the close minute like same-day blocks).
+   */
+  private findOvernightSpill(
+    yesterday: BusinessHours | undefined,
+    curMinutes: number,
+  ): { open: string; close: string } | null {
+    if (!yesterday) return null;
+    const candidates: Array<{ open: string; close: string }> =
+      yesterday.blocks && yesterday.blocks.length > 0
+        ? yesterday.blocks
+        : [{ open: yesterday.open, close: yesterday.close }];
+    for (const block of candidates) {
+      if (!isClockTime(block.open) || !isClockTime(block.close)) continue;
+      const span = windowSpan({ start_time: block.open, end_time: block.close });
+      if (span.endMin > 1440 && curMinutes <= span.endMin - 1440) {
+        return { open: block.open, close: block.close };
+      }
+    }
+    return null;
   }
 
   /**

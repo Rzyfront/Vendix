@@ -10,9 +10,12 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { booking_status_enum, booking_mode_enum, Prisma } from '@prisma/client';
+import { bookingEndDateFor, bookingMinuteSpan } from '@common/utils/schedule-window.util';
 import {
   CreateBookingDto,
   RescheduleBookingDto,
+  CancelBookingDto,
+  DepositDecisionDto,
   BookingQueryDto,
   CalendarQueryDto,
 } from './dto';
@@ -26,6 +29,11 @@ import { OrderHistoryService } from '../orders/order-history/order-history.servi
 import { ServiceAllocationCoordinator } from './service-allocation-coordinator.service';
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { assertSaleNatureProducts } from '../products/services/product-usage-nature.util';
+import { ReservationDepositsService } from './reservation-deposits.service';
+import { RentalQuoteService } from '../service-stations/rental-quote/rental-quote.service';
+import type { RentalQuote } from '../service-stations/rental-quote/rental-quote.service';
+import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
+import { ServiceDepositsService } from '../service-deposits/service-deposits.service';
 
 @Injectable()
 export class ReservationsService {
@@ -43,6 +51,14 @@ export class ReservationsService {
     // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
     private readonly orderHistory: OrderHistoryService,
     @Optional() private readonly allocationCoordinator?: ServiceAllocationCoordinator,
+    // Deposit side of station bookings. Optional so bookings without a deposit keep working untouched.
+    @Optional() private readonly reservationDeposits?: ReservationDepositsService,
+    // Rental quote (T15): optional so every existing booking path stays untouched without it.
+    @Optional() private readonly rentalQuote?: RentalQuoteService,
+    // "Cobro para reservar" of the station (T15, S1): the online hold charge.
+    @Optional() private readonly rentalPrepay?: RentalPrepayService,
+    // Ledger of consumable deposits: the compensation of a failed order releases a received deposit to credit.
+    @Optional() private readonly serviceDeposits?: ServiceDepositsService,
   ) {}
 
   // Estado maquina de transiciones validas
@@ -122,6 +138,10 @@ export class ReservationsService {
     order: {
       select: { id: true, order_number: true },
     },
+    // S19: position badge "Serie i/n" (i comes from bookings.series_index).
+    series: {
+      select: { id: true, occurrences: true, frequency: true },
+    },
   };
 
   /**
@@ -190,6 +210,19 @@ export class ReservationsService {
     // reserva quedaría trabada. Se valida aquí, antes de crear orden o reserva.
     assertSaleNatureProducts([product]);
 
+    // S21: bookings can cross midnight (`end_time <= start_time` ends on D+1) and, on
+    // station services, have no end at all (D9). Daytime bookings keep `end_date` null.
+    const isOpenEnded = !!dto.is_open_ended;
+    if (isOpenEnded && !product.requires_station) {
+      throw new BadRequestException('Solo los servicios con estación admiten reservas sin hora de fin');
+    }
+    const endTime = dto.end_time ?? dto.start_time;
+    const endDateValue = isOpenEnded
+      ? null
+      : dto.end_date && dto.end_date.slice(0, 10) !== dto.date.slice(0, 10)
+        ? dto.end_date.slice(0, 10)
+        : bookingEndDateFor(dto.date.slice(0, 10), dto.start_time, endTime);
+
     // Validate product_variant_id if provided
     let selectedVariant: {
       id: number;
@@ -223,6 +256,9 @@ export class ReservationsService {
     if (product.requires_station && !this.allocationCoordinator) {
       throw new VendixHttpException(ErrorCodes.STATION_012, 'No se pudo validar la asignación requerida para este servicio.');
     }
+    if (dto.deposit && !product.requires_station) {
+      throw new VendixHttpException(ErrorCodes.STATION_BOOKING_002);
+    }
 
     // 2. Resolver provider_id
     let resolvedProviderId: number | null = dto.provider_id ?? null;
@@ -241,7 +277,8 @@ export class ReservationsService {
       }
     } else if (
       product.booking_mode === booking_mode_enum.provider_required &&
-      !dto.skip_availability_check
+      !dto.skip_availability_check &&
+      !isOpenEnded
     ) {
       // Check if there are ANY providers for this service
       const serviceProviders = await this.prisma.provider_services.findMany({
@@ -260,7 +297,7 @@ export class ReservationsService {
             dto.product_id,
             dto.date,
             dto.start_time,
-            dto.end_time,
+            endTime,
           );
 
         if (availableProviders.length > 0) {
@@ -276,14 +313,14 @@ export class ReservationsService {
       product.booking_mode === booking_mode_enum.free_booking;
     const noProvidersConfigured = !resolvedProviderId && !dto.provider_id;
     const shouldSkipAvailability =
-      dto.skip_availability_check || isFreeBooking || noProvidersConfigured;
+      dto.skip_availability_check || isFreeBooking || noProvidersConfigured || isOpenEnded;
 
     if (!shouldSkipAvailability) {
       const isAvailable = await this.availabilityService.isSlotAvailable(
         dto.product_id,
         dto.date,
         dto.start_time,
-        dto.end_time,
+        endTime,
         resolvedProviderId ?? undefined,
       );
 
@@ -298,7 +335,7 @@ export class ReservationsService {
         dto.customer_id,
         dto.date,
         dto.start_time,
-        dto.end_time,
+        endTime,
       );
     }
 
@@ -376,6 +413,8 @@ export class ReservationsService {
     }
 
     let booking: Awaited<ReturnType<typeof this.mapBooking>> | null = null;
+    let startedDeposit: Awaited<ReturnType<ReservationDepositsService['startInTx']>> = null;
+    let rentalQuoted: RentalQuote | null = null;
     try {
       booking = await this.prisma.$transaction(
         async (tx) => {
@@ -386,7 +425,7 @@ export class ReservationsService {
                 provider_id: resolvedProviderId,
                 date: new Date(dto.date),
                 start_time: dto.start_time,
-                end_time: dto.end_time,
+                end_time: endTime,
                 status: { notIn: [booking_status_enum.cancelled] },
               },
             });
@@ -408,7 +447,11 @@ export class ReservationsService {
               booking_number,
               date: new Date(dto.date),
               start_time: dto.start_time,
-              end_time: dto.end_time,
+              end_time: endTime,
+              // S21: a booking that crosses midnight ends on D+1; null = same day.
+              end_date: endDateValue ? new Date(endDateValue) : null,
+              // D9: no end yet; the coordinator fills end_time/end_date when it allocates.
+              is_open_ended: isOpenEnded,
               status: booking_status_enum.pending,
               channel: dto.channel || 'pos',
               // CP-POS-SVC-PERF-001 — cart-line anchor surfaced by the
@@ -436,7 +479,7 @@ export class ReservationsService {
           });
 
           if (product.requires_station) {
-            await this.allocationCoordinator!.allocateBooking(tx, {
+            const allocated = await this.allocationCoordinator!.allocateBooking(tx, {
               storeId: store_id,
               bookingId: created.id,
               productId: dto.product_id,
@@ -445,12 +488,39 @@ export class ReservationsService {
               providerId: resolvedProviderId,
               date: dto.date,
               startTime: dto.start_time,
-              endTime: dto.end_time,
+              endTime: isOpenEnded ? undefined : endTime,
+              endDate: endDateValue,
+              isOpenEnded,
               excludeBookingId: created.id,
             });
+            rentalQuoted = await this.quoteBookingInTx(tx, {
+              bookingId: created.id,
+              productId: dto.product_id,
+              variantId: dto.product_variant_id,
+              isOpenEnded,
+              allocated,
+              date: dto.date,
+              startTime: dto.start_time,
+              endTime: isOpenEnded ? undefined : endTime,
+            });
+            // The deposit rules need the station the slot landed on, so they run after allocating.
+            if (this.reservationDeposits && allocated?.station_id != null) {
+              startedDeposit = await this.reservationDeposits.startInTx(tx, {
+                storeId: store_id,
+                bookingId: created.id,
+                customerId: dto.customer_id,
+                stationId: allocated.station_id,
+                deposit: dto.deposit,
+                userId: context?.user_id ?? null,
+              });
+            }
           }
 
-          return await this.mapBooking(created);
+          // The open-ended end is only known after allocation (and a desk deposit confirms the booking): re-read it.
+          const finalBooking = isOpenEnded || startedDeposit
+            ? await tx.bookings.findFirst({ where: { id: created.id }, include: this.BOOKING_INCLUDE })
+            : created;
+          return await this.mapBooking(finalBooking ?? created);
         },
         { isolationLevel: 'Serializable' },
       );
@@ -479,6 +549,9 @@ export class ReservationsService {
       throw err;
     }
 
+    // The deposit event goes out only once the booking and its ledger rows are committed.
+    this.reservationDeposits?.announceDeposit(startedDeposit);
+
     // Station-required services need a committed booking allocation before
     // the order writer is allowed to persist the service line. OrdersService
     // validates and links this booking inside its own order transaction.
@@ -496,6 +569,10 @@ export class ReservationsService {
           track_inventory_override: selectedVariant.track_inventory_override,
         } : undefined,
       });
+      // A station-rate rental is charged at its frozen quote; any other product keeps the catalog price.
+      const quoteNow = rentalQuoted as RentalQuote | null;
+      const lineUnitPrice =
+        quoteNow?.pricing_mode === 'station_rate' ? quoteNow.amount : priceResult.unitPrice;
       try {
         const createdOrder = await this.ordersService.create({
           customer_id: dto.customer_id,
@@ -505,11 +582,11 @@ export class ReservationsService {
             booking_id: booking.id,
             product_name: product.name || 'Servicio',
             quantity: 1,
-            unit_price: priceResult.unitPrice,
-            total_price: priceResult.unitPrice,
+            unit_price: lineUnitPrice,
+            total_price: lineUnitPrice,
           }],
-          subtotal: priceResult.unitPrice,
-          total_amount: priceResult.unitPrice,
+          subtotal: lineUnitPrice,
+          total_amount: lineUnitPrice,
           internal_notes: `Reserva ${booking_number}`,
           channel: dto.channel || 'pos',
           skip_schedule_validation: true,
@@ -521,6 +598,20 @@ export class ReservationsService {
       } catch (error) {
         try {
           await this.prisma.$transaction(async (tx) => {
+            // A desk deposit is already received on this booking: it must not stay `completed` on a
+            // cancelled one. It goes back to the customer as wallet credit (same rule as a refundable cancel).
+            if (this.serviceDeposits && dto.customer_id) {
+              const held = await this.serviceDeposits.balanceOfInTx(tx, { bookingId: booking!.id, store_id });
+              if (held.balance > 0) {
+                await this.serviceDeposits.releaseInTx(tx, {
+                  store_id,
+                  customer_id: dto.customer_id,
+                  booking_id: booking!.id,
+                  request_id: `booking-order-failed:${booking!.id}`,
+                  user_id: context?.user_id ?? null,
+                });
+              }
+            }
             await this.allocationCoordinator!.releaseBooking(tx, store_id, booking!.id, 'cancelled');
             await tx.bookings.update({ where: { id: booking!.id }, data: { status: booking_status_enum.cancelled, updated_at: new Date() } });
           });
@@ -560,7 +651,62 @@ export class ReservationsService {
       channel: dto.channel || 'pos',
     });
 
+    // The closure assigns it, so TypeScript narrowed it to `null`: read it through its declared type.
+    const startedNow = startedDeposit as Awaited<ReturnType<ReservationDepositsService['startInTx']>>;
+    if (startedNow && this.reservationDeposits) {
+      return {
+        ...booking,
+        deposit: await this.reservationDeposits.summary(booking.id, null),
+        // Only a `link` deposit has a payment page to hand over.
+        payment_path: startedNow.publicToken
+          ? this.reservationDeposits.paymentPath(startedNow.publicToken)
+          : null,
+        payment_url: startedNow.publicToken
+          ? await this.reservationDeposits.paymentUrl(store_id, startedNow.publicToken)
+          : null,
+      };
+    }
     return booking;
+  }
+
+  /**
+   * T15 (S2): freezes the booking's quote once the station is known. A `station_rate`
+   * product is priced by the station's time rate at the booking start; any other
+   * product keeps its catalog price. Stored as `quoted_amount`: the prepay and the
+   * channels charge from it. Skipped when the end is open (the duration is unknown).
+   */
+  private async quoteBookingInTx(
+    tx: Prisma.TransactionClient,
+    args: {
+      bookingId: number;
+      productId: number;
+      variantId?: number | null;
+      isOpenEnded?: boolean;
+      allocated: { station_id?: number | null; start_at?: Date; end_time?: string | null; end_date?: string | null } | null | undefined;
+      date: string;
+      startTime: string;
+      endTime?: string;
+    },
+  ): Promise<RentalQuote | null> {
+    const { allocated } = args;
+    if (!this.rentalQuote || args.isOpenEnded || allocated?.station_id == null || !allocated.start_at) return null;
+    // The booked span, overnight included: a free-duration station is priced by what was booked.
+    const endTime = allocated.end_time ?? args.endTime;
+    const span = endTime
+      ? bookingMinuteSpan({ date: args.date, end_date: allocated.end_date ?? null, start_time: args.startTime, end_time: endTime }, args.date)
+      : null;
+    const quote = await this.rentalQuote.quote({
+      productId: args.productId,
+      variantId: args.variantId ?? null,
+      stationId: allocated.station_id,
+      startAt: allocated.start_at,
+      minutes: span ? span.endMin - span.startMin : null,
+    });
+    await tx.bookings.update({
+      where: { id: args.bookingId },
+      data: { quoted_amount: quote.amount, updated_at: new Date() },
+    });
+    return quote;
   }
 
   async hold(dto: {
@@ -649,12 +795,15 @@ export class ReservationsService {
       }
     }
 
+    const holdEndDate = bookingEndDateFor(dto.date.slice(0, 10), dto.start_time, dto.end_time);
     const HOLD_DURATION_MINUTES = 15;
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + HOLD_DURATION_MINUTES);
 
     const booking_number = await this.generateBookingNumber(store_id, dto.date);
 
+    let holdDeposit: Awaited<ReturnType<ReservationDepositsService['startHoldInTx']>> = null;
+    let holdPrepay: Awaited<ReturnType<RentalPrepayService['startHoldInTx']>> = null;
     const booking = await this.prisma.$transaction(async (tx) => {
       const created = await tx.bookings.create({
         data: {
@@ -666,6 +815,7 @@ export class ReservationsService {
         date: new Date(dto.date),
         start_time: dto.start_time,
         end_time: dto.end_time,
+        end_date: holdEndDate ? new Date(holdEndDate) : null,
         status: booking_status_enum.pending,
         channel: 'ecommerce',
         // CP-POS-SVC-PERF-001 — cart-line anchor surfaced by the POS
@@ -682,7 +832,7 @@ export class ReservationsService {
         include: this.BOOKING_INCLUDE,
       });
       if (product.requires_station) {
-        await this.allocationCoordinator!.allocateBooking(tx, {
+        const allocated = await this.allocationCoordinator!.allocateBooking(tx, {
           storeId: store_id,
           bookingId: created.id,
           productId: dto.product_id,
@@ -692,15 +842,63 @@ export class ReservationsService {
           date: dto.date,
           startTime: dto.start_time,
           endTime: dto.end_time,
+          endDate: holdEndDate,
           expiresAt,
           state: 'held',
           excludeBookingId: created.id,
         });
+        await this.quoteBookingInTx(tx, {
+          bookingId: created.id,
+          productId: dto.product_id,
+          variantId: dto.product_variant_id,
+          allocated,
+          date: dto.date,
+          startTime: dto.start_time,
+          endTime: dto.end_time,
+        });
+        // One charge online (A17): the station's "cobro para reservar" wins; without it the deposit applies (A12).
+        if (this.rentalPrepay && allocated?.station_id != null) {
+          holdPrepay = await this.rentalPrepay.startHoldInTx(tx, {
+            storeId: store_id,
+            bookingId: created.id,
+            stationId: allocated.station_id,
+            userId: context?.user_id ?? null,
+          });
+        }
+        // A station that requires a deposit holds the slot as `payment_pending` behind a payment page (A12).
+        if (!holdPrepay && this.reservationDeposits && allocated?.station_id != null) {
+          holdDeposit = await this.reservationDeposits.startHoldInTx(tx, {
+            storeId: store_id,
+            bookingId: created.id,
+            customerId: dto.customer_id,
+            stationId: allocated.station_id,
+            userId: context?.user_id ?? null,
+          });
+        }
       }
       return created;
     });
 
-    return await this.mapBooking(booking);
+    const mapped = await this.mapBooking(booking);
+    const prepayNow = holdPrepay as Awaited<ReturnType<RentalPrepayService['startHoldInTx']>>;
+    if (prepayNow && this.rentalPrepay) {
+      return {
+        ...mapped,
+        expires_at: prepayNow.expiresAt,
+        payment_path: this.rentalPrepay.paymentPath(prepayNow.publicToken),
+        prepay_amount: prepayNow.amount,
+      };
+    }
+    const heldNow = holdDeposit as Awaited<ReturnType<ReservationDepositsService['startHoldInTx']>>;
+    if (heldNow && this.reservationDeposits) {
+      return {
+        ...mapped,
+        expires_at: heldNow.expiresAt,
+        deposit: await this.reservationDeposits.summary(mapped.id, null),
+        payment_path: this.reservationDeposits.paymentPath(heldNow.publicToken),
+      };
+    }
+    return mapped;
   }
 
   async confirmHold(id: number) {
@@ -712,6 +910,19 @@ export class ReservationsService {
     });
     if (product?.requires_station && !this.allocationCoordinator) {
       throw new VendixHttpException(ErrorCodes.STATION_012);
+    }
+    // A hold that waits for its deposit is confirmed by the payment, never by this call.
+    if (product?.requires_station && this.reservationDeposits) {
+      const waiting = await this.prisma.service_allocations.findFirst({
+        where: { store_id: booking.store_id, booking_id: id, state: 'payment_pending' },
+        select: { id: true },
+      });
+      if (waiting) {
+        throw new VendixHttpException(
+          ErrorCodes.STATION_011,
+          'Esta reserva espera el pago del anticipo: se confirma cuando el pago se acredite.',
+        );
+      }
     }
 
     if (booking.expires_at && new Date(booking.expires_at) < new Date()) {
@@ -895,6 +1106,15 @@ export class ReservationsService {
     return await this.mapBooking(booking);
   }
 
+  /** `findOne` plus the `deposit` block (null when the booking never had a deposit). */
+  async findOneDetail(id: number) {
+    const booking = await this.findOne(id);
+    const deposit = this.reservationDeposits
+      ? await this.reservationDeposits.summary(id, booking.deposit_decision_due_at ?? null)
+      : null;
+    return { ...booking, deposit };
+  }
+
   /**
    * Confirma una reserva (pending -> confirmed)
    */
@@ -945,8 +1165,10 @@ export class ReservationsService {
   /**
    * Cancela una reserva (pending|confirmed -> cancelled)
    */
-  async cancel(id: number) {
-    const booking = await this.transition(id, 'cancelled');
+  async cancel(id: number, options: CancelBookingDto = {}) {
+    // A booking with a deposit settles it (A1) before it is cancelled; without one this is a no-op.
+    const closed = await this.reservationDeposits?.cancelWithDeposit(id, options);
+    const booking = closed ? await this.findOne(id) : await this.transition(id, 'cancelled');
     this.eventEmitter.emit('booking.cancelled', {
       store_id: booking.store_id,
       booking_id: booking.id,
@@ -992,6 +1214,8 @@ export class ReservationsService {
    * Marca una reserva como no-show (confirmed -> no_show)
    */
   async noShow(id: number) {
+    // With a deposit balance the booking stays confirmed until the administrator decides (S17).
+    if (await this.reservationDeposits?.deferNoShowIfDeposit(id)) return this.findOneDetail(id);
     const booking = await this.transition(id, 'no_show');
     this.eventEmitter.emit('booking.no_show', {
       store_id: booking.store_id,
@@ -1022,8 +1246,37 @@ export class ReservationsService {
    * `booking.auto_archived` con `count` + `ids[]` y dejar que el
    * listener agrupe las notificaciones.
    */
-  async archiveToNoShow(id: number): Promise<void> {
+  async archiveToNoShow(id: number): Promise<'archived' | 'deferred'> {
+    // A booking with a deposit balance is never archived by a job: it waits for the administrator's decision.
+    if (await this.reservationDeposits?.deferNoShowIfDeposit(id)) return 'deferred';
     await this.transition(id, 'no_show');
+    return 'archived';
+  }
+
+  /**
+   * S17: what happens with the deposit of a booking that did not show up.
+   * `reschedule` moves the booking keeping its deposit rows; the rest is settled by the deposits service.
+   */
+  async decideDeposit(id: number, dto: DepositDecisionDto) {
+    if (!this.reservationDeposits) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_005);
+    if (dto.action !== 'reschedule') {
+      await this.reservationDeposits.decide(id, dto);
+      return this.findOneDetail(id);
+    }
+    if (!dto.new_date || !dto.new_start_time || !dto.new_end_time) {
+      throw new VendixHttpException(ErrorCodes.STATION_BOOKING_009);
+    }
+    const booking = await this.findOne(id);
+    const detail = await this.reservationDeposits.summary(id, booking.deposit_decision_due_at ?? null);
+    if (!detail || detail.balance <= 0) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_005);
+    if (!['pending', 'confirmed'].includes(booking.status)) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_006);
+    await this.rescheduleDirectPath(id, booking, {
+      date: dto.new_date,
+      start_time: dto.new_start_time,
+      end_time: dto.new_end_time,
+    } as RescheduleBookingDto);
+    await this.prisma.bookings.update({ where: { id }, data: { deposit_decision_due_at: null, updated_at: new Date() } });
+    return this.findOneDetail(id);
   }
 
   /**
@@ -1142,6 +1395,7 @@ export class ReservationsService {
     if (product?.requires_station && !this.allocationCoordinator) {
       throw new VendixHttpException(ErrorCodes.STATION_012);
     }
+    const rescheduleEndDate = bookingEndDateFor(dto.date.slice(0, 10), dto.start_time, dto.end_time);
     const updated = await this.prisma.$transaction(async (tx) => {
       if (product?.requires_station) {
         await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, id, 'cancelled');
@@ -1152,6 +1406,8 @@ export class ReservationsService {
           date: new Date(dto.date),
           start_time: dto.start_time,
           end_time: dto.end_time,
+          end_date: rescheduleEndDate ? new Date(rescheduleEndDate) : null,
+          is_open_ended: false,
           ...(dto.provider_id != null ? { provider_id: dto.provider_id } : {}),
           updated_at: new Date(),
         },
@@ -1173,6 +1429,7 @@ export class ReservationsService {
           date: dto.date,
           startTime: dto.start_time,
           endTime: dto.end_time,
+          endDate: rescheduleEndDate,
           excludeBookingId: id,
         });
       }
@@ -1357,11 +1614,12 @@ export class ReservationsService {
 
     const product = await this.prisma.products.findFirst({ where: { id: booking.product_id }, select: { requires_station: true } });
     if (product?.requires_station && !this.allocationCoordinator) throw new VendixHttpException(ErrorCodes.STATION_012);
+    const approvedEndDate = bookingEndDateFor(this.formatDateOnly(request.requested_date), request.requested_start_time, request.requested_end_time);
     const updated = await this.prisma.$transaction(async (tx) => {
       if (product?.requires_station) await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, booking.id, 'cancelled');
       const saved = await tx.bookings.update({
         where: { id: booking.id },
-        data: { date: request.requested_date, start_time: request.requested_start_time, end_time: request.requested_end_time, updated_at: new Date() },
+        data: { date: request.requested_date, start_time: request.requested_start_time, end_time: request.requested_end_time, end_date: approvedEndDate ? new Date(approvedEndDate) : null, is_open_ended: false, updated_at: new Date() },
         include: this.BOOKING_INCLUDE,
       });
       if (product?.requires_station) {
@@ -1370,7 +1628,7 @@ export class ReservationsService {
           storeId: booking.store_id, bookingId: booking.id, productId: booking.product_id,
           productVariantId: booking.product_variant_id, stationId: previous?.station_id,
           providerId: booking.provider_id ?? previous?.provider_id, date: this.formatDateOnly(request.requested_date),
-          startTime: request.requested_start_time, endTime: request.requested_end_time,
+          startTime: request.requested_start_time, endTime: request.requested_end_time, endDate: approvedEndDate,
           excludeBookingId: booking.id,
         });
       }
@@ -1721,12 +1979,10 @@ export class ReservationsService {
    * Obtiene reservas agrupadas por fecha para vista de calendario
    */
   async getCalendar(query: CalendarQueryDto) {
-    const where: any = {
-      date: {
-        gte: new Date(query.date_from),
-        lte: new Date(query.date_to),
-      },
-    };
+    const range = { gte: new Date(query.date_from), lte: new Date(query.date_to) };
+    // S21 / A14: an overnight booking also shows on the day it ends, so it is
+    // fetched when either its start day or its end day is inside the range.
+    const where: any = { OR: [{ date: range }, { end_date: range }] };
 
     if (query.product_id) where.product_id = query.product_id;
     if (query.status) where.status = query.status;
@@ -1741,13 +1997,22 @@ export class ReservationsService {
 
     // Group by date string
     const grouped: Record<string, any[]> = {};
+    const dayKey = (value: unknown) =>
+      value instanceof Date ? value.toISOString().split('T')[0] : String(value).split('T')[0];
+    const fromKey = dayKey(range.gte);
+    const toKey = dayKey(range.lte);
+    const inRange = (key: string) => key >= fromKey && key <= toKey;
     for (const booking of bookings) {
-      const dateKey =
-        booking.date instanceof Date
-          ? booking.date.toISOString().split('T')[0]
-          : String(booking.date).split('T')[0];
-      if (!grouped[dateKey]) grouped[dateKey] = [];
-      grouped[dateKey].push(booking);
+      const dateKey = dayKey(booking.date);
+      const endKey = (booking as any).end_date ? dayKey((booking as any).end_date) : null;
+      if (inRange(dateKey)) {
+        if (!grouped[dateKey]) grouped[dateKey] = [];
+        grouped[dateKey].push(booking);
+      }
+      if (endKey && endKey !== dateKey && inRange(endKey)) {
+        if (!grouped[endKey]) grouped[endKey] = [];
+        grouped[endKey].push(booking);
+      }
     }
 
     return grouped;
@@ -1878,6 +2143,13 @@ export class ReservationsService {
         if (held) {
           if (held.expires_at && held.expires_at <= new Date()) throw new VendixHttpException(ErrorCodes.STATION_011);
           await tx.service_allocations.update({ where: { id: held.id }, data: { state: 'confirmed', expires_at: null, updated_at: new Date() } });
+        }
+        // A hold waiting for its deposit is confirmed by hand by the administrator (not expired yet).
+        if (this.reservationDeposits) {
+          await tx.service_allocations.updateMany({
+            where: { store_id: booking.store_id, booking_id: id, state: 'payment_pending', expires_at: { gt: new Date() } },
+            data: { state: 'confirmed', expires_at: null, updated_at: new Date() },
+          });
         }
       }
       return this.mapBooking(await tx.bookings.update({

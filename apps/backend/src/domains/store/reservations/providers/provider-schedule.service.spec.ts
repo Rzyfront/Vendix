@@ -92,7 +92,7 @@ describe('ProviderScheduleService.upsertSchedule (QUI-968)', () => {
 
   it.each([
     ['duplicated order', [{ day_of_week: 1, block_order: 0, start_time: '08:00', end_time: '12:00' }, { day_of_week: 1, block_order: 0, start_time: '14:00', end_time: '18:00' }]],
-    ['end before start', [{ day_of_week: 1, block_order: 0, start_time: '18:00', end_time: '08:00' }]],
+    ['overnight block overlapping the next day', [{ day_of_week: 5, block_order: 0, start_time: '20:00', end_time: '03:00' }, { day_of_week: 6, block_order: 0, start_time: '02:00', end_time: '10:00' }]],
     ['empty times', [{ day_of_week: 1, block_order: 0, start_time: '', end_time: '' }]],
     ['seconds format', [{ day_of_week: 1, block_order: 0, start_time: '08:00:00', end_time: '18:00:00' }]],
     ['garbage times', [{ day_of_week: 1, block_order: 0, start_time: 'NaN:NaN', end_time: '25:99' }]],
@@ -136,5 +136,54 @@ describe('ProviderScheduleService.upsertSchedule (QUI-968)', () => {
 
     expect(tx.provider_schedules.deleteMany).toHaveBeenCalled();
     expect(tx.provider_schedules.createMany).not.toHaveBeenCalled();
+  });
+
+  describe('overnight blocks (S21)', () => {
+    it('accepts a block that ends the next day', async () => {
+      const { service, tx } = buildService();
+      await service.upsertSchedule(8, [
+        { day_of_week: 5, block_order: 0, start_time: '20:00', end_time: '03:00' },
+      ] as any);
+      expect(tx.provider_schedules.createMany).toHaveBeenCalledWith({
+        data: [expect.objectContaining({ day_of_week: 5, start_time: '20:00', end_time: '03:00' })],
+      });
+    });
+
+    it('accepts the next day starting when the spill ends', async () => {
+      const { service, tx } = buildService();
+      await service.upsertSchedule(8, [
+        { day_of_week: 5, block_order: 0, start_time: '20:00', end_time: '03:00' },
+        { day_of_week: 6, block_order: 0, start_time: '03:00', end_time: '10:00' },
+      ] as any);
+      expect(tx.provider_schedules.createMany).toHaveBeenCalled();
+    });
+
+    it('accepts 00:00-00:00 as 24 hours', async () => {
+      const { service, tx } = buildService();
+      await service.upsertSchedule(8, [
+        { day_of_week: 6, block_order: 0, start_time: '00:00', end_time: '00:00' },
+      ] as any);
+      expect(tx.provider_schedules.createMany).toHaveBeenCalled();
+    });
+
+    it('rejects two blocks of the same day that overlap once one is overnight', async () => {
+      const { service, tx } = buildService();
+      await expect(
+        service.upsertSchedule(8, [
+          { day_of_week: 5, block_order: 0, start_time: '20:00', end_time: '03:00' },
+          { day_of_week: 5, block_order: 1, start_time: '22:00', end_time: '23:00' },
+        ] as any),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(tx.provider_schedules.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('keeps accepting overlapping daytime blocks as before', async () => {
+      const { service, tx } = buildService();
+      await service.upsertSchedule(8, [
+        { day_of_week: 1, block_order: 0, start_time: '08:00', end_time: '13:00' },
+        { day_of_week: 1, block_order: 1, start_time: '12:00', end_time: '18:00' },
+      ] as any);
+      expect(tx.provider_schedules.createMany).toHaveBeenCalled();
+    });
   });
 });

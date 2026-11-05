@@ -129,6 +129,7 @@ export class ProductVariantService {
       const isService = product.product_type === 'service';
       const hasServiceFields =
         createVariantDto.service_duration_minutes !== undefined ||
+        createVariantDto.service_duration_unit !== undefined ||
         createVariantDto.service_pricing_type !== undefined ||
         createVariantDto.buffer_minutes !== undefined ||
         createVariantDto.preparation_time_minutes !== undefined;
@@ -273,6 +274,7 @@ export class ProductVariantService {
         image_id: createVariantDto.image_id,
         track_inventory_override: createVariantDto.track_inventory_override,
         service_duration_minutes: createVariantDto.service_duration_minutes,
+        service_duration_unit: createVariantDto.service_duration_unit,
         service_pricing_type: createVariantDto.service_pricing_type,
         buffer_minutes: createVariantDto.buffer_minutes,
         preparation_time_minutes: createVariantDto.preparation_time_minutes,
@@ -472,6 +474,7 @@ export class ProductVariantService {
 
     const hasServiceFields =
       variantData.service_duration_minutes !== undefined ||
+      variantData.service_duration_unit !== undefined ||
       variantData.service_pricing_type !== undefined ||
       variantData.buffer_minutes !== undefined ||
       variantData.preparation_time_minutes !== undefined;

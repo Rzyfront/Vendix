@@ -1,3 +1,4 @@
+import { payment_methods_type_enum } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -7,6 +8,7 @@ import {
   IsEmail,
   IsIn,
   IsInt,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
@@ -50,6 +52,54 @@ export class ServiceIntakeValueDto {
   value: string | number | boolean | null;
 }
 
+/** Money received for the consumable deposit of a station session (cash, transfer, card...). */
+export class ServiceSessionDepositDto {
+  /** Major units; the ledger works in cents. */
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  amount: number;
+
+  /** Canonical method type: cash, bank_transfer, card... The ledger books `cash` to the drawer and the rest to the bank. */
+  @IsIn(Object.values(payment_methods_type_enum), { message: 'El método de pago no es válido' })
+  method: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  store_payment_method_id?: number;
+
+  /** Idempotency key: a replay with the same id never credits twice. */
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  request_id: string;
+}
+
+export class SettleServiceSessionDto {
+  /** What happens with the deposit left after the account is covered. Defaults to `credit`. */
+  @IsOptional()
+  @IsIn(['refund', 'credit'])
+  leftover_action?: 'refund' | 'credit';
+
+  /** How the refund leaves (cash, bank_transfer...). Defaults to `cash`. */
+  @IsOptional()
+  @IsIn(Object.values(payment_methods_type_enum), { message: 'El método de pago no es válido' })
+  refund_method?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  store_payment_method_id?: number;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(100)
+  request_id: string;
+}
+
 export class OpenServiceSessionDto {
   @IsOptional()
   @Type(() => Number)
@@ -74,6 +124,13 @@ export class OpenServiceSessionDto {
   @IsInt()
   @Min(1)
   product_id?: number;
+
+  /** Walk-in only: duration variant of the rental product. Its duration wins over the product's. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  product_variant_id?: number;
 
   /** Opcional para walk-in (si no se envía, calcula now + duración del servicio o 60 min); las reservas usan su asignación confirmada. */
   @IsOptional()
@@ -103,6 +160,12 @@ export class OpenServiceSessionDto {
   @ValidateNested({ each: true })
   @Type(() => ServiceIntakeValueDto)
   intake_values?: ServiceIntakeValueDto[];
+
+  /** Consumable deposit received while opening (S4). */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ServiceSessionDepositDto)
+  deposit?: ServiceSessionDepositDto;
 }
 
 export class ProviderAvailabilityQueryDto {

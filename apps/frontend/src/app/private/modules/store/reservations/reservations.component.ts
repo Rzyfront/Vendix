@@ -19,6 +19,7 @@ import { QuickActionsPanelComponent } from './components/quick-actions-panel/qui
 import { ReportExportModalComponent } from './components/report-export-modal/report-export-modal.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
+import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 import {
   Booking,
   BookingStats,
@@ -359,8 +360,9 @@ export class ReservationsComponent {
                 this.loadTodayBookings();
                 this.calendarRefreshTrigger.update(v => v + 1);
               },
-              error: () => {
-                this.toastService.error('Error al cancelar la reserva');
+              error: (error) => {
+                // A booking with a deposit can be refused (e.g. STATION_BOOKING_004): show why; the detail dialog decides it.
+                this.toastService.error(extractApiErrorMessage(error) || 'Error al cancelar la reserva');
               },
             });
         }

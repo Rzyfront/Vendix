@@ -27,6 +27,13 @@ const guestOrderSummary = () =>
 
 export const storeProductPagePublicRoutes: Routes = [
   {
+    path: 'pagar/:token',
+    loadComponent: () =>
+      import('../../public/payment-request/payment-request-page.component').then(
+        (c) => c.PaymentRequestPageComponent,
+      ),
+  },
+  {
     path: '',
     loadComponent: layout,
     children: [

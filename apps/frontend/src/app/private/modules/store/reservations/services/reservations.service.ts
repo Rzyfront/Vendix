@@ -7,6 +7,9 @@ import {
   BookingStats,
   BookingQuery,
   CreateBookingDto,
+  CancelBookingInput,
+  DepositDecisionAction,
+  DepositDecisionInput,
   RescheduleBookingDto,
   AvailabilitySlot,
   ServiceProvider,
@@ -28,6 +31,41 @@ import { AvailableProviderUser, RescheduleRequest } from '../interfaces/reservat
 // co-located; this re-export avoids forcing every component to import
 // from two paths. Use `export type` for `isolatedModules: true` (TS 5+).
 export type { RescheduleRequest };
+
+/** Recurring bookings (S19): body of POST store/reservations/series[/preview]. */
+export interface BookingSeriesInput {
+  customer_id?: number;
+  product_id: number;
+  product_variant_id?: number;
+  station_id?: number;
+  provider_id?: number;
+  frequency: 'daily' | 'weekly';
+  interval_count?: number;
+  /** First occurrence, YYYY-MM-DD. */
+  start_date: string;
+  start_time: string;
+  /** end_time <= start_time ends the next day. */
+  end_time: string;
+  occurrences: number;
+  skip_conflicts?: boolean;
+  notes?: string;
+  channel?: string;
+}
+
+export interface BookingSeriesPreviewRow {
+  index: number;
+  date: string;
+  end_date: string | null;
+  status: 'ok' | 'conflict';
+  code?: string;
+  message?: string;
+}
+
+export interface BookingSeriesResult {
+  series_id: number;
+  created: Array<{ index: number; booking_id: number; booking_number: string; date: string }>;
+  conflicts: Array<{ index: number; date: string; code: string; message: string }>;
+}
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -243,16 +281,55 @@ export class ReservationsService {
     );
   }
 
+  previewBookingSeries(dto: BookingSeriesInput): Observable<BookingSeriesPreviewRow[]> {
+    return this.http
+      .post<any>(`${this.apiUrl}/series/preview`, dto)
+      .pipe(map((response) => response.data || response));
+  }
+
+  createBookingSeries(dto: BookingSeriesInput): Observable<BookingSeriesResult> {
+    return this.http.post<any>(`${this.apiUrl}/series`, dto).pipe(map((response) => response.data || response));
+  }
+
+  /** Each occurrence is a normal booking: this only cancels in bulk; one date cancels with cancelReservation. */
+  cancelBookingSeries(seriesId: number, from = 0): Observable<unknown> {
+    return this.http
+      .post<any>(`${this.apiUrl}/series/${seriesId}/cancel`, { from })
+      .pipe(map((response) => response.data || response));
+  }
+
   confirmReservation(id: number): Observable<Booking> {
     return this.http.patch<any>(`${this.apiUrl}/${id}/confirm`, {}).pipe(
       map((response) => response.data || response),
     );
   }
 
-  cancelReservation(id: number): Observable<Booking> {
-    return this.http.patch<any>(`${this.apiUrl}/${id}/cancel`, {}).pipe(
+  /** The optional body only matters for a booking with a deposit (A1); without it the booking is cancelled as always. */
+  cancelReservation(id: number, body: CancelBookingInput = {}): Observable<Booking> {
+    return this.http.patch<any>(`${this.apiUrl}/${id}/cancel`, body).pipe(
       map((response) => response.data || response),
     );
+  }
+
+  /** Fresh payment link of a booking whose deposit request is still pending (S15). */
+  rotateDepositLink(id: number): Observable<{ payment_path: string; payment_url: string | null; payment_request_id: number }> {
+    return this.http
+      .post<any>(`${this.apiUrl}/${id}/deposit-link`, {})
+      .pipe(map((response) => response.data || response));
+  }
+
+  /** Payment link of the station's "cobro para reservar" (full or partial rental charge); errors are RENTAL_PREPAY_001..005. */
+  openPrepayLink(id: number): Observable<{ payment_path: string; payment_url: string | null; payment_request_id: number; amount: number; expires_at: string | null }> {
+    return this.http
+      .post<any>(`${this.apiUrl}/${id}/prepay-link`, {})
+      .pipe(map((response) => response.data || response));
+  }
+
+  /** What happens with the deposit of a booking that did not show up (S17). */
+  decideDeposit(id: number, body: DepositDecisionInput): Observable<{ action: DepositDecisionAction }> {
+    return this.http
+      .post<any>(`${this.apiUrl}/${id}/deposit-decision`, body)
+      .pipe(map((response) => response.data || response));
   }
 
   completeReservation(id: number): Observable<Booking> {

@@ -16,6 +16,7 @@ import {
   MaxLength,
   Matches,
   Min,
+  ValidateIf,
   registerDecorator,
   ValidationArguments,
   ValidationOptions,
@@ -52,15 +53,150 @@ function IsRentalBlockPair(validationOptions?: ValidationOptions) {
   };
 }
 
-export class CreateServiceStationDto {
+/** Deposit amount ceiling: column Decimal(12, 2). */
+export const DEPOSIT_AMOUNT_MAX = 9_999_999_999.99;
+
+/**
+ * Charge-to-book coherence (S17): `partial` takes exactly one of percent or amount;
+ * `none` and `full` take neither (null clears them). Without a mode in the body
+ * (update) the service checks against the stored mode.
+ */
+function IsPrepayModeCoherent(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'IsPrepayModeCoherent',
+      target: object.constructor,
+      propertyName,
+      options: {
+        message: 'El cobro parcial lleva un porcentaje o un monto (solo uno); el total o ninguno no llevan ninguno de los dos',
+        ...validationOptions,
+      },
+      validator: {
+        validate(_value: unknown, args: ValidationArguments) {
+          const dto = args.object as StationDepositRulesDto;
+          const hasPercent = dto.booking_prepay_percent != null;
+          const hasAmount = dto.booking_prepay_amount != null;
+          if (dto.booking_prepay_mode === 'partial') return hasPercent !== hasAmount;
+          if (dto.booking_prepay_mode === 'none' || dto.booking_prepay_mode === 'full') return !hasPercent && !hasAmount;
+          return true;
+        },
+      },
+    });
+  };
+}
+
+/**
+ * Deposit and booking rules of a station (S1). Shared by create and update so both
+ * validate the same way. `deposit_amount` is required whenever the policy is set to
+ * something other than `none`; on update the service also checks the stored policy.
+ */
+export class StationDepositRulesDto {
+  /** none = no deposit, optional = can be asked, required = needed to book or open. */
+  @IsOptional()
+  @IsIn(['none', 'optional', 'required'])
+  deposit_policy?: 'none' | 'optional' | 'required';
+
+  /** Minimum deposit; required when the policy is not `none`. */
+  @ValidateIf((o: StationDepositRulesDto) => (o.deposit_policy !== undefined && o.deposit_policy !== 'none') || (o.deposit_amount !== undefined && o.deposit_amount !== null))
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(DEPOSIT_AMOUNT_MAX)
+  deposit_amount?: number | null;
+
+  /** What happens when the consumption passes the deposit. */
+  @IsOptional()
+  @IsIn(['recharge', 'overflow'])
+  deposit_exhausted_policy?: 'recharge' | 'overflow';
+
+  /** What happens with the leftover. */
+  @IsOptional()
+  @IsIn(['refund_or_credit', 'minimum_spend'])
+  leftover_policy?: 'refund_or_credit' | 'minimum_spend';
+
+  /** fixed = start and end; free = start only. */
+  @IsOptional()
+  @IsIn(['fixed', 'free'])
+  booking_duration_mode?: 'fixed' | 'free';
+
+  /** Minutes an unpaid hold lasts (D11). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(5)
+  @Max(1440)
+  hold_minutes?: number;
+
+  /** Block taken by an open-ended booking when the station has no earlier close (D9). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(30)
+  @Max(2880)
+  open_end_block_minutes?: number;
+
+  /** Hours before the start up to which a cancellation returns the deposit (null = admin decides). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(8760) // one year
+  cancel_refund_hours?: number | null;
+
+  /** Tax category of the "Gastos de reserva" line (null = no tax). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  reservation_fee_tax_category_id?: number | null;
+
+  /** Unit the rental block is shown in (minutes stay the stored measure). */
+  @IsOptional()
+  @IsIn(['minute', 'hour', 'day'])
+  rental_block_unit?: 'minute' | 'hour' | 'day';
+
+  /** elapsed = charge the time used; planned = charge the booked time even if it ends early. */
+  @IsOptional()
+  @IsIn(['elapsed', 'planned'])
+  rental_billing_mode?: 'elapsed' | 'planned';
+
+  /** at_start = charge the rental when the session opens; at_end = at checkout. */
+  @IsOptional()
+  @IsIn(['at_start', 'at_end'])
+  rental_charge_timing?: 'at_start' | 'at_end';
+
+  /** Charge to book a rental: none, the full quote or part of it. */
+  @IsOptional()
+  @IsIn(['none', 'full', 'partial'])
+  @IsPrepayModeCoherent()
+  booking_prepay_mode?: 'none' | 'full' | 'partial';
+
+  /** Share of the quote charged to book (partial mode). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(99.99)
+  booking_prepay_percent?: number | null;
+
+  /** Fixed amount charged to book (partial mode). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(DEPOSIT_AMOUNT_MAX)
+  booking_prepay_amount?: number | null;
+}
+
+export class CreateServiceStationDto extends StationDepositRulesDto {
   @IsString()
   @MinLength(1)
   @MaxLength(120)
   name: string;
 
   @IsOptional()
-  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'general', 'celular'])
-  station_type?: 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular';
+  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'general', 'celular', 'cava', 'cancha', 'sala', 'finca'])
+  station_type?: 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular' | 'cava' | 'cancha' | 'sala' | 'finca';
 
   @IsOptional()
   @Type(() => Number)
@@ -125,7 +261,7 @@ export class CreateServiceStationDto {
   intake_template_id?: number | null;
 }
 
-export class UpdateServiceStationDto {
+export class UpdateServiceStationDto extends StationDepositRulesDto {
   @IsOptional()
   @IsString()
   @MinLength(1)
@@ -133,8 +269,8 @@ export class UpdateServiceStationDto {
   name?: string;
 
   @IsOptional()
-  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'general', 'celular'])
-  station_type?: 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular';
+  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'general', 'celular', 'cava', 'cancha', 'sala', 'finca'])
+  station_type?: 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular' | 'cava' | 'cancha' | 'sala' | 'finca';
 
   @IsOptional()
   @Type(() => Number)

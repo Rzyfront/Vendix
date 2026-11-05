@@ -17,6 +17,7 @@ import { PaymentEncryptionService } from '../../store/payments/services/payment-
 import { WebhookHandlerService } from '../../store/payments/services/webhook-handler.service';
 import { PaymentGatewayService } from '../../store/payments/services/payment-gateway.service';
 import { ReservationsService } from '../../store/reservations/reservations.service';
+import { RentalQuoteService } from '../../store/service-stations/rental-quote/rental-quote.service';
 import { InvoiceDataRequestsService } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.service';
 import { InvoicingService } from '../../store/invoicing/invoicing.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
@@ -81,6 +82,7 @@ describe('CheckoutService - promotions and coupons', () => {
   let service: CheckoutService;
   let prisma: any;
   let storePrisma: any;
+  let rentalQuote: { quote: jest.Mock };
   // Use `any` so jest mock methods (quoteDiscounts, applyPromotion) don't
   // get filtered out by the strict shape of jest.Mocked<...>.
   let promotionEngine: any;
@@ -230,6 +232,7 @@ describe('CheckoutService - promotions and coupons', () => {
       },
     };
 
+    rentalQuote = { quote: jest.fn() };
     storePrisma = {
       shipping_methods: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -246,6 +249,8 @@ describe('CheckoutService - promotions and coupons', () => {
         }),
       },
       orders: { count: jest.fn().mockResolvedValue(0) },
+      // A12 guard: no station with a mandatory deposit unless a test says so.
+      service_stations: { findFirst: jest.fn().mockResolvedValue(null) },
       shipping_rates: { findFirst: jest.fn() },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       invoice_resolutions: { findFirst: jest.fn().mockResolvedValue(null) },
@@ -310,6 +315,7 @@ describe('CheckoutService - promotions and coupons', () => {
           },
         },
         { provide: ReservationsService, useValue: { create: jest.fn() } },
+        { provide: RentalQuoteService, useValue: rentalQuote },
         {
           provide: InvoiceDataRequestsService,
           useValue: {
@@ -864,6 +870,244 @@ describe('CheckoutService - promotions and coupons', () => {
       ],
     };
 
+    it('rechaza el carrito de una estación con anticipo obligatorio, sin crear orden ni reserva (A12)', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      mockOrderCreate(10000);
+      storePrisma.service_stations.findFirst.mockResolvedValue({ id: 5 });
+
+      await expect(service.checkout({ ...stationDto } as any)).rejects.toMatchObject({
+        errorCode: 'STATION_BOOKING_010',
+      });
+      expect(storePrisma.service_stations.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: expect.arrayContaining([{ deposit_policy: 'required' }]),
+          }),
+        }),
+      );
+      expect(reservations.create).not.toHaveBeenCalled();
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza el carrito de una estación que cobra para reservar: la reserva sale de la página de pago (A17)', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      mockOrderCreate(10000);
+      storePrisma.service_stations.findFirst.mockResolvedValue({ id: 5 });
+
+      await expect(service.checkout({ ...stationDto } as any)).rejects.toMatchObject({
+        errorCode: 'STATION_BOOKING_010',
+      });
+      expect(storePrisma.service_stations.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: expect.arrayContaining([{ booking_prepay_mode: { not: 'none' } }]),
+          }),
+        }),
+      );
+      expect(reservations.create).not.toHaveBeenCalled();
+    });
+
+    it('un alquiler por tarifa de estación se cobra con la cotización del servidor, no con el precio base (S2)', async () => {
+      const baseImpl = prisma.products.findUnique.getMockImplementation();
+      prisma.products.findUnique.mockImplementation((args: any) =>
+        args.where.id === STATION_SERVICE_ID
+          ? Promise.resolve({
+              ...buildProduct({ id: STATION_SERVICE_ID, name: 'Alquiler cancha', product_type: 'service' }),
+              requires_station: true,
+              requires_booking: true,
+              rental_pricing_mode: 'station_rate',
+            })
+          : baseImpl!(args),
+      );
+      const { reservations } = mockBookingLinking();
+      reservations.create.mockResolvedValue({ id: 61 });
+      mockOrderCreate(36000);
+      storePrisma.store_settings.findFirst = jest
+        .fn()
+        .mockResolvedValue({ settings: {}, stores: { timezone: 'America/Bogota' } });
+      rentalQuote.quote.mockResolvedValue({ amount: 36000, cents: 3600000, pricing_mode: 'station_rate' });
+
+      const result: any = await service.checkout({ ...stationDto } as any);
+
+      expect(rentalQuote.quote).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: STATION_SERVICE_ID, stationId: 5 }),
+      );
+      expect(
+        rentalQuote.quote.mock.calls[0][0].startAt.toISOString(),
+      ).toBe('2026-11-02T14:00:00.000Z');
+      expect(result.items).toEqual([
+        expect.objectContaining({ unit_price: 36000, total_price: 36000 }),
+      ]);
+    });
+
+    function mockStationRateProduct() {
+      const baseImpl = prisma.products.findUnique.getMockImplementation();
+      prisma.products.findUnique.mockImplementation((args: any) =>
+        args.where.id === STATION_SERVICE_ID
+          ? Promise.resolve({
+              ...buildProduct({ id: STATION_SERVICE_ID, name: 'Alquiler cancha', product_type: 'service' }),
+              requires_station: true,
+              requires_booking: true,
+              rental_pricing_mode: 'station_rate',
+            })
+          : baseImpl!(args),
+      );
+      storePrisma.store_settings.findFirst = jest
+        .fn()
+        .mockResolvedValue({ settings: {}, stores: { timezone: 'America/Bogota' } });
+    }
+
+    it('H-2: a station rental is taxed with the STATION rows, never the product ones, and totals to the quote', async () => {
+      mockStationRateProduct();
+      const { reservations } = mockBookingLinking();
+      reservations.create.mockResolvedValue({ id: 63 });
+      mockOrderCreate(119000);
+      // The product carries its own 19% exclusive VAT: it must NOT be added on top of the quote.
+      taxesService.calculateProductTaxes.mockResolvedValue({
+        total_rate: 0.19,
+        total_tax_amount: 19000,
+        taxes: [{ tax_rate_id: 99, name: 'IVA producto', rate: 0.19, tax_type: 'iva', is_inclusive: false, amount: 19000, base: 100000 }],
+      });
+      rentalQuote.quote.mockResolvedValue({
+        amount: 119000,
+        cents: 11900000,
+        published_amount: 100000,
+        pricing_mode: 'station_rate',
+        tax_rows: [{ tax_rate_id: 3, name: 'IVA estación', rate: 0.19, tax_type: 'iva', is_inclusive: false }],
+      });
+
+      await service.checkout({ ...stationDto } as any);
+
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(taxesService.calculateProductTaxes).not.toHaveBeenCalledWith(STATION_SERVICE_ID, expect.anything());
+      expect(Number(data.grand_total)).toBe(119000);
+      expect(Number(data.subtotal_amount)).toBe(100000);
+      expect(Number(data.tax_amount)).toBe(19000);
+      const taxes = data.order_items.create[0].order_item_taxes.create;
+      expect(taxes).toEqual([expect.objectContaining({ tax_rate_id: 3, tax_name: 'IVA estación' })]);
+    });
+
+    it('H-2: a station rental with no rental tax is charged exactly the quote even if the product has taxes', async () => {
+      mockStationRateProduct();
+      const { reservations } = mockBookingLinking();
+      reservations.create.mockResolvedValue({ id: 64 });
+      mockOrderCreate(36000);
+      taxesService.calculateProductTaxes.mockResolvedValue({
+        total_rate: 0.19,
+        total_tax_amount: 5748,
+        taxes: [{ tax_rate_id: 99, name: 'IVA producto', rate: 0.19, tax_type: 'iva', is_inclusive: false, amount: 5748, base: 30252 }],
+      });
+      rentalQuote.quote.mockResolvedValue({
+        amount: 36000,
+        cents: 3600000,
+        published_amount: 36000,
+        pricing_mode: 'station_rate',
+        tax_rows: [],
+      });
+
+      await service.checkout({ ...stationDto } as any);
+
+      const data = prisma.orders.create.mock.calls[0][0].data;
+      expect(Number(data.grand_total)).toBe(36000);
+      expect(Number(data.tax_amount)).toBe(0);
+    });
+
+    it('M-1: a station_rate line with quantity > 1 is rejected before anything is created', async () => {
+      mockStationRateProduct();
+      const { reservations } = mockBookingLinking();
+      mockOrderCreate(72000);
+
+      await expect(
+        service.checkout({
+          ...stationDto,
+          items: [{ product_id: STATION_SERVICE_ID, quantity: 2 }],
+          bookings: [stationDto.bookings[0], { ...stationDto.bookings[0], start_time: '14:00', end_time: '15:00' }],
+        } as any),
+      ).rejects.toMatchObject({
+        errorCode: 'SERVICE_BOOKING_001',
+        message: 'Cada horario de una estación se compra por separado.',
+      });
+      expect(rentalQuote.quote).not.toHaveBeenCalled();
+      expect(reservations.create).not.toHaveBeenCalled();
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('H-3: a booking on a station that does not charge online is not blocked by another station of the same product', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      reservations.create.mockResolvedValue({ id: 65 });
+      mockOrderCreate(10000);
+      // Only "Cava VIP" (id 6) charges online; the booking is on "Cava 2" (id 5).
+      storePrisma.service_stations.findFirst.mockImplementation((args: any) =>
+        Promise.resolve(args.where?.id?.in?.includes(6) ? { id: 6 } : null),
+      );
+
+      await service.checkout({ ...stationDto } as any);
+
+      expect(storePrisma.service_stations.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: { in: [5] }, OR: expect.any(Array) }),
+        }),
+      );
+      expect(reservations.create).toHaveBeenCalled();
+    });
+
+    it('H-3: a booking on the station that charges online is still rejected with STATION_BOOKING_010', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      mockOrderCreate(10000);
+      storePrisma.service_stations.findFirst.mockImplementation((args: any) =>
+        Promise.resolve(args.where?.id?.in?.includes(5) ? { id: 5 } : null),
+      );
+
+      await expect(service.checkout({ ...stationDto } as any)).rejects.toMatchObject({
+        errorCode: 'STATION_BOOKING_010',
+      });
+      expect(reservations.create).not.toHaveBeenCalled();
+    });
+
+    it('H-3: a booking without station_id keeps the product-wide guard (the allocator may land on a charging station)', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      mockOrderCreate(10000);
+      storePrisma.service_stations.findFirst.mockResolvedValue({ id: 6 });
+      const { station_id: _omit, ...bookingWithoutStation } = stationDto.bookings[0];
+
+      await expect(
+        service.checkout({ ...stationDto, bookings: [bookingWithoutStation] } as any),
+      ).rejects.toMatchObject({ errorCode: 'STATION_BOOKING_010' });
+      const where = storePrisma.service_stations.findFirst.mock.calls[0][0].where;
+      expect(where.id).toBeUndefined();
+      expect(where.service_station_services_station_fkey).toEqual({ some: { product_id: { in: [STATION_SERVICE_ID] } } });
+      expect(reservations.create).not.toHaveBeenCalled();
+    });
+
+    it('un servicio de estación sin tarifa por tiempo conserva su precio y no se cotiza', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      reservations.create.mockResolvedValue({ id: 62 });
+      mockOrderCreate(10000);
+
+      const result: any = await service.checkout({ ...stationDto } as any);
+
+      expect(rentalQuote.quote).not.toHaveBeenCalled();
+      expect(result.items).toEqual([
+        expect.objectContaining({ unit_price: 10000 }),
+      ]);
+    });
+
+    it('una estación sin anticipo obligatorio sigue el flujo de siempre: la reserva se intenta y el carrito no se rechaza', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      reservations.create.mockRejectedValue(new Error('sin cupo'));
+      mockOrderCreate(10000);
+
+      await expect(service.checkout({ ...stationDto } as any)).rejects.toThrow('sin cupo');
+      expect(storePrisma.service_stations.findFirst).toHaveBeenCalled();
+    });
+
     it('falla el checkout cuando la reserva CON estación falla (sin orden creada)', async () => {
       mockServiceProducts();
       const { reservations } = mockBookingLinking();
@@ -1161,6 +1405,65 @@ describe('CheckoutService - promotions and coupons', () => {
           }),
         }),
       );
+    });
+
+    it('getPaymentMethods keeps its public shape after the util extraction (bank instructions whitelisted)', async () => {
+      prisma.store_payment_methods.findMany.mockResolvedValue([
+        {
+          id: 9,
+          display_name: 'Bancolombia',
+          min_amount: null,
+          max_amount: null,
+          custom_config: { bank_name: 'Bancolombia', account_number: '123', secret: 'x' },
+          system_payment_method: {
+            display_name: 'Transferencia',
+            type: 'bank_transfer',
+            provider: 'manual',
+            processing_mode: 'DIRECT',
+            logo_url: null,
+          },
+        },
+        {
+          id: 10,
+          display_name: null,
+          min_amount: null,
+          max_amount: null,
+          custom_config: { public_key: 'pk' },
+          system_payment_method: {
+            display_name: 'Wompi',
+            type: 'wompi',
+            provider: 'wompi',
+            processing_mode: 'ONLINE',
+            logo_url: 'logo',
+          },
+        },
+      ]);
+
+      const methods = await service.getPaymentMethods('own_fleet');
+
+      expect(methods).toEqual([
+        {
+          id: 9,
+          name: 'Bancolombia',
+          type: 'bank_transfer',
+          provider: 'manual',
+          processing_mode: 'DIRECT',
+          logo_url: null,
+          min_amount: null,
+          max_amount: null,
+          payment_instructions: { bank_name: 'Bancolombia', account_number: '123' },
+        },
+        {
+          id: 10,
+          name: 'Wompi',
+          type: 'wompi',
+          provider: 'wompi',
+          processing_mode: 'ONLINE',
+          logo_url: 'logo',
+          min_amount: null,
+          max_amount: null,
+        },
+      ]);
     });
 
     it('getDeliveryOptions devuelve un tipo de entrega por método activo', async () => {

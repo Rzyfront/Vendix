@@ -26,6 +26,8 @@ export interface ServicePageViewData {
     price: number;
     image_url: string | null;
     service_duration_minutes: number | null;
+    /** Unit the duration is shown in; null reads as 'minute'. */
+    service_duration_unit: 'minute' | 'hour' | 'day' | null;
     service_modality: string | null;
     requires_booking: boolean;
     categories: { id: number; name: string; slug: string }[];
@@ -84,6 +86,7 @@ export class ServicePageViewService {
           sale_price: true,
           is_on_sale: true,
           service_duration_minutes: true,
+          service_duration_unit: true,
           service_modality: true,
           requires_booking: true,
           product_images: image,
@@ -109,6 +112,7 @@ export class ServicePageViewService {
         price: Number(s.is_on_sale && s.sale_price != null ? s.sale_price : s.base_price),
         image_url: await sign(s.product_images[0]?.image_url),
         service_duration_minutes: s.service_duration_minutes ?? null,
+        service_duration_unit: s.service_duration_unit ?? null,
         service_modality: s.service_modality ?? null,
         requires_booking: !!s.requires_booking,
         categories: s.product_categories

@@ -65,6 +65,10 @@ export interface Product {
   scale_code?: number | null;
   product_type?: 'physical' | 'service' | 'prepared';
   service_duration_minutes?: number;
+  /** Display unit of the duration; minutes stay in `service_duration_minutes` (S2). */
+  service_duration_unit?: 'minute' | 'hour' | 'day' | null;
+  /** Rental product price: a fixed pass price or the station's rate by time. */
+  rental_pricing_mode?: 'fixed_price' | 'station_rate' | null;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
   service_pricing_type?:
     | 'per_hour'
@@ -230,6 +234,8 @@ export interface ProductVariant {
   track_inventory_override?: boolean | null;
   effective_track_inventory?: boolean;
   service_duration_minutes?: number;
+  /** Display unit of the duration; minutes stay in `service_duration_minutes` (S2). */
+  service_duration_unit?: 'minute' | 'hour' | 'day' | null;
   service_pricing_type?: 'per_session' | 'package' | 'subscription';
   buffer_minutes?: number;
   preparation_time_minutes?: number;
@@ -393,6 +399,10 @@ export interface CreateProductDto {
   scale_code?: number | null;
   product_type?: 'physical' | 'service' | 'prepared';
   service_duration_minutes?: number;
+  /** Display unit of the duration; minutes stay in `service_duration_minutes` (S2). */
+  service_duration_unit?: 'minute' | 'hour' | 'day' | null;
+  /** Rental product price: a fixed pass price or the station's rate by time. */
+  rental_pricing_mode?: 'fixed_price' | 'station_rate' | null;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
   service_pricing_type?:
     | 'per_hour'
@@ -507,6 +517,10 @@ export interface UpdateProductDto {
   scale_code?: number | null;
   product_type?: 'physical' | 'service' | 'prepared';
   service_duration_minutes?: number;
+  /** Display unit of the duration; minutes stay in `service_duration_minutes` (S2). */
+  service_duration_unit?: 'minute' | 'hour' | 'day' | null;
+  /** Rental product price: a fixed pass price or the station's rate by time. */
+  rental_pricing_mode?: 'fixed_price' | 'station_rate' | null;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
   service_pricing_type?:
     | 'per_hour'
@@ -584,7 +598,9 @@ export interface CreateProductVariantDto {
   attributes?: Record<string, any>;
   variant_image_url?: string | null;
   track_inventory_override?: boolean | null;
-  service_duration_minutes?: number;
+  service_duration_minutes?: number | null;
+  /** Display unit of the duration; minutes stay in `service_duration_minutes` (S2). */
+  service_duration_unit?: 'minute' | 'hour' | 'day' | null;
   service_pricing_type?: 'per_session' | 'package' | 'subscription';
   buffer_minutes?: number;
   preparation_time_minutes?: number;

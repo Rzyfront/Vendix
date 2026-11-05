@@ -26,6 +26,17 @@ import { ProductsModule } from '../products/products.module';
 import { TablesModule } from '../tables/tables.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 import { ServiceAllocationModule } from './service-allocation.module';
+import { ServiceDepositsModule } from '../service-deposits/service-deposits.module';
+import { PaymentRequestsModule } from '../payment-requests/payment-requests.module';
+import { ReservationDepositsService } from './reservation-deposits.service';
+import { ServiceStationsModule } from '../service-stations/service-stations.module';
+import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
+import { RentalPrepayPaidListener } from './rental-prepay/rental-prepay-paid.listener';
+import { RentalPrepayHoldExpiryJob } from './rental-prepay/rental-prepay-hold-expiry.job';
+import { ServiceDepositPaidListener } from './listeners/service-deposit-paid.listener';
+import { ServiceDepositHoldExpiryJob } from './jobs/service-deposit-hold-expiry.job';
+import { BookingSeriesController } from './recurrence/booking-series.controller';
+import { BookingSeriesService } from './recurrence/booking-series.service';
 
 @Module({
   imports: [
@@ -38,9 +49,14 @@ import { ServiceAllocationModule } from './service-allocation.module';
     AppointmentQueueModule,
     OrderHistoryModule,
     ServiceAllocationModule,
+    ServiceDepositsModule,
+    PaymentRequestsModule,
+    // RentalQuoteService: the rental price of a booking (T15).
+    ServiceStationsModule,
   ],
   controllers: [
     ProvidersController,
+    BookingSeriesController,
     ReservationsController,
     StationAvailabilityController,
     BusinessHoursController,
@@ -55,9 +71,20 @@ import { ServiceAllocationModule } from './service-allocation.module';
     ProviderScheduleService,
     ProviderAvailabilityService,
     AutoNoShowJob,
+    ReservationDepositsService,
+    BookingSeriesService,
+    ServiceDepositPaidListener,
+    ServiceDepositHoldExpiryJob,
+    RentalPrepayService,
+    RentalPrepayPaidListener,
+    RentalPrepayHoldExpiryJob,
   ],
   exports: [
     ReservationsService,
+    ReservationDepositsService,
+    RentalPrepayService,
+    // Re-exported so the ecommerce checkout (imports this module) can inject RentalQuoteService.
+    ServiceStationsModule,
     AvailabilityService,
     BookingConfirmationService,
     BusinessHoursService,

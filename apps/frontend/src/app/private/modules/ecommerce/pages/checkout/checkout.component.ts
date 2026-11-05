@@ -11,8 +11,9 @@ import {
   effect,
   untracked,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { firstValueFrom, debounceTime, distinctUntilChanged, filter, finalize, merge } from 'rxjs';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { firstValueFrom, debounceTime, distinctUntilChanged, filter, finalize, merge, forkJoin, of } from 'rxjs';
+import { catchError, map, switchMap } from 'rxjs/operators';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import {
@@ -169,13 +170,31 @@ const UNLOCATED_ADDRESS_WARNING =
 export class CheckoutComponent implements OnInit {
   readonly cart = signal<Cart | null>(null);
   /** Líneas del resumen con su vista neutra (nota incluida). */
-  readonly summary_lines = computed(() =>
-    (this.cart()?.items ?? []).map((item) => ({
-      item,
-      key: this.lineKey(item),
-      view: cartItemToLineView(item),
-    })),
-  );
+  readonly summary_lines = computed(() => {
+    const quotes = this.rental_quotes();
+    return (this.cart()?.items ?? []).map((item) => {
+      const view = cartItemToLineView(item);
+      const quote = quotes[this.getBookingKey(item)];
+      return {
+        item,
+        key: this.lineKey(item),
+        // A station rental costs the quote of its booked slot, the price checkout charges (S18).
+        view: quote == null ? view : { ...view, unitPrice: quote, lineTotal: quote * item.quantity },
+      };
+    });
+  });
+
+  /** Quote of each station rental in the cart, keyed by booking key (S18). */
+  readonly rental_quotes = signal<Record<string, number>>({});
+
+  /** What the quotes add over the cart price, which prices a time-rated rental without its slot. */
+  readonly rental_quote_delta = computed(() => {
+    const quotes = this.rental_quotes();
+    return (this.cart()?.items ?? []).reduce((sum, item) => {
+      const quote = quotes[this.getBookingKey(item)];
+      return quote == null ? sum : sum + (quote - (Number(item.unit_price) || 0)) * item.quantity;
+    }, 0);
+  });
   /** Línea cuya nota se está guardando (atenúa la fila). */
   readonly note_saving_key = signal<string | null>(null);
   readonly payment_methods = signal<PaymentMethod[]>([]);
@@ -697,6 +716,7 @@ export class CheckoutComponent implements OnInit {
       this.cancelScheduledAutoLocate();
     });
     this.initForm();
+    this.watchRentalQuotes();
 
     // CP-tienda-checkout-whatsapp (C.2): recotización de fondo del domicilio.
     // Cuando el modo es domicilio y hay una dirección válida, cotiza con
@@ -3340,6 +3360,55 @@ export class CheckoutComponent implements OnInit {
 
   getBookingKey(item: CartItem): string {
     return `${item.product_id}:${item.product_variant_id ?? 'base'}`;
+  }
+
+  /** Quotes every station rental whose slot is chosen, the same quote checkout charges. */
+  private watchRentalQuotes(): void {
+    const requests = computed(() => {
+      const selections = this.bookingSelections();
+      return (this.cart()?.items ?? []).flatMap((item) => {
+        const booking = selections.get(this.getBookingKey(item));
+        if (item.product?.rental_pricing_mode !== 'station_rate') return [];
+        if (!booking?.station_id || !booking.date || !booking.start_time) return [];
+        return [{ key: this.getBookingKey(item), item, booking }];
+      });
+    });
+    toObservable(requests)
+      .pipe(
+        distinctUntilChanged(
+          (a, b) =>
+            JSON.stringify(a.map((r) => [r.key, r.booking.station_id, r.booking.date, r.booking.start_time])) ===
+            JSON.stringify(b.map((r) => [r.key, r.booking.station_id, r.booking.date, r.booking.start_time])),
+        ),
+        switchMap((list) =>
+          list.length === 0
+            ? of([] as Array<[string, number] | null>)
+            : forkJoin(
+                list.map((r) =>
+                  this.booking_service
+                    .getRentalQuote(
+                      r.item.product_id,
+                      r.booking.station_id!,
+                      r.booking.date,
+                      r.booking.start_time,
+                      r.item.product_variant_id ?? undefined,
+                    )
+                    .pipe(
+                      map((quote): [string, number] | null =>
+                        quote.pricing_mode === 'station_rate' ? [r.key, quote.amount] : null,
+                      ),
+                      catchError(() => of(null)),
+                    ),
+                ),
+              ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((pairs) => {
+        this.rental_quotes.set(
+          Object.fromEntries(pairs.filter((pair): pair is [string, number] => pair !== null)),
+        );
+      });
   }
 
   /**

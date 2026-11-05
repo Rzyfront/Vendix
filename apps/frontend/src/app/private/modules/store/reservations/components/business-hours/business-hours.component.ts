@@ -15,6 +15,7 @@ import {
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ReservationsService } from '../../services/reservations.service';
 import { BusinessHoursRow } from '../../interfaces/reservation.interface';
+import { isClockTime, isOvernight, validateWeeklyBlocks } from '../../../../../../shared/utils/schedule-window.util';
 
 const DAY_LABELS: Array<{ dow: number; label: string; short: string }> = [
   { dow: 0, label: 'Domingo', short: 'Dom' },
@@ -123,6 +124,11 @@ export class BusinessHoursComponent implements OnInit {
     );
   }
 
+  /** True when the row closes the next day (e.g. 20:00–03:00). */
+  closesNextDay(r: DayRow): boolean {
+    return isClockTime(r.start_time) && isClockTime(r.end_time) && isOvernight(r);
+  }
+
   row(dow: number): DayRow | undefined {
     return this.rows().find((r) => r.day_of_week === dow);
   }
@@ -133,15 +139,22 @@ export class BusinessHoursComponent implements OnInit {
       this.errorMsg.set('Debes activar al menos un día');
       return;
     }
-    // Validate end > start for active rows.
+    // S21: a close at or before the open ends the next day (20:00–03:00); only the
+    // HH:mm format is required.
     for (const r of activeRows) {
-      if (r.start_time >= r.end_time) {
+      if (!isClockTime(r.start_time) || !isClockTime(r.end_time)) {
         const dayLabel = DAY_LABELS.find((d) => d.dow === r.day_of_week)?.label;
-        this.errorMsg.set(
-          `${dayLabel}: la hora de cierre debe ser mayor que la hora de apertura`,
-        );
+        this.errorMsg.set(`${dayLabel}: usa horas válidas (HH:mm)`);
         return;
       }
+    }
+    const overlap = validateWeeklyBlocks(
+      activeRows.map((r) => ({ day: r.day_of_week, start_time: r.start_time, end_time: r.end_time })),
+    );
+    if (overlap) {
+      const dayLabel = DAY_LABELS.find((d) => d.dow === overlap.day)?.label;
+      this.errorMsg.set(`${dayLabel}: el horario se cruza con el cierre nocturno del día anterior`);
+      return;
     }
     this.errorMsg.set(null);
     this.saving.set(true);

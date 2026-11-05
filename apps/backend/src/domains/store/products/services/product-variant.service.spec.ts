@@ -188,6 +188,44 @@ describe('ProductVariantService', () => {
     });
   });
 
+  describe('updateVariant — unidad de duración del alquiler (S2, T15)', () => {
+    const variant = (product_type: string) => ({
+      id: 1,
+      product_id: 10,
+      sku: 'ALQ-4H',
+      name: 'Variante',
+      price_override: 50,
+      cost_price: 20,
+      profit_margin: 150,
+      is_on_sale: false,
+      sale_price: null,
+      track_inventory_override: null,
+      products: { id: 10, store_id: 1, product_type, base_price: 100 },
+    });
+
+    it('persiste service_duration_unit en la variante de un servicio', async () => {
+      mockPrismaService.product_variants.findFirst.mockResolvedValue(variant('service'));
+      mockPrismaService.product_variants.findUnique.mockResolvedValue(variant('service'));
+      mockPrismaService.product_variants.update.mockResolvedValue(variant('service'));
+
+      await service.updateVariant(1, { service_duration_unit: 'day' } as any);
+
+      expect(mockPrismaService.product_variants.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ service_duration_unit: 'day' }) }),
+      );
+    });
+
+    it('rechaza la unidad en la variante de un producto que no es servicio', async () => {
+      mockPrismaService.product_variants.findFirst.mockResolvedValue(variant('physical'));
+      mockPrismaService.product_variants.findUnique.mockResolvedValue(variant('physical'));
+
+      await expect(service.updateVariant(1, { service_duration_unit: 'hour' } as any)).rejects.toThrow(
+        'Service-specific fields can only be set on service product variants',
+      );
+      expect(mockPrismaService.product_variants.update).not.toHaveBeenCalled();
+    });
+  });
+
   describe('findUniqueVariantBySlug', () => {
     it('should find a variant by store ID and slug successfully', async () => {
       const expectedVariant = {

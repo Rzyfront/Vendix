@@ -530,6 +530,14 @@ export const storeAdminRoutes: Routes = [
                 '../../private/modules/store/reservations/components/reschedule-requests-page/reschedule-requests-page.component'
               ).then((c) => c.RescheduleRequestsPageComponent),
           },
+          {
+            // Admin side of the payment page (S15): transfer receipts to confirm or reject.
+            path: 'payment-requests',
+            loadComponent: () =>
+              import('../../private/modules/store/payment-requests/payment-requests-page.component').then(
+                (c) => c.PaymentRequestsPageComponent,
+              ),
+          },
         ],
       },
       // Scheduled Orders Routes
@@ -548,6 +556,13 @@ export const storeAdminRoutes: Routes = [
             loadComponent: () =>
               import('../../private/modules/store/reservations/components/service-stations/service-stations-page.component').then(
                 (c) => c.ServiceStationsPageComponent,
+              ),
+          },
+          {
+            path: 'stations/session/:id',
+            loadComponent: () =>
+              import('../../private/modules/store/reservations/components/service-stations/session-page/service-session-page.component').then(
+                (c) => c.ServiceSessionPageComponent,
               ),
           },
         ],

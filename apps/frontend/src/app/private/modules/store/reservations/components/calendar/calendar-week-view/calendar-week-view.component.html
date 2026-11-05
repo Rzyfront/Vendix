@@ -50,8 +50,8 @@
               class="booking-block"
               [class]="'status-' + booking.status"
               [class.expired-pending]="isBookingExpired(booking)"
-              [style.top.%]="getBlockTop(booking)"
-              [style.height.%]="getBlockHeight(booking)"
+              [style.top.%]="getBlockTop(booking, day.date)"
+              [style.height.%]="getBlockHeight(booking, day.date)"
               (click)="onBookingClick($event, booking)">
               <span class="booking-time">{{ formatTime(booking.start_time) }}</span>
               <span class="booking-title">{{ booking.product?.name }}</span>
@@ -70,8 +70,8 @@
           } @else {
             <div
               class="booking-stack"
-              [style.top.%]="getGroupTop(group)"
-              [style.min-height.%]="getGroupMinHeight(group)"
+              [style.top.%]="getGroupTop(group, day.date)"
+              [style.min-height.%]="getGroupMinHeight(group, day.date)"
               (click)="$event.stopPropagation()"
               [attr.aria-label]="group.bookings.length + ' citas a las ' + group.startKey">
               @for (stacked of visibleStackBookings(day.date, group); track stacked.id) {

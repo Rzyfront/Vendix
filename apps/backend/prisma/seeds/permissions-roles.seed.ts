@@ -1165,6 +1165,12 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/reservations/:id/check-in',
       method: 'POST',
     },
+    {
+      name: 'store:reservations:close_with_balance',
+      description: 'Cerrar una atención de estación dejando el saldo por cobrar',
+      path: '/api/store/service-sessions/:id/close-pending',
+      method: 'POST',
+    },
 
     // ===== Business hours (appointment redesign phase 1) =====
     {
@@ -4817,6 +4823,21 @@ export async function seedPermissionsAndRoles(
       name: 'store:apps:manage',
       description: 'Activar y desactivar las Apps de la tienda',
       path: '/api/store/apps/:kind/activate',
+      method: 'POST',
+    },
+
+    // Payment requests — página de pago (anticipos, transferencias). owner/admin/manager
+    // los heredan por el prefijo `store:`.
+    {
+      name: 'store:payment_requests:read',
+      description: 'Ver las solicitudes de pago y sus comprobantes de transferencia',
+      path: '/api/store/payment-requests',
+      method: 'GET',
+    },
+    {
+      name: 'store:payment_requests:manage',
+      description: 'Confirmar o rechazar transferencias y cancelar solicitudes de pago',
+      path: '/api/store/payment-requests/:id/confirm',
       method: 'POST',
     },
   ];

@@ -1739,14 +1739,22 @@
             <div
               class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4"
             >
-              <app-input
-                label="Duración (minutos)"
-                type="number"
-                formControlName="service_duration_minutes"
-                placeholder="Ej. 60"
-                tooltipText="Duración estimada del servicio en minutos. Define la franja horaria que bloquea al proveedor."
-                customWrapperClass="!mt-0"
-              ></app-input>
+              <div class="grid grid-cols-[1fr_auto] gap-2 items-end">
+                <app-input
+                  label="Duración"
+                  type="number"
+                  formControlName="service_duration_minutes"
+                  placeholder="Ej. 60"
+                  tooltipText="Duración estimada del servicio. Define la franja horaria que bloquea al proveedor."
+                  customWrapperClass="!mt-0"
+                ></app-input>
+                <app-selector
+                  label="Unidad"
+                  [options]="serviceDurationUnitOptions"
+                  formControlName="service_duration_unit"
+                  customWrapperClass="!mt-0 w-32"
+                ></app-selector>
+              </div>
 
               <app-selector
                 label="Modalidad"
@@ -1806,6 +1814,23 @@
                       placeholder="Elige las estaciones..."
                       helpText="Solo en estas estaciones se podrá reservar o iniciar el servicio."
                     />
+                  }
+                  @if (productForm.get('requires_station')?.value) {
+                    <app-selector
+                      label="Precio del alquiler"
+                      [options]="rentalPricingModeOptions"
+                      formControlName="rental_pricing_mode"
+                      customWrapperClass="!mt-0"
+                    ></app-selector>
+                    @if (productForm.get('rental_pricing_mode')?.value === 'station_rate') {
+                      <p class="text-xs text-gray-500">
+                        Se cobra con la tarifa de la estación: la duración debe ser múltiplo del bloque de la estación.
+                      </p>
+                    } @else if (productForm.get('rental_pricing_mode')?.value === 'fixed_price') {
+                      <p class="text-xs text-gray-500">Se cobra el precio del servicio sin importar el tiempo de uso.</p>
+                    } @else {
+                      <p class="text-xs text-gray-500">Servicio normal: usa la estación sin venderla como alquiler.</p>
+                    }
                   }
                 </div>
               }
@@ -3412,6 +3437,27 @@
                             </div>
                           </div>
                         }
+                        @if (isService) {
+                          <div class="col-span-2 grid grid-cols-[1fr_auto] gap-2 items-end">
+                            <app-input
+                              label="Duración"
+                              type="number"
+                              size="sm"
+                              [(ngModel)]="variant.duration_amount"
+                              [ngModelOptions]="{ standalone: true }"
+                              placeholder="Hereda del producto"
+                              customWrapperClass="!mt-0"
+                            ></app-input>
+                            <app-selector
+                              label="Unidad"
+                              size="sm"
+                              [options]="serviceDurationUnitOptions"
+                              [(ngModel)]="variant.duration_unit"
+                              [ngModelOptions]="{ standalone: true }"
+                              customWrapperClass="!mt-0 w-28"
+                            ></app-selector>
+                          </div>
+                        }
                         <app-input
                           label="SKU"
                           type="text"
@@ -3510,6 +3556,13 @@
                         class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                       >
                         Stock
+                      </th>
+                    }
+                    @if (isService) {
+                      <th
+                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                      >
+                        Duración
                       </th>
                     }
                     <th
@@ -3722,6 +3775,28 @@
                             placeholder="0"
                             customWrapperClass="!mt-0"
                           ></app-input>
+                        </td>
+                      }
+                      <!-- Duration (service variants) -->
+                      @if (isService) {
+                        <td class="px-3 py-2">
+                          <div class="flex items-center gap-1 min-w-[11rem]">
+                            <app-input
+                              type="number"
+                              size="sm"
+                              [(ngModel)]="variant.duration_amount"
+                              [ngModelOptions]="{ standalone: true }"
+                              placeholder="Hereda"
+                              customWrapperClass="!mt-0 w-20"
+                            ></app-input>
+                            <app-selector
+                              size="sm"
+                              [options]="serviceDurationUnitOptions"
+                              [(ngModel)]="variant.duration_unit"
+                              [ngModelOptions]="{ standalone: true }"
+                              customWrapperClass="!mt-0 w-28"
+                            ></app-selector>
+                          </div>
                         </td>
                       }
                       <!-- SKU -->

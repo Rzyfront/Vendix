@@ -752,6 +752,13 @@ export class CartService {
             sku: item.product.sku,
             image_url: signed_image_url || null,
             weight: Number(item.product.weight || 0),
+            // Same service fields the guest cart carries: checkout reads them to
+            // skip delivery for a services-only cart and to ask the booking slot.
+            product_type: item.product.product_type,
+            requires_booking: item.product.requires_booking === true,
+            service_duration_minutes: item.product.service_duration_minutes ?? null,
+            service_duration_unit: item.product.service_duration_unit ?? null,
+            rental_pricing_mode: item.product.rental_pricing_mode ?? null,
           },
           variant: item.product_variant
             ? {

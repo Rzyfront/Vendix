@@ -11,13 +11,166 @@ export interface PaginatedApiResponse<T> {
   meta: { total: number; page: number; limit: number; totalPages: number; hasNextPage: boolean; hasPreviousPage: boolean };
 }
 
-export type StationType = 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular';
+export type StationType = 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular' | 'cava' | 'cancha' | 'sala' | 'finca';
 
 export interface ProviderAvailability {
   provider_id: number;
   display_name: string;
   status: 'available' | 'no_schedule' | 'off_schedule' | 'busy' | 'inactive';
   detail: string | null;
+}
+
+/** Booking that starts on a station after its current session (backend: next_reservation). */
+export interface StationNextReservation {
+  start_at: string;
+  booking_id?: number | null;
+  customer_name?: string | null;
+}
+
+/** Live session summary the stations list attaches to an occupied station. */
+export interface StationActiveSession {
+  id: number;
+  opened_at: string;
+  planned_end_at: string | null;
+  status: string;
+}
+
+/** Station rules for the consumable deposit (field names mirror the backend schema). */
+export type StationDepositPolicy = 'none' | 'optional' | 'required';
+export type StationDepositExhaustedPolicy = 'recharge' | 'overflow';
+export type StationLeftoverPolicy = 'refund_or_credit' | 'minimum_spend';
+export type StationBookingDurationMode = 'fixed' | 'free';
+
+export interface StationRules {
+  deposit_policy: StationDepositPolicy;
+  deposit_amount: number | null;
+  deposit_exhausted_policy: StationDepositExhaustedPolicy;
+  leftover_policy: StationLeftoverPolicy;
+  booking_duration_mode: StationBookingDurationMode;
+  hold_minutes: number;
+  open_end_block_minutes: number;
+  cancel_refund_hours: number | null;
+  reservation_fee_tax_category_id: number | null;
+}
+
+/** Rental rate and "cobro para reservar" rules of a station (S1, phase 3). */
+export type RentalBlockUnit = 'minute' | 'hour' | 'day';
+export type RentalBillingMode = 'elapsed' | 'planned';
+export type RentalChargeTiming = 'at_start' | 'at_end';
+export type BookingPrepayMode = 'none' | 'full' | 'partial';
+
+export interface StationRentalRules {
+  /** Stored measure of the block, always in minutes (1-1440); null with a null price = no rental rate. */
+  rental_block_minutes: number | null;
+  rental_block_price: number | null;
+  /** Display unit only: minutes stay the stored value, day = 1440. */
+  rental_block_unit: RentalBlockUnit;
+  rental_billing_mode: RentalBillingMode;
+  rental_charge_timing: RentalChargeTiming;
+  booking_prepay_mode: BookingPrepayMode;
+  /** Partial mode takes exactly one of percent or amount; none/full send both null. */
+  booking_prepay_percent: number | null;
+  booking_prepay_amount: number | null;
+}
+
+/** One rate window of a station (GET/PUT store/service-stations/:id/rate-windows). */
+export interface StationRateWindow {
+  /** 0 = domingo ... 6 = sábado. */
+  weekday: number;
+  start_time: string;
+  end_time: string;
+  block_price: number;
+}
+
+/** Method + payment method row used by every deposit request (open, recharge, refund). */
+export interface DepositPaymentInput {
+  amount: number;
+  /** Canonical method type of the chosen store payment method (cash, card, bank_transfer...). */
+  method: string;
+  store_payment_method_id?: number;
+  request_id: string;
+}
+
+export type SessionDepositInput = DepositPaymentInput;
+
+/** `deposit` block of GET /store/service-sessions/:id; null when the session has no deposit. */
+export interface SessionDeposit {
+  required: number | string;
+  received: number | string;
+  applied: number | string;
+  balance: number | string;
+  remaining_for_consumption: number | string;
+  policy: StationDepositPolicy;
+  exhausted_policy: StationDepositExhaustedPolicy;
+  leftover_policy: StationLeftoverPolicy;
+  settled_at: string | null;
+}
+
+export type LeftoverAction = 'refund' | 'credit';
+
+/** GET /store/service-sessions/:id/settlement while the session is not settled yet. */
+export interface SessionSettlementOpen {
+  already_settled: false;
+  session_id: number;
+  order_id: number;
+  settled_at: null;
+  currency: string;
+  leftover_policy: StationLeftoverPolicy;
+  consumption: number | string;
+  deposit_received: number | string;
+  deposit_balance: number | string;
+  /** "Gastos de reserva" charged to complete the minimum spend. */
+  fee: number | string;
+  invoice_total: number | string;
+  paid: number | string;
+  /** Deposit applied to the account. */
+  apply: number | string;
+  to_collect: number | string;
+  leftover: number | string;
+  /** What the cashier may do with the leftover; empty when it is not refundable. */
+  leftover_actions: LeftoverAction[];
+}
+
+/** Same endpoint once the session was settled (read-only snapshot). */
+export interface SessionSettlementDone {
+  already_settled: true;
+  session_id: number;
+  order_id: number;
+  settled_at: string;
+  invoice_total: number | string;
+  paid: number | string;
+  remaining_to_collect: number | string;
+  deposit: SessionDeposit | null;
+}
+
+export type SessionSettlementPreview = SessionSettlementOpen | SessionSettlementDone;
+
+/** POST /store/service-sessions/:id/settle (the settled snapshot on a replay). */
+export type SettleSessionResult =
+  | {
+      settled_at: string;
+      invoice_total: number | string;
+      fee: number | string;
+      applied: number | string;
+      leftover: { amount: number | string; action: LeftoverAction | null };
+      remaining_to_collect: number | string;
+    }
+  | SessionSettlementDone;
+
+/** POST /store/service-sessions/:id/settle. */
+export interface SettleSessionInput {
+  leftover_action?: LeftoverAction;
+  refund_method?: string;
+  store_payment_method_id?: number;
+  request_id: string;
+}
+
+/** Rental or consumption order of a session, as returned by GET /store/service-sessions/:id (S11). */
+export interface SessionAccountPart {
+  order_id: number;
+  total: number;
+  paid: number;
+  remaining: number;
 }
 
 export interface ServiceStation {
@@ -35,7 +188,27 @@ export interface ServiceStation {
   rental_tax_category_id?: number | null;
   /** true = incluido en el precio del bloque; false = se suma al cobrar. */
   rental_tax_is_inclusive?: boolean;
+  deposit_policy?: StationDepositPolicy;
+  deposit_amount?: number | string | null;
+  deposit_exhausted_policy?: StationDepositExhaustedPolicy;
+  leftover_policy?: StationLeftoverPolicy;
+  booking_duration_mode?: StationBookingDurationMode;
+  hold_minutes?: number;
+  open_end_block_minutes?: number;
+  cancel_refund_hours?: number | null;
+  reservation_fee_tax_category_id?: number | null;
+  rental_block_minutes?: number | null;
+  rental_block_price?: number | string | null;
+  rental_block_unit?: RentalBlockUnit;
+  rental_billing_mode?: RentalBillingMode;
+  rental_charge_timing?: RentalChargeTiming;
+  booking_prepay_mode?: BookingPrepayMode;
+  booking_prepay_percent?: number | string | null;
+  booking_prepay_amount?: number | string | null;
   status: 'active' | 'inactive';
+  /** Present when the station is occupied; the page falls back to the sessions list when absent. */
+  active_session?: StationActiveSession | null;
+  next_reservation?: StationNextReservation | null;
   public_id: string | null;
   qr_status: 'ready' | 'unavailable';
   services: Array<{ product_id: number; product: { id: number; name: string; base_price?: number | string; service_duration_minutes: number | null } | null }>;
@@ -175,11 +348,11 @@ export class ServiceStationsService {
       .pipe(map((response) => this.unwrap(response)));
   }
 
-  create(body: { name: string; capacity: number; station_type?: StationType; track_time?: boolean; target_minutes?: number | null; intake_template_id?: number | null; rental_tax_category_id?: number | null; rental_tax_is_inclusive?: boolean }): Observable<ServiceStation> {
+  create(body: { name: string; capacity: number; station_type?: StationType; track_time?: boolean; target_minutes?: number | null; intake_template_id?: number | null; rental_tax_category_id?: number | null; rental_tax_is_inclusive?: boolean } & Partial<StationRules> & Partial<StationRentalRules>): Observable<ServiceStation> {
     return this.http.post<{ data?: ServiceStation } | ServiceStation>(this.base, body).pipe(map((r) => this.unwrap(r)));
   }
 
-  update(id: number, body: Partial<Pick<ServiceStation, 'name' | 'capacity' | 'status' | 'station_type' | 'track_time' | 'target_minutes' | 'intake_template_id' | 'rental_tax_category_id' | 'rental_tax_is_inclusive'>>): Observable<ServiceStation> {
+  update(id: number, body: Partial<Pick<ServiceStation, 'name' | 'capacity' | 'status' | 'station_type' | 'track_time' | 'target_minutes' | 'intake_template_id' | 'rental_tax_category_id' | 'rental_tax_is_inclusive'>> & Partial<StationRules> & Partial<StationRentalRules>): Observable<ServiceStation> {
     return this.http.patch<{ data?: ServiceStation } | ServiceStation>(`${this.base}/${id}`, body).pipe(map((r) => this.unwrap(r)));
   }
 
@@ -205,6 +378,19 @@ export class ServiceStationsService {
 
   setSchedules(id: number, schedules: StationSchedule[]): Observable<StationSchedule[]> {
     return this.http.put<{ data?: StationSchedule[] } | StationSchedule[]>(`${this.base}/${id}/schedules`, { schedules }).pipe(map((r) => this.unwrap(r)));
+  }
+
+  getRateWindows(id: number): Observable<StationRateWindow[]> {
+    return this.http
+      .get<{ data?: StationRateWindow[] } | StationRateWindow[]>(`${this.base}/${id}/rate-windows`)
+      .pipe(map((r) => this.unwrap(r).map((w) => ({ ...w, block_price: Number(w.block_price) }))));
+  }
+
+  /** Replaces every window of the station. */
+  setRateWindows(id: number, windows: StationRateWindow[]): Observable<StationRateWindow[]> {
+    return this.http
+      .put<{ data?: StationRateWindow[] } | StationRateWindow[]>(`${this.base}/${id}/rate-windows`, { windows })
+      .pipe(map((r) => this.unwrap(r)));
   }
 
   getExceptions(id: number): Observable<StationException[]> {
@@ -266,6 +452,13 @@ export class ServiceStationsService {
   prepareCharge(sessionId: number): Observable<{ order_id: number }> {
     return this.http
       .post<{ data?: { order_id: number } } | { order_id: number }>(`${environment.apiUrl}/store/service-sessions/${sessionId}/prepare-charge`, {})
+      .pipe(map((r) => this.unwrap(r)));
+  }
+
+  /** S11: opens (or finds) the rental order of an `at_start` session so it can be collected. */
+  prepareRentalCharge(sessionId: number): Observable<{ order_id: number }> {
+    return this.http
+      .post<{ data?: { order_id: number } } | { order_id: number }>(`${environment.apiUrl}/store/service-sessions/${sessionId}/rental/prepare-charge`, {})
       .pipe(map((r) => this.unwrap(r)));
   }
 
@@ -350,5 +543,61 @@ export class ServiceStationsService {
     ).pipe(
       map((r) => this.unwrap(r)),
     );
+  }
+
+  /** Moves the planned end of an active session. The backend rejects conflicts with a readable message. */
+  extendSession(sessionId: number, plannedEndAt: string): Observable<{ id: number; planned_end_at: string }> {
+    return this.http
+      .patch<{ data?: { id: number; planned_end_at: string } } | { id: number; planned_end_at: string }>(
+        `${environment.apiUrl}/store/service-sessions/${sessionId}/extend`,
+        { planned_end_at: plannedEndAt },
+      )
+      .pipe(map((r) => this.unwrap(r)));
+  }
+
+  /** Normal close (409 when a balance is pending). */
+  closeSession(sessionId: number): Observable<unknown> {
+    return this.http.patch<unknown>(`${environment.apiUrl}/store/service-sessions/${sessionId}`, { action: 'close' });
+  }
+
+  /** Admin close that leaves the balance receivable; returns the pending balance. */
+  closeSessionPending(sessionId: number): Observable<{ balance_pending?: number | string }> {
+    return this.http
+      .post<{ data?: { balance_pending?: number | string } } | { balance_pending?: number | string }>(
+        `${environment.apiUrl}/store/service-sessions/${sessionId}/close-pending`,
+        {},
+      )
+      .pipe(map((r) => this.unwrap(r)));
+  }
+
+  pauseResumeSession(sessionId: number, action: 'pause' | 'resume'): Observable<unknown> {
+    return this.http.patch<unknown>(`${environment.apiUrl}/store/service-sessions/${sessionId}`, { action });
+  }
+
+  getSessionBudget(sessionId: number): Observable<{ amount: number | string; currency?: string; version?: number; is_system?: boolean } | null> {
+    return this.http
+      .get<{ data?: { amount: number | string; currency?: string; version?: number; is_system?: boolean } | null }>(
+        `${environment.apiUrl}/store/service-sessions/${sessionId}/budget`,
+      )
+      .pipe(map((r) => r?.data ?? null));
+  }
+
+  /** Recharge: more deposit money received during an open session. */
+  rechargeDeposit(sessionId: number, body: DepositPaymentInput): Observable<unknown> {
+    return this.http
+      .post<{ data?: unknown } | unknown>(`${environment.apiUrl}/store/service-sessions/${sessionId}/deposits`, body)
+      .pipe(map((r) => this.unwrap(r)));
+  }
+
+  getSettlement(sessionId: number): Observable<SessionSettlementPreview> {
+    return this.http
+      .get<{ data?: SessionSettlementPreview } | SessionSettlementPreview>(`${environment.apiUrl}/store/service-sessions/${sessionId}/settlement`)
+      .pipe(map((r) => this.unwrap(r)));
+  }
+
+  settleDeposit(sessionId: number, body: SettleSessionInput): Observable<SettleSessionResult> {
+    return this.http
+      .post<{ data?: SettleSessionResult } | SettleSessionResult>(`${environment.apiUrl}/store/service-sessions/${sessionId}/settle`, body)
+      .pipe(map((r) => this.unwrap(r)));
   }
 }

@@ -34,6 +34,7 @@ import type {
   ItemListCardConfig,
   StickyHeaderActionButton,
 } from '../../../../../../shared/components';
+import { windowMinutes } from '../../../../../../shared/utils/schedule-window.util';
 import { WeeklyScheduleEditorComponent } from './weekly-schedule-editor/weekly-schedule-editor.component';
 import { ExceptionsManagerComponent } from './exceptions-manager/exceptions-manager.component';
 import {
@@ -484,9 +485,7 @@ export class ScheduleManagementComponent {
     let totalMinutes = 0;
     for (const s of provider.schedules) {
       if (!s.is_active) continue;
-      const [sh, sm] = s.start_time.split(':').map(Number);
-      const [eh, em] = s.end_time.split(':').map(Number);
-      totalMinutes += eh * 60 + em - (sh * 60 + sm);
+      totalMinutes += windowMinutes(s);
     }
     return Math.round(totalMinutes / 60);
   }
