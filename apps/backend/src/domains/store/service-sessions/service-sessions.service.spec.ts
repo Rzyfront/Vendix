@@ -1315,11 +1315,11 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
       });
     });
 
-    it('in recharge mode the cap measures consumption only: extension and rental lines and the tip do not count (same base as the deposit summary)', async () => {
+    it('in recharge mode the cap uses the settlement base: rental and extension lines count, the tip does not', async () => {
       const { tx, order } = buildOrderTx([
         { name: 'Extensión +60 min', gross: 100000, kind: 'extension' },
         { name: 'Alquiler', gross: 50000, kind: 'rental' },
-        { name: 'Cerveza', gross: 250000 },
+        { name: 'Cerveza', gross: 150000 },
       ]);
       order.tip_amount = 20000;
       tx.service_sessions.findFirst.mockResolvedValue(live());
@@ -1327,7 +1327,19 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
       await expect(service.addItem(30, { product_id: 5 } as any)).resolves.toMatchObject({ order_id: 200 });
     });
 
-    it('in recharge mode the cap still rejects consumption above the deposit when non-consumption lines exist', async () => {
+    it('in recharge mode an item that pushes rental + consumption above the deposit is rejected with the shortfall', async () => {
+      const { tx } = buildOrderTx([
+        { name: 'Alquiler', gross: 150000, kind: 'rental' },
+        { name: 'Cerveza', gross: 250000 },
+      ]);
+      tx.service_sessions.findFirst.mockResolvedValue(live());
+      deposits.balanceOfInTx.mockResolvedValue(balance(300000));
+      await expect(service.addItem(30, { product_id: 5 } as any)).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'SERVICE_DEPOSIT_007', message: expect.stringContaining('$100.000') }),
+      });
+    });
+
+    it('in recharge mode the cap still rejects consumption above the deposit when an extension line exists (shortfall includes it)', async () => {
       const { tx } = buildOrderTx([
         { name: 'Extensión +60 min', gross: 100000, kind: 'extension' },
         { name: 'Cerveza', gross: 350000 },
@@ -1335,7 +1347,7 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
       tx.service_sessions.findFirst.mockResolvedValue(live());
       deposits.balanceOfInTx.mockResolvedValue(balance(300000));
       await expect(service.addItem(30, { product_id: 5 } as any)).rejects.toMatchObject({
-        response: expect.objectContaining({ error_code: 'SERVICE_DEPOSIT_007', message: expect.stringContaining('$50.000') }),
+        response: expect.objectContaining({ error_code: 'SERVICE_DEPOSIT_007', message: expect.stringContaining('$150.000') }),
       });
     });
 
@@ -1569,6 +1581,84 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
         required: 400000, received: 400000, applied: 0, balance: 400000, remaining_for_consumption: 150000,
         policy: 'required', exhausted_policy: 'recharge', leftover_policy: 'minimum_spend', settled_at: null,
       });
+    });
+
+    it('rental and extension lines are charged to the deposit: available = deposit - (rental + extension + consumption)', async () => {
+      prisma.orders.findFirst.mockResolvedValue({
+        ...order,
+        grand_total: 250000,
+        order_items: [
+          { service_line_kind: 'rental', cancelled_at: null, final_unit_price: 100000, quantity: 1 },
+          { service_line_kind: 'extension', cancelled_at: null, final_unit_price: 20000, quantity: 1 },
+          { service_line_kind: null, cancelled_at: null, final_unit_price: 130000, quantity: 1 },
+        ],
+      });
+      prisma.service_sessions.findFirst.mockResolvedValue({ ...base, deposit_policy: 'required', deposit_required_amount: 400000, deposit_exhausted_policy: 'recharge', leftover_policy: 'refund_or_credit', settled_at: null });
+      deposits.balanceOf.mockResolvedValue(balance(400000));
+      const found: any = await service.findOne(30);
+      expect(found.deposit.remaining_for_consumption).toBe(150000);
+    });
+
+    it('the available amount equals the leftover a settlement would leave now (rental lines included)', async () => {
+      const { order: settleOrder } = buildOrderTx([
+        { name: 'Alquiler Sala 1', gross: 100000, kind: 'rental' },
+        { name: 'Cerveza', gross: 150000 },
+      ]);
+      prisma.orders.findFirst.mockResolvedValue({
+        ...order,
+        grand_total: 250000,
+        order_items: [
+          { service_line_kind: 'rental', cancelled_at: null, final_unit_price: 100000, quantity: 1 },
+          { service_line_kind: null, cancelled_at: null, final_unit_price: 150000, quantity: 1 },
+        ],
+      });
+      prisma.service_sessions.findFirst.mockResolvedValue({ ...base, deposit_policy: 'required', deposit_required_amount: 400000, deposit_exhausted_policy: 'recharge', leftover_policy: 'refund_or_credit', settled_at: null });
+      deposits.balanceOf.mockResolvedValue(balance(400000));
+      const found: any = await service.findOne(30);
+      const state = { ...balance(400000) };
+      deposits.balanceOfInTx.mockImplementation(() => Promise.resolve({ ...state }));
+      deposits.applyToOrderInTx.mockImplementation(async () => {
+        const amount = Math.min(state.balance, Number(settleOrder.grand_total) - Number(settleOrder.total_paid));
+        settleOrder.total_paid += amount; state.applied += amount; state.balance -= amount;
+        return { applied: true, amount, payment_id: 1, deposit_id: 2, payment_received: { payment_id: 1, amount } };
+      });
+      prisma.service_sessions.findFirst.mockResolvedValue({ id: 30, status: 'open', order_id: 200, booking_id: null, station_id: 3, opened_at: new Date(Date.now() - 3_600_000), deposit_policy: 'required', deposit_exhausted_policy: 'recharge', leftover_policy: 'refund_or_credit', settled_at: null });
+      jest.spyOn(service, 'findOne').mockResolvedValue({ deposit: { balance: 0 } } as any);
+      jest.spyOn(service as any, 'emitDepositPaymentReceived').mockResolvedValue(undefined);
+      const result: any = await service.settle(30, { request_id: 'settle-pin' } as any);
+      expect(result.applied).toBe(250000);
+      expect(result.leftover.amount).toBe(found.deposit.remaining_for_consumption);
+      expect(result.leftover.amount).toBe(150000);
+    });
+
+    it('with a partial payment already on the account the available amount still equals the settle leftover', async () => {
+      const lines = [
+        { service_line_kind: 'rental', cancelled_at: null, final_unit_price: 100000, quantity: 1 },
+        { service_line_kind: null, cancelled_at: null, final_unit_price: 150000, quantity: 1 },
+      ];
+      prisma.orders.findFirst.mockResolvedValue({ ...order, grand_total: 250000, total_paid: 100000, order_items: lines });
+      prisma.service_sessions.findFirst.mockResolvedValue({ ...base, deposit_policy: 'required', deposit_required_amount: 400000, deposit_exhausted_policy: 'recharge', leftover_policy: 'refund_or_credit', settled_at: null });
+      deposits.balanceOf.mockResolvedValue(balance(400000));
+      const found: any = await service.findOne(30);
+      const { order: settleOrder } = buildOrderTx([
+        { name: 'Alquiler Sala 1', gross: 100000, kind: 'rental' },
+        { name: 'Cerveza', gross: 150000 },
+      ]);
+      settleOrder.total_paid = 100000;
+      const state = { ...balance(400000) };
+      deposits.balanceOfInTx.mockImplementation(() => Promise.resolve({ ...state }));
+      deposits.applyToOrderInTx.mockImplementation(async () => {
+        const amount = Math.min(state.balance, Number(settleOrder.grand_total) - Number(settleOrder.total_paid));
+        settleOrder.total_paid += amount; state.applied += amount; state.balance -= amount;
+        return { applied: true, amount, payment_id: 1, deposit_id: 2, payment_received: { payment_id: 1, amount } };
+      });
+      prisma.service_sessions.findFirst.mockResolvedValue({ id: 30, status: 'open', order_id: 200, booking_id: null, station_id: 3, opened_at: new Date(Date.now() - 3_600_000), deposit_policy: 'required', deposit_exhausted_policy: 'recharge', leftover_policy: 'refund_or_credit', settled_at: null });
+      jest.spyOn(service, 'findOne').mockResolvedValue({ deposit: { balance: 0 } } as any);
+      jest.spyOn(service as any, 'emitDepositPaymentReceived').mockResolvedValue(undefined);
+      const result: any = await service.settle(30, { request_id: 'settle-partial' } as any);
+      expect(result.applied).toBe(150000);
+      expect(result.leftover.amount).toBe(250000);
+      expect(found.deposit.remaining_for_consumption).toBe(result.leftover.amount);
     });
 
     it('una atención ya liquidada no deja nada disponible para consumir', async () => {

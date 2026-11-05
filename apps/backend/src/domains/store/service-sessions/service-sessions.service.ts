@@ -11,7 +11,6 @@ import {
   buildSessionTaxedLine,
   computeSessionOrderTotals,
   ensureSessionRentalLine,
-  NON_CONSUMPTION_LINE_KINDS,
   priceRentalBlocks,
   readSessionRentalSnapshot,
   RENTAL_LINE_KIND,
@@ -1590,18 +1589,18 @@ export class ServiceSessionsService {
    */
   private async buildDepositSummary(
     session: { id: number; booking_id: number | null; deposit_policy: string | null; deposit_required_amount: Prisma.Decimal | null; deposit_exhausted_policy: string | null; leftover_policy: string | null; settled_at: Date | null },
-    order: { grand_total: Prisma.Decimal; tip_amount: Prisma.Decimal | null; order_items: Array<{ service_line_kind: string | null; cancelled_at: Date | null; final_unit_price: Prisma.Decimal; quantity: number }> } | null,
+    order: { grand_total: Prisma.Decimal; tip_amount: Prisma.Decimal | null; total_paid?: Prisma.Decimal | null; order_items: Array<{ service_line_kind: string | null; cancelled_at: Date | null; final_unit_price: Prisma.Decimal; quantity: number }> } | null,
   ) {
     if (!session.deposit_policy || !DEPOSIT_POLICIES.includes(session.deposit_policy)) return null;
     const balance = await this.deposits.balanceOf({ sessionId: session.id, bookingId: session.booking_id });
-    const consumptionCents = order ? this.consumptionCents(order) : 0;
+    const availableCents = this.settlementPlanNow(order, balance).leftover_cents;
     return {
       required: Number(session.deposit_required_amount ?? 0),
       received: balance.received,
       applied: balance.applied,
       balance: balance.balance,
       // Once settled the deposit was applied, refunded or credited: nothing is left to consume.
-      remaining_for_consumption: session.settled_at ? 0 : centsToAmount(Math.max(0, toCents(balance.received) - consumptionCents)),
+      remaining_for_consumption: session.settled_at ? 0 : centsToAmount(availableCents),
       policy: session.deposit_policy,
       exhausted_policy: session.deposit_exhausted_policy,
       leftover_policy: session.leftover_policy,
@@ -1609,11 +1608,34 @@ export class ServiceSessionsService {
     };
   }
 
-  /** Consumption of the account (rental + products, taxes in, no tip, no "Gastos de reserva" line), in cents. */
+  /**
+   * What the deposit still leaves if the account were settled now: the leftover of `planSettlement`, fed with the same
+   * inputs `prepareSettlementTx` uses (account base, payments already on the order, ledger balance). No fee: the
+   * available amount is the room before any "Gastos de reserva" is charged.
+   */
+  private settlementPlanNow(
+    order: { grand_total: Prisma.Decimal; tip_amount: Prisma.Decimal | null; total_paid?: Prisma.Decimal | null; order_items: Array<{ service_line_kind: string | null; cancelled_at: Date | null; final_unit_price: Prisma.Decimal; quantity: number }> } | null,
+    balance: { received: number; balance: number },
+  ) {
+    const consumption = order ? this.consumptionCents(order) : 0;
+    return planSettlement({
+      consumption_cents: consumption,
+      paid_cents: toCents(order?.total_paid),
+      received_cents: toCents(balance.received),
+      balance_cents: toCents(balance.balance),
+      leftover_policy: null,
+    });
+  }
+
+  /**
+   * Amount of the account the deposit is charged against, in cents: rental + extension + products, taxes in,
+   * no tip, no "Gastos de reserva" line. It is the same base the settlement applies the deposit to
+   * (`prepareSettlementTx`), so the available amount shown matches the leftover a settlement would leave.
+   * Also the base of the recharge guard.
+   */
   private consumptionCents(order: { grand_total: Prisma.Decimal; tip_amount: Prisma.Decimal | null; order_items: Array<{ service_line_kind: string | null; cancelled_at: Date | null; final_unit_price: Prisma.Decimal; quantity: number }> }): number {
-    // The reservation fee and the rental/extension lines are not consumption (question 6).
     const feeCents = order.order_items
-      .filter((item) => (item.service_line_kind === 'reservation_fee' || NON_CONSUMPTION_LINE_KINDS.includes(item.service_line_kind ?? '')) && !item.cancelled_at)
+      .filter((item) => item.service_line_kind === 'reservation_fee' && !item.cancelled_at)
       .reduce((sum, item) => sum + toCents(item.final_unit_price) * Number(item.quantity ?? 1), 0);
     return Math.max(0, toCents(order.grand_total) - toCents(order.tip_amount) - feeCents);
   }
@@ -1719,21 +1741,21 @@ export class ServiceSessionsService {
       if (live.deposit_exhausted_policy === 'recharge' && live.deposit_policy && DEPOSIT_POLICIES.includes(live.deposit_policy)) {
         const held = await this.deposits.balanceOfInTx(tx, { store_id: storeId, sessionId: session.id, bookingId: session.booking_id });
         const receivedCents = toCents(held.received);
-        // Same base as the deposit summary (`remaining_for_consumption`): the rental, the extension and the tip
-        // are not consumption, so they never block an item the summary says still fits.
+        // Same base as the deposit summary (`remaining_for_consumption`) and the settlement: rental and extension
+        // lines count (the settlement applies the deposit to them); the tip does not.
         const [orderTip, lines] = await Promise.all([
-          tx.orders.findFirst({ where: { id: orderId }, select: { tip_amount: true } }),
+          tx.orders.findFirst({ where: { id: orderId }, select: { tip_amount: true, total_paid: true } }),
           tx.order_items.findMany({
             where: { order_id: orderId, cancelled_at: null },
             select: { service_line_kind: true, cancelled_at: true, final_unit_price: true, quantity: true },
           }),
         ]);
-        const consumedCents = this.consumptionCents({
-          grand_total: new Prisma.Decimal(totals.grand_total),
-          tip_amount: orderTip?.tip_amount ?? null,
-          order_items: lines,
-        });
-        const shortfallCents = consumedCents - receivedCents;
+        const plan = this.settlementPlanNow(
+          { grand_total: new Prisma.Decimal(totals.grand_total), tip_amount: orderTip?.tip_amount ?? null, total_paid: orderTip?.total_paid ?? null, order_items: lines },
+          held,
+        );
+        // Account still owed after the deposit: the same plan the settlement would produce.
+        const shortfallCents = plan.to_collect_cents;
         if (receivedCents > 0 && shortfallCents > 0) {
           throw new VendixHttpException(
             ErrorCodes.SERVICE_DEPOSIT_007,
@@ -2256,6 +2278,7 @@ export class ServiceSessionsService {
     const minimumBasisCents = Math.max(0, consumptionCents - (await nonConsumptionGrossCents(tx, orderId)));
     // A paid or closed account cannot grow lines: its leftover is only refunded or credited.
     const leftoverPolicy = draft ? (session.leftover_policy as SessionLeftoverPolicy | null) : null;
+    // Same `planSettlement` the summary and the recharge guard run (`settlementPlanNow`), here with the live lines and the fee policy.
     const plan = planSettlement({
       consumption_cents: consumptionCents,
       paid_cents: toCents(order?.total_paid),
