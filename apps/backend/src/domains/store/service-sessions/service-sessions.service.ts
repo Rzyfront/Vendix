@@ -1701,7 +1701,21 @@ export class ServiceSessionsService {
       if (live.deposit_exhausted_policy === 'recharge' && live.deposit_policy && DEPOSIT_POLICIES.includes(live.deposit_policy)) {
         const held = await this.deposits.balanceOfInTx(tx, { store_id: storeId, sessionId: session.id, bookingId: session.booking_id });
         const receivedCents = toCents(held.received);
-        const shortfallCents = toCents(totals.grand_total) - receivedCents;
+        // Same base as the deposit summary (`remaining_for_consumption`): the rental, the extension and the tip
+        // are not consumption, so they never block an item the summary says still fits.
+        const [orderTip, lines] = await Promise.all([
+          tx.orders.findFirst({ where: { id: orderId }, select: { tip_amount: true } }),
+          tx.order_items.findMany({
+            where: { order_id: orderId, cancelled_at: null },
+            select: { service_line_kind: true, cancelled_at: true, final_unit_price: true, quantity: true },
+          }),
+        ]);
+        const consumedCents = this.consumptionCents({
+          grand_total: new Prisma.Decimal(totals.grand_total),
+          tip_amount: orderTip?.tip_amount ?? null,
+          order_items: lines,
+        });
+        const shortfallCents = consumedCents - receivedCents;
         if (receivedCents > 0 && shortfallCents > 0) {
           throw new VendixHttpException(
             ErrorCodes.SERVICE_DEPOSIT_007,

@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsInt,
   IsNumber,
   IsOptional,
@@ -33,6 +34,7 @@ export class StationRateWindowDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(9_999_999_999.99) // Decimal(12, 2)
   block_price: number;
 
   @IsOptional()
@@ -66,6 +68,6 @@ export class RentalQuoteQueryDto {
   @Min(1)
   variant_id?: number;
 
-  @IsString()
+  @IsDateString({}, { message: 'start_at debe ser una fecha y hora válida' })
   start_at: string;
 }

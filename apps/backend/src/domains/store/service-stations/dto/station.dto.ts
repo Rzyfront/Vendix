@@ -140,6 +140,7 @@ export class StationDepositRulesDto {
   @Type(() => Number)
   @IsInt()
   @Min(0)
+  @Max(8760) // one year
   cancel_refund_hours?: number | null;
 
   /** Tax category of the "Gastos de reserva" line (null = no tax). */

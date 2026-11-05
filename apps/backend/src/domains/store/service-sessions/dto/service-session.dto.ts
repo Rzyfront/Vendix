@@ -1,3 +1,4 @@
+import { payment_methods_type_enum } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -59,10 +60,8 @@ export class ServiceSessionDepositDto {
   @Min(0.01)
   amount: number;
 
-  /** Canonical method type: cash, bank_transfer, card... */
-  @IsString()
-  @MinLength(1)
-  @MaxLength(50)
+  /** Canonical method type: cash, bank_transfer, card... The ledger books `cash` to the drawer and the rest to the bank. */
+  @IsIn(Object.values(payment_methods_type_enum), { message: 'El método de pago no es válido' })
   method: string;
 
   @IsOptional()
@@ -86,8 +85,7 @@ export class SettleServiceSessionDto {
 
   /** How the refund leaves (cash, bank_transfer...). Defaults to `cash`. */
   @IsOptional()
-  @IsString()
-  @MaxLength(50)
+  @IsIn(Object.values(payment_methods_type_enum), { message: 'El método de pago no es válido' })
   refund_method?: string;
 
   @IsOptional()

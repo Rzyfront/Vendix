@@ -1315,6 +1315,30 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
       });
     });
 
+    it('in recharge mode the cap measures consumption only: extension and rental lines and the tip do not count (same base as the deposit summary)', async () => {
+      const { tx, order } = buildOrderTx([
+        { name: 'Extensión +60 min', gross: 100000, kind: 'extension' },
+        { name: 'Alquiler', gross: 50000, kind: 'rental' },
+        { name: 'Cerveza', gross: 250000 },
+      ]);
+      order.tip_amount = 20000;
+      tx.service_sessions.findFirst.mockResolvedValue(live());
+      deposits.balanceOfInTx.mockResolvedValue(balance(300000));
+      await expect(service.addItem(30, { product_id: 5 } as any)).resolves.toMatchObject({ order_id: 200 });
+    });
+
+    it('in recharge mode the cap still rejects consumption above the deposit when non-consumption lines exist', async () => {
+      const { tx } = buildOrderTx([
+        { name: 'Extensión +60 min', gross: 100000, kind: 'extension' },
+        { name: 'Cerveza', gross: 350000 },
+      ]);
+      tx.service_sessions.findFirst.mockResolvedValue(live());
+      deposits.balanceOfInTx.mockResolvedValue(balance(300000));
+      await expect(service.addItem(30, { product_id: 5 } as any)).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'SERVICE_DEPOSIT_007', message: expect.stringContaining('$50.000') }),
+      });
+    });
+
     it('en recarga acepta el consumo que cabe en el anticipo', async () => {
       const { tx } = buildOrderTx([{ name: 'Cerveza', gross: 400000 }]);
       tx.service_sessions.findFirst.mockResolvedValue(live());

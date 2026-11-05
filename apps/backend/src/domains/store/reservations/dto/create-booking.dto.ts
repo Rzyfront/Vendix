@@ -15,7 +15,7 @@ import {
   Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { order_channel_enum } from '@prisma/client';
+import { order_channel_enum, payment_methods_type_enum } from '@prisma/client';
 
 /**
  * Deposit taken with an admin booking of a station (S15). `desk` = the money is
@@ -33,8 +33,7 @@ export class BookingDepositDto {
 
   /** Canonical method of a desk deposit: cash, bank_transfer, card... Defaults to cash. */
   @IsOptional()
-  @IsString()
-  @MaxLength(32)
+  @IsIn(Object.values(payment_methods_type_enum), { message: 'El método de pago no es válido' })
   method?: string;
 
   @IsOptional()

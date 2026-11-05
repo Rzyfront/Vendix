@@ -1,5 +1,6 @@
 import { IsDateString, IsIn, IsInt, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
+import { payment_methods_type_enum } from '@prisma/client';
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -17,8 +18,7 @@ export class DepositDecisionDto {
 
   /** How a refund leaves: cash, bank_transfer... Defaults to cash. */
   @IsOptional()
-  @IsString()
-  @MaxLength(32)
+  @IsIn(Object.values(payment_methods_type_enum), { message: 'El método de pago no es válido' })
   refund_method?: string;
 
   @IsOptional()
