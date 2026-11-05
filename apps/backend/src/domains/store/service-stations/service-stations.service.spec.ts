@@ -220,6 +220,15 @@ describe('ServiceStationsService.findAll — próxima reserva y sesión activa',
     const nextCall = prisma.service_allocations.findMany.mock.calls.find((c: any[]) => c[0].where.state !== 'in_service');
     expect(nextCall[0].where).toEqual(expect.objectContaining({ store_id: 10, station_id: { in: [1, 2] }, start_at: { gte: expect.any(Date) } }));
   });
+
+  it('la próxima reserva no muestra la asignación de la atención en curso', async () => {
+    await run(() => service.findAll({} as any));
+    const nextCall = prisma.service_allocations.findMany.mock.calls.find((c: any[]) => c[0].where.state !== 'in_service');
+    // An early arrival keeps a future start_at on the session's own allocation:
+    // it is the current session, not the next reservation.
+    expect(nextCall[0].where.session_id).toBeNull();
+    expect(nextCall[0].where.state.in).not.toContain('in_service');
+  });
 });
 
 describe('ServiceStationsService.setSchedules — horarios nocturnos (S21)', () => {

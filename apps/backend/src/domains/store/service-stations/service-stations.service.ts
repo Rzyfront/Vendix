@@ -73,7 +73,15 @@ export class ServiceStationsService {
     if (!stationIds.length) return { next, session };
     const [upcoming, sessions] = await Promise.all([
       this.prisma.service_allocations.findMany({
-        where: { store_id: this.storeId, station_id: { in: stationIds }, state: { in: ACTIVE_ALLOCATION_STATES }, start_at: { gte: new Date() } },
+        // An allocation already attached to a session (early arrival) is the
+        // current session, not the next reservation.
+        where: {
+          store_id: this.storeId,
+          station_id: { in: stationIds },
+          state: { in: ACTIVE_ALLOCATION_STATES.filter((state) => state !== 'in_service') },
+          session_id: null,
+          start_at: { gte: new Date() },
+        },
         orderBy: [{ station_id: 'asc' }, { start_at: 'asc' }],
         distinct: ['station_id'],
         select: NEXT_RESERVATION_SELECT,
