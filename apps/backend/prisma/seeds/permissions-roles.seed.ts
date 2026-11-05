@@ -4819,6 +4819,46 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/apps/:kind/activate',
       method: 'POST',
     },
+
+    // Flujos (odd/tasks/flujos-documental.md, S3). Roles por defecto:
+    // owner/admin todo; manager lee/inicia/atiende; supervisor, employee y
+    // cashier inician y atienden.
+    {
+      name: 'store:workflows:read',
+      description: 'Ver flujos, solicitudes y tablero',
+      path: '/api/store/workflows',
+      method: 'GET',
+    },
+    {
+      name: 'store:workflows:design',
+      description: 'Crear y editar borradores de flujos, publicar, archivar, importar y exportar',
+      path: '/api/store/workflows',
+      method: 'POST',
+    },
+    {
+      name: 'store:workflows:start',
+      description: 'Crear solicitudes en los flujos habilitados para su rol',
+      path: '/api/store/workflows/instances',
+      method: 'POST',
+    },
+    {
+      name: 'store:workflows:task',
+      description: 'Atender las tareas asignadas a la persona, su rol o su grupo',
+      path: '/api/store/workflows/tasks/:id/complete',
+      method: 'POST',
+    },
+    {
+      name: 'store:workflows:manage',
+      description: 'Forzar transiciones, reasignar y cancelar solicitudes',
+      path: '/api/store/workflows/instances/:id/transition',
+      method: 'POST',
+    },
+    {
+      name: 'store:work_groups:manage',
+      description: 'Administrar grupos de trabajo y sus miembros',
+      path: '/api/store/work-groups',
+      method: 'POST',
+    },
   ];
 
   // Create-only seed: never delete existing permission rows.
@@ -5173,6 +5213,11 @@ export async function seedPermissionsAndRoles(
       // Campañas masivas gastan dinero (SMS/WhatsApp): solo owner/admin
       // (PLAN-CRM §4.1).
       p.name !== 'store:crm_campaigns:send' &&
+      // Flujos: el gerente lee, inicia y atiende; diseñar, forzar/cancelar y
+      // administrar grupos queda para owner/admin (odd flujos-ai-business §5.5).
+      p.name !== 'store:workflows:design' &&
+      p.name !== 'store:workflows:manage' &&
+      p.name !== 'store:work_groups:manage' &&
       // Documentos recibidos en el espacio de organización requieren un rol
       // ORG_ADMIN; el gerente conserva únicamente los tres permisos de tienda.
       !p.name.startsWith('organization:invoicing:received:') &&
@@ -5265,6 +5310,8 @@ export async function seedPermissionsAndRoles(
   // Assign basic permissions to supervisor
   const supervisorPermissions = allPermissions.filter(
     (p) =>
+      p.name === 'store:workflows:start' ||
+      p.name === 'store:workflows:task' ||
       p.name.includes('store:orders:') ||
       p.name.includes('store:payments:read') ||
       (p.name.startsWith('store:inventory:') && p.name.includes(':read')) ||
@@ -5328,6 +5375,8 @@ export async function seedPermissionsAndRoles(
   // Assign minimum permissions to employee
   const employeePermissions = allPermissions.filter(
     (p) =>
+      p.name === 'store:workflows:start' ||
+      p.name === 'store:workflows:task' ||
       p.name.includes('store:orders:create') ||
       p.name.includes('store:orders:read') ||
       // POS order flow (pay / ship / deliver / fast-track / cancel). The
@@ -5421,6 +5470,9 @@ export async function seedPermissionsAndRoles(
   // Assign permissions to cashier (lectura amplia, escritura limitada)
   const cashierPermissions = allPermissions.filter(
     (p) =>
+      // Flujos: inicia y atiende solicitudes
+      p.name === 'store:workflows:start' ||
+      p.name === 'store:workflows:task' ||
       // Autenticación básica
       p.name.includes('auth.login') ||
       p.name.includes('auth.logout') ||

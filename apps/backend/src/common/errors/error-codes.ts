@@ -40,6 +40,28 @@ export const ErrorCodes = {
   OPT_SELECTION_INVALID: { code: 'OPT_SELECTION_INVALID', httpStatus: 400, devMessage: 'Las adiciones elegidas no cumplen las reglas del producto.' },
   OPT_DRAFT_LINE_LOCKED: { code: 'OPT_DRAFT_LINE_LOCKED', httpStatus: 409, devMessage: 'Esta línea del borrador tiene adiciones y no se puede cambiar aquí: quítala y vuelve a agregarla con sus adiciones.' },
   OPT_DRAFT_ADD_LOCKED: { code: 'OPT_DRAFT_ADD_LOCKED', httpStatus: 409, devMessage: 'Este pedido ya está guardado: no se le pueden agregar productos con adiciones. Cóbralo o cancélalo y registra las adiciones en un pedido nuevo.' },
+  // Flujos (vendix.workflow/v1)
+  WORKFLOW_STALE: { code: 'WORKFLOW_STALE', httpStatus: 409, devMessage: 'Esta solicitud cambió; recarga.' },
+  WORKFLOW_NOT_FOUND: { code: 'WORKFLOW_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la solicitud.' },
+  WORKFLOW_DEFINITION_NOT_FOUND: { code: 'WORKFLOW_DEFINITION_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró el flujo.' },
+  WORKFLOW_TASK_NOT_FOUND: { code: 'WORKFLOW_TASK_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la tarea.' },
+  WORKFLOW_TASK_FORBIDDEN: { code: 'WORKFLOW_TASK_FORBIDDEN', httpStatus: 403, devMessage: 'Esta tarea no está asignada a ti.' },
+  WORKFLOW_TASK_CLOSED: { code: 'WORKFLOW_TASK_CLOSED', httpStatus: 409, devMessage: 'Esta tarea ya fue atendida o cerrada.' },
+  WORKFLOW_ALREADY_VOTED: { code: 'WORKFLOW_ALREADY_VOTED', httpStatus: 409, devMessage: 'Ya registraste tu voto en esta tarea.' },
+  WORKFLOW_CLAIM_NOT_ALLOWED: { code: 'WORKFLOW_CLAIM_NOT_ALLOWED', httpStatus: 409, devMessage: 'Esta tarea no se puede tomar.' },
+  WORKFLOW_REQUIREMENT_PENDING: { code: 'WORKFLOW_REQUIREMENT_PENDING', httpStatus: 409, devMessage: 'Faltan requisitos para avanzar.' },
+  WORKFLOW_NO_TRANSITION: { code: 'WORKFLOW_NO_TRANSITION', httpStatus: 422, devMessage: 'No hay una transición definida para este resultado.' },
+  WORKFLOW_COMMENT_REQUIRED: { code: 'WORKFLOW_COMMENT_REQUIRED', httpStatus: 422, devMessage: 'Esta decisión requiere un comentario.' },
+  WORKFLOW_FORM_INVALID: { code: 'WORKFLOW_FORM_INVALID', httpStatus: 422, devMessage: 'Los datos del formulario no son válidos.' },
+  WORKFLOW_OUTCOME_INVALID: { code: 'WORKFLOW_OUTCOME_INVALID', httpStatus: 422, devMessage: 'El resultado no es válido para esta etapa.' },
+  WORKFLOW_NOT_ACTIVE: { code: 'WORKFLOW_NOT_ACTIVE', httpStatus: 409, devMessage: 'El flujo no está publicado y activo.' },
+  WORKFLOW_START_FORBIDDEN: { code: 'WORKFLOW_START_FORBIDDEN', httpStatus: 403, devMessage: 'Tu rol no puede iniciar este flujo.' },
+  WORKFLOW_INSTANCE_CLOSED: { code: 'WORKFLOW_INSTANCE_CLOSED', httpStatus: 409, devMessage: 'La solicitud ya está cerrada.' },
+  WORKFLOW_STAGE_NOT_FOUND: { code: 'WORKFLOW_STAGE_NOT_FOUND', httpStatus: 422, devMessage: 'La etapa indicada no existe en este flujo.' },
+  WORKFLOW_GROUP_NOT_FOUND: { code: 'WORKFLOW_GROUP_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró el grupo de trabajo.' },
+  WORKFLOW_GROUP_DUPLICATE: { code: 'WORKFLOW_GROUP_DUPLICATE', httpStatus: 409, devMessage: 'Ya existe un grupo con ese nombre o clave.' },
+  WORKFLOW_GROUP_MEMBER_INVALID: { code: 'WORKFLOW_GROUP_MEMBER_INVALID', httpStatus: 422, devMessage: 'La persona no pertenece a esta tienda.' },
+
   // System
   SYS_INTERNAL_001: {
     code: 'SYS_INTERNAL_001',

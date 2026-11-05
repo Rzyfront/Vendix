@@ -8,6 +8,11 @@ datasource db {
 }
 
 model users {
+  workflow_definitions_created workflow_definitions[] @relation("workflow_definitions_created_by")
+  workflow_definitions_updated workflow_definitions[] @relation("workflow_definitions_updated_by")
+  workflow_versions_published  workflow_versions[]
+  work_group_memberships       work_group_members[]
+  workflow_task_votes          workflow_task_votes[]
   service_providers_as_user service_providers[] @relation("service_providers_user")
   service_reminder_logs_customer service_reminder_logs[] @relation("service_reminder_logs_customer_id_fkey")
   invoice_resolutions_archived invoice_resolutions[] @relation("invoice_resolutions_archived_by")
@@ -638,6 +643,10 @@ model order_events {
 }
 
 model organizations {
+  workflow_definitions workflow_definitions[]
+  work_groups          work_groups[]
+  workflow_instances   workflow_instances[]
+  workflow_tasks       workflow_tasks[]
   id                            Int                               @id @default(autoincrement())
   name                          String                            @db.VarChar(255)
   slug                          String                            @unique @db.VarChar(255)
@@ -937,6 +946,15 @@ model organization_payment_policies {
 }
 
 model stores {
+  workflow_definitions       workflow_definitions[]
+  workflow_versions          workflow_versions[]
+  work_groups                work_groups[]
+  work_group_members         work_group_members[]
+  workflow_instances         workflow_instances[]
+  workflow_tasks             workflow_tasks[]
+  workflow_task_votes        workflow_task_votes[]
+  workflow_instance_events   workflow_instance_events[]
+  workflow_outbox            workflow_outbox[]
   financial_splits order_financial_splits[]
   financial_accounts order_financial_accounts[]
   financial_lines order_financial_lines[]
@@ -5058,6 +5076,8 @@ enum notification_type_enum {
   subscription_renewal_upcoming
   partner_commission_available
   weekly_report
+  /// Flujos — aviso de tarea asignada, recordatorio o escalamiento.
+  workflow_task
   pqr_new
   pqr_update
   membership_expiring
@@ -15311,4 +15331,291 @@ model crm_message_templates {
   social_channel social_channels @relation(fields: [social_channel_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([social_channel_id, name, language])
+}
+
+
+// ============================================================================
+// Flujos (vendix.workflow/v1) — odd/tasks/flujos-documental.md, T3 / S3
+// Migración aditiva: prisma/migrations/20261113100000_workflows_core
+// ============================================================================
+
+enum workflow_definition_status_enum {
+  draft
+  active
+  archived
+}
+
+enum workflow_instance_status_enum {
+  active
+  completed
+  rejected
+  cancelled
+  failed
+}
+
+enum workflow_task_status_enum {
+  open
+  claimed
+  done
+  cancelled
+  expired
+}
+
+enum workflow_task_kind_enum {
+  form
+  approval
+  review
+}
+
+enum workflow_actor_type_enum {
+  user
+  public
+  system
+  ai
+}
+
+enum workflow_outbox_status_enum {
+  pending
+  processing
+  done
+  failed
+  dead
+}
+
+enum workflow_assignment_strategy_enum {
+  any
+  round_robin
+  least_load
+}
+
+model workflow_definitions {
+  id                   Int                             @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int
+  key                  String                          @db.VarChar(80)
+  name                 String                          @db.VarChar(160)
+  description          String?
+  status               workflow_definition_status_enum @default(draft)
+  /// Borrador editable (no ejecutable).
+  draft_definition     Json?
+  draft_updated_at     DateTime?                       @db.Timestamp(6)
+  published_version_id Int?                            @unique
+  category             String?                         @db.VarChar(60)
+  source_template_key  String?                         @db.VarChar(80)
+  created_by_user_id   Int
+  updated_by_user_id   Int?
+  created_at           DateTime                        @default(now()) @db.Timestamp(6)
+  updated_at           DateTime                        @default(now()) @updatedAt @db.Timestamp(6)
+
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store             stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by        users                @relation("workflow_definitions_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  updated_by        users?               @relation("workflow_definitions_updated_by", fields: [updated_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  published_version workflow_versions?   @relation("workflow_definition_published", fields: [published_version_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  versions          workflow_versions[]  @relation("workflow_definition_versions")
+  instances         workflow_instances[]
+
+  @@unique([store_id, key])
+  @@index([store_id, status])
+  @@index([organization_id])
+}
+
+model workflow_versions {
+  id                   Int      @id @default(autoincrement())
+  store_id             Int
+  definition_id        Int
+  version              Int
+  /// "vendix.workflow/v1"
+  schema_version       String   @db.VarChar(20)
+  /// INMUTABLE tras publicar.
+  definition           Json
+  /// sha256 del JSON canónico.
+  definition_hash      String   @db.Char(64)
+  published_by_user_id Int
+  published_at         DateTime @default(now()) @db.Timestamp(6)
+  changelog            String?
+
+  store        stores                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  definition_r workflow_definitions  @relation("workflow_definition_versions", fields: [definition_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  published_by users                 @relation(fields: [published_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  published_of workflow_definitions? @relation("workflow_definition_published")
+  instances    workflow_instances[]
+
+  @@unique([definition_id, version])
+  @@index([store_id])
+}
+
+model work_groups {
+  id                  Int                               @id @default(autoincrement())
+  organization_id     Int
+  store_id            Int
+  /// Slug estable que referencian las definiciones (`group_key`).
+  key                 String                            @db.VarChar(80)
+  name                String                            @db.VarChar(120)
+  description         String?
+  is_active           Boolean                           @default(true)
+  assignment_strategy workflow_assignment_strategy_enum @default(round_robin)
+  created_at          DateTime                          @default(now()) @db.Timestamp(6)
+  updated_at          DateTime                          @default(now()) @updatedAt @db.Timestamp(6)
+
+  organization organizations        @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store        stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  members      work_group_members[]
+  tasks        workflow_tasks[]
+
+  @@unique([store_id, key])
+  @@unique([store_id, name])
+}
+
+model work_group_members {
+  id            Int     @id @default(autoincrement())
+  store_id      Int
+  work_group_id Int
+  user_id       Int
+  is_lead       Boolean @default(false)
+  /// Vacaciones / ausente: no recibe asignaciones automáticas.
+  is_available  Boolean @default(true)
+
+  store      stores      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  work_group work_groups @relation(fields: [work_group_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  user       users       @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([work_group_id, user_id])
+  @@index([store_id, user_id])
+}
+
+model workflow_instances {
+  id                    Int                           @id @default(autoincrement())
+  organization_id       Int
+  store_id              Int
+  definition_id         Int
+  /// Fija para toda la vida de la solicitud.
+  version_id            Int
+  /// "FLU-000123", correlativo por tienda.
+  reference             String                        @db.VarChar(30)
+  title                 String                        @db.VarChar(200)
+  status                workflow_instance_status_enum @default(active)
+  current_stage_key     String                        @db.VarChar(80)
+  stage_entered_at      DateTime                      @db.Timestamp(6)
+  stage_due_at          DateTime?                     @db.Timestamp(6)
+  /// n-ésima entrada a la etapa actual (bucles); las tareas la copian.
+  stage_entry_seq       Int                           @default(1)
+  stage_last_reminded_at DateTime?                    @db.Timestamp(6)
+  stage_escalated_at    DateTime?                     @db.Timestamp(6)
+  cancel_reason         String?
+  data                  Json                          @default("{}")
+  subject_type          String?                       @db.VarChar(40)
+  subject_id            Int?
+  started_by_type       workflow_actor_type_enum
+  started_by_id         Int?
+  /// CAS.
+  row_version           Int                           @default(0)
+  completed_at          DateTime?                     @db.Timestamp(6)
+  created_at            DateTime                      @default(now()) @db.Timestamp(6)
+  updated_at            DateTime                      @default(now()) @updatedAt @db.Timestamp(6)
+
+  organization organizations             @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store        stores                    @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  definition   workflow_definitions      @relation(fields: [definition_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  version      workflow_versions         @relation(fields: [version_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  tasks        workflow_tasks[]
+  events       workflow_instance_events[]
+
+  @@unique([store_id, reference])
+  @@index([store_id, definition_id, status, current_stage_key])
+  @@index([store_id, status, stage_due_at])
+  @@index([store_id, subject_type, subject_id])
+}
+
+model workflow_tasks {
+  id                   Int                       @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int
+  instance_id          Int
+  stage_key            String                    @db.VarChar(80)
+  stage_entry_seq      Int
+  kind                 workflow_task_kind_enum
+  status               workflow_task_status_enum @default(open)
+  assignee_user_id     Int?
+  assignee_role_id     Int?
+  assignee_group_id    Int?
+  claimed_at           DateTime?                 @db.Timestamp(6)
+  due_at               DateTime?                 @db.Timestamp(6)
+  outcome              String?                   @db.VarChar(40)
+  outcome_comment      String?
+  completed_by_user_id Int?
+  completed_at         DateTime?                 @db.Timestamp(6)
+  created_at           DateTime                  @default(now()) @db.Timestamp(6)
+
+  organization organizations        @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store        stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  instance     workflow_instances   @relation(fields: [instance_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  group        work_groups?         @relation(fields: [assignee_group_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  votes        workflow_task_votes[]
+
+  @@index([store_id, assignee_user_id, status, due_at])
+  @@index([store_id, assignee_group_id, status])
+  @@index([store_id, assignee_role_id, status])
+  @@index([instance_id, stage_key, stage_entry_seq])
+}
+
+/// Votos de quórum: una fila por persona y tarea de aprobación.
+model workflow_task_votes {
+  id         Int      @id @default(autoincrement())
+  store_id   Int
+  task_id    Int
+  user_id    Int
+  outcome    String   @db.VarChar(40)
+  comment    String?
+  created_at DateTime @default(now()) @db.Timestamp(6)
+
+  store stores         @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  task  workflow_tasks @relation(fields: [task_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  user  users          @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([task_id, user_id])
+  @@index([store_id])
+}
+
+/// Historial append-only.
+model workflow_instance_events {
+  id              BigInt                   @id @default(autoincrement())
+  store_id        Int
+  instance_id     Int
+  /// 1..n por instancia.
+  seq             Int
+  type            String                   @db.VarChar(40)
+  from_stage_key  String?                  @db.VarChar(80)
+  to_stage_key    String?                  @db.VarChar(80)
+  actor_type      workflow_actor_type_enum
+  actor_id        Int?
+  payload         Json                     @default("{}")
+  idempotency_key String?                  @db.VarChar(80)
+  occurred_at     DateTime                 @default(now()) @db.Timestamp(6)
+
+  store    stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  instance workflow_instances @relation(fields: [instance_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([instance_id, seq])
+  @@unique([store_id, idempotency_key])
+  @@index([store_id, occurred_at])
+}
+
+/// Efectos diferidos (patrón outbox): notify | advance.
+model workflow_outbox {
+  id           BigInt                      @id @default(autoincrement())
+  store_id     Int
+  instance_id  Int?
+  kind         String                      @db.VarChar(40)
+  payload      Json
+  status       workflow_outbox_status_enum @default(pending)
+  attempts     Int                         @default(0)
+  available_at DateTime                    @default(now()) @db.Timestamp(6)
+  last_error   String?
+  created_at   DateTime                    @default(now()) @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([status, available_at])
+  @@index([store_id, instance_id])
 }

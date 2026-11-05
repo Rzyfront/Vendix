@@ -231,6 +231,16 @@ export class StorePrismaService extends BasePrismaService {
     // ===== CRM (PLAN-CRM §2.3) =====
     // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
     'crm_conversations',
+    // Flujos (T3/S3): todas llevan `store_id` propio NOT NULL → scoping directo.
+    'workflow_definitions',
+    'workflow_versions',
+    'work_groups',
+    'work_group_members',
+    'workflow_instances',
+    'workflow_tasks',
+    'workflow_task_votes',
+    'workflow_instance_events',
+    'workflow_outbox',
     'crm_messages',
     'crm_tags',
     'crm_customer_tags',
@@ -1894,6 +1904,42 @@ export class StorePrismaService extends BasePrismaService {
   }
 
   // CRM (PLAN-CRM §2.3)
+  get workflow_definitions() {
+    return this.scoped_client.workflow_definitions;
+  }
+
+  get workflow_versions() {
+    return this.scoped_client.workflow_versions;
+  }
+
+  get work_groups() {
+    return this.scoped_client.work_groups;
+  }
+
+  get work_group_members() {
+    return this.scoped_client.work_group_members;
+  }
+
+  get workflow_instances() {
+    return this.scoped_client.workflow_instances;
+  }
+
+  get workflow_tasks() {
+    return this.scoped_client.workflow_tasks;
+  }
+
+  get workflow_task_votes() {
+    return this.scoped_client.workflow_task_votes;
+  }
+
+  get workflow_instance_events() {
+    return this.scoped_client.workflow_instance_events;
+  }
+
+  get workflow_outbox() {
+    return this.scoped_client.workflow_outbox;
+  }
+
   get crm_conversations() {
     return this.scoped_client.crm_conversations;
   }
