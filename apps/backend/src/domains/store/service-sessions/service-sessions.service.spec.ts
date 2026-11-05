@@ -600,6 +600,57 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
       });
     });
 
+    describe('closePending — cerrar dejando el saldo por cobrar', () => {
+      const orderMock = (remaining: number, customerId: number | null) =>
+        tx.orders.findFirst.mockImplementation((args: any) =>
+          Promise.resolve(
+            args?.select?.remaining_balance !== undefined
+              ? { remaining_balance: remaining, customer_id: customerId }
+              : { grand_total: 100, tip_amount: 0, currency: 'COP' },
+          ),
+        );
+
+      it('rechaza con STATION_015 si hay saldo y la orden no tiene cliente identificado', async () => {
+        orderMock(50000, null);
+        await expect(service.closePending(21)).rejects.toMatchObject({
+          errorCode: 'STATION_015',
+          response: expect.objectContaining({
+            message: 'Para dejar la cuenta por cobrar, la atención debe tener un cliente identificado.',
+          }),
+        });
+        expect(tx.service_sessions.updateMany).not.toHaveBeenCalled();
+        expect(tx.service_allocations.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('con cliente cierra, libera la asignación y deja el saldo intacto', async () => {
+        orderMock(50000, 77);
+        tx.orders.updateMany = jest.fn();
+        tx.bookings = { updateMany: jest.fn() };
+        await expect(service.closePending(21)).resolves.toMatchObject({ id: 21, status: 'closed', balance_pending: 50000 });
+        expect(tx.service_allocations.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ state: 'released' }) }),
+        );
+        // The order is neither finished nor cancelled and its balance is not rewritten.
+        expect(tx.orders.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('con saldo cero simplemente cierra', async () => {
+        orderMock(0, null);
+        await expect(service.closePending(21)).resolves.toMatchObject({ status: 'closed', balance_pending: 0 });
+      });
+
+      it('el cierre normal sigue rechazando el saldo pendiente con STATION_006', async () => {
+        orderMock(50000, 77);
+        await expect(service.transition(21, { action: 'close' } as any)).rejects.toMatchObject({
+          errorCode: 'STATION_006',
+          response: expect.objectContaining({
+            message: 'La atención tiene saldo pendiente; registra el pago antes de finalizar.',
+          }),
+        });
+        expect(tx.service_sessions.updateMany).not.toHaveBeenCalled();
+      });
+    });
+
     describe('alquiler por bloque de la estación', () => {
       const withTariff = () => {
         tx.service_stations.findFirst.mockResolvedValue({ name: 'Sala 1', rental_block_minutes: 30, rental_block_price: 20000 });
@@ -908,6 +959,89 @@ describe('ServiceSessionsService — intake (Recolección de datos) y carga masi
         response: expect.objectContaining({ error_code: 'STATION_009' }),
       });
       expect(pickStation).not.toHaveBeenCalled();
+    });
+  });
+});
+
+
+describe('ServiceSessionsService — próxima reserva y choques al extender', () => {
+  let service: ServiceSessionsService;
+  let prisma: any;
+
+  beforeEach(() => {
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue({ store_id: 1, user_id: 9, roles: ['admin'], permissions: [] } as any);
+    prisma = {
+      service_sessions: { findFirst: jest.fn() },
+      service_subjects: { findMany: jest.fn().mockResolvedValue([]) },
+      service_allocations: { findMany: jest.fn(), findFirst: jest.fn() },
+      service_progress_events: { findMany: jest.fn().mockResolvedValue([]) },
+      orders: { findFirst: jest.fn() },
+      store_settings: { findFirst: jest.fn().mockResolvedValue({ settings: {}, stores: { timezone: 'America/Bogota' } }) },
+      $transaction: jest.fn(),
+    };
+    service = new ServiceSessionsService(prisma, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  describe('findOne', () => {
+    const start = new Date('2026-11-05T01:00:00Z');
+    const end = new Date('2026-11-05T03:00:00Z');
+    beforeEach(() => {
+      prisma.service_sessions.findFirst.mockResolvedValue({ id: 21, store_id: 1, station_id: 9, order_id: null, booking_id: null, status: 'open', opened_at: start });
+      prisma.service_allocations.findMany.mockResolvedValue([{ id: 5, station_id: 9, session_id: 21, state: 'in_service', start_at: start, end_at: end, created_at: start }]);
+      jest.spyOn(service as any, 'buildIntakeSummary').mockResolvedValue(null);
+    });
+
+    it('expone opened_at, planned_end_at y la próxima reserva de la misma estación (sin la propia)', async () => {
+      prisma.service_allocations.findFirst.mockResolvedValue({
+        id: 6,
+        booking_id: 44,
+        start_at: new Date('2026-11-05T07:00:00Z'),
+        booking: { customer: { first_name: 'Ana', last_name: 'Pérez' } },
+      });
+      const result: any = await service.findOne(21);
+      expect(result.opened_at).toEqual(start);
+      expect(result.planned_end_at).toBe(end.toISOString());
+      expect(result.next_reservation).toEqual({ start_at: '2026-11-05T07:00:00.000Z', booking_id: 44, customer_name: 'Ana Pérez' });
+      expect(prisma.service_allocations.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+          store_id: 1,
+          station_id: 9,
+          id: { not: 5 },
+          state: { in: ['held', 'payment_pending', 'confirmed', 'in_service'] },
+          start_at: { gt: start },
+        }),
+        orderBy: { start_at: 'asc' },
+      }));
+    });
+
+    it('sin otra reserva devuelve next_reservation null', async () => {
+      prisma.service_allocations.findFirst.mockResolvedValue(null);
+      const result: any = await service.findOne(21);
+      expect(result.next_reservation).toBeNull();
+    });
+  });
+
+  describe('extend — mensaje de choque', () => {
+    it('nombra la hora local del inicio conflictivo en STATION_002', async () => {
+      const now = Date.now();
+      const tx: any = {
+        service_sessions: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        service_allocations: {
+          findFirst: jest.fn()
+            .mockResolvedValueOnce({ id: 5, station_id: 9, provider_id: null, start_at: new Date(now - 3_600_000), end_at: new Date(now + 3_600_000) })
+            .mockResolvedValueOnce({ id: 6, start_at: new Date('2026-11-05T07:00:00Z') }),
+          updateMany: jest.fn(),
+        },
+      };
+      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      jest.spyOn(service, 'findOne').mockResolvedValue({ id: 21, status: 'open' } as any);
+      await expect(service.extend(21, new Date(now + 5 * 3_600_000))).rejects.toMatchObject({
+        errorCode: 'STATION_002',
+        response: expect.objectContaining({ message: expect.stringContaining('02:00') }),
+      });
+      expect(tx.service_allocations.updateMany).not.toHaveBeenCalled();
     });
   });
 });

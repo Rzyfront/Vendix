@@ -13,7 +13,8 @@ import {
 import { assertSaleNatureProducts } from '../products/services/product-usage-nature.util';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { resolveStoreTimezone } from '../../../common/utils/store-timezone.util';
+import { localTimeString, resolveStoreTimezone } from '../../../common/utils/store-timezone.util';
+import { ACTIVE_ALLOCATION_STATES, NEXT_RESERVATION_SELECT, toNextReservation } from './utils/next-reservation.util';
 import { BusinessHoursService } from '../reservations/business-hours/business-hours.service';
 import { ServiceAllocationCoordinator } from '../reservations/service-allocation-coordinator.service';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
@@ -29,7 +30,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 
-const ACTIVE_ALLOCATIONS = ['held', 'payment_pending', 'confirmed', 'in_service'];
+const ACTIVE_ALLOCATIONS = ACTIVE_ALLOCATION_STATES;
 const ACTIVE_SESSION_STATUSES = ['open', 'paused'];
 const ITEM_SESSION_STATUSES = ['open', 'in_progress', 'paused'];
 /** Reintentos de un walk-in sin estación cuando otra atención le gana la estación elegida. */
@@ -788,9 +789,28 @@ export class ServiceSessionsService {
 
 
   async transition(id: number, dto: ServiceSessionTransitionDto) {
+    if (dto.action === 'change_provider') {
+      this.requireContext();
+      await this.findOne(id);
+      return this.changeProvider(id, dto.provider_id);
+    }
+    return (await this.runTransition(id, dto, false)).updated;
+  }
+
+  /**
+   * Admin close that leaves the account receivable: same close as `transition`
+   * (rental line, allocations released, booking completed) but a pending balance
+   * does not block it. The order is neither finished nor cancelled.
+   */
+  async closePending(id: number) {
+    const { updated, balancePending } = await this.runTransition(id, { action: 'close' } as ServiceSessionTransitionDto, true);
+    return { ...updated, balance_pending: balancePending };
+  }
+
+  private async runTransition(id: number, dto: ServiceSessionTransitionDto, allowPendingBalance: boolean) {
     const { storeId, userId } = this.requireContext();
+    let balancePending = 0;
     const existing = await this.findOne(id);
-    if (dto.action === 'change_provider') return this.changeProvider(id, dto.provider_id);
     const terminal = ['close', 'cancel', 'no_show'].includes(dto.action);
     const nextStatus = dto.action === 'pause' ? 'paused' : dto.action === 'resume' ? 'open' : dto.action === 'close' ? 'closed' : dto.action === 'cancel' ? 'cancelled' : 'no_show';
     const allowed = dto.action === 'pause' ? existing.status === 'open'
@@ -815,9 +835,17 @@ export class ServiceSessionsService {
         if (locked.state !== 'cancelled') {
           const totals = await tx.orders.findFirst({
             where: { id: existing.order_id, store_id: storeId },
-            select: { remaining_balance: true },
+            select: { remaining_balance: true, customer_id: true },
           });
-          if (totals && Number(totals.remaining_balance) > 0) {
+          if (totals && Number(totals.remaining_balance) > 0 && allowPendingBalance) {
+            if (!totals.customer_id) {
+              throw new VendixHttpException(
+                ErrorCodes.STATION_015,
+                'Para dejar la cuenta por cobrar, la atención debe tener un cliente identificado.',
+              );
+            }
+            balancePending = Number(totals.remaining_balance);
+          } else if (totals && Number(totals.remaining_balance) > 0) {
             throw new VendixHttpException(
               ErrorCodes.STATION_006,
               'La atención tiene saldo pendiente; registra el pago antes de finalizar.',
@@ -855,7 +883,7 @@ export class ServiceSessionsService {
       return { id, status: nextStatus, closed_at: terminal ? new Date() : null };
     });
     this.emit(storeId, id, dto.action === 'resume' ? 'resumed' : dto.action === 'pause' ? 'paused' : nextStatus, { status: nextStatus });
-    return updated;
+    return { updated, balancePending };
   }
 
   /**
@@ -1002,9 +1030,16 @@ export class ServiceSessionsService {
       if (!allocation || plannedEndAt <= allocation.end_at || plannedEndAt <= now) throw new VendixHttpException(ErrorCodes.STATION_009);
       const conflict = await tx.service_allocations.findFirst({
         where: { store_id: storeId, id: { not: allocation.id }, state: { in: ACTIVE_ALLOCATIONS }, start_at: { lt: plannedEndAt }, end_at: { gt: allocation.start_at }, OR: [{ station_id: allocation.station_id }, ...(allocation.provider_id ? [{ provider_id: allocation.provider_id }] : [])] },
-        select: { id: true },
+        orderBy: { start_at: 'asc' },
+        select: { id: true, start_at: true },
       });
-      if (conflict) throw new VendixHttpException(allocation.provider_id ? ErrorCodes.STATION_003 : ErrorCodes.STATION_002);
+      if (conflict) {
+        const timezone = await resolveStoreTimezone(this.prisma, storeId);
+        const from = localTimeString(conflict.start_at, timezone).slice(0, 5);
+        throw allocation.provider_id
+          ? new VendixHttpException(ErrorCodes.STATION_003, `El especialista tiene otra reserva desde las ${from}.`)
+          : new VendixHttpException(ErrorCodes.STATION_002, `La estación tiene otra reserva desde las ${from}.`);
+      }
       try {
         await tx.service_allocations.updateMany({ where: { id: allocation.id, store_id: storeId, session_id: id }, data: { end_at: plannedEndAt, updated_at: now } });
       } catch (error) {
@@ -1063,7 +1098,27 @@ export class ServiceSessionsService {
         }))(order)
       : null;
     const intake = await this.buildIntakeSummary(session, order?.customer_id ?? null);
-    return { ...session, subjects, allocations, progress_events: progressEvents, events_have_older: eventsHaveOlder, order: normalizedOrder, intake };
+    const ownAllocation = allocations.find((row) => row.state === 'in_service')
+      ?? allocations.find((row) => ACTIVE_ALLOCATIONS.includes(row.state));
+    const nextRow = ownAllocation
+      ? await this.prisma.service_allocations.findFirst({
+          where: { store_id: storeId, station_id: session.station_id, id: { not: ownAllocation.id }, state: { in: ACTIVE_ALLOCATIONS }, start_at: { gt: ownAllocation.start_at } },
+          orderBy: { start_at: 'asc' },
+          select: NEXT_RESERVATION_SELECT,
+        })
+      : null;
+    const plannedEnd = allocations.find((row) => row.state === 'in_service')?.end_at ?? null;
+    return {
+      ...session,
+      subjects,
+      allocations,
+      progress_events: progressEvents,
+      events_have_older: eventsHaveOlder,
+      order: normalizedOrder,
+      intake,
+      planned_end_at: plannedEnd ? plannedEnd.toISOString() : null,
+      next_reservation: toNextReservation(nextRow),
+    };
   }
 
   async listActive(cursor?: number) {

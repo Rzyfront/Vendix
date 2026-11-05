@@ -5478,6 +5478,11 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'No active store domain to build the station public URL',
   },
+  STATION_015: {
+    code: 'STATION_015',
+    httpStatus: 409,
+    devMessage: 'Closing a station session with a pending balance requires an identified customer on the order',
+  },
   SERVICE_BOOKING_001: {
     code: 'SERVICE_BOOKING_001',
     httpStatus: 409,

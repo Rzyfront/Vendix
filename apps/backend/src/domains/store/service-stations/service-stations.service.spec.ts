@@ -169,3 +169,55 @@ describe('ServiceStationsService — impuesto del alquiler', () => {
     expect(data).not.toHaveProperty('rental_tax_is_inclusive');
   });
 });
+
+
+describe('ServiceStationsService.findAll — próxima reserva y sesión activa', () => {
+  const context: RequestContext = { store_id: 10, is_super_admin: false, is_owner: false };
+  let service: ServiceStationsService;
+  let prisma: Record<string, any>;
+
+  beforeEach(() => {
+    prisma = {
+      service_stations: {
+        findMany: jest.fn().mockResolvedValue([{ id: 1, name: 'Cava 1' }, { id: 2, name: 'Cava 2' }]),
+        count: jest.fn().mockResolvedValue(2),
+      },
+      service_station_services: { findMany: jest.fn().mockResolvedValue([]) },
+      service_station_providers: { findMany: jest.fn().mockResolvedValue([]) },
+      service_allocations: {
+        findMany: jest.fn().mockImplementation((args: any) =>
+          Promise.resolve(
+            args.where.state === 'in_service'
+              ? [{ session_id: 70, end_at: new Date('2026-11-05T03:00:00Z') }]
+              : [{ station_id: 1, booking_id: 8, start_at: new Date('2026-11-05T07:00:00Z'), booking: { customer: { first_name: 'Ana', last_name: null } } }],
+          ),
+        ),
+      },
+      service_sessions: {
+        findMany: jest.fn().mockResolvedValue([{ id: 70, station_id: 2, opened_at: new Date('2026-11-05T01:00:00Z'), status: 'open' }]),
+      },
+    };
+    service = new ServiceStationsService(prisma as unknown as StorePrismaService, {} as any);
+  });
+
+  const run = <T,>(fn: () => Promise<T>) => RequestContextService.runIsolated(context, fn);
+
+  it('agrega next_reservation y active_session con consultas en lote', async () => {
+    const result = await run(() => service.findAll({} as any));
+    const [s1, s2]: any[] = result.data;
+    expect(s1.next_reservation).toEqual({ start_at: '2026-11-05T07:00:00.000Z', booking_id: 8, customer_name: 'Ana' });
+    expect(s1.active_session).toBeNull();
+    expect(s2.next_reservation).toBeNull();
+    expect(s2.active_session).toEqual({
+      id: 70,
+      opened_at: new Date('2026-11-05T01:00:00Z'),
+      planned_end_at: '2026-11-05T03:00:00.000Z',
+      status: 'open',
+    });
+    // One batched query per concern, never per station.
+    expect(prisma.service_sessions.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.service_allocations.findMany).toHaveBeenCalledTimes(2);
+    const nextCall = prisma.service_allocations.findMany.mock.calls.find((c: any[]) => c[0].where.state !== 'in_service');
+    expect(nextCall[0].where).toEqual(expect.objectContaining({ store_id: 10, station_id: { in: [1, 2] }, start_at: { gte: expect.any(Date) } }));
+  });
+});

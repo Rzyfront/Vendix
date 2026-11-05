@@ -17,6 +17,7 @@ import {
   UpdateServiceStationDto,
 } from './dto/station.dto';
 import { StationListQueryDto } from './dto/station-list-query.dto';
+import { ACTIVE_ALLOCATION_STATES, NEXT_RESERVATION_SELECT, toNextReservation } from '../service-sessions/utils/next-reservation.util';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 
 @Injectable()
@@ -48,12 +49,54 @@ export class ServiceStationsService {
       }),
       this.prisma.service_stations.count({ where }),
     ]);
+    const [withCaps, liveState] = await Promise.all([
+      Promise.all(stations.map((station) => this.withCapabilities(station))),
+      this.liveStateByStation(stations.map((station) => station.id)),
+    ]);
     return {
-      data: await Promise.all(stations.map((station) => this.withCapabilities(station))),
+      data: withCaps.map((station) => ({
+        ...station,
+        next_reservation: liveState.next.get(station.id) ?? null,
+        active_session: liveState.session.get(station.id) ?? null,
+      })),
       total,
       page,
       limit,
     };
+  }
+
+  /** Next reservation and active session per station, in three batched queries. */
+  private async liveStateByStation(stationIds: number[]) {
+    const next = new Map<number, ReturnType<typeof toNextReservation>>();
+    const session = new Map<number, { id: number; opened_at: Date; planned_end_at: string | null; status: string }>();
+    if (!stationIds.length) return { next, session };
+    const [upcoming, sessions] = await Promise.all([
+      this.prisma.service_allocations.findMany({
+        where: { store_id: this.storeId, station_id: { in: stationIds }, state: { in: ACTIVE_ALLOCATION_STATES }, start_at: { gte: new Date() } },
+        orderBy: [{ station_id: 'asc' }, { start_at: 'asc' }],
+        distinct: ['station_id'],
+        select: NEXT_RESERVATION_SELECT,
+      }),
+      this.prisma.service_sessions.findMany({
+        where: { store_id: this.storeId, station_id: { in: stationIds }, status: { in: ['open', 'paused'] } },
+        orderBy: { id: 'desc' },
+        select: { id: true, station_id: true, opened_at: true, status: true },
+      }),
+    ]);
+    for (const row of upcoming) next.set(row.station_id, toNextReservation(row));
+    const inService = sessions.length
+      ? await this.prisma.service_allocations.findMany({
+          where: { store_id: this.storeId, session_id: { in: sessions.map((row) => row.id) }, state: 'in_service' },
+          select: { session_id: true, end_at: true },
+        })
+      : [];
+    const endBySession = new Map<number | null, Date>(inService.map((row) => [row.session_id, row.end_at] as [number | null, Date]));
+    for (const row of sessions) {
+      if (session.has(row.station_id)) continue;
+      const end = endBySession.get(row.id);
+      session.set(row.station_id, { id: row.id, opened_at: row.opened_at, planned_end_at: end ? end.toISOString() : null, status: row.status });
+    }
+    return { next, session };
   }
 
   private async withCapabilities(station: any) {

@@ -1165,6 +1165,12 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/reservations/:id/check-in',
       method: 'POST',
     },
+    {
+      name: 'store:reservations:close_with_balance',
+      description: 'Cerrar una atención de estación dejando el saldo por cobrar',
+      path: '/api/store/service-sessions/:id/close-pending',
+      method: 'POST',
+    },
 
     // ===== Business hours (appointment redesign phase 1) =====
     {

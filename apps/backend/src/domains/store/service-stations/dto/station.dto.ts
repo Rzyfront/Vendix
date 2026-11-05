@@ -59,8 +59,8 @@ export class CreateServiceStationDto {
   name: string;
 
   @IsOptional()
-  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'general', 'celular'])
-  station_type?: 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular';
+  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'general', 'celular', 'cava', 'cancha', 'sala', 'finca'])
+  station_type?: 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular' | 'cava' | 'cancha' | 'sala' | 'finca';
 
   @IsOptional()
   @Type(() => Number)
@@ -133,8 +133,8 @@ export class UpdateServiceStationDto {
   name?: string;
 
   @IsOptional()
-  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'general', 'celular'])
-  station_type?: 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular';
+  @IsIn(['carro', 'moto', 'peluqueria', 'barberia', 'salon_belleza', 'general', 'celular', 'cava', 'cancha', 'sala', 'finca'])
+  station_type?: 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular' | 'cava' | 'cancha' | 'sala' | 'finca';
 
   @IsOptional()
   @Type(() => Number)

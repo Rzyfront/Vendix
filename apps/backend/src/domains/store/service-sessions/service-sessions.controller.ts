@@ -84,6 +84,12 @@ export class ServiceSessionsController {
     return this.response.updated(await this.sessions.transition(id, dto), 'Atención actualizada');
   }
 
+  @Post(':id/close-pending')
+  @Permissions('store:reservations:close_with_balance')
+  async closePending(@Param('id', ParseIntPipe) id: number) {
+    return this.response.updated(await this.sessions.closePending(id), 'Atención cerrada con saldo por cobrar');
+  }
+
   @Patch(':id/extend')
   @Permissions('store:reservations:update')
   async extend(
