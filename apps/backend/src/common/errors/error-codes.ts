@@ -5483,6 +5483,21 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Closing a station session with a pending balance requires an identified customer on the order',
   },
+  STATION_016: {
+    code: 'STATION_016',
+    httpStatus: 409,
+    devMessage: 'The requested interval is outside the station or store opening hours',
+  },
+  STATION_017: {
+    code: 'STATION_017',
+    httpStatus: 400,
+    devMessage: 'The service duration must be a multiple of the station booking block',
+  },
+  STATION_018: {
+    code: 'STATION_018',
+    httpStatus: 409,
+    devMessage: 'The station assigned to the provider cannot serve this booking',
+  },
   SERVICE_BOOKING_001: {
     code: 'SERVICE_BOOKING_001',
     httpStatus: 409,
@@ -6106,6 +6121,15 @@ export const ErrorCodes = {
   STATION_BOOKING_009: { code: 'STATION_BOOKING_009', httpStatus: 400, devMessage: 'Faltan datos para la decisión del anticipo.' },
   STATION_BOOKING_010: { code: 'STATION_BOOKING_010', httpStatus: 409, devMessage: 'Esta estación cobra anticipo: reserva desde el flujo de reservas, no desde el carrito.' },
   STATION_BOOKING_011: { code: 'STATION_BOOKING_011', httpStatus: 400, devMessage: 'Una serie recurrente no se permite en estaciones con cobro para reservar o anticipo obligatorio.' },
+  STATION_BOOKING_012: { code: 'STATION_BOOKING_012', httpStatus: 409, devMessage: 'La reserva tiene un cobro recibido: elige si devolverlo, dejarlo como saldo a favor o retenerlo.' },
+  STATION_BOOKING_013: { code: 'STATION_BOOKING_013', httpStatus: 403, devMessage: 'Esta tienda no permite reservar sin iniciar sesión.' },
+  STATION_BOOKING_014: { code: 'STATION_BOOKING_014', httpStatus: 400, devMessage: 'Para reservar sin cuenta indica tu nombre, correo y teléfono.' },
+  STATION_BOOKING_015: { code: 'STATION_BOOKING_015', httpStatus: 409, devMessage: 'La reserva no tiene un cobro pendiente por registrar.' },
+  STATION_BOOKING_016: { code: 'STATION_BOOKING_016', httpStatus: 400, devMessage: 'El método de pago o la cuenta no son válidos para este cobro.' },
+  STATION_BOOKING_017: { code: 'STATION_BOOKING_017', httpStatus: 409, devMessage: 'Esa opción no está permitida para cancelar esta reserva.' },
+  STATION_BOOKING_018: { code: 'STATION_BOOKING_018', httpStatus: 400, devMessage: 'Lo pagado se devuelve por el mismo medio con que pagó el cliente: no elijas un medio de devolución.' },
+  STATION_BOOKING_019: { code: 'STATION_BOOKING_019', httpStatus: 409, devMessage: 'La cancelación de esta reserva ya empezó con otra opción: repítela con la misma opción.' },
+  STATION_BOOKING_020: { code: 'STATION_BOOKING_020', httpStatus: 409, devMessage: 'Esta reserva ya está pagada: para cancelarla, comunícate con la tienda.' },
   // Station rental "cobro para reservar" (T15, S1)
   RENTAL_PREPAY_001: { code: 'RENTAL_PREPAY_001', httpStatus: 400, devMessage: 'Esta estación no cobra para reservar.' },
   RENTAL_PREPAY_002: { code: 'RENTAL_PREPAY_002', httpStatus: 400, devMessage: 'La reserva no tiene un valor cotizado para calcular el cobro.' },

@@ -10,3 +10,4 @@ export * from './send-confirmation.dto';
 export * from './check-in.dto';
 export * from './cancel-booking.dto';
 export * from './deposit-decision.dto';
+export * from './register-prepay-payment.dto';

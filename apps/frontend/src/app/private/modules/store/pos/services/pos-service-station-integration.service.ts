@@ -117,6 +117,8 @@ export interface PosOpenSessionPayload {
   product_variant_id?: number;
   customer_id?: number;
   deposit?: SessionDepositInput;
+  /** Answers of the intake form (`entity_metadata_fields.id` -> value). */
+  intake_values?: Array<{ field_id: number; value: string | number | boolean | null }>;
   subject?: { subject_type: string; label: string };
 }
 

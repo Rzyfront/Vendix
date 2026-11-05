@@ -23,6 +23,7 @@ import {
   PAYMENT_REQUEST_STATUS_LABELS,
   PaymentRequest,
   PaymentRequestStatus,
+  paymentRequestPurposeLabel,
 } from './interfaces/payment-request.interface';
 import { PaymentRequestsService } from './services/payment-requests.service';
 import { PaymentRequestDetailModalComponent } from './components/payment-request-detail-modal/payment-request-detail-modal.component';
@@ -89,6 +90,7 @@ export class PaymentRequestsPageComponent implements OnInit {
 
   readonly columns: TableColumn[] = [
     { key: 'amount', label: 'Monto', align: 'right', transform: (value) => this.currencyService.format(Number(value) || 0) },
+    { key: 'purpose', label: 'Concepto', transform: (value) => paymentRequestPurposeLabel(value as string) },
     { key: 'description', label: 'Descripción', priority: 1 },
     { key: 'created_at', label: 'Creada', transform: (value) => this.formatDate(value) },
     { key: 'has_receipt', label: 'Comprobante', align: 'center', transform: (value) => (value ? 'Con comprobante' : 'Sin comprobante') },
@@ -96,7 +98,8 @@ export class PaymentRequestsPageComponent implements OnInit {
 
   readonly cardConfig: ItemListCardConfig = {
     titleKey: 'description',
-    subtitleTransform: (item: PaymentRequest) => this.formatDate(item.created_at),
+    subtitleTransform: (item: PaymentRequest) =>
+      `${paymentRequestPurposeLabel(item.purpose)} · ${this.formatDate(item.created_at)}`,
     badgeKey: 'has_receipt',
     badgeTransform: (value) => (value ? 'Con comprobante' : 'Sin comprobante'),
     badgeConfig: { type: 'custom', colorFn: (value) => (value ? '#059669' : '#6b7280') },
@@ -110,12 +113,16 @@ export class PaymentRequestsPageComponent implements OnInit {
     { label: 'Ver detalle', icon: 'eye', variant: 'primary', action: (item: PaymentRequest) => this.openDetail(item) },
   ];
 
+  /** True once the user picked a tab: the automatic "En revisión" landing never overrides it. */
+  private tabChosen = false;
+
   ngOnInit(): void {
     this.load();
     this.loadCounters();
   }
 
   onTabChange(id: string): void {
+    this.tabChosen = true;
     if (id === this.status()) return;
     this.status.set(id as PaymentRequestStatus);
     this.page.set(1);
@@ -167,10 +174,35 @@ export class PaymentRequestsPageComponent implements OnInit {
     this.api
       .list('pending', 1, 1)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (r) => this.pendingCount.set(r.total), error: () => this.pendingCount.set(null) });
+      .subscribe({
+        next: (r) => {
+          this.pendingCount.set(r.total);
+          this.landOnReviewIfOnlyThere();
+        },
+        error: () => this.pendingCount.set(null),
+      });
     this.api
       .list('awaiting_confirmation', 1, 1)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (r) => this.reviewCount.set(r.total), error: () => this.reviewCount.set(null) });
+      .subscribe({
+        next: (r) => {
+          this.reviewCount.set(r.total);
+          this.landOnReviewIfOnlyThere();
+        },
+        error: () => this.reviewCount.set(null),
+      });
+  }
+
+  /** Nothing pending but receipts to review: open on "En revisión", unless the user already chose a tab. */
+  private landOnReviewIfOnlyThere(): void {
+    if (this.tabChosen || this.status() !== 'pending') return;
+    const pending = this.pendingCount();
+    const review = this.reviewCount();
+    if (pending === 0 && review !== null && review > 0) {
+      this.tabChosen = true;
+      this.status.set('awaiting_confirmation');
+      this.page.set(1);
+      this.load();
+    }
   }
 }

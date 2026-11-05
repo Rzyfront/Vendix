@@ -4872,6 +4872,8 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     expect(refundFlow.completeCancellationNonCashRefunds).toHaveBeenCalledWith(
       expect.objectContaining({ id: ORDER_ID }),
       created,
+      // Default cancel: gateway legs are reversed as always.
+      { keepGatewayFunds: false },
     );
     // Sin salida de efectivo: la transferencia no toca el cajón.
     expect(refundFlow.recordCancellationCashRefund).not.toHaveBeenCalled();

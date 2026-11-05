@@ -426,6 +426,9 @@
           [required]="true"
         ></app-input>
       </div>
+      @if (endsNextDay()) {
+        <p class="deposit-panel-hint">La reserva termina el día siguiente.</p>
+      }
 
       <!-- Skip availability toggle -->
       <div class="toggle-section">
@@ -670,6 +673,9 @@
             {{ formatDate(selectedDate()) }} &middot;
             {{ formatTime(startTime()) }} &rarr;
             {{ formatTime(endTime() || getEndTime()) }}
+            @if (endsNextDay()) {
+              <span class="deposit-panel-hint">(termina el día siguiente)</span>
+            }
           </div>
         </div>
 
@@ -757,6 +763,39 @@
           </div>
         }
 
+        @if (stationCharges()) {
+          <div class="deposit-panel">
+            <div class="deposit-panel-title">
+              <app-icon name="credit-card" [size]="16"></app-icon>
+              Cobro para reservar
+            </div>
+            <div class="toggle-row">
+              <app-toggle
+                [ngModel]="chargeNow()"
+                (ngModelChange)="onChargeNowChange($event)"
+              ></app-toggle>
+              <span class="toggle-label">Cobrar ahora</span>
+            </div>
+            @if (chargeNow()) {
+              <app-selector
+                label="Medio de pago"
+                [ngModel]="prepayMethodId()"
+                (ngModelChange)="onPrepayMethodChange($event)"
+                [options]="prepayMethodOptions()"
+              ></app-selector>
+              @if (prepayAccountOptions().length > 0) {
+                <app-selector
+                  label="Cuenta de destino"
+                  [ngModel]="prepayAccountId()"
+                  (ngModelChange)="prepayAccountId.set($event)"
+                  [options]="prepayAccountOptions()"
+                ></app-selector>
+              }
+              <p class="deposit-panel-hint">Se crea la reserva y se registra el cobro con el valor pendiente de la estación.</p>
+            }
+          </div>
+        }
+
         @if (requiresStation() && selectedStation() && depositPolicy() !== 'none') {
           <div class="deposit-panel">
             <div class="deposit-panel-title">
@@ -835,7 +874,7 @@
       <app-button
         variant="primary"
         size="sm"
-        [disabled]="submitting() || depositInvalid()"
+        [disabled]="submitting() || depositInvalid() || chargeNowInvalid()"
         [loading]="submitting()"
         (clicked)="submit()"
       >

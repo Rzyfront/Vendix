@@ -29,6 +29,8 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
     station?: Record<string, unknown>;
     daily?: { start_time: string; end_time: string };
     dailyWeekday?: number;
+    storeDaily?: { start_time: string; end_time: string } | null;
+    stationRows?: any[];
   } = {}) {
     const { requiresStation = true, legacyOverlapId = BOOKING_ID, duration = 60 } = options;
     const dailyWeekday = options.dailyWeekday ?? weekday;
@@ -51,7 +53,7 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
       service_providers: { findFirst: jest.fn().mockResolvedValue({ id: PROVIDER_ID }) },
       product_variants: { findFirst: jest.fn() },
       service_station_schedules: {
-        findMany: jest.fn().mockResolvedValue([{ weekday: dailyWeekday, ...daily }]),
+        findMany: jest.fn().mockResolvedValue(options.stationRows ?? [{ weekday: dailyWeekday, ...daily }]),
       },
       service_station_exceptions: { findMany: jest.fn().mockResolvedValue([]) },
       store_settings: {
@@ -83,7 +85,11 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
     const businessHours: any = {
       loadStoreWindows: jest
         .fn()
-        .mockResolvedValue(new Map([[dailyWeekday, [daily]]])),
+        .mockResolvedValue(
+          options.storeDaily === null
+            ? new Map()
+            : new Map([[dailyWeekday, [options.storeDaily ?? daily]]]),
+        ),
     };
     const coordinator = new ServiceAllocationCoordinator(prisma, businessHours);
     return { coordinator, tx };
@@ -203,6 +209,61 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
       expect(tx.service_allocations.create).toHaveBeenCalledWith({ data: expect.objectContaining({ station_id: 8 }), select: { id: true } });
     });
 
+    describe('estación preferida del proveedor (S10, D3)', () => {
+      const withPreferred = (preferredId: number | null) => {
+        const ctx = build();
+        ctx.tx.service_providers.findFirst.mockResolvedValue({ id: PROVIDER_ID, default_station_id: preferredId });
+        return ctx;
+      };
+
+      it('usa la estación preferida del proveedor antes que la asignación automática, con los mismos filtros', async () => {
+        const { coordinator, tx } = withPreferred(8);
+        tx.service_stations.findFirst.mockResolvedValue({ id: 8 });
+        tx.service_stations.findMany.mockResolvedValue([station(4, 0)]);
+        const result = await coordinator.allocateBooking(tx, { ...baseInput, stationId: undefined, excludeBookingId: BOOKING_ID });
+
+        expect(result).toMatchObject({ id: 900, station_id: 8, provider_id: PROVIDER_ID });
+        expect(tx.service_stations.findMany).not.toHaveBeenCalled();
+        const where = tx.service_stations.findFirst.mock.calls[0][0].where;
+        expect(where).toMatchObject({
+          id: 8,
+          store_id: STORE_ID,
+          status: 'active',
+          capacity: 1,
+          service_station_services_station_fkey: { some: { product_id: 5 } },
+          service_station_providers_station_fkey: { some: { provider_id: PROVIDER_ID } },
+          service_allocations_station_fkey: { none: expect.objectContaining({ start_at: expect.any(Object), end_at: expect.any(Object) }) },
+        });
+        expect(tx.service_allocations.create).toHaveBeenCalledWith({ data: expect.objectContaining({ station_id: 8 }), select: { id: true } });
+      });
+
+      it('cae a la asignación automática cuando la preferida no sirve (no presta el servicio u ocupada)', async () => {
+        const { coordinator, tx } = withPreferred(8);
+        tx.service_stations.findFirst.mockResolvedValueOnce(null);
+        tx.service_stations.findMany.mockResolvedValue([station(4, 0)]);
+        const result = await coordinator.allocateBooking(tx, { ...baseInput, stationId: undefined, excludeBookingId: BOOKING_ID });
+
+        expect(result).toMatchObject({ id: 900, station_id: 4 });
+        expect(tx.service_stations.findMany).toHaveBeenCalledTimes(1);
+      });
+
+      it('sin estación preferida el comportamiento no cambia', async () => {
+        const { coordinator, tx } = withPreferred(null);
+        tx.service_stations.findMany.mockResolvedValue([station(4, 0)]);
+        const result = await coordinator.allocateBooking(tx, { ...baseInput, stationId: undefined, excludeBookingId: BOOKING_ID });
+
+        expect(result).toMatchObject({ station_id: 4 });
+        // Only the later station load uses findFirst; no preference probe.
+        expect(tx.service_stations.findFirst).toHaveBeenCalledTimes(1);
+      });
+
+      it('con estación indicada la preferida del proveedor se ignora', async () => {
+        const { coordinator, tx } = withPreferred(8);
+        const result = await coordinator.allocateBooking(tx, { ...baseInput, excludeBookingId: BOOKING_ID });
+        expect(result).toMatchObject({ station_id: STATION_ID });
+      });
+    });
+
     it('una reserva sin estación y sin ninguna elegible mantiene STATION_012', async () => {
       const { coordinator, tx } = build();
       await expect(coordinator.allocateBooking(tx, { ...baseInput, stationId: undefined })).rejects.toMatchObject({ errorCode: 'STATION_012' });
@@ -236,22 +297,75 @@ describe('ServiceAllocationCoordinator.allocateBooking', () => {
       expect(result).toMatchObject({ id: 900, end_date: null });
     });
 
-    it('rejects a booking that runs past the overnight block close with STATION_002', async () => {
+    it('rejects a booking that runs past the overnight block close with STATION_016', async () => {
       const { coordinator, tx } = build({ ...noLegacy, daily: overnight });
       await expect(
         coordinator.allocateBooking(tx, { ...baseInput, startTime: '23:00', endTime: '04:00', endDate: addDay(date) }),
       ).rejects.toMatchObject({ errorCode: 'STATION_009' });
       await expect(
         coordinator.allocateBooking(tx, { ...baseInput, startTime: '02:30', endTime: '03:30' }),
-      ).rejects.toMatchObject({ errorCode: 'STATION_002' });
+      ).rejects.toMatchObject({ errorCode: 'STATION_016' });
       expect(tx.service_allocations.create).not.toHaveBeenCalled();
+    });
+
+    describe('el horario propio de la estación manda (S8, D2)', () => {
+      const stationNight = { start_time: '22:00', end_time: '02:00' };
+      const storeCloses2359 = { start_time: '08:00', end_time: '23:59' };
+
+      it('allows 22:00-01:00 on a station with its own overnight schedule although the store closes 23:59', async () => {
+        const { coordinator, tx } = build({ ...noLegacy, daily: stationNight, storeDaily: storeCloses2359, duration: 180 });
+        const result = await coordinator.allocateBooking(tx, { ...baseInput, startTime: '22:00', endTime: '01:00' });
+
+        expect(result).toMatchObject({ id: 900, end_time: '01:00', end_date: addDay(date) });
+        expect(tx.service_allocations.create).toHaveBeenCalledTimes(1);
+      });
+
+      it('a station with its own schedule is bookable at night even when the store never configured hours (legacy 08-18 does not apply)', async () => {
+        const { coordinator, tx } = build({ ...noLegacy, daily: stationNight, storeDaily: null, duration: 180 });
+        const result = await coordinator.allocateBooking(tx, { ...baseInput, startTime: '22:00', endTime: '01:00' });
+
+        expect(result).toMatchObject({ id: 900, end_time: '01:00', end_date: addDay(date) });
+        expect(tx.service_allocations.create).toHaveBeenCalledTimes(1);
+      });
+
+      it('a station without its own schedule is out of hours: STATION_016, never STATION_002', async () => {
+        const { coordinator, tx } = build({ ...noLegacy, daily: stationNight, storeDaily: storeCloses2359, duration: 180, stationRows: [] });
+        await expect(
+          coordinator.allocateBooking(tx, { ...baseInput, startTime: '22:00', endTime: '01:00' }),
+        ).rejects.toMatchObject({ errorCode: 'STATION_016' });
+        expect(tx.service_allocations.create).not.toHaveBeenCalled();
+      });
+
+      it('outside the station schedule answers STATION_016', async () => {
+        const { coordinator, tx } = build({ ...noLegacy, daily: stationNight, storeDaily: storeCloses2359, duration: 60 });
+        await expect(
+          coordinator.allocateBooking(tx, { ...baseInput, startTime: '12:00', endTime: '13:00' }),
+        ).rejects.toMatchObject({ errorCode: 'STATION_016' });
+      });
+
+      it('a station exception inside the booking answers STATION_016', async () => {
+        const { coordinator, tx } = build({ ...noLegacy });
+        tx.service_station_exceptions.findMany.mockResolvedValue([{ id: 1 }]);
+        await expect(coordinator.allocateBooking(tx, baseInput)).rejects.toMatchObject({ errorCode: 'STATION_016' });
+      });
+
+      it('a real overlap still answers STATION_002', async () => {
+        const { coordinator, tx } = build({ ...noLegacy });
+        tx.service_allocations.findMany.mockResolvedValue([{ station_id: STATION_ID, provider_id: null }]);
+        await expect(coordinator.allocateBooking(tx, baseInput)).rejects.toMatchObject({ errorCode: 'STATION_002' });
+      });
+
+      it('a normal daytime booking is unchanged', async () => {
+        const { coordinator, tx } = build({ ...noLegacy });
+        await expect(coordinator.allocateBooking(tx, baseInput)).resolves.toMatchObject({ id: 900, end_date: null });
+      });
     });
 
     it('keeps rejecting a daytime booking that exceeds the window', async () => {
       const { coordinator, tx } = build(noLegacy);
       await expect(
         coordinator.allocateBooking(tx, { ...baseInput, startTime: '17:30', endTime: '18:30' }),
-      ).rejects.toMatchObject({ errorCode: 'STATION_002' });
+      ).rejects.toMatchObject({ errorCode: 'STATION_016' });
     });
 
     it('free duration mode accepts multiples of the rental block only', async () => {

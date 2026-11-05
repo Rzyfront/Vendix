@@ -7,13 +7,16 @@ import {
 } from '../../../../../../../shared/components';
 import { StationDepositPolicy, StationRules } from '../service-stations.service';
 
-/** Defaults applied to a new station (they match the schema defaults). */
+/**
+ * Defaults applied to a new station. Booking duration starts free (the schema default is
+ * still `fixed`, so a station row that lacks the field keeps `fixed`).
+ */
 export const DEFAULT_STATION_RULES: StationRules = {
   deposit_policy: 'none',
   deposit_amount: null,
   deposit_exhausted_policy: 'overflow',
   leftover_policy: 'refund_or_credit',
-  booking_duration_mode: 'fixed',
+  booking_duration_mode: 'free',
   hold_minutes: 30,
   open_end_block_minutes: 360,
   cancel_refund_hours: null,
@@ -30,7 +33,10 @@ export function stationRulesFrom(station: StationRulesSource | null | undefined)
     deposit_amount: amount == null ? null : Number(amount),
     deposit_exhausted_policy: station?.deposit_exhausted_policy ?? DEFAULT_STATION_RULES.deposit_exhausted_policy,
     leftover_policy: station?.leftover_policy ?? DEFAULT_STATION_RULES.leftover_policy,
-    booking_duration_mode: station?.booking_duration_mode ?? DEFAULT_STATION_RULES.booking_duration_mode,
+    // Editing keeps the stored value; only a new station (no row) starts free.
+    booking_duration_mode: station
+      ? (station.booking_duration_mode ?? 'fixed')
+      : DEFAULT_STATION_RULES.booking_duration_mode,
     hold_minutes: station?.hold_minutes ?? DEFAULT_STATION_RULES.hold_minutes,
     open_end_block_minutes: station?.open_end_block_minutes ?? DEFAULT_STATION_RULES.open_end_block_minutes,
     cancel_refund_hours: station?.cancel_refund_hours ?? null,
@@ -71,14 +77,12 @@ function toNullablePositiveInt(value: unknown): number | null {
   standalone: true,
   imports: [FormsModule, InputComponent, SelectorComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styleUrl: '../station-form-section.scss',
   template: `
-    <section
-      class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3"
-      aria-labelledby="station-rules-title"
-    >
-      <div>
-        <h4 id="station-rules-title" class="text-xs font-bold text-[var(--color-text-primary)]">Reglas de uso y anticipo</h4>
-        <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">
+    <section class="station-section" aria-labelledby="station-rules-title">
+      <div class="station-section__head">
+        <h4 id="station-rules-title" class="station-section__title">Reglas de uso y anticipo</h4>
+        <p class="station-section__hint">
           Cada atención copia estas reglas al abrirse; cambiarlas no altera las atenciones abiertas.
         </p>
       </div>
@@ -119,7 +123,7 @@ function toNullablePositiveInt(value: unknown): number | null {
         (ngModelChange)="patch({ booking_duration_mode: $event })"
       />
 
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div class="station-section__grid station-section__grid--3">
         <app-input
           label="Minutos de apartado"
           type="number"

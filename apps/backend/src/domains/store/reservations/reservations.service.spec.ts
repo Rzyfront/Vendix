@@ -895,6 +895,7 @@ describe('ReservationsService — station deposits', () => {
       cancelWithDeposit: jest.fn().mockResolvedValue(null),
       deferNoShowIfDeposit: jest.fn().mockResolvedValue(false),
       decide: jest.fn().mockResolvedValue({ action: 'retain' }),
+      assertCashGate: jest.fn().mockResolvedValue(undefined),
       ...options.deposits,
     };
     const emits: any[] = [];
@@ -957,6 +958,30 @@ describe('ReservationsService — station deposits', () => {
     const result: any = await service.create({ ...createDto, deposit: { ...deposit, mode: 'desk' } });
     expect(result.payment_path).toBeNull();
     expect(result.payment_url).toBeNull();
+  });
+
+  it('create S14: a desk deposit passes the cash gate before anything is written; no session -> the gate code and no booking', async () => {
+    const gateError = Object.assign(new Error('gate'), { errorCode: 'CASH_SESSION_REQUIRED_001' });
+    const { service, deposits, prisma } = build({
+      deposits: {
+        startInTx: jest.fn(),
+        assertCashGate: jest.fn().mockRejectedValue(gateError),
+      },
+    });
+    await expect(service.create({ ...createDto, deposit: { ...deposit, mode: 'desk' } })).rejects.toMatchObject({
+      errorCode: 'CASH_SESSION_REQUIRED_001',
+    });
+    expect(deposits.startInTx).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('create S14: a booking without deposit, or with a link deposit, never touches the cash gate', async () => {
+    const plain = build();
+    await plain.service.create(createDto);
+    expect(plain.deposits.assertCashGate).not.toHaveBeenCalled();
+    const linked = build({ deposits: { startInTx: jest.fn().mockResolvedValue({ mode: 'link', publicToken: 'tok', event: null }) } });
+    await linked.service.create({ ...createDto, deposit });
+    expect(linked.deposits.assertCashGate).not.toHaveBeenCalled();
   });
 
   it('create: a station booking without deposit behaves as before (no payment_path, no deposit block)', async () => {
@@ -1181,10 +1206,16 @@ describe('ReservationsService — station deposits', () => {
     });
   });
 
+  it('cancel by the customer forwards who cancels to the deposit rules', async () => {
+    const { service, deposits } = build();
+    await service.cancel(77, {}, 'customer');
+    expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, {}, 'customer');
+  });
+
   it('cancel: without a deposit the booking is cancelled by the state machine as always', async () => {
     const { service, prisma, deposits, emits } = build();
     const result = await service.cancel(77);
-    expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, {});
+    expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, {}, 'staff');
     expect(result.status).toBe('cancelled');
     expect(prisma.bookings.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ status: 'cancelled' }) }),
@@ -1199,9 +1230,32 @@ describe('ReservationsService — station deposits', () => {
       return { closed: true };
     });
     const result = await service.cancel(77, { leftover_action: 'refund' });
-    expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, { leftover_action: 'refund' });
+    expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, { leftover_action: 'refund' }, 'staff');
     expect(result.status).toBe('cancelled');
     expect(prisma.bookings.update).not.toHaveBeenCalled();
+    expect(emits.map((e) => e.name)).toContain('booking.cancelled');
+  });
+
+  it('cancel S3: a retention already announced booking.no_show, so booking.cancelled is not emitted', async () => {
+    const { service, deposits, emits, row } = build();
+    deposits.cancelWithDeposit.mockImplementation(async () => {
+      row.status = 'no_show';
+      return { closed: true, emitted: true };
+    });
+    await service.cancel(77, { leftover_action: 'retain' });
+    expect(emits.map((e) => e.name)).not.toContain('booking.cancelled');
+  });
+
+  it('cancel S3: a booking without a charge cancels its open prepay request and deactivates the Wompi link', async () => {
+    const rentalPrepay: any = {
+      cancelOpenRequestsInTx: jest.fn().mockResolvedValue([812]),
+      deactivateLinks: jest.fn().mockResolvedValue(undefined),
+    };
+    const { service, emits } = build({ rentalPrepay });
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(1);
+    await service.cancel(77);
+    expect(rentalPrepay.cancelOpenRequestsInTx).toHaveBeenCalledWith(expect.anything(), 1, 77);
+    expect(rentalPrepay.deactivateLinks).toHaveBeenCalledWith([812]);
     expect(emits.map((e) => e.name)).toContain('booking.cancelled');
   });
 

@@ -974,6 +974,7 @@ export class CheckoutService {
     require_payment_receipt: boolean;
     whatsapp_checkout: boolean;
     whatsapp_number: string;
+    allow_guest_booking: boolean;
   }> {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) {
@@ -998,6 +999,8 @@ export class CheckoutService {
         typeof checkout.whatsapp_number === 'string'
           ? checkout.whatsapp_number.trim()
           : '',
+      // Opt-in (default off): visitors may book services with a schedule.
+      allow_guest_booking: checkout.allow_guest_booking === true,
     };
   }
 
@@ -1704,21 +1707,32 @@ export class CheckoutService {
       }
       await this.scheduledOrdersService.preValidate(store_id_ctx, dto.schedule);
     }
-    let resolved_customer_id: number | null = user_id ?? null;
-    if (is_guest && guest_customer && store_id_ctx) {
-      const resolved =
-        await this.customersService.resolveGuestCustomerForCheckout(
-          store_id_ctx,
-          guest_customer,
-        );
-      resolved_customer_id = resolved?.customer_id ?? null;
-    }
-
-    if (is_guest && dto.bookings?.length) {
+    // A visitor may book a scheduled service only when the store enabled
+    // `ecommerce.checkout.allow_guest_booking`; the booking is then created
+    // for the guest customer resolved below. Checked first so a
+    // refused visitor never creates a guest customer.
+    if (
+      is_guest &&
+      dto.bookings?.length &&
+      !(await this.getCheckoutSettings()).allow_guest_booking
+    ) {
       throw new VendixHttpException(
         ErrorCodes.ECOM_CHECKOUT_001,
         'Debes iniciar sesión para reservar servicios con horario',
       );
+    }
+    let resolved_customer_id: number | null = user_id ?? null;
+    if (is_guest && guest_customer && store_id_ctx) {
+      // With bookings the guest is matched by email only (D1): the phone
+      // would attach the booking to (and rewrite) someone else's account.
+      // It is still stored on a newly created customer.
+      const resolved =
+        await this.customersService.resolveGuestCustomerForCheckout(
+          store_id_ctx,
+          guest_customer,
+          dto.bookings?.length ? { match_by_phone: false } : undefined,
+        );
+      resolved_customer_id = resolved?.customer_id ?? null;
     }
 
     // Guest checkout must never read store-scoped backend carts because there

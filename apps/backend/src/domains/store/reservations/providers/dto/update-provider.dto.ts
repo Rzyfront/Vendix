@@ -20,4 +20,9 @@ export class UpdateProviderDto {
   @IsOptional()
   @IsInt()
   sort_order?: number;
+
+  /** Preferred station (S10): must be linked to the provider; `null` clears it. */
+  @IsOptional()
+  @IsInt()
+  default_station_id?: number | null;
 }

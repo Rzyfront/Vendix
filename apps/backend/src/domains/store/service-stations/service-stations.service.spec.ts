@@ -41,13 +41,29 @@ describe('ServiceStationsService.getPublicUrl', () => {
     expect(url).toContain('https://all-in-one-shop.vendix.com/estacion/');
   });
 
-  it('cae al dominio principal activo de otra app cuando no hay ecommerce', async () => {
+  it('cae al dominio landing activo cuando no hay ecommerce (S12)', async () => {
     prisma.domain_settings.findFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({ hostname: 'tienda.vendix.com' });
     const url = await run(() => service.getPublicUrl(2));
-    expect(url).toContain('https://tienda.vendix.com/estacion/');
+    expect(url).toBe('https://tienda.vendix.com/estacion/11111111-2222-3333-4444-555555555555');
     expect(prisma.domain_settings.findFirst).toHaveBeenCalledTimes(2);
+    expect(prisma.domain_settings.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { store_id: 10, app_type: 'STORE_LANDING', status: 'active' },
+      }),
+    );
+  });
+
+  it('nunca resuelve un host que no sirve /estacion: sin ecommerce ni landing lanza STATION_014 (S12)', async () => {
+    // A primary admin domain must not be used: the admin app has no /estacion route.
+    prisma.domain_settings.findFirst.mockImplementation(async (args: any) =>
+      args?.where?.app_type ? null : { hostname: 'admin.tienda.vendix.com' },
+    );
+    await expect(run(() => service.getPublicUrl(2))).rejects.toMatchObject({ errorCode: 'STATION_014' });
+    for (const [args] of prisma.domain_settings.findFirst.mock.calls) {
+      expect(['STORE_ECOMMERCE', 'STORE_LANDING']).toContain(args.where.app_type);
+    }
   });
 
   it('lanza STATION_014 guiando a configuración cuando no hay dominio activo', async () => {
@@ -450,5 +466,112 @@ describe('ServiceStationsService — reglas de anticipo (S1)', () => {
     await run(() => service.update(2, { name: 'Cava 4' } as any));
     expect(shippingTax.assertCategoryAssignable).toHaveBeenCalledWith(undefined, 'station_rental');
     expect(prisma.service_stations.updateMany.mock.calls[0][0].data).not.toHaveProperty('deposit_policy');
+  });
+});
+
+describe('ServiceStationsService — defaults y múltiplo del bloque (S7-h, S7-f)', () => {
+  const context: RequestContext = { store_id: 10, is_super_admin: false, is_owner: false };
+  let service: ServiceStationsService;
+  let prisma: Record<string, any>;
+  let tx: Record<string, any>;
+  let current: Record<string, any>;
+
+  beforeEach(() => {
+    current = { id: 2, store_id: 10, name: 'Sala 1', rental_block_minutes: 30, deposit_policy: 'none', deposit_amount: null };
+    tx = {
+      service_station_services: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    prisma = {
+      service_stations: {
+        create: jest.fn().mockResolvedValue({ id: 2 }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findFirst: jest.fn(async () => ({ ...current })),
+        findMany: jest.fn().mockResolvedValue([{ id: 2, name: 'Sala 1', rental_block_minutes: 30 }]),
+        count: jest.fn().mockResolvedValue(1),
+      },
+      products: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 7, product_type: 'service', service_duration_minutes: 45, rental_pricing_mode: 'station_rate',
+        }),
+        findMany: jest.fn().mockResolvedValue([
+          { id: 7, product_type: 'service', name: 'Alquiler', service_duration_minutes: 45, rental_pricing_mode: 'station_rate' },
+        ]),
+      },
+      data_collection_templates: { findFirst: jest.fn().mockResolvedValue({ id: 5, station_type: 'cava' }) },
+      service_station_services: { findMany: jest.fn().mockResolvedValue([]) },
+      service_station_providers: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn(async (cb: any) => cb(tx)),
+    };
+    service = new ServiceStationsService(prisma as unknown as StorePrismaService, { assertCategoryAssignable: jest.fn() } as any);
+  });
+
+  const run = <T>(fn: () => Promise<T>) => RequestContextService.runIsolated(context, fn);
+
+  it('create sin booking_duration_mode guarda "free"', async () => {
+    await run(() => service.create({ name: 'Bahía', intake_template_id: 5 } as any));
+    expect(prisma.service_stations.create.mock.calls[0][0].data.booking_duration_mode).toBe('free');
+  });
+
+  it('create con booking_duration_mode explícito lo respeta', async () => {
+    await run(() => service.create({ name: 'Bahía', intake_template_id: 5, booking_duration_mode: 'fixed' } as any));
+    expect(prisma.service_stations.create.mock.calls[0][0].data.booking_duration_mode).toBe('fixed');
+  });
+
+  it('update sin booking_duration_mode no lo toca', async () => {
+    await run(() => service.update(2, { name: 'Sala 1b' } as any));
+    expect(prisma.service_stations.updateMany.mock.calls[0][0].data).not.toHaveProperty('booking_duration_mode');
+  });
+
+  it('setServices rechaza un servicio station_rate cuya duración no es múltiplo del bloque', async () => {
+    await expect(run(() => service.setServices(2, { product_ids: [7] } as any))).rejects.toMatchObject({
+      errorCode: 'STATION_017',
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('setServices acepta un servicio que no es station_rate aunque no sea múltiplo', async () => {
+    prisma.products.findMany.mockResolvedValue([
+      { id: 7, product_type: 'service', name: 'Corte', service_duration_minutes: 45, rental_pricing_mode: null },
+    ]);
+    await run(() => service.setServices(2, { product_ids: [7] } as any));
+    expect(tx.service_station_services.createMany).toHaveBeenCalled();
+  });
+
+  it('setProductStations rechaza si alguna estación elegida tiene un bloque que no divide la duración', async () => {
+    await expect(run(() => service.setProductStations(7, { station_ids: [2] } as any))).rejects.toMatchObject({
+      errorCode: 'STATION_017',
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('update rechaza un cambio de bloque que deja un servicio station_rate vinculado fuera de múltiplo', async () => {
+    current.rental_block_minutes = 15;
+    prisma.service_station_services.findMany.mockResolvedValue([
+      { product: { service_duration_minutes: 45, rental_pricing_mode: 'station_rate' } },
+    ]);
+    await expect(run(() => service.update(2, { rental_block_minutes: 30 } as any))).rejects.toMatchObject({
+      errorCode: 'STATION_017',
+    });
+    expect(prisma.service_stations.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('update que reenvía el mismo bloque guardado no lo revalida: una fila heredada no bloquea editar el nombre', async () => {
+    prisma.service_station_services.findMany.mockResolvedValue([
+      { product: { service_duration_minutes: 45, rental_pricing_mode: 'station_rate' } },
+    ]);
+    await run(() => service.update(2, { name: 'Sala 1b', rental_block_minutes: 30 } as any));
+    const blockChecks = prisma.service_station_services.findMany.mock.calls.filter((c: any[]) => c[0]?.where?.product);
+    expect(blockChecks).toHaveLength(0);
+    expect(prisma.service_stations.updateMany).toHaveBeenCalled();
+  });
+
+  it('update sin cambio de bloque no consulta los servicios vinculados', async () => {
+    await run(() => service.update(2, { name: 'Otra' } as any));
+    const calls = prisma.service_station_services.findMany.mock.calls.filter((c: any[]) => c[0]?.where?.product);
+    expect(calls).toHaveLength(0);
+    expect(prisma.service_stations.updateMany).toHaveBeenCalled();
   });
 });

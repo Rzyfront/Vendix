@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { VendixHttpException } from 'src/common/errors';
+import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   hashPaymentRequestToken,
@@ -16,6 +16,8 @@ describe('PaymentRequestsService', () => {
   let s3: any;
   let paymentLinks: any;
   let response: any;
+  let sessions: any;
+  let moduleRef: any;
 
   beforeEach(() => {
     tx = {
@@ -41,6 +43,8 @@ describe('PaymentRequestsService', () => {
     s3 = { getPresignedUrl: jest.fn().mockResolvedValue('https://signed') };
     paymentLinks = { deactivate: jest.fn() };
     response = { success: jest.fn((d: any) => ({ success: true, data: d })) };
+    sessions = { assertSessionForSales: jest.fn().mockResolvedValue(undefined) };
+    moduleRef = { get: jest.fn(() => sessions) };
     service = new PaymentRequestsService(
       prisma,
       events as any,
@@ -48,6 +52,7 @@ describe('PaymentRequestsService', () => {
       s3,
       paymentLinks,
       response,
+      moduleRef as any,
     );
     jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(7);
     jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(3);
@@ -215,6 +220,32 @@ describe('PaymentRequestsService', () => {
     it('confirm only works on a request awaiting confirmation', async () => {
       prisma.payment_requests.findFirst.mockResolvedValue({ id: 5, status: 'pending' });
       await expect(service.confirm(5)).rejects.toMatchObject({ errorCode: 'PAYMENT_REQUEST_INVALID_STATE' });
+    });
+
+    it('confirm runs the cash gate with the confirming user and carries that user on the event', async () => {
+      prisma.payment_requests.findFirst
+        .mockResolvedValueOnce({ id: 5, status: 'awaiting_confirmation' })
+        .mockResolvedValueOnce({ id: 5, store_id: 7, purpose: 'service_rental:9', amount: 100, paid_at: new Date() });
+      tx.payment_requests.updateMany.mockResolvedValue({ count: 1 });
+      tx.payment_requests.findFirst = jest.fn().mockResolvedValue({ id: 5, store_id: 7, purpose: 'service_rental:9', amount: 100, paid_at: new Date() });
+      const result: any = await service.confirm(5);
+      expect(sessions.assertSessionForSales).toHaveBeenCalledWith(3);
+      expect(result.data.confirmed_by_user_id).toBe(3);
+    });
+
+    it('confirm without an open session (register on) is rejected with the gate code and pays nothing', async () => {
+      sessions.assertSessionForSales.mockRejectedValue(new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001));
+      prisma.payment_requests.findFirst.mockResolvedValue({ id: 5, status: 'awaiting_confirmation' });
+      await expect(service.confirm(5)).rejects.toMatchObject({ errorCode: 'CASH_SESSION_REQUIRED_001' });
+      expect(tx.payment_requests.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('markPaid without a staff user (Wompi / customer page) carries no confirming user', async () => {
+      tx.payment_requests.updateMany.mockResolvedValue({ count: 1 });
+      tx.payment_requests.findFirst = jest.fn().mockResolvedValue({ id: 5, store_id: 7, purpose: 'x', amount: 1, paid_at: new Date() });
+      const event: any = await service.markPaid(5, { method: 'wompi' });
+      expect(event.confirmed_by_user_id).toBeUndefined();
+      expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
     });
 
     it('reject needs a reason and sends the request back to pending', async () => {

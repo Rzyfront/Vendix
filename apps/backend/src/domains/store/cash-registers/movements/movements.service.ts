@@ -11,6 +11,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { MAX_MANUAL_MOVEMENT_AMOUNT } from '../dto/create-movement.dto';
+import { shouldRecordCashMovement } from './cash-movement-policy.util';
 
 /**
  * CP-REFUND-FLOW-REDESIGN paso 4 — outbox semántico para el movimiento de
@@ -32,6 +33,19 @@ import { MAX_MANUAL_MOVEMENT_AMOUNT } from '../dto/create-movement.dto';
  */
 export const REFUND_CASH_MOVEMENT_KEY = 'refund_cash_movement_v1';
 export const REFUND_CASH_MOVEMENT_SOURCE = 'refund.cash_movement';
+/** `source_type` of booking/session deposit money (S14): traced in the drawer, never a sale. */
+export const SERVICE_DEPOSIT_MOVEMENT_SOURCE = 'service_deposit';
+
+/**
+ * Non-cash booking deposit row (S14): `recordModuleCashMovement` writes it as
+ * `sale` for drawer traceability, but every sales total must skip it.
+ */
+export function isServiceDepositSale(m: {
+  type: string;
+  source_type?: string | null;
+}): boolean {
+  return m.type === 'sale' && m.source_type === SERVICE_DEPOSIT_MOVEMENT_SOURCE;
+}
 /** B18: outbox refund row with no actor to book it to. */
 export const REFUND_NO_ACTOR_PREFIX = 'PENDING_REVIEW_NO_ACTOR';
 export const DEFERRED_SALE_CASH_MOVEMENT_KEY = 'deferred_sale_cash_movement_v1';
@@ -395,8 +409,8 @@ export class MovementsService {
    * anticipos de reserva, cierre de ruta): un `cash_in`/`cash_out` en la sesión
    * abierta del usuario, DENTRO de la tx del módulo.
    *
-   * - Solo efectivo (`cash`). Cualquier otro método, o ausente, no mueve el
-   *   cajón: devuelve `null` (nunca se asume efectivo por defecto).
+   * - Solo efectivo (`cash`) salvo `include_non_cash` (opt-in, S14). Cualquier
+   *   otro método, o ausente, devuelve `null` (nunca se asume efectivo).
    * - Con `pos.cash_register.enabled` apagado devuelve `null`; encendido y sin
    *   sesión abierta del usuario lanza `CASH_SESSION_REQUIRED_001`.
    * - Bloquea la sesión con `assertOpenSessionLocked` y es idempotente por
@@ -416,9 +430,21 @@ export class MovementsService {
       source_id: number;
       reference?: string;
       notes?: string;
+      /**
+       * Opt-in (default false): also record any non-cash method that
+       * `shouldRecordCashMovement` accepts. Non-cash rows never touch the
+       * drawer count: incoming is a `sale` row and outgoing a `refund` row
+       * (the closing sums only `cash`), carrying the real method.
+       */
+      include_non_cash?: boolean;
     },
   ) {
-    if (data.payment_method !== 'cash') return null;
+    const method = data.payment_method;
+    if (!method) return null;
+    const isCash = method === 'cash';
+    if (!isCash && !(data.include_non_cash && shouldRecordCashMovement(method))) {
+      return null;
+    }
 
     const settings = await tx.store_settings.findUnique({
       where: { store_id: data.store_id },
@@ -445,7 +471,13 @@ export class MovementsService {
     }
     await this.assertOpenSessionLocked(tx, session.id, data.store_id);
 
-    const type = data.direction === 'in' ? 'cash_in' : 'cash_out';
+    const type = isCash
+      ? data.direction === 'in'
+        ? 'cash_in'
+        : 'cash_out'
+      : data.direction === 'in'
+        ? 'sale'
+        : 'refund';
     const existing = await tx.cash_register_movements.findFirst({
       where: {
         store_id: data.store_id,
@@ -464,7 +496,7 @@ export class MovementsService {
         user_id: data.user_id,
         type,
         amount: data.amount,
-        payment_method: 'cash',
+        payment_method: method,
         reference: data.reference,
         notes: data.notes,
         source_type: data.source_type,

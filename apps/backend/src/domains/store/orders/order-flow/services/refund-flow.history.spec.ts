@@ -639,6 +639,25 @@ describe('RefundFlowService — order_events (plan order-truth-and-invoice-tz)',
       expect(completed[0][1]).toMatchObject({ refund_id: 387, effective_channel: 'gateway' });
     });
 
+    it('keepGatewayFunds (saldo a favor / retención de reserva): no reversa por la pasarela, cierra completed y no audita', async () => {
+      mockPrisma.payments.findFirst.mockResolvedValue(paymentOf(807, 'wompi', 'tx-3'));
+      mockPrisma.cash_register_movements.findFirst.mockReset();
+      mockPrisma.cash_register_movements.findFirst.mockResolvedValue(null);
+
+      await service.completeCancellationNonCashRefunds(order, [resultOf(388, 807, 'wompi')], { keepGatewayFunds: true });
+
+      expect(mockPaymentGateway.reversePaymentWithProcessor).not.toHaveBeenCalled();
+      expect(mockPrisma.audit_logs.create).not.toHaveBeenCalled();
+      expect(mockPrisma.refunds.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 388, state: { in: ['processing', 'failed'] } },
+          data: expect.objectContaining({ state: 'completed' }),
+        }),
+      );
+      const completed = eventEmitter.emit.mock.calls.filter(([name]: any) => name === 'refund.completed');
+      expect(completed).toHaveLength(1);
+    });
+
     it('voucher/wallet: canal store_credit y crédito a la wallet del cliente', async () => {
       mockPrisma.payments.findFirst.mockResolvedValue(paymentOf(803, 'wallet'));
 

@@ -6,8 +6,11 @@ import {
   Matches,
   IsIn,
   IsEnum,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { booking_service_location_enum } from '@prisma/client';
+import { GuestBookingDto } from './guest-booking.dto';
 
 export class CreateEcommerceBookingDto {
   @IsInt()
@@ -61,4 +64,10 @@ export class CreateEcommerceBookingDto {
   @IsOptional()
   @IsInt()
   service_address_id?: number;
+
+  /** Contact data when the visitor books without a session (switch `allow_guest_booking`). */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => GuestBookingDto)
+  guest?: GuestBookingDto;
 }

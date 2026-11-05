@@ -4,7 +4,10 @@ import {
   IsString,
   IsOptional,
   Matches,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { GuestBookingDto } from './guest-booking.dto';
 
 export class HoldBookingDto {
   @IsInt()
@@ -40,4 +43,10 @@ export class HoldBookingDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /** Contact data when the visitor books without a session (switch `allow_guest_booking`). */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => GuestBookingDto)
+  guest?: GuestBookingDto;
 }

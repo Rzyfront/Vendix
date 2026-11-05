@@ -24,8 +24,17 @@ describe('ProvidersService — proveedores como usuarios de tienda', () => {
         findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn().mockResolvedValue([]),
         create: jest.fn().mockImplementation(({ data }) => ({ id: 1, ...data })),
+        update: jest.fn().mockImplementation(({ data }) => ({ id: 1, ...data })),
+      },
+      service_stations: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]) },
+      service_station_providers: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 1 }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        createMany: jest.fn().mockResolvedValue({ count: 0 }),
       },
     };
+    prisma.$transaction = jest.fn((fn: any) => fn(prisma));
     service = new ProvidersService(prisma as unknown as StorePrismaService);
   });
 
@@ -139,5 +148,114 @@ describe('ProvidersService — proveedores como usuarios de tienda', () => {
     await service.getAvailableEmployees();
 
     expect(prisma.employees.findMany.mock.calls[0][0].where.id).toEqual({ notIn: [4] });
+  });
+
+  describe('estación asignada (S10)', () => {
+    const provider = (default_station_id: number | null = null) => ({ id: 1, store_id: STORE_ID, default_station_id });
+
+    it('update acepta una estación vinculada al proveedor y la guarda', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue(provider());
+      prisma.service_stations.findFirst.mockResolvedValue({ id: 4 });
+      prisma.service_station_providers.findFirst.mockResolvedValue({ id: 9 });
+
+      await service.update(1, { default_station_id: 4 } as any);
+
+      expect(prisma.service_stations.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 4, store_id: STORE_ID } }),
+      );
+      expect(prisma.service_station_providers.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { store_id: STORE_ID, provider_id: 1, station_id: 4 } }),
+      );
+      expect(prisma.service_providers.update.mock.calls[0][0].data.default_station_id).toBe(4);
+    });
+
+    it('update rechaza una estación de otra tienda con STATION_004', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue(provider());
+      prisma.service_stations.findFirst.mockResolvedValue(null);
+
+      await expect(service.update(1, { default_station_id: 99 } as any)).rejects.toMatchObject({ errorCode: 'STATION_004' });
+      expect(prisma.service_providers.update).not.toHaveBeenCalled();
+    });
+
+    it('update rechaza una estación no vinculada al proveedor con STATION_001', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue(provider());
+      prisma.service_stations.findFirst.mockResolvedValue({ id: 4 });
+      prisma.service_station_providers.findFirst.mockResolvedValue(null);
+
+      await expect(service.update(1, { default_station_id: 4 } as any)).rejects.toMatchObject({ errorCode: 'STATION_001' });
+      expect(prisma.service_providers.update).not.toHaveBeenCalled();
+    });
+
+    it('update con null limpia la estación asignada sin validar nada', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue(provider(4));
+
+      await service.update(1, { default_station_id: null } as any);
+
+      expect(prisma.service_providers.update.mock.calls[0][0].data.default_station_id).toBeNull();
+      expect(prisma.service_stations.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('update sin default_station_id no la toca (comportamiento previo)', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue(provider(4));
+
+      await service.update(1, { bio: 'hola' } as any);
+
+      expect('default_station_id' in prisma.service_providers.update.mock.calls[0][0].data).toBe(false);
+    });
+
+    it('create con estación de la tienda la guarda y deja el vínculo proveedor-estación', async () => {
+      prisma.users.findFirst.mockResolvedValue({ id: 31, first_name: 'Ana', last_name: 'Ruiz' });
+      prisma.service_stations.findFirst.mockResolvedValue({ id: 4 });
+
+      await service.create({ user_id: 31, default_station_id: 4 } as any);
+
+      expect(prisma.service_providers.create.mock.calls[0][0].data.default_station_id).toBe(4);
+      expect(prisma.service_station_providers.create).toHaveBeenCalledWith({
+        data: { store_id: STORE_ID, provider_id: 1, station_id: 4 },
+      });
+    });
+
+    it('create con una estación ajena responde STATION_004 y no crea nada', async () => {
+      prisma.users.findFirst.mockResolvedValue({ id: 31, first_name: 'Ana', last_name: 'Ruiz' });
+      prisma.service_stations.findFirst.mockResolvedValue(null);
+
+      await expect(service.create({ user_id: 31, default_station_id: 99 } as any)).rejects.toMatchObject({ errorCode: 'STATION_004' });
+      expect(prisma.service_providers.create).not.toHaveBeenCalled();
+    });
+
+    it('setStations limpia la asignada cuando su vínculo desaparece', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue(provider(4));
+      prisma.service_stations.findMany.mockResolvedValue([{ id: 5 }]);
+
+      await service.setStations(1, [5]);
+
+      expect(prisma.service_providers.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 1 }, data: expect.objectContaining({ default_station_id: null }) }),
+      );
+    });
+
+    it('setStations conserva la asignada si sigue vinculada', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue(provider(4));
+      prisma.service_stations.findMany.mockResolvedValue([{ id: 4 }, { id: 5 }]);
+
+      await service.setStations(1, [4, 5]);
+
+      expect(prisma.service_providers.update).not.toHaveBeenCalled();
+      expect(prisma.service_station_providers.createMany).toHaveBeenCalled();
+    });
+
+    it('removeStation limpia la asignada si era esa estación y no otra', async () => {
+      prisma.service_providers.findFirst.mockResolvedValue(provider(4));
+      await service.removeStation(1, 5);
+      expect(prisma.service_providers.update).not.toHaveBeenCalled();
+
+      await service.removeStation(1, 4);
+      expect(prisma.service_station_providers.deleteMany).toHaveBeenLastCalledWith({
+        where: { store_id: STORE_ID, provider_id: 1, station_id: 4 },
+      });
+      expect(prisma.service_providers.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 1 }, data: expect.objectContaining({ default_station_id: null }) }),
+      );
+    });
   });
 });

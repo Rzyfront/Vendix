@@ -307,6 +307,20 @@
               }
             </div>
 
+            @if (assignedStationCount() > 0) {
+              <div class="mt-3">
+                <app-selector
+                  label="Estación asignada"
+                  helpText="Opcional. Al agendar con este profesional se elige esta estación; si está ocupada o no presta el servicio, se asigna otra compatible."
+                  [options]="defaultStationOptions()"
+                  [ngModel]="defaultStationValue()"
+                  (ngModelChange)="setDefaultStation($event)"
+                  [disabled]="savingDefaultStation()"
+                  size="sm"
+                />
+              </div>
+            }
+
             @if (loadingStations() && allStations().length === 0) {
               <div class="flex items-center justify-center py-8 text-gray-400">
                 <app-icon name="loader" [size]="24" class="animate-spin" />

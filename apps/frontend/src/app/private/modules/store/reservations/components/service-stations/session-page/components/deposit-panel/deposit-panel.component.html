@@ -1,12 +1,12 @@
 <section class="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] space-y-3" aria-labelledby="deposit-panel-title">
   <div class="flex flex-wrap items-center justify-between gap-2">
     <div class="flex items-center gap-2">
-      <div class="w-8 h-8 rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex items-center justify-center">
+      <div class="w-8 h-8 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)] text-[var(--color-primary)] flex items-center justify-center shrink-0">
         <app-icon name="wallet" [size]="16" />
       </div>
       <div>
         <h4 id="deposit-panel-title" class="font-bold text-sm text-[var(--color-text-primary)]">Anticipo</h4>
-        <p class="text-[11px] text-[var(--color-text-secondary)]">
+        <p class="text-xs text-[var(--color-text-secondary)]">
           {{ exhaustedLabels[deposit().exhausted_policy] }} · {{ leftoverLabels[deposit().leftover_policy] }}
         </p>
       </div>
@@ -17,25 +17,25 @@
   </div>
 
   <dl class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
-    <div class="p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/70">
-      <dt class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Requerido</dt>
-      <dd class="font-mono font-bold text-[var(--color-text-primary)]">{{ required() | currency }}</dd>
+    <div class="p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]">
+      <dt class="text-[11px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Requerido</dt>
+      <dd class="font-mono font-bold text-sm text-[var(--color-text-primary)]">{{ required() | currency }}</dd>
     </div>
-    <div class="p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/70">
-      <dt class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Recibido</dt>
-      <dd class="font-mono font-bold text-[var(--color-text-primary)]">{{ received() | currency }}</dd>
+    <div class="p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]">
+      <dt class="text-[11px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Recibido</dt>
+      <dd class="font-mono font-bold text-sm text-[var(--color-text-primary)]">{{ received() | currency }}</dd>
     </div>
-    <div class="p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/70">
-      <dt class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Aplicado</dt>
-      <dd class="font-mono font-bold text-[var(--color-text-primary)]">{{ applied() | currency }}</dd>
+    <div class="p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]">
+      <dt class="text-[11px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Aplicado</dt>
+      <dd class="font-mono font-bold text-sm text-[var(--color-text-primary)]">{{ applied() | currency }}</dd>
     </div>
-    <div class="p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/70">
-      <dt class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Saldo</dt>
-      <dd class="font-mono font-bold text-[var(--color-text-primary)]">{{ balance() | currency }}</dd>
+    <div class="p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]">
+      <dt class="text-[11px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Saldo</dt>
+      <dd class="font-mono font-bold text-sm text-[var(--color-text-primary)]">{{ balance() | currency }}</dd>
     </div>
-    <div class="col-span-2 sm:col-span-1 p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/70">
-      <dt class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Disponible para consumo</dt>
-      <dd class="font-mono font-bold" [class.text-[var(--color-error)]]="isExhausted()" [class.text-[var(--color-text-primary)]]="!isExhausted()">
+    <div class="col-span-2 sm:col-span-1 p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]">
+      <dt class="text-[11px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Disponible para consumo</dt>
+      <dd class="font-mono font-bold text-sm" [class.text-[var(--color-error)]]="isExhausted()" [class.text-[var(--color-text-primary)]]="!isExhausted()">
         {{ available() | currency }}
       </dd>
     </div>

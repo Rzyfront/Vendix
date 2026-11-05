@@ -7,6 +7,9 @@ import {
 } from './rental-prepay.service';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 import { PaymentLinksService } from '../../payment-links/payment-links.service';
+import { SessionsService } from '../../cash-registers/sessions/sessions.service';
+import { MovementsService } from '../../cash-registers/movements/movements.service';
+import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 
 (RequestContextService.getStoreId as jest.Mock) = jest.fn().mockReturnValue(1);
 (RequestContextService.getUserId as jest.Mock) = jest.fn().mockReturnValue(9);
@@ -60,7 +63,7 @@ describe('RentalPrepayService', () => {
     booking_prepay_amount: null,
   };
 
-  function build(options: { booking?: any; station?: any; order?: any; existing?: any } = {}) {
+  function build(options: { booking?: any; station?: any; order?: any; existing?: any; method?: any; settings?: any; session?: any; sessionError?: any } = {}) {
     const booking: any = {
       id: 77,
       store_id: 1,
@@ -99,12 +102,18 @@ describe('RentalPrepayService', () => {
       },
       payment_requests: {
         findFirst: jest.fn().mockResolvedValue(options.existing ?? null),
+        findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       orders: {
         findUnique: jest.fn().mockResolvedValue(order),
+        findFirst: jest.fn().mockResolvedValue(order),
         update: jest.fn().mockResolvedValue(order),
       },
+      store_payment_methods: { findFirst: jest.fn().mockResolvedValue(options.method ?? null) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue(options.settings ?? null) },
+      stores: { findFirst: jest.fn().mockResolvedValue({ organization_id: 3 }) },
+      bank_accounts: { findFirst: jest.fn().mockResolvedValue({ id: 2 }) },
       order_items: { findMany: jest.fn().mockResolvedValue([]) },
       payments: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -132,11 +141,28 @@ describe('RentalPrepayService', () => {
     const ordersService: any = { create: jest.fn().mockResolvedValue({ id: 556 }) };
     const orderHistory: any = { record: jest.fn().mockResolvedValue(null) };
     const orderFlow = { invoicePaidBookingRentalOrder: jest.fn().mockResolvedValue(undefined) };
+    const sessions = {
+      assertSessionForSales: options.sessionError
+        ? jest.fn().mockRejectedValue(options.sessionError)
+        : jest.fn().mockResolvedValue(undefined),
+      getActiveSession: jest.fn().mockResolvedValue(options.session ?? null),
+    };
+    const movements = { recordSaleMovement: jest.fn().mockResolvedValue({ id: 1 }) };
     const moduleRef: any = {
-      get: jest.fn((token: unknown) => (token === OrderFlowService ? orderFlow : token === PaymentLinksService ? paymentLinks : undefined)),
+      get: jest.fn((token: unknown) =>
+        token === OrderFlowService
+          ? orderFlow
+          : token === PaymentLinksService
+            ? paymentLinks
+            : token === SessionsService
+              ? sessions
+              : token === MovementsService
+                ? movements
+                : undefined,
+      ),
     };
     const service = new RentalPrepayService(prisma, paymentRequests, eventEmitter, ordersService, orderHistory, moduleRef);
-    return { service, prisma, tx, booking, order, paymentRequests, paymentLinks, emits, ordersService, orderHistory, orderFlow };
+    return { service, prisma, tx, booking, order, paymentRequests, paymentLinks, emits, ordersService, orderHistory, orderFlow, sessions, movements };
   }
 
   const paidEvent = (purpose = 'service_rental:77', amount = 75000) =>
@@ -484,6 +510,261 @@ describe('RentalPrepayService', () => {
       const { service, tx } = build({ booking: { status: 'cancelled' } });
       await service.settlePaidRequest(paidEvent());
       expect(tx.payments.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('S1: el pago por enlace deja método, cuenta y comprobante', () => {
+    const transferEvent = () =>
+      ({ store_id: 1, payment_request_id: 31, purpose: 'service_rental:77', amount: 75000, method: 'transfer', paid_at: new Date() }) as any;
+
+    it('transferencia: el pago lleva el método de la tienda, la única cuenta del método y el comprobante', async () => {
+      const { service, tx, prisma } = build();
+      prisma.payment_requests.findFirst.mockResolvedValue({
+        transfer_store_payment_method_id: 8,
+        transfer_receipt_s3_key: 'receipts/r1.jpg',
+        transfer_submitted_at: new Date('2026-11-05T10:00:00Z'),
+        transfer_reference: 'ABC',
+      });
+      prisma.store_payment_methods.findFirst.mockResolvedValue({ custom_config: { accounts: [{ id: 21, bank_name: 'B', account_number: '1' }] } });
+      await service.settlePaidRequest(transferEvent());
+      const data = tx.payments.create.mock.calls[0][0].data;
+      expect(data).toEqual(
+        expect.objectContaining({
+          store_payment_method_id: 8,
+          bank_account_id: 21,
+          receipt_s3_key: 'receipts/r1.jpg',
+          receipt_uploaded_at: new Date('2026-11-05T10:00:00Z'),
+        }),
+      );
+    });
+
+    it('transferencia con varias cuentas en el método: el método y el comprobante se guardan, la cuenta queda sin asignar', async () => {
+      const { service, tx, prisma } = build();
+      prisma.payment_requests.findFirst.mockResolvedValue({
+        transfer_store_payment_method_id: 8,
+        transfer_receipt_s3_key: 'receipts/r1.jpg',
+        transfer_submitted_at: new Date(),
+        transfer_reference: null,
+      });
+      prisma.store_payment_methods.findFirst.mockResolvedValue({ custom_config: { accounts: [{ id: 21 }, { id: 22 }] } });
+      await service.settlePaidRequest(transferEvent());
+      const data = tx.payments.create.mock.calls[0][0].data;
+      expect(data.store_payment_method_id).toBe(8);
+      expect(data.bank_account_id).toBeNull();
+      expect(data.receipt_s3_key).toBe('receipts/r1.jpg');
+    });
+
+    it('Wompi conserva su propio método y no lleva comprobante', async () => {
+      const { service, tx, prisma } = build();
+      prisma.store_payment_methods.findFirst.mockResolvedValue({ id: 3 });
+      await service.settlePaidRequest(paidEvent());
+      const data = tx.payments.create.mock.calls[0][0].data;
+      expect(data.store_payment_method_id).toBe(3);
+      expect(data.bank_account_id).toBeNull();
+      expect(data.receipt_s3_key).toBeNull();
+    });
+  });
+
+  describe('S14: transferencia confirmada por staff', () => {
+    const confirmed = (extra: object = {}) =>
+      ({ store_id: 1, payment_request_id: 31, purpose: 'service_rental:77', amount: 75000, method: 'transfer', paid_at: new Date(), ...extra }) as any;
+    const registerOn = { settings: { settings: { pos: { cash_register: { enabled: true } } } } };
+
+    it('con confirmador y sesión abierta el pago entra a la caja de quien confirmó', async () => {
+      const { service, movements } = build({ ...registerOn, session: { id: 40 } });
+      await service.settlePaidRequest(confirmed({ confirmed_by_user_id: 12 }));
+      expect(movements.recordSaleMovement).toHaveBeenCalledWith(
+        40,
+        expect.objectContaining({ store_id: 1, user_id: 12, amount: 75000, payment_method: 'bank_transfer', order_id: 555, payment_id: 900 }),
+        expect.anything(),
+      );
+    });
+
+    it('Wompi (sin staff) no registra movimiento de caja', async () => {
+      const { service, movements } = build({ ...registerOn, session: { id: 40 } });
+      await service.settlePaidRequest(paidEvent());
+      expect(movements.recordSaleMovement).not.toHaveBeenCalled();
+    });
+
+    it('transferencia sin confirmador (página del cliente) no registra movimiento', async () => {
+      const { service, movements } = build({ ...registerOn, session: { id: 40 } });
+      await service.settlePaidRequest(confirmed());
+      expect(movements.recordSaleMovement).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('summary (bloque prepay del detalle)', () => {
+    it('una reserva pagada muestra lo pagado y nada pendiente por cobrar', async () => {
+      const { service } = build({ order: { payments: [{ amount: '75000', state: 'succeeded' }] }, booking: { status: 'confirmed' } });
+      const block = await service.summary(77);
+      expect(block).toEqual({ paid_amount: 75000, order_total: 150000, remaining: 0, pending_request: null });
+    });
+
+    it('sin pagos y con la regla de la estación muestra el saldo por cobrar', async () => {
+      const { service } = build();
+      expect(await service.summary(77)).toEqual(expect.objectContaining({ paid_amount: 0, remaining: 75000 }));
+    });
+  });
+
+  describe('receivedCharge (S3: cancelar con cobro recibido)', () => {
+    const pay = (id: number, amount: string, state: string, type: string, paid = true) => ({
+      id,
+      amount,
+      state,
+      paid_at: paid ? new Date() : null,
+      store_payment_method_id: id + 10,
+      store_payment_method: { system_payment_method: { type } },
+    });
+
+    it('orden viva: una pierna por pago recibido, con su medio y su monto', async () => {
+      const { service, tx } = build();
+      tx.orders.findFirst.mockResolvedValue({
+        id: 555,
+        state: 'processing',
+        internal_notes: null,
+        payments: [pay(1, '50000', 'succeeded', 'cash'), pay(2, '25000', 'succeeded', 'bank_transfer'), pay(3, '10000', 'pending', 'cash', false)],
+      });
+      expect(await service.receivedCharge(1, 77)).toEqual({
+        orderId: 555,
+        orderState: 'processing',
+        receivedCents: 7500000,
+        methodType: 'cash',
+        legs: [
+          { paymentId: 1, cents: 5000000, methodType: 'cash', storePaymentMethodId: 11 },
+          { paymentId: 2, cents: 2500000, methodType: 'bank_transfer', storePaymentMethodId: 12 },
+        ],
+        cancelledAction: null,
+      });
+    });
+
+    it('orden cancelada a mano (sin el marcador de la reserva): no hay nada que decidir', async () => {
+      const { service, tx } = build();
+      tx.orders.findFirst.mockResolvedValue({
+        id: 555,
+        state: 'cancelled',
+        internal_notes: JSON.stringify({ _flow_metadata: { cancellation_reason: 'Cliente desistió' } }),
+        payments: [pay(1, '75000', 'cancelled', 'cash')],
+      });
+      expect(await service.receivedCharge(1, 77)).toBeNull();
+    });
+
+    it('orden cancelada por la cancelación de la reserva: cuenta las piernas cobradas y devuelve la acción registrada', async () => {
+      const { service, tx } = build();
+      tx.orders.findFirst.mockResolvedValue({
+        id: 555,
+        state: 'cancelled',
+        internal_notes: JSON.stringify({ _flow_metadata: { cancellation_reason: 'Reserva BKG-1 cancelada (saldo a favor)' } }),
+        payments: [pay(1, '75000', 'cancelled', 'cash'), pay(2, '5000', 'cancelled', 'cash', false)],
+      });
+      expect(await service.receivedCharge(1, 77)).toEqual(
+        expect.objectContaining({
+          orderState: 'cancelled',
+          receivedCents: 7500000,
+          legs: [{ paymentId: 1, cents: 7500000, methodType: 'cash', storePaymentMethodId: 11 }],
+          cancelledAction: 'credit',
+        }),
+      );
+    });
+  });
+
+  describe('registerInPerson (POST :id/prepay-payment)', () => {
+    const cashMethod = { id: 4, system_payment_method: { type: 'cash', processing_mode: 'DIRECT' } };
+    const registerOn = { settings: { settings: { pos: { cash_register: { enabled: true } } } } };
+
+    it('sin caja obligatoria registra el pago con el método, confirma la reserva y cancela la solicitud abierta', async () => {
+      const { service, tx, paymentLinks, movements } = build({ method: cashMethod });
+      tx.payment_requests.findMany.mockResolvedValue([{ id: 31, payment_link_id: 812 }]);
+      tx.service_allocations.findFirst.mockResolvedValue({ id: 1, state: 'held', station: stationRow });
+      const result = await service.registerInPerson(77, { store_payment_method_id: 4 });
+      const data = tx.payments.create.mock.calls[0][0].data;
+      expect(data).toEqual(expect.objectContaining({ store_payment_method_id: 4, state: 'succeeded', order_id: 555 }));
+      expect(Number(data.amount)).toBe(75000);
+      expect(tx.bookings.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'confirmed' }) }));
+      expect(tx.payment_requests.updateMany).toHaveBeenCalledWith({ where: { id: 31, status: 'pending' }, data: expect.objectContaining({ status: 'cancelled' }) });
+      expect(paymentLinks.deactivate).toHaveBeenCalledWith(812);
+      expect(movements.recordSaleMovement).not.toHaveBeenCalled();
+      expect(result.fully_paid).toBe(false);
+    });
+
+    it('caja obligatoria y sin sesión abierta: rechaza con CASH_SESSION_REQUIRED_001 y no registra nada', async () => {
+      const { service, tx } = build({
+        method: cashMethod,
+        ...registerOn,
+        sessionError: new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+      });
+      await expect(service.registerInPerson(77, { store_payment_method_id: 4 })).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'CASH_SESSION_REQUIRED_001' }),
+      });
+      expect(tx.payments.create).not.toHaveBeenCalled();
+    });
+
+    it('la compuerta de caja corre para cualquier método, no solo efectivo', async () => {
+      const { service, sessions } = build({
+        method: { id: 6, system_payment_method: { type: 'card', processing_mode: 'DIRECT' } },
+        ...registerOn,
+        session: { id: 40 },
+      });
+      await service.registerInPerson(77, { store_payment_method_id: 6 });
+      expect(sessions.assertSessionForSales).toHaveBeenCalledWith(9);
+    });
+
+    it('con sesión abierta el pago entra a la caja de quien cobra como movimiento de venta', async () => {
+      const { service, movements } = build({ method: cashMethod, ...registerOn, session: { id: 40 } });
+      await service.registerInPerson(77, { store_payment_method_id: 4 });
+      expect(movements.recordSaleMovement).toHaveBeenCalledWith(
+        40,
+        expect.objectContaining({ store_id: 1, user_id: 9, amount: 75000, payment_method: 'cash', order_id: 555, payment_id: 900 }),
+        expect.anything(),
+      );
+    });
+
+    it('sin cobro pendiente responde STATION_BOOKING_015', async () => {
+      const { service, tx } = build({ method: cashMethod, order: { payments: [{ amount: '75000', state: 'succeeded' }] } });
+      await expect(service.registerInPerson(77, { store_payment_method_id: 4 })).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'STATION_BOOKING_015' }),
+      });
+      expect(tx.payments.create).not.toHaveBeenCalled();
+    });
+
+    it('B1: dos cobros simultáneos en modo parcial: bajo el bloqueo lo cobrado más el monto supera la meta y responde STATION_BOOKING_015 sin crear el pago', async () => {
+      const { service, tx } = build({ method: cashMethod });
+      // The summary read (outside the lock) saw nothing paid; the other request committed before this lock.
+      tx.orders.findUnique.mockResolvedValue({ id: 555, store_id: 1, customer_id: 4, currency: 'COP', grand_total: '150000', payments: [{ amount: '75000', state: 'succeeded' }] });
+      await expect(service.registerInPerson(77, { store_payment_method_id: 4 })).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'STATION_BOOKING_015' }),
+      });
+      expect(tx.payments.create).not.toHaveBeenCalled();
+    });
+
+    it('B1: el request_id del diálogo es la llave del pago: el transaction_id la lleva', async () => {
+      const { service, tx } = build({ method: cashMethod });
+      await service.registerInPerson(77, { store_payment_method_id: 4, request_id: 'dlg-1234abcd' });
+      expect(tx.payments.create.mock.calls[0][0].data.transaction_id).toBe('SVC-RENTAL-IP-77-dlg-1234abcd');
+    });
+
+    it('B1: un reintento con la misma llave devuelve el estado actual y no registra otro pago', async () => {
+      const { service, tx, sessions } = build({ method: cashMethod, order: { payments: [{ amount: '75000', state: 'succeeded' }] } });
+      tx.payments.findFirst.mockResolvedValue({ id: 900 });
+      await expect(
+        service.registerInPerson(77, { store_payment_method_id: 4, request_id: 'dlg-1234abcd' }),
+      ).resolves.toEqual({ paid_amount: 75000, fully_paid: false });
+      expect(tx.payments.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { transaction_id: 'SVC-RENTAL-IP-77-dlg-1234abcd' } }));
+      expect(tx.payments.create).not.toHaveBeenCalled();
+      expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+    });
+
+    it('un método inválido (pasarela) responde STATION_BOOKING_016', async () => {
+      const { service } = build({ method: { id: 5, system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' } } });
+      await expect(service.registerInPerson(77, { store_payment_method_id: 5 })).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'STATION_BOOKING_016' }),
+      });
+    });
+
+    it('un valor mayor al pendiente responde STATION_BOOKING_016', async () => {
+      const { service } = build({ method: cashMethod });
+      await expect(service.registerInPerson(77, { store_payment_method_id: 4, amount: 80000 })).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'STATION_BOOKING_016' }),
+      });
     });
   });
 });

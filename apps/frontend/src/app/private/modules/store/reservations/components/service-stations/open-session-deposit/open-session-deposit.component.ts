@@ -59,6 +59,8 @@ export function openCustomerError(allowAnonymousSales: boolean, customerId: numb
   standalone: true,
   imports: [FormsModule, CurrencyPipe, InputComponent, SelectorComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // Block host so the parent's vertical spacing applies; hidden when there is no deposit policy.
+  host: { '[class.block]': 'visible()', '[class.hidden]': '!visible()' },
   template: `
     @if (visible()) {
       <section
