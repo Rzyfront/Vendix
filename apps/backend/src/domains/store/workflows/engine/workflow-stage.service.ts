@@ -5,6 +5,7 @@ import {
   WorkflowStageDef,
   isHumanStage,
 } from '@common/workflows/contract';
+import { applyActionList } from './workflow-rules';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import { WorkflowEventsService } from './workflow-events.service';
 import {
@@ -39,19 +40,15 @@ export class WorkflowStageService {
     data: Record<string, unknown>,
     instance: Pick<WorkflowInstanceRow, 'reference' | 'title'>,
   ): { data: Record<string, unknown>; notifies: WorkflowNotifyPayload[] } {
-    const next = { ...data };
-    const notifies: WorkflowNotifyPayload[] = [];
-    for (const a of actions ?? []) {
-      if (a.action === 'set_field') next[a.field] = a.value;
-      else if (a.action === 'notify') {
-        notifies.push({
-          title: `${instance.reference} · ${instance.title}`,
-          message: a.message,
-          def: a.to,
-        });
-      }
-    }
-    return { data: next, notifies };
+    const applied = applyActionList(actions, data);
+    return {
+      data: applied.data,
+      notifies: applied.notifies.map((n) => ({
+        title: `${instance.reference} · ${instance.title}`,
+        message: n.message,
+        def: n.to,
+      })),
+    };
   }
 
   stagePatch(

@@ -21,6 +21,7 @@ import { WorkGroupsController } from './work-groups.controller';
 import { WorkGroupsService } from './work-groups.service';
 import { WorkflowDefinitionsController } from './definitions/workflow-definitions.controller';
 import { WorkflowDefinitionsService } from './definitions/workflow-definitions.service';
+import { WorkflowSimulatorService } from './definitions/workflow-simulator.service';
 import { WorkflowInstancesController } from './instances/workflow-instances.controller';
 import { WorkflowInstancesService } from './instances/workflow-instances.service';
 import { DocumentFilesController } from './files/document-files.controller';
@@ -46,6 +47,7 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
   providers: [
     WorkGroupsService,
     WorkflowDefinitionsService,
+    WorkflowSimulatorService,
     WorkflowInstancesService,
     WorkflowFilesService,
     WorkflowLoaderService,

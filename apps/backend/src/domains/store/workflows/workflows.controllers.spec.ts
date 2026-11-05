@@ -27,6 +27,7 @@ const EXPECTED: Array<[any, string, string | string[], string, string]> = [
   [WorkflowDefinitionsController, 'getDraft', D, 'GET', ':id/draft'],
   [WorkflowDefinitionsController, 'saveDraft', D, 'PATCH', ':id/draft'],
   [WorkflowDefinitionsController, 'validate', D, 'POST', ':id/validate'],
+  [WorkflowDefinitionsController, 'simulate', D, 'POST', ':id/simulate'],
   [WorkflowDefinitionsController, 'publish', D, 'POST', ':id/publish'],
   [WorkflowDefinitionsController, 'versions', R, 'GET', ':id/versions'],
   [WorkflowDefinitionsController, 'version', R, 'GET', ':id/versions/:version'],

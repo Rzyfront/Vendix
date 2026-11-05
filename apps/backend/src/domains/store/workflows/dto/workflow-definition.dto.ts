@@ -1,5 +1,8 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
+  ValidateNested,
   IsIn,
   IsInt,
   IsObject,
@@ -51,4 +54,19 @@ export class ImportWorkflowDto {
 
 export class ExportWorkflowQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) version?: number;
+}
+
+export class SimulateStateDto {
+  @IsString() @MinLength(1) @MaxLength(100) stage_key!: string;
+  @IsObject() data!: Record<string, unknown>;
+}
+
+export class SimulateWorkflowDto {
+  @IsOptional() @IsObject() definition?: Record<string, unknown>;
+  @IsOptional() @ValidateNested() @Type(() => SimulateStateDto) state?: SimulateStateDto;
+  @IsOptional() @IsString() @MaxLength(100) outcome?: string;
+  @IsOptional() @IsObject() values?: Record<string, unknown>;
+  @IsOptional() @IsString() @MaxLength(2000) comment?: string;
+  @IsOptional() @IsArray() @ArrayMaxSize(100) @IsString({ each: true })
+  satisfied_requirements?: string[];
 }

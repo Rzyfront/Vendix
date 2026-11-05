@@ -22,10 +22,12 @@ import {
   ImportWorkflowDto,
   PublishWorkflowDto,
   SaveWorkflowDraftDto,
+  SimulateWorkflowDto,
   ValidateWorkflowDto,
   WorkflowDefinitionsQueryDto,
 } from '../dto/workflow-definition.dto';
 import { WorkflowDefinitionsService } from './workflow-definitions.service';
+import { WorkflowSimulatorService } from './workflow-simulator.service';
 
 /** Definitions: drafts, validation, publishing, versions, export/import. */
 @Controller('store/workflows/definitions')
@@ -34,6 +36,7 @@ import { WorkflowDefinitionsService } from './workflow-definitions.service';
 export class WorkflowDefinitionsController {
   constructor(
     private readonly definitions: WorkflowDefinitionsService,
+    private readonly simulator: WorkflowSimulatorService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -98,6 +101,15 @@ export class WorkflowDefinitionsController {
   @Permissions('store:workflows:design')
   async validate(@Param('id', ParseIntPipe) id: number) {
     return this.responseService.success(await this.definitions.validate(id));
+  }
+
+  @Post(':id/simulate')
+  @Permissions('store:workflows:design')
+  async simulate(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SimulateWorkflowDto,
+  ) {
+    return this.responseService.success(await this.simulator.simulate(id, dto));
   }
 
   @Post(':id/publish')

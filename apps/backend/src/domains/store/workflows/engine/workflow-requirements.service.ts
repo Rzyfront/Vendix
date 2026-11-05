@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { WorkflowStageDef } from '@common/workflows/contract';
+import { isBlockingRequirement, isFilledValue } from './workflow-rules';
 import { DossiersService } from '../../documents/dossiers.service';
 import {
   PendingRequirement,
@@ -8,14 +9,7 @@ import {
   WorkflowTx,
 } from './workflow-engine.types';
 
-function isFilled(v: unknown): boolean {
-  return !(
-    v === undefined ||
-    v === null ||
-    v === '' ||
-    (Array.isArray(v) && v.length === 0)
-  );
-}
+const isFilled = isFilledValue;
 
 function fileIdsOf(v: unknown): number[] {
   const list = Array.isArray(v) ? v : [v];
@@ -54,6 +48,7 @@ export class DossierWorkflowRequirementsService extends WorkflowRequirementsServ
 
     const pending: PendingRequirement[] = [];
     for (const req of requirements) {
+      if (!isBlockingRequirement(req)) continue;
       switch (req.kind) {
         case 'file_field': {
           const value = (instance.data ?? {})[req.field];
