@@ -304,6 +304,14 @@ export class WorkflowsPageComponent implements OnInit {
 
   readonly definitionActions: TableAction[] = [
     {
+      label: 'Editar',
+      icon: 'pencil',
+      variant: 'info',
+      show: (row: WorkflowDefinitionRow) => row.status !== 'archived',
+      action: (row: WorkflowDefinitionRow) =>
+        this.router.navigate(['/admin/workflows', row.id, 'edit']),
+    },
+    {
       label: 'Publicar',
       icon: 'send',
       variant: 'primary',

@@ -168,40 +168,48 @@ type FieldValues = Record<string, unknown>;
               <span class="text-sm font-medium text-text-primary">{{
                 labelOf(field)
               }}</span>
-              <div class="flex flex-wrap items-center gap-2">
-                <input
-                  #picker
-                  type="file"
-                  class="hidden"
-                  [attr.accept]="acceptOf(field)"
-                  (change)="onFilePicked(field, $event)"
+              @if (simulate()) {
+                <app-toggle
+                  label="Archivo simulado (no se sube nada)"
+                  [checked]="rawValue(field.key) === 1"
+                  (toggled)="setValue(field.key, $event ? 1 : null)"
                 />
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  [loading]="uploading()[field.key] === true"
-                  (clicked)="picker.click()"
-                >
-                  <app-icon name="upload" [size]="14" slot="icon" />
-                  {{
-                    fileNames()[field.key]
-                      ? 'Reemplazar archivo'
-                      : 'Subir archivo'
-                  }}
-                </app-button>
-                @if (fileNames()[field.key]) {
-                  <span
-                    class="flex items-center gap-1 text-sm text-text-primary"
+              } @else {
+                <div class="flex flex-wrap items-center gap-2">
+                  <input
+                    #picker
+                    type="file"
+                    class="hidden"
+                    [attr.accept]="acceptOf(field)"
+                    (change)="onFilePicked(field, $event)"
+                  />
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    [loading]="uploading()[field.key] === true"
+                    (clicked)="picker.click()"
                   >
-                    <app-icon name="paperclip" [size]="14" />
-                    {{ fileNames()[field.key] }}
-                  </span>
-                } @else if (rawValue(field.key)) {
-                  <span class="text-sm text-text-secondary"
-                    >Archivo ya cargado</span
-                  >
-                }
-              </div>
+                    <app-icon name="upload" [size]="14" slot="icon" />
+                    {{
+                      fileNames()[field.key]
+                        ? 'Reemplazar archivo'
+                        : 'Subir archivo'
+                    }}
+                  </app-button>
+                  @if (fileNames()[field.key]) {
+                    <span
+                      class="flex items-center gap-1 text-sm text-text-primary"
+                    >
+                      <app-icon name="paperclip" [size]="14" />
+                      {{ fileNames()[field.key] }}
+                    </span>
+                  } @else if (rawValue(field.key)) {
+                    <span class="text-sm text-text-secondary"
+                      >Archivo ya cargado</span
+                    >
+                  }
+                </div>
+              }
               @if (field.help) {
                 <span class="text-xs text-text-secondary">{{
                   field.help
@@ -235,7 +243,10 @@ export class WorkflowStageFormComponent {
   readonly fields = input<WorkflowFieldDef[]>([]);
   /** Data already stored in the request; seeds the form. */
   readonly instanceData = input<FieldValues>({});
-  readonly instanceId = input.required<number>();
+  /** Not used in `simulate` mode (no uploads happen). */
+  readonly instanceId = input<number>(0);
+  /** Designer simulation: file fields become a "simulated file" toggle. */
+  readonly simulate = input<boolean>(false);
   /** Changes when the stage (or request) changes; a plain reload keeps typed values. */
   readonly seedKey = input<string>('');
 

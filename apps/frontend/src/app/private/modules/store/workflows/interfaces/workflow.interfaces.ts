@@ -216,3 +216,68 @@ export interface WorkflowApiError {
   status: number | null;
   details: unknown;
 }
+
+// ─── Editor (design) ───────────────────────────────────────────────────
+
+export interface DefinitionDraft {
+  id: number;
+  key: string;
+  definition: unknown;
+  draft_updated_at: string | null;
+}
+
+export interface SaveDraftResult {
+  id: number;
+  draft_updated_at: string;
+}
+
+export interface WorkflowVersionRow {
+  version: number;
+  published_at: string;
+  published_by_user_id: number | null;
+  changelog: string | null;
+  definition_hash: string;
+}
+
+export interface WorkflowVersionDetail extends WorkflowVersionRow {
+  definition: unknown;
+}
+
+export interface WorkGroupRow {
+  id: number;
+  key: string;
+  name: string;
+  is_active: boolean;
+}
+
+export interface SimulateBody {
+  definition?: unknown;
+  state?: { stage_key: string; data: Record<string, unknown> };
+  outcome?: string;
+  values?: Record<string, unknown>;
+  comment?: string;
+  satisfied_requirements?: string[];
+}
+
+export interface SimulationResult {
+  valid: boolean;
+  issues: WorkflowIssueView[];
+  form_errors: { field: string; message: string }[];
+  comment_required: boolean;
+  pending_requirements: { key: string; label: string }[];
+  no_transition: boolean;
+  from_stage: { key: string; name: string } | null;
+  to_stage: { key: string; name: string; type: string } | null;
+  transition: { on: string; label?: string; when_text?: string } | null;
+  path: string[];
+  data: Record<string, unknown>;
+  tasks: {
+    stage_key: string;
+    kind: string;
+    assignee: { kind: string; label: string } | null;
+  }[];
+  notifications: { to: string; message: string }[];
+  ended: { outcome: string } | null;
+  loop_guard: boolean;
+  watermark: string;
+}

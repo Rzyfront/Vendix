@@ -19,6 +19,14 @@ export const workflowsRoutes: Routes = [
     data: { permission: 'store:workflows:read' },
   },
   {
+    path: ':id/edit',
+    loadComponent: () =>
+      import('../editor/workflow-editor-page.component').then(
+        (c) => c.WorkflowEditorPageComponent,
+      ),
+    data: { permission: 'store:workflows:design' },
+  },
+  {
     path: 'instances/:id',
     loadComponent: () =>
       import('../pages/instance-detail-page/instance-detail-page.component').then(

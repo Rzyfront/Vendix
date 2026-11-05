@@ -6,13 +6,20 @@ import {
   ApiResponse,
   CompleteTaskBody,
   CreateDefinitionBody,
+  DefinitionDraft,
   ExportDefinitionResult,
   FileDownloadResult,
   PaginatedApiResponse,
   PublishResult,
+  SaveDraftResult,
+  SimulateBody,
+  SimulationResult,
   StartInstanceBody,
   StartInstanceResult,
   UploadedFileResult,
+  WorkGroupRow,
+  WorkflowVersionDetail,
+  WorkflowVersionRow,
   ValidateDefinitionResult,
   WorkflowDefinitionRow,
   WorkflowInstanceDetail,
@@ -86,6 +93,79 @@ export class WorkflowsApiService {
 
   unarchiveDefinition(id: number): Observable<unknown> {
     return this.http.post(`${this.base}/definitions/${id}/unarchive`, {});
+  }
+
+  // ─── Editor ──────────────────────────────────────────────────────────
+
+  getDefinition(id: number): Observable<WorkflowDefinitionRow> {
+    return this.http
+      .get<ApiResponse<WorkflowDefinitionRow>>(`${this.base}/definitions/${id}`)
+      .pipe(map((res) => res.data));
+  }
+
+  getDraft(id: number): Observable<DefinitionDraft> {
+    return this.http
+      .get<ApiResponse<DefinitionDraft>>(`${this.base}/definitions/${id}/draft`)
+      .pipe(map((res) => res.data));
+  }
+
+  saveDraft(
+    id: number,
+    definition: unknown,
+    expectedDraftUpdatedAt: string | null,
+  ): Observable<SaveDraftResult> {
+    const body: { definition: unknown; expected_draft_updated_at?: string } = {
+      definition,
+    };
+    if (expectedDraftUpdatedAt) {
+      body.expected_draft_updated_at = expectedDraftUpdatedAt;
+    }
+    return this.http
+      .patch<ApiResponse<SaveDraftResult>>(
+        `${this.base}/definitions/${id}/draft`,
+        body,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  validateDraft(id: number): Observable<ValidateDefinitionResult> {
+    return this.http
+      .post<ApiResponse<ValidateDefinitionResult>>(
+        `${this.base}/definitions/${id}/validate`,
+        {},
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  simulate(id: number, body: SimulateBody): Observable<SimulationResult> {
+    return this.http
+      .post<ApiResponse<SimulationResult>>(
+        `${this.base}/definitions/${id}/simulate`,
+        body,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  listVersions(id: number): Observable<WorkflowVersionRow[]> {
+    return this.http
+      .get<ApiResponse<WorkflowVersionRow[]>>(
+        `${this.base}/definitions/${id}/versions`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  getVersion(id: number, version: number): Observable<WorkflowVersionDetail> {
+    return this.http
+      .get<ApiResponse<WorkflowVersionDetail>>(
+        `${this.base}/definitions/${id}/versions/${version}`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  listWorkGroups(): Observable<WorkGroupRow[]> {
+    return this.http
+      .get<ApiResponse<WorkGroupRow[]>>(`${environment.apiUrl}/store/work-groups`)
+      .pipe(map((res) => res.data));
   }
 
   // ─── Instances ───────────────────────────────────────────────────────
