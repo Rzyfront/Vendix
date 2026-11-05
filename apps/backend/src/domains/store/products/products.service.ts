@@ -26,11 +26,13 @@ import {
   ProductImageDto,
   ProductState,
   ProductType,
+  BookingMode,
   resolveCatalogInclusiveDefault,
   resolveIsInclusive,
   validateTaxInclusiveMap,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import { assertProductFitsLinkedStations } from '../service-stations/station-duration-block.util';
 import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
 import {
   calculateVariantFinalPrice,
@@ -1191,6 +1193,16 @@ export class ProductsService {
         sanitizedDto.product_type === ProductType.SERVICE &&
           !!sanitizedDto.requires_station,
       );
+      // A station-rate service with no booking mode would stay offline-only
+      // ("provider_required"): default to free booking. An explicit value wins.
+      if (
+        sanitizedDto.product_type === ProductType.SERVICE &&
+        sanitizedDto.requires_station &&
+        sanitizedDto.rental_pricing_mode === 'station_rate' &&
+        sanitizedDto.booking_mode == null
+      ) {
+        sanitizedDto.booking_mode = BookingMode.FREE_BOOKING;
+      }
 
       // Consultation validation
       if (sanitizedDto.is_consultation) {
@@ -4147,6 +4159,50 @@ export class ProductsService {
       // A product that stops being a station service cannot keep a rental mode.
       if (!isStationService && sanitizedDto.rental_pricing_mode === undefined) {
         sanitizedDto.rental_pricing_mode = null;
+      }
+      // A product that becomes station_rate (or clears its mode) without a booking
+      // mode gets free booking; a plain edit never rewrites the stored mode.
+      const becomesStationRate =
+        isStationService &&
+        sanitizedDto.rental_pricing_mode === 'station_rate' &&
+        existingProduct.rental_pricing_mode !== 'station_rate';
+      if (
+        isStationService &&
+        sanitizedDto.rental_pricing_mode === 'station_rate' &&
+        (sanitizedDto.booking_mode === null ||
+          (sanitizedDto.booking_mode === undefined && becomesStationRate))
+      ) {
+        sanitizedDto.booking_mode = BookingMode.FREE_BOOKING;
+      }
+      // The duration of a station-rate service must be a whole number of blocks
+      // for every station it is linked to.
+      const effectiveRentalMode =
+        sanitizedDto.rental_pricing_mode !== undefined
+          ? sanitizedDto.rental_pricing_mode
+          : existingProduct.rental_pricing_mode;
+      // Only a change is checked: the form resends both fields on every save
+      // and a legacy misaligned service must stay editable.
+      if (
+        isStationService &&
+        ((sanitizedDto.service_duration_minutes !== undefined &&
+          sanitizedDto.service_duration_minutes !==
+            existingProduct.service_duration_minutes) ||
+          (sanitizedDto.rental_pricing_mode !== undefined &&
+            sanitizedDto.rental_pricing_mode !==
+              existingProduct.rental_pricing_mode))
+      ) {
+        await assertProductFitsLinkedStations(
+          this.prisma as any,
+          existingProduct.store_id,
+          id,
+          {
+            rental_pricing_mode: effectiveRentalMode,
+            service_duration_minutes:
+              sanitizedDto.service_duration_minutes !== undefined
+                ? sanitizedDto.service_duration_minutes
+                : existingProduct.service_duration_minutes,
+          },
+        );
       }
       if (
         !options?.from_lodging &&

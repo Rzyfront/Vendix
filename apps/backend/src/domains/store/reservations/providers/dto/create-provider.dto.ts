@@ -22,4 +22,9 @@ export class CreateProviderDto {
   @IsOptional()
   @IsString()
   bio?: string;
+
+  /** Preferred station (S10). The provider is linked to it on creation. */
+  @IsOptional()
+  @IsInt()
+  default_station_id?: number | null;
 }

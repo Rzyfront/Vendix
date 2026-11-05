@@ -5,6 +5,9 @@ import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 import { SettingsService } from '../settings/settings.service';
 import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { SessionsService } from '../cash-registers/sessions/sessions.service';
+import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
+import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 
 jest.mock('../service-sessions/utils/session-order-lines.util', () => ({
   ...jest.requireActual('../service-sessions/utils/session-order-lines.util'),
@@ -34,7 +37,7 @@ describe('ReservationDepositsService', () => {
     ...over,
   });
 
-  function build(opts: { policy?: string; balance?: number; booking?: any; allocation?: any } = {}) {
+  function build(opts: { policy?: string; balance?: number; booking?: any; allocation?: any; gateError?: any; received?: any } = {}) {
     const tx: any = {
       service_stations: { findFirst: jest.fn().mockResolvedValue(station({ deposit_policy: opts.policy ?? 'required' })) },
       service_allocations: {
@@ -113,7 +116,17 @@ describe('ReservationDepositsService', () => {
     const taxes = { taxRowsForCategory: jest.fn().mockResolvedValue([]) };
     const settings = { getStoreCurrency: jest.fn().mockResolvedValue('COP') };
     const orderFlow = { invoicePaidReservationFeeOrder: jest.fn().mockResolvedValue(undefined) };
+    const sessions = {
+      assertSessionForSales: opts.gateError ? jest.fn().mockRejectedValue(opts.gateError) : jest.fn().mockResolvedValue(undefined),
+    };
+    const prepay = {
+      receivedCharge: jest.fn().mockResolvedValue(opts.received ?? null),
+      cancelOpenRequestsInTx: jest.fn().mockResolvedValue([]),
+      deactivateLinks: jest.fn().mockResolvedValue(undefined),
+    };
     const lookups = new Map<unknown, unknown>([
+      [SessionsService, sessions],
+      [RentalPrepayService, prepay],
       [PaymentLinksService, links],
       [NotificationsService, notifications],
       [ShippingTaxService, taxes],
@@ -126,7 +139,7 @@ describe('ReservationDepositsService', () => {
       releaseBooking: jest.fn().mockResolvedValue(undefined),
     };
     const service = new ReservationDepositsService(prisma, deposits, paymentRequests, eventEmitter, moduleRef, coordinator);
-    return { service, tx, prisma, deposits, paymentRequests, emits, links, notifications, taxes, coordinator, orderFlow };
+    return { service, tx, prisma, deposits, paymentRequests, emits, links, notifications, taxes, coordinator, orderFlow, sessions, prepay };
   }
 
   const link = { amount: 400000, mode: 'link' as const, request_id: 'req-1' };
@@ -275,10 +288,16 @@ describe('ReservationDepositsService', () => {
       ...over,
     });
 
+    it('S14: the user who confirmed the transfer is passed to the ledger so the cash is attributed to them', async () => {
+      const { service, tx, deposits } = build();
+      await service.settlePaidRequest(event({ method: 'transfer', confirmed_by_user_id: 12 }));
+      expect(deposits.completePendingInTx).toHaveBeenCalledWith(tx, { deposit_id: 3, store_id: 1, user_id: 12 });
+    });
+
     it('confirms the booking and the allocation, completes the ledger row and announces after commit', async () => {
       const { service, tx, deposits, emits } = build();
       await service.settlePaidRequest(event());
-      expect(deposits.completePendingInTx).toHaveBeenCalledWith(tx, { deposit_id: 3, store_id: 1 });
+      expect(deposits.completePendingInTx).toHaveBeenCalledWith(tx, { deposit_id: 3, store_id: 1, user_id: null });
       expect(tx.service_allocations.updateMany).toHaveBeenCalledWith({
         where: expect.objectContaining({ state: 'payment_pending' }),
         data: expect.objectContaining({ state: 'confirmed', expires_at: null }),
@@ -451,7 +470,46 @@ describe('ReservationDepositsService', () => {
         where: { id: 3, status: 'pending' },
         data: expect.objectContaining({ method: 'bank_transfer' }),
       });
-      expect(deposits.completePendingInTx).toHaveBeenCalledWith(tx, { deposit_id: 3, store_id: 1 });
+      expect(deposits.completePendingInTx).toHaveBeenCalledWith(tx, { deposit_id: 3, store_id: 1, user_id: null });
+    });
+
+    it('A2: the retry settles in the drawer of whoever confirmed the transfer', async () => {
+      const { service, tx, prisma, deposits } = build();
+      tx.service_deposits.findMany.mockResolvedValue(overdue);
+      tx.payment_requests.findFirst.mockResolvedValue({
+        id: 9,
+        status: 'paid',
+        payment_link_id: null,
+        purpose: 'service_deposit',
+        amount: 400000,
+        paid_at: new Date(),
+        transfer_submitted_at: new Date(),
+        confirmed_by_user_id: 42,
+      });
+      prisma.cash_register_sessions = { findFirst: jest.fn().mockResolvedValue({ id: 5 }) };
+      await service.expireOverdueHolds();
+      expect(deposits.completePendingInTx).toHaveBeenCalledWith(tx, { deposit_id: 3, store_id: 1, user_id: 42 });
+    });
+
+    it('A2: if whoever confirmed no longer has an open drawer, the retry settles without a cash movement', async () => {
+      const { service, tx, prisma, deposits } = build();
+      tx.service_deposits.findMany.mockResolvedValue(overdue);
+      tx.payment_requests.findFirst.mockResolvedValue({
+        id: 9,
+        status: 'paid',
+        payment_link_id: null,
+        purpose: 'service_deposit',
+        amount: 400000,
+        paid_at: new Date(),
+        transfer_submitted_at: new Date(),
+        confirmed_by_user_id: 42,
+      });
+      prisma.cash_register_sessions = { findFirst: jest.fn().mockResolvedValue(null) };
+      await service.expireOverdueHolds();
+      expect(prisma.cash_register_sessions.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { store_id: 1, status: 'open', opened_by: 42 } }),
+      );
+      expect(deposits.completePendingInTx).toHaveBeenCalledWith(tx, { deposit_id: 3, store_id: 1, user_id: null });
     });
 
     it('is idempotent: a booking already claimed by another tick is not released twice', async () => {
@@ -592,6 +650,188 @@ describe('ReservationDepositsService', () => {
         allocation: { id: 1, state: 'confirmed', start_at: new Date(Date.now() + 99 * 3_600_000), expires_at: null, station: station({ cancel_refund_hours: null }) },
       });
       await expect(noWindow.service.cancelWithDeposit(77, {})).rejects.toMatchObject(code('STATION_BOOKING_004'));
+    });
+  });
+
+  describe('S14: caja al devolver dinero', () => {
+    const confirmedBooking = { id: 77, status: 'confirmed', customer_id: 1, booking_number: 'BKG-1' };
+
+    it('refund del anticipo corre la compuerta de caja; sin sesión responde CASH_SESSION_REQUIRED_001 y no devuelve nada', async () => {
+      const { service, deposits, sessions } = build({
+        booking: confirmedBooking,
+        gateError: new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+      });
+      await expect(service.decide(77, { request_id: 'g-1', action: 'refund', refund_method: 'cash' })).rejects.toMatchObject(
+        code('CASH_SESSION_REQUIRED_001'),
+      );
+      expect(sessions.assertSessionForSales).toHaveBeenCalledWith(9);
+      expect(deposits.refundInTx).not.toHaveBeenCalled();
+    });
+
+    it('credit y retain no tocan la compuerta de caja', async () => {
+      const credit = build({ booking: confirmedBooking });
+      await credit.service.decide(77, { request_id: 'g-2', action: 'credit' });
+      expect(credit.sessions.assertSessionForSales).not.toHaveBeenCalled();
+      const retain = build({ booking: confirmedBooking });
+      await retain.service.decide(77, { request_id: 'g-3', action: 'retain' });
+      expect(retain.sessions.assertSessionForSales).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('S3: cancelar con cobro para reservar (cancelWithPrepay)', () => {
+    const confirmedBooking = { id: 77, status: 'confirmed', customer_id: 1, booking_number: 'BKG-1' };
+    const cashLeg = { paymentId: 501, cents: 7500000, methodType: 'cash', storePaymentMethodId: 3 };
+    const paid = { orderId: 900, orderState: 'finished', receivedCents: 7500000, methodType: 'cash', legs: [cashLeg], cancelledAction: null };
+
+    it('sin decisión responde 409 STATION_BOOKING_012 y no cancela nada', async () => {
+      const { service, tx, deposits } = build({ booking: confirmedBooking, received: paid });
+      await expect(service.cancelWithDeposit(77, {})).rejects.toMatchObject(code('STATION_BOOKING_012'));
+      expect(tx.bookings.update).not.toHaveBeenCalled();
+      expect(deposits.receiveInTx).not.toHaveBeenCalled();
+    });
+
+    it('cliente: una reserva con cobro recibido no se cancela sola: 409 STATION_BOOKING_020 sin mover nada', async () => {
+      const { service, tx, deposits, orderFlow } = build({ booking: confirmedBooking, received: paid });
+      const cancelOrder = jest.fn();
+      (orderFlow as any).cancelOrder = cancelOrder;
+      await expect(service.cancelWithDeposit(77, {}, 'customer')).rejects.toMatchObject(code('STATION_BOOKING_020'));
+      expect(cancelOrder).not.toHaveBeenCalled();
+      expect(deposits.receiveInTx).not.toHaveBeenCalled();
+      expect(tx.bookings.update).not.toHaveBeenCalled();
+    });
+
+    it('cliente: sin cobro recibido la reserva sigue el camino de siempre', async () => {
+      const { service } = build({ booking: confirmedBooking, received: null, balance: 0 });
+      await expect(service.cancelWithDeposit(77, {}, 'customer')).resolves.toBeNull();
+    });
+
+    it('ventana tardía solo admite retain: refund responde STATION_BOOKING_017', async () => {
+      const { service } = build({
+        booking: confirmedBooking,
+        received: paid,
+        allocation: { id: 1, state: 'confirmed', start_at: new Date(Date.now() + 3_600_000), expires_at: null, station: station() },
+      });
+      await expect(service.cancelWithDeposit(77, { leftover_action: 'refund' })).rejects.toMatchObject(code('STATION_BOOKING_017'));
+    });
+
+    it('ventana temprana no admite retain: STATION_BOOKING_017', async () => {
+      const { service } = build({ booking: confirmedBooking, received: paid });
+      await expect(service.cancelWithDeposit(77, { leftover_action: 'retain' })).rejects.toMatchObject(code('STATION_BOOKING_017'));
+    });
+
+    it('refund con caja obligatoria y sin sesión: CASH_SESSION_REQUIRED_001 antes de cancelar la orden', async () => {
+      const { service, orderFlow } = build({
+        booking: confirmedBooking,
+        received: paid,
+        gateError: new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001),
+      });
+      const cancelOrder = jest.fn();
+      (orderFlow as any).cancelOrder = cancelOrder;
+      await expect(service.cancelWithDeposit(77, { leftover_action: 'refund' })).rejects.toMatchObject(code('CASH_SESSION_REQUIRED_001'));
+      expect(cancelOrder).not.toHaveBeenCalled();
+    });
+
+    it('refund cancela la orden (reversa de pagos) y cierra la reserva; el dinero no vuelve a entrar a caja', async () => {
+      const { service, orderFlow, deposits, tx, prepay } = build({ booking: confirmedBooking, received: paid, balance: 0 });
+      const cancelOrder = jest.fn().mockResolvedValue({});
+      (orderFlow as any).cancelOrder = cancelOrder;
+      const result = await service.cancelWithDeposit(77, { leftover_action: 'refund', request_id: 'c-9' });
+      expect(cancelOrder).toHaveBeenCalledWith(900, expect.objectContaining({ reason: expect.any(String) }), false, { keepGatewayFunds: false });
+      expect(tx.bookings.update).toHaveBeenCalledWith({ where: { id: 77 }, data: expect.objectContaining({ status: 'cancelled' }) });
+      expect(prepay.cancelOpenRequestsInTx).toHaveBeenCalled();
+      expect(deposits.refundInTx).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ closed: true });
+    });
+
+    it('credit: la reversa de la orden saca el efectivo y receiveInTx lo vuelve a entrar con quien cancela (neto: una sola entrada de la venta original)', async () => {
+      const { service, orderFlow, deposits, sessions } = build({ booking: confirmedBooking, received: paid });
+      (orderFlow as any).cancelOrder = jest.fn().mockResolvedValue({});
+      await service.cancelWithDeposit(77, { leftover_action: 'credit', request_id: 'c-10' });
+      expect(deposits.receiveInTx).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ booking_id: 77, user_id: 9, amount: 75000 }));
+      expect(deposits.releaseInTx).toHaveBeenCalled();
+      // Only the order cancel (the cash egress) passes the gate; the ledger move adds no second gate.
+      expect(sessions.assertSessionForSales).toHaveBeenCalledTimes(1);
+    });
+
+    it('doble envío: con la orden ya cancelada no se vuelve a cancelar ni a pasar por la compuerta', async () => {
+      const { service, orderFlow, sessions } = build({
+        booking: confirmedBooking,
+        received: { ...paid, orderState: 'cancelled', cancelledAction: 'refund' },
+        balance: 0,
+      });
+      const cancelOrder = jest.fn();
+      (orderFlow as any).cancelOrder = cancelOrder;
+      await service.cancelWithDeposit(77, { leftover_action: 'refund', request_id: 'c-9' });
+      expect(cancelOrder).not.toHaveBeenCalled();
+      expect(sessions.assertSessionForSales).not.toHaveBeenCalled();
+    });
+    it('B4: cancelOrder lleva el marcador de la acción y conserva los fondos de pasarela solo en saldo a favor o retención', async () => {
+      const credit = build({ booking: confirmedBooking, received: paid });
+      const creditCancel = jest.fn().mockResolvedValue({});
+      (credit.orderFlow as any).cancelOrder = creditCancel;
+      await credit.service.cancelWithDeposit(77, { leftover_action: 'credit', request_id: 'c-11' });
+      expect(creditCancel).toHaveBeenCalledWith(900, { reason: 'Reserva BKG-1 cancelada (saldo a favor)' }, false, { keepGatewayFunds: true });
+
+      const refund = build({ booking: confirmedBooking, received: paid, balance: 0 });
+      const refundCancel = jest.fn().mockResolvedValue({});
+      (refund.orderFlow as any).cancelOrder = refundCancel;
+      await refund.service.cancelWithDeposit(77, { leftover_action: 'refund', request_id: 'c-12' });
+      expect(refundCancel).toHaveBeenCalledWith(900, { reason: 'Reserva BKG-1 cancelada (devolución)' }, false, { keepGatewayFunds: false });
+    });
+
+    it('B4: piernas mixtas entran una por una con su medio y su monto; la pierna de saldo a favor no vuelve a entrar', async () => {
+      const legs = [
+        { paymentId: 501, cents: 5000000, methodType: 'cash', storePaymentMethodId: 3 },
+        { paymentId: 502, cents: 2500000, methodType: 'bank_transfer', storePaymentMethodId: 4 },
+        { paymentId: 503, cents: 1000000, methodType: 'wallet', storePaymentMethodId: 5 },
+      ];
+      const { service, orderFlow, deposits } = build({ booking: confirmedBooking, received: { ...paid, receivedCents: 8500000, legs } });
+      (orderFlow as any).cancelOrder = jest.fn().mockResolvedValue({});
+      await service.cancelWithDeposit(77, { leftover_action: 'credit', request_id: 'c-13' });
+      expect(deposits.receiveInTx).toHaveBeenCalledTimes(2);
+      expect(deposits.receiveInTx).toHaveBeenNthCalledWith(1, expect.anything(), expect.objectContaining({
+        amount: 50000, method: 'cash', store_payment_method_id: 3, request_id: 'cancel-prepay:77:received:501',
+      }));
+      expect(deposits.receiveInTx).toHaveBeenNthCalledWith(2, expect.anything(), expect.objectContaining({
+        amount: 25000, method: 'bank_transfer', store_payment_method_id: 4, request_id: 'cancel-prepay:77:received:502',
+      }));
+      expect(deposits.releaseInTx).toHaveBeenCalled();
+    });
+
+    it('B4: reintento tras cancelar la orden con saldo a favor retoma el ingreso (fuera de ventana incluso) y cierra la reserva', async () => {
+      const { service, orderFlow, deposits, tx } = build({
+        booking: confirmedBooking,
+        received: { ...paid, orderState: 'cancelled', cancelledAction: 'credit' },
+        allocation: { id: 1, state: 'confirmed', start_at: new Date(Date.now() + 3_600_000), expires_at: null, station: station() },
+      });
+      const cancelOrder = jest.fn();
+      (orderFlow as any).cancelOrder = cancelOrder;
+      const result = await service.cancelWithDeposit(77, { leftover_action: 'credit', request_id: 'otro-dialogo' });
+      expect(cancelOrder).not.toHaveBeenCalled();
+      expect(deposits.receiveInTx).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ request_id: 'cancel-prepay:77:received:501' }));
+      expect(deposits.releaseInTx).toHaveBeenCalled();
+      expect(tx.bookings.update).toHaveBeenCalledWith({ where: { id: 77 }, data: expect.objectContaining({ status: 'cancelled' }) });
+      expect(result).toMatchObject({ closed: true });
+    });
+
+    it('B4: reintento con otra opción distinta a la que canceló la orden responde 409 STATION_BOOKING_019 y no mueve dinero', async () => {
+      const { service, deposits, tx } = build({
+        booking: confirmedBooking,
+        received: { ...paid, orderState: 'cancelled', cancelledAction: 'refund' },
+      });
+      await expect(service.cancelWithDeposit(77, { leftover_action: 'credit' })).rejects.toMatchObject(code('STATION_BOOKING_019'));
+      expect(deposits.receiveInTx).not.toHaveBeenCalled();
+      expect(tx.bookings.update).not.toHaveBeenCalled();
+    });
+
+    it('B2: devolver un cobro sin anticipo con medio elegido responde 400 STATION_BOOKING_018 antes de cancelar la orden', async () => {
+      const { service, orderFlow } = build({ booking: confirmedBooking, received: paid, balance: 0 });
+      const cancelOrder = jest.fn();
+      (orderFlow as any).cancelOrder = cancelOrder;
+      await expect(
+        service.cancelWithDeposit(77, { leftover_action: 'refund', refund_method: 'cash' }),
+      ).rejects.toMatchObject(code('STATION_BOOKING_018'));
+      expect(cancelOrder).not.toHaveBeenCalled();
     });
   });
 

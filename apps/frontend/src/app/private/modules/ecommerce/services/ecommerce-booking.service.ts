@@ -25,13 +25,24 @@ export interface RentalQuote {
   pricing_mode: 'fixed_price' | 'station_rate';
 }
 
+/** Contact data of a visitor booking without a session (`allow_guest_booking`). */
+export interface GuestBookingContact {
+  name: string;
+  email: string;
+  phone: string;
+}
+
 export interface CreateBookingDto {
   product_id: number;
   product_variant_id?: number;
+  station_id?: number;
+  provider_id?: number;
   date: string;
   start_time: string;
   end_time: string;
   notes?: string;
+  /** Only for visitors without a session; the store comes from the domain, never from here. */
+  guest?: GuestBookingContact;
 }
 
 export interface RescheduleBookingDto {
@@ -306,6 +317,7 @@ export class EcommerceBookingService {
     start_time: string;
     end_time: string;
     notes?: string;
+    guest?: GuestBookingContact;
   }): Observable<{ success: boolean; data: HoldResult }> {
     return this.http.post<{ success: boolean; data: HoldResult }>(
       `${this.api_url}/hold`,

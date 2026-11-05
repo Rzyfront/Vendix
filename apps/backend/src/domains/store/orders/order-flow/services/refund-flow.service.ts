@@ -525,10 +525,11 @@ export class RefundFlowService {
   async completeCancellationNonCashRefunds(
     order: { id: number; store_id: number; grand_total: Prisma.Decimal },
     results: CancellationLegRefundResult[],
+    options: { keepGatewayFunds?: boolean } = {},
   ): Promise<void> {
     for (const result of results) {
       try {
-        await this.completeCancellationNonCashLeg(order, result);
+        await this.completeCancellationNonCashLeg(order, result, options);
       } catch (error) {
         this.logger.error(
           `Order #${order.id}: cancellation refund #${result.refund.id} completion failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -545,6 +546,7 @@ export class RefundFlowService {
   private async completeCancellationNonCashLeg(
     order: { id: number; store_id: number; grand_total: Prisma.Decimal },
     result: CancellationLegRefundResult,
+    options: { keepGatewayFunds?: boolean } = {},
   ): Promise<void> {
     const { refund, breakdown, leg } = result;
     const userId = RequestContextService.getUserId();
@@ -569,8 +571,11 @@ export class RefundFlowService {
     // (a) Pasarela con reversa por API: intento primero, resultado irrelevante
     // para el cierre. `dispatchRefundProcessor` busca un pago `succeeded`: el
     // pago ya está `cancelled` en BD, así que se le presenta como recibido.
+    // Con `keepGatewayFunds` no hay reversa: el dinero se queda en la tienda
+    // (el llamador lo registra como anticipo de la reserva).
     let gatewayClosedRefund = false;
     if (
+      !options.keepGatewayFunds &&
       payment &&
       methodType &&
       (API_REVERSIBLE_REFUND_PROCESSORS as readonly string[]).includes(methodType)

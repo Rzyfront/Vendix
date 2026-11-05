@@ -4,6 +4,8 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { CreateProviderDto } from './dto/create-provider.dto';
@@ -106,15 +108,51 @@ export class ProvidersService {
         'Envía user_id o employee_id, no ambos',
       );
     }
-    if (dto.user_id != null) {
-      return this.createForUser(dto.user_id, dto);
-    }
-    if (dto.employee_id == null) {
+    if (dto.user_id == null && dto.employee_id == null) {
       throw new BadRequestException(
         'Selecciona el usuario de la tienda que prestará el servicio',
       );
     }
-    return this.createForEmployee(dto.employee_id, dto);
+    const stationId = dto.default_station_id ?? null;
+    // A new provider has no station links yet: the preferred station only has to belong
+    // to the store, and the link is created together with the provider (invariant S10).
+    if (stationId != null) await this.assertStationInStore(stationId);
+    const created =
+      dto.user_id != null
+        ? await this.createForUser(dto.user_id, dto)
+        : await this.createForEmployee(dto.employee_id!, dto);
+    if (stationId != null) {
+      await this.prisma.service_station_providers.create({
+        data: { store_id: this.storeId, provider_id: created.id, station_id: stationId },
+      });
+    }
+    return created;
+  }
+
+  private async assertStationInStore(stationId: number): Promise<void> {
+    const station = await this.prisma.service_stations.findFirst({
+      where: { id: stationId, store_id: this.storeId },
+      select: { id: true },
+    });
+    if (!station) throw new VendixHttpException(ErrorCodes.STATION_004);
+  }
+
+  /** Preferred station invariant: it belongs to the store AND is linked to that provider. */
+  private async assertPreferredStation(providerId: number, stationId: number): Promise<void> {
+    await this.assertStationInStore(stationId);
+    const link = await this.prisma.service_station_providers.findFirst({
+      where: { store_id: this.storeId, provider_id: providerId, station_id: stationId },
+      select: { id: true },
+    });
+    if (!link) throw new VendixHttpException(ErrorCodes.STATION_001);
+  }
+
+  /** Clears `default_station_id` (the column joins the generated client with 20261115090000). */
+  private clearPreferredStation(client: any, providerId: number) {
+    return client.service_providers.update({
+      where: { id: providerId },
+      data: { default_station_id: null } as Prisma.service_providersUncheckedUpdateInput,
+    });
   }
 
   /**
@@ -149,7 +187,8 @@ export class ProvidersService {
           display_name: dto.display_name || fullName || null,
           avatar_url: dto.avatar_url,
           bio: dto.bio,
-        },
+          ...(dto.default_station_id != null && { default_station_id: dto.default_station_id }),
+        } as Prisma.service_providersUncheckedCreateInput,
         include: this.PROVIDER_INCLUDE,
       });
     } catch (error: any) {
@@ -198,17 +237,21 @@ export class ProvidersService {
           dto.display_name || `${employee.first_name} ${employee.last_name}`,
         avatar_url: dto.avatar_url,
         bio: dto.bio,
-      },
+        ...(dto.default_station_id != null && { default_station_id: dto.default_station_id }),
+      } as Prisma.service_providersUncheckedCreateInput,
       include: this.PROVIDER_INCLUDE,
     });
   }
 
   async update(id: number, dto: UpdateProviderDto) {
     await this.findOne(id); // validate exists
+    // S10: undefined = untouched, null = clear, number = must be a linked station.
+    if (dto.default_station_id != null) await this.assertPreferredStation(id, dto.default_station_id);
 
     return this.prisma.service_providers.update({
       where: { id },
       data: {
+        ...(dto.default_station_id !== undefined && { default_station_id: dto.default_station_id }),
         ...(dto.display_name !== undefined && {
           display_name: dto.display_name,
         }),
@@ -217,7 +260,7 @@ export class ProvidersService {
         ...(dto.is_active !== undefined && { is_active: dto.is_active }),
         ...(dto.sort_order !== undefined && { sort_order: dto.sort_order }),
         updated_at: new Date(),
-      },
+      } as Prisma.service_providersUncheckedUpdateInput,
       include: this.PROVIDER_INCLUDE,
     });
   }
@@ -353,7 +396,8 @@ export class ProvidersService {
   }
 
   async setStations(providerId: number, stationIds: number[]): Promise<number[]> {
-    await this.findOne(providerId);
+    const provider = await this.findOne(providerId);
+    const preferredId = (provider as { default_station_id?: number | null }).default_station_id ?? null;
 
     if (stationIds.length > 0) {
       const stations = await this.prisma.service_stations.findMany({
@@ -386,6 +430,10 @@ export class ProvidersService {
           })),
           skipDuplicates: true,
         });
+      }
+      // The preferred station must stay linked: drop it with its link.
+      if (preferredId != null && !stationIds.includes(preferredId)) {
+        await this.clearPreferredStation(tx, providerId);
       }
     });
 
@@ -426,7 +474,7 @@ export class ProvidersService {
   }
 
   async removeStation(providerId: number, stationId: number): Promise<void> {
-    await this.findOne(providerId);
+    const provider = await this.findOne(providerId);
 
     await this.prisma.service_station_providers.deleteMany({
       where: {
@@ -435,6 +483,9 @@ export class ProvidersService {
         station_id: stationId,
       },
     });
+    if ((provider as { default_station_id?: number | null }).default_station_id === stationId) {
+      await this.clearPreferredStation(this.prisma, providerId);
+    }
   }
 }
 

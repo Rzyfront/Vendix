@@ -1790,7 +1790,7 @@
               <app-setting-toggle
                 formControlName="is_eligible_for_home_service"
                 label="A domicilio"
-                description="Marca este servicio como elegible para realizarse en casa del cliente. Si lo desactivas, el selector de ubicación del ecommerce mostrará solo 'En el local del técnico'."
+                description="Marca este servicio como elegible para realizarse en casa del cliente. Si lo desactivas, el selector de ubicación del ecommerce mostrará solo 'En el establecimiento'."
               >
               </app-setting-toggle>
             </div>
@@ -1894,7 +1894,8 @@
                   { value: 'free_booking', label: 'Reserva libre' },
                 ]"
                 placeholder="Seleccionar modo"
-                tooltipText="'Requiere proveedor' asocia la cita a un profesional específico; 'Reserva libre' solo bloquea horario."
+                helpText="Reserva libre: el cliente reserva sin elegir profesional; solo se escoge horario (y estación, si el servicio la usa)."
+                tooltipText="'Requiere proveedor' asocia la cita a un profesional específico; 'Reserva libre' reserva el servicio sin elegir profesional y solo bloquea horario."
                 customWrapperClass="!mt-0"
               >
               </app-selector>

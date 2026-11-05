@@ -53,9 +53,11 @@
         </div>
 
         <div class="confirmation-actions">
-          <app-button (clicked)="goToMyReservations()"
-            >Ver mis reservas</app-button
-          >
+          @if (isLoggedIn()) {
+            <app-button (clicked)="goToMyReservations()"
+              >Ver mis reservas</app-button
+            >
+          }
           <app-button (clicked)="goBack()" variant="outline"
             >Volver al inicio</app-button
           >
@@ -214,7 +216,7 @@
             [storeAddress]="storeAddress()"
             [customerAddresses]="customerAddresses()"
             [selectedAddressId]="selectedAddressId()"
-            [offerHomeService]="offerHomeService()"
+            [offerHomeService]="offerHomeService() && !guestBookingEnabled()"
             [productEligibleForHomeService]="productEligibleForHomeService()"
             (valueChange)="onServiceLocationChange($event)"
             (addressChange)="onServiceAddressChange($event)"
@@ -364,7 +366,7 @@
           </div>
 
           <!-- Auth check -->
-          @if (!isLoggedIn()) {
+          @if (!isLoggedIn() && !guestBookingEnabled()) {
             <div class="login-prompt">
               <app-icon name="user" [size]="24" />
               <p>Inicia sesión para completar tu reserva</p>
@@ -373,24 +375,68 @@
               >
             </div>
           } @else {
-            <!-- Customer info (pre-filled) -->
-            <div class="customer-info">
-              <h3>Tus datos</h3>
-              <div class="info-row">
-                <app-icon name="user" [size]="16" />
-                <span>{{ guestName() }}</span>
+            @if (guestBookingEnabled() && !chargesOnline()) {
+              <!-- Visitor without session, no online charge: the checkout asks the contact data -->
+              <div class="customer-info" data-testid="guest-booking-checkout-hint">
+                <h3>Tus datos</h3>
+                <p class="text-sm text-text-secondary">
+                  Al continuar pasas al pago, donde escribes tus datos y eliges cómo pagar.
+                </p>
               </div>
-              <div class="info-row">
-                <app-icon name="mail" [size]="16" />
-                <span>{{ guestEmail() }}</span>
+            } @else if (guestBookingEnabled()) {
+              <!-- Visitor without session: contact data instead of the account -->
+              <div class="customer-info" data-testid="guest-booking-form">
+                <h3>Tus datos</h3>
+                <app-input
+                  label="Nombre"
+                  placeholder="Tu nombre"
+                  [required]="true"
+                  [ngModel]="guestName()"
+                  (ngModelChange)="guestName.set($event)"
+                />
+                <app-input
+                  label="Correo"
+                  type="email"
+                  placeholder="tucorreo@ejemplo.com"
+                  [required]="true"
+                  [ngModel]="guestEmail()"
+                  (ngModelChange)="guestEmail.set($event)"
+                />
+                <app-input
+                  label="Teléfono"
+                  type="tel"
+                  placeholder="300 123 4567"
+                  [required]="true"
+                  [ngModel]="guestPhone()"
+                  (ngModelChange)="guestPhone.set($event)"
+                />
+                @if (guestContactTouched() && guestContactError(); as contactError) {
+                  <div class="error-message">
+                    <app-icon name="alert-circle" [size]="16" />
+                    {{ contactError }}
+                  </div>
+                }
               </div>
-              @if (guestPhone()) {
+            } @else {
+              <!-- Customer info (pre-filled) -->
+              <div class="customer-info">
+                <h3>Tus datos</h3>
                 <div class="info-row">
-                  <app-icon name="phone" [size]="16" />
-                  <span>{{ guestPhone() }}</span>
+                  <app-icon name="user" [size]="16" />
+                  <span>{{ guestName() }}</span>
                 </div>
-              }
-            </div>
+                <div class="info-row">
+                  <app-icon name="mail" [size]="16" />
+                  <span>{{ guestEmail() }}</span>
+                </div>
+                @if (guestPhone()) {
+                  <div class="info-row">
+                    <app-icon name="phone" [size]="16" />
+                    <span>{{ guestPhone() }}</span>
+                  </div>
+                }
+              </div>
+            }
 
             <!-- Notes -->
             <div class="notes-field">

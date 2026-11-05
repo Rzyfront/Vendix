@@ -865,6 +865,28 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(summary.non_cash_total).toBe(30000);
     });
 
+    it('un anticipo de reserva con tarjeta queda fuera de las ventas del cierre (no es una venta)', async () => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue(
+        OPEN_SESSION,
+      );
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        { type: 'sale', amount: 30000, payment_method: 'card' },
+        { type: 'sale', amount: 400000, payment_method: 'card', source_type: 'service_deposit', source_id: 3 },
+        { type: 'refund', amount: 400000, payment_method: 'card', source_type: 'service_deposit', source_id: 4 },
+        { type: 'cash_in', amount: 20000, payment_method: 'cash', source_type: 'service_deposit', source_id: 5 },
+      ]);
+
+      const summary = await service.getCashSummary(SESSION_ID);
+
+      expect(summary.sales_total).toBe(30000);
+      expect(summary.sales_count).toBe(1);
+      expect(summary.non_cash_total).toBe(30000);
+      expect(summary.sales_by_method).toEqual([{ method: 'card', count: 1, total: 30000 }]);
+      // The cash deposit still counts in the drawer, as before.
+      expect(summary.cash_in).toBe(20000);
+      expect(summary.expected_cash_total).toBe(OPENING_AMOUNT + 20000);
+    });
+
     it('suma en Decimal exacto, sin error de punto flotante (B21)', async () => {
       prismaMock.cash_register_sessions.findFirst.mockResolvedValue({
         ...OPEN_SESSION,
@@ -1269,6 +1291,23 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       const { outflows } = await service.getCloseReport(SESSION_ID);
       const w = outflows.find((o) => o.id === 10)!;
       expect(w).toMatchObject({ kind: 'withdrawal', reference: 'Taxi', notes: 'Mensajero', reason: ' Mensajero ' });
+    });
+
+    it('anticipo de reserva con tarjeta: entra a la fila de su método como ingreso, no como venta (S14)', async () => {
+      wire(base, [ord(1, 100000), ord(2, 60000, 'cancelled'), ord(3, 40000, 'refunded')]);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        ...movs,
+        { id: 30, type: 'sale', amount: 400000, payment_method: 'card', source_type: 'service_deposit', order_id: null, reference: 'Anticipo reserva #77', notes: 'Anticipo consumible', created_at: T(21) },
+      ]);
+      const report = await service.getCloseReport(SESSION_ID);
+      expect(report.sales_summary).toMatchObject({ payments_count: 3, grand_total: 200000 });
+      expect(report.sales.payments_count).toBe(3);
+      const card = report.consolidated.rows.find((r) => r.method === 'card')!;
+      expect(card).toMatchObject({ sales: 60000, cash_in: 400000, entered: 460000, exited: 60000, expected: 400000 });
+      expect(report.consolidated.rows[0]).toMatchObject({ method: 'cash', sales: 100000, cash_in: 2000, expected: 187000 });
+      expect(report.integrity.notes.some((n) => n.includes('consolidado'))).toBe(false);
+      expect(report.inflows.find((i) => i.id === 30)).toMatchObject({ amount: 400000, payment_method: 'card', notes: 'Anticipo consumible' });
+      expect(report.inflows.find((i) => i.id === 8)).toMatchObject({ payment_method: 'cash' });
     });
 
     it('cash_out manual con referencia "Cancelación orden…" es retiro visible', async () => {

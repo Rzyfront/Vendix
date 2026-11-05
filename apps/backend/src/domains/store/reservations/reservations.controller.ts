@@ -32,6 +32,7 @@ import {
   RejectRescheduleRequestDto,
   CancelBookingDto,
   DepositDecisionDto,
+  RegisterPrepayPaymentDto,
 } from './dto';
 import { buildReportBuffer } from '@common/reports/report-builder';
 import {
@@ -556,6 +557,17 @@ export class ReservationsController {
   async prepayLink(@Param('id', ParseIntPipe) id: number) {
     const result = await this.rentalPrepay.openLink(id);
     return this.responseService.success(result, 'Enlace de pago generado');
+  }
+
+  /** The "cobro para reservar" collected in person: cash, card or transfer (S2). */
+  @Post(':id/prepay-payment')
+  @Permissions('store:reservations:update')
+  async prepayPayment(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RegisterPrepayPaymentDto,
+  ) {
+    const result = await this.rentalPrepay.registerInPerson(id, dto);
+    return this.responseService.success(result, 'Pago registrado');
   }
 
   /** What happens with the deposit of a booking that did not show up (S17). */

@@ -58,6 +58,7 @@ describe('ProductsService', () => {
 
   const mockPrismaService = {
     lodging_unit_types: { findFirst: jest.fn() },
+    service_station_services: { findMany: jest.fn().mockResolvedValue([]) },
     products: {
       create: jest.fn(),
       findMany: jest.fn(),
@@ -754,6 +755,123 @@ describe('ProductsService', () => {
       mockPrismaService.products.update.mockResolvedValue(existing);
 
       await expect(service.update(1, { rental_pricing_mode: null } as UpdateProductDto)).resolves.toBeDefined();
+    });
+  });
+
+  describe('alquiler por tarifa de estación — modo de reserva y múltiplo del bloque (S7-b, S7-f)', () => {
+    const rentalDto = (over: Record<string, unknown> = {}) =>
+      ({
+        name: 'Alquiler cava',
+        base_price: 100000,
+        sku: 'ALQ-002',
+        store_id: 1,
+        product_type: 'service',
+        requires_station: true,
+        service_duration_minutes: 60,
+        rental_pricing_mode: 'station_rate',
+        ...over,
+      }) as unknown as CreateProductDto;
+
+    const primeCreate = () => {
+      const row = { id: 9, store_id: 1, state: ProductState.ACTIVE, stock_levels: [], product_variants: [], product_images: [], _count: {} };
+      mockPrismaService.products.create.mockResolvedValue(row);
+      mockPrismaService.products.findUnique.mockResolvedValue(row);
+      mockPrismaService.$transaction.mockImplementation((callback) => callback(mockPrismaService));
+    };
+
+    const createdData = () => mockPrismaService.products.create.mock.calls[0][0].data;
+
+    it('create station_rate sin booking_mode guarda free_booking', async () => {
+      primeCreate();
+      await service.create(rentalDto());
+      expect(createdData().booking_mode).toBe('free_booking');
+    });
+
+    it('create station_rate con booking_mode explícito lo respeta', async () => {
+      primeCreate();
+      await service.create(rentalDto({ booking_mode: 'provider_required' }));
+      expect(createdData().booking_mode).toBe('provider_required');
+    });
+
+    it('create de un servicio con estación que no es station_rate conserva el default de siempre', async () => {
+      primeCreate();
+      await service.create(rentalDto({ rental_pricing_mode: 'fixed_price' }));
+      expect(createdData().booking_mode).toBeUndefined();
+    });
+
+    const existingStationService = (over: Record<string, unknown> = {}) => ({
+      id: 1, store_id: 1, state: ProductState.ACTIVE, product_type: 'service', requires_station: true,
+      rental_pricing_mode: null, service_duration_minutes: 60, booking_mode: 'provider_required',
+      stock_levels: [], product_variants: [], product_images: [], _count: {},
+      ...over,
+    });
+    const primeUpdate = (existing: Record<string, unknown>) => {
+      mockPrismaService.products.findFirst.mockResolvedValue(existing);
+      mockPrismaService.$transaction.mockImplementation((callback) => callback(mockPrismaService));
+      mockPrismaService.products.update.mockResolvedValue(existing);
+    };
+
+    it('update que vuelve station_rate a un servicio sin booking_mode fija free_booking', async () => {
+      primeUpdate(existingStationService());
+      await service.update(1, { rental_pricing_mode: 'station_rate' } as UpdateProductDto);
+      expect(mockPrismaService.products.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: expect.objectContaining({ booking_mode: 'free_booking' }),
+      });
+    });
+
+    it('update con booking_mode explícito lo respeta', async () => {
+      primeUpdate(existingStationService());
+      await service.update(1, { rental_pricing_mode: 'station_rate', booking_mode: 'provider_required' } as UpdateProductDto);
+      expect(mockPrismaService.products.update.mock.calls[0][0].data.booking_mode).toBe('provider_required');
+    });
+
+    it('update de otro campo no cambia el booking_mode ya guardado', async () => {
+      primeUpdate(existingStationService({ rental_pricing_mode: 'station_rate' }));
+      await service.update(1, { name: 'Nuevo nombre' } as UpdateProductDto);
+      expect(mockPrismaService.products.update.mock.calls[0][0].data).not.toHaveProperty('booking_mode');
+    });
+
+    it('update rechaza una duración que no es múltiplo del bloque de una estación vinculada (STATION_017)', async () => {
+      primeUpdate(existingStationService({ rental_pricing_mode: 'station_rate' }));
+      mockPrismaService.service_station_services.findMany.mockResolvedValue([
+        { station: { name: 'Sala 1', rental_block_minutes: 30 } },
+      ]);
+      await expect(
+        service.update(1, { service_duration_minutes: 45 } as UpdateProductDto),
+      ).rejects.toMatchObject({ errorCode: 'STATION_017' });
+      expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+    });
+
+    it('update acepta una duración múltiplo del bloque', async () => {
+      primeUpdate(existingStationService({ rental_pricing_mode: 'station_rate' }));
+      mockPrismaService.service_station_services.findMany.mockResolvedValue([
+        { station: { name: 'Sala 1', rental_block_minutes: 30 } },
+      ]);
+      await service.update(1, { service_duration_minutes: 90 } as UpdateProductDto);
+      expect(mockPrismaService.products.update).toHaveBeenCalled();
+    });
+
+    it('update que reenvía la misma duración y modo guardados no revalida el múltiplo (fila heredada)', async () => {
+      primeUpdate(existingStationService({ rental_pricing_mode: 'station_rate', service_duration_minutes: 45 }));
+      mockPrismaService.service_station_services.findMany.mockResolvedValue([
+        { station: { name: 'Sala 1', rental_block_minutes: 30 } },
+      ]);
+      await service.update(1, {
+        name: 'Nuevo nombre',
+        service_duration_minutes: 45,
+        rental_pricing_mode: 'station_rate',
+      } as UpdateProductDto);
+      expect(mockPrismaService.products.update).toHaveBeenCalled();
+    });
+
+    it('update de un servicio que no es station_rate no valida el múltiplo', async () => {
+      primeUpdate(existingStationService({ rental_pricing_mode: 'fixed_price' }));
+      mockPrismaService.service_station_services.findMany.mockResolvedValue([
+        { station: { name: 'Sala 1', rental_block_minutes: 30 } },
+      ]);
+      await service.update(1, { service_duration_minutes: 45 } as UpdateProductDto);
+      expect(mockPrismaService.products.update).toHaveBeenCalled();
     });
   });
 

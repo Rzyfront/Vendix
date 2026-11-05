@@ -16,7 +16,7 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { PaymentMethodsService } from '../../../settings/payments/services/payment-methods.service';
 import {
-  PAYMENT_REQUEST_PURPOSE_LABELS,
+  paymentRequestPurposeLabel,
   PAYMENT_REQUEST_STATUS_LABELS,
   PaymentRequest,
   PaymentRequestDetail,
@@ -65,8 +65,7 @@ export class PaymentRequestDetailModalComponent {
   readonly status = computed<PaymentRequestStatus | null>(() => this.view()?.status ?? null);
   readonly statusLabel = computed(() => (this.status() ? PAYMENT_REQUEST_STATUS_LABELS[this.status()!] : ''));
   readonly purposeLabel = computed(() => {
-    const purpose = this.view()?.purpose ?? '';
-    return PAYMENT_REQUEST_PURPOSE_LABELS[purpose] ?? purpose;
+    return paymentRequestPurposeLabel(this.view()?.purpose);
   });
   readonly receiptUrl = computed(() => this.detail()?.receipt_url ?? null);
   readonly receiptIsImage = computed(() => {

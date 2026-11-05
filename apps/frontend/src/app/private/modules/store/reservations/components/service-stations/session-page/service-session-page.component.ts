@@ -10,6 +10,7 @@ import {
   ButtonComponent,
   CustomerSelectComponent,
   CustomerSelectOption,
+  DialogService,
   IconComponent,
   InputComponent,
   ModalComponent,
@@ -189,6 +190,7 @@ export class ServiceSessionPageComponent {
   private readonly paymentMethodsApi = inject(PaymentMethodsService);
   private readonly registryApi = inject(ServiceRegistryService);
   private readonly toast = inject(ToastService);
+  private readonly dialog = inject(DialogService);
   private readonly authFacade = inject(AuthFacade);
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly currencyService = inject(CurrencyFormatService);
@@ -820,16 +822,44 @@ export class ServiceSessionPageComponent {
   extendBy(minutes: number): void {
     const current = this.session();
     if (!current) return;
-    this.submitExtend(addMinutesIso(current.planned_end_at, minutes, Date.now()));
+    void this.confirmAndExtend(addMinutesIso(current.planned_end_at, minutes, Date.now()), minutes);
   }
 
   extendToCustom(): void {
+    const current = this.session();
     const iso = storeWallTimeToIso(this.customEnd(), this.timezone() || 'America/Bogota');
-    if (!iso) {
+    if (!current || !iso) {
       this.toast.error('Indica una fecha y hora de fin válidas.');
       return;
     }
-    this.submitExtend(iso);
+    const minutes = current.planned_end_at ? (Date.parse(iso) - Date.parse(current.planned_end_at)) / 60_000 : 0;
+    void this.confirmAndExtend(iso, minutes);
+  }
+
+  /** Every extension asks first, with the new end time and the price of the added time; cancel changes nothing. */
+  private async confirmAndExtend(plannedEndAt: string, minutes: number): Promise<void> {
+    if (this.extending()) return;
+    const endText = new Intl.DateTimeFormat('es-CO', {
+      timeZone: this.timezone() || 'America/Bogota',
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(plannedEndAt));
+    const price = this.extensionPrice(minutes);
+    const priceText =
+      price != null
+        ? `Valor de la extensión: ${this.currencyService.format(price)}.`
+        : (this.extendNote() ?? 'El valor se calcula al confirmar según la tarifa de la estación.');
+    const confirmed = await this.dialog.confirm({
+      title: 'Extender atención',
+      message: `La atención terminará el ${endText}. ${priceText}`,
+      confirmText: 'Extender',
+      cancelText: 'Cancelar',
+    });
+    if (!confirmed) return;
+    this.submitExtend(plannedEndAt);
   }
 
   private submitExtend(plannedEndAt: string): void {

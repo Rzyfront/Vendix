@@ -442,6 +442,11 @@ export class CustomersService {
       document_type?: string | null;
       document_number?: string | null;
     } | null,
+    /**
+     * `match_by_phone: false` (bookings, D1): the phone is stored on a new
+     * customer but never used to find or rewrite an existing account.
+     */
+    options: { match_by_phone?: boolean } = {},
   ): Promise<{
     customer_id: number;
     was_created: boolean;
@@ -451,12 +456,13 @@ export class CustomersService {
 
     const normalizedEmail = this.resolveCustomerEmail(guest.email);
     const normalizedPhone = guest.phone?.replace(/\s+/g, '').trim() || null;
+    const lookupPhone = options.match_by_phone === false ? null : normalizedPhone;
     const normalizedDoc = this.normalizeDocument({
       type: guest.document_type ?? null,
       number: guest.document_number ?? null,
     });
 
-    if (!normalizedEmail && !normalizedPhone) return null;
+    if (!normalizedEmail && !lookupPhone) return null;
 
     const store = await this.prisma.stores.findUnique({
       where: { id: storeId },
@@ -484,10 +490,10 @@ export class CustomersService {
       });
     }
 
-    if (!existing && normalizedPhone) {
+    if (!existing && lookupPhone) {
       existing = await this.prisma.users.findFirst({
         where: {
-          phone: normalizedPhone,
+          phone: lookupPhone,
           store_users: { some: { store_id: storeId } },
           user_roles: { some: { roles: { name: 'customer' } } },
           state: { not: user_state_enum.archived },
@@ -592,8 +598,8 @@ export class CustomersService {
     if (guest.last_name?.trim()) {
       data.last_name = toTitleCase(guest.last_name);
     }
-    if (normalizedPhone) {
-      data.phone = normalizedPhone;
+    if (lookupPhone) {
+      data.phone = lookupPhone;
     }
     if (normalizedDoc.type) {
       data.document_type = normalizedDoc.type;

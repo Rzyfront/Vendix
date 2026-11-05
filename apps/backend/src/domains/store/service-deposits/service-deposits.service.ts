@@ -6,7 +6,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { WalletService } from '../wallet/wallet.service';
 import { WalletBalanceService } from '../wallet/services/wallet-balance.service';
-import { MovementsService } from '../cash-registers/movements/movements.service';
+import { MovementsService, SERVICE_DEPOSIT_MOVEMENT_SOURCE } from '../cash-registers/movements/movements.service';
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale-share.util';
 import { getSettledOrderAmount } from '../payments/services/payment-validator.service';
@@ -724,21 +724,26 @@ export class ServiceDepositsService {
     };
   }
 
-  /** Cash only (the register ignores other methods), inside the tx like lodging. */
+  /**
+   * Staff-recorded money (S14): any method that moves the user's cash flow (`shouldRecordCashMovement`) is
+   * registered in the acting user's session, inside the tx. Without a staff user (Wompi webhook, customer
+   * pages) nothing is recorded.
+   */
   private async recordCash(
     tx: Tx,
     direction: 'in' | 'out',
     user_id: number | null,
     data: { store_id: number; amount: number; method: string; deposit_id: number; reference: string },
   ): Promise<void> {
-    if (data.method !== 'cash' || !user_id) return;
+    if (!user_id) return;
     await this.movements.recordModuleCashMovement(tx, {
       store_id: data.store_id,
       user_id,
       direction,
       amount: data.amount,
       payment_method: data.method,
-      source_type: 'service_deposit',
+      include_non_cash: true,
+      source_type: SERVICE_DEPOSIT_MOVEMENT_SOURCE,
       source_id: data.deposit_id,
       reference: data.reference,
       notes: direction === 'in' ? 'Anticipo consumible' : 'Devolución de anticipo consumible',

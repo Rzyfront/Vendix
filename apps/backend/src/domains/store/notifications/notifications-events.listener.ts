@@ -155,6 +155,10 @@ export class NotificationsEventsListener {
     if (event.source === 'kitchen_bridge') {
       return;
     }
+    // A no-op transition (created → created) carries no information.
+    if (event.old_state === event.new_state) {
+      return;
+    }
     await this.notifications_service.createAndBroadcast(
       event.store_id,
       'order_status_change',

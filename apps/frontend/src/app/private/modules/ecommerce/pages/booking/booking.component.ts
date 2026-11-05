@@ -25,6 +25,8 @@ import { StoreUiService } from '../../services/store-ui.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { StepsLineComponent } from '../../../../../shared/components/steps-line/steps-line.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { InputComponent } from '../../../../../shared/components/input/input.component';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
@@ -52,6 +54,7 @@ import {
     RouterModule,
     StepsLineComponent,
     ButtonComponent,
+    InputComponent,
     IconComponent,
     ServiceLocationSelectorComponent,
     CurrencyPipe,
@@ -72,6 +75,7 @@ export class BookingComponent implements OnInit {
   private authFacade = inject(AuthFacade);
   private toast = inject(ToastService);
   private storeUiService = inject(StoreUiService);
+  private tenantFacade = inject(TenantFacade);
 
   private destroyRef = inject(DestroyRef);
 
@@ -254,6 +258,27 @@ export class BookingComponent implements OnInit {
   guestName = signal('');
   guestEmail = signal('');
   guestPhone = signal('');
+  /**
+   * The store lets visitors book (and pay) without logging in
+   * (`ecommerce.checkout.allow_guest_booking`, opt-in: absent means off).
+   */
+  readonly guestBookingEnabled = computed(
+    () =>
+      !this.isLoggedIn() &&
+      this.tenantFacade.getCurrentDomainConfig()?.customConfig?.ecommerce?.checkout
+        ?.allow_guest_booking === true,
+  );
+  /** Missing/invalid contact data of a visitor, shown under the form (null = ready). */
+  readonly guestContactError = computed<string | null>(() => {
+    if (!this.guestBookingEnabled()) return null;
+    if (!this.guestName().trim()) return 'Escribe tu nombre.';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.guestEmail().trim())) {
+      return 'Escribe un correo válido.';
+    }
+    if (!this.guestPhone().trim()) return 'Escribe tu teléfono.';
+    return null;
+  });
+  readonly guestContactTouched = signal(false);
   bookingNotes = signal('');
 
   // Service location (where the technician will perform the work)
@@ -493,9 +518,14 @@ export class BookingComponent implements OnInit {
   // --- Step 4: Confirm ---
 
   confirmBooking(): void {
-    if (!this.isLoggedIn()) {
+    const isGuest = this.guestBookingEnabled();
+    if (!this.isLoggedIn() && !isGuest) {
       this.errorMessage.set('Debes iniciar sesion para reservar');
       return;
+    }
+    if (isGuest) {
+      // A visitor has no saved addresses: the service is always at the establishment.
+      this.serviceLocation.set('shop');
     }
 
     // The customer must pick where the service will be performed before
@@ -528,9 +558,18 @@ export class BookingComponent implements OnInit {
     }
 
     if (this.chargesOnline()) {
+      // The hold is created here, so a visitor gives the contact data now.
+      if (isGuest) {
+        this.guestContactTouched.set(true);
+        if (this.guestContactError()) return;
+      }
       this.holdAndPay(date, startTime, endTime);
       return;
     }
+
+    // Without an online charge a visitor follows the same cart → checkout path
+    // as a customer: the checkout asks the contact data and the payment method
+    // (including paying at the establishment) and may include products.
 
     const variantId = this.selectedVariantId();
     const bookingSelection: Record<string, any> = {
@@ -606,6 +645,16 @@ export class BookingComponent implements OnInit {
     }
   }
 
+  /** Contact data to send when the visitor has no session; undefined for a customer. */
+  private guestContact() {
+    if (!this.guestBookingEnabled()) return undefined;
+    return {
+      name: this.guestName().trim(),
+      email: this.guestEmail().trim(),
+      phone: this.guestPhone().trim(),
+    };
+  }
+
   /** Holds the slot and opens its payment page; the booking is confirmed by that payment. */
   private holdAndPay(date: string, startTime: string, endTime: string): void {
     const slot = this.selectedSlot();
@@ -620,6 +669,7 @@ export class BookingComponent implements OnInit {
         date,
         start_time: startTime,
         end_time: endTime,
+        guest: this.guestContact(),
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

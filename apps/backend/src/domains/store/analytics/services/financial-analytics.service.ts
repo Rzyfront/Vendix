@@ -33,6 +33,7 @@ import {
   sqlStateList,
 } from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { isServiceDepositSale } from '../../cash-registers/movements/movements.service';
 
 // Aggregated P&L tolerates 1-2 min of staleness → short TTL (ms).
 const PROFIT_LOSS_CACHE_TTL_MS = 120_000;
@@ -592,10 +593,12 @@ export class FinancialAnalyticsService {
     movements: Array<{
       type: string;
       amount: Prisma.Decimal | number | null;
+      source_type?: string | null;
     }>;
   }): CashSessionExportRow {
+    // A booking deposit sits in the drawer as `sale` but is not a sale (S14).
     const totalSales = s.movements
-      .filter((m) => m.type === 'sale')
+      .filter((m) => m.type === 'sale' && !isServiceDepositSale(m))
       .reduce((sum, m) => sum + Number(m.amount || 0), 0);
     const totalExpenses = s.movements
       .filter((m) => m.type === 'expense')
@@ -658,6 +661,7 @@ export class FinancialAnalyticsService {
           select: {
             type: true,
             amount: true,
+            source_type: true,
           },
         },
       },
@@ -1979,7 +1983,7 @@ export class FinancialAnalyticsService {
         opened_by_user: { select: { first_name: true, last_name: true } },
         closed_by_user: { select: { first_name: true, last_name: true } },
         movements: {
-          select: { type: true, amount: true },
+          select: { type: true, amount: true, source_type: true },
         },
       },
       orderBy: { opened_at: 'desc' },

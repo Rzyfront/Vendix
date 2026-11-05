@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
@@ -9,6 +10,7 @@ import { S3Service } from '@common/services/s3.service';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { PaymentLinksService } from '../payment-links/payment-links.service';
+import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { PaymentRequestQueryDto } from './dto/payment-request.dto';
 
 type Tx = Prisma.TransactionClient;
@@ -24,6 +26,8 @@ export interface PaymentRequestPaidEvent {
   amount: number;
   method: PaymentRequestPayMethod;
   paid_at: Date;
+  /** Staff user who confirmed it (admin transfer confirmation); absent for Wompi and customer pages. */
+  confirmed_by_user_id?: number | null;
 }
 
 export interface CreatePaymentRequestInput {
@@ -68,6 +72,8 @@ export class PaymentRequestsService {
     private readonly s3: S3Service,
     private readonly paymentLinks: PaymentLinksService,
     private readonly response: ResponseService,
+    // Lazy lookup of the cash-register gate (cash-registers must not be imported here: DI cycles).
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
   /**
@@ -158,6 +164,7 @@ export class PaymentRequestsService {
       amount: Number(row.amount),
       method: options.method,
       paid_at: row.paid_at ?? paid_at,
+      ...(options.confirmed_by_user_id ? { confirmed_by_user_id: options.confirmed_by_user_id } : {}),
     };
   }
 
@@ -263,9 +270,14 @@ export class PaymentRequestsService {
         'Solo se puede confirmar una transferencia con comprobante en revisión.',
       );
     }
+    // S14: confirming a transfer receipt is a cash-flow movement of the confirming staff member.
+    const userId = RequestContextService.getUserId() ?? null;
+    const sessions = this.moduleRef?.get(SessionsService, { strict: false });
+    if (!sessions) throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    await sessions.assertSessionForSales(userId ?? undefined);
     const event = await this.markPaid(id, {
       method: 'transfer',
-      confirmed_by_user_id: RequestContextService.getUserId() ?? null,
+      confirmed_by_user_id: userId,
     });
     if (!event) {
       throw new VendixHttpException(ErrorCodes.PAYMENT_REQUEST_INVALID_STATE);
