@@ -10,6 +10,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { booking_status_enum, booking_mode_enum, Prisma } from '@prisma/client';
+import { bookingEndDateFor } from '@common/utils/schedule-window.util';
 import {
   CreateBookingDto,
   RescheduleBookingDto,
@@ -190,6 +191,19 @@ export class ReservationsService {
     // reserva quedaría trabada. Se valida aquí, antes de crear orden o reserva.
     assertSaleNatureProducts([product]);
 
+    // S21: bookings can cross midnight (`end_time <= start_time` ends on D+1) and, on
+    // station services, have no end at all (D9). Daytime bookings keep `end_date` null.
+    const isOpenEnded = !!dto.is_open_ended;
+    if (isOpenEnded && !product.requires_station) {
+      throw new BadRequestException('Solo los servicios con estación admiten reservas sin hora de fin');
+    }
+    const endTime = dto.end_time ?? dto.start_time;
+    const endDateValue = isOpenEnded
+      ? null
+      : dto.end_date && dto.end_date.slice(0, 10) !== dto.date.slice(0, 10)
+        ? dto.end_date.slice(0, 10)
+        : bookingEndDateFor(dto.date.slice(0, 10), dto.start_time, endTime);
+
     // Validate product_variant_id if provided
     let selectedVariant: {
       id: number;
@@ -241,7 +255,8 @@ export class ReservationsService {
       }
     } else if (
       product.booking_mode === booking_mode_enum.provider_required &&
-      !dto.skip_availability_check
+      !dto.skip_availability_check &&
+      !isOpenEnded
     ) {
       // Check if there are ANY providers for this service
       const serviceProviders = await this.prisma.provider_services.findMany({
@@ -260,7 +275,7 @@ export class ReservationsService {
             dto.product_id,
             dto.date,
             dto.start_time,
-            dto.end_time,
+            endTime,
           );
 
         if (availableProviders.length > 0) {
@@ -276,14 +291,14 @@ export class ReservationsService {
       product.booking_mode === booking_mode_enum.free_booking;
     const noProvidersConfigured = !resolvedProviderId && !dto.provider_id;
     const shouldSkipAvailability =
-      dto.skip_availability_check || isFreeBooking || noProvidersConfigured;
+      dto.skip_availability_check || isFreeBooking || noProvidersConfigured || isOpenEnded;
 
     if (!shouldSkipAvailability) {
       const isAvailable = await this.availabilityService.isSlotAvailable(
         dto.product_id,
         dto.date,
         dto.start_time,
-        dto.end_time,
+        endTime,
         resolvedProviderId ?? undefined,
       );
 
@@ -298,7 +313,7 @@ export class ReservationsService {
         dto.customer_id,
         dto.date,
         dto.start_time,
-        dto.end_time,
+        endTime,
       );
     }
 
@@ -386,7 +401,7 @@ export class ReservationsService {
                 provider_id: resolvedProviderId,
                 date: new Date(dto.date),
                 start_time: dto.start_time,
-                end_time: dto.end_time,
+                end_time: endTime,
                 status: { notIn: [booking_status_enum.cancelled] },
               },
             });
@@ -408,7 +423,11 @@ export class ReservationsService {
               booking_number,
               date: new Date(dto.date),
               start_time: dto.start_time,
-              end_time: dto.end_time,
+              end_time: endTime,
+              // S21: a booking that crosses midnight ends on D+1; null = same day.
+              end_date: endDateValue ? new Date(endDateValue) : null,
+              // D9: no end yet; the coordinator fills end_time/end_date when it allocates.
+              is_open_ended: isOpenEnded,
               status: booking_status_enum.pending,
               channel: dto.channel || 'pos',
               // CP-POS-SVC-PERF-001 — cart-line anchor surfaced by the
@@ -445,12 +464,18 @@ export class ReservationsService {
               providerId: resolvedProviderId,
               date: dto.date,
               startTime: dto.start_time,
-              endTime: dto.end_time,
+              endTime: isOpenEnded ? undefined : endTime,
+              endDate: endDateValue,
+              isOpenEnded,
               excludeBookingId: created.id,
             });
           }
 
-          return await this.mapBooking(created);
+          // The open-ended end is only known after allocation: re-read the booking.
+          const finalBooking = isOpenEnded
+            ? await tx.bookings.findFirst({ where: { id: created.id }, include: this.BOOKING_INCLUDE })
+            : created;
+          return await this.mapBooking(finalBooking ?? created);
         },
         { isolationLevel: 'Serializable' },
       );
@@ -649,6 +674,7 @@ export class ReservationsService {
       }
     }
 
+    const holdEndDate = bookingEndDateFor(dto.date.slice(0, 10), dto.start_time, dto.end_time);
     const HOLD_DURATION_MINUTES = 15;
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + HOLD_DURATION_MINUTES);
@@ -666,6 +692,7 @@ export class ReservationsService {
         date: new Date(dto.date),
         start_time: dto.start_time,
         end_time: dto.end_time,
+        end_date: holdEndDate ? new Date(holdEndDate) : null,
         status: booking_status_enum.pending,
         channel: 'ecommerce',
         // CP-POS-SVC-PERF-001 — cart-line anchor surfaced by the POS
@@ -692,6 +719,7 @@ export class ReservationsService {
           date: dto.date,
           startTime: dto.start_time,
           endTime: dto.end_time,
+          endDate: holdEndDate,
           expiresAt,
           state: 'held',
           excludeBookingId: created.id,
@@ -1142,6 +1170,7 @@ export class ReservationsService {
     if (product?.requires_station && !this.allocationCoordinator) {
       throw new VendixHttpException(ErrorCodes.STATION_012);
     }
+    const rescheduleEndDate = bookingEndDateFor(dto.date.slice(0, 10), dto.start_time, dto.end_time);
     const updated = await this.prisma.$transaction(async (tx) => {
       if (product?.requires_station) {
         await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, id, 'cancelled');
@@ -1152,6 +1181,8 @@ export class ReservationsService {
           date: new Date(dto.date),
           start_time: dto.start_time,
           end_time: dto.end_time,
+          end_date: rescheduleEndDate ? new Date(rescheduleEndDate) : null,
+          is_open_ended: false,
           ...(dto.provider_id != null ? { provider_id: dto.provider_id } : {}),
           updated_at: new Date(),
         },
@@ -1173,6 +1204,7 @@ export class ReservationsService {
           date: dto.date,
           startTime: dto.start_time,
           endTime: dto.end_time,
+          endDate: rescheduleEndDate,
           excludeBookingId: id,
         });
       }
@@ -1357,11 +1389,12 @@ export class ReservationsService {
 
     const product = await this.prisma.products.findFirst({ where: { id: booking.product_id }, select: { requires_station: true } });
     if (product?.requires_station && !this.allocationCoordinator) throw new VendixHttpException(ErrorCodes.STATION_012);
+    const approvedEndDate = bookingEndDateFor(this.formatDateOnly(request.requested_date), request.requested_start_time, request.requested_end_time);
     const updated = await this.prisma.$transaction(async (tx) => {
       if (product?.requires_station) await this.allocationCoordinator!.releaseBooking(tx, booking.store_id, booking.id, 'cancelled');
       const saved = await tx.bookings.update({
         where: { id: booking.id },
-        data: { date: request.requested_date, start_time: request.requested_start_time, end_time: request.requested_end_time, updated_at: new Date() },
+        data: { date: request.requested_date, start_time: request.requested_start_time, end_time: request.requested_end_time, end_date: approvedEndDate ? new Date(approvedEndDate) : null, is_open_ended: false, updated_at: new Date() },
         include: this.BOOKING_INCLUDE,
       });
       if (product?.requires_station) {
@@ -1370,7 +1403,7 @@ export class ReservationsService {
           storeId: booking.store_id, bookingId: booking.id, productId: booking.product_id,
           productVariantId: booking.product_variant_id, stationId: previous?.station_id,
           providerId: booking.provider_id ?? previous?.provider_id, date: this.formatDateOnly(request.requested_date),
-          startTime: request.requested_start_time, endTime: request.requested_end_time,
+          startTime: request.requested_start_time, endTime: request.requested_end_time, endDate: approvedEndDate,
           excludeBookingId: booking.id,
         });
       }
@@ -1721,12 +1754,10 @@ export class ReservationsService {
    * Obtiene reservas agrupadas por fecha para vista de calendario
    */
   async getCalendar(query: CalendarQueryDto) {
-    const where: any = {
-      date: {
-        gte: new Date(query.date_from),
-        lte: new Date(query.date_to),
-      },
-    };
+    const range = { gte: new Date(query.date_from), lte: new Date(query.date_to) };
+    // S21 / A14: an overnight booking also shows on the day it ends, so it is
+    // fetched when either its start day or its end day is inside the range.
+    const where: any = { OR: [{ date: range }, { end_date: range }] };
 
     if (query.product_id) where.product_id = query.product_id;
     if (query.status) where.status = query.status;
@@ -1741,13 +1772,22 @@ export class ReservationsService {
 
     // Group by date string
     const grouped: Record<string, any[]> = {};
+    const dayKey = (value: unknown) =>
+      value instanceof Date ? value.toISOString().split('T')[0] : String(value).split('T')[0];
+    const fromKey = dayKey(range.gte);
+    const toKey = dayKey(range.lte);
+    const inRange = (key: string) => key >= fromKey && key <= toKey;
     for (const booking of bookings) {
-      const dateKey =
-        booking.date instanceof Date
-          ? booking.date.toISOString().split('T')[0]
-          : String(booking.date).split('T')[0];
-      if (!grouped[dateKey]) grouped[dateKey] = [];
-      grouped[dateKey].push(booking);
+      const dateKey = dayKey(booking.date);
+      const endKey = (booking as any).end_date ? dayKey((booking as any).end_date) : null;
+      if (inRange(dateKey)) {
+        if (!grouped[dateKey]) grouped[dateKey] = [];
+        grouped[dateKey].push(booking);
+      }
+      if (endKey && endKey !== dateKey && inRange(endKey)) {
+        if (!grouped[endKey]) grouped[endKey] = [];
+        grouped[endKey].push(booking);
+      }
     }
 
     return grouped;

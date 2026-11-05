@@ -3,6 +3,7 @@ import { Component, input, output, computed, signal, DestroyRef, inject } from '
 
 import { Booking } from '../../../interfaces/reservation.interface';
 import { isBookingExpired as checkBookingExpired } from '../booking-expired.util';
+import { bookingDaySpan } from '../booking-day-span.util';
 import {
   BookingStackGroup,
   bookingCustomerName,
@@ -79,9 +80,9 @@ export class CalendarWeekViewComponent {
     resolveCalendarRange(
       this.settings.pos()?.business_hours,
       this.weekDates(),
-      Object.values(this.bookingsByDate())
-        .flat()
-        .map((b) => ({ start: b.start_time, end: b.end_time })),
+      Object.entries(this.bookingsByDate()).flatMap(([day, list]) =>
+        list.map((b) => bookingDaySpan(b, day)),
+      ),
       this.slotMinutes(),
     ),
   );
@@ -169,12 +170,12 @@ export class CalendarWeekViewComponent {
     return groupBookingsByStart(this.getBookingsForDate(dateStr));
   }
 
-  getGroupTop(group: BookingStackGroup): number {
-    return this.getBlockTop(group.bookings[0]);
+  getGroupTop(group: BookingStackGroup, day: string): number {
+    return this.getBlockTop(group.bookings[0], day);
   }
 
-  getGroupMinHeight(group: BookingStackGroup): number {
-    return Math.max(...group.bookings.map((b) => this.getBlockHeight(b)));
+  getGroupMinHeight(group: BookingStackGroup, day: string): number {
+    return Math.max(...group.bookings.map((b) => this.getBlockHeight(b, day)));
   }
 
   isStackExpanded(dateStr: string, startKey: string): boolean {
@@ -231,12 +232,14 @@ export class CalendarWeekViewComponent {
     return this.freeSlotsByDate()[dateStr] || [];
   }
 
-  getBlockTop(booking: Booking): number {
-    return this.blockGeometry(booking.start_time, booking.end_time).top;
+  getBlockTop(booking: Booking, day: string): number {
+    const span = bookingDaySpan(booking, day);
+    return this.blockGeometry(span.start, span.end).top;
   }
 
-  getBlockHeight(booking: Booking): number {
-    return this.blockGeometry(booking.start_time, booking.end_time).height;
+  getBlockHeight(booking: Booking, day: string): number {
+    const span = bookingDaySpan(booking, day);
+    return this.blockGeometry(span.start, span.end).height;
   }
 
   getFreeSlotTop(slot: FreeSlot): number {

@@ -75,7 +75,10 @@ function parseEndDateTime(booking: Booking): Date | null {
 
   // Construct a local-time Date. `new Date('YYYY-MM-DDTHH:mm:ss')` is
   // parsed as LOCAL time (per the ES spec) — no `Z`, so no UTC drift.
-  const endDateTime = new Date(`${dateStr}T${timeStr}`);
+  // S21: an overnight booking ends on `end_date` (D+1), not on its start day.
+  const rawEndDate = booking.end_date ? String(booking.end_date).split('T')[0] : null;
+  const endDay = rawEndDate && /^\d{4}-\d{2}-\d{2}$/.test(rawEndDate) ? rawEndDate : dateStr;
+  const endDateTime = new Date(`${endDay}T${timeStr}`);
   if (isNaN(endDateTime.getTime())) return null;
   return endDateTime;
 }

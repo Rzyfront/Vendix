@@ -21,6 +21,7 @@ import {
   ButtonComponent,
   ToggleComponent,
 } from '../../../../../../../shared/components';
+import { validateWeeklyBlocks, windowMinutes } from '../../../../../../../shared/utils/schedule-window.util';
 
 interface ScheduleBlock {
   block_order: number;
@@ -148,7 +149,8 @@ export class WeeklyScheduleEditorComponent {
     ) {
       return false;
     }
-    return this.timeToMinutes(end) > this.timeToMinutes(start);
+    // S21: end <= start is a valid block that ends the next day (20:00–03:00).
+    return true;
   }
 
   formatTimeShort(time: string): string {
@@ -170,9 +172,7 @@ export class WeeklyScheduleEditorComponent {
     let totalMin = 0;
     for (const d of active) {
       for (const block of d.blocks) {
-        const [sh, sm] = block.start_time.split(':').map(Number);
-        const [eh, em] = block.end_time.split(':').map(Number);
-        totalMin += (eh * 60 + em) - (sh * 60 + sm);
+        totalMin += windowMinutes(block);
       }
     }
     this.scheduleChanged.emit({ activeDays: active.length, weeklyHours: Math.round(totalMin / 60) });
@@ -321,11 +321,22 @@ export class WeeklyScheduleEditorComponent {
       for (const block of d.blocks) {
         if (!this.isValidBlock(block.start_time, block.end_time)) {
           this.toastService.error(
-            `Revisa el horario del ${d.label.toLowerCase()}: usa horas válidas (HH:mm) y fin mayor que inicio`,
+            `Revisa el horario del ${d.label.toLowerCase()}: usa horas válidas (HH:mm)`,
           );
           return;
         }
       }
+    }
+
+    const overlap = validateWeeklyBlocks(
+      this.days()
+        .filter((d) => d.is_active)
+        .flatMap((d) => d.blocks.map((b) => ({ day: d.day_of_week, start_time: b.start_time, end_time: b.end_time }))),
+    );
+    if (overlap) {
+      const label = this.days().find((d) => d.day_of_week === overlap.day)?.label.toLowerCase() ?? '';
+      this.toastService.error(`Revisa el horario del ${label}: los bloques se cruzan entre sí o con el cierre nocturno del día anterior`);
+      return;
     }
 
     this.saving.set(true);

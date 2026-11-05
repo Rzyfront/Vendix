@@ -421,6 +421,30 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
     // because the caller provided their own order_id.
   });
 
+  it('S21: a booking that crosses midnight is stored with end_date = D+1', async () => {
+    const ctx = buildServiceForCreate();
+    await ctx.service.create({ ...baseDto, start_time: '23:00', end_time: '01:00' });
+
+    expect(ctx.bookings[0].end_time).toBe('01:00');
+    expect(ctx.bookings[0].end_date).toEqual(new Date('2026-09-02'));
+    expect(ctx.bookings[0].is_open_ended).toBe(false);
+  });
+
+  it('S21: a daytime booking keeps end_date null', async () => {
+    const ctx = buildServiceForCreate();
+    await ctx.service.create(baseDto);
+
+    expect(ctx.bookings[0].end_date).toBeNull();
+  });
+
+  it('S21: an open-ended booking on a service without station is rejected', async () => {
+    const ctx = buildServiceForCreate();
+    await expect(
+      ctx.service.create({ ...baseDto, end_time: undefined, is_open_ended: true }),
+    ).rejects.toThrow(/sin hora de fin/);
+    expect(ctx.bookings.length).toBe(0);
+  });
+
   it('QUI-649: when ordersService.create throws, the reservation is NOT persisted (atomicity)', async () => {
     const ctx = buildServiceForCreate();
     ctx.setOrderCreateImpl(() =>
@@ -741,5 +765,53 @@ describe('ReservationsService.reschedule — provider change (QUI-972)', () => {
     await expect(
       service.reschedule(7, { ...dto, provider_id: 2 } as any),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe('ReservationsService.getCalendar — overnight bookings (S21 / A14)', () => {
+  const build = (rows: any[]) => {
+    const prisma: any = { bookings: { findMany: jest.fn().mockResolvedValue(rows) } };
+    const service = new ReservationsService(
+      prisma,
+      {} as any,
+      {} as any,
+      { signUrl: jest.fn((u: string) => Promise.resolve(u)) } as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+    return { service, prisma };
+  };
+  const query = { date_from: '2026-03-06', date_to: '2026-03-07' } as any;
+
+  it('lists an overnight booking under its start day and its end day', async () => {
+    const { service, prisma } = build([
+      { id: 1, date: new Date('2026-03-06'), end_date: new Date('2026-03-07'), start_time: '23:00', end_time: '01:00' },
+    ]);
+    const grouped = await service.getCalendar(query);
+
+    expect(grouped['2026-03-06'].map((b: any) => b.id)).toEqual([1]);
+    expect(grouped['2026-03-07'].map((b: any) => b.id)).toEqual([1]);
+    expect(prisma.bookings.findMany.mock.calls[0][0].where.OR).toHaveLength(2);
+  });
+
+  it('keeps a daytime booking on a single day', async () => {
+    const { service } = build([
+      { id: 2, date: new Date('2026-03-06'), end_date: null, start_time: '10:00', end_time: '11:00' },
+    ]);
+    const grouped = await service.getCalendar(query);
+
+    expect(Object.keys(grouped)).toEqual(['2026-03-06']);
+  });
+
+  it('does not list a booking under an end day outside the requested range', async () => {
+    const { service } = build([
+      { id: 3, date: new Date('2026-03-07'), end_date: new Date('2026-03-08'), start_time: '23:00', end_time: '01:00' },
+    ]);
+    const grouped = await service.getCalendar(query);
+
+    expect(Object.keys(grouped)).toEqual(['2026-03-07']);
   });
 });

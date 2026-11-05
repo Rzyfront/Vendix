@@ -16,6 +16,7 @@ import {
   SetStationServicesDto,
   UpdateServiceStationDto,
 } from './dto/station.dto';
+import { validateWeeklyBlocks } from '../../../common/utils/schedule-window.util';
 import { StationListQueryDto } from './dto/station-list-query.dto';
 import { ACTIVE_ALLOCATION_STATES, NEXT_RESERVATION_SELECT, toNextReservation } from '../service-sessions/utils/next-reservation.util';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
@@ -423,10 +424,17 @@ export class ServiceStationsService {
   async setSchedules(id: number, dto: SetStationSchedulesDto) {
     await this.findOne(id);
     const byWeekday = new Map<number, typeof dto.schedules>();
+    // S21: end <= start means the block ends the next day (00:00-00:00 = 24 h).
+    // Overlaps are checked on spans, including the previous day's overnight spill.
+    const invalid = validateWeeklyBlocks(dto.schedules.map((b) => ({ day: b.weekday, start_time: b.start_time, end_time: b.end_time })));
+    if (invalid) {
+      throw new BadRequestException(
+        invalid.reason === 'overlap'
+          ? `Los bloques del día ${invalid.day} no pueden superponerse`
+          : 'Cada bloque debe tener horas con formato HH:mm',
+      );
+    }
     for (const block of dto.schedules) {
-      if (block.start_time >= block.end_time) {
-        throw new BadRequestException('Cada bloque debe terminar después de su hora de inicio');
-      }
       const day = byWeekday.get(block.weekday) ?? [];
       day.push(block);
       byWeekday.set(block.weekday, day);
@@ -444,9 +452,6 @@ export class ServiceStationsService {
     for (const [weekday, blocks] of byWeekday) {
       blocks.sort((a, b) => a.start_time.localeCompare(b.start_time));
       for (let i = 0; i < blocks.length; i++) {
-        if (i > 0 && blocks[i].start_time < blocks[i - 1].end_time) {
-          throw new BadRequestException(`Los bloques del día ${weekday} no pueden superponerse`);
-        }
         rows.push({
           store_id: this.storeId,
           station_id: id,

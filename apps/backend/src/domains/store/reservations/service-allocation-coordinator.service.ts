@@ -2,10 +2,21 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { resolveStoreTimezone, zonedWallClockToUtc } from '../../../common/utils/store-timezone.util';
+import {
+  ClockWindow,
+  addDaysToDateString,
+  bookingEndDateFor,
+  bookingInterval,
+  bookingMinuteSpan,
+  coverageForDate,
+  coversSpan,
+  spansOverlap,
+} from '../../../common/utils/schedule-window.util';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { BusinessHoursService } from './business-hours/business-hours.service';
 
 const ACTIVE_STATES = ['held', 'payment_pending', 'confirmed', 'in_service'];
+const DEFAULT_OPEN_END_BLOCK_MINUTES = 360;
 
 export interface BookingAllocationInput {
   storeId: number;
@@ -16,7 +27,12 @@ export interface BookingAllocationInput {
   providerId?: number | null;
   date: string;
   startTime: string;
-  endTime: string;
+  /** Required unless `isOpenEnded`. `endTime <= startTime` ends the next day (S21). */
+  endTime?: string;
+  /** Day the booking ends (`YYYY-MM-DD`); defaults to D+1 when the booking crosses midnight, else D. */
+  endDate?: string | null;
+  /** Booking without an end (D9): ends at the station close or after `open_end_block_minutes`. */
+  isOpenEnded?: boolean;
   expiresAt?: Date | null;
   state?: 'held' | 'payment_pending' | 'confirmed' | 'in_service';
   excludeBookingId?: number;
@@ -36,7 +52,15 @@ export class ServiceAllocationCoordinator {
     });
     if (!product?.requires_station) return null;
     if (product.product_type !== 'service') throw new VendixHttpException(ErrorCodes.STATION_001);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date) || !this.isTime(input.startTime) || !this.isTime(input.endTime) || input.endTime <= input.startTime) {
+    const isOpenEnded = !!input.isOpenEnded;
+    const isDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+    const endTime = input.endTime ?? input.startTime;
+    if (
+      !isDate(input.date) ||
+      !this.isTime(input.startTime) ||
+      (!isOpenEnded && !this.isTime(input.endTime ?? '')) ||
+      (input.endDate != null && !isDate(input.endDate))
+    ) {
       throw new VendixHttpException(ErrorCodes.STATION_009);
     }
 
@@ -49,16 +73,20 @@ export class ServiceAllocationCoordinator {
     if (input.productVariantId && !variant) throw new VendixHttpException(ErrorCodes.STATION_001);
     const buffer = Math.max(0, variant?.buffer_minutes ?? product.buffer_minutes ?? 0);
     const duration = variant?.service_duration_minutes ?? product.service_duration_minutes;
-    const requestedMinutes = this.minutes(input.endTime) - this.minutes(input.startTime);
-    if (!duration || requestedMinutes !== duration) throw new VendixHttpException(ErrorCodes.STATION_009);
     const timezone = await resolveStoreTimezone(this.prisma, input.storeId);
-    const [year, month, day] = input.date.split('-').map(Number);
-    const [startHour, startMinute] = input.startTime.split(':').map(Number);
-    const [endHour, endMinute] = input.endTime.split(':').map(Number);
-    const startAt = zonedWallClockToUtc(year, month, day, startHour, startMinute, 0, 0, timezone);
-    const serviceEndAt = zonedWallClockToUtc(year, month, day, endHour, endMinute, 0, 0, timezone);
-    const endAt = new Date(serviceEndAt.getTime() + buffer * 60_000);
     const now = new Date();
+    // S21: `end <= start` (or an explicit `endDate`) puts the end on another day. A booking
+    // without an end plans a placeholder block until the station (and its close) is known (D9).
+    const planned = bookingInterval(
+      { date: input.date, end_date: isOpenEnded ? null : input.endDate, start_time: input.startTime, end_time: isOpenEnded ? input.startTime : endTime },
+      timezone,
+    );
+    let startAt = planned.startAt;
+    let serviceEndAt = isOpenEnded ? new Date(startAt.getTime() + DEFAULT_OPEN_END_BLOCK_MINUTES * 60_000) : planned.endAt;
+    const requestedMinutes = Math.round((serviceEndAt.getTime() - startAt.getTime()) / 60_000);
+    // The end day can never precede the start, and a same-day booking must end after it starts.
+    if (!isOpenEnded && requestedMinutes <= 0) throw new VendixHttpException(ErrorCodes.STATION_009);
+    let endAt = new Date(serviceEndAt.getTime() + buffer * 60_000);
     if (startAt <= now || endAt <= startAt) throw new VendixHttpException(ErrorCodes.STATION_009);
 
     // Sin estación elegida: se asigna una elegible; si no hay, el error de siempre.
@@ -67,7 +95,7 @@ export class ServiceAllocationCoordinator {
 
     const station = await tx.service_stations.findFirst({
       where: { id: stationId, store_id: input.storeId, status: 'active', capacity: 1 },
-      select: { id: true },
+      select: { id: true, booking_duration_mode: true, open_end_block_minutes: true, rental_block_minutes: true },
     });
     const stationService = station && await tx.service_station_services.findFirst({
       where: { store_id: input.storeId, station_id: stationId, product_id: input.productId },
@@ -75,6 +103,17 @@ export class ServiceAllocationCoordinator {
     });
     if (!station) throw new VendixHttpException(ErrorCodes.STATION_004);
     if (!stationService) throw new VendixHttpException(ErrorCodes.STATION_001);
+
+    // Duration rule: fixed stations take exactly the service duration; free ones accept any
+    // positive duration that is a multiple of the rental block (S1). Open-ended skips it (D9).
+    if (!isOpenEnded) {
+      if (station.booking_duration_mode === 'free') {
+        const block = station.rental_block_minutes;
+        if (requestedMinutes <= 0 || (block && requestedMinutes % block !== 0)) throw new VendixHttpException(ErrorCodes.STATION_009);
+      } else if (!duration || requestedMinutes !== duration) {
+        throw new VendixHttpException(ErrorCodes.STATION_009);
+      }
+    }
 
     if (input.providerId) {
       const [stationProvider, providerService, provider] = await Promise.all([
@@ -88,39 +127,78 @@ export class ServiceAllocationCoordinator {
     }
 
     const weekday = new Date(`${input.date}T00:00:00.000Z`).getUTCDay();
-    const [stationSchedules, stationExceptions, storeWindows] = await Promise.all([
-      tx.service_station_schedules.findMany({ where: { store_id: input.storeId, station_id: stationId, weekday, is_active: true }, select: { start_time: true, end_time: true } }),
-      tx.service_station_exceptions.findMany({ where: { store_id: input.storeId, station_id: stationId, start_at: { lt: endAt }, end_at: { gt: startAt } }, select: { id: true } }),
+    const dayBefore = addDaysToDateString(input.date, -1);
+    const dayAfter = addDaysToDateString(input.date, 1);
+    const [stationRows, storeWindows] = await Promise.all([
+      tx.service_station_schedules.findMany({ where: { store_id: input.storeId, station_id: stationId, is_active: true }, select: { weekday: true, start_time: true, end_time: true } }),
       this.businessHours.loadStoreWindows(input.storeId, tx as unknown as StorePrismaService),
     ]);
+    const stationWindows = new Map<number, ClockWindow[]>();
+    for (const row of stationRows) {
+      stationWindows.set(row.weekday, [...(stationWindows.get(row.weekday) ?? []), { start_time: row.start_time, end_time: row.end_time }]);
+    }
     const startMinutes = this.minutes(input.startTime);
-    const endWithBufferMinutes = this.minutes(input.endTime) + buffer;
-    const inside = (windows: Array<{ start_time: string; end_time: string }>) => endWithBufferMinutes <= 24 * 60 && windows.some((window) =>
-      startMinutes >= this.minutes(window.start_time) && endWithBufferMinutes <= this.minutes(window.end_time),
-    );
-    if (!inside(stationSchedules) || stationExceptions.length > 0) throw new VendixHttpException(ErrorCodes.STATION_002);
-    const storeHours = storeWindows.get(weekday) ?? [];
+
+    // Open-ended (D9): occupies until the covering station block closes or after
+    // `open_end_block_minutes`, whichever comes first. Nothing closes it later (D4).
+    let endTimeOut = endTime;
+    let endDateOut: string | null = isOpenEnded
+      ? null
+      : (input.endDate && input.endDate !== input.date ? input.endDate : bookingEndDateFor(input.date, input.startTime, endTime));
+    if (isOpenEnded) {
+      const covering = coverageForDate(stationWindows, weekday).find((span) => startMinutes >= span.startMin && startMinutes < span.endMin);
+      if (!covering) throw new VendixHttpException(ErrorCodes.STATION_002);
+      const blockMinutes = station.open_end_block_minutes ?? DEFAULT_OPEN_END_BLOCK_MINUTES;
+      const endMinute = Math.min(covering.endMin - buffer, startMinutes + blockMinutes);
+      if (endMinute <= startMinutes) throw new VendixHttpException(ErrorCodes.STATION_002);
+      const dayOffset = Math.floor(endMinute / 1440);
+      const minuteOfDay = endMinute % 1440;
+      endTimeOut = `${String(Math.floor(minuteOfDay / 60)).padStart(2, '0')}:${String(minuteOfDay % 60).padStart(2, '0')}`;
+      endDateOut = dayOffset > 0 ? addDaysToDateString(input.date, dayOffset) : null;
+      const closed = bookingInterval({ date: input.date, end_date: endDateOut, start_time: input.startTime, end_time: endTimeOut }, timezone);
+      startAt = closed.startAt;
+      serviceEndAt = closed.endAt;
+      endAt = new Date(serviceEndAt.getTime() + buffer * 60_000);
+    }
+
+    const stationExceptions = await tx.service_station_exceptions.findMany({ where: { store_id: input.storeId, station_id: stationId, start_at: { lt: endAt }, end_at: { gt: startAt } }, select: { id: true } });
+    const serviceSpan = bookingMinuteSpan({ date: input.date, end_date: endDateOut, start_time: input.startTime, end_time: endTimeOut }, input.date);
+    const bufferedEndMin = serviceSpan.endMin + buffer;
+    if (!coversSpan(stationWindows, weekday, serviceSpan.startMin, bufferedEndMin) || stationExceptions.length > 0) {
+      throw new VendixHttpException(ErrorCodes.STATION_002);
+    }
     if (storeWindows.size > 0) {
-      if (!inside(storeHours)) throw new VendixHttpException(ErrorCodes.STATION_002);
+      if (!coversSpan(storeWindows, weekday, serviceSpan.startMin, bufferedEndMin)) throw new VendixHttpException(ErrorCodes.STATION_002);
     } else {
       const storeSettings = await tx.store_settings.findUnique({ where: { store_id: input.storeId }, select: { settings: true } });
       const rawWorkingDays = (storeSettings?.settings as any)?.availability?.working_days;
       const workingDays = Array.isArray(rawWorkingDays) && rawWorkingDays.length > 0 && rawWorkingDays.every((d: unknown) => Number.isInteger(d) && Number(d) >= 0 && Number(d) <= 6)
         ? rawWorkingDays as number[]
         : [1, 2, 3, 4, 5];
-      const fallbackWindow = workingDays.includes(weekday) && startMinutes >= 8 * 60 && endWithBufferMinutes <= 18 * 60;
+      const fallbackWindow = workingDays.includes(weekday) && serviceSpan.startMin >= 8 * 60 && bufferedEndMin <= 18 * 60;
       if (!fallbackWindow) throw new VendixHttpException(ErrorCodes.STATION_002);
     }
 
     if (input.providerId) {
-      const [schedules, exception] = await Promise.all([
-        tx.provider_schedules.findMany({ where: { provider_id: input.providerId, day_of_week: weekday, is_active: true }, select: { start_time: true, end_time: true } }),
-        tx.provider_exceptions.findFirst({ where: { provider_id: input.providerId, date: new Date(`${input.date}T00:00:00.000Z`) } }),
+      const [schedules, exceptions] = await Promise.all([
+        tx.provider_schedules.findMany({ where: { provider_id: input.providerId, is_active: true }, select: { day_of_week: true, start_time: true, end_time: true } }),
+        tx.provider_exceptions.findMany({ where: { provider_id: input.providerId, date: { gte: new Date(`${dayBefore}T00:00:00.000Z`), lte: new Date(`${dayAfter}T00:00:00.000Z`) } } }),
       ]);
-      const providerWindows = exception?.custom_start_time && exception.custom_end_time
-        ? [{ start_time: exception.custom_start_time, end_time: exception.custom_end_time }]
-        : schedules;
-      if (!providerWindows.length || exception?.is_unavailable || !inside(providerWindows)) throw new VendixHttpException(ErrorCodes.STATION_003);
+      // Weekly blocks, replaced per calendar day by that day's exception: an exception on D
+      // governs D's own blocks only; the one on D-1 governs the spill (A5).
+      const providerWindows = new Map<number, ClockWindow[]>();
+      for (const day of [dayBefore, input.date, dayAfter]) {
+        const dow = new Date(`${day}T00:00:00.000Z`).getUTCDay();
+        const exception = exceptions.find((e: any) => e.date instanceof Date ? e.date.toISOString().slice(0, 10) === day : String(e.date).slice(0, 10) === day);
+        if (exception?.is_unavailable) {
+          providerWindows.set(dow, []);
+        } else if (exception?.custom_start_time && exception.custom_end_time) {
+          providerWindows.set(dow, [{ start_time: exception.custom_start_time, end_time: exception.custom_end_time }]);
+        } else {
+          providerWindows.set(dow, schedules.filter((row: any) => row.day_of_week === dow).map((row: any) => ({ start_time: row.start_time, end_time: row.end_time })));
+        }
+      }
+      if (!coversSpan(providerWindows, weekday, serviceSpan.startMin, bufferedEndMin)) throw new VendixHttpException(ErrorCodes.STATION_003);
     }
 
     await tx.service_allocations.updateMany({
@@ -151,21 +229,21 @@ export class ServiceAllocationCoordinator {
     // Legacy bookings predate allocations. Conservatively keep their provider
     // interval exclusive until they are completed or reconciled.
     if (input.providerId) {
-      const legacyOverlap = await tx.bookings.findFirst({
+      const legacyRows = await tx.bookings.findMany({
         where: {
           store_id: input.storeId,
           provider_id: input.providerId,
-          date: new Date(`${input.date}T00:00:00.000Z`),
+          date: { gte: new Date(`${dayBefore}T00:00:00.000Z`), lte: new Date(`${dayAfter}T00:00:00.000Z`) },
           status: { notIn: ['cancelled', 'completed', 'no_show'] },
           service_allocation_id: null,
           ...(input.excludeBookingId ? { id: { not: input.excludeBookingId } } : {}),
-          start_time: { lt: input.endTime },
-          end_time: { gt: input.startTime },
           OR: [{ expires_at: null }, { expires_at: { gt: now } }],
         },
-        select: { id: true },
+        select: { date: true, end_date: true, start_time: true, end_time: true },
       });
-      if (legacyOverlap) throw new VendixHttpException(ErrorCodes.STATION_003);
+      if (legacyRows.some((row: any) => spansOverlap(bookingMinuteSpan(row, input.date), serviceSpan))) {
+        throw new VendixHttpException(ErrorCodes.STATION_003);
+      }
     }
 
     let allocation: { id: number };
@@ -193,14 +271,16 @@ export class ServiceAllocationCoordinator {
     try {
       linked = await tx.bookings.updateMany({
         where: { id: input.bookingId, store_id: input.storeId },
-        data: { service_allocation_id: allocation.id },
+        data: isOpenEnded
+          ? { service_allocation_id: allocation.id, end_time: endTimeOut, end_date: endDateOut ? new Date(`${endDateOut}T00:00:00.000Z`) : null, is_open_ended: true }
+          : { service_allocation_id: allocation.id },
       });
     } catch (error) {
       if (this.isForeignKeyConflict(error)) throw new VendixHttpException(ErrorCodes.STATION_004);
       throw error;
     }
     if (linked.count !== 1) throw new VendixHttpException(ErrorCodes.STATION_001);
-    return { id: allocation.id, station_id: stationId, provider_id: input.providerId ?? null, start_at: startAt, end_at: endAt };
+    return { id: allocation.id, station_id: stationId, provider_id: input.providerId ?? null, start_at: startAt, end_at: endAt, end_time: endTimeOut, end_date: endDateOut, is_open_ended: isOpenEnded };
   }
 
   /**

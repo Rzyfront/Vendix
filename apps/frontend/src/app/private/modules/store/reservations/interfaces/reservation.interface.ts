@@ -8,6 +8,10 @@ export interface Booking {
   date: string;
   start_time: string;
   end_time: string;
+  /** Day the booking ends when it crosses midnight (S21); null/absent = same day. */
+  end_date?: string | null;
+  /** Booking without an end (D9). */
+  is_open_ended?: boolean;
   status: BookingStatus;
   channel: string;
   notes?: string;

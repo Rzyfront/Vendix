@@ -8,6 +8,7 @@ import {
   IsBoolean,
   Matches,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { order_channel_enum } from '@prisma/client';
@@ -38,11 +39,23 @@ export class CreateBookingDto {
   })
   start_time: string;
 
+  /** Required unless `is_open_ended`. `end_time <= start_time` ends the next day (S21). */
+  @ValidateIf((o: CreateBookingDto) => !o.is_open_ended)
   @IsString()
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
     message: 'end_time debe tener formato HH:mm',
   })
   end_time: string;
+
+  /** Day the booking ends (`YYYY-MM-DD`). Defaults to D+1 when it crosses midnight. */
+  @IsOptional()
+  @IsDateString()
+  end_date?: string;
+
+  /** Booking without an end (D9): station services only. */
+  @IsOptional()
+  @IsBoolean()
+  is_open_ended?: boolean;
 
   @IsOptional()
   @IsEnum(order_channel_enum)

@@ -221,3 +221,76 @@ describe('ServiceStationsService.findAll — próxima reserva y sesión activa',
     expect(nextCall[0].where).toEqual(expect.objectContaining({ store_id: 10, station_id: { in: [1, 2] }, start_at: { gte: expect.any(Date) } }));
   });
 });
+
+describe('ServiceStationsService.setSchedules — horarios nocturnos (S21)', () => {
+  const context: RequestContext = { store_id: 10, is_super_admin: false, is_owner: false };
+  let service: ServiceStationsService;
+  let tx: Record<string, any>;
+
+  beforeEach(() => {
+    tx = {
+      service_station_schedules: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = {
+      service_stations: { findFirst: jest.fn().mockResolvedValue({ id: 2, name: 'Cava 1' }) },
+      service_station_services: { findMany: jest.fn().mockResolvedValue([]) },
+      service_station_providers: { findMany: jest.fn().mockResolvedValue([]) },
+      service_station_schedules: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn(async (cb: any) => cb(tx)),
+    };
+    service = new ServiceStationsService(prisma as unknown as StorePrismaService, {} as any);
+  });
+
+  const run = <T>(fn: () => Promise<T>): Promise<T> => RequestContextService.runIsolated(context, fn);
+
+  it('guarda un bloque que termina al día siguiente', async () => {
+    await run(() => service.setSchedules(2, { schedules: [{ weekday: 5, start_time: '20:00', end_time: '03:00' }] }));
+    expect(tx.service_station_schedules.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ weekday: 5, start_time: '20:00', end_time: '03:00' })],
+    });
+  });
+
+  it('acepta 00:00-00:00 como 24 horas', async () => {
+    await run(() => service.setSchedules(2, { schedules: [{ weekday: 6, start_time: '00:00', end_time: '00:00' }] }));
+    expect(tx.service_station_schedules.createMany).toHaveBeenCalled();
+  });
+
+  it('rechaza un día que se cruza con el bloque nocturno del día anterior', async () => {
+    await expect(
+      run(() => service.setSchedules(2, {
+        schedules: [
+          { weekday: 5, start_time: '20:00', end_time: '03:00' },
+          { weekday: 6, start_time: '02:00', end_time: '10:00' },
+        ],
+      })),
+    ).rejects.toThrow('no pueden superponerse');
+    expect(tx.service_station_schedules.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('mantiene el rechazo de bloques diurnos superpuestos', async () => {
+    await expect(
+      run(() => service.setSchedules(2, {
+        schedules: [
+          { weekday: 1, start_time: '09:00', end_time: '13:00' },
+          { weekday: 1, start_time: '12:00', end_time: '18:00' },
+        ],
+      })),
+    ).rejects.toThrow('no pueden superponerse');
+  });
+
+  it('mantiene los bloques diurnos contiguos y ordena block_order', async () => {
+    await run(() => service.setSchedules(2, {
+      schedules: [
+        { weekday: 1, start_time: '14:00', end_time: '18:00' },
+        { weekday: 1, start_time: '09:00', end_time: '14:00' },
+      ],
+    }));
+    expect(tx.service_station_schedules.createMany.mock.calls[0][0].data).toEqual([
+      expect.objectContaining({ start_time: '09:00', block_order: 0 }),
+      expect.objectContaining({ start_time: '14:00', block_order: 1 }),
+    ]);
+  });
+});

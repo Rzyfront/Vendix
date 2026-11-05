@@ -54,6 +54,9 @@
                   [value]="r.end_time"
                   (input)="updateField(day.dow, 'end_time', $any($event.target).value)"
                 />
+                @if (closesNextDay(r)) {
+                  <span class="days__sep">(+1 día)</span>
+                }
               </div>
               <div class="days__status">
                 @if (r.is_active) {

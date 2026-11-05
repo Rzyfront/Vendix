@@ -7,6 +7,18 @@ import {
   localCivil,
   zonedWallClockToUtc,
 } from '@common/utils/store-timezone.util';
+import {
+  ClockWindow,
+  Span,
+  addDaysToDateString,
+  bookingMinuteSpan,
+  coverageForDate,
+  intersectSpans,
+  isOvernight,
+  spansOverlap,
+  toMinutes,
+  windowSpan,
+} from '@common/utils/schedule-window.util';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
@@ -27,6 +39,8 @@ export interface AvailabilitySlot {
   /** Bookings overlapping this slot that are NOT in cancelled status. */
   booked_count?: number;
   is_booked?: boolean;
+  /** Day the slot ends when it crosses midnight (S21); absent when it ends the same day. */
+  end_date?: string;
   /** Station is present only for services that require an assigned station. */
   station_id?: number;
   station_name?: string;
@@ -174,11 +188,16 @@ export class AvailabilityService {
     });
 
     // 5. Obtener excepciones en el rango de fechas
+    // S21: a block belongs to the day it starts, so the day before `date_from`
+    // can still produce slots that start after midnight inside the range, and
+    // bookings of the days around the range can overlap them.
+    const scanFrom = addDaysToDateString(date_from, -1);
+    const scanTo = addDaysToDateString(date_to, 1);
     const exceptions = await this.prisma.provider_exceptions.findMany({
       where: {
         provider_id: { in: providerIds },
         date: {
-          gte: new Date(date_from),
+          gte: new Date(scanFrom),
           lte: new Date(date_to),
         },
       },
@@ -189,22 +208,23 @@ export class AvailabilityService {
       where: {
         product_id,
         date: {
-          gte: new Date(date_from),
-          lte: new Date(date_to),
+          gte: new Date(scanFrom),
+          lte: new Date(scanTo),
         },
         status: { notIn: [booking_status_enum.cancelled] },
       },
       select: {
         date: true,
+        end_date: true,
         start_time: true,
         end_time: true,
         provider_id: true,
       },
     });
 
-    // 7. Generar slots por fecha y provider
+    // 7. Generar slots por fecha de inicio del bloque y provider
     const slots: AvailabilitySlot[] = [];
-    const dates = this.getDatesInRange(date_from, date_to);
+    const dates = this.getDatesInRange(scanFrom, date_to);
 
     // "Ahora" en horario local del store. Se usa SOLO para descartar slots
     // cuyo start_time ya pasó cuando la fecha es hoy — mantiene coherente
@@ -241,6 +261,7 @@ export class AvailabilityService {
         date: string;
         start_time: string;
         end_time: string;
+        end_date?: string;
         providers: AvailableProvider[];
         is_booked: boolean;
       }
@@ -248,11 +269,10 @@ export class AvailabilityService {
 
     for (const currentDate of dates) {
       const dayOfWeek = currentDate.getUTCDay();
+      // `dateStr` is the day the BLOCK starts (A5); each slot carries its own date.
       const dateStr = this.formatDate(currentDate);
-      // Si la fecha es HOY en horario local del store, descartamos los
-      // slots cuyo start_time ya pasó. El grid del admin y el del ecommerce
-      // muestran solo horarios disponibles REALMENTE.
-      const isToday = dateStr === todayLocal;
+      const storeCoverage = coverageForDate(storeHoursMap, dayOfWeek);
+      if (storeCoverage.length === 0) continue;
 
       for (const provider of providers) {
         const provSchedules = schedulesByProvider.get(provider.id) || [];
@@ -277,77 +297,59 @@ export class AvailabilityService {
           const effectiveEnd = exception?.custom_end_time || schedule.end_time;
 
           // Intersectar con horario maestro de la tienda
-          const storeWindow = storeHoursMap.get(dayOfWeek);
-          const clamped = this.clampToStoreHours(
-            effectiveStart,
-            effectiveEnd,
-            storeWindow,
+          const clamps = intersectSpans(
+            windowSpan({ start_time: effectiveStart, end_time: effectiveEnd }),
+            storeCoverage,
           );
-          if (!clamped) continue;
 
-          // Generar time slots
-          let timeSlots = this.generateTimeSlots(
-            clamped.start,
-            clamped.end,
-            duration,
-            buffer,
-          );
-          if (isToday) {
-            // Filtra los slots cuyo start_time ya pasó. Comparación
-            // lexicográfica válida porque `HH:mm` está zero-padded.
-            timeSlots = timeSlots.filter((s) => s.start_time >= nowHHMM);
-          }
+          for (const clamp of clamps) {
+            for (const slot of this.generateSlotSpans(clamp, duration, buffer)) {
+              const expanded = this.expandSlot(dateStr, slot);
+              if (expanded.date < date_from || expanded.date > date_to) continue;
+              // Filtra los slots cuyo start_time ya pasó (solo HOY). Comparación
+              // lexicográfica válida porque `HH:mm` está zero-padded.
+              if (expanded.date === todayLocal && expanded.start_time < nowHHMM) continue;
 
-          for (const slot of timeSlots) {
-            // Verificar si este provider ya tiene booking que se superpone con este slot.
-            // Usamos `<` y `>` (strict half-open intervals) — el slot solo se
-            // bloquea si su rango INTERIOR se solapa con el de la reserva.
-            // Slots adyacentes (booking 8:00-8:20 + slot 8:20-8:40) NO se
-            // bloquean: el cliente puede reservar back-to-back si lo desea.
-            // Si quieres buffer entre clientes, configura `buffer_minutes`
-            // en el producto y se aplicará automáticamente.
-            const providerBooked = existingBookings.some(
-              (b) =>
-                this.formatDate(new Date(b.date)) === dateStr &&
-                b.provider_id === provider.id &&
-                b.start_time < slot.end_time &&
-                b.end_time > slot.start_time,
-            );
+              // Verificar si este provider ya tiene booking que se superpone con este slot.
+              // Intervalos semiabiertos estrictos: reservas pegadas (8:00-8:20 + slot
+              // 8:20-8:40) NO se bloquean. Las reservas nocturnas se comparan por su
+              // intervalo real (`end_date`).
+              const providerBooked = existingBookings.some(
+                (b) =>
+                  b.provider_id === provider.id &&
+                  spansOverlap(bookingMinuteSpan(b, dateStr), slot),
+              );
 
-            if (providerBooked) {
-              // The slot is blocked by an existing booking on this provider.
-              // We still emit it (with total_available=0 and is_booked=true)
-              // so the ecommerce UI can render it in red with an X and the
-              // customer sees WHY that time is not selectable. Previously
-              // we `continue`d which hid the slot entirely.
-              const blockedKey = `${dateStr}|${slot.start_time}|${slot.end_time}`;
-              if (!slotMap.has(blockedKey)) {
-                slotMap.set(blockedKey, {
-                  date: dateStr,
-                  start_time: slot.start_time,
-                  end_time: slot.end_time,
+              if (providerBooked) {
+                // The slot is blocked by an existing booking on this provider.
+                // We still emit it (with total_available=0 and is_booked=true)
+                // so the ecommerce UI can render it in red with an X and the
+                // customer sees WHY that time is not selectable.
+                const blockedKey = `${expanded.date}|${expanded.start_time}|${expanded.end_time}`;
+                if (!slotMap.has(blockedKey)) {
+                  slotMap.set(blockedKey, {
+                    ...expanded,
+                    providers: [],
+                    is_booked: true,
+                  });
+                }
+                continue;
+              }
+
+              const key = `${expanded.date}|${expanded.start_time}|${expanded.end_time}`;
+              if (!slotMap.has(key)) {
+                slotMap.set(key, {
+                  ...expanded,
                   providers: [],
-                  is_booked: true,
+                  is_booked: false,
                 });
               }
-              continue;
-            }
-
-            const key = `${dateStr}|${slot.start_time}|${slot.end_time}`;
-            if (!slotMap.has(key)) {
-              slotMap.set(key, {
-                date: dateStr,
-                start_time: slot.start_time,
-                end_time: slot.end_time,
-                providers: [],
-                is_booked: false,
+              slotMap.get(key)!.providers.push({
+                id: provider.id,
+                display_name: provider.display_name || '',
+                avatar_url: provider.avatar_url,
               });
             }
-            slotMap.get(key)!.providers.push({
-              id: provider.id,
-              display_name: provider.display_name || '',
-              avatar_url: provider.avatar_url,
-            });
           }
         }
       }
@@ -365,6 +367,7 @@ export class AvailabilityService {
         date: entry.date,
         start_time: entry.start_time,
         end_time: entry.end_time,
+        ...(entry.end_date ? { end_date: entry.end_date } : {}),
         available_providers: entry.providers,
         total_available: entry.providers.length,
         is_booked: entry.is_booked,
@@ -392,7 +395,7 @@ export class AvailabilityService {
    * while existing reservations are reconciled by the reservation writer.
    */
   private async getStationAvailableSlots(
-    product: { id: number; store_id: number },
+    product: { id: number; store_id: number; booking_mode?: booking_mode_enum | null },
     dateFrom: string,
     dateTo: string,
     duration: number,
@@ -437,7 +440,16 @@ export class AvailabilityService {
       },
       select: { id: true, display_name: true, avatar_url: true },
     });
-    if (!providers.length) return [];
+    // A13: a station without providers (e.g. a cava) has its own online slots unless
+    // the service demands a provider. A provider filter always needs providers.
+    const stationOnlyIds = new Set<number>(
+      product.booking_mode === booking_mode_enum.provider_required || provider_id
+        ? []
+        : stations
+            .filter((station) => !stationProviders.some((row) => row.station_id === station.id))
+            .map((station) => station.id),
+    );
+    if (!providers.length && stationOnlyIds.size === 0) return [];
 
     const compatibleProviders = new Map<number, typeof providers>();
     for (const station of stations) {
@@ -450,8 +462,11 @@ export class AvailabilityService {
     const schedules = await prisma.provider_schedules.findMany({
       where: { provider_id: { in: providerIds }, is_active: true },
     });
+    // S21: blocks belong to the day they start; scan one day before and after the range.
+    const scanFrom = addDaysToDateString(dateFrom, -1);
+    const scanTo = addDaysToDateString(dateTo, 1);
     const providerExceptions = await prisma.provider_exceptions.findMany({
-      where: { provider_id: { in: providerIds }, date: { gte: new Date(dateFrom), lte: new Date(dateTo) } },
+      where: { provider_id: { in: providerIds }, date: { gte: new Date(scanFrom), lte: new Date(dateTo) } },
     });
     const stationSchedules = await prisma.service_station_schedules.findMany({
       where: { store_id: product.store_id, station_id: { in: stationIds }, is_active: true },
@@ -482,78 +497,137 @@ export class AvailabilityService {
       where: {
         store_id: product.store_id,
         provider_id: { in: providerIds },
-        date: { gte: new Date(dateFrom), lte: new Date(dateTo) },
+        date: { gte: new Date(scanFrom), lte: new Date(scanTo) },
         status: { notIn: [booking_status_enum.cancelled] },
       },
-      select: { date: true, start_time: true, end_time: true, provider_id: true, expires_at: true },
+      select: { date: true, end_date: true, start_time: true, end_time: true, provider_id: true, expires_at: true },
     });
-    const storeHours = await this.businessHoursService.loadStoreHours(product.store_id, prisma);
+    const configuredHours = await this.businessHoursService.loadStoreHours(product.store_id, prisma);
+    // A store that never configured its hours keeps the legacy 08:00-18:00 window.
+    const storeHours: Map<number, ClockWindow[]> = configuredHours.size === 0
+      ? new Map(Array.from({ length: 7 }, (_, day) => [day, [{ start_time: '08:00', end_time: '18:00' }]] as [number, ClockWindow[]]))
+      : configuredHours;
     const timezone = await resolveStoreTimezone(prisma, product.store_id);
     const nowLocal = localCivil(now, timezone);
     const today = `${nowLocal.year}-${pad2(nowLocal.month)}-${pad2(nowLocal.day)}`;
     const nowHHMM = `${pad2(nowLocal.hour)}:${pad2(nowLocal.minute)}`;
-    const dates = this.getDatesInRange(dateFrom, dateTo);
+    // A block belongs to the day it starts (A5): scan from the day before the range.
+    const dates = this.getDatesInRange(scanFrom, dateTo);
     const slotMap = new Map<string, AvailabilitySlot>();
+    const instantAt = (day: string, minutes: number) => {
+      const target = addDaysToDateString(day, Math.floor(minutes / 1440));
+      const minuteOfDay = minutes % 1440;
+      return zonedWallClockToUtc(
+        Number(target.slice(0, 4)),
+        Number(target.slice(5, 7)),
+        Number(target.slice(8, 10)),
+        Math.floor(minuteOfDay / 60),
+        minuteOfDay % 60,
+        0,
+        0,
+        timezone,
+      );
+    };
 
     for (const date of dates) {
       const dateStr = this.formatDate(date);
       const weekday = date.getUTCDay();
       if (!workingDays.includes(weekday)) continue;
-      const storeWindow = storeHours.get(weekday) ??
-        (storeHours.size === 0 ? { start_time: '08:00', end_time: '18:00' } : undefined);
-      if (!storeWindow) continue;
+      const storeCoverage = coverageForDate(storeHours, weekday);
+      if (!storeCoverage.length) continue;
       for (const station of stations) {
         const stationBlocks = stationSchedules.filter((row) => row.station_id === station.id && row.weekday === weekday);
         if (!stationBlocks.length) continue;
-        const stationDayExceptions = stationExceptions.filter((exception) => {
-          const localStart = localCivil(new Date(exception.start_at), timezone);
-          const localEnd = localCivil(new Date(exception.end_at), timezone);
-          const startDate = `${localStart.year}-${pad2(localStart.month)}-${pad2(localStart.day)}`;
-          const endDate = `${localEnd.year}-${pad2(localEnd.month)}-${pad2(localEnd.day)}`;
-          return exception.station_id === station.id && startDate <= dateStr && endDate >= dateStr;
-        });
+        // Exceptions are instants: overlap is decided per slot below.
+        const stationDayExceptions = stationExceptions.filter((exception) => exception.station_id === station.id);
+        const stationWindows = stationBlocks.flatMap((block) =>
+          intersectSpans(windowSpan({ start_time: block.start_time, end_time: block.end_time }), storeCoverage),
+        );
+        if (!stationWindows.length) continue;
+
+        const emit = (
+          slot: Span,
+          providerOf: { id: number; display_name: string | null; avatar_url: string | null } | null,
+          busy: boolean,
+        ) => {
+          const expanded = this.expandSlot(dateStr, slot);
+          const key = `${station.id}|${expanded.date}|${expanded.start_time}|${expanded.end_time}`;
+          let result = slotMap.get(key);
+          if (!result) {
+            result = {
+              station_id: station.id,
+              station_name: station.name,
+              ...expanded,
+              available_providers: [],
+              total_available: 0,
+              total_capacity: providerOf ? (compatibleProviders.get(station.id)?.length ?? 0) : 1,
+              is_booked: busy,
+            };
+            slotMap.set(key, result);
+          }
+          if (!busy && providerOf && !result.available_providers.some((item) => item.id === providerOf.id)) {
+            result.available_providers.push({ id: providerOf.id, display_name: providerOf.display_name || '', avatar_url: providerOf.avatar_url });
+            result.total_available = result.available_providers.length;
+          }
+          // A station without providers has a single seat: free means 1 available.
+          if (!busy && !providerOf) result.total_available = 1;
+          if (busy) result.is_booked = true;
+        };
+        const inRange = (slot: Span) => {
+          const expanded = this.expandSlot(dateStr, slot);
+          if (expanded.date < dateFrom || expanded.date > dateTo) return false;
+          // Past slots of today are skipped (compared on the store-local clock).
+          return !(expanded.date === today && expanded.start_time < nowHHMM);
+        };
+        const stationBusyAt = (slot: Span) => {
+          const slotStart = instantAt(dateStr, slot.startMin);
+          const slotEnd = instantAt(dateStr, slot.endMin);
+          return {
+            slotStart,
+            slotEnd,
+            exceptionBlocked: stationDayExceptions.some((exception) => new Date(exception.start_at) < slotEnd && new Date(exception.end_at) > slotStart),
+            stationBusy: allocations.some((allocation) => allocation.station_id === station.id && allocation.start_at < slotEnd && allocation.end_at > slotStart),
+          };
+        };
+
+        if (stationOnlyIds.has(station.id)) {
+          for (const window of stationWindows) {
+            for (const slot of this.generateSlotSpans(window, duration, buffer)) {
+              if (!inRange(slot)) continue;
+              const { exceptionBlocked, stationBusy } = stationBusyAt(slot);
+              if (exceptionBlocked) continue;
+              if (stationBusy && include_booked === false) continue;
+              emit(slot, null, stationBusy);
+            }
+          }
+          continue;
+        }
+
         for (const provider of compatibleProviders.get(station.id) ?? []) {
           const providerBlocks = schedules.filter((row) => row.provider_id === provider.id && row.day_of_week === weekday);
           const providerException = providerExceptions.find((row) => row.provider_id === provider.id && this.formatDate(new Date(row.date)) === dateStr);
           if (!providerBlocks.length || providerException?.is_unavailable) continue;
-          for (const stationBlock of stationBlocks) {
-            const stationWindow = this.clampToStoreHours(stationBlock.start_time, stationBlock.end_time, storeWindow);
-            if (!stationWindow) continue;
+          for (const stationWindow of stationWindows) {
             for (const providerBlock of providerBlocks) {
               const effectiveStart = providerException?.custom_start_time ?? providerBlock.start_time;
               const effectiveEnd = providerException?.custom_end_time ?? providerBlock.end_time;
-              const providerWindow = this.clampToStoreHours(effectiveStart, effectiveEnd, storeWindow);
-              if (!providerWindow) continue;
-              const windowStart = this.timeToMinutes(stationWindow.start) > this.timeToMinutes(providerWindow.start) ? stationWindow.start : providerWindow.start;
-              const windowEnd = this.timeToMinutes(stationWindow.end) < this.timeToMinutes(providerWindow.end) ? stationWindow.end : providerWindow.end;
-              if (this.timeToMinutes(windowEnd) <= this.timeToMinutes(windowStart)) continue;
-              let daySlots = this.generateTimeSlots(windowStart, windowEnd, duration, buffer);
-              if (dateStr === today) daySlots = daySlots.filter((slot) => slot.start_time >= nowHHMM);
-              for (const slot of daySlots) {
-                const [startHour, startMinute] = slot.start_time.split(':').map(Number);
-                const [endHour, endMinute] = slot.end_time.split(':').map(Number);
-                const year = Number(dateStr.slice(0, 4));
-                const month = Number(dateStr.slice(5, 7));
-                const day = Number(dateStr.slice(8, 10));
-                const slotStart = zonedWallClockToUtc(year, month, day, startHour, startMinute, 0, 0, timezone);
-                const slotEnd = zonedWallClockToUtc(year, month, day, endHour, endMinute, 0, 0, timezone);
-                const exceptionBlocked = stationDayExceptions.some((exception) => new Date(exception.start_at) < slotEnd && new Date(exception.end_at) > slotStart);
-                if (exceptionBlocked) continue;
-                const stationBusy = allocations.some((allocation) => allocation.station_id === station.id && allocation.start_at < slotEnd && allocation.end_at > slotStart);
-                const providerBusy = allocations.some((allocation) => allocation.provider_id === provider.id && allocation.start_at < slotEnd && allocation.end_at > slotStart) || existingBookings.some((booking) => booking.provider_id === provider.id && this.formatDate(new Date(booking.date)) === dateStr && (!booking.expires_at || booking.expires_at > now) && booking.start_time < slot.end_time && booking.end_time > slot.start_time);
-                const busy = stationBusy || providerBusy;
-                if (busy && include_booked === false) continue;
-                const key = `${station.id}|${dateStr}|${slot.start_time}|${slot.end_time}`;
-                let result = slotMap.get(key);
-                if (!result) {
-                  result = { station_id: station.id, station_name: station.name, date: dateStr, start_time: slot.start_time, end_time: slot.end_time, available_providers: [], total_available: 0, total_capacity: compatibleProviders.get(station.id)?.length ?? 0, is_booked: busy };
-                  slotMap.set(key, result);
+              const providerWindows = intersectSpans(windowSpan({ start_time: effectiveStart, end_time: effectiveEnd }), storeCoverage);
+              for (const providerWindow of providerWindows) {
+                const window: Span = {
+                  startMin: Math.max(stationWindow.startMin, providerWindow.startMin),
+                  endMin: Math.min(stationWindow.endMin, providerWindow.endMin),
+                };
+                if (window.endMin <= window.startMin) continue;
+                for (const slot of this.generateSlotSpans(window, duration, buffer)) {
+                  if (!inRange(slot)) continue;
+                  const { slotStart, slotEnd, exceptionBlocked, stationBusy } = stationBusyAt(slot);
+                  if (exceptionBlocked) continue;
+                  const providerBusy = allocations.some((allocation) => allocation.provider_id === provider.id && allocation.start_at < slotEnd && allocation.end_at > slotStart)
+                    || existingBookings.some((booking) => booking.provider_id === provider.id && (!booking.expires_at || booking.expires_at > now) && spansOverlap(bookingMinuteSpan(booking, dateStr), slot));
+                  const busy = stationBusy || providerBusy;
+                  if (busy && include_booked === false) continue;
+                  emit(slot, provider, busy);
                 }
-                if (!busy && !result.available_providers.some((item) => item.id === provider.id)) {
-                  result.available_providers.push({ id: provider.id, display_name: provider.display_name || '', avatar_url: provider.avatar_url });
-                  result.total_available = result.available_providers.length;
-                }
-                if (busy) result.is_booked = true;
               }
             }
           }
@@ -637,9 +711,10 @@ export class AvailabilityService {
     const storeHoursMap = await this.businessHoursService.loadStoreHours(
       product.store_id,
     );
-    const storeWindow = storeHoursMap.get(dayOfWeek);
-    // No business-hours row for this day → store closed → no providers available.
-    if (!storeWindow) return [];
+    const storeCoverage = coverageForDate(storeHoursMap, dayOfWeek);
+    // No business-hours coverage for this day → store closed → no providers available.
+    if (storeCoverage.length === 0) return [];
+    const slot = this.slotSpanFor(start_time, end_time);
 
     // Obtener providers activos que ofrecen este servicio
     const providers = await this.prisma.service_providers.findMany({
@@ -653,72 +728,23 @@ export class AvailabilityService {
     const available: AvailableProvider[] = [];
 
     for (const provider of providers) {
-      // Get ALL blocks for this day (supports multiple blocks per day)
-      const dayBlocks = await this.prisma.provider_schedules.findMany({
-        where: {
-          provider_id: provider.id,
-          day_of_week: dayOfWeek,
-          is_active: true,
-        },
-        orderBy: { block_order: 'asc' },
+      if (
+        !(await this.providerFitsSlot(
+          provider.id,
+          dateStr,
+          dayOfWeek,
+          slot,
+          storeCoverage,
+          exclude_booking_id,
+        ))
+      ) {
+        continue;
+      }
+      available.push({
+        id: provider.id,
+        display_name: provider.display_name || '',
+        avatar_url: provider.avatar_url,
       });
-
-      if (dayBlocks.length === 0) continue;
-
-      // Verificar excepciones
-      const exception = await this.prisma.provider_exceptions.findFirst({
-        where: { provider_id: provider.id, date: targetDate },
-      });
-
-      if (exception?.is_unavailable) continue;
-
-      // Check if the slot falls within ANY of the provider's blocks for this day
-      let slotIsWithinBlock = false;
-      for (const schedule of dayBlocks) {
-        // Verificar que el slot cae dentro del horario efectivo del provider
-        // Y dentro de la ventana maestra de la tienda
-        const providerStart =
-          exception?.custom_start_time || schedule.start_time;
-        const providerEnd =
-          exception?.custom_end_time || schedule.end_time;
-        const effective = this.clampToStoreHours(
-          providerStart,
-          providerEnd,
-          storeWindow,
-        );
-        if (!effective) continue;
-
-        if (
-          this.timeToMinutes(start_time) >= this.timeToMinutes(effective.start) &&
-          this.timeToMinutes(end_time) <= this.timeToMinutes(effective.end)
-        ) {
-          slotIsWithinBlock = true;
-          break;
-        }
-      }
-
-      if (!slotIsWithinBlock) continue;
-
-      // Verificar si ya tiene booking que se superponga con este slot
-      const where: any = {
-        provider_id: provider.id,
-        date: targetDate,
-        start_time: { lt: end_time },
-        end_time: { gt: start_time },
-        status: { notIn: [booking_status_enum.cancelled] },
-      };
-      if (exclude_booking_id) {
-        where.id = { not: exclude_booking_id };
-      }
-      const booked = await this.prisma.bookings.count({ where });
-
-      if (booked === 0) {
-        available.push({
-          id: provider.id,
-          display_name: provider.display_name || '',
-          avatar_url: provider.avatar_url,
-        });
-      }
     }
 
     return available;
@@ -775,22 +801,6 @@ export class AvailabilityService {
 
     if (!assignment) return false;
 
-    // Verificar schedule - get ALL blocks for this day
-    const dayBlocks = await this.prisma.provider_schedules.findMany({
-      where: { provider_id, day_of_week: dayOfWeek, is_active: true },
-      orderBy: { block_order: 'asc' },
-    });
-
-    if (dayBlocks.length === 0) return false;
-
-    // Verificar excepciones
-    const exception = await this.prisma.provider_exceptions.findFirst({
-      where: { provider_id, date: targetDate },
-    });
-
-    if (exception?.is_unavailable) return false;
-
-    // Verificar horario efectivo del provider - check if slot falls within ANY block
     const product = await this.prisma.products.findFirst({
       where: { id: product_id },
       select: { store_id: true },
@@ -799,69 +809,151 @@ export class AvailabilityService {
     const storeHoursMap = await this.businessHoursService.loadStoreHours(
       product.store_id,
     );
-    const storeWindow = storeHoursMap.get(dayOfWeek);
+    const storeCoverage = coverageForDate(storeHoursMap, dayOfWeek);
 
-    let slotIsWithinBlock = false;
-    for (const schedule of dayBlocks) {
-      const effectiveStart = exception?.custom_start_time || schedule.start_time;
-      const effectiveEnd = exception?.custom_end_time || schedule.end_time;
-      const effective = this.clampToStoreHours(
-        effectiveStart,
-        effectiveEnd,
-        storeWindow,
-      );
-      if (!effective) continue;
+    return this.providerFitsSlot(
+      provider_id,
+      this.formatDate(targetDate),
+      dayOfWeek,
+      this.slotSpanFor(start_time, end_time),
+      storeCoverage,
+      exclude_booking_id,
+    );
+  }
 
-      if (
-        this.timeToMinutes(start_time) >= this.timeToMinutes(effective.start) &&
-        this.timeToMinutes(end_time) <= this.timeToMinutes(effective.end)
-      ) {
-        slotIsWithinBlock = true;
-        break;
+  /** Slot span in minutes from 00:00 of its start day; `end <= start` ends the next day. */
+  private slotSpanFor(start_time: string, end_time: string): Span {
+    const startMin = toMinutes(start_time);
+    let endMin = toMinutes(end_time);
+    if (endMin <= startMin) endMin += 1440;
+    return { startMin, endMin };
+  }
+
+  /**
+   * True when `slot` (minutes from 00:00 of `dateStr`) fits one provider block
+   * inside the store coverage and no booking of the provider overlaps it.
+   * Blocks belong to the day they start (A5), so the slot may also sit in the
+   * overnight spill of the previous day (block span shifted by -1440).
+   */
+  private async providerFitsSlot(
+    provider_id: number,
+    dateStr: string,
+    dayOfWeek: number,
+    slot: Span,
+    storeCoverage: Span[],
+    exclude_booking_id?: number,
+  ): Promise<boolean> {
+    const prevDay = (dayOfWeek + 6) % 7;
+    const rows = (
+      await this.prisma.provider_schedules.findMany({
+        where: {
+          provider_id,
+          day_of_week: { in: [dayOfWeek, prevDay] },
+          is_active: true,
+        },
+        orderBy: { block_order: 'asc' },
+      })
+    ).filter((row) => row.day_of_week === dayOfWeek || row.day_of_week === prevDay);
+    const ownBlocks = rows.filter((row) => row.day_of_week === dayOfWeek);
+    const spillBlocks = rows.filter(
+      (row) =>
+        row.day_of_week === prevDay &&
+        row.day_of_week !== dayOfWeek &&
+        isOvernight(row),
+    );
+    if (ownBlocks.length === 0 && spillBlocks.length === 0) return false;
+
+    const candidates: Span[] = [];
+    if (ownBlocks.length > 0) {
+      const exception = await this.prisma.provider_exceptions.findFirst({
+        where: { provider_id, date: new Date(dateStr) },
+      });
+      if (!exception?.is_unavailable) {
+        for (const schedule of ownBlocks) {
+          candidates.push(
+            windowSpan({
+              start_time: exception?.custom_start_time || schedule.start_time,
+              end_time: exception?.custom_end_time || schedule.end_time,
+            }),
+          );
+        }
+      }
+    }
+    if (spillBlocks.length > 0) {
+      const prevDate = addDaysToDateString(dateStr, -1);
+      const exception = await this.prisma.provider_exceptions.findFirst({
+        where: { provider_id, date: new Date(prevDate) },
+      });
+      if (!exception?.is_unavailable) {
+        for (const schedule of spillBlocks) {
+          const span = windowSpan({
+            start_time: exception?.custom_start_time || schedule.start_time,
+            end_time: exception?.custom_end_time || schedule.end_time,
+          });
+          candidates.push({ startMin: span.startMin - 1440, endMin: span.endMin - 1440 });
+        }
       }
     }
 
-    if (!slotIsWithinBlock) return false;
+    const insideBlock = candidates.some(
+      (c) => slot.startMin >= c.startMin && slot.endMin <= c.endMin,
+    );
+    const insideStore = storeCoverage.some(
+      (c) => slot.startMin >= c.startMin && slot.endMin <= c.endMin,
+    );
+    if (!insideBlock || !insideStore) return false;
 
-    // Verificar si ya tiene booking que se superponga
-    const where: any = {
-      provider_id,
-      date: targetDate,
-      start_time: { lt: end_time },
-      end_time: { gt: start_time },
-      status: { notIn: [booking_status_enum.cancelled] },
-    };
-    if (exclude_booking_id) {
-      where.id = { not: exclude_booking_id };
-    }
-    const booked = await this.prisma.bookings.count({ where });
-
-    return booked === 0;
+    // Overlapping bookings of the provider, compared on their real interval.
+    const bookings = await this.prisma.bookings.findMany({
+      where: {
+        provider_id,
+        date: {
+          gte: new Date(addDaysToDateString(dateStr, -1)),
+          lte: new Date(addDaysToDateString(dateStr, 1)),
+        },
+        status: { notIn: [booking_status_enum.cancelled] },
+        ...(exclude_booking_id ? { id: { not: exclude_booking_id } } : {}),
+      },
+      select: { date: true, end_date: true, start_time: true, end_time: true },
+    });
+    return !bookings.some((b) =>
+      spansOverlap(bookingMinuteSpan(b, dateStr), slot),
+    );
   }
 
-  private generateTimeSlots(
-    start: string,
-    end: string,
-    duration: number,
-    buffer: number,
-  ): Array<{ start_time: string; end_time: string }> {
-    const slots: Array<{ start_time: string; end_time: string }> = [];
-    let current = this.timeToMinutes(start);
-    const endMinutes = this.timeToMinutes(end);
-
-    while (current + duration <= endMinutes) {
-      const slot_start = this.minutesToTime(current);
-      const slot_end = this.minutesToTime(current + duration);
-      slots.push({ start_time: slot_start, end_time: slot_end });
+  /**
+   * Slot grid inside a window, anchored at the window start (minutes from the
+   * start day 00:00; the end may exceed 1440 for blocks that cross midnight).
+   */
+  private generateSlotSpans(window: Span, duration: number, buffer: number): Span[] {
+    const slots: Span[] = [];
+    if (duration <= 0) return slots;
+    let current = window.startMin;
+    while (current + duration <= window.endMin) {
+      slots.push({ startMin: current, endMin: current + duration });
       current += duration + buffer;
     }
-
     return slots;
   }
 
-  private timeToMinutes(time: string): number {
-    const [h, m] = time.split(':').map(Number);
-    return h * 60 + m;
+  /**
+   * Turns a slot expressed relative to the block start day into its calendar
+   * shape: it belongs to the day it STARTS, and carries `end_date` (D+1) only
+   * when it ends on another day.
+   */
+  private expandSlot(
+    blockDay: string,
+    slot: Span,
+  ): { date: string; start_time: string; end_time: string; end_date?: string } {
+    const startDay = Math.floor(slot.startMin / 1440);
+    const endDay = Math.floor(slot.endMin / 1440);
+    const date = addDaysToDateString(blockDay, startDay);
+    return {
+      date,
+      start_time: this.minutesToTime(slot.startMin % 1440),
+      end_time: this.minutesToTime(slot.endMin % 1440),
+      ...(endDay !== startDay ? { end_date: addDaysToDateString(blockDay, endDay) } : {}),
+    };
   }
 
   private minutesToTime(minutes: number): string {
@@ -960,18 +1052,20 @@ export class AvailabilityService {
     buffer: number,
   ): Promise<AvailabilitySlot[]> {
     const slots: AvailabilitySlot[] = [];
-    const dates = this.getDatesInRange(date_from, date_to);
+    // S21: blocks belong to the day they start; scan one day before the range.
+    const scanFrom = addDaysToDateString(date_from, -1);
+    const dates = this.getDatesInRange(scanFrom, date_to);
 
     const existingBookings = await this.prisma.bookings.findMany({
       where: {
         product_id,
         date: {
-          gte: new Date(date_from),
+          gte: new Date(scanFrom),
           lte: new Date(date_to),
         },
         status: { notIn: [booking_status_enum.cancelled] },
       },
-      select: { date: true, start_time: true, end_time: true },
+      select: { date: true, end_date: true, start_time: true, end_time: true },
     });
 
     // Resolve the store's working-days setting. Default (Mon-Fri) matches
@@ -981,17 +1075,16 @@ export class AvailabilityService {
     const workingDays = await this.getStoreWorkingDays(product_id);
 
     // Resolve the store's business-hours master calendar. When the store
-    // has configured `store_business_hours`, we use those HH:mm windows
-    // instead of the legacy hardcoded 08:00–18:00 default. If the store
-    // has no rows at all, fall back to 08:00–18:00 so old stores without
-    // a configured calendar keep working unchanged.
+    // has configured hours we use those windows instead of the legacy
+    // hardcoded 08:00–18:00 default. A day with no configured window keeps
+    // the 08:00–18:00 fallback to preserve legacy behavior.
     const product = await this.prisma.products.findFirst({
       where: { id: product_id },
       select: { store_id: true },
     });
     const storeHoursMap = product
       ? await this.businessHoursService.loadStoreHours(product.store_id)
-      : new Map<number, { start_time: string; end_time: string }>();
+      : new Map<number, ClockWindow[]>();
 
     for (const currentDate of dates) {
       const dateStr = this.formatDate(currentDate);
@@ -999,64 +1092,32 @@ export class AvailabilityService {
 
       if (!workingDays.includes(dayOfWeek)) continue;
 
-      // Use the store's business-hours window when configured; legacy
-      // 08:00–18:00 fallback otherwise.
-      const storeWindow = storeHoursMap.get(dayOfWeek);
-      const dayStart = storeWindow?.start_time ?? '08:00';
-      const dayEnd = storeWindow?.end_time ?? '18:00';
-      // If the store explicitly closed this day (no row), skip entirely.
-      if (!storeWindow) {
-        // No business-hours row + day is in workingDays → use fallback.
-        // If workingDays includes this DOW but the store didn't configure
-        // business hours, we still emit slots in 08:00–18:00 to preserve
-        // legacy behavior.
-      }
+      const dayWindows = storeHoursMap.get(dayOfWeek);
+      const blocks: ClockWindow[] = dayWindows?.length
+        ? dayWindows
+        : [{ start_time: '08:00', end_time: '18:00' }];
 
-      const timeSlots = this.generateTimeSlots(dayStart, dayEnd, duration, buffer);
+      for (const block of blocks) {
+        for (const slot of this.generateSlotSpans(windowSpan(block), duration, buffer)) {
+          const expanded = this.expandSlot(dateStr, slot);
+          if (expanded.date < date_from || expanded.date > date_to) continue;
+          const bookedCount = existingBookings.filter(
+            (b) =>
+              this.formatDate(new Date(b.date)) === expanded.date &&
+              b.start_time === expanded.start_time &&
+              b.end_time === expanded.end_time,
+          ).length;
 
-      for (const slot of timeSlots) {
-        const bookedCount = existingBookings.filter(
-          (b) =>
-            this.formatDate(new Date(b.date)) === dateStr &&
-            b.start_time === slot.start_time &&
-            b.end_time === slot.end_time,
-        ).length;
-
-        slots.push({
-          date: dateStr,
-          start_time: slot.start_time,
-          end_time: slot.end_time,
-          available_providers: [],
-          total_available: Math.max(10 - bookedCount, 0),
-        });
+          slots.push({
+            ...expanded,
+            available_providers: [],
+            total_available: Math.max(10 - bookedCount, 0),
+          });
+        }
       }
     }
 
     return slots;
-  }
-
-  /**
-   * Intersects an effective provider window with the store's master
-   * business-hours window. Returns null when the intersection is empty
-   * (provider schedule outside store hours, or store closed that day).
-   *
-   * Used by getAvailableSlots, getAvailableProvidersForSlot and
-   * isProviderAvailableForSlot to enforce the upper bound.
-   */
-  private clampToStoreHours(
-    providerStart: string,
-    providerEnd: string,
-    storeWindow: { start_time: string; end_time: string } | undefined,
-  ): { start: string; end: string } | null {
-    if (!storeWindow) return null;
-    const ps = this.timeToMinutes(providerStart);
-    const pe = this.timeToMinutes(providerEnd);
-    const ss = this.timeToMinutes(storeWindow.start_time);
-    const se = this.timeToMinutes(storeWindow.end_time);
-    const start = Math.max(ps, ss);
-    const end = Math.min(pe, se);
-    if (end <= start) return null;
-    return { start: this.minutesToTime(start), end: this.minutesToTime(end) };
   }
 
   /**
@@ -1285,8 +1346,8 @@ export class AvailabilityService {
         product.store_id,
         db as unknown as StorePrismaService,
       );
-      const storeWindow = storeHoursMap.get(dayOfWeek);
-      if (!storeWindow) {
+      const storeCoverage = coverageForDate(storeHoursMap, dayOfWeek);
+      if (storeCoverage.length === 0) {
         result.push({ date: dateStr, has_slots: false, slots_count: 0 });
         continue;
       }
@@ -1300,7 +1361,7 @@ export class AvailabilityService {
           product,
           dateStr,
           dayOfWeek,
-          storeWindow,
+          storeCoverage,
           provider_id,
           minStartTime,
         );
@@ -1342,7 +1403,7 @@ export class AvailabilityService {
     product: { id: number; store_id: number },
     dateStr: string,
     dayOfWeek: number,
-    storeWindow: { start_time: string; end_time: string },
+    storeCoverage: Span[],
     provider_id?: number,
     minStartTime?: string,
   ): Promise<number> {
@@ -1361,12 +1422,10 @@ export class AvailabilityService {
 
     // free_booking
     if (productFull.booking_mode === 'free_booking') {
-      const total = this.countTimeSlots(
-        storeWindow.start_time,
-        storeWindow.end_time,
-        duration,
-        buffer,
-        minStartTime,
+      const total = storeCoverage.reduce(
+        (sum, span) =>
+          sum + this.countTimeSlots(span, duration, buffer, minStartTime),
+        0,
       );
       if (total === 0) return 0;
       if (!isToday) return total;
@@ -1374,8 +1433,7 @@ export class AvailabilityService {
         db,
         product,
         dateStr,
-        storeWindow.start_time,
-        storeWindow.end_time,
+        storeCoverage,
         total,
       );
     }
@@ -1408,39 +1466,47 @@ export class AvailabilityService {
     });
     if (exception) return 0;
 
-    // Itera sobre los bloques. Si para ALGUN bloque queda хотя бы 1 slot
-    // libre (teniendo en cuenta reservas previas en HOY), devolvemos 1.
-    // Devolver el conteo exacto aquí daría más precisión pero dispararía
-    // el costo para future days (que dominan el render del calendario
-    // mensual); el calendario solo necesita saber "hay / no hay" slots.
+    // Itera sobre los bloques. Si para ALGUN bloque queda al menos 1 slot
+    // libre (teniendo en cuenta reservas previas en HOY), devolvemos el total.
+    // El calendario solo necesita saber "hay / no hay" slots. Los slots que
+    // empiezan después de medianoche pertenecen al día en que empieza el bloque.
     for (const s of schedules) {
-      const clamped = this.clampToStoreHours(
-        s.start_time,
-        s.end_time,
-        storeWindow,
-      );
-      if (!clamped) continue;
-      const total = this.countTimeSlots(
-        clamped.start,
-        clamped.end,
-        duration,
-        buffer,
-        minStartTime,
-      );
-      if (total === 0) continue;
-      if (!isToday) return total;
-      const stillFree = await this.hasAnyProviderSlotFreeToday(
-        db,
-        product,
-        dateStr,
-        providerIds,
-        clamped.start,
-        clamped.end,
-        total,
-      );
-      if (stillFree) return total;
+      for (const clamped of intersectSpans(windowSpan(s), storeCoverage)) {
+        const total = this.countTimeSlots(clamped, duration, buffer, minStartTime);
+        if (total === 0) continue;
+        if (!isToday) return total;
+        const stillFree = await this.hasAnyProviderSlotFreeToday(
+          db,
+          product,
+          dateStr,
+          providerIds,
+          clamped,
+          total,
+        );
+        if (stillFree) return total;
+      }
     }
     return 0;
+  }
+
+  /** Bookings that can overlap `dateStr`: the ones that start the day before or that day. */
+  private async loadBookingsAround(
+    db: any,
+    where: Record<string, unknown>,
+    dateStr: string,
+    select: Record<string, boolean>,
+  ): Promise<any[]> {
+    return db.bookings.findMany({
+      where: {
+        ...where,
+        date: {
+          gte: new Date(`${addDaysToDateString(dateStr, -1)}T00:00:00.000Z`),
+          lte: new Date(`${dateStr}T00:00:00.000Z`),
+        },
+        status: { notIn: [booking_status_enum.cancelled] },
+      },
+      select: { date: true, end_date: true, start_time: true, end_time: true, ...select },
+    });
   }
 
   /**
@@ -1451,120 +1517,88 @@ export class AvailabilityService {
     db: any,
     product: { id: number; store_id: number },
     dateStr: string,
-    windowStart: string,
-    windowEnd: string,
+    windows: Span[],
     total: number,
   ): Promise<number> {
-    const ws = this.timeToMinutes(windowStart);
-    const we = this.timeToMinutes(windowEnd);
-    const bookings = await db.bookings.findMany({
-      where: {
-        product_id: product.id,
-        date: new Date(`${dateStr}T00:00:00.000Z`),
-        status: { notIn: [booking_status_enum.cancelled] },
-      },
-      select: { start_time: true, end_time: true },
-    });
+    const bookings = await this.loadBookingsAround(
+      db,
+      { product_id: product.id },
+      dateStr,
+      {},
+    );
     const blocked = new Set<string>();
     for (const b of bookings) {
-      const bs = this.timeToMinutes(b.start_time);
-      const be = this.timeToMinutes(b.end_time);
+      const span = bookingMinuteSpan(b, dateStr);
       // Solo cuentan reservas que caen dentro del rango horario del día.
-      if (be <= ws || bs >= we) continue;
-      blocked.add(b.start_time.substring(0, 5));
+      if (!windows.some((w) => spansOverlap(span, w))) continue;
+      blocked.add(`${span.startMin}`);
     }
     return Math.max(total - blocked.size, 0);
   }
 
   /**
-   * Modo provider para HOY: devuelve true si хотя бы один provider
-   * del conjunto conserva хотя бы 1 slot del rango SIN booking que lo
+   * Modo provider para HOY: devuelve true si al menos un provider
+   * del conjunto conserva al menos 1 slot del rango SIN booking que lo
    * solape. Si todos los providers están ocupados para todos los slots,
    * devuelve false → `has_slots: false` para ese día.
-   *
-   * Implementación O(P * B + P * S): para cada provider cruzamos sus
-   * bookings con los slots del rango (Set de start_times). Si el set
-   * "slots del rango sin booking del provider" no está vacío, ganamos.
-   * El día pinta verde.
    */
   private async hasAnyProviderSlotFreeToday(
     db: any,
     product: { id: number; store_id: number },
     dateStr: string,
     providerIds: number[],
-    windowStart: string,
-    windowEnd: string,
+    window: Span,
     totalSlots: number,
   ): Promise<boolean> {
-    const ws = this.timeToMinutes(windowStart);
-    const we = this.timeToMinutes(windowEnd);
-    const bookings = await db.bookings.findMany({
-      where: {
-        product_id: product.id,
-        provider_id: { in: providerIds },
-        date: new Date(`${dateStr}T00:00:00.000Z`),
-        status: { notIn: [booking_status_enum.cancelled] },
-      },
-      select: { provider_id: true, start_time: true, end_time: true },
-    });
+    const bookings = await this.loadBookingsAround(
+      db,
+      { product_id: product.id, provider_id: { in: providerIds } },
+      dateStr,
+      { provider_id: true },
+    );
     // Bookings agrupadas por provider.
-    const byProvider = new Map<number, Array<{ s: number; e: number }>>();
+    const byProvider = new Map<number, Span[]>();
     for (const b of bookings) {
-      const bs = this.timeToMinutes(b.start_time);
-      const be = this.timeToMinutes(b.end_time);
-      if (be <= ws || bs >= we) continue;
+      const span = bookingMinuteSpan(b, dateStr);
+      if (!spansOverlap(span, window)) continue;
       const list = byProvider.get(b.provider_id) ?? [];
-      list.push({ s: bs, e: be });
+      list.push(span);
       byProvider.set(b.provider_id, list);
     }
-    // Para cada slot-start del rango (cada `service_duration + buffer`
-    // minutos, estimado con duration=60 / buffer=0 ya que no tenemos
-    // esos valores aquí). Aproximamos caminando de 1-min en 1-min y
-    // mirando si ese instante está libre para AL MENOS un provider.
-    // Como no recibimos duration aquí, usamos una granularidad gruesa
-    // de 30 minutos (suficiente para el calendario mensual: cualquier
-    // hueco libre real se proyecta como slot verde).
+    // Aproximamos caminando de 30 en 30 minutos (no recibimos la duración
+    // aquí): cualquier hueco libre real se proyecta como slot verde.
     const step = 30;
-    for (let t = ws; t + 60 <= we; t += step) {
-      const slotStart = t;
-      const slotEnd = t + 60;
+    for (let t = window.startMin; t + 60 <= window.endMin; t += step) {
+      const candidate: Span = { startMin: t, endMin: t + 60 };
       for (const pid of providerIds) {
         const provBookings = byProvider.get(pid);
         if (!provBookings || provBookings.length === 0) return true; // provider sin bookings = libre
-        const overlaps = provBookings.some(
-          (pb) => pb.s < slotEnd && pb.e > slotStart,
-        );
-        if (!overlaps) return true; // este provider tiene este slot libre
+        if (!provBookings.some((pb) => spansOverlap(pb, candidate))) return true;
       }
     }
-    // Llegamos aquí solo si cada slotStart está solapado para TODOS
-    // los providers del día → todo reservado.
-    // (Guardamos `totalSlots` solo para legibilidad; no se usa en el bucle
-    // porque la granularidad del escaneo no necesita igualarlo.)
+    // Todos los slotStart están solapados para TODOS los providers del día.
     void totalSlots;
     return false;
   }
 
-  /** Count how many slots of `duration`+`buffer` fit between start..end.
-   *  When `minStart` is provided, the cursor starts at
-   *  `max(timeToMinutes(start), timeToMinutes(minStart))` so slots whose
-   *  start_time is already in the past (today, post-clock) are excluded. */
+  /** Count how many slots of `duration`+`buffer` fit in `window` and START on its day
+   *  (before 24:00). When `minStart` is provided, the cursor starts at
+   *  `max(window.startMin, minStart)` so slots whose start_time is already in the
+   *  past (today, post-clock) are excluded. */
   private countTimeSlots(
-    start: string,
-    end: string,
+    window: Span,
     duration: number,
     buffer: number,
     minStart?: string,
   ): number {
-    let cur = this.timeToMinutes(start);
-    const endMin = this.timeToMinutes(end);
+    let cur = window.startMin;
     if (minStart) {
-      const floor = this.timeToMinutes(minStart);
+      const floor = toMinutes(minStart);
       if (floor > cur) cur = floor;
     }
-    if (duration <= 0 || endMin <= cur) return 0;
+    if (duration <= 0 || window.endMin <= cur) return 0;
     let count = 0;
-    while (cur + duration <= endMin) {
+    while (cur + duration <= window.endMin && cur < 1440) {
       count++;
       cur += duration + buffer;
     }

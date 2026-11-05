@@ -38,6 +38,7 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 import { DialogService } from '../../../../../../../shared/components/dialog/dialog.service';
 import { VariableBarcodeFormatsModalComponent } from '../variable-barcode-formats-modal.component';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
+import { isClockTime, isOvernight } from '../../../../../../../shared/utils/schedule-window.util';
 
 @Component({
   selector: 'app-pos-settings-form',
@@ -596,6 +597,11 @@ export class PosSettingsForm implements OnInit {
     }
   }
 
+  /** S21: a close at or before the open ends the next day (e.g. 20:00–03:00). */
+  closesNextDay(open: string, close: string): boolean {
+    return isClockTime(open) && isClockTime(close) && isOvernight({ start_time: open, end_time: close });
+  }
+
   isDayClosed(day: string): boolean {
     const hours = this.form.get('business_hours')?.value;
     return hours?.[day]?.open === 'closed';
@@ -742,10 +748,10 @@ export class PosSettingsForm implements OnInit {
     const dayHours = this.form.get('business_hours')?.value?.[first.key];
     const range = this.isCustomMode()
       ? this.getDayBlocks(first.key)
-          .map((block) => `${block.open}–${block.close}`)
+          .map((block) => `${block.open}–${block.close}${this.closesNextDay(block.open, block.close) ? ' (+1 día)' : ''}`)
           .join(' y ')
       : dayHours
-        ? `${dayHours.open}–${dayHours.close}`
+        ? `${dayHours.open}–${dayHours.close}${this.closesNextDay(dayHours.open, dayHours.close) ? ' (+1 día)' : ''}`
         : '';
 
     const closedLabels = this.daysOfWeek
