@@ -202,6 +202,47 @@ describe('StoredFilesService', () => {
       expect(kit.db.table('stored_files')).toHaveLength(0);
       expect(kit.s3.deleteFile).toHaveBeenCalledWith(row.s3_key);
     });
+
+    describe('retención y legal_hold', () => {
+      const DAY = 86_400_000;
+      const stored = (id: number) => kit.db.table('stored_files').find((f) => f.id === id);
+
+      it.each([
+        ['bajo legal_hold', { legal_hold: true, retention_until: null }],
+        ['con retención vigente', { legal_hold: false, retention_until: new Date(Date.now() + DAY) }],
+        ['con legal_hold aunque la retención ya venció', { legal_hold: true, retention_until: new Date(Date.now() - DAY) }],
+      ])('discard rechaza una fila %s (409 DOCUMENT_RETAINED) y no borra ni la fila ni el objeto', async (_l, hold) => {
+        const row = await upload();
+        Object.assign(stored(row.id)!, hold);
+        const err = await kit.storedFiles.discard(row).catch((e) => e);
+        expect(err).toBeInstanceOf(VendixHttpException);
+        expect(err.errorCode).toBe('DOCUMENT_RETAINED');
+        expect(err.getStatus()).toBe(409);
+        expect(stored(row.id)).toBeDefined();
+        expect(kit.s3.deleteFile).not.toHaveBeenCalled();
+      });
+
+      it('con la retención ya vencida y sin legal_hold sí se descarta', async () => {
+        const row = await upload();
+        Object.assign(stored(row.id)!, { legal_hold: false, retention_until: new Date(Date.now() - DAY) });
+        await expect(kit.storedFiles.discard(row)).resolves.toBeUndefined();
+        expect(stored(row.id)).toBeUndefined();
+        expect(kit.s3.deleteFile).toHaveBeenCalledWith(row.s3_key);
+      });
+
+      it('la comprobación corre dentro de una transacción', async () => {
+        const row = await upload();
+        const svc = kit.storedFiles as any;
+        const real = svc.prisma;
+        const tx = jest.fn((fn: any) => real.$transaction(fn));
+        // Fuera de la transacción el cliente no puede borrar: todo pasa por `tx`.
+        svc.prisma = { $transaction: tx, stored_files: {} };
+        await kit.storedFiles.discard(row);
+        svc.prisma = real;
+        expect(tx).toHaveBeenCalledTimes(1);
+        expect(stored(row.id)).toBeUndefined();
+      });
+    });
   });
 
   describe('descarga firmada', () => {

@@ -96,6 +96,7 @@ export const ErrorCodes = {
   DOCUMENT_NOT_FOUND: { code: 'DOCUMENT_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró el documento.' },
   DOCUMENT_FILE_REQUIRED: { code: 'DOCUMENT_FILE_REQUIRED', httpStatus: 400, devMessage: 'Adjunta un archivo en el campo "file".' },
   DOCUMENT_TARGET_INVALID: { code: 'DOCUMENT_TARGET_INVALID', httpStatus: 422, devMessage: 'El requisito o campo indicado no corresponde a la etapa actual de la solicitud.' },
+  DOCUMENT_RETAINED: { code: 'DOCUMENT_RETAINED', httpStatus: 409, devMessage: 'El archivo está bajo retención legal o su periodo de retención sigue vigente; no se puede borrar.' },
 
   // System
   SYS_INTERNAL_001: {

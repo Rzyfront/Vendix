@@ -189,13 +189,41 @@ export class StoredFilesService {
     }
   }
 
-  /** Compensation for a file whose dossier item never committed: row + object. */
+  /**
+   * Compensation for a file whose dossier item never committed: row + object.
+   * A row under `legal_hold` or with `retention_until` still in the future is
+   * never deleted: 409 `DOCUMENT_RETAINED`, and its object stays in S3. The
+   * guard is part of the `DELETE` predicate, inside one transaction, so a hold
+   * set concurrently wins over the delete.
+   */
   async discard(file: Pick<StoredFileRow, 'id' | 's3_key'>): Promise<void> {
+    const storeId = this.ctx().store_id;
+    const now = new Date();
     try {
-      await this.prisma.stored_files.deleteMany({
-        where: { id: file.id, store_id: this.ctx().store_id },
+      await this.prisma.$transaction(async (tx: any) => {
+        const { count } = await tx.stored_files.deleteMany({
+          where: {
+            id: file.id,
+            store_id: storeId,
+            legal_hold: false,
+            OR: [{ retention_until: null }, { retention_until: { lte: now } }],
+          },
+        });
+        if (count > 0) return;
+        const kept = await tx.stored_files.findFirst({
+          where: { id: file.id, store_id: storeId },
+          select: { id: true, legal_hold: true, retention_until: true },
+        });
+        if (kept) {
+          throw new VendixHttpException(ErrorCodes.DOCUMENT_RETAINED, undefined, {
+            file_id: kept.id,
+            legal_hold: kept.legal_hold,
+            retention_until: kept.retention_until,
+          });
+        }
       });
     } catch (e: any) {
+      if (e instanceof VendixHttpException) throw e;
       this.logger.error(`No se pudo borrar la fila huérfana ${file.id}: ${e?.message}`);
     }
     await this.discardObject(file.s3_key);
