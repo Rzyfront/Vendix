@@ -13,6 +13,7 @@ import type { PaymentRequestPaidEvent } from '../payment-requests/payment-reques
 import { PaymentLinksService } from '../payment-links/payment-links.service';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 import { SettingsService } from '../settings/settings.service';
+import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ServiceAllocationCoordinator } from './service-allocation-coordinator.service';
 import { buildPaymentReceivedEvents } from '../payments/utils/payment-received-event.util';
@@ -749,8 +750,22 @@ export class ReservationDepositsService {
       return { orderId: order.id, paymentReceived: applied.payment_received };
     });
     await this.emitPaymentReceived(result.orderId, result.paymentReceived, currency, userId);
+    await this.invoiceFeeOrder(result.orderId);
     this.emitClosed('booking.no_show', store_id, booking);
     return { action: 'retain' };
+  }
+
+  /**
+   * The fee order is born paid: hand it to the POS invoice emitter. The
+   * decision is already committed, so an emitter failure is only logged (the
+   * invoice can be issued later from the order).
+   */
+  private async invoiceFeeOrder(orderId: number): Promise<void> {
+    try {
+      await this.lazy(OrderFlowService)?.invoicePaidReservationFeeOrder(orderId);
+    } catch (error) {
+      this.logger.error(`[reservation fee invoice] order=${orderId}: ${(error as Error).message}`);
+    }
   }
 
   /** `payment.received` of the fee order (wallet method books DR 2805), after commit. */

@@ -3423,6 +3423,15 @@ export class OrderFlowService {
   }
 
   /**
+   * Retained booking deposit (S17 `retain`): the `RSV-<booking>` order is born
+   * finished and paid with the deposit wallet. Run the POS invoice emitter on
+   * it like any paid presential sale; idempotent (an issued invoice is skipped).
+   */
+  async invoicePaidReservationFeeOrder(orderId: number): Promise<void> {
+    await this.emitPosSaleCompletedIfFullyPaid(orderId, 'reservation_fee.retained');
+  }
+
+  /**
    * Station session settlement seam: once the deposit is applied and the
    * order of a `service_sessions` row is fully paid, promote it like any
    * paid POS order and run the invoice emitter (`invoicing.pos.auto_emit`).

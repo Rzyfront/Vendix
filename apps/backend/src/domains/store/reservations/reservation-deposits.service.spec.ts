@@ -3,6 +3,7 @@ import { ReservationDepositsService } from './reservation-deposits.service';
 import { PaymentLinksService } from '../payment-links/payment-links.service';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 import { SettingsService } from '../settings/settings.service';
+import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
 jest.mock('../service-sessions/utils/session-order-lines.util', () => ({
@@ -109,11 +110,13 @@ describe('ReservationDepositsService', () => {
     const notifications = { createAndBroadcast: jest.fn().mockResolvedValue(undefined) };
     const taxes = { taxRowsForCategory: jest.fn().mockResolvedValue([]) };
     const settings = { getStoreCurrency: jest.fn().mockResolvedValue('COP') };
+    const orderFlow = { invoicePaidReservationFeeOrder: jest.fn().mockResolvedValue(undefined) };
     const lookups = new Map<unknown, unknown>([
       [PaymentLinksService, links],
       [NotificationsService, notifications],
       [ShippingTaxService, taxes],
       [SettingsService, settings],
+      [OrderFlowService, orderFlow],
     ]);
     const moduleRef: any = { get: jest.fn((token: unknown) => lookups.get(token)) };
     const coordinator: any = {
@@ -121,7 +124,7 @@ describe('ReservationDepositsService', () => {
       releaseBooking: jest.fn().mockResolvedValue(undefined),
     };
     const service = new ReservationDepositsService(prisma, deposits, paymentRequests, eventEmitter, moduleRef, coordinator);
-    return { service, tx, prisma, deposits, paymentRequests, emits, links, notifications, taxes, coordinator };
+    return { service, tx, prisma, deposits, paymentRequests, emits, links, notifications, taxes, coordinator, orderFlow };
   }
 
   const link = { amount: 400000, mode: 'link' as const, request_id: 'req-1' };
@@ -532,6 +535,20 @@ describe('ReservationDepositsService', () => {
       const paid = emits.find((e) => e.name === 'payment.received');
       expect(paid?.payload).toMatchObject({ payment_id: 55, order_id: 900, amount: 400000, payment_method: 'wallet' });
       expect(emits.map((e) => e.name)).toContain('booking.no_show');
+    });
+
+    it('retain sends the paid fee order to the invoice emitter after commit', async () => {
+      const { service, tx, orderFlow } = build({ booking: { id: 77, status: 'confirmed', customer_id: 1, booking_number: 'BKG-1' } });
+      await service.decide(77, { ...base, action: 'retain' });
+      expect(orderFlow.invoicePaidReservationFeeOrder).toHaveBeenCalledWith(900);
+      expect(orderFlow.invoicePaidReservationFeeOrder.mock.invocationCallOrder[0])
+        .toBeGreaterThan(tx.bookings.update.mock.invocationCallOrder[0]);
+    });
+
+    it('a failing invoice emitter does not undo the retained decision', async () => {
+      const { service, orderFlow } = build({ booking: { id: 77, status: 'confirmed', customer_id: 1, booking_number: 'BKG-1' } });
+      orderFlow.invoicePaidReservationFeeOrder.mockRejectedValueOnce(new Error('dian down'));
+      await expect(service.decide(77, { ...base, action: 'retain' })).resolves.toEqual({ action: 'retain' });
     });
 
     it('retain uses the station tax category of the fee line (inclusive), none by default (A3)', async () => {
