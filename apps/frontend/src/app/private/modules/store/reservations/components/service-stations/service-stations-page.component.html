@@ -1039,6 +1039,14 @@
           </button>
           <button
             type="button"
+            (click)="selectedConfigTab.set('schedule')"
+            class="px-3 py-1.5 rounded-lg transition-all"
+            [ngClass]="selectedConfigTab() === 'schedule' ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'"
+          >
+            Horario
+          </button>
+          <button
+            type="button"
             (click)="selectedConfigTab.set('services')"
             class="px-3 py-1.5 rounded-lg transition-all"
             [ngClass]="selectedConfigTab() === 'services' ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'"
@@ -1238,6 +1246,15 @@
         }
 
         <!-- Pestaña 3: Proveedores Compatibles -->
+        @if (selectedConfigTab() === 'schedule') {
+          <div class="space-y-3">
+            <p class="text-xs text-[var(--color-text-secondary)]">
+              Días y horas en que la estación se puede reservar. Si el cierre es menor que la apertura (por ejemplo 18:00 → 03:00), el bloque termina al día siguiente. Sin horario, la estación no aparece disponible para reservar.
+            </p>
+            <app-weekly-schedule-editor [stationId]="station.id" />
+          </div>
+        }
+
         @if (selectedConfigTab() === 'providers') {
           <div class="space-y-4">
             <p class="text-xs text-[var(--color-text-secondary)]">Asigna los técnicos y especialistas autorizados para operar en esta estación:</p>

@@ -11,8 +11,9 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
-import { finalize } from 'rxjs';
+import { finalize, map, Observable } from 'rxjs';
 import { ReservationsService } from '../../../services/reservations.service';
+import { ServiceStationsService } from '../../service-stations/service-stations.service';
 import { ProviderSchedule } from '../../../interfaces/reservation.interface';
 import {
   IconComponent,
@@ -22,6 +23,9 @@ import {
   ToggleComponent,
 } from '../../../../../../../shared/components';
 import { validateWeeklyBlocks, windowMinutes } from '../../../../../../../shared/utils/schedule-window.util';
+
+/** Row the editor loads: a specialist row, or a station row mapped from `weekday`. */
+type EditorScheduleRow = Pick<ProviderSchedule, 'day_of_week' | 'start_time' | 'end_time'> & { block_order?: number };
 
 interface ScheduleBlock {
   block_order: number;
@@ -47,10 +51,13 @@ interface ScheduleDay {
 })
 export class WeeklyScheduleEditorComponent {
   private reservationsService = inject(ReservationsService);
+  private serviceStationsService = inject(ServiceStationsService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
 
-  readonly providerId = input.required<number>();
+  /** Whose week is edited: a specialist, or a station (S21: a station's hours may cross midnight too). */
+  readonly providerId = input<number | null>(null);
+  readonly stationId = input<number | null>(null);
   readonly scheduleChanged = output<{ activeDays: number; weeklyHours: number }>();
 
   days = signal<ScheduleDay[]>([]);
@@ -67,17 +74,44 @@ export class WeeklyScheduleEditorComponent {
 
   constructor() {
     effect(() => {
-      const id = this.providerId();
-      if (id) {
-        untracked(() => this.loadSchedule(id));
+      const stationId = this.stationId();
+      const providerId = this.providerId();
+      if (stationId || providerId) {
+        untracked(() => this.loadSchedule());
       }
     });
   }
 
-  private loadSchedule(providerId: number): void {
+  /** Station rows use `weekday`; the editor works in `day_of_week` like the specialist rows. */
+  private fetchSchedule(): Observable<EditorScheduleRow[]> {
+    const stationId = this.stationId();
+    if (stationId) {
+      return this.serviceStationsService.getSchedules(stationId).pipe(
+        map((rows) =>
+          (rows ?? [])
+            .filter((row) => row.is_active !== false)
+            .map((row) => ({ day_of_week: row.weekday, block_order: row.block_order ?? 0, start_time: row.start_time, end_time: row.end_time })),
+        ),
+      );
+    }
+    return this.reservationsService.getProviderSchedule(this.providerId()!);
+  }
+
+  private persistSchedule(items: Array<{ day_of_week: number; block_order: number; is_active: boolean; start_time: string; end_time: string }>): Observable<unknown> {
+    const stationId = this.stationId();
+    if (stationId) {
+      return this.serviceStationsService.setSchedules(
+        stationId,
+        // The station DTO has no `block_order` (unknown fields are rejected); the API orders blocks by start time.
+        items.map((item) => ({ weekday: item.day_of_week, start_time: item.start_time, end_time: item.end_time, is_active: item.is_active })),
+      );
+    }
+    return this.reservationsService.upsertProviderSchedule(this.providerId()!, items);
+  }
+
+  private loadSchedule(): void {
     this.loading.set(true);
-    this.reservationsService
-      .getProviderSchedule(providerId)
+    this.fetchSchedule()
       .pipe(
         takeUntilDestroyed(this.destroyRef),
         finalize(() => this.loading.set(false)),
@@ -91,7 +125,7 @@ export class WeeklyScheduleEditorComponent {
       });
   }
 
-  private initDays(schedules: ProviderSchedule[]): void {
+  private initDays(schedules: EditorScheduleRow[]): void {
     const dayNames = [
       { day: 1, label: 'Lunes', short: 'Lun' },
       { day: 2, label: 'Martes', short: 'Mar' },
@@ -112,7 +146,7 @@ export class WeeklyScheduleEditorComponent {
         blocksByDay.set(s.day_of_week, []);
       }
       blocksByDay.get(s.day_of_week)!.push({
-        block_order: (s as any).block_order ?? 0,
+        block_order: s.block_order ?? 0,
         start_time: s.start_time,
         end_time: s.end_time,
       });
@@ -340,7 +374,7 @@ export class WeeklyScheduleEditorComponent {
     }
 
     this.saving.set(true);
-    const items: any[] = [];
+    const items: Array<{ day_of_week: number; block_order: number; is_active: boolean; start_time: string; end_time: string }> = [];
     for (const d of this.days()) {
       if (!d.is_active) continue;
       for (const block of d.blocks) {
@@ -354,8 +388,7 @@ export class WeeklyScheduleEditorComponent {
       }
     }
 
-    this.reservationsService
-      .upsertProviderSchedule(this.providerId(), items)
+    this.persistSchedule(items)
       .pipe(
         takeUntilDestroyed(this.destroyRef),
         finalize(() => this.saving.set(false)),

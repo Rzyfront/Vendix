@@ -93,6 +93,7 @@ import {
   stationRentalSummary,
 } from './station-rental-form/station-rental-form.component';
 import { StationRateWindowsComponent } from './station-rate-windows/station-rate-windows.component';
+import { WeeklyScheduleEditorComponent } from '../schedule-management/weekly-schedule-editor/weekly-schedule-editor.component';
 import {
   OpenSessionDepositComponent,
   OpenSessionDepositValue,
@@ -322,6 +323,7 @@ export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
     StationRulesFormComponent,
     StationRentalFormComponent,
     StationRateWindowsComponent,
+    WeeklyScheduleEditorComponent,
     OpenSessionDepositComponent,
   ],
   templateUrl: './service-stations-page.component.html',
@@ -740,7 +742,7 @@ export class ServiceStationsPageComponent implements OnInit {
 
   // Config station state
   readonly selectedStation = signal<ServiceStation | null>(null);
-  readonly selectedConfigTab = signal<'details' | 'intake' | 'services' | 'providers'>('details');
+  readonly selectedConfigTab = signal<'details' | 'intake' | 'schedule' | 'services' | 'providers'>('details');
   readonly editName = signal('');
   readonly editStationType = signal<StationType>('carro');
   readonly editCapacity = signal(1);
