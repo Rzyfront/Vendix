@@ -17,6 +17,8 @@
  *   precios-pricing /precios responde 301 a /pricing (solo en vendix.online)
  *   archivo-404     un archivo inexistente (/no-existe-<ts>.js) responde 404
  *   robots-200, sitemap-200, sitemap-hosts, sitemap-tokens
+ *   http-https      http://<host>/ responde 301/308 a https
+ *   hsts, nosniff, referrer-policy  cabeceras de seguridad de la portada
  *
  * Privacidad: el reporte nunca imprime una URL con ruta de token (pedido, order, factura);
  * solo cuenta cuántas hay. Esas URLs tampoco se piden.
@@ -106,7 +108,7 @@ function createSmoke(opts = {}) {
   async function checkHost() {
     const alias = host.startsWith('www.') ? host.slice(4) : 'www.' + host;
     const http = await get('http://' + host + '/');
-    add('host', 'http → https', isRedirect(http.status) && (http.location || '').startsWith('https://') ? 'OK' : 'FALLA', http.status + ' → ' + http.location, { rec: http.rec });
+    add('host', 'http → https', isRedirect(http.status) && (http.location || '').startsWith('https://') ? 'OK' : 'FALLA', http.status + ' → ' + http.location, { id: 'http-https', rec: http.rec });
     try {
       const www = await get('https://' + alias + '/');
       const redirects = isRedirect(www.status) && (www.location || '').startsWith(base);
@@ -215,8 +217,9 @@ function createSmoke(opts = {}) {
     // x-frame-options y CSP se omiten a propósito (infra/cloudfront/README-security-headers.md):
     // un DENY/SAMEORIGIN rompería el checkout de Wompi y las tiendas embebidas. Su ausencia es AVISO.
     const optional = ['x-frame-options', 'content-security-policy'];
+    const ids = { 'strict-transport-security': 'hsts', 'x-content-type-options': 'nosniff', 'referrer-policy': 'referrer-policy' };
     for (const name of ['strict-transport-security', 'x-content-type-options', 'referrer-policy', ...optional]) {
-      add('seguridad', 'cabecera ' + name, h(name) ? 'OK' : (optional.includes(name) ? 'AVISO' : 'FALLA'), h(name) || 'ausente', { rec: res.rec });
+      add('seguridad', 'cabecera ' + name, h(name) ? 'OK' : (optional.includes(name) ? 'AVISO' : 'FALLA'), h(name) || 'ausente', { id: ids[name] || null, rec: res.rec });
     }
     add('cache', 'HTML con revalidación', /max-age=0|no-cache/.test(h('cache-control') || '') ? 'OK' : 'AVISO', h('cache-control') || 'ausente');
   }

@@ -39,6 +39,10 @@ jobs:
             url: https://vendix-pit-and-grill-shop.vendix.online
     env:
       SEO_SMOKE_MODE: ${{ inputs.mode || vars.SEO_SMOKE_MODE || 'report' }}
+      # Alerta (SEO-TECH-22): estos controles ya pasan en producción; si alguno vuelve a fallar,
+      # el job falla y GitHub avisa por correo. Las FALLA legacy (soft 404, HTML sin prerender) siguen en report.
+      # Se puede cambiar sin tocar el archivo con la variable de repositorio SEO_SMOKE_ENFORCE ('-' la desactiva).
+      SEO_SMOKE_ENFORCE: ${{ vars.SEO_SMOKE_ENFORCE || 'www-apex,precios-pricing,archivo-404,http-https,hsts,nosniff,referrer-policy,robots-200,sitemap-200,sitemap-hosts,sitemap-tokens' }}
     steps:
       - uses: actions/checkout@v4
 
