@@ -14,6 +14,7 @@ import {
   SetStationProvidersDto,
   SetStationSchedulesDto,
   SetStationServicesDto,
+  StationDepositRulesDto,
   UpdateServiceStationDto,
 } from './dto/station.dto';
 import { validateWeeklyBlocks } from '../../../common/utils/schedule-window.util';
@@ -207,6 +208,7 @@ export class ServiceStationsService {
     await this.assertIntakeTemplate(dto.intake_template_id);
     // Impuesto del alquiler: misma validación que la tarifa de envío.
     await this.shippingTax.assertCategoryAssignable(dto.rental_tax_category_id, 'station_rental');
+    await this.shippingTax.assertCategoryAssignable(dto.reservation_fee_tax_category_id, 'station_rental');
     // Sin tipo explícito, la estación toma el tipo para el que se diseñó su plantilla.
     const template = !dto.station_type && dto.intake_template_id
       ? await this.prisma.data_collection_templates.findFirst({
@@ -229,6 +231,7 @@ export class ServiceStationsService {
           rental_tax_category_id: dto.rental_tax_category_id ?? null,
           rental_tax_is_inclusive: dto.rental_tax_is_inclusive ?? true,
           intake_template_id: dto.intake_template_id ?? null,
+          ...this.depositRulesData(dto),
         },
       });
       return this.findOne(station.id);
@@ -241,9 +244,17 @@ export class ServiceStationsService {
   }
 
   async update(id: number, dto: UpdateServiceStationDto) {
-    await this.findOne(id);
+    const current = await this.findOne(id);
     await this.assertIntakeTemplate(dto.intake_template_id);
     await this.shippingTax.assertCategoryAssignable(dto.rental_tax_category_id, 'station_rental');
+    await this.shippingTax.assertCategoryAssignable(dto.reservation_fee_tax_category_id, 'station_rental');
+    // The effective rule (what is stored plus what changes) must stay coherent.
+    const policy = dto.deposit_policy ?? current.deposit_policy ?? 'none';
+    const amount = dto.deposit_amount !== undefined ? dto.deposit_amount : current.deposit_amount;
+    const touchesDeposit = dto.deposit_policy !== undefined || dto.deposit_amount !== undefined;
+    if (touchesDeposit && policy !== 'none' && (amount === null || amount === undefined)) {
+      throw new BadRequestException('Indica el monto del anticipo para esta estación.');
+    }
     try {
       await this.prisma.service_stations.updateMany({
         where: { id, store_id: this.storeId },
@@ -259,6 +270,7 @@ export class ServiceStationsService {
           ...(dto.rental_tax_category_id !== undefined && { rental_tax_category_id: dto.rental_tax_category_id }),
           ...(dto.rental_tax_is_inclusive !== undefined && { rental_tax_is_inclusive: dto.rental_tax_is_inclusive }),
           ...(dto.intake_template_id !== undefined && { intake_template_id: dto.intake_template_id }),
+          ...this.depositRulesData(dto),
           updated_at: new Date(),
         },
       });
@@ -269,6 +281,27 @@ export class ServiceStationsService {
       throw error;
     }
     return this.findOne(id);
+  }
+
+  /**
+   * Deposit and booking rules to persist: only what the request carries, so a
+   * station saved without them keeps the column defaults. A policy of `none`
+   * never keeps an amount.
+   */
+  private depositRulesData(dto: Partial<StationDepositRulesDto>) {
+    return {
+      ...(dto.deposit_policy !== undefined && { deposit_policy: dto.deposit_policy }),
+      ...(dto.deposit_policy === 'none'
+        ? { deposit_amount: null }
+        : dto.deposit_amount !== undefined && { deposit_amount: dto.deposit_amount }),
+      ...(dto.deposit_exhausted_policy !== undefined && { deposit_exhausted_policy: dto.deposit_exhausted_policy }),
+      ...(dto.leftover_policy !== undefined && { leftover_policy: dto.leftover_policy }),
+      ...(dto.booking_duration_mode !== undefined && { booking_duration_mode: dto.booking_duration_mode }),
+      ...(dto.hold_minutes !== undefined && { hold_minutes: dto.hold_minutes }),
+      ...(dto.open_end_block_minutes !== undefined && { open_end_block_minutes: dto.open_end_block_minutes }),
+      ...(dto.cancel_refund_hours !== undefined && { cancel_refund_hours: dto.cancel_refund_hours }),
+      ...(dto.reservation_fee_tax_category_id !== undefined && { reservation_fee_tax_category_id: dto.reservation_fee_tax_category_id }),
+    };
   }
 
   /** Estaciones de la tienda que prestan este servicio. */

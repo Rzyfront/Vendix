@@ -1765,6 +1765,27 @@ export class CheckoutService {
       }
     }
 
+    // A station that requires a deposit is booked from the hold + payment page flow
+    // (A12), never from the cart: the cart would sell the slot without the deposit.
+    if (requiredServiceUnits.size > 0) {
+      const stationProductIds = [
+        ...new Set(
+          cart_items
+            .filter((item) => item.product?.requires_station)
+            .map((item) => item.product_id),
+        ),
+      ];
+      const depositStation = await this.store_prisma.service_stations.findFirst({
+        where: {
+          deposit_policy: 'required',
+          status: 'active',
+          service_station_services_station_fkey: { some: { product_id: { in: stationProductIds } } },
+        },
+        select: { id: true },
+      });
+      if (depositStation) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_010);
+    }
+
     const cart_currency =
       cart?.currency || (await this.settingsService.getStoreCurrency());
 

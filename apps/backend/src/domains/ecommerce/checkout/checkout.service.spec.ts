@@ -246,6 +246,8 @@ describe('CheckoutService - promotions and coupons', () => {
         }),
       },
       orders: { count: jest.fn().mockResolvedValue(0) },
+      // A12 guard: no station with a mandatory deposit unless a test says so.
+      service_stations: { findFirst: jest.fn().mockResolvedValue(null) },
       shipping_rates: { findFirst: jest.fn() },
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       invoice_resolutions: { findFirst: jest.fn().mockResolvedValue(null) },
@@ -863,6 +865,34 @@ describe('CheckoutService - promotions and coupons', () => {
         },
       ],
     };
+
+    it('rechaza el carrito de una estación con anticipo obligatorio, sin crear orden ni reserva (A12)', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      mockOrderCreate(10000);
+      storePrisma.service_stations.findFirst.mockResolvedValue({ id: 5 });
+
+      await expect(service.checkout({ ...stationDto } as any)).rejects.toMatchObject({
+        errorCode: 'STATION_BOOKING_010',
+      });
+      expect(storePrisma.service_stations.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ deposit_policy: 'required' }),
+        }),
+      );
+      expect(reservations.create).not.toHaveBeenCalled();
+      expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('una estación sin anticipo obligatorio sigue el flujo de siempre: la reserva se intenta y el carrito no se rechaza', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      reservations.create.mockRejectedValue(new Error('sin cupo'));
+      mockOrderCreate(10000);
+
+      await expect(service.checkout({ ...stationDto } as any)).rejects.toThrow('sin cupo');
+      expect(storePrisma.service_stations.findFirst).toHaveBeenCalled();
+    });
 
     it('falla el checkout cuando la reserva CON estación falla (sin orden creada)', async () => {
       mockServiceProducts();

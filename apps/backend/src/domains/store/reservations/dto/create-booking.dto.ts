@@ -9,9 +9,44 @@ import {
   Matches,
   MaxLength,
   ValidateIf,
+  ValidateNested,
+  IsNumber,
+  Min,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { order_channel_enum } from '@prisma/client';
+
+/**
+ * Deposit taken with an admin booking of a station (S15). `desk` = the money is
+ * received now; `link` = a payment page is opened and the slot is held (D11).
+ */
+export class BookingDepositDto {
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'El anticipo debe tener máximo 2 decimales' })
+  @Min(0.01, { message: 'El anticipo debe ser mayor a cero' })
+  @Max(9_999_999_999.99)
+  amount: number;
+
+  @IsIn(['desk', 'link'], { message: 'El anticipo se recibe en caja o por enlace de pago' })
+  mode: 'desk' | 'link';
+
+  /** Canonical method of a desk deposit: cash, bank_transfer, card... Defaults to cash. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  method?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  store_payment_method_id?: number;
+
+  /** Idempotency key of this deposit. */
+  @IsString()
+  @MaxLength(100)
+  request_id: string;
+}
 
 export class CreateBookingDto {
   /**
@@ -131,4 +166,10 @@ export class CreateBookingDto {
   @IsString()
   @MaxLength(64)
   cart_item_id?: string;
+
+  /** Deposit to take with the booking (stations that charge one, S15). */
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BookingDepositDto)
+  deposit?: BookingDepositDto;
 }

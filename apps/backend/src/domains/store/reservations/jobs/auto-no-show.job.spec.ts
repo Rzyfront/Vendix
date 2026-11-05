@@ -47,4 +47,24 @@ describe('AutoNoShowJob.archiveStore', () => {
     await expect(run(job)).resolves.toBe(0);
     expect(reservations.archiveToNoShow).not.toHaveBeenCalled();
   });
+
+  it('does not count a booking deferred for its deposit as archived, and leaves it confirmed (S17)', async () => {
+    const { job, reservations } = build([
+      { id: 4, date: day(-3), end_date: null, start_time: '09:00', end_time: '10:00', status: 'confirmed' },
+      { id: 5, date: day(-3), end_date: null, start_time: '09:00', end_time: '10:00', status: 'confirmed' },
+    ]);
+    reservations.archiveToNoShow.mockImplementation(async (id: number) => (id === 4 ? 'deferred' : 'archived'));
+    await expect(run(job)).resolves.toBe(1);
+    expect(reservations.archiveToNoShow).toHaveBeenCalledTimes(2);
+  });
+
+  it('never picks up a booking that already waits for a deposit decision', async () => {
+    const { job, prisma } = build([]);
+    await run(job);
+    expect(prisma.bookings.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ deposit_decision_due_at: null }),
+      }),
+    );
+  });
 });

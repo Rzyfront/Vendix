@@ -16,6 +16,7 @@ import {
   MaxLength,
   Matches,
   Min,
+  ValidateIf,
   registerDecorator,
   ValidationArguments,
   ValidationOptions,
@@ -52,7 +53,75 @@ function IsRentalBlockPair(validationOptions?: ValidationOptions) {
   };
 }
 
-export class CreateServiceStationDto {
+/** Deposit amount ceiling: column Decimal(12, 2). */
+export const DEPOSIT_AMOUNT_MAX = 9_999_999_999.99;
+
+/**
+ * Deposit and booking rules of a station (S1). Shared by create and update so both
+ * validate the same way. `deposit_amount` is required whenever the policy is set to
+ * something other than `none`; on update the service also checks the stored policy.
+ */
+export class StationDepositRulesDto {
+  /** none = no deposit, optional = can be asked, required = needed to book or open. */
+  @IsOptional()
+  @IsIn(['none', 'optional', 'required'])
+  deposit_policy?: 'none' | 'optional' | 'required';
+
+  /** Minimum deposit; required when the policy is not `none`. */
+  @ValidateIf((o: StationDepositRulesDto) => (o.deposit_policy !== undefined && o.deposit_policy !== 'none') || (o.deposit_amount !== undefined && o.deposit_amount !== null))
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(DEPOSIT_AMOUNT_MAX)
+  deposit_amount?: number | null;
+
+  /** What happens when the consumption passes the deposit. */
+  @IsOptional()
+  @IsIn(['recharge', 'overflow'])
+  deposit_exhausted_policy?: 'recharge' | 'overflow';
+
+  /** What happens with the leftover. */
+  @IsOptional()
+  @IsIn(['refund_or_credit', 'minimum_spend'])
+  leftover_policy?: 'refund_or_credit' | 'minimum_spend';
+
+  /** fixed = start and end; free = start only. */
+  @IsOptional()
+  @IsIn(['fixed', 'free'])
+  booking_duration_mode?: 'fixed' | 'free';
+
+  /** Minutes an unpaid hold lasts (D11). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(5)
+  @Max(1440)
+  hold_minutes?: number;
+
+  /** Block taken by an open-ended booking when the station has no earlier close (D9). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(30)
+  @Max(2880)
+  open_end_block_minutes?: number;
+
+  /** Hours before the start up to which a cancellation returns the deposit (null = admin decides). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  cancel_refund_hours?: number | null;
+
+  /** Tax category of the "Gastos de reserva" line (null = no tax). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  reservation_fee_tax_category_id?: number | null;
+}
+
+export class CreateServiceStationDto extends StationDepositRulesDto {
   @IsString()
   @MinLength(1)
   @MaxLength(120)
@@ -125,7 +194,7 @@ export class CreateServiceStationDto {
   intake_template_id?: number | null;
 }
 
-export class UpdateServiceStationDto {
+export class UpdateServiceStationDto extends StationDepositRulesDto {
   @IsOptional()
   @IsString()
   @MinLength(1)

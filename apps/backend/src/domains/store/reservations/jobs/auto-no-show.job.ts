@@ -120,6 +120,8 @@ export class AutoNoShowJob {
         status: {
           in: [booking_status_enum.pending, booking_status_enum.confirmed],
         },
+        // A booking already waiting for a deposit decision is not picked up again.
+        deposit_decision_due_at: null,
         // Solo fechas pasadas — `date < cutoff_date` (sin time para
         // evitar perder bookings del día actual que ya vencieron).
         date: {
@@ -157,8 +159,9 @@ export class AutoNoShowJob {
         // operador). Para un job de background que puede archivar
         // decenas de bookings por tick, emitir N notificaciones sería
         // peor que el problema de stats que estamos arreglando.
-        await this.reservationsService.archiveToNoShow(b.id);
-        archived += 1;
+        const outcome = await this.reservationsService.archiveToNoShow(b.id);
+        // A booking with a deposit balance waits for the administrator (S17): not archived.
+        if (outcome !== 'deferred') archived += 1;
       } catch (err: any) {
         // Si la transición falla (p.ej. booking ya no está pending), lo
         // logueamos pero seguimos con el resto.

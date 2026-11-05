@@ -815,3 +815,351 @@ describe('ReservationsService.getCalendar — overnight bookings (S21 / A14)', (
     expect(Object.keys(grouped)).toEqual(['2026-03-07']);
   });
 });
+
+/**
+ * Station deposits (S3, S15, S17, A1, A12). The deposits collaborator is a hand-made
+ * double: its own rules live in reservation-deposits.service.spec.ts. Every touched
+ * method also proves that a booking without a deposit behaves as before.
+ */
+describe('ReservationsService — station deposits', () => {
+  const stationProduct = {
+    id: 100,
+    name: 'Cava 3',
+    requires_booking: true,
+    requires_station: true,
+    booking_mode: 'free_booking',
+    base_price: '400000',
+    is_on_sale: false,
+    sale_price: null,
+    track_inventory: false,
+    usage_nature: 'sale',
+    is_ingredient: false,
+    is_sellable: true,
+    service_duration_minutes: 60,
+  };
+
+  function build(options: { product?: any; deposits?: any; booking?: any } = {}) {
+    const row: any = {
+      id: 77,
+      store_id: 1,
+      customer_id: 1,
+      product_id: 100,
+      status: 'pending',
+      order_id: 555,
+      booking_number: 'BKG-1',
+      deposit_decision_due_at: null,
+      customer: { first_name: 'Lola', last_name: 'Pérez' },
+      product: { name: 'Cava 3' },
+      ...options.booking,
+    };
+    const prisma: any = {
+      products: { findFirst: jest.fn().mockResolvedValue(options.product ?? stationProduct) },
+      bookings: {
+        findFirst: jest.fn(({ where }: any) => Promise.resolve(where?.booking_number ? null : { ...row })),
+        create: jest.fn(({ data }: any) => Promise.resolve({ ...row, ...data })),
+        update: jest.fn(({ data }: any) => {
+          Object.assign(row, data);
+          return Promise.resolve({ ...row });
+        }),
+      },
+      service_allocations: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      tables: { updateMany: jest.fn() },
+      $transaction: jest.fn(async (cb: any) => cb(prisma)),
+    };
+    const coordinator: any = {
+      allocateBooking: jest.fn().mockResolvedValue({ id: 1, station_id: 5 }),
+      releaseBooking: jest.fn().mockResolvedValue(undefined),
+    };
+    const deposits: any = {
+      startInTx: jest.fn().mockResolvedValue(null),
+      startHoldInTx: jest.fn().mockResolvedValue(null),
+      announceDeposit: jest.fn(),
+      summary: jest.fn().mockResolvedValue(null),
+      paymentPath: jest.fn((token: string) => `/pagar/${token}`),
+      cancelWithDeposit: jest.fn().mockResolvedValue(null),
+      deferNoShowIfDeposit: jest.fn().mockResolvedValue(false),
+      decide: jest.fn().mockResolvedValue({ action: 'retain' }),
+      ...options.deposits,
+    };
+    const emits: any[] = [];
+    const ordersService: any = { create: jest.fn().mockResolvedValue({ id: 555 }) };
+    const service = new ReservationsService(
+      prisma,
+      { isSlotAvailable: jest.fn().mockResolvedValue(true), validateNoOverlapForCustomer: jest.fn() } as any,
+      ordersService,
+      { signUrl: jest.fn((u: string) => Promise.resolve(u)) } as any,
+      { emit: jest.fn((name: string, payload: any) => emits.push({ name, payload })) } as any,
+      { resolvePrice: jest.fn(() => ({ unitPrice: 400000 })) } as any,
+      {} as any,
+      {} as any,
+      { record: jest.fn() } as any,
+      coordinator,
+      deposits,
+    );
+    jest.spyOn(service as any, 'generateBookingNumber').mockResolvedValue('BKG-1');
+    return { service, prisma, coordinator, deposits, emits, row, ordersService };
+  }
+
+  const createDto: any = {
+    customer_id: 1,
+    product_id: 100,
+    station_id: 5,
+    date: '2099-09-01',
+    start_time: '10:00',
+    end_time: '11:00',
+    channel: 'pos',
+  };
+  const deposit = { amount: 400000, mode: 'link', request_id: 'req-1' };
+
+  it('create: a station booking with a deposit hands the allocated station to the deposits service and answers payment_path', async () => {
+    const started = { mode: 'link', publicToken: 'tok', event: null };
+    const { service, deposits } = build({
+      deposits: {
+        startInTx: jest.fn().mockResolvedValue(started),
+        summary: jest.fn().mockResolvedValue({ required: 400000, received: 0, balance: 0 }),
+      },
+    });
+    const result: any = await service.create({ ...createDto, deposit });
+    expect(deposits.startInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ stationId: 5, bookingId: 77, customerId: 1, deposit }),
+    );
+    expect(deposits.announceDeposit).toHaveBeenCalledWith(started);
+    expect(result.payment_path).toBe('/pagar/tok');
+    expect(result.deposit).toEqual({ required: 400000, received: 0, balance: 0 });
+  });
+
+  it('create: a desk deposit answers no payment_path', async () => {
+    const started = { mode: 'desk', publicToken: null, event: { deposit_id: 1 } };
+    const { service } = build({ deposits: { startInTx: jest.fn().mockResolvedValue(started) } });
+    const result: any = await service.create({ ...createDto, deposit: { ...deposit, mode: 'desk' } });
+    expect(result.payment_path).toBeNull();
+  });
+
+  it('create: a station booking without deposit behaves as before (no payment_path, no deposit block)', async () => {
+    const { service, deposits } = build();
+    const result: any = await service.create(createDto);
+    expect(result.id).toBe(77);
+    expect(result.payment_path).toBeUndefined();
+    expect(result.deposit).toBeUndefined();
+    expect(deposits.startInTx).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ deposit: undefined }));
+  });
+
+  it('create: a deposit on a service without station is rejected with STATION_BOOKING_002', async () => {
+    const { service, prisma } = build({ product: { ...stationProduct, requires_station: false } });
+    await expect(service.create({ ...createDto, deposit })).rejects.toMatchObject({
+      response: expect.objectContaining({ error_code: 'STATION_BOOKING_002' }),
+    });
+    expect(prisma.bookings.create).not.toHaveBeenCalled();
+  });
+
+  it('hold: a station that requires a deposit holds payment_pending and answers payment_path and the new expiry', async () => {
+    const expiresAt = new Date(Date.now() + 30 * 60_000);
+    const { service, deposits } = build({
+      deposits: { startHoldInTx: jest.fn().mockResolvedValue({ publicToken: 'hold-tok', expiresAt, amount: 400000 }) },
+    });
+    const result: any = await service.hold({
+      customer_id: 1,
+      product_id: 100,
+      date: '2099-09-01',
+      start_time: '10:00',
+      end_time: '11:00',
+      station_id: 5,
+    });
+    expect(deposits.startHoldInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ stationId: 5, customerId: 1 }),
+    );
+    expect(result.payment_path).toBe('/pagar/hold-tok');
+    expect(result.expires_at).toBe(expiresAt);
+  });
+
+  it('hold: a station without a mandatory deposit keeps the plain 15 minute hold', async () => {
+    const { service } = build();
+    const result: any = await service.hold({
+      customer_id: 1,
+      product_id: 100,
+      date: '2099-09-01',
+      start_time: '10:00',
+      end_time: '11:00',
+      station_id: 5,
+    });
+    expect(result.payment_path).toBeUndefined();
+    expect(result.deposit).toBeUndefined();
+  });
+
+  it('confirmHold: a hold waiting for its deposit is refused (the payment confirms it)', async () => {
+    const { service, prisma } = build({ booking: { expires_at: new Date(Date.now() + 600_000) } });
+    prisma.service_allocations.findFirst.mockResolvedValue({ id: 3 });
+    await expect(service.confirmHold(77)).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error_code: 'STATION_011',
+        message: expect.stringContaining('espera el pago del anticipo'),
+      }),
+    });
+    expect(prisma.service_allocations.update).not.toHaveBeenCalled();
+  });
+
+  it('confirmHold: a plain held allocation is still confirmed as before', async () => {
+    const { service, prisma } = build({ booking: { expires_at: new Date(Date.now() + 600_000) } });
+    prisma.service_allocations.findFirst
+      .mockResolvedValueOnce(null) // no payment_pending waiting
+      .mockResolvedValueOnce({ id: 3 }); // the held allocation
+    await service.confirmHold(77);
+    expect(prisma.service_allocations.update).toHaveBeenCalledWith({
+      where: { id: 3 },
+      data: expect.objectContaining({ state: 'confirmed', expires_at: null }),
+    });
+  });
+
+  it('cancel: without a deposit the booking is cancelled by the state machine as always', async () => {
+    const { service, prisma, deposits, emits } = build();
+    const result = await service.cancel(77);
+    expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, {});
+    expect(result.status).toBe('cancelled');
+    expect(prisma.bookings.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'cancelled' }) }),
+    );
+    expect(emits.map((e) => e.name)).toContain('booking.cancelled');
+  });
+
+  it('cancel: with a deposit already settled by the deposits service no second transition runs', async () => {
+    const { service, prisma, deposits, emits, row } = build();
+    deposits.cancelWithDeposit.mockImplementation(async () => {
+      row.status = 'cancelled';
+      return { closed: true };
+    });
+    const result = await service.cancel(77, { leftover_action: 'refund' });
+    expect(deposits.cancelWithDeposit).toHaveBeenCalledWith(77, { leftover_action: 'refund' });
+    expect(result.status).toBe('cancelled');
+    expect(prisma.bookings.update).not.toHaveBeenCalled();
+    expect(emits.map((e) => e.name)).toContain('booking.cancelled');
+  });
+
+  it('noShow: a booking with a deposit balance stays as is and no event goes out', async () => {
+    const { service, prisma, deposits, emits } = build({ booking: { status: 'confirmed' } });
+    deposits.deferNoShowIfDeposit.mockResolvedValue(true);
+    const result: any = await service.noShow(77);
+    expect(result.status).toBe('confirmed');
+    expect(prisma.bookings.update).not.toHaveBeenCalled();
+    expect(emits.find((e) => e.name === 'booking.no_show')).toBeUndefined();
+  });
+
+  it('noShow: without a deposit it marks no_show and emits the event as before', async () => {
+    const { service, emits } = build({ booking: { status: 'confirmed' } });
+    const result: any = await service.noShow(77);
+    expect(result.status).toBe('no_show');
+    expect(emits.map((e) => e.name)).toContain('booking.no_show');
+  });
+
+  it('archiveToNoShow: a deposit balance defers it, otherwise it archives', async () => {
+    const deferred = build({ booking: { status: 'confirmed' } });
+    deferred.deposits.deferNoShowIfDeposit.mockResolvedValue(true);
+    await expect(deferred.service.archiveToNoShow(77)).resolves.toBe('deferred');
+    expect(deferred.prisma.bookings.update).not.toHaveBeenCalled();
+
+    const plain = build({ booking: { status: 'confirmed' } });
+    await expect(plain.service.archiveToNoShow(77)).resolves.toBe('archived');
+    expect(plain.row.status).toBe('no_show');
+  });
+
+  it('confirm: a pending booking promotes its payment_pending allocation, an unexpired hold only', async () => {
+    const { service, prisma } = build();
+    prisma.service_allocations.findFirst.mockResolvedValue(null);
+    await service.confirm(77);
+    expect(prisma.service_allocations.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ state: 'payment_pending', expires_at: { gt: expect.any(Date) } }),
+      data: expect.objectContaining({ state: 'confirmed', expires_at: null }),
+    });
+  });
+
+  it('confirm: without the deposits service nothing is promoted (as before)', async () => {
+    const { service, prisma, coordinator } = build();
+    const bare = new ReservationsService(
+      prisma,
+      {} as any,
+      {} as any,
+      { signUrl: jest.fn((u: string) => Promise.resolve(u)) } as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { record: jest.fn() } as any,
+      coordinator,
+    );
+    await bare.confirm(77);
+    expect(prisma.service_allocations.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('findOneDetail: adds the deposit block with the decision deadline', async () => {
+    const due = new Date('2099-01-01T00:00:00Z');
+    const block = { required: 400000, received: 400000, balance: 400000 };
+    const { service, deposits } = build({
+      booking: { deposit_decision_due_at: due },
+      deposits: { summary: jest.fn().mockResolvedValue(block) },
+    });
+    const detail: any = await service.findOneDetail(77);
+    expect(deposits.summary).toHaveBeenCalledWith(77, due);
+    expect(detail.deposit).toBe(block);
+  });
+
+  it('decideDeposit: retain, refund and credit go to the deposits service and answer the detail', async () => {
+    const { service, deposits } = build({ booking: { status: 'confirmed' } });
+    const dto = { action: 'retain' as const, request_id: 'd1' };
+    const detail: any = await service.decideDeposit(77, dto);
+    expect(deposits.decide).toHaveBeenCalledWith(77, dto);
+    expect(detail.id).toBe(77);
+  });
+
+  it('decideDeposit reschedule: asks for the new date and times', async () => {
+    const { service } = build({ booking: { status: 'confirmed' } });
+    await expect(service.decideDeposit(77, { action: 'reschedule', request_id: 'd2' })).rejects.toMatchObject({
+      response: expect.objectContaining({ error_code: 'STATION_BOOKING_009' }),
+    });
+  });
+
+  it('decideDeposit reschedule: moves the booking keeping the deposit and clears the decision deadline', async () => {
+    const { service, deposits, prisma } = build({
+      booking: { status: 'confirmed', deposit_decision_due_at: new Date() },
+      deposits: { summary: jest.fn().mockResolvedValue({ balance: 400000 }) },
+    });
+    const move = jest.spyOn(service as any, 'rescheduleDirectPath').mockResolvedValue({});
+    await service.decideDeposit(77, {
+      action: 'reschedule',
+      request_id: 'd3',
+      new_date: '2099-09-08',
+      new_start_time: '10:00',
+      new_end_time: '11:00',
+    });
+    expect(move).toHaveBeenCalledWith(77, expect.objectContaining({ id: 77 }), {
+      date: '2099-09-08',
+      start_time: '10:00',
+      end_time: '11:00',
+    });
+    expect(deposits.decide).not.toHaveBeenCalled();
+    expect(prisma.bookings.update).toHaveBeenCalledWith({
+      where: { id: 77 },
+      data: expect.objectContaining({ deposit_decision_due_at: null }),
+    });
+  });
+
+  it('decideDeposit reschedule: without a deposit balance there is nothing to decide', async () => {
+    const { service } = build({
+      booking: { status: 'confirmed' },
+      deposits: { summary: jest.fn().mockResolvedValue(null) },
+    });
+    await expect(
+      service.decideDeposit(77, {
+        action: 'reschedule',
+        request_id: 'd4',
+        new_date: '2099-09-08',
+        new_start_time: '10:00',
+        new_end_time: '11:00',
+      }),
+    ).rejects.toMatchObject({ response: expect.objectContaining({ error_code: 'STATION_BOOKING_005' }) });
+  });
+});

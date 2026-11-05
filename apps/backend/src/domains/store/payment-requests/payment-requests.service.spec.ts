@@ -190,6 +190,27 @@ describe('PaymentRequestsService', () => {
     });
   });
 
+  describe('rotateTokenInTx', () => {
+    it('writes only the new hash while the request is pending and returns the new token', async () => {
+      tx.payment_requests.updateMany.mockResolvedValue({ count: 1 });
+      const { publicToken } = await service.rotateTokenInTx(tx, 5);
+
+      expect(publicToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      const call = tx.payment_requests.updateMany.mock.calls[0][0];
+      expect(call.where).toEqual({ id: 5, status: 'pending' });
+      expect(call.data.public_token_hash).toBe(hashPaymentRequestToken(publicToken));
+      expect(Object.keys(call.data).sort()).toEqual(['public_token_hash', 'updated_at']);
+      expect(JSON.stringify(call)).not.toContain(publicToken);
+    });
+
+    it('refuses a request that is not pending (paid, expired, awaiting confirmation)', async () => {
+      tx.payment_requests.updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.rotateTokenInTx(tx, 5)).rejects.toMatchObject({
+        errorCode: 'PAYMENT_REQUEST_INVALID_STATE',
+      });
+    });
+  });
+
   describe('admin decisions', () => {
     it('confirm only works on a request awaiting confirmation', async () => {
       prisma.payment_requests.findFirst.mockResolvedValue({ id: 5, status: 'pending' });

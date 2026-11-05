@@ -303,3 +303,85 @@ describe('ServiceStationsService.setSchedules — horarios nocturnos (S21)', () 
     ]);
   });
 });
+
+describe('ServiceStationsService — reglas de anticipo (S1)', () => {
+  const context: RequestContext = { store_id: 10, is_super_admin: false, is_owner: false };
+  let service: ServiceStationsService;
+  let prisma: Record<string, any>;
+  let shippingTax: { assertCategoryAssignable: jest.Mock };
+  let current: Record<string, any>;
+
+  beforeEach(() => {
+    current = { id: 2, store_id: 10, name: 'Cava 3', deposit_policy: 'none', deposit_amount: null };
+    prisma = {
+      service_stations: {
+        create: jest.fn().mockResolvedValue({ id: 2 }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findFirst: jest.fn(async () => ({ ...current })),
+      },
+      data_collection_templates: { findFirst: jest.fn().mockResolvedValue({ id: 5, station_type: 'cava' }) },
+      service_station_services: { findMany: jest.fn().mockResolvedValue([]) },
+      service_station_providers: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    shippingTax = { assertCategoryAssignable: jest.fn().mockResolvedValue(undefined) };
+    service = new ServiceStationsService(prisma as unknown as StorePrismaService, shippingTax as any);
+  });
+
+  const run = <T>(fn: () => Promise<T>) => RequestContextService.runIsolated(context, fn);
+
+  it('create persiste las reglas de anticipo y valida la categoría del cargo de reserva', async () => {
+    await run(() => service.create({
+      name: 'Cava 3', intake_template_id: 5,
+      deposit_policy: 'required', deposit_amount: 400000, deposit_exhausted_policy: 'recharge',
+      leftover_policy: 'minimum_spend', booking_duration_mode: 'free', hold_minutes: 45,
+      open_end_block_minutes: 240, cancel_refund_hours: 24, reservation_fee_tax_category_id: 3,
+    } as any));
+    expect(prisma.service_stations.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        deposit_policy: 'required', deposit_amount: 400000, deposit_exhausted_policy: 'recharge',
+        leftover_policy: 'minimum_spend', booking_duration_mode: 'free', hold_minutes: 45,
+        open_end_block_minutes: 240, cancel_refund_hours: 24, reservation_fee_tax_category_id: 3,
+      }),
+    });
+    expect(shippingTax.assertCategoryAssignable).toHaveBeenCalledWith(3, 'station_rental');
+  });
+
+  it('create sin reglas conserva los valores de siempre (sin columnas nuevas en el insert)', async () => {
+    await run(() => service.create({ name: 'Bahía 1', intake_template_id: 5 } as any));
+    const data = prisma.service_stations.create.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty('deposit_policy');
+    expect(data).not.toHaveProperty('hold_minutes');
+    expect(data.rental_tax_is_inclusive).toBe(true);
+  });
+
+  it('create con anticipo "ninguno" no guarda monto', async () => {
+    await run(() => service.create({ name: 'Cava 3', intake_template_id: 5, deposit_policy: 'none', deposit_amount: 1000 } as any));
+    expect(prisma.service_stations.create.mock.calls[0][0].data.deposit_amount).toBeNull();
+  });
+
+  it('update rechaza pasar a anticipo obligatorio sin monto en la estación ni en el pedido', async () => {
+    await expect(run(() => service.update(2, { deposit_policy: 'required' } as any))).rejects.toThrow('Indica el monto del anticipo');
+    expect(prisma.service_stations.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('update acepta una política con el monto que la estación ya tenía', async () => {
+    current.deposit_amount = 200000;
+    await run(() => service.update(2, { deposit_policy: 'optional' } as any));
+    expect(prisma.service_stations.updateMany.mock.calls[0][0].data).toEqual(expect.objectContaining({ deposit_policy: 'optional' }));
+  });
+
+  it('update a "ninguno" borra el monto y no toca lo demás', async () => {
+    current.deposit_policy = 'required';
+    current.deposit_amount = 400000;
+    await run(() => service.update(2, { deposit_policy: 'none' } as any));
+    const data = prisma.service_stations.updateMany.mock.calls[0][0].data;
+    expect(data).toEqual(expect.objectContaining({ deposit_policy: 'none', deposit_amount: null }));
+    expect(data).not.toHaveProperty('hold_minutes');
+  });
+
+  it('update solo de nombre no valida categorías nuevas ni anticipo', async () => {
+    await run(() => service.update(2, { name: 'Cava 4' } as any));
+    expect(shippingTax.assertCategoryAssignable).toHaveBeenCalledWith(undefined, 'station_rental');
+    expect(prisma.service_stations.updateMany.mock.calls[0][0].data).not.toHaveProperty('deposit_policy');
+  });
+});

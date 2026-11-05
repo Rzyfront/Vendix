@@ -6094,6 +6094,17 @@ export const ErrorCodes = {
   PAYMENT_REQUEST_METHOD_INVALID: { code: 'PAYMENT_REQUEST_METHOD_INVALID', httpStatus: 400, devMessage: 'Elige un medio de transferencia disponible de la tienda.' },
   PAYMENT_REQUEST_WOMPI_UNAVAILABLE: { code: 'PAYMENT_REQUEST_WOMPI_UNAVAILABLE', httpStatus: 400, devMessage: 'No pudimos iniciar el pago con Wompi. Intenta con otro medio.' },
   PAYMENT_REQUEST_REJECT_REASON: { code: 'PAYMENT_REQUEST_REJECT_REASON', httpStatus: 400, devMessage: 'Indica el motivo del rechazo.' },
+  // Station bookings with a deposit (S3 / S15 / S17)
+  STATION_BOOKING_001: { code: 'STATION_BOOKING_001', httpStatus: 400, devMessage: 'Esta estación exige un anticipo para reservar.' },
+  STATION_BOOKING_002: { code: 'STATION_BOOKING_002', httpStatus: 400, devMessage: 'Esta estación no recibe anticipo.' },
+  STATION_BOOKING_003: { code: 'STATION_BOOKING_003', httpStatus: 400, devMessage: 'El anticipo es menor al mínimo de la estación.' },
+  STATION_BOOKING_004: { code: 'STATION_BOOKING_004', httpStatus: 409, devMessage: 'La cancelación está fuera del plazo de devolución: decide qué hacer con el anticipo.' },
+  STATION_BOOKING_005: { code: 'STATION_BOOKING_005', httpStatus: 409, devMessage: 'La reserva no tiene un anticipo por decidir.' },
+  STATION_BOOKING_006: { code: 'STATION_BOOKING_006', httpStatus: 409, devMessage: 'La reserva no admite esa decisión en su estado actual.' },
+  STATION_BOOKING_007: { code: 'STATION_BOOKING_007', httpStatus: 409, devMessage: 'La reserva no tiene un enlace de pago pendiente.' },
+  STATION_BOOKING_008: { code: 'STATION_BOOKING_008', httpStatus: 400, devMessage: 'Para reservar con anticipo identifica al cliente.' },
+  STATION_BOOKING_009: { code: 'STATION_BOOKING_009', httpStatus: 400, devMessage: 'Faltan datos para la decisión del anticipo.' },
+  STATION_BOOKING_010: { code: 'STATION_BOOKING_010', httpStatus: 409, devMessage: 'Esta estación cobra anticipo: reserva desde el flujo de reservas, no desde el carrito.' },
   LODGING_BOOKING_FIND_001: {
     code: 'LODGING_BOOKING_FIND_001',
     httpStatus: 404,

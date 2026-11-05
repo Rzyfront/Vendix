@@ -101,6 +101,26 @@ export class PaymentRequestsService {
   }
 
   /**
+   * Issues a new public token for a still-pending request (only the hash is
+   * stored, so the admin cannot read the old link back). The previous token
+   * stops working. Refuses any other status.
+   */
+  async rotateTokenInTx(tx: Tx, id: number): Promise<{ publicToken: string }> {
+    const publicToken = randomBytes(32).toString('base64url');
+    const rotated = await tx.payment_requests.updateMany({
+      where: { id, status: 'pending' },
+      data: { public_token_hash: hashPaymentRequestToken(publicToken), updated_at: new Date() },
+    });
+    if (rotated.count !== 1) {
+      throw new VendixHttpException(
+        ErrorCodes.PAYMENT_REQUEST_INVALID_STATE,
+        'Solo se puede generar un nuevo enlace mientras el pago está pendiente.',
+      );
+    }
+    return { publicToken };
+  }
+
+  /**
    * Claims the request as paid inside the caller's transaction. Returns the
    * event to emit after commit (`emitPaid`), or `null` when it was not open
    * (already paid, cancelled, expired): the second caller is a no-op.

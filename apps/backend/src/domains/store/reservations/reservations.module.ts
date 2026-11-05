@@ -26,6 +26,11 @@ import { ProductsModule } from '../products/products.module';
 import { TablesModule } from '../tables/tables.module';
 import { OrderHistoryModule } from '../orders/order-history/order-history.module';
 import { ServiceAllocationModule } from './service-allocation.module';
+import { ServiceDepositsModule } from '../service-deposits/service-deposits.module';
+import { PaymentRequestsModule } from '../payment-requests/payment-requests.module';
+import { ReservationDepositsService } from './reservation-deposits.service';
+import { ServiceDepositPaidListener } from './listeners/service-deposit-paid.listener';
+import { ServiceDepositHoldExpiryJob } from './jobs/service-deposit-hold-expiry.job';
 
 @Module({
   imports: [
@@ -38,6 +43,8 @@ import { ServiceAllocationModule } from './service-allocation.module';
     AppointmentQueueModule,
     OrderHistoryModule,
     ServiceAllocationModule,
+    ServiceDepositsModule,
+    PaymentRequestsModule,
   ],
   controllers: [
     ProvidersController,
@@ -55,9 +62,13 @@ import { ServiceAllocationModule } from './service-allocation.module';
     ProviderScheduleService,
     ProviderAvailabilityService,
     AutoNoShowJob,
+    ReservationDepositsService,
+    ServiceDepositPaidListener,
+    ServiceDepositHoldExpiryJob,
   ],
   exports: [
     ReservationsService,
+    ReservationDepositsService,
     AvailabilityService,
     BookingConfirmationService,
     BusinessHoursService,
