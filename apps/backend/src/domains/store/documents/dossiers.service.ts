@@ -164,7 +164,32 @@ export class DossiersService {
       }),
       this.prisma.dossiers.count({ where }),
     ]);
-    return { data, total, page, limit };
+    // Active items per dossier in one query, so the list shows the count
+    // without one detail request per row.
+    const ids = data.map((d: { id: number }) => d.id);
+    const items: Array<{ dossier_id: number }> = ids.length
+      ? await this.prisma.dossier_items.findMany({
+          where: {
+            store_id: c.store_id,
+            dossier_id: { in: ids },
+            status: { in: ['received', 'validated', 'rejected'] },
+          },
+          select: { dossier_id: true },
+        })
+      : [];
+    const counts = new Map<number, number>();
+    for (const item of items) {
+      counts.set(item.dossier_id, (counts.get(item.dossier_id) ?? 0) + 1);
+    }
+    return {
+      data: data.map((d: { id: number }) => ({
+        ...d,
+        items_count: counts.get(d.id) ?? 0,
+      })),
+      total,
+      page,
+      limit,
+    };
   }
 
   /**

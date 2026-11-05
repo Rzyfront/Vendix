@@ -9,6 +9,6 @@
  *   - apps/frontend/src/app/shared/workflows/contract/
  * Edit the canonical copy and `cp` it to the other two.
  */
-export * from './workflow-contract';
-export * from './workflow-validator';
-export * from './workflow-runtime';
+export * from "./workflow-contract";
+export * from "./workflow-validator";
+export * from "./workflow-runtime";

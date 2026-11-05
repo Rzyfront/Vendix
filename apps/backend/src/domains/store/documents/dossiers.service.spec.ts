@@ -178,4 +178,21 @@ describe.each([
     expect((await kit.dossiers.list({ search: 'exp-000001' })).data).toHaveLength(1);
     expect((await kit.dossiers.list({ search: 'Solicitud 2' })).data).toHaveLength(1);
   });
+
+  it('list: items_count cuenta solo los ítems activos (no los reemplazados)', async () => {
+    const d = await create(1);
+    const empty = await create(2);
+    kit.as({ store_id: 1 });
+    const base = { dossier_id: d.id, stage_key: 'intake', requirement_key: 'rut', actor };
+    await kit.dossiers.addFileItem(undefined, { ...base, file_id: file().id });
+    await kit.dossiers.addFileItem(undefined, { ...base, file_id: file().id });
+    await kit.dossiers.addFileItem(undefined, {
+      ...base,
+      requirement_key: 'cedula',
+      file_id: file().id,
+    });
+    const rows = (await kit.dossiers.list()).data as Array<{ id: number; items_count: number }>;
+    expect(rows.find((r) => r.id === d.id)?.items_count).toBe(2);
+    expect(rows.find((r) => r.id === empty.id)?.items_count).toBe(0);
+  });
 });
