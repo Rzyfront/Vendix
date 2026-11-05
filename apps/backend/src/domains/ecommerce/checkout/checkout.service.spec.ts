@@ -1237,9 +1237,11 @@ describe('CheckoutService - promotions and coupons', () => {
 
         await service.checkout({ ...guestDto } as any);
 
+        // The phone is kept for the new customer record, but never used to match (D1).
         expect(resolve).toHaveBeenCalledWith(
           1,
-          expect.objectContaining({ email: 'ana@example.com', phone: null }),
+          expect.objectContaining({ email: 'ana@example.com', phone: '3001234567' }),
+          { match_by_phone: false },
         );
       });
     });
@@ -2277,6 +2279,7 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(resolve).toHaveBeenCalledWith(
         1,
         expect.objectContaining({ email: 'juan@example.com', phone: '3001234567' }),
+        undefined,
       );
     });
 

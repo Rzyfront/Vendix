@@ -1725,10 +1725,12 @@ export class CheckoutService {
     if (is_guest && guest_customer && store_id_ctx) {
       // With bookings the guest is matched by email only (D1): the phone
       // would attach the booking to (and rewrite) someone else's account.
+      // It is still stored on a newly created customer.
       const resolved =
         await this.customersService.resolveGuestCustomerForCheckout(
           store_id_ctx,
-          dto.bookings?.length ? { ...guest_customer, phone: null } : guest_customer,
+          guest_customer,
+          dto.bookings?.length ? { match_by_phone: false } : undefined,
         );
       resolved_customer_id = resolved?.customer_id ?? null;
     }

@@ -25,7 +25,7 @@ import {
   REFUND_CASH_MOVEMENT_KEY,
   REFUND_CASH_MOVEMENT_SOURCE,
   ORDER_CANCELLED_MOVEMENT_REFERENCE,
-  SERVICE_DEPOSIT_MOVEMENT_SOURCE,
+  isServiceDepositSale,
 } from '../movements/movements.service';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
@@ -117,7 +117,10 @@ function classifyMovement(
 ): { kind: MovementKind; method: string } | null {
   switch (m.type) {
     case 'sale':
-      return { kind: 'sale', method: m.payment_method || 'unknown' };
+      // A booking deposit enters its method's row without counting as a sale (S14).
+      return isServiceDepositSale(m)
+        ? { kind: 'cash_in', method: m.payment_method || 'unknown' }
+        : { kind: 'sale', method: m.payment_method || 'unknown' };
     case 'cash_in':
       return { kind: 'cash_in', method: CASH_PAYMENT_METHOD };
     case 'refund': {
@@ -1144,7 +1147,9 @@ export class SessionsService {
     // --- Órdenes de la sesión ---
     // Un pago dividido entre sesiones toca la misma orden en dos cajas: la
     // orden se atribuye a la sesión de su PRIMER movimiento `sale`.
-    const sale_movements = movements.filter((m) => m.type === 'sale');
+    const sale_movements = movements.filter(
+      (m) => m.type === 'sale' && !isServiceDepositSale(m),
+    );
     const candidate_ids: number[] = [
       ...new Set<number>(
         sale_movements.map((m) => m.order_id).filter((v): v is number => !!v),
@@ -1806,7 +1811,7 @@ export class SessionsService {
       switch (m.type) {
         case 'sale': {
           // A non-cash booking deposit sits in the drawer for traceability (S14) but is not a sale.
-          if (m.source_type === SERVICE_DEPOSIT_MOVEMENT_SOURCE) break;
+          if (isServiceDepositSale(m)) break;
           const method = m.payment_method || 'unknown';
           const bucket = by_method.get(method) ?? { count: 0, total: new Prisma.Decimal(0) };
           bucket.count++;
@@ -2065,7 +2070,7 @@ export class SessionsService {
   /** Entradas manuales (`cash_in`) de la sesión, por fecha ascendente. */
   private buildInflows(session: any, movements: any[]): CashInflow[] {
     return movements
-      .filter((m) => m.type === 'cash_in')
+      .filter((m) => m.type === 'cash_in' || isServiceDepositSale(m))
       .map(
         (m) =>
           ({
@@ -2077,7 +2082,10 @@ export class SessionsService {
             reference: movementReference(m),
             notes: m.notes?.trim() || null,
             user_name: movementUserName(m),
-            payment_method: CASH_PAYMENT_METHOD,
+            payment_method:
+              m.type === 'cash_in'
+                ? CASH_PAYMENT_METHOD
+                : m.payment_method || 'unknown',
           }) as CashInflow,
       )
       .sort((a, b) => a.at.localeCompare(b.at) || a.id - b.id);

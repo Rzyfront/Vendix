@@ -1293,6 +1293,23 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(w).toMatchObject({ kind: 'withdrawal', reference: 'Taxi', notes: 'Mensajero', reason: ' Mensajero ' });
     });
 
+    it('anticipo de reserva con tarjeta: entra a la fila de su método como ingreso, no como venta (S14)', async () => {
+      wire(base, [ord(1, 100000), ord(2, 60000, 'cancelled'), ord(3, 40000, 'refunded')]);
+      prismaMock.cash_register_movements.findMany.mockResolvedValue([
+        ...movs,
+        { id: 30, type: 'sale', amount: 400000, payment_method: 'card', source_type: 'service_deposit', order_id: null, reference: 'Anticipo reserva #77', notes: 'Anticipo consumible', created_at: T(21) },
+      ]);
+      const report = await service.getCloseReport(SESSION_ID);
+      expect(report.sales_summary).toMatchObject({ payments_count: 3, grand_total: 200000 });
+      expect(report.sales.payments_count).toBe(3);
+      const card = report.consolidated.rows.find((r) => r.method === 'card')!;
+      expect(card).toMatchObject({ sales: 60000, cash_in: 400000, entered: 460000, exited: 60000, expected: 400000 });
+      expect(report.consolidated.rows[0]).toMatchObject({ method: 'cash', sales: 100000, cash_in: 2000, expected: 187000 });
+      expect(report.integrity.notes.some((n) => n.includes('consolidado'))).toBe(false);
+      expect(report.inflows.find((i) => i.id === 30)).toMatchObject({ amount: 400000, payment_method: 'card', notes: 'Anticipo consumible' });
+      expect(report.inflows.find((i) => i.id === 8)).toMatchObject({ payment_method: 'cash' });
+    });
+
     it('cash_out manual con referencia "Cancelación orden…" es retiro visible', async () => {
       wire(base, [ord(1, 100000)]);
       prismaMock.cash_register_movements.findMany.mockResolvedValue([
