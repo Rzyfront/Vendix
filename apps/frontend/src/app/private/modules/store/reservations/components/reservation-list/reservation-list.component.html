@@ -99,7 +99,7 @@
       <app-badge variant="service" size="xsm">Consulta</app-badge>
     }
     @if (item.series_id) {
-      <app-badge variant="neutral" size="xsm">Serie · {{ (item.series_index ?? 0) + 1 }}</app-badge>
+      <app-badge variant="neutral" size="xsm">{{ seriesLabel(item) }}</app-badge>
     }
   </span>
 </ng-template>

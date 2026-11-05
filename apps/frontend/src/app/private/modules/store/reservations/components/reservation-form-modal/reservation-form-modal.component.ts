@@ -26,6 +26,7 @@ import { CalendarDayViewComponent, FreeSlot } from '../calendar/calendar-day-vie
 import { environment } from '../../../../../../../environments/environment';
 import { debounceTime, Subject, switchMap, of, forkJoin, finalize, map, catchError } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { bookingPaymentUrl } from '../../utils/booking-display.util';
 
 @Component({
   selector: 'app-reservation-form-modal',
@@ -639,7 +640,7 @@ export class ReservationFormModalComponent {
       .pipe(finalize(() => this.rotatingLink.set(false)), takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
-          this.paymentUrl.set(`${window.location.origin}${result.payment_path}`);
+          this.paymentUrl.set(bookingPaymentUrl(result));
           this.toastService.success('Enlace de pago generado');
         },
         error: (err) => this.toastService.error(extractApiErrorMessage(err)),
@@ -1260,7 +1261,7 @@ export class ReservationFormModalComponent {
         // A payment link has to be handed to the customer before the modal closes (S15).
         if (booking?.payment_path) {
           this.linkedBooking.set(booking);
-          this.paymentUrl.set(`${window.location.origin}${booking.payment_path}`);
+          this.paymentUrl.set(bookingPaymentUrl(booking));
           return;
         }
         this.toastService.success('Reserva creada exitosamente');

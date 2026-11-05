@@ -312,7 +312,7 @@ export class ReservationsService {
   }
 
   /** Fresh payment link of a booking whose deposit request is still pending (S15). */
-  rotateDepositLink(id: number): Observable<{ payment_path: string; payment_request_id: number }> {
+  rotateDepositLink(id: number): Observable<{ payment_path: string; payment_url: string | null; payment_request_id: number }> {
     return this.http
       .post<any>(`${this.apiUrl}/${id}/deposit-link`, {})
       .pipe(map((response) => response.data || response));

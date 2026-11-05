@@ -39,10 +39,14 @@ export interface Booking {
   /** Recurring series the booking belongs to (S19) and its position (0-based); absent for a single booking. */
   series_id?: number | null;
   series_index?: number | null;
+  /** Size of the series, for the "Serie i/n" badge. */
+  series?: { id: number; occurrences: number; frequency: 'daily' | 'weekly' | string } | null;
   /** Deposit block of the detail endpoint and of the create answer; null when the booking never had one (S15). */
   deposit?: BookingDeposit | null;
   /** Path of the payment page (`/pagar/:token`) returned when a `link` deposit was created. */
   payment_path?: string | null;
+  /** Absolute payment page on the store's public domain; null when the store has none. */
+  payment_url?: string | null;
 }
 
 /** `deposit` block of a booking (field names mirror `BookingDepositBlock` of the backend). */

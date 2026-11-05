@@ -16,6 +16,9 @@
       <div class="header-left">
         <span class="booking-number">#{{ b.booking_number }}</span>
         <span class="status-badge" [ngClass]="statusColor()">{{ statusLabel() }}</span>
+        @if (seriesLabel(b); as series) {
+          <span class="series-badge">{{ series }}</span>
+        }
       </div>
       <div class="header-actions">
         @if (!isTerminal() && !rescheduling()) {

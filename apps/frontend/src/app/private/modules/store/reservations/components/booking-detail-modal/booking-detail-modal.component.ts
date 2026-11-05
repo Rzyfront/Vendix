@@ -16,6 +16,7 @@ import { BookingDepositDialogComponent } from './booking-deposit-dialog/booking-
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { finalize } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
+import { bookingPaymentUrl, bookingSeriesLabel } from '../../utils/booking-display.util';
 
 @Component({
   selector: 'app-booking-detail-modal',
@@ -29,6 +30,8 @@ import { environment } from '../../../../../../../environments/environment';
   styleUrls: ['./booking-detail-modal.component.scss'],
 })
 export class BookingDetailModalComponent {
+  /** "Serie i/n" badge of a recurring booking (S19). */
+  protected readonly seriesLabel = bookingSeriesLabel;
   private destroyRef = inject(DestroyRef);
   private reservationsService = inject(ReservationsService);
   private submissionsService = inject(DataCollectionSubmissionsService);
@@ -643,7 +646,7 @@ export class BookingDetailModalComponent {
       .pipe(finalize(() => this.depositLinkBusy.set(false)), takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
-          this.depositLinkUrl.set(`${window.location.origin}${result.payment_path}`);
+          this.depositLinkUrl.set(bookingPaymentUrl(result));
           this.toastService.success('Enlace de pago generado');
         },
         error: (err) => this.toastService.error(extractApiErrorMessage(err)),

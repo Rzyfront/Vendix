@@ -72,6 +72,17 @@
   white-space: nowrap;
 }
 
+.series-badge {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--color-surface-secondary, #f3f4f6);
+  color: var(--color-text-secondary, #4b5563);
+}
+
 .status-badge {
   padding: 4px 10px;
   border-radius: 20px;
