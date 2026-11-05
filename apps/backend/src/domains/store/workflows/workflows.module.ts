@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WorkflowAdvanceService } from './engine/workflow-advance.service';
@@ -15,18 +16,32 @@ import { WorkflowStageService } from './engine/workflow-stage.service';
 import { WorkflowStartService } from './engine/workflow-start.service';
 import { WorkflowTickService } from './engine/workflow-tick.service';
 import { WorkflowTimersCron } from './engine/workflow-timers.cron';
+import { WorkGroupsController } from './work-groups.controller';
 import { WorkGroupsService } from './work-groups.service';
+import { WorkflowDefinitionsController } from './definitions/workflow-definitions.controller';
+import { WorkflowDefinitionsService } from './definitions/workflow-definitions.service';
+import { WorkflowInstancesController } from './instances/workflow-instances.controller';
+import { WorkflowInstancesService } from './instances/workflow-instances.service';
+import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
 
 /**
  * Flujos: motor (start / completeTask / claim / transition / cancel / tick),
- * grupos de trabajo, despachador de outbox y temporizadores. Los controladores
- * llegan en el bloque 4. `WorkflowRequirementsService` es el punto de enchufe
- * del bloque documental (upload / issued_document / signature).
+ * grupos de trabajo, despachador de outbox y temporizadores. Controladores (bloque 4):
+ * `store/workflows/{definitions,instances,tasks}` y `store/work-groups`.
+ * `WorkflowRequirementsService` es el punto de enchufe del bloque documental (upload / issued_document / signature).
  */
 @Module({
-  imports: [PrismaModule, NotificationsModule],
+  imports: [PrismaModule, NotificationsModule, ResponseModule],
+  controllers: [
+    WorkflowDefinitionsController,
+    WorkflowInstancesController,
+    WorkflowTasksController,
+    WorkGroupsController,
+  ],
   providers: [
     WorkGroupsService,
+    WorkflowDefinitionsService,
+    WorkflowInstancesService,
     WorkflowLoaderService,
     WorkflowEventsService,
     WorkflowReferenceService,

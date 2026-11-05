@@ -30,6 +30,8 @@ const UNIQUES: Record<string, string[][]> = {
   ],
   workflow_task_votes: [['task_id', 'user_id']],
   workflow_instances: [['store_id', 'reference']],
+  workflow_definitions: [['store_id', 'key']],
+  workflow_versions: [['definition_id', 'version']],
   work_groups: [['store_id', 'key']],
   work_group_members: [['work_group_id', 'user_id']],
 };
@@ -77,6 +79,14 @@ const DEFAULTS: Record<string, Row> = {
   work_groups: { is_active: true },
 };
 
+/** Columns Prisma fills with `now()` when the caller omits them. */
+const TIMESTAMPS: Record<string, string[]> = {
+  workflow_definitions: ['created_at', 'updated_at'],
+  workflow_instances: ['created_at'],
+  workflow_versions: ['published_at'],
+  workflow_instance_events: ['occurred_at'],
+};
+
 function eq(a: any, b: any): boolean {
   if (a instanceof Date || b instanceof Date) {
     return new Date(a as any).getTime() === new Date(b as any).getTime();
@@ -107,6 +117,13 @@ function matchValue(actual: any, cond: any): boolean {
           return !matchValue(actual, v);
         case 'equals':
           return eq(actual, v);
+        case 'contains':
+          return (
+            typeof actual === 'string' &&
+            actual.toLowerCase().includes(String(v).toLowerCase())
+          );
+        case 'mode':
+          return true;
         case 'lte':
           return actual != null && cmp(actual, v) <= 0;
         case 'lt':
@@ -151,6 +168,9 @@ export class FakeWorkflowDb {
   insert(name: string, row: Row): Row {
     const t = this.table(name);
     const full: Row = { ...(DEFAULTS[name] ?? {}), ...row };
+    for (const col of TIMESTAMPS[name] ?? []) {
+      if (full[col] === undefined) full[col] = new Date();
+    }
     if (full.id === undefined) {
       this.seq[name] = (this.seq[name] ?? 0) + 1;
       full.id = this.seq[name];
@@ -209,9 +229,18 @@ export class FakeWorkflowDb {
     const find = (args: Row = {}) => {
       let rows = db.table(name).filter((r) => matches(r, scopeWhere(args.where)));
       if (args.orderBy) {
-        const [[k, dir]] = Object.entries(args.orderBy) as [string, string][];
-        rows = [...rows].sort((a, b) => cmp(a[k], b[k]) * (dir === 'desc' ? -1 : 1));
+        const keys = (Array.isArray(args.orderBy) ? args.orderBy : [args.orderBy]).flatMap(
+          (o: Row) => Object.entries(o) as [string, string][],
+        );
+        rows = [...rows].sort((a, b) => {
+          for (const [k, dir] of keys) {
+            const c = cmp(a[k], b[k]) * (dir === 'desc' ? -1 : 1);
+            if (c !== 0) return c;
+          }
+          return 0;
+        });
       }
+      if (args.skip !== undefined) rows = rows.slice(args.skip);
       if (args.take !== undefined) rows = rows.slice(0, args.take);
       return rows;
     };
