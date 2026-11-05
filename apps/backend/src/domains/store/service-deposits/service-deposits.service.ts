@@ -724,20 +724,25 @@ export class ServiceDepositsService {
     };
   }
 
-  /** Cash only (the register ignores other methods), inside the tx like lodging. */
+  /**
+   * Staff-recorded money (S14): any method that moves the user's cash flow (`shouldRecordCashMovement`) is
+   * registered in the acting user's session, inside the tx. Without a staff user (Wompi webhook, customer
+   * pages) nothing is recorded.
+   */
   private async recordCash(
     tx: Tx,
     direction: 'in' | 'out',
     user_id: number | null,
     data: { store_id: number; amount: number; method: string; deposit_id: number; reference: string },
   ): Promise<void> {
-    if (data.method !== 'cash' || !user_id) return;
+    if (!user_id) return;
     await this.movements.recordModuleCashMovement(tx, {
       store_id: data.store_id,
       user_id,
       direction,
       amount: data.amount,
       payment_method: data.method,
+      include_non_cash: true,
       source_type: 'service_deposit',
       source_id: data.deposit_id,
       reference: data.reference,

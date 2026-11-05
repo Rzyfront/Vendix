@@ -166,7 +166,7 @@ describe('ServiceDepositsService', () => {
       });
       expect(movements.recordModuleCashMovement).toHaveBeenCalledWith(
         tx,
-        expect.objectContaining({ direction: 'in', amount: 400000, payment_method: 'cash', source_type: 'service_deposit' }),
+        expect.objectContaining({ direction: 'in', amount: 400000, payment_method: 'cash', source_type: 'service_deposit', include_non_cash: true }),
       );
       expect(result.event).toMatchObject({
         store_id: 3,
@@ -242,11 +242,34 @@ describe('ServiceDepositsService', () => {
       expect(error.errorCode).toBe('SERVICE_DEPOSIT_001');
     });
 
-    it('a transfer deposit does not touch the register', async () => {
+    it('S14: a staff transfer deposit enters the user cash flow through the opt-in (the register helper decides)', async () => {
       const { service, tx, movements } = build();
       const result = await receive(service, tx, { method: 'bank_transfer' });
-      expect(movements.recordModuleCashMovement).not.toHaveBeenCalled();
+      expect(movements.recordModuleCashMovement).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ user_id: 42, direction: 'in', amount: 400000, payment_method: 'bank_transfer', source_type: 'service_deposit', include_non_cash: true }),
+      );
       expect(result.event?.payment_method_type).toBe('bank_transfer');
+    });
+
+    it('S14: without a staff user (customer page, webhook) nothing is recorded', async () => {
+      const { service, tx, movements } = build();
+      await receive(service, tx, { method: 'card', user_id: null });
+      expect(movements.recordModuleCashMovement).not.toHaveBeenCalled();
+    });
+
+    it('S14: a pending deposit confirmed by staff enters their cash flow; the webhook confirmation records nothing', async () => {
+      const staff = build();
+      await staff.service.createPendingInTx(staff.tx, { store_id: 3, customer_id: 9, booking_id: 70, amount: 400000, method: 'bank_transfer', payment_request_id: 5, request_id: 'dep-s', user_id: 42 });
+      await staff.service.completePendingInTx(staff.tx, { payment_request_id: 5, store_id: 3, user_id: 42 });
+      expect(staff.movements.recordModuleCashMovement).toHaveBeenCalledWith(
+        staff.tx,
+        expect.objectContaining({ user_id: 42, direction: 'in', payment_method: 'bank_transfer', include_non_cash: true }),
+      );
+      const hook = build();
+      await hook.service.createPendingInTx(hook.tx, { store_id: 3, customer_id: 9, booking_id: 70, amount: 400000, method: 'wompi', payment_request_id: 6, request_id: 'dep-w', user_id: null });
+      await hook.service.completePendingInTx(hook.tx, { payment_request_id: 6, store_id: 3 });
+      expect(hook.movements.recordModuleCashMovement).not.toHaveBeenCalled();
     });
   });
 
@@ -409,10 +432,20 @@ describe('ServiceDepositsService', () => {
       expect(rows.find((r) => r.kind === 'refunded')).toMatchObject({ amount: 150000, status: 'completed', wallet_transaction_id: 802 });
       expect(movements.recordModuleCashMovement).toHaveBeenLastCalledWith(
         tx,
-        expect.objectContaining({ direction: 'out', amount: 150000, payment_method: 'cash', source_type: 'service_deposit' }),
+        expect.objectContaining({ direction: 'out', amount: 150000, payment_method: 'cash', source_type: 'service_deposit', include_non_cash: true }),
       );
       expect(result.event).toMatchObject({ amount: 150000, payment_method_type: 'cash', customer_id: 9 });
       expect((await service.balanceOf({ bookingId: 70 })).balance).toBe(250000);
+    });
+
+    it('S14: a transfer refund goes out through the user cash flow with the opt-in', async () => {
+      const { service, tx, movements } = build();
+      await receive(service, tx);
+      await service.refundInTx(tx, { store_id: 3, customer_id: 9, booking_id: 70, amount: 100000, method: 'bank_transfer', request_id: 'ref-t', user_id: 42 });
+      expect(movements.recordModuleCashMovement).toHaveBeenLastCalledWith(
+        tx,
+        expect.objectContaining({ user_id: 42, direction: 'out', amount: 100000, payment_method: 'bank_transfer', include_non_cash: true }),
+      );
     });
 
     it('cannot refund more than the deposit balance', async () => {

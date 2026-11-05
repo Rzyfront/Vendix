@@ -30,6 +30,8 @@ import {
   syncReservationFeeLine,
   writeDepositBudget,
 } from './utils/session-deposit.util';
+import { ModuleRef } from '@nestjs/core';
+import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { ServiceDepositsService } from '../service-deposits/service-deposits.service';
 import type { ServiceDepositPaymentReceived, ServiceDepositReceivedEvent, ServiceDepositRefundedEvent } from '../service-deposits/service-deposits.service';
 import { centsToAmount, toCents } from '../service-deposits/utils/service-deposit-math';
@@ -146,7 +148,24 @@ export class ServiceSessionsService {
     private readonly deposits: ServiceDepositsService,
     private readonly orderFlow: OrderFlowService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * Single cash gate (S14) for a money movement a staff member makes on a session (deposit at opening, top-up,
+   * refund of the leftover). Adding items or consumption never calls it. Resolved lazily to avoid a DI cycle;
+   * a missing gate service fails closed.
+   */
+  private async assertCashGate(userId: number | undefined): Promise<void> {
+    let sessions: SessionsService | null = null;
+    try {
+      sessions = this.moduleRef.get(SessionsService, { strict: false });
+    } catch {
+      sessions = null;
+    }
+    if (!sessions) throw new VendixHttpException(ErrorCodes.CASH_SESSION_REQUIRED_001);
+    await sessions.assertSessionForSales(userId);
+  }
 
   async open(dto: OpenServiceSessionDto) {
     return this.openAttempt(dto, []);
@@ -158,6 +177,7 @@ export class ServiceSessionsService {
    */
   private async openAttempt(dto: OpenServiceSessionDto, excludedStationIds: number[]) {
     const { storeId, userId } = this.requireContext();
+    if (dto.deposit) await this.assertCashGate(userId);
     // Walk-in sin estación: se asigna una elegible más abajo (necesita el servicio).
     if (dto.booking_id ? Boolean(dto.station_id) : !dto.station_id && !dto.product_id) {
       throw new VendixHttpException(ErrorCodes.STATION_009, 'Indica una reserva o una estación para walk-in.');
@@ -2049,6 +2069,7 @@ export class ServiceSessionsService {
   /** S4/S9: top-up of the consumable deposit of an active session (`POST :id/deposits`). */
   async addDeposit(sessionId: number, dto: ServiceSessionDepositDto) {
     const { storeId, userId } = this.requireContext();
+    await this.assertCashGate(userId);
     const session = await this.prisma.service_sessions.findFirst({
       where: { id: sessionId, store_id: storeId },
       select: { id: true, status: true, order_id: true, booking_id: true, deposit_policy: true, deposit_exhausted_policy: true, settled_at: true },
@@ -2174,6 +2195,8 @@ export class ServiceSessionsService {
           user_id: userId ?? null,
         };
         if (leftoverAction === 'refund') {
+          // Money leaves the drawer: the acting user needs an open session when the register is mandatory.
+          await this.assertCashGate(userId);
           const refunded = await this.deposits.refundInTx(tx, {
             ...move,
             method: dto.refund_method ?? 'cash',

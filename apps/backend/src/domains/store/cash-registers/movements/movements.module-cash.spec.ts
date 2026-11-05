@@ -129,4 +129,86 @@ describe('MovementsService.recordModuleCashMovement', () => {
       }),
     );
   });
+
+  describe('include_non_cash (S14, opt-in)', () => {
+    it('sin la opción, tarjeta sigue sin registrar nada (comportamiento previo)', async () => {
+      const db = makeDb({});
+      const res = await service.recordModuleCashMovement(db as any, {
+        ...base,
+        payment_method: 'card',
+      });
+      expect(res).toBeNull();
+      expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+      expect(db.cash_register_sessions.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('con la opción, tarjeta entrante crea una fila sale con el método real (no toca el cajón)', async () => {
+      const db = makeDb({});
+      const res = await service.recordModuleCashMovement(db as any, {
+        ...base,
+        payment_method: 'card',
+        source_type: 'service_deposit',
+        source_id: 33,
+        include_non_cash: true,
+      });
+      expect(res).toEqual(expect.objectContaining({ id: 900 }));
+      expect(db.cash_register_movements.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          session_id: 200,
+          user_id: USER_ID,
+          type: 'sale',
+          amount: 50000,
+          payment_method: 'card',
+          source_type: 'service_deposit',
+          source_id: 33,
+        }),
+      });
+    });
+
+    it('con la opción, transferencia saliente crea una fila refund con el método real', async () => {
+      const db = makeDb({});
+      await service.recordModuleCashMovement(db as any, {
+        ...base,
+        direction: 'out',
+        payment_method: 'bank_transfer',
+        include_non_cash: true,
+      });
+      expect(db.cash_register_movements.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ type: 'refund', payment_method: 'bank_transfer' }),
+      });
+    });
+
+    it('con la opción, wompi (dinero en la pasarela) no registra', async () => {
+      const db = makeDb({});
+      const res = await service.recordModuleCashMovement(db as any, {
+        ...base,
+        payment_method: 'wompi',
+        include_non_cash: true,
+      });
+      expect(res).toBeNull();
+      expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+
+    it('con la opción y la caja habilitada sin sesión: CASH_SESSION_REQUIRED_001', async () => {
+      const db = makeDb({ session: null });
+      await expect(
+        service.recordModuleCashMovement(db as any, {
+          ...base,
+          payment_method: 'card',
+          include_non_cash: true,
+        }),
+      ).rejects.toMatchObject({ errorCode: 'CASH_SESSION_REQUIRED_001' });
+    });
+
+    it('con la opción y caja deshabilitada: no registra', async () => {
+      const db = makeDb({ enabled: false, session: null });
+      const res = await service.recordModuleCashMovement(db as any, {
+        ...base,
+        payment_method: 'card',
+        include_non_cash: true,
+      });
+      expect(res).toBeNull();
+      expect(db.cash_register_movements.create).not.toHaveBeenCalled();
+    });
+  });
 });
