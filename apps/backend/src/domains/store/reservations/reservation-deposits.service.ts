@@ -8,6 +8,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { ServiceDepositsService } from '../service-deposits/service-deposits.service';
 import type { ServiceDepositPaymentReceived } from '../service-deposits/service-deposits.service';
 import { toCents } from '../service-deposits/utils/service-deposit-math';
+import { publicPaymentUrl, resolveStorePublicOrigin } from '../../../common/utils/store-public-origin.util';
 import { PaymentRequestsService } from '../payment-requests/payment-requests.service';
 import type { PaymentRequestPaidEvent } from '../payment-requests/payment-requests.service';
 import { PaymentLinksService } from '../payment-links/payment-links.service';
@@ -81,6 +82,11 @@ export class ReservationDepositsService {
 
   paymentPath(publicToken: string): string {
     return `/pagar/${publicToken}`;
+  }
+
+  /** Absolute payment page on the store's public domain (null without one): what the admin shares. */
+  async paymentUrl(storeId: number, publicToken: string): Promise<string | null> {
+    return publicPaymentUrl(await resolveStorePublicOrigin(this.prisma, storeId), this.paymentPath(publicToken));
   }
 
   private requireStoreId(): number {
@@ -324,7 +330,7 @@ export class ReservationDepositsService {
   }
 
   /** New public link of a booking whose deposit request is still pending. */
-  async rotateLink(bookingId: number): Promise<{ payment_path: string; payment_request_id: number }> {
+  async rotateLink(bookingId: number): Promise<{ payment_path: string; payment_url: string | null; payment_request_id: number }> {
     const store_id = this.requireStoreId();
     const pending = await this.prisma.service_deposits.findFirst({
       where: { store_id, booking_id: bookingId, kind: 'received', status: 'pending', payment_request_id: { not: null } },
@@ -333,7 +339,11 @@ export class ReservationDepositsService {
     if (!pending?.payment_request_id) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_007);
     const requestId = pending.payment_request_id;
     const { publicToken } = await this.prisma.$transaction((tx) => this.paymentRequests.rotateTokenInTx(tx, requestId));
-    return { payment_path: this.paymentPath(publicToken), payment_request_id: requestId };
+    return {
+      payment_path: this.paymentPath(publicToken),
+      payment_url: await this.paymentUrl(store_id, publicToken),
+      payment_request_id: requestId,
+    };
   }
 
   // ------------------------------------------------------------ payment paid

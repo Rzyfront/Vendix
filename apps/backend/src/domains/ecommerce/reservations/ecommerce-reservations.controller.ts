@@ -15,6 +15,12 @@ import {
 } from '@nestjs/common';
 import { order_channel_enum } from '@prisma/client';
 import { Public } from '@common/decorators/public.decorator';
+import { RequestContextService } from '@common/context/request-context.service';
+import {
+  resolveStoreTimezone,
+  zonedWallClockToUtc,
+} from '../../../common/utils/store-timezone.util';
+import { RentalQuoteService } from '../../store/service-stations/rental-quote/rental-quote.service';
 import { AvailabilityService } from '../../store/reservations/availability.service';
 import { ReservationsService } from '../../store/reservations/reservations.service';
 import { ProvidersService } from '../../store/reservations/providers/providers.service';
@@ -34,7 +40,55 @@ export class EcommerceReservationsController {
     private readonly reservationsService: ReservationsService,
     private readonly providersService: ProvidersService,
     private readonly globalPrisma: GlobalPrismaService,
+    private readonly rentalQuote: RentalQuoteService,
   ) {}
+
+  /**
+   * Public price quote for a station rental (storefront shows the amount
+   * before the customer picks a slot). Wall-clock date/time are read in the
+   * store timezone so the rate window matches what the admin configured.
+   */
+  @Public()
+  @Get('rental-quote/:productId')
+  @Header('Cache-Control', 'no-store')
+  async getRentalQuote(
+    @Param('productId', ParseIntPipe) productId: number,
+    @Query('station_id') stationIdRaw?: string,
+    @Query('date') date?: string,
+    @Query('start_time') startTime?: string,
+    @Query('product_variant_id') variantIdRaw?: string,
+  ) {
+    const stationId = parseInt(stationIdRaw ?? '', 10);
+    const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date ?? '');
+    const timeMatch = /^(\d{2}):(\d{2})/.exec(startTime ?? '');
+    if (!(stationId > 0) || !dateMatch || !timeMatch) {
+      throw new BadRequestException(
+        'station_id, date (YYYY-MM-DD) y start_time (HH:mm) son obligatorios',
+      );
+    }
+    const storeId = RequestContextService.getContext()?.store_id;
+    const tz = storeId
+      ? await resolveStoreTimezone(this.availabilityService['prisma'], storeId)
+      : 'America/Bogota';
+    const startAt = zonedWallClockToUtc(
+      Number(dateMatch[1]),
+      Number(dateMatch[2]),
+      Number(dateMatch[3]),
+      Number(timeMatch[1]),
+      Number(timeMatch[2]),
+      0,
+      0,
+      tz,
+    );
+    const variantId = parseInt(variantIdRaw ?? '', 10);
+    const quote = await this.rentalQuote.quote({
+      productId,
+      variantId: variantId > 0 ? variantId : null,
+      stationId,
+      startAt,
+    });
+    return { success: true, data: quote };
+  }
 
   @Public()
   @Get('availability/:productId')

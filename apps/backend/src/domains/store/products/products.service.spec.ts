@@ -672,6 +672,91 @@ describe('ProductsService', () => {
     });
   });
 
+  describe('alquiler de estación — rental_pricing_mode (S2, T15)', () => {
+    const rentalDto = (over: Record<string, unknown> = {}) =>
+      ({
+        name: 'Alquiler cava',
+        base_price: 100000,
+        sku: 'ALQ-001',
+        store_id: 1,
+        product_type: 'service',
+        requires_station: true,
+        service_duration_minutes: 240,
+        service_duration_unit: 'hour',
+        rental_pricing_mode: 'station_rate',
+        ...over,
+      }) as unknown as CreateProductDto;
+
+    it('create persiste la unidad y el modo en un servicio con estación', async () => {
+      const row = { id: 9, store_id: 1, state: ProductState.ACTIVE, stock_levels: [], product_variants: [], product_images: [], _count: {} };
+      mockPrismaService.products.create.mockResolvedValue(row);
+      mockPrismaService.products.findUnique.mockResolvedValue(row);
+      mockPrismaService.$transaction.mockImplementation((callback) => callback(mockPrismaService));
+
+      await service.create(rentalDto());
+
+      expect(mockPrismaService.products.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          service_duration_minutes: 240,
+          service_duration_unit: 'hour',
+          rental_pricing_mode: 'station_rate',
+        }),
+      });
+    });
+
+    it('create rechaza el modo de alquiler en un servicio sin estación', async () => {
+      await expect(service.create(rentalDto({ requires_station: false }))).rejects.toThrow(
+        'El modo de precio del alquiler solo aplica a servicios que requieren estación',
+      );
+      expect(mockPrismaService.products.create).not.toHaveBeenCalled();
+    });
+
+    it('create rechaza el modo de alquiler en un producto físico', async () => {
+      await expect(
+        service.create(rentalDto({ product_type: 'physical', requires_station: false })),
+      ).rejects.toThrow('El modo de precio del alquiler solo aplica a servicios que requieren estación');
+    });
+
+    it('update rechaza fijar el modo si el producto existente no requiere estación', async () => {
+      mockPrismaService.products.findFirst.mockResolvedValue({
+        id: 1, store_id: 1, state: ProductState.ACTIVE, product_type: 'service', requires_station: false,
+      });
+      await expect(service.update(1, { rental_pricing_mode: 'fixed_price' } as UpdateProductDto)).rejects.toThrow(
+        'El modo de precio del alquiler solo aplica a servicios que requieren estación',
+      );
+      expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+    });
+
+    it('update deja pasar el modo cuando el producto existente ya requiere estación', async () => {
+      const existing = {
+        id: 1, store_id: 1, state: ProductState.ACTIVE, product_type: 'service', requires_station: true,
+        stock_levels: [], product_variants: [], product_images: [], _count: {},
+      };
+      mockPrismaService.products.findFirst.mockResolvedValue(existing);
+      mockPrismaService.$transaction.mockImplementation((callback) => callback(mockPrismaService));
+      mockPrismaService.products.update.mockResolvedValue(existing);
+
+      await service.update(1, { rental_pricing_mode: 'fixed_price' } as UpdateProductDto);
+
+      expect(mockPrismaService.products.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: expect.objectContaining({ rental_pricing_mode: 'fixed_price' }),
+      });
+    });
+
+    it('update permite limpiar el modo (null) sin exigir estación', async () => {
+      const existing = {
+        id: 1, store_id: 1, state: ProductState.ACTIVE, product_type: 'physical', requires_station: false,
+        stock_levels: [], product_variants: [], product_images: [], _count: {},
+      };
+      mockPrismaService.products.findFirst.mockResolvedValue(existing);
+      mockPrismaService.$transaction.mockImplementation((callback) => callback(mockPrismaService));
+      mockPrismaService.products.update.mockResolvedValue(existing);
+
+      await expect(service.update(1, { rental_pricing_mode: null } as UpdateProductDto)).resolves.toBeDefined();
+    });
+  });
+
   describe('unicidad de sku/slug/barcode — los archivados no bloquean', () => {
     const dto: CreateProductDto = {
       name: 'Nuevo',

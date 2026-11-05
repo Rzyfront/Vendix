@@ -66,6 +66,10 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
       rotateLink: jest.fn().mockResolvedValue({ payment_path: '/pagar/abc', payment_request_id: 9 }),
     } as any;
 
+    const rentalPrepay = {
+      openLink: jest.fn().mockResolvedValue({ payment_path: '/pagar/pre', payment_request_id: 12, amount: 75000, expires_at: null }),
+    } as any;
+
     const controller = new ReservationsController(
       reservationsService,
       reservationsExportService,
@@ -75,9 +79,10 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
       responseService,
       prisma,
       reservationDeposits,
+      rentalPrepay,
     );
 
-    return { controller, reservationDeposits, reservationsService, bookingConfirmationService, appointmentQueueService, responseService };
+    return { controller, rentalPrepay, reservationDeposits, reservationsService, bookingConfirmationService, appointmentQueueService, responseService };
   }
 
   it('markArriving delegates to the service and wraps the response', async () => {
@@ -178,5 +183,21 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
     ]) {
       expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toEqual(['store:reservations:update']);
     }
+  });
+
+  it('prepay-link abre el cobro para reservar y devuelve la ruta de pago', async () => {
+    const { controller, rentalPrepay, responseService } = buildController();
+    await controller.prepayLink(7);
+    expect(rentalPrepay.openLink).toHaveBeenCalledWith(7);
+    expect(responseService.success).toHaveBeenCalledWith(
+      { payment_path: '/pagar/pre', payment_request_id: 12, amount: 75000, expires_at: null },
+      expect.any(String),
+    );
+  });
+
+  it('prepay-link requiere store:reservations:update', () => {
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, ReservationsController.prototype.prepayLink)).toEqual([
+      'store:reservations:update',
+    ]);
   });
 });

@@ -17,6 +17,7 @@ import { PaymentEncryptionService } from '../../store/payments/services/payment-
 import { WebhookHandlerService } from '../../store/payments/services/webhook-handler.service';
 import { PaymentGatewayService } from '../../store/payments/services/payment-gateway.service';
 import { ReservationsService } from '../../store/reservations/reservations.service';
+import { RentalQuoteService } from '../../store/service-stations/rental-quote/rental-quote.service';
 import { InvoiceDataRequestsService } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.service';
 import { InvoicingService } from '../../store/invoicing/invoicing.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
@@ -81,6 +82,7 @@ describe('CheckoutService - promotions and coupons', () => {
   let service: CheckoutService;
   let prisma: any;
   let storePrisma: any;
+  let rentalQuote: { quote: jest.Mock };
   // Use `any` so jest mock methods (quoteDiscounts, applyPromotion) don't
   // get filtered out by the strict shape of jest.Mocked<...>.
   let promotionEngine: any;
@@ -230,6 +232,7 @@ describe('CheckoutService - promotions and coupons', () => {
       },
     };
 
+    rentalQuote = { quote: jest.fn() };
     storePrisma = {
       shipping_methods: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -312,6 +315,7 @@ describe('CheckoutService - promotions and coupons', () => {
           },
         },
         { provide: ReservationsService, useValue: { create: jest.fn() } },
+        { provide: RentalQuoteService, useValue: rentalQuote },
         {
           provide: InvoiceDataRequestsService,
           useValue: {
@@ -877,11 +881,79 @@ describe('CheckoutService - promotions and coupons', () => {
       });
       expect(storePrisma.service_stations.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ deposit_policy: 'required' }),
+          where: expect.objectContaining({
+            OR: expect.arrayContaining([{ deposit_policy: 'required' }]),
+          }),
         }),
       );
       expect(reservations.create).not.toHaveBeenCalled();
       expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza el carrito de una estación que cobra para reservar: la reserva sale de la página de pago (A17)', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      mockOrderCreate(10000);
+      storePrisma.service_stations.findFirst.mockResolvedValue({ id: 5 });
+
+      await expect(service.checkout({ ...stationDto } as any)).rejects.toMatchObject({
+        errorCode: 'STATION_BOOKING_010',
+      });
+      expect(storePrisma.service_stations.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            OR: expect.arrayContaining([{ booking_prepay_mode: { not: 'none' } }]),
+          }),
+        }),
+      );
+      expect(reservations.create).not.toHaveBeenCalled();
+    });
+
+    it('un alquiler por tarifa de estación se cobra con la cotización del servidor, no con el precio base (S2)', async () => {
+      const baseImpl = prisma.products.findUnique.getMockImplementation();
+      prisma.products.findUnique.mockImplementation((args: any) =>
+        args.where.id === STATION_SERVICE_ID
+          ? Promise.resolve({
+              ...buildProduct({ id: STATION_SERVICE_ID, name: 'Alquiler cancha', product_type: 'service' }),
+              requires_station: true,
+              requires_booking: true,
+              rental_pricing_mode: 'station_rate',
+            })
+          : baseImpl!(args),
+      );
+      const { reservations } = mockBookingLinking();
+      reservations.create.mockResolvedValue({ id: 61 });
+      mockOrderCreate(36000);
+      storePrisma.store_settings.findFirst = jest
+        .fn()
+        .mockResolvedValue({ settings: {}, stores: { timezone: 'America/Bogota' } });
+      rentalQuote.quote.mockResolvedValue({ amount: 36000, cents: 3600000, pricing_mode: 'station_rate' });
+
+      const result: any = await service.checkout({ ...stationDto } as any);
+
+      expect(rentalQuote.quote).toHaveBeenCalledWith(
+        expect.objectContaining({ productId: STATION_SERVICE_ID, stationId: 5 }),
+      );
+      expect(
+        rentalQuote.quote.mock.calls[0][0].startAt.toISOString(),
+      ).toBe('2026-11-02T14:00:00.000Z');
+      expect(result.items).toEqual([
+        expect.objectContaining({ unit_price: 36000, total_price: 36000 }),
+      ]);
+    });
+
+    it('un servicio de estación sin tarifa por tiempo conserva su precio y no se cotiza', async () => {
+      mockServiceProducts();
+      const { reservations } = mockBookingLinking();
+      reservations.create.mockResolvedValue({ id: 62 });
+      mockOrderCreate(10000);
+
+      const result: any = await service.checkout({ ...stationDto } as any);
+
+      expect(rentalQuote.quote).not.toHaveBeenCalled();
+      expect(result.items).toEqual([
+        expect.objectContaining({ unit_price: 10000 }),
+      ]);
     });
 
     it('una estación sin anticipo obligatorio sigue el flujo de siempre: la reserva se intenta y el carrito no se rechaza', async () => {

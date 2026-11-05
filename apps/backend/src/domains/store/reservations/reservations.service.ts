@@ -30,6 +30,9 @@ import { ServiceAllocationCoordinator } from './service-allocation-coordinator.s
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { assertSaleNatureProducts } from '../products/services/product-usage-nature.util';
 import { ReservationDepositsService } from './reservation-deposits.service';
+import { RentalQuoteService } from '../service-stations/rental-quote/rental-quote.service';
+import type { RentalQuote } from '../service-stations/rental-quote/rental-quote.service';
+import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
 
 @Injectable()
 export class ReservationsService {
@@ -49,6 +52,10 @@ export class ReservationsService {
     @Optional() private readonly allocationCoordinator?: ServiceAllocationCoordinator,
     // Deposit side of station bookings. Optional so bookings without a deposit keep working untouched.
     @Optional() private readonly reservationDeposits?: ReservationDepositsService,
+    // Rental quote (T15): optional so every existing booking path stays untouched without it.
+    @Optional() private readonly rentalQuote?: RentalQuoteService,
+    // "Cobro para reservar" of the station (T15, S1): the online hold charge.
+    @Optional() private readonly rentalPrepay?: RentalPrepayService,
   ) {}
 
   // Estado maquina de transiciones validas
@@ -127,6 +134,10 @@ export class ReservationsService {
     },
     order: {
       select: { id: true, order_number: true },
+    },
+    // S19: position badge "Serie i/n" (i comes from bookings.series_index).
+    series: {
+      select: { id: true, occurrences: true, frequency: true },
     },
   };
 
@@ -400,6 +411,7 @@ export class ReservationsService {
 
     let booking: Awaited<ReturnType<typeof this.mapBooking>> | null = null;
     let startedDeposit: Awaited<ReturnType<ReservationDepositsService['startInTx']>> = null;
+    let rentalQuoted: RentalQuote | null = null;
     try {
       booking = await this.prisma.$transaction(
         async (tx) => {
@@ -478,6 +490,13 @@ export class ReservationsService {
               isOpenEnded,
               excludeBookingId: created.id,
             });
+            rentalQuoted = await this.quoteBookingInTx(tx, {
+              bookingId: created.id,
+              productId: dto.product_id,
+              variantId: dto.product_variant_id,
+              isOpenEnded,
+              allocated,
+            });
             // The deposit rules need the station the slot landed on, so they run after allocating.
             if (this.reservationDeposits && allocated?.station_id != null) {
               startedDeposit = await this.reservationDeposits.startInTx(tx, {
@@ -544,6 +563,10 @@ export class ReservationsService {
           track_inventory_override: selectedVariant.track_inventory_override,
         } : undefined,
       });
+      // A station-rate rental is charged at its frozen quote; any other product keeps the catalog price.
+      const quoteNow = rentalQuoted as RentalQuote | null;
+      const lineUnitPrice =
+        quoteNow?.pricing_mode === 'station_rate' ? quoteNow.amount : priceResult.unitPrice;
       try {
         const createdOrder = await this.ordersService.create({
           customer_id: dto.customer_id,
@@ -553,11 +576,11 @@ export class ReservationsService {
             booking_id: booking.id,
             product_name: product.name || 'Servicio',
             quantity: 1,
-            unit_price: priceResult.unitPrice,
-            total_price: priceResult.unitPrice,
+            unit_price: lineUnitPrice,
+            total_price: lineUnitPrice,
           }],
-          subtotal: priceResult.unitPrice,
-          total_amount: priceResult.unitPrice,
+          subtotal: lineUnitPrice,
+          total_amount: lineUnitPrice,
           internal_notes: `Reserva ${booking_number}`,
           channel: dto.channel || 'pos',
           skip_schedule_validation: true,
@@ -618,9 +641,43 @@ export class ReservationsService {
         payment_path: startedNow.publicToken
           ? this.reservationDeposits.paymentPath(startedNow.publicToken)
           : null,
+        payment_url: startedNow.publicToken
+          ? await this.reservationDeposits.paymentUrl(store_id, startedNow.publicToken)
+          : null,
       };
     }
     return booking;
+  }
+
+  /**
+   * T15 (S2): freezes the booking's quote once the station is known. A `station_rate`
+   * product is priced by the station's time rate at the booking start; any other
+   * product keeps its catalog price. Stored as `quoted_amount`: the prepay and the
+   * channels charge from it. Skipped when the end is open (the duration is unknown).
+   */
+  private async quoteBookingInTx(
+    tx: Prisma.TransactionClient,
+    args: {
+      bookingId: number;
+      productId: number;
+      variantId?: number | null;
+      isOpenEnded?: boolean;
+      allocated: { station_id?: number | null; start_at?: Date } | null | undefined;
+    },
+  ): Promise<RentalQuote | null> {
+    const { allocated } = args;
+    if (!this.rentalQuote || args.isOpenEnded || allocated?.station_id == null || !allocated.start_at) return null;
+    const quote = await this.rentalQuote.quote({
+      productId: args.productId,
+      variantId: args.variantId ?? null,
+      stationId: allocated.station_id,
+      startAt: allocated.start_at,
+    });
+    await tx.bookings.update({
+      where: { id: args.bookingId },
+      data: { quoted_amount: quote.amount, updated_at: new Date() },
+    });
+    return quote;
   }
 
   async hold(dto: {
@@ -717,6 +774,7 @@ export class ReservationsService {
     const booking_number = await this.generateBookingNumber(store_id, dto.date);
 
     let holdDeposit: Awaited<ReturnType<ReservationDepositsService['startHoldInTx']>> = null;
+    let holdPrepay: Awaited<ReturnType<RentalPrepayService['startHoldInTx']>> = null;
     const booking = await this.prisma.$transaction(async (tx) => {
       const created = await tx.bookings.create({
         data: {
@@ -760,8 +818,23 @@ export class ReservationsService {
           state: 'held',
           excludeBookingId: created.id,
         });
+        await this.quoteBookingInTx(tx, {
+          bookingId: created.id,
+          productId: dto.product_id,
+          variantId: dto.product_variant_id,
+          allocated,
+        });
+        // One charge online (A17): the station's "cobro para reservar" wins; without it the deposit applies (A12).
+        if (this.rentalPrepay && allocated?.station_id != null) {
+          holdPrepay = await this.rentalPrepay.startHoldInTx(tx, {
+            storeId: store_id,
+            bookingId: created.id,
+            stationId: allocated.station_id,
+            userId: context?.user_id ?? null,
+          });
+        }
         // A station that requires a deposit holds the slot as `payment_pending` behind a payment page (A12).
-        if (this.reservationDeposits && allocated?.station_id != null) {
+        if (!holdPrepay && this.reservationDeposits && allocated?.station_id != null) {
           holdDeposit = await this.reservationDeposits.startHoldInTx(tx, {
             storeId: store_id,
             bookingId: created.id,
@@ -775,6 +848,15 @@ export class ReservationsService {
     });
 
     const mapped = await this.mapBooking(booking);
+    const prepayNow = holdPrepay as Awaited<ReturnType<RentalPrepayService['startHoldInTx']>>;
+    if (prepayNow && this.rentalPrepay) {
+      return {
+        ...mapped,
+        expires_at: prepayNow.expiresAt,
+        payment_path: this.rentalPrepay.paymentPath(prepayNow.publicToken),
+        prepay_amount: prepayNow.amount,
+      };
+    }
     const heldNow = holdDeposit as Awaited<ReturnType<ReservationDepositsService['startHoldInTx']>>;
     if (heldNow && this.reservationDeposits) {
       return {

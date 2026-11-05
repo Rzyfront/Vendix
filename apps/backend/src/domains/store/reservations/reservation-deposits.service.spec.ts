@@ -213,8 +213,20 @@ describe('ReservationDepositsService', () => {
     it('answers a new payment_path for the pending request', async () => {
       const { service, tx, paymentRequests } = build();
       tx.service_deposits.findFirst.mockResolvedValue({ payment_request_id: 9 });
-      await expect(service.rotateLink(77)).resolves.toEqual({ payment_path: '/pagar/tok-2', payment_request_id: 9 });
+      await expect(service.rotateLink(77)).resolves.toEqual({ payment_path: '/pagar/tok-2', payment_url: null, payment_request_id: 9 });
       expect(paymentRequests.rotateTokenInTx).toHaveBeenCalledWith(tx, 9);
+    });
+
+    it('answers the absolute payment_url on the store public domain, never the admin host', async () => {
+      const { service, tx, prisma } = build();
+      tx.service_deposits.findFirst.mockResolvedValue({ payment_request_id: 9 });
+      prisma.domain_settings = {
+        findMany: jest.fn().mockResolvedValue([
+          { hostname: 'admin.tienda.co', app_type: 'STORE_ADMIN' },
+          { hostname: 'tienda.co', app_type: 'STORE_ECOMMERCE' },
+        ]),
+      };
+      await expect(service.rotateLink(77)).resolves.toMatchObject({ payment_url: 'https://tienda.co/pagar/tok-2' });
     });
 
     it('without a pending request answers STATION_BOOKING_007', async () => {

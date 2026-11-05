@@ -74,6 +74,17 @@ describe('ReservationsService — state machine (appointments redesign)', () => 
     return { service, prisma, bookings, eventEmitter, emits, orderHistory };
   }
 
+  it('findOne returns the series position and size of a recurring booking (S19 "Serie i/n")', async () => {
+    const { service, prisma, bookings } = buildService();
+    bookings.push({ id: 1, status: 'confirmed', series_id: 4, series_index: 2, series: { id: 4, occurrences: 6, frequency: 'weekly' } });
+    const result: any = await service.findOne(1);
+    expect(prisma.bookings.findFirst.mock.calls[0][0].include.series).toEqual({
+      select: { id: true, occurrences: true, frequency: true },
+    });
+    expect(result.series).toEqual({ id: 4, occurrences: 6, frequency: 'weekly' });
+    expect(result.series_index).toBe(2);
+  });
+
   it('markArriving only allows confirmed → arriving', async () => {
     const { service, bookings } = buildService();
     bookings.push({ id: 1, status: 'confirmed' });
@@ -838,7 +849,7 @@ describe('ReservationsService — station deposits', () => {
     service_duration_minutes: 60,
   };
 
-  function build(options: { product?: any; deposits?: any; booking?: any } = {}) {
+  function build(options: { product?: any; deposits?: any; booking?: any; rentalQuote?: any; rentalPrepay?: any; allocated?: any } = {}) {
     const row: any = {
       id: 77,
       store_id: 1,
@@ -871,7 +882,7 @@ describe('ReservationsService — station deposits', () => {
       $transaction: jest.fn(async (cb: any) => cb(prisma)),
     };
     const coordinator: any = {
-      allocateBooking: jest.fn().mockResolvedValue({ id: 1, station_id: 5 }),
+      allocateBooking: jest.fn().mockResolvedValue(options.allocated ?? { id: 1, station_id: 5 }),
       releaseBooking: jest.fn().mockResolvedValue(undefined),
     };
     const deposits: any = {
@@ -880,6 +891,7 @@ describe('ReservationsService — station deposits', () => {
       announceDeposit: jest.fn(),
       summary: jest.fn().mockResolvedValue(null),
       paymentPath: jest.fn((token: string) => `/pagar/${token}`),
+      paymentUrl: jest.fn(async (_storeId: number, token: string) => `https://tienda.co/pagar/${token}`),
       cancelWithDeposit: jest.fn().mockResolvedValue(null),
       deferNoShowIfDeposit: jest.fn().mockResolvedValue(false),
       decide: jest.fn().mockResolvedValue({ action: 'retain' }),
@@ -899,6 +911,8 @@ describe('ReservationsService — station deposits', () => {
       { record: jest.fn() } as any,
       coordinator,
       deposits,
+      options.rentalQuote,
+      options.rentalPrepay,
     );
     jest.spyOn(service as any, 'generateBookingNumber').mockResolvedValue('BKG-1');
     return { service, prisma, coordinator, deposits, emits, row, ordersService };
@@ -930,6 +944,9 @@ describe('ReservationsService — station deposits', () => {
     );
     expect(deposits.announceDeposit).toHaveBeenCalledWith(started);
     expect(result.payment_path).toBe('/pagar/tok');
+    // The admin shares the link: absolute, on the store's public domain.
+    expect(result.payment_url).toBe('https://tienda.co/pagar/tok');
+    expect(deposits.paymentUrl).toHaveBeenCalledWith(1, 'tok');
     expect(result.deposit).toEqual({ required: 400000, received: 0, balance: 0 });
   });
 
@@ -938,6 +955,7 @@ describe('ReservationsService — station deposits', () => {
     const { service } = build({ deposits: { startInTx: jest.fn().mockResolvedValue(started) } });
     const result: any = await service.create({ ...createDto, deposit: { ...deposit, mode: 'desk' } });
     expect(result.payment_path).toBeNull();
+    expect(result.payment_url).toBeNull();
   });
 
   it('create: a station booking without deposit behaves as before (no payment_path, no deposit block)', async () => {
@@ -990,6 +1008,91 @@ describe('ReservationsService — station deposits', () => {
     });
     expect(result.payment_path).toBeUndefined();
     expect(result.deposit).toBeUndefined();
+  });
+
+  describe('alquiler: cotización y cobro para reservar (S1, S2, S3, S15, T15)', () => {
+    const startAt = new Date('2099-09-01T15:00:00.000Z');
+    const allocated = { id: 1, station_id: 5, start_at: startAt };
+    const rate = { amount: 56000, cents: 5600000, blocks: 4, block_minutes: 60, per_block: [], pricing_mode: 'station_rate' };
+    const fixed = { amount: 400000, cents: 40000000, blocks: 1, block_minutes: 60, per_block: [], pricing_mode: 'fixed_price' };
+
+    it('create: un producto station_rate cotiza con la estación asignada y el inicio, y cobra la cotización', async () => {
+      const rentalQuote = { quote: jest.fn().mockResolvedValue(rate) };
+      const { service, prisma, ordersService } = build({ rentalQuote, allocated });
+      await service.create(createDto);
+      expect(rentalQuote.quote).toHaveBeenCalledWith({ productId: 100, variantId: null, stationId: 5, startAt });
+      expect(prisma.bookings.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 77 }, data: expect.objectContaining({ quoted_amount: 56000 }) }),
+      );
+      const items = ordersService.create.mock.calls[0][0].items;
+      expect(items[0]).toEqual(expect.objectContaining({ unit_price: 56000, total_price: 56000 }));
+      expect(ordersService.create.mock.calls[0][0].total_amount).toBe(56000);
+    });
+
+    it('create: un producto de precio fijo guarda el precio de catálogo como quoted_amount y no cambia la línea', async () => {
+      const rentalQuote = { quote: jest.fn().mockResolvedValue(fixed) };
+      const { service, prisma, ordersService } = build({ rentalQuote, allocated });
+      await service.create(createDto);
+      expect(prisma.bookings.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ quoted_amount: 400000 }) }),
+      );
+      expect(ordersService.create.mock.calls[0][0].items[0].unit_price).toBe(400000);
+    });
+
+    it('create: un servicio sin estación no pasa por la cotización', async () => {
+      const rentalQuote = { quote: jest.fn() };
+      const { service, prisma } = build({ rentalQuote, product: { ...stationProduct, requires_station: false } });
+      await service.create(createDto);
+      expect(rentalQuote.quote).not.toHaveBeenCalled();
+      expect(prisma.bookings.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ quoted_amount: expect.anything() }) }),
+      );
+    });
+
+    it('create: una reserva sin hora de fin no se cotiza (la duración no se conoce)', async () => {
+      const rentalQuote = { quote: jest.fn() };
+      const { service } = build({ rentalQuote, allocated });
+      await service.create({ ...createDto, end_time: undefined, is_open_ended: true });
+      expect(rentalQuote.quote).not.toHaveBeenCalled();
+    });
+
+    it('hold: la estación con cobro para reservar aparta behind payment page con el abono (A17)', async () => {
+      const expiresAt = new Date(Date.now() + 30 * 60_000);
+      const rentalQuote = { quote: jest.fn().mockResolvedValue(rate) };
+      const rentalPrepay = {
+        startHoldInTx: jest.fn().mockResolvedValue({ publicToken: 'pr-tok', expiresAt, amount: 28000 }),
+        paymentPath: jest.fn((t: string) => `/pagar/${t}`),
+      };
+      const { service, deposits, prisma } = build({ rentalQuote, rentalPrepay, allocated });
+      const result: any = await service.hold({
+        customer_id: 1, product_id: 100, date: '2099-09-01', start_time: '10:00', end_time: '11:00', station_id: 5,
+      });
+      expect(prisma.bookings.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ quoted_amount: 56000 }) }),
+      );
+      expect(rentalPrepay.startHoldInTx).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ stationId: 5, bookingId: 77 }),
+      );
+      expect(deposits.startHoldInTx).not.toHaveBeenCalled(); // one charge online
+      expect(result.payment_path).toBe('/pagar/pr-tok');
+      expect(result.expires_at).toBe(expiresAt);
+    });
+
+    it('hold: sin cobro para reservar rige el anticipo como hoy', async () => {
+      const rentalQuote = { quote: jest.fn().mockResolvedValue(fixed) };
+      const rentalPrepay = { startHoldInTx: jest.fn().mockResolvedValue(null), paymentPath: jest.fn() };
+      const expiresAt = new Date(Date.now() + 30 * 60_000);
+      const { service, deposits } = build({
+        rentalQuote, rentalPrepay, allocated,
+        deposits: { startHoldInTx: jest.fn().mockResolvedValue({ publicToken: 'dep-tok', expiresAt, amount: 400000 }) },
+      });
+      const result: any = await service.hold({
+        customer_id: 1, product_id: 100, date: '2099-09-01', start_time: '10:00', end_time: '11:00', station_id: 5,
+      });
+      expect(deposits.startHoldInTx).toHaveBeenCalled();
+      expect(result.payment_path).toBe('/pagar/dep-tok');
+    });
   });
 
   it('confirmHold: a hold waiting for its deposit is refused (the payment confirms it)', async () => {

@@ -18,6 +18,7 @@ import { ReservationsService } from './reservations.service';
 import { ReservationsExportService } from './reservations-export.service';
 import { AvailabilityService } from './availability.service';
 import { ReservationDepositsService } from './reservation-deposits.service';
+import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
 import {
   BookingQueryDto,
   AvailabilityQueryDto,
@@ -87,6 +88,7 @@ export class ReservationsController {
     private readonly responseService: ResponseService,
     private readonly prisma: StorePrismaService,
     private readonly reservationDeposits: ReservationDepositsService,
+    private readonly rentalPrepay: RentalPrepayService,
   ) {}
 
   @Get()
@@ -545,6 +547,14 @@ export class ReservationsController {
   @Permissions('store:reservations:update')
   async depositLink(@Param('id', ParseIntPipe) id: number) {
     const result = await this.reservationDeposits.rotateLink(id);
+    return this.responseService.success(result, 'Enlace de pago generado');
+  }
+
+  /** Payment link of the station's "cobro para reservar" (full or partial rental charge, T15). */
+  @Post(':id/prepay-link')
+  @Permissions('store:reservations:update')
+  async prepayLink(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.rentalPrepay.openLink(id);
     return this.responseService.success(result, 'Enlace de pago generado');
   }
 

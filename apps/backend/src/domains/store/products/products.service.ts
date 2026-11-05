@@ -902,6 +902,18 @@ export class ProductsService {
    * Validates and normalizes product data based on product_type.
    * Services cannot have physical attributes (weight, inventory, serial numbers).
    */
+  /** S2 (T15): a rental pricing mode only makes sense for a service that requires a station. */
+  private assertRentalPricingMode(
+    mode: string | null | undefined,
+    isStationService: boolean,
+  ): void {
+    if (mode && !isStationService) {
+      throw new BadRequestException(
+        'El modo de precio del alquiler solo aplica a servicios que requieren estación',
+      );
+    }
+  }
+
   private validateByProductType(dto: Record<string, any>): void {
     if (dto.product_type !== ProductType.SERVICE) return;
 
@@ -1174,6 +1186,11 @@ export class ProductsService {
           'Solo los productos de tipo servicio pueden requerir una estación',
         );
       }
+      this.assertRentalPricingMode(
+        sanitizedDto.rental_pricing_mode,
+        sanitizedDto.product_type === ProductType.SERVICE &&
+          !!sanitizedDto.requires_station,
+      );
 
       // Consultation validation
       if (sanitizedDto.is_consultation) {
@@ -4118,6 +4135,13 @@ export class ProductsService {
         throw new BadRequestException(
           'Solo los productos de tipo servicio pueden requerir una estación',
         );
+      }
+      const isStationService =
+        effectiveProductType === ProductType.SERVICE && !!effectiveRequiresStation;
+      this.assertRentalPricingMode(sanitizedDto.rental_pricing_mode, isStationService);
+      // A product that stops being a station service cannot keep a rental mode.
+      if (!isStationService && sanitizedDto.rental_pricing_mode === undefined) {
+        sanitizedDto.rental_pricing_mode = null;
       }
       if (
         !options?.from_lodging &&

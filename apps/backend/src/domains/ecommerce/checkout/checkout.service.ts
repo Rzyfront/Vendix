@@ -31,6 +31,11 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { RentalQuoteService } from '../../store/service-stations/rental-quote/rental-quote.service';
+import {
+  resolveStoreTimezone,
+  zonedWallClockToUtc,
+} from '../../../common/utils/store-timezone.util';
 import { StockLevelManager } from '../../store/inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../../store/inventory/shared/services/stock-validator.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
@@ -208,7 +213,57 @@ export class CheckoutService {
     // Adiciones de producto. `@Optional()` por el mismo motivo.
     @Optional()
     private readonly optionPricingService?: OptionPricingService,
+    // Cotización de alquiler por estación. `@Optional()` por el mismo motivo.
+    @Optional()
+    private readonly rentalQuote?: RentalQuoteService,
   ) {}
+
+  /**
+   * Station rental priced by time: when the product is `station_rate`, the
+   * line price is the server-side quote for the submitted booking slot (never
+   * the catalog "from" price). Any other product keeps the resolved price.
+   * Returns the chosen station so the booking is created on the quoted one.
+   */
+  private async applyRentalQuote<T extends { net_unit_price: number; gross_unit_price: number; compare_at_price: number | null }>(
+    product: { id: number; rental_pricing_mode?: string | null; requires_station?: boolean | null } | null,
+    variantId: number | null | undefined,
+    bookings: Array<{ product_id: number; product_variant_id?: number | null; station_id?: number | null; date: string; start_time: string }> | undefined,
+    line: T,
+  ): Promise<T> {
+    if (!this.rentalQuote || !product || product.rental_pricing_mode !== 'station_rate') return line;
+    const booking = (bookings ?? []).find(
+      (b) => b.product_id === product.id && (b.product_variant_id ?? null) === (variantId ?? null),
+    );
+    const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(booking?.date ?? '');
+    const time = /^(\d{2}):(\d{2})/.exec(booking?.start_time ?? '');
+    if (!booking || !date || !time) return line;
+    const stationId = await this.resolveRentalStationId(product.id, booking.station_id);
+    if (!stationId) return line;
+    const storeId = RequestContextService.getContext()?.store_id;
+    const tz = storeId ? await resolveStoreTimezone(this.store_prisma, storeId) : 'America/Bogota';
+    const quote = await this.rentalQuote.quote({
+      productId: product.id,
+      variantId: variantId ?? null,
+      stationId,
+      startAt: zonedWallClockToUtc(Number(date[1]), Number(date[2]), Number(date[3]), Number(time[1]), Number(time[2]), 0, 0, tz),
+    });
+    if (quote.pricing_mode !== 'station_rate') return line;
+    return { ...line, net_unit_price: quote.amount, gross_unit_price: quote.amount, compare_at_price: null };
+  }
+
+  /** Submitted station, or the first active station that offers the product. */
+  private async resolveRentalStationId(productId: number, submitted?: number | null): Promise<number | null> {
+    if (submitted) return submitted;
+    const station = await this.store_prisma.service_stations.findFirst({
+      where: {
+        status: 'active',
+        service_station_services_station_fkey: { some: { product_id: productId } },
+      },
+      orderBy: { id: 'asc' },
+      select: { id: true },
+    });
+    return station?.id ?? null;
+  }
 
   /**
    * Copia del impuesto del envío para una orden cuyo costo salió de la tarifa
@@ -1777,8 +1832,8 @@ export class CheckoutService {
       ];
       const depositStation = await this.store_prisma.service_stations.findFirst({
         where: {
-          deposit_policy: 'required',
           status: 'active',
+          OR: [{ deposit_policy: 'required' }, { booking_prepay_mode: { not: 'none' } }],
           service_station_services_station_fkey: { some: { product_id: { in: stationProductIds } } },
         },
         select: { id: true },
@@ -2120,12 +2175,18 @@ export class CheckoutService {
         // solo desdobla el inventario. Se pide la escala NETA (sin `taxRate`)
         // porque el checkout arma el impuesto aparte con `TaxesService`.
         const saleUnit = saleUnitsByIndex[index] ?? null;
-        const line = this.storefrontPrice.resolveLine({
+        const resolvedLine = this.storefrontPrice.resolveLine({
           product: productWithTaxes as any,
           variant: item.product_variant ?? null,
           saleUnit,
           quantity: item.quantity,
         });
+        const line = await this.applyRentalQuote(
+          productWithTaxes as any,
+          item.product_variant_id,
+          dto.bookings,
+          resolvedLine,
+        );
 
         // Adiciones (S3): delta FINAL (con impuestos) por unidad calculado en
         // el servidor sobre los `option_ids` de la línea, igual que en POS.
@@ -2386,11 +2447,23 @@ export class CheckoutService {
     const createdBookingIds: number[] = [];
     try {
       for (const booking of stationBookings) {
+        // A time-rated rental is booked on the station that was quoted.
+        let bookingStationId = booking.station_id ?? undefined;
+        if (!bookingStationId && this.rentalQuote) {
+          const rentalProduct = await this.prisma.products.findFirst({
+            where: { id: booking.product_id },
+            select: { rental_pricing_mode: true },
+          });
+          if (rentalProduct?.rental_pricing_mode === 'station_rate') {
+            bookingStationId =
+              (await this.resolveRentalStationId(booking.product_id)) ?? undefined;
+          }
+        }
         const created = await this.reservationsService.create({
           customer_id: resolved_customer_id ?? undefined,
           product_id: booking.product_id,
           product_variant_id: booking.product_variant_id,
-          station_id: booking.station_id,
+          station_id: bookingStationId,
           provider_id: booking.provider_id,
           date: booking.date,
           start_time: booking.start_time,
