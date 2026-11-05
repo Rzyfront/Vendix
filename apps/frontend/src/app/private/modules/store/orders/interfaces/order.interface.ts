@@ -1308,7 +1308,7 @@ export interface ResolveRefundPayload {
 
 /**
  * * CP-POS-SVC-PERF-001 / C.5 — booking row surfaced via `findOne`. The
- * `provider.employee` chain is the canonical way Vendix resolves the
+ * `provider.user` (or legacy `provider.employee`) chain is how Vendix resolves the
  * assigned staff member (vendix-restaurant-ops equivalent is `staff`).
  */
 export interface OrderBooking {
@@ -1337,6 +1337,14 @@ export interface OrderBooking {
       first_name: string;
       last_name: string;
       avatar_url?: string;
+    } | null;
+    user_id?: number | null;
+    user?: {
+      id: number;
+      first_name: string | null;
+      last_name: string | null;
+      email: string | null;
+      avatar_url: string | null;
     } | null;
   } | null;
 }

@@ -1,8 +1,15 @@
 import { IsInt, IsOptional, IsString } from 'class-validator';
 
 export class CreateProviderDto {
+  /** Store user (non-customer) who provides the service. Preferred. */
+  @IsOptional()
   @IsInt()
-  employee_id: number;
+  user_id?: number;
+
+  /** Legacy: payroll employee. Used only when `user_id` is absent. */
+  @IsOptional()
+  @IsInt()
+  employee_id?: number;
 
   @IsOptional()
   @IsString()

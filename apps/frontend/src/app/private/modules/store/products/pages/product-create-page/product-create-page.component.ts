@@ -1,3 +1,5 @@
+import { ProviderNamePipe } from '../../../../../../shared/pipes/provider-name/provider-name.pipe';
+import { providerDisplayName, providerSubtitle } from '../../../../../../shared/utils/provider-display-name';
 import {
   afterNextRender,
   Component,
@@ -248,7 +250,7 @@ interface PriceTierOverrideRow {
 @Component({
   selector: 'app-product-create-page',
   standalone: true,
-  imports: [
+  imports: [ProviderNamePipe, 
     RouterModule,
     AlertBannerComponent,
     ReactiveFormsModule,
@@ -1219,12 +1221,10 @@ export class ProductCreatePageComponent {
 
   readonly providerSelectorOptions = computed<MultiSelectorOption[]>(() =>
     this.allProviders().map((p) => {
-      const fullName =
-        `${p.employee?.first_name ?? ''} ${p.employee?.last_name ?? ''}`.trim();
       return {
         value: p.id,
-        label: p.display_name || fullName || `Proveedor #${p.id}`,
-        description: p.employee?.position || undefined,
+        label: providerDisplayName(p) || `Proveedor #${p.id}`,
+        description: providerSubtitle(p) || undefined,
       };
     }),
   );
@@ -5733,11 +5733,15 @@ export class ProductCreatePageComponent {
         .toUpperCase()
         .substring(0, 2);
     }
-    if (provider.employee) {
-      return (
-        (provider.employee.first_name?.[0] || '') +
-        (provider.employee.last_name?.[0] || '')
-      ).toUpperCase();
+    const resolved = providerDisplayName(provider);
+    if (resolved) {
+      return resolved
+        .split(' ')
+        .filter(Boolean)
+        .map((w) => w[0])
+        .join('')
+        .toUpperCase()
+        .substring(0, 2);
     }
     return '??';
   }

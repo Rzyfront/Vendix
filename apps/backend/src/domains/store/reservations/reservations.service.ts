@@ -113,6 +113,7 @@ export class ReservationsService {
         display_name: true,
         avatar_url: true,
         employee: { select: { first_name: true, last_name: true } },
+        user: { select: { first_name: true, last_name: true } },
       },
     },
     created_by: {

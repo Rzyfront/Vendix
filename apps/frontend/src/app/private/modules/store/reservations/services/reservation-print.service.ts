@@ -1,3 +1,4 @@
+import { providerDisplayName } from '../../../../../shared/utils/provider-display-name';
 import { Injectable, inject } from '@angular/core';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency/currency.pipe';
 import { DocumentPrintService } from '../../../../../shared/services/print';
@@ -130,10 +131,7 @@ export class ReservationPrintService {
     const channelLabel = channelLabels[booking.channel] || booking.channel;
 
     const providerName = booking.provider
-      ? booking.provider.display_name ||
-        (booking.provider.employee
-          ? `${booking.provider.employee.first_name} ${booking.provider.employee.last_name}`
-          : 'N/A')
+      ? providerDisplayName(booking.provider) || 'N/A'
       : null;
 
     return `

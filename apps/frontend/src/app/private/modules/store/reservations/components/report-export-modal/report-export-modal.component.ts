@@ -1,3 +1,4 @@
+import { providerDisplayName } from '../../../../../../shared/utils/provider-display-name';
 import {
   Component,
   DestroyRef,
@@ -136,7 +137,7 @@ export class ReportExportModalComponent {
           this.providers.set(
             (providers ?? []).map((p) => ({
               value: p.id,
-              label: p.display_name || p.employee?.first_name || `Profesional ${p.id}`,
+              label: providerDisplayName(p) || `Profesional ${p.id}`,
             })),
           ),
         error: () => this.providers.set([]),

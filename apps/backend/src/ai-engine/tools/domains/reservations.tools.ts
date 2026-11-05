@@ -16,6 +16,7 @@ import { ProvidersService } from '../../../domains/store/reservations/providers/
 import { ProviderScheduleService } from '../../../domains/store/reservations/providers/provider-schedule.service';
 import { BusinessHoursService } from '../../../domains/store/reservations/business-hours/business-hours.service';
 import { CreateProviderDto } from '../../../domains/store/reservations/providers/dto/create-provider.dto';
+import { providerDisplayName } from '../../../domains/store/reservations/providers/provider-name.util';
 import { UpdateProviderDto } from '../../../domains/store/reservations/providers/dto/update-provider.dto';
 import { AssignServiceDto } from '../../../domains/store/reservations/providers/dto/assign-service.dto';
 import {
@@ -192,12 +193,7 @@ function compactBooking(booking: any) {
     inicio: booking.start_time ?? null,
     fin: booking.end_time ?? null,
     estado: booking.status,
-    proveedor:
-      booking.provider?.display_name ??
-      [booking.provider?.employee?.first_name, booking.provider?.employee?.last_name]
-        .filter(Boolean)
-        .join(' ') ??
-      null,
+    proveedor: providerDisplayName(booking.provider) || null,
   };
 }
 
@@ -402,12 +398,7 @@ export function createReservationsTools(
             proveedor: booking.provider
               ? {
                   provider_id: booking.provider.id,
-                  nombre:
-                    booking.provider.display_name ??
-                    [booking.provider.employee?.first_name, booking.provider.employee?.last_name]
-                      .filter(Boolean)
-                      .join(' ') ??
-                    null,
+                  nombre: providerDisplayName(booking.provider) || null,
                 }
               : null,
             orden_vinculada: booking.order
@@ -1558,9 +1549,15 @@ export function createReservationsTools(
             type: 'number',
             description: 'Proveedor objetivo (todo salvo create y set_business_hours).',
           },
+          user_id: {
+            type: 'number',
+            description:
+              'Usuario de la tienda (no cliente) a dar de alta como proveedor (solo create). Preferido.',
+          },
           employee_id: {
             type: 'number',
-            description: 'Empleado a dar de alta como proveedor (solo create).',
+            description:
+              'Legado: empleado de nómina a dar de alta como proveedor (solo create, si no hay user_id).',
           },
           display_name: {
             type: 'string',
@@ -1632,10 +1629,7 @@ export function createReservationsTools(
           };
         }
         const providerName = (provider: any): string =>
-          provider?.display_name ??
-          [provider?.employee?.first_name, provider?.employee?.last_name]
-            .filter(Boolean)
-            .join(' ') ??
+          providerDisplayName(provider) ||
           `Proveedor #${provider?.id ?? args.provider_id}`;
         const needProvider = async (): Promise<any | ToolPreview> => {
           const providerId = Number(args.provider_id);
@@ -1663,6 +1657,10 @@ export function createReservationsTools(
 
         if (action === 'create') {
           const validated = toValidatedDto(CreateProviderDto, {
+            ...(args.user_id !== undefined &&
+              args.user_id !== null && {
+                user_id: Number(args.user_id),
+              }),
             ...(args.employee_id !== undefined &&
               args.employee_id !== null && {
                 employee_id: Number(args.employee_id),
@@ -1686,10 +1684,13 @@ export function createReservationsTools(
             target: `Nuevo proveedor${validated.dto.display_name ? `: ${validated.dto.display_name}` : ''}`,
             changes: [
               {
-                field: 'empleado',
-                label: 'Empleado',
+                field: validated.dto.user_id != null ? 'usuario' : 'empleado',
+                label: validated.dto.user_id != null ? 'Usuario' : 'Empleado',
                 from: null,
-                to: `Empleado #${validated.dto.employee_id}`,
+                to:
+                  validated.dto.user_id != null
+                    ? `Usuario #${validated.dto.user_id}`
+                    : `Empleado #${validated.dto.employee_id}`,
               },
               ...(validated.dto.display_name
                 ? [
@@ -1986,14 +1987,15 @@ export function createReservationsTools(
           });
         }
         const providerName = (provider: any): string =>
-          provider?.display_name ??
-          [provider?.employee?.first_name, provider?.employee?.last_name]
-            .filter(Boolean)
-            .join(' ') ??
+          providerDisplayName(provider) ||
           `Proveedor #${provider?.id ?? args.provider_id}`;
         try {
           if (action === 'create') {
             const validated = toValidatedDto(CreateProviderDto, {
+              ...(args.user_id !== undefined &&
+                args.user_id !== null && {
+                  user_id: Number(args.user_id),
+                }),
               ...(args.employee_id !== undefined &&
                 args.employee_id !== null && {
                   employee_id: Number(args.employee_id),
