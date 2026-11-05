@@ -1,0 +1,38 @@
+# BLOQUEO — Bloques 9 (D2) y 10 (D3)
+
+Fecha: 2026-11-05. Rama `feat/flujos-documental`.
+
+## Bloque 9 — plantillas y render HTML→PDF
+
+**Qué pide el brief:** "Servicio de render HTML→PDF en cola aparte con límite de memoria y timeout; `issued_document` conectado al motor; requisito `issued_document`." El diseño (`odd/tasks/flujos-ai-business.md` §10.4, decisión D4) fija Chromium headless en un servicio aislado.
+
+**Por qué se detiene:**
+
+1. No existe ningún motor HTML→PDF en el repo. `apps/backend/package.json` no tiene `puppeteer`, `playwright`, Chromium, Gotenberg ni Handlebars. Hay que agregar dependencias nuevas y cambiar la imagen de Docker.
+2. Es un cambio de entrega e infraestructura (riesgo alto, item 5). Hace falta un contenedor nuevo con `mem_limit` en `docker-compose.yml` y en el workflow de deploy a EC2. El propio compose dice "Subir mem_limit requiere VM con más RAM (hoy 10 GB, 1.6 GB libres)", y el riesgo T4 del plan pide "Medir antes de D2".
+3. Cambiar la topología de producción, la RAM de la VM o el proveedor (por ejemplo un servicio gestionado) no se puede decidir desde el código.
+
+**Decisión que necesito de Rafael (elige una):**
+
+- **A.** Contenedor `vendix_pdf_renderer` (Chromium headless + cola BullMQ `documents-render`, concurrencia 2, timeout 30 s, `mem_limit` ~768 MB) en la VM actual. Requiere confirmar la RAM libre o subir la instancia.
+- **B.** Servicio gestionado de HTML→PDF (por ejemplo Gotenberg en un host aparte, o un SaaS). Requiere la cuenta o el host y el costo.
+- **C.** Render con `pdfkit`, que ya está en el repo, sobre el modelo de bloques: sin HTML/CSS libre, con bloques limitados (títulos, párrafos con tokens, tabla, imagen, salto, casilla de firma). Es una desviación de D4, pero no suma infraestructura.
+
+Con la elección se implementa en orden: `document_templates` y sus versiones inmutables, tokens y filtros, editor por bloques con vista previa, render en cola, `issued_document` en el motor y el requisito.
+
+## Bloque 10 — documento firmado por el cliente
+
+Depende del 9. En el contrato `vendix.workflow/v1`, el requisito `signature` se define con `of`, la clave de un requisito `issued_document` de la misma etapa: el documento firmado es la versión firmada de un documento emitido. Además, el validador rechaza hoy todo `issued_document` mientras no haya plantillas publicadas (`TEMPLATE_NOT_PUBLISHED`), así que no se puede publicar ningún flujo con firma.
+
+Para construir el 10 sin el 9 habría que cambiar el contrato (un `signature` sin `of`, o sea la carga de un documento firmado sin documento emitido de origen), y eso es una decisión de producto. Opciones:
+
+- Esperar al 9.
+- Autorizar `signature` sin `of` como "documento firmado aportado por el cliente".
+
+## Qué se hizo en su lugar
+
+Se sigue con los bloques 11 en adelante, en orden, y cada uno se cierra entero. El estado final queda en `REPORTE-FLUJOS.md`.
+
+## Bloque 14 — OCR/validación IA, plantillas desde PDF base, generación IA de plantillas, retención
+
+No iniciado. Dos de sus cuatro partes (plantillas desde PDF base con coordenadas y generación IA de plantillas) dependen de las plantillas del Bloque 9. Las otras dos (OCR/validación IA con procedencia y revisión humana; políticas de retención y purga con `legal_hold`) son independientes. Se priorizó cerrar con calidad la revisión del PR (verificador independiente, corrección del bloqueante y re-verificación en vivo) en vez de abrir un bloque que no podía cerrarse entero. Siguiente PR: OCR + retención, y el resto cuando se decida el 9.
