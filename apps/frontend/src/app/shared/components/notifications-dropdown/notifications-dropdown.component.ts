@@ -235,6 +235,11 @@ export class NotificationsDropdownComponent {
       case 'auto_renew_disabled_no_credential':
       case 'auto_renew_charge_failed':
         return '/admin/subscription/payment';
+      // Flujos: the backend outbox sends `data.url`; this is the fallback.
+      case 'workflow_task':
+        return d?.instance_id
+          ? `/admin/workflows/instances/${d.instance_id}`
+          : '/admin/workflows/inbox';
       default:
         return null;
     }
@@ -302,6 +307,7 @@ export class NotificationsDropdownComponent {
       // octagon reads louder than the triangle in the bell list.
       auto_renew_disabled_no_credential: 'alert-triangle',
       auto_renew_charge_failed: 'alert-octagon',
+      workflow_task: 'list-checks',
     };
     return map[type] ?? 'bell';
   }

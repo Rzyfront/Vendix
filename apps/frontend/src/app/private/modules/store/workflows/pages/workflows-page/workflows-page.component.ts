@@ -11,13 +11,16 @@ import {
   PaginationComponent,
   ResponsiveDataViewComponent,
   ScrollableTabsComponent,
+  SelectorComponent,
   StatsComponent,
   StickyHeaderComponent,
   TableAction,
   TableColumn,
   ToastService,
+  ToggleComponent,
 } from '../../../../../../shared/components/index';
 import { ScrollableTab } from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
+import { WorkflowPublicLinkModalComponent } from '../../components/public-link-modal.component';
 import { ImportDefinitionModalComponent } from '../../components/import-definition-modal.component';
 import { PublishIssuesModalComponent } from '../../components/publish-issues-modal.component';
 import { StartInstanceModalComponent } from '../../components/start-instance-modal.component';
@@ -74,6 +77,9 @@ const BADGE_LABEL: Record<string, string> = {
     ImportDefinitionModalComponent,
     PublishIssuesModalComponent,
     StartInstanceModalComponent,
+    WorkflowPublicLinkModalComponent,
+    SelectorComponent,
+    ToggleComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -147,6 +153,27 @@ const BADGE_LABEL: Record<string, string> = {
               />
             </div>
           </div>
+          @if (activeTab() === 'requests') {
+            <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3 sm:items-end">
+              <app-selector
+                label="Flujo"
+                [options]="definitionOptions()"
+                [value]="instDefinition()"
+                (valueChange)="onInstanceFilter('definition', $event)"
+              />
+              <app-selector
+                label="Estado"
+                [options]="statusOptions"
+                [value]="instStatus()"
+                (valueChange)="onInstanceFilter('status', $event)"
+              />
+              <app-toggle
+                label="Solo vencidas"
+                [checked]="instOverdue()"
+                (toggled)="onInstanceFilter('overdue', $event)"
+              />
+            </div>
+          }
           <h2 class="mt-2 text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
             {{ activeTab() === 'flows' ? 'Flujos' : 'Solicitudes' }} ({{ totalItems() }})
           </h2>
@@ -218,6 +245,7 @@ const BADGE_LABEL: Record<string, string> = {
       [flowName]="issuesFlow()"
       [issues]="issues()"
     />
+    <app-workflow-public-link-modal [(isOpen)]="linkOpen" [definition]="linkTarget()" />
     <app-start-instance-modal
       [(isOpen)]="startOpen"
       [definition]="startTarget()"
@@ -238,6 +266,7 @@ export class WorkflowsPageComponent implements OnInit {
     { id: 'requests', label: 'Solicitudes', icon: 'list-checks' },
   ];
   readonly headerActions = [
+    { id: 'inbox', label: 'Mis tareas', icon: 'inbox', variant: 'outline' as const },
     { id: 'import', label: 'Nuevo desde JSON', icon: 'plus', variant: 'primary' as const },
   ];
 
@@ -259,6 +288,22 @@ export class WorkflowsPageComponent implements OnInit {
   readonly issuesFlow = signal('');
   readonly startOpen = signal(false);
   readonly startTarget = signal<WorkflowDefinitionRow | null>(null);
+  readonly linkOpen = signal(false);
+  readonly linkTarget = signal<WorkflowDefinitionRow | null>(null);
+
+  readonly statusOptions = [
+    { value: 'all', label: 'Todos los estados' },
+    { value: 'active', label: 'En curso' },
+    { value: 'completed', label: 'Completadas' },
+    { value: 'rejected', label: 'Rechazadas' },
+    { value: 'cancelled', label: 'Canceladas' },
+  ];
+  readonly definitionOptions = signal<{ value: string; label: string }[]>([
+    { value: 'all', label: 'Todos los flujos' },
+  ]);
+  readonly instDefinition = signal('all');
+  readonly instStatus = signal('all');
+  readonly instOverdue = signal(false);
 
   readonly definitionRows = computed<DefinitionView[]>(() =>
     this.definitions().map((row) => ({
@@ -326,6 +371,24 @@ export class WorkflowsPageComponent implements OnInit {
       action: (row: WorkflowDefinitionRow) => this.openStart(row),
     },
     {
+      label: 'Tablero',
+      icon: 'layout-dashboard',
+      variant: 'info',
+      show: (row: WorkflowDefinitionRow) => row.status === 'published',
+      action: (row: WorkflowDefinitionRow) =>
+        this.router.navigate(['/admin/workflows', row.id, 'board']),
+    },
+    {
+      label: 'Enlace público',
+      icon: 'link',
+      variant: 'info',
+      show: (row: WorkflowDefinitionRow) => row.status === 'published',
+      action: (row: WorkflowDefinitionRow) => {
+        this.linkTarget.set(row);
+        this.linkOpen.set(true);
+      },
+    },
+    {
       label: 'Exportar JSON',
       icon: 'download',
       variant: 'info',
@@ -378,18 +441,37 @@ export class WorkflowsPageComponent implements OnInit {
   };
 
   ngOnInit(): void {
+    this.api
+      .listDefinitions({ limit: 100 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) =>
+          this.definitionOptions.set([
+            { value: 'all', label: 'Todos los flujos' },
+            ...(res.data ?? []).map((d) => ({ value: String(d.id), label: d.name })),
+          ]),
+      });
     this.loadStats();
     this.load();
   }
 
   onHeaderAction(id: string): void {
     if (id === 'import') this.importOpen.set(true);
+    if (id === 'inbox') this.router.navigate(['/admin/workflows/inbox']);
   }
 
   onTabChange(tab: string): void {
     if (tab !== 'flows' && tab !== 'requests') return;
     this.activeTab.set(tab);
     this.searchTerm.set('');
+    this.page.set(1);
+    this.load();
+  }
+
+  onInstanceFilter(kind: 'definition' | 'status' | 'overdue', value: unknown): void {
+    if (kind === 'overdue') this.instOverdue.set(value === true);
+    else if (kind === 'status') this.instStatus.set(String(value ?? 'all'));
+    else this.instDefinition.set(String(value ?? 'all'));
     this.page.set(1);
     this.load();
   }
@@ -514,7 +596,16 @@ export class WorkflowsPageComponent implements OnInit {
         });
     } else {
       this.api
-        .listInstances({ page: this.page(), limit: this.limit, search })
+        .listInstances({
+          page: this.page(),
+          limit: this.limit,
+          search,
+          ...(this.instDefinition() !== 'all'
+            ? { definition_id: Number(this.instDefinition()) }
+            : {}),
+          ...(this.instStatus() !== 'all' ? { status: this.instStatus() } : {}),
+          ...(this.instOverdue() ? { overdue: true } : {}),
+        })
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (res) => {

@@ -1,3 +1,4 @@
+import { InstanceComment } from './workflow-ops.interfaces';
 import { WorkflowFieldDef } from '../../../../../shared/workflows/contract/workflow-contract';
 
 /** Paginated envelope of `ResponseService.paginated()`. */
@@ -187,6 +188,7 @@ export interface WorkflowInstanceDetail {
   pending_requirements: { key: string; label: string }[];
   allowed_outcomes: string[];
   dossier: { id: number; reference: string; items: DossierItemView[] } | null;
+  comments?: InstanceComment[];
 }
 
 export interface CompleteTaskBody {

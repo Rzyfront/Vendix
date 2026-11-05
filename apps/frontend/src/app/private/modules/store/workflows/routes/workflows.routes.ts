@@ -5,8 +5,9 @@ import { Routes } from '@angular/router';
  * `routes/private/store_admin.routes.ts`. Panel_ui key: `flows`
  * (industry `administration`, always enforced).
  *
- * Backend permission enforcement (store/workflows): the API checks
- * `store:workflows:*` per endpoint; these entries only describe the read side.
+ * Permissions are enforced by the API per endpoint (`store:workflows:*`);
+ * staff with only `start`/`task` reach their requests and "Mis tareas", and
+ * the backend answers 403 with its message on anything else.
  */
 export const workflowsRoutes: Routes = [
   {
@@ -16,7 +17,16 @@ export const workflowsRoutes: Routes = [
       import('../pages/workflows-page/workflows-page.component').then(
         (c) => c.WorkflowsPageComponent,
       ),
-    data: { permission: 'store:workflows:read' },
+  },
+  {
+    path: 'inbox',
+    loadComponent: () =>
+      import('../pages/inbox-page/inbox-page.component').then((c) => c.InboxPageComponent),
+  },
+  {
+    path: ':id/board',
+    loadComponent: () =>
+      import('../pages/board-page/board-page.component').then((c) => c.BoardPageComponent),
   },
   {
     path: ':id/edit',
@@ -24,7 +34,6 @@ export const workflowsRoutes: Routes = [
       import('../editor/workflow-editor-page.component').then(
         (c) => c.WorkflowEditorPageComponent,
       ),
-    data: { permission: 'store:workflows:design' },
   },
   {
     path: 'instances/:id',
@@ -32,6 +41,5 @@ export const workflowsRoutes: Routes = [
       import('../pages/instance-detail-page/instance-detail-page.component').then(
         (c) => c.InstanceDetailPageComponent,
       ),
-    data: { permission: 'store:workflows:read' },
   },
 ];

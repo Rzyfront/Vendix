@@ -26,6 +26,15 @@ import {
   WorkflowInstanceQuery,
   WorkflowInstanceRow,
 } from '../interfaces/workflow.interfaces';
+import {
+  BoardData,
+  BoardQuery,
+  InboxQuery,
+  InboxTaskRow,
+  InstanceComment,
+  PublicLinkCreated,
+  PublicLinkStatus,
+} from '../interfaces/workflow-ops.interfaces';
 
 export interface DefinitionQuery {
   page?: number;
@@ -231,6 +240,49 @@ export class WorkflowsApiService {
     return this.http.post(`${this.base}/tasks/${taskId}/complete`, body, {
       headers: this.idempotency(idempotencyKey),
     });
+  }
+
+  // ─── Inbox, board, comments, public link ─────────────────────────────
+
+  listInbox(query: InboxQuery = {}): Observable<PaginatedApiResponse<InboxTaskRow>> {
+    return this.http.get<PaginatedApiResponse<InboxTaskRow>>(`${this.base}/inbox`, {
+      params: this.params(query),
+    });
+  }
+
+  getBoard(definitionId: number, query: BoardQuery = {}): Observable<BoardData> {
+    return this.http
+      .get<ApiResponse<BoardData>>(`${this.base}/board/${definitionId}`, {
+        params: this.params(query),
+      })
+      .pipe(map((res) => res.data));
+  }
+
+  addComment(instanceId: number, body: string): Observable<InstanceComment> {
+    return this.http
+      .post<ApiResponse<InstanceComment>>(`${this.base}/instances/${instanceId}/comments`, {
+        body,
+      })
+      .pipe(map((res) => res.data));
+  }
+
+  getPublicLink(definitionId: number): Observable<PublicLinkStatus> {
+    return this.http
+      .get<ApiResponse<PublicLinkStatus>>(`${this.base}/definitions/${definitionId}/public-link`)
+      .pipe(map((res) => res.data));
+  }
+
+  createPublicLink(definitionId: number): Observable<PublicLinkCreated> {
+    return this.http
+      .post<ApiResponse<PublicLinkCreated>>(
+        `${this.base}/definitions/${definitionId}/public-link`,
+        {},
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  revokePublicLink(definitionId: number): Observable<unknown> {
+    return this.http.delete(`${this.base}/definitions/${definitionId}/public-link`);
   }
 
   // ─── Files ───────────────────────────────────────────────────────────

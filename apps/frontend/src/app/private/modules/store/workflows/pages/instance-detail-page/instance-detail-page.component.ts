@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import {
   AlertBannerComponent,
   BadgeComponent,
@@ -22,6 +22,7 @@ import {
 } from '../../../../../../shared/components/index';
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { WorkflowInstanceCommentsComponent } from '../../components/instance-comments.component';
 import { DossierItemsListComponent } from '../../components/dossier-items-list.component';
 import { WorkflowStageFormComponent } from '../../components/stage-form.component';
 import {
@@ -70,6 +71,7 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
     AlertBannerComponent,
     WorkflowStageFormComponent,
     DossierItemsListComponent,
+    WorkflowInstanceCommentsComponent,
   ],
   template: `
     <div class="w-full">
@@ -84,6 +86,8 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
           [badgeText]="statusText()"
           [badgeColor]="statusColor()"
           [metadataContent]="headerMeta()"
+          [actions]="headerActions"
+          (actionClicked)="onHeaderAction($event)"
         />
 
         <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-sm md:hidden">
@@ -249,6 +253,13 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
               />
             </app-card>
 
+            <app-card title="Comentarios" [responsivePadding]="true" overflow="visible">
+              <app-workflow-instance-comments
+                [instanceId]="d.id"
+                [comments]="d.comments ?? []"
+              />
+            </app-card>
+
             <app-card title="Línea de tiempo" [responsivePadding]="true" overflow="visible">
               <ol class="flex flex-col gap-3" data-testid="timeline" aria-label="Línea de tiempo">
                 @for (event of timeline(); track event.seq) {
@@ -282,11 +293,16 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
 export class InstanceDetailPageComponent implements OnInit {
   private readonly api = inject(WorkflowsApiService);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
   private readonly settings = inject(StoreSettingsFacade);
   private readonly destroyRef = inject(DestroyRef);
 
   private readonly stageForm = viewChild(WorkflowStageFormComponent);
+
+  readonly headerActions = [
+    { id: 'board', label: 'Tablero', icon: 'layout-dashboard', variant: 'outline' as const },
+  ];
 
   readonly detail = signal<WorkflowInstanceDetail | null>(null);
   readonly loading = signal(true);
@@ -355,6 +371,13 @@ export class InstanceDetailPageComponent implements OnInit {
       this.detail.set(null);
       this.reload(true);
     });
+  }
+
+  onHeaderAction(id: string): void {
+    const definitionId = this.detail()?.definition.id;
+    if (id === 'board' && definitionId) {
+      this.router.navigate(['/admin/workflows', definitionId, 'board']);
+    }
   }
 
   // ─── Template helpers ────────────────────────────────────────────────
