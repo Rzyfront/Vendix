@@ -348,6 +348,7 @@ export class InboxPageComponent implements OnInit {
         },
         key,
       )
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.inFlight.delete(row.task_id);

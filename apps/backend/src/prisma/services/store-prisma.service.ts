@@ -228,9 +228,7 @@ export class StorePrismaService extends BasePrismaService {
     // ===== Apps (odd/tasks/apps-module.md) =====
     // `store_id` propio NOT NULL → scoping directo por tienda.
     'store_apps',
-    // ===== CRM (PLAN-CRM §2.3) =====
-    // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
-    'crm_conversations',
+    // ===== Flujos y Documentos (odd/tasks/flujos-documental.md) =====
     // Flujos (T3/S3): todas llevan `store_id` propio NOT NULL → scoping directo.
     'workflow_definitions',
     'workflow_versions',
@@ -253,6 +251,9 @@ export class StorePrismaService extends BasePrismaService {
     // Webhooks salientes de Flujos (bloque 13): ambas llevan `store_id` NOT NULL.
     'workflow_webhook_endpoints',
     'workflow_webhook_deliveries',
+    // ===== CRM (PLAN-CRM §2.3) =====
+    // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
+    'crm_conversations',
     'crm_messages',
     'crm_tags',
     'crm_customer_tags',
@@ -1915,7 +1916,7 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.social_webhook_events;
   }
 
-  // CRM (PLAN-CRM §2.3)
+  // Flujos y Documentos (odd/tasks/flujos-documental.md)
   get workflow_definitions() {
     return this.scoped_client.workflow_definitions;
   }
@@ -1984,6 +1985,7 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.workflow_public_links;
   }
 
+  // CRM (PLAN-CRM §2.3)
   get crm_conversations() {
     return this.scoped_client.crm_conversations;
   }

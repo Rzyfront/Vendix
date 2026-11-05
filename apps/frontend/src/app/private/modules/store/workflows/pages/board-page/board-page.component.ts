@@ -286,6 +286,7 @@ export class BoardPageComponent implements OnInit {
               { outcome: move.outcome, expected_row_version: detail.row_version },
               crypto.randomUUID(),
             )
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
                 this.moving.delete(card.id);

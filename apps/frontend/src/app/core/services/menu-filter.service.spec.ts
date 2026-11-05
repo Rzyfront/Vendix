@@ -987,7 +987,12 @@ describe('MenuFilterService — industria siempre aplicada (flujos-documental S6
   });
 
   it('sin la industria administration, sidebar y Apps conservan el módulo y lo marcan con candado', () => {
+    gate.report.calls.reset();
     expect(service.applyAccessGate(['flows'], true, 'sidebar')).toBeTrue();
+    // Visible with a lock: logged as would_hide, never as hidden.
+    expect(gate.report).toHaveBeenCalledOnceWith(
+      jasmine.objectContaining({ key: 'flows', decision: 'would_hide', surface: 'sidebar' }),
+    );
     expect(service.applyAccessGate(['documents'], true, 'apps_card')).toBeTrue();
     expect(service.isIndustryLocked(['flows'])).toBeTrue();
     expect(service.isIndustryLocked(['documents'])).toBeTrue();

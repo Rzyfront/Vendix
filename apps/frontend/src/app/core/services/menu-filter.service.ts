@@ -1658,9 +1658,13 @@ export class MenuFilterService {
       ? verdicts[0]
       : (verdicts.find((verdict) => verdict.layer !== 'industry') ?? verdicts[0]);
     const hides = surface === 'sidebar' || surface === 'apps_card';
+    // An always-enforced key stays visible with a lock on the sidebar and the
+    // Apps card, so it is logged as `would_hide`, never as `hidden`.
     const decision: AccessDecision = block
       ? hides
-        ? 'hidden'
+        ? alwaysEnforced
+          ? 'would_hide'
+          : 'hidden'
         : 'blocked'
       : hides
         ? 'would_hide'
