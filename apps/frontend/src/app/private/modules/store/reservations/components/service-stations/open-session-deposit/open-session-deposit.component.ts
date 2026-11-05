@@ -41,6 +41,18 @@ export function openDepositError(
   return null;
 }
 
+/** Shown when the store sells only to identified customers and the session has none. */
+export const OPEN_CUSTOMER_REQUIRED_MESSAGE =
+  'Esta tienda no vende sin cliente: busca o crea el cliente antes de abrir la atención.';
+
+/**
+ * Same rule as opening a table: with `pos.allow_anonymous_sales` off, the session account
+ * could never be paid (ORD_EDIT_PAY_NOT_ALLOWED_001), so the session needs a customer to open.
+ */
+export function openCustomerError(allowAnonymousSales: boolean, customerId: number | null | undefined): string | null {
+  return allowAnonymousSales || customerId ? null : OPEN_CUSTOMER_REQUIRED_MESSAGE;
+}
+
 /** Deposit block of the "Nuevo ingreso" dialog (S4). Hidden when the station has no deposit policy. */
 @Component({
   selector: 'app-open-session-deposit',

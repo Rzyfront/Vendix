@@ -34,8 +34,10 @@ import type { ServiceStation } from '../../reservations/components/service-stati
 import {
   OpenSessionDepositComponent,
   OpenSessionDepositValue,
+  openCustomerError,
   openDepositError,
 } from '../../reservations/components/service-stations/open-session-deposit/open-session-deposit.component';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import type { CartItem } from '../models/cart.model';
 import { PosServiceSessionPickerComponent } from './pos-service-session-picker.component';
 
@@ -257,6 +259,7 @@ export class PosChargeStationModalComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly integration = inject(PosServiceStationIntegrationService);
   private readonly toastService = inject(ToastService);
+  private readonly settingsFacade = inject(StoreSettingsFacade);
 
   readonly isOpen = input<boolean>(false);
   readonly cartItems = input<CartItem[]>([]);
@@ -319,6 +322,11 @@ export class PosChargeStationModalComponent {
   readonly openBlockReason = computed<string | null>(() => {
     const station = this.selectedStation();
     if (!station) return null;
+    const customerError = openCustomerError(
+      this.settingsFacade.pos()?.allow_anonymous_sales ?? false,
+      this.customer()?.id,
+    );
+    if (customerError) return customerError;
     if (
       station.deposit_policy &&
       station.deposit_policy !== 'none' &&

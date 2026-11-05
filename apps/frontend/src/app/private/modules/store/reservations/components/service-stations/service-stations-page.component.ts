@@ -93,7 +93,12 @@ import {
   stationRentalSummary,
 } from './station-rental-form/station-rental-form.component';
 import { StationRateWindowsComponent } from './station-rate-windows/station-rate-windows.component';
-import { OpenSessionDepositComponent, OpenSessionDepositValue, openDepositError } from './open-session-deposit/open-session-deposit.component';
+import {
+  OpenSessionDepositComponent,
+  OpenSessionDepositValue,
+  openCustomerError,
+  openDepositError,
+} from './open-session-deposit/open-session-deposit.component';
 
 /** El selector de impuesto trabaja con `number`; `null` es «Sin impuesto». */
 function toTaxCategoryId(value: unknown): number | null {
@@ -440,6 +445,8 @@ export class ServiceStationsPageComponent implements OnInit {
   readonly selectedCategory = signal<string>('all');
   readonly selectedStatusFilter = signal<StatusFilterId>('all');
   readonly timezone = computed(() => this.storeSettings.timezone());
+  /** `pos.allow_anonymous_sales`, read as the table and POS flows do: off means a customer is required. */
+  readonly checkinAllowsAnonymous = computed(() => this.storeSettings.pos()?.allow_anonymous_sales ?? false);
 
   // Modals state
   readonly showCreateModal = signal(false);
@@ -2006,7 +2013,9 @@ export class ServiceStationsPageComponent implements OnInit {
 
     // Anticipo (S4): solo viaja si la estación lo pide y el cajero registró monto y medio.
     const deposit = station && station.deposit_policy && station.deposit_policy !== 'none' ? this.checkinDeposit() : null;
-    const depositError = openDepositError(station, this.checkinCustomer()?.id, deposit);
+    const depositError =
+      openCustomerError(this.checkinAllowsAnonymous(), this.checkinCustomer()?.id) ??
+      openDepositError(station, this.checkinCustomer()?.id, deposit);
     if (depositError) {
       this.saving.set(false);
       this.toastService.error(depositError);

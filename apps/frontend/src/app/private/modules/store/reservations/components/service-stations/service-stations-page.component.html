@@ -720,8 +720,12 @@
           <span>Datos del Cliente</span>
         </span>
         <app-customer-select
-          label="Cliente registrado (opcional)"
-          helpText="Busca o crea el cliente para vincular la atención a su perfil. Puedes continuar sin cliente."
+          [label]="checkinAllowsAnonymous() ? 'Cliente registrado (opcional)' : 'Cliente registrado'"
+          [helpText]="
+            checkinAllowsAnonymous()
+              ? 'Busca o crea el cliente para vincular la atención a su perfil. Puedes continuar sin cliente.'
+              : 'Esta tienda no vende sin cliente: búscalo o créalo para abrir la atención.'
+          "
           [selected]="checkinCustomer()"
           (selectedChange)="onCheckinCustomerChange($event)"
           [createInitialValues]="checkinCustomerInitialValues()"
