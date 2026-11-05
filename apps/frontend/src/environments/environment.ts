@@ -6,6 +6,8 @@ export const environment = {
   commercialAnalyticsId: 'G-1N43GNPS5Q',
   // Editorial preview: activation requires a separate publication review.
   sectorGuidesEnabled: false,
+  // SEO-OPS-19: página /implementacion, apagada en producción hasta la aprobación de Ventas y Producto.
+  implementationPageEnabled: false,
 
   // Configuración para producción
   debugDomainDetection: false,

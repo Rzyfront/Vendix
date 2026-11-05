@@ -1,0 +1,112 @@
+<a class="skip-link" [routerLink]="[]" fragment="implementation-content">Saltar al contenido</a>
+<header class="guide-header">
+  <a routerLink="/" class="guide-brand"
+    ><img src="/vlogo-128.png" alt="" width="32" height="32" />Vendix</a
+  >
+  <nav aria-label="Navegación principal">
+    <a routerLink="/pricing">Planes y precios</a>
+    <a routerLink="/ayuda">Centro de ayuda</a>
+  </nav>
+</header>
+<main id="implementation-content" class="guide-content">
+  <p class="preview-label">Borrador para revisión · Sin publicar</p>
+  <h1>Cómo empezamos con Vendix en tu negocio</h1>
+  <p class="guide-intro">
+    Cambiar de sistema da miedo cuando no sabes qué te toca a ti y qué hace el equipo. Aquí está
+    todo, sin letra pequeña: qué incluye la puesta en marcha, qué haces tú y qué no te prometemos.
+  </p>
+  <div class="implementation-ctas">
+    <a class="implementation-cta implementation-cta--primary" [href]="whatsappUrl" target="_blank" rel="noopener"
+      >Cuéntanos cómo trabaja tu negocio</a
+    >
+    <a class="implementation-cta" routerLink="/auth/register">Probar 14 días gratis</a>
+  </div>
+
+  <section class="article-section" aria-labelledby="incluye">
+    <h2 id="incluye">Qué incluye la implementación</h2>
+    <p>Con tu plan, el equipo de Vendix te ayuda a:</p>
+    <ul>
+      @for (item of included; track item) {
+        <li>{{ item }}</li>
+      }
+    </ul>
+    <p>
+      ¿Tienes muchos productos y prefieres que los cargue el equipo? Pide la
+      <strong>implementación avanzada</strong>: es opcional, se cobra por hora y te la cotizamos según
+      tu caso.
+    </p>
+  </section>
+
+  <section class="article-section" aria-labelledby="etapas">
+    <h2 id="etapas">Las etapas</h2>
+    @for (stage of stages; track stage.title; let i = $index) {
+      <h3>{{ i + 1 }}. {{ stage.title }}</h3>
+      <p>{{ stage.text }}</p>
+      @if (stage.you && stage.team) {
+        <ul class="implementation-roles">
+          <li><strong>Tú:</strong> {{ stage.you }}</li>
+          <li><strong>Nosotros:</strong> {{ stage.team }}</li>
+        </ul>
+      }
+    }
+  </section>
+
+  <section class="article-section" aria-labelledby="roles">
+    <h2 id="roles">Qué aportas tú y qué hacemos nosotros</h2>
+    <table class="implementation-table">
+      <thead>
+        <tr>
+          <th scope="col">Tú</th>
+          <th scope="col">Equipo Vendix</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of responsibilities; track row.you) {
+          <tr>
+            <td>{{ row.you }}</td>
+            <td>{{ row.team }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </section>
+
+  <section class="article-section" aria-labelledby="dian">
+    <h2 id="dian">Facturación electrónica: qué depende de ti y de la DIAN</h2>
+    <p>
+      El certificado digital y la resolución de numeración son de tu comercio, no de Vendix. En los
+      planes Empresarial Pro e IA Business, Vendix incluye el certificado y hace la configuración
+      fiscal y de nómina; en Impulsa y Emprendedor la haces tú con tu propio certificado. En todos los
+      casos, el tiempo de habilitación depende de la DIAN y de los trámites de tu negocio, así que no
+      te prometemos una fecha.
+    </p>
+  </section>
+
+  <section class="article-section" aria-labelledby="no-prometemos">
+    <h2 id="no-prometemos">Lo que no te prometemos</h2>
+    <ul>
+      @for (item of notPromised; track item) {
+        <li>{{ item }}</li>
+      }
+    </ul>
+  </section>
+
+  <section class="article-section implementation-faq" aria-labelledby="preguntas">
+    <h2 id="preguntas">Preguntas frecuentes</h2>
+    @for (faq of faqs; track faq.question) {
+      <h3>{{ faq.question }}</h3>
+      <p>{{ faq.answer }}</p>
+    }
+  </section>
+
+  <section class="guide-checklist" aria-labelledby="sin-amarres">
+    <h2 id="sin-amarres">Sin amarres</h2>
+    <p>Pruebas 14 días sin tarjeta, eliges cuándo empezar y cancelas cuando quieras.</p>
+    <div class="implementation-ctas">
+      <a class="implementation-cta implementation-cta--primary" [href]="whatsappUrl" target="_blank" rel="noopener"
+        >Cuéntanos cómo trabaja tu negocio</a
+      >
+      <a class="implementation-cta" routerLink="/auth/register">Probar 14 días gratis</a>
+    </div>
+  </section>
+</main>
