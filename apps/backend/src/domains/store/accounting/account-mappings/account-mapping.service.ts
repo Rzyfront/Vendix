@@ -479,6 +479,28 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '2805',
     description: 'Anticipos de Clientes (depósito de reserva)',
   },
+  // Estaciones — anticipo consumible: anticipo de cliente en la billetera,
+  // aplicado a la cuenta, devuelto o dejado como saldo a favor.
+  'service_deposit.cash': {
+    code: '1105',
+    description: 'Caja (anticipo de estación)',
+  },
+  'service_deposit.bank': {
+    code: '1110',
+    description: 'Banco (anticipo de estación)',
+  },
+  'service_deposit.customer_advance': {
+    code: '2805',
+    description: 'Anticipos de Clientes (anticipo de estación)',
+  },
+  'service_deposit.refund_cash': {
+    code: '1105',
+    description: 'Caja (devolución de anticipo de estación)',
+  },
+  'service_deposit.refund_bank': {
+    code: '1110',
+    description: 'Banco (devolución de anticipo de estación)',
+  },
   'lodging.deposit_retained.customer_advance': {
     code: '2805',
     description: 'Anticipos de Clientes (depósito retenido)',
@@ -1160,6 +1182,8 @@ export const MAPPING_EVENT_LABELS: Record<string, string> = {
   'lodging.folio_sale_settlement': 'Cruce de anticipos de venta de folio hotelero',
   'lodging.deposit': 'Depósito de reserva hotelera',
   'lodging.deposit_retained': 'Penalidad retenida del depósito',
+  'service_deposit.received': 'Anticipo de estación recibido',
+  'service_deposit.refunded': 'Anticipo de estación devuelto',
   'lodging.reservation_payment_retained': 'Penalidad retenida del pago en línea',
   'order.completed': 'Orden completada',
   'order_item.prepared_waste': 'Merma de plato preparado',

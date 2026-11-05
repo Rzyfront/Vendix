@@ -6487,6 +6487,41 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El depósito no es válido para la reserva',
   },
+  SERVICE_DEPOSIT_001: {
+    code: 'SERVICE_DEPOSIT_001',
+    httpStatus: 400,
+    devMessage: 'El anticipo debe ser mayor a cero',
+  },
+  SERVICE_DEPOSIT_002: {
+    code: 'SERVICE_DEPOSIT_002',
+    httpStatus: 400,
+    devMessage: 'Identifica al cliente para recibir el anticipo',
+  },
+  SERVICE_DEPOSIT_003: {
+    code: 'SERVICE_DEPOSIT_003',
+    httpStatus: 404,
+    devMessage: 'No se encontró el anticipo',
+  },
+  SERVICE_DEPOSIT_004: {
+    code: 'SERVICE_DEPOSIT_004',
+    httpStatus: 409,
+    devMessage: 'El saldo del anticipo no alcanza',
+  },
+  SERVICE_DEPOSIT_005: {
+    code: 'SERVICE_DEPOSIT_005',
+    httpStatus: 409,
+    devMessage: 'La cuenta no tiene saldo por cubrir con el anticipo',
+  },
+  SERVICE_DEPOSIT_006: {
+    code: 'SERVICE_DEPOSIT_006',
+    httpStatus: 409,
+    devMessage: 'La billetera del cliente no tiene saldo para el anticipo',
+  },
+  SERVICE_DEPOSIT_007: {
+    code: 'SERVICE_DEPOSIT_007',
+    httpStatus: 409,
+    devMessage: 'El consumo supera el anticipo: recarga el anticipo para continuar',
+  },
   LODGING_RESTRICTION_STAY_001: {
     code: 'LODGING_RESTRICTION_STAY_001',
     httpStatus: 409,

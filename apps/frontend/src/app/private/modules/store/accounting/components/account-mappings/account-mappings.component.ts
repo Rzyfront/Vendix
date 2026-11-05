@@ -153,6 +153,12 @@ const GROUP_DEFINITIONS: Array<{
     ],
   },
   {
+    key: 'service_deposits',
+    label: 'Estaciones (anticipos)',
+    icon: 'clock',
+    prefixes: ['service_deposit.'],
+  },
+  {
     key: 'layaway',
     label: 'Plan Separe',
     icon: 'clock',
@@ -255,6 +261,7 @@ const GROUP_DEFINITIONS: Array<{
 const GROUP_FLOW_MAP: Record<string, string> = {
   invoicing: 'invoicing',
   payments: 'payments',
+  service_deposits: 'payments',
   expenses: 'expenses',
   payroll: 'payroll',
   credit_sales: 'credit_sales',

@@ -1260,6 +1260,8 @@ export class AutoEntryService {
       'lodging.folio_sale_settlement': 'auto_invoice',
       'lodging.deposit': 'auto_payment',
       'lodging.deposit_retained': 'auto_payment',
+      'service_deposit.received': 'auto_payment',
+      'service_deposit.refunded': 'auto_payment',
       'lodging.reservation_payment_retained': 'auto_payment',
       'depreciation.monthly': 'auto_depreciation',
       'disposal.fixed_asset': 'auto_depreciation',
@@ -6671,6 +6673,125 @@ export class AutoEntryService {
       lines,
       user_id: data.user_id,
     });
+  }
+
+  /**
+   * service_deposit.received: DR Caja/Banco → CR Anticipos de Clientes (2805).
+   * The consumable deposit of a station booking or session is a customer
+   * advance held in the customer's wallet, never revenue: it is applied to the
+   * station bill (`payment.received` with the wallet method drains 2805),
+   * refunded (`service_deposit.refunded`) or left as customer credit. VAT on
+   * the advance is pending the accountant (A3). `source_id` is the
+   * `service_deposits.id` of the `received` row (never `wallet_id`).
+   */
+  async onServiceDepositReceived(data: {
+    deposit_id: number;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    payment_method_type?: string;
+    booking_id?: number | null;
+    session_id?: number | null;
+    customer?: AutoEntryThirdParty;
+    user_id?: number;
+  }) {
+    const cash_bank_key =
+      data.payment_method_type === 'cash' ? 'service_deposit.cash' : 'service_deposit.bank';
+    const where = this.serviceDepositTarget(data);
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        cash_bank_key,
+        `Anticipo ${where}`,
+        data.amount,
+        0,
+        data.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'service_deposit.customer_advance',
+        `Anticipo de cliente ${where}`,
+        0,
+        data.amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'service_deposit.received',
+      source_id: data.deposit_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Anticipo de estación ${where}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * service_deposit.refunded: DR Anticipos de Clientes (2805) → CR Caja/Banco.
+   * The deposit goes back to the customer. `source_id` is the `service_deposits.id`
+   * of the `refunded` row.
+   */
+  async onServiceDepositRefunded(data: {
+    deposit_id: number;
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    payment_method_type?: string;
+    booking_id?: number | null;
+    session_id?: number | null;
+    customer?: AutoEntryThirdParty;
+    user_id?: number;
+  }) {
+    const cash_bank_key =
+      data.payment_method_type === 'cash'
+        ? 'service_deposit.refund_cash'
+        : 'service_deposit.refund_bank';
+    const where = this.serviceDepositTarget(data);
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'service_deposit.customer_advance',
+        `Devolución de anticipo ${where}`,
+        data.amount,
+        0,
+        data.store_id,
+        data.customer,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        cash_bank_key,
+        `Devolución de anticipo ${where}`,
+        0,
+        data.amount,
+        data.store_id,
+        data.customer,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'service_deposit.refunded',
+      source_id: data.deposit_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `Devolución de anticipo de estación ${where}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  private serviceDepositTarget(data: {
+    booking_id?: number | null;
+    session_id?: number | null;
+  }): string {
+    return data.session_id != null
+      ? `sesión ${data.session_id}`
+      : `reserva ${data.booking_id ?? ''}`.trim();
   }
 
   /**
