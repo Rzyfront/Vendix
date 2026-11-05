@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionV1, startStage } from '@common/workflows/contract';
+import { DossiersService } from '../../documents/dossiers.service';
 import {
   StartWorkflowInput,
   WorkflowActor,
@@ -24,6 +25,7 @@ export class WorkflowStartService {
     private readonly stages: WorkflowStageService,
     private readonly events: WorkflowEventsService,
     private readonly references: WorkflowReferenceService,
+    private readonly dossiers: DossiersService,
   ) {}
 
   async execute(
@@ -84,6 +86,8 @@ export class WorkflowStartService {
       },
     })) as WorkflowInstanceRow;
 
+    // One dossier per request, in the same transaction as the instance.
+    await this.dossiers.createForInstance(tx, created);
     await this.events.append(tx, {
       store_id: ctx.store_id,
       instance_id: created.id,

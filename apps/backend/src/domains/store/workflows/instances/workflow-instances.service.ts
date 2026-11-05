@@ -9,6 +9,7 @@ import {
   visibleFieldKeys,
 } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { DossiersService } from '../../documents/dossiers.service';
 import { WorkflowAssignmentService } from '../engine/workflow-assignment.service';
 import {
   WorkflowInstanceRow,
@@ -39,6 +40,7 @@ export class WorkflowInstancesService {
     private readonly prisma: StorePrismaService,
     private readonly assignment: WorkflowAssignmentService,
     private readonly requirements: WorkflowRequirementsService,
+    private readonly dossiers: DossiersService,
   ) {}
 
   private ctx() {
@@ -115,6 +117,17 @@ export class WorkflowInstancesService {
         { id: { in: [...ids] } },
       ],
     };
+  }
+
+  /** Whether the current caller may see the instance (same rule as `get`). */
+  async canSee(id: number): Promise<boolean> {
+    const c = this.ctx();
+    const visible = await this.visibility(c);
+    const row = await this.prisma.workflow_instances.findFirst({
+      where: { AND: [{ id, store_id: c.store_id }, ...(visible ? [visible] : [])] },
+      select: { id: true },
+    });
+    return !!row;
   }
 
   async list(input: ListInstancesInput = {}) {
@@ -286,6 +299,7 @@ export class WorkflowInstancesService {
       active && stage
         ? await this.requirements.pendingRequirements(instance, stage, this.prisma)
         : [];
+    const dossier = await this.dossiers.summaryForInstance(instance.id);
     const outcomes = new Set(stageOutcomes(stage ?? ({ type: 'end' } as any)));
     const allowed_outcomes =
       active && human && stage
@@ -325,6 +339,17 @@ export class WorkflowInstancesService {
             name: stage.name,
             type: stage.type,
             description: stage.description ?? null,
+            requirements: (stage.requirements ?? []).map((r) => ({
+              key: r.key,
+              kind: r.kind,
+              label: r.label,
+              accept: 'accept' in r ? (r.accept ?? null) : null,
+              max_size_mb: r.kind === 'upload' ? (r.max_size_mb ?? null) : null,
+              blocks_exit:
+                r.kind === 'file_field' || r.kind === 'issued_document'
+                  ? true
+                  : r.blocks_exit !== false,
+            })),
             form_fields: definition
               ? visibleFieldKeys(definition, stage, instance.data ?? {})
                   .map((k) => definition.fields.find((f) => f.key === k))
@@ -345,6 +370,7 @@ export class WorkflowInstancesService {
         occurred_at: e.occurred_at,
       })),
       pending_requirements: pending,
+      dossier,
       allowed_outcomes,
     };
   }

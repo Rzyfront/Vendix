@@ -38,6 +38,7 @@ const EXPECTED: Array<[any, string, string, string, string]> = [
   [WorkflowInstancesController, 'get', R, 'GET', ':id'],
   [WorkflowInstancesController, 'cancel', M, 'POST', ':id/cancel'],
   [WorkflowInstancesController, 'forceTransition', M, 'POST', ':id/force-transition'],
+  [WorkflowInstancesController, 'uploadFile', T, 'POST', ':id/files'],
   [WorkflowTasksController, 'claim', T, 'POST', ':id/claim'],
   [WorkflowTasksController, 'complete', T, 'POST', ':id/complete'],
   [WorkGroupsController, 'list', R, 'GET', '/'],
@@ -98,7 +99,7 @@ describe('controladores de Flujos', () => {
       completeTask: jest.fn().mockResolvedValue({ instance: { id: 1 } }),
     };
     const responses = new ResponseService();
-    const instances = new WorkflowInstancesController(engine as any, {} as any, responses);
+    const instances = new WorkflowInstancesController(engine as any, {} as any, responses, {} as any);
     const tasks = new WorkflowTasksController(engine as any, responses);
     beforeEach(() => jest.clearAllMocks());
 

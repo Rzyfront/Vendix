@@ -410,12 +410,21 @@ describe('WorkflowEngineService', () => {
       expect(r.instance.status).toBe('rejected');
     });
 
-    it('file_field se cumple cuando el campo de la solicitud tiene valor', async () => {
+    it('file_field se cumple cuando el campo apunta a un archivo del expediente de la solicitud', async () => {
       kit.db.table('workflow_versions')[0].definition = withRequirements({
         requirements: [{ kind: 'file_field', key: 'inv', label: 'Factura', field: 'invoice' }],
       });
       const approval = await toManager();
-      kit.db.table('workflow_instances')[0].data.invoice = 'file-1';
+      const file = kit.db.insert('stored_files', { store_id: 1, organization_id: 1, s3_key: 'k/1' });
+      const dossier = kit.db.table('dossiers')[0];
+      kit.db.insert('dossier_items', {
+        store_id: 1,
+        dossier_id: dossier.id,
+        kind: 'uploaded_file',
+        field_key: 'invoice',
+        file_id: file.id,
+      });
+      kit.db.table('workflow_instances')[0].data.invoice = file.id;
       kit.as({ user_id: 2 });
       const r = await kit.engine.completeTask({ taskId: approval.id, outcome: 'approve', expectedRowVersion: 1 });
       expect(r.instance.status).toBe('completed');

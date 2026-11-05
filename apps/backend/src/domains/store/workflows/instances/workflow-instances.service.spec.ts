@@ -1,5 +1,4 @@
 import { VendixHttpException } from '@common/errors';
-import { DefaultWorkflowRequirementsService } from '../engine/workflow-requirements.service';
 import { WorkflowInstancesService } from './workflow-instances.service';
 import {
   buildWorkflowKit,
@@ -50,7 +49,8 @@ describe('WorkflowInstancesService', () => {
     svc = new WorkflowInstancesService(
       kit.prisma,
       kit.assignment,
-      new DefaultWorkflowRequirementsService(),
+      kit.requirements,
+      kit.dossiers,
     );
     A = await startAs(4, 5000);
     B = await startAs(5, 500);

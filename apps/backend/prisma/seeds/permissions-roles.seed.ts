@@ -4859,6 +4859,15 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/work-groups',
       method: 'POST',
     },
+    // Documental D1 (odd/tasks/flujos-documental.md, S5): expedientes y
+    // descarga de documentos. owner/admin/manager; el resto accede solo como
+    // participante de la solicitud (regla de visibilidad de Flujos).
+    {
+      name: 'store:documents:read',
+      description: 'Ver expedientes y descargar los documentos de la tienda',
+      path: '/api/store/documents',
+      method: 'GET',
+    },
   ];
 
   // Create-only seed: never delete existing permission rows.

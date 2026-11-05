@@ -20,6 +20,9 @@ const SCOPED = new Set([
   'workflow_task_votes',
   'workflow_instance_events',
   'workflow_outbox',
+  'stored_files',
+  'dossiers',
+  'dossier_items',
   'store_users',
 ]);
 
@@ -34,6 +37,11 @@ const UNIQUES: Record<string, string[][]> = {
   workflow_versions: [['definition_id', 'version']],
   work_groups: [['store_id', 'key']],
   work_group_members: [['work_group_id', 'user_id']],
+  stored_files: [['s3_key']],
+  dossiers: [
+    ['store_id', 'reference'],
+    ['workflow_instance_id'],
+  ],
 };
 
 const DEFAULTS: Record<string, Row> = {
@@ -75,6 +83,29 @@ const DEFAULTS: Record<string, Row> = {
     idempotency_key: null,
     payload: {},
   },
+  stored_files: {
+    source: 'upload',
+    uploaded_by_id: null,
+    retention_until: null,
+    legal_hold: false,
+    deleted_at: null,
+  },
+  dossiers: {
+    subject_type: null,
+    subject_id: null,
+    workflow_instance_id: null,
+    closed_at: null,
+  },
+  dossier_items: {
+    requirement_key: null,
+    stage_key: null,
+    field_key: null,
+    file_id: null,
+    note: null,
+    status: 'received',
+    supersedes_id: null,
+    added_by_id: null,
+  },
   work_group_members: { is_lead: false, is_available: true },
   work_groups: { is_active: true },
 };
@@ -85,6 +116,9 @@ const TIMESTAMPS: Record<string, string[]> = {
   workflow_instances: ['created_at'],
   workflow_versions: ['published_at'],
   workflow_instance_events: ['occurred_at'],
+  stored_files: ['created_at'],
+  dossiers: ['created_at', 'updated_at'],
+  dossier_items: ['created_at'],
 };
 
 function eq(a: any, b: any): boolean {
@@ -345,6 +379,13 @@ export class FakeWorkflowDb {
       if (out !== undefined) return out;
     }
     if (text.includes('FOR NO KEY UPDATE')) return [{ id: values[0] }];
+    if (text.includes('FROM dossiers') && text.includes('MAX(CAST(SUBSTRING(reference')) {
+      const store = values[0];
+      const nums = this.table('dossiers')
+        .filter((d) => d.store_id === store && /^EXP-\d+$/.test(d.reference))
+        .map((d) => Number(d.reference.slice(4)));
+      return [{ n: Math.max(0, ...nums) + 1 }];
+    }
     if (text.includes('MAX(CAST(SUBSTRING(reference')) {
       const store = values[0];
       const nums = this.table('workflow_instances')

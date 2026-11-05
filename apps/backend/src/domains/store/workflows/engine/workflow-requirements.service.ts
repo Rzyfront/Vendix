@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { WorkflowStageDef } from '@common/workflows/contract';
+import { DossiersService } from '../../documents/dossiers.service';
 import {
   PendingRequirement,
   WorkflowInstanceRow,
   WorkflowRequirementsService,
+  WorkflowTx,
 } from './workflow-engine.types';
 
 function isFilled(v: unknown): boolean {
@@ -15,30 +17,74 @@ function isFilled(v: unknown): boolean {
   );
 }
 
+function fileIdsOf(v: unknown): number[] {
+  const list = Array.isArray(v) ? v : [v];
+  return list.filter((x): x is number => Number.isInteger(x) && (x as number) > 0);
+}
+
 /**
- * Default evaluation. `file_field` is satisfied when the instance data field is
- * non-empty. `upload`, `issued_document` and `signature` have no storage yet
- * (documents block): they are reported as pending whenever they block the exit,
- * and the documents module replaces this provider with the real evaluation.
+ * Evaluation backed by the instance dossier.
+ *
+ * - `upload`: satisfied when the dossier holds an active (`received` |
+ *   `validated`) item with that `requirement_key`. `blocks_exit: false` never
+ *   blocks (it is not reported as pending).
+ * - `file_field`: the instance data field is non-empty AND every file id in it
+ *   is a stored file of this store that belongs to the instance dossier.
+ * - `issued_document` / `signature`: still pending whenever they block the
+ *   exit (issuing and signing arrive with later documents tasks; the validator
+ *   already refuses to publish an `issued_document` without a published template).
  */
 @Injectable()
-export class DefaultWorkflowRequirementsService extends WorkflowRequirementsService {
+export class DossierWorkflowRequirementsService extends WorkflowRequirementsService {
+  constructor(private readonly dossiers: DossiersService) {
+    super();
+  }
+
   async pendingRequirements(
-    instance: Pick<WorkflowInstanceRow, 'data'>,
+    instance: Pick<WorkflowInstanceRow, 'id' | 'data' | 'current_stage_key'> &
+      Partial<WorkflowInstanceRow>,
     stage: WorkflowStageDef,
+    tx?: WorkflowTx,
   ): Promise<PendingRequirement[]> {
+    const requirements = stage.requirements ?? [];
+    if (requirements.length === 0) return [];
+    const dossier = requirements.some((r) => r.kind === 'upload' || r.kind === 'file_field')
+      ? await this.dossiers.getByInstance(instance.id, tx)
+      : null;
+
     const pending: PendingRequirement[] = [];
-    for (const req of stage.requirements ?? []) {
-      if (req.kind === 'file_field') {
-        if (!isFilled((instance.data ?? {})[req.field])) {
-          pending.push({ key: req.key, label: req.label });
+    for (const req of requirements) {
+      switch (req.kind) {
+        case 'file_field': {
+          const value = (instance.data ?? {})[req.field];
+          if (!isFilled(value)) {
+            pending.push({ key: req.key, label: req.label });
+            break;
+          }
+          const ids = fileIdsOf(value);
+          const missing = dossier
+            ? await this.dossiers.missingFileIds(dossier.id, ids, tx)
+            : ids;
+          if (ids.length === 0 || missing.length > 0) {
+            pending.push({ key: req.key, label: req.label });
+          }
+          break;
         }
-        continue;
+        case 'upload': {
+          if (req.blocks_exit === false) break;
+          const done = dossier
+            ? await this.dossiers.hasActiveItem(dossier.id, req.key, tx)
+            : false;
+          if (!done) pending.push({ key: req.key, label: req.label });
+          break;
+        }
+        case 'signature':
+          if (req.blocks_exit !== false) pending.push({ key: req.key, label: req.label });
+          break;
+        case 'issued_document':
+          pending.push({ key: req.key, label: req.label });
+          break;
       }
-      // upload / signature: blocks_exit defaults to true; issued_document blocks.
-      const blocks =
-        req.kind === 'issued_document' ? true : req.blocks_exit !== false;
-      if (blocks) pending.push({ key: req.key, label: req.label });
     }
     return pending;
   }

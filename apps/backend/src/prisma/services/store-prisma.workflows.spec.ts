@@ -19,6 +19,10 @@ const WORKFLOW_MODELS = [
   'workflow_task_votes',
   'workflow_instance_events',
   'workflow_outbox',
+  // Documental D1 (S5)
+  'stored_files',
+  'dossiers',
+  'dossier_items',
 ] as const;
 
 describe('StorePrismaService · aislamiento de Flujos', () => {

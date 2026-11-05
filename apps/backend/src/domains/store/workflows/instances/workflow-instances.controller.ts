@@ -7,8 +7,12 @@ import {
   ParseIntPipe,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ResponseService } from '@common/responses/response.service';
 
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
@@ -23,6 +27,9 @@ import {
   StartWorkflowDto,
   WorkflowInstancesQueryDto,
 } from '../dto/workflow-instance.dto';
+import { HARD_MAX_FILE_BYTES } from '../../documents/documents.constants';
+import { UploadWorkflowFileDto } from '../dto/upload-workflow-file.dto';
+import { WorkflowFilesService } from '../files/workflow-files.service';
 import { WorkflowInstancesService } from './workflow-instances.service';
 
 /** Instances: start, list/detail (read model) and admin commands. */
@@ -34,6 +41,7 @@ export class WorkflowInstancesController {
     private readonly engine: WorkflowEngineService,
     private readonly instances: WorkflowInstancesService,
     private readonly responseService: ResponseService,
+    private readonly workflowFiles: WorkflowFilesService,
   ) {}
 
   @Post()
@@ -90,5 +98,27 @@ export class WorkflowInstancesController {
       expectedRowVersion: dto.expected_row_version,
     });
     return this.responseService.updated(result);
+  }
+
+  /**
+   * Adjunta un archivo a la etapa ACTUAL: `requirement_key` (requisito `upload`)
+   * XOR `field_key` (campo `file` del formulario; devuelve `file_id` para que el
+   * cliente lo ponga en los valores del formulario, aquí no se escribe `data`).
+   */
+  @Post(':id/files')
+  @Permissions('store:workflows:task')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: HARD_MAX_FILE_BYTES, files: 1 },
+    }),
+  )
+  async uploadFile(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() dto: UploadWorkflowFileDto,
+  ) {
+    const result = await this.workflowFiles.upload(id, file, dto);
+    return this.responseService.created(result, 'Archivo recibido');
   }
 }

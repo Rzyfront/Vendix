@@ -8,10 +8,15 @@ import { WorkflowEngineService } from '../../domains/store/workflows/engine/work
 import { WorkflowEventsService } from '../../domains/store/workflows/engine/workflow-events.service';
 import { WorkflowLoaderService } from '../../domains/store/workflows/engine/workflow-loader.service';
 import { WorkflowReferenceService } from '../../domains/store/workflows/engine/workflow-reference.service';
-import { DefaultWorkflowRequirementsService } from '../../domains/store/workflows/engine/workflow-requirements.service';
+import { DossierWorkflowRequirementsService } from '../../domains/store/workflows/engine/workflow-requirements.service';
 import { WorkflowStageService } from '../../domains/store/workflows/engine/workflow-stage.service';
 import { WorkflowStartService } from '../../domains/store/workflows/engine/workflow-start.service';
 import { WorkflowTickService } from '../../domains/store/workflows/engine/workflow-tick.service';
+import { DossiersService } from '../../domains/store/documents/dossiers.service';
+import { StoredFilesService } from '../../domains/store/documents/stored-files.service';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { WorkflowFilesService } from '../../domains/store/workflows/files/workflow-files.service';
+import { WorkflowInstancesService } from '../../domains/store/workflows/instances/workflow-instances.service';
 import { WorkGroupsService } from '../../domains/store/workflows/work-groups.service';
 import { FakeWorkflowDb } from './fake-workflow-prisma';
 
@@ -36,8 +41,17 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
   const assignment = new WorkflowAssignmentService(groups);
   const stages = new WorkflowStageService(assignment, events);
   const advancer = new WorkflowAdvanceService(stages, events);
-  const requirements = new DefaultWorkflowRequirementsService();
-  const starter = new WorkflowStartService(loader, stages, events, references);
+  const dossiers = new DossiersService(prisma);
+  const requirements = new DossierWorkflowRequirementsService(dossiers);
+  const starter = new WorkflowStartService(loader, stages, events, references, dossiers);
+  // S3 and audit are mocks: specs assert on `s3.uploadFile` / `deleteFile` / `getPresignedUrl`.
+  const s3 = {
+    uploadFile: jest.fn(async (_b: Buffer, key: string) => key),
+    deleteFile: jest.fn(async () => undefined),
+    getPresignedUrl: jest.fn(async (key: string, ttl: number) => `https://signed.example/${key}?ttl=${ttl}`),
+  };
+  const audit = { log: jest.fn(async () => undefined) };
+  const storedFiles = new StoredFilesService(prisma, s3 as any, new S3PathHelper(), audit as any);
   const completer = new WorkflowCompleteService(
     loader,
     assignment,
@@ -64,6 +78,15 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     events,
     ticker,
   );
+  const instances = new WorkflowInstancesService(prisma, assignment, requirements, dossiers);
+  const workflowFiles = new WorkflowFilesService(
+    prisma,
+    loader,
+    assignment,
+    dossiers,
+    storedFiles,
+    instances,
+  );
   let ctx: TestCtx = { store_id: 1, organization_id: 1, user_id: 1 };
   const scoped = new AsyncLocalStorage<TestCtx>();
   jest.spyOn(RequestContextService, 'getContext').mockImplementation(
@@ -74,6 +97,13 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     prisma,
     engine,
     groups,
+    dossiers,
+    requirements,
+    storedFiles,
+    workflowFiles,
+    instances,
+    s3,
+    audit,
     assignment,
     ticker,
     as(next: Partial<TestCtx>) {

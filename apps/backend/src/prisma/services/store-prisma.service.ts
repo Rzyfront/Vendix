@@ -241,6 +241,10 @@ export class StorePrismaService extends BasePrismaService {
     'workflow_task_votes',
     'workflow_instance_events',
     'workflow_outbox',
+    // Documental D1 (T5/S5): todas llevan `store_id` propio NOT NULL.
+    'stored_files',
+    'dossiers',
+    'dossier_items',
     'crm_messages',
     'crm_tags',
     'crm_customer_tags',
@@ -1938,6 +1942,18 @@ export class StorePrismaService extends BasePrismaService {
 
   get workflow_outbox() {
     return this.scoped_client.workflow_outbox;
+  }
+
+  get stored_files() {
+    return this.scoped_client.stored_files;
+  }
+
+  get dossiers() {
+    return this.scoped_client.dossiers;
+  }
+
+  get dossier_items() {
+    return this.scoped_client.dossier_items;
   }
 
   get crm_conversations() {

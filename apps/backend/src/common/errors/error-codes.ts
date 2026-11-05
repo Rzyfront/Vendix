@@ -67,6 +67,13 @@ export const ErrorCodes = {
   WORKFLOW_INVALID: { code: 'WORKFLOW_INVALID', httpStatus: 422, devMessage: 'La definición del flujo tiene errores; corrígelos para publicar.' },
   WORKFLOW_VERSION_NOT_FOUND: { code: 'WORKFLOW_VERSION_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró esa versión del flujo.' },
   WORKFLOW_IDEMPOTENCY_KEY_REQUIRED: { code: 'WORKFLOW_IDEMPOTENCY_KEY_REQUIRED', httpStatus: 400, devMessage: 'Falta el encabezado Idempotency-Key (máximo 80 caracteres).' },
+  // Documental D1 (flujos-documental S5)
+  DOCUMENT_TOO_LARGE: { code: 'DOCUMENT_TOO_LARGE', httpStatus: 413, devMessage: 'El archivo supera el tamaño máximo permitido.' },
+  DOCUMENT_TYPE_NOT_ALLOWED: { code: 'DOCUMENT_TYPE_NOT_ALLOWED', httpStatus: 415, devMessage: 'Este tipo de archivo no está permitido.' },
+  DOCUMENT_TYPE_MISMATCH: { code: 'DOCUMENT_TYPE_MISMATCH', httpStatus: 422, devMessage: 'El contenido del archivo no corresponde a su extensión o tipo.' },
+  DOCUMENT_NOT_FOUND: { code: 'DOCUMENT_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró el documento.' },
+  DOCUMENT_FILE_REQUIRED: { code: 'DOCUMENT_FILE_REQUIRED', httpStatus: 400, devMessage: 'Adjunta un archivo en el campo "file".' },
+  DOCUMENT_TARGET_INVALID: { code: 'DOCUMENT_TARGET_INVALID', httpStatus: 422, devMessage: 'El requisito o campo indicado no corresponde a la etapa actual de la solicitud.' },
 
   // System
   SYS_INTERNAL_001: {
