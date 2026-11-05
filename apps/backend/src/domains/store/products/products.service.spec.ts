@@ -1105,6 +1105,27 @@ describe('ProductsService', () => {
       expect(result.data[0].has_variants).toBe(true);
     });
 
+    it('S2 — exposes the duration unit of each variant so the POS labels "4 horas"', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        {
+          id: 7,
+          name: 'Alquiler Cava 3',
+          stock_levels: [],
+          product_variants: [
+            { id: 70, sku: 'CAVA-4H', service_duration_minutes: 240, service_duration_unit: 'hour', stock_levels: [] },
+            { id: 71, sku: 'CAVA-90', service_duration_minutes: 90, stock_levels: [] },
+          ],
+        },
+      ]);
+      mockPrismaService.products.count.mockResolvedValue(1);
+
+      const result = await service.findAll({ include_variants: true, page: 1, limit: 10 });
+
+      const args = mockPrismaService.products.findMany.mock.calls.at(-1)[0];
+      expect(args.include.product_variants.select.service_duration_unit).toBe(true);
+      expect(result.data[0].product_variants.map((v: any) => v.service_duration_unit)).toEqual(['hour', null]);
+    });
+
     it('QUI-978 — expone purchase_uom_id en el listado (admin y pos_optimized)', async () => {
       // El POP precarga la UoM de compra al recomprar desde el listado; si el
       // mapper la omite, el select vuelve vacío aunque el producto la tenga.
