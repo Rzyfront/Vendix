@@ -310,6 +310,8 @@ model users {
   crm_created_campaigns      crm_campaigns[]              @relation("crm_campaigns_created_by")
 
   service_deposits_customer service_deposits[] @relation("service_deposits_customer")
+  booking_series_customer booking_series[] @relation("booking_series_customer")
+  booking_series_created_by booking_series[] @relation("booking_series_created_by")
 
   @@index([email_verified])
   @@index([state])
@@ -1141,6 +1143,8 @@ model stores {
   lodging_deposits               lodging_deposits[]
   service_deposits               service_deposits[]
   payment_requests               payment_requests[]
+  service_station_rate_windows   service_station_rate_windows[]
+  booking_series                 booking_series[]
   lodging_room_charges           lodging_room_charges[]
   lodging_housekeeping_tasks     lodging_housekeeping_tasks[]
   lodging_inventory_blocks       lodging_inventory_blocks[]
@@ -1868,6 +1872,7 @@ model orders {
   service_session service_sessions? @relation("orders_service_session_fkey", fields: [store_id, service_session_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "orders_service_session_fkey")
 
   service_sessions_order_fkey service_sessions[] @relation("service_sessions_order_fkey")
+  service_sessions_rental_order_fkey service_sessions[] @relation("service_sessions_rental_order_fkey")
   order_items_service_session_fkey order_items[] @relation("order_items_service_session_fkey")
 
   crm_opportunities crm_opportunities[]
@@ -2109,6 +2114,8 @@ model product_variants {
   track_inventory_override      Boolean?
   // Service-specific overrides (null = inherit from parent product)
   service_duration_minutes      Int?
+  /// Unidad en que se muestra la duración (S1). Solo presentación: la duración se guarda en minutos. NULL = hereda del producto.
+  service_duration_unit         duration_unit_enum?
   service_pricing_type          service_pricing_type_enum?
   buffer_minutes                Int?
   preparation_time_minutes      Int?
@@ -2130,6 +2137,7 @@ model product_variants {
   created_at                    DateTime?                       @default(now()) @db.Timestamp(6)
   updated_at                    DateTime?                       @default(now()) @db.Timestamp(6)
   bookings                      bookings[]
+  booking_series_variant_fkey   booking_series[] @relation("booking_series_variant_fkey")
   inventory_adjustments         inventory_adjustments[]
   inventory_batches             inventory_batches[]
   inventory_movements           inventory_movements[]
@@ -2194,6 +2202,10 @@ model products {
   pricing_type                   pricing_type_enum                @default(unit)
   product_type                   product_type_enum                @default(physical)
   service_duration_minutes       Int?
+  /// Unidad en que se muestra la duración (S1). Solo presentación: la duración se guarda en minutos. NULL = minutos.
+  service_duration_unit          duration_unit_enum?
+  /// Producto de alquiler de estación (S2): fixed_price = precio del producto, station_rate = tarifa de la estación. NULL = servicio normal.
+  rental_pricing_mode            rental_pricing_mode_enum?
   service_modality               service_modality_enum?
   service_pricing_type           service_pricing_type_enum?
   requires_booking               Boolean                          @default(false)
@@ -2405,6 +2417,7 @@ model products {
   /// usa findFirst con `state: { not: 'archived' }`.
   service_station_services_product_fkey service_station_services[] @relation("service_station_services_product_fkey")
   service_sessions_product_fkey service_sessions[] @relation("service_sessions_product_fkey")
+  booking_series_product_fkey booking_series[] @relation("booking_series_product_fkey")
 
   @@index([store_id, slug])
   @@index([store_id, sku])
@@ -10733,6 +10746,12 @@ model bookings {
   is_open_ended             Boolean                       @default(false)
   /// No asistencia con anticipo pagado: el administrador debe decidir (S17) antes de esta fecha.
   deposit_decision_due_at   DateTime?                     @db.Timestamptz(6)
+  /// Precio cotizado al reservar (S1/S18), congelado: el cobro para reservar se calcula sobre este valor.
+  quoted_amount             Decimal?                      @db.Decimal(12, 2)
+  /// Serie recurrente a la que pertenece (S19). NULL = reserva suelta.
+  series_id                 Int?
+  /// Posición dentro de la serie (0..n-1).
+  series_index              Int?
   status                    booking_status_enum           @default(pending)
   channel                   order_channel_enum            @default(pos)
   notes                     String?                       @db.Text
@@ -10795,7 +10814,10 @@ model bookings {
 
   service_deposits_booking_fkey service_deposits[] @relation("service_deposits_booking_fkey")
 
+  series booking_series? @relation("bookings_series_fkey", fields: [series_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "bookings_series_id_fkey")
+
   @@unique([store_id, booking_number])
+  @@unique([series_id, series_index], map: "bookings_series_id_series_index_key")
   @@unique([store_id, id])
   @@index([store_id, date])
   @@index([store_id, status])
@@ -14306,6 +14328,16 @@ model service_stations {
   /// Alquiler por bloque: al cerrar la atención se cobra ceil(minutos / bloque) × precio. NULL = sin alquiler.
   rental_block_minutes Int?
   rental_block_price Decimal? @db.Decimal(12, 2)
+  /// Unidad en que se muestra el bloque (S1). Solo presentación: el bloque se guarda en minutos.
+  rental_block_unit duration_unit_enum @default(minute)
+  /// elapsed = cobra ceil(minutos reales / bloque) al cerrar (comportamiento previo); planned = cobra la duración reservada y la extensión aparte (S10).
+  rental_billing_mode station_rental_billing_enum @default(elapsed)
+  /// at_start = el alquiler se cobra al abrir; at_end = al cerrar (S11).
+  rental_charge_timing station_rental_timing_enum @default(at_end)
+  /// Cobro para reservar (S1): none, full = todo el alquiler, partial = un porcentaje o un monto.
+  booking_prepay_mode station_prepay_mode_enum @default(none)
+  booking_prepay_percent Decimal? @db.Decimal(5, 2)
+  booking_prepay_amount Decimal? @db.Decimal(12, 2)
   /// Impuesto OPCIONAL del alquiler, mismo mecanismo que `shipping_rates.tax_category_id`
   /// (null = sin impuesto, el default). Elegible: IVA/INC con una sola tasa > 0 en el alcance
   /// fiscal de la tienda (`ShippingTaxService.taxRowsForCategory`). RESTRICT: borrar la
@@ -14347,6 +14379,8 @@ model service_stations {
   service_station_exceptions_station_fkey service_station_exceptions[] @relation("service_station_exceptions_station_fkey")
   service_allocations_station_fkey service_allocations[] @relation("service_allocations_station_fkey")
   service_sessions_station_fkey service_sessions[] @relation("service_sessions_station_fkey")
+  service_station_rate_windows_station_fkey service_station_rate_windows[] @relation("service_station_rate_windows_station_fkey")
+  booking_series_station_fkey booking_series[] @relation("booking_series_station_fkey")
   booking_reschedule_requests_station_store_fkey booking_reschedule_requests[] @relation("booking_reschedule_requests_station_store_fkey")
 
   @@unique([store_id, name], map: "service_stations_store_name_key")
@@ -14461,12 +14495,22 @@ model service_sessions {
   leftover_policy station_leftover_policy_enum?
   /// Liquidación del anticipo hecha (S12); después no se aceptan consumos nuevos.
   settled_at DateTime? @db.Timestamptz(6)
+  /// Copia de la tarifa de alquiler al abrir (fase 3). NULL = atención anterior: se cobra como antes (elapsed, tarifa viva).
+  rental_billing_mode station_rental_billing_enum?
+  rental_charge_timing station_rental_timing_enum?
+  rental_block_minutes Int?
+  rental_block_price Decimal? @db.Decimal(12, 2)
+  /// Ventanas de tarifa vigentes al abrir (S18): [{weekday, start_time, end_time, block_price}].
+  rate_windows_snapshot Json?
+  /// Orden propia del alquiler cuando se cobra aparte del consumo (S11, D6).
+  rental_order_id Int?
   created_at  DateTime @default(now()) @db.Timestamptz(6)
   updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz(6)
   station service_stations @relation("service_sessions_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_station_fkey")
   product products @relation("service_sessions_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_product_fkey")
   booking bookings? @relation("service_sessions_booking_fkey", fields: [store_id, booking_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_booking_fkey")
   order orders? @relation("service_sessions_order_fkey", fields: [store_id, order_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_order_fkey")
+  rental_order orders? @relation("service_sessions_rental_order_fkey", fields: [store_id, rental_order_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_sessions_rental_order_fkey")
 
   service_allocations_session_fkey service_allocations[] @relation("service_allocations_session_fkey")
   orders_service_session_fkey orders[] @relation("orders_service_session_fkey")
@@ -14487,6 +14531,7 @@ model service_sessions {
   @@index([store_id, status], map: "service_sessions_store_status_idx")
   @@index([booking_id], map: "service_sessions_booking_idx")
   @@index([order_id], map: "service_sessions_order_idx")
+  @@index([rental_order_id], map: "service_sessions_rental_order_idx")
   @@unique([store_id, id], map: "service_sessions_store_id_key")
   @@map("service_sessions")
 }
@@ -15380,6 +15425,92 @@ enum station_leftover_policy_enum {
 enum station_booking_duration_enum {
   fixed
   free
+}
+
+/// Unidad de presentación de una duración (fase 3). Siempre se guarda en minutos; un día = 1440.
+enum duration_unit_enum {
+  minute
+  hour
+  day
+}
+
+enum station_rental_billing_enum {
+  elapsed
+  planned
+}
+
+enum station_rental_timing_enum {
+  at_start
+  at_end
+}
+
+enum station_prepay_mode_enum {
+  none
+  full
+  partial
+}
+
+enum rental_pricing_mode_enum {
+  fixed_price
+  station_rate
+}
+
+enum booking_series_frequency_enum {
+  daily
+  weekly
+}
+
+/// Tarifa del bloque de alquiler por día y franja (S18). Mismo formato que `service_station_schedules`;
+/// end_time <= start_time cruza la medianoche. Fuera de toda ventana rige `service_stations.rental_block_price`.
+model service_station_rate_windows {
+  id          Int      @id @default(autoincrement())
+  store_id    Int
+  station_id  Int
+  weekday     Int      @db.SmallInt
+  block_order Int      @default(0)
+  start_time  String   @db.VarChar(5)
+  end_time    String   @db.VarChar(5)
+  block_price Decimal  @db.Decimal(12, 2)
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  store   stores           @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_rate_windows_store_fkey")
+  station service_stations @relation("service_station_rate_windows_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "service_station_rate_windows_station_fkey")
+
+  @@unique([station_id, weekday, block_order], map: "service_station_rate_windows_station_weekday_block_key")
+  @@index([store_id, station_id, weekday], map: "service_station_rate_windows_store_station_weekday_idx")
+  @@map("service_station_rate_windows")
+}
+
+/// Serie de reservas recurrentes (S19): cada ocurrencia es una fila de `bookings` con `series_id`.
+model booking_series {
+  id                 Int                           @id @default(autoincrement())
+  store_id           Int
+  customer_id        Int?
+  product_id         Int
+  product_variant_id Int?
+  station_id         Int?
+  frequency          booking_series_frequency_enum
+  interval_count     Int                           @default(1)
+  start_date         DateTime                      @db.Date
+  start_time         String                        @db.VarChar(5)
+  end_time           String                        @db.VarChar(5)
+  occurrences        Int
+  created_by_user_id Int?
+  created_at         DateTime                      @default(now()) @db.Timestamptz(6)
+
+  store           stores            @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "booking_series_store_fkey")
+  customer        users?            @relation("booking_series_customer", fields: [customer_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "booking_series_customer_fkey")
+  product         products          @relation("booking_series_product_fkey", fields: [store_id, product_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "booking_series_product_fkey")
+  product_variant product_variants? @relation("booking_series_variant_fkey", fields: [product_variant_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "booking_series_variant_fkey")
+  station         service_stations? @relation("booking_series_station_fkey", fields: [store_id, station_id], references: [store_id, id], onDelete: Restrict, onUpdate: NoAction, map: "booking_series_station_fkey")
+  created_by      users?            @relation("booking_series_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "booking_series_created_by_fkey")
+
+  bookings bookings[] @relation("bookings_series_fkey")
+
+  @@index([store_id, created_at], map: "booking_series_store_created_idx")
+  @@map("booking_series")
 }
 
 enum service_deposit_kind_enum {

@@ -93,6 +93,9 @@ export class StorePrismaService extends BasePrismaService {
     // Estaciones fase 2: anticipo consumible y solicitudes de pago
     'service_deposits',
     'payment_requests',
+    // Estaciones fase 3: tarifas por franja y reservas recurrentes
+    'service_station_rate_windows',
+    'booking_series',
     'service_progress_events',
     'service_session_tokens',
     'service_subjects',
@@ -1643,6 +1646,8 @@ export class StorePrismaService extends BasePrismaService {
   get service_budgets() { return this.scoped_client.service_budgets; }
   get service_deposits() { return this.scoped_client.service_deposits; }
   get payment_requests() { return this.scoped_client.payment_requests; }
+  get service_station_rate_windows() { return this.scoped_client.service_station_rate_windows; }
+  get booking_series() { return this.scoped_client.booking_series; }
   get service_change_proposals() { return this.scoped_client.service_change_proposals; }
   get service_proposal_decisions() { return this.scoped_client.service_proposal_decisions; }
   get service_contact_attempts() { return this.scoped_client.service_contact_attempts; }
