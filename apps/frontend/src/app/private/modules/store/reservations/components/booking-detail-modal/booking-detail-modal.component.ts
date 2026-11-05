@@ -17,6 +17,7 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 import { finalize } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import { bookingPaymentUrl, bookingSeriesLabel } from '../../utils/booking-display.util';
+import { windowMinutes } from '../../../../../../shared/utils/schedule-window.util';
 
 @Component({
   selector: 'app-booking-detail-modal',
@@ -772,9 +773,8 @@ export class BookingDetailModalComponent {
   getDurationMinutes(): number {
     const b = this.booking();
     if (!b) return 0;
-    const [sh, sm] = b.start_time.split(':').map(Number);
-    const [eh, em] = b.end_time.split(':').map(Number);
-    return (eh * 60 + em) - (sh * 60 + sm);
+    // 22:00 → 01:00 ends the next day (S21): the shared kernel counts past midnight.
+    return windowMinutes({ start_time: b.start_time.slice(0, 5), end_time: b.end_time.slice(0, 5) });
   }
 
   private formatDateISO(date: Date): string {
