@@ -598,7 +598,7 @@ export interface CreateProductVariantDto {
   attributes?: Record<string, any>;
   variant_image_url?: string | null;
   track_inventory_override?: boolean | null;
-  service_duration_minutes?: number;
+  service_duration_minutes?: number | null;
   /** Display unit of the duration; minutes stay in `service_duration_minutes` (S2). */
   service_duration_unit?: 'minute' | 'hour' | 'day' | null;
   service_pricing_type?: 'per_session' | 'package' | 'subscription';

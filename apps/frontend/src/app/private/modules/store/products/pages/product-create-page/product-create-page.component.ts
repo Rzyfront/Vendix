@@ -196,6 +196,12 @@ interface GeneratedVariant {
    * producto, y si el producto tampoco la declara, cae al ingreso por defecto.
    */
   account_code?: string | null;
+  /**
+   * Service variants only (S2): duration typed as amount + unit. Both empty =
+   * inherit the product's duration. Stored as minutes on save.
+   */
+  duration_amount?: number | null;
+  duration_unit?: string;
 }
 
 export type { GeneratedVariant };
@@ -1603,6 +1609,15 @@ export class ProductCreatePageComponent {
     const factor = ProductCreatePageComponent.DURATION_UNIT_MINUTES[unit ?? 'minute'] ?? 1;
     if (factor > 1 && minutes % factor === 0) return { amount: minutes / factor, unit: unit as string };
     return { amount: minutes, unit: 'minute' };
+  }
+
+  /** Loads a stored variant duration (minutes + unit) into the amount + unit shown in the form. */
+  private variantDurationFields(v: {
+    service_duration_minutes?: number | null;
+    service_duration_unit?: string | null;
+  }): { duration_amount: number | null; duration_unit: string } {
+    const shown = this.durationForDisplay(v.service_duration_minutes, v.service_duration_unit);
+    return { duration_amount: shown.amount, duration_unit: shown.unit };
   }
 
   serviceModalityOptions: SelectorOption[] = [
@@ -3264,6 +3279,7 @@ export class ProductCreatePageComponent {
             ? undefined
             : v.track_inventory_override,
         account_code: v.account_code ?? null,
+        ...this.variantDurationFields(v),
       }));
 
       // Si alguna variante ya trae cuenta propia, el bloque se abre solo: un
@@ -3630,6 +3646,8 @@ export class ProductCreatePageComponent {
         attributes,
         track_inventory_override:
           this.getDefaultVariantTrackInventoryOverride(),
+        duration_amount: null,
+        duration_unit: 'minute',
       });
     }
 
@@ -5316,6 +5334,19 @@ export class ProductCreatePageComponent {
               : v.track_inventory_override,
           // null = heredar la cuenta del producto; un código = la variante manda.
           account_code: v.account_code || null,
+          // Only service products accept these (the backend rejects them on
+          // physical ones). null clears the override so the product's applies.
+          ...(this.isService
+            ? (() => {
+                const minutes = this.durationToMinutes(v.duration_amount, v.duration_unit);
+                return {
+                  service_duration_minutes: minutes ?? null,
+                  service_duration_unit: minutes
+                    ? ((v.duration_unit || 'minute') as 'minute' | 'hour' | 'day')
+                    : null,
+                };
+              })()
+            : {}),
         };
       });
 

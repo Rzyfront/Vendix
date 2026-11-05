@@ -3437,6 +3437,27 @@
                             </div>
                           </div>
                         }
+                        @if (isService) {
+                          <div class="col-span-2 grid grid-cols-[1fr_auto] gap-2 items-end">
+                            <app-input
+                              label="Duración"
+                              type="number"
+                              size="sm"
+                              [(ngModel)]="variant.duration_amount"
+                              [ngModelOptions]="{ standalone: true }"
+                              placeholder="Hereda del producto"
+                              customWrapperClass="!mt-0"
+                            ></app-input>
+                            <app-selector
+                              label="Unidad"
+                              size="sm"
+                              [options]="serviceDurationUnitOptions"
+                              [(ngModel)]="variant.duration_unit"
+                              [ngModelOptions]="{ standalone: true }"
+                              customWrapperClass="!mt-0 w-28"
+                            ></app-selector>
+                          </div>
+                        }
                         <app-input
                           label="SKU"
                           type="text"
@@ -3535,6 +3556,13 @@
                         class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                       >
                         Stock
+                      </th>
+                    }
+                    @if (isService) {
+                      <th
+                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                      >
+                        Duración
                       </th>
                     }
                     <th
@@ -3747,6 +3775,28 @@
                             placeholder="0"
                             customWrapperClass="!mt-0"
                           ></app-input>
+                        </td>
+                      }
+                      <!-- Duration (service variants) -->
+                      @if (isService) {
+                        <td class="px-3 py-2">
+                          <div class="flex items-center gap-1 min-w-[11rem]">
+                            <app-input
+                              type="number"
+                              size="sm"
+                              [(ngModel)]="variant.duration_amount"
+                              [ngModelOptions]="{ standalone: true }"
+                              placeholder="Hereda"
+                              customWrapperClass="!mt-0 w-20"
+                            ></app-input>
+                            <app-selector
+                              size="sm"
+                              [options]="serviceDurationUnitOptions"
+                              [(ngModel)]="variant.duration_unit"
+                              [ngModelOptions]="{ standalone: true }"
+                              customWrapperClass="!mt-0 w-28"
+                            ></app-selector>
+                          </div>
                         </td>
                       }
                       <!-- SKU -->
