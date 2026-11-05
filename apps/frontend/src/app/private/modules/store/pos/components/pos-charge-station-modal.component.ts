@@ -8,6 +8,7 @@ import {
   output,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { forkJoin } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -37,6 +38,10 @@ import {
   openCustomerError,
   openDepositError,
 } from '../../reservations/components/service-stations/open-session-deposit/open-session-deposit.component';
+import {
+  IntakeCustomerDefaults,
+  SessionIntakeFormComponent,
+} from '../../reservations/components/service-stations/session-intake-form/session-intake-form.component';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import type { CartItem } from '../models/cart.model';
 import { PosServiceSessionPickerComponent } from './pos-service-session-picker.component';
@@ -65,6 +70,7 @@ export interface StationChargedEvent {
     CustomerSelectComponent,
     OpenSessionDepositComponent,
     PosServiceSessionPickerComponent,
+    SessionIntakeFormComponent,
   ],
   template: `
     <app-modal
@@ -132,6 +138,15 @@ export interface StationChargedEvent {
             [selected]="customer()"
             (selectedChange)="customer.set($event)"
           />
+          @if (selectedStation()) {
+            <app-session-intake-form
+              scope="all"
+              [productId]="planId()"
+              [stationId]="stationId()"
+              [customerId]="customer()?.id ?? null"
+              [customerDefaults]="customerDefaults()"
+            />
+          }
           <app-open-session-deposit
             [station]="selectedStation()"
             [customerIdentified]="!!customer()?.id"
@@ -338,10 +353,27 @@ export class PosChargeStationModalComponent {
     }
     return openDepositError(station, this.customer()?.id, this.deposit());
   });
+  /** Intake form of the chosen station/service (absent when it has no template). */
+  private readonly intakeForm = viewChild(SessionIntakeFormComponent);
+  /** Customer data that prefills the template's customer fields. */
+  readonly customerDefaults = computed<IntakeCustomerDefaults | null>(() => {
+    const c = this.customer();
+    if (!c) return null;
+    return {
+      nombre_cliente:
+        [c.first_name, c.last_name].filter(Boolean).join(' ').trim() || c.name,
+      numero_documento: c.document_number,
+      telefono: c.phone,
+      correo: c.email,
+    };
+  });
+  /** Loaded and with every required intake field answered (or there is no form). */
+  readonly intakeReady = computed(() => this.intakeForm()?.valid() ?? false);
   readonly canOpen = computed(
     () =>
       this.selectedStation() != null &&
       this.openBlockReason() == null &&
+      this.intakeReady() &&
       (this.variantOptions().length === 0 || this.variantId() != null),
   );
 
@@ -450,6 +482,7 @@ export class PosChargeStationModalComponent {
     if (!station || !this.canOpen()) return;
     const customer = this.customer();
     const deposit = station.deposit_policy !== 'none' ? this.deposit() : null;
+    const intakeValues = this.intakeForm()?.entries() ?? [];
     this.submitting.set(true);
     this.integration
       .openSession({
@@ -459,6 +492,7 @@ export class PosChargeStationModalComponent {
         ...(this.variantId() ? { product_variant_id: this.variantId()! } : {}),
         ...(customer?.id ? { customer_id: customer.id } : {}),
         ...(deposit ? { deposit } : {}),
+        ...(intakeValues.length ? { intake_values: intakeValues } : {}),
         subject: { subject_type: 'person', label: customer?.name || station.name },
       })
       .pipe(takeUntilDestroyed(this.destroyRef))

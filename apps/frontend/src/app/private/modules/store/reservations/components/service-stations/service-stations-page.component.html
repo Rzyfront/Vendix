@@ -741,27 +741,12 @@
               [required]="true"
             />
           }
-          <div class="flex flex-wrap gap-3">
-            @for (item of checkinCustomerIntakeItems(); track item.id) {
-              <div [class]="getItemWidthClass(item.width)">
-                @if (item.metadata_field.field_type === 'file') {
-                  <p class="text-xs text-[var(--color-text-secondary)]">
-                    {{ item.metadata_field.label }}: los archivos no se capturan en la recepción.
-                  </p>
-                } @else {
-                  <app-dynamic-field
-                    [field]="item.metadata_field"
-                    [value]="intakeValue(item.metadata_field.id)"
-                    [required]="isIntakeItemRequired(item)"
-                    [placeholder]="item.placeholder || ''"
-                    [helpText]="item.help_text || ''"
-                    [icon]="item.icon || ''"
-                    (valueChange)="setIntakeValue(item.metadata_field.id, $event)"
-                  />
-                }
-              </div>
-            }
-          </div>
+          <app-session-intake-form
+            scope="customer"
+            [loadTemplate]="false"
+            [(template)]="checkinIntakeTemplate"
+            [(values)]="checkinIntakeValues"
+          />
           <p class="text-[11px] text-[var(--color-text-secondary)]">Estos campos se guardan en el perfil del cliente.</p>
         } @else {
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -905,58 +890,18 @@
       </div>
       }
 
-      @if (checkinIntakeLoading()) {
-        <div class="rounded-xl border border-[var(--color-border)] p-4 flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
-          <app-spinner size="sm" /> Cargando formulario de recepción...
-        </div>
-      } @else if (checkinIntakeTemplate(); as intakeTemplate) {
-        @if (checkinNonCustomerIntakeSections().length) {
-          <div class="rounded-xl border border-[var(--color-border)] p-4 space-y-4">
-            <div>
-              <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-1.5">
-                <app-icon name="clipboard-list" [size]="14" class="text-[var(--color-primary)]" />
-                {{ intakeTemplate.name || 'Formulario de recepción' }}
-              </h4>
-              <p class="text-xs text-[var(--color-text-secondary)]">
-                Se guarda con esta atención.
-              </p>
-            </div>
-            @for (section of checkinNonCustomerIntakeSections(); track section.key) {
-              <div class="space-y-2">
-                @if (checkinNonCustomerIntakeSections().length > 1 || section.description) {
-                  <div>
-                    <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">{{ section.title }}</p>
-                    @if (section.description) {
-                      <p class="text-xs text-[var(--color-text-secondary)]">{{ section.description }}</p>
-                    }
-                  </div>
-                }
-                <div class="flex flex-wrap gap-3">
-                  @for (item of section.items; track item.id) {
-                    <div [class]="getItemWidthClass(item.width)">
-                      @if (item.metadata_field.field_type === 'file') {
-                        <p class="text-xs text-[var(--color-text-secondary)]">
-                          {{ item.metadata_field.label }}: los archivos no se capturan en la recepción.
-                        </p>
-                      } @else {
-                        <app-dynamic-field
-                          [field]="item.metadata_field"
-                          [value]="intakeValue(item.metadata_field.id)"
-                          [required]="isIntakeItemRequired(item)"
-                          [placeholder]="item.placeholder || ''"
-                          [helpText]="item.help_text || ''"
-                          [icon]="item.icon || ''"
-                          (valueChange)="setIntakeValue(item.metadata_field.id, $event)"
-                        />
-                      }
-                    </div>
-                  }
-                </div>
-              </div>
-            }
-          </div>
-        }
-      } @else if (checkinProductId()) {
+      @if (showCheckinModal()) {
+        <app-session-intake-form
+          scope="rest"
+          [productId]="checkinIntakeProductId()"
+          [stationId]="checkinStationId() || null"
+          [customerId]="checkinCustomer()?.id ?? null"
+          [(template)]="checkinIntakeTemplate"
+          [(values)]="checkinIntakeValues"
+          (loadingChange)="checkinIntakeLoading.set($event)"
+        />
+      }
+      @if (!checkinIntakeLoading() && !checkinIntakeTemplate() && checkinProductId()) {
         <div class="rounded-xl border border-dashed border-[var(--color-border)] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
           <span>Este servicio no tiene formulario de recepción. Los datos a pedir se configuran en el servicio (Productos → editar → “Formulario de recepción”).</span>
           <app-button variant="outline" size="sm" (clicked)="openServiceIntakeConfig()">

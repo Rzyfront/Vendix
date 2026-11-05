@@ -41,12 +41,16 @@ import {
   StationServiceOption,
   IntakeTemplate,
   IntakeTemplateItem,
-  IntakeTemplateSection,
-  IntakeValue,
   SessionIntake,
   StationType,
 } from './service-stations.service';
-import { DynamicFieldComponent } from '../../../../ecommerce/pages/data-collection-form/components/dynamic-field/dynamic-field.component';
+import { SessionIntakeFormComponent } from './session-intake-form/session-intake-form.component';
+import {
+  buildIntakeEntries,
+  flattenIntakeSections,
+  missingRequiredIntakeItems,
+  uniqueIntakeItems,
+} from './session-intake-form/session-intake-form.util';
 import {
   computeStationClock,
   nextReservationLabel,
@@ -54,15 +58,7 @@ import {
   StationClock,
 } from './station-clock.util';
 import { stationTypeLabel } from './station-type-labels';
-import { getItemWidthClass } from '../../../data-collection/utils/item-width.util';
 
-/** Sección plana del formulario de recepción (tabs y subsecciones aplanadas en orden). */
-export interface CheckinIntakeSection {
-  key: string;
-  title: string;
-  description?: string | null;
-  items: IntakeTemplateItem[];
-}
 import { environment } from '../../../../../../../environments/environment';
 import { DataCollectionTemplatesService } from '../../../data-collection/services/data-collection-templates.service';
 import { MetadataFieldsService } from '../../../data-collection/services/metadata-fields.service';
@@ -317,7 +313,7 @@ export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
     SelectorComponent,
     TextareaComponent,
     ToggleComponent,
-    DynamicFieldComponent,
+    SessionIntakeFormComponent,
     ServiceRemindersPageComponent,
     CustomerSelectComponent,
     StationRulesFormComponent,
@@ -489,8 +485,6 @@ export class ServiceStationsPageComponent implements OnInit {
   readonly checkinIntakeTemplate = signal<IntakeTemplate | null>(null);
   readonly checkinIntakeLoading = signal(false);
   readonly checkinIntakeValues = signal<Record<number, unknown>>({});
-  private intakeRequestSeq = 0;
-  private prefillRequestSeq = 0;
   private readonly destroyRef = inject(DestroyRef);
 
   /** Prellenado del alta de cliente con lo ya digitado en el check-in. */
@@ -620,39 +614,9 @@ export class ServiceStationsPageComponent implements OnInit {
     return Number(service?.final_price ?? service?.base_price ?? 0);
   });
 
-  /** Secciones del formulario de recepción, aplanadas en orden (tabs → secciones → subsecciones). */
-  readonly checkinIntakeSections = computed<CheckinIntakeSection[]>(() => {
-    const template = this.checkinIntakeTemplate();
-    if (!template) return [];
-    const bySort = <T extends { sort_order?: number }>(list: T[] | undefined): T[] =>
-      [...(list ?? [])].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-    const roots: IntakeTemplateSection[] = template.tabs?.length
-      ? bySort(template.tabs).flatMap((tab) => bySort(tab.sections))
-      : bySort(template.sections);
-    const out: CheckinIntakeSection[] = [];
-    const push = (section: IntakeTemplateSection) => {
-      const items = bySort(section.items).filter((item) => !!item.metadata_field);
-      if (items.length) {
-        out.push({ key: `s${section.id}`, title: section.title, description: section.description, items });
-      }
-      for (const child of bySort(section.child_sections)) push(child);
-    };
-    for (const root of roots) push(root);
-    return out;
-  });
-
-  readonly checkinIntakeItems = computed<IntakeTemplateItem[]>(() => {
-    const seen = new Set<number>();
-    const items: IntakeTemplateItem[] = [];
-    for (const section of this.checkinIntakeSections()) {
-      for (const item of section.items) {
-        if (seen.has(item.metadata_field.id)) continue;
-        seen.add(item.metadata_field.id);
-        items.push(item);
-      }
-    }
-    return items;
-  });
+  readonly checkinIntakeItems = computed<IntakeTemplateItem[]>(() =>
+    uniqueIntakeItems(flattenIntakeSections(this.checkinIntakeTemplate())),
+  );
 
   /** Campos de cliente (entity_type customer) de la plantilla, en orden y sin repetir. */
   readonly checkinCustomerIntakeItems = computed<IntakeTemplateItem[]>(() =>
@@ -662,17 +626,10 @@ export class ServiceStationsPageComponent implements OnInit {
   /** La plantilla trae campos de cliente: van en "Datos del Cliente", una sola vez. */
   readonly templateHasCustomerFields = computed(() => this.checkinCustomerIntakeItems().length > 0);
 
-  /** Secciones del formulario sin los campos de cliente (ya van en "Datos del Cliente"). */
-  readonly checkinNonCustomerIntakeSections = computed<CheckinIntakeSection[]>(() =>
-    this.checkinIntakeSections()
-      .map((section) => ({
-        ...section,
-        items: section.items.filter((item) => item.metadata_field.entity_type !== 'customer'),
-      }))
-      .filter((section) => section.items.length > 0),
+  /** El servicio solo se manda al cargar la plantilla si la estación no trae la suya. */
+  readonly checkinIntakeProductId = computed(() =>
+    this.selectedCheckinStation()?.intake_template_id ? null : Number(this.checkinProductId() || 0) || null,
   );
-
-  readonly getItemWidthClass = getItemWidthClass;
 
   readonly checkinInitialLineTotal = computed(() => {
     return this.checkinLines().reduce((acc, line) => acc + this.checkinLineEstimate(line), 0);
@@ -1545,7 +1502,7 @@ export class ServiceStationsPageComponent implements OnInit {
     this.checkinCustomerPhone.set('');
     this.checkinCustomerEmail.set('');
     this.checkinProductId.set(this.defaultCheckinServiceId(target));
-    this.loadCheckinIntake();
+    this.resetCheckinIntake();
     this.checkinProviderId.set(null);
     this.checkinProviderError.set(false);
     this.checkinDurationMinutes.set(this.defaultCheckinDuration());
@@ -1575,7 +1532,7 @@ export class ServiceStationsPageComponent implements OnInit {
     this.loadCheckinProviderAvailability();
     this.checkinProductId.set(this.defaultCheckinServiceId(this.selectedCheckinStation()));
     this.checkinDurationMinutes.set(this.defaultCheckinDuration());
-    this.loadCheckinIntake();
+    this.resetCheckinIntake();
   }
 
   /** Minutos objetivo de la estación; si no tiene, la duración del servicio elegido; si no, 45. */
@@ -1595,7 +1552,7 @@ export class ServiceStationsPageComponent implements OnInit {
       this.checkinDurationMinutes.set(this.defaultCheckinDuration());
       // Con plantilla de estación el formulario no cambia con el servicio: no se
       // recarga para no borrar lo que ya se escribió.
-      if (!this.selectedCheckinStation()?.intake_template_id) this.loadCheckinIntake();
+      if (!this.selectedCheckinStation()?.intake_template_id) this.resetCheckinIntake();
     }
   }
 
@@ -1613,99 +1570,16 @@ export class ServiceStationsPageComponent implements OnInit {
     if (customer.document_number) this.checkinCustomerDoc.set(customer.document_number);
     if (customer.phone) this.checkinCustomerPhone.set(customer.phone);
     if (customer.email) this.checkinCustomerEmail.set(customer.email);
-    this.loadCheckinIntakePrefill();
   }
 
-  /** Prellena (sin pisar lo ya digitado) los campos de perfil del cliente seleccionado. */
-  private loadCheckinIntakePrefill(): void {
-    const customerId = this.checkinCustomer()?.id;
-    const productId = Number(this.checkinProductId() || 0);
-    if (!customerId || !this.checkinIntakeTemplate()) return;
-    const seq = ++this.prefillRequestSeq;
-    this.stationsApi.getIntakePrefill(productId || null, customerId, this.checkinStationId()).subscribe({
-      next: (entries) => {
-        if (seq !== this.prefillRequestSeq) return;
-        if (this.checkinCustomer()?.id !== customerId || Number(this.checkinProductId() || 0) !== productId) return;
-        const known = new Set(this.checkinIntakeItems().map((item) => item.metadata_field.id));
-        this.checkinIntakeValues.update((values) => {
-          const next = { ...values };
-          for (const entry of entries) {
-            if (!known.has(entry.field_id)) continue;
-            const current = next[entry.field_id];
-            if (current !== undefined && current !== null && current !== '') continue;
-            if (entry.value === undefined || entry.value === null) continue;
-            next[entry.field_id] = entry.value;
-          }
-          return next;
-        });
-      },
-      error: () => {}, // No crítico: el formulario queda vacío
-    });
-  }
-
-  /** Carga el formulario de recepción: el de la estación o, si no tiene, el del servicio. */
-  private loadCheckinIntake(): void {
-    const productId = Number(this.checkinProductId() || 0);
-    const stationId = Number(this.checkinStationId() || 0);
-    const seq = ++this.intakeRequestSeq;
+  /**
+   * Reinicia el formulario de recepción: `app-session-intake-form` vuelve a cargar
+   * la plantilla de la estación (o, sin ella, la del servicio) con sus entradas.
+   */
+  private resetCheckinIntake(): void {
     this.checkinIntakeTemplate.set(null);
     this.checkinIntakeValues.set({});
-    // La plantilla de la estación no depende del servicio: se carga apenas hay estación.
-    if (!productId && !stationId) {
-      this.checkinIntakeLoading.set(false);
-      return;
-    }
-    this.checkinIntakeLoading.set(true);
-    this.stationsApi.getIntakeTemplate(productId || null, stationId || null).subscribe({
-      next: (template) => {
-        if (seq !== this.intakeRequestSeq) return;
-        this.checkinIntakeTemplate.set(template);
-        this.checkinIntakeLoading.set(false);
-        if (template) this.loadCheckinIntakePrefill();
-      },
-      error: () => {
-        if (seq !== this.intakeRequestSeq) return;
-        this.checkinIntakeLoading.set(false);
-      },
-    });
-  }
-
-  intakeValue(fieldId: number): unknown {
-    return this.checkinIntakeValues()[fieldId] ?? '';
-  }
-
-  setIntakeValue(fieldId: number, value: unknown): void {
-    this.checkinIntakeValues.update((values) => ({ ...values, [fieldId]: value }));
-  }
-
-  isIntakeItemRequired(item: IntakeTemplateItem): boolean {
-    // Igual que el servidor: manda el "obligatorio" del ítem en la plantilla.
-    return !!item.is_required;
-  }
-
-  private normalizeIntakeValue(fieldType: string, raw: unknown): IntakeValue | undefined {
-    if (fieldType === 'checkbox') return raw === true || raw === 'true';
-    if (raw === undefined || raw === null) return undefined;
-    if (fieldType === 'number') {
-      if (raw === '') return undefined;
-      const num = Number(raw);
-      return Number.isFinite(num) ? num : undefined;
-    }
-    const text = String(raw).trim();
-    return text ? text : undefined;
-  }
-
-  /** Valores del formulario de recepción listos para `intake_values` (omite vacíos). */
-  private buildIntakeValues(): Array<{ field_id: number; value: IntakeValue }> {
-    const values = this.checkinIntakeValues();
-    const out: Array<{ field_id: number; value: IntakeValue }> = [];
-    for (const item of this.checkinIntakeItems()) {
-      const field = item.metadata_field;
-      const value = this.normalizeIntakeValue(field.field_type, values[field.id]);
-      if (value === undefined) continue;
-      out.push({ field_id: field.id, value });
-    }
-    return out;
+    this.checkinIntakeLoading.set(!!(this.checkinIntakeProductId() || Number(this.checkinStationId() || 0)));
   }
 
   private defaultCheckinServiceId(station: ServiceStation | null): number {
@@ -1927,15 +1801,8 @@ export class ServiceStationsPageComponent implements OnInit {
       this.toastService.error('Espera a que cargue el formulario de recepción del servicio.');
       return;
     }
-    const intakeValues = this.buildIntakeValues();
-    const answered = new Set(intakeValues.map((entry) => entry.field_id));
-    const missingIntakeItem = this.checkinIntakeItems().find(
-      (item) =>
-        this.isIntakeItemRequired(item) &&
-        (item.metadata_field.field_type === 'checkbox'
-          ? this.checkinIntakeValues()[item.metadata_field.id] !== true // casilla obligatoria = marcada
-          : !answered.has(item.metadata_field.id)),
-    );
+    const intakeValues = buildIntakeEntries(this.checkinIntakeItems(), this.checkinIntakeValues());
+    const [missingIntakeItem] = missingRequiredIntakeItems(this.checkinIntakeItems(), this.checkinIntakeValues());
     if (missingIntakeItem) {
       this.toastService.error(`Completa el campo obligatorio "${missingIntakeItem.metadata_field.label}".`);
       return;
