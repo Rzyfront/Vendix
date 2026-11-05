@@ -6546,6 +6546,26 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'El consumo supera el anticipo: recarga el anticipo para continuar',
   },
+  SERVICE_DEPOSIT_008: {
+    code: 'SERVICE_DEPOSIT_008',
+    httpStatus: 409,
+    devMessage: 'La estación exige un anticipo para iniciar la atención',
+  },
+  SERVICE_DEPOSIT_009: {
+    code: 'SERVICE_DEPOSIT_009',
+    httpStatus: 409,
+    devMessage: 'El anticipo ya fue liquidado: la cuenta no admite más cambios',
+  },
+  SERVICE_DEPOSIT_010: {
+    code: 'SERVICE_DEPOSIT_010',
+    httpStatus: 409,
+    devMessage: 'Liquida el anticipo antes de cerrar la atención',
+  },
+  SERVICE_DEPOSIT_011: {
+    code: 'SERVICE_DEPOSIT_011',
+    httpStatus: 409,
+    devMessage: 'La atención no maneja anticipo',
+  },
   LODGING_RESTRICTION_STAY_001: {
     code: 'LODGING_RESTRICTION_STAY_001',
     httpStatus: 409,

@@ -3423,6 +3423,21 @@ export class OrderFlowService {
   }
 
   /**
+   * Station session settlement seam: once the deposit is applied and the
+   * order of a `service_sessions` row is fully paid, promote it like any
+   * paid POS order and run the invoice emitter (`invoicing.pos.auto_emit`).
+   * Idempotent; a no-op for an order that is not backed by a session. With
+   * a balance still open the cashier collects through the normal order
+   * payment flow, which already triggers invoicing.
+   */
+  async settlePaidServiceSessionOrder(orderId: number, actorUserId?: number): Promise<void> {
+    const order = await this.getOrder(orderId);
+    if (order.service_session_id == null) return;
+    await this.settlePaidSource(orderId, actorUserId, false, true);
+    await this.emitPosSaleCompletedIfFullyPaid(orderId, 'service_session.settled');
+  }
+
+  /**
    * B07/B11 — consumer of `finish_pending_after_payment`. Repeats the closing
    * step that failed after the money was taken, never the charge itself:
    * - `pay_finish`: `processing → finished` with the settled balance, voids
@@ -3667,11 +3682,11 @@ export class OrderFlowService {
     }
   }
 
-  private async settlePaidSource(orderId: number, actorUserId: number | undefined, requireSplit: boolean): Promise<void> {
+  private async settlePaidSource(orderId: number, actorUserId: number | undefined, requireSplit: boolean, serviceSession = false): Promise<void> {
     const context = RequestContextService.getContext();
     if (actorUserId && context?.user_id !== actorUserId) {
       return RequestContextService.runIsolated({ ...context!, user_id: actorUserId },
-        () => this.settlePaidSource(orderId, actorUserId, requireSplit));
+        () => this.settlePaidSource(orderId, actorUserId, requireSplit, serviceSession));
     }
     const order = await this.getOrder(orderId);
     if (['cancelled', 'refunded'].includes(order.state)) return;
@@ -3680,7 +3695,7 @@ export class OrderFlowService {
       .reduce((sum, p) => sum.plus(p.amount), new Prisma.Decimal(0));
     if (paid.lt(order.grand_total)) return;
     const table = await this.prisma.table_sessions.findFirst({ where: { order_id: orderId, store_id: order.store_id }, select: { id: true } });
-    if (!requireSplit && !table) return;
+    if (!requireSplit && !table && !serviceSession) return;
     if (order.state === 'draft') {
       if (table) {
         // Mesa: la promocion draft->created reserva solo lineas NO consumidas

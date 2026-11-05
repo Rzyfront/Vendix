@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { entity_type_enum, order_items, Prisma } from '@prisma/client';
 import { filter } from 'rxjs';
 import { ErrorCodes, VendixHttpException } from '../../../common/errors';
@@ -6,10 +7,25 @@ import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 import { resolveFullTaxRowsByProductId } from '../orders/utils/catalog-line-pricing.util';
 import {
   buildSessionTaxedLine,
+  computeSessionOrderTotals,
   ensureSessionRentalLine,
   reserveSessionLineStock,
   writeSessionOrderTotals,
 } from './utils/session-order-lines.util';
+import {
+  formatMoneyEs,
+  planSettlement,
+  reservationFeeGrossCents,
+  SessionLeftoverPolicy,
+  syncReservationFeeLine,
+  writeDepositBudget,
+} from './utils/session-deposit.util';
+import { ServiceDepositsService } from '../service-deposits/service-deposits.service';
+import type { ServiceDepositPaymentReceived, ServiceDepositReceivedEvent, ServiceDepositRefundedEvent } from '../service-deposits/service-deposits.service';
+import { centsToAmount, toCents } from '../service-deposits/utils/service-deposit-math';
+import { OrderFlowService } from '../orders/order-flow/order-flow.service';
+import { buildPaymentReceivedEvents } from '../payments/utils/payment-received-event.util';
+import { buildOrderSaleTaxPayload } from '../payments/utils/order-sale-tax-payload.util';
 import { assertSaleNatureProducts } from '../products/services/product-usage-nature.util';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -21,7 +37,7 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { ServiceSessionAccessService } from '../../ecommerce/service-sessions/service-session-access.service';
 import { EmailService } from '../../../email/email.service';
 import { SettingsService } from '../settings/settings.service';
-import { AddSessionItemDto, OpenServiceSessionDto, ServiceIntakeValueDto, ServiceSessionTransitionDto } from './dto/service-session.dto';
+import { AddSessionItemDto, OpenServiceSessionDto, ServiceIntakeValueDto, ServiceSessionDepositDto, ServiceSessionTransitionDto, SettleServiceSessionDto } from './dto/service-session.dto';
 import { TemplatesService } from '../data-collection/templates.service';
 import { buildEntityQueries, EntityContext, resolveEntityId } from '../data-collection/utils/entity-resolver.util';
 import { ReissueServiceSessionLinkDto } from './dto/reissue-service-session-link.dto';
@@ -35,6 +51,15 @@ const ACTIVE_SESSION_STATUSES = ['open', 'paused'];
 const ITEM_SESSION_STATUSES = ['open', 'in_progress', 'paused'];
 /** Reintentos de un walk-in sin estación cuando otra atención le gana la estación elegida. */
 const MAX_WALK_IN_PICK_RETRIES = 3;
+/** A session whose deposit policy is one of these carries a consumable deposit (S4). */
+const DEPOSIT_POLICIES = ['optional', 'required'];
+
+/** Thrown inside a transaction to read the settlement preview and roll everything back. */
+class SettlementPreviewRollback extends Error {
+  constructor(readonly preview: Record<string, unknown>) {
+    super('settlement-preview');
+  }
+}
 
 export type IntakeField = {
   id: number;
@@ -94,6 +119,9 @@ export class ServiceSessionsService {
     private readonly stockValidator: StockValidatorService,
     private readonly sellableStockAllocator: SellableStockAllocator,
     private readonly shippingTax: ShippingTaxService,
+    private readonly deposits: ServiceDepositsService,
+    private readonly orderFlow: OrderFlowService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async open(dto: OpenServiceSessionDto) {
@@ -143,7 +171,7 @@ export class ServiceSessionsService {
     const stationId = bookingAllocation?.station_id ?? dto.station_id ?? await this.pickWalkInStation(storeId, productId, providerId, dto.planned_end_at, now, excludedStationIds);
     const station = await this.prisma.service_stations.findFirst({
       where: { id: stationId, store_id: storeId, status: 'active', capacity: 1 },
-      select: { id: true },
+      select: { id: true, deposit_policy: true, deposit_amount: true, deposit_exhausted_policy: true, leftover_policy: true },
     });
     const [stationService, product] = await Promise.all([
       this.prisma.service_station_services.findFirst({ where: { store_id: storeId, station_id: stationId, product_id: productId } }),
@@ -165,6 +193,25 @@ export class ServiceSessionsService {
         select: { id: true },
       });
       if (!customer) throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
+    }
+    // Consumable deposit (S4): the station rules are copied onto the session; a `required`
+    // policy needs an identified customer and the minimum already held or received now.
+    const depositPolicy = station.deposit_policy ?? 'none';
+    if (dto.deposit && !DEPOSIT_POLICIES.includes(depositPolicy)) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_DEPOSIT_011, 'Esta estación no maneja anticipo.');
+    }
+    if ((depositPolicy === 'required' || dto.deposit) && !customerId) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_DEPOSIT_002, 'Identifica al cliente para recibir el anticipo.');
+    }
+    if (depositPolicy === 'required') {
+      const heldCents = booking ? toCents((await this.deposits.balanceOf({ bookingId: booking.id })).balance) : 0;
+      const requiredCents = toCents(station.deposit_amount);
+      if (heldCents + toCents(dto.deposit?.amount) < requiredCents) {
+        throw new VendixHttpException(
+          ErrorCodes.SERVICE_DEPOSIT_008,
+          `Esta estación exige un anticipo de ${formatMoneyEs(requiredCents)} para iniciar la atención.`,
+        );
+      }
     }
     // Required intake items are enforced on walk-in reception (the reservation flow may
     // have collected them earlier through a data-collection submission).
@@ -212,6 +259,7 @@ export class ServiceSessionsService {
     }
 
     const currency = await this.settings.getStoreCurrency();
+    let depositEvent: ServiceDepositReceivedEvent | null = null;
     let result: { id: number; order_id: number | null; station_id: number; booking_id: number | null; status: string; access_token: string; access_token_id: number; access_expires_at: Date; email_delivery_status: string; access_url: string | null };
     try {
       result = await this.prisma.$transaction(async (tx) => {
@@ -224,7 +272,17 @@ export class ServiceSessionsService {
       }
 
       const session = await tx.service_sessions.create({
-        data: { store_id: storeId, station_id: stationId, product_id: productId, booking_id: booking?.id ?? null, order_id: orderId, contact_email: contactEmail, status: 'open', opened_at: now, updated_at: now },
+        data: {
+          store_id: storeId, station_id: stationId, product_id: productId, booking_id: booking?.id ?? null, order_id: orderId, contact_email: contactEmail, status: 'open', opened_at: now, updated_at: now,
+          ...(station.deposit_policy
+            ? {
+                deposit_policy: station.deposit_policy,
+                deposit_required_amount: station.deposit_amount ?? null,
+                deposit_exhausted_policy: station.deposit_exhausted_policy,
+                leftover_policy: station.leftover_policy,
+              }
+            : {}),
+        },
       });
 
       if (bookingAllocation) {
@@ -246,7 +304,8 @@ export class ServiceSessionsService {
             customer_id: customerId,
             order_number: orderNumber,
             state: 'draft',
-            channel: booking?.channel ?? 'pos',
+            // Presential consumption (A11 / D6): an online booking's session order is still a POS order.
+            channel: 'pos',
             delivery_type: 'direct_delivery',
             currency,
             subtotal_amount: 0,
@@ -317,6 +376,30 @@ export class ServiceSessionsService {
         if (checkedIn.count !== 1) throw new VendixHttpException(ErrorCodes.STATION_006);
       }
 
+      // S5: the deposits of the booking now belong to the session too; S4: the deposit
+      // received while opening; S8: recharge mode caps the account at what was received.
+      if (booking) await this.deposits.linkBookingToSessionInTx(tx, booking.id, session.id, storeId);
+      if (dto.deposit) {
+        const received = await this.deposits.receiveInTx(tx, {
+          store_id: storeId,
+          customer_id: customerId,
+          booking_id: booking?.id ?? null,
+          session_id: session.id,
+          amount: dto.deposit.amount,
+          method: dto.deposit.method,
+          store_payment_method_id: dto.deposit.store_payment_method_id ?? null,
+          request_id: dto.deposit.request_id,
+          user_id: userId ?? null,
+        });
+        depositEvent = received.event;
+      }
+      if (DEPOSIT_POLICIES.includes(depositPolicy) && station.deposit_exhausted_policy === 'recharge') {
+        const held = await this.deposits.balanceOfInTx(tx, { store_id: storeId, sessionId: session.id, bookingId: booking?.id ?? null });
+        if (toCents(held.received) > 0) {
+          await writeDepositBudget(tx, { storeId, sessionId: session.id, orderId: orderId!, amountCents: toCents(held.received), currency });
+        }
+      }
+
       if (dto.subject) {
         await tx.service_subjects.create({ data: { store_id: storeId, session_id: session.id, subject_type: dto.subject.subject_type, label: dto.subject.label, metadata: dto.subject.metadata as Prisma.InputJsonValue | undefined } });
       }
@@ -338,6 +421,7 @@ export class ServiceSessionsService {
       throw error;
     }
 
+    this.deposits.announceReceived(depositEvent);
     if (contactEmail) result.email_delivery_status = await this.sendAccessEmail(storeId, result);
     result.access_url = await this.buildAccessUrl(storeId, result.access_token);
 
@@ -817,6 +901,13 @@ export class ServiceSessionsService {
       : dto.action === 'resume' ? existing.status === 'paused'
       : terminal && ACTIVE_SESSION_STATUSES.includes(existing.status);
     if (!allowed) throw new VendixHttpException(ErrorCodes.STATION_006);
+    // S12: a deposit still held must be settled (applied, refunded or credited) before closing.
+    if (dto.action === 'close' && existing.deposit && !existing.deposit.settled_at && toCents(existing.deposit.balance) > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SERVICE_DEPOSIT_010,
+        'La atención tiene un anticipo sin liquidar; liquídalo antes de cerrarla.',
+      );
+    }
 
     // Alquiler por bloque de la estación: se carga en su propia transacción antes de validar
     // el saldo, para que sobreviva al 409 y el pago que se registre después lo incluya.
@@ -1108,8 +1199,10 @@ export class ServiceSessionsService {
         })
       : null;
     const plannedEnd = allocations.find((row) => row.state === 'in_service')?.end_at ?? null;
+    const deposit = await this.buildDepositSummary(session, order);
     return {
       ...session,
+      deposit,
       subjects,
       allocations,
       progress_events: progressEvents,
@@ -1119,6 +1212,39 @@ export class ServiceSessionsService {
       planned_end_at: plannedEnd ? plannedEnd.toISOString() : null,
       next_reservation: toNextReservation(nextRow),
     };
+  }
+
+  /**
+   * Consumable deposit of the session (S8/S9): what was required and received, what the
+   * account has consumed and what is left to consume. `null` for a session without deposit
+   * (legacy or policy `none`), so the admin screens keep their old behavior.
+   */
+  private async buildDepositSummary(
+    session: { id: number; booking_id: number | null; deposit_policy: string | null; deposit_required_amount: Prisma.Decimal | null; deposit_exhausted_policy: string | null; leftover_policy: string | null; settled_at: Date | null },
+    order: { grand_total: Prisma.Decimal; tip_amount: Prisma.Decimal | null; order_items: Array<{ service_line_kind: string | null; cancelled_at: Date | null; final_unit_price: Prisma.Decimal; quantity: number }> } | null,
+  ) {
+    if (!session.deposit_policy || !DEPOSIT_POLICIES.includes(session.deposit_policy)) return null;
+    const balance = await this.deposits.balanceOf({ sessionId: session.id, bookingId: session.booking_id });
+    const consumptionCents = order ? this.consumptionCents(order) : 0;
+    return {
+      required: Number(session.deposit_required_amount ?? 0),
+      received: balance.received,
+      applied: balance.applied,
+      balance: balance.balance,
+      remaining_for_consumption: centsToAmount(Math.max(0, toCents(balance.received) - consumptionCents)),
+      policy: session.deposit_policy,
+      exhausted_policy: session.deposit_exhausted_policy,
+      leftover_policy: session.leftover_policy,
+      settled_at: session.settled_at,
+    };
+  }
+
+  /** Consumption of the account (rental + products, taxes in, no tip, no "Gastos de reserva" line), in cents. */
+  private consumptionCents(order: { grand_total: Prisma.Decimal; tip_amount: Prisma.Decimal | null; order_items: Array<{ service_line_kind: string | null; cancelled_at: Date | null; final_unit_price: Prisma.Decimal; quantity: number }> }): number {
+    const feeCents = order.order_items
+      .filter((item) => item.service_line_kind === 'reservation_fee' && !item.cancelled_at)
+      .reduce((sum, item) => sum + toCents(item.final_unit_price) * Number(item.quantity ?? 1), 0);
+    return Math.max(0, toCents(order.grand_total) - toCents(order.tip_amount) - feeCents);
   }
 
   async listActive(cursor?: number) {
@@ -1187,11 +1313,12 @@ export class ServiceSessionsService {
     const { storeId, userId } = this.requireContext();
     const found = await this.prisma.service_sessions.findFirst({
       where: { id: sessionId, store_id: storeId },
-      select: { id: true, status: true, order_id: true, booking_id: true },
+      select: { id: true, status: true, order_id: true, booking_id: true, settled_at: true },
     });
     if (!found || !ITEM_SESSION_STATUSES.includes(found.status)) {
       throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención no está activa.');
     }
+    if (found.settled_at) throw this.settledDepositError();
     const session = { id: found.id, order_id: found.order_id, booking_id: found.booking_id };
     const now = new Date();
 
@@ -1203,16 +1330,32 @@ export class ServiceSessionsService {
         }
       }
       // Re-chequeo bajo el lock: un cierre que confirmó entre la lectura y la tx no recibe líneas.
-      const live = await tx.service_sessions.findFirst({ where: { id: session.id, store_id: storeId }, select: { status: true } });
+      const live = await tx.service_sessions.findFirst({
+        where: { id: session.id, store_id: storeId },
+        select: { status: true, settled_at: true, deposit_policy: true, deposit_exhausted_policy: true },
+      });
       if (!live || !ITEM_SESSION_STATUSES.includes(live.status)) {
         throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención no está activa.');
       }
+      if (live.settled_at) throw this.settledDepositError();
       const items: order_items[] = [];
       for (const dto of dtos) {
         items.push(await this.addItemTx(tx, storeId, userId ?? null, session, dto, now));
       }
       const orderId = session.order_id!;
       const totals = await this.recalcOrderTotals(tx, orderId, now);
+      // S8: in recharge mode the consumption cannot pass what the customer has deposited.
+      if (live.deposit_exhausted_policy === 'recharge' && live.deposit_policy && DEPOSIT_POLICIES.includes(live.deposit_policy)) {
+        const held = await this.deposits.balanceOfInTx(tx, { store_id: storeId, sessionId: session.id, bookingId: session.booking_id });
+        const receivedCents = toCents(held.received);
+        const shortfallCents = toCents(totals.grand_total) - receivedCents;
+        if (receivedCents > 0 && shortfallCents > 0) {
+          throw new VendixHttpException(
+            ErrorCodes.SERVICE_DEPOSIT_007,
+            `El consumo supera el anticipo recibido (${formatMoneyEs(receivedCents)}) por ${formatMoneyEs(shortfallCents)}. Recarga el anticipo para continuar.`,
+          );
+        }
+      }
       return { order_id: orderId, grand_total: totals.grand_total, items };
     });
 
@@ -1391,6 +1534,7 @@ export class ServiceSessionsService {
     if (!ITEM_SESSION_STATUSES.includes(session.status)) {
       throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención no está activa.');
     }
+    if (session.settled_at) throw this.settledDepositError();
     const now = new Date();
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -1399,6 +1543,9 @@ export class ServiceSessionsService {
       if (order.state !== 'draft') {
         throw new VendixHttpException(ErrorCodes.STATION_006, 'La cuenta ya fue cobrada; no se pueden quitar ítems.');
       }
+      // Settle takes the same lock: re-read so a settlement committed after the first read freezes the lines.
+      const live = await tx.service_sessions.findFirst({ where: { id: session.id, store_id: storeId }, select: { settled_at: true } });
+      if (live?.settled_at) throw this.settledDepositError();
       // Se lee bajo el lock: dos borrados simultáneos dan "no encontrado", no un P2025.
       const item = await tx.order_items.findFirst({
         where: { id: itemId, order_id: session.order_id! },
@@ -1490,6 +1637,346 @@ export class ServiceSessionsService {
 
   private isUniqueConflict(error: unknown) {
     return !!error && typeof error === 'object' && (error as { code?: string }).code === 'P2002';
+  }
+
+  /** S4/S9: top-up of the consumable deposit of an active session (`POST :id/deposits`). */
+  async addDeposit(sessionId: number, dto: ServiceSessionDepositDto) {
+    const { storeId, userId } = this.requireContext();
+    const session = await this.prisma.service_sessions.findFirst({
+      where: { id: sessionId, store_id: storeId },
+      select: { id: true, status: true, order_id: true, booking_id: true, deposit_policy: true, deposit_exhausted_policy: true, settled_at: true },
+    });
+    if (!session || !ITEM_SESSION_STATUSES.includes(session.status)) {
+      throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención no está activa.');
+    }
+    if (!session.deposit_policy || !DEPOSIT_POLICIES.includes(session.deposit_policy)) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_DEPOSIT_011, 'Esta atención no maneja anticipo.');
+    }
+    if (session.settled_at) throw this.settledDepositError();
+    if (!session.order_id) throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención aún no tiene cuenta.');
+    const orderId = session.order_id;
+
+    let event: ServiceDepositReceivedEvent | null = null;
+    const created = await this.prisma.$transaction(async (tx) => {
+      const locked = await lockOrderLifecycle(tx, orderId, storeId);
+      const live = await tx.service_sessions.findFirst({ where: { id: sessionId, store_id: storeId }, select: { settled_at: true } });
+      if (live?.settled_at) throw this.settledDepositError();
+      if (locked.state !== 'draft') {
+        throw new VendixHttpException(ErrorCodes.STATION_006, 'La cuenta ya fue cobrada; no se puede recargar el anticipo.');
+      }
+      const order = await tx.orders.findFirst({ where: { id: orderId, store_id: storeId }, select: { customer_id: true, currency: true } });
+      if (!order?.customer_id) {
+        throw new VendixHttpException(ErrorCodes.SERVICE_DEPOSIT_002, 'Identifica al cliente para recibir el anticipo.');
+      }
+      const received = await this.deposits.receiveInTx(tx, {
+        store_id: storeId,
+        customer_id: order.customer_id,
+        booking_id: session.booking_id,
+        session_id: sessionId,
+        amount: dto.amount,
+        method: dto.method,
+        store_payment_method_id: dto.store_payment_method_id ?? null,
+        request_id: dto.request_id,
+        user_id: userId ?? null,
+      });
+      event = received.event;
+      // S8: in the same transaction as each receive, the cap follows the total received.
+      if (session.deposit_exhausted_policy === 'recharge') {
+        const held = await this.deposits.balanceOfInTx(tx, { store_id: storeId, sessionId, bookingId: session.booking_id });
+        await writeDepositBudget(tx, {
+          storeId,
+          sessionId,
+          orderId,
+          amountCents: toCents(held.received),
+          currency: order.currency ?? (await this.settings.getStoreCurrency()),
+        });
+      }
+      return received.created;
+    });
+
+    this.deposits.announceReceived(event);
+    this.emit(storeId, sessionId, 'deposit_received', { created });
+    return { created, deposit: (await this.findOne(sessionId)).deposit };
+  }
+
+  /**
+   * Settlement preview (`GET :id/settlement`). Runs the exact settlement steps that do not
+   * move money (final rental line, "Gastos de reserva" line) and rolls them back, so the
+   * numbers are the ones `settle` will produce.
+   */
+  async getSettlement(sessionId: number) {
+    const { storeId } = this.requireContext();
+    const session = await this.requireSettleableSession(storeId, sessionId);
+    if (session.settled_at) return this.settledSnapshot(storeId, session);
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const prep = await this.prepareSettlementTx(tx, storeId, session);
+        throw new SettlementPreviewRollback(this.settlementPreview(session, prep));
+      });
+    } catch (error) {
+      if (error instanceof SettlementPreviewRollback) return error.preview;
+      throw error;
+    }
+    throw new VendixHttpException(ErrorCodes.STATION_006);
+  }
+
+  /**
+   * S12: one transaction with the order locked. Final rental line, "Gastos de reserva" line
+   * (minimum spend), deposit applied to the account, leftover refunded or kept as credit,
+   * recharge cap raised to the final total, `settled_at`. After commit: events and, with the
+   * account covered, the invoicing seam. Idempotent once `settled_at` is set.
+   */
+  async settle(sessionId: number, dto: SettleServiceSessionDto) {
+    const { storeId, userId } = this.requireContext();
+    const session = await this.requireSettleableSession(storeId, sessionId);
+    if (session.settled_at) return this.settledSnapshot(storeId, session);
+    const orderId = session.order_id!;
+
+    let refundEvent: ServiceDepositRefundedEvent | null = null;
+    let paymentReceived: ServiceDepositPaymentReceived | null = null;
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      await lockOrderLifecycle(tx, orderId, storeId);
+      const live = await tx.service_sessions.findFirst({ where: { id: sessionId, store_id: storeId }, select: { settled_at: true } });
+      if (live?.settled_at) return null;
+      const prep = await this.prepareSettlementTx(tx, storeId, session);
+      if (!prep.customerId && toCents(prep.balance.received) > 0) {
+        throw new VendixHttpException(ErrorCodes.SERVICE_DEPOSIT_002, 'Identifica al cliente para liquidar el anticipo.');
+      }
+      let appliedCents = 0;
+      if (prep.plan.apply_cents > 0) {
+        const applied = await this.deposits.applyToOrderInTx(tx, {
+          store_id: storeId,
+          order_id: orderId,
+          booking_id: session.booking_id,
+          session_id: sessionId,
+          user_id: userId ?? null,
+        });
+        appliedCents = toCents(applied.amount);
+        paymentReceived = applied.payment_received;
+      }
+      const after = await this.deposits.balanceOfInTx(tx, { store_id: storeId, sessionId, bookingId: session.booking_id });
+      const leftoverCents = toCents(after.balance);
+      let leftoverAction: 'refund' | 'credit' | null = null;
+      if (leftoverCents > 0) {
+        leftoverAction = dto.leftover_action ?? 'credit';
+        const move = {
+          store_id: storeId,
+          customer_id: prep.customerId!,
+          booking_id: session.booking_id,
+          session_id: sessionId,
+          user_id: userId ?? null,
+        };
+        if (leftoverAction === 'refund') {
+          const refunded = await this.deposits.refundInTx(tx, {
+            ...move,
+            method: dto.refund_method ?? 'cash',
+            store_payment_method_id: dto.store_payment_method_id ?? null,
+            request_id: `${dto.request_id}:refund`,
+          });
+          refundEvent = refunded.event;
+        } else {
+          await this.deposits.releaseInTx(tx, { ...move, request_id: `${dto.request_id}:release` });
+        }
+      }
+      // A10: "Liquidar" counts as the approval that raises an existing recharge cap to the final total.
+      const final = await computeSessionOrderTotals(tx, orderId);
+      if (session.deposit_exhausted_policy === 'recharge') {
+        await writeDepositBudget(tx, {
+          storeId,
+          sessionId,
+          orderId,
+          amountCents: toCents(final.grandTotal),
+          currency: prep.currency,
+          raiseOnly: true,
+          onlyIfCapped: true,
+        });
+      }
+      const settledAt = new Date();
+      const claimed = await tx.service_sessions.updateMany({
+        where: { id: sessionId, store_id: storeId, settled_at: null },
+        data: { settled_at: settledAt, updated_at: settledAt },
+      });
+      if (claimed.count !== 1) throw this.settledDepositError();
+      return {
+        settled_at: settledAt,
+        invoice_total: centsToAmount(toCents(final.grandTotal)),
+        fee: centsToAmount(prep.plan.fee_cents),
+        applied: centsToAmount(appliedCents),
+        leftover: { amount: centsToAmount(leftoverCents), action: leftoverAction },
+        remaining_to_collect: final.remaining,
+        covered: toCents(final.remaining) === 0 && toCents(final.grandTotal) > 0,
+        currency: prep.currency,
+      };
+    });
+    if (!outcome) return this.settledSnapshot(storeId, { ...session, settled_at: new Date() });
+
+    this.deposits.announceRefunded(refundEvent);
+    await this.emitDepositPaymentReceived(orderId, paymentReceived, outcome.currency, userId ?? null);
+    if (outcome.covered) {
+      // The account is fully paid by the deposit: promote it and run the invoice emitter. With a
+      // balance left, the cashier collects through the normal payment flow, which already invoices.
+      try {
+        await this.orderFlow.settlePaidServiceSessionOrder(orderId, userId ?? undefined);
+      } catch (error) {
+        this.logger.error(`Settling the paid account of session ${sessionId} failed: ${(error as Error).message}`);
+      }
+    }
+    this.emit(storeId, sessionId, 'deposit_settled', { order_id: orderId });
+    const { currency: _currency, covered: _covered, ...result } = outcome;
+    return { session_id: sessionId, order_id: orderId, already_settled: false, ...result, deposit: (await this.findOne(sessionId)).deposit };
+  }
+
+  private async requireSettleableSession(storeId: number, sessionId: number) {
+    const session = await this.prisma.service_sessions.findFirst({
+      where: { id: sessionId, store_id: storeId },
+      select: { id: true, status: true, order_id: true, booking_id: true, station_id: true, opened_at: true, deposit_policy: true, deposit_exhausted_policy: true, leftover_policy: true, settled_at: true },
+    });
+    if (!session) throw new VendixHttpException(ErrorCodes.STATION_004, 'Sesión de servicio no encontrada en esta tienda.');
+    if (!session.deposit_policy || !DEPOSIT_POLICIES.includes(session.deposit_policy)) {
+      throw new VendixHttpException(ErrorCodes.SERVICE_DEPOSIT_011, 'Esta atención no maneja anticipo.');
+    }
+    if (!session.settled_at && !ITEM_SESSION_STATUSES.includes(session.status)) {
+      throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención no está activa.');
+    }
+    if (!session.order_id) throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención aún no tiene cuenta.');
+    return session;
+  }
+
+  /**
+   * Lines first, money after: final rental line, then the "Gastos de reserva" line for a
+   * minimum-spend leftover (gross exactly the leftover), then the totals. The order is
+   * locked by the caller. Nothing here moves money.
+   */
+  private async prepareSettlementTx(
+    tx: Prisma.TransactionClient,
+    storeId: number,
+    session: { id: number; booking_id: number | null; station_id: number; opened_at: Date; order_id: number | null; leftover_policy: string | null },
+  ) {
+    const orderId = session.order_id!;
+    const locked = await lockOrderLifecycle(tx, orderId, storeId);
+    const draft = locked.state === 'draft';
+    if (draft) await this.addRentalLine(tx, storeId, session, orderId);
+    const balance = await this.deposits.balanceOfInTx(tx, { store_id: storeId, sessionId: session.id, bookingId: session.booking_id });
+    const order = await tx.orders.findFirst({
+      where: { id: orderId, store_id: storeId },
+      select: { customer_id: true, currency: true, total_paid: true },
+    });
+    const currency = order?.currency ?? (await this.settings.getStoreCurrency());
+    const before = await computeSessionOrderTotals(tx, orderId);
+    const consumptionCents = toCents(before.grandTotal) - (await reservationFeeGrossCents(tx, orderId, session.id));
+    // A paid or closed account cannot grow lines: its leftover is only refunded or credited.
+    const leftoverPolicy = draft ? (session.leftover_policy as SessionLeftoverPolicy | null) : null;
+    const plan = planSettlement({
+      consumption_cents: consumptionCents,
+      paid_cents: toCents(order?.total_paid),
+      received_cents: toCents(balance.received),
+      balance_cents: toCents(balance.balance),
+      leftover_policy: leftoverPolicy,
+    });
+    if (draft) {
+      const station = await tx.service_stations.findFirst({
+        where: { id: session.station_id, store_id: storeId },
+        select: { reservation_fee_tax_category_id: true },
+      });
+      const changed = await syncReservationFeeLine(
+        tx,
+        {
+          storeId,
+          sessionId: session.id,
+          orderId,
+          taxCategoryId: station?.reservation_fee_tax_category_id ?? null,
+          feeCents: plan.fee_cents,
+          now: new Date(),
+        },
+        this.shippingTax,
+      );
+      if (changed) await this.recalcOrderTotals(tx, orderId, new Date());
+    }
+    return { plan, balance, consumptionCents, customerId: order?.customer_id ?? null, currency, paidCents: toCents(order?.total_paid) };
+  }
+
+  private settlementPreview(
+    session: { id: number; order_id: number | null; leftover_policy: string | null },
+    prep: { plan: ReturnType<typeof planSettlement>; balance: { received: number; balance: number }; consumptionCents: number; currency: string; paidCents: number },
+  ) {
+    const leftover = prep.plan.leftover_cents;
+    return {
+      session_id: session.id,
+      order_id: session.order_id,
+      already_settled: false,
+      settled_at: null,
+      currency: prep.currency,
+      leftover_policy: session.leftover_policy,
+      consumption: centsToAmount(prep.consumptionCents),
+      deposit_received: prep.balance.received,
+      deposit_balance: prep.balance.balance,
+      fee: centsToAmount(prep.plan.fee_cents),
+      invoice_total: centsToAmount(prep.plan.invoice_cents),
+      paid: centsToAmount(prep.paidCents),
+      apply: centsToAmount(prep.plan.apply_cents),
+      to_collect: centsToAmount(prep.plan.to_collect_cents),
+      leftover: centsToAmount(leftover),
+      leftover_actions: leftover > 0 ? ['refund', 'credit'] : [],
+    };
+  }
+
+  /** Replay of a settle (or preview) on a session already settled: current state, nothing written. */
+  private async settledSnapshot(storeId: number, session: { id: number; order_id: number | null; settled_at: Date | null }) {
+    const order = session.order_id
+      ? await this.prisma.orders.findFirst({ where: { id: session.order_id, store_id: storeId }, select: { grand_total: true, total_paid: true } })
+      : null;
+    const remaining = Math.max(0, toCents(order?.grand_total) - toCents(order?.total_paid));
+    return {
+      session_id: session.id,
+      order_id: session.order_id,
+      already_settled: true,
+      settled_at: session.settled_at,
+      invoice_total: centsToAmount(toCents(order?.grand_total)),
+      paid: centsToAmount(toCents(order?.total_paid)),
+      remaining_to_collect: centsToAmount(remaining),
+      deposit: (await this.findOne(session.id)).deposit,
+    };
+  }
+
+  /** `payment.received` of the deposit applied to the account (wallet method books DR 2805), after commit. */
+  private async emitDepositPaymentReceived(
+    orderId: number,
+    received: ServiceDepositPaymentReceived | null,
+    currency: string,
+    userId: number | null,
+  ) {
+    if (!received) return;
+    const order = await this.prisma.orders.findFirst({ where: { id: orderId } });
+    if (!order) return;
+    const items = await this.prisma.order_items.findMany({
+      where: { order_id: orderId, cancelled_at: null },
+      select: {
+        total_price: true,
+        quantity: true,
+        tax_amount_item: true,
+        weight: true,
+        price_unit_quantity: true,
+        item_type: true,
+        order_item_taxes: { select: { tax_type: true, tax_amount: true, tax_rate: true } },
+      },
+    });
+    const sale_tax = buildOrderSaleTaxPayload({
+      product_tax_rows: items.flatMap((item) =>
+        (item.order_item_taxes || []).map((tax) => ({ ...tax, taxable_amount: Number(item.total_price || 0) })),
+      ),
+      order,
+      order_items: items,
+    });
+    for (const payload of buildPaymentReceivedEvents({ order: received.order, sale_tax, payments: [received.payment], currency, user_id: userId })) {
+      this.eventEmitter.emit('payment.received', payload);
+    }
+  }
+
+  private settledDepositError() {
+    return new VendixHttpException(
+      ErrorCodes.SERVICE_DEPOSIT_009,
+      'El anticipo ya fue liquidado; la cuenta no admite más cambios.',
+    );
   }
 
   private requireContext() {

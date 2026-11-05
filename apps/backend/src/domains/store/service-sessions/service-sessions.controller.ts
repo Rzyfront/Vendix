@@ -28,7 +28,9 @@ import {
   ProviderAvailabilityQueryDto,
   ServiceIntakePrefillQueryDto,
   ServiceIntakeQueryDto,
+  ServiceSessionDepositDto,
   ServiceSessionTransitionDto,
+  SettleServiceSessionDto,
 } from './dto/service-session.dto';
 import { ReissueServiceSessionLinkDto } from './dto/reissue-service-session-link.dto';
 import { ServiceSessionsService } from './service-sessions.service';
@@ -112,6 +114,30 @@ export class ServiceSessionsController {
     @Body() dto: ReissueServiceSessionLinkDto,
   ) {
     return this.response.updated(await this.sessions.reissueAccessLink(id, dto), 'Enlace temporal reemitido');
+  }
+
+  @Post(':id/deposits')
+  @Permissions('store:reservations:update')
+  async addDeposit(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ServiceSessionDepositDto,
+  ) {
+    return this.response.created(await this.sessions.addDeposit(id, dto), 'Anticipo recibido');
+  }
+
+  @Get(':id/settlement')
+  @Permissions('store:reservations:read')
+  async settlement(@Param('id', ParseIntPipe) id: number) {
+    return this.response.success(await this.sessions.getSettlement(id));
+  }
+
+  @Post(':id/settle')
+  @Permissions('store:reservations:update')
+  async settle(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SettleServiceSessionDto,
+  ) {
+    return this.response.success(await this.sessions.settle(id, dto), 'Anticipo liquidado');
   }
 
   @Get(':id')
