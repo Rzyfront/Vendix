@@ -37,6 +37,7 @@ describe('PaymentRequestsPublicService', () => {
   let paymentLinks: any;
   let s3: any;
   let paths: any;
+  let events: any;
 
   beforeEach(() => {
     prisma = {
@@ -55,7 +56,8 @@ describe('PaymentRequestsPublicService', () => {
     };
     s3 = { uploadFile: jest.fn().mockResolvedValue(undefined) };
     paths = { buildReceiptPath: jest.fn().mockReturnValue('organizations/org-2/stores/tienda-7/receipts') };
-    service = new PaymentRequestsPublicService(prisma, paymentLinks, s3, paths);
+    events = { emit: jest.fn() };
+    service = new PaymentRequestsPublicService(prisma, paymentLinks, s3, paths, events);
     jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(7);
   });
 
@@ -181,6 +183,20 @@ describe('PaymentRequestsPublicService', () => {
       expect(out.status).toBe('awaiting_confirmation');
     });
 
+    it('tells the store admin that a receipt is waiting for confirmation', async () => {
+      prisma.payment_requests.findFirst.mockResolvedValue(baseRow());
+
+      await service.submitTransfer('t', file(), {});
+
+      expect(events.emit).toHaveBeenCalledWith('payment_request.receipt_submitted', {
+        store_id: 7,
+        payment_request_id: 5,
+        amount: 400000,
+        purpose: 'service_deposit',
+        description: 'Anticipo Cava 3',
+      });
+    });
+
     it('refuses a transfer method that is not a bank transfer of the store', async () => {
       prisma.payment_requests.findFirst.mockResolvedValue(baseRow());
       prisma.store_payment_methods.findFirst.mockResolvedValue(null);
@@ -195,6 +211,7 @@ describe('PaymentRequestsPublicService', () => {
       await expect(service.submitTransfer('t', file(), {})).rejects.toMatchObject({
         errorCode: 'PAYMENT_REQUEST_AWAITING_CONFIRMATION',
       });
+      expect(events.emit).not.toHaveBeenCalled();
     });
   });
 

@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { PaymentRequestReceiptSubmittedEvent } from './interfaces/payment-request-events.interface';
 import { randomUUID } from 'crypto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
@@ -33,6 +35,7 @@ export class PaymentRequestsPublicService {
     private readonly paymentLinks: PaymentLinksService,
     private readonly s3: S3Service,
     private readonly s3PathHelper: S3PathHelper,
+    private readonly events: EventEmitter2,
   ) {}
 
   async get(token: string) {
@@ -158,6 +161,15 @@ export class PaymentRequestsPublicService {
     if (claimed.count !== 1) {
       throw new VendixHttpException(ErrorCodes.PAYMENT_REQUEST_AWAITING_CONFIRMATION);
     }
+    // The admin confirms the transfer by hand; without this nobody learns a receipt arrived.
+    const submitted: PaymentRequestReceiptSubmittedEvent = {
+      store_id: row.store_id,
+      payment_request_id: row.id,
+      amount: Number(row.amount),
+      purpose: row.purpose,
+      description: row.description,
+    };
+    this.events.emit('payment_request.receipt_submitted', submitted);
     return { status: 'awaiting_confirmation' as const };
   }
 
