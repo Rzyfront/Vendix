@@ -59,6 +59,52 @@ function redirect(location) {
   };
 }
 
+// SEO-TECH-03 (aprobado por Adel el 5-nov): en vendix.online, una ruta sin
+// extensión que no es de la app NO se reescribe a /index.html. S3 responde 404
+// con index.html como cuerpo (documento de error), así que el visitante ve la
+// página «no encontrada» de Angular y los buscadores reciben un 404 real en vez
+// de un soft 404. Al crear una página comercial nueva hay que agregarla aquí
+// (y a scripts/seo/seo-smoke.cjs), o responderá 404.
+var MARKETING_PAGES = {
+  '/': true,
+  '/index.html': true,
+  '/pricing': true,
+  '/ayuda': true,
+  '/pqr': true,
+  '/legal/terminos': true,
+  '/legal/privacidad': true,
+  '/legal/cookies': true
+};
+// Prefijos de la app en vendix.online: rutas con parámetros (/pqr/consultar/:n),
+// guías, autenticación y paneles privados (super admin, organización, tienda,
+// repartos), más los enlaces que envía el backend (onboarding, reset-password).
+var MARKETING_PREFIXES = [
+  '/pqr',
+  '/guias',
+  '/auth',
+  '/admin',
+  '/super-admin',
+  '/superadmin',
+  '/repartos',
+  '/onboarding',
+  '/reset-password',
+  '/authenticate'
+];
+
+function isMarketingAppRoute(uri) {
+  var path = uri.length > 1 && endsWith(uri, '/') ? uri.substring(0, uri.length - 1) : uri;
+  if (MARKETING_PAGES[path]) {
+    return true;
+  }
+  for (var i = 0; i < MARKETING_PREFIXES.length; i++) {
+    var prefix = MARKETING_PREFIXES[i];
+    if (path === prefix || path.indexOf(prefix + '/') === 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 var SPA_PREFIXES = [
   '/productos/',
   '/products/',
@@ -100,6 +146,9 @@ function handler(event) {
 
   var lastSegment = uri.substring(uri.lastIndexOf('/') + 1);
   if (lastSegment.indexOf('.') === -1) {
+    if (host === MARKETING_HOST && !isMarketingAppRoute(uri)) {
+      return request;
+    }
     request.uri = '/index.html';
   }
 
