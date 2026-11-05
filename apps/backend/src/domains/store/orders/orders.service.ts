@@ -801,9 +801,12 @@ export class OrdersService {
       ),
     );
     const stationProducts = lineProductIds.length
-      ? await this.prisma.products.findMany({ where: { id: { in: lineProductIds }, store_id }, select: { id: true, requires_station: true } })
+      ? await this.prisma.products.findMany({ where: { id: { in: lineProductIds }, store_id }, select: { id: true, requires_station: true, rental_pricing_mode: true } })
       : [];
     const stationProductIds = new Set(stationProducts.filter((product) => product.requires_station).map((product) => product.id));
+    const stationRateProductIds = new Set<number>(
+      stationProducts.filter((product) => product.rental_pricing_mode === 'station_rate').map((product) => product.id),
+    );
     const requiredStationLines = createOrderDto.items.filter((item) => item.product_id != null && stationProductIds.has(item.product_id));
     const requiredBookingIds = requiredStationLines.map((item) => item.booking_id).filter((id): id is number => typeof id === 'number');
     if (requiredStationLines.some((item) => item.quantity !== 1 || !item.booking_id) || new Set(requiredBookingIds).size !== requiredBookingIds.length) {
@@ -848,6 +851,11 @@ export class OrdersService {
       createOrderDto.items,
       lineTaxByProductId,
     );
+    const stationRentalRatesByIndex = await this.resolveStationRentalLineRates(
+      createOrderDto.items,
+      stationRateProductIds,
+      store_id,
+    );
     const plannedLines = createOrderDto.items.map((item, index) =>
       this.planServerOrderLine(
         item,
@@ -856,6 +864,7 @@ export class OrdersService {
         declaredTaxCategoryRows,
         shelfByIndex.get(index),
         'orders.create',
+        stationRentalRatesByIndex.get(index),
       ),
     );
 
@@ -6475,6 +6484,80 @@ export class OrdersService {
   }
 
   /**
+   * H-2 (L28): a `station_rate` rental is taxed with its STATION's rental tax in every channel (the POS
+   * rule), never with the product's assignments. Its line arrives at the frozen quote, which already is the
+   * gross of that tax (`RentalQuoteService`), so the rows are resolved as inside it: the line total is
+   * exactly the quote whether the station tax is inclusive or exclusive. Keyed by line index; an empty list
+   * means the station charges no tax. A line whose booking has no live station keeps the ordinary sources.
+   */
+  private async resolveStationRentalLineRates(
+    items: Array<{ product_id?: number | null; booking_id?: number | null }>,
+    stationRateProductIds: Set<number>,
+    storeId: number,
+  ): Promise<Map<number, ResolvedLineTax[]>> {
+    const byIndex = new Map<number, ResolvedLineTax[]>();
+    const lines = items
+      .map((item, index) => ({ index, product_id: item.product_id, booking_id: item.booking_id }))
+      .filter(
+        (line): line is { index: number; product_id: number; booking_id: number } =>
+          line.product_id != null &&
+          stationRateProductIds.has(line.product_id) &&
+          typeof line.booking_id === 'number',
+      );
+    if (lines.length === 0) return byIndex;
+
+    const allocations = await this.prisma.service_allocations.findMany({
+      where: {
+        store_id: storeId,
+        booking_id: { in: lines.map((line) => line.booking_id) },
+        state: { in: ['held', 'payment_pending', 'confirmed'] },
+      },
+      select: { booking_id: true, station_id: true },
+    });
+    const stationByBooking = new Map<number, number>();
+    for (const allocation of allocations) {
+      if (allocation.booking_id != null && allocation.station_id != null) {
+        stationByBooking.set(allocation.booking_id, allocation.station_id);
+      }
+    }
+    const stationIds = [...new Set(stationByBooking.values())];
+    if (stationIds.length === 0) return byIndex;
+
+    const stations = await this.prisma.service_stations.findMany({
+      where: { id: { in: stationIds }, store_id: storeId },
+      select: { id: true, rental_tax_category_id: true, rental_tax_is_inclusive: true },
+    });
+    const rowsByStation = new Map<number, ResolvedLineTax[]>();
+    for (const station of stations) {
+      const rows = this.shippingTaxService
+        ? await this.shippingTaxService.taxRowsForCategory(null, {
+            tax_category_id: station.rental_tax_category_id ?? null,
+            tax_is_inclusive: station.rental_tax_is_inclusive ?? true,
+            store_id: storeId,
+          })
+        : [];
+      rowsByStation.set(
+        station.id,
+        rows.map((row) => ({
+          id: row.tax_rate_id,
+          name: row.name,
+          rate: row.rate,
+          is_compound: false,
+          tax_type: row.tax_type ?? null,
+          is_inclusive: true,
+        })),
+      );
+    }
+
+    for (const line of lines) {
+      const stationId = stationByBooking.get(line.booking_id);
+      const rows = stationId != null ? rowsByStation.get(stationId) : undefined;
+      if (rows) byIndex.set(line.index, rows);
+    }
+    return byIndex;
+  }
+
+  /**
    * P0-1 / P0-4 / P1-2 (auditoría impuestos por producto) — plan fiscal
    * server-side de UNA línea del carril de órdenes. El precio lo trae el
    * cliente (puede estar negociado); el impuesto, su clasificación y su monto
@@ -6508,17 +6591,27 @@ export class OrdersService {
     declaredTaxCategoryRows: Map<number, ResolvedLineTax[]>,
     catalogShelfPrice: number | null | undefined,
     logContext: string,
+    /**
+     * H-2: rows of a `station_rate` rental line (see `resolveStationRentalLineRates`). When present they
+     * replace every other source, and an empty list means "no tax"; the line price is their gross.
+     */
+    stationRentalRates?: ResolvedLineTax[],
   ): PlannedOrderLine {
     const productRates =
       item.product_id != null
         ? ratesByProductId.get(Number(item.product_id)) ?? null
         : null;
-    const rates =
-      productRates && productRates.length > 0
+    const rates = stationRentalRates
+      ? stationRentalRates
+      : productRates && productRates.length > 0
         ? productRates
         : item.tax_category_id
           ? declaredTaxCategoryRows.get(Number(item.tax_category_id)) ?? null
           : null;
+    // The quote is the gross: the inclusive station rows are cleared from it, never added on top.
+    if (stationRentalRates?.length && item.final_unit_price == null) {
+      item = { ...item, final_unit_price: item.unit_price };
+    }
 
     if (item.product_id == null && !(rates && rates.length > 0)) {
       const unitPrice = Number(item.unit_price ?? 0);

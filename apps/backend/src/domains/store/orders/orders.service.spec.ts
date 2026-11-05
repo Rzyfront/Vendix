@@ -5535,6 +5535,117 @@ describe('OrdersService', () => {
       }
     });
 
+    /**
+     * H-2 (L28): a `station_rate` rental with a booking arrives at its frozen quote, which already is the
+     * gross of the STATION's rental tax (POS rule). The line is taxed with the station's rows inside that
+     * gross, never with the product's own assignments, so the order total is exactly the quote.
+     */
+    describe('alquiler por tarifa de estación (H-2)', () => {
+      let restore: (() => void) | null = null;
+      afterEach(() => {
+        restore?.();
+        restore = null;
+      });
+
+      const arrangeRental = (pricingMode: string, stationRows: unknown[]) => {
+        arrange(
+          productTaxRow(
+            1,
+            { id: 10, name: 'IVA 19% producto', rate: 0.19, is_inclusive: false },
+            'iva',
+            { requires_station: true, rental_pricing_mode: pricingMode, base_price: 10000 },
+          ),
+        );
+        const prisma = mockPrismaService as any;
+        const previous = {
+          allocations: prisma.service_allocations,
+          stations: prisma.service_stations,
+          updateMany: prisma.bookings.updateMany,
+          tax: (service as any).shippingTaxService,
+        };
+        prisma.bookings.findMany.mockResolvedValue([{ id: 77, product_id: 1, product_variant_id: null }]);
+        prisma.bookings.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+        prisma.service_allocations = {
+          findMany: jest.fn().mockResolvedValue([{ booking_id: 77, station_id: 5 }]),
+          findFirst: jest.fn().mockResolvedValue({ id: 900 }),
+        };
+        prisma.service_stations = {
+          findMany: jest
+            .fn()
+            .mockResolvedValue([{ id: 5, rental_tax_category_id: 8, rental_tax_is_inclusive: false }]),
+        };
+        const taxRowsForCategory = jest.fn().mockResolvedValue(stationRows);
+        (service as any).shippingTaxService = { taxRowsForCategory };
+        restore = () => {
+          prisma.service_allocations = previous.allocations;
+          prisma.service_stations = previous.stations;
+          prisma.bookings.updateMany = previous.updateMany;
+          prisma.bookings.findMany.mockResolvedValue([]);
+          (service as any).shippingTaxService = previous.tax;
+        };
+        return taxRowsForCategory;
+      };
+
+      it('cotización 59.500 con IVA de la estación agregado: la línea es 50.000 + 9.500 con la fila de la estación, no la del producto', async () => {
+        const spy = contextSpy();
+        try {
+          const taxRowsForCategory = arrangeRental('station_rate', [
+            { tax_rate_id: 31, name: 'IVA 19% estación', rate: 0.19, tax_type: 'iva', is_inclusive: false },
+          ]);
+          await service.create(reservationStyleDto(59500, { booking_id: 77 }), { id: 99 });
+          const { header, line } = written();
+          expect(taxRowsForCategory).toHaveBeenCalledWith(null, {
+            tax_category_id: 8,
+            tax_is_inclusive: false,
+            store_id: 1,
+          });
+          expect(line.unit_price).toBe(50000);
+          expect(line.tax_amount_item).toBe(9500);
+          expect(line.final_unit_price).toBe(59500);
+          expect(line.order_item_taxes.create).toHaveLength(1);
+          expect(line.order_item_taxes.create[0]).toMatchObject({ tax_rate_id: 31, tax_type: 'iva' });
+          expect(line.order_item_taxes.create[0].tax_amount.toNumber()).toBe(9500);
+          expect(header.tax_amount).toBe(9500);
+          expect(header.grand_total).toBe(59500);
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it('estación sin impuesto de alquiler: el alquiler no toma el IVA del producto y totaliza la cotización', async () => {
+        const spy = contextSpy();
+        try {
+          arrangeRental('station_rate', []);
+          await service.create(reservationStyleDto(50000, { booking_id: 77 }), { id: 99 });
+          const { header, line } = written();
+          expect(line.unit_price).toBe(50000);
+          expect(line.tax_amount_item).toBe(0);
+          expect(line.final_unit_price).toBe(50000);
+          expect(line.order_item_taxes).toBeUndefined();
+          expect(header.tax_amount).toBe(0);
+          expect(header.grand_total).toBe(50000);
+        } finally {
+          spy.mockRestore();
+        }
+      });
+
+      it('producto con estación a precio fijo (fixed_price) sigue gravado con su propio IVA', async () => {
+        const spy = contextSpy();
+        try {
+          const taxRowsForCategory = arrangeRental('fixed_price', []);
+          await service.create(reservationStyleDto(10000, { booking_id: 77 }), { id: 99 });
+          const { header, line } = written();
+          expect(taxRowsForCategory).not.toHaveBeenCalled();
+          expect(line.unit_price).toBe(10000);
+          expect(line.tax_amount_item).toBe(1900);
+          expect(line.order_item_taxes.create[0]).toMatchObject({ tax_rate_id: 10 });
+          expect(header.grand_total).toBe(11900);
+        } finally {
+          spy.mockRestore();
+        }
+      });
+    });
+
     it('IVA 19 % AGREGADO: base 10.000 ⇒ línea 10.000 + 1.900, total 11.900', async () => {
       const spy = contextSpy();
       try {
