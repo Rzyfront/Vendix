@@ -21,7 +21,7 @@ import {
   SelectorComponent,
 } from '../../../../../shared/components';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
-import { CurrencyPipe } from '../../../../../shared/pipes/currency';
+import { CurrencyFormatService, CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
   ChargeCartToSessionResult,
@@ -260,6 +260,7 @@ export class PosChargeStationModalComponent {
   private readonly integration = inject(PosServiceStationIntegrationService);
   private readonly toastService = inject(ToastService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
+  private readonly currencyService = inject(CurrencyFormatService);
 
   readonly isOpen = input<boolean>(false);
   readonly cartItems = input<CartItem[]>([]);
@@ -310,7 +311,7 @@ export class PosChargeStationModalComponent {
           v.service_duration_minutes,
           v.service_duration_unit,
         );
-        const price = v.price != null ? ` · $${v.price.toLocaleString('es-CO')}` : '';
+        const price = v.price != null ? ` · ${this.currencyService.format(v.price)}` : '';
         return { value: v.id, label: `${v.name || duration}${v.name ? ` (${duration})` : ''}${price}` };
       }),
   );

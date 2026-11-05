@@ -390,7 +390,7 @@
   <app-modal [(isOpen)]="showCloseDialog" title="Cerrar atención" [subtitle]="stationName()" size="md">
     <div class="space-y-3">
       <p class="text-sm text-[var(--color-text-primary)]">
-        La cuenta tiene <strong class="font-mono">{{ balance() | currency }}</strong> pendientes.
+        La cuenta tiene <strong class="font-mono">{{ accountDue() | currency }}</strong> pendientes.
       </p>
       <p class="text-xs text-[var(--color-text-secondary)]">
         Cóbrala ahora o, si tienes permiso y la atención tiene un cliente identificado, ciérrala y déjala por cobrar.

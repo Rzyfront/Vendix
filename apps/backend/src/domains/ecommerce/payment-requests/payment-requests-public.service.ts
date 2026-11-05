@@ -16,6 +16,7 @@ import {
 } from '../checkout/utils/online-payment-methods.util';
 import { StartWompiDto, SubmitTransferDto } from './dto/payment-requests-public.dto';
 import { SniffedBinaryMime, sniffBinaryMime } from '@common/utils/file-signature.util';
+import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 
 export const RECEIPT_MAX_BYTES = 5 * 1024 * 1024;
 const RECEIPT_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
@@ -43,8 +44,11 @@ export class PaymentRequestsPublicService {
     const row = await this.load(token);
     const status = this.effectiveStatus(row);
     const methods = status === 'pending' ? await this.listMethods(Number(row.amount)) : [];
+    // The page prints the hold expiry and the payment date in the store's clock, not the visitor's.
+    const timezone = await resolveStoreTimezone(this.prisma, row.store_id);
     return {
       amount: Number(row.amount),
+      timezone,
       currency: row.currency,
       description: row.description,
       status,

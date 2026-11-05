@@ -350,7 +350,7 @@ export class PaymentRequestPageComponent implements OnInit {
   }
 
   dateTime(value: string): string {
-    return formatStoreDateTime(value, this.browserTimezone, {
+    return formatStoreDateTime(value, this.request()?.timezone || this.browserTimezone, {
       dateStyle: 'medium',
       timeStyle: 'short',
     });

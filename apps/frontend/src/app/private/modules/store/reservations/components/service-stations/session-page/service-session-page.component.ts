@@ -860,7 +860,9 @@ export class ServiceSessionPageComponent {
   async requestClose(): Promise<void> {
     const current = this.session();
     if (!current || this.isClosed()) return;
-    if (this.balanceCents() > 0) {
+    // Both orders count: a session that only owes its rental still needs the close-with-balance dialog,
+    // the server blocks a plain close for the rental debt too.
+    if (toCents(this.accountDue()) > 0) {
       this.showCloseDialog.set(true);
       return;
     }
@@ -882,6 +884,11 @@ export class ServiceSessionPageComponent {
 
   chargeFromCloseDialog(): void {
     this.showCloseDialog.set(false);
+    // Nothing left on the account: what is owed is the rental order.
+    if (this.balanceCents() <= 0 && this.canCollectRental()) {
+      this.openRentalCharge();
+      return;
+    }
     this.openCharge();
   }
 

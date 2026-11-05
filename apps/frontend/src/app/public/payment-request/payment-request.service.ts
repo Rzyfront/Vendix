@@ -45,6 +45,8 @@ export interface PublicBankAccount {
 export interface PublicPaymentRequest {
   amount: number;
   currency: string;
+  /** IANA timezone of the store: dates on the page are printed in the store's clock. */
+  timezone?: string | null;
   description: string;
   status: PaymentRequestStatus;
   expires_at: string | null;

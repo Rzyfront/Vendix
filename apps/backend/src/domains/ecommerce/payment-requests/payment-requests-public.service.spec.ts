@@ -52,6 +52,7 @@ describe('PaymentRequestsPublicService', () => {
       store_payment_methods: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn() },
       stores: { findUnique: jest.fn().mockResolvedValue({ id: 7, slug: 'tienda', organization_id: 2 }) },
       organizations: { findUnique: jest.fn().mockResolvedValue({ id: 2, slug: 'org' }) },
+      store_settings: { findFirst: jest.fn().mockResolvedValue({ settings: {}, stores: { timezone: 'America/Bogota' } }) },
     };
     paymentLinks = {
       create: jest.fn().mockResolvedValue({ data: { id: 11, checkout_url: 'https://checkout.wompi.co/l/abc' } }),
@@ -130,6 +131,14 @@ describe('PaymentRequestsPublicService', () => {
       expect(json).not.toContain('api_secret');
       expect(json).not.toContain('private_key');
       expect(out.has_receipt).toBe(true);
+    });
+
+    it("returns the store timezone so the page shows the hold expiry in the store's clock, not the visitor's", async () => {
+      prisma.payment_requests.findFirst.mockResolvedValue(baseRow());
+      prisma.store_settings.findFirst.mockResolvedValue({ settings: {}, stores: { timezone: 'America/Lima' } });
+      const out = await service.get('t');
+      expect(out.timezone).toBe('America/Lima');
+      expect(prisma.store_settings.findFirst.mock.calls[0][0].where).toEqual({ store_id: 7 });
     });
   });
 
