@@ -639,6 +639,11 @@ export class ServiceSessionPageComponent {
     return meta && meta['customer_document'] ? String(meta['customer_document']) : null;
   }
 
+  /** The API sends money as Decimal strings; the currency pipe takes numbers. */
+  money(value: number | string | null | undefined): number | null {
+    return value == null || value === '' ? null : Number(value);
+  }
+
   lineTotalWithTax(item: SessionOrderItem): number {
     return item.final_unit_price != null
       ? Math.round(Number(item.final_unit_price) * Number(item.quantity) * 100) / 100

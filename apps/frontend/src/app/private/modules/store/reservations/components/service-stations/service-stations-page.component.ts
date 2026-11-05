@@ -5,7 +5,7 @@ import { Component, computed, DestroyRef, inject, OnInit, signal } from '@angula
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { interval } from 'rxjs';
+import { firstValueFrom, interval } from 'rxjs';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -1213,6 +1213,7 @@ export class ServiceStationsPageComponent implements OnInit {
       try { url = await firstValueFrom(this.stationsApi.getPublicUrl(st.id)); this.qrPublicUrl.set(url); }
       catch (error) { this.toastService.error(extractApiErrorMessage(error) || 'No se pudo resolver el dominio público de la tienda.'); return; }
     }
+    if (!url) return;
     if (navigator?.clipboard?.writeText) {
       navigator.clipboard.writeText(url).then(() => {
         this.toastService.success('Enlace de la estación copiado al portapapeles.');

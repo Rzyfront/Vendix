@@ -201,7 +201,7 @@
                   <div class="min-w-0">
                     <div class="font-bold text-[var(--color-text-primary)] truncate">{{ item.product_name }}</div>
                     <div class="text-[11px] text-[var(--color-text-secondary)] font-mono">
-                      {{ item.quantity }} x {{ (item.final_unit_price ?? item.unit_price) | currency }}
+                      {{ item.quantity }} x {{ money(item.final_unit_price ?? item.unit_price) | currency }}
                       @if (Number(item.tax_rate) > 0) {
                         <span class="ml-1 text-[10px]">· IVA {{ Number(item.tax_rate) * 100 | number: '1.0-2' }}%</span>
                       }
@@ -221,13 +221,13 @@
           </div>
           <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-xs space-y-1 font-mono">
             <div class="flex justify-between text-[var(--color-text-secondary)]">
-              <span>Subtotal</span><span>{{ order()?.subtotal_amount | currency }}</span>
+              <span>Subtotal</span><span>{{ money(order()?.subtotal_amount) | currency }}</span>
             </div>
             <div class="flex justify-between text-[var(--color-text-secondary)]">
-              <span>Impuestos</span><span>{{ (order()?.tax_amount || 0) | currency }}</span>
+              <span>Impuestos</span><span>{{ money(order()?.tax_amount || 0) | currency }}</span>
             </div>
             <div class="flex justify-between font-bold text-[var(--color-text-primary)]">
-              <span>Total</span><span>{{ order()?.grand_total | currency }}</span>
+              <span>Total</span><span>{{ money(order()?.grand_total) | currency }}</span>
             </div>
             <div class="flex justify-between text-[var(--color-text-secondary)]">
               <span>Pagado</span><span>{{ paidAmount() | currency }}</span>
@@ -239,7 +239,7 @@
           @if (budget() && Number(order()?.grand_total) > Number(budget()?.amount)) {
             <div class="p-3 rounded-xl border border-[var(--color-warning)] bg-[var(--color-warning-light)] text-xs text-[var(--color-text-primary)] flex items-start gap-2">
               <app-icon name="alert-triangle" [size]="14" class="shrink-0 mt-0.5" />
-              <span>La cuenta supera el presupuesto autorizado por el cliente ({{ budget()?.amount | currency }}). Ajusta el techo abajo para poder cobrarla.</span>
+              <span>La cuenta supera el presupuesto autorizado por el cliente ({{ money(budget()?.amount) | currency }}). Ajusta el techo abajo para poder cobrarla.</span>
             </div>
           }
         } @else {
@@ -277,7 +277,7 @@
               <div class="p-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between text-xs">
                 <div>
                   <span class="font-bold text-[var(--color-text-primary)]">Versión {{ prop.version }}</span>
-                  <span class="text-[var(--color-text-secondary)] ml-2 font-mono">Total: {{ prop.total | currency }}</span>
+                  <span class="text-[var(--color-text-secondary)] ml-2 font-mono">Total: {{ money(prop.total) | currency }}</span>
                 </div>
                 <app-badge [variant]="prop.status === 'approved' ? 'success' : prop.status === 'rejected' ? 'error' : 'warning'" size="xs">
                   {{ prop.status === 'approved' ? 'Aprobada' : prop.status === 'rejected' ? 'Rechazada' : 'Pendiente' }}
