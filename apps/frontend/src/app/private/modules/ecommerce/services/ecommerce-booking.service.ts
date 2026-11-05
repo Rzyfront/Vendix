@@ -12,6 +12,8 @@ export interface AvailabilitySlot {
   available: number;
   station_id?: number;
   station_name?: string;
+  /** The station requires a deposit or a payment to book (A12): hold + payment page. */
+  charges_online?: boolean;
 }
 
 /** Public price quote of a station rental (`GET rental-quote/:productId`). */
@@ -47,6 +49,9 @@ export interface HoldResult {
   end_time: string;
   status: string;
   expires_at: string | null;
+  /** Payment page of the held slot when the station charges to book (A12). */
+  payment_path?: string | null;
+  prepay_amount?: number;
 }
 
 export interface CustomerBooking {
@@ -294,6 +299,9 @@ export class EcommerceBookingService {
 
   holdBooking(dto: {
     product_id: number;
+    product_variant_id?: number;
+    station_id?: number;
+    provider_id?: number;
     date: string;
     start_time: string;
     end_time: string;

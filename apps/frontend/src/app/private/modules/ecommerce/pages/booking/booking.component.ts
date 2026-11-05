@@ -30,6 +30,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { toLocalDateString } from '../../../../../shared/utils/date.util';
 import { formatDurationUnit } from '../../../../../shared/utils/duration-unit.util';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 import { BookingCalendarComponent } from '../../components/booking/booking-calendar/booking-calendar.component';
 import {
@@ -180,6 +181,20 @@ export class BookingComponent implements OnInit {
 
   // Free-booking fallback (when product has no provider scheduling).
   isFreeBooking = signal(false);
+  /**
+   * Synthetic 08:00-18:00 grid of a free-booking service. A station rental never uses it:
+   * its slots come from the station and store hours (S21) and carry the `station_id`
+   * the rental quote and the booking need.
+   */
+  readonly usesSyntheticSlots = computed(() => this.isFreeBooking() && !this.product()?.requires_station);
+
+  /**
+   * The chosen station requires a deposit or a payment to book (A12): the slot is held and
+   * paid on its payment page. The cart would sell it without that money, so checkout refuses it.
+   */
+  readonly chargesOnline = computed(
+    () => !this.usesSyntheticSlots() && this.selectedSlot()?.charges_online === true,
+  );
   freeBookingTime = signal<string | null>(null);
   freeBookingEndTime = signal<string | null>(null);
   readonly freeBookingSlots = computed(() => {
@@ -466,7 +481,7 @@ export class BookingComponent implements OnInit {
 
   onSlotSelected(slot: BookingSlot): void {
     this.selectedSlot.set(slot);
-    this.currentStep.set(3);
+    this.currentStep.set(this.confirmStep);
   }
 
   selectFreeBookingTime(slot: { time: string; endTime: string }): void {
@@ -497,7 +512,7 @@ export class BookingComponent implements OnInit {
     let startTime: string;
     let endTime: string;
 
-    if (this.isFreeBooking()) {
+    if (this.usesSyntheticSlots()) {
       startTime = this.freeBookingTime()!;
       endTime = this.freeBookingEndTime()!;
       if (!startTime || !endTime) return;
@@ -510,6 +525,11 @@ export class BookingComponent implements OnInit {
         this.toast.error('Selecciona un horario con estación disponible');
         return;
       }
+    }
+
+    if (this.chargesOnline()) {
+      this.holdAndPay(date, startTime, endTime);
+      return;
     }
 
     const variantId = this.selectedVariantId();
@@ -584,6 +604,39 @@ export class BookingComponent implements OnInit {
     } else {
       this.router.navigate(['/checkout']);
     }
+  }
+
+  /** Holds the slot and opens its payment page; the booking is confirmed by that payment. */
+  private holdAndPay(date: string, startTime: string, endTime: string): void {
+    const slot = this.selectedSlot();
+    this.submitting.set(true);
+    this.errorMessage.set('');
+    this.bookingService
+      .holdBooking({
+        product_id: this.productId(),
+        product_variant_id: this.selectedVariantId() ?? undefined,
+        station_id: slot?.station_id,
+        provider_id: this.providerId() ?? undefined,
+        date,
+        start_time: startTime,
+        end_time: endTime,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const path = response.data?.payment_path;
+          if (path) {
+            this.router.navigateByUrl(path);
+            return;
+          }
+          this.submitting.set(false);
+          this.toast.error('No se pudo abrir el pago de la reserva. Intenta de nuevo.');
+        },
+        error: (err) => {
+          this.submitting.set(false);
+          this.errorMessage.set(extractApiErrorMessage(err));
+        },
+      });
   }
 
   /**

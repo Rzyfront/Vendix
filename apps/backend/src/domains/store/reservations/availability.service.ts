@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { stationChargesOnline } from '../service-stations/station-online-charge.util';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { booking_status_enum, booking_mode_enum } from '@prisma/client';
 import { BusinessHoursService } from './business-hours/business-hours.service';
@@ -44,6 +45,8 @@ export interface AvailabilitySlot {
   /** Station is present only for services that require an assigned station. */
   station_id?: number;
   station_name?: string;
+  /** The station requires a deposit or a payment to book: online, it is booked by hold + payment page. */
+  charges_online?: boolean;
 }
 
 @Injectable()
@@ -424,7 +427,7 @@ export class AvailabilityService {
             .filter((id) => !station_id || id === station_id),
         },
       },
-      select: { id: true, name: true, capacity: true },
+      select: { id: true, name: true, capacity: true, deposit_policy: true, booking_prepay_mode: true },
       orderBy: { id: 'asc' },
     });
     if (!stations.length) return [];
@@ -562,6 +565,7 @@ export class AvailabilityService {
             result = {
               station_id: station.id,
               station_name: station.name,
+              charges_online: stationChargesOnline(station),
               ...expanded,
               available_providers: [],
               total_available: 0,

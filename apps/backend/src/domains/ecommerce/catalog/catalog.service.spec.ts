@@ -167,6 +167,32 @@ describe('CatalogService reviews', () => {
     expect(result.variants[0].service_duration_unit).toBe('day');
   });
 
+  it('S2: el detalle dice si el servicio exige estación, para que la reserva en línea pida sus horarios', async () => {
+    prisma.store_settings.findFirst.mockResolvedValueOnce(disabledSettings);
+    prisma.products.findFirst.mockResolvedValue({
+      ...baseProduct,
+      reviews: undefined,
+      product_type: 'service',
+      requires_booking: true,
+      booking_mode: 'free_booking',
+      requires_station: true,
+      rental_pricing_mode: 'station_rate',
+    });
+
+    const result: any = await service.getProductBySlug('producto');
+
+    expect(result.requires_station).toBe(true);
+  });
+
+  it('S2: un producto sin estación declara requires_station false, no ausente', async () => {
+    prisma.store_settings.findFirst.mockResolvedValueOnce(disabledSettings);
+    prisma.products.findFirst.mockResolvedValue({ ...baseProduct, reviews: undefined });
+
+    const result: any = await service.getProductBySlug('producto');
+
+    expect(result.requires_station).toBe(false);
+  });
+
   it('S2: un producto ordinario sigue sin unidad ni modo de alquiler (null)', async () => {
     prisma.store_settings.findFirst.mockResolvedValueOnce(disabledSettings);
     prisma.products.findFirst.mockResolvedValue({ ...baseProduct, reviews: undefined });

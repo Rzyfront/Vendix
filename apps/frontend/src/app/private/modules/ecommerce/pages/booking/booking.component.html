@@ -160,7 +160,7 @@
             {{ formatDateDisplay(selectedDate()!) }}
           </p>
 
-          @if (isFreeBooking()) {
+          @if (usesSyntheticSlots()) {
             <div class="slot-group">
               <h3 class="slot-group-label">
                 <app-icon name="clock" [size]="16" />
@@ -192,7 +192,7 @@
           }
 
           <div class="step-actions">
-            <app-button (clicked)="goToStep(1)" variant="outline" size="sm"
+            <app-button (clicked)="goToStep(isFreeBooking() ? 0 : 1)" variant="outline" size="sm"
               >Volver</app-button
             >
           </div>
@@ -329,7 +329,7 @@
               <span class="summary-value"
                 >{{
                   formatTime(
-                    isFreeBooking()
+                    usesSyntheticSlots()
                       ? freeBookingTime()!
                       : selectedSlot()!.start_time
                   )
@@ -337,7 +337,7 @@
                 -
                 {{
                   formatTime(
-                    isFreeBooking()
+                    usesSyntheticSlots()
                       ? freeBookingEndTime()!
                       : selectedSlot()!.end_time
                   )
@@ -347,9 +347,18 @@
             @if (product(); as p) {
               <div class="summary-row summary-price">
                 <span class="summary-label">Precio</span>
-                <span class="summary-value price">{{
-                  p.final_price | currency
-                }}</span>
+                <!-- A station rental costs what the quote of the chosen slot says (S18). -->
+                <span class="summary-value price">
+                  @if (!isStationRate()) {
+                    {{ p.final_price | currency }}
+                  } @else if (rentalQuote(); as quote) {
+                    {{ quote.amount | currency }}
+                  } @else if (rentalQuoting()) {
+                    Calculando…
+                  } @else {
+                    Precio según horario
+                  }
+                </span>
               </div>
             }
           </div>
@@ -395,6 +404,13 @@
               ></textarea>
             </div>
 
+            @if (chargesOnline()) {
+              <p class="text-sm text-text-secondary" data-testid="booking-charges-online">
+                Esta estación cobra para reservar: te llevamos a la página de pago y el horario
+                queda apartado mientras pagas.
+              </p>
+            }
+
             @if (errorMessage()) {
               <div class="error-message">
                 <app-icon name="alert-circle" [size]="16" />
@@ -413,7 +429,7 @@
                 (clicked)="confirmBooking()"
                 [loading]="submitting()"
                 [disabled]="submitting()"
-                >Confirmar Reserva</app-button
+                >{{ chargesOnline() ? 'Reservar y pagar' : 'Confirmar Reserva' }}</app-button
               >
             </div>
           }

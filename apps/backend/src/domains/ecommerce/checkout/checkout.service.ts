@@ -32,6 +32,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { RentalQuoteService } from '../../store/service-stations/rental-quote/rental-quote.service';
+import { STATION_CHARGES_ONLINE_WHERE } from '../../store/service-stations/station-online-charge.util';
 import {
   resolveStoreTimezone,
   zonedWallClockToUtc,
@@ -1833,7 +1834,7 @@ export class CheckoutService {
       const depositStation = await this.store_prisma.service_stations.findFirst({
         where: {
           status: 'active',
-          OR: [{ deposit_policy: 'required' }, { booking_prepay_mode: { not: 'none' } }],
+          ...STATION_CHARGES_ONLINE_WHERE,
           service_station_services_station_fkey: { some: { product_id: { in: stationProductIds } } },
         },
         select: { id: true },

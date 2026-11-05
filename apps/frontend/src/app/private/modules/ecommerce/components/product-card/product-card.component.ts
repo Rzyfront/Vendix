@@ -183,6 +183,10 @@ import { prepMinutesOrNull } from '../../../../../public/ecommerce/components/st
             </div>
           }
           <div class="product-price">
+            @if (product().rental_pricing_mode === 'station_rate') {
+              <!-- A station rental is priced by the time slot it books (S18): no catalog price. -->
+              <span class="price-from-label">Precio según horario</span>
+            } @else {
             @if (hasSaleUnitChoice()) {
               <!-- Con varias presentaciones no hay UN precio: se anuncia el
                    más barato (price_from, resuelto por el backend) y la
@@ -218,6 +222,7 @@ import { prepMinutesOrNull } from '../../../../../public/ecommerce/components/st
               <a [routerLink]="['/products', product().slug]" class="tier-more-link">
                 +{{ extraTiersCount() }} más
               </a>
+            }
             }
           </div>
           <!-- Inline "next opening" block — surfaces WHEN the off-schedule

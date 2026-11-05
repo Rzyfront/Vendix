@@ -258,9 +258,14 @@ import { StoreSeoService, productPageSeo } from '../../services/store-seo';
                         label
                       }}</span>
                     }
-                    <span class="current-price text-2xl md:text-3xl font-extrabold text-text-primary">
-                      {{ (hasActiveDiscount() ? effectiveUnitPrice() : currentUnitPrice()) | currency }}
-                    </span>
+                    @if (p.rental_pricing_mode === 'station_rate') {
+                      <!-- A station rental is priced by the time slot it books (S18): no catalog price. -->
+                      <span class="current-price text-xl md:text-2xl font-extrabold text-text-primary">Precio según horario</span>
+                    } @else {
+                      <span class="current-price text-2xl md:text-3xl font-extrabold text-text-primary">
+                        {{ (hasActiveDiscount() ? effectiveUnitPrice() : currentUnitPrice()) | currency }}
+                      </span>
+                    }
                     @if (selectedPresentation(); as unit) {
                       <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
                         / {{ unit.name }}

@@ -511,6 +511,21 @@ describe('AvailabilityService — horarios nocturnos (S21)', () => {
       });
     });
 
+    it.each([
+      ['a required deposit', { deposit_policy: 'required', booking_prepay_mode: 'none' }, true],
+      ['a charge to book', { deposit_policy: 'optional', booking_prepay_mode: 'full' }, true],
+      ['no online charge', { deposit_policy: 'optional', booking_prepay_mode: 'none' }, false],
+    ])('tells the online booking whether the station charges to book (%s)', async (_label, rules, charges) => {
+      const { service } = buildService({
+        product: stationProduct,
+        storeHours: nightStore,
+        stations: [{ ...station, ...rules }],
+        stationSchedules: stationNight,
+      });
+      const slots = await service.getAvailableSlots(10, FRIDAY, FRIDAY);
+      expect(slots.find((s) => s.start_time === '23:00')?.charges_online).toBe(charges);
+    });
+
     it('marks a slot busy from the station allocation and drops it when include_booked is false', async () => {
       const allocation = {
         station_id: 3,

@@ -1576,6 +1576,8 @@ export class CatalogService {
       service_duration_minutes: product.service_duration_minutes,
       service_duration_unit: product.service_duration_unit ?? null,
       rental_pricing_mode: product.rental_pricing_mode ?? null,
+      // The booking page asks the station availability (and its station_id) only when this holds.
+      requires_station: product.requires_station === true,
       service_modality: product.service_modality,
       booking_mode: product.booking_mode,
       preparation_time_minutes: product.preparation_time_minutes ?? null,

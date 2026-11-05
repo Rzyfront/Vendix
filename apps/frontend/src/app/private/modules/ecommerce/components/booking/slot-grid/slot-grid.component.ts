@@ -23,6 +23,8 @@ export interface BookingSlot {
   booked_count?: number;
   station_id?: number;
   station_name?: string;
+  /** The station requires a deposit or a payment to book: hold + payment page, never the cart. */
+  charges_online?: boolean;
 }
 
 /**
