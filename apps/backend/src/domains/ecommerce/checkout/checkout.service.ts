@@ -58,6 +58,10 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
 import { FiscalStatusService } from '@common/services/fiscal-status.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import {
+  buildPaymentMethodsWhere,
+  toPublicPaymentMethod,
+} from './utils/online-payment-methods.util';
 import { CustomersService } from '../../store/customers/customers.service';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../../store/coupons/coupons.service';
@@ -888,91 +892,15 @@ export class CheckoutService {
 
     // store_id se aplica automáticamente por EcommercePrismaService
     const methods = await this.prisma.store_payment_methods.findMany({
-      where: {
-        state: 'enabled',
-        AND: [
-          { system_payment_method: { processing_mode: { in: allowedModes } } },
-          // QUI-850: 'cash' (efectivo) solo se expone en ecommerce para 'pickup' (recoger en tienda).
-          ...(isPickup
-            ? []
-            : [{ system_payment_method: { type: { not: 'cash' } } }]),
-          // Hide wallet from anonymous users — it requires a logged-in
-          // customer with a wallet_id.
-          ...(isAuthenticated
-            ? []
-            : [{ system_payment_method: { NOT: { type: 'wallet' } } }]),
-        ],
-      },
+      // QUI-850: 'cash' only for pickup; wallet hidden from anonymous users.
+      where: buildPaymentMethodsWhere({ allowedModes, isPickup, isAuthenticated }),
       include: {
         system_payment_method: true,
       },
       orderBy: { display_order: 'asc' },
     });
 
-    return methods.map((m) => {
-      const base: Record<string, any> = {
-        id: m.id,
-        name: m.display_name || m.system_payment_method.display_name,
-        type: m.system_payment_method.type,
-        provider: m.system_payment_method.provider,
-        processing_mode: m.system_payment_method.processing_mode,
-        logo_url: m.system_payment_method.logo_url,
-        min_amount: m.min_amount,
-        max_amount: m.max_amount,
-      };
-
-      const instructions = this.buildPaymentInstructions(
-        m.system_payment_method.type,
-        m.custom_config,
-      );
-      if (instructions) {
-        base.payment_instructions = instructions;
-      }
-
-      return base;
-    });
-  }
-
-  /**
-   * Returns a whitelisted subset of `custom_config` to expose publicly for
-   * payment methods whose `system_payment_method.type` is `bank_transfer` or
-   * `voucher`. Returns `null` when there is nothing to expose so the caller
-   * can omit the field entirely (we never return an empty `{}`).
-   *
-   * Whitelists:
-   *  - bank_transfer: bank_name, account_holder, account_number, account_type, instructions
-   *  - voucher:       voucher_instructions, redemption_phone, notes
-   */
-  private buildPaymentInstructions(
-    type: string,
-    customConfig: unknown,
-  ): Record<string, unknown> | null {
-    if (type !== 'bank_transfer' && type !== 'voucher') return null;
-    if (!customConfig || typeof customConfig !== 'object') return null;
-
-    const config = customConfig as Record<string, unknown>;
-    const whitelist: string[] =
-      type === 'bank_transfer'
-        ? [
-            'bank_name',
-            'account_holder',
-            'account_number',
-            'account_type',
-            'instructions',
-          ]
-        : ['voucher_instructions', 'redemption_phone', 'notes'];
-
-    const exposed: Record<string, unknown> = {};
-    for (const key of whitelist) {
-      if (Object.prototype.hasOwnProperty.call(config, key)) {
-        const value = config[key];
-        if (value !== null && value !== undefined && value !== '') {
-          exposed[key] = value;
-        }
-      }
-    }
-
-    return Object.keys(exposed).length > 0 ? exposed : null;
+    return methods.map((m) => toPublicPaymentMethod(m));
   }
 
   private async getCheckoutSettings(): Promise<{

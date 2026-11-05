@@ -1163,6 +1163,65 @@ describe('CheckoutService - promotions and coupons', () => {
       );
     });
 
+    it('getPaymentMethods keeps its public shape after the util extraction (bank instructions whitelisted)', async () => {
+      prisma.store_payment_methods.findMany.mockResolvedValue([
+        {
+          id: 9,
+          display_name: 'Bancolombia',
+          min_amount: null,
+          max_amount: null,
+          custom_config: { bank_name: 'Bancolombia', account_number: '123', secret: 'x' },
+          system_payment_method: {
+            display_name: 'Transferencia',
+            type: 'bank_transfer',
+            provider: 'manual',
+            processing_mode: 'DIRECT',
+            logo_url: null,
+          },
+        },
+        {
+          id: 10,
+          display_name: null,
+          min_amount: null,
+          max_amount: null,
+          custom_config: { public_key: 'pk' },
+          system_payment_method: {
+            display_name: 'Wompi',
+            type: 'wompi',
+            provider: 'wompi',
+            processing_mode: 'ONLINE',
+            logo_url: 'logo',
+          },
+        },
+      ]);
+
+      const methods = await service.getPaymentMethods('own_fleet');
+
+      expect(methods).toEqual([
+        {
+          id: 9,
+          name: 'Bancolombia',
+          type: 'bank_transfer',
+          provider: 'manual',
+          processing_mode: 'DIRECT',
+          logo_url: null,
+          min_amount: null,
+          max_amount: null,
+          payment_instructions: { bank_name: 'Bancolombia', account_number: '123' },
+        },
+        {
+          id: 10,
+          name: 'Wompi',
+          type: 'wompi',
+          provider: 'wompi',
+          processing_mode: 'ONLINE',
+          logo_url: 'logo',
+          min_amount: null,
+          max_amount: null,
+        },
+      ]);
+    });
+
     it('getDeliveryOptions devuelve un tipo de entrega por método activo', async () => {
       storePrisma.shipping_methods.findMany.mockResolvedValue([
         { id: 1, name: 'Retiro en tienda', type: 'pickup' },

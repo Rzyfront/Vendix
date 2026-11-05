@@ -4825,6 +4825,21 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/apps/:kind/activate',
       method: 'POST',
     },
+
+    // Payment requests — página de pago (anticipos, transferencias). owner/admin/manager
+    // los heredan por el prefijo `store:`.
+    {
+      name: 'store:payment_requests:read',
+      description: 'Ver las solicitudes de pago y sus comprobantes de transferencia',
+      path: '/api/store/payment-requests',
+      method: 'GET',
+    },
+    {
+      name: 'store:payment_requests:manage',
+      description: 'Confirmar o rechazar transferencias y cancelar solicitudes de pago',
+      path: '/api/store/payment-requests/:id/confirm',
+      method: 'POST',
+    },
   ];
 
   // Create-only seed: never delete existing permission rows.

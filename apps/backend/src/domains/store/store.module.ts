@@ -55,6 +55,7 @@ import { WalletModule } from './wallet/wallet.module';
 import { AccountsPayableModule } from './accounts-payable/accounts-payable.module';
 import { CommissionsModule } from './commissions/commissions.module';
 import { PaymentLinksModule } from './payment-links/payment-links.module';
+import { PaymentRequestsModule } from './payment-requests/payment-requests.module';
 import { CustomerQueueModule } from './customer-queue/customer-queue.module';
 import { InvoiceDataRequestsModule } from './invoicing/invoice-data-requests/invoice-data-requests.module';
 import { MetadataModule } from './metadata/metadata.module';
@@ -151,6 +152,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     AccountsPayableModule,
     CommissionsModule,
     PaymentLinksModule,
+    PaymentRequestsModule,
     CustomerQueueModule,
     InvoiceDataRequestsModule,
     MetadataModule,
