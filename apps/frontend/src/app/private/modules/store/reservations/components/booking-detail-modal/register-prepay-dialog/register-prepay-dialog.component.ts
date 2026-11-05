@@ -10,9 +10,9 @@ import {
   SelectorComponent,
   SelectorOption,
   ToastService,
-} from '../../../../../../../../shared/components';
-import { CurrencyPipe } from '../../../../../../../../shared/pipes/currency/currency.pipe';
-import { extractApiErrorMessage } from '../../../../../../../../core/utils/api-error-handler';
+} from '../../../../../../../shared/components';
+import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
 import { ReservationsService } from '../../../services/reservations.service';
 import { PaymentMethodsService } from '../../../../settings/payments/services/payment-methods.service';
 import { PaymentMethodState, StorePaymentMethod } from '../../../../settings/payments/interfaces/payment-methods.interface';
