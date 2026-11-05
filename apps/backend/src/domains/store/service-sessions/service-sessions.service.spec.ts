@@ -1412,6 +1412,28 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
       expect((service as any).emitDepositPaymentReceived).toHaveBeenCalledWith(200, expect.objectContaining({ amount: 400000 }), 'COP', 9);
     });
 
+    it('consumo mínimo: la línea de alquiler y la extensión no cuentan como consumo (pregunta 6), pero sí se facturan', async () => {
+      const { items, order } = buildOrderTx([
+        { name: 'Alquiler Sala 1', gross: 100000, kind: 'rental' },
+        { name: 'Extensión · 1 hora', gross: 20000, kind: 'extension' },
+        { name: 'Cerveza', gross: 130000 },
+      ]);
+      wireLedger(order, 400000);
+      const result: any = await service.settle(30, dto);
+      const fee = items.find((i) => i.service_line_kind === 'reservation_fee');
+      // Only the 130.000 of beer counts against the 400.000 minimum: the fee is 270.000, not 150.000.
+      expect(Number(fee.final_unit_price)).toBe(270000);
+      expect(result).toMatchObject({ already_settled: false, fee: 270000, invoice_total: 520000 });
+      expect(order.grand_total).toBe(520000);
+    });
+
+    it('sin líneas de alquiler (legacy) el consumo mínimo se calcula como siempre', async () => {
+      const { items, order } = buildOrderTx([{ name: 'Alquiler Sala 1', gross: 100000 }, { name: 'Cerveza', gross: 150000 }]);
+      wireLedger(order, 400000);
+      await service.settle(30, dto);
+      expect(Number(items.find((i) => i.service_line_kind === 'reservation_fee').final_unit_price)).toBe(150000);
+    });
+
     it('la línea de reserva lleva el impuesto de la categoría de la estación, siempre incluido', async () => {
       const { tx, order } = buildOrderTx([{ name: 'Cerveza', gross: 250000 }]);
       tx.service_stations.findFirst.mockResolvedValue({ name: 'Cava', rental_block_minutes: null, rental_block_price: null, reservation_fee_tax_category_id: 15 });
@@ -1532,4 +1554,371 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
       expect(deposits.balanceOf).not.toHaveBeenCalled();
     });
   });
+
+  describe('alquiler: instantánea de apertura, walk-in con variante y orden aparte (S10, S11, S18)', () => {
+    const STATION = {
+      id: 3, name: 'Sala 1', deposit_policy: null, deposit_amount: null, deposit_exhausted_policy: null, leftover_policy: null,
+      rental_billing_mode: 'planned', rental_charge_timing: 'at_end', rental_block_minutes: 30, rental_block_price: 20000,
+      rental_tax_category_id: null, rental_tax_is_inclusive: true,
+    };
+    const RENTAL_PRODUCT = { id: 10, name: 'Alquiler cancha', base_price: 0, sale_price: null, is_on_sale: false, product_type: 'service', state: 'active', service_duration_minutes: 60, rental_pricing_mode: 'fixed_price' };
+    const VARIANT = { id: 77, name: '4 horas', sku: 'CAN-4H', price_override: 300000, sale_price: null, is_on_sale: false, service_duration_minutes: 240 };
+    let tx: any;
+    let sessionCreate: jest.Mock;
+    let orderCreate: jest.Mock;
+
+    const stub = (station: Record<string, unknown>, product: Record<string, unknown> = RENTAL_PRODUCT, windows: any[] = []) => {
+      prisma.service_stations = { findFirst: jest.fn().mockResolvedValue(station) };
+      prisma.service_station_services = { findFirst: jest.fn().mockResolvedValue({ id: 1 }) };
+      prisma.service_station_rate_windows = { findMany: jest.fn().mockResolvedValue(windows) };
+      prisma.products = { findFirst: jest.fn().mockResolvedValue(product) };
+      prisma.product_variants = { findFirst: jest.fn().mockResolvedValue(VARIANT) };
+      prisma.users = { findFirst: jest.fn().mockResolvedValue({ id: 5 }) };
+      prisma.bookings = { findFirst: jest.fn() };
+      prisma.service_allocations = { findFirst: jest.fn() };
+      (service as any).allocationCoordinator = { allocateSession: jest.fn(), transferBookingToSession: jest.fn() };
+      (service as any).sessionAccess = { createAccessToken: jest.fn().mockResolvedValue({ token: 't', token_id: 1, expires_at: new Date() }) };
+      jest.spyOn(service as any, 'prepareIntake').mockResolvedValue(null);
+      jest.spyOn(service as any, 'persistIntake').mockResolvedValue(undefined);
+      jest.spyOn(service as any, 'buildAccessUrl').mockResolvedValue(null);
+      const built = buildOrderTx([]);
+      tx = built.tx;
+      sessionCreate = jest.fn().mockResolvedValue({ id: 30 });
+      orderCreate = jest.fn(({ data }: any) => Promise.resolve({ id: String(data.order_number).endsWith('-R') ? 201 : 200 }));
+      tx.service_sessions = { create: sessionCreate, updateMany: jest.fn() };
+      tx.orders.create = orderCreate;
+      tx.order_items.updateMany = jest.fn();
+      tx.product_tax_assignments = { findMany: jest.fn().mockResolvedValue([]) };
+      tx.bookings = { updateMany: jest.fn().mockResolvedValue({ count: 1 }) };
+      return built;
+    };
+    const itemsFor = (orderId: number) => tx.order_items.create.mock.calls.map((c: any) => c[0].data).filter((d: any) => d.order_id === orderId);
+    const allocationSpan = () => {
+      const { startAt, endAt } = (service as any).allocationCoordinator.allocateSession.mock.calls[0][1];
+      return (endAt.getTime() - startAt.getTime()) / 60_000;
+    };
+
+    it('copia la tarifa y las ventanas de la estación a la sesión al abrir (S18)', async () => {
+      const windows = [{ weekday: 6, start_time: '20:00', end_time: '23:00', block_price: '50000.00' }];
+      stub(STATION, RENTAL_PRODUCT, windows);
+      prisma.store_settings = { findFirst: jest.fn().mockResolvedValue({ settings: {}, stores: { timezone: 'America/Bogota' } }) };
+      await service.open({ station_id: 3, product_id: 10 } as any);
+      expect(prisma.service_station_rate_windows.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { store_id: 1, station_id: 3, is_active: true } }));
+      expect(sessionCreate.mock.calls[0][0].data).toMatchObject({
+        rental_billing_mode: 'planned',
+        rental_charge_timing: 'at_end',
+        rental_block_minutes: 30,
+        rental_block_price: 20000,
+        rate_windows_snapshot: [{ weekday: 6, start_time: '20:00', end_time: '23:00', block_price: 50000 }],
+      });
+    });
+
+    it('walk-in con variante: la duración de la variante gana, y la línea usa el precio de la variante con kind rental', async () => {
+      stub(STATION);
+      const opened: any = await service.open({ station_id: 3, product_id: 10, product_variant_id: 77 } as any);
+      expect(prisma.product_variants.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 77, product_id: 10 } }));
+      expect(allocationSpan()).toBe(240);
+      expect(orderCreate).toHaveBeenCalledTimes(1);
+      const [line] = itemsFor(200);
+      expect(line).toMatchObject({ product_id: 10, product_variant_id: 77, product_name: 'Alquiler cancha - 4 horas', quantity: 1, service_line_kind: 'rental', service_session_id: 30 });
+      expect(Number(line.unit_price)).toBe(300000);
+      expect(opened).toMatchObject({ id: 30, order_id: 200, rental_order_id: null });
+    });
+
+    it('una variante de otro producto se rechaza con PRODUCT_VARIANT_MISMATCH', async () => {
+      stub(STATION);
+      prisma.product_variants.findFirst.mockResolvedValue(null);
+      await expect(service.open({ station_id: 3, product_id: 10, product_variant_id: 99 } as any)).rejects.toMatchObject({ errorCode: 'PRODUCT_VARIANT_MISMATCH' });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('station_rate: la línea del producto es la cotización por bloques de la estación (4 bloques de 30 min)', async () => {
+      stub(STATION, { ...RENTAL_PRODUCT, rental_pricing_mode: 'station_rate' });
+      prisma.product_variants.findFirst.mockResolvedValue({ ...VARIANT, price_override: 1, service_duration_minutes: 120 });
+      await service.open({ station_id: 3, product_id: 10, product_variant_id: 77 } as any);
+      const [line] = itemsFor(200);
+      expect(line).toMatchObject({ quantity: 1, service_line_kind: 'rental' });
+      expect(Number(line.unit_price)).toBe(80000);
+    });
+
+    it('station_rate con una duración que no es múltiplo del bloque rechaza con STATION_009', async () => {
+      stub(STATION, { ...RENTAL_PRODUCT, rental_pricing_mode: 'station_rate' });
+      prisma.product_variants.findFirst.mockResolvedValue({ ...VARIANT, service_duration_minutes: 45 });
+      await expect(service.open({ station_id: 3, product_id: 10, product_variant_id: 77 } as any)).rejects.toMatchObject({ errorCode: 'STATION_009' });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('at_end mantiene UNA sola orden SVC: sin orden de alquiler ni rental_order_id', async () => {
+      stub(STATION);
+      await service.open({ station_id: 3, product_id: 10, product_variant_id: 77 } as any);
+      expect(orderCreate).toHaveBeenCalledTimes(1);
+      expect(orderCreate.mock.calls[0][0].data).toMatchObject({ order_number: 'SVC-30', service_session_id: 30, channel: 'pos' });
+      expect(tx.service_sessions.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ rental_order_id: expect.anything() }) }));
+    });
+
+    it('at_start: crea la orden de alquiler SVC-<id>-R (pos, borrador, sin service_session_id) con la línea rental y la guarda en la sesión', async () => {
+      stub({ ...STATION, rental_charge_timing: 'at_start' });
+      const opened: any = await service.open({ station_id: 3, product_id: 10, product_variant_id: 77 } as any);
+      expect(orderCreate).toHaveBeenCalledTimes(2);
+      const rentalOrder = orderCreate.mock.calls[1][0].data;
+      expect(rentalOrder).toMatchObject({ order_number: 'SVC-30-R', state: 'draft', channel: 'pos', customer_id: null });
+      expect(rentalOrder).not.toHaveProperty('service_session_id');
+      // The rental line lives on the rental order (no session id: the composite FK needs the order's null); the SVC order has none.
+      expect(itemsFor(201)).toEqual([expect.objectContaining({ product_id: 10, service_line_kind: 'rental', service_session_id: null, product_name: 'Alquiler cancha - 4 horas' })]);
+      expect(itemsFor(200)).toEqual([]);
+      expect(tx.service_sessions.updateMany).toHaveBeenCalledWith({ where: { id: 30, store_id: 1 }, data: { rental_order_id: 201 } });
+      expect(opened).toMatchObject({ order_id: 200, rental_order_id: 201 });
+    });
+
+    it('at_start con un servicio común y tarifa por tiempo: bloques previstos en la orden de alquiler, el servicio en la cuenta SVC', async () => {
+      stub({ ...STATION, rental_charge_timing: 'at_start' }, { ...RENTAL_PRODUCT, rental_pricing_mode: null, service_duration_minutes: 60 });
+      prisma.product_variants.findFirst.mockResolvedValue(null);
+      await service.open({ station_id: 3, product_id: 10 } as any);
+      const [rentalLine] = itemsFor(201);
+      expect(rentalLine).toMatchObject({ product_id: null, product_name: 'Alquiler Sala 1', quantity: 2, service_line_kind: 'rental', service_session_id: null });
+      expect(Number(rentalLine.total_price)).toBe(40000);
+      expect(itemsFor(200)).toEqual([expect.objectContaining({ product_id: 10, service_session_id: 30 })]);
+      expect(itemsFor(200)[0]).not.toHaveProperty('service_line_kind');
+    });
+
+    it('una reserva ya pagada en línea (su orden trae la línea de alquiler) pasa a ser rental_order_id y la cuenta SVC es nueva', async () => {
+      stub(STATION);
+      prisma.bookings.findFirst.mockResolvedValue({ id: 7, status: 'confirmed', customer_id: 5, product_id: 10, channel: 'ecommerce', order_id: 55, checked_in_at: null, customer: { email: null } });
+      prisma.service_allocations.findFirst.mockResolvedValue({ id: 3, state: 'confirmed', station_id: 3, provider_id: null, end_at: new Date(Date.now() + 3_600_000) });
+      prisma.service_sessions.findFirst.mockResolvedValue(null);
+      tx.orders.findFirst.mockResolvedValueOnce({ id: 55, state: 'processing', service_session_id: null });
+      tx.order_items.findFirst.mockResolvedValueOnce({ id: 1 });
+      const opened: any = await service.open({ booking_id: 7 } as any);
+      expect(sessionCreate.mock.calls[0][0].data).toMatchObject({ order_id: null, rental_order_id: 55 });
+      expect(orderCreate).toHaveBeenCalledTimes(1);
+      expect(orderCreate.mock.calls[0][0].data).toMatchObject({ order_number: 'SVC-30', service_session_id: 30, channel: 'pos' });
+      // The rental line is already on order 55: the SVC order gets no product line, and the booking keeps its order.
+      expect(itemsFor(200)).toEqual([]);
+      expect(tx.bookings.updateMany.mock.calls.every((c: any) => !('order_id' in c[0].data))).toBe(true);
+      expect(opened).toMatchObject({ order_id: 200, rental_order_id: 55 });
+    });
+
+    it('una estación anterior a la fase 3 (sin modo de cobro) abre como siempre: sin instantánea y una sola orden', async () => {
+      stub({ id: 3, name: 'Sala 1' }, { ...RENTAL_PRODUCT, rental_pricing_mode: null });
+      prisma.product_variants.findFirst.mockResolvedValue(null);
+      await service.open({ station_id: 3, product_id: 10 } as any);
+      const data = sessionCreate.mock.calls[0][0].data;
+      expect(Object.keys(data).filter((k) => k.startsWith('rental_') || k === 'rate_windows_snapshot')).toEqual([]);
+      expect(prisma.service_station_rate_windows.findMany).not.toHaveBeenCalled();
+      expect(orderCreate).toHaveBeenCalledTimes(1);
+      expect(itemsFor(200)[0]).not.toHaveProperty('service_line_kind');
+    });
+  });
+
+  describe('extend — cobro del tiempo extendido (S10)', () => {
+    const NOW = Date.now();
+    const oldEnd = new Date(NOW + 3_600_000);
+    const newEnd = new Date(NOW + 2 * 3_600_000);
+    const sessionRow = (over: Record<string, unknown> = {}) => ({
+      id: 21, status: 'open', order_id: 149, station_id: 9, settled_at: null, booking_id: null,
+      rental_billing_mode: 'planned', rental_charge_timing: 'at_end', rental_block_minutes: 60, rental_block_price: 80000, rate_windows_snapshot: [], ...over,
+    });
+    const station = { rental_block_unit: 'hour', rental_tax_category_id: null, rental_tax_is_inclusive: true };
+
+    const buildTx = (opts: { state?: string; settledAt?: Date | null } = {}) => {
+      const tx: any = {
+        $queryRaw: jest.fn().mockResolvedValue([{ id: 149, state: opts.state ?? 'draft' }]),
+        service_sessions: {
+          findFirst: jest.fn().mockResolvedValue({ settled_at: opts.settledAt ?? null }),
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+        service_allocations: {
+          findFirst: jest.fn()
+            .mockResolvedValueOnce({ id: 5, station_id: 9, provider_id: null, start_at: new Date(NOW - 3_600_000), end_at: oldEnd })
+            .mockResolvedValueOnce(null),
+          updateMany: jest.fn(),
+        },
+        service_session_tokens: { updateMany: jest.fn() },
+        service_progress_events: { create: jest.fn() },
+        service_stations: { findFirst: jest.fn().mockResolvedValue(station) },
+        order_items: {
+          create: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([{ total_price: 80000, tax_amount_item: 0, quantity: 1, weight: null, price_unit_quantity: null, order_item_taxes: [] }]),
+        },
+        orders: {
+          findUnique: jest.fn().mockResolvedValue({ total_paid: 0, discount_amount: 0 }),
+          update: jest.fn().mockResolvedValue({ store_id: 1, service_session_id: 21 }),
+          findFirst: jest.fn().mockResolvedValue({ grand_total: 80000, tip_amount: 0, currency: 'COP' }),
+        },
+        service_budgets: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn() },
+      };
+      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      return tx;
+    };
+
+    it('planned con tarifa por tiempo: agrega "Extensión · 1 hora" en la misma transacción y recalcula la cuenta', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(sessionRow() as any);
+      const tx = buildTx();
+      await expect(service.extend(21, newEnd)).resolves.toEqual({ id: 21, planned_end_at: newEnd });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.service_allocations.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ end_at: newEnd }) }));
+      expect(tx.order_items.create).toHaveBeenCalledTimes(1);
+      const { data } = tx.order_items.create.mock.calls[0][0];
+      expect(data).toMatchObject({ order_id: 149, service_session_id: 21, product_id: null, product_name: 'Extensión · 1 hora', quantity: 1, service_line_kind: 'extension' });
+      expect(Number(data.total_price)).toBe(80000);
+      expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 149 }, data: expect.objectContaining({ grand_total: 80000 }) }));
+      // The charged minutes are remembered so the planned rental line never repeats them.
+      expect(tx.service_progress_events.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ event_type: 'extended', metadata: { extension_minutes: 60 } }),
+      });
+    });
+
+    it('elapsed (o sin tarifa por tiempo): extiende sin agregar ninguna línea', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(sessionRow({ rental_billing_mode: 'elapsed' }) as any);
+      const tx = buildTx();
+      await service.extend(21, newEnd);
+      expect(tx.order_items.create).not.toHaveBeenCalled();
+      expect(tx.orders.update).not.toHaveBeenCalled();
+      expect(tx.service_progress_events.create.mock.calls[0][0].data).not.toHaveProperty('metadata');
+
+      jest.spyOn(service, 'findOne').mockResolvedValue(sessionRow({ rental_block_minutes: null, rental_block_price: null }) as any);
+      const cava = buildTx();
+      await service.extend(21, newEnd);
+      expect(cava.order_items.create).not.toHaveBeenCalled();
+    });
+
+    it('una sesión anterior a la fase 3 (instantánea NULL) extiende como siempre, sin línea', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(sessionRow({ rental_billing_mode: null, rental_block_minutes: null, rental_block_price: null }) as any);
+      const tx = buildTx();
+      await service.extend(21, newEnd);
+      expect(tx.order_items.create).not.toHaveBeenCalled();
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('con la cuenta fuera de borrador rechaza con STATION_006 y no mueve la asignación', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(sessionRow() as any);
+      const tx = buildTx({ state: 'processing' });
+      await expect(service.extend(21, newEnd)).rejects.toMatchObject({ errorCode: 'STATION_006' });
+      expect(tx.service_allocations.updateMany).not.toHaveBeenCalled();
+      expect(tx.order_items.create).not.toHaveBeenCalled();
+    });
+
+    it('liquidada entre la lectura y el bloqueo: rechaza con SERVICE_DEPOSIT_009', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(sessionRow() as any);
+      const tx = buildTx({ settledAt: new Date() });
+      await expect(service.extend(21, newEnd)).rejects.toMatchObject({ errorCode: 'SERVICE_DEPOSIT_009' });
+      expect(tx.order_items.create).not.toHaveBeenCalled();
+      expect(tx.service_allocations.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('un doble clic con el mismo fin no cobra dos veces: STATION_009 sin línea', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(sessionRow() as any);
+      const tx = buildTx();
+      await expect(service.extend(21, oldEnd)).rejects.toMatchObject({ errorCode: 'STATION_009' });
+      expect(tx.order_items.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('alquiler en orden aparte: cobro, cierre y findOne (S11)', () => {
+    const baseSession = { id: 21, status: 'open', order_id: 149, rental_order_id: 150, station_id: 9, booking_id: null, settled_at: null, deposit: null, opened_at: new Date(Date.now() - 3_600_000), rental_billing_mode: 'planned', rental_charge_timing: 'at_start', rental_block_minutes: 30, rental_block_price: 20000, rate_windows_snapshot: [] };
+
+    const wire = (remaining: { svc: number; rental: number }, states: { svc?: string; rental?: string } = {}) => {
+      const tx: any = {
+        $queryRaw: jest.fn().mockImplementation(() => Promise.resolve([{ id: 0, state: 'draft' }])),
+        orders: {
+          findFirst: jest.fn(({ where }: any) => Promise.resolve(where.id === 150
+            ? { remaining_balance: remaining.rental, customer_id: 5, grand_total: 100000, tip_amount: 0, currency: 'COP' }
+            : { remaining_balance: remaining.svc, customer_id: 5, grand_total: 85000, tip_amount: 0, currency: 'COP' })),
+          findUnique: jest.fn().mockResolvedValue({ total_paid: 0, discount_amount: 0 }),
+          update: jest.fn().mockResolvedValue({ store_id: 1, service_session_id: null }),
+        },
+        order_items: { findFirst: jest.fn().mockResolvedValue(null), findMany: jest.fn().mockResolvedValue([]), create: jest.fn(), update: jest.fn() },
+        service_sessions: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        service_allocations: { updateMany: jest.fn() },
+        service_session_tokens: { updateMany: jest.fn() },
+        service_budgets: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn() },
+        service_progress_events: { create: jest.fn() },
+        bookings: { updateMany: jest.fn() },
+      };
+      void states;
+      prisma.$transaction.mockImplementation((fn: any) => fn(tx));
+      return tx;
+    };
+
+    it('cerrar con el alquiler sin pagar se bloquea con STATION_006 aunque el consumo esté en cero', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(baseSession as any);
+      const tx = wire({ svc: 0, rental: 100000 });
+      await expect(service.transition(21, { action: 'close' } as any)).rejects.toMatchObject({ errorCode: 'STATION_006' });
+      expect(tx.service_sessions.updateMany).not.toHaveBeenCalled();
+      // `at_start`: the consumption order never receives the station rental line at close.
+      expect(tx.order_items.create).not.toHaveBeenCalled();
+    });
+
+    it('cierra cuando el alquiler y el consumo están saldados', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(baseSession as any);
+      const tx = wire({ svc: 0, rental: 0 });
+      await expect(service.transition(21, { action: 'close' } as any)).resolves.toMatchObject({ status: 'closed' });
+      expect(tx.service_sessions.updateMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('el consumo pendiente sigue bloqueando aunque el alquiler esté pagado', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(baseSession as any);
+      wire({ svc: 85000, rental: 0 });
+      await expect(service.transition(21, { action: 'close' } as any)).rejects.toMatchObject({ errorCode: 'STATION_006' });
+    });
+
+    it('cerrar dejando por cobrar suma los dos saldos', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(baseSession as any);
+      wire({ svc: 85000, rental: 100000 });
+      await expect(service.closePending(21)).resolves.toMatchObject({ status: 'closed', balance_pending: 185000 });
+    });
+
+    it('prepare-charge del alquiler deja la orden aparte recalculada y devuelve su id', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(baseSession as any);
+      const tx = wire({ svc: 0, rental: 100000 });
+      tx.order_items.findMany.mockResolvedValue([{ total_price: 100000, tax_amount_item: 0, quantity: 1, weight: null, price_unit_quantity: null, order_item_taxes: [] }]);
+      await expect(service.prepareRentalCharge(21)).resolves.toEqual({ order_id: 150 });
+      expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 150 }, data: expect.objectContaining({ grand_total: 100000 }) }));
+    });
+
+    it('prepare-charge sin orden de alquiler rechaza con STATION_006', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue({ ...baseSession, rental_order_id: null } as any);
+      await expect(service.prepareRentalCharge(21)).rejects.toMatchObject({ errorCode: 'STATION_006' });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    describe('findOne', () => {
+      beforeEach(() => {
+        Object.assign(prisma, {
+          service_subjects: { findMany: jest.fn().mockResolvedValue([]) },
+          service_allocations: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn() },
+          service_progress_events: { findMany: jest.fn().mockResolvedValue([]) },
+        });
+        jest.spyOn(service as any, 'buildIntakeSummary').mockResolvedValue(null);
+      });
+      const orderRow = (id: number, total: number, paid: number, remaining: number) => ({ id, state: 'draft', grand_total: total, total_paid: paid, remaining_balance: remaining, tip_amount: 0, customer_id: 5, users: null, order_items: [] });
+
+      it('devuelve rental, consumo y por cobrar: "Alquiler $100.000 (pagado) · Consumos $85.000 · Por cobrar $85.000"', async () => {
+        prisma.service_sessions.findFirst.mockResolvedValue({ ...baseSession, store_id: 1 });
+        prisma.orders.findFirst.mockImplementation(({ where }: any) => Promise.resolve(where.id === 150 ? orderRow(150, 100000, 100000, 0) : orderRow(149, 85000, 0, 85000)));
+        const found: any = await service.findOne(21);
+        expect(found.rental).toEqual({ order_id: 150, total: 100000, paid: 100000, remaining: 0 });
+        expect(found.consumption).toEqual({ order_id: 149, total: 85000, paid: 0, remaining: 85000 });
+        expect(found.to_collect).toBe(85000);
+      });
+
+      it('con el alquiler sin pagar, por cobrar suma ambos saldos', async () => {
+        prisma.service_sessions.findFirst.mockResolvedValue({ ...baseSession, store_id: 1 });
+        prisma.orders.findFirst.mockImplementation(({ where }: any) => Promise.resolve(where.id === 150 ? orderRow(150, 100000, 0, 100000) : orderRow(149, 85000, 0, 85000)));
+        const found: any = await service.findOne(21);
+        expect(found.rental).toMatchObject({ remaining: 100000 });
+        expect(found.to_collect).toBe(185000);
+      });
+
+      it('una sesión de una sola orden devuelve rental null y por cobrar del consumo', async () => {
+        prisma.service_sessions.findFirst.mockResolvedValue({ ...baseSession, store_id: 1, rental_order_id: null });
+        prisma.orders.findFirst.mockResolvedValue(orderRow(149, 85000, 35000, 50000));
+        const found: any = await service.findOne(21);
+        expect(found.rental).toBeNull();
+        expect(found.to_collect).toBe(50000);
+        expect(prisma.orders.findFirst).toHaveBeenCalledTimes(1);
+      });
+    });
+  });
+
 });

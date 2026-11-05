@@ -127,6 +127,13 @@ export class OpenServiceSessionDto {
   @Min(1)
   product_id?: number;
 
+  /** Walk-in only: duration variant of the rental product. Its duration wins over the product's. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  product_variant_id?: number;
+
   /** Opcional para walk-in (si no se envía, calcula now + duración del servicio o 60 min); las reservas usan su asignación confirmada. */
   @IsOptional()
   @IsDateString()

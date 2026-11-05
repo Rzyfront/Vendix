@@ -6,7 +6,7 @@ import {
   RESERVATION_FEE_LINE_KIND,
   RESERVATION_FEE_LINE_NAME,
 } from '../../reservations/reservation-deposits.service';
-import { buildSessionTaxedLine } from './session-order-lines.util';
+import { buildSessionTaxedLine, NON_CONSUMPTION_LINE_KINDS } from './session-order-lines.util';
 
 export type SessionLeftoverPolicy = 'refund_or_credit' | 'minimum_spend';
 
@@ -31,6 +31,11 @@ export interface SettlementInput {
   /** Already paid on the order by any method. */
   paid_cents: number;
   received_cents: number;
+  /**
+   * What is compared against the minimum spend (question 6): consumption WITHOUT the rental and
+   * extension lines. Defaults to `consumption_cents` (legacy and accounts without rental lines).
+   */
+  minimum_basis_cents?: number;
   /** Deposit ledger balance still held for this session. */
   balance_cents: number;
   leftover_policy: SessionLeftoverPolicy | null;
@@ -54,7 +59,7 @@ export interface SettlementPlan {
 export function planSettlement(input: SettlementInput): SettlementPlan {
   const fee_cents =
     input.leftover_policy === 'minimum_spend'
-      ? Math.max(0, input.received_cents - input.consumption_cents)
+      ? Math.max(0, input.received_cents - (input.minimum_basis_cents ?? input.consumption_cents))
       : 0;
   const invoice_cents = input.consumption_cents + fee_cents;
   const remaining_cents = Math.max(0, invoice_cents - input.paid_cents);
@@ -130,6 +135,20 @@ export async function reservationFeeGrossCents(
     select: { final_unit_price: true, quantity: true },
   });
   return line ? lineGrossCents(line) : 0;
+}
+
+/**
+ * Gross cents of the live rental and extension lines of the order (0 when there are none).
+ * They are billed but are not consumption: the minimum spend ignores them.
+ */
+export async function nonConsumptionGrossCents(tx: Prisma.TransactionClient, orderId: number): Promise<number> {
+  const lines = await tx.order_items.findMany({
+    where: { order_id: orderId, service_line_kind: { in: NON_CONSUMPTION_LINE_KINDS }, cancelled_at: null },
+    select: { final_unit_price: true, quantity: true, service_line_kind: true, cancelled_at: true },
+  });
+  return lines
+    .filter((line) => !line.cancelled_at && NON_CONSUMPTION_LINE_KINDS.includes(line.service_line_kind ?? ''))
+    .reduce((sum, line) => sum + lineGrossCents(line), 0);
 }
 
 /**

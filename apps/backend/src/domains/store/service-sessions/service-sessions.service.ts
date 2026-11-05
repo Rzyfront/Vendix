@@ -6,14 +6,24 @@ import { ErrorCodes, VendixHttpException } from '../../../common/errors';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 import { resolveFullTaxRowsByProductId } from '../orders/utils/catalog-line-pricing.util';
 import {
+  addSessionExtensionLine,
   buildSessionTaxedLine,
   computeSessionOrderTotals,
   ensureSessionRentalLine,
+  NON_CONSUMPTION_LINE_KINDS,
+  priceRentalBlocks,
+  readSessionRentalSnapshot,
+  RENTAL_LINE_KIND,
+  RENTAL_LINE_PREFIX,
+  rentalBlocksPlanned,
   reserveSessionLineStock,
+  SessionRentalColumns,
+  snapshotHasTimeRate,
   writeSessionOrderTotals,
 } from './utils/session-order-lines.util';
 import {
   formatMoneyEs,
+  nonConsumptionGrossCents,
   planSettlement,
   reservationFeeGrossCents,
   SessionLeftoverPolicy,
@@ -167,18 +177,44 @@ export class ServiceSessionsService {
     const providerId = bookingAllocation?.provider_id ?? dto.provider_id ?? null;
     const productId = booking?.product_id ?? dto.product_id;
     if (!productId) throw new VendixHttpException(ErrorCodes.STATION_001, 'El walk-in requiere un servicio.');
+    if (booking && dto.product_variant_id) {
+      throw new VendixHttpException(ErrorCodes.STATION_009, 'La variante solo se elige en un walk-in; la reserva ya la define.');
+    }
     const autoPicked = !bookingAllocation && !dto.station_id;
-    const stationId = bookingAllocation?.station_id ?? dto.station_id ?? await this.pickWalkInStation(storeId, productId, providerId, dto.planned_end_at, now, excludedStationIds);
+    const stationId = bookingAllocation?.station_id ?? dto.station_id ?? await this.pickWalkInStation(storeId, productId, providerId, dto.planned_end_at, now, excludedStationIds, dto.product_variant_id);
     const station = await this.prisma.service_stations.findFirst({
       where: { id: stationId, store_id: storeId, status: 'active', capacity: 1 },
-      select: { id: true, deposit_policy: true, deposit_amount: true, deposit_exhausted_policy: true, leftover_policy: true },
+      select: {
+        id: true,
+        name: true,
+        deposit_policy: true,
+        deposit_amount: true,
+        deposit_exhausted_policy: true,
+        leftover_policy: true,
+        rental_billing_mode: true,
+        rental_charge_timing: true,
+        rental_block_minutes: true,
+        rental_block_price: true,
+        rental_tax_category_id: true,
+        rental_tax_is_inclusive: true,
+      },
     });
     const [stationService, product] = await Promise.all([
       this.prisma.service_station_services.findFirst({ where: { store_id: storeId, station_id: stationId, product_id: productId } }),
-      this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { id: true, name: true, base_price: true, sale_price: true, is_on_sale: true, product_type: true, state: true, booking_mode: true, service_duration_minutes: true, buffer_minutes: true } }),
+      this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { id: true, name: true, base_price: true, sale_price: true, is_on_sale: true, product_type: true, state: true, booking_mode: true, service_duration_minutes: true, buffer_minutes: true, rental_pricing_mode: true } }),
     ]);
     if (!station || product?.product_type !== 'service') {
       throw new VendixHttpException(ErrorCodes.STATION_001);
+    }
+    // Walk-in duration variant (S2): its duration wins over the product's, its price over the product's.
+    const variant = dto.product_variant_id
+      ? await this.prisma.product_variants.findFirst({
+          where: { id: dto.product_variant_id, product_id: productId },
+          select: { id: true, name: true, sku: true, price_override: true, sale_price: true, is_on_sale: true, service_duration_minutes: true },
+        })
+      : null;
+    if (dto.product_variant_id && !variant) {
+      throw new VendixHttpException(ErrorCodes.PRODUCT_VARIANT_MISMATCH, 'La variante no pertenece al producto.');
     }
     // El servicio tiene que estar asignado a la estación (reserva o walk-in) y,
     // para un walk-in, activo en el catálogo.
@@ -252,21 +288,81 @@ export class ServiceSessionsService {
         throw new VendixHttpException(ErrorCodes.STATION_009);
       }
     } else {
-      plannedEnd = walkInPlannedEnd(dto.planned_end_at, product.service_duration_minutes, now);
+      plannedEnd = walkInPlannedEnd(dto.planned_end_at, variant?.service_duration_minutes ?? product.service_duration_minutes, now);
       if (plannedEnd <= now) {
         throw new VendixHttpException(ErrorCodes.STATION_009);
       }
     }
 
+    // S18: the station rate and its windows are copied onto the session; a later change of the
+    // station never reprices an open session. A station without the new columns = legacy session.
+    const hasTimeRate = (station.rental_block_minutes ?? 0) > 0 && Number(station.rental_block_price ?? 0) > 0;
+    const windowRows = station.rental_billing_mode && hasTimeRate
+      ? await this.prisma.service_station_rate_windows.findMany({
+          where: { store_id: storeId, station_id: stationId, is_active: true },
+          orderBy: [{ weekday: 'asc' }, { block_order: 'asc' }],
+          select: { weekday: true, start_time: true, end_time: true, block_price: true },
+        })
+      : [];
+    const windowsSnapshot = windowRows.map((w) => ({ weekday: w.weekday, start_time: w.start_time, end_time: w.end_time, block_price: Number(w.block_price) }));
+    const snapshotColumns: {
+      rental_billing_mode?: 'elapsed' | 'planned';
+      rental_charge_timing?: 'at_start' | 'at_end';
+      rental_block_minutes?: number | null;
+      rental_block_price?: Prisma.Decimal | null;
+      rate_windows_snapshot?: Prisma.InputJsonValue;
+    } = station.rental_billing_mode
+      ? {
+          rental_billing_mode: station.rental_billing_mode,
+          rental_charge_timing: station.rental_charge_timing ?? 'at_end',
+          rental_block_minutes: station.rental_block_minutes ?? null,
+          rental_block_price: station.rental_block_price ?? null,
+          rate_windows_snapshot: windowsSnapshot,
+        }
+      : {};
+    const rentalSnapshot = readSessionRentalSnapshot(snapshotColumns);
+    const tz = windowsSnapshot.length ? await resolveStoreTimezone(this.prisma, storeId) : null;
+    const plannedMinutes = Math.max(1, Math.round((plannedEnd.getTime() - startAt.getTime()) / 60_000));
+    const isRentalProduct = !!product.rental_pricing_mode;
+    // Product line price: the variant/catalog price, or for `station_rate` the window-aware quote (qty 1).
+    let productUnitPrice = catalogUnitPrice(product, variant);
+    if (isRentalProduct && product.rental_pricing_mode === 'station_rate') {
+      if (!snapshotHasTimeRate(rentalSnapshot)) {
+        throw new VendixHttpException(ErrorCodes.STATION_009, 'La estación no tiene tarifa por tiempo configurada.');
+      }
+      const quoteMinutes = booking ? plannedMinutes : (variant?.service_duration_minutes ?? product.service_duration_minutes ?? 0);
+      if (!quoteMinutes || quoteMinutes <= 0 || quoteMinutes % rentalSnapshot.block_minutes !== 0) {
+        throw new VendixHttpException(ErrorCodes.STATION_009, 'La duración debe ser un múltiplo del bloque de tarifa de la estación.');
+      }
+      productUnitPrice = priceRentalBlocks(rentalSnapshot, startAt, quoteMinutes / rentalSnapshot.block_minutes, tz).totalCents / 100;
+    }
+    const productLineName = variant ? `${product.name} - ${variant.name || variant.sku}` : product.name;
+    // D5 `at_start`: the rental is charged on its own order, paid before or while the session runs.
+    const rentalOwnOrder = rentalSnapshot?.charge_timing === 'at_start' && (isRentalProduct || snapshotHasTimeRate(rentalSnapshot));
+
     const currency = await this.settings.getStoreCurrency();
     let depositEvent: ServiceDepositReceivedEvent | null = null;
-    let result: { id: number; order_id: number | null; station_id: number; booking_id: number | null; status: string; access_token: string; access_token_id: number; access_expires_at: Date; email_delivery_status: string; access_url: string | null };
+    let result: { id: number; order_id: number | null; rental_order_id: number | null; station_id: number; booking_id: number | null; status: string; access_token: string; access_token_id: number; access_expires_at: Date; email_delivery_status: string; access_url: string | null };
     try {
       result = await this.prisma.$transaction(async (tx) => {
       let orderId = booking?.order_id ?? null;
+      let rentalOrderId: number | null = null;
+      let bookingHoldsRental = false;
       if (orderId) {
         const order = await tx.orders.findFirst({ where: { id: orderId, store_id: storeId }, select: { id: true, state: true, service_session_id: true } });
-        if (!order || !['draft', 'processing'].includes(order.state) || order.service_session_id) {
+        // A booking order that already holds the rental line (paid online) is the RENTAL order of the
+        // session (S11): it never takes `service_session_id`, and the consumption gets its own order.
+        bookingHoldsRental = !!order && !!(await tx.order_items.findFirst({
+          where: { order_id: orderId, service_line_kind: RENTAL_LINE_KIND, cancelled_at: null },
+          select: { id: true },
+        }));
+        if (bookingHoldsRental) {
+          if (order!.state === 'cancelled' || order!.service_session_id) {
+            throw new VendixHttpException(ErrorCodes.STATION_006, 'La orden vinculada no está disponible para esta atención.');
+          }
+          rentalOrderId = orderId;
+          orderId = null;
+        } else if (!order || !['draft', 'processing'].includes(order.state) || order.service_session_id) {
           throw new VendixHttpException(ErrorCodes.STATION_006, 'La orden vinculada no está disponible para esta atención.');
         }
       }
@@ -274,6 +370,8 @@ export class ServiceSessionsService {
       const session = await tx.service_sessions.create({
         data: {
           store_id: storeId, station_id: stationId, product_id: productId, booking_id: booking?.id ?? null, order_id: orderId, contact_email: contactEmail, status: 'open', opened_at: now, updated_at: now,
+          ...snapshotColumns,
+          ...(rentalOrderId ? { rental_order_id: rentalOrderId } : {}),
           ...(station.deposit_policy
             ? {
                 deposit_policy: station.deposit_policy,
@@ -322,9 +420,11 @@ export class ServiceSessionsService {
         });
         orderId = order.id;
         await tx.service_sessions.updateMany({ where: { id: session.id, store_id: storeId }, data: { order_id: orderId } });
-        if (booking) await tx.bookings.updateMany({ where: { id: booking.id, store_id: storeId }, data: { order_id: orderId } });
+        // The booking keeps pointing at the order that holds its rental line.
+        if (booking && !bookingHoldsRental) await tx.bookings.updateMany({ where: { id: booking.id, store_id: storeId }, data: { order_id: orderId } });
 
-        if (product) {
+        // The rental product line goes to the rental order (at_start) or is already on the booking's order.
+        if (product && !bookingHoldsRental && !(rentalOwnOrder && isRentalProduct)) {
           // El servicio entra con SU impuesto (incluido o sumado según se configuró).
           const taxRows = await resolveFullTaxRowsByProductId(tx, [product.id]);
           await tx.order_items.create({
@@ -332,11 +432,13 @@ export class ServiceSessionsService {
               order_id: orderId,
               service_session_id: session.id,
               product_id: product.id,
-              product_name: product.name,
+              ...(variant ? { product_variant_id: variant.id } : {}),
+              product_name: productLineName,
               quantity: 1,
               item_type: 'service',
+              ...(isRentalProduct ? { service_line_kind: RENTAL_LINE_KIND } : {}),
               updated_at: now,
-              ...buildSessionTaxedLine(catalogUnitPrice(product), 1, taxRows.get(product.id) ?? []),
+              ...buildSessionTaxedLine(productUnitPrice, 1, taxRows.get(product.id) ?? []),
             },
           });
           await this.recalcOrderTotals(tx, orderId, now);
@@ -347,6 +449,74 @@ export class ServiceSessionsService {
           data: { service_session_id: session.id, updated_at: now },
         });
         if (linked.count !== 1) throw new VendixHttpException(ErrorCodes.STATION_006);
+      }
+
+      // S11 / D5 `at_start`: the rental has its OWN order (`SVC-<id>-R`, channel pos). It never gets
+      // `service_session_id` (readers assume one order per session) and the SVC order never gets the rental line.
+      if (rentalOwnOrder && !rentalOrderId) {
+        const rentalOrder = await tx.orders.create({
+          data: {
+            store_id: storeId,
+            created_by_user_id: userId ?? null,
+            customer_id: customerId,
+            order_number: `SVC-${session.id}-R`,
+            state: 'draft',
+            channel: 'pos',
+            delivery_type: 'direct_delivery',
+            currency,
+            subtotal_amount: 0,
+            tax_amount: 0,
+            shipping_cost: 0,
+            discount_amount: 0,
+            grand_total: 0,
+            total_paid: 0,
+            remaining_balance: 0,
+            updated_at: now,
+          },
+          select: { id: true },
+        });
+        const createdRentalId = rentalOrder.id;
+        rentalOrderId = createdRentalId;
+        if (isRentalProduct) {
+          const taxRows = await resolveFullTaxRowsByProductId(tx, [product.id]);
+          await tx.order_items.create({
+            data: {
+              order_id: createdRentalId,
+              service_session_id: null,
+              product_id: product.id,
+              ...(variant ? { product_variant_id: variant.id } : {}),
+              product_name: productLineName,
+              quantity: 1,
+              item_type: 'service',
+              service_line_kind: RENTAL_LINE_KIND,
+              updated_at: now,
+              ...buildSessionTaxedLine(productUnitPrice, 1, taxRows.get(product.id) ?? []),
+            },
+          });
+        } else if (snapshotHasTimeRate(rentalSnapshot)) {
+          // Planned blocks of the allocation, priced from the start over the snapshot windows.
+          const priced = priceRentalBlocks(rentalSnapshot, startAt, rentalBlocksPlanned(plannedMinutes, rentalSnapshot.block_minutes), tz);
+          const taxRows = await this.shippingTax.taxRowsForCategory(tx, {
+            tax_category_id: station.rental_tax_category_id ?? null,
+            tax_is_inclusive: station.rental_tax_is_inclusive ?? true,
+            store_id: storeId,
+          });
+          await tx.order_items.create({
+            data: {
+              order_id: createdRentalId,
+              service_session_id: null,
+              product_id: null,
+              product_name: `${RENTAL_LINE_PREFIX}${station.name}`,
+              quantity: priced.quantity,
+              item_type: 'service',
+              service_line_kind: RENTAL_LINE_KIND,
+              updated_at: now,
+              ...buildSessionTaxedLine(priced.unitPrice, priced.quantity, taxRows),
+            },
+          });
+        }
+        await this.recalcOrderTotals(tx, createdRentalId, now);
+        await tx.service_sessions.updateMany({ where: { id: session.id, store_id: storeId }, data: { rental_order_id: createdRentalId } });
       }
 
       // Tie pre-existing booking lines to this service session as well. The
@@ -411,7 +581,7 @@ export class ServiceSessionsService {
             data: { store_id: storeId, session_id: session.id, token_id: access.token_id, idempotency_key: `service-session-token:${access.token_id}`, recipient: contactEmail, status: 'pending' },
           });
         }
-        return { id: session.id, order_id: orderId, station_id: stationId, booking_id: booking?.id ?? null, status: 'open', access_token: access.token, access_token_id: access.token_id, access_expires_at: access.expires_at, email_delivery_status: contactEmail ? 'pending' : 'no_email', access_url: null };
+        return { id: session.id, order_id: orderId, rental_order_id: rentalOrderId, station_id: stationId, booking_id: booking?.id ?? null, status: 'open', access_token: access.token, access_token_id: access.token_id, access_expires_at: access.expires_at, email_delivery_status: contactEmail ? 'pending' : 'no_email', access_url: null };
       });
     } catch (error) {
       if (autoPicked && excludedStationIds.length < MAX_WALK_IN_PICK_RETRIES && this.isStationTaken(error)) {
@@ -434,14 +604,17 @@ export class ServiceSessionsService {
    * Walk-in sin estación: elige una estación elegible para [ahora, fin previsto). Sin
    * ninguna, mantiene el error de siempre (falta indicar la estación).
    */
-  private async pickWalkInStation(storeId: number, productId: number, providerId: number | null, plannedEndAt: string | undefined, now: Date, excludedStationIds: number[] = []) {
+  private async pickWalkInStation(storeId: number, productId: number, providerId: number | null, plannedEndAt: string | undefined, now: Date, excludedStationIds: number[] = [], variantId?: number) {
     const product = await this.prisma.products.findFirst({ where: { id: productId, store_id: storeId }, select: { service_duration_minutes: true } });
+    const variant = variantId
+      ? await this.prisma.product_variants.findFirst({ where: { id: variantId, product_id: productId }, select: { service_duration_minutes: true } })
+      : null;
     const stationId = await this.allocationCoordinator.pickStation(this.prisma, {
       storeId,
       productId,
       providerId,
       startAt: now,
-      endAt: walkInPlannedEnd(plannedEndAt, product?.service_duration_minutes, now),
+      endAt: walkInPlannedEnd(plannedEndAt, variant?.service_duration_minutes ?? product?.service_duration_minutes, now),
       requireIdle: true,
       ...(excludedStationIds.length ? { excludeStationIds: excludedStationIds } : {}),
     });
@@ -917,31 +1090,50 @@ export class ServiceSessionsService {
         if (order.state === 'draft') await this.addRentalLine(tx, storeId, existing, existing.order_id!);
       });
     }
+    const rentalOrderId = (existing as { rental_order_id?: number | null }).rental_order_id ?? null;
 
     const updated = await this.prisma.$transaction(async (tx) => {
       // Regla de negocio: la estación no se libera hasta cobrar la cuenta.
       // Cerrar con saldo pendiente se rechaza (409); el cobro vive en la orden.
-      if (dto.action === 'close' && existing.order_id) {
-        const locked = await lockOrderLifecycle(tx, existing.order_id, storeId);
-        if (locked.state !== 'cancelled') {
-          const totals = await tx.orders.findFirst({
-            where: { id: existing.order_id, store_id: storeId },
-            select: { remaining_balance: true, customer_id: true },
-          });
-          if (totals && Number(totals.remaining_balance) > 0 && allowPendingBalance) {
-            if (!totals.customer_id) {
-              throw new VendixHttpException(
-                ErrorCodes.STATION_015,
-                'Para dejar la cuenta por cobrar, la atención debe tener un cliente identificado.',
-              );
-            }
-            balancePending = Number(totals.remaining_balance);
-          } else if (totals && Number(totals.remaining_balance) > 0) {
+      if (dto.action === 'close' && (existing.order_id || rentalOrderId)) {
+        let remaining = 0;
+        let customerId: number | null = null;
+        if (existing.order_id) {
+          const locked = await lockOrderLifecycle(tx, existing.order_id, storeId);
+          if (locked.state !== 'cancelled') {
+            const totals = await tx.orders.findFirst({
+              where: { id: existing.order_id, store_id: storeId },
+              select: { remaining_balance: true, customer_id: true },
+            });
+            remaining += Number(totals?.remaining_balance ?? 0);
+            customerId = totals?.customer_id ?? null;
+          }
+        }
+        // S11: the rental paid on its own order counts too. An unpaid rental never blocks OPENING, it blocks closing.
+        if (rentalOrderId) {
+          const lockedRental = await lockOrderLifecycle(tx, rentalOrderId, storeId);
+          if (lockedRental.state !== 'cancelled') {
+            const rentalTotals = await tx.orders.findFirst({
+              where: { id: rentalOrderId, store_id: storeId },
+              select: { remaining_balance: true, customer_id: true },
+            });
+            remaining += Number(rentalTotals?.remaining_balance ?? 0);
+            customerId = customerId ?? rentalTotals?.customer_id ?? null;
+          }
+        }
+        if (remaining > 0 && allowPendingBalance) {
+          if (!customerId) {
             throw new VendixHttpException(
-              ErrorCodes.STATION_006,
-              'La atención tiene saldo pendiente; registra el pago antes de finalizar.',
+              ErrorCodes.STATION_015,
+              'Para dejar la cuenta por cobrar, la atención debe tener un cliente identificado.',
             );
           }
+          balancePending = remaining;
+        } else if (remaining > 0) {
+          throw new VendixHttpException(
+            ErrorCodes.STATION_006,
+            'La atención tiene saldo pendiente; registra el pago antes de finalizar.',
+          );
         }
       }
       const claimed = await tx.service_sessions.updateMany({
@@ -1009,10 +1201,20 @@ export class ServiceSessionsService {
   private async addRentalLine(
     tx: Prisma.TransactionClient,
     storeId: number,
-    session: { id: number; station_id: number; opened_at: Date },
+    session: { id: number; station_id: number; opened_at: Date } & SessionRentalColumns,
     orderId: number,
   ) {
     const now = new Date();
+    const snapshot = readSessionRentalSnapshot(session);
+    // `at_start`: the rental lives on its own order from the opening; the consumption order never gets it.
+    if (snapshot?.charge_timing === 'at_start') return;
+    let plannedMinutes: number | null = null;
+    let tz: string | null = null;
+    if (snapshot) {
+      if (!snapshotHasTimeRate(snapshot)) return;
+      if (snapshot.billing_mode === 'planned') plannedMinutes = await this.plannedBaseMinutes(tx, storeId, session.id);
+      if (snapshot.windows.length) tz = await resolveStoreTimezone(this.prisma, storeId);
+    }
     const changed = await ensureSessionRentalLine(tx, {
       storeId,
       sessionId: session.id,
@@ -1020,8 +1222,45 @@ export class ServiceSessionsService {
       stationId: session.station_id,
       openedAt: session.opened_at,
       now,
+      snapshot,
+      plannedMinutes,
+      tz,
     }, this.shippingTax);
     if (changed) await this.recalcOrderTotals(tx, orderId, now);
+  }
+
+  /**
+   * Minutes the allocation covered WITHOUT paid extensions: end - start minus the minutes of every
+   * charged `extended` event. Paid extensions have their own line, so the planned rental never repeats them.
+   */
+  private async plannedBaseMinutes(tx: Prisma.TransactionClient, storeId: number, sessionId: number): Promise<number | null> {
+    const allocation = await tx.service_allocations.findFirst({
+      where: { store_id: storeId, session_id: sessionId, state: 'in_service' },
+      select: { start_at: true, end_at: true },
+    });
+    if (!allocation) return null;
+    const events = await tx.service_progress_events.findMany({
+      where: { store_id: storeId, session_id: sessionId, event_type: 'extended' },
+      select: { metadata: true },
+    });
+    const charged = events.reduce((sum, event) => {
+      const minutes = Number((event.metadata as { extension_minutes?: number } | null)?.extension_minutes ?? 0);
+      return sum + (Number.isFinite(minutes) ? minutes : 0);
+    }, 0);
+    return Math.max(0, (allocation.end_at.getTime() - allocation.start_at.getTime()) / 60_000 - charged);
+  }
+
+  /** S11: leaves the separate rental order of an `at_start` session ready for the normal POS payment flow. */
+  async prepareRentalCharge(id: number) {
+    const { storeId } = this.requireContext();
+    const session = await this.findOne(id);
+    const rentalOrderId = (session as { rental_order_id?: number | null }).rental_order_id ?? null;
+    if (!rentalOrderId) throw new VendixHttpException(ErrorCodes.STATION_006, 'La atención no tiene un alquiler por cobrar.');
+    await this.prisma.$transaction(async (tx) => {
+      const order = await lockOrderLifecycle(tx, rentalOrderId, storeId);
+      if (order.state === 'draft') await this.recalcOrderTotals(tx, rentalOrderId, new Date());
+    });
+    return { order_id: rentalOrderId };
   }
 
   /** Deja la cuenta lista para "Registrar pago" sin cerrar la atención. */
@@ -1111,7 +1350,21 @@ export class ServiceSessionsService {
     const session = await this.findOne(id);
     if (!ACTIVE_SESSION_STATUSES.includes(session.status) || Number.isNaN(plannedEndAt.getTime())) throw new VendixHttpException(ErrorCodes.STATION_006);
     const now = new Date();
+    // S10: only a `planned` session with a time rate charges the added time, in the same transaction.
+    const snapshot = readSessionRentalSnapshot(session);
+    const chargeSnapshot = snapshot?.billing_mode === 'planned' && snapshotHasTimeRate(snapshot) && session.order_id ? snapshot : null;
+    if (session.settled_at) throw this.settledDepositError();
+    const tz = chargeSnapshot && chargeSnapshot.windows.length ? await resolveStoreTimezone(this.prisma, storeId) : null;
     const result = await this.prisma.$transaction(async (tx) => {
+      if (chargeSnapshot) {
+        // Order lock BEFORE the session row (settle takes them in that order), then re-read settled_at under it.
+        const order = await lockOrderLifecycle(tx, session.order_id!, storeId);
+        if (order.state !== 'draft') {
+          throw new VendixHttpException(ErrorCodes.STATION_006, 'La cuenta ya fue cobrada; no se puede extender el tiempo con cobro.');
+        }
+        const live = await tx.service_sessions.findFirst({ where: { id, store_id: storeId }, select: { settled_at: true } });
+        if (live?.settled_at) throw this.settledDepositError();
+      }
       const claimed = await tx.service_sessions.updateMany({
         where: { id, store_id: storeId, status: { in: ACTIVE_SESSION_STATUSES } },
         data: { updated_at: now },
@@ -1141,7 +1394,22 @@ export class ServiceSessionsService {
         where: { store_id: storeId, session_id: id, revoked_at: null, expires_at: { gt: now } },
         data: { expires_at: new Date(plannedEndAt.getTime() + 24 * 60 * 60 * 1000) },
       });
-      await this.writeProgress(tx, storeId, id, 'extended', userId ?? null, 'Tiempo de atención extendido');
+      let charged: { extra_minutes: number; blocks: number; total_cents: number } | null = null;
+      if (chargeSnapshot) {
+        charged = await addSessionExtensionLine(tx, {
+          storeId,
+          sessionId: id,
+          orderId: session.order_id!,
+          stationId: allocation.station_id,
+          snapshot: chargeSnapshot,
+          oldEnd: allocation.end_at,
+          newEnd: plannedEndAt,
+          tz,
+          now,
+        }, this.shippingTax);
+        if (charged) await this.recalcOrderTotals(tx, session.order_id!, now);
+      }
+      await this.writeProgress(tx, storeId, id, 'extended', userId ?? null, 'Tiempo de atención extendido', charged ? { extension_minutes: charged.extra_minutes } : undefined);
       return { id, planned_end_at: plannedEndAt };
     });
     this.emit(storeId, id, 'extended', result);
@@ -1200,9 +1468,36 @@ export class ServiceSessionsService {
       : null;
     const plannedEnd = allocations.find((row) => row.state === 'in_service')?.end_at ?? null;
     const deposit = await this.buildDepositSummary(session, order);
+    // S11: "Alquiler $100.000 (pagado) · Consumos $85.000 · Por cobrar $85.000".
+    const rentalOrder = session.rental_order_id
+      ? await this.prisma.orders.findFirst({
+          where: { id: session.rental_order_id, store_id: storeId },
+          select: { id: true, state: true, grand_total: true, total_paid: true, remaining_balance: true },
+        })
+      : null;
+    const rental = rentalOrder
+      ? {
+          order_id: rentalOrder.id,
+          total: Number(rentalOrder.grand_total),
+          paid: Number(rentalOrder.total_paid),
+          remaining: rentalOrder.state === 'cancelled' ? 0 : Number(rentalOrder.remaining_balance),
+        }
+      : null;
+    const consumption = order
+      ? {
+          order_id: order.id,
+          total: Number(order.grand_total),
+          paid: Number(order.total_paid),
+          remaining: order.state === 'cancelled' ? 0 : Number(order.remaining_balance),
+        }
+      : null;
+    const toCollect = Math.round(((consumption?.remaining ?? 0) + (rental?.remaining ?? 0)) * 100) / 100;
     return {
       ...session,
       deposit,
+      rental,
+      consumption,
+      to_collect: toCollect,
       subjects,
       allocations,
       progress_events: progressEvents,
@@ -1241,8 +1536,9 @@ export class ServiceSessionsService {
 
   /** Consumption of the account (rental + products, taxes in, no tip, no "Gastos de reserva" line), in cents. */
   private consumptionCents(order: { grand_total: Prisma.Decimal; tip_amount: Prisma.Decimal | null; order_items: Array<{ service_line_kind: string | null; cancelled_at: Date | null; final_unit_price: Prisma.Decimal; quantity: number }> }): number {
+    // The reservation fee and the rental/extension lines are not consumption (question 6).
     const feeCents = order.order_items
-      .filter((item) => item.service_line_kind === 'reservation_fee' && !item.cancelled_at)
+      .filter((item) => (item.service_line_kind === 'reservation_fee' || NON_CONSUMPTION_LINE_KINDS.includes(item.service_line_kind ?? '')) && !item.cancelled_at)
       .reduce((sum, item) => sum + toCents(item.final_unit_price) * Number(item.quantity ?? 1), 0);
     return Math.max(0, toCents(order.grand_total) - toCents(order.tip_amount) - feeCents);
   }
@@ -1608,8 +1904,8 @@ export class ServiceSessionsService {
     };
   }
 
-  private async writeProgress(tx: Prisma.TransactionClient, storeId: number, sessionId: number, type: string, actorUserId: number | null, publicText: string | null) {
-    await tx.service_progress_events.create({ data: { store_id: storeId, session_id: sessionId, event_type: type, actor_user_id: actorUserId, public_text: publicText } });
+  private async writeProgress(tx: Prisma.TransactionClient, storeId: number, sessionId: number, type: string, actorUserId: number | null, publicText: string | null, metadata?: Prisma.InputJsonValue) {
+    await tx.service_progress_events.create({ data: { store_id: storeId, session_id: sessionId, event_type: type, actor_user_id: actorUserId, public_text: publicText, ...(metadata ? { metadata } : {}) } });
   }
 
   private emit(storeId: number, sessionId: number, type: string, data: Record<string, unknown>) {
@@ -1829,7 +2125,10 @@ export class ServiceSessionsService {
   private async requireSettleableSession(storeId: number, sessionId: number) {
     const session = await this.prisma.service_sessions.findFirst({
       where: { id: sessionId, store_id: storeId },
-      select: { id: true, status: true, order_id: true, booking_id: true, station_id: true, opened_at: true, deposit_policy: true, deposit_exhausted_policy: true, leftover_policy: true, settled_at: true },
+      select: {
+        id: true, status: true, order_id: true, booking_id: true, station_id: true, opened_at: true, deposit_policy: true, deposit_exhausted_policy: true, leftover_policy: true, settled_at: true,
+        rental_billing_mode: true, rental_charge_timing: true, rental_block_minutes: true, rental_block_price: true, rate_windows_snapshot: true,
+      },
     });
     if (!session) throw new VendixHttpException(ErrorCodes.STATION_004, 'Sesión de servicio no encontrada en esta tienda.');
     if (!session.deposit_policy || !DEPOSIT_POLICIES.includes(session.deposit_policy)) {
@@ -1850,7 +2149,7 @@ export class ServiceSessionsService {
   private async prepareSettlementTx(
     tx: Prisma.TransactionClient,
     storeId: number,
-    session: { id: number; booking_id: number | null; station_id: number; opened_at: Date; order_id: number | null; leftover_policy: string | null },
+    session: { id: number; booking_id: number | null; station_id: number; opened_at: Date; order_id: number | null; leftover_policy: string | null } & SessionRentalColumns,
   ) {
     const orderId = session.order_id!;
     const locked = await lockOrderLifecycle(tx, orderId, storeId);
@@ -1864,12 +2163,15 @@ export class ServiceSessionsService {
     const currency = order?.currency ?? (await this.settings.getStoreCurrency());
     const before = await computeSessionOrderTotals(tx, orderId);
     const consumptionCents = toCents(before.grandTotal) - (await reservationFeeGrossCents(tx, orderId, session.id));
+    // Question 6: the rental and extension lines are billed but never count towards the minimum spend.
+    const minimumBasisCents = Math.max(0, consumptionCents - (await nonConsumptionGrossCents(tx, orderId)));
     // A paid or closed account cannot grow lines: its leftover is only refunded or credited.
     const leftoverPolicy = draft ? (session.leftover_policy as SessionLeftoverPolicy | null) : null;
     const plan = planSettlement({
       consumption_cents: consumptionCents,
       paid_cents: toCents(order?.total_paid),
       received_cents: toCents(balance.received),
+      minimum_basis_cents: minimumBasisCents,
       balance_cents: toCents(balance.balance),
       leftover_policy: leftoverPolicy,
     });

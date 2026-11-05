@@ -107,6 +107,13 @@ export class ServiceSessionsController {
     return this.response.success(await this.sessions.prepareCharge(id));
   }
 
+  /** S11: leaves the separate rental order ready for the normal POS payment flow. */
+  @Post(':id/rental/prepare-charge')
+  @Permissions('store:reservations:update')
+  async prepareRentalCharge(@Param('id', ParseIntPipe) id: number) {
+    return this.response.success(await this.sessions.prepareRentalCharge(id));
+  }
+
   @Post(':id/access-link/reissue')
   @Permissions('store:reservations:update')
   async reissueAccessLink(
