@@ -550,6 +550,13 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.ServiceStationsPageComponent,
               ),
           },
+          {
+            path: 'stations/session/:id',
+            loadComponent: () =>
+              import('../../private/modules/store/reservations/components/service-stations/session-page/service-session-page.component').then(
+                (c) => c.ServiceSessionPageComponent,
+              ),
+          },
         ],
       },
       // Consultations Routes

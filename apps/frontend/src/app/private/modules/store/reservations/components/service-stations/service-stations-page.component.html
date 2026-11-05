@@ -190,7 +190,10 @@
                       <!-- Card Header (estilo restaurante: mesa ocupada) -->
                       <div class="flex items-center justify-between gap-2 pb-2.5 border-b border-[var(--color-border)]/60">
                         <div class="flex items-center gap-2">
-                          <span class="font-bold text-sm text-[var(--color-text-primary)] tracking-wide">{{ station.name }}</span>
+                          <div class="min-w-0">
+                            <span class="font-bold text-sm text-[var(--color-text-primary)] tracking-wide block truncate">{{ station.name }}</span>
+                            <span class="text-[10px] text-[var(--color-text-secondary)] block">{{ stationTypeSubtitle(station) }}</span>
+                          </div>
                           <span class="px-2 py-0.5 rounded-full bg-red-500/15 text-red-600 dark:text-red-400 text-[10px] font-bold flex items-center gap-1">
                             <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span> OCUPADA
                           </span>
@@ -270,33 +273,39 @@
                         </span>
                       </div>
 
-                      <!-- Timer & Progress Bar: solo si la estación lleva cronómetro -->
-                      @if (station.track_time) {
-                      <div class="mt-3 p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 space-y-1.5">
-                        <div class="flex items-center justify-between text-xs font-mono">
-                          <span class="text-[var(--color-text-secondary)] flex items-center gap-1 text-[11px]">
-                            <app-icon name="clock" [size]="12" class="text-red-500" /> Cronómetro
-                          </span>
-                          <span class="font-bold text-red-600 dark:text-red-400">
-                            {{ sessionElapsedMinutes(session.opened_at) }}m / {{ sessionPlannedMinutes(session) }}m ({{ sessionProgressPercent(session) }}%)
-                          </span>
+                      <!-- Reloj en vivo: sube sin fin planeado, baja con fin futuro, "+" si ya pasó -->
+                      @if (stationClock(station, session); as clock) {
+                        <div class="mt-3 p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 space-y-1.5">
+                          <div class="flex items-center justify-between text-xs font-mono">
+                            <span class="text-[var(--color-text-secondary)] flex items-center gap-1 text-[11px]">
+                              <app-icon name="clock" [size]="12" [ngClass]="clock.mode === 'overtime' ? 'text-[var(--color-error)]' : 'text-[var(--color-primary)]'" />
+                              {{ clock.mode === 'overtime' ? 'Tiempo extra' : clock.mode === 'countdown' ? 'Tiempo restante' : 'Transcurrido' }}
+                            </span>
+                            <span
+                              class="font-bold text-sm"
+                              [ngClass]="clock.mode === 'overtime' ? 'text-[var(--color-error)]' : 'text-[var(--color-text-primary)]'"
+                            >
+                              {{ clock.text }}
+                            </span>
+                          </div>
+                          @if (nextReservationChip(station, session); as chip) {
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--color-warning-light)] text-[var(--color-warning)] text-[10px] font-bold">
+                              <app-icon name="alert-triangle" [size]="11" /> {{ chip }}
+                            </span>
+                          }
                         </div>
-                        <div class="w-full bg-[var(--color-surface)] h-2 rounded-full overflow-hidden border border-[var(--color-border)]/40">
-                          <div class="bg-gradient-to-r from-red-500 to-amber-500 h-full rounded-full transition-all duration-300" [style.width.%]="sessionProgressPercent(session)"></div>
-                        </div>
-                      </div>
                       }
                     </div>
 
                     <!-- Action Buttons -->
                     <div class="mt-4 pt-3 border-t border-[var(--color-border)]/60 flex items-center gap-2">
-                      <app-button variant="primary" size="sm" class="flex-1" (clicked)="openManageSession(session)">
+                      <app-button variant="primary" size="sm" class="flex-1" (clicked)="openSessionPage(session)">
                         <app-icon name="file-text" [size]="14" slot="icon" /> Ver Cuenta
                       </app-button>
                       <app-button variant="outline" size="sm" (clicked)="openQrModal(station)" ariaLabel="Ver QR" title="Ver e imprimir QR">
                         <app-icon name="qr-code" [size]="14" slot="icon" />
                       </app-button>
-                      <app-button variant="secondary" size="sm" (clicked)="requestClose(session)">
+                      <app-button variant="secondary" size="sm" (clicked)="openSessionPage(session, true)">
                         Finalizar
                       </app-button>
                     </div>
@@ -332,22 +341,22 @@
                         <p class="text-[11px] text-[var(--color-text-secondary)] mt-0.5">
                           {{ session.subject?.label || 'Vehículo en bahía' }}
                         </p>
-                        @if (station.track_time) {
+                        @if (stationClock(station, session); as pausedClock) {
                           <span class="inline-block font-mono text-xs font-semibold text-amber-600 mt-2">
-                            {{ sessionElapsedMinutes(session.opened_at) }} min transcurridos
+                            {{ pausedClock.text }}
                           </span>
                         }
                       </div>
                     </div>
 
                     <div class="mt-4 pt-3 border-t border-[var(--color-border)]/60 flex items-center gap-2">
-                      <app-button variant="secondary" size="sm" class="flex-1" (clicked)="openManageSession(session)">
+                      <app-button variant="secondary" size="sm" class="flex-1" (clicked)="openSessionPage(session)">
                         Detalle
                       </app-button>
                       <app-button variant="outline" size="sm" (clicked)="openQrModal(station)" ariaLabel="Ver QR" title="Ver e imprimir QR">
                         <app-icon name="qr-code" [size]="14" slot="icon" />
                       </app-button>
-                      <app-button variant="outline" size="sm" class="flex-1 text-emerald-600 border-emerald-500/40" (clicked)="transitionSession(session, 'resume')">
+                      <app-button variant="outline" size="sm" class="flex-1 text-emerald-600 border-emerald-500/40" (clicked)="resumeSession(session)">
                         Reanudar
                       </app-button>
                     </div>
@@ -446,32 +455,6 @@
 
   }
 
-  <!-- Servicio recurrente sin cliente: pedir cliente para poder recordarle -->
-  @if (closePrompt(); as pending) {
-    <app-modal
-      [isOpen]="true"
-      (isOpenChange)="!$event && closePrompt.set(null)"
-      title="¿A quién le recordamos el próximo servicio?"
-      [subtitle]="pending.product_name + ' es un servicio recurrente'"
-      size="md"
-    >
-      <div class="space-y-3">
-        <p class="text-sm text-[var(--color-text-secondary)]">
-          Esta atención no tiene cliente registrado, así que no recibirá recordatorio. Búscalo o créalo; también puedes asignarlo después desde el Registro de servicios.
-        </p>
-        <app-customer-select
-          label="Cliente"
-          [selected]="closeCustomer()"
-          (selectedChange)="closeCustomer.set($event)"
-        />
-      </div>
-      <div slot="footer" class="flex flex-wrap items-center justify-end gap-2.5">
-        <app-button variant="outline" [disabled]="saving()" (clicked)="confirmClose(false)">Finalizar sin cliente</app-button>
-        <app-button variant="primary" [disabled]="!closeCustomer()" [loading]="saving()" (clicked)="confirmClose(true)">Asignar y finalizar</app-button>
-      </div>
-    </app-modal>
-  }
-
   <!-- Tipo de la plantilla de estación: define con qué campos arranca -->
   <app-modal [(isOpen)]="showTemplateTypePicker" title="¿Para qué tipo de estación es la plantilla?" subtitle="Arranca con los campos típicos de ese tipo; luego los puedes cambiar" size="md">
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -502,6 +485,14 @@
         (ngModelChange)="newName.set($event)"
         placeholder="Ej. Bahía 1, Elevador 2, Silla 3"
         [required]="true"
+      />
+
+      <app-selector
+        label="Tipo de estación"
+        [options]="newStationTypeOptions"
+        [ngModel]="newStationType()"
+        (ngModelChange)="newStationType.set($event ?? '')"
+        placeholder="Según la plantilla"
       />
 
       <div>
@@ -996,368 +987,6 @@
     </div>
   </app-modal>
 
-  <!-- Modal 3: Gestión de Atención y Cuenta Abierta de la Bahía (Estilo Mesa Restaurante) -->
-  @if (selectedSession(); as session) {
-    <app-modal [(isOpen)]="showSessionModal" [title]="'Cuenta de Estación: ' + stationNameOf(session)" [subtitle]="getCustomerName(session) + ' • Sesión #' + session.id" size="xl-mid">
-      <div class="space-y-5">
-        <!-- Ficha del Cliente y Estado de la Atención -->
-        <div class="p-4 rounded-2xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-wrap items-center justify-between gap-3">
-          <div class="flex items-center gap-3">
-            <div class="w-11 h-11 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] flex items-center justify-center text-[var(--color-primary)] shrink-0">
-              <app-icon name="user" [size]="20" />
-            </div>
-            <div>
-              <div class="flex items-center gap-2">
-                <span class="font-bold text-sm text-[var(--color-text-primary)]">{{ getCustomerName(session) }}</span>
-                @if (getCustomerPlate(session); as plate) {
-                  <span class="px-2 py-0.5 rounded font-mono font-bold bg-amber-400/20 text-amber-800 dark:text-amber-300 text-[10px] border border-amber-400/40">
-                    {{ plate }}
-                  </span>
-                }
-              </div>
-              <div class="flex flex-wrap items-center gap-3 text-xs text-[var(--color-text-secondary)] mt-0.5">
-                @if (getCustomerPhone(session); as phone) {
-                  <span class="flex items-center gap-1 font-mono">
-                    <app-icon name="phone" [size]="12" /> {{ phone }}
-                  </span>
-                }
-                @if (getCustomerDoc(session); as doc) {
-                  <span class="flex items-center gap-1 font-mono">
-                    <app-icon name="credit-card" [size]="12" /> CC: {{ doc }}
-                  </span>
-                }
-                <span class="flex items-center gap-1">
-                  <app-icon name="user-check" [size]="12" /> {{ session.allocation?.provider_name || 'Especialista asignado' }}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex items-center gap-2">
-            <app-badge [variant]="session.status === 'paused' ? 'warning' : 'success'" size="sm">
-              {{ session.status === 'paused' ? 'En Pausa' : 'Atención Activa' }}
-            </app-badge>
-            @if (stationTracksTime(session.station_id)) {
-              <span class="px-2.5 py-1 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] text-xs font-mono font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
-                <app-icon name="clock" [size]="12" /> {{ sessionElapsedMinutes(session.opened_at) }} min
-              </span>
-            }
-          </div>
-        </div>
-
-        @if (session.intake; as intake) {
-          @if (intake.answers.length) {
-            <div class="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] space-y-2">
-              <div class="flex items-center justify-between gap-2">
-                <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
-                  <app-icon name="clipboard-list" [size]="14" class="text-[var(--color-primary)]" />
-                  Datos de la atención
-                </span>
-                @if (intake.template_name) {
-                  <span class="text-xs text-[var(--color-text-secondary)] truncate">{{ intake.template_name }}</span>
-                }
-              </div>
-              <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
-                @for (answer of intake.answers; track answer.field_id) {
-                  <div class="flex gap-1.5 min-w-0">
-                    <dt class="text-[var(--color-text-secondary)] shrink-0">{{ answer.label }}:</dt>
-                    <dd class="font-medium text-[var(--color-text-primary)] break-words min-w-0">{{ formatIntakeAnswer(answer.field_type, answer.value) }}</dd>
-                  </div>
-                }
-              </dl>
-            </div>
-          }
-        }
-
-        <!-- Sección: Consumo / Cuenta Abierta (Estilo restaurante mesa) -->
-        <div class="p-4 rounded-2xl bg-[var(--color-surface)] border-2 border-emerald-500/30 shadow-sm space-y-4">
-          <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[var(--color-border)]">
-            <div class="flex items-center gap-2">
-              <div class="w-8 h-8 rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                <app-icon name="shopping-bag" [size]="16" />
-              </div>
-              <div>
-                <h4 class="font-bold text-sm text-[var(--color-text-primary)]">Cuenta de la Estación</h4>
-                <p class="text-[11px] text-[var(--color-text-secondary)]">
-                  Orden #{{ sessionOrder()?.order_number || ('SVC-' + session.id) }} • Ítems y productos cargados
-                </p>
-              </div>
-            </div>
-
-            <!-- Total de la Cuenta Destacado -->
-            <div class="text-right">
-              <span class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)] block">Total Acumulado</span>
-              <span class="font-mono font-black text-lg text-emerald-600 dark:text-emerald-400">
-                {{ (sessionOrder()?.grand_total ?? session.order?.grand_total ?? session.budget_amount ?? 0) | currency }}
-              </span>
-            </div>
-          </div>
-
-          <!-- Barra para Agregar Producto, Insumo o Servicio a la Cuenta -->
-          <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-2.5">
-            <span class="text-xs font-bold text-[var(--color-text-primary)] flex items-center gap-1.5">
-              <app-icon name="plus-circle" [size]="14" class="text-[var(--color-primary)]" />
-              Agregar Producto o Servicio Adicional
-            </span>
-            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
-              <div class="sm:col-span-6">
-                <app-selector
-                  label="Producto / Servicio del Catálogo"
-                  [options]="sessionCatalogProductSelectorOptions()"
-                  [ngModel]="selectedAddProductId()"
-                  (ngModelChange)="onAddProductSelect($event)"
-                  placeholder="-- Seleccionar producto o servicio --"
-                />
-              </div>
-
-              @if (addVariantOptions().length) {
-                <div class="sm:col-span-12">
-                  <app-selector
-                    label="Variante"
-                    [options]="addVariantOptions()"
-                    [ngModel]="selectedAddVariantId()"
-                    (ngModelChange)="onAddVariantSelect($event)"
-                    placeholder="-- Elegir variante --"
-                    [required]="true"
-                  />
-                </div>
-              }
-
-              <div class="sm:col-span-2">
-                <app-input
-                  label="Cantidad"
-                  type="number"
-                  [ngModel]="addQuantity()"
-                  (ngModelChange)="addQuantity.set($event)"
-                />
-              </div>
-
-              <div class="sm:col-span-2">
-                <app-input
-                  label="Precio Unitario"
-                  type="number"
-                  [ngModel]="addUnitPrice()"
-                  (ngModelChange)="onAddUnitPriceChange($event)"
-                  [placeholder]="currencyCode() || 'COP'"
-                />
-              </div>
-
-              <div class="sm:col-span-2 pb-0.5">
-                <app-button
-                  variant="primary"
-                  size="md"
-                  class="w-full"
-                  [disabled]="!selectedAddProductId()"
-                  [loading]="addingItem()"
-                  (clicked)="addItemToAccount()"
-                >
-                  <app-icon name="plus" [size]="14" slot="icon" /> Agregar
-                </app-button>
-              </div>
-            </div>
-            <div class="flex justify-end text-xs text-[var(--color-text-secondary)]">
-              Total estimado al agregar: <strong class="ml-1 font-mono text-emerald-600">{{ addItemEstimatedTotal() | currency }}</strong>
-            </div>
-          </div>
-
-          <!-- Lista de Ítems en la Cuenta -->
-          <div class="space-y-2">
-            @if (sessionOrderLoading()) {
-              <div class="py-6 text-center text-xs text-[var(--color-text-secondary)]">
-                Cargando cuenta de la estación...
-              </div>
-            } @else if (sessionOrder()?.order_items?.length > 0) {
-              <div class="divide-y divide-[var(--color-border)]/60 rounded-xl border border-[var(--color-border)] overflow-hidden">
-                @for (item of sessionOrder().order_items; track item.id) {
-                  <div class="p-3 bg-[var(--color-surface)] flex items-center justify-between gap-3 text-xs">
-                    <div class="flex items-center gap-2.5 min-w-0">
-                      <span class="px-2 py-0.5 rounded-md text-[10px] font-bold" [ngClass]="item.item_type === 'physical' ? 'bg-blue-500/15 text-blue-600' : 'bg-purple-500/15 text-purple-600'">
-                        {{ item.item_type === 'physical' ? 'Producto' : 'Servicio' }}
-                      </span>
-                      <div class="min-w-0">
-                        <div class="font-bold text-[var(--color-text-primary)] truncate">{{ item.product_name }}</div>
-                        <div class="text-[11px] text-[var(--color-text-secondary)] font-mono">
-                          {{ item.quantity }} x {{ (item.final_unit_price ?? item.unit_price) | currency }}
-                          @if (Number(item.tax_rate) > 0) {
-                            <span class="ml-1 text-[10px]">· IVA {{ Number(item.tax_rate) * 100 | number: '1.0-2' }}%</span>
-                          }
-                        </div>
-                      </div>
-                    </div>
-
-                    <div class="flex items-center gap-3">
-                      <span class="font-mono font-bold text-xs text-[var(--color-text-primary)]">
-                        {{ lineTotalWithTax(item) | currency }}
-                      </span>
-                      <app-button variant="ghost" size="sm" (clicked)="removeItemFromAccount(item.id)" ariaLabel="Eliminar ítem">
-                        <app-icon name="trash-2" [size]="13" class="text-red-500" />
-                      </app-button>
-                    </div>
-                  </div>
-                }
-              </div>
-              <div class="mt-2 p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-xs space-y-1 font-mono">
-                <div class="flex justify-between text-[var(--color-text-secondary)]">
-                  <span>Subtotal</span><span>{{ sessionOrder()?.subtotal_amount | currency }}</span>
-                </div>
-                <div class="flex justify-between text-[var(--color-text-secondary)]">
-                  <span>Impuestos</span><span>{{ (sessionOrder()?.tax_amount || 0) | currency }}</span>
-                </div>
-                <div class="flex justify-between font-bold text-[var(--color-text-primary)]">
-                  <span>Total</span><span>{{ sessionOrder()?.grand_total | currency }}</span>
-                </div>
-              </div>
-              @if (budget() && Number(sessionOrder()?.grand_total) > Number(budget()?.amount)) {
-                <div class="mt-2 p-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2">
-                  <app-icon name="alert-triangle" [size]="14" class="shrink-0 mt-0.5" />
-                  <span>La cuenta supera el presupuesto autorizado por el cliente ({{ budget()?.amount | currency }}). Ajusta el presupuesto abajo para poder cobrarla.</span>
-                </div>
-              }
-            } @else {
-              <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-center text-xs text-[var(--color-text-secondary)] italic">
-                La cuenta de esta estación está abierta con el servicio inicial. Puedes agregar productos, consumibles o servicios adicionales con el botón de arriba.
-              </div>
-            }
-          </div>
-        </div>
-
-        <!-- Techo de Presupuesto Autorizado -->
-        <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
-          <div class="flex items-center justify-between">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
-              <app-icon name="dollar-sign" [size]="14" class="text-emerald-500" />
-              Techo de Presupuesto Autorizado ({{ currencyCode() || 'COP' }})
-            </h4>
-            <span class="text-xs font-semibold text-[var(--color-text-secondary)]">Control POS</span>
-          </div>
-          <div class="flex items-center gap-3">
-            <app-input
-              type="number"
-              [ngModel]="sessionBudgetAmount()"
-              (ngModelChange)="sessionBudgetAmount.set($event)"
-              placeholder="Ej. 250000"
-            />
-            <app-button variant="primary" size="md" class="shrink-0" [loading]="saving()" (clicked)="saveBudget()">
-              Guardar Tope
-            </app-button>
-          </div>
-          <p class="text-[11px] text-[var(--color-text-secondary)]">
-            El POS validará este monto y bloqueará el cobro de líneas no aprobadas por el cliente.
-          </p>
-        </div>
-
-        <!-- Propuestas de Trabajo Adicional -->
-        <div class="space-y-2.5">
-          <h4 class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
-            <app-icon name="file-text" [size]="14" /> Propuestas de Trabajo Adicional
-          </h4>
-          @if (proposals().length > 0) {
-            <div class="space-y-2">
-              @for (prop of proposals(); track prop.id) {
-                <div class="p-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between text-xs">
-                  <div>
-                    <span class="font-bold text-[var(--color-text-primary)]">Versión {{ prop.version }}</span>
-                    <span class="text-[var(--color-text-secondary)] ml-2 font-mono">Total: {{ prop.total | currency }}</span>
-                  </div>
-                  <app-badge [variant]="prop.status === 'approved' ? 'success' : prop.status === 'rejected' ? 'error' : 'warning'" size="xs">
-                    {{ prop.status === 'approved' ? 'Aprobada' : prop.status === 'rejected' ? 'Rechazada' : 'Pendiente' }}
-                  </app-badge>
-                </div>
-              }
-            </div>
-          } @else {
-            <p class="text-xs text-[var(--color-text-secondary)] italic p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60">
-              No hay propuestas de trabajo adicional registradas en esta atención.
-            </p>
-          }
-        </div>
-
-        <!-- Compartir seguimiento con el cliente -->
-        <div class="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] space-y-3">
-          <div class="flex items-center justify-between pb-2 border-b border-[var(--color-border)]/60">
-            <h4 class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
-              <app-icon name="smartphone" [size]="14" class="text-[var(--color-primary)]" />
-              Compartir seguimiento con el cliente
-            </h4>
-            @if (sessionAccessUrl()) {
-              <span class="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold">
-                Enlace Activo
-              </span>
-            }
-          </div>
-
-          @if (sessionAccessUrl(); as url) {
-            <div class="flex flex-col sm:flex-row items-center gap-4">
-              @if (sessionAccessQrDataUrl(); as qr) {
-                <div class="p-2 rounded-xl bg-white border border-[var(--color-border)] shrink-0">
-                  <img [src]="qr" alt="QR Seguimiento" class="w-28 h-28 object-contain" />
-                </div>
-              } @else if (sessionAccessQrLoading()) {
-                <div class="w-28 h-28 flex items-center justify-center bg-[var(--color-background)] rounded-xl border border-[var(--color-border)] shrink-0">
-                  <app-spinner size="sm" />
-                </div>
-              }
-              <div class="flex-1 min-w-0 space-y-2 text-center sm:text-left">
-                <p class="text-xs text-[var(--color-text-secondary)]">
-                  El cliente puede ver el avance en vivo, fotos, ítems cargados y aprobar presupuestos desde su móvil.
-                </p>
-                <div class="p-2 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)]/70 text-[11px] font-mono text-[var(--color-text-primary)] truncate select-all">
-                  {{ url }}
-                </div>
-                <div class="flex flex-wrap items-center gap-2 pt-1 justify-center sm:justify-start">
-                  <app-button variant="outline" size="sm" (clicked)="copySessionAccessUrl()">
-                    <app-icon name="copy" [size]="13" slot="icon" /> Copiar enlace
-                  </app-button>
-                  <app-button variant="primary" size="sm" (clicked)="shareSessionByWhatsApp(session)">
-                    <app-icon name="smartphone" [size]="13" slot="icon" /> Enviar por WhatsApp
-                  </app-button>
-                </div>
-              </div>
-            </div>
-          } @else {
-            <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/60 text-xs text-[var(--color-text-secondary)] space-y-3">
-              <p>Por seguridad el enlace solo se muestra al abrir la atención. Si se cerró o recargó la página, genera uno nuevo: el anterior deja de funcionar.</p>
-              @if (session.contact_email) {
-                <label class="flex items-start gap-2 cursor-pointer text-[var(--color-text-primary)]">
-                  <input type="checkbox" class="mt-0.5" [checked]="reissueIdentityChecked()" (change)="reissueIdentityChecked.set($any($event.target).checked)" />
-                  <span>Verifiqué en persona que es el cliente ({{ session.contact_email }})</span>
-                </label>
-                <app-button variant="outline" size="sm" [disabled]="!reissueIdentityChecked()" [loading]="reissuingLink()" (clicked)="reissueSessionLink()">
-                  <app-icon name="refresh-cw" [size]="14" slot="icon" /> Generar nuevo enlace
-                </app-button>
-              } @else {
-                <p class="italic">Esta atención no tiene correo de contacto, así que no se puede reemitir el enlace.</p>
-              }
-            </div>
-          }
-        </div>
-
-        <!-- Acciones Operativas -->
-        <div class="pt-3 border-t border-[var(--color-border)] flex flex-wrap items-center justify-between gap-3">
-          <div class="flex items-center gap-2">
-            @if (session.status === 'paused') {
-              <app-button variant="outline" size="sm" class="text-emerald-600 border-emerald-500/40" [loading]="saving()" (clicked)="transitionSession(session, 'resume')">
-                <app-icon name="play" [size]="14" slot="icon" /> Reanudar Atención
-              </app-button>
-            } @else {
-              <app-button variant="secondary" size="sm" [loading]="saving()" (clicked)="transitionSession(session, 'pause')">
-                <app-icon name="pause" [size]="14" slot="icon" /> Pausar Atención
-              </app-button>
-            }
-          </div>
-          <div class="flex items-center gap-2">
-            <app-button variant="outline" size="sm" (clicked)="chargeSessionAccount(session)">
-              <app-icon name="credit-card" [size]="14" slot="icon" /> Cobrar cuenta
-            </app-button>
-            <app-button variant="danger" size="sm" [loading]="saving()" (clicked)="requestClose(session)">
-              <app-icon name="check-circle" [size]="14" slot="icon" /> Finalizar y cobrar
-            </app-button>
-          </div>
-        </div>
-      </div>
-    </app-modal>
-  }
-
   <!-- Modal 4: Configuración Avanzada de Bahía (Servicios, Proveedores, QR) -->
   @if (selectedStation(); as station) {
     <app-modal [(isOpen)]="showConfigModal" [title]="'Configurar Estación: ' + station.name" subtitle="Ajusta servicios compatibles, especialistas autorizados y datos operativos" size="xl-mid">
@@ -1431,6 +1060,13 @@
               (ngModelChange)="editName.set($event)"
               placeholder="Ej. Bahía de Alineación 1, Silla Barber 2"
               [required]="true"
+            />
+
+            <app-selector
+              label="Tipo de estación"
+              [options]="stationTypeOptions"
+              [ngModel]="editStationType()"
+              (ngModelChange)="editStationType.set($event)"
             />
 
             <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">

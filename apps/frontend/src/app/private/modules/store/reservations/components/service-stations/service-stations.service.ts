@@ -11,13 +11,28 @@ export interface PaginatedApiResponse<T> {
   meta: { total: number; page: number; limit: number; totalPages: number; hasNextPage: boolean; hasPreviousPage: boolean };
 }
 
-export type StationType = 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular';
+export type StationType = 'carro' | 'moto' | 'peluqueria' | 'barberia' | 'salon_belleza' | 'general' | 'celular' | 'cava' | 'cancha' | 'sala' | 'finca';
 
 export interface ProviderAvailability {
   provider_id: number;
   display_name: string;
   status: 'available' | 'no_schedule' | 'off_schedule' | 'busy' | 'inactive';
   detail: string | null;
+}
+
+/** Booking that starts on a station after its current session (backend: next_reservation). */
+export interface StationNextReservation {
+  start_at: string;
+  booking_id?: number | null;
+  customer_name?: string | null;
+}
+
+/** Live session summary the stations list attaches to an occupied station. */
+export interface StationActiveSession {
+  id: number;
+  opened_at: string;
+  planned_end_at: string | null;
+  status: string;
 }
 
 export interface ServiceStation {
@@ -36,6 +51,9 @@ export interface ServiceStation {
   /** true = incluido en el precio del bloque; false = se suma al cobrar. */
   rental_tax_is_inclusive?: boolean;
   status: 'active' | 'inactive';
+  /** Present when the station is occupied; the page falls back to the sessions list when absent. */
+  active_session?: StationActiveSession | null;
+  next_reservation?: StationNextReservation | null;
   public_id: string | null;
   qr_status: 'ready' | 'unavailable';
   services: Array<{ product_id: number; product: { id: number; name: string; base_price?: number | string; service_duration_minutes: number | null } | null }>;
@@ -350,5 +368,42 @@ export class ServiceStationsService {
     ).pipe(
       map((r) => this.unwrap(r)),
     );
+  }
+
+  /** Moves the planned end of an active session. The backend rejects conflicts with a readable message. */
+  extendSession(sessionId: number, plannedEndAt: string): Observable<{ id: number; planned_end_at: string }> {
+    return this.http
+      .patch<{ data?: { id: number; planned_end_at: string } } | { id: number; planned_end_at: string }>(
+        `${environment.apiUrl}/store/service-sessions/${sessionId}/extend`,
+        { planned_end_at: plannedEndAt },
+      )
+      .pipe(map((r) => this.unwrap(r)));
+  }
+
+  /** Normal close (409 when a balance is pending). */
+  closeSession(sessionId: number): Observable<unknown> {
+    return this.http.patch<unknown>(`${environment.apiUrl}/store/service-sessions/${sessionId}`, { action: 'close' });
+  }
+
+  /** Admin close that leaves the balance receivable; returns the pending balance. */
+  closeSessionPending(sessionId: number): Observable<{ balance_pending?: number | string }> {
+    return this.http
+      .post<{ data?: { balance_pending?: number | string } } | { balance_pending?: number | string }>(
+        `${environment.apiUrl}/store/service-sessions/${sessionId}/close-pending`,
+        {},
+      )
+      .pipe(map((r) => this.unwrap(r)));
+  }
+
+  pauseResumeSession(sessionId: number, action: 'pause' | 'resume'): Observable<unknown> {
+    return this.http.patch<unknown>(`${environment.apiUrl}/store/service-sessions/${sessionId}`, { action });
+  }
+
+  getSessionBudget(sessionId: number): Observable<{ amount: number | string; currency?: string; version?: number; is_system?: boolean } | null> {
+    return this.http
+      .get<{ data?: { amount: number | string; currency?: string; version?: number; is_system?: boolean } | null }>(
+        `${environment.apiUrl}/store/service-sessions/${sessionId}/budget`,
+      )
+      .pipe(map((r) => r?.data ?? null));
   }
 }
