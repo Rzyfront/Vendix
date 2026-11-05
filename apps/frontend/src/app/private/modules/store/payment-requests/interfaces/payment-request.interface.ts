@@ -41,3 +41,13 @@ export const PAYMENT_REQUEST_STATUS_LABELS: Record<PaymentRequestStatus, string>
 export const PAYMENT_REQUEST_PURPOSE_LABELS: Record<string, string> = {
   service_deposit: 'Anticipo de reserva',
 };
+
+const RENTAL_PURPOSE = /^service_rental:(\d+)$/;
+
+/** Human label of a request purpose; `service_rental:<booking_id>` is the "Cobro para reservar" of that booking. */
+export function paymentRequestPurposeLabel(purpose: string | null | undefined): string {
+  const value = purpose ?? '';
+  const rental = RENTAL_PURPOSE.exec(value);
+  if (rental) return `Cobro para reservar · Reserva #${rental[1]}`;
+  return PAYMENT_REQUEST_PURPOSE_LABELS[value] ?? value;
+}

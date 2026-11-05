@@ -11,8 +11,9 @@ import { ModalComponent, IconComponent, SpinnerComponent, TooltipComponent } fro
 import { ToastService } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
 import { DataCollectionSubmissionsService } from '../../../data-collection/services/data-collection-submissions.service';
-import { Booking, BookingDeposit, BookingStatus, AvailabilitySlot, ProviderDateInfo, ServiceProvider } from '../../interfaces/reservation.interface';
+import { Booking, BookingDeposit, BookingPrepay, BookingStatus, AvailabilitySlot, ProviderDateInfo, ServiceProvider } from '../../interfaces/reservation.interface';
 import { BookingDepositDialogComponent } from './booking-deposit-dialog/booking-deposit-dialog.component';
+import { RegisterPrepayDialogComponent } from './register-prepay-dialog/register-prepay-dialog.component';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { finalize } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
@@ -22,7 +23,7 @@ import { windowMinutes } from '../../../../../../shared/utils/schedule-window.ut
 @Component({
   selector: 'app-booking-detail-modal',
   standalone: true,
-  imports: [ProviderNamePipe, FormsModule, ModalComponent, IconComponent, SpinnerComponent, TooltipComponent, BookingDepositDialogComponent,
+  imports: [ProviderNamePipe, FormsModule, ModalComponent, IconComponent, SpinnerComponent, TooltipComponent, BookingDepositDialogComponent, RegisterPrepayDialogComponent,
     CurrencyPipe,
     DatePipe,
     NgClass,
@@ -229,6 +230,18 @@ export class BookingDetailModalComponent {
   prepayLinkUrl = signal<string | null>(null);
   prepayAmount = signal<number | null>(null);
   prepayBusy = signal(false);
+  /** `prepay` block of the detail endpoint: what was paid and what is left to collect. */
+  prepay = signal<BookingPrepay | null>(null);
+  registerPaymentOpen = signal(false);
+
+  /** The charge has money on it: show "Pagado" and ask what happens with it when cancelling. */
+  hasPrepayPaid = computed(() => (this.prepay()?.paid_amount ?? 0) > 0);
+
+  /** Something is still left to collect (also true while the block is unknown, the backend decides). */
+  prepayHasRemaining = computed(() => {
+    const block = this.prepay();
+    return !block || block.remaining > 0;
+  });
 
   /**
    * A station booking that can still be prepaid: pending or confirmed, with no deposit link waiting
@@ -238,6 +251,7 @@ export class BookingDetailModalComponent {
     const b = this.booking();
     if (!b || !(b.station_id || b.product?.requires_station)) return false;
     if (b.status !== 'pending' && b.status !== 'confirmed') return false;
+    if (!this.prepayHasRemaining()) return false;
     return !this.pendingDepositRequest();
   });
 
@@ -625,13 +639,17 @@ export class BookingDetailModalComponent {
     this.depositLinkUrl.set(null);
     this.prepayLinkUrl.set(null);
     this.prepayAmount.set(null);
+    this.prepay.set(b.prepay ?? null);
     this.deposit.set(b.deposit ?? null);
     if (!b.product?.requires_station && !b.station_id) return;
     this.reservationsService
       .getReservation(b.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (detail) => this.deposit.set(detail?.deposit ?? null),
+        next: (detail) => {
+          this.deposit.set(detail?.deposit ?? null);
+          this.prepay.set(detail?.prepay ?? null);
+        },
         error: () => this.deposit.set(b.deposit ?? null),
       });
   }
@@ -646,8 +664,14 @@ export class BookingDetailModalComponent {
 
   /** Cancel asks what happens with the deposit first when there is money on the booking. */
   requestCancel(b: Booking): void {
-    if (this.hasDepositBalance()) this.depositDialog.set('cancel');
+    if (this.hasDepositBalance() || this.hasPrepayPaid()) this.depositDialog.set('cancel');
     else this.cancelled.emit(b);
+  }
+
+  /** "Registrar pago" saved: the parent reloads and closes (same exit as a deposit decision). */
+  onPrepayPaymentRegistered(): void {
+    this.registerPaymentOpen.set(false);
+    this.rescheduled.emit();
   }
 
   onDepositDialogDone(): void {

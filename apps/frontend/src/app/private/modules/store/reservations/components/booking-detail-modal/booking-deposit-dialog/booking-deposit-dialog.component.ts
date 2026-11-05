@@ -16,6 +16,7 @@ import { ReservationsService } from '../../../services/reservations.service';
 import {
   Booking,
   BookingDeposit,
+  BookingPrepay,
   DepositDecisionAction,
   DepositDecisionInput,
   DepositRefundMethod,
@@ -50,15 +51,17 @@ interface DecisionOption {
       [subtitle]="'Reserva #' + (booking()?.booking_number ?? '')"
       size="md"
     >
-      @if (deposit(); as dep) {
+      @if (deposit() || prepayPaid() > 0) {
         <div class="space-y-4">
           <div class="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
-            <span class="text-sm text-[var(--color-text-secondary)]">Anticipo disponible</span>
-            <strong class="text-base text-[var(--color-text-primary)]">{{ dep.balance | currency }}</strong>
+            <span class="text-sm text-[var(--color-text-secondary)]">{{ prepaySource() ? 'Pagado' : 'Anticipo disponible' }}</span>
+            <strong class="text-base text-[var(--color-text-primary)]">{{ moneyOnBooking() | currency }}</strong>
           </div>
 
           @if (view() === 'cancel') {
-            <p class="text-sm text-[var(--color-text-primary)]">¿Devolver o dejar saldo a favor?</p>
+            <p class="text-sm text-[var(--color-text-primary)]">
+              {{ prepaySource() ? '¿Qué pasa con lo que pagó el cliente?' : '¿Devolver o dejar saldo a favor?' }}
+            </p>
           }
 
           <div class="grid gap-2" role="radiogroup" aria-label="Qué pasa con el anticipo">
@@ -105,7 +108,7 @@ interface DecisionOption {
               <app-icon name="alert-triangle" [size]="16" class="mt-0.5 text-[var(--color-error)]"></app-icon>
               <span>{{ message }}</span>
             </div>
-            @if (view() === 'cancel') {
+            @if (view() === 'cancel' && !prepaySource()) {
               <button type="button" class="text-sm font-medium text-[var(--color-primary)] underline" (click)="switchToDecision()">
                 Decidir el anticipo en su lugar
               </button>
@@ -139,6 +142,8 @@ export class BookingDepositDialogComponent {
   readonly deposit = input<BookingDeposit | null>(null);
   /** Which question opens first: cancelling the booking or the no-show decision. */
   readonly mode = input<DialogView>('decide');
+  /** "Cobro para reservar" block: when it holds the money (no deposit balance) cancelling asks about it. */
+  readonly prepay = input<BookingPrepay | null>(null);
 
   readonly closed = output<void>();
   /** The booking was cancelled or its deposit decided: the parent reloads and closes. */
@@ -172,7 +177,23 @@ export class BookingDepositDialogComponent {
     ...this.leftoverOptions.slice().reverse(),
   ];
 
-  readonly options = computed(() => (this.view() === 'cancel' ? this.leftoverOptions : this.decisionOptions));
+  readonly prepayPaid = computed(() => this.prepay()?.paid_amount ?? 0);
+
+  /** The money to decide on is the prepay (the booking has no deposit balance). */
+  readonly prepaySource = computed(() => (this.deposit()?.balance ?? 0) <= 0 && this.prepayPaid() > 0);
+
+  readonly moneyOnBooking = computed(() => (this.prepaySource() ? this.prepayPaid() : (this.deposit()?.balance ?? 0)));
+
+  private readonly prepayCancelOptions: DecisionOption[] = [
+    { value: 'refund', label: 'Devolver', hint: 'Se cancela el cobro y se devuelve el dinero al cliente; sale de tu caja si la caja está activa.', icon: 'banknote' },
+    { value: 'credit', label: 'Dejar saldo a favor', hint: 'Lo pagado queda en la cuenta del cliente para su próxima compra.', icon: 'wallet' },
+    { value: 'retain', label: 'Retener', hint: 'Se factura como "Gastos de reserva" y la reserva queda como no asistida. Solo aplica si la cancelación es tardía.', icon: 'check-circle' },
+  ];
+
+  readonly options = computed(() => {
+    if (this.view() !== 'cancel') return this.decisionOptions;
+    return this.prepaySource() ? this.prepayCancelOptions : this.leftoverOptions;
+  });
 
   readonly canSubmit = computed(() => {
     if (this.submitting() || !this.booking()) return false;
@@ -184,7 +205,7 @@ export class BookingDepositDialogComponent {
 
   onOpen(): void {
     this.view.set(this.mode());
-    this.action.set(this.mode() === 'cancel' ? 'credit' : 'retain');
+    this.action.set(this.mode() === 'cancel' ? (this.prepaySource() ? 'refund' : 'credit') : 'retain');
     this.refundMethod.set('cash');
     this.newDate.set('');
     this.newStart.set('');
@@ -210,7 +231,11 @@ export class BookingDepositDialogComponent {
 
     if (this.view() === 'cancel') {
       this.reservationsService
-        .cancelReservation(booking.id, { leftover_action: this.action() === 'refund' ? 'refund' : 'credit', refund_method: refund })
+        .cancelReservation(booking.id, {
+          leftover_action: this.action() === 'refund' || this.action() === 'retain' ? this.action() as 'refund' | 'retain' : 'credit',
+          refund_method: refund,
+          request_id: this.requestId,
+        })
         .pipe(finalize(() => this.submitting.set(false)), takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => this.finish('Reserva cancelada'),

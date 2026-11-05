@@ -256,6 +256,11 @@ export class ReservationsService {
     if (product.requires_station && !this.allocationCoordinator) {
       throw new VendixHttpException(ErrorCodes.STATION_012, 'No se pudo validar la asignación requerida para este servicio.');
     }
+    // S14: a deposit received at the desk is cash flow of the user who registers it. Creating the booking
+    // alone needs no session; only the in-person deposit does, checked before anything is written.
+    if (dto.deposit?.mode === 'desk') {
+      await this.reservationDeposits?.assertCashGate();
+    }
     if (dto.deposit && !product.requires_station) {
       throw new VendixHttpException(ErrorCodes.STATION_BOOKING_002);
     }
@@ -1112,7 +1117,9 @@ export class ReservationsService {
     const deposit = this.reservationDeposits
       ? await this.reservationDeposits.summary(id, booking.deposit_decision_due_at ?? null)
       : null;
-    return { ...booking, deposit };
+    // What the "cobro para reservar" collected and still asks (null when the station charges nothing).
+    const prepay = this.rentalPrepay ? await this.rentalPrepay.summary(id) : null;
+    return { ...booking, deposit, prepay };
   }
 
   /**
@@ -1168,7 +1175,11 @@ export class ReservationsService {
   async cancel(id: number, options: CancelBookingDto = {}) {
     // A booking with a deposit settles it (A1) before it is cancelled; without one this is a no-op.
     const closed = await this.reservationDeposits?.cancelWithDeposit(id, options);
+    // No money to decide: the open "cobro para reservar" request (and its Wompi link) goes with the booking.
+    if (!closed) await this.cancelOpenPrepayRequests(id);
     const booking = closed ? await this.findOne(id) : await this.transition(id, 'cancelled');
+    // A retention closes the booking as a no-show and already announced it.
+    if (closed?.emitted) return booking;
     this.eventEmitter.emit('booking.cancelled', {
       store_id: booking.store_id,
       booking_id: booking.id,
@@ -1184,6 +1195,15 @@ export class ReservationsService {
       start_time: booking.start_time,
     });
     return booking;
+  }
+
+  /** Cancels the booking's open prepay request and deactivates its Wompi link; a no-op without one. */
+  private async cancelOpenPrepayRequests(bookingId: number): Promise<void> {
+    if (!this.rentalPrepay) return;
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) return;
+    const linkIds = await this.prisma.$transaction((tx) => this.rentalPrepay!.cancelOpenRequestsInTx(tx, storeId, bookingId));
+    await this.rentalPrepay.deactivateLinks(linkIds);
   }
 
   /**

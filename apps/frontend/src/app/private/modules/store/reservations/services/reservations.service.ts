@@ -8,6 +8,7 @@ import {
   BookingQuery,
   CreateBookingDto,
   CancelBookingInput,
+  RegisterPrepayPaymentInput,
   DepositDecisionAction,
   DepositDecisionInput,
   RescheduleBookingDto,
@@ -322,6 +323,13 @@ export class ReservationsService {
   openPrepayLink(id: number): Observable<{ payment_path: string; payment_url: string | null; payment_request_id: number; amount: number; expires_at: string | null }> {
     return this.http
       .post<any>(`${this.apiUrl}/${id}/prepay-link`, {})
+      .pipe(map((response) => response.data || response));
+  }
+
+  /** "Registrar pago": the prepay collected in person (cash, card, transfer); errors are STATION_BOOKING_015/016 and the cash gate. */
+  registerPrepayPayment(id: number, body: RegisterPrepayPaymentInput): Observable<{ paid_amount: number; fully_paid: boolean }> {
+    return this.http
+      .post<any>(`${this.apiUrl}/${id}/prepay-payment`, body)
       .pipe(map((response) => response.data || response));
   }
 

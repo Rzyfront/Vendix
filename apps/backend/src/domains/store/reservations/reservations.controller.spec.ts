@@ -68,6 +68,7 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
 
     const rentalPrepay = {
       openLink: jest.fn().mockResolvedValue({ payment_path: '/pagar/pre', payment_request_id: 12, amount: 75000, expires_at: null }),
+      registerInPerson: jest.fn().mockResolvedValue({ paid_amount: 75000, fully_paid: false }),
     } as any;
 
     const controller = new ReservationsController(
@@ -197,6 +198,17 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
 
   it('prepay-link requiere store:reservations:update', () => {
     expect(Reflect.getMetadata(PERMISSIONS_KEY, ReservationsController.prototype.prepayLink)).toEqual([
+      'store:reservations:update',
+    ]);
+  });
+
+  it('prepay-payment registra el cobro en persona con el cuerpo recibido y requiere store:reservations:update', async () => {
+    const { controller, rentalPrepay, responseService } = buildController();
+    const dto = { store_payment_method_id: 4, bank_account_id: 2, amount: 75000 };
+    await controller.prepayPayment(7, dto as any);
+    expect(rentalPrepay.registerInPerson).toHaveBeenCalledWith(7, dto);
+    expect(responseService.success).toHaveBeenCalledWith({ paid_amount: 75000, fully_paid: false }, 'Pago registrado');
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, ReservationsController.prototype.prepayPayment)).toEqual([
       'store:reservations:update',
     ]);
   });

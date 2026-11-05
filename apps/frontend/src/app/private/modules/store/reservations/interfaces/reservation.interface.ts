@@ -43,6 +43,8 @@ export interface Booking {
   series?: { id: number; occurrences: number; frequency: 'daily' | 'weekly' | string } | null;
   /** Deposit block of the detail endpoint and of the create answer; null when the booking never had one (S15). */
   deposit?: BookingDeposit | null;
+  /** "Cobro para reservar" block of the detail endpoint; null/absent when the booking has no charge. */
+  prepay?: BookingPrepay | null;
   /** Path of the payment page (`/pagar/:token`) returned when a `link` deposit was created. */
   payment_path?: string | null;
   /** Absolute payment page on the store's public domain; null when the store has none. */
@@ -63,6 +65,29 @@ export interface BookingDeposit {
   decision_due_at: string | null;
 }
 
+/** `prepay` block of the booking detail (mirrors `RentalPrepayService.summary` of the backend). */
+export interface BookingPrepay {
+  paid_amount: number;
+  order_total: number;
+  remaining: number;
+  pending_request: {
+    payment_request_id: number;
+    amount: number;
+    status: string;
+    expires_at: string | null;
+  } | null;
+}
+
+/** Body of `POST :id/prepay-payment`: the prepay collected in person. */
+export interface RegisterPrepayPaymentInput {
+  store_payment_method_id: number;
+  bank_account_id?: number;
+  amount?: number;
+  reference?: string;
+}
+
+export type CancelLeftoverAction = 'refund' | 'credit' | 'retain';
+
 /** Deposit taken with an admin booking: `desk` = received now, `link` = payment page + held slot. */
 export interface BookingDepositInput {
   amount: number;
@@ -76,8 +101,10 @@ export type DepositRefundMethod = 'cash' | 'bank_transfer' | 'card' | 'wompi';
 export type DepositDecisionAction = 'retain' | 'reschedule' | 'refund' | 'credit';
 
 export interface CancelBookingInput {
-  leftover_action?: 'refund' | 'credit';
+  leftover_action?: CancelLeftoverAction;
   refund_method?: DepositRefundMethod;
+  /** Idempotency key: one per dialog open. */
+  request_id?: string;
 }
 
 export interface DepositDecisionInput {
