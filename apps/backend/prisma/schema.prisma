@@ -5600,6 +5600,7 @@ enum industry_enum {
   gym
   construction
   hospitality
+  administration
 }
 
 enum crm_generation_status_enum {

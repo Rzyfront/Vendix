@@ -35,6 +35,7 @@ export const MODULE_INDUSTRY_VALUES = [
   'gym',
   'construction',
   'hospitality',
+  'administration',
 ] as const;
 
 export type ModuleIndustry = (typeof MODULE_INDUSTRY_VALUES)[number];
@@ -49,6 +50,7 @@ const MANUFACTURING: readonly ModuleIndustry[] = ['manufacturing'];
 const GYM: readonly ModuleIndustry[] = ['gym'];
 const HOSPITALITY: readonly ModuleIndustry[] = ['hospitality'];
 const RETAIL_ONLY: readonly ModuleIndustry[] = ['retail'];
+const ADMINISTRATION: readonly ModuleIndustry[] = ['administration'];
 
 export const MODULE_INDUSTRIES: Readonly<Record<string, ModuleIndustryRule>> = {
   // ── Panel and sales ──────────────────────────────────────────────────
@@ -235,6 +237,10 @@ export const MODULE_INDUSTRIES: Readonly<Record<string, ModuleIndustryRule>> = {
   help_center: 'all',
   help_videos: 'all',
 
+  // ── Administration suite (flujos-documental S1) ─────────────────────
+  flows: ADMINISTRATION,
+  documents: ADMINISTRATION,
+
   // ── ORG_ADMIN only ───────────────────────────────────────────────────
   stores: 'all',
   users: 'all',
@@ -268,6 +274,8 @@ export const VERTICAL_MODULE_KEYS: readonly string[] = [
   'hospitality_rooms',
   'hospitality_reservations',
   'hospitality_rates',
+  'flows',
+  'documents',
 ];
 
 /**
@@ -297,6 +305,19 @@ export const LEGACY_INDUSTRY_GATED_KEYS: readonly string[] = [
   'analytics_dispatch',
   'reports_dispatch',
 ];
+
+/**
+ * Keys whose industry rule is ALWAYS enforced, whatever the access-gate mode
+ * (flujos-documental S1). They belong to modules born after the F4 audit week:
+ * no store used them before, so blocking from day one breaks nobody. The
+ * backend answers 403 `MODULE_INDUSTRY_001`; the frontend shows the lock.
+ */
+export const ENFORCED_INDUSTRY_KEYS: readonly string[] = ['flows', 'documents'];
+
+/** `true` when the industry rule of `key` ignores the audit mode. */
+export function isIndustryAlwaysEnforced(key: string): boolean {
+  return ENFORCED_INDUSTRY_KEYS.includes(key);
+}
 
 /** Known industry values of a store, in enum order. Empty → `['retail']`. */
 export function normalizeModuleIndustries(

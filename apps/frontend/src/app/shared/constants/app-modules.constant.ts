@@ -565,6 +565,19 @@ export const APP_MODULES: {
       ],
     },
 
+    // Administración (flujos-documental S1). Gated by industry
+    // `administration` (MODULE_INDUSTRIES), always enforced.
+    {
+      key: 'flows',
+      label: 'Flujos',
+      description: 'Procesos con etapas, responsables, aprobaciones y plazos',
+    },
+    {
+      key: 'documents',
+      label: 'Documentos',
+      description: 'Expedientes, archivos y documentos de cada solicitud',
+    },
+
     // Facturaci\u00f3n (padre con hijos)
     {
       key: 'invoicing',
