@@ -32,6 +32,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { RentalQuoteService } from '../../store/service-stations/rental-quote/rental-quote.service';
+import type { FullTaxRow } from '../../store/orders/utils/catalog-line-pricing.util';
 import { STATION_CHARGES_ONLINE_WHERE } from '../../store/service-stations/station-online-charge.util';
 import {
   resolveStoreTimezone,
@@ -230,7 +231,7 @@ export class CheckoutService {
     variantId: number | null | undefined,
     bookings: Array<{ product_id: number; product_variant_id?: number | null; station_id?: number | null; date: string; start_time: string }> | undefined,
     line: T,
-  ): Promise<T> {
+  ): Promise<T & { rental_tax_rows?: FullTaxRow[] }> {
     if (!this.rentalQuote || !product || product.rental_pricing_mode !== 'station_rate') return line;
     const booking = (bookings ?? []).find(
       (b) => b.product_id === product.id && (b.product_variant_id ?? null) === (variantId ?? null),
@@ -249,7 +250,16 @@ export class CheckoutService {
       startAt: zonedWallClockToUtc(Number(date[1]), Number(date[2]), Number(date[3]), Number(time[1]), Number(time[2]), 0, 0, tz),
     });
     if (quote.pricing_mode !== 'station_rate') return line;
-    return { ...line, net_unit_price: quote.amount, gross_unit_price: quote.amount, compare_at_price: null };
+    // The quote is the gross of the line taxed with the STATION's rows (POS rule). The line is priced at the
+    // published amount and taxed with those rows, so its total is exactly the quote; the product's own taxes
+    // never apply to a station rental (they would tax the quote a second time).
+    return {
+      ...line,
+      net_unit_price: quote.published_amount ?? quote.amount,
+      gross_unit_price: quote.amount,
+      compare_at_price: null,
+      ...(quote.tax_rows ? { rental_tax_rows: quote.tax_rows } : {}),
+    };
   }
 
   /** Submitted station, or the first active station that offers the product. */
@@ -1799,6 +1809,14 @@ export class CheckoutService {
         stationRequiredKeys.add(key);
       }
     }
+    // M-1: a station_rate cart line is priced with ONE booking's quote; several units would all be
+    // charged at the first booking's rate window. Each slot is bought on its own.
+    if (cart_items.some((item) => item.product?.rental_pricing_mode === 'station_rate' && Number(item.quantity) > 1)) {
+      throw new VendixHttpException(
+        ErrorCodes.SERVICE_BOOKING_001,
+        'Cada horario de una estación se compra por separado.',
+      );
+    }
     const submittedBookingUnits = new Map<string, number>();
     for (const booking of dto.bookings ?? []) {
       const key = `${booking.product_id}:${booking.product_variant_id ?? ''}`;
@@ -1831,15 +1849,36 @@ export class CheckoutService {
             .map((item) => item.product_id),
         ),
       ];
-      const depositStation = await this.store_prisma.service_stations.findFirst({
-        where: {
-          status: 'active',
-          ...STATION_CHARGES_ONLINE_WHERE,
-          service_station_services_station_fkey: { some: { product_id: { in: stationProductIds } } },
-        },
-        select: { id: true },
-      });
-      if (depositStation) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_010);
+      // H-3: a booking that names its station is judged by THAT station only (the storefront already
+      // marks `charges_online` per station); a booking without one could land on any station that offers
+      // the product, so the product-wide check stays for it.
+      const stationBookings = (dto.bookings ?? []).filter((booking) =>
+        stationRequiredKeys.has(`${booking.product_id}:${booking.product_variant_id ?? ''}`),
+      );
+      const bookedStationIds = [
+        ...new Set(stationBookings.map((booking) => booking.station_id).filter((id): id is number => !!id)),
+      ];
+      const unassignedProductIds = [
+        ...new Set(stationBookings.filter((booking) => !booking.station_id).map((booking) => booking.product_id)),
+      ];
+      const chargingStationWheres: Prisma.service_stationsWhereInput[] = [];
+      if (bookedStationIds.length) {
+        chargingStationWheres.push({ id: { in: bookedStationIds } });
+      }
+      if (unassignedProductIds.length || !stationBookings.length) {
+        chargingStationWheres.push({
+          service_station_services_station_fkey: {
+            some: { product_id: { in: unassignedProductIds.length ? unassignedProductIds : stationProductIds } },
+          },
+        });
+      }
+      for (const scope of chargingStationWheres) {
+        const depositStation = await this.store_prisma.service_stations.findFirst({
+          where: { status: 'active', ...STATION_CHARGES_ONLINE_WHERE, ...scope },
+          select: { id: true },
+        });
+        if (depositStation) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_010);
+      }
     }
 
     const cart_currency =
@@ -2198,10 +2237,26 @@ export class CheckoutService {
         const stockUnitsConsumed = line.stock_units_consumed;
         stockUnitsByIndex[index] = stockUnitsConsumed;
 
-        const baseTaxInfo = await this.taxes_service.calculateProductTaxes(
-          item.product_id,
-          line.net_unit_price,
-        );
+        // A station rental takes the station's tax rows, never the product's (H-2).
+        const rentalTaxRows = line.rental_tax_rows;
+        let stationTaxes: CatalogTaxRow[] | null = null;
+        if (rentalTaxRows) {
+          const stationTotals = resolveLineTotals(
+            line.net_unit_price,
+            rentalTaxRows.map((row) => ({ rate: row.rate, is_inclusive: row.is_inclusive })),
+          );
+          stationTaxes = rentalTaxRows.map((row, i) => ({
+            ...row,
+            amount: stationTotals.taxes[i].amount,
+            base: stationTotals.taxes[i].base,
+          }));
+        }
+        const baseTaxInfo: { taxes: CatalogTaxRow[] } = stationTaxes
+          ? { taxes: stationTaxes }
+          : await this.taxes_service.calculateProductTaxes(
+              item.product_id,
+              line.net_unit_price,
+            );
         // Con impuestos NO incluidos el precio del catálogo es neto: al neto
         // se suma solo la base del delta, para que el impuesto que se agrega
         // después no se cobre dos veces sobre la adición (POS = tienda en línea).
@@ -2218,7 +2273,7 @@ export class CheckoutService {
               ).base;
         const netPrice = line.net_unit_price + optionNet;
         const taxInfo =
-          optionDelta === 0
+          optionDelta === 0 || rentalTaxRows
             ? baseTaxInfo
             : await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
 

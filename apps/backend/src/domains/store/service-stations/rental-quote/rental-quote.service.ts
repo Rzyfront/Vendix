@@ -1,10 +1,13 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import type { product_variants, products } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { BlockQuote, quoteBlocks } from '../../../../common/utils/rate-window.util';
 import { resolveStoreTimezone } from '../../../../common/utils/store-timezone.util';
+import { ShippingTaxService } from '../../shipping/services/shipping-tax.service';
+import type { FullTaxRow } from '../../orders/utils/catalog-line-pricing.util';
+import { buildSessionTaxedLine } from '../../service-sessions/utils/session-order-lines.util';
 
 export interface RentalQuote {
   amount: number;
@@ -13,13 +16,25 @@ export interface RentalQuote {
   block_minutes: number | null;
   per_block: Array<{ start_at: Date; amount: number; cents: number; window_id: number | null }>;
   pricing_mode: 'fixed_price' | 'station_rate';
+  /**
+   * Price of the blocks before the station's rental tax. For `station_rate`, `amount`/`cents` are the
+   * GROSS of the line built with the station's tax rows (same rule as POS): exclusive tax is added on
+   * top, inclusive tax is already inside. Equal to `amount` without a rental tax or for `fixed_price`.
+   */
+  published_amount: number;
+  /** Station rental tax rows (`station_rate` only; null for `fixed_price`, whose tax is the product's). */
+  tax_rows: FullTaxRow[] | null;
 }
 
 const STATION_RATE_MESSAGE = 'La duración debe ser un múltiplo del bloque de tarifa de la estación.';
 
 @Injectable()
 export class RentalQuoteService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    // Optional so a spec or module without it prices with no rental tax, as before.
+    @Optional() private readonly shippingTax?: ShippingTaxService,
+  ) {}
 
   private get storeId(): number {
     const store_id = RequestContextService.getContext()?.store_id;
@@ -45,7 +60,13 @@ export class RentalQuoteService {
   private async loadStation(stationId: number) {
     const station = await this.prisma.service_stations.findFirst({
       where: { id: stationId, store_id: this.storeId },
-      select: { id: true, rental_block_minutes: true, rental_block_price: true },
+      select: {
+        id: true,
+        rental_block_minutes: true,
+        rental_block_price: true,
+        rental_tax_category_id: true,
+        rental_tax_is_inclusive: true,
+      },
     });
     if (!station) throw new NotFoundException('Estación no encontrada');
     return station;
@@ -79,7 +100,16 @@ export class RentalQuoteService {
     if (product.rental_pricing_mode !== 'station_rate') {
       // fixed_price (A15): the catalog price is the rental; windows never apply.
       const cents = Math.round(this.catalogPrice(product, variant) * 100);
-      return { amount: cents / 100, cents, blocks: 1, block_minutes: minutes, per_block: [], pricing_mode: 'fixed_price' };
+      return {
+        amount: cents / 100,
+        cents,
+        blocks: 1,
+        block_minutes: minutes,
+        per_block: [],
+        pricing_mode: 'fixed_price',
+        published_amount: cents / 100,
+        tax_rows: null,
+      };
     }
 
     const station = await this.loadStation(input.stationId);
@@ -91,13 +121,28 @@ export class RentalQuoteService {
       throw new VendixHttpException(ErrorCodes.STATION_009, STATION_RATE_MESSAGE);
     }
     const result = await this.priceStation(station, input.startAt, minutes / blockMinutes);
+    // The tax of a station rental is the station's in every channel (POS rule): the amount quoted,
+    // shown and charged is the gross of that line.
+    const taxRows = this.shippingTax
+      ? await this.shippingTax.taxRowsForCategory(null, {
+          tax_category_id: station.rental_tax_category_id ?? null,
+          tax_is_inclusive: station.rental_tax_is_inclusive ?? true,
+          store_id: this.storeId,
+        })
+      : [];
+    const gross = taxRows.length
+      ? buildSessionTaxedLine(result.cents / 100, 1, taxRows).final_unit_price
+      : null;
+    const grossCents = gross ? Math.round(gross.toNumber() * 100) : result.cents;
     return {
-      amount: result.cents / 100,
-      cents: result.cents,
+      amount: grossCents / 100,
+      cents: grossCents,
       blocks: minutes / blockMinutes,
       block_minutes: blockMinutes,
       per_block: this.perBlock(result.perBlock),
       pricing_mode: 'station_rate',
+      published_amount: result.cents / 100,
+      tax_rows: taxRows,
     };
   }
 

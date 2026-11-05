@@ -14,6 +14,8 @@ import { NotificationsService } from '../../notifications/notifications.service'
 import { getSettledOrderAmount } from '../../payments/services/payment-validator.service';
 import { buildPaymentReceivedEvents } from '../../payments/utils/payment-received-event.util';
 import { buildOrderSaleTaxPayload } from '../../payments/utils/order-sale-tax-payload.util';
+import { resolvePaymentReceivedSaleFields } from '../../payments/utils/payment-sale-share.util';
+import type { PaymentReceivedSaleFields } from '../../payments/utils/payment-sale-share.util';
 import { toCents } from '../../service-deposits/utils/service-deposit-math';
 import { publicPaymentUrl, resolveStorePublicOrigin } from '../../../../common/utils/store-public-origin.util';
 
@@ -131,7 +133,7 @@ export class RentalPrepayService {
     const link = await this.prisma.$transaction(async (tx) => {
       const booking = await tx.bookings.findFirst({
         where: { id: bookingId, store_id: storeId },
-        select: { id: true, status: true, quoted_amount: true },
+        select: { id: true, status: true, quoted_amount: true, order_id: true },
       });
       if (!booking) throw new VendixHttpException(ErrorCodes.RENTAL_PREPAY_005);
       if (!PAYABLE_STATUSES.includes(booking.status)) {
@@ -146,8 +148,26 @@ export class RentalPrepayService {
       if (!station || station.booking_prepay_mode === 'none') {
         throw new VendixHttpException(ErrorCodes.RENTAL_PREPAY_001);
       }
-      const cents = rentalPrepayCents(station, booking.quoted_amount);
+      let cents = rentalPrepayCents(station, booking.quoted_amount);
       if (cents <= 0) throw new VendixHttpException(ErrorCodes.RENTAL_PREPAY_002);
+      // M-3: a booking that already has an order may have paid part (or all) of it: a new link never
+      // collects more than what the order still owes, so settlement can never overpay it.
+      if (booking.order_id != null) {
+        const order = await tx.orders.findUnique({
+          where: { id: booking.order_id },
+          include: { payments: { select: { amount: true, state: true } } },
+        });
+        if (order) {
+          const remainingCents = toCents(order.grand_total) - toCents(getSettledOrderAmount(order));
+          if (remainingCents <= 0) {
+            throw new VendixHttpException(
+              ErrorCodes.RENTAL_PREPAY_003,
+              'La orden de esta reserva ya está pagada: no hay saldo por cobrar.',
+            );
+          }
+          cents = Math.min(cents, remainingCents);
+        }
+      }
       const purpose = rentalPrepayPurpose(bookingId);
 
       const paid = await tx.payment_requests.findFirst({
@@ -363,7 +383,14 @@ export class RentalPrepayService {
         });
         slotConfirmed = true;
       }
-      return { cancelledOrder: false as const, order, payment, fullyPaid: nextRemaining === 0, slotConfirmed };
+      // A partial payment recognises only its share of the sale; with the whole order's totals the
+      // auto-entry would credit more than it debits and drop the unbalanced entry.
+      const sale_share = await resolvePaymentReceivedSaleFields(tx, {
+        order_id: orderId,
+        payment_id: payment.id,
+        amount: Number(amount),
+      });
+      return { cancelledOrder: false as const, order, payment, fullyPaid: nextRemaining === 0, slotConfirmed, sale_share };
     });
     if (!outcome) return;
     if (outcome.cancelledOrder) {
@@ -376,7 +403,7 @@ export class RentalPrepayService {
       return;
     }
 
-    await this.emitPaymentReceived(outcome.order, outcome.payment.id, amount, method);
+    await this.emitPaymentReceived(outcome.order, outcome.payment.id, amount, method, outcome.sale_share);
     if (outcome.fullyPaid) await this.invoiceRentalOrder(orderId);
     this.eventEmitter.emit('booking.rental_prepay_paid', {
       store_id: storeId,
@@ -457,6 +484,7 @@ export class RentalPrepayService {
     paymentId: number,
     amount: Prisma.Decimal,
     method: string,
+    sale_share: PaymentReceivedSaleFields,
   ): Promise<void> {
     const items = await this.prisma.order_items.findMany({
       where: { order_id: order.id, cancelled_at: null },
@@ -489,7 +517,7 @@ export class RentalPrepayService {
         tip_amount: order.tip_amount,
       },
       sale_tax,
-      payments: [{ id: paymentId, amount, currency, accounting_method: method }],
+      payments: [{ id: paymentId, amount, currency, accounting_method: method, sale_share }],
       currency,
       user_id: RequestContextService.getUserId() ?? null,
     })) {

@@ -1,11 +1,13 @@
 import { RequestContext, RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RentalQuoteService } from './rental-quote.service';
+import type { ShippingTaxService } from '../../shipping/services/shipping-tax.service';
 
 describe('RentalQuoteService', () => {
   const context: RequestContext = { store_id: 10, is_super_admin: false, is_owner: false };
   let service: RentalQuoteService;
   let prisma: Record<string, any>;
+  let shippingTax: { taxRowsForCategory: jest.Mock };
   // Saturday 20:00 Bogota.
   const startAt = new Date('2026-11-07T20:00:00-05:00');
 
@@ -35,7 +37,8 @@ describe('RentalQuoteService', () => {
         findFirst: jest.fn().mockResolvedValue({ settings: {}, stores: { timezone: 'America/Bogota' } }),
       },
     };
-    service = new RentalQuoteService(prisma as unknown as StorePrismaService);
+    shippingTax = { taxRowsForCategory: jest.fn().mockResolvedValue([]) };
+    service = new RentalQuoteService(prisma as unknown as StorePrismaService, shippingTax as unknown as ShippingTaxService);
   });
 
   const run = <T>(fn: () => Promise<T>) => RequestContextService.runIsolated(context, fn);
@@ -105,5 +108,49 @@ describe('RentalQuoteService', () => {
     const q = await run(() => service.quoteStationBlocks({ stationId: 5, startAt, blocks: 3 }));
     expect(q).toMatchObject({ cents: 30000000, blocks: 3, block_minutes: 60 });
     expect(prisma.products.findFirst).not.toHaveBeenCalled();
+  });
+
+  describe('station rental tax (H-2: the quote is the gross of the POS line)', () => {
+    const vat = (is_inclusive: boolean) => [
+      { tax_rate_id: 3, name: 'IVA 19%', rate: 0.19, tax_type: 'iva', is_inclusive },
+    ];
+    const stationWithTax = (over: Record<string, unknown>) => ({
+      id: 5,
+      rental_block_minutes: 60,
+      rental_block_price: 80000,
+      rental_tax_category_id: 9,
+      ...over,
+    });
+
+    it('an exclusive station tax is added on top: amount = gross, published stays the net price', async () => {
+      prisma.service_stations.findFirst.mockResolvedValue(stationWithTax({ rental_tax_is_inclusive: false }));
+      shippingTax.taxRowsForCategory.mockResolvedValue(vat(false));
+      const q = await run(() => service.quote({ productId: 1, stationId: 5, startAt }));
+      expect(shippingTax.taxRowsForCategory).toHaveBeenCalledWith(
+        null,
+        { tax_category_id: 9, tax_is_inclusive: false, store_id: 10 },
+      );
+      expect(q).toMatchObject({ amount: 238000, cents: 23800000, published_amount: 200000, pricing_mode: 'station_rate' });
+      expect(q.tax_rows).toHaveLength(1);
+    });
+
+    it('an inclusive station tax keeps the published price as the gross amount', async () => {
+      prisma.service_stations.findFirst.mockResolvedValue(stationWithTax({ rental_tax_is_inclusive: true }));
+      shippingTax.taxRowsForCategory.mockResolvedValue(vat(true));
+      const q = await run(() => service.quote({ productId: 1, stationId: 5, startAt }));
+      expect(q).toMatchObject({ amount: 200000, cents: 20000000, published_amount: 200000 });
+    });
+
+    it('without a rental tax category the amounts are exactly the published price', async () => {
+      const q = await run(() => service.quote({ productId: 1, stationId: 5, startAt }));
+      expect(q).toMatchObject({ amount: 200000, cents: 20000000, published_amount: 200000, tax_rows: [] });
+    });
+
+    it('fixed_price never applies the station tax (the product price is the rental)', async () => {
+      prisma.products.findFirst.mockResolvedValue(product({ rental_pricing_mode: 'fixed_price', base_price: 70000 }));
+      const q = await run(() => service.quote({ productId: 1, stationId: 5, startAt }));
+      expect(q.amount).toBe(70000);
+      expect(shippingTax.taxRowsForCategory).not.toHaveBeenCalled();
+    });
   });
 });

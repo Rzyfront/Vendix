@@ -849,7 +849,7 @@ describe('ReservationsService — station deposits', () => {
     service_duration_minutes: 60,
   };
 
-  function build(options: { product?: any; deposits?: any; booking?: any; rentalQuote?: any; rentalPrepay?: any; allocated?: any } = {}) {
+  function build(options: { product?: any; deposits?: any; booking?: any; rentalQuote?: any; rentalPrepay?: any; allocated?: any; serviceDeposits?: any } = {}) {
     const row: any = {
       id: 77,
       store_id: 1,
@@ -913,6 +913,7 @@ describe('ReservationsService — station deposits', () => {
       deposits,
       options.rentalQuote,
       options.rentalPrepay,
+      options.serviceDeposits,
     );
     jest.spyOn(service as any, 'generateBookingNumber').mockResolvedValue('BKG-1');
     return { service, prisma, coordinator, deposits, emits, row, ordersService };
@@ -1106,6 +1107,53 @@ describe('ReservationsService — station deposits', () => {
       });
       expect(deposits.startHoldInTx).toHaveBeenCalled();
       expect(result.payment_path).toBe('/pagar/dep-tok');
+    });
+  });
+
+  describe('M-2b: a failed order must not strand a received deposit on a cancelled booking', () => {
+    const startedDesk = { mode: 'desk', publicToken: null, event: { deposit_id: 1 } };
+
+    it('releases the received deposit to the customer credit in the same transaction that cancels the booking', async () => {
+      const serviceDeposits = {
+        balanceOfInTx: jest.fn().mockResolvedValue({ balance: 400000 }),
+        releaseInTx: jest.fn().mockResolvedValue({ created: true, deposit: { id: 9 }, amount: 400000 }),
+      };
+      const { service, prisma, ordersService, coordinator } = build({
+        serviceDeposits,
+        deposits: { startInTx: jest.fn().mockResolvedValue(startedDesk) },
+      });
+      ordersService.create.mockRejectedValue(new Error('orden fallida'));
+
+      await expect(service.create({ ...createDto, deposit: { ...deposit, mode: 'desk' } })).rejects.toThrow('orden fallida');
+
+      expect(serviceDeposits.balanceOfInTx).toHaveBeenCalledWith(prisma, { bookingId: 77, store_id: 1 });
+      expect(serviceDeposits.releaseInTx).toHaveBeenCalledWith(prisma, {
+        store_id: 1,
+        customer_id: 1,
+        booking_id: 77,
+        request_id: 'booking-order-failed:77',
+        user_id: 1,
+      });
+      expect(coordinator.releaseBooking).toHaveBeenCalledWith(prisma, 1, 77, 'cancelled');
+      expect(prisma.bookings.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 77 }, data: expect.objectContaining({ status: 'cancelled' }) }),
+      );
+    });
+
+    it('a booking without a received deposit is cancelled with no ledger write', async () => {
+      const serviceDeposits = {
+        balanceOfInTx: jest.fn().mockResolvedValue({ balance: 0 }),
+        releaseInTx: jest.fn(),
+      };
+      const { service, ordersService, prisma } = build({ serviceDeposits });
+      ordersService.create.mockRejectedValue(new Error('orden fallida'));
+
+      await expect(service.create(createDto)).rejects.toThrow('orden fallida');
+
+      expect(serviceDeposits.releaseInTx).not.toHaveBeenCalled();
+      expect(prisma.bookings.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'cancelled' }) }),
+      );
     });
   });
 

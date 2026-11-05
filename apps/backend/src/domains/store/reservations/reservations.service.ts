@@ -33,6 +33,7 @@ import { ReservationDepositsService } from './reservation-deposits.service';
 import { RentalQuoteService } from '../service-stations/rental-quote/rental-quote.service';
 import type { RentalQuote } from '../service-stations/rental-quote/rental-quote.service';
 import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
+import { ServiceDepositsService } from '../service-deposits/service-deposits.service';
 
 @Injectable()
 export class ReservationsService {
@@ -56,6 +57,8 @@ export class ReservationsService {
     @Optional() private readonly rentalQuote?: RentalQuoteService,
     // "Cobro para reservar" of the station (T15, S1): the online hold charge.
     @Optional() private readonly rentalPrepay?: RentalPrepayService,
+    // Ledger of consumable deposits: the compensation of a failed order releases a received deposit to credit.
+    @Optional() private readonly serviceDeposits?: ServiceDepositsService,
   ) {}
 
   // Estado maquina de transiciones validas
@@ -595,6 +598,20 @@ export class ReservationsService {
       } catch (error) {
         try {
           await this.prisma.$transaction(async (tx) => {
+            // A desk deposit is already received on this booking: it must not stay `completed` on a
+            // cancelled one. It goes back to the customer as wallet credit (same rule as a refundable cancel).
+            if (this.serviceDeposits && dto.customer_id) {
+              const held = await this.serviceDeposits.balanceOfInTx(tx, { bookingId: booking!.id, store_id });
+              if (held.balance > 0) {
+                await this.serviceDeposits.releaseInTx(tx, {
+                  store_id,
+                  customer_id: dto.customer_id,
+                  booking_id: booking!.id,
+                  request_id: `booking-order-failed:${booking!.id}`,
+                  user_id: context?.user_id ?? null,
+                });
+              }
+            }
             await this.allocationCoordinator!.releaseBooking(tx, store_id, booking!.id, 'cancelled');
             await tx.bookings.update({ where: { id: booking!.id }, data: { status: booking_status_enum.cancelled, updated_at: new Date() } });
           });

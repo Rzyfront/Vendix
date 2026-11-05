@@ -106,6 +106,7 @@ describe('RentalPrepayService', () => {
       order_items: { findMany: jest.fn().mockResolvedValue([]) },
       payments: {
         findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
         create: jest.fn().mockResolvedValue({ id: 900 }),
       },
       products: { findFirst: jest.fn().mockResolvedValue({ name: 'Alquiler cava' }) },
@@ -205,6 +206,47 @@ describe('RentalPrepayService', () => {
       expect(result.payment_path).toBe('/pagar/tok-2');
     });
 
+    it('M-3: with an order already partly paid the link is capped at the order remaining balance', async () => {
+      // 50% of 150000 = 75000, but 100000 are already paid: only 50000 remain.
+      const { service, paymentRequests } = build({
+        order: { payments: [{ amount: '100000', state: 'succeeded' }] },
+      });
+      const result = await service.openLink(77);
+      expect(paymentRequests.createInTx).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ amount: 50000 }),
+      );
+      expect(result.amount).toBe(50000);
+    });
+
+    it('M-3: an order already paid in full rejects a new link with RENTAL_PREPAY_003 and no write', async () => {
+      const { service, paymentRequests, tx } = build({
+        order: { payments: [{ amount: '150000', state: 'succeeded' }] },
+      });
+      await expect(service.openLink(77)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          error_code: 'RENTAL_PREPAY_003',
+          message: 'La orden de esta reserva ya está pagada: no hay saldo por cobrar.',
+        }),
+      });
+      expect(paymentRequests.createInTx).not.toHaveBeenCalled();
+      expect(paymentRequests.rotateTokenInTx).not.toHaveBeenCalled();
+      expect(tx.service_allocations.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('M-3: an order with nothing paid yet keeps the link amount of the station rule', async () => {
+      const { service } = build({ order: { payments: [] } });
+      const result = await service.openLink(77);
+      expect(result.amount).toBe(75000);
+    });
+
+    it('M-3: a booking without an order yet is not capped', async () => {
+      const { service, tx } = build({ booking: { order_id: null } });
+      const result = await service.openLink(77);
+      expect(result.amount).toBe(75000);
+      expect(tx.orders.findUnique).not.toHaveBeenCalled();
+    });
+
     it('una reserva cancelada rechaza con RENTAL_PREPAY_004', async () => {
       const { service } = build({ booking: { status: 'cancelled' } });
       await expect(service.openLink(77)).rejects.toMatchObject({
@@ -257,6 +299,39 @@ describe('RentalPrepayService', () => {
       );
       const received = emits.find((e) => e.name === 'payment.received');
       expect(received?.payload).toEqual(expect.objectContaining({ order_id: 555, payment_method: 'wompi' }));
+    });
+
+    it('H-1: a partial payment emits payment.received with ITS share of the sale, not the whole order', async () => {
+      // 119000 = 100000 net + 19000 VAT; a 59500 payment recognises half of each component.
+      const { service, emits } = build({
+        order: { subtotal_amount: '100000', tax_amount: '19000', grand_total: '119000' },
+      });
+      await service.settlePaidRequest(paidEvent('service_rental:77', 59500));
+      const received = emits.find((e) => e.name === 'payment.received')!.payload;
+      expect(Number(received.amount)).toBe(59500);
+      expect(received.subtotal_amount).toBe(50000);
+      expect(received.tax_amount).toBe(9500);
+    });
+
+    it('H-1: the payment that completes the order takes the exact remainder of the sale', async () => {
+      const { service, emits, tx } = build({
+        order: { subtotal_amount: '100000', tax_amount: '19000', grand_total: '119000' },
+      });
+      tx.payments.findMany.mockResolvedValue([{ amount: 59500 }]);
+      await service.settlePaidRequest(paidEvent('service_rental:77', 59500));
+      const received = emits.find((e) => e.name === 'payment.received')!.payload;
+      expect(received.subtotal_amount).toBe(50000);
+      expect(received.tax_amount).toBe(9500);
+    });
+
+    it('H-1: a payment for the full order keeps the order totals untouched', async () => {
+      const { service, emits } = build({
+        order: { subtotal_amount: '100000', tax_amount: '19000', grand_total: '119000' },
+      });
+      await service.settlePaidRequest(paidEvent('service_rental:77', 119000));
+      const received = emits.find((e) => e.name === 'payment.received')!.payload;
+      expect(received.subtotal_amount).toBe(100000);
+      expect(received.tax_amount).toBe(19000);
     });
 
     it('queda el saldo pendiente en la orden cuando el pago es un abono', async () => {
