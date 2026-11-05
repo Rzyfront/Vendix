@@ -28,6 +28,9 @@ const WORKFLOW_MODELS = [
   'workflow_public_links',
   // API keys por tienda (bloque 13)
   'store_api_keys',
+  // Webhooks salientes de Flujos (bloque 13)
+  'workflow_webhook_endpoints',
+  'workflow_webhook_deliveries',
 ] as const;
 
 describe('StorePrismaService · aislamiento de Flujos', () => {

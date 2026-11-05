@@ -56,7 +56,7 @@ export class WorkflowAdvanceService {
     const now = new Date();
     const exit = a.runExitHooks
       ? this.stages.applyActions(a.fromStage.on_exit, a.data, a.instance)
-      : { data: a.data, notifies: [] };
+      : { data: a.data, notifies: [], vendix: [] };
     const enter = this.stages.applyActions(toStage.on_enter, exit.data, a.instance);
     const patch = this.stages.stagePatch(toStage, now, a.instance.stage_entry_seq);
 
@@ -107,13 +107,33 @@ export class WorkflowAdvanceService {
     });
 
     // 9–11. New stage: notifications, task, automatic `advance` row.
+    await this.events.emitWebhook(a.tx, updated, 'workflow.instance.transitioned', {
+      from_stage_key: a.fromStage.key,
+      to_stage_key: toStage.key,
+      status: updated.status,
+    });
     await this.stages.afterEnter(a.tx, {
       definition: a.definition,
       instance: updated,
       stage: toStage,
       actor: a.actor,
       notifies: [...exit.notifies, ...enter.notifies],
+      vendix: [...exit.vendix, ...enter.vendix],
     });
+    if (toStage.type === 'end') {
+      const finished =
+        toStage.outcome === 'rejected'
+          ? 'workflow.instance.rejected'
+          : toStage.outcome === 'completed' || toStage.outcome === undefined
+            ? 'workflow.instance.completed'
+            : null;
+      if (finished) {
+        await this.events.emitWebhook(a.tx, updated, finished, {
+          stage_key: toStage.key,
+          outcome: toStage.outcome ?? 'completed',
+        });
+      }
+    }
     return updated;
   }
 }

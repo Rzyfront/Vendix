@@ -1,13 +1,50 @@
 import {
   WorkflowActionDef,
+  WorkflowActionMapValue,
   WorkflowAssigneeDef,
   WorkflowRequirementDef,
+  WorkflowVendixActionName,
+  resolveTokens,
 } from '@common/workflows/contract';
 
 /** A `notify` action resolved to its content (who is still the definition's `to`). */
 export interface AppliedNotify {
   message: string;
   to: WorkflowAssigneeDef;
+}
+
+/**
+ * A `vendix.*` action with its `map` already resolved against the instance
+ * data. Strings only (the action parses numbers); `assignee` stays a definition.
+ * The engine writes it to the outbox, the simulator only reports it.
+ */
+export interface AppliedVendixAction {
+  action: WorkflowVendixActionName;
+  map_resolved: Record<string, string | WorkflowAssigneeDef>;
+}
+
+/** What `{{instance.*}}` resolves to while applying a hook. */
+export interface ActionInstanceRef {
+  reference?: string | null;
+  title?: string | null;
+}
+
+function resolveMap(
+  map: Record<string, WorkflowActionMapValue> | undefined,
+  data: Record<string, unknown>,
+  instance: ActionInstanceRef | undefined,
+): Record<string, string | WorkflowAssigneeDef> {
+  const out: Record<string, string | WorkflowAssigneeDef> = {};
+  for (const [key, value] of Object.entries(map ?? {})) {
+    if (typeof value === 'string') {
+      out[key] = resolveTokens(value, { fields: data, instance });
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      out[key] = String(value);
+    } else if (value && typeof value === 'object') {
+      out[key] = value;
+    }
+  }
+  return out;
 }
 
 /**
@@ -18,14 +55,29 @@ export interface AppliedNotify {
 export function applyActionList(
   actions: WorkflowActionDef[] | undefined,
   data: Record<string, unknown>,
-): { data: Record<string, unknown>; notifies: AppliedNotify[] } {
+  instance?: ActionInstanceRef,
+): {
+  data: Record<string, unknown>;
+  notifies: AppliedNotify[];
+  vendix: AppliedVendixAction[];
+} {
   const next = { ...data };
   const notifies: AppliedNotify[] = [];
+  const vendix: AppliedVendixAction[] = [];
   for (const a of actions ?? []) {
     if (a.action === 'set_field') next[a.field] = a.value;
     else if (a.action === 'notify') notifies.push({ message: a.message, to: a.to });
+    else if (
+      a.action === 'vendix.purchase_order.create_draft' ||
+      a.action === 'vendix.crm_task.create'
+    ) {
+      vendix.push({
+        action: a.action,
+        map_resolved: resolveMap(a.map, next, instance),
+      });
+    }
   }
-  return { data: next, notifies };
+  return { data: next, notifies, vendix };
 }
 
 /** Whether a requirement can hold back `approve` / `submit` (engine rule). */

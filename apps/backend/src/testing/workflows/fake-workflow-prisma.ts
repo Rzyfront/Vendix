@@ -25,6 +25,8 @@ const SCOPED = new Set([
   'dossier_items',
   'workflow_instance_comments',
   'workflow_public_links',
+  'workflow_webhook_endpoints',
+  'workflow_webhook_deliveries',
   'store_users',
 ]);
 
@@ -34,6 +36,7 @@ const UNIQUES: Record<string, string[][]> = {
     ['store_id', 'idempotency_key'],
   ],
   workflow_task_votes: [['task_id', 'user_id']],
+  workflow_webhook_deliveries: [['endpoint_id', 'event_id']],
   workflow_public_links: [['token_hash']],
   workflow_instances: [['store_id', 'reference']],
   workflow_definitions: [['store_id', 'key']],
@@ -110,6 +113,15 @@ const DEFAULTS: Record<string, Row> = {
     added_by_id: null,
   },
   work_group_members: { is_lead: false, is_available: true },
+  workflow_webhook_endpoints: { is_active: true, description: null, event_types: [] },
+  workflow_webhook_deliveries: {
+    status: 'pending',
+    attempts: 0,
+    status_code: null,
+    last_error: null,
+    next_retry_at: null,
+    delivered_at: null,
+  },
   workflow_public_links: { is_active: true, expires_at: null, last_used_at: null },
   work_groups: { is_active: true },
 };
@@ -126,6 +138,8 @@ const TIMESTAMPS: Record<string, string[]> = {
   stored_files: ['created_at'],
   dossiers: ['created_at', 'updated_at'],
   dossier_items: ['created_at'],
+  workflow_webhook_endpoints: ['created_at', 'updated_at'],
+  workflow_webhook_deliveries: ['created_at'],
 };
 
 function eq(a: any, b: any): boolean {
@@ -142,6 +156,11 @@ function cmp(a: any, b: any): number {
 }
 
 function matchValue(actual: any, cond: any): boolean {
+  // JSON path filter: `{ path: ['k'], equals: v }`
+  if (cond && typeof cond === 'object' && Array.isArray(cond.path)) {
+    const value = cond.path.reduce((acc: any, k: string) => acc?.[k], actual);
+    return eq(value, cond.equals);
+  }
   if (
     cond !== null &&
     typeof cond === 'object' &&
@@ -165,6 +184,8 @@ function matchValue(actual: any, cond: any): boolean {
           );
         case 'mode':
           return true;
+        case 'has':
+          return Array.isArray(actual) && actual.includes(v);
         case 'lte':
           return actual != null && cmp(actual, v) <= 0;
         case 'lt':
@@ -333,7 +354,7 @@ export class FakeWorkflowDb {
           const t = db.table(name);
           t.splice(t.indexOf(row), 1);
         });
-        return { ...row };
+        return project(row, args);
       },
       updateMany: async (args: Row) => {
         await tick();

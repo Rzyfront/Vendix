@@ -182,6 +182,11 @@ export class WorkflowTickService {
             to: onOverdue.escalate_to,
           },
         });
+        await this.events.emitWebhook(tx, instance, 'workflow.task.overdue', {
+          stage_key: instance.current_stage_key,
+          task_ids: taskIds,
+          action: 'escalated',
+        });
         result.escalated = true;
         return result; // the new assignees were just notified
       }
@@ -205,6 +210,11 @@ export class WorkflowTickService {
             title,
             message: 'Tienes una tarea vencida pendiente de atender.',
             task_ids: taskIds,
+          });
+          await this.events.emitWebhook(tx, instance, 'workflow.task.overdue', {
+            stage_key: instance.current_stage_key,
+            task_ids: taskIds,
+            action: 'reminded',
           });
           result.reminded = true;
         }

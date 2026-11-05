@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import {
+  WORKFLOW_EVENT_TOKENS,
   WorkflowDefinitionV1,
+  WorkflowFieldType,
+  WorkflowTriggerEvent,
+  resolveTokens,
   resolveTransition,
   startStage,
   validateFormValues,
@@ -9,6 +13,7 @@ import {
 import { DossiersService } from '../../documents/dossiers.service';
 import {
   StartPublicWorkflowInput,
+  StartSystemWorkflowInput,
   StartWorkflowInput,
   WorkflowActor,
   WorkflowCommandResult,
@@ -23,6 +28,43 @@ import {
 } from './workflow-loader.service';
 import { WorkflowReferenceService } from './workflow-reference.service';
 import { WorkflowStageService } from './workflow-stage.service';
+
+/** Events that identify a business record the flow can be about. */
+const EVENT_SUBJECT: Record<string, { type: string; key: string }> = {
+  'order.created': { type: 'order', key: 'order_id' },
+  'order.paid': { type: 'order', key: 'order_id' },
+  'purchase_order.received': { type: 'purchase_order', key: 'purchase_order_id' },
+  'customer.created': { type: 'customer', key: 'customer_id' },
+};
+
+/** Event values arrive as strings; coerce to the declared field type or drop. */
+function coerceMapped(type: WorkflowFieldType, raw: string): unknown {
+  if (raw === '') return undefined;
+  switch (type) {
+    case 'number':
+    case 'money': {
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : undefined;
+    }
+    case 'user': {
+      const n = Number(raw);
+      return Number.isInteger(n) && n > 0 ? n : undefined;
+    }
+    case 'boolean':
+      return raw === 'true' ? true : raw === 'false' ? false : undefined;
+    case 'text':
+      return raw.slice(0, 2000);
+    case 'textarea':
+      return raw.slice(0, 10000);
+    case 'email':
+    case 'phone':
+    case 'date':
+    case 'select':
+      return raw;
+    default:
+      return undefined;
+  }
+}
 
 /** `start` inside the engine transaction. */
 @Injectable()
@@ -105,12 +147,18 @@ export class WorkflowStartService {
       payload: { reference, definition_key: def.key, version_id: def.published_version_id },
       idempotencyKey: input.idempotencyKey ?? null,
     });
+    await this.events.emitWebhook(tx, created, 'workflow.instance.started', {
+      title: created.title,
+      stage_key: stage.key,
+      definition_key: def.key,
+    });
     await this.stages.afterEnter(tx, {
       definition,
       instance: created,
       stage,
       actor,
       notifies: enter.notifies,
+      vendix: enter.vendix,
     });
     return {
       instance: created,
@@ -229,6 +277,12 @@ export class WorkflowStartService {
         payload: payload as unknown as Record<string, unknown>,
       });
     }
+    await this.stages.enqueueVendixActions(tx, created, stage.key, enter.vendix);
+    await this.events.emitWebhook(tx, created, 'workflow.instance.started', {
+      title: created.title,
+      stage_key: stage.key,
+      definition_key: def.key,
+    });
     const updated = await this.advancer.advance({
       tx,
       instance: created,
@@ -252,6 +306,132 @@ export class WorkflowStartService {
       replayed: false,
       from_stage_key: stage.key,
       to_stage_key: transition.to,
+    };
+  }
+
+  /**
+   * Starts an instance because a business event happened (actor `system`).
+   * Closed path: it only works for a store's active definition whose published
+   * version declares an `event` trigger for this very event. The data comes
+   * from the trigger's `map` resolved against the event context restricted to
+   * the event's token catalog; the start form is NOT auto-submitted, the
+   * instance waits at the start stage for whoever the stage assigns it to.
+   */
+  async executeSystem(
+    tx: WorkflowTx,
+    ctx: WorkflowCallContext,
+    input: StartSystemWorkflowInput,
+  ): Promise<WorkflowCommandResult> {
+    const prev = await this.events.replay(tx, input.idempotencyKey);
+    if (prev) return prev;
+
+    const def = await tx.workflow_definitions.findFirst({
+      where: { id: input.definitionId, store_id: ctx.store_id },
+    });
+    if (!def) throw new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND);
+    if (def.status !== 'active' || !def.published_version_id) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_ACTIVE);
+    }
+    const definition = await this.loader.loadDefinition(tx, def.published_version_id);
+    const trigger = (definition.triggers ?? []).find(
+      (t) => t.kind === 'event' && t.event === input.event,
+    );
+    const stage = startStage(definition);
+    if (
+      !trigger ||
+      trigger.kind !== 'event' ||
+      !stage ||
+      stage.assignee?.kind === 'initiator'
+    ) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_ACTIVE);
+    }
+
+    const allowed = (WORKFLOW_EVENT_TOKENS[trigger.event as WorkflowTriggerEvent] ?? []).map(
+      (k) => `event.${k}`,
+    );
+    const declared = new Map(definition.fields.map((f) => [f.key, f.type]));
+    const initial: Record<string, unknown> = {};
+    for (const [fieldKey, template] of Object.entries(trigger.map ?? {})) {
+      const type = declared.get(fieldKey);
+      if (!type) continue;
+      const value = coerceMapped(
+        type,
+        resolveTokens(template, { event: input.eventContext, allowed }),
+      );
+      if (value !== undefined) initial[fieldKey] = value;
+    }
+
+    const actor: WorkflowActor = { type: 'system', id: null };
+    const now = new Date();
+    const reference = await this.references.next(tx, ctx.store_id);
+    const title = definition.name.slice(0, 200);
+    const enter = this.stages.applyActions(stage.on_enter, initial, { reference, title });
+    const patch = this.stages.stagePatch(stage, now, 0);
+    const subjectSpec = EVENT_SUBJECT[input.event];
+    const subjectId = subjectSpec ? Number(input.eventContext[subjectSpec.key]) : NaN;
+    const subject =
+      subjectSpec &&
+      definition.subject?.type === subjectSpec.type &&
+      Number.isInteger(subjectId) &&
+      subjectId > 0
+        ? { type: subjectSpec.type, id: subjectId }
+        : null;
+
+    const created = (await tx.workflow_instances.create({
+      data: {
+        organization_id: ctx.organization_id,
+        store_id: ctx.store_id,
+        definition_id: def.id,
+        version_id: def.published_version_id,
+        reference,
+        title,
+        data: enter.data,
+        subject_type: subject?.type ?? null,
+        subject_id: subject?.id ?? null,
+        started_by_type: actor.type,
+        started_by_id: null,
+        row_version: 0,
+        ...patch,
+        status: patch.status ?? 'active',
+      },
+    })) as WorkflowInstanceRow;
+    await this.dossiers.createForInstance(tx, created);
+    await this.events.append(tx, {
+      store_id: ctx.store_id,
+      instance_id: created.id,
+      type: 'started',
+      to_stage_key: stage.key,
+      actor,
+      payload: {
+        reference,
+        definition_key: def.key,
+        version_id: def.published_version_id,
+        via: 'event',
+        event: input.event,
+      },
+      idempotencyKey: input.idempotencyKey,
+    });
+    await this.events.emitWebhook(tx, created, 'workflow.instance.started', {
+      title: created.title,
+      stage_key: stage.key,
+      definition_key: def.key,
+      via: 'event',
+    });
+    await this.stages.afterEnter(tx, {
+      definition,
+      instance: created,
+      stage,
+      actor,
+      notifies: enter.notifies,
+      vendix: enter.vendix,
+    });
+    return {
+      instance: created,
+      task: null,
+      advanced: true,
+      replayed: false,
+      from_stage_key: null,
+      to_stage_key: stage.key,
     };
   }
 

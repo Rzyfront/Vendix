@@ -7,6 +7,7 @@ import { WorkflowAssignmentService } from './workflow-assignment.service';
 import {
   CompleteTaskInput,
   StartPublicWorkflowInput,
+  StartSystemWorkflowInput,
   StartWorkflowInput,
   WorkflowActor,
   WorkflowCommandResult,
@@ -74,6 +75,25 @@ export class WorkflowEngineService {
     try {
       return await this.prisma.$transaction((tx: WorkflowTx) =>
         this.starter.executePublic(tx, ctx, input),
+      );
+    } catch (e) {
+      if (e instanceof WorkflowIdempotencyConflict) {
+        const prev = await this.events.replay(this.prisma, e.idempotencyKey);
+        if (prev) return prev;
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Start from a business event (actor `system`). Only the outbox dispatcher
+   * calls it, inside the store context of the `start_instance` row.
+   */
+  async startSystem(input: StartSystemWorkflowInput): Promise<WorkflowCommandResult> {
+    const ctx = this.loader.context();
+    try {
+      return await this.prisma.$transaction((tx: WorkflowTx) =>
+        this.starter.executeSystem(tx, ctx, input),
       );
     } catch (e) {
       if (e instanceof WorkflowIdempotencyConflict) {

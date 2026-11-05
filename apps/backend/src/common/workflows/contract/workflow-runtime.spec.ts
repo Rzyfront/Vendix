@@ -8,6 +8,7 @@ import {
   findStage,
   isHumanStage,
   normalizeDefinition,
+  resolveTokens,
   resolveTransition,
   stageOutcomes,
   startStage,
@@ -329,5 +330,42 @@ describe('normalizeDefinition', () => {
   it('is idempotent and hash-stable', () => {
     const once = normalizeDefinition(def);
     expect(canonicalJson(normalizeDefinition(once))).toBe(canonicalJson(once));
+  });
+});
+
+describe('resolveTokens', () => {
+  const ctx = {
+    fields: { monto: 1500.5, proveedor: 'ACME', ok: true, files: [1, 2], obj: { a: 1 } },
+    instance: { reference: 'FLU-0001', title: 'Compra' },
+    event: { order_id: 42, email: 'a@b.co' },
+  };
+
+  it('replaces fields, instance and event tokens with strings', () => {
+    expect(resolveTokens('{{fields.proveedor}} · {{ fields.monto }}', ctx)).toBe('ACME · 1500.5');
+    expect(resolveTokens('{{instance.reference}} {{instance.title}}', ctx)).toBe('FLU-0001 Compra');
+    expect(resolveTokens('#{{event.order_id}} {{event.email}}', ctx)).toBe('#42 a@b.co');
+    expect(resolveTokens('{{fields.ok}}', ctx)).toBe('true');
+    expect(resolveTokens('sin tokens', ctx)).toBe('sin tokens');
+  });
+
+  it('is total: unknown paths, non-scalars, prototype keys and bad roots become empty', () => {
+    expect(resolveTokens('[{{fields.ghost}}]', ctx)).toBe('[]');
+    expect(resolveTokens('[{{fields.files}}][{{fields.obj}}]', ctx)).toBe('[][]');
+    expect(resolveTokens('[{{fields.constructor}}][{{fields.__proto__}}]', ctx)).toBe('[][]');
+    expect(resolveTokens('[{{process.env.HOME}}][{{fields}}][{{fields.a.b}}][{{}}]', ctx)).toBe('[][][][]');
+    expect(resolveTokens('{{ event.order_id | upper }}', ctx)).toBe('');
+    expect(resolveTokens(undefined as unknown as string, ctx)).toBe('');
+    expect(resolveTokens('{{fields.proveedor}}', {})).toBe('');
+  });
+
+  it('only resolves allowed paths when a whitelist is given and never evaluates code', () => {
+    const allowed = ['event.order_id'];
+    expect(resolveTokens('{{event.order_id}}-{{event.email}}', { ...ctx, allowed })).toBe('42-');
+    expect(resolveTokens('{{ 1+1 }} {{ require("fs") }}', ctx)).toBe(' ');
+  });
+
+  it('caps the resolved length', () => {
+    const big = { fields: { x: 'a'.repeat(10000) } };
+    expect(resolveTokens('{{fields.x}}', big).length).toBe(4000);
   });
 });

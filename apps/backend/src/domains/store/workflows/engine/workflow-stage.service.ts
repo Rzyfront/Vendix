@@ -5,7 +5,7 @@ import {
   WorkflowStageDef,
   isHumanStage,
 } from '@common/workflows/contract';
-import { applyActionList } from './workflow-rules';
+import { AppliedVendixAction, applyActionList } from './workflow-rules';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import { WorkflowEventsService } from './workflow-events.service';
 import {
@@ -39,10 +39,15 @@ export class WorkflowStageService {
     actions: WorkflowActionDef[] | undefined,
     data: Record<string, unknown>,
     instance: Pick<WorkflowInstanceRow, 'reference' | 'title'>,
-  ): { data: Record<string, unknown>; notifies: WorkflowNotifyPayload[] } {
-    const applied = applyActionList(actions, data);
+  ): {
+    data: Record<string, unknown>;
+    notifies: WorkflowNotifyPayload[];
+    vendix: AppliedVendixAction[];
+  } {
+    const applied = applyActionList(actions, data, instance);
     return {
       data: applied.data,
+      vendix: applied.vendix,
       notifies: applied.notifies.map((n) => ({
         title: `${instance.reference} · ${instance.title}`,
         message: n.message,
@@ -72,6 +77,30 @@ export class WorkflowStageService {
       patch.stage_due_at = null;
     }
     return patch;
+  }
+
+  /**
+   * `vendix.*` actions never run inside the transaction: each becomes an
+   * `action` outbox row, executed by the dispatcher under the store context.
+   */
+  async enqueueVendixActions(
+    tx: WorkflowTx,
+    instance: Pick<WorkflowInstanceRow, 'id' | 'store_id'>,
+    stageKey: string,
+    actions: AppliedVendixAction[] | undefined,
+  ): Promise<void> {
+    for (const a of actions ?? []) {
+      await this.events.enqueue(tx, {
+        store_id: instance.store_id,
+        instance_id: instance.id,
+        kind: 'action',
+        payload: {
+          action: a.action,
+          map_resolved: a.map_resolved,
+          stage_key: stageKey,
+        },
+      });
+    }
   }
 
   /** Open|claimed tasks of the instance → cancelled (except the completed one). */
@@ -106,6 +135,7 @@ export class WorkflowStageService {
       stage: WorkflowStageDef;
       actor: WorkflowActor;
       notifies: WorkflowNotifyPayload[];
+      vendix?: AppliedVendixAction[];
     },
   ): Promise<void> {
     const { instance, stage, actor } = args;
@@ -117,6 +147,7 @@ export class WorkflowStageService {
         payload: payload as unknown as Record<string, unknown>,
       });
     }
+    await this.enqueueVendixActions(tx, instance, stage.key, args.vendix);
     if (stage.type === 'automatic') {
       await this.events.enqueue(tx, {
         store_id: instance.store_id,
@@ -145,6 +176,12 @@ export class WorkflowStageService {
         ...assigned.fields,
         due_at: instance.stage_due_at,
       },
+    });
+    await this.events.emitWebhook(tx, instance, 'workflow.task.created', {
+      task_id: task.id,
+      stage_key: stage.key,
+      kind: stage.type,
+      due_at: instance.stage_due_at ? instance.stage_due_at.toISOString() : null,
     });
     if (assigned.unassigned) {
       await this.events.append(tx, {

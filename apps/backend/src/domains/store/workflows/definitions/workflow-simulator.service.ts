@@ -13,6 +13,7 @@ import {
   validateFormValues,
 } from '@common/workflows/contract';
 import {
+  AppliedVendixAction,
   applyActionList,
   isBlockingRequirement,
   isFilledValue,
@@ -21,6 +22,8 @@ import { WorkflowDefinitionsService } from './workflow-definitions.service';
 
 const MAX_AUTOMATIC_HOPS = 20;
 const WATERMARK = 'SIMULACIÓN';
+/** What `{{instance.reference}}` / `{{instance.title}}` show in a simulation. */
+const SIM_REFERENCE = 'SIM-0001';
 
 export interface SimulateInput {
   state?: { stage_key: string; data: Record<string, unknown> };
@@ -50,6 +53,8 @@ export interface SimulationResult {
   data: Record<string, unknown>;
   tasks: SimulatedTask[];
   notifications: Array<{ to: string; message: string }>;
+  /** `vendix.*` actions the run would queue; nothing is executed. */
+  actions: AppliedVendixAction[];
   ended: { outcome: string } | null;
   loop_guard: boolean;
   watermark: typeof WATERMARK;
@@ -89,6 +94,7 @@ function emptyResult(): SimulationResult {
     data: {},
     tasks: [],
     notifications: [],
+    actions: [],
     ended: null,
     loop_guard: false,
     watermark: WATERMARK,
@@ -112,6 +118,7 @@ export function simulateWorkflow(
 ): SimulationResult {
   const def = normalizeDefinition(rawDefinition);
   const res = emptyResult();
+  const instanceRef = { reference: SIM_REFERENCE, title: def.name };
 
   let data: Record<string, unknown>;
   let current: WorkflowStageDef | undefined;
@@ -123,12 +130,13 @@ export function simulateWorkflow(
       res.no_transition = true;
       return res;
     }
-    const enter = applyActionList(current.on_enter, {});
+    const enter = applyActionList(current.on_enter, {}, instanceRef);
     data = enter.data;
     res.from_stage = { key: current.key, name: current.name };
     res.to_stage = { key: current.key, name: current.name, type: current.type };
     res.path = [current.key];
     collectEntry(res, current, enter.notifies);
+    res.actions.push(...enter.vendix);
   } else {
     current = findStage(def, input.state.stage_key);
     if (!current) {
@@ -189,11 +197,12 @@ export function simulateWorkflow(
       return res;
     }
 
-    const exit = applyActionList(current.on_exit, data);
+    const exit = applyActionList(current.on_exit, data, instanceRef);
     res.path = [current.key];
     res.notifications.push(...notifyList(exit.notifies));
+    res.actions.push(...exit.vendix);
     data = exit.data;
-    current = enterStage(res, def, transition.to, data);
+    current = enterStage(res, def, transition.to, data, instanceRef);
     if (!current) return res;
     data = res.data;
   }
@@ -210,9 +219,10 @@ export function simulateWorkflow(
       res.no_transition = true;
       break;
     }
-    const exit = applyActionList(current.on_exit, data);
+    const exit = applyActionList(current.on_exit, data, instanceRef);
     res.notifications.push(...notifyList(exit.notifies));
-    current = enterStage(res, def, t.to, exit.data);
+    res.actions.push(...exit.vendix);
+    current = enterStage(res, def, t.to, exit.data, instanceRef);
     if (!current) break;
     data = res.data;
   }
@@ -250,6 +260,7 @@ function enterStage(
   def: WorkflowDefinitionV1,
   toKey: string,
   data: Record<string, unknown>,
+  instanceRef: { reference: string; title: string },
 ): WorkflowStageDef | undefined {
   const stage = findStage(def, toKey);
   if (!stage) {
@@ -257,7 +268,8 @@ function enterStage(
     res.data = data;
     return undefined;
   }
-  const enter = applyActionList(stage.on_enter, data);
+  const enter = applyActionList(stage.on_enter, data, instanceRef);
+  res.actions.push(...enter.vendix);
   res.data = enter.data;
   res.path.push(stage.key);
   res.to_stage = { key: stage.key, name: stage.name, type: stage.type };

@@ -13,6 +13,7 @@ model users {
   workflow_public_links        workflow_public_links[]
   store_api_keys_created       store_api_keys[] @relation("store_api_keys_created_by")
   store_api_keys_acting        store_api_keys[] @relation("store_api_keys_acting_user")
+  workflow_webhook_endpoints   workflow_webhook_endpoints[]
   workflow_definitions_updated workflow_definitions[] @relation("workflow_definitions_updated_by")
   workflow_versions_published  workflow_versions[]
   work_group_memberships       work_group_members[]
@@ -651,6 +652,7 @@ model organizations {
   workflow_instance_comments workflow_instance_comments[]
   workflow_public_links workflow_public_links[]
   store_api_keys        store_api_keys[]
+  workflow_webhook_endpoints workflow_webhook_endpoints[]
   work_groups          work_groups[]
   workflow_instances   workflow_instances[]
   workflow_tasks       workflow_tasks[]
@@ -967,6 +969,8 @@ model stores {
   workflow_instance_comments workflow_instance_comments[]
   workflow_public_links      workflow_public_links[]
   store_api_keys             store_api_keys[]
+  workflow_webhook_endpoints workflow_webhook_endpoints[]
+  workflow_webhook_deliveries workflow_webhook_deliveries[]
   stored_files               stored_files[]
   dossiers                   dossiers[]
   dossier_items              dossier_items[]
@@ -15808,4 +15812,53 @@ model store_api_keys {
   acting_user  users         @relation("store_api_keys_acting_user", fields: [acting_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([store_id])
+}
+
+/// Webhooks salientes de Flujos (bloque 13). El secreto de firma se guarda
+/// cifrado (`EncryptionService`) y solo se muestra una vez al crearlo o rotarlo.
+model workflow_webhook_endpoints {
+  id                 Int      @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int
+  url                String   @db.VarChar(500)
+  secret_enc         String
+  event_types        String[] @default([])
+  is_active          Boolean  @default(true)
+  description        String?  @db.VarChar(200)
+  created_by_user_id Int
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamp(6)
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store        stores        @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by   users         @relation(fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  deliveries   workflow_webhook_deliveries[]
+
+  @@index([store_id, is_active])
+}
+
+/// Entregas de webhooks: una fila por (endpoint, event_id). El reintento lo
+/// gobierna `workflow_outbox` (kind `webhook`); aquí queda el rastro visible.
+model workflow_webhook_deliveries {
+  id            BigInt    @id @default(autoincrement())
+  store_id      Int
+  endpoint_id   Int
+  event_id      String    @db.VarChar(40)
+  event_type    String    @db.VarChar(60)
+  payload       Json
+  /// pending | delivered | failed | dead
+  status        String    @default("pending") @db.VarChar(20)
+  attempts      Int       @default(0)
+  status_code   Int?
+  last_error    String?
+  next_retry_at DateTime? @db.Timestamp(6)
+  delivered_at  DateTime? @db.Timestamp(6)
+  created_at    DateTime  @default(now()) @db.Timestamp(6)
+
+  store    stores                     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  endpoint workflow_webhook_endpoints @relation(fields: [endpoint_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([endpoint_id, event_id])
+  @@index([store_id, created_at])
+  @@index([status, next_retry_at])
 }

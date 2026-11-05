@@ -40,6 +40,8 @@ describe('WorkflowOutboxDispatcher', () => {
       new WorkflowAssignmentService(new WorkGroupsService(prisma)),
       notifications as any,
       mailer as any,
+      { deliver: jest.fn() } as any,
+      { execute: jest.fn(), recordFailure: jest.fn() } as any,
     );
   });
 
@@ -99,7 +101,7 @@ describe('WorkflowOutboxDispatcher', () => {
   });
 
   it('un tipo desconocido falla y reintenta (no se pierde en silencio)', async () => {
-    enqueue('webhook', {});
+    enqueue('telepathy', {});
     const s = await dispatcher.dispatchBatch();
     expect(s.retried).toBe(1);
     expect(row().last_error).toMatch(/Unsupported outbox kind/);

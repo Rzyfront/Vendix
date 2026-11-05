@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 import { industryAllowsKey } from '../../../../common/access/module-industries';
-import { buildActiveUserRolesWhere } from '../../../../common/utils/role-scope.util';
+import { resolveUserStorePermissions } from '../../../../common/utils/user-store-permissions.util';
 import { API_KEY_LAST_USED_INTERVAL_MS } from './api-key.constants';
 import { effectivePermissions, hashApiKey, hashesEqual } from './api-key.util';
 
@@ -120,22 +120,7 @@ export class ApiKeyAuthService {
     userId: number,
     storeId: number,
   ): Promise<string[]> {
-    const userRoles = await this.prisma.user_roles.findMany({
-      where: buildActiveUserRolesWhere(userId, storeId),
-      include: {
-        roles: {
-          include: { role_permissions: { include: { permissions: true } } },
-        },
-      },
-    });
-    const names = new Set<string>();
-    for (const ur of userRoles) {
-      for (const rp of ur.roles?.role_permissions ?? []) {
-        const p = rp.permissions;
-        if (p && p.status === 'active' && p.name) names.add(p.name);
-      }
-    }
-    return [...names];
+    return resolveUserStorePermissions(this.prisma as never, userId, storeId);
   }
 
   /** At most one write per key per minute; the conditional update is atomic. */

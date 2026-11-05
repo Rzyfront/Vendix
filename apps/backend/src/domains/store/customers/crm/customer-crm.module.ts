@@ -57,5 +57,7 @@ import { CrmUnsubscribeService } from './campaigns/crm-unsubscribe.service';
     CrmUnsubscribeService,
     StoreBootstrapHelper,
   ],
+  // Flujos (bloque 13): la acción `vendix.crm_task.create` crea tareas por aquí.
+  exports: [CrmTasksService],
 })
 export class CustomerCrmModule {}

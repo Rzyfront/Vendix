@@ -6,6 +6,7 @@
  * apps/frontend/src/app/shared/workflows/contract/. Parity is enforced by
  * workflow-contract.parity.spec.ts (backend). Messages are user-facing Spanish.
  */
+import { WORKFLOW_TOKEN_PATTERN } from "./workflow-runtime";
 import {
   HUMAN_STAGE_TYPES,
   OPS_BY_FIELD_TYPE,
@@ -14,6 +15,13 @@ import {
   WORKFLOW_ACTIONS,
   WORKFLOW_CONDITION_OPS,
   WORKFLOW_END_OUTCOMES,
+  WORKFLOW_EVENT_TOKENS,
+  WORKFLOW_INSTANCE_TOKENS,
+  WORKFLOW_TRIGGER_EVENTS,
+  WORKFLOW_VENDIX_ACTIONS,
+  WORKFLOW_VENDIX_ACTION_MAP_KEYS,
+  WorkflowTriggerEvent,
+  WorkflowVendixActionName,
   WORKFLOW_FIELD_TYPES,
   WORKFLOW_KEY_PATTERN,
   WORKFLOW_LIMITS,
@@ -56,6 +64,9 @@ export const WORKFLOW_ISSUE_CODES = [
   "REQUIREMENT_INVALID",
   "TEMPLATE_NOT_PUBLISHED",
   "OUTCOME_UNREACHABLE",
+  "TOKEN_UNKNOWN",
+  "EVENT_UNKNOWN",
+  "MAP_INVALID",
 ] as const;
 
 export type WorkflowIssueCode = (typeof WORKFLOW_ISSUE_CODES)[number];
@@ -468,15 +479,19 @@ function run(input: unknown, ctx: WorkflowValidationContext, c: Collector) {
           isObj(t) &&
           (t["kind"] === "manual"
             ? Object.keys(t).length === 1
-            : t["kind"] === "public_form" &&
-              Object.keys(t).every((k) => k === "kind" || k === "stage") &&
-              (t["stage"] === undefined || isStr(t["stage"]))),
+            : t["kind"] === "event"
+              ? Object.keys(t).every(
+                  (k) => k === "kind" || k === "event" || k === "map",
+                )
+              : t["kind"] === "public_form" &&
+                Object.keys(t).every((k) => k === "kind" || k === "stage") &&
+                (t["stage"] === undefined || isStr(t["stage"]))),
       )
     ) {
       c.err(
         "SHAPE_INVALID",
         "triggers",
-        'Los disparadores permitidos son {"kind":"manual"} y {"kind":"public_form"}.',
+        'Los disparadores permitidos son {"kind":"manual"}, {"kind":"public_form"} y {"kind":"event"}.',
       );
     } else if (
       input["triggers"].filter((t) => t["kind"] === "public_form").length > 1
@@ -515,6 +530,116 @@ function run(input: unknown, ctx: WorkflowValidationContext, c: Collector) {
   const stages = checkStages(input["stages"], fields, ctx, c);
   checkGraph(stages, c);
   checkPublicFormTrigger(input, c);
+  checkEventTriggers(input, fields, c);
+}
+
+/** Lists `{{path}}` tokens found in a string. */
+function tokensOf(text: string): string[] {
+  const out: string[] = [];
+  const re = new RegExp(WORKFLOW_TOKEN_PATTERN.source, "g");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) out.push(m[1]);
+  return out;
+}
+
+/** True when text still has braces after the well-formed tokens are removed. */
+function hasStrayBraces(text: string): boolean {
+  return /[{}]/.test(text.replace(new RegExp(WORKFLOW_TOKEN_PATTERN.source, "g"), ""));
+}
+
+/**
+ * `event` triggers: a known event, a `map` from declared fields to literals or
+ * `{{event.<path>}}` tokens of that event's catalog, and a start stage that a
+ * person other than "the initiator" fills (nobody initiates a system start).
+ */
+function checkEventTriggers(input: Json, fields: FieldMap, c: Collector) {
+  const triggers = input["triggers"];
+  if (!Array.isArray(triggers)) return;
+  const seen = new Set<string>();
+  triggers.forEach((t, index) => {
+    if (!isObj(t) || t["kind"] !== "event") return;
+    const path = `triggers[${index}]`;
+    const event = t["event"];
+    if (
+      !isStr(event) ||
+      !(WORKFLOW_TRIGGER_EVENTS as readonly string[]).includes(event)
+    ) {
+      c.err(
+        "EVENT_UNKNOWN",
+        `${path}.event`,
+        `El evento "${String(event)}" no existe (permitidos: ${WORKFLOW_TRIGGER_EVENTS.join(", ")}).`,
+      );
+      return;
+    }
+    if (seen.has(event)) {
+      c.err(
+        "SHAPE_INVALID",
+        `${path}.event`,
+        `El evento "${event}" ya tiene un disparador en este flujo.`,
+      );
+    }
+    seen.add(event);
+    const allowed = WORKFLOW_EVENT_TOKENS[event as WorkflowTriggerEvent].map(
+      (k) => `event.${k}`,
+    );
+    const map = t["map"];
+    if (map !== undefined) {
+      if (!isObj(map)) {
+        c.err("MAP_INVALID", `${path}.map`, "El mapa del disparador debe ser un objeto.");
+      } else {
+        for (const [key, value] of Object.entries(map)) {
+          const p = `${path}.map.${key}`;
+          const f = fields.get(key);
+          if (!f) {
+            c.err(
+              "FIELD_UNKNOWN",
+              p,
+              `El disparador llena el campo "${key}", que no está declarado.`,
+            );
+          } else if (f.type === "file" || f.type === "multiselect") {
+            c.err(
+              "FIELD_TYPE_MISMATCH",
+              p,
+              `El disparador no puede llenar el campo "${key}" (los campos de tipo ${f.type} no admiten eventos).`,
+            );
+          }
+          if (!isStr(value) || value.length > 500) {
+            c.err(
+              "MAP_INVALID",
+              p,
+              `El valor de "${key}" debe ser texto de hasta 500 caracteres.`,
+            );
+            continue;
+          }
+          if (hasStrayBraces(value)) {
+            c.err("TOKEN_UNKNOWN", p, `El valor de "${key}" tiene llaves que no forman un token válido {{...}}.`);
+          }
+          for (const tok of tokensOf(value)) {
+            if (!allowed.includes(tok)) {
+              c.err(
+                "TOKEN_UNKNOWN",
+                p,
+                `El token "{{${tok}}}" no existe para el evento "${event}" (permitidos: ${allowed.map((a) => `{{${a}}}`).join(", ")}).`,
+              );
+            }
+          }
+        }
+      }
+    }
+    const stages = Array.isArray(input["stages"])
+      ? (input["stages"] as unknown[]).filter(isObj)
+      : [];
+    const start = stages.find((s) => s["start"] === true);
+    const assignee = start?.["assignee"];
+    if (start && isObj(assignee) && assignee["kind"] === "initiator") {
+      c.err(
+        "ASSIGNEE_NOT_ALLOWED",
+        path,
+        "Un disparador por evento no tiene a nadie que inicie la solicitud: la etapa inicial no puede estar asignada a quien inicia (usa un rol, un grupo, un usuario o un campo).",
+        isStr(start["key"]) ? start["key"] : undefined,
+      );
+    }
+  });
 }
 
 /** `public_form`: the start stage must be a `form` stage filled by the initiator. */
@@ -1384,6 +1509,10 @@ function checkActions(
           sk,
         );
       }
+    } else if (
+      (WORKFLOW_VENDIX_ACTIONS as readonly unknown[]).includes(a["action"])
+    ) {
+      checkVendixAction(a, p, L, sk, fields, ctx, c);
     } else {
       checkKeys(c, a, ["action", "field", "value"], p, sk);
       if (!isStr(a["field"]) || !fields.has(a["field"]))
@@ -1411,6 +1540,127 @@ function checkActions(
       }
     }
   });
+}
+
+/** Literal numeric keys of the Vendix actions and their minimum. */
+const NUMERIC_MAP_KEYS: Record<string, { min: number; integer: boolean }> = {
+  supplier_id: { min: 1, integer: true },
+  location_id: { min: 1, integer: true },
+  product_id: { min: 1, integer: true },
+  quantity: { min: 1, integer: true },
+  unit_price: { min: 0, integer: false },
+  due_in_days: { min: 0, integer: true },
+};
+
+/**
+ * `vendix.*` actions: `map` values are literals or tokens of the closed
+ * catalog `{{fields.<declared field>}}`, `{{instance.reference}}`,
+ * `{{instance.title}}`. Required keys must be present; unknown keys and tokens
+ * are rejected. The actions run through the outbox, never inline.
+ */
+function checkVendixAction(
+  a: Json,
+  p: string,
+  L: string,
+  sk: string | undefined,
+  fields: FieldMap,
+  ctx: WorkflowValidationContext,
+  c: Collector,
+) {
+  const name = a["action"] as WorkflowVendixActionName;
+  checkKeys(c, a, ["action", "map"], p, sk);
+  const map = a["map"];
+  if (!isObj(map)) {
+    c.err(
+      "MAP_INVALID",
+      `${p}.map`,
+      `${L}: la acción ${name} necesita un "map" (objeto).`,
+      sk,
+    );
+    return;
+  }
+  const spec = WORKFLOW_VENDIX_ACTION_MAP_KEYS[name];
+  const known = [...spec.required, ...spec.optional];
+  for (const key of spec.required) {
+    const v = map[key];
+    if (v === undefined || v === null || (isStr(v) && v.trim() === "")) {
+      c.err(
+        "MAP_INVALID",
+        `${p}.map.${key}`,
+        `${L}: la acción ${name} necesita el valor "${key}" en su mapa.`,
+        sk,
+      );
+    }
+  }
+  for (const [key, value] of Object.entries(map)) {
+    const vp = `${p}.map.${key}`;
+    if (!known.includes(key)) {
+      c.err(
+        "MAP_INVALID",
+        vp,
+        `${L}: la clave "${key}" no existe en la acción ${name} (permitidas: ${known.join(", ")}).`,
+        sk,
+      );
+      continue;
+    }
+    if (value === undefined || value === null) continue;
+    if (key === "assignee") {
+      checkAssignee(value, vp, L, sk, fields, ctx, c);
+      continue;
+    }
+    if (isObj(value) || Array.isArray(value)) {
+      c.err(
+        "MAP_INVALID",
+        vp,
+        `${L}: el valor de "${key}" debe ser un texto, número o booleano.`,
+        sk,
+      );
+      continue;
+    }
+    if (typeof value === "number" && !Number.isFinite(value)) {
+      c.err("MAP_INVALID", vp, `${L}: el valor de "${key}" no es un número válido.`, sk);
+      continue;
+    }
+    if (isStr(value)) {
+      if (value.length > 2000) {
+        c.err("MAP_INVALID", vp, `${L}: el valor de "${key}" supera los 2000 caracteres.`, sk);
+        continue;
+      }
+      if (hasStrayBraces(value)) {
+        c.err("TOKEN_UNKNOWN", vp, `${L}: el valor de "${key}" tiene llaves que no forman un token válido {{...}}.`, sk);
+      }
+      const tokens = tokensOf(value);
+      for (const tok of tokens) {
+        const isField =
+          tok.startsWith("fields.") && fields.has(tok.slice("fields.".length));
+        if (!isField && !WORKFLOW_INSTANCE_TOKENS.includes(tok)) {
+          c.err(
+            "TOKEN_UNKNOWN",
+            vp,
+            `${L}: el token "{{${tok}}}" no existe (permitidos: {{fields.<campo declarado>}}, ${WORKFLOW_INSTANCE_TOKENS.map((t) => `{{${t}}}`).join(", ")}).`,
+            sk,
+          );
+        }
+      }
+      if (tokens.length > 0) continue;
+    }
+    const num = NUMERIC_MAP_KEYS[key];
+    if (num) {
+      const n = typeof value === "number" ? value : Number(value);
+      if (
+        !Number.isFinite(n) ||
+        n < num.min ||
+        (num.integer && !Number.isInteger(n))
+      ) {
+        c.err(
+          "MAP_INVALID",
+          vp,
+          `${L}: "${key}" debe ser un número${num.integer ? " entero" : ""} mayor o igual a ${num.min}.`,
+          sk,
+        );
+      }
+    }
+  }
 }
 
 function checkTransitions(

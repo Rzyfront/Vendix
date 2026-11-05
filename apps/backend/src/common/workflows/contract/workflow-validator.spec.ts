@@ -1,6 +1,9 @@
 import {
+  WORKFLOW_ACTIONS,
+  WORKFLOW_EVENT_TOKENS,
   WORKFLOW_EXAMPLE_PURCHASE_APPROVAL,
   WORKFLOW_ISSUE_CODES,
+  WORKFLOW_TRIGGER_EVENTS,
   WORKFLOW_LIMITS,
   WORKFLOW_V1_JSON_SCHEMA,
   WorkflowDefinitionV1,
@@ -529,5 +532,174 @@ describe('trigger public_form', () => {
       has(run((d) => (d.triggers = [{ kind: 'public_form', extra: 1 }])), 'SHAPE_INVALID'),
     ).toBe(true);
     expect(has(run((d) => (d.triggers = [{ kind: 'webhook' }])), 'SHAPE_INVALID')).toBe(true);
+  });
+});
+
+describe('trigger event', () => {
+  const startKey = (d: any) => d.stages.find((s: any) => s.start).key;
+  const asRole = (d: any) => {
+    stage(d, startKey(d)).assignee = { kind: 'role', role_key: 'store_manager' };
+  };
+  const CTX = { roleKeys: ['store_manager'], groupKeys: ['gerencia'] };
+  const withEvent = (trigger: any, m?: Mut) =>
+    run((d) => {
+      asRole(d);
+      d.triggers = [trigger];
+      m?.(d);
+    }, CTX);
+
+  it('accepts a known event with a map of declared fields and event tokens', () => {
+    const r = withEvent({
+      kind: 'event',
+      event: 'order.created',
+      map: { monto: '{{event.grand_total}}', proveedor: 'Pedido {{event.order_number}}' },
+    });
+    expect(r).toEqual({ valid: true, errors: [], warnings: [] });
+    expect(withEvent({ kind: 'event', event: 'pqr.created' }).valid).toBe(true);
+  });
+
+  it('exports the six events and a closed token catalog per event', () => {
+    expect([...WORKFLOW_TRIGGER_EVENTS]).toEqual([
+      'order.created',
+      'order.paid',
+      'purchase_order.received',
+      'expense.approved',
+      'customer.created',
+      'pqr.created',
+    ]);
+    for (const e of WORKFLOW_TRIGGER_EVENTS) {
+      expect(WORKFLOW_EVENT_TOKENS[e].length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects an unknown event (EVENT_UNKNOWN)', () => {
+    const r = withEvent({ kind: 'event', event: 'order.deleted' });
+    expect(has(r, 'EVENT_UNKNOWN')).toBe(true);
+    expect(has(withEvent({ kind: 'event' }), 'EVENT_UNKNOWN')).toBe(true);
+  });
+
+  it('rejects tokens outside the event catalog, other roots and stray braces (TOKEN_UNKNOWN)', () => {
+    const bad = (value: string) =>
+      has(withEvent({ kind: 'event', event: 'order.created', map: { monto: value } }), 'TOKEN_UNKNOWN');
+    expect(bad('{{event.password}}')).toBe(true);
+    expect(bad('{{event.email}}')).toBe(true); // belongs to customer.created, not order.created
+    expect(bad('{{fields.monto}}')).toBe(true);
+    expect(bad('{{instance.title}}')).toBe(true);
+    expect(bad('{{event.grand_total | upper}}')).toBe(true);
+    expect(bad('{{ constructor }}')).toBe(true);
+    expect(bad('{{event.grand_total')).toBe(true);
+  });
+
+  it('rejects a map key that is not a declared field or is a file field, and a non-string value', () => {
+    expect(
+      has(withEvent({ kind: 'event', event: 'order.created', map: { nope: 'x' } }), 'FIELD_UNKNOWN'),
+    ).toBe(true);
+    expect(
+      has(
+        withEvent({ kind: 'event', event: 'order.created', map: { cotizacion: 'x' } }),
+        'FIELD_TYPE_MISMATCH',
+      ),
+    ).toBe(true);
+    expect(
+      has(withEvent({ kind: 'event', event: 'order.created', map: { monto: 5 } }), 'MAP_INVALID'),
+    ).toBe(true);
+  });
+
+  it('rejects a start stage assigned to the initiator (nobody initiates a system start)', () => {
+    const r = run((d) => {
+      d.triggers = [{ kind: 'event', event: 'order.created' }];
+    });
+    expect(r.errors.some((e) => e.code === 'ASSIGNEE_NOT_ALLOWED' && e.path === 'triggers[0]')).toBe(
+      true,
+    );
+  });
+
+  it('rejects two triggers for the same event and unknown keys', () => {
+    const r = run((d) => {
+      asRole(d);
+      d.triggers = [
+        { kind: 'event', event: 'order.created' },
+        { kind: 'event', event: 'order.created' },
+      ];
+    }, CTX);
+    expect(has(r, 'SHAPE_INVALID')).toBe(true);
+    expect(
+      has(withEvent({ kind: 'event', event: 'order.created', url: 'http://x' }), 'SHAPE_INVALID'),
+    ).toBe(true);
+  });
+
+  it('the JSON schema lists the event trigger', () => {
+    expect(JSON.stringify(WORKFLOW_V1_JSON_SCHEMA)).toContain('"order.paid"');
+  });
+});
+
+describe('vendix actions', () => {
+  const PO = {
+    action: 'vendix.purchase_order.create_draft',
+    map: {
+      supplier_id: 7,
+      location_id: '{{fields.proveedor}}',
+      product_id: 3,
+      quantity: 2,
+      unit_price: '{{fields.monto}}',
+      notes: 'Solicitud {{instance.reference}} — {{instance.title}}',
+    },
+  };
+  const TASK = {
+    action: 'vendix.crm_task.create',
+    map: { title: 'Llamar {{fields.proveedor}}', due_in_days: 2, assignee: { kind: 'user', user_id: 5 } },
+  };
+  const withActions = (actions: any[], ctx?: any) =>
+    run((d) => {
+      stage(d, 'aprobada').on_enter = actions;
+    }, ctx);
+
+  it('accepts both actions with literals and catalog tokens', () => {
+    expect(withActions([PO, TASK], { userIds: [5] })).toEqual({ valid: true, errors: [], warnings: [] });
+    expect(WORKFLOW_ACTIONS).toEqual(
+      expect.arrayContaining(['vendix.purchase_order.create_draft', 'vendix.crm_task.create']),
+    );
+  });
+
+  it('rejects unknown tokens, including event.* and undeclared fields (TOKEN_UNKNOWN)', () => {
+    const t = (v: string) =>
+      has(withActions([{ action: 'vendix.crm_task.create', map: { title: v } }]), 'TOKEN_UNKNOWN');
+    expect(t('{{fields.ghost}}')).toBe(true);
+    expect(t('{{event.order_id}}')).toBe(true);
+    expect(t('{{instance.secret}}')).toBe(true);
+    expect(t('{{process.env.X}}')).toBe(true);
+    expect(t('{{fields.monto')).toBe(true);
+    expect(t('{{fields.monto}}')).toBe(false);
+  });
+
+  it('rejects missing required keys, unknown keys and bad literals (MAP_INVALID)', () => {
+    const noSupplier = JSON.parse(JSON.stringify(PO));
+    delete noSupplier.map.supplier_id;
+    expect(has(withActions([noSupplier]), 'MAP_INVALID')).toBe(true);
+    expect(has(withActions([{ action: 'vendix.crm_task.create', map: {} }]), 'MAP_INVALID')).toBe(true);
+    expect(has(withActions([{ action: 'vendix.crm_task.create' }]), 'MAP_INVALID')).toBe(true);
+    expect(
+      has(withActions([{ action: 'vendix.crm_task.create', map: { title: 'x', url: 'http://evil' } }]), 'MAP_INVALID'),
+    ).toBe(true);
+    const badQty = JSON.parse(JSON.stringify(PO));
+    badQty.map.quantity = 0;
+    expect(has(withActions([badQty]), 'MAP_INVALID')).toBe(true);
+    badQty.map.quantity = 'many';
+    expect(has(withActions([badQty]), 'MAP_INVALID')).toBe(true);
+    expect(
+      has(withActions([{ action: 'vendix.crm_task.create', map: { title: { a: 1 } } }]), 'MAP_INVALID'),
+    ).toBe(true);
+  });
+
+  it('still rejects arbitrary actions such as an HTTP call (ACTION_UNKNOWN)', () => {
+    expect(has(withActions([{ action: 'http.request', map: { url: 'http://x' } }]), 'ACTION_UNKNOWN')).toBe(true);
+    expect(has(withActions([{ action: 'vendix.order.delete', map: {} }]), 'ACTION_UNKNOWN')).toBe(true);
+  });
+
+  it('validates the crm assignee like any other assignee', () => {
+    const t = JSON.parse(JSON.stringify(TASK));
+    expect(has(withActions([t], { userIds: [9] }), 'USER_UNKNOWN')).toBe(true);
+    t.map.assignee = { kind: 'field', field: 'ghost' };
+    expect(has(withActions([t]), 'FIELD_UNKNOWN')).toBe(true);
   });
 });

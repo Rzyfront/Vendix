@@ -8,6 +8,15 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { DocumentsModule } from '../documents/documents.module';
+import { CustomerCrmModule } from '../customers/crm/customer-crm.module';
+import { PurchaseOrdersModule } from '../orders/purchase-orders/purchase-orders.module';
+import { EncryptionService } from '../../../common/services/encryption.service';
+import { WorkflowActionsExecutor } from './engine/workflow-actions.executor';
+import { WorkflowTriggerListener } from './engine/workflow-trigger.listener';
+import { WorkflowWebhookDeliveryService } from './webhooks/workflow-webhook-delivery.service';
+import { WorkflowWebhookEmitter } from './webhooks/workflow-webhook-emitter.service';
+import { WorkflowWebhooksController } from './webhooks/workflow-webhooks.controller';
+import { WorkflowWebhooksService } from './webhooks/workflow-webhooks.service';
 import { EmailModule } from '../../../email/email.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { WorkflowAdvanceService } from './engine/workflow-advance.service';
@@ -60,6 +69,9 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
     EmailModule,
     ResponseModule,
     DocumentsModule,
+    // Bloque 13: acciones Vendix (OC borrador, tarea CRM) por sus servicios.
+    PurchaseOrdersModule,
+    CustomerCrmModule,
   ],
   controllers: [
     WorkflowDefinitionsController,
@@ -70,6 +82,7 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
     WorkflowAnalyticsController,
     WorkGroupsController,
     DocumentFilesController,
+    WorkflowWebhooksController,
   ],
   providers: [
     WorkGroupsService,
@@ -96,6 +109,13 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
     WorkflowEngineService,
     WorkflowOutboxDispatcher,
     WorkflowTimersCron,
+    // Bloque 13: webhooks salientes, disparadores por evento y acciones Vendix.
+    EncryptionService,
+    WorkflowWebhookEmitter,
+    WorkflowWebhookDeliveryService,
+    WorkflowWebhooksService,
+    WorkflowTriggerListener,
+    WorkflowActionsExecutor,
     {
       provide: WorkflowRequirementsService,
       useClass: DossierWorkflowRequirementsService,

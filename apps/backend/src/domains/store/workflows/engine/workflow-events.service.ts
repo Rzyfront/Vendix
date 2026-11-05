@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
+import { WorkflowWebhookEmitter } from '../webhooks/workflow-webhook-emitter.service';
+import { WorkflowWebhookEvent } from '../webhooks/workflow-webhook.constants';
 import {
   WorkflowActor,
   WorkflowCommandResult,
@@ -22,7 +24,7 @@ export interface AppendEventInput {
 export interface EnqueueInput {
   store_id: number;
   instance_id: number | null;
-  kind: 'notify' | 'advance';
+  kind: 'notify' | 'advance' | 'start_instance' | 'action';
   payload: Record<string, unknown>;
   available_at?: Date;
 }
@@ -30,6 +32,26 @@ export interface EnqueueInput {
 /** Append-only history (`seq`) and the transactional outbox. */
 @Injectable()
 export class WorkflowEventsService {
+  constructor(private readonly webhooks: WorkflowWebhookEmitter) {}
+
+  /**
+   * Outgoing webhook for something that just happened to `instance` (same
+   * transaction). `data` always carries the instance reference, never form data.
+   */
+  async emitWebhook(
+    tx: WorkflowTx,
+    instance: { id: number; store_id: number; reference: string },
+    type: WorkflowWebhookEvent,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    await this.webhooks.emit(tx, {
+      store_id: instance.store_id,
+      instance_id: instance.id,
+      type,
+      data: { instance_id: instance.id, reference: instance.reference, ...data },
+    });
+  }
+
   /**
    * Appends `seq = last + 1`. `@@unique([instance_id, seq])` is the second
    * lock: a concurrent writer collides and becomes `WORKFLOW_STALE`; a reused

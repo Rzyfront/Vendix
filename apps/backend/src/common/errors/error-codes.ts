@@ -48,6 +48,14 @@ export const ErrorCodes = {
   API_KEY_FORBIDDEN: { code: 'API_KEY_FORBIDDEN', httpStatus: 403, devMessage: 'Esta API key no tiene permiso para esta operación.' },
   API_KEY_ACTING_USER_INVALID: { code: 'API_KEY_ACTING_USER_INVALID', httpStatus: 400, devMessage: 'El usuario con el que actúa la API key no pertenece a esta tienda.' },
   API_KEY_RATE_LIMITED: { code: 'API_KEY_RATE_LIMITED', httpStatus: 429, devMessage: 'Demasiadas solicitudes con esta API key. Intenta de nuevo en un minuto.' },
+  // Webhooks salientes de Flujos
+  WEBHOOK_NOT_FOUND: { code: 'WEBHOOK_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró el webhook.' },
+  WEBHOOK_URL_INVALID: { code: 'WEBHOOK_URL_INVALID', httpStatus: 400, devMessage: 'La URL del webhook no es válida o no está permitida (solo https público).' },
+  WEBHOOK_LIMIT_REACHED: { code: 'WEBHOOK_LIMIT_REACHED', httpStatus: 409, devMessage: 'Alcanzaste el máximo de 10 webhooks activos. Desactiva uno para crear otro.' },
+  WEBHOOK_EVENT_INVALID: { code: 'WEBHOOK_EVENT_INVALID', httpStatus: 400, devMessage: 'Uno de los eventos del webhook no existe.' },
+  WEBHOOK_INACTIVE: { code: 'WEBHOOK_INACTIVE', httpStatus: 409, devMessage: 'El webhook está desactivado.' },
+  WEBHOOK_DELIVERY_NOT_RETRYABLE: { code: 'WEBHOOK_DELIVERY_NOT_RETRYABLE', httpStatus: 409, devMessage: 'Solo se pueden reintentar entregas fallidas o agotadas.' },
+  WEBHOOK_DELIVERY_NOT_FOUND: { code: 'WEBHOOK_DELIVERY_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la entrega del webhook.' },
   // Flujos (vendix.workflow/v1)
   WORKFLOW_STALE: { code: 'WORKFLOW_STALE', httpStatus: 409, devMessage: 'Esta solicitud cambió; recarga.' },
   WORKFLOW_NOT_FOUND: { code: 'WORKFLOW_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la solicitud.' },

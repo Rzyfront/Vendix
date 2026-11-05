@@ -170,3 +170,16 @@ export interface StartPublicWorkflowInput {
   contact: { name: string; email?: string | null; phone?: string | null };
   idempotencyKey: string;
 }
+
+/**
+ * System start from a business event (actor `system`). Built only by the
+ * outbox dispatcher from a `start_instance` row; the engine re-checks that the
+ * published version still has a matching `event` trigger.
+ */
+export interface StartSystemWorkflowInput {
+  definitionId: number;
+  event: string;
+  /** Flat context with exactly the keys of `WORKFLOW_EVENT_TOKENS[event]`. */
+  eventContext: Record<string, unknown>;
+  idempotencyKey: string;
+}

@@ -250,6 +250,9 @@ export class StorePrismaService extends BasePrismaService {
     'workflow_public_links',
     // API keys por tienda (bloque 13): `store_id` propio NOT NULL.
     'store_api_keys',
+    // Webhooks salientes de Flujos (bloque 13): ambas llevan `store_id` NOT NULL.
+    'workflow_webhook_endpoints',
+    'workflow_webhook_deliveries',
     'crm_messages',
     'crm_tags',
     'crm_customer_tags',
@@ -1947,6 +1950,14 @@ export class StorePrismaService extends BasePrismaService {
 
   get store_api_keys() {
     return this.scoped_client.store_api_keys;
+  }
+
+  get workflow_webhook_endpoints() {
+    return this.scoped_client.workflow_webhook_endpoints;
+  }
+
+  get workflow_webhook_deliveries() {
+    return this.scoped_client.workflow_webhook_deliveries;
   }
 
   get workflow_outbox() {

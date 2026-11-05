@@ -5,6 +5,14 @@ import { WorkflowDefinitionV1, findStage } from '@common/workflows/contract';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import {
+  OUTBOX_BACKOFF_MINUTES,
+  OUTBOX_BATCH,
+  OUTBOX_MAX_ATTEMPTS,
+} from './workflow-outbox.dispatcher.constants';
+import { VendixHttpException } from '@common/errors';
+import { WorkflowWebhookDeliveryService } from '../webhooks/workflow-webhook-delivery.service';
+import { WorkflowActionsExecutor } from './workflow-actions.executor';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import { WorkflowEmailService } from './workflow-email.service';
 import { WorkflowEngineService } from './workflow-engine.service';
@@ -13,10 +21,11 @@ import {
   WorkflowNotifyPayload,
 } from './workflow-engine.types';
 
-export const OUTBOX_BATCH = 20;
-export const OUTBOX_MAX_ATTEMPTS = 6;
-/** Delay before attempt 2..6 (minutes): 1m, 5m, 30m, 2h, 12h. */
-export const OUTBOX_BACKOFF_MINUTES = [1, 5, 30, 120, 720];
+export {
+  OUTBOX_BACKOFF_MINUTES,
+  OUTBOX_BATCH,
+  OUTBOX_MAX_ATTEMPTS,
+} from './workflow-outbox.dispatcher.constants';
 /** A `processing` row older than this was abandoned by a dead worker. */
 const STALE_PROCESSING_MINUTES = 10;
 const NOTIFICATION_TYPE = 'workflow_task';
@@ -54,6 +63,8 @@ export class WorkflowOutboxDispatcher {
     private readonly assignment: WorkflowAssignmentService,
     private readonly notifications: NotificationsService,
     private readonly mailer: WorkflowEmailService,
+    private readonly webhooks: WorkflowWebhookDeliveryService,
+    private readonly actions: WorkflowActionsExecutor,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -83,6 +94,7 @@ export class WorkflowOutboxDispatcher {
         summary.done++;
       } catch (e) {
         const outcome = await this.fail(row, e, now);
+        if (outcome === 'dead') await this.afterDead(row, e);
         summary[outcome]++;
       }
     }
@@ -135,6 +147,62 @@ export class WorkflowOutboxDispatcher {
     return dead ? 'dead' : 'retried';
   }
 
+  /** An exhausted `action` row leaves `action_failed` in the instance history. */
+  private async afterDead(row: ClaimedOutboxRow, error: unknown): Promise<void> {
+    if (row.kind !== 'action') return;
+    try {
+      const store = await this.prisma
+        .withoutScope()
+        .stores.findFirst({ where: { id: row.store_id }, select: { organization_id: true } });
+      if (!store) return;
+      await RequestContextService.runIsolated(
+        {
+          store_id: row.store_id,
+          organization_id: store.organization_id,
+          is_super_admin: false,
+          is_owner: false,
+        },
+        () =>
+          this.actions.recordFailure(
+            row,
+            ((error as Error)?.message ?? String(error)).slice(0, 500),
+          ),
+      );
+    } catch (e) {
+      this.logger.error(
+        `Could not record action_failed for outbox ${row.id}: ${(e as Error)?.message}`,
+      );
+    }
+  }
+
+  /**
+   * Business event → instance (actor `system`). A definition that was
+   * deactivated or lost its trigger since the event is a permanent skip, not a
+   * retry loop.
+   */
+  private async startFromEvent(row: ClaimedOutboxRow): Promise<void> {
+    const p = row.payload;
+    try {
+      await this.engine.startSystem({
+        definitionId: Number(p.definition_id),
+        event: String(p.event),
+        eventContext: (p.event_context ?? {}) as Record<string, unknown>,
+        idempotencyKey: String(p.idempotency_key),
+      });
+    } catch (e) {
+      if (
+        e instanceof VendixHttpException &&
+        ['WORKFLOW_NOT_ACTIVE', 'WORKFLOW_DEFINITION_NOT_FOUND'].includes(e.errorCode)
+      ) {
+        this.logger.warn(
+          `start_instance ${row.id} skipped: ${e.errorCode} (definition ${String(p.definition_id)})`,
+        );
+        return;
+      }
+      throw e;
+    }
+  }
+
   /** Runs the effect under the tenant of the row, never under a caller's. */
   private async process(
     row: ClaimedOutboxRow,
@@ -163,6 +231,12 @@ export class WorkflowOutboxDispatcher {
           });
         } else if (row.kind === 'notify') {
           await this.notify(row);
+        } else if (row.kind === 'webhook') {
+          await this.webhooks.deliver(row);
+        } else if (row.kind === 'start_instance') {
+          await this.startFromEvent(row);
+        } else if (row.kind === 'action') {
+          await this.actions.execute(row);
         } else {
           throw new Error(`Unsupported outbox kind: ${row.kind}`);
         }

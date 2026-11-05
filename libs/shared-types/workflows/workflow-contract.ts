@@ -257,7 +257,56 @@ export const WORKFLOW_REQUIREMENT_KINDS = [
   "signature",
 ] as const;
 
-export const WORKFLOW_ACTIONS = ["notify", "set_field"] as const;
+export const WORKFLOW_ACTIONS = [
+  "notify",
+  "set_field",
+  "vendix.purchase_order.create_draft",
+  "vendix.crm_task.create",
+] as const;
+
+/** Actions the engine writes to the outbox instead of running inline. */
+export const WORKFLOW_VENDIX_ACTIONS = [
+  "vendix.purchase_order.create_draft",
+  "vendix.crm_task.create",
+] as const;
+
+export type WorkflowVendixActionName = (typeof WORKFLOW_VENDIX_ACTIONS)[number];
+
+/**
+ * `map` of a Vendix action: a literal (string, number, boolean) or a string
+ * with `{{tokens}}` of the closed catalog (see WORKFLOW_ACTION_TOKEN_PREFIXES);
+ * `assignee` (CRM task only) is an assignee definition.
+ */
+export type WorkflowActionMapValue =
+  | string
+  | number
+  | boolean
+  | WorkflowAssigneeDef;
+
+/**
+ * Keys accepted by each Vendix action. The purchase order is a one-line DRAFT:
+ * the purchase-order service needs a supplier, a receiving location and a line
+ * (product, quantity, unit price), so those are required.
+ */
+export const WORKFLOW_VENDIX_ACTION_MAP_KEYS: Record<
+  WorkflowVendixActionName,
+  { required: readonly string[]; optional: readonly string[] }
+> = {
+  "vendix.purchase_order.create_draft": {
+    required: [
+      "supplier_id",
+      "location_id",
+      "product_id",
+      "quantity",
+      "unit_price",
+    ],
+    optional: ["notes", "expected_date"],
+  },
+  "vendix.crm_task.create": {
+    required: ["title"],
+    optional: ["description", "due_in_days", "assignee"],
+  },
+};
 
 export type WorkflowActionDef =
   | { action: "notify"; to: WorkflowAssigneeDef; message: string }
@@ -265,7 +314,73 @@ export type WorkflowActionDef =
       action: "set_field";
       field: string;
       value: string | number | boolean | null;
+    }
+  | {
+      action: "vendix.purchase_order.create_draft";
+      map: Record<string, WorkflowActionMapValue>;
+    }
+  | {
+      action: "vendix.crm_task.create";
+      map: Record<string, WorkflowActionMapValue>;
     };
+
+/** Tokens usable in action maps: `{{fields.<declared field>}}` plus these. */
+export const WORKFLOW_INSTANCE_TOKENS: readonly string[] = [
+  "instance.reference",
+  "instance.title",
+];
+
+/** Business events that can start a flow (6 of them, all carry a store id). */
+export const WORKFLOW_TRIGGER_EVENTS = [
+  "order.created",
+  "order.paid",
+  "purchase_order.received",
+  "expense.approved",
+  "customer.created",
+  "pqr.created",
+] as const;
+
+export type WorkflowTriggerEvent = (typeof WORKFLOW_TRIGGER_EVENTS)[number];
+
+/**
+ * Closed catalog of `{{event.<path>}}` tokens per event. The listener builds a
+ * flat context with exactly these keys, so nothing else of the payload is ever
+ * reachable from a definition.
+ */
+export const WORKFLOW_EVENT_TOKENS: Record<
+  WorkflowTriggerEvent,
+  readonly string[]
+> = {
+  "order.created": [
+    "order_id",
+    "order_number",
+    "grand_total",
+    "currency",
+    "channel",
+  ],
+  "order.paid": ["order_id", "payment_id", "grand_total", "currency"],
+  "purchase_order.received": [
+    "purchase_order_id",
+    "supplier_id",
+    "total_amount",
+  ],
+  "expense.approved": ["expense_id", "amount", "category_id"],
+  "customer.created": [
+    "customer_id",
+    "first_name",
+    "last_name",
+    "email",
+  ],
+  "pqr.created": [
+    "ticket_id",
+    "ticket_number",
+    "title",
+    "description",
+    "category",
+    "contact_name",
+    "contact_email",
+  ],
+};
 
 export interface WorkflowStageDef {
   key: string;
@@ -288,7 +403,17 @@ export interface WorkflowStageDef {
 export type WorkflowTriggerDef =
   | { kind: "manual" }
   /** Public form by link: `stage`, when present, must be the start stage. */
-  | { kind: "public_form"; stage?: string };
+  | { kind: "public_form"; stage?: string }
+  /**
+   * A business event starts the flow as actor `system`. `map` fills declared
+   * fields from `{{event.<path>}}` tokens (or literals). The start form is not
+   * auto-submitted, so the start stage cannot be assigned to the `initiator`.
+   */
+  | {
+      kind: "event";
+      event: WorkflowTriggerEvent;
+      map?: Record<string, string>;
+    };
 
 export type WorkflowSubjectType =
   | "none"
@@ -367,6 +492,18 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
             properties: {
               kind: { const: "public_form" },
               stage: { $ref: "#/$defs/key" },
+            },
+          },
+          {
+            additionalProperties: false,
+            required: ["kind", "event"],
+            properties: {
+              kind: { const: "event" },
+              event: { enum: [...WORKFLOW_TRIGGER_EVENTS] },
+              map: {
+                type: "object",
+                additionalProperties: { type: "string", maxLength: 500 },
+              },
             },
           },
         ],
@@ -590,6 +727,23 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
             action: { const: "set_field" },
             field: { $ref: "#/$defs/key" },
             value: { type: ["string", "number", "boolean", "null"] },
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["action", "map"],
+          properties: {
+            action: { enum: [...WORKFLOW_VENDIX_ACTIONS] },
+            map: {
+              type: "object",
+              additionalProperties: {
+                oneOf: [
+                  { type: ["string", "number", "boolean"] },
+                  { $ref: "#/$defs/assignee" },
+                ],
+              },
+            },
           },
         },
       ],

@@ -253,3 +253,75 @@ describe('controlador simulate', () => {
     expect(Reflect.getMetadata('method', fn)).toBe(1);
   });
 });
+
+describe('simulateWorkflow · acciones Vendix', () => {
+  const def = (): WorkflowDefinitionV1 =>
+    ({
+      schema: 'vendix.workflow/v1',
+      key: 'oc',
+      name: 'Compra',
+      fields: [
+        { key: 'proveedor', type: 'number', label: 'Proveedor' },
+        { key: 'motivo', type: 'text', label: 'Motivo' },
+      ],
+      stages: [
+        {
+          key: 'solicitud', name: 'Solicitud', type: 'form', start: true,
+          assignee: { kind: 'initiator' }, form: { fields: ['proveedor', 'motivo'] },
+          transitions: [{ on: 'submit', to: 'crear' }],
+        },
+        {
+          key: 'crear', name: 'Crear', type: 'automatic',
+          on_enter: [
+            { action: 'vendix.crm_task.create', map: { title: 'Revisar {{fields.motivo}}', due_in_days: 2, assignee: { kind: 'user', user_id: 3 } } },
+            { action: 'vendix.purchase_order.create_draft', map: { supplier_id: '{{fields.proveedor}}', location_id: 1, product_id: 2, quantity: 3, unit_price: 10, notes: '{{instance.reference}}' } },
+          ],
+          transitions: [{ on: 'auto', to: 'fin' }],
+        },
+        { key: 'fin', name: 'Fin', type: 'end', outcome: 'completed' },
+      ],
+    }) as WorkflowDefinitionV1;
+
+  it('lista las acciones con el map resuelto y no ejecuta nada', () => {
+    const r = simulateWorkflow(def(), {
+      state: { stage_key: 'solicitud', data: {} },
+      outcome: 'submit',
+      values: { proveedor: 7, motivo: 'Tóner' },
+    });
+    expect(r.actions).toEqual([
+      {
+        action: 'vendix.crm_task.create',
+        map_resolved: { title: 'Revisar Tóner', due_in_days: '2', assignee: { kind: 'user', user_id: 3 } },
+      },
+      {
+        action: 'vendix.purchase_order.create_draft',
+        map_resolved: { supplier_id: '7', location_id: '1', product_id: '2', quantity: '3', unit_price: '10', notes: 'SIM-0001' },
+      },
+    ]);
+    expect(r.ended).toEqual({ outcome: 'completed' });
+    expect(r.watermark).toBe('SIMULACIÓN');
+  });
+
+  it('sin acciones devuelve actions: [] (forma estable) y no cambia el resto del resultado', () => {
+    expect(simulateWorkflow(EX).actions).toEqual([]);
+  });
+
+  it('el servicio de simulación valida y expone actions', async () => {
+    const kit = buildWorkflowKit();
+    seedPeople(kit.db);
+    const definitions = { getDraft: jest.fn(), validateDefinition: jest.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }) };
+    const service = new WorkflowSimulatorService(definitions as any);
+    const r = await service.simulate(1, {
+      definition: def() as any,
+      state: { stage_key: 'solicitud', data: {} },
+      outcome: 'submit',
+      values: { proveedor: 7, motivo: 'x' },
+    });
+    expect(r.actions).toHaveLength(2);
+    const invalid = new WorkflowSimulatorService({
+      getDraft: jest.fn(),
+      validateDefinition: jest.fn().mockResolvedValue({ valid: false, errors: [{ code: 'TOKEN_UNKNOWN' }], warnings: [] }),
+    } as any);
+    expect((await invalid.simulate(1, { definition: def() as any })).actions).toEqual([]);
+  });
+});

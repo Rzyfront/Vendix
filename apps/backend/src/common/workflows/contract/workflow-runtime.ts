@@ -381,6 +381,66 @@ export function validateFormValues(
   return { ok: errors.length === 0, errors, values: out };
 }
 
+/** `{{ path }}` (no expressions, no filters, no code). */
+export const WORKFLOW_TOKEN_PATTERN = /\{\{\s*([^{}]*?)\s*\}\}/g;
+
+/** Hard cap of a resolved string, whatever the data holds. */
+export const WORKFLOW_TOKEN_MAX_LENGTH = 4000;
+
+export interface WorkflowTokenContext {
+  /** Instance data, addressed as `{{fields.<key>}}`. */
+  fields?: Record<string, unknown>;
+  /** `{{instance.reference}}` and `{{instance.title}}`. */
+  instance?: { reference?: string | null; title?: string | null };
+  /** Flat event context, addressed as `{{event.<key>}}`. */
+  event?: Record<string, unknown>;
+  /**
+   * When present, only these `event.<key>` / `fields.<key>` paths resolve;
+   * anything else becomes an empty string.
+   */
+  allowed?: readonly string[];
+}
+
+function tokenValue(path: string, ctx: WorkflowTokenContext): string {
+  if (ctx.allowed && !ctx.allowed.includes(path)) return "";
+  const dot = path.indexOf(".");
+  if (dot <= 0) return "";
+  const root = path.slice(0, dot);
+  const key = path.slice(dot + 1);
+  if (key === "" || key.includes(".")) return "";
+  let source: unknown;
+  if (root === "fields") source = ctx.fields;
+  else if (root === "event") source = ctx.event;
+  else if (root === "instance") source = ctx.instance;
+  else return "";
+  if (!isObj(source) || !Object.prototype.hasOwnProperty.call(source, key)) {
+    return "";
+  }
+  const v = source[key];
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  return "";
+}
+
+/**
+ * Replaces `{{root.key}}` tokens in a string. Pure and total: strings only
+ * (the action parses numbers), unknown or unavailable paths become "", values
+ * that are not scalar become "", and the result is capped. Used by the engine
+ * and the simulator.
+ */
+export function resolveTokens(
+  template: string,
+  ctx: WorkflowTokenContext,
+): string {
+  if (typeof template !== "string") return "";
+  const out = template.replace(WORKFLOW_TOKEN_PATTERN, (_m, path: string) =>
+    tokenValue(path, ctx),
+  );
+  return out.length > WORKFLOW_TOKEN_MAX_LENGTH
+    ? out.slice(0, WORKFLOW_TOKEN_MAX_LENGTH)
+    : out;
+}
+
 /** Deterministic JSON: object keys sorted at every level, no whitespace. */
 export function canonicalJson(value: unknown): string {
   const walk = (v: unknown): string => {
@@ -420,6 +480,13 @@ export function normalizeDefinition(
     }
     for (const a of [...(s.on_enter ?? []), ...(s.on_exit ?? [])]) {
       if (a.action === "notify") a.to = normAssignee(a.to);
+      if (
+        a.action === "vendix.crm_task.create" &&
+        isObj(a.map) &&
+        isObj(a.map["assignee"])
+      ) {
+        a.map["assignee"] = normAssignee(a.map["assignee"] as WorkflowAssigneeDef);
+      }
     }
     for (const r of s.requirements ?? []) {
       if (

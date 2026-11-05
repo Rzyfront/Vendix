@@ -5,6 +5,7 @@ import { WorkflowAdvanceService } from '../../domains/store/workflows/engine/wor
 import { WorkflowAssignmentService } from '../../domains/store/workflows/engine/workflow-assignment.service';
 import { WorkflowCompleteService } from '../../domains/store/workflows/engine/workflow-complete.service';
 import { WorkflowEngineService } from '../../domains/store/workflows/engine/workflow-engine.service';
+import { WorkflowWebhookEmitter } from '../../domains/store/workflows/webhooks/workflow-webhook-emitter.service';
 import { WorkflowEventsService } from '../../domains/store/workflows/engine/workflow-events.service';
 import { WorkflowLoaderService } from '../../domains/store/workflows/engine/workflow-loader.service';
 import { WorkflowReferenceService } from '../../domains/store/workflows/engine/workflow-reference.service';
@@ -41,7 +42,7 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
   const prisma = db.asStorePrisma({ txScoped: !opts.unscopedTx });
   const groups = new WorkGroupsService(prisma);
   const loader = new WorkflowLoaderService();
-  const events = new WorkflowEventsService();
+  const events = new WorkflowEventsService(new WorkflowWebhookEmitter());
   const references = new WorkflowReferenceService();
   const assignment = new WorkflowAssignmentService(groups);
   const stages = new WorkflowStageService(assignment, events);

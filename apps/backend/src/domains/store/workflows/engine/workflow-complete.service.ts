@@ -227,6 +227,11 @@ export class WorkflowCompleteService {
         if (done.count === 0) {
           throw new VendixHttpException(ErrorCodes.WORKFLOW_TASK_CLOSED);
         }
+        await this.events.emitWebhook(tx, instance, 'workflow.task.completed', {
+          task_id: task.id,
+          stage_key: stage.key,
+          outcome: input.outcome,
+        });
         if (quorum && !votesApprove) {
           // The approving vote was recorded above, under the instance lock.
           await tx.workflow_task_votes.create({
