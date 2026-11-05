@@ -1906,7 +1906,9 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
         $queryRaw: jest.fn().mockImplementation(() => Promise.resolve([{ id: 0, state: 'draft' }])),
         orders: {
           findFirst: jest.fn(({ where }: any) => Promise.resolve(where.id === 150
-            ? { remaining_balance: remaining.rental, customer_id: 5, grand_total: 100000, tip_amount: 0, currency: 'COP' }
+            // The rental order's stored remaining_balance is not trusted (OrdersService.create leaves it at 0):
+            // what is owed is grand_total minus its settled payments.
+            ? { remaining_balance: remaining.rental, customer_id: 5, grand_total: 100000, tip_amount: 0, currency: 'COP', payments: remaining.rental < 100000 ? [{ amount: 100000 - remaining.rental, state: 'succeeded' }] : [] }
             : { remaining_balance: remaining.svc, customer_id: 5, grand_total: 85000, tip_amount: 0, currency: 'COP' })),
           findUnique: jest.fn().mockResolvedValue({ total_paid: 0, discount_amount: 0 }),
           update: jest.fn().mockResolvedValue({ store_id: 1, service_session_id: null }),
@@ -1930,6 +1932,22 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
       await expect(service.transition(21, { action: 'close' } as any)).rejects.toMatchObject({ errorCode: 'STATION_006' });
       expect(tx.service_sessions.updateMany).not.toHaveBeenCalled();
       // `at_start`: the consumption order never receives the station rental line at close.
+      expect(tx.order_items.create).not.toHaveBeenCalled();
+    });
+
+    it('N2: una orden de alquiler sin pagos bloquea el cierre aunque su remaining_balance guardado sea 0', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue(baseSession as any);
+      const tx = wire({ svc: 0, rental: 100000 });
+      const base = tx.orders.findFirst.getMockImplementation();
+      tx.orders.findFirst.mockImplementation((args: any) => base!(args).then((row: object) => (args.where.id === 150 ? { ...row, remaining_balance: 0 } : row)));
+      await expect(service.transition(21, { action: 'close' } as any)).rejects.toMatchObject({ errorCode: 'STATION_006' });
+      expect(tx.service_sessions.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('N1: at_end con el alquiler en la orden de la reserva no vuelve a cargar el alquiler en la cuenta de consumo', async () => {
+      jest.spyOn(service, 'findOne').mockResolvedValue({ ...baseSession, rental_charge_timing: 'at_end', rental_billing_mode: 'elapsed' } as any);
+      const tx = wire({ svc: 0, rental: 0 });
+      await service.transition(21, { action: 'close' } as any);
       expect(tx.order_items.create).not.toHaveBeenCalled();
     });
 
@@ -1961,7 +1979,7 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
         tx.$queryRaw.mockImplementation(() => Promise.resolve([{ id: 0, state: rental.state }]));
         tx.orders.updateMany = jest.fn().mockResolvedValue({ count: 1 });
         const base = tx.orders.findFirst.getMockImplementation();
-        tx.orders.findFirst.mockImplementation((args: any) => base!(args).then((row: object) => ({ ...row, ...(args.where.id === 150 ? { total_paid: rental.total_paid } : {}) })));
+        tx.orders.findFirst.mockImplementation((args: any) => base!(args).then((row: object) => ({ ...row, ...(args.where.id === 150 ? { total_paid: rental.total_paid, payments: rental.total_paid > 0 ? [{ amount: rental.total_paid, state: 'succeeded' }] : [] } : {}) })));
         return tx;
       };
       const rentalCancelCalls = (tx: any) => tx.orders.updateMany.mock.calls.filter((c: any) => c[0].where.id === 150);
@@ -2012,7 +2030,15 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
         });
         jest.spyOn(service as any, 'buildIntakeSummary').mockResolvedValue(null);
       });
-      const orderRow = (id: number, total: number, paid: number, remaining: number) => ({ id, state: 'draft', grand_total: total, total_paid: paid, remaining_balance: remaining, tip_amount: 0, customer_id: 5, users: null, order_items: [] });
+      const orderRow = (id: number, total: number, paid: number, remaining: number) => ({ id, state: 'draft', grand_total: total, total_paid: paid, remaining_balance: remaining, tip_amount: 0, customer_id: 5, users: null, order_items: [], payments: paid > 0 ? [{ amount: paid, state: 'succeeded' }] : [] });
+
+      it('N2: una orden de alquiler sin pagos se muestra por cobrar aunque su remaining_balance guardado sea 0', async () => {
+        prisma.service_sessions.findFirst.mockResolvedValue({ ...baseSession, store_id: 1 });
+        prisma.orders.findFirst.mockImplementation(({ where }: any) => Promise.resolve(where.id === 150 ? orderRow(150, 100000, 0, 0) : orderRow(149, 85000, 0, 85000)));
+        const found: any = await service.findOne(21);
+        expect(found.rental).toEqual({ order_id: 150, total: 100000, paid: 0, remaining: 100000 });
+        expect(found.to_collect).toBe(185000);
+      });
 
       it('devuelve rental, consumo y por cobrar: "Alquiler $100.000 (pagado) · Consumos $85.000 · Por cobrar $85.000"', async () => {
         prisma.service_sessions.findFirst.mockResolvedValue({ ...baseSession, store_id: 1 });

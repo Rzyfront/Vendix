@@ -321,6 +321,21 @@ describe('RentalPrepayService', () => {
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
+    it('N3: una reserva en no asistencia no recibe pago ni se factura: se avisa al admin', async () => {
+      const { service, tx, orderFlow } = build({ booking: { status: 'no_show' }, order: { grand_total: '75000' } });
+      await service.settlePaidRequest(paidEvent());
+      expect(tx.payments.create).not.toHaveBeenCalled();
+      expect(orderFlow.invoicePaidBookingRentalOrder).not.toHaveBeenCalled();
+    });
+
+    it('N3: una orden de alquiler cancelada no recibe pago ni se factura', async () => {
+      const { service, tx, orderFlow } = build({ booking: { status: 'confirmed' }, order: { grand_total: '75000', state: 'cancelled' } });
+      await service.settlePaidRequest(paidEvent());
+      expect(tx.payments.create).not.toHaveBeenCalled();
+      expect(tx.orders.update).not.toHaveBeenCalled();
+      expect(orderFlow.invoicePaidBookingRentalOrder).not.toHaveBeenCalled();
+    });
+
     it('una reserva cancelada no recibe pago: se avisa y no se toca la orden', async () => {
       const { service, tx } = build({ booking: { status: 'cancelled' } });
       await service.settlePaidRequest(paidEvent());

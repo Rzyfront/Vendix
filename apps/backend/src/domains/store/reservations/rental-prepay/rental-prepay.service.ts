@@ -283,11 +283,14 @@ export class RentalPrepayService {
       },
     });
     if (!booking) return;
-    if (booking.status === 'cancelled') {
+    if (booking.status === 'cancelled' || booking.status === 'no_show') {
+      const when = booking.status === 'no_show' ? 'después de marcarse como no asistencia' : 'después de cancelarse';
       await this.alertAdmin(
         storeId,
-        'Cobro para reservar recibido en una reserva cancelada',
-        `El cliente pagó el cobro de la reserva ${booking.booking_number} después de cancelarse. Devuélvelo o reagenda.`,
+        booking.status === 'no_show'
+          ? 'Cobro para reservar recibido en una reserva sin asistencia'
+          : 'Cobro para reservar recibido en una reserva cancelada',
+        `El cliente pagó el cobro de la reserva ${booking.booking_number} ${when}. Devuélvelo o reagenda.`,
         { booking_id: bookingId },
       );
       return;
@@ -306,6 +309,8 @@ export class RentalPrepayService {
         include: { payments: { select: { amount: true, state: true } } },
       });
       if (!order) return null;
+      // A cancelled rental order takes no payment and is never invoiced (the session was cancelled under it).
+      if (order.state === 'cancelled') return { cancelledOrder: true as const };
       const remainingCents = toCents(order.grand_total) - toCents(getSettledOrderAmount(order));
       const nextRemaining = Math.max(0, remainingCents - toCents(amount));
       const now = new Date();
@@ -358,9 +363,18 @@ export class RentalPrepayService {
         });
         slotConfirmed = true;
       }
-      return { order, payment, fullyPaid: nextRemaining === 0, slotConfirmed };
+      return { cancelledOrder: false as const, order, payment, fullyPaid: nextRemaining === 0, slotConfirmed };
     });
     if (!outcome) return;
+    if (outcome.cancelledOrder) {
+      await this.alertAdmin(
+        storeId,
+        'Cobro para reservar recibido en una orden cancelada',
+        `El cliente pagó el cobro de la reserva ${booking.booking_number} y su orden ya estaba cancelada. No se registró el pago: devuélvelo o reagenda.`,
+        { booking_id: bookingId, order_id: orderId },
+      );
+      return;
+    }
 
     await this.emitPaymentReceived(outcome.order, outcome.payment.id, amount, method);
     if (outcome.fullyPaid) await this.invoiceRentalOrder(orderId);

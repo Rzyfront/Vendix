@@ -33,6 +33,7 @@ import {
 import { ServiceDepositsService } from '../service-deposits/service-deposits.service';
 import type { ServiceDepositPaymentReceived, ServiceDepositReceivedEvent, ServiceDepositRefundedEvent } from '../service-deposits/service-deposits.service';
 import { centsToAmount, toCents } from '../service-deposits/utils/service-deposit-math';
+import { getSettledOrderAmount } from '../payments/services/payment-validator.service';
 import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import { buildPaymentReceivedEvents } from '../payments/utils/payment-received-event.util';
 import { buildOrderSaleTaxPayload } from '../payments/utils/order-sale-tax-payload.util';
@@ -60,6 +61,17 @@ const ACTIVE_ALLOCATIONS = ACTIVE_ALLOCATION_STATES;
 const ACTIVE_SESSION_STATUSES = ['open', 'paused'];
 /** Rental-order states that can still be cancelled with the session (nothing shipped, nothing finished). */
 const OPEN_RENTAL_ORDER_STATES = ['draft', 'created', 'pending_payment'] as const;
+
+/**
+ * Paid and owed amounts of a separate rental order, from its settled payment rows. Its stored
+ * `remaining_balance`/`total_paid` are not maintained for booking orders (`OrdersService.create`
+ * leaves the schema default 0), so an unpaid booking would otherwise read as settled.
+ */
+function rentalOrderBalance(row: { state: string; grand_total: Prisma.Decimal | number | string | null; payments: ReadonlyArray<{ state: string; amount: Prisma.Decimal | number | string }> }) {
+  const paidCents = toCents(getSettledOrderAmount(row));
+  const owedCents = row.state === 'cancelled' ? 0 : Math.max(0, toCents(row.grand_total) - paidCents);
+  return { paidCents, owedCents };
+}
 const ITEM_SESSION_STATUSES = ['open', 'in_progress', 'paused'];
 /** Reintentos de un walk-in sin estación cuando otra atención le gana la estación elegida. */
 const MAX_WALK_IN_PICK_RETRIES = 3;
@@ -1140,9 +1152,11 @@ export class ServiceSessionsService {
           if (lockedRental.state !== 'cancelled') {
             const rentalTotals = await tx.orders.findFirst({
               where: { id: rentalOrderId, store_id: storeId },
-              select: { remaining_balance: true, customer_id: true },
+              select: { customer_id: true, grand_total: true, payments: { select: { amount: true, state: true } } },
             });
-            remaining += Number(rentalTotals?.remaining_balance ?? 0);
+            if (rentalTotals) {
+              remaining += centsToAmount(rentalOrderBalance({ ...rentalTotals, state: lockedRental.state }).owedCents);
+            }
             customerId = customerId ?? rentalTotals?.customer_id ?? null;
           }
         }
@@ -1185,8 +1199,12 @@ export class ServiceSessionsService {
         // still open; a rental with a payment stays as it is (the refund/credit flows own that money).
         if (dto.action !== 'close' && rentalOrderId) {
           const rental = await lockOrderLifecycle(tx, rentalOrderId, storeId);
-          const rentalTotals = await tx.orders.findFirst({ where: { id: rentalOrderId, store_id: storeId }, select: { total_paid: true } });
-          if ((OPEN_RENTAL_ORDER_STATES as readonly string[]).includes(rental.state) && toCents(rentalTotals?.total_paid) === 0) {
+          const rentalTotals = await tx.orders.findFirst({
+            where: { id: rentalOrderId, store_id: storeId },
+            select: { grand_total: true, payments: { select: { amount: true, state: true } } },
+          });
+          const rentalPaidCents = rentalTotals ? rentalOrderBalance({ ...rentalTotals, state: rental.state }).paidCents : 0;
+          if ((OPEN_RENTAL_ORDER_STATES as readonly string[]).includes(rental.state) && rentalPaidCents === 0) {
             await this.stockLevelManager.releaseReservationsByReference('order', rentalOrderId, 'cancelled', tx);
             await tx.orders.updateMany({ where: { id: rentalOrderId, store_id: storeId, state: { in: [...OPEN_RENTAL_ORDER_STATES] } }, data: { state: 'cancelled', updated_at: new Date() } });
           }
@@ -1236,13 +1254,15 @@ export class ServiceSessionsService {
   private async addRentalLine(
     tx: Prisma.TransactionClient,
     storeId: number,
-    session: { id: number; station_id: number; opened_at: Date } & SessionRentalColumns,
+    session: { id: number; station_id: number; opened_at: Date; rental_order_id: number | null } & SessionRentalColumns,
     orderId: number,
   ) {
     const now = new Date();
     const snapshot = readSessionRentalSnapshot(session);
     // `at_start`: the rental lives on its own order from the opening; the consumption order never gets it.
-    if (snapshot?.charge_timing === 'at_start') return;
+    // A rental held on its own order (`rental_order_id`: `at_start`, or a booking order that already carries the
+    // rental line) is never charged again on the consumption order, whatever the timing.
+    if (snapshot?.charge_timing === 'at_start' || session.rental_order_id) return;
     let plannedMinutes: number | null = null;
     let tz: string | null = null;
     if (snapshot) {
@@ -1507,15 +1527,16 @@ export class ServiceSessionsService {
     const rentalOrder = session.rental_order_id
       ? await this.prisma.orders.findFirst({
           where: { id: session.rental_order_id, store_id: storeId },
-          select: { id: true, state: true, grand_total: true, total_paid: true, remaining_balance: true },
+          select: { id: true, state: true, grand_total: true, payments: { select: { amount: true, state: true } } },
         })
       : null;
-    const rental = rentalOrder
+    const rentalBalance = rentalOrder ? rentalOrderBalance(rentalOrder) : null;
+    const rental = rentalOrder && rentalBalance
       ? {
           order_id: rentalOrder.id,
           total: Number(rentalOrder.grand_total),
-          paid: Number(rentalOrder.total_paid),
-          remaining: rentalOrder.state === 'cancelled' ? 0 : Number(rentalOrder.remaining_balance),
+          paid: centsToAmount(rentalBalance.paidCents),
+          remaining: centsToAmount(rentalBalance.owedCents),
         }
       : null;
     const consumption = order
@@ -2161,7 +2182,7 @@ export class ServiceSessionsService {
     const session = await this.prisma.service_sessions.findFirst({
       where: { id: sessionId, store_id: storeId },
       select: {
-        id: true, status: true, order_id: true, booking_id: true, station_id: true, opened_at: true, deposit_policy: true, deposit_exhausted_policy: true, leftover_policy: true, settled_at: true,
+        id: true, status: true, order_id: true, rental_order_id: true, booking_id: true, station_id: true, opened_at: true, deposit_policy: true, deposit_exhausted_policy: true, leftover_policy: true, settled_at: true,
         rental_billing_mode: true, rental_charge_timing: true, rental_block_minutes: true, rental_block_price: true, rate_windows_snapshot: true,
       },
     });
@@ -2184,7 +2205,7 @@ export class ServiceSessionsService {
   private async prepareSettlementTx(
     tx: Prisma.TransactionClient,
     storeId: number,
-    session: { id: number; booking_id: number | null; station_id: number; opened_at: Date; order_id: number | null; leftover_policy: string | null } & SessionRentalColumns,
+    session: { id: number; booking_id: number | null; station_id: number; opened_at: Date; order_id: number | null; rental_order_id: number | null; leftover_policy: string | null } & SessionRentalColumns,
   ) {
     const orderId = session.order_id!;
     const locked = await lockOrderLifecycle(tx, orderId, storeId);
