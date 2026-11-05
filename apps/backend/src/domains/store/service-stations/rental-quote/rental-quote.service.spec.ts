@@ -69,6 +69,12 @@ describe('RentalQuoteService', () => {
     expect(q.cents).toBe(30000000);
   });
 
+  it('booked minutes win over the catalog duration (a free-duration station books any multiple of the block)', async () => {
+    prisma.product_variants.findFirst.mockResolvedValue({ id: 2, service_duration_minutes: 60 });
+    const q = await run(() => service.quote({ productId: 1, variantId: 2, stationId: 5, startAt, minutes: 180 }));
+    expect(q).toMatchObject({ blocks: 3, cents: 30000000, amount: 300000 });
+  });
+
   it('prices the blocks outside windows at the station base price', async () => {
     const q = await run(() => service.quote({ productId: 1, stationId: 5, startAt: new Date('2026-11-07T10:00:00-05:00') }));
     expect(q.cents).toBe(16000000);

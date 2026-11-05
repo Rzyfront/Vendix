@@ -10,7 +10,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { booking_status_enum, booking_mode_enum, Prisma } from '@prisma/client';
-import { bookingEndDateFor } from '@common/utils/schedule-window.util';
+import { bookingEndDateFor, bookingMinuteSpan } from '@common/utils/schedule-window.util';
 import {
   CreateBookingDto,
   RescheduleBookingDto,
@@ -496,6 +496,9 @@ export class ReservationsService {
               variantId: dto.product_variant_id,
               isOpenEnded,
               allocated,
+              date: dto.date,
+              startTime: dto.start_time,
+              endTime: isOpenEnded ? undefined : endTime,
             });
             // The deposit rules need the station the slot landed on, so they run after allocating.
             if (this.reservationDeposits && allocated?.station_id != null) {
@@ -662,16 +665,25 @@ export class ReservationsService {
       productId: number;
       variantId?: number | null;
       isOpenEnded?: boolean;
-      allocated: { station_id?: number | null; start_at?: Date } | null | undefined;
+      allocated: { station_id?: number | null; start_at?: Date; end_time?: string | null; end_date?: string | null } | null | undefined;
+      date: string;
+      startTime: string;
+      endTime?: string;
     },
   ): Promise<RentalQuote | null> {
     const { allocated } = args;
     if (!this.rentalQuote || args.isOpenEnded || allocated?.station_id == null || !allocated.start_at) return null;
+    // The booked span, overnight included: a free-duration station is priced by what was booked.
+    const endTime = allocated.end_time ?? args.endTime;
+    const span = endTime
+      ? bookingMinuteSpan({ date: args.date, end_date: allocated.end_date ?? null, start_time: args.startTime, end_time: endTime }, args.date)
+      : null;
     const quote = await this.rentalQuote.quote({
       productId: args.productId,
       variantId: args.variantId ?? null,
       stationId: allocated.station_id,
       startAt: allocated.start_at,
+      minutes: span ? span.endMin - span.startMin : null,
     });
     await tx.bookings.update({
       where: { id: args.bookingId },
@@ -823,6 +835,9 @@ export class ReservationsService {
           productId: dto.product_id,
           variantId: dto.product_variant_id,
           allocated,
+          date: dto.date,
+          startTime: dto.start_time,
+          endTime: dto.end_time,
         });
         // One charge online (A17): the station's "cobro para reservar" wins; without it the deposit applies (A12).
         if (this.rentalPrepay && allocated?.station_id != null) {

@@ -58,7 +58,11 @@ export class RentalQuoteService {
     });
   }
 
-  async quote(input: { productId: number; variantId?: number | null; stationId: number; startAt: Date }): Promise<RentalQuote> {
+  /**
+   * `minutes`: the booked duration when there is one. It wins over the catalog duration
+   * because a free-duration station books any multiple of the block (S1).
+   */
+  async quote(input: { productId: number; variantId?: number | null; stationId: number; startAt: Date; minutes?: number | null }): Promise<RentalQuote> {
     const product = await this.prisma.products.findFirst({
       where: { id: input.productId, store_id: this.storeId },
     });
@@ -70,7 +74,7 @@ export class RentalQuoteService {
       });
       if (!variant) throw new NotFoundException('Variante no encontrada');
     }
-    const minutes: number | null = variant?.service_duration_minutes ?? product.service_duration_minutes ?? null;
+    const minutes: number | null = input.minutes ?? variant?.service_duration_minutes ?? product.service_duration_minutes ?? null;
 
     if (product.rental_pricing_mode !== 'station_rate') {
       // fixed_price (A15): the catalog price is the rental; windows never apply.

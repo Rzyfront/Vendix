@@ -1020,13 +1020,27 @@ describe('ReservationsService — station deposits', () => {
       const rentalQuote = { quote: jest.fn().mockResolvedValue(rate) };
       const { service, prisma, ordersService } = build({ rentalQuote, allocated });
       await service.create(createDto);
-      expect(rentalQuote.quote).toHaveBeenCalledWith({ productId: 100, variantId: null, stationId: 5, startAt });
+      expect(rentalQuote.quote).toHaveBeenCalledWith({ productId: 100, variantId: null, stationId: 5, startAt, minutes: 60 });
       expect(prisma.bookings.update).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: 77 }, data: expect.objectContaining({ quoted_amount: 56000 }) }),
       );
       const items = ordersService.create.mock.calls[0][0].items;
       expect(items[0]).toEqual(expect.objectContaining({ unit_price: 56000, total_price: 56000 }));
       expect(ordersService.create.mock.calls[0][0].total_amount).toBe(56000);
+    });
+
+    it('create: a free-duration booking is quoted by the booked minutes, not the catalog duration', async () => {
+      const rentalQuote = { quote: jest.fn().mockResolvedValue(rate) };
+      const { service } = build({ rentalQuote, allocated: { ...allocated, end_time: '13:00', end_date: null } });
+      await service.create({ ...createDto, end_time: '13:00' });
+      expect(rentalQuote.quote).toHaveBeenCalledWith(expect.objectContaining({ stationId: 5, startAt, minutes: 180 }));
+    });
+
+    it('create: an overnight booking counts the minutes past midnight', async () => {
+      const rentalQuote = { quote: jest.fn().mockResolvedValue(rate) };
+      const { service } = build({ rentalQuote, allocated: { ...allocated, end_time: '01:00', end_date: '2099-09-02' } });
+      await service.create({ ...createDto, start_time: '22:00', end_time: '01:00' });
+      expect(rentalQuote.quote).toHaveBeenCalledWith(expect.objectContaining({ minutes: 180 }));
     });
 
     it('create: un producto de precio fijo guarda el precio de catálogo como quoted_amount y no cambia la línea', async () => {
