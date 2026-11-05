@@ -122,7 +122,7 @@ export class WorkflowOutboxDispatcher {
   private async buryExhaustedStale(now: Date): Promise<number> {
     const cutoff = new Date(now.getTime() - STALE_PROCESSING_MINUTES * 60_000);
     const where = {
-      status: 'processing',
+      status: 'processing' as const,
       available_at: { lte: cutoff },
       attempts: { gte: OUTBOX_MAX_ATTEMPTS },
     };

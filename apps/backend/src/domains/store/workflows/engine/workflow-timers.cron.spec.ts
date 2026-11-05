@@ -163,7 +163,8 @@ describe('WorkflowTimersCron', () => {
         row.stage_due_at = new Date(now.getTime() - 3 * HOUR); // vencen antes: encabezan el lote
       }
       await kit.engine.start({ definitionKey: 'slow' });
-      const target = kit.db.table('workflow_instances').at(-1)!;
+      const all = kit.db.table('workflow_instances');
+      const target = all[all.length - 1];
       target.stage_due_at = new Date(now.getTime() - HOUR);
       kit.db.table('workflow_outbox').length = 0;
 
