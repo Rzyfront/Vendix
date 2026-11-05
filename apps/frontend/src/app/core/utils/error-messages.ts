@@ -569,6 +569,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   STATION_009: 'La duración o el horario elegido no es válido para esta estación (o ya pasó). Revisa la hora de inicio y de fin.',
   STATION_014: 'Para usar el QR público, configura y activa un dominio en Configuración > Dominios.',
   STATION_016: 'Ese horario está fuera del horario de atención. Elige un horario dentro de la jornada de la estación.',
+  STATION_017: 'La duración del servicio debe ser múltiplo del bloque de reserva de la estación.',
+  STATION_018: 'La estación asignada a este profesional no puede atender esta reserva. Elige otra estación.',
 
   // Customer History
   CUST_HISTORY_001: 'Historial del cliente no encontrado.',
