@@ -68,6 +68,7 @@ import {
 // tolera EXACTAMENTE 1 centavo; la traducción fiel es
 // `differsByAtLeastCents(a, b, 2)`, no el umbral por defecto (1).
 import { differsByAtLeastCents } from '@money-kernel/money-compare';
+import { formatDurationUnit } from '../../../../../shared/utils/duration-unit.util';
 import { StoreSeoService, productPageSeo } from '../../services/store-seo';
 
 @Component({
@@ -215,7 +216,7 @@ import { StoreSeoService, productPageSeo } from '../../services/store-seo';
                     @if (p.service_duration_minutes) {
                       <div class="service-detail-item">
                         <app-icon name="clock" [size]="14" />
-                        <span>{{ p.service_duration_minutes }} minutos</span>
+                        <span>{{ durationLabel(p) }}</span>
                       </div>
                     }
                     @if (p.service_modality) {
@@ -1868,6 +1869,11 @@ import { StoreSeoService, productPageSeo } from '../../services/store-seo';
   ],
 })
 export class ProductDetailComponent implements OnInit {
+  /** Service duration in its unit: "45 min", "4 horas", "1 día". */
+  protected durationLabel(p: { service_duration_minutes?: number | null; service_duration_unit?: string | null }): string | null {
+    return formatDurationUnit(p.service_duration_minutes, p.service_duration_unit);
+  }
+
   // SEO de la tienda: título, canonical único (/products/<slug>), og y JSON-LD
   // Product con su oferta real. Reemplaza los metadatos de Vendix del index.html.
   private readonly storeSeo = inject(StoreSeoService);

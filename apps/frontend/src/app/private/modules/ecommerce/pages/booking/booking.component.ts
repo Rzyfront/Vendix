@@ -7,7 +7,9 @@ import {
   inject,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { EMPTY, of } from 'rxjs';
+import { catchError, distinctUntilChanged, switchMap } from 'rxjs/operators';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -15,6 +17,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import {
   EcommerceBookingService,
   AvailabilitySlot,
+  RentalQuote,
 } from '../../services/ecommerce-booking.service';
 import { CatalogService, ProductDetail, ProductVariantDetail } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
@@ -26,6 +29,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { toLocalDateString } from '../../../../../shared/utils/date.util';
+import { formatDurationUnit } from '../../../../../shared/utils/duration-unit.util';
 
 import { BookingCalendarComponent } from '../../components/booking/booking-calendar/booking-calendar.component';
 import {
@@ -70,6 +74,46 @@ export class BookingComponent implements OnInit {
 
   private destroyRef = inject(DestroyRef);
 
+  constructor() {
+    // Quote once station, date and start time are chosen; switchMap drops stale calls.
+    toObservable(
+      computed(() => {
+        const slot = this.selectedSlot();
+        const date = this.selectedDate();
+        const stationId = slot?.station_id;
+        if (!this.isStationRate() || !slot || !date || !stationId) return null;
+        const variantId = this.selectedVariantId();
+        return `${this.productId()}|${stationId}|${date.split('T')[0]}|${slot.start_time}|${variantId ?? ''}`;
+      }),
+    )
+      .pipe(
+        distinctUntilChanged(),
+        switchMap((key) => {
+          this.rentalQuote.set(null);
+          if (!key) {
+            this.rentalQuoting.set(false);
+            return EMPTY;
+          }
+          const [productId, stationId, date, startTime, variantId] = key.split('|');
+          this.rentalQuoting.set(true);
+          return this.bookingService
+            .getRentalQuote(
+              Number(productId),
+              Number(stationId),
+              date,
+              startTime,
+              variantId ? Number(variantId) : undefined,
+            )
+            .pipe(catchError(() => of(null)));
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((quote) => {
+        this.rentalQuote.set(quote);
+        this.rentalQuoting.set(false);
+      });
+  }
+
   // State
   currentStep = signal(0);
   loading = signal(true);
@@ -89,6 +133,41 @@ export class BookingComponent implements OnInit {
     return this.variants().find((v) => v.id === id) ?? null;
   });
 
+  /** Minutes and unit of the chosen option; a variant overrides the product, a null unit reads as minutes. */
+  private readonly durationSource = computed(() => {
+    const variant = this.selectedVariant();
+    const product = this.product();
+    if (variant?.service_duration_minutes) {
+      return { minutes: variant.service_duration_minutes, unit: variant.service_duration_unit ?? null };
+    }
+    return {
+      minutes: product?.service_duration_minutes ?? null,
+      unit: product?.service_duration_unit ?? null,
+    };
+  });
+  readonly durationLabel = computed(() => {
+    const { minutes, unit } = this.durationSource();
+    return formatDurationUnit(minutes, unit);
+  });
+
+  readonly isStationRate = computed(() => this.product()?.rental_pricing_mode === 'station_rate');
+
+  /** Variant chips: "4 horas · $120.000". A station-rate price depends on the schedule, so it is not shown here. */
+  readonly variantChips = computed(() =>
+    this.variants().map((variant) => ({
+      variant,
+      label:
+        formatDurationUnit(variant.service_duration_minutes, variant.service_duration_unit) ||
+        variant.name ||
+        variant.sku,
+      price: !this.isStationRate() && variant.price_override ? variant.final_price : null,
+    })),
+  );
+
+  // Public quote for station-rate rentals (needs station, date and start time).
+  readonly rentalQuote = signal<RentalQuote | null>(null);
+  readonly rentalQuoting = signal(false);
+
   // Step 1 — Date
   selectedDate = signal<string | null>(null);
 
@@ -104,7 +183,7 @@ export class BookingComponent implements OnInit {
   freeBookingTime = signal<string | null>(null);
   freeBookingEndTime = signal<string | null>(null);
   readonly freeBookingSlots = computed(() => {
-    const duration = this.product()?.service_duration_minutes || 60;
+    const duration = this.durationSource().minutes || 60;
     const slots: { time: string; endTime: string }[] = [];
     for (let mins = 480; mins + duration <= 1080; mins += duration) {
       const h = Math.floor(mins / 60);

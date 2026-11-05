@@ -76,11 +76,17 @@
           <h1>{{ product()?.name || "Reservar" }}</h1>
           @if (product(); as p) {
             <p class="service-meta">
-              {{ p.final_price | currency }}
-              @if (p.service_duration_minutes) {
-                <span class="duration"
-                  >{{ p.service_duration_minutes }} min</span
-                >
+              @if (isStationRate()) {
+                @if (rentalQuote(); as quote) {
+                  {{ quote.amount | currency }}
+                } @else {
+                  Precio según horario
+                }
+              } @else {
+                {{ p.final_price | currency }}
+              }
+              @if (durationLabel(); as duration) {
+                <span class="duration">{{ duration }}</span>
               }
             </p>
           }
@@ -103,15 +109,15 @@
             <div class="variant-section">
               <h2 class="step-title">Selecciona una opción</h2>
               <div class="variant-list">
-                @for (variant of variants(); track variant.id) {
+                @for (chip of variantChips(); track chip.variant.id) {
                   <button
                     class="variant-btn"
-                    [class.selected]="selectedVariantId() === variant.id"
-                    (click)="onVariantSelected(variant)"
+                    [class.selected]="selectedVariantId() === chip.variant.id"
+                    (click)="onVariantSelected(chip.variant)"
                   >
-                    <span class="variant-name">{{ variant.name || variant.sku }}</span>
-                    @if (variant.price_override) {
-                      <span class="variant-price">{{ variant.final_price | currency }}</span>
+                    <span class="variant-name">{{ chip.label }}</span>
+                    @if (chip.price !== null) {
+                      <span class="variant-price">{{ chip.price | currency }}</span>
                     }
                   </button>
                 }
@@ -224,6 +230,26 @@
               <div class="summary-row">
                 <span class="summary-label">Opción</span>
                 <span class="summary-value">{{ variant.name || variant.sku }}</span>
+              </div>
+            }
+            @if (durationLabel(); as duration) {
+              <div class="summary-row">
+                <span class="summary-label">Duración</span>
+                <span class="summary-value">{{ duration }}</span>
+              </div>
+            }
+            @if (isStationRate()) {
+              <div class="summary-row">
+                <span class="summary-label">Precio</span>
+                <span class="summary-value">
+                  @if (rentalQuote(); as quote) {
+                    {{ quote.amount | currency }}
+                  } @else if (rentalQuoting()) {
+                    Calculando…
+                  } @else {
+                    Precio según horario
+                  }
+                </span>
               </div>
             }
             @if (selectedProvider(); as provider) {

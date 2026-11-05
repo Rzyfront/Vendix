@@ -18,6 +18,7 @@ import {
   CurrencyFormatService,
 } from '../../../../../shared/pipes/currency';
 import { CartService } from '../../services/cart.service';
+import { formatDurationUnit } from '../../../../../shared/utils/duration-unit.util';
 
 /**
  * Shape of `cart.per_product_tier_ladder` as emitted by the backend from
@@ -133,7 +134,7 @@ type CartWithTierLadder = Cart & {
               }
               @if (serviceDuration()) {
                 <app-badge variant="service" size="xs">
-                  {{ serviceDuration() }} min
+                  {{ serviceDuration() }}
                 </app-badge>
               }
               @if (item().variant?.name) {
@@ -524,11 +525,11 @@ export class CartItemCardComponent {
     return product.product_type === 'service' || product.requires_booking === true;
   });
 
-  /** Service duration in minutes, only when this is a service line. */
-  readonly serviceDuration = computed<number | null>(() => {
+  /** Service duration in its unit ("45 min", "4 horas"), only when this is a service line. */
+  readonly serviceDuration = computed<string | null>(() => {
     if (!this.isService()) return null;
-    const minutes = this.item().product.service_duration_minutes;
-    return typeof minutes === 'number' && minutes > 0 ? minutes : null;
+    const product = this.item().product;
+    return formatDurationUnit(product.service_duration_minutes, product.service_duration_unit);
   });
 
   /**
