@@ -531,6 +531,29 @@ describe('AvailabilityService — horarios nocturnos (S21)', () => {
       expect(free.find((s) => s.start_time === '23:00')).toBeUndefined();
     });
 
+    it('opens a weekend cava when the store hours cover it, even with the Mon-Fri working_days default', async () => {
+      const { service, prisma } = buildService({
+        product: stationProduct,
+        storeHours: [{ day_of_week: 6, start_time: '18:00', end_time: '03:00' }],
+        stations: [station],
+        stationSchedules: [{ station_id: 3, weekday: 6, start_time: '20:00', end_time: '03:00', is_active: true }],
+      });
+      prisma.store_settings.findUnique.mockResolvedValue({ settings: { availability: { working_days: [1, 2, 3, 4, 5] } } });
+      const slots = await service.getAvailableSlots(10, SATURDAY, SATURDAY);
+      expect(slots.find((s) => s.start_time === '22:00')).toMatchObject({ station_id: 3, date: SATURDAY, total_available: 1 });
+    });
+
+    it('keeps working_days for a store that never configured its hours', async () => {
+      const { service, prisma } = buildService({
+        product: stationProduct,
+        storeHours: [],
+        stations: [station],
+        stationSchedules: [{ station_id: 3, weekday: 6, start_time: '08:00', end_time: '12:00', is_active: true }],
+      });
+      prisma.store_settings.findUnique.mockResolvedValue({ settings: { availability: { working_days: [1, 2, 3, 4, 5] } } });
+      await expect(service.getAvailableSlots(10, SATURDAY, SATURDAY)).resolves.toEqual([]);
+    });
+
     it('still returns [] for a station without providers when the service requires a provider', async () => {
       const { service } = buildService({
         product: { requires_station: true, booking_mode: 'provider_required' },

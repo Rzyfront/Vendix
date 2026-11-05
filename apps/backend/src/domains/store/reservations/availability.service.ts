@@ -89,8 +89,13 @@ export class AvailabilityService {
       product.store_id,
       queryPrisma,
     );
+    // Same rule as the booking validator (ServiceAllocationCoordinator): configured store
+    // hours decide the open days; `working_days` (Mon-Fri default, no UI) only backs the
+    // legacy 08:00-18:00 window of a store that never configured its hours.
     const stationWorkingDays = product.requires_station
-      ? await this.getStoreWorkingDays(product_id, queryPrisma)
+      ? storeHoursMap.size > 0
+        ? [0, 1, 2, 3, 4, 5, 6]
+        : await this.getStoreWorkingDays(product_id, queryPrisma)
       : undefined;
 
     // Resolve variant-specific duration/buffer if applicable
