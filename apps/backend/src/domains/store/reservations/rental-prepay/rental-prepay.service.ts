@@ -5,6 +5,7 @@ import { Prisma, booking_status_enum } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { PaymentLinksService } from '../../payment-links/payment-links.service';
 import { PaymentRequestsService } from '../../payment-requests/payment-requests.service';
 import type { PaymentRequestPaidEvent } from '../../payment-requests/payment-requests.service';
 import { OrdersService } from '../../orders/orders.service';
@@ -67,6 +68,23 @@ export function rentalPrepayCents(station: PrepayStationRules, quotedAmount: unk
 }
 
 const PAYABLE_STATUSES: string[] = ['pending', 'confirmed'];
+const ORDER_SETTLED_MESSAGE = 'La orden de esta reserva ya está pagada: no hay saldo por cobrar.';
+
+function rentalPrepayDescription(stationName: string): string {
+  return `Cobro para reservar en ${stationName}`;
+}
+
+/** `openLink` transaction result: a link to share, or an order already settled (its stale link was cancelled). */
+type OpenLinkOutcome =
+  | {
+      kind: 'link';
+      staleLinkId: number | null;
+      payment_path: string;
+      payment_request_id: number;
+      amount: number;
+      expires_at: Date | null;
+    }
+  | { kind: 'settled'; staleLinkId: number | null };
 const STATION_SELECT = {
   id: true,
   name: true,
@@ -130,7 +148,7 @@ export class RentalPrepayService {
   }> {
     const storeId = this.requireStoreId();
     const userId = RequestContextService.getUserId() ?? null;
-    const link = await this.prisma.$transaction(async (tx) => {
+    const outcome = await this.prisma.$transaction(async (tx): Promise<OpenLinkOutcome> => {
       const booking = await tx.bookings.findFirst({
         where: { id: bookingId, store_id: storeId },
         select: { id: true, status: true, quoted_amount: true, order_id: true },
@@ -150,8 +168,9 @@ export class RentalPrepayService {
       }
       let cents = rentalPrepayCents(station, booking.quoted_amount);
       if (cents <= 0) throw new VendixHttpException(ErrorCodes.RENTAL_PREPAY_002);
-      // M-3: a booking that already has an order may have paid part (or all) of it: a new link never
+      // M-3: a booking that already has an order may have paid part (or all) of it: a link never
       // collects more than what the order still owes, so settlement can never overpay it.
+      let orderSettled = false;
       if (booking.order_id != null) {
         const order = await tx.orders.findUnique({
           where: { id: booking.order_id },
@@ -159,12 +178,7 @@ export class RentalPrepayService {
         });
         if (order) {
           const remainingCents = toCents(order.grand_total) - toCents(getSettledOrderAmount(order));
-          if (remainingCents <= 0) {
-            throw new VendixHttpException(
-              ErrorCodes.RENTAL_PREPAY_003,
-              'La orden de esta reserva ya está pagada: no hay saldo por cobrar.',
-            );
-          }
+          orderSettled = remainingCents <= 0;
           cents = Math.min(cents, remainingCents);
         }
       }
@@ -178,18 +192,54 @@ export class RentalPrepayService {
 
       const open = await tx.payment_requests.findFirst({
         where: { store_id: storeId, purpose, status: { in: ['pending', 'awaiting_confirmation'] } },
-        select: { id: true, status: true, expires_at: true },
+        select: { id: true, status: true, amount: true, payment_link_id: true, expires_at: true },
       });
-      if (open) {
-        if (open.status === 'awaiting_confirmation') {
-          throw new VendixHttpException(ErrorCodes.PAYMENT_REQUEST_AWAITING_CONFIRMATION);
-        }
+      // A pending request whose amount no longer matches (the order was paid elsewhere) would still charge
+      // the old amount: it is cancelled, and replaced unless nothing is owed any more.
+      const stale = open?.status === 'pending' && (orderSettled || toCents(open.amount) !== cents) ? open : null;
+      if (stale) {
+        const cancelled = await tx.payment_requests.updateMany({
+          where: { id: stale.id, status: 'pending' },
+          data: { status: 'cancelled', updated_at: new Date() },
+        });
+        // Paid or under review meanwhile: nothing is replaced (same rule as rotating the token).
+        if (cancelled.count !== 1) throw new VendixHttpException(ErrorCodes.PAYMENT_REQUEST_INVALID_STATE);
+      }
+      const staleLinkId = stale?.payment_link_id ?? null;
+      if (orderSettled) {
+        if (stale) return { kind: 'settled', staleLinkId };
+        throw new VendixHttpException(ErrorCodes.RENTAL_PREPAY_003, ORDER_SETTLED_MESSAGE);
+      }
+      if (open?.status === 'awaiting_confirmation') {
+        throw new VendixHttpException(ErrorCodes.PAYMENT_REQUEST_AWAITING_CONFIRMATION);
+      }
+      if (open && !stale) {
         const { publicToken } = await this.paymentRequests.rotateTokenInTx(tx, open.id);
         return {
+          kind: 'link',
+          staleLinkId: null,
           payment_path: this.paymentPath(publicToken),
           payment_request_id: open.id,
           amount: cents / 100,
           expires_at: open.expires_at ?? null,
+        };
+      }
+      if (stale) {
+        // Same hold, same deadline: only the amount changes.
+        const { request, publicToken } = await this.paymentRequests.createInTx(tx, {
+          purpose,
+          amount: cents / 100,
+          description: rentalPrepayDescription(station.name),
+          expires_at: stale.expires_at ?? null,
+          created_by_user_id: userId,
+        });
+        return {
+          kind: 'link',
+          staleLinkId,
+          payment_path: this.paymentPath(publicToken),
+          payment_request_id: request.id,
+          amount: cents / 100,
+          expires_at: stale.expires_at ?? null,
         };
       }
       const opened = await this.openRequestInTx(tx, {
@@ -201,14 +251,33 @@ export class RentalPrepayService {
         userId,
       });
       return {
+        kind: 'link',
+        staleLinkId: null,
         payment_path: this.paymentPath(opened.publicToken),
         payment_request_id: opened.paymentRequestId,
         amount: cents / 100,
         expires_at: opened.expiresAt,
       };
     });
+    if (outcome.staleLinkId != null) await this.deactivateWompiLink(outcome.staleLinkId);
+    if (outcome.kind === 'settled') throw new VendixHttpException(ErrorCodes.RENTAL_PREPAY_003, ORDER_SETTLED_MESSAGE);
     // The admin shares this link: it must point at the store's public domain, not the admin host.
-    return { ...link, payment_url: publicPaymentUrl(await resolveStorePublicOrigin(this.prisma, storeId), link.payment_path) };
+    return {
+      payment_path: outcome.payment_path,
+      payment_url: publicPaymentUrl(await resolveStorePublicOrigin(this.prisma, storeId), outcome.payment_path),
+      payment_request_id: outcome.payment_request_id,
+      amount: outcome.amount,
+      expires_at: outcome.expires_at,
+    };
+  }
+
+  /** Best effort, after commit: the request is already cancelled, so a late Wompi payment settles nothing. */
+  private async deactivateWompiLink(paymentLinkId: number): Promise<void> {
+    try {
+      await this.moduleRef?.get(PaymentLinksService, { strict: false })?.deactivate(paymentLinkId);
+    } catch (err: unknown) {
+      this.logger.warn(`Payment link ${paymentLinkId} not deactivated: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   /**
@@ -267,7 +336,7 @@ export class RentalPrepayService {
     const { request, publicToken } = await this.paymentRequests.createInTx(tx, {
       purpose: rentalPrepayPurpose(args.bookingId),
       amount: args.amount,
-      description: `Cobro para reservar en ${args.stationName}`,
+      description: rentalPrepayDescription(args.stationName),
       expires_at: expiresAt,
       created_by_user_id: args.userId,
     });

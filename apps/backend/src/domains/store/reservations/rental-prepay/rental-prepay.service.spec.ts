@@ -6,6 +6,7 @@ import {
   rentalPrepayPurpose,
 } from './rental-prepay.service';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
+import { PaymentLinksService } from '../../payment-links/payment-links.service';
 
 (RequestContextService.getStoreId as jest.Mock) = jest.fn().mockReturnValue(1);
 (RequestContextService.getUserId as jest.Mock) = jest.fn().mockReturnValue(9);
@@ -98,6 +99,7 @@ describe('RentalPrepayService', () => {
       },
       payment_requests: {
         findFirst: jest.fn().mockResolvedValue(options.existing ?? null),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       orders: {
         findUnique: jest.fn().mockResolvedValue(order),
@@ -124,14 +126,17 @@ describe('RentalPrepayService', () => {
       createInTx: jest.fn().mockResolvedValue({ request: { id: 31 }, publicToken: 'tok-1' }),
       rotateTokenInTx: jest.fn().mockResolvedValue({ publicToken: 'tok-2' }),
     };
+    const paymentLinks = { deactivate: jest.fn().mockResolvedValue(undefined) };
     const emits: Array<{ name: string; payload: any }> = [];
     const eventEmitter: any = { emit: jest.fn((name: string, payload: any) => emits.push({ name, payload })) };
     const ordersService: any = { create: jest.fn().mockResolvedValue({ id: 556 }) };
     const orderHistory: any = { record: jest.fn().mockResolvedValue(null) };
     const orderFlow = { invoicePaidBookingRentalOrder: jest.fn().mockResolvedValue(undefined) };
-    const moduleRef: any = { get: jest.fn((token: unknown) => (token === OrderFlowService ? orderFlow : undefined)) };
+    const moduleRef: any = {
+      get: jest.fn((token: unknown) => (token === OrderFlowService ? orderFlow : token === PaymentLinksService ? paymentLinks : undefined)),
+    };
     const service = new RentalPrepayService(prisma, paymentRequests, eventEmitter, ordersService, orderHistory, moduleRef);
-    return { service, prisma, tx, booking, order, paymentRequests, emits, ordersService, orderHistory, orderFlow };
+    return { service, prisma, tx, booking, order, paymentRequests, paymentLinks, emits, ordersService, orderHistory, orderFlow };
   }
 
   const paidEvent = (purpose = 'service_rental:77', amount = 75000) =>
@@ -199,11 +204,75 @@ describe('RentalPrepayService', () => {
       const { service, tx, paymentRequests } = build();
       tx.payment_requests.findFirst
         .mockResolvedValueOnce(null) // paid
-        .mockResolvedValueOnce({ id: 31, status: 'pending' }); // open
+        .mockResolvedValueOnce({ id: 31, status: 'pending', amount: '75000.00', payment_link_id: null }); // open
       const result = await service.openLink(77);
       expect(paymentRequests.rotateTokenInTx).toHaveBeenCalledWith(tx, 31);
       expect(paymentRequests.createInTx).not.toHaveBeenCalled();
       expect(result.payment_path).toBe('/pagar/tok-2');
+    });
+
+    it('M-3: an open request for a different amount is replaced by one for the capped amount (the old link stops charging)', async () => {
+      const expiresAt = new Date('2026-11-05T15:00:00Z');
+      const { service, tx, paymentRequests, paymentLinks } = build({
+        order: { payments: [{ amount: '100000', state: 'succeeded' }] },
+      });
+      tx.payment_requests.findFirst
+        .mockResolvedValueOnce(null) // paid
+        .mockResolvedValueOnce({ id: 31, status: 'pending', amount: '75000.00', payment_link_id: 812, expires_at: expiresAt });
+      paymentRequests.createInTx.mockResolvedValueOnce({ request: { id: 32 }, publicToken: 'tok-1' });
+      const result = await service.openLink(77);
+      expect(tx.payment_requests.updateMany).toHaveBeenCalledWith({
+        where: { id: 31, status: 'pending' },
+        data: expect.objectContaining({ status: 'cancelled' }),
+      });
+      expect(paymentRequests.createInTx).toHaveBeenCalledWith(tx, expect.objectContaining({
+        purpose: 'service_rental:77', amount: 50000, expires_at: expiresAt, description: 'Cobro para reservar en Cava 3',
+      }));
+      expect(paymentRequests.rotateTokenInTx).not.toHaveBeenCalled();
+      // The hold is already in place: replacing the request does not move it.
+      expect(tx.service_allocations.updateMany).not.toHaveBeenCalled();
+      expect(paymentLinks.deactivate).toHaveBeenCalledWith(812);
+      expect(result).toMatchObject({ payment_request_id: 32, amount: 50000, payment_path: '/pagar/tok-1', expires_at: expiresAt });
+    });
+
+    it('M-3: an order paid in full cancels the still-open request and its Wompi link, then rejects with RENTAL_PREPAY_003', async () => {
+      const { service, tx, paymentRequests, paymentLinks } = build({
+        order: { payments: [{ amount: '150000', state: 'succeeded' }] },
+      });
+      tx.payment_requests.findFirst
+        .mockResolvedValueOnce(null) // paid
+        .mockResolvedValueOnce({ id: 31, status: 'pending', amount: '75000.00', payment_link_id: 812, expires_at: null });
+      await expect(service.openLink(77)).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'RENTAL_PREPAY_003' }),
+      });
+      expect(tx.payment_requests.updateMany).toHaveBeenCalledWith({
+        where: { id: 31, status: 'pending' },
+        data: expect.objectContaining({ status: 'cancelled' }),
+      });
+      expect(paymentLinks.deactivate).toHaveBeenCalledWith(812);
+      expect(paymentRequests.createInTx).not.toHaveBeenCalled();
+    });
+
+    it('a request paid meanwhile (cancel claims nothing) is not replaced', async () => {
+      const { service, tx, paymentRequests, paymentLinks } = build({ order: { payments: [{ amount: '100000', state: 'succeeded' }] } });
+      tx.payment_requests.updateMany.mockResolvedValueOnce({ count: 0 });
+      tx.payment_requests.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 31, status: 'pending', amount: '75000.00', payment_link_id: 812, expires_at: null });
+      await expect(service.openLink(77)).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'PAYMENT_REQUEST_INVALID_STATE' }),
+      });
+      expect(paymentRequests.createInTx).not.toHaveBeenCalled();
+      expect(paymentLinks.deactivate).not.toHaveBeenCalled();
+    });
+
+    it('a failed Wompi deactivation does not undo the replacement', async () => {
+      const { service, tx, paymentLinks } = build({ order: { payments: [{ amount: '100000', state: 'succeeded' }] } });
+      paymentLinks.deactivate.mockRejectedValueOnce(new Error('wompi down'));
+      tx.payment_requests.findFirst
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 31, status: 'pending', amount: '75000.00', payment_link_id: 812, expires_at: null });
+      await expect(service.openLink(77)).resolves.toMatchObject({ amount: 50000 });
     });
 
     it('M-3: with an order already partly paid the link is capped at the order remaining balance', async () => {
