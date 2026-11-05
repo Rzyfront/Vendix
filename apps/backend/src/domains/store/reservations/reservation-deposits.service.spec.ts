@@ -399,6 +399,33 @@ describe('ReservationDepositsService', () => {
       expect(coordinator.releaseBooking).not.toHaveBeenCalled();
     });
 
+    it('A9: a paid request whose settlement failed is settled again, never expired', async () => {
+      const { service, tx, coordinator, deposits } = build();
+      tx.service_deposits.findMany.mockResolvedValue(overdue);
+      tx.payment_requests.findFirst.mockResolvedValue({
+        id: 9,
+        status: 'paid',
+        payment_link_id: 4,
+        purpose: 'service_deposit',
+        amount: 400000,
+        paid_at: new Date(),
+        transfer_submitted_at: new Date(),
+      });
+      await expect(service.expireOverdueHolds()).resolves.toBe(0);
+      expect(coordinator.releaseBooking).not.toHaveBeenCalled();
+      expect(tx.bookings.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'cancelled' }) }),
+      );
+      expect(tx.service_deposits.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: 'cancelled' }) }),
+      );
+      expect(tx.service_deposits.updateMany).toHaveBeenCalledWith({
+        where: { id: 3, status: 'pending' },
+        data: expect.objectContaining({ method: 'bank_transfer' }),
+      });
+      expect(deposits.completePendingInTx).toHaveBeenCalledWith(tx, { deposit_id: 3, store_id: 1 });
+    });
+
     it('is idempotent: a booking already claimed by another tick is not released twice', async () => {
       const { service, tx, coordinator, links } = build();
       tx.service_deposits.findMany.mockResolvedValue(overdue);

@@ -496,9 +496,23 @@ export class ReservationDepositsService {
     for (const row of rows) {
       const request = await this.prisma.payment_requests.findFirst({
         where: { id: row.payment_request_id! },
-        select: { id: true, status: true, payment_link_id: true },
+        select: {
+          id: true,
+          status: true,
+          payment_link_id: true,
+          purpose: true,
+          amount: true,
+          paid_at: true,
+          transfer_submitted_at: true,
+        },
       });
       if (!request || request.status === 'awaiting_confirmation') continue;
+      if (request.status === 'paid') {
+        // The money arrived but its settlement failed (the paid listener only logs it):
+        // settle it again on every tick, never cancel a booking the customer paid (A9).
+        await this.retrySettlement(store_id, request);
+        continue;
+      }
       const bookingId = row.booking_id!;
       try {
         const claimed = await this.prisma.$transaction(async (tx) => {
@@ -534,6 +548,34 @@ export class ReservationDepositsService {
       }
     }
     return released;
+  }
+
+  /** Settles a paid deposit request again; a failure waits for the next tick. */
+  private async retrySettlement(
+    store_id: number,
+    request: {
+      id: number;
+      purpose: string;
+      amount: Prisma.Decimal | number;
+      paid_at: Date | null;
+      payment_link_id: number | null;
+      transfer_submitted_at: Date | null;
+    },
+  ): Promise<void> {
+    try {
+      await this.settlePaidRequest({
+        store_id,
+        payment_request_id: request.id,
+        purpose: request.purpose,
+        amount: Number(request.amount),
+        method: request.transfer_submitted_at ? 'transfer' : request.payment_link_id ? 'wompi' : 'manual',
+        paid_at: request.paid_at ?? new Date(),
+      });
+    } catch (err: unknown) {
+      this.logger.error(
+        `Paid deposit request ${request.id} still not settled: ${err instanceof Error ? err.message : err}`,
+      );
+    }
   }
 
   // --------------------------------------------------------------- no-show
