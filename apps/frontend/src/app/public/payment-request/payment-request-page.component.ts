@@ -18,6 +18,7 @@ import { formatStoreDateTime } from '../../shared/utils/date.util';
 import {
   PaymentRequestService,
   PaymentRequestStatus,
+  PublicBankAccount,
   PublicPaymentMethod,
   PublicPaymentRequest,
 } from './payment-request.service';
@@ -180,7 +181,24 @@ const INSTRUCTION_LABELS: Array<[string, string]> = [
                         </app-button>
                       </div>
                     } @else {
-                      @if (instructionRows(method).length > 0) {
+                      @if (accountsOf(method).length > 0) {
+                        <ul class="mt-3 grid gap-2">
+                          @for (account of accountsOf(method); track account.id) {
+                            <li class="flex items-center gap-3 rounded-xl border border-border bg-surface-secondary/40 p-3 text-sm">
+                              @if (account.image_url) {
+                                <img [src]="account.image_url" alt="" class="h-9 w-9 shrink-0 rounded-lg object-contain" />
+                              }
+                              <div class="min-w-0 flex-1">
+                                <p class="text-xs font-semibold text-text-secondary">{{ account.bank_name }}</p>
+                                @if (account.name) {
+                                  <p class="truncate text-xs text-text-secondary">{{ account.name }}</p>
+                                }
+                                <p class="break-all font-medium tabular-nums">{{ account.account_number }}</p>
+                              </div>
+                            </li>
+                          }
+                        </ul>
+                      } @else if (instructionRows(method).length > 0) {
                         <dl class="mt-3 grid gap-2 rounded-xl border border-border bg-surface-secondary/40 p-3 text-sm">
                           @for (row of instructionRows(method); track $index) {
                             <div class="flex flex-col sm:flex-row sm:justify-between sm:gap-3">
@@ -269,6 +287,8 @@ export class PaymentRequestPageComponent implements OnInit {
   readonly openTransfer = signal<number | undefined>(undefined);
   readonly file = signal<File | null>(null);
   readonly reference = signal('');
+  /** Curated bank accounts per transfer method id, loaded once per page view. */
+  readonly bankAccounts = signal<Record<number, PublicBankAccount[]>>({});
 
   readonly statusLabel = computed(() => {
     const labels: Record<PaymentRequestStatus, string> = {
@@ -317,6 +337,7 @@ export class PaymentRequestPageComponent implements OnInit {
         next: (value) => {
           this.request.set(value);
           this.state.set('loaded');
+          this.loadBankAccounts(value.methods);
         },
         error: (error: HttpErrorResponse) => {
           this.state.set(error.status === 404 ? 'unavailable' : 'error');
@@ -333,6 +354,10 @@ export class PaymentRequestPageComponent implements OnInit {
       dateStyle: 'medium',
       timeStyle: 'short',
     });
+  }
+
+  accountsOf(method: PublicPaymentMethod): PublicBankAccount[] {
+    return method.id != null ? (this.bankAccounts()[method.id] ?? []) : [];
   }
 
   instructionRows(method: PublicPaymentMethod): Array<{ label: string; value: string }> {
@@ -413,6 +438,21 @@ export class PaymentRequestPageComponent implements OnInit {
           this.handleActionError(error);
         },
       });
+  }
+
+  private loadBankAccounts(methods: PublicPaymentMethod[]): void {
+    for (const method of methods) {
+      const id = method.id;
+      if (method.kind !== 'transfer' || id == null || id in this.bankAccounts()) continue;
+      this.api
+        .bankAccounts(id)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (accounts) => this.bankAccounts.update((all) => ({ ...all, [id]: accounts })),
+          // Without the list the method instructions are still shown.
+          error: () => this.bankAccounts.update((all) => ({ ...all, [id]: [] })),
+        });
+    }
   }
 
   private handleActionError(error: HttpErrorResponse): void {

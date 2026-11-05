@@ -33,6 +33,15 @@ export interface PublicPaymentMethod {
   payment_instructions?: PaymentInstructions;
 }
 
+/** Bank account the store curated for a transfer method (same list as the checkout, QUI-728). */
+export interface PublicBankAccount {
+  id: number;
+  name: string | null;
+  bank_name: string;
+  account_number: string;
+  image_url: string | null;
+}
+
 export interface PublicPaymentRequest {
   amount: number;
   currency: string;
@@ -70,6 +79,15 @@ export class PaymentRequestService {
         return_url: returnUrl,
       })
       .pipe(map((res) => res.data));
+  }
+
+  /** Accounts of a transfer method; an empty list means "show the method instructions". */
+  bankAccounts(methodId: number): Observable<PublicBankAccount[]> {
+    return this.http
+      .get<Envelope<PublicBankAccount[]>>(
+        `${environment.apiUrl}/ecommerce/checkout/payment-methods/${methodId}/bank-accounts`,
+      )
+      .pipe(map((res) => res.data ?? []));
   }
 
   submitTransfer(
