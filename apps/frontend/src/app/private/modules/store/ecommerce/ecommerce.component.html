@@ -750,6 +750,11 @@
                 description="Obligar a crear cuenta"
               ></app-setting-toggle>
               <app-setting-toggle
+                [formControl]="allowGuestBookingControl"
+                label="Permitir reservas sin iniciar sesión"
+                description="El cliente reserva y paga con nombre, correo y teléfono"
+              ></app-setting-toggle>
+              <app-setting-toggle
                 [formControl]="whatsappCheckoutControl"
                 label="Whatsapp Checkout"
                 description="Permitir terminar compra en whatsapp"

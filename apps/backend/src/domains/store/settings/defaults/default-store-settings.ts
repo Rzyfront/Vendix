@@ -54,6 +54,9 @@ export function getDefaultStoreSettings(): StoreSettings {
       enabled: false,
       checkout: {
         require_registration: false,
+        // Opt-in: lets a visitor book (and pay) a service without logging in.
+        // Absent => off (read with `=== true`).
+        allow_guest_booking: false,
         guest_email_required: false,
         create_account_after_order: false,
         terms_required: false,

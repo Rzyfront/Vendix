@@ -26,6 +26,7 @@ describe('EcommerceReservationsController - cotización pública de alquiler', (
       {} as any,
       {} as any,
       rentalQuote as any,
+      {} as any,
     );
     jest
       .spyOn(RequestContextService, 'getContext')

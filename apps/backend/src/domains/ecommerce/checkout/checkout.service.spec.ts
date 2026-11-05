@@ -1174,6 +1174,57 @@ describe('CheckoutService - promotions and coupons', () => {
       });
     });
 
+    describe('invitado con reserva (S9, switch allow_guest_booking)', () => {
+      const guestDto = {
+        ...stationDto,
+        guest_customer: { first_name: 'Ana', email: 'ana@example.com', phone: '3001234567' },
+      };
+
+      beforeEach(() => {
+        jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(undefined);
+      });
+
+      it('con el switch apagado rechaza al invitado con reserva sin crear orden ni reserva', async () => {
+        mockServiceProducts();
+        const { reservations } = mockBookingLinking();
+        mockOrderCreate(10000);
+
+        await expect(service.checkout({ ...guestDto } as any)).rejects.toMatchObject({
+          errorCode: 'ECOM_CHECKOUT_001',
+        });
+        expect(reservations.create).not.toHaveBeenCalled();
+        expect(prisma.orders.create).not.toHaveBeenCalled();
+        // Refused before resolving the guest: no customer is created.
+        expect(
+          (service as any).customersService.resolveGuestCustomerForCheckout,
+        ).not.toHaveBeenCalled();
+      });
+
+      it('con el switch encendido reserva y crea la orden para el cliente invitado resuelto', async () => {
+        mockServiceProducts();
+        const { reservations, linkBookings } = mockBookingLinking();
+        reservations.create.mockResolvedValue({ id: 57 });
+        mockOrderCreate(10000);
+        storePrisma.store_settings.findUnique.mockResolvedValue({
+          settings: { ecommerce: { checkout: { allow_guest_booking: true } } },
+        });
+        (service as any).customersService.resolveGuestCustomerForCheckout.mockResolvedValue({
+          customer_id: 77,
+          was_created: true,
+        });
+
+        const result: any = await service.checkout({ ...guestDto } as any);
+
+        expect(result.order_id).toBe(1);
+        expect(reservations.create).toHaveBeenCalledWith(
+          expect.objectContaining({ customer_id: 77, product_id: STATION_SERVICE_ID, station_id: 5 }),
+        );
+        expect(linkBookings).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: 57, store_id: 1, order_id: null } }),
+        );
+      });
+    });
+
     it('booking extra SIN estación no aborta: mantiene log-and-continue', async () => {
       mockServiceProducts();
       const { reservations } = mockBookingLinking();
