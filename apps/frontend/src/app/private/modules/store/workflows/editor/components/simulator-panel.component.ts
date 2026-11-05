@@ -10,12 +10,13 @@ import {
   ToggleComponent,
 } from '../../../../../../shared/components/index';
 import { STAGE_OUTCOMES } from '../../../../../../shared/workflows/contract/workflow-contract';
-import { SimulationResult } from '../../interfaces/workflow.interfaces';
+import { SimulatedAction, SimulationResult } from '../../interfaces/workflow.interfaces';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { toWorkflowError } from '../../utils/workflow-errors.util';
 import { WorkflowStageFormComponent } from '../../components/stage-form.component';
 import { WorkflowEditorStore } from '../workflow-editor.store';
 import { END_OUTCOME_LABEL, outcomeText, stageFieldsOf } from '../workflow-editor.utils';
+import { ACTION_MAP_KEY_LABEL, VENDIX_ACTION_LABEL } from '../workflow-editor-triggers.utils';
 
 interface SimState {
   stage_key: string;
@@ -141,6 +142,14 @@ interface SimState {
                   @for (n of res.notifications; track $index) { <li>{{ n.to }}: {{ n.message }}</li> }
                 </ul>
               }
+              @if (res.actions && res.actions.length > 0) {
+                <p class="text-xs font-semibold text-text-primary">Acciones de Vendix (no se ejecutan)</p>
+                <ul class="list-disc pl-5 text-xs text-text-primary" data-testid="sim-actions">
+                  @for (a of res.actions; track $index) {
+                    <li>Se ejecutaría: {{ actionText(a) }}</li>
+                  }
+                </ul>
+              }
               @if (res.ended) {
                 <p class="text-sm font-bold text-text-primary">Fin: {{ endText(res.ended.outcome) }}</p>
               }
@@ -209,6 +218,15 @@ export class SimulatorPanelComponent {
 
   stageName(key: string): string {
     return this.store.draft()?.stages.find((s) => s.key === key)?.name ?? key;
+  }
+
+  actionText(a: SimulatedAction): string {
+    const label = VENDIX_ACTION_LABEL[a.action] ?? a.action;
+    const detail = Object.entries(a.map_resolved ?? {})
+      .filter(([, v]) => typeof v !== 'object')
+      .map(([k, v]) => `${ACTION_MAP_KEY_LABEL[k] ?? k}: ${v}`)
+      .join(', ');
+    return detail ? `${label} (${detail})` : label;
   }
 
   pathText(res: SimulationResult): string {

@@ -261,6 +261,11 @@ export interface SimulateBody {
   satisfied_requirements?: string[];
 }
 
+export interface SimulatedAction {
+  action: 'vendix.purchase_order.create_draft' | 'vendix.crm_task.create';
+  map_resolved: Record<string, string | { kind: string }>;
+}
+
 export interface SimulationResult {
   valid: boolean;
   issues: WorkflowIssueView[];
@@ -279,6 +284,8 @@ export interface SimulationResult {
     assignee: { kind: string; label: string } | null;
   }[];
   notifications: { to: string; message: string }[];
+  /** `vendix.*` actions the run would queue; never executed by the simulator. */
+  actions?: SimulatedAction[];
   ended: { outcome: string } | null;
   loop_guard: boolean;
   watermark: string;

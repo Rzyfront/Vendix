@@ -10,6 +10,7 @@ import {
 } from '../../../../../../../shared/components/index';
 import {
   WORKFLOW_LIMITS,
+  WORKFLOW_VENDIX_ACTIONS,
   WorkflowActionDef,
   WorkflowAssigneeDef,
   WorkflowFieldDef,
@@ -17,6 +18,8 @@ import {
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
 import { removeAt, replaceAt } from '../../workflow-editor.utils';
+import { VENDIX_ACTION_LABEL } from '../../workflow-editor-triggers.utils';
+import { ActionMapEditorComponent } from '../action-map-editor.component';
 import { AssigneeEditorComponent } from '../assignee-editor.component';
 
 type Hook = 'on_enter' | 'on_exit';
@@ -26,7 +29,7 @@ const HOOKS: { id: Hook; title: string; hint: string }[] = [
   { id: 'on_exit', title: 'Al salir de la etapa', hint: 'Se ejecutan cuando la solicitud avanza.' },
 ];
 
-/** Acciones tab: notify and set_field actions for on_enter / on_exit. */
+/** Acciones tab: notify, set_field and Vendix actions for on_enter / on_exit. */
 @Component({
   selector: 'app-stage-actions-tab',
   standalone: true,
@@ -39,6 +42,7 @@ const HOOKS: { id: Hook; title: string; hint: string }[] = [
     TextareaComponent,
     ToggleComponent,
     AssigneeEditorComponent,
+    ActionMapEditorComponent,
   ],
   template: `
     <div class="flex flex-col gap-6">
@@ -72,7 +76,7 @@ const HOOKS: { id: Hook; title: string; hint: string }[] = [
                   (valueChange)="patch(hook.id, i, { to: $event })"
                 />
                 <app-textarea label="Mensaje" [rows]="2" [ngModel]="action.message" (ngModelChange)="patch(hook.id, i, { message: $event })" />
-              } @else {
+              } @else if (action.action === 'set_field') {
                 <app-selector
                   label="Campo a cambiar"
                   size="sm"
@@ -94,6 +98,14 @@ const HOOKS: { id: Hook; title: string; hint: string }[] = [
                     <app-input label="Valor" [ngModel]="action.value" (ngModelChange)="patch(hook.id, i, { value: $event })" />
                   }
                 }
+              } @else {
+                <p class="text-xs text-text-secondary">Se ejecuta en segundo plano al publicar el cambio de etapa; no bloquea la solicitud.</p>
+                <app-action-map-editor
+                  [action]="action.action"
+                  [map]="action.map"
+                  [fields]="fields()"
+                  (mapChange)="patch(hook.id, i, { map: $event })"
+                />
               }
             </div>
           } @empty {
@@ -119,6 +131,7 @@ export class StageActionsTabComponent {
   readonly actionOptions = [
     { value: 'notify', label: 'Enviar aviso' },
     { value: 'set_field', label: 'Cambiar un campo' },
+    ...WORKFLOW_VENDIX_ACTIONS.map((a) => ({ value: a, label: VENDIX_ACTION_LABEL[a] })),
   ];
   readonly fields = computed<WorkflowFieldDef[]>(() => this.store.draft()?.fields ?? []);
   readonly fieldOptions = computed(() => this.fields().map((f) => ({ value: f.key, label: f.label })));
@@ -147,8 +160,10 @@ export class StageActionsTabComponent {
   }
 
   setKind(hook: Hook, index: number, kind: string | number | null): void {
-    const next: WorkflowActionDef =
-      kind === 'set_field'
+    const vendix = WORKFLOW_VENDIX_ACTIONS.find((a) => a === kind);
+    const next: WorkflowActionDef = vendix
+      ? { action: vendix, map: {} }
+      : kind === 'set_field'
         ? { action: 'set_field', field: this.fields()[0]?.key ?? '', value: null }
         : { action: 'notify', to: { kind: 'initiator' }, message: '' };
     this.set(hook, replaceAt(this.list(hook), index, next));

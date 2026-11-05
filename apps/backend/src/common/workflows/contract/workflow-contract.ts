@@ -903,3 +903,19 @@ export const WORKFLOW_EXAMPLE_PURCHASE_APPROVAL: WorkflowDefinitionV1 = {
   ],
   triggers: [{ kind: "manual" }],
 };
+
+/**
+ * Outgoing webhook event types a store endpoint can subscribe to (design
+ * §5.7). Shared so the backend emitter and the frontend panel never drift.
+ */
+export const WORKFLOW_WEBHOOK_EVENTS = [
+  'workflow.instance.started',
+  'workflow.instance.transitioned',
+  'workflow.instance.completed',
+  'workflow.instance.rejected',
+  'workflow.task.created',
+  'workflow.task.completed',
+  'workflow.task.overdue',
+] as const;
+
+export type WorkflowWebhookEvent = (typeof WORKFLOW_WEBHOOK_EVENTS)[number];

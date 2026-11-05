@@ -26,6 +26,13 @@ export const workflowsRoutes: Routes = [
       ),
   },
   {
+    path: 'integrations',
+    loadComponent: () =>
+      import('../integrations/pages/integrations-page/integrations-page.component').then(
+        (c) => c.IntegrationsPageComponent,
+      ),
+  },
+  {
     path: ':id/board',
     loadComponent: () =>
       import('../pages/board-page/board-page.component').then(

@@ -21,6 +21,7 @@ import { JsonPanelComponent } from './components/json-panel.component';
 import { RouteMapComponent } from './components/route-map.component';
 import { SimulatorPanelComponent } from './components/simulator-panel.component';
 import { StageListComponent } from './components/stage-list.component';
+import { TriggersPanelComponent } from './components/triggers-panel.component';
 import { StagePropertiesComponent } from './components/stage-properties.component';
 import { TransitionMatrixComponent } from './components/transition-matrix.component';
 import { ValidationPanelComponent } from './components/validation-panel.component';
@@ -50,6 +51,7 @@ type CenterView = 'map' | 'matrix';
     StageListComponent,
     StagePropertiesComponent,
     TransitionMatrixComponent,
+    TriggersPanelComponent,
     ValidationPanelComponent,
   ],
   template: `
@@ -112,6 +114,7 @@ type CenterView = 'map' | 'matrix';
           </app-card>
           <app-card [responsive]="true" class="lg:w-96 lg:shrink-0"><app-stage-properties /></app-card>
         </div>
+        <app-card [responsive]="true"><app-triggers-panel /></app-card>
 
         <app-simulator-panel [(isOpen)]="simulateOpen" [definitionId]="id()" />
         <app-json-panel [(isOpen)]="jsonOpen" />

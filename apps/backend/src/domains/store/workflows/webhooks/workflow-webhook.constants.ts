@@ -1,15 +1,9 @@
-/** Event types a store can subscribe an endpoint to (design §5.7). */
-export const WORKFLOW_WEBHOOK_EVENTS = [
-  'workflow.instance.started',
-  'workflow.instance.transitioned',
-  'workflow.instance.completed',
-  'workflow.instance.rejected',
-  'workflow.task.created',
-  'workflow.task.completed',
-  'workflow.task.overdue',
-] as const;
-
-export type WorkflowWebhookEvent = (typeof WORKFLOW_WEBHOOK_EVENTS)[number];
+// Subscribable event types live in the shared contract (frontend panel uses
+// the same list).
+export {
+  WORKFLOW_WEBHOOK_EVENTS,
+  type WorkflowWebhookEvent,
+} from '@common/workflows/contract';
 
 /** Sent by `POST :id/test`; not subscribable, always delivered to that endpoint. */
 export const WORKFLOW_WEBHOOK_PING = 'ping';
