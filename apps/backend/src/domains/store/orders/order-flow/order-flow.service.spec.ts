@@ -1086,6 +1086,29 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
     expect(projectTablePayment).toHaveBeenCalledWith(1, 999);
   });
 
+  it('anonymous order: a store without the key reads the default (allowed), like the rest of the panel', async () => {
+    prismaMock.store_settings.findFirst.mockResolvedValue({ settings: { pos: {} } });
+    jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: 1, state: 'finished' });
+
+    await service.payOrder(1, DTO);
+
+    expect(prismaMock.payments.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('anonymous order: allow_anonymous_sales=false still rejects before charging', async () => {
+    prismaMock.store_settings.findFirst.mockResolvedValue({
+      settings: { pos: { allow_anonymous_sales: false } },
+    });
+
+    const error = await service.payOrder(1, DTO).catch((e) => e);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_EDIT_PAY_NOT_ALLOWED_001');
+    expect(prismaMock.payments.create).not.toHaveBeenCalled();
+  });
+
   it('E.6 flow/pay: 10% usa productos brutos, suma propina al cargo sin gravarla', async () => {
     const orderRow = {
       ...buildOrder(), customer_id: 44, subtotal_amount: 100000,

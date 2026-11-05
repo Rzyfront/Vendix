@@ -155,6 +155,7 @@ import {
   WithholdingFlowService,
   type WithholdingResolution,
 } from '../../withholding-tax/withholding-flow.service';
+import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 
 type OrderState = order_state_enum;
 
@@ -2140,7 +2141,10 @@ export class OrderFlowService {
         where: { store_id: order.store_id ?? -1 },
         select: { settings: true },
       });
-      const pos = (settings?.settings as any)?.pos ?? {};
+      // Read with the defaults, as SettingsService and the panel do: a store whose `pos`
+      // section lacks the key opens anonymous tables, stations and POS sales, so its
+      // payment cannot be the one place that reads the absent key as "disabled".
+      const pos = mergeStoreSettingsWithDefaults(settings?.settings).pos;
       const allowAnonymous = pos?.allow_anonymous_sales === true;
       // QUI-737 (B.4) — una orden por alias (customer_id null + customer_alias
       // poblado) es otra venta legítima de "sin cliente formal": avanzar cuando
