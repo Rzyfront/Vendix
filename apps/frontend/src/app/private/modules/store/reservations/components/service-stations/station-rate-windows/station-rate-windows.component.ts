@@ -73,16 +73,14 @@ export function priceAt(
   standalone: true,
   imports: [FormsModule, ButtonComponent, IconComponent, InputComponent, SelectorComponent, CurrencyPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styleUrl: '../station-form-section.scss',
   template: `
-    <section
-      class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3"
-      aria-labelledby="station-rate-windows-title"
-    >
-      <div>
-        <h4 id="station-rate-windows-title" class="text-xs font-bold text-[var(--color-text-primary)]">
+    <section class="station-section" aria-labelledby="station-rate-windows-title">
+      <div class="station-section__head">
+        <h4 id="station-rate-windows-title" class="station-section__title">
           Tarifa por franja
         </h4>
-        <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">
+        <p class="station-section__hint">
           Cada bloque se cobra con la franja donde empieza. Sin franja, se cobra la tarifa base de
           {{ blockPrice() | currency }}. Una franja que termina antes de empezar pasa al día siguiente.
         </p>
@@ -97,7 +95,7 @@ export function priceAt(
 
         @for (row of rows(); track row.key) {
           <div
-            class="grid grid-cols-2 sm:grid-cols-[1.4fr_1fr_1fr_1.4fr_auto] gap-2 items-end p-2 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)]"
+            class="grid grid-cols-2 sm:grid-cols-[1.4fr_1fr_1fr_1.4fr_auto] gap-3 items-end p-3 rounded-lg bg-[var(--color-surface-secondary)] border border-[var(--color-border)]"
           >
             <app-selector
               class="col-span-2 sm:col-span-1"
@@ -157,9 +155,9 @@ export function priceAt(
           </app-button>
         </div>
 
-        <div class="border-t border-[var(--color-border)] pt-3 space-y-2">
-          <h5 class="text-xs font-bold text-[var(--color-text-primary)]">Vista previa</h5>
-          <div class="grid grid-cols-2 gap-2">
+        <div class="station-section__group">
+          <h5 class="station-section__title">Vista previa</h5>
+          <div class="station-section__grid">
             <app-selector
               label="Día"
               [options]="weekdayOptions"

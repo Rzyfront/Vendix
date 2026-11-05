@@ -323,7 +323,7 @@ export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
     OpenSessionDepositComponent,
   ],
   templateUrl: './service-stations-page.component.html',
-  styleUrl: './service-stations-page.component.scss',
+  styleUrls: ['./service-stations-page.component.scss', './station-form-section.scss'],
 })
 export class ServiceStationsPageComponent implements OnInit {
   private readonly http = inject(HttpClient);

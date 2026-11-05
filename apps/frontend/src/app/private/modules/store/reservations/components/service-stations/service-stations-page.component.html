@@ -511,7 +511,7 @@
         }
       </div>
 
-      <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
+      <div class="station-section">
         <div class="flex items-center justify-between gap-3">
           <div>
             <span class="text-xs font-bold text-[var(--color-text-primary)]">Cronómetro de atención</span>
@@ -534,10 +534,10 @@
         }
       </div>
 
-      <section class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3" aria-labelledby="new-station-tax-title">
-        <div>
-          <h4 id="new-station-tax-title" class="text-xs font-bold text-[var(--color-text-primary)]">Impuesto del alquiler (opcional)</h4>
-          <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">Se aplica a la línea “Alquiler” de la estación. Sin impuesto, el alquiler se cobra tal cual.</p>
+      <section class="station-section" aria-labelledby="new-station-tax-title">
+        <div class="station-section__head">
+          <h4 id="new-station-tax-title" class="station-section__title">Impuesto del alquiler (opcional)</h4>
+          <p class="station-section__hint">Se aplica a la línea “Alquiler” de la estación. Sin impuesto, el alquiler se cobra tal cual.</p>
         </div>
         <app-selector
           id="new-station-tax-category"
@@ -609,9 +609,9 @@
       @if (!checkinIntakeTemplate() && !checkinIntakeLoading() && !selectedCheckinStation()?.intake_template_id) {
       <!-- Datos del Vehículo (Solo si la estación es de Carro o Moto) -->
       @if (checkinRequiresVehicle()) {
-        <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-amber-500/25 space-y-3">
-          <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
-            <app-icon [name]="checkinIsMoto() ? 'zap' : 'warehouse'" [size]="14" class="text-amber-500" />
+        <div class="station-section">
+          <span class="station-section__head station-section__title uppercase tracking-wider">
+            <app-icon [name]="checkinIsMoto() ? 'zap' : 'warehouse'" [size]="14" class="text-[var(--color-primary)]" />
             <span>{{ checkinIsMoto() ? 'Datos de la Motocicleta (Moto)' : 'Datos del Vehículo (Carro / Auto)' }}</span>
           </span>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -643,9 +643,9 @@
 
       <!-- Datos del Dispositivo Móvil / Electrónica (Solo si la estación es Celular) -->
       @if (checkinIsCelular()) {
-        <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-blue-500/25 space-y-3">
-          <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
-            <app-icon name="smartphone" [size]="14" class="text-blue-500" />
+        <div class="station-section">
+          <span class="station-section__head station-section__title uppercase tracking-wider">
+            <app-icon name="smartphone" [size]="14" class="text-[var(--color-primary)]" />
             <span>Datos del Dispositivo Móvil / Electrónica</span>
           </span>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -689,9 +689,9 @@
 
       <!-- Preferencias de Belleza (Peluquería, Barbería, Salón / Spa) -->
       @if (checkinIsBeauty()) {
-        <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-purple-500/25 space-y-3">
-          <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
-            <app-icon name="sparkles" [size]="14" class="text-purple-500" />
+        <div class="station-section">
+          <span class="station-section__head station-section__title uppercase tracking-wider">
+            <app-icon name="sparkles" [size]="14" class="text-[var(--color-primary)]" />
             <span>Preferencias y Cuidado Personal (Opcional)</span>
           </span>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -714,8 +714,8 @@
       }
 
       <!-- Datos del Cliente (Siempre solicitados para la orden / factura) -->
-      <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/80 space-y-3">
-        <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
+      <div class="station-section">
+        <span class="station-section__head station-section__title uppercase tracking-wider">
           <app-icon name="user" [size]="14" class="text-[var(--color-primary)]" />
           <span>Datos del Cliente</span>
         </span>
@@ -785,9 +785,9 @@
 
       <!-- Presupuesto del Cliente Opcional (Común para TODOS los tipos) -->
       @if (checkinShowBudget()) {
-      <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/80 space-y-3">
-        <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
-          <app-icon name="dollar-sign" [size]="14" class="text-emerald-500" />
+      <div class="station-section">
+        <span class="station-section__head station-section__title uppercase tracking-wider">
+          <app-icon name="dollar-sign" [size]="14" class="text-[var(--color-primary)]" />
           <span>Presupuesto del cliente (opcional)</span>
         </span>
         <app-input
@@ -835,9 +835,9 @@
 
       <!-- Cuenta de la estación: productos que entran desde el ingreso y total -->
       @if (checkinShowProducts()) {
-      <div class="rounded-xl border border-[var(--color-border)] p-3 space-y-3">
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
+      <div class="station-section">
+        <div class="station-section__head flex items-center justify-between gap-2">
+          <span class="station-section__title uppercase tracking-wider">
             <app-icon name="shopping-bag" [size]="14" class="text-[var(--color-primary)]" /> Productos de la cuenta
           </span>
           <app-button variant="outline" size="sm" (clicked)="addCheckinLine()">
@@ -1010,7 +1010,7 @@
 
         @if (selectedConfigTab() === 'intake') {
           <div class="space-y-4">
-            <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-2">
+            <div class="station-section">
               <div class="flex flex-col sm:flex-row sm:items-end gap-2">
                 <div class="flex-1 min-w-0">
                   <app-selector
@@ -1050,7 +1050,7 @@
               (ngModelChange)="editStationType.set($event)"
             />
 
-            <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
+            <div class="station-section">
               <div class="flex items-center justify-between gap-3">
                 <div>
                   <span class="text-xs font-bold text-[var(--color-text-primary)]">Cronómetro de atención</span>
@@ -1073,10 +1073,10 @@
               }
             </div>
 
-            <section class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3" aria-labelledby="edit-station-tax-title">
-              <div>
-                <h4 id="edit-station-tax-title" class="text-xs font-bold text-[var(--color-text-primary)]">Impuesto del alquiler (opcional)</h4>
-                <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">Se aplica a la línea “Alquiler” de la estación. Sin impuesto, el alquiler se cobra tal cual.</p>
+            <section class="station-section" aria-labelledby="edit-station-tax-title">
+              <div class="station-section__head">
+                <h4 id="edit-station-tax-title" class="station-section__title">Impuesto del alquiler (opcional)</h4>
+                <p class="station-section__hint">Se aplica a la línea “Alquiler” de la estación. Sin impuesto, el alquiler se cobra tal cual.</p>
               </div>
               <app-selector
                 id="edit-station-tax-category"
@@ -1123,7 +1123,7 @@
               />
             }
 
-            <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="p-4 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex items-center justify-center shrink-0">
                   <app-icon name="qr-code" [size]="20" />

@@ -77,14 +77,12 @@ function toNullablePositiveInt(value: unknown): number | null {
   standalone: true,
   imports: [FormsModule, InputComponent, SelectorComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styleUrl: '../station-form-section.scss',
   template: `
-    <section
-      class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3"
-      aria-labelledby="station-rules-title"
-    >
-      <div>
-        <h4 id="station-rules-title" class="text-xs font-bold text-[var(--color-text-primary)]">Reglas de uso y anticipo</h4>
-        <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">
+    <section class="station-section" aria-labelledby="station-rules-title">
+      <div class="station-section__head">
+        <h4 id="station-rules-title" class="station-section__title">Reglas de uso y anticipo</h4>
+        <p class="station-section__hint">
           Cada atención copia estas reglas al abrirse; cambiarlas no altera las atenciones abiertas.
         </p>
       </div>
@@ -125,7 +123,7 @@ function toNullablePositiveInt(value: unknown): number | null {
         (ngModelChange)="patch({ booking_duration_mode: $event })"
       />
 
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div class="station-section__grid station-section__grid--3">
         <app-input
           label="Minutos de apartado"
           type="number"

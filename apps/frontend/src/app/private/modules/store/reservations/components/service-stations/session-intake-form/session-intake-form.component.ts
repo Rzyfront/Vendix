@@ -52,6 +52,7 @@ export interface IntakeCustomerDefaults {
   standalone: true,
   imports: [NgTemplateOutlet, DynamicFieldComponent, IconComponent, SpinnerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styleUrl: '../station-form-section.scss',
   template: `
     @if (scope() === 'customer') {
       @if (customerItems().length) {
@@ -69,16 +70,16 @@ export interface IntakeCustomerDefaults {
       </div>
     } @else if (template(); as tpl) {
       @if (visibleSections().length) {
-        <div class="rounded-xl border border-[var(--color-border)] p-4 space-y-4">
-          <div>
-            <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-1.5">
+        <div class="station-section">
+          <div class="station-section__head">
+            <h4 class="station-section__title">
               <app-icon name="clipboard-list" [size]="14" class="text-[var(--color-primary)]" />
               {{ tpl.name || 'Formulario de recepción' }}
             </h4>
-            <p class="text-xs text-[var(--color-text-secondary)]">Se guarda con esta atención.</p>
+            <p class="station-section__hint">Se guarda con esta atención.</p>
           </div>
           @for (section of visibleSections(); track section.key) {
-            <div class="space-y-2">
+            <div class="station-section__group">
               @if (visibleSections().length > 1 || section.description) {
                 <div>
                   <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">{{ section.title }}</p>

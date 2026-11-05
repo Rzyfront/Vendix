@@ -137,19 +137,17 @@ export function formatBlock(minutes: number, unit: RentalBlockUnit): string {
   standalone: true,
   imports: [FormsModule, InputComponent, SelectorComponent, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styleUrl: '../station-form-section.scss',
   template: `
-    <section
-      class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3"
-      aria-labelledby="station-rental-title"
-    >
-      <div>
-        <h4 id="station-rental-title" class="text-xs font-bold text-[var(--color-text-primary)]">Tarifa de alquiler</h4>
-        <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">
+    <section class="station-section" aria-labelledby="station-rental-title">
+      <div class="station-section__head">
+        <h4 id="station-rental-title" class="station-section__title">Tarifa de alquiler</h4>
+        <p class="station-section__hint">
           Deja la duración y el precio vacíos si la estación no cobra alquiler por tiempo.
         </p>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div class="station-section__grid station-section__grid--3">
         <app-input
           label="Duración del bloque"
           type="number"
@@ -175,7 +173,7 @@ export function formatBlock(minutes: number, unit: RentalBlockUnit): string {
       </div>
 
       @if (hasBlock()) {
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="station-section__grid">
           <app-selector
             label="Qué se cobra"
             [options]="billingOptions"
@@ -203,10 +201,10 @@ export function formatBlock(minutes: number, unit: RentalBlockUnit): string {
         }
       }
 
-      <div class="border-t border-[var(--color-border)] pt-3 space-y-3">
+      <div class="station-section__group">
         <div>
-          <h4 class="text-xs font-bold text-[var(--color-text-primary)]">Cobro para reservar</h4>
-          <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">
+          <h4 class="station-section__title">Cobro para reservar</h4>
+          <p class="station-section__hint">
             Lo que el cliente paga al reservar. Es independiente del anticipo consumible.
           </p>
         </div>
@@ -219,7 +217,7 @@ export function formatBlock(minutes: number, unit: RentalBlockUnit): string {
         />
 
         @if (value().booking_prepay_mode === 'partial') {
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div class="station-section__grid">
             <app-selector
               label="El abono se define como"
               [options]="basisOptions"

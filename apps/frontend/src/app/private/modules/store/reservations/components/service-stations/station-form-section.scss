@@ -1,0 +1,87 @@
+/*
+ * Shared look of the station form sections (S13): every section is a card (border + padding +
+ * title row), sections are separated by the same gap, and the fields inside have their own
+ * surface (field surface vs section surface) with a visible border. Tokens only, so light and
+ * dark themes resolve on their own.
+ */
+:host {
+  /* Custom elements are inline by default: block makes the parent's vertical gap apply. */
+  display: block;
+  --station-section-border: color-mix(in srgb, var(--color-text-primary) 14%, var(--color-surface));
+  --station-field-border: color-mix(in srgb, var(--color-text-primary) 24%, var(--color-surface));
+}
+
+.station-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--station-section-border);
+  background: var(--color-surface);
+}
+
+.station-section__head {
+  padding-bottom: 0.625rem;
+  border-bottom: 1px solid var(--station-section-border);
+}
+
+.station-section__title {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--color-text-primary);
+}
+
+.station-section__hint {
+  margin-top: 0.125rem;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+/* Mobile first: one column, two from sm; the --3 variant keeps three where the content fits. */
+.station-section__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+@media (min-width: 640px) {
+  .station-section__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .station-section__grid--3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* Sub-group inside a section (e.g. "Cobro para reservar"): a divider, same rhythm. */
+.station-section__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--station-section-border);
+}
+
+/* Fields: distinct surface and visible border against the section surface. */
+.station-section ::ng-deep :is(input:not([type='checkbox']):not([type='radio']), textarea, select, button.appearance-none) {
+  background-color: var(--color-background);
+  border-color: var(--station-field-border);
+}
+
+.station-section ::ng-deep :is(input:not([type='checkbox']):not([type='radio']), textarea, select, button.appearance-none):focus {
+  background-color: var(--color-surface);
+  border-color: var(--color-primary);
+}
+
+/* The first group right under the title row needs no second divider. */
+.station-section__head + .station-section__group {
+  padding-top: 0;
+  border-top: 0;
+}
