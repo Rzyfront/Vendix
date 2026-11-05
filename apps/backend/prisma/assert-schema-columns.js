@@ -39,6 +39,8 @@ const { Client } = require('pg');
  * Formato: 'tabla.columna'.
  */
 const REQUIRED_COLUMNS = [
+  // --- Estaciones S10: estación preferida del proveedor (20261115090000) ---
+  'service_providers.default_station_id',
   // --- Fase 1 · contrato de datos DIAN (migración 20260815120000) ---------
   // El frontend ya envía estos campos y el flujo de emisión los persiste; sin
   // la columna, crear o emitir una factura revienta con ColumnNotFound.

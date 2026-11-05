@@ -10879,10 +10879,13 @@ model service_providers {
   avatar_url   String?   @db.Text
   bio          String?   @db.Text
   sort_order   Int       @default(0)
+  /// Preferred station (not exclusive): booking with this provider tries it first, then falls back to auto-assignment. Must be linked in service_station_providers.
+  default_station_id Int?
   created_at   DateTime? @default(now()) @db.Timestamp(6)
   updated_at   DateTime? @default(now()) @db.Timestamp(6)
 
   store      stores                @relation(fields: [store_id], references: [id])
+  default_station service_stations? @relation("service_providers_default_station", fields: [default_station_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "service_providers_default_station_fkey")
   // Explicit actions: the DB FK is RESTRICT/CASCADE (20260328160000); an
   // implicit optional relation would make Prisma diff it to SET NULL.
   employee   employees?            @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: Cascade)
@@ -10900,6 +10903,7 @@ model service_providers {
   @@unique([store_id, user_id])
   @@unique([store_id, id])
   @@index([store_id, is_active])
+  @@index([default_station_id])
 }
 
 model provider_services {
@@ -14381,6 +14385,7 @@ model service_stations {
   service_sessions_station_fkey service_sessions[] @relation("service_sessions_station_fkey")
   service_station_rate_windows_station_fkey service_station_rate_windows[] @relation("service_station_rate_windows_station_fkey")
   booking_series_station_fkey booking_series[] @relation("booking_series_station_fkey")
+  providers_with_default_station service_providers[] @relation("service_providers_default_station")
   booking_reschedule_requests_station_store_fkey booking_reschedule_requests[] @relation("booking_reschedule_requests_station_store_fkey")
 
   @@unique([store_id, name], map: "service_stations_store_name_key")
