@@ -126,7 +126,7 @@ export class WorkflowTickService {
     now: Date,
   ): Promise<TickResult> {
     const result: TickResult = { action: 'overdue', reminded: false, escalated: false };
-    if (!onOverdue) return result;
+    if (!onOverdue) return this.park(tx, instance, result, now);
     const openTasks: Array<{ id: number }> = await tx.workflow_tasks.findMany({
       where: {
         store_id: instance.store_id,
@@ -137,7 +137,7 @@ export class WorkflowTickService {
       },
       select: { id: true },
     });
-    if (openTasks.length === 0) return result;
+    if (openTasks.length === 0) return this.park(tx, instance, result, now);
     const taskIds = openTasks.map((t) => t.id);
     const title = `${instance.reference} · ${instance.title}`;
 
@@ -193,33 +193,59 @@ export class WorkflowTickService {
     }
 
     const every = onOverdue.remind_every_hours;
-    if (every) {
-      const last = instance.stage_last_reminded_at;
-      if (!last || now.getTime() - last.getTime() >= every * 3_600_000) {
-        const stamped = await tx.workflow_instances.updateMany({
-          where: {
-            id: instance.id,
-            store_id: instance.store_id,
-            stage_entry_seq: instance.stage_entry_seq,
-            stage_last_reminded_at: last,
-          },
-          data: { stage_last_reminded_at: now },
+    // Already escalated (or lost the escalation race) and no reminders: done.
+    if (!every) return this.park(tx, instance, result, now);
+    const last = instance.stage_last_reminded_at;
+    if (!last || now.getTime() - last.getTime() >= every * 3_600_000) {
+      const stamped = await tx.workflow_instances.updateMany({
+        where: {
+          id: instance.id,
+          store_id: instance.store_id,
+          stage_entry_seq: instance.stage_entry_seq,
+          stage_last_reminded_at: last,
+        },
+        data: { stage_last_reminded_at: now },
+      });
+      if (stamped.count === 1) {
+        await this.notify(tx, instance, {
+          title,
+          message: 'Tienes una tarea vencida pendiente de atender.',
+          task_ids: taskIds,
         });
-        if (stamped.count === 1) {
-          await this.notify(tx, instance, {
-            title,
-            message: 'Tienes una tarea vencida pendiente de atender.',
-            task_ids: taskIds,
-          });
-          await this.events.emitWebhook(tx, instance, 'workflow.task.overdue', {
-            stage_key: instance.current_stage_key,
-            task_ids: taskIds,
-            action: 'reminded',
-          });
-          result.reminded = true;
-        }
+        await this.events.emitWebhook(tx, instance, 'workflow.task.overdue', {
+          stage_key: instance.current_stage_key,
+          task_ids: taskIds,
+          action: 'reminded',
+        });
+        result.reminded = true;
       }
     }
+    return result;
+  }
+
+  /**
+   * An overdue stage with nothing to send (no `on_overdue`, no open task, or
+   * escalated with no reminders) still gets `stage_last_reminded_at` stamped,
+   * in this transaction and by CAS: otherwise it keeps the `nulls first` head
+   * of the timers batch every minute and starves the instances behind it.
+   * The stamp is reset on stage entry. Not used when a reminder is configured
+   * but not yet due: stamping then would shift its cadence.
+   */
+  private async park(
+    tx: WorkflowTx,
+    instance: WorkflowInstanceRow,
+    result: TickResult,
+    now: Date,
+  ): Promise<TickResult> {
+    await tx.workflow_instances.updateMany({
+      where: {
+        id: instance.id,
+        store_id: instance.store_id,
+        stage_entry_seq: instance.stage_entry_seq,
+        stage_last_reminded_at: instance.stage_last_reminded_at,
+      },
+      data: { stage_last_reminded_at: now },
+    });
     return result;
   }
 

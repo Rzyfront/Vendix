@@ -4,12 +4,15 @@ import {
   seedDefinition,
   seedPeople,
 } from '../../../../testing/workflows/workflow-test-kit';
-import { WorkflowTimersCron } from './workflow-timers.cron';
+import { TIMERS_BATCH, WorkflowTimersCron } from './workflow-timers.cron';
 
-const slowDefinition = (onOverdue: Record<string, unknown>): WorkflowDefinitionV1 =>
+const slowDefinition = (
+  onOverdue: Record<string, unknown> | undefined,
+  key = 'slow',
+): WorkflowDefinitionV1 =>
   ({
     schema: 'vendix.workflow/v1',
-    key: 'slow',
+    key,
     name: 'Lento',
     fields: [],
     stages: [
@@ -147,5 +150,71 @@ describe('WorkflowTimersCron', () => {
     expect(first.stage_last_reminded_at).toEqual(now);
     await cron.runOnce(new Date(now.getTime() + HOUR + 1), 1);
     expect(ticked).toEqual([first.id, second.id]);
+  });
+  describe('una instancia vencida sin nada que enviar no ocupa el lote', () => {
+    it(`${TIMERS_BATCH}+ vencidas sin on_overdue no impiden que la siguiente reciba su recordatorio`, async () => {
+      seedDefinition(kit.db, slowDefinition(undefined, 'mute'));
+      seedDefinition(kit.db, slowDefinition({ remind_every_hours: 12 }));
+      const now = new Date();
+      for (let i = 0; i < TIMERS_BATCH + 5; i++) {
+        await kit.engine.start({ definitionKey: 'mute' });
+      }
+      for (const row of kit.db.table('workflow_instances')) {
+        row.stage_due_at = new Date(now.getTime() - 3 * HOUR); // vencen antes: encabezan el lote
+      }
+      await kit.engine.start({ definitionKey: 'slow' });
+      const target = kit.db.table('workflow_instances').at(-1)!;
+      target.stage_due_at = new Date(now.getTime() - HOUR);
+      kit.db.table('workflow_outbox').length = 0;
+
+      await cron.runOnce(now);
+      expect(notifies()).toHaveLength(0); // el lote entero se lo llevaron las mudas…
+      const mute = kit.db.table('workflow_instances').filter((i) => i.id !== target.id);
+      expect(mute.filter((i) => i.stage_last_reminded_at?.getTime() === now.getTime())).toHaveLength(TIMERS_BATCH);
+
+      // …pero quedaron selladas: al minuto siguiente la 201+ tiene turno.
+      await cron.runOnce(new Date(now.getTime() + 60_000));
+      expect(notifies()).toHaveLength(1);
+      expect(notifies()[0].instance_id).toBe(target.id);
+      expect(target.stage_last_reminded_at).not.toBeNull();
+    });
+
+    it('sin on_overdue: se sella el no-op y no se notifica nada', async () => {
+      await startOverdue(undefined as any);
+      const now = new Date();
+      await cron.runOnce(now);
+      expect(notifies()).toHaveLength(0);
+      expect(instance().stage_last_reminded_at).toEqual(now);
+      // dentro de la hora ni se selecciona
+      expect(await cron.runOnce(new Date(now.getTime() + 60_000))).toBe(0);
+    });
+
+    it('sin tareas abiertas: se sella el no-op', async () => {
+      await startOverdue({ remind_every_hours: 12 });
+      for (const t of kit.db.table('workflow_tasks')) t.status = 'completed';
+      const now = new Date();
+      await cron.runOnce(now);
+      expect(notifies()).toHaveLength(0);
+      expect(instance().stage_last_reminded_at).toEqual(now);
+    });
+
+    it('ya escalada y sin recordatorios: tras escalar, el siguiente barrido sella el no-op', async () => {
+      await startOverdue({ escalate_to: { kind: 'user', user_id: 1 } });
+      const now = new Date();
+      await cron.runOnce(now);
+      expect(instance().stage_last_reminded_at).toBeNull(); // escalar no sella el recordatorio
+      const later = new Date(now.getTime() + 60_000);
+      await cron.runOnce(later);
+      expect(instance().stage_last_reminded_at).toEqual(later);
+      expect(notifies()).toHaveLength(1); // solo el aviso de escalamiento
+    });
+
+    it('con recordatorio configurado que aún no toca no se re-sella (la cadencia se conserva)', async () => {
+      await startOverdue({ remind_every_hours: 12 });
+      const now = new Date();
+      await cron.runOnce(now);
+      await cron.runOnce(new Date(now.getTime() + 2 * HOUR));
+      expect(instance().stage_last_reminded_at).toEqual(now);
+    });
   });
 });
