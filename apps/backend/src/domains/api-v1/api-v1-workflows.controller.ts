@@ -7,9 +7,12 @@ import {
   ParseIntPipe,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ResponseService } from '@common/responses/response.service';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { IndustryModule } from '../../common/decorators/industry-module.decorator';
+import { IndustryModuleGuard } from '../../common/guards/industry-module.guard';
 import { ApiKeyAuth } from '../store/integrations/api-keys/api-key-auth.decorator';
 import { WorkflowDefinitionsService } from '../store/workflows/definitions/workflow-definitions.service';
 import { WorkflowEngineService } from '../store/workflows/engine/workflow-engine.service';
@@ -33,9 +36,16 @@ const TASK = 'store:workflows:task';
  * services as `/api/store/workflows` (the request context carries the key's
  * store and acting user, with the effective permission set). No design,
  * manage, publish or claim endpoints exist here.
+ *
+ * Same industry lock as `/api/store/workflows/*`: a store that is no longer
+ * `administration` (or lost the `flows` module) gets 403 `MODULE_INDUSTRY_001`
+ * even with a valid key. `UseGuards` sits above `ApiKeyAuth` so the industry
+ * guard runs after `ApiKeyGuard` has set `req.user` (decorators apply bottom-up).
  */
 @Controller('v1/workflows')
+@UseGuards(IndustryModuleGuard)
 @ApiKeyAuth()
+@IndustryModule('flows')
 export class ApiV1WorkflowsController {
   constructor(
     private readonly definitions: WorkflowDefinitionsService,

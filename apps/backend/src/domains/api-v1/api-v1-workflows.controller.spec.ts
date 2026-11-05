@@ -10,6 +10,8 @@ import { ApiKeyGuard } from '../store/integrations/api-keys/api-key.guard';
 import { ApiKeyThrottlerGuard } from '../store/integrations/api-keys/api-key-throttler.guard';
 import { effectivePermissions } from '../store/integrations/api-keys/api-key.util';
 import { ApiV1WorkflowsController } from './api-v1-workflows.controller';
+import { IndustryModuleGuard } from '../../common/guards/industry-module.guard';
+import { INDUSTRY_MODULE_KEY } from '../../common/decorators/industry-module.decorator';
 import {
   buildWorkflowKit,
   purchaseDefinition,
@@ -33,8 +35,19 @@ describe('ApiV1WorkflowsController (metadata)', () => {
       true,
     );
     expect(Reflect.getMetadata('__guards__', ApiV1WorkflowsController)).toEqual(
-      [ApiKeyGuard, ApiKeyThrottlerGuard, PermissionsGuard],
+      [
+        ApiKeyGuard,
+        ApiKeyThrottlerGuard,
+        PermissionsGuard,
+        IndustryModuleGuard,
+      ],
     );
+  });
+
+  it('carries the same flows industry lock as /api/store/workflows', () => {
+    expect(
+      Reflect.getMetadata(INDUSTRY_MODULE_KEY, ApiV1WorkflowsController),
+    ).toBe('flows');
   });
 
   it('declares a per-key throttle of 120/min', () => {
@@ -133,6 +146,21 @@ describe('/api/v1/workflows request chain', () => {
   const reflector = new Reflector();
   const permissionsGuard = new PermissionsGuard(reflector);
   const interceptor = new RequestContextInterceptor();
+  /** Industries per store, read by the real IndustryModuleGuard. */
+  let industries: Record<number, string[]>;
+  const audit = { record: jest.fn() };
+  const industryGuard = new IndustryModuleGuard(
+    reflector,
+    {
+      stores: {
+        findUnique: jest.fn(async ({ where }: any) =>
+          industries[where.id] ? { industries: industries[where.id] } : null,
+        ),
+      },
+    } as any,
+    { modeForStore: jest.fn(async () => 'audit') } as any,
+    audit as any,
+  );
 
   function principal(over: {
     store_id?: number;
@@ -174,11 +202,13 @@ describe('/api/v1/workflows request chain', () => {
       switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }),
     };
     await guard.canActivate(http as any);
-    permissionsGuard.canActivate({
+    const exec = {
       ...http,
       getHandler: () => (ApiV1WorkflowsController.prototype as any)[handler],
       getClass: () => ApiV1WorkflowsController,
-    } as any);
+    } as any;
+    permissionsGuard.canActivate(exec);
+    await industryGuard.canActivate(exec);
     return firstValueFrom(
       interceptor.intercept(
         http as any,
@@ -192,6 +222,8 @@ describe('/api/v1/workflows request chain', () => {
   const ALL = [R, S, T, 'store:workflows:design', 'store:workflows:manage'];
 
   beforeEach(() => {
+    industries = { 1: ['administration'], 2: ['administration'] };
+    audit.record.mockClear();
     kit = buildWorkflowKit();
     seedPeople(kit.db);
     seedDefinition(kit.db, purchaseDefinition(), 1);
@@ -354,5 +386,61 @@ describe('/api/v1/workflows request chain', () => {
     });
     const listed: any = await call('listInstances', p, [{}]);
     expect(listed.data.map((r: any) => r.id)).toEqual([mine.instance.id]);
+  });
+  describe('flows industry lock (403 MODULE_INDUSTRY_001)', () => {
+    const p = () =>
+      principal({
+        userPerms: ALL,
+        scopes: ['workflows:read', 'workflows:write'],
+      });
+
+    it.each([
+      ['a store that is no longer administration', ['retail']],
+      ['a store that lost every industry', []],
+    ])(
+      '%s: GET and POST are rejected and nothing is written',
+      async (_l, inds) => {
+        industries[1] = inds;
+        const get = await call('listInstances', p(), [{}]).catch((x) => x);
+        expect(get).toBeInstanceOf(VendixHttpException);
+        expect(get.getStatus()).toBe(403);
+        expect(get.errorCode).toBe('MODULE_INDUSTRY_001');
+        const post = await call(
+          'start',
+          p(),
+          [{ definition_key: 'purchase' }, 'idem-ind'],
+          'POST',
+        ).catch((x) => x);
+        expect(post).toBeInstanceOf(VendixHttpException);
+        expect(post.getStatus()).toBe(403);
+        expect(post.errorCode).toBe('MODULE_INDUSTRY_001');
+        expect(kit.db.table('workflow_instances')).toHaveLength(0);
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            key: 'flows',
+            decision: 'blocked',
+            store_id: 1,
+          }),
+        );
+      },
+    );
+
+    it('an administration store passes: GET 200 and POST creates', async () => {
+      const created: any = await call(
+        'start',
+        p(),
+        [{ definition_key: 'purchase' }, 'idem-ok'],
+        'POST',
+      );
+      expect(created.instance.id).toBeDefined();
+      const listed: any = await call('listInstances', p(), [{}]);
+      expect(listed.data.map((r: any) => r.id)).toContain(created.instance.id);
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('the lock is per store: store 2 losing administration does not block a key of store 1', async () => {
+      industries[2] = ['retail'];
+      await expect(call('listInstances', p(), [{}])).resolves.toBeDefined();
+    });
   });
 });
