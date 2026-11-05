@@ -21,7 +21,7 @@ export class DocumentFilesController {
   ) {}
 
   @Get(':id/download')
-  @Permissions('store:documents:read', 'store:workflows:read')
+  @Permissions('store:documents:read', 'store:workflows:read', 'store:workflows:task')
   async download(@Param('id', ParseIntPipe) id: number) {
     return this.responseService.success(await this.files.download(id));
   }

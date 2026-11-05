@@ -59,8 +59,9 @@ export class WorkflowDefinitionsController {
     return this.responseService.created(await this.definitions.import(dto));
   }
 
+  // `start` lists definitions so staff can pick one to start a request.
   @Get()
-  @Permissions('store:workflows:read')
+  @Permissions('store:workflows:read', 'store:workflows:start')
   async list(@Query() query: WorkflowDefinitionsQueryDto) {
     const r = await this.definitions.list(query);
     return this.responseService.paginated(r.data, r.total, r.page, r.limit);
@@ -73,7 +74,7 @@ export class WorkflowDefinitionsController {
   }
 
   @Get(':id')
-  @Permissions('store:workflows:read')
+  @Permissions('store:workflows:read', 'store:workflows:start')
   async get(@Param('id', ParseIntPipe) id: number) {
     return this.responseService.success(await this.definitions.get(id));
   }

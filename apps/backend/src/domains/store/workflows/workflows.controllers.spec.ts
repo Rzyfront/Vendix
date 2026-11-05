@@ -17,13 +17,13 @@ const M = 'store:workflows:manage';
 const G = 'store:work_groups:manage';
 
 /** [handler, permission, HTTP method, path] */
-const EXPECTED: Array<[any, string, string, string, string]> = [
+const EXPECTED: Array<[any, string, string | string[], string, string]> = [
   [WorkflowDefinitionsController, 'schema', R, 'GET', 'schema'],
   [WorkflowDefinitionsController, 'validateBody', D, 'POST', 'validate'],
   [WorkflowDefinitionsController, 'import', D, 'POST', 'import'],
-  [WorkflowDefinitionsController, 'list', R, 'GET', '/'],
+  [WorkflowDefinitionsController, 'list', [R, S], 'GET', '/'],
   [WorkflowDefinitionsController, 'create', D, 'POST', '/'],
-  [WorkflowDefinitionsController, 'get', R, 'GET', ':id'],
+  [WorkflowDefinitionsController, 'get', [R, S], 'GET', ':id'],
   [WorkflowDefinitionsController, 'getDraft', D, 'GET', ':id/draft'],
   [WorkflowDefinitionsController, 'saveDraft', D, 'PATCH', ':id/draft'],
   [WorkflowDefinitionsController, 'validate', D, 'POST', ':id/validate'],
@@ -34,8 +34,8 @@ const EXPECTED: Array<[any, string, string, string, string]> = [
   [WorkflowDefinitionsController, 'archive', D, 'POST', ':id/archive'],
   [WorkflowDefinitionsController, 'unarchive', D, 'POST', ':id/unarchive'],
   [WorkflowInstancesController, 'start', S, 'POST', '/'],
-  [WorkflowInstancesController, 'list', R, 'GET', '/'],
-  [WorkflowInstancesController, 'get', R, 'GET', ':id'],
+  [WorkflowInstancesController, 'list', [R, S, T], 'GET', '/'],
+  [WorkflowInstancesController, 'get', [R, S, T], 'GET', ':id'],
   [WorkflowInstancesController, 'cancel', M, 'POST', ':id/cancel'],
   [WorkflowInstancesController, 'forceTransition', M, 'POST', ':id/force-transition'],
   [WorkflowInstancesController, 'uploadFile', T, 'POST', ':id/files'],
@@ -70,7 +70,9 @@ describe('controladores de Flujos', () => {
 
   it.each(EXPECTED)('%p.%s exige %s y expone %s %s', (ctrl, handler, permission, method, path) => {
     const fn = ctrl.prototype[handler];
-    expect(Reflect.getMetadata(PERMISSIONS_KEY, fn)).toEqual([permission]);
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, fn)).toEqual(
+      Array.isArray(permission) ? permission : [permission],
+    );
     expect(METHODS[Reflect.getMetadata('method', fn)]).toBe(method);
     expect(Reflect.getMetadata('path', fn)).toBe(path);
   });
@@ -80,7 +82,7 @@ describe('controladores de Flujos', () => {
       for (const name of Object.getOwnPropertyNames(ctrl.prototype)) {
         const fn = ctrl.prototype[name];
         if (name === 'constructor' || Reflect.getMetadata('path', fn) === undefined) continue;
-        expect(Reflect.getMetadata(PERMISSIONS_KEY, fn)).toHaveLength(1);
+        expect(Reflect.getMetadata(PERMISSIONS_KEY, fn)?.length ?? 0).toBeGreaterThan(0);
       }
     }
   });

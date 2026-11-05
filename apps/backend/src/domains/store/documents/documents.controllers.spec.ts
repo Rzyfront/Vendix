@@ -27,7 +27,7 @@ describe('controladores documentales', () => {
     [DossiersController, 'list', ['store:documents:read'], 'GET', '/'],
     [DossiersController, 'get', ['store:documents:read'], 'GET', ':id'],
     // El participante de la solicitud no necesita documents:read: el servicio decide.
-    [DocumentFilesController, 'download', ['store:documents:read', 'store:workflows:read'], 'GET', ':id/download'],
+    [DocumentFilesController, 'download', ['store:documents:read', 'store:workflows:read', 'store:workflows:task'], 'GET', ':id/download'],
     [WorkflowInstancesController, 'uploadFile', ['store:workflows:task'], 'POST', ':id/files'],
   ])('%p.%s exige %j y expone %s %s', (ctrl: any, handler: string, perms, method, path) => {
     const fn = ctrl.prototype[handler];

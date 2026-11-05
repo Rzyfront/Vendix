@@ -62,15 +62,17 @@ export class WorkflowInstancesController {
     return this.responseService.created(result, 'Solicitud iniciada');
   }
 
+  // Staff with only start/task see their own requests and tasks: the service
+  // applies the participation rule to everyone without `manage`.
   @Get()
-  @Permissions('store:workflows:read')
+  @Permissions('store:workflows:read', 'store:workflows:start', 'store:workflows:task')
   async list(@Query() query: WorkflowInstancesQueryDto) {
     const r = await this.instances.list(query);
     return this.responseService.paginated(r.data, r.total, r.page, r.limit);
   }
 
   @Get(':id')
-  @Permissions('store:workflows:read')
+  @Permissions('store:workflows:read', 'store:workflows:start', 'store:workflows:task')
   async get(@Param('id', ParseIntPipe) id: number) {
     return this.responseService.success(await this.instances.get(id));
   }
