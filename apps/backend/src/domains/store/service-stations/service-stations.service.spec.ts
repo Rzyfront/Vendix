@@ -70,6 +70,8 @@ describe('ServiceStationsService.destroy', () => {
       service_station_schedules: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       service_station_services: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
       service_station_providers: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      service_station_rate_windows: { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) },
+      booking_series: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
       service_stations: { delete: jest.fn().mockResolvedValue({ id: 2 }) },
     };
     prisma = {
@@ -119,6 +121,20 @@ describe('ServiceStationsService.destroy', () => {
       expect.objectContaining({ data: { requested_station_id: null } }),
     );
   });
+
+  it('borra las ventanas de tarifa y suelta las series antes de borrar la estación (FKs RESTRICT)', async () => {
+    await run(() => service.destroy(2));
+    expect(tx.service_station_rate_windows.deleteMany).toHaveBeenCalledWith({
+      where: { store_id: 10, station_id: 2 },
+    });
+    expect(tx.booking_series.updateMany).toHaveBeenCalledWith({
+      where: { store_id: 10, station_id: 2 },
+      data: { station_id: null },
+    });
+    const deleteOrder = tx.service_stations.delete.mock.invocationCallOrder[0];
+    expect(tx.service_station_rate_windows.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(deleteOrder);
+    expect(tx.booking_series.updateMany.mock.invocationCallOrder[0]).toBeLessThan(deleteOrder);
+  });
 });
 
 describe('ServiceStationsService — impuesto del alquiler', () => {
@@ -167,5 +183,272 @@ describe('ServiceStationsService — impuesto del alquiler', () => {
     const data = prisma.service_stations.updateMany.mock.calls[0][0].data;
     expect(data.rental_tax_category_id).toBeNull();
     expect(data).not.toHaveProperty('rental_tax_is_inclusive');
+  });
+});
+
+
+describe('ServiceStationsService.findAll — próxima reserva y sesión activa', () => {
+  const context: RequestContext = { store_id: 10, is_super_admin: false, is_owner: false };
+  let service: ServiceStationsService;
+  let prisma: Record<string, any>;
+
+  beforeEach(() => {
+    prisma = {
+      service_stations: {
+        findMany: jest.fn().mockResolvedValue([{ id: 1, name: 'Cava 1' }, { id: 2, name: 'Cava 2' }]),
+        count: jest.fn().mockResolvedValue(2),
+      },
+      service_station_services: { findMany: jest.fn().mockResolvedValue([]) },
+      service_station_providers: { findMany: jest.fn().mockResolvedValue([]) },
+      service_allocations: {
+        findMany: jest.fn().mockImplementation((args: any) =>
+          Promise.resolve(
+            args.where.state === 'in_service'
+              ? [{ session_id: 70, end_at: new Date('2026-11-05T03:00:00Z') }]
+              : [{ station_id: 1, booking_id: 8, start_at: new Date('2026-11-05T07:00:00Z'), booking: { customer: { first_name: 'Ana', last_name: null } } }],
+          ),
+        ),
+      },
+      service_sessions: {
+        findMany: jest.fn().mockResolvedValue([{ id: 70, station_id: 2, opened_at: new Date('2026-11-05T01:00:00Z'), status: 'open' }]),
+      },
+    };
+    service = new ServiceStationsService(prisma as unknown as StorePrismaService, {} as any);
+  });
+
+  const run = <T,>(fn: () => Promise<T>) => RequestContextService.runIsolated(context, fn);
+
+  it('agrega next_reservation y active_session con consultas en lote', async () => {
+    const result = await run(() => service.findAll({} as any));
+    const [s1, s2]: any[] = result.data;
+    expect(s1.next_reservation).toEqual({ start_at: '2026-11-05T07:00:00.000Z', booking_id: 8, customer_name: 'Ana' });
+    expect(s1.active_session).toBeNull();
+    expect(s2.next_reservation).toBeNull();
+    expect(s2.active_session).toEqual({
+      id: 70,
+      opened_at: new Date('2026-11-05T01:00:00Z'),
+      planned_end_at: '2026-11-05T03:00:00.000Z',
+      status: 'open',
+    });
+    // One batched query per concern, never per station.
+    expect(prisma.service_sessions.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.service_allocations.findMany).toHaveBeenCalledTimes(2);
+    const nextCall = prisma.service_allocations.findMany.mock.calls.find((c: any[]) => c[0].where.state !== 'in_service');
+    expect(nextCall[0].where).toEqual(expect.objectContaining({ store_id: 10, station_id: { in: [1, 2] }, start_at: { gte: expect.any(Date) } }));
+  });
+
+  it('la próxima reserva no muestra la asignación de la atención en curso', async () => {
+    await run(() => service.findAll({} as any));
+    const nextCall = prisma.service_allocations.findMany.mock.calls.find((c: any[]) => c[0].where.state !== 'in_service');
+    // An early arrival keeps a future start_at on the session's own allocation:
+    // it is the current session, not the next reservation.
+    expect(nextCall[0].where.session_id).toBeNull();
+    expect(nextCall[0].where.state.in).not.toContain('in_service');
+  });
+});
+
+describe('ServiceStationsService.setSchedules — horarios nocturnos (S21)', () => {
+  const context: RequestContext = { store_id: 10, is_super_admin: false, is_owner: false };
+  let service: ServiceStationsService;
+  let tx: Record<string, any>;
+
+  beforeEach(() => {
+    tx = {
+      service_station_schedules: {
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+        createMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = {
+      service_stations: { findFirst: jest.fn().mockResolvedValue({ id: 2, name: 'Cava 1' }) },
+      service_station_services: { findMany: jest.fn().mockResolvedValue([]) },
+      service_station_providers: { findMany: jest.fn().mockResolvedValue([]) },
+      service_station_schedules: { findMany: jest.fn().mockResolvedValue([]) },
+      $transaction: jest.fn(async (cb: any) => cb(tx)),
+    };
+    service = new ServiceStationsService(prisma as unknown as StorePrismaService, {} as any);
+  });
+
+  const run = <T>(fn: () => Promise<T>): Promise<T> => RequestContextService.runIsolated(context, fn);
+
+  it('guarda un bloque que termina al día siguiente', async () => {
+    await run(() => service.setSchedules(2, { schedules: [{ weekday: 5, start_time: '20:00', end_time: '03:00' }] }));
+    expect(tx.service_station_schedules.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ weekday: 5, start_time: '20:00', end_time: '03:00' })],
+    });
+  });
+
+  it('acepta 00:00-00:00 como 24 horas', async () => {
+    await run(() => service.setSchedules(2, { schedules: [{ weekday: 6, start_time: '00:00', end_time: '00:00' }] }));
+    expect(tx.service_station_schedules.createMany).toHaveBeenCalled();
+  });
+
+  it('rechaza un día que se cruza con el bloque nocturno del día anterior', async () => {
+    await expect(
+      run(() => service.setSchedules(2, {
+        schedules: [
+          { weekday: 5, start_time: '20:00', end_time: '03:00' },
+          { weekday: 6, start_time: '02:00', end_time: '10:00' },
+        ],
+      })),
+    ).rejects.toThrow('no pueden superponerse');
+    expect(tx.service_station_schedules.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('mantiene el rechazo de bloques diurnos superpuestos', async () => {
+    await expect(
+      run(() => service.setSchedules(2, {
+        schedules: [
+          { weekday: 1, start_time: '09:00', end_time: '13:00' },
+          { weekday: 1, start_time: '12:00', end_time: '18:00' },
+        ],
+      })),
+    ).rejects.toThrow('no pueden superponerse');
+  });
+
+  it('mantiene los bloques diurnos contiguos y ordena block_order', async () => {
+    await run(() => service.setSchedules(2, {
+      schedules: [
+        { weekday: 1, start_time: '14:00', end_time: '18:00' },
+        { weekday: 1, start_time: '09:00', end_time: '14:00' },
+      ],
+    }));
+    expect(tx.service_station_schedules.createMany.mock.calls[0][0].data).toEqual([
+      expect.objectContaining({ start_time: '09:00', block_order: 0 }),
+      expect.objectContaining({ start_time: '14:00', block_order: 1 }),
+    ]);
+  });
+});
+
+describe('ServiceStationsService — reglas de anticipo (S1)', () => {
+  const context: RequestContext = { store_id: 10, is_super_admin: false, is_owner: false };
+  let service: ServiceStationsService;
+  let prisma: Record<string, any>;
+  let shippingTax: { assertCategoryAssignable: jest.Mock };
+  let current: Record<string, any>;
+
+  beforeEach(() => {
+    current = { id: 2, store_id: 10, name: 'Cava 3', deposit_policy: 'none', deposit_amount: null };
+    prisma = {
+      service_stations: {
+        create: jest.fn().mockResolvedValue({ id: 2 }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        findFirst: jest.fn(async () => ({ ...current })),
+      },
+      data_collection_templates: { findFirst: jest.fn().mockResolvedValue({ id: 5, station_type: 'cava' }) },
+      service_station_services: { findMany: jest.fn().mockResolvedValue([]) },
+      service_station_providers: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    shippingTax = { assertCategoryAssignable: jest.fn().mockResolvedValue(undefined) };
+    service = new ServiceStationsService(prisma as unknown as StorePrismaService, shippingTax as any);
+  });
+
+  const run = <T>(fn: () => Promise<T>) => RequestContextService.runIsolated(context, fn);
+
+  it('create persiste las reglas de anticipo y valida la categoría del cargo de reserva', async () => {
+    await run(() => service.create({
+      name: 'Cava 3', intake_template_id: 5,
+      deposit_policy: 'required', deposit_amount: 400000, deposit_exhausted_policy: 'recharge',
+      leftover_policy: 'minimum_spend', booking_duration_mode: 'free', hold_minutes: 45,
+      open_end_block_minutes: 240, cancel_refund_hours: 24, reservation_fee_tax_category_id: 3,
+    } as any));
+    expect(prisma.service_stations.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        deposit_policy: 'required', deposit_amount: 400000, deposit_exhausted_policy: 'recharge',
+        leftover_policy: 'minimum_spend', booking_duration_mode: 'free', hold_minutes: 45,
+        open_end_block_minutes: 240, cancel_refund_hours: 24, reservation_fee_tax_category_id: 3,
+      }),
+    });
+    expect(shippingTax.assertCategoryAssignable).toHaveBeenCalledWith(3, 'station_rental');
+  });
+
+  it('create sin reglas conserva los valores de siempre (sin columnas nuevas en el insert)', async () => {
+    await run(() => service.create({ name: 'Bahía 1', intake_template_id: 5 } as any));
+    const data = prisma.service_stations.create.mock.calls[0][0].data;
+    expect(data).not.toHaveProperty('deposit_policy');
+    expect(data).not.toHaveProperty('hold_minutes');
+    expect(data.rental_tax_is_inclusive).toBe(true);
+  });
+
+  it('create con anticipo "ninguno" no guarda monto', async () => {
+    await run(() => service.create({ name: 'Cava 3', intake_template_id: 5, deposit_policy: 'none', deposit_amount: 1000 } as any));
+    expect(prisma.service_stations.create.mock.calls[0][0].data.deposit_amount).toBeNull();
+  });
+
+  it('update rechaza pasar a anticipo obligatorio sin monto en la estación ni en el pedido', async () => {
+    await expect(run(() => service.update(2, { deposit_policy: 'required' } as any))).rejects.toThrow('Indica el monto del anticipo');
+    expect(prisma.service_stations.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('update acepta una política con el monto que la estación ya tenía', async () => {
+    current.deposit_amount = 200000;
+    await run(() => service.update(2, { deposit_policy: 'optional' } as any));
+    expect(prisma.service_stations.updateMany.mock.calls[0][0].data).toEqual(expect.objectContaining({ deposit_policy: 'optional' }));
+  });
+
+  it('update a "ninguno" borra el monto y no toca lo demás', async () => {
+    current.deposit_policy = 'required';
+    current.deposit_amount = 400000;
+    await run(() => service.update(2, { deposit_policy: 'none' } as any));
+    const data = prisma.service_stations.updateMany.mock.calls[0][0].data;
+    expect(data).toEqual(expect.objectContaining({ deposit_policy: 'none', deposit_amount: null }));
+    expect(data).not.toHaveProperty('hold_minutes');
+  });
+
+  it('create persiste unidad, modo y momento del cobro y el cobro parcial por porcentaje', async () => {
+    await run(() => service.create({
+      name: 'Cancha 1', intake_template_id: 5, rental_block_unit: 'hour', rental_billing_mode: 'planned',
+      rental_charge_timing: 'at_start', booking_prepay_mode: 'partial', booking_prepay_percent: 30,
+    } as any));
+    expect(prisma.service_stations.create.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      rental_block_unit: 'hour', rental_billing_mode: 'planned', rental_charge_timing: 'at_start',
+      booking_prepay_mode: 'partial', booking_prepay_percent: 30, booking_prepay_amount: null,
+    }));
+  });
+
+  it('create sin reglas de alquiler no agrega esas columnas al insert', async () => {
+    await run(() => service.create({ name: 'Bahía 1', intake_template_id: 5 } as any));
+    const data = prisma.service_stations.create.mock.calls[0][0].data;
+    for (const key of ['rental_block_unit', 'rental_billing_mode', 'rental_charge_timing', 'booking_prepay_mode', 'booking_prepay_percent', 'booking_prepay_amount']) {
+      expect(data).not.toHaveProperty(key);
+    }
+  });
+
+  it('update a cobro total borra porcentaje y monto', async () => {
+    current.booking_prepay_mode = 'partial';
+    current.booking_prepay_percent = 30;
+    await run(() => service.update(2, { booking_prepay_mode: 'full' } as any));
+    expect(prisma.service_stations.updateMany.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      booking_prepay_mode: 'full', booking_prepay_percent: null, booking_prepay_amount: null,
+    }));
+  });
+
+  it('update de parcial por porcentaje a parcial por monto borra el porcentaje guardado', async () => {
+    current.booking_prepay_mode = 'partial';
+    current.booking_prepay_percent = 30;
+    await run(() => service.update(2, { booking_prepay_mode: 'partial', booking_prepay_amount: 50000 } as any));
+    expect(prisma.service_stations.updateMany.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      booking_prepay_percent: null, booking_prepay_amount: 50000,
+    }));
+  });
+
+  it('update rechaza un porcentaje suelto cuando la estación no cobra parcial', async () => {
+    current.booking_prepay_mode = 'none';
+    await expect(run(() => service.update(2, { booking_prepay_percent: 30 } as any)))
+      .rejects.toThrow('El cobro parcial lleva un porcentaje o un monto');
+    expect(prisma.service_stations.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('update rechaza dejar el cobro parcial sin porcentaje ni monto', async () => {
+    current.booking_prepay_mode = 'partial';
+    current.booking_prepay_amount = 50000;
+    await expect(run(() => service.update(2, { booking_prepay_amount: null } as any)))
+      .rejects.toThrow('El cobro parcial lleva un porcentaje o un monto');
+  });
+
+  it('update solo de nombre no valida categorías nuevas ni anticipo', async () => {
+    await run(() => service.update(2, { name: 'Cava 4' } as any));
+    expect(shippingTax.assertCategoryAssignable).toHaveBeenCalledWith(undefined, 'station_rental');
+    expect(prisma.service_stations.updateMany.mock.calls[0][0].data).not.toHaveProperty('deposit_policy');
   });
 });

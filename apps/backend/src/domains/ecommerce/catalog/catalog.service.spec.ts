@@ -141,6 +141,69 @@ describe('CatalogService reviews', () => {
     );
   });
 
+  it('S2: el detalle de un alquiler expone la unidad de duración y el modo de precio, con la unidad por variante', async () => {
+    prisma.store_settings.findFirst.mockResolvedValueOnce(disabledSettings);
+    prisma.products.findFirst.mockResolvedValue({
+      ...baseProduct,
+      reviews: undefined,
+      product_type: 'service',
+      requires_booking: true,
+      service_duration_minutes: 240,
+      service_duration_unit: 'hour',
+      rental_pricing_mode: 'station_rate',
+      product_variants: [
+        {
+          id: 7, sku: 'ALQ-1D', name: '1 día', price_override: null, stock_quantity: 0,
+          is_on_sale: false, sale_price: null, track_inventory_override: false, stock_levels: [],
+          service_duration_minutes: 1440, service_duration_unit: 'day', attributes: {},
+        },
+      ],
+    });
+
+    const result: any = await service.getProductBySlug('producto');
+
+    expect(result.service_duration_unit).toBe('hour');
+    expect(result.rental_pricing_mode).toBe('station_rate');
+    expect(result.variants[0].service_duration_unit).toBe('day');
+  });
+
+  it('S2: el detalle dice si el servicio exige estación, para que la reserva en línea pida sus horarios', async () => {
+    prisma.store_settings.findFirst.mockResolvedValueOnce(disabledSettings);
+    prisma.products.findFirst.mockResolvedValue({
+      ...baseProduct,
+      reviews: undefined,
+      product_type: 'service',
+      requires_booking: true,
+      booking_mode: 'free_booking',
+      requires_station: true,
+      rental_pricing_mode: 'station_rate',
+    });
+
+    const result: any = await service.getProductBySlug('producto');
+
+    expect(result.requires_station).toBe(true);
+  });
+
+  it('S2: un producto sin estación declara requires_station false, no ausente', async () => {
+    prisma.store_settings.findFirst.mockResolvedValueOnce(disabledSettings);
+    prisma.products.findFirst.mockResolvedValue({ ...baseProduct, reviews: undefined });
+
+    const result: any = await service.getProductBySlug('producto');
+
+    expect(result.requires_station).toBe(false);
+  });
+
+  it('S2: un producto ordinario sigue sin unidad ni modo de alquiler (null)', async () => {
+    prisma.store_settings.findFirst.mockResolvedValueOnce(disabledSettings);
+    prisma.products.findFirst.mockResolvedValue({ ...baseProduct, reviews: undefined });
+
+    const result: any = await service.getProductBySlug('producto');
+
+    expect(result.service_duration_unit).toBeNull();
+    expect(result.rental_pricing_mode).toBeNull();
+    expect(result.base_price).toBeDefined();
+  });
+
   it('uses real approved review aggregates while returning the latest public reviews', async () => {
     prisma.products.findFirst.mockResolvedValue({
       ...baseProduct,
@@ -1333,11 +1396,14 @@ describe('CatalogService public smart search (D.3)', () => {
         'price_from',
         'price_unit',
         'product_type',
+        'regular_final_price',
+        'rental_pricing_mode',
         'requires_booking',
         'sale_price',
         'sale_unit',
         'sale_unit_count',
         'service_duration_minutes',
+        'service_duration_unit',
         'service_modality',
         'sku',
         'slug',

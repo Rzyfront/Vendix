@@ -28,7 +28,9 @@ import {
   ProviderAvailabilityQueryDto,
   ServiceIntakePrefillQueryDto,
   ServiceIntakeQueryDto,
+  ServiceSessionDepositDto,
   ServiceSessionTransitionDto,
+  SettleServiceSessionDto,
 } from './dto/service-session.dto';
 import { ReissueServiceSessionLinkDto } from './dto/reissue-service-session-link.dto';
 import { ServiceSessionsService } from './service-sessions.service';
@@ -84,6 +86,12 @@ export class ServiceSessionsController {
     return this.response.updated(await this.sessions.transition(id, dto), 'Atención actualizada');
   }
 
+  @Post(':id/close-pending')
+  @Permissions('store:reservations:close_with_balance')
+  async closePending(@Param('id', ParseIntPipe) id: number) {
+    return this.response.updated(await this.sessions.closePending(id), 'Atención cerrada con saldo por cobrar');
+  }
+
   @Patch(':id/extend')
   @Permissions('store:reservations:update')
   async extend(
@@ -99,6 +107,13 @@ export class ServiceSessionsController {
     return this.response.success(await this.sessions.prepareCharge(id));
   }
 
+  /** S11: leaves the separate rental order ready for the normal POS payment flow. */
+  @Post(':id/rental/prepare-charge')
+  @Permissions('store:reservations:update')
+  async prepareRentalCharge(@Param('id', ParseIntPipe) id: number) {
+    return this.response.success(await this.sessions.prepareRentalCharge(id));
+  }
+
   @Post(':id/access-link/reissue')
   @Permissions('store:reservations:update')
   async reissueAccessLink(
@@ -106,6 +121,30 @@ export class ServiceSessionsController {
     @Body() dto: ReissueServiceSessionLinkDto,
   ) {
     return this.response.updated(await this.sessions.reissueAccessLink(id, dto), 'Enlace temporal reemitido');
+  }
+
+  @Post(':id/deposits')
+  @Permissions('store:reservations:update')
+  async addDeposit(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ServiceSessionDepositDto,
+  ) {
+    return this.response.created(await this.sessions.addDeposit(id, dto), 'Anticipo recibido');
+  }
+
+  @Get(':id/settlement')
+  @Permissions('store:reservations:read')
+  async settlement(@Param('id', ParseIntPipe) id: number) {
+    return this.response.success(await this.sessions.getSettlement(id));
+  }
+
+  @Post(':id/settle')
+  @Permissions('store:reservations:update')
+  async settle(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SettleServiceSessionDto,
+  ) {
+    return this.response.success(await this.sessions.settle(id, dto), 'Anticipo liquidado');
   }
 
   @Get(':id')

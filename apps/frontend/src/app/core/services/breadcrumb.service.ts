@@ -689,10 +689,22 @@ export class BreadcrumbService {
       icon: 'calendar-clock',
     },
     {
+      path: '/admin/reservations/payment-requests',
+      title: 'Solicitudes de pago',
+      parent: 'Reservas',
+      icon: 'receipt',
+    },
+    {
       path: '/admin/services/stations',
       title: 'Estaciones de Servicio',
       parent: 'Tienda',
       icon: 'warehouse',
+    },
+    {
+      path: '/admin/services/stations/session/:id',
+      title: 'Atención',
+      parent: 'Estaciones de Servicio',
+      icon: 'timer',
     },
     {
       path: '/admin/reservations/reminders',

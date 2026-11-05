@@ -16,6 +16,7 @@ import { GeocodingModule } from './geocoding/geocoding.module';
 import { RoutingModule } from './routing/routing.module';
 import { ServiceSessionAccessModule } from './service-sessions/service-session-access.module';
 import { EcommerceHospitalityModule } from './hospitality/ecommerce-hospitality.module';
+import { PaymentRequestsPublicModule } from './payment-requests/payment-requests-public.module';
 
 /**
  * 🛒 Ecommerce Domain Module
@@ -48,6 +49,7 @@ import { EcommerceHospitalityModule } from './hospitality/ecommerce-hospitality.
     RoutingModule,
     ServiceSessionAccessModule,
     EcommerceHospitalityModule,
+    PaymentRequestsPublicModule,
   ],
 })
 export class EcommerceDomainModule {}

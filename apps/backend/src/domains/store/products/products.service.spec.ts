@@ -672,6 +672,91 @@ describe('ProductsService', () => {
     });
   });
 
+  describe('alquiler de estación — rental_pricing_mode (S2, T15)', () => {
+    const rentalDto = (over: Record<string, unknown> = {}) =>
+      ({
+        name: 'Alquiler cava',
+        base_price: 100000,
+        sku: 'ALQ-001',
+        store_id: 1,
+        product_type: 'service',
+        requires_station: true,
+        service_duration_minutes: 240,
+        service_duration_unit: 'hour',
+        rental_pricing_mode: 'station_rate',
+        ...over,
+      }) as unknown as CreateProductDto;
+
+    it('create persiste la unidad y el modo en un servicio con estación', async () => {
+      const row = { id: 9, store_id: 1, state: ProductState.ACTIVE, stock_levels: [], product_variants: [], product_images: [], _count: {} };
+      mockPrismaService.products.create.mockResolvedValue(row);
+      mockPrismaService.products.findUnique.mockResolvedValue(row);
+      mockPrismaService.$transaction.mockImplementation((callback) => callback(mockPrismaService));
+
+      await service.create(rentalDto());
+
+      expect(mockPrismaService.products.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          service_duration_minutes: 240,
+          service_duration_unit: 'hour',
+          rental_pricing_mode: 'station_rate',
+        }),
+      });
+    });
+
+    it('create rechaza el modo de alquiler en un servicio sin estación', async () => {
+      await expect(service.create(rentalDto({ requires_station: false }))).rejects.toThrow(
+        'El modo de precio del alquiler solo aplica a servicios que requieren estación',
+      );
+      expect(mockPrismaService.products.create).not.toHaveBeenCalled();
+    });
+
+    it('create rechaza el modo de alquiler en un producto físico', async () => {
+      await expect(
+        service.create(rentalDto({ product_type: 'physical', requires_station: false })),
+      ).rejects.toThrow('El modo de precio del alquiler solo aplica a servicios que requieren estación');
+    });
+
+    it('update rechaza fijar el modo si el producto existente no requiere estación', async () => {
+      mockPrismaService.products.findFirst.mockResolvedValue({
+        id: 1, store_id: 1, state: ProductState.ACTIVE, product_type: 'service', requires_station: false,
+      });
+      await expect(service.update(1, { rental_pricing_mode: 'fixed_price' } as UpdateProductDto)).rejects.toThrow(
+        'El modo de precio del alquiler solo aplica a servicios que requieren estación',
+      );
+      expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+    });
+
+    it('update deja pasar el modo cuando el producto existente ya requiere estación', async () => {
+      const existing = {
+        id: 1, store_id: 1, state: ProductState.ACTIVE, product_type: 'service', requires_station: true,
+        stock_levels: [], product_variants: [], product_images: [], _count: {},
+      };
+      mockPrismaService.products.findFirst.mockResolvedValue(existing);
+      mockPrismaService.$transaction.mockImplementation((callback) => callback(mockPrismaService));
+      mockPrismaService.products.update.mockResolvedValue(existing);
+
+      await service.update(1, { rental_pricing_mode: 'fixed_price' } as UpdateProductDto);
+
+      expect(mockPrismaService.products.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: expect.objectContaining({ rental_pricing_mode: 'fixed_price' }),
+      });
+    });
+
+    it('update permite limpiar el modo (null) sin exigir estación', async () => {
+      const existing = {
+        id: 1, store_id: 1, state: ProductState.ACTIVE, product_type: 'physical', requires_station: false,
+        stock_levels: [], product_variants: [], product_images: [], _count: {},
+      };
+      mockPrismaService.products.findFirst.mockResolvedValue(existing);
+      mockPrismaService.$transaction.mockImplementation((callback) => callback(mockPrismaService));
+      mockPrismaService.products.update.mockResolvedValue(existing);
+
+      await expect(service.update(1, { rental_pricing_mode: null } as UpdateProductDto)).resolves.toBeDefined();
+    });
+  });
+
   describe('unicidad de sku/slug/barcode — los archivados no bloquean', () => {
     const dto: CreateProductDto = {
       name: 'Nuevo',
@@ -1020,6 +1105,27 @@ describe('ProductsService', () => {
       expect(result.data[0].has_variants).toBe(true);
     });
 
+    it('S2 — exposes the duration unit of each variant so the POS labels "4 horas"', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([
+        {
+          id: 7,
+          name: 'Alquiler Cava 3',
+          stock_levels: [],
+          product_variants: [
+            { id: 70, sku: 'CAVA-4H', service_duration_minutes: 240, service_duration_unit: 'hour', stock_levels: [] },
+            { id: 71, sku: 'CAVA-90', service_duration_minutes: 90, stock_levels: [] },
+          ],
+        },
+      ]);
+      mockPrismaService.products.count.mockResolvedValue(1);
+
+      const result = await service.findAll({ include_variants: true, page: 1, limit: 10 });
+
+      const args = mockPrismaService.products.findMany.mock.calls.at(-1)[0];
+      expect(args.include.product_variants.select.service_duration_unit).toBe(true);
+      expect(result.data[0].product_variants.map((v: any) => v.service_duration_unit)).toEqual(['hour', null]);
+    });
+
     it('QUI-978 — expone purchase_uom_id en el listado (admin y pos_optimized)', async () => {
       // El POP precarga la UoM de compra al recomprar desde el listado; si el
       // mapper la omite, el select vuelve vacío aunque el producto la tenga.
@@ -1165,6 +1271,38 @@ describe('ProductsService', () => {
       mockPrismaService.products.findFirst.mockResolvedValue(null);
 
       await expect(service.findOne(999)).rejects.toThrow(VendixHttpException);
+    });
+
+    // The edit form patches both fields from this read: a missing one shows "No es un
+    // alquiler" / minutes, and saving the form would silently overwrite the stored value.
+    it('returns the rental pricing mode and the duration unit of a station service', async () => {
+      mockPrismaService.products.findFirst.mockResolvedValue({
+        id: 7,
+        store_id: 1,
+        name: 'Alquiler Sala',
+        base_price: 0,
+        state: ProductState.ACTIVE,
+        product_type: 'service',
+        requires_station: true,
+        service_duration_minutes: 120,
+        service_duration_unit: 'hour',
+        rental_pricing_mode: 'station_rate',
+        stock_levels: [],
+        product_variants: [],
+        product_images: [],
+        product_categories: [],
+        _count: { product_variants: 0, product_images: 0, reviews: 0 },
+      });
+
+      const result = await service.findOne(7);
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          service_duration_minutes: 120,
+          service_duration_unit: 'hour',
+          rental_pricing_mode: 'station_rate',
+        }),
+      );
     });
   });
 

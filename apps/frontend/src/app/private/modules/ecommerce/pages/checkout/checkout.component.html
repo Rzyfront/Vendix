@@ -1293,7 +1293,7 @@
               <span>{{
                 ((cart()!.promotion_discount ?? 0) > 0
                   ? (cart()!.promotional_subtotal ?? cart()!.subtotal)
-                  : cart()!.subtotal) | currency
+                  : cart()!.subtotal) + rental_quote_delta() | currency
               }}</span>
             </div>
             @if (
@@ -1399,6 +1399,7 @@
               <span>Total estimado</span>
               <span>{{
                 (cart()!.promotional_subtotal ?? cart()!.subtotal) +
+                  rental_quote_delta() +
                   shippingCostForTotal() -
                   couponDiscount() | currency
               }}</span>

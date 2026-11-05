@@ -1,0 +1,154 @@
+<section class="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] space-y-3" aria-labelledby="deposit-panel-title">
+  <div class="flex flex-wrap items-center justify-between gap-2">
+    <div class="flex items-center gap-2">
+      <div class="w-8 h-8 rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex items-center justify-center">
+        <app-icon name="wallet" [size]="16" />
+      </div>
+      <div>
+        <h4 id="deposit-panel-title" class="font-bold text-sm text-[var(--color-text-primary)]">Anticipo</h4>
+        <p class="text-[11px] text-[var(--color-text-secondary)]">
+          {{ exhaustedLabels[deposit().exhausted_policy] }} · {{ leftoverLabels[deposit().leftover_policy] }}
+        </p>
+      </div>
+    </div>
+    @if (isSettled()) {
+      <app-badge variant="success" size="sm">Anticipo liquidado</app-badge>
+    }
+  </div>
+
+  <dl class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+    <div class="p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/70">
+      <dt class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Requerido</dt>
+      <dd class="font-mono font-bold text-[var(--color-text-primary)]">{{ required() | currency }}</dd>
+    </div>
+    <div class="p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/70">
+      <dt class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Recibido</dt>
+      <dd class="font-mono font-bold text-[var(--color-text-primary)]">{{ received() | currency }}</dd>
+    </div>
+    <div class="p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/70">
+      <dt class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Aplicado</dt>
+      <dd class="font-mono font-bold text-[var(--color-text-primary)]">{{ applied() | currency }}</dd>
+    </div>
+    <div class="p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/70">
+      <dt class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Saldo</dt>
+      <dd class="font-mono font-bold text-[var(--color-text-primary)]">{{ balance() | currency }}</dd>
+    </div>
+    <div class="col-span-2 sm:col-span-1 p-2.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]/70">
+      <dt class="text-[10px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)]">Disponible para consumo</dt>
+      <dd class="font-mono font-bold" [class.text-[var(--color-error)]]="isExhausted()" [class.text-[var(--color-text-primary)]]="!isExhausted()">
+        {{ available() | currency }}
+      </dd>
+    </div>
+  </dl>
+
+  @if (warning(); as message) {
+    <div class="p-3 rounded-xl border border-[var(--color-warning)] bg-[var(--color-warning-light)] text-xs text-[var(--color-text-primary)] flex items-start gap-2" role="status">
+      <app-icon name="alert-triangle" [size]="14" class="shrink-0 mt-0.5" />
+      <span>{{ message }}</span>
+    </div>
+  }
+
+  @if (canAct()) {
+    <div class="flex flex-wrap items-center justify-end gap-2">
+      <app-button variant="outline" size="sm" (clicked)="openRecharge()">
+        <app-icon name="plus" [size]="14" slot="icon" /> Recargar anticipo
+      </app-button>
+      <app-button variant="primary" size="sm" (clicked)="openSettle()">
+        <app-icon name="check-circle" [size]="14" slot="icon" /> Liquidar anticipo
+      </app-button>
+    </div>
+  }
+</section>
+
+<!-- Recharge -->
+<app-modal [(isOpen)]="showRecharge" title="Recargar anticipo" subtitle="El dinero entra al anticipo de esta atención" size="sm">
+  <div class="space-y-3">
+    <app-input label="Monto de la recarga" [currency]="true" [ngModel]="rechargeAmount()" (ngModelChange)="rechargeAmount.set($event === '' || $event == null ? null : +$event)" />
+    <app-selector
+      label="Medio de pago"
+      [options]="methodOptions()"
+      [ngModel]="rechargeMethodId()"
+      (ngModelChange)="rechargeMethodId.set(+$event || null)"
+      [helpText]="loadingMethods() ? 'Cargando medios de pago…' : ''"
+      placeholder="Selecciona el medio"
+    />
+  </div>
+  <div slot="footer" class="flex items-center justify-end gap-2.5">
+    <app-button variant="secondary" (clicked)="showRecharge.set(false)">Cancelar</app-button>
+    <app-button variant="primary" [loading]="recharging()" (clicked)="submitRecharge()">Recargar</app-button>
+  </div>
+</app-modal>
+
+<!-- Settlement -->
+<app-modal [(isOpen)]="showSettle" title="Liquidar anticipo" subtitle="Así queda la cuenta al aplicar el anticipo" size="md">
+  @if (loadingPreview()) {
+    <div class="flex items-center justify-center gap-2 py-8 text-sm text-[var(--color-text-secondary)]">
+      <app-spinner size="sm" /> Calculando liquidación…
+    </div>
+  } @else if (previewError(); as errorMessage) {
+    <p class="p-3 rounded-xl text-sm text-[var(--color-error)] bg-[var(--color-background)] border border-[var(--color-border)]" role="alert">{{ errorMessage }}</p>
+  } @else if (previewSettled()) {
+    <p class="p-3 rounded-xl text-sm text-[var(--color-text-primary)] bg-[var(--color-background)] border border-[var(--color-border)]" role="status">
+      El anticipo ya fue liquidado. Por cobrar: <strong class="font-mono">{{ previewDue() | currency }}</strong>.
+    </p>
+  } @else if (preview()) {
+    <div class="space-y-3">
+      <dl class="rounded-xl border border-[var(--color-border)] divide-y divide-[var(--color-border)]/60 text-sm">
+        <div class="flex justify-between px-3 py-2">
+          <dt class="text-[var(--color-text-secondary)]">Consumo</dt>
+          <dd class="font-mono">{{ previewConsumption() | currency }}</dd>
+        </div>
+        @if (previewFee() > 0) {
+          <div class="flex justify-between px-3 py-2">
+            <dt class="text-[var(--color-text-secondary)]">Gastos de reserva</dt>
+            <dd class="font-mono">{{ previewFee() | currency }}</dd>
+          </div>
+        }
+        <div class="flex justify-between px-3 py-2">
+          <dt class="text-[var(--color-text-secondary)]">Anticipo aplicado</dt>
+          <dd class="font-mono">{{ previewApplied() | currency }}</dd>
+        </div>
+        <div class="flex justify-between px-3 py-2">
+          <dt class="text-[var(--color-text-secondary)]">Sobrante</dt>
+          <dd class="font-mono">{{ previewLeftover() | currency }}</dd>
+        </div>
+        <div class="flex justify-between px-3 py-2 font-bold text-[var(--color-text-primary)]">
+          <dt>Por cobrar</dt>
+          <dd class="font-mono">{{ previewDue() | currency }}</dd>
+        </div>
+      </dl>
+
+      @if (choosesLeftover()) {
+        <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
+          <app-selector
+            label="Qué hacer con el sobrante"
+            [options]="leftoverOptions()"
+            [ngModel]="leftoverAction()"
+            (ngModelChange)="leftoverAction.set($event === 'refund' ? 'refund' : 'credit')"
+          />
+          @if (leftoverAction() === 'refund') {
+            <app-selector
+              label="Medio de la devolución"
+              [options]="methodOptions()"
+              [ngModel]="refundMethodId()"
+              (ngModelChange)="refundMethodId.set(+$event || null)"
+              [helpText]="loadingMethods() ? 'Cargando medios de pago…' : ''"
+              placeholder="Selecciona el medio"
+            />
+          }
+        </div>
+      }
+
+      @if (previewDue() > 0) {
+        <p class="text-xs text-[var(--color-text-secondary)] flex items-start gap-2">
+          <app-icon name="info" [size]="14" class="shrink-0 mt-0.5" />
+          Después de liquidar, cobra los {{ previewDue() | currency }} restantes con «Cobrar» en la parte superior de la página.
+        </p>
+      }
+    </div>
+  }
+  <div slot="footer" class="flex items-center justify-end gap-2.5">
+    <app-button variant="secondary" (clicked)="showSettle.set(false)">Cancelar</app-button>
+    <app-button variant="primary" [disabled]="previewSettled() || !preview()" [loading]="settling()" (clicked)="submitSettle()">Liquidar</app-button>
+  </div>
+</app-modal>

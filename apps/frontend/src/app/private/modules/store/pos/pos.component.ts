@@ -235,6 +235,7 @@ export function resolvePosPaymentCustomerName(
       <app-pos-charge-station-modal
         [isOpen]="showChargeStationModal()"
         [cartItems]="cartItems()"
+        [startMode]="chargeStationStartMode()"
         (isOpenChange)="showChargeStationModal.set($event)"
         (charged)="onStationCharged($event)"
       />
@@ -1080,6 +1081,8 @@ export class PosComponent {
     PosServiceStationIntegrationService,
   );
   readonly showChargeStationModal = signal(false);
+  /** Empty cart: the station button opens a free station instead of charging (S4). */
+  readonly chargeStationStartMode = signal<'charge' | 'open'>('charge');
   /** Visible cuando la industria de la tienda usa estaciones de servicio. */
   readonly showChargeToStation = computed(
     () =>
@@ -1090,9 +1093,12 @@ export class PosComponent {
 
   onOpenChargeStation(): void {
     if (this.cartItems().length === 0) {
-      this.toastService.warning('Agrega productos al carrito antes de cargarlos a una estación');
+      this.chargeStationStartMode.set('open');
+      this.showCartModal.set(false);
+      this.showChargeStationModal.set(true);
       return;
     }
+    this.chargeStationStartMode.set('charge');
     if (this.cartState()?.linkedOrderId != null) {
       this.toastService.warning(
         'Esta venta ya está vinculada a una orden; guárdala o cóbrala en lugar de cargarla a una estación',

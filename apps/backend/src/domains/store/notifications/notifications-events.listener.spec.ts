@@ -452,6 +452,42 @@ describe('NotificationsEventsListener — CRM SMS spend cap', () => {
   });
 });
 
+describe('NotificationsEventsListener — comprobante de transferencia por confirmar', () => {
+  it('notifies the store with a link to the payment requests to review', async () => {
+    const notificationsService = { createAndBroadcast: jest.fn().mockResolvedValue({}) } as any;
+    const listener = new NotificationsEventsListener(
+      notificationsService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+    );
+
+    await listener.handlePaymentRequestReceiptSubmitted({
+      store_id: 10,
+      payment_request_id: 5,
+      amount: 400000,
+      purpose: 'service_deposit',
+      description: 'Anticipo Cava 3',
+    });
+
+    expect(notificationsService.createAndBroadcast).toHaveBeenCalledWith(
+      10,
+      'payment_received',
+      'Comprobante por confirmar',
+      'Un cliente subió el comprobante de transferencia de «Anticipo Cava 3». Revísalo para confirmar el pago.',
+      {
+        payment_request_id: 5,
+        amount: 400000,
+        purpose: 'service_deposit',
+        route: '/admin/reservations/payment-requests',
+      },
+    );
+  });
+});
+
 describe('NotificationsEventsListener — recordatorio de cuota de crédito (campana)', () => {
   const baseEvent = {
     store_id: 10,

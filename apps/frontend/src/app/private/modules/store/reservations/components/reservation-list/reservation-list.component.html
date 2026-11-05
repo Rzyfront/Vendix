@@ -98,5 +98,8 @@
     @if (item.product?.is_consultation) {
       <app-badge variant="service" size="xsm">Consulta</app-badge>
     }
+    @if (item.series_id) {
+      <app-badge variant="neutral" size="xsm">{{ seriesLabel(item) }}</app-badge>
+    }
   </span>
 </ng-template>

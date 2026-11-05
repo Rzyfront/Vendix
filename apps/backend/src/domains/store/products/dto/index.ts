@@ -647,6 +647,26 @@ export class CreateProductDto {
   @Min(1, { message: 'La duración del servicio debe ser al menos 1 minuto' })
   service_duration_minutes?: number;
 
+  @ApiPropertyOptional({
+    enum: ['minute', 'hour', 'day'],
+    nullable: true,
+    description: 'Unidad en que se muestra la duración del servicio. Solo presentación: la duración se guarda en minutos.',
+  })
+  @IsOptional()
+  @IsIn(['minute', 'hour', 'day'], { message: 'La unidad de duración debe ser minuto, hora o día' })
+  service_duration_unit?: 'minute' | 'hour' | 'day' | null;
+
+
+  @ApiPropertyOptional({
+    enum: ['fixed_price', 'station_rate'],
+    nullable: true,
+    description: 'Cómo se cobra un alquiler de estación: precio fijo del producto o tarifa por tiempo de la estación.',
+  })
+  @IsOptional()
+  @IsIn(['fixed_price', 'station_rate'], { message: 'El modo de precio del alquiler debe ser precio fijo o tarifa de la estación' })
+  rental_pricing_mode?: 'fixed_price' | 'station_rate' | null;
+
+
   @IsOptional()
   @IsEnum(ServiceModality)
   service_modality?: ServiceModality;
@@ -1188,6 +1208,26 @@ export class UpdateProductDto {
   @Type(() => Number)
   @Min(1, { message: 'La duración del servicio debe ser al menos 1 minuto' })
   service_duration_minutes?: number;
+
+  @ApiPropertyOptional({
+    enum: ['minute', 'hour', 'day'],
+    nullable: true,
+    description: 'Unidad en que se muestra la duración del servicio. Solo presentación: la duración se guarda en minutos.',
+  })
+  @IsOptional()
+  @IsIn(['minute', 'hour', 'day'], { message: 'La unidad de duración debe ser minuto, hora o día' })
+  service_duration_unit?: 'minute' | 'hour' | 'day' | null;
+
+
+  @ApiPropertyOptional({
+    enum: ['fixed_price', 'station_rate'],
+    nullable: true,
+    description: 'Cómo se cobra un alquiler de estación: precio fijo del producto o tarifa por tiempo de la estación.',
+  })
+  @IsOptional()
+  @IsIn(['fixed_price', 'station_rate'], { message: 'El modo de precio del alquiler debe ser precio fijo o tarifa de la estación' })
+  rental_pricing_mode?: 'fixed_price' | 'station_rate' | null;
+
 
   @IsOptional()
   @IsEnum(ServiceModality)
@@ -1765,6 +1805,16 @@ export class CreateProductVariantDto {
   @Min(1)
   service_duration_minutes?: number;
 
+  @ApiPropertyOptional({
+    enum: ['minute', 'hour', 'day'],
+    nullable: true,
+    description: 'Unidad en que se muestra la duración del servicio. Solo presentación: la duración se guarda en minutos.',
+  })
+  @IsOptional()
+  @IsIn(['minute', 'hour', 'day'], { message: 'La unidad de duración debe ser minuto, hora o día' })
+  service_duration_unit?: 'minute' | 'hour' | 'day' | null;
+
+
   @ApiPropertyOptional({ enum: ['per_session', 'package', 'subscription'] })
   @IsOptional()
   @IsIn(['per_session', 'package', 'subscription'])
@@ -1872,6 +1922,16 @@ export class UpdateProductVariantDto {
   @IsInt()
   @Min(1)
   service_duration_minutes?: number;
+
+  @ApiPropertyOptional({
+    enum: ['minute', 'hour', 'day'],
+    nullable: true,
+    description: 'Unidad en que se muestra la duración del servicio. Solo presentación: la duración se guarda en minutos.',
+  })
+  @IsOptional()
+  @IsIn(['minute', 'hour', 'day'], { message: 'La unidad de duración debe ser minuto, hora o día' })
+  service_duration_unit?: 'minute' | 'hour' | 'day' | null;
+
 
   @ApiPropertyOptional({ enum: ['per_session', 'package', 'subscription'] })
   @IsOptional()
@@ -2074,6 +2134,26 @@ export class UpdateProductWithVariantsDto {
   @Type(() => Number)
   @Min(1, { message: 'La duración del servicio debe ser al menos 1 minuto' })
   service_duration_minutes?: number;
+
+  @ApiPropertyOptional({
+    enum: ['minute', 'hour', 'day'],
+    nullable: true,
+    description: 'Unidad en que se muestra la duración del servicio. Solo presentación: la duración se guarda en minutos.',
+  })
+  @IsOptional()
+  @IsIn(['minute', 'hour', 'day'], { message: 'La unidad de duración debe ser minuto, hora o día' })
+  service_duration_unit?: 'minute' | 'hour' | 'day' | null;
+
+
+  @ApiPropertyOptional({
+    enum: ['fixed_price', 'station_rate'],
+    nullable: true,
+    description: 'Cómo se cobra un alquiler de estación: precio fijo del producto o tarifa por tiempo de la estación.',
+  })
+  @IsOptional()
+  @IsIn(['fixed_price', 'station_rate'], { message: 'El modo de precio del alquiler debe ser precio fijo o tarifa de la estación' })
+  rental_pricing_mode?: 'fixed_price' | 'station_rate' | null;
+
 
   @IsOptional()
   @IsEnum(ServiceModality)

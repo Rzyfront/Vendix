@@ -37,6 +37,13 @@ export const storeLandingPublicRoutes: Routes = [
     // Estaciones de servicio: el enlace de seguimiento y el QR de la estación deben
     // abrir también en tiendas que solo tienen landing (sin tienda en línea).
     {
+        path: 'pagar/:token',
+        loadComponent: () =>
+            import('../../public/payment-request/payment-request-page.component').then(
+                (c) => c.PaymentRequestPageComponent,
+            ),
+    },
+    {
         path: 'estacion/:publicId',
         loadComponent: () =>
             import('../../public/ecommerce/pages/service-station-status/service-station-status.component').then(

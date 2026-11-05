@@ -25,7 +25,7 @@ export class BusinessHoursDayDto {
   })
   start_time: string;
 
-  /// HH:mm in 24h format. Must be strictly after start_time.
+  /// HH:mm in 24h format. end <= start means the block ends the next day (S21).
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
     message: 'end_time debe tener formato HH:mm',
   })

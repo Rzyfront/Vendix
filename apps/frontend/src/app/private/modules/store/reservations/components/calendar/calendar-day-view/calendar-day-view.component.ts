@@ -4,6 +4,7 @@ import { Component, input, output, computed, signal, DestroyRef, inject } from '
 import { IconComponent } from '../../../../../../../shared/components';
 import { Booking, BookingStatus } from '../../../interfaces/reservation.interface';
 import { isBookingExpired as checkBookingExpired } from '../booking-expired.util';
+import { bookingDaySpan, localDayKey } from '../booking-day-span.util';
 import {
   BookingStackGroup,
   bookingCustomerName,
@@ -82,7 +83,7 @@ export class CalendarDayViewComponent {
     resolveCalendarRange(
       this.settings.pos()?.business_hours,
       [this.currentDate()],
-      this.bookings().map((b) => ({ start: b.start_time, end: b.end_time })),
+      this.bookings().map((b) => bookingDaySpan(b, localDayKey(this.currentDate()))),
       this.slotMinutes(),
     ),
   );
@@ -186,7 +187,8 @@ export class CalendarDayViewComponent {
     for (const f of this.freeSlots()) if (inAny(f.start, f.end)) return true;
     for (const u of this.unavailableSlots()) if (inAny(u.start, u.end)) return true;
     for (const b of this.bookings()) {
-      if (inAny(b.start_time, b.end_time)) return true;
+      const span = bookingDaySpan(b, localDayKey(this.currentDate()));
+      if (inAny(span.start, span.end)) return true;
     }
     return false;
   }
@@ -256,11 +258,13 @@ export class CalendarDayViewComponent {
   }
 
   getBlockTop(booking: Booking): number {
-    return this.blockGeometry(booking.start_time, booking.end_time).top;
+    const span = bookingDaySpan(booking, localDayKey(this.currentDate()));
+    return this.blockGeometry(span.start, span.end).top;
   }
 
   getBlockHeight(booking: Booking): number {
-    return this.blockGeometry(booking.start_time, booking.end_time).height;
+    const span = bookingDaySpan(booking, localDayKey(this.currentDate()));
+    return this.blockGeometry(span.start, span.end).height;
   }
 
   /**

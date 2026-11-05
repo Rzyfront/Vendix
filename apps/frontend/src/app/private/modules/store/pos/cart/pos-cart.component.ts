@@ -1017,11 +1017,10 @@ import {
                   type="button"
                   class="cart-btn save-btn w-full"
                   (click)="chargeToStation.emit()"
-                  [disabled]="isEmpty()"
-                  title="Cargar el carrito a la cuenta de una estación ocupada"
+                  [title]="isEmpty() ? 'Abrir una estación libre' : 'Cargar el carrito a la cuenta de una estación ocupada'"
                 >
                   <app-icon name="warehouse" [size]="16"></app-icon>
-                  <span>Cargar a estación</span>
+                  <span>{{ isEmpty() ? 'Abrir estación' : 'Cargar a estación' }}</span>
                 </button>
               }
 

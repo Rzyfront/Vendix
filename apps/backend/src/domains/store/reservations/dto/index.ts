@@ -8,3 +8,5 @@ export * from './availability-query.dto';
 export * from './calendar-query.dto';
 export * from './send-confirmation.dto';
 export * from './check-in.dto';
+export * from './cancel-booking.dto';
+export * from './deposit-decision.dto';

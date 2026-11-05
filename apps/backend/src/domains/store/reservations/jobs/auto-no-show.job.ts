@@ -8,6 +8,7 @@ import {
   resolveStoreTimezone,
   localCivil,
 } from '@common/utils/store-timezone.util';
+import { bookingInterval } from '@common/utils/schedule-window.util';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
@@ -119,6 +120,8 @@ export class AutoNoShowJob {
         status: {
           in: [booking_status_enum.pending, booking_status_enum.confirmed],
         },
+        // A booking already waiting for a deposit decision is not picked up again.
+        deposit_decision_due_at: null,
         // Solo fechas pasadas — `date < cutoff_date` (sin time para
         // evitar perder bookings del día actual que ya vencieron).
         date: {
@@ -130,6 +133,8 @@ export class AutoNoShowJob {
       select: {
         id: true,
         date: true,
+        end_date: true,
+        start_time: true,
         end_time: true,
         status: true,
       },
@@ -141,7 +146,7 @@ export class AutoNoShowJob {
       // Construimos Date completo: date + end_time, en horario local del
       // store, y le sumamos el grace. Si `now > date+end+grace`,
       // archivamos.
-      const bookingEnd = this.composeBookingEnd(b.date, b.end_time);
+      const bookingEnd = this.composeBookingEnd(b, timezone);
       if (!bookingEnd) continue;
       const graceEnd = new Date(
         bookingEnd.getTime() + AutoNoShowJob.GRACE_MINUTES * 60_000,
@@ -154,8 +159,9 @@ export class AutoNoShowJob {
         // operador). Para un job de background que puede archivar
         // decenas de bookings por tick, emitir N notificaciones sería
         // peor que el problema de stats que estamos arreglando.
-        await this.reservationsService.archiveToNoShow(b.id);
-        archived += 1;
+        const outcome = await this.reservationsService.archiveToNoShow(b.id);
+        // A booking with a deposit balance waits for the administrator (S17): not archived.
+        if (outcome !== 'deferred') archived += 1;
       } catch (err: any) {
         // Si la transición falla (p.ej. booking ya no está pending), lo
         // logueamos pero seguimos con el resto.
@@ -168,20 +174,27 @@ export class AutoNoShowJob {
   }
 
   /**
-   * Compone un Date a partir de `date` (DATE) + `end_time` (string HH:mm
-   * o HH:mm:ss). Devuelve null si el formato es inválido.
+   * Instante real de fin de la reserva en la zona horaria del store: `date` +
+   * `end_time`, o `end_date` + `end_time` si cruza la medianoche (S21).
+   * Devuelve null si el formato es inválido.
    */
   private composeBookingEnd(
-    date: Date | string,
-    endTime: string,
+    b: {
+      date: Date | string;
+      end_date?: Date | string | null;
+      start_time: string;
+      end_time: string;
+    },
+    timezone: string,
   ): Date | null {
-    const d =
-      typeof date === 'string'
-        ? date.split('T')[0]
-        : date.toISOString().slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
-    const m = endTime.match(/^(\d{2}):(\d{2})/);
-    if (!m) return null;
-    return new Date(`${d}T${m[1]}:${m[2]}:00`);
+    const timeOf = (value: string) => value.match(/^(\d{2}):(\d{2})/)?.slice(1, 3).join(':');
+    const startTime = timeOf(b.start_time);
+    const endTime = timeOf(b.end_time);
+    const day = typeof b.date === 'string' ? b.date.split('T')[0] : b.date.toISOString().slice(0, 10);
+    if (!startTime || !endTime || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    return bookingInterval(
+      { date: day, end_date: b.end_date, start_time: startTime, end_time: endTime },
+      timezone,
+    ).endAt;
   }
 }

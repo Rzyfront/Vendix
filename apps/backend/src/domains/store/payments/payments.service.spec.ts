@@ -4127,6 +4127,71 @@ describe('PaymentsService', () => {
       expect(caught).toBeDefined();
       expect(caught.errorCode).toBe('POS_PRICE_OVERRIDE_NOT_ALLOWED_001');
     });
+
+    it('alquiler por tarifa de estación: el precio de catálogo esperado es la cotización de la reserva, no una edición de precio (S2)', async () => {
+      calculateProductTaxesMock.mockResolvedValue({
+        ...catalogExclusive(),
+        base: 36000,
+        total: 42840,
+      });
+      const bookings = {
+        findFirst: jest.fn().mockResolvedValue({ quoted_amount: 36000 }),
+      };
+      const tx = {
+        products: {
+          findFirst: jest.fn().mockResolvedValue({
+            ...product,
+            allow_pos_price_override: false,
+            rental_pricing_mode: 'station_rate',
+          }),
+        },
+        bookings,
+      };
+
+      const result = await (service as any).buildPosOrderItem(
+        tx,
+        { product_id: product.id, quantity: 1, unit_price: 36000, final_unit_price: 42840 },
+        dtoStoreId,
+        posUser,
+        undefined,
+      );
+
+      expect(bookings.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ product_id: product.id, quoted_amount: 36000 }),
+        }),
+      );
+      expect(calculateProductTaxesMock).toHaveBeenCalledWith(
+        product.id,
+        36000,
+        expect.anything(),
+      );
+      expect(result.is_price_overridden).toBe(false);
+    });
+
+    it('alquiler por tarifa de estación sin reserva que respalde el precio: sigue rigiendo el rechazo de override', async () => {
+      calculateProductTaxesMock.mockResolvedValue(catalogExclusive());
+      const tx = {
+        products: {
+          findFirst: jest.fn().mockResolvedValue({
+            ...product,
+            allow_pos_price_override: false,
+            rental_pricing_mode: 'station_rate',
+          }),
+        },
+        bookings: { findFirst: jest.fn().mockResolvedValue(null) },
+      };
+
+      await expect(
+        (service as any).buildPosOrderItem(
+          tx,
+          { product_id: product.id, quantity: 1, unit_price: 13000, final_unit_price: 13000 },
+          dtoStoreId,
+          posUser,
+          undefined,
+        ),
+      ).rejects.toMatchObject({ errorCode: 'POS_PRICE_OVERRIDE_NOT_ALLOWED_001' });
+    });
   });
 
   /**

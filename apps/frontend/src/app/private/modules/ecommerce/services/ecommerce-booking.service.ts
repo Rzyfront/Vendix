@@ -12,6 +12,17 @@ export interface AvailabilitySlot {
   available: number;
   station_id?: number;
   station_name?: string;
+  /** The station requires a deposit or a payment to book (A12): hold + payment page. */
+  charges_online?: boolean;
+}
+
+/** Public price quote of a station rental (`GET rental-quote/:productId`). */
+export interface RentalQuote {
+  amount: number;
+  cents: number;
+  blocks: number;
+  block_minutes: number | null;
+  pricing_mode: 'fixed_price' | 'station_rate';
 }
 
 export interface CreateBookingDto {
@@ -38,6 +49,9 @@ export interface HoldResult {
   end_time: string;
   status: string;
   expires_at: string | null;
+  /** Payment page of the held slot when the station charges to book (A12). */
+  payment_path?: string | null;
+  prepay_amount?: number;
 }
 
 export interface CustomerBooking {
@@ -198,6 +212,29 @@ export class EcommerceBookingService {
     );
   }
 
+  /** Quotes a station rental for a start date and time; the server reads them in the store timezone. */
+  getRentalQuote(
+    productId: number,
+    stationId: number,
+    date: string,
+    startTime: string,
+    productVariantId?: number,
+  ): Observable<RentalQuote> {
+    let params = new HttpParams()
+      .set('station_id', String(stationId))
+      .set('date', date)
+      .set('start_time', startTime);
+    if (productVariantId) {
+      params = params.set('product_variant_id', String(productVariantId));
+    }
+    return this.http
+      .get<{ success: boolean; data: RentalQuote }>(
+        `${this.api_url}/rental-quote/${productId}`,
+        { headers: this.getHeaders(), params },
+      )
+      .pipe(map((r) => r.data));
+  }
+
   createBooking(
     dto: CreateBookingDto,
   ): Observable<{ success: boolean; data: CustomerBooking; message?: string }> {
@@ -262,6 +299,9 @@ export class EcommerceBookingService {
 
   holdBooking(dto: {
     product_id: number;
+    product_variant_id?: number;
+    station_id?: number;
+    provider_id?: number;
     date: string;
     start_time: string;
     end_time: string;

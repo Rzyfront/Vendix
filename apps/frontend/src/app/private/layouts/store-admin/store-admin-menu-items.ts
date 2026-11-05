@@ -209,6 +209,13 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         route: '/admin/reservations',
       },
       {
+        // Same panel_ui module as "Reservas": the payment requests belong to its flow.
+        label: 'Solicitudes de pago',
+        icon: 'receipt',
+        route: '/admin/reservations/payment-requests',
+        panelUiKey: 'orders_reservations',
+      },
+      {
         label: 'Pedidos programados',
         icon: 'calendar-clock',
         route: '/admin/scheduled-orders',

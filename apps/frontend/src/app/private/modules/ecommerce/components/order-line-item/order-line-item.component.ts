@@ -11,6 +11,7 @@ import {
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { formatVariantAttributes } from '../../../../../shared/utils/variant-attributes.util';
 import type { CartItem } from '../../services/cart.service';
+import { formatDurationUnit } from '../../../../../shared/utils/duration-unit.util';
 import {
   CurrencyPipe,
   CurrencyFormatService,
@@ -57,8 +58,11 @@ export function cartItemToLineView(item: CartItem): OrderLineItemView {
     item.product.product_type === 'service' ||
     item.product.requires_booking === true
   ) {
-    const mins = item.product.service_duration_minutes;
-    badges.push(mins && mins > 0 ? `Servicio · ${mins} min` : 'Servicio');
+    const duration = formatDurationUnit(
+      item.product.service_duration_minutes,
+      item.product.service_duration_unit,
+    );
+    badges.push(duration ? `Servicio · ${duration}` : 'Servicio');
   }
 
   return {

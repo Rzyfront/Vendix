@@ -43,6 +43,7 @@ import {
   ProviderAvailabilityRow,
   ProviderSchedule,
 } from '../../interfaces/reservation.interface';
+import { bookingDaySpan } from '../calendar/booking-day-span.util';
 
 /**
  * Provider availability dashboard.
@@ -541,7 +542,12 @@ export class ProviderAvailabilityComponent {
         const providerId = provider.provider_id;
         const matched = bookings
           .filter((b: any) => !providerId || b.provider_id === providerId)
-          .map((b: any) => ({ start_time: b.start_time?.substring(0, 5) || '', end_time: b.end_time?.substring(0, 5) || '' }));
+          // An overnight booking is listed on both days (A14): draw only the part of `date`.
+          .map((b: any) => {
+            if (!b.start_time || !b.end_time) return { start_time: '', end_time: '' };
+            const span = bookingDaySpan(b, date);
+            return { start_time: span.start, end_time: span.end };
+          });
         this.detailBookings.set(matched);
       },
       error: () => this.detailBookings.set([]),

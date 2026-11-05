@@ -7,7 +7,9 @@ import {
   inject,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { EMPTY, of } from 'rxjs';
+import { catchError, distinctUntilChanged, switchMap } from 'rxjs/operators';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -15,6 +17,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import {
   EcommerceBookingService,
   AvailabilitySlot,
+  RentalQuote,
 } from '../../services/ecommerce-booking.service';
 import { CatalogService, ProductDetail, ProductVariantDetail } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
@@ -26,6 +29,8 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { toLocalDateString } from '../../../../../shared/utils/date.util';
+import { formatDurationUnit } from '../../../../../shared/utils/duration-unit.util';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 import { BookingCalendarComponent } from '../../components/booking/booking-calendar/booking-calendar.component';
 import {
@@ -70,6 +75,46 @@ export class BookingComponent implements OnInit {
 
   private destroyRef = inject(DestroyRef);
 
+  constructor() {
+    // Quote once station, date and start time are chosen; switchMap drops stale calls.
+    toObservable(
+      computed(() => {
+        const slot = this.selectedSlot();
+        const date = this.selectedDate();
+        const stationId = slot?.station_id;
+        if (!this.isStationRate() || !slot || !date || !stationId) return null;
+        const variantId = this.selectedVariantId();
+        return `${this.productId()}|${stationId}|${date.split('T')[0]}|${slot.start_time}|${variantId ?? ''}`;
+      }),
+    )
+      .pipe(
+        distinctUntilChanged(),
+        switchMap((key) => {
+          this.rentalQuote.set(null);
+          if (!key) {
+            this.rentalQuoting.set(false);
+            return EMPTY;
+          }
+          const [productId, stationId, date, startTime, variantId] = key.split('|');
+          this.rentalQuoting.set(true);
+          return this.bookingService
+            .getRentalQuote(
+              Number(productId),
+              Number(stationId),
+              date,
+              startTime,
+              variantId ? Number(variantId) : undefined,
+            )
+            .pipe(catchError(() => of(null)));
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((quote) => {
+        this.rentalQuote.set(quote);
+        this.rentalQuoting.set(false);
+      });
+  }
+
   // State
   currentStep = signal(0);
   loading = signal(true);
@@ -89,6 +134,41 @@ export class BookingComponent implements OnInit {
     return this.variants().find((v) => v.id === id) ?? null;
   });
 
+  /** Minutes and unit of the chosen option; a variant overrides the product, a null unit reads as minutes. */
+  private readonly durationSource = computed(() => {
+    const variant = this.selectedVariant();
+    const product = this.product();
+    if (variant?.service_duration_minutes) {
+      return { minutes: variant.service_duration_minutes, unit: variant.service_duration_unit ?? null };
+    }
+    return {
+      minutes: product?.service_duration_minutes ?? null,
+      unit: product?.service_duration_unit ?? null,
+    };
+  });
+  readonly durationLabel = computed(() => {
+    const { minutes, unit } = this.durationSource();
+    return formatDurationUnit(minutes, unit);
+  });
+
+  readonly isStationRate = computed(() => this.product()?.rental_pricing_mode === 'station_rate');
+
+  /** Variant chips: "4 horas · $120.000". A station-rate price depends on the schedule, so it is not shown here. */
+  readonly variantChips = computed(() =>
+    this.variants().map((variant) => ({
+      variant,
+      label:
+        formatDurationUnit(variant.service_duration_minutes, variant.service_duration_unit) ||
+        variant.name ||
+        variant.sku,
+      price: !this.isStationRate() && variant.price_override ? variant.final_price : null,
+    })),
+  );
+
+  // Public quote for station-rate rentals (needs station, date and start time).
+  readonly rentalQuote = signal<RentalQuote | null>(null);
+  readonly rentalQuoting = signal(false);
+
   // Step 1 — Date
   selectedDate = signal<string | null>(null);
 
@@ -101,10 +181,24 @@ export class BookingComponent implements OnInit {
 
   // Free-booking fallback (when product has no provider scheduling).
   isFreeBooking = signal(false);
+  /**
+   * Synthetic 08:00-18:00 grid of a free-booking service. A station rental never uses it:
+   * its slots come from the station and store hours (S21) and carry the `station_id`
+   * the rental quote and the booking need.
+   */
+  readonly usesSyntheticSlots = computed(() => this.isFreeBooking() && !this.product()?.requires_station);
+
+  /**
+   * The chosen station requires a deposit or a payment to book (A12): the slot is held and
+   * paid on its payment page. The cart would sell it without that money, so checkout refuses it.
+   */
+  readonly chargesOnline = computed(
+    () => !this.usesSyntheticSlots() && this.selectedSlot()?.charges_online === true,
+  );
   freeBookingTime = signal<string | null>(null);
   freeBookingEndTime = signal<string | null>(null);
   readonly freeBookingSlots = computed(() => {
-    const duration = this.product()?.service_duration_minutes || 60;
+    const duration = this.durationSource().minutes || 60;
     const slots: { time: string; endTime: string }[] = [];
     for (let mins = 480; mins + duration <= 1080; mins += duration) {
       const h = Math.floor(mins / 60);
@@ -387,7 +481,7 @@ export class BookingComponent implements OnInit {
 
   onSlotSelected(slot: BookingSlot): void {
     this.selectedSlot.set(slot);
-    this.currentStep.set(3);
+    this.currentStep.set(this.confirmStep);
   }
 
   selectFreeBookingTime(slot: { time: string; endTime: string }): void {
@@ -418,7 +512,7 @@ export class BookingComponent implements OnInit {
     let startTime: string;
     let endTime: string;
 
-    if (this.isFreeBooking()) {
+    if (this.usesSyntheticSlots()) {
       startTime = this.freeBookingTime()!;
       endTime = this.freeBookingEndTime()!;
       if (!startTime || !endTime) return;
@@ -431,6 +525,11 @@ export class BookingComponent implements OnInit {
         this.toast.error('Selecciona un horario con estación disponible');
         return;
       }
+    }
+
+    if (this.chargesOnline()) {
+      this.holdAndPay(date, startTime, endTime);
+      return;
     }
 
     const variantId = this.selectedVariantId();
@@ -505,6 +604,39 @@ export class BookingComponent implements OnInit {
     } else {
       this.router.navigate(['/checkout']);
     }
+  }
+
+  /** Holds the slot and opens its payment page; the booking is confirmed by that payment. */
+  private holdAndPay(date: string, startTime: string, endTime: string): void {
+    const slot = this.selectedSlot();
+    this.submitting.set(true);
+    this.errorMessage.set('');
+    this.bookingService
+      .holdBooking({
+        product_id: this.productId(),
+        product_variant_id: this.selectedVariantId() ?? undefined,
+        station_id: slot?.station_id,
+        provider_id: this.providerId() ?? undefined,
+        date,
+        start_time: startTime,
+        end_time: endTime,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const path = response.data?.payment_path;
+          if (path) {
+            this.router.navigateByUrl(path);
+            return;
+          }
+          this.submitting.set(false);
+          this.toast.error('No se pudo abrir el pago de la reserva. Intenta de nuevo.');
+        },
+        error: (err) => {
+          this.submitting.set(false);
+          this.errorMessage.set(extractApiErrorMessage(err));
+        },
+      });
   }
 
   /**

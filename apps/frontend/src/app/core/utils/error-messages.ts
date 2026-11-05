@@ -554,6 +554,11 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DCOL_DELETE_001:
     'No se puede eliminar una plantilla que tiene formularios enviados.',
   DCOL_PRODUCT_001: 'El formulario de recepción solo se puede vincular a servicios de esta tienda.',
+  // Rejections a customer meets when booking a station online.
+  STATION_002: 'Ese horario de la estación ya fue tomado. Elige otro horario.',
+  STATION_003: 'El profesional ya tiene ocupado ese horario. Elige otro horario.',
+  STATION_011: 'El apartado de tu reserva venció. Vuelve a elegir el horario.',
+  STATION_012: 'Este servicio se reserva con una estación: elige un horario con estación disponible.',
   STATION_013: 'La atención incluye campos que no pertenecen al formulario de recepción del servicio.',
   STATION_014: 'Para usar el QR público, configura y activa un dominio en Configuración > Dominios.',
 

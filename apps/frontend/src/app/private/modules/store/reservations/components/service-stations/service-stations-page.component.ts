@@ -1,11 +1,11 @@
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { HttpClient } from '@angular/common/http';
-import { Component, computed, DestroyRef, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import { Component, computed, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, interval } from 'rxjs';
 import {
   BadgeComponent,
   ButtonComponent,
@@ -47,6 +47,13 @@ import {
   StationType,
 } from './service-stations.service';
 import { DynamicFieldComponent } from '../../../../ecommerce/pages/data-collection-form/components/dynamic-field/dynamic-field.component';
+import {
+  computeStationClock,
+  nextReservationLabel,
+  shouldWarnNextReservation,
+  StationClock,
+} from './station-clock.util';
+import { stationTypeLabel } from './station-type-labels';
 import { getItemWidthClass } from '../../../data-collection/utils/item-width.util';
 
 /** Sección plana del formulario de recepción (tabs y subsecciones aplanadas en orden). */
@@ -70,7 +77,29 @@ import {
 import { forkJoin, of } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 import { ServiceRemindersPageComponent } from '../service-reminders-page/service-reminders-page.component';
-import { ServiceRegistryService } from '../service-reminders-page/service-registry.service';
+import {
+  DEFAULT_STATION_RULES,
+  StationRulesFormComponent,
+  stationRulesError,
+  stationRulesFrom,
+  stationRulesPayload,
+} from './station-rules-form/station-rules-form.component';
+import {
+  DEFAULT_RENTAL_RULES,
+  StationRentalFormComponent,
+  stationRentalError,
+  stationRentalFrom,
+  stationRentalPayload,
+  stationRentalSummary,
+} from './station-rental-form/station-rental-form.component';
+import { StationRateWindowsComponent } from './station-rate-windows/station-rate-windows.component';
+import { WeeklyScheduleEditorComponent } from '../schedule-management/weekly-schedule-editor/weekly-schedule-editor.component';
+import {
+  OpenSessionDepositComponent,
+  OpenSessionDepositValue,
+  openCustomerError,
+  openDepositError,
+} from './open-session-deposit/open-session-deposit.component';
 
 /** El selector de impuesto trabaja con `number`; `null` es «Sin impuesto». */
 function toTaxCategoryId(value: unknown): number | null {
@@ -94,6 +123,7 @@ export interface ServiceSessionRow {
   status: string;
   opened_at: string;
   planned_end_at?: string | null;
+  next_reservation?: { start_at: string; booking_id?: number | null; customer_name?: string | null } | null;
   station_id: number;
   station_name: string;
   product_id?: number | null;
@@ -136,12 +166,6 @@ export interface StationTypeMeta {
   vehicleNamePlaceholder: string;
   platePlaceholder: string;
 }
-
-/**
- * Prefijo telefónico por defecto (Colombia-first) cuando el número trae 10 dígitos
- * locales sin indicativo de país. Espejo del backend (service-reminders.utils.ts).
- */
-const DEFAULT_WHATSAPP_COUNTRY_PREFIX = '57';
 
 export const STATION_TYPES_META: Record<StationType, StationTypeMeta> = {
   carro: {
@@ -214,6 +238,46 @@ export const STATION_TYPES_META: Record<StationType, StationTypeMeta> = {
     vehicleNamePlaceholder: '',
     platePlaceholder: '',
   },
+  cava: {
+    id: 'cava',
+    label: 'Cavas',
+    singularLabel: 'Cava',
+    icon: 'sparkles',
+    description: 'Cavas y zonas privadas con consumo por anticipo',
+    requiresVehicle: false,
+    vehicleNamePlaceholder: '',
+    platePlaceholder: '',
+  },
+  cancha: {
+    id: 'cancha',
+    label: 'Canchas',
+    singularLabel: 'Cancha',
+    icon: 'trophy',
+    description: 'Canchas y escenarios deportivos por tiempo',
+    requiresVehicle: false,
+    vehicleNamePlaceholder: '',
+    platePlaceholder: '',
+  },
+  sala: {
+    id: 'sala',
+    label: 'Salas',
+    singularLabel: 'Sala',
+    icon: 'door-open',
+    description: 'Salas de reunión, juegos o eventos por tiempo',
+    requiresVehicle: false,
+    vehicleNamePlaceholder: '',
+    platePlaceholder: '',
+  },
+  finca: {
+    id: 'finca',
+    label: 'Fincas',
+    singularLabel: 'Finca',
+    icon: 'home',
+    description: 'Fincas y espacios campestres de uso por día',
+    requiresVehicle: false,
+    vehicleNamePlaceholder: '',
+    platePlaceholder: '',
+  },
 };
 
 export const STATION_TYPE_SELECTOR_OPTIONS: SelectorOption[] = [
@@ -223,6 +287,10 @@ export const STATION_TYPE_SELECTOR_OPTIONS: SelectorOption[] = [
   { value: 'peluqueria', label: 'Peluquería', icon: 'scissors', description: 'corte, tinte, peinado, tratamientos capilares (unisex)' },
   { value: 'barberia', label: 'Barbería (Sillón Clásico)', icon: 'user', description: 'corte masculino, fade, arreglo de barba y afeitado con navaja' },
   { value: 'salon_belleza', label: 'Salón de Belleza / Spa', icon: 'sparkles', description: 'manicure, pedicure, masajes, faciales' },
+  { value: 'cava', label: 'Cava', icon: 'sparkles', description: 'Zona privada con anticipo consumible' },
+  { value: 'cancha', label: 'Cancha', icon: 'trophy', description: 'Escenario deportivo por tiempo' },
+  { value: 'sala', label: 'Sala', icon: 'door-open', description: 'Sala de reunión, juegos o eventos' },
+  { value: 'finca', label: 'Finca', icon: 'home', description: 'Espacio campestre de uso por día' },
   { value: 'general', label: 'Servicio General', icon: 'activity', description: 'Atención personalizada y puestos polivalentes' },
 ];
 
@@ -252,11 +320,16 @@ export type StatusFilterId = 'all' | 'occupied' | 'free' | 'paused';
     DynamicFieldComponent,
     ServiceRemindersPageComponent,
     CustomerSelectComponent,
+    StationRulesFormComponent,
+    StationRentalFormComponent,
+    StationRateWindowsComponent,
+    WeeklyScheduleEditorComponent,
+    OpenSessionDepositComponent,
   ],
   templateUrl: './service-stations-page.component.html',
   styleUrl: './service-stations-page.component.scss',
 })
-export class ServiceStationsPageComponent implements OnInit, OnDestroy {
+export class ServiceStationsPageComponent implements OnInit {
   private readonly http = inject(HttpClient);
   private readonly stationsApi = inject(ServiceStationsService);
   private readonly reservationsApi = inject(ReservationsService);
@@ -266,7 +339,6 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly stationTemplateTypes = STATION_TEMPLATE_TYPES;
   /** Selector de tipo antes de diseñar una plantilla de estación. */
   readonly showTemplateTypePicker = signal(false);
-  private readonly registryApi = inject(ServiceRegistryService);
 
   /** Formularios activos de Recolección de datos, para asignar uno a cada estación. */
   readonly intakeTemplates = signal<Array<{ id: number; name: string; entity_type?: string; station_type?: string | null }>>([]);
@@ -297,6 +369,17 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly newTaxIsInclusive = signal(true);
   readonly editTaxCategoryId = signal<number | null>(null);
   readonly editTaxIsInclusive = signal(true);
+  // Reglas de uso y anticipo (S1): un valor por formulario, con el impuesto de Gastos de reserva.
+  readonly newRules = signal(DEFAULT_STATION_RULES);
+  readonly editRules = signal(DEFAULT_STATION_RULES);
+  readonly newRental = signal(DEFAULT_RENTAL_RULES);
+  readonly editRental = signal(DEFAULT_RENTAL_RULES);
+  readonly newRulesTaxOptions = computed(() =>
+    this.buildTaxSelectorOptions(this.newRules().reservation_fee_tax_category_id),
+  );
+  readonly editRulesTaxOptions = computed(() =>
+    this.buildTaxSelectorOptions(this.editRules().reservation_fee_tax_category_id),
+  );
   readonly newTaxSelectorOptions = computed(() => this.buildTaxSelectorOptions(null));
   readonly editTaxSelectorOptions = computed(() =>
     this.buildTaxSelectorOptions(this.selectedStation()?.rental_tax_category_id ?? null),
@@ -306,7 +389,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   private readonly currencyService = inject(CurrencyFormatService);
   readonly currencyCode = this.currencyService.currencyCode;
 
-  private timerInterval?: any;
+  /** Ticks every second so the per-station clocks stay live (signal based, no zone APIs). */
   readonly now = signal(Date.now());
 
   // Base state
@@ -364,11 +447,12 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly selectedCategory = signal<string>('all');
   readonly selectedStatusFilter = signal<StatusFilterId>('all');
   readonly timezone = computed(() => this.storeSettings.timezone());
+  /** `pos.allow_anonymous_sales`, read as the table and POS flows do: off means a customer is required. */
+  readonly checkinAllowsAnonymous = computed(() => this.storeSettings.pos()?.allow_anonymous_sales ?? false);
 
   // Modals state
   readonly showCreateModal = signal(false);
   readonly showCheckinModal = signal(false);
-  readonly showSessionModal = signal(false);
   readonly showConfigModal = signal(false);
   readonly showDeactivateConfirm = signal(false);
   readonly showDeleteConfirm = signal(false);
@@ -382,7 +466,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   // Create station form
   readonly newName = signal('');
-  readonly newStationType = signal<StationType>('carro');
+  /** Empty means: the backend takes the type from the chosen template. */
+  readonly newStationType = signal<StationType | ''>('');
   readonly newTrackTime = signal(false);
   readonly newTargetMinutes = signal<number | null>(null);
 
@@ -406,7 +491,6 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly checkinIntakeValues = signal<Record<number, unknown>>({});
   private intakeRequestSeq = 0;
   private prefillRequestSeq = 0;
-  private manageSessionSeq = 0;
   private readonly destroyRef = inject(DestroyRef);
 
   /** Prellenado del alta de cliente con lo ya digitado en el check-in. */
@@ -436,20 +520,20 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   readonly checkinBudgetAmount = signal<number | null>(null);
   /** Productos que entran a la cuenta desde el ingreso (además del servicio). */
   readonly checkinLines = signal<CheckinLine[]>([]);
+  /** Anticipo del ingreso (S4): monto, medio y request_id; null mientras la estación no lo pide. */
+  readonly checkinDeposit = signal<OpenSessionDepositValue | null>(null);
   private checkinLineSeq = 0;
 
-  // Tracking de access_url por sesión (para compartir seguimiento con QR y WhatsApp)
+  // access_url recién emitido por sesión; viaja a la página de la atención al abrirla
   readonly lastAccessUrlBySession = signal<Map<number, string>>(new Map());
-  readonly sessionAccessUrl = signal<string | null>(null);
-  /** El enlace solo existe en memoria; tras recargar se reemite (requiere verificar identidad). */
-  readonly reissueIdentityChecked = signal(false);
-  readonly reissuingLink = signal(false);
-  readonly sessionAccessQrDataUrl = signal<string | null>(null);
-  readonly sessionAccessQrLoading = signal(false);
 
   // Selector Options
   readonly stationTypesMeta = STATION_TYPES_META;
   readonly stationTypeOptions = STATION_TYPE_SELECTOR_OPTIONS;
+  readonly newStationTypeOptions: SelectorOption[] = [
+    { value: '', label: 'Según la plantilla', description: 'Usa el tipo de la plantilla elegida' },
+    ...STATION_TYPE_SELECTOR_OPTIONS,
+  ];
 
   readonly selectedCheckinStation = computed(() => {
     const id = this.checkinStationId();
@@ -594,21 +678,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     return this.checkinLines().reduce((acc, line) => acc + this.checkinLineEstimate(line), 0);
   });
 
-  /** Total de la línea con impuestos; líneas viejas sin `final_unit_price` muestran su base. */
-  lineTotalWithTax(item: { quantity: number; total_price: number; final_unit_price?: number | null }): number {
-    return item.final_unit_price != null
-      ? Math.round(Number(item.final_unit_price) * Number(item.quantity) * 100) / 100
-      : Number(item.total_price);
-  }
-
   readonly checkinEstimatedTotal = computed(() => this.checkinServicePrice() + this.checkinInitialLineTotal());
-
-  readonly addItemEstimatedTotal = computed(() => {
-    const current = Number(this.sessionOrder()?.grand_total ?? this.selectedSession()?.order?.grand_total ?? 0);
-    const quantity = Math.max(1, Number(this.addQuantity() || 1));
-    const unitPrice = Number(this.addUnitPrice() ?? 0);
-    return current + quantity * Math.max(0, unitPrice);
-  });
 
   readonly checkinProviderAvailability = signal<ProviderAvailability[]>([]);
   /** Personal de la estación que no se puede asignar ahora, con el motivo. */
@@ -616,19 +686,34 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.checkinProviderAvailability().filter((entry) => entry.status !== 'available' && entry.status !== 'inactive'),
   );
 
+  /** Station staff still loading: the check-in waits so a staffed station is never opened without its specialist. */
+  readonly checkinProvidersLoading = signal(false);
+  /**
+   * A specialist is mandatory only where the station has active staff assigned. Rooms and
+   * cavas usually have none, and the API opens those sessions without a provider.
+   */
+  readonly checkinNeedsProvider = computed(() => this.checkinProviderAvailability().some((entry) => entry.status !== 'inactive'));
+
   private loadCheckinProviderAvailability(): void {
     const stationId = Number(this.checkinStationId() || 0);
     this.checkinProviderAvailability.set([]);
+    this.checkinProvidersLoading.set(false);
     if (!stationId) return;
+    this.checkinProvidersLoading.set(true);
     const plannedEnd = new Date(Date.now() + (Number(this.checkinDurationMinutes()) || 45) * 60000).toISOString();
     this.stationsApi.getProviderAvailability(stationId, plannedEnd).subscribe({
       next: (list) => {
         if (Number(this.checkinStationId()) !== stationId) return;
+        this.checkinProvidersLoading.set(false);
         this.checkinProviderAvailability.set(list);
         const chosen = Number(this.checkinProviderId() || 0);
         if (chosen && !list.some((p) => p.provider_id === chosen && p.status === 'available')) this.checkinProviderId.set(null);
       },
-      error: () => this.checkinProviderAvailability.set([]),
+      error: () => {
+        if (Number(this.checkinStationId()) !== stationId) return;
+        this.checkinProvidersLoading.set(false);
+        this.checkinProviderAvailability.set([]);
+      },
     });
   }
 
@@ -651,74 +736,13 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     }));
   });
 
-  readonly selectedSessionStation = computed<ServiceStation | null>(() => {
-    const session = this.selectedSession();
-    if (!session) return null;
-    return this.stations().find((s) => s.id === session.station_id) ?? null;
-  });
-
-  readonly sessionLinkedServiceIds = computed<number[]>(() => {
-    return this.selectedSessionStation()?.services?.map((s) => s.product_id) ?? [];
-  });
-
-  readonly sessionCatalogProductSelectorOptions = computed<SelectorOption[]>(() => {
-    const linked = this.sessionLinkedServiceIds();
-    return this.sellableCatalogProducts()
-      .filter((prod) => {
-        if (prod.is_ingredient === true || prod.is_sellable === false) return false;
-        if (prod.product_type === 'service' && linked.length) return linked.includes(prod.id);
-        return true;
-      })
-      .map((prod) => ({
-        value: prod.id,
-        label: `${prod.name} (${this.currencyService.format(Number(prod.base_price || 0))})`,
-        description:
-          prod.product_type === 'service'
-            ? linked.length
-              ? 'Servicio vinculado a esta estación'
-              : 'Servicio / Mano de obra'
-            : 'Producto / Consumible',
-      }));
-  });
-
-  // Manage session / Cuenta state (estilo mesas / cuenta abierta)
-  readonly selectedSession = signal<ServiceSessionRow | null>(null);
-  protected readonly Number = Number;
-  readonly sessionOrder = signal<any | null>(null);
-  readonly sessionOrderLoading = signal(false);
-  readonly budget = signal<any>(null);
-  readonly proposals = signal<any[]>([]);
-  readonly sessionBudgetAmount = signal<number | null>(null);
-
-  // Agregar ítems / productos a la cuenta
+  // Catalogs used by the check-in line picker
   readonly allCatalogProducts = signal<any[]>([]);
   readonly sellableCatalogProducts = signal<any[]>([]);
-  readonly selectedAddProductId = signal<number | null>(null);
-  readonly selectedAddVariantId = signal<number | null>(null);
-
-  /** Variantes del producto elegido para agregar (talla, presentación, viscosidad…). */
-  readonly addProductVariants = computed<any[]>(() => {
-    const id = this.selectedAddProductId();
-    if (!id) return [];
-    return this.sellableCatalogProducts().find((p) => p.id === id)?.product_variants ?? [];
-  });
-
-  readonly addVariantOptions = computed<SelectorOption[]>(() =>
-    this.addProductVariants().map((v) => ({
-      value: v.id,
-      label: `${v.name || v.sku} (${this.currencyService.format(this.variantPublishedPrice(v))})`,
-    })),
-  );
-  readonly addQuantity = signal<number>(1);
-  readonly addUnitPrice = signal<number | null>(null);
-  /** true si el usuario cambió el precio: solo entonces se envía `unit_price` (igual que el check-in). */
-  readonly addPriceEdited = signal(false);
-  readonly addDescription = signal('');
-  readonly addingItem = signal(false);
 
   // Config station state
   readonly selectedStation = signal<ServiceStation | null>(null);
-  readonly selectedConfigTab = signal<'details' | 'intake' | 'services' | 'providers'>('details');
+  readonly selectedConfigTab = signal<'details' | 'intake' | 'schedule' | 'services' | 'providers'>('details');
   readonly editName = signal('');
   readonly editStationType = signal<StationType>('carro');
   readonly editCapacity = signal(1);
@@ -841,11 +865,9 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.loadData();
-    this.timerInterval = setInterval(() => this.now.set(Date.now()), 15000);
-  }
-
-  ngOnDestroy(): void {
-    if (this.timerInterval) clearInterval(this.timerInterval);
+    interval(1000)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.now.set(Date.now()));
   }
 
   loadData(): void {
@@ -938,56 +960,6 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
         s.station_id === stationId &&
         (s.status === 'open' || s.status === 'in_progress' || s.status === 'paused'),
     );
-  }
-
-  /** Muestra el enlace de seguimiento con su QR y lo recuerda mientras la página esté abierta. */
-  private showSessionAccessUrl(sessionId: number, url: string | null): void {
-    this.sessionAccessUrl.set(url);
-    this.sessionAccessQrDataUrl.set(null);
-    if (!url) return;
-    this.lastAccessUrlBySession.update((map) => new Map(map).set(sessionId, url));
-    this.sessionAccessQrLoading.set(true);
-    import('qrcode')
-      .then((QRCode) => QRCode.toDataURL(url, { width: 320, margin: 2, color: { dark: '#0f172a', light: '#ffffff' } }))
-      .then((dataUrl) => {
-        // Si el usuario ya abrió otra cuenta, no pintar el QR de esta en el modal.
-        if (this.selectedSession()?.id === sessionId) {
-          this.sessionAccessQrDataUrl.set(dataUrl);
-        }
-      })
-      .catch(() => {})
-      .finally(() => this.sessionAccessQrLoading.set(false));
-  }
-
-  /** Genera un enlace nuevo (el anterior deja de servir) y lo envía al correo de contacto. */
-  reissueSessionLink(): void {
-    const session = this.selectedSession();
-    if (!session || !this.reissueIdentityChecked()) return;
-    this.reissuingLink.set(true);
-    this.stationsApi.reissueAccessLink(session.id, {
-      identity_verified: true,
-      verification_method: 'in_person',
-      verification_note: 'Reemitido desde el panel de estaciones con el cliente presente',
-      idempotency_key: crypto.randomUUID(),
-    }).subscribe({
-      next: (res) => {
-        this.reissuingLink.set(false);
-        this.reissueIdentityChecked.set(false);
-        // Si el usuario ya abrió otra cuenta, no pintar el enlace/QR de esta en el modal.
-        if (this.selectedSession()?.id === session.id) {
-          this.showSessionAccessUrl(session.id, res.access_url ?? null);
-        }
-        this.toastService.success(
-          res.email_delivery_status === 'sent'
-            ? 'Enlace nuevo generado y enviado al correo del cliente.'
-            : 'Enlace nuevo generado.',
-        );
-      },
-      error: (error: unknown) => {
-        this.reissuingLink.set(false);
-        this.toastService.error(this.errorText(error, 'No fue posible generar el enlace.'));
-      },
-    });
   }
 
   /** Lleva al formulario del servicio, donde se elige su "Formulario de recepción". */
@@ -1191,21 +1163,42 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     return Math.floor(diff / 60000);
   }
 
-  sessionPlannedMinutes(session: ServiceSessionRow): number {
-    if (session.planned_end_at && session.opened_at) {
-      const diff = Math.max(
-        1,
-        Math.round((new Date(session.planned_end_at).getTime() - new Date(session.opened_at).getTime()) / 60000),
-      );
-      return diff;
-    }
-    return 45;
+  /** Planned end of the live session: the sessions list wins, the station summary is the fallback. */
+  private sessionPlannedEnd(station: ServiceStation, session: ServiceSessionRow): string | null {
+    return session.planned_end_at ?? station.active_session?.planned_end_at ?? null;
   }
 
-  sessionProgressPercent(session: ServiceSessionRow): number {
-    const elapsed = this.sessionElapsedMinutes(session.opened_at);
-    const target = this.sessionPlannedMinutes(session);
-    return Math.min(100, Math.round((elapsed / target) * 100));
+  /** Live clock for an occupied station: elapsed up, countdown down, or "+HH:MM:SS" past the end. */
+  stationClock(station: ServiceStation, session: ServiceSessionRow): StationClock | null {
+    return computeStationClock(
+      session.opened_at ?? station.active_session?.opened_at,
+      this.sessionPlannedEnd(station, session),
+      this.now(),
+    );
+  }
+
+  /** "Próxima reserva 02:00" when the session is overtime or ends within 30 min of the next booking. */
+  nextReservationChip(station: ServiceStation, session: ServiceSessionRow): string | null {
+    const next = station.next_reservation ?? session.next_reservation ?? null;
+    if (!next) return null;
+    return shouldWarnNextReservation(this.sessionPlannedEnd(station, session), next, this.now())
+      ? nextReservationLabel(next, this.timezone())
+      : null;
+  }
+
+  stationTypeSubtitle(station: ServiceStation): string {
+    const rule = stationRentalSummary(station, (amount) => this.currencyService.format(amount));
+    const label = stationTypeLabel(this.getStationType(station));
+    return rule ? `${label} · ${rule}` : label;
+  }
+
+  /** The account now lives in its own page; "Finalizar" lands there with the close flow open. */
+  openSessionPage(session: ServiceSessionRow, startClose = false): void {
+    void this.router.navigate(['/admin/services/stations/session', session.id], {
+      queryParams: startClose ? { close: 1 } : undefined,
+      // The tracking link only exists in memory right after check-in; hand it to the page.
+      state: { accessUrl: this.lastAccessUrlBySession().get(session.id) ?? session.access_url ?? null },
+    });
   }
 
   // Modal QR: Visualización, descarga e impresión del QR físico
@@ -1244,6 +1237,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       try { url = await firstValueFrom(this.stationsApi.getPublicUrl(st.id)); this.qrPublicUrl.set(url); }
       catch (error) { this.toastService.error(extractApiErrorMessage(error) || 'No se pudo resolver el dominio público de la tienda.'); return; }
     }
+    if (!url) return;
     if (navigator?.clipboard?.writeText) {
       navigator.clipboard.writeText(url).then(() => {
         this.toastService.success('Enlace de la estación copiado al portapapeles.');
@@ -1380,12 +1374,14 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
   // Modal 1: Create Station con Tipo de Estación
   openCreateModal(): void {
     this.newName.set('');
-    this.newStationType.set('carro');
+    this.newStationType.set('');
     this.newTrackTime.set(false);
     this.newTargetMinutes.set(null);
     this.newIntakeTemplateId.set(0);
     this.newTaxCategoryId.set(null);
     this.newTaxIsInclusive.set(true);
+    this.newRules.set(DEFAULT_STATION_RULES);
+    this.newRental.set(DEFAULT_RENTAL_RULES);
     this.loadIntakeTemplates();
     this.loadTaxOptions();
     this.showCreateModal.set(true);
@@ -1454,16 +1450,24 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       this.toastService.error('Elige la plantilla de la estación (o diséñala con el botón de arriba).');
       return;
     }
+    const rulesError = stationRulesError(this.newRules()) ?? stationRentalError(this.newRental());
+    if (rulesError) {
+      this.toastService.error(rulesError);
+      return;
+    }
     this.saving.set(true);
     this.stationsApi.create({
       name,
       capacity: 1,
-      // Sin tipo: el backend le pone el de su plantilla (carro, moto, barbería…).
+      // Sin tipo elegido, el backend usa el de su plantilla (carro, moto, barbería…).
+      ...(this.newStationType() ? { station_type: this.newStationType() as StationType } : {}),
       track_time: this.newTrackTime(),
       target_minutes: this.newTrackTime() ? this.positiveMinutes(this.newTargetMinutes()) : null,
       intake_template_id: templateId,
       rental_tax_category_id: this.newTaxCategoryId(),
       rental_tax_is_inclusive: this.newTaxIsInclusive(),
+      ...stationRulesPayload(this.newRules()),
+      ...stationRentalPayload(this.newRental()),
     }).subscribe({
       next: (station) => {
         this.saving.set(false);
@@ -1550,6 +1554,7 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     // Limpiar campos de presupuesto e insumos iniciales
     this.checkinBudgetAmount.set(null);
     this.checkinLines.set([]);
+    this.checkinDeposit.set(null);
 
     // Asegurar carga de catálogo de productos para el selector de insumos
     // Catálogo vendible con variantes para las líneas de "Agregar producto"
@@ -1701,16 +1706,6 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       out.push({ field_id: field.id, value });
     }
     return out;
-  }
-
-  formatIntakeAnswer(fieldType: string, value: unknown): string {
-    if (value === null || value === undefined || value === '') return '—';
-    if (fieldType === 'checkbox' || typeof value === 'boolean') {
-      return value === true || value === 'true' ? 'Sí' : 'No';
-    }
-    if (Array.isArray(value)) return value.join(', ');
-    if (typeof value === 'object') return JSON.stringify(value);
-    return String(value);
   }
 
   private defaultCheckinServiceId(station: ServiceStation | null): number {
@@ -1918,7 +1913,11 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       this.toastService.error('Selecciona el servicio de la atención.');
       return;
     }
-    if (!this.checkinProviderId()) {
+    if (this.checkinProvidersLoading()) {
+      this.toastService.error('Espera a que cargue el personal de la estación.');
+      return;
+    }
+    if (this.checkinNeedsProvider() && !this.checkinProviderId()) {
       this.checkinProviderError.set(true);
       this.toastService.error('Seleccione una persona de servicio.');
       return;
@@ -2014,6 +2013,18 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       },
     };
 
+    // Anticipo (S4): solo viaja si la estación lo pide y el cajero registró monto y medio.
+    const deposit = station && station.deposit_policy && station.deposit_policy !== 'none' ? this.checkinDeposit() : null;
+    const depositError =
+      openCustomerError(this.checkinAllowsAnonymous(), this.checkinCustomer()?.id) ??
+      openDepositError(station, this.checkinCustomer()?.id, deposit);
+    if (depositError) {
+      this.saving.set(false);
+      this.toastService.error(depositError);
+      return;
+    }
+    if (deposit) payload.deposit = deposit;
+
     const budgetVal = this.checkinShowBudget() ? this.checkinBudgetAmount() : null;
     const initialLines = (this.checkinShowProducts() ? this.checkinLines() : [])
       .filter((line) => line.product_id)
@@ -2079,345 +2090,14 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  // Modal 3: Manage Active Session / Cuenta de la Bahía
-  openManageSession(session: ServiceSessionRow): void {
-    const seq = ++this.manageSessionSeq;
-    const isCurrent = () =>
-      seq === this.manageSessionSeq && this.selectedSession()?.id === session.id;
-
-    this.selectedSession.set(session);
-    this.sessionOrder.set(session.order ?? null);
-    this.budget.set(null);
-    this.sessionBudgetAmount.set(null);
-    this.proposals.set([]);
-    this.showSessionModal.set(true);
-    this.sessionOrderLoading.set(true);
-    this.selectedAddProductId.set(null);
-    this.addQuantity.set(1);
-    this.addUnitPrice.set(null);
-    this.addDescription.set('');
-
-    this.reissueIdentityChecked.set(false);
-    this.showSessionAccessUrl(session.id, this.lastAccessUrlBySession().get(session.id) || session.access_url || null);
-
-    // Load full session with order_items
-    this.stationsApi.getSession(session.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (full) => {
-        if (!isCurrent()) return;
-        this.sessionOrderLoading.set(false);
-        if (full) {
-          this.selectedSession.set(full);
-          this.sessionOrder.set(full.order ?? null);
-          if (full.access_url && !this.sessionAccessUrl()) {
-            this.showSessionAccessUrl(session.id, full.access_url);
-          }
-        }
-      },
-      error: () => {
-        if (!isCurrent()) return;
-        this.sessionOrderLoading.set(false);
-      },
-    });
-
-    // Load sellable catalog for adding to the account (products + services, no insumos)
-    if (!this.sellableCatalogProducts().length) {
-      this.stationsApi.getSellableProducts().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-        next: (prods) => this.sellableCatalogProducts.set(prods || []),
-        error: () => {},
-      });
-    }
-
-    // Load budget
-    this.http.get<any>(`${environment.apiUrl}/store/service-sessions/${session.id}/budget`).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (r) => {
-        if (!isCurrent()) return;
-        // El base del sistema (is_system) no es un tope del cliente: ni aviso ni "Techo".
-        const raw = r?.data ?? null;
-        const val = raw && !raw.is_system ? raw : null;
-        this.budget.set(val);
-        this.sessionBudgetAmount.set(val ? Number(val.amount) : null);
-      },
-      error: (error: unknown) => {
-        if (!isCurrent()) return;
-        this.toastService.error(this.errorText(error, 'No fue posible cargar el presupuesto de la cuenta.'));
-      },
-    });
-
-    // Load proposals
-    this.http.get<any>(`${environment.apiUrl}/store/service-sessions/${session.id}/proposals`).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (r) => {
-        if (!isCurrent()) return;
-        this.proposals.set(r?.data ?? []);
-      },
-      error: () => {
-        if (!isCurrent()) return;
-        this.proposals.set([]);
-      },
-    });
-  }
-
-  copySessionAccessUrl(): void {
-    const url = this.sessionAccessUrl();
-    if (!url) return;
-    if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(url).then(() => {
-        this.toastService.success('Enlace de seguimiento copiado al portapapeles.');
-      }).catch(() => {
-        this.toastService.info(`URL de seguimiento: ${url}`);
-      });
-    } else {
-      this.toastService.info(`URL de seguimiento: ${url}`);
-    }
-  }
-
-  shareSessionByWhatsApp(session: ServiceSessionRow): void {
-    const url = this.sessionAccessUrl();
-    if (!url) return;
-    const clientName = this.getCustomerName(session);
-    const stationName = session.station_name;
-    const rawPhone = this.getCustomerPhone(session) || '';
-    const digitsOnly = rawPhone.replace(/\D/g, '');
-    let formattedPhone = digitsOnly;
-    if (digitsOnly.length === 10) {
-      formattedPhone = `${DEFAULT_WHATSAPP_COUNTRY_PREFIX}${digitsOnly}`;
-    }
-    const message = `Hola ${clientName}, sigue en tiempo real el servicio en ${stationName}: ${url}`;
-    const waUrl = formattedPhone
-      ? `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`
-      : `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(waUrl, '_blank');
-  }
-
-  /** Misma escalera que el backend: oferta de variante → precio propio → oferta/base del producto. */
-  private variantPublishedPrice(variant: any): number {
-    if (variant?.is_on_sale && Number(variant.sale_price) > 0) return Number(variant.sale_price);
-    if (Number(variant?.price_override) > 0) return Number(variant.price_override);
-    const product = this.sellableCatalogProducts().find((p) => p.id === this.selectedAddProductId());
-    if (product?.is_on_sale && Number(product.sale_price) > 0) return Number(product.sale_price);
-    return Number(product?.base_price || 0);
-  }
-
-  onAddVariantSelect(variantId: number | null): void {
-    this.selectedAddVariantId.set(Number(variantId) || null);
-    const variant = this.addProductVariants().find((v) => v.id === Number(variantId));
-    if (variant) this.addUnitPrice.set(this.variantPublishedPrice(variant));
-    this.addPriceEdited.set(false);
-  }
-
-  onAddUnitPriceChange(value: number | null): void {
-    this.addUnitPrice.set(value);
-    this.addPriceEdited.set(true);
-  }
-
-  onAddProductSelect(productId: number | null): void {
-    this.selectedAddProductId.set(productId);
-    this.selectedAddVariantId.set(null);
-    this.addPriceEdited.set(false);
-    if (!productId) {
-      this.addUnitPrice.set(null);
-      return;
-    }
-    const found =
-      this.sellableCatalogProducts().find((p) => p.id === productId) ??
-      this.allCatalogProducts().find((p) => p.id === productId);
-    // Precio publicado (oferta incluida); el backend lo vuelve a resolver si no se edita.
-    if (found) {
-      this.addUnitPrice.set(this.publishedPrice(found));
-    }
-  }
-
-  addItemToAccount(): void {
-    const session = this.selectedSession();
-    const productId = this.selectedAddProductId();
-    if (!session || !productId) return;
-    if (this.addProductVariants().length && !this.selectedAddVariantId()) {
-      this.toastService.error('Elige la variante del producto.');
-      return;
-    }
-    const qty = Math.max(1, Number(this.addQuantity() || 1));
-    const price = this.addPriceEdited() && this.addUnitPrice() != null ? Number(this.addUnitPrice()) : undefined;
-
-    this.addingItem.set(true);
-    this.stationsApi.addItem(session.id, {
-      product_id: productId,
-      product_variant_id: this.selectedAddVariantId() ?? undefined,
-      quantity: qty,
-      unit_price: price,
-      description: this.addDescription().trim() || undefined,
-    }).subscribe({
-      next: () => {
-        this.addingItem.set(false);
-        this.selectedAddProductId.set(null);
-        this.selectedAddVariantId.set(null);
-        this.addQuantity.set(1);
-        this.addUnitPrice.set(null);
-        this.addPriceEdited.set(false);
-        this.addDescription.set('');
-        this.toastService.success('Ítem agregado a la cuenta de la estación.');
-        // Refresh session & order
-        this.stationsApi.getSession(session.id).subscribe({
-          next: (full) => {
-            // El usuario pudo cerrar o cambiar de cuenta mientras llegaba la respuesta.
-            if (full && this.selectedSession()?.id === session.id) {
-              this.selectedSession.set(full);
-              this.sessionOrder.set(full.order ?? null);
-            }
-            this.loadActiveSessions();
-          },
-        });
-      },
-      error: (error: unknown) => {
-        this.addingItem.set(false);
-        this.toastService.error(this.errorText(error, 'No fue posible agregar el ítem a la cuenta.'));
-      },
-    });
-  }
-
-  removeItemFromAccount(itemId: number): void {
-    const session = this.selectedSession();
-    if (!session || !itemId) return;
-
-    this.stationsApi.removeItem(session.id, itemId).subscribe({
-      next: () => {
-        this.toastService.success('Ítem eliminado de la cuenta.');
-        // Refresh session & order
-        this.stationsApi.getSession(session.id).subscribe({
-          next: (full) => {
-            // El usuario pudo cerrar o cambiar de cuenta mientras llegaba la respuesta.
-            if (full && this.selectedSession()?.id === session.id) {
-              this.selectedSession.set(full);
-              this.sessionOrder.set(full.order ?? null);
-            }
-            this.loadActiveSessions();
-          },
-        });
-      },
-      error: (error: unknown) => {
-        this.toastService.error(this.errorText(error, 'No fue posible eliminar el ítem.'));
-      },
-    });
-  }
-
-  saveBudget(): void {
-    const session = this.selectedSession();
-    const amount = this.sessionBudgetAmount();
-    if (!session || amount == null || amount < 0) return;
+  /** Resumes a paused session from the card; the rest of the account lives in the session page. */
+  resumeSession(session: ServiceSessionRow): void {
     this.saving.set(true);
-    this.http
-      .put<any>(`${environment.apiUrl}/store/service-sessions/${session.id}/budget`, {
-        amount,
-        currency: this.budget()?.currency || this.currencyService.currencyCode() || 'COP',
-        expectedVersion: this.budget()?.version ?? 0,
-      })
-      .subscribe({
-        next: (r) => {
-          // El usuario pudo cerrar o cambiar de cuenta mientras llegaba la respuesta.
-          if (this.selectedSession()?.id === session.id) {
-            this.budget.set(r?.data ?? r);
-          }
-          this.saving.set(false);
-          this.toastService.success('Techo de presupuesto actualizado.');
-          this.loadActiveSessions();
-        },
-        error: (error: unknown) => {
-          this.saving.set(false);
-          this.toastService.error(this.errorText(error, 'No fue posible guardar el presupuesto.'));
-        },
-      });
-  }
-
-  /**
-   * La cuenta SVC queda como orden en borrador: se cobra con "Registrar pago" del
-   * detalle de la orden (mismo flujo `flow/pay` de cualquier orden, que promueve el borrador).
-   */
-  chargeSessionAccount(session: ServiceSessionRow): void {
-    this.saving.set(true);
-    this.stationsApi.prepareCharge(session.id).subscribe({
-      next: ({ order_id }) => {
-        this.saving.set(false);
-        this.showSessionModal.set(false);
-        this.toastService.info('Registra el pago desde "Registrar pago" en la orden.');
-        this.router.navigate(['/admin/orders', order_id]);
-      },
-      error: (error: unknown) => {
-        this.saving.set(false);
-        this.toastService.error(this.errorText(error, 'No fue posible preparar el cobro de la cuenta.'));
-      },
-    });
-  }
-
-  /** Atención por cerrar mientras se decide su cliente (servicio recurrente sin cliente). */
-  readonly closePrompt = signal<ServiceSessionRow | null>(null);
-  readonly closeCustomer = signal<CustomerSelectOption | null>(null);
-
-  /**
-   * Finalizar: si el servicio es recurrente y la atención no tiene cliente, primero
-   * se ofrece asignarlo; sin cliente no hay a quién enviarle el recordatorio.
-   */
-  async requestClose(session: ServiceSessionRow): Promise<void> {
-    const recurring = !!this.services().find((s) => s.id === session.product_id)?.is_recurring;
-    if (recurring) {
-      const full = await firstValueFrom(this.stationsApi.getSession(session.id)).catch(() => null);
-      const order = (full?.order ?? session.order) as { customer?: { id?: number } | null; customer_id?: number | null } | null | undefined;
-      if (!order?.customer?.id && !order?.customer_id) {
-        this.closeCustomer.set(null);
-        this.closePrompt.set(full ?? session);
-        return;
-      }
-    }
-    this.transitionSession(session, 'close');
-  }
-
-  confirmClose(withCustomer: boolean): void {
-    const session = this.closePrompt();
-    if (!session) return;
-    const customer = withCustomer ? this.closeCustomer() : null;
-    this.closePrompt.set(null);
-    this.transitionSession(session, 'close', customer?.id ?? null);
-  }
-
-  transitionSession(session: ServiceSessionRow, action: 'pause' | 'resume' | 'close', assignCustomerId: number | null = null): void {
-    this.saving.set(true);
-    const order = this.sessionOrder()?.id === session.order?.id ? this.sessionOrder() ?? session.order : session.order;
-    // Regla: la estación no se libera hasta cobrar. Con saldo pendiente no se
-    // cierra: se avisa y se lleva a registrar el pago (el backend lo revalida).
-    if (action === 'close' && order?.id && Number(order.remaining_balance ?? order.grand_total ?? 0) > 0) {
-      this.saving.set(false);
-      this.toastService.warning(
-        'Esta cuenta tiene saldo pendiente. Regístralo para poder finalizar y liberar la estación.',
-        undefined,
-        6000,
-      );
-      this.router.navigate(['/admin/orders', order.id]);
-      return;
-    }
-    this.http.patch<any>(`${environment.apiUrl}/store/service-sessions/${session.id}`, { action }).subscribe({
+    this.stationsApi.pauseResumeSession(session.id, 'resume').subscribe({
       next: () => {
         this.saving.set(false);
-        this.showSessionModal.set(false);
-        this.selectedSession.set(null);
         this.loadActiveSessions();
-        const orderId = order?.id;
-        if (assignCustomerId && orderId && session.product_id) {
-          // La fila ya existe en el registro: se le vincula el cliente para el recordatorio.
-          this.registryApi
-            .assignCustomerToOrder(orderId, session.product_id, assignCustomerId)
-            .subscribe({
-              error: (error: unknown) =>
-                this.toastService.warning(
-                  this.errorText(error, 'La atención se cerró, pero no se pudo asignar el cliente. Hazlo desde el Registro de servicios.'),
-                  undefined,
-                  6000,
-                ),
-            });
-        }
-        this.toastService.success(
-          action === 'close'
-            ? 'Atención finalizada con éxito.'
-            : action === 'pause'
-              ? 'Atención pausada.'
-              : 'Atención reanudada.',
-        );
+        this.toastService.success('Atención reanudada.');
       },
       error: (error: unknown) => {
         this.saving.set(false);
@@ -2437,6 +2117,8 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
     this.editIntakeTemplateId.set(station.intake_template_id ?? 0);
     this.editTaxCategoryId.set(station.rental_tax_category_id ?? null);
     this.editTaxIsInclusive.set(station.rental_tax_is_inclusive !== false);
+    this.editRules.set(stationRulesFrom(station));
+    this.editRental.set(stationRentalFrom(station));
     this.loadIntakeTemplates();
     this.loadTaxOptions();
     this.selectedConfigTab.set('details');
@@ -2453,14 +2135,23 @@ export class ServiceStationsPageComponent implements OnInit, OnDestroy {
       this.toastService.error('El nombre es obligatorio.');
       return;
     }
+    const rulesError = stationRulesError(this.editRules()) ?? stationRentalError(this.editRental());
+    if (rulesError) {
+      this.toastService.error(rulesError);
+      return;
+    }
     this.runSave(
       this.stationsApi.update(station.id, {
         name,
         capacity: 1,
+        // Only sent when the person changed it, so older stations keep their derived type.
+        ...(this.editStationType() !== this.getStationType(station) ? { station_type: this.editStationType() } : {}),
         track_time: this.editTrackTime(),
         target_minutes: this.editTrackTime() ? this.positiveMinutes(this.editTargetMinutes()) : null,
         rental_tax_category_id: this.editTaxCategoryId(),
         rental_tax_is_inclusive: this.editTaxIsInclusive(),
+        ...stationRulesPayload(this.editRules()),
+        ...stationRentalPayload(this.editRental()),
       }),
       'Datos guardados.',
       station.id,
