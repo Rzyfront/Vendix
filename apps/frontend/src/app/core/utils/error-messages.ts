@@ -555,7 +555,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No se puede eliminar una plantilla que tiene formularios enviados.',
   DCOL_PRODUCT_001: 'El formulario de recepción solo se puede vincular a servicios de esta tienda.',
   // Rejections a customer meets when booking a station online.
+  STATION_001: 'El servicio, el profesional y la estación elegidos no son compatibles.',
   STATION_002: 'Ese horario de la estación ya fue tomado. Elige otro horario.',
+  STATION_004: 'La estación no existe en esta tienda.',
+  STATION_005: 'La estación ya tiene una atención abierta.',
+  STATION_006: 'La atención cambió mientras la editabas o no admite esa acción. Recarga e intenta de nuevo.',
+  STATION_007: 'Faltan datos obligatorios del cliente o de la ficha del servicio.',
+  STATION_008: 'Ese horario se cruza con otra asignación. Elige otro horario.',
   STATION_003: 'El profesional ya tiene ocupado ese horario. Elige otro horario.',
   STATION_011: 'El apartado de tu reserva venció. Vuelve a elegir el horario.',
   STATION_012: 'Este servicio se reserva con una estación: elige un horario con estación disponible.',

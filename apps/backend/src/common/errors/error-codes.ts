@@ -6111,6 +6111,9 @@ export const ErrorCodes = {
   STATION_BOOKING_009: { code: 'STATION_BOOKING_009', httpStatus: 400, devMessage: 'Faltan datos para la decisión del anticipo.' },
   STATION_BOOKING_010: { code: 'STATION_BOOKING_010', httpStatus: 409, devMessage: 'Esta estación cobra anticipo: reserva desde el flujo de reservas, no desde el carrito.' },
   STATION_BOOKING_011: { code: 'STATION_BOOKING_011', httpStatus: 400, devMessage: 'Una serie recurrente no se permite en estaciones con cobro para reservar o anticipo obligatorio.' },
+  STATION_BOOKING_012: { code: 'STATION_BOOKING_012', httpStatus: 409, devMessage: 'La reserva tiene un cobro recibido: elige si devolverlo, dejarlo como saldo a favor o retenerlo.' },
+  STATION_BOOKING_013: { code: 'STATION_BOOKING_013', httpStatus: 403, devMessage: 'Esta tienda no permite reservar sin iniciar sesión.' },
+  STATION_BOOKING_014: { code: 'STATION_BOOKING_014', httpStatus: 400, devMessage: 'Para reservar sin cuenta indica tu nombre, correo y teléfono.' },
   // Station rental "cobro para reservar" (T15, S1)
   RENTAL_PREPAY_001: { code: 'RENTAL_PREPAY_001', httpStatus: 400, devMessage: 'Esta estación no cobra para reservar.' },
   RENTAL_PREPAY_002: { code: 'RENTAL_PREPAY_002', httpStatus: 400, devMessage: 'La reserva no tiene un valor cotizado para calcular el cobro.' },
