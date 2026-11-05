@@ -1582,7 +1582,8 @@ export class ServiceSessionsService {
       received: balance.received,
       applied: balance.applied,
       balance: balance.balance,
-      remaining_for_consumption: centsToAmount(Math.max(0, toCents(balance.received) - consumptionCents)),
+      // Once settled the deposit was applied, refunded or credited: nothing is left to consume.
+      remaining_for_consumption: session.settled_at ? 0 : centsToAmount(Math.max(0, toCents(balance.received) - consumptionCents)),
       policy: session.deposit_policy,
       exhausted_policy: session.deposit_exhausted_policy,
       leftover_policy: session.leftover_policy,

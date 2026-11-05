@@ -1547,6 +1547,14 @@ describe('ServiceSessionsService — anticipo consumible de la estación', () =>
       });
     });
 
+    it('una atención ya liquidada no deja nada disponible para consumir', async () => {
+      const settledAt = new Date('2026-11-05T03:00:00Z');
+      prisma.service_sessions.findFirst.mockResolvedValue({ ...base, deposit_policy: 'required', deposit_required_amount: 400000, deposit_exhausted_policy: 'overflow', leftover_policy: 'minimum_spend', settled_at: settledAt });
+      deposits.balanceOf.mockResolvedValue(balance(400000, 400000));
+      const found: any = await service.findOne(30);
+      expect(found.deposit).toMatchObject({ received: 400000, applied: 400000, balance: 0, remaining_for_consumption: 0, settled_at: settledAt });
+    });
+
     it('una atención anterior al anticipo (legacy) devuelve deposit null y no consulta el libro', async () => {
       prisma.service_sessions.findFirst.mockResolvedValue({ ...base });
       const found: any = await service.findOne(30);
