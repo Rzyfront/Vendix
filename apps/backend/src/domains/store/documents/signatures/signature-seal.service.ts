@@ -38,7 +38,9 @@ export class SignatureSealService {
       where: { id: requestId, store_id: storeId },
     });
     if (!request) throw new VendixHttpException(ErrorCodes.SIGNATURE_REQUEST_NOT_FOUND);
-    if (request.status === 'completed') return false;
+    // Only a request whose last signer just signed can be sealed: a cancelled,
+    // expired or declined one stays closed and a completed one is done.
+    if (request.status !== 'partially_signed') return false;
     const signers: signature_signers[] = await this.prisma.signature_signers.findMany({
       where: { request_id: requestId, store_id: storeId },
       orderBy: [{ order: 'asc' }, { id: 'asc' }],
@@ -115,7 +117,8 @@ export class SignatureSealService {
           where: { id: requestId, store_id: storeId },
           select: { status: true },
         });
-        if (!fresh || fresh.status === 'completed') return false;
+        // Re-checked under the lock: a cancel that won the race keeps the request closed.
+        if (!fresh || fresh.status !== 'partially_signed') return false;
         await tx.signature_requests.updateMany({
           where: { id: requestId, store_id: storeId },
           data: {

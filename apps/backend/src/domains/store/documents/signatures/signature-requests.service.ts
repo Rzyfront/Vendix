@@ -228,6 +228,12 @@ export class SignatureRequestsService {
       if (!OPEN_REQUEST_STATUSES.includes(request.status)) {
         throw new VendixHttpException(ErrorCodes.SIGNATURE_REQUEST_CLOSED);
       }
+      if (await this.allSigned(tx, requestId, c.store_id)) {
+        throw new VendixHttpException(
+          ErrorCodes.SIGNATURE_REQUEST_CLOSED,
+          'Todos los firmantes ya firmaron; el documento se está sellando y no se puede cancelar.',
+        );
+      }
       await this.close(tx, request, 'cancelled', 'cancelled', text.slice(0, 500));
     });
     return this.get(requestId);
@@ -248,12 +254,8 @@ export class SignatureRequestsService {
           await this.evidence.lock(tx, id);
           const request = await tx.signature_requests.findFirst({ where: { id, store_id: c.store_id } });
           if (!request || !OPEN_REQUEST_STATUSES.includes(request.status)) return false;
-          const signers: Array<{ status: string }> = await tx.signature_signers.findMany({
-            where: { request_id: id, store_id: c.store_id },
-            select: { status: true },
-          });
           // Everyone signed and only the seal is missing: the seal retry finishes it.
-          if (signers.length > 0 && signers.every((s) => s.status === 'signed')) return false;
+          if (await this.allSigned(tx, id, c.store_id)) return false;
           await this.close(tx, request, 'expired', 'expired', null);
           return true;
         });
@@ -268,11 +270,19 @@ export class SignatureRequestsService {
   /** Seals the requests whose signers all signed but the seal failed earlier. */
   async sealPending(): Promise<number> {
     const c = this.ctx();
-    const rows: Array<{ id: number }> = await this.prisma.signature_requests.findMany({
+    const open: Array<{ id: number }> = await this.prisma.signature_requests.findMany({
       where: { store_id: c.store_id, status: 'partially_signed' },
       select: { id: true },
-      take: 50,
+      orderBy: { id: 'asc' },
     });
+    if (open.length === 0) return 0;
+    // Requests still waiting for a signer are not due; the rest are sealed oldest first.
+    const waiting: Array<{ request_id: number }> = await this.prisma.signature_signers.findMany({
+      where: { store_id: c.store_id, request_id: { in: open.map((r) => r.id) }, status: { not: 'signed' } },
+      select: { request_id: true },
+    });
+    const blocked = new Set(waiting.map((s) => s.request_id));
+    const rows = open.filter((r) => !blocked.has(r.id)).slice(0, 50);
     let sealed = 0;
     for (const { id } of rows) {
       try {
@@ -282,6 +292,15 @@ export class SignatureRequestsService {
       }
     }
     return sealed;
+  }
+
+  /** Whether every signer of the request signed (only the seal is missing). */
+  private async allSigned(tx: any, requestId: number, storeId: number): Promise<boolean> {
+    const signers: Array<{ status: string }> = await tx.signature_signers.findMany({
+      where: { request_id: requestId, store_id: storeId },
+      select: { status: true },
+    });
+    return signers.length > 0 && signers.every((s) => s.status === 'signed');
   }
 
   /** Closes an open request (cancel / expire) and gives the document back. */

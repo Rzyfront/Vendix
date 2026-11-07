@@ -333,6 +333,53 @@ describe('Public signing (P4.2)', () => {
     });
   });
 
+  describe('seal vs cancel (r1 M1)', () => {
+    it('once every signer signed, cancel is refused and the retry still seals', async () => {
+      const { request, tokens } = await createRequest();
+      k.fake.render.mockRejectedValueOnce(new Error('render down'));
+      await signFully(tokens[0]);
+      k.asAdmin();
+      const err = await k.requests.cancel(request.id, 'ya no aplica').catch((e) => e);
+      expect(err.getResponse()).toMatchObject({
+        error_code: 'SIGNATURE_REQUEST_CLOSED',
+        message: 'Todos los firmantes ya firmaron; el documento se está sellando y no se puede cancelar.',
+      });
+      expect(table('signature_requests')[0].status).toBe('partially_signed');
+      expect(await k.seal.seal(request.id)).toBe(true);
+      expect(table('signature_requests')[0].status).toBe('completed');
+    });
+
+    it('a request closed while the PDF renders stays closed: no seal, no signed document, no dossier item', async () => {
+      const { request, tokens } = await createRequest();
+      k.fake.render.mockRejectedValueOnce(new Error('render down'));
+      await signFully(tokens[0]);
+      k.asAdmin();
+      const original = k.fake.render.getMockImplementation()!;
+      k.fake.render.mockImplementationOnce(async (id, options) => {
+        const row = table('signature_requests')[0];
+        row.status = 'cancelled';
+        table('issued_documents')[0].status = 'issued';
+        return original(id, options);
+      });
+      expect(await k.seal.seal(request.id)).toBe(false);
+      expect(table('signature_requests')[0].status).toBe('cancelled');
+      expect(table('issued_documents')[0].status).toBe('issued');
+      expect(types()).not.toContain('sealed');
+      expect(table('dossier_items').filter((i) => i.kind === 'signed_document')).toHaveLength(0);
+      expect(k.kit.s3.deleteFile).toHaveBeenCalled();
+    });
+
+    it('the seal retry only takes requests whose signers all signed', async () => {
+      const waiting = await createRequest([emailA, emailB]);
+      await signFully(waiting.tokens[0]);
+      expect(table('signature_requests')[0].status).toBe('partially_signed');
+      const spy = jest.spyOn(k.seal, 'seal');
+      k.asAdmin();
+      expect(await k.requests.sealPending()).toBe(0);
+      expect(spy).not.toHaveBeenCalled();
+    });
+  });
+
   describe('decline', () => {
     it('leaves the request declined, frees the document and writes the reason in the flow timeline', async () => {
       const { request, tokens } = await createRequest([emailA, emailB]);
