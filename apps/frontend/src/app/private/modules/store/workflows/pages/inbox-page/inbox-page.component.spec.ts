@@ -3,7 +3,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Router, provideRouter } from '@angular/router';
-import { NEVER, of, throwError } from 'rxjs';
+import { NEVER, Observable, of, throwError } from 'rxjs';
 import { ToastService } from '../../../../../../shared/components/index';
 import { InboxTaskRow } from '../../interfaces/workflow-ops.interfaces';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
@@ -158,5 +158,16 @@ describe('InboxPageComponent', () => {
     const c = fixture.componentInstance;
     c.open(c.tasks()[0]);
     expect(navigate).toHaveBeenCalledWith(['/admin/workflows/instances', 11]);
+  });
+
+  it('al destruir la pantalla cancela la petición en curso', async () => {
+    let cancelled = 0;
+    api.listInbox.and.returnValue(new Observable(() => () => cancelled++) as never);
+    await render();
+    const inFlight = api.listInbox.calls.count();
+    expect(inFlight).toBeGreaterThan(0);
+    expect(cancelled).toBe(0);
+    fixture.destroy();
+    expect(cancelled).toBe(inFlight);
   });
 });

@@ -4,7 +4,7 @@ import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
 import { provideMockStore } from '@ngrx/store/testing';
-import { NEVER, of, throwError } from 'rxjs';
+import { NEVER, Observable, of, throwError } from 'rxjs';
 import { ToastService } from '../../../../../../shared/components/index';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { WorkflowsPageComponent } from './workflows-page.component';
@@ -126,5 +126,16 @@ describe('WorkflowsPageComponent', () => {
     c.publish(row as never);
     expect(c.issuesOpen()).toBeTrue();
     expect(c.issues().join(' ')).toContain('no tiene responsable');
+  });
+
+  it('al destruir la pantalla cancela la petición en curso', async () => {
+    let cancelled = 0;
+    api.listDefinitions.and.returnValue(new Observable(() => () => cancelled++) as never);
+    await render();
+    const inFlight = api.listDefinitions.calls.count();
+    expect(inFlight).toBeGreaterThan(0);
+    expect(cancelled).toBe(0);
+    fixture.destroy();
+    expect(cancelled).toBe(inFlight);
   });
 });
