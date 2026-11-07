@@ -146,9 +146,22 @@ export const MODULE_ROUTES: Record<string, string> = {
   hospitality_reservations: '/admin/hospitality/reservations',
   hospitality_rates: '/admin/hospitality/rates',
 
-  // Administración (flujos-documental S1)
+  // Administración (flujos-documental S1). P5.7: one key per sidebar child.
   flows: '/admin/workflows',
+  flows_list: '/admin/workflows',
+  flows_inbox: '/admin/workflows/inbox',
+  flows_board: '/admin/workflows/board',
+  flows_templates: '/admin/workflows/templates',
+  flows_records: '/admin/workflows/records',
+  flows_connectors: '/admin/workflows/connectors',
+  flows_integrations: '/admin/workflows/integrations',
   documents: '/admin/documents',
+  documents_dossiers: '/admin/documents',
+  documents_search: '/admin/documents/search',
+  documents_folders: '/admin/documents/folders',
+  documents_expiring: '/admin/documents/expiring',
+  documents_retention: '/admin/documents/retention',
+  documents_templates: '/admin/documents/templates',
 
   // Facturación electrónica
   invoicing: '/admin/invoicing',
@@ -226,6 +239,26 @@ export const MODULE_ROUTES: Record<string, string> = {
  */
 export const MODULE_ROUTE_ALIASES: Record<string, string[]> = {
   ecommerce: ['/admin/apps/ecommerce'],
+  // P5.7: the parent key also governs every child route, so switching off
+  // "Flujos" or "Documentos" closes the whole group. An instance opens from
+  // "Mis tareas", the boards and the dossiers: it answers only to `flows`,
+  // never to the `flows_list` child.
+  flows: [
+    '/admin/workflows/instances',
+    '/admin/workflows/inbox',
+    '/admin/workflows/board',
+    '/admin/workflows/templates',
+    '/admin/workflows/records',
+    '/admin/workflows/connectors',
+    '/admin/workflows/integrations',
+  ],
+  documents: [
+    '/admin/documents/search',
+    '/admin/documents/folders',
+    '/admin/documents/expiring',
+    '/admin/documents/retention',
+    '/admin/documents/templates',
+  ],
 };
 
 /**

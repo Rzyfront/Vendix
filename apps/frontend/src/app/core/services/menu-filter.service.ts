@@ -94,7 +94,47 @@ export const DEFAULT_ON_PANEL_KEYS: readonly string[] = [
   'customers_tasks',
   'customers_segments',
   'apps',
+  // P5.7: the sidebar children of Flujos and Documentos. Opt-out so every
+  // user who saw the single entry before keeps seeing the screens; the
+  // parent key (`flows`/`documents`) and the permission prefilter
+  // (`ADMINISTRATION_PERMISSION_ROUTES`) still decide.
+  'flows_list',
+  'flows_inbox',
+  'flows_board',
+  'flows_templates',
+  'flows_records',
+  'flows_connectors',
+  'flows_integrations',
+  'documents_dossiers',
+  'documents_search',
+  'documents_folders',
+  'documents_expiring',
+  'documents_retention',
+  'documents_templates',
 ];
+
+/**
+ * P5.7: permission each sidebar child of Flujos and Documentos needs, any of
+ * the list, matching the API that loads the screen. Exact routes only: the
+ * detail pages under them (an instance opened from "Mis tareas", a record, a
+ * retention run) keep their own API check, so a task-only user still opens
+ * the instance of a task. The owner always passes.
+ */
+export const ADMINISTRATION_PERMISSION_ROUTES: Readonly<Record<string, readonly string[]>> = {
+  '/admin/workflows': ['store:workflows:read', 'store:workflows:start'],
+  '/admin/workflows/inbox': ['store:workflows:task'],
+  '/admin/workflows/board': ['store:workflows:read'],
+  '/admin/workflows/templates': ['store:workflows:read'],
+  '/admin/workflows/records': ['store:workflows:read'],
+  '/admin/workflows/connectors': ['store:workflows:design'],
+  '/admin/workflows/integrations': ['store:integrations:api_keys', 'store:workflows:manage'],
+  '/admin/documents': ['store:documents:read'],
+  '/admin/documents/search': ['store:documents:read'],
+  '/admin/documents/folders': ['store:documents:read'],
+  '/admin/documents/expiring': ['store:documents:read'],
+  '/admin/documents/retention': ['store:workflows:design'],
+  '/admin/documents/templates': ['store:documents:read'],
+};
 
 /** Route of the Apps catalog page (apps-module T6). */
 /** CRM entries whose permission prefilter diagnose reports (apps-module T0). */
@@ -1325,7 +1365,11 @@ export class MenuFilterService {
     // permission prefilter must also reach diagnose; otherwise the redirect
     // chain could land on an entry the sidebar does not show. Scoped to those
     // routes: other prefilters keep their pre-existing diagnose behavior.
-    if (CRM_PERMISSION_ROUTES.has(menuItem.route ?? '') && !this.passesAuthorizationGates(menuItem)) {
+    if (
+      (CRM_PERMISSION_ROUTES.has(menuItem.route ?? '') ||
+        ADMINISTRATION_PERMISSION_ROUTES[menuItem.route ?? ''] !== undefined) &&
+      !this.passesAuthorizationGates(menuItem)
+    ) {
       return {
         visible: false,
         blockedBy: 'permission',
@@ -1405,7 +1449,38 @@ export class MenuFilterService {
     if (item.route === APPS_CATALOG_ROUTE && !this.canOpenAppsCatalog()) {
       return false;
     }
+    if (item.route && !this.canOpenAdministrationRoute(item.route)) {
+      return false;
+    }
     return true;
+  }
+
+  /**
+   * P5.7: `true` unless `route` is a Flujos/Documentos child whose permission
+   * the user lacks (`ADMINISTRATION_PERMISSION_ROUTES`). The owner passes.
+   */
+  private canOpenAdministrationRoute(route: string): boolean {
+    const permissions = ADMINISTRATION_PERMISSION_ROUTES[route];
+    if (!permissions || this.authFacade.isOwner()) return true;
+    return permissions.some((permission) => this.authFacade.hasPermission(permission));
+  }
+
+  /**
+   * P5.7: why a Flujos/Documentos child URL is closed to the user by
+   * permission, or `null` when it is not one of those routes or the user may
+   * open it. The URL guard shows the reason and leaves the user on an active
+   * module, the same treatment as a module switched off in panel_ui.
+   */
+  administrationPermissionBlockForUrl(url: string): ModuleVisibilityDiagnosis | null {
+    const clean = (url.split('?')[0].split('#')[0] || '/').replace(/\/+$/, '') || '/';
+    if (this.canOpenAdministrationRoute(clean)) return null;
+    return {
+      visible: false,
+      blockedBy: 'permission',
+      detail:
+        'Tu usuario no tiene el permiso que esta sección requiere. Si crees que deberías tenerlo, pídele a tu administrador que lo active en tu rol.',
+      fixPath: null,
+    };
   }
 
   /** Depth-first lookup of the menu item whose label maps to `moduleKey`. */

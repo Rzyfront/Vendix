@@ -571,11 +571,82 @@ export const APP_MODULES: {
       key: 'flows',
       label: 'Flujos',
       description: 'Procesos con etapas, responsables, aprobaciones y plazos',
+      isParent: true,
+      children: [
+        {
+          key: 'flows_list',
+          label: 'Todos los flujos',
+          description: 'Diseño de flujos y solicitudes en curso',
+        },
+        {
+          key: 'flows_inbox',
+          label: 'Mis tareas',
+          description: 'Tareas asignadas al usuario o a sus grupos',
+        },
+        {
+          key: 'flows_board',
+          label: 'Tablero general',
+          description: 'Solicitudes de todos los flujos por etapa',
+        },
+        {
+          key: 'flows_templates',
+          label: 'Galería de plantillas',
+          description: 'Flujos listos para activar',
+        },
+        {
+          key: 'flows_records',
+          label: 'Registros',
+          description: 'Colecciones y registros propios de la empresa',
+        },
+        {
+          key: 'flows_connectors',
+          label: 'Conectores',
+          description: 'Conectores de mensajería de los flujos',
+        },
+        {
+          key: 'flows_integrations',
+          label: 'Integraciones',
+          description: 'Llaves de API, webhooks y secretos',
+        },
+      ],
     },
     {
       key: 'documents',
       label: 'Documentos',
       description: 'Expedientes, archivos y documentos de cada solicitud',
+      isParent: true,
+      children: [
+        {
+          key: 'documents_dossiers',
+          label: 'Expedientes',
+          description: 'Expedientes de cada solicitud',
+        },
+        {
+          key: 'documents_search',
+          label: 'Búsqueda',
+          description: 'Búsqueda de documentos por contenido y metadatos',
+        },
+        {
+          key: 'documents_folders',
+          label: 'Carpetas',
+          description: 'Documentos agrupados por cliente, proveedor o empleado',
+        },
+        {
+          key: 'documents_expiring',
+          label: 'Por vencer',
+          description: 'Documentos próximos a vencer',
+        },
+        {
+          key: 'documents_retention',
+          label: 'Retención',
+          description: 'Políticas de retención y purgas',
+        },
+        {
+          key: 'documents_templates',
+          label: 'Plantillas',
+          description: 'Plantillas para generar documentos',
+        },
+      ],
     },
 
     // Facturaci\u00f3n (padre con hijos)

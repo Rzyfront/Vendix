@@ -213,8 +213,23 @@ export class DefaultPanelUIService {
         hospitality_rates: true,
         // Administración (flujos-documental S1): default visible; the gate is
         // the `administration` industry (MODULE_INDUSTRIES, always enforced).
+        // P5.7: one key per sidebar child, default on for every role; the
+        // role's permissions decide which children it actually sees.
         flows: true,
+        flows_list: true,
+        flows_inbox: true,
+        flows_board: true,
+        flows_templates: true,
+        flows_records: true,
+        flows_connectors: true,
+        flows_integrations: true,
         documents: true,
+        documents_dossiers: true,
+        documents_search: true,
+        documents_folders: true,
+        documents_expiring: true,
+        documents_retention: true,
+        documents_templates: true,
         reports: true,
         reports_dispatch: true,
         invoicing: true,

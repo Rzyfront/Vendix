@@ -124,6 +124,12 @@ export interface MenuItem {
    * paywall (plan) or the industry paywall.
    */
   _planLocked?: boolean;
+  /**
+   * Highlight the entry only on its exact route. For a child whose route is
+   * the prefix of its siblings (e.g. "Todos los flujos" at `/admin/workflows`
+   * next to `/admin/workflows/inbox`), so two children are never active at once.
+   */
+  exactActive?: boolean;
 }
 
 @Component({
@@ -303,6 +309,7 @@ export interface MenuItem {
                           [routerLink]="child.route"
                           [queryParams]="child.queryParams || null"
                           routerLinkActive="active"
+                          [routerLinkActiveOptions]="{ exact: !!child.exactActive }"
                           #rlaChild="routerLinkActive"
                           [class.active]="rlaChild.isActive"
                           (click)="onMenuItemClick(child)"
