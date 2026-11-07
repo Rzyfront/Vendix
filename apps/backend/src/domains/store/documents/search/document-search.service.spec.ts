@@ -25,7 +25,7 @@ describe('DocumentSearchService (P4.7)', () => {
     return kit.db.insert('dossiers', {
       organization_id: 1, store_id: store, reference: `EXP-${String(seq).padStart(6, '0')}`,
       title: `Expediente ${seq}`, subject_type: subject?.type ?? null, subject_id: subject?.id ?? null, ...over,
-    });
+    }) as unknown as { id: number; reference: string };
   };
   /** A file inside a dossier, optionally with a profile. */
   const doc = (

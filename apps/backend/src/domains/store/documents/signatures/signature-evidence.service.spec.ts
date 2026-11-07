@@ -3,7 +3,7 @@ import 'reflect-metadata';
 jest.mock('../../../../messaging/messaging.service', () => ({ MessagingService: class {} }));
 jest.mock('../../../../email/email.service', () => ({ EmailService: class {} }));
 
-import { canonicalJson, verifyEvidenceChain } from './signature-evidence.service';
+import { canonicalJson, EvidenceRow, verifyEvidenceChain } from './signature-evidence.service';
 import { buildSignatureKit, SignatureKit } from './signatures.testkit';
 
 describe('Signature evidence chain (P4.2)', () => {
@@ -47,7 +47,8 @@ describe('Signature evidence chain (P4.2)', () => {
     await append('created', { a: 1 });
     await append('sent', { a: 2 });
     await append('opened', { a: 3 });
-    const rows = () => k.kit.db.table('signature_evidence_events').map((r) => ({ ...r }));
+    const rows = () =>
+      k.kit.db.table('signature_evidence_events').map((r) => ({ ...r }) as unknown as EvidenceRow);
 
     const edited = rows();
     edited[1].payload = { a: 999 };

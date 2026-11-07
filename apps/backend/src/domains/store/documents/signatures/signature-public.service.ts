@@ -48,6 +48,10 @@ export function otpHash(signerTokenHash: string, code: string): string {
   return sha256Hex(`${signerTokenHash}:${code}`);
 }
 
+type VerifyOtpOutcome =
+  | { kind: 'ok' | 'closed' | 'blocked' | 'expired'; remaining?: number }
+  | { kind: 'wrong'; remaining: number };
+
 /**
  * Public side of the signature: what the signer sees and the four things they
  * may do (ask for a code, verify it, sign, decline). The store comes from the
@@ -181,7 +185,7 @@ export class SignaturePublicService {
 
   async verifyOtp(token: string, code: string, meta: ClientMeta) {
     const r = await this.resolveOpen(token);
-    const outcome = await this.inContext(r, () =>
+    const outcome = await this.inContext<VerifyOtpOutcome>(r, () =>
       this.prisma.$transaction(async (tx: any) => {
         await this.evidence.lock(tx, r.request.id);
         const signer = await tx.signature_signers.findFirst({

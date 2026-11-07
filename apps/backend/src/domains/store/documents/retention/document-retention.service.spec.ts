@@ -343,7 +343,10 @@ describe('DocumentRetentionService (P4.4)', () => {
         'DOCRET_POLICY_KEY_TAKEN',
       );
       kit.as({ store_id: 2 });
-      expect((await svc.createPolicy({ name: 'x', key: 'laboral-nandu', retain_days: 5 })).store_id).toBe(2);
+      await svc.createPolicy({ name: 'x', key: 'laboral-nandu', retain_days: 5 });
+      expect(
+        kit.db.table('document_retention_policies').filter((r) => r.key === 'laboral-nandu').map((r) => r.store_id),
+      ).toEqual([1, 2]);
       expect(await codeOf(svc.updatePolicy(p.id, { retain_days: 9 }))).toBe('DOCRET_POLICY_NOT_FOUND');
       expect(await codeOf(svc.removePolicy(p.id))).toBe('DOCRET_POLICY_NOT_FOUND');
 

@@ -49,7 +49,7 @@ describe('controladores de la biblioteca documental (P4.4/P4.6/P4.7)', () => {
   it('todo handler HTTP declara permisos', () => {
     for (const ctrl of CONTROLLERS) {
       for (const name of Object.getOwnPropertyNames(ctrl.prototype)) {
-        const fn = (ctrl.prototype as Record<string, unknown>)[name];
+        const fn = (ctrl.prototype as unknown as Record<string, unknown>)[name];
         if (name === 'constructor' || Reflect.getMetadata('path', fn as object) === undefined) continue;
         expect(Reflect.getMetadata(PERMISSIONS_KEY, fn as object)?.length).toBeGreaterThan(0);
       }
