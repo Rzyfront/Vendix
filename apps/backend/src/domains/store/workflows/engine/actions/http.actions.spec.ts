@@ -180,6 +180,34 @@ describe('vendix.http.request', () => {
     });
   });
 
+  it('manda Idempotency-Key con la fila del outbox (igual en cada reintento) y respeta la del flujo', async () => {
+    const b = build();
+    const withRow = (map: Record<string, unknown>) =>
+      b.actions.handlers['vendix.http.request']!({
+        ...ctx({ method: 'POST', url: PUBLIC_URL, ...map }),
+        outboxId: 42,
+      });
+    await withRow({});
+    await withRow({});
+    expect(b.sent.map((r) => r.headers['Idempotency-Key'])).toEqual(['wf-42', 'wf-42']);
+    await withRow({ headers: 'idempotency-key: mia' });
+    expect(b.sent[2].headers).toMatchObject({ 'idempotency-key': 'mia' });
+    expect(b.sent[2].headers).not.toHaveProperty('Idempotency-Key');
+    // "Probar esta acción" has no outbox row: no key.
+    await b.actions.perform(1, { method: 'POST', url: PUBLIC_URL });
+    expect(b.sent[3].headers).not.toHaveProperty('Idempotency-Key');
+  });
+
+  it('enmascara un secreto que el destino devuelve en un encabezado', async () => {
+    const b = build({ secrets: { CRM_TOKEN: SECRET_VALUE } });
+    b.reply.headers = { 'x-echo': `Bearer ${SECRET_VALUE}` };
+    const map = { method: 'POST', url: PUBLIC_URL, headers: 'Authorization: Bearer {{secrets.CRM_TOKEN}}' };
+    const res = await b.actions.handlers['vendix.http.request']!(ctx(map, { eco: 'headers.x-echo' }));
+    expect(res.fields).toEqual({ eco: 'Bearer ••••' });
+    const outcome = await b.actions.perform(1, map);
+    expect(JSON.stringify(outcome.headers)).not.toContain(SECRET_VALUE);
+  });
+
   it('un cuerpo que no es JSON solo se puede mapear entero', () => {
     const res = { status: 200, headers: {}, body: 'OK plano' };
     expect(mapResponseOutput({ a: 'body', b: 'body.x' }, res)).toEqual({ a: 'OK plano' });

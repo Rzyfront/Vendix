@@ -193,7 +193,9 @@ export class WorkflowHttpActions implements WorkflowActionGroup {
   private async request(ctx: WorkflowActionContext): Promise<WorkflowActionResult> {
     let outcome: HttpCallOutcome;
     try {
-      outcome = await this.perform(ctx.instance.store_id, ctx.map);
+      outcome = await this.perform(ctx.instance.store_id, ctx.map, {
+        idempotencyKey: ctx.outboxId === undefined ? undefined : `wf-${ctx.outboxId}`,
+      });
     } catch (e) {
       if (e instanceof HttpCallError) {
         if (e.retryable) throw new Error(e.message);
@@ -230,7 +232,11 @@ export class WorkflowHttpActions implements WorkflowActionGroup {
    * and `{{secrets.*}}` still in place. Throws {@link HttpCallError} /
    * `WorkflowActionInputError` for anything that is not a response.
    */
-  async perform(storeId: number, map: Record<string, unknown>): Promise<HttpCallOutcome> {
+  async perform(
+    storeId: number,
+    map: Record<string, unknown>,
+    opts: { idempotencyKey?: string } = {},
+  ): Promise<HttpCallOutcome> {
     let i: ReturnType<typeof actionInputs>;
     let method: string;
     let urlTemplate: string;
@@ -298,6 +304,14 @@ export class WorkflowHttpActions implements WorkflowActionGroup {
       }
       headers[name] = value;
     }
+    // A timeout or 5xx after sending is retried: the key (same for every
+    // retry of the outbox row) lets the destination drop the repeat.
+    if (
+      opts.idempotencyKey &&
+      !Object.keys(headers).some((h) => h.toLowerCase() === 'idempotency-key')
+    ) {
+      headers['Idempotency-Key'] = opts.idempotencyKey;
+    }
     const body = bodyTemplate === undefined ? undefined : fill(bodyTemplate);
     if (body !== undefined && !Object.keys(headers).some((h) => h.toLowerCase() === 'content-type')) {
       headers['Content-Type'] = looksLikeJson(body)
@@ -324,7 +338,12 @@ export class WorkflowHttpActions implements WorkflowActionGroup {
         timeoutMs: timeoutSeconds * 1000,
         maxResponseBytes: HTTP_MAX_RESPONSE_BYTES,
       });
-      return { ...res, duration_ms: Date.now() - started, secretValues };
+      // A destination may echo a secret in a header: never hand it back.
+      const resHeaders: Record<string, string> = {};
+      for (const [k, v] of Object.entries(res.headers)) {
+        resHeaders[k] = maskSecrets(v, secretValues);
+      }
+      return { ...res, headers: resHeaders, duration_ms: Date.now() - started, secretValues };
     } catch (e) {
       if (e instanceof WebhookUrlError) throw blockedError(e);
       if (e instanceof OutboundTimeoutError) {

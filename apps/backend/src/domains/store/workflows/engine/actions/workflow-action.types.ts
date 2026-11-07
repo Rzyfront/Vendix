@@ -15,6 +15,11 @@ export interface WorkflowActionContext {
   map: Record<string, unknown>;
   /** P3.2: `output` of the action (field ← response path), when it declares one. */
   output?: Record<string, string>;
+  /**
+   * Outbox row being run: stable across its retries, so an effect may hand it
+   * to the destination as an idempotency key.
+   */
+  outboxId?: number;
   /** Person who published the version: the effect acts as them. */
   actingUserId: number;
   /** Their REAL store permissions (never widened by the flow). */

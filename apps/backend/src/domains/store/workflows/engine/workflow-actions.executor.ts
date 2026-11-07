@@ -140,6 +140,7 @@ export class WorkflowActionsExecutor {
         const result = await handler({
           instance,
           map,
+          outboxId: row.id,
           ...(output ? { output } : {}),
           actingUserId,
           permissions,
