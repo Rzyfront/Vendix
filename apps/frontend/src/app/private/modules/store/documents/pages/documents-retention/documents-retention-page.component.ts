@@ -20,7 +20,6 @@ import {
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { formatFileSize } from '../../../workflows/utils/workflow-labels.util';
-import { DocumentsTabsComponent } from '../../components/documents-tabs.component';
 import {
   PurgePreview,
   PurgeRun,
@@ -57,7 +56,6 @@ const ANY_SUBJECT = '';
     ModalComponent,
     PaginationComponent,
     EmptyStateComponent,
-    DocumentsTabsComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -67,7 +65,6 @@ const ANY_SUBJECT = '';
         icon="folder-open"
         variant="glass"
       />
-      <app-documents-tabs active="retention" />
 
       <app-card [responsive]="true" [padding]="false" overflow="visible" class="mb-4 block">
         <div class="flex items-center justify-between gap-3 border-b border-border px-2 py-3 md:px-6 md:py-4">

@@ -54,8 +54,6 @@ const toOptions = (all: string, rows: BoardFilterOption[]) => [
         subtitle="Las solicitudes de todos los flujos, por rol y sede"
         icon="layout-dashboard"
         variant="glass"
-        [showBackButton]="true"
-        backRoute="/admin/workflows"
       />
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">

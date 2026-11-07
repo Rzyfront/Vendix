@@ -290,13 +290,8 @@ export class WorkflowsPageComponent implements OnInit {
     { id: 'flows', label: 'Flujos', icon: 'git-branch' },
     { id: 'requests', label: 'Solicitudes', icon: 'list-checks' },
   ];
+  /** P5.7: only this screen's actions; the submodules live in the sidebar. */
   readonly headerActions = [
-    { id: 'inbox', label: 'Mis tareas', icon: 'inbox', variant: 'outline' as const },
-    { id: 'board', label: 'Tablero general', icon: 'layout-dashboard', variant: 'outline' as const },
-    { id: 'templates', label: 'Galería de plantillas', icon: 'layout-template', variant: 'outline' as const },
-    { id: 'records', label: 'Registros', icon: 'folder-open', variant: 'outline' as const },
-    { id: 'connectors', label: 'Conectores', icon: 'zap', variant: 'outline' as const },
-    { id: 'integrations', label: 'Integraciones', icon: 'plug', variant: 'outline' as const },
     { id: 'import', label: 'Nuevo desde JSON', icon: 'upload', variant: 'outline' as const },
     { id: 'new', label: 'Nuevo flujo', icon: 'plus', variant: 'primary' as const },
   ];
@@ -513,12 +508,6 @@ export class WorkflowsPageComponent implements OnInit {
   onHeaderAction(id: string): void {
     if (id === 'import') this.importOpen.set(true);
     if (id === 'new') this.newOpen.set(true);
-    if (id === 'inbox') this.router.navigate(['/admin/workflows/inbox']);
-    if (id === 'board') this.router.navigate(['/admin/workflows/board']);
-    if (id === 'templates') this.router.navigate(['/admin/workflows/templates']);
-    if (id === 'records') this.router.navigate(['/admin/workflows/records']);
-    if (id === 'connectors') this.router.navigate(['/admin/workflows/connectors']);
-    if (id === 'integrations') this.router.navigate(['/admin/workflows/integrations']);
   }
 
   onTabChange(tab: string): void {

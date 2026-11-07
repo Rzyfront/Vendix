@@ -180,13 +180,14 @@ describe('WorkflowsPageComponent', () => {
     expect(router.navigate).toHaveBeenCalledWith(['/admin/workflows', 9, 'edit']);
   });
 
-  it('el encabezado lleva a la galería y al tablero general', async () => {
+  it('P5.7: el encabezado solo trae las acciones de la pantalla; los submódulos están en el Sidebar', async () => {
     await render();
     const router = TestBed.inject(Router);
     spyOn(router, 'navigate').and.resolveTo(true);
-    fixture.componentInstance.onHeaderAction('templates');
-    fixture.componentInstance.onHeaderAction('board');
-    expect(router.navigate).toHaveBeenCalledWith(['/admin/workflows/templates']);
-    expect(router.navigate).toHaveBeenCalledWith(['/admin/workflows/board']);
+    expect(fixture.componentInstance.headerActions.map((a) => a.id)).toEqual(['import', 'new']);
+    for (const id of ['inbox', 'board', 'templates', 'records', 'connectors', 'integrations']) {
+      fixture.componentInstance.onHeaderAction(id);
+    }
+    expect(router.navigate).not.toHaveBeenCalled();
   });
 });

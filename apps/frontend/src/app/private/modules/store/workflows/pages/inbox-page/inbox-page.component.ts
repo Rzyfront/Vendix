@@ -85,8 +85,6 @@ const STATUS_OPTIONS = [
         subtitle="Lo que está esperando tu atención en los flujos"
         icon="inbox"
         variant="glass"
-        [showBackButton]="true"
-        backRoute="/admin/workflows"
       />
 
       <div class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent">

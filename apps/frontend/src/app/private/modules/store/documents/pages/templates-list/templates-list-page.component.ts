@@ -17,7 +17,6 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { apiErrorMessage } from '../../../workflows/utils/workflow-errors.util';
-import { DocumentsTabsComponent } from '../../components/documents-tabs.component';
 import { TemplateRow } from '../../interfaces/document-template.interfaces';
 import { DocumentTemplatesApiService } from '../../services/document-templates-api.service';
 
@@ -42,7 +41,6 @@ const STATUS_TEXT = { draft: 'Borrador', published: 'Publicada', archived: 'Arch
     InputsearchComponent,
     ResponsiveDataViewComponent,
     EmptyStateComponent,
-    DocumentsTabsComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -54,7 +52,6 @@ const STATUS_TEXT = { draft: 'Borrador', published: 'Publicada', archived: 'Arch
         [actions]="headerActions()"
         (actionClicked)="onHeaderAction($event)"
       />
-      <app-documents-tabs active="templates" />
 
       <div class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent">
         <app-stats

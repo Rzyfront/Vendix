@@ -1,6 +1,4 @@
 import { Component, signal } from '@angular/core';
-import { Router } from '@angular/router';
-import { inject } from '@angular/core';
 import {
   CardComponent,
   ScrollableTabsComponent,
@@ -32,8 +30,6 @@ type IntegrationsTab = 'api_keys' | 'webhooks' | 'secrets';
         subtitle="Conecta tus flujos con otros sistemas: API keys, webhooks firmados y secretos para llamadas HTTP"
         icon="plug"
         variant="glass"
-        [actions]="headerActions"
-        (actionClicked)="onHeaderAction($event)"
       />
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div class="border-b border-border px-2 py-1.5 md:px-6 md:py-4">
@@ -59,23 +55,14 @@ type IntegrationsTab = 'api_keys' | 'webhooks' | 'secrets';
   `,
 })
 export class IntegrationsPageComponent {
-  private readonly router = inject(Router);
-
   readonly tabs: ScrollableTab[] = [
     { id: 'api_keys', label: 'API keys', icon: 'key' },
     { id: 'webhooks', label: 'Webhooks', icon: 'webhook' },
     { id: 'secrets', label: 'Secretos', icon: 'key-round' },
   ];
-  readonly headerActions = [
-    { id: 'back', label: 'Flujos', icon: 'git-branch', variant: 'outline' as const },
-  ];
   readonly activeTab = signal<IntegrationsTab>('api_keys');
 
   onTabChange(tab: string): void {
     if (tab === 'api_keys' || tab === 'webhooks' || tab === 'secrets') this.activeTab.set(tab);
-  }
-
-  onHeaderAction(id: string): void {
-    if (id === 'back') this.router.navigate(['/admin/workflows']);
   }
 }

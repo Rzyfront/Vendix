@@ -47,8 +47,6 @@ import {
         subtitle="Activa un flujo listo y ajústalo a tu operación"
         icon="layout-template"
         variant="glass"
-        [actions]="headerActions"
-        (actionClicked)="onHeaderAction($event)"
       />
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
@@ -198,10 +196,6 @@ export class TemplatesGalleryPageComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
 
-  readonly headerActions = [
-    { id: 'back', label: 'Volver a Flujos', icon: 'arrow-left', variant: 'outline' as const },
-  ];
-
   readonly templates = signal<WorkflowTemplateSummary[]>([]);
   readonly loading = signal(true);
   readonly loadFailed = signal(false);
@@ -291,9 +285,5 @@ export class TemplatesGalleryPageComponent implements OnInit {
 
   goToFlows(): void {
     void this.router.navigate(['/admin/workflows']);
-  }
-
-  onHeaderAction(id: string): void {
-    if (id === 'back') this.goToFlows();
   }
 }

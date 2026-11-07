@@ -14,7 +14,6 @@ import {
 } from '../../../../../../shared/components/index';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { DocumentFileListComponent } from '../../components/document-file-list.component';
-import { DocumentsTabsComponent } from '../../components/documents-tabs.component';
 import { FileProfileModalComponent } from '../../components/file-profile-modal.component';
 import {
   LibraryFile,
@@ -38,7 +37,6 @@ import {
     SelectorComponent,
     PaginationComponent,
     EmptyStateComponent,
-    DocumentsTabsComponent,
     DocumentFileListComponent,
     FileProfileModalComponent,
   ],
@@ -50,7 +48,6 @@ import {
         icon="folder-open"
         variant="glass"
       />
-      <app-documents-tabs active="search" />
 
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div class="flex flex-col gap-3 border-b border-border px-2 py-3 md:px-6 md:py-4">
