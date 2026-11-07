@@ -7,7 +7,7 @@ import { JournalEntryFlowService } from '../../../accounting/journal-entries/jou
 import { FiscalPeriodsService } from '../../../accounting/fiscal-periods/fiscal-periods.service';
 import { SuppliersService } from '../../../inventory/suppliers/suppliers.service';
 import { AccountsPayableService } from '../../../accounts-payable/accounts-payable.service';
-import { runAsStoreAdmin, transactionOf } from './producers.test-util';
+import { runAsStoreAdmin, transactionOf, noGoverningFlow } from './producers.test-util';
 
 jest.mock('../workflow-trigger.outbox', () => ({
   recordTriggerEvent: jest.fn().mockResolvedValue(true),
@@ -33,6 +33,7 @@ describe('Flujos P1.1 producers: finance, payroll, accounting, suppliers', () =>
         },
       };
       const prisma = {
+        ...noGoverningFlow(),
         $transaction: transactionOf(tx),
         organizationWhere: {},
         expense_categories: { findFirst: jest.fn().mockResolvedValue({ id: 2 }) },
@@ -81,6 +82,7 @@ describe('Flujos P1.1 producers: finance, payroll, accounting, suppliers', () =>
         },
       };
       const prisma = {
+        ...noGoverningFlow(),
         $transaction: transactionOf(tx),
         expenses: {
           findFirst: jest.fn().mockResolvedValue({ id: 9, state: 'approved' }),
@@ -128,6 +130,7 @@ describe('Flujos P1.1 producers: finance, payroll, accounting, suppliers', () =>
     const build = (status: string) => {
       const tx = { payroll_runs: { update: jest.fn().mockResolvedValue(run) } };
       const prisma = {
+        ...noGoverningFlow(),
         $transaction: transactionOf(tx),
         payroll_runs: {
           findFirst: jest.fn().mockResolvedValue({ ...run, status }),
@@ -195,6 +198,7 @@ describe('Flujos P1.1 producers: finance, payroll, accounting, suppliers', () =>
         },
       };
       const prisma = {
+        ...noGoverningFlow(),
         $transaction: transactionOf(tx),
         accounting_entries: { findFirst: jest.fn().mockResolvedValue(entry) },
       };
@@ -233,6 +237,7 @@ describe('Flujos P1.1 producers: finance, payroll, accounting, suppliers', () =>
         fiscal_periods: { update: jest.fn().mockResolvedValue(closed) },
       };
       const prisma = {
+        ...noGoverningFlow(),
         $transaction: transactionOf(tx),
         fiscal_periods: {
           findFirst: jest.fn().mockResolvedValue({ id: 6, status: 'open' }),
@@ -281,7 +286,7 @@ describe('Flujos P1.1 producers: finance, payroll, accounting, suppliers', () =>
           }),
         },
       };
-      const prisma = { $transaction: transactionOf(tx) };
+      const prisma = { ...noGoverningFlow(), $transaction: transactionOf(tx) };
       const scope = {
         requireStoreContext: jest.fn(),
         resolveOperatingScope: jest.fn(),
@@ -353,6 +358,7 @@ describe('Flujos P1.1 producers: finance, payroll, accounting, suppliers', () =>
         },
       };
       const prisma = {
+        ...noGoverningFlow(),
         $transaction: transactionOf(tx),
         accounts_payable: { findFirst: jest.fn().mockResolvedValue(ap) },
       };

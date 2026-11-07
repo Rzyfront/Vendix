@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { InvoiceFlowService } from '../../../invoicing/invoice-flow/invoice-flow.service';
 import { recordTriggerEvent } from '../workflow-trigger.outbox';
-import { runAsStoreAdmin, transactionOf } from './producers.test-util';
+import { runAsStoreAdmin, transactionOf, noGoverningFlow } from './producers.test-util';
 
 jest.mock('../workflow-trigger.outbox', () => ({
   recordTriggerEvent: jest.fn().mockResolvedValue(true),
@@ -28,6 +28,7 @@ describe('Flujos P1.1 producer: invoice.voided (InvoiceFlowService.void)', () =>
       },
     };
     const prisma = {
+      ...noGoverningFlow(),
       $transaction: transactionOf(tx),
       invoices: { findFirst: jest.fn().mockResolvedValue(invoice) },
     };

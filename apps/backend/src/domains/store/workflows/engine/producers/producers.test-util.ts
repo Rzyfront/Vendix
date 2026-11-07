@@ -26,3 +26,13 @@ export function transactionOf<Tx>(tx: Tx) {
     callback(tx),
   );
 }
+
+/**
+ * Prisma fields the approval gate (P1.3) reads before a governed write: a
+ * store without the flows industry, so no flow governs the operation.
+ */
+export function noGoverningFlow() {
+  return {
+    withoutScope: () => ({ stores: { findFirst: async () => null } }),
+  };
+}
