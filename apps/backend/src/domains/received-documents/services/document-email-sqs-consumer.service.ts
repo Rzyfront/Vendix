@@ -125,7 +125,7 @@ export class DocumentEmailSqsConsumerService implements OnModuleInit, OnModuleDe
         handled = 1;
       } else {
         const delivery = this.validateDelivery(parsed);
-        await this.routeWorkflowMailboxes(delivery, transport, signal);
+        const mailboxDeferred = await this.routeWorkflowMailboxes(delivery, transport, signal);
         const rows: Message[] = [];
         // Register all recognized aliases first. Unknown aliases never inherit a tenant from MIME headers.
         for (const recipient of delivery.recipients) {
@@ -137,7 +137,8 @@ export class DocumentEmailSqsConsumerService implements OnModuleInit, OnModuleDe
           handled++;
           if (!this.final(row) && !await this.processRecord(row, this.checkpointFacts(row.parts) ?? delivery.facts, transport, signal)) allFinal = false;
         }
-        if (!allFinal) return { acknowledged: false, handled };
+        // A deferred mailbox keeps the message: the redelivery skips the final rows.
+        if (!allFinal || mailboxDeferred) return { acknowledged: false, handled };
         if (rows.length && transport.tagRaw) {
           const fresh = await this.prisma.document_reception_email_messages.findMany({ where: { id: { in: rows.map((row) => row.id) } }, select: { reason_code: true } });
           const nonInvoice = fresh.every((row) => ['NOT_AN_INVOICE', 'SUSPICIOUS_EMAIL'].includes(row.reason_code ?? ''));
@@ -156,23 +157,26 @@ export class DocumentEmailSqsConsumerService implements OnModuleInit, OnModuleDe
 
   /**
    * `flujos-<hex>@<domain>` recipients belong to a workflow mailbox, not to the
-   * document pipeline. The receiver never throws for a bad mail; anything else
-   * is logged so one mailbox can never block the invoice recipients.
+   * document pipeline. The receiver never throws for a bad mail; a throw is a
+   * transient failure, so the delivery is left unacknowledged for a retry
+   * (returns `true`) once the invoice recipients were served all the same.
    */
-  private async routeWorkflowMailboxes(delivery: Delivery, transport: DocumentEmailTransport, signal: AbortSignal): Promise<void> {
+  private async routeWorkflowMailboxes(delivery: Delivery, transport: DocumentEmailTransport, signal: AbortSignal): Promise<boolean> {
     const domain = this.binding().domain;
     const recipients = delivery.recipients.filter((recipient) => /^flujos-[0-9a-f]{32}@[^@]+$/.test(recipient) && recipient.endsWith('@' + domain));
-    if (!recipients.length) return;
+    if (!recipients.length) return false;
     let receiver: WorkflowMailboxReceiver;
     try { receiver = this.moduleRef!.get<WorkflowMailboxReceiver>(WORKFLOW_MAILBOX_RECEIVER, { strict: false }); }
-    catch { this.logger.warn('Workflow mailbox receiver is not available; mail for flujos- addresses was skipped.'); return; }
+    catch { this.logger.warn('Workflow mailbox receiver is not available; mail for flujos- addresses was skipped.'); return false; }
+    let deferred = false;
     for (const recipient of recipients) {
       try {
         await receiver.receive({ recipient, ses_message_id: delivery.ses_id, from_header: delivery.from_header,
           facts: { virus_status: delivery.facts.virus_status, spam_status: delivery.facts.spam_status },
           openRaw: () => transport.readRaw(delivery.bucket, delivery.key, signal), signal });
-      } catch { this.logger.warn('Workflow mailbox delivery failed.'); }
+      } catch { deferred = true; this.logger.warn('Workflow mailbox delivery deferred for a retry.'); }
     }
+    return deferred;
   }
 
   /** Enqueue metadata-only internal retry. Consumer reloads all pointers/security facts from DB. */

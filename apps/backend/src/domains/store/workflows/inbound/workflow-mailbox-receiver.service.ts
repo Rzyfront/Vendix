@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { HttpException, Injectable, Logger } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -24,9 +24,25 @@ import type {
 const SYSTEM = { type: 'system' as const, id: null };
 
 /**
+ * A business refusal (`VendixHttpException`) or a malformed mail is final. A
+ * storage, database or network failure is not: the mail is delivered again.
+ */
+function isTransient(e: unknown): boolean {
+  if (e instanceof VendixHttpException) return false;
+  if (e instanceof HttpException) {
+    const reason = (e.getResponse() as { reason_code?: string } | string | null) ?? null;
+    return typeof reason === 'object' && reason?.reason_code === 'TECHNICAL_PROCESSING_ERROR';
+  }
+  return true;
+}
+
+/**
  * Turns a mail delivered to `flujos-<hex>@…` into a request of the mailbox's
  * flow (actor `system`) and files its attachments in the request dossier.
  * Dedupes by SES message id; a bad mail is recorded as `rejected`, never thrown.
+ * A transient failure before the request starts records nothing and is thrown,
+ * so the queue delivers the mail again; once the request exists the mail is
+ * `accepted` and nothing after that can turn it into a rejection.
  */
 @Injectable()
 export class WorkflowMailboxReceiverService implements WorkflowMailboxReceiver {
@@ -62,6 +78,10 @@ export class WorkflowMailboxReceiverService implements WorkflowMailboxReceiver {
         () => this.receiveInStore(box, delivery),
       );
     } catch (e) {
+      if (isTransient(e)) {
+        this.logger.warn(`Mailbox ${box.id}: mail deferred after a transient failure.`);
+        throw e;
+      }
       this.logger.warn(`Mailbox ${box.id}: mail could not be processed.`);
       await this.record(box, delivery, { status: 'rejected', error: this.describe(e) });
       return { status: 'rejected' };
@@ -104,21 +124,37 @@ export class WorkflowMailboxReceiverService implements WorkflowMailboxReceiver {
       started: { mailbox_id: box.id },
     });
 
-    // A replayed start already filed its attachments the first time.
-    if (!result.replayed) {
-      await this.fileAttachments(result.instance, mail.parts);
-    }
+    // The request exists from here on: record it before anything else can fail.
     await this.record(box, delivery, {
       status: 'accepted',
       instance_id: result.instance.id,
       subject: mail.subject,
       from_email: mail.sender,
     });
-    await this.prisma.workflow_mailboxes.updateMany({
-      where: { id: box.id, store_id: box.store_id },
-      data: { last_received_at: new Date() },
-    });
+    try {
+      // A retried mail whose request already started files what the first attempt missed.
+      if (!result.replayed || !(await this.attachmentsFiled(result.instance))) {
+        await this.fileAttachments(result.instance, mail.parts);
+      }
+      await this.prisma.workflow_mailboxes.updateMany({
+        where: { id: box.id, store_id: box.store_id },
+        data: { last_received_at: new Date() },
+      });
+    } catch {
+      this.logger.warn(
+        `Mailbox ${box.id}: request ${result.instance.id} started but its attachments could not be filed.`,
+      );
+    }
     return { status: 'accepted', instance_id: result.instance.id };
+  }
+
+  /** The `email_received` event closes the filing of a mail's attachments. */
+  private async attachmentsFiled(instance: WorkflowInstanceRow): Promise<boolean> {
+    const filed = await this.prisma.workflow_instance_events.findFirst({
+      where: { store_id: instance.store_id, instance_id: instance.id, type: 'email_received' },
+      select: { id: true },
+    });
+    return filed !== null;
   }
 
   /** Attachments ≤ 25 MB go to the dossier; the rest are skipped and noted in the timeline. */

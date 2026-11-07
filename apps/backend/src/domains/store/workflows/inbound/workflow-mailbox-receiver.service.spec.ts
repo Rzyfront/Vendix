@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream';
+import { BadRequestException } from '@nestjs/common';
 import { VendixHttpException } from '@common/errors';
 import { WorkflowMailboxReceiverService } from './workflow-mailbox-receiver.service';
 import type { WorkflowMailboxDelivery } from './workflow-mailbox.types';
@@ -14,6 +15,7 @@ function build(
     startExternal?: jest.Mock;
     upload?: jest.Mock;
     industries?: string[];
+    filedEvent?: boolean;
   } = {},
 ) {
   const box =
@@ -39,6 +41,9 @@ function build(
       ),
     },
     workflow_mailboxes: { updateMany: jest.fn(async () => ({ count: 1 })) },
+    workflow_instance_events: {
+      findFirst: jest.fn(async () => (opts.filedEvent ? { id: 1 } : null)),
+    },
     $transaction: jest.fn(async (fn: any) => fn({})),
   };
   const instance = {
@@ -90,7 +95,7 @@ function build(
     openRaw: jest.fn(async () => Readable.from([Buffer.from('raw')])),
     ...over,
   });
-  return { service, engine, files, dossiers, events, mime, messages, unscoped, delivery };
+  return { service, engine, files, dossiers, events, mime, messages, unscoped, scoped, delivery };
 }
 
 const pdf = (name: string, size = 10) => ({
@@ -191,5 +196,48 @@ describe('WorkflowMailboxReceiverService (P3.3 correo entrante)', () => {
     const inactive = build({ box: { id: 5, store_id: 3, organization_id: 2, definition_id: 11, is_active: false } });
     await expect(inactive.service.receive(inactive.delivery())).resolves.toEqual({ status: 'rejected' });
     expect(inactive.engine.startExternal).not.toHaveBeenCalled();
+  });
+  it('a transient failure before the start records nothing and throws, so the queue delivers the mail again', async () => {
+    const h = build({ parts: [pdf('rut.pdf')] });
+    const flaky = h.delivery({ openRaw: jest.fn(async () => Promise.reject(new Error('S3 read timed out'))) });
+    await expect(h.service.receive(flaky)).rejects.toThrow('S3 read timed out');
+    expect(h.messages).toHaveLength(0);
+    expect(h.engine.startExternal).not.toHaveBeenCalled();
+
+    await expect(h.service.receive(h.delivery())).resolves.toEqual({ status: 'accepted', instance_id: 40 });
+    expect(h.files.upload).toHaveBeenCalledTimes(1);
+  });
+
+  it('a malformed mail is still a final rejection', async () => {
+    const h = build();
+    h.mime.parse.mockRejectedValueOnce(
+      new BadRequestException({ reason_code: 'CORRUPT_OR_ENCRYPTED_FILE', message: 'x' }),
+    );
+    await expect(h.service.receive(h.delivery())).resolves.toEqual({ status: 'rejected' });
+    expect(h.messages[0]).toMatchObject({ status: 'rejected', error: 'CORRUPT_OR_ENCRYPTED_FILE' });
+  });
+
+  it('once the request started, a failure filing its attachments keeps the mail accepted', async () => {
+    const h = build({ parts: [pdf('rut.pdf')] });
+    h.events.append.mockRejectedValueOnce(new Error('database blip'));
+    await expect(h.service.receive(h.delivery())).resolves.toEqual({ status: 'accepted', instance_id: 40 });
+    expect(h.messages).toEqual([expect.objectContaining({ status: 'accepted', instance_id: 40 })]);
+  });
+
+  it('a retried mail whose request already started files the attachments the first attempt missed, once', async () => {
+    const replayed = jest.fn(async () => ({
+      instance: { id: 40, store_id: 3, current_stage_key: 'request' },
+      replayed: true,
+    }));
+    const missing = build({ parts: [pdf('rut.pdf')], startExternal: replayed });
+    await expect(missing.service.receive(missing.delivery())).resolves.toMatchObject({ status: 'accepted' });
+    expect(missing.files.upload).toHaveBeenCalledTimes(1);
+    expect(missing.scoped.workflow_instance_events.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { store_id: 3, instance_id: 40, type: 'email_received' } }),
+    );
+
+    const filed = build({ parts: [pdf('rut.pdf')], startExternal: replayed, filedEvent: true });
+    await expect(filed.service.receive(filed.delivery())).resolves.toMatchObject({ status: 'accepted' });
+    expect(filed.files.upload).not.toHaveBeenCalled();
   });
 });

@@ -311,11 +311,16 @@ describe('DocumentEmailSqsConsumerService workflow mailbox routing (Flujos P3)',
     expect(receiver.receive).not.toHaveBeenCalled(); expect(h.rows.size).toBe(1); expect(h.processor.processEmail).toHaveBeenCalledTimes(1);
   });
 
-  it('a mixed delivery serves both recipients, and a failing mailbox does not block the invoice', async () => {
+  it('a mixed delivery serves both recipients; a mailbox that throws (transient) keeps the message for a retry without blocking the invoice', async () => {
     const h = harness(); const receiver = withReceiver(h); receiver.receive.mockRejectedValueOnce(new Error('boom'));
     const body = envelope((n) => { n.receipt.recipients = [`${flujos}@${domain}`, `${alias}@${domain}`]; });
-    expect(await receive(h, body)).toEqual({ acknowledged: true, handled: 1 });
+    expect(await receive(h, body)).toEqual({ acknowledged: false, handled: 1 });
     expect(receiver.receive).toHaveBeenCalledTimes(1); expect(h.processor.processEmail).toHaveBeenCalledTimes(1);
+    expect(h.transport.delete).not.toHaveBeenCalled();
+    // The redelivery serves the mailbox and does not process the invoice twice.
+    expect(await receive(h, body)).toEqual({ acknowledged: true, handled: 1 });
+    expect(receiver.receive).toHaveBeenCalledTimes(2); expect(h.processor.processEmail).toHaveBeenCalledTimes(1);
+    expect(h.transport.delete).toHaveBeenCalledTimes(1);
   });
 
   it('a flujos- address on another domain is ignored', async () => {
