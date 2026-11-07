@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy, Optional } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { document_reception_email_messages, Prisma } from '@prisma/client';
 import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand, ChangeMessageVisibilityCommand, SendMessageCommand } from '@aws-sdk/client-sqs';
@@ -11,6 +12,7 @@ import { ErrorCodes } from '../../../common/errors/error-codes';
 import { VendixHttpException } from '../../../common/errors/vendix-http.exception';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { DocumentEmailInboxService } from './document-email-inbox.service';
+import { WORKFLOW_MAILBOX_RECEIVER, type WorkflowMailboxReceiver } from '../../store/workflows/inbound/workflow-mailbox.types';
 import {
   DOCUMENT_EMAIL_PROCESSOR, DOCUMENT_EMAIL_REASON_CODES, DOCUMENT_EMAIL_STATES, DOCUMENT_EMAIL_WARNINGS,
   DocumentEmailPartResult, DocumentEmailProcessor, DocumentEmailProcessorResult, DocumentEmailSnapshot,
@@ -20,7 +22,7 @@ import {
 type Message = document_reception_email_messages;
 type JsonRecord = Record<string, unknown>;
 type Binding = { environment: string; domain: string; region: string; topic: string; bucket: string; prefix: string; queue: string };
-type Delivery = { ses_id: string; sns_id: string; recipients: string[]; bucket: string; key: string; received_at: Date; rfc_hash: string | null; sender: string | null; subject: string | null; facts: DocumentEmailTransportFacts };
+type Delivery = { ses_id: string; sns_id: string; recipients: string[]; bucket: string; key: string; received_at: Date; rfc_hash: string | null; sender: string | null; subject: string | null; from_header: string | null; facts: DocumentEmailTransportFacts };
 export interface DocumentEmailDeliveryResult { acknowledged: boolean; handled: number }
 const MAX_RAW = 20 * 1024 * 1024;
 const DAILY_BYTES = 1024 * 1024 * 1024;
@@ -43,6 +45,7 @@ export class DocumentEmailSqsConsumerService implements OnModuleInit, OnModuleDe
     private readonly config: ConfigService,
     private readonly inboxes: DocumentEmailInboxService,
     @Inject(DOCUMENT_EMAIL_PROCESSOR) private readonly processor: DocumentEmailProcessor,
+    @Optional() private readonly moduleRef?: ModuleRef,
   ) {}
 
   onModuleInit(): void {
@@ -122,6 +125,7 @@ export class DocumentEmailSqsConsumerService implements OnModuleInit, OnModuleDe
         handled = 1;
       } else {
         const delivery = this.validateDelivery(parsed);
+        await this.routeWorkflowMailboxes(delivery, transport, signal);
         const rows: Message[] = [];
         // Register all recognized aliases first. Unknown aliases never inherit a tenant from MIME headers.
         for (const recipient of delivery.recipients) {
@@ -148,6 +152,27 @@ export class DocumentEmailSqsConsumerService implements OnModuleInit, OnModuleDe
       if (!signal.aborted) { this.logger.warn('Email delivery deferred without acknowledgement.'); await this.metric('ConsumerErrors'); }
       return { acknowledged: false, handled };
     } finally { if (visibilityTimer) clearInterval(visibilityTimer); deliveryAbort.abort(); this.stop.signal.removeEventListener('abort', abortDelivery); }
+  }
+
+  /**
+   * `flujos-<hex>@<domain>` recipients belong to a workflow mailbox, not to the
+   * document pipeline. The receiver never throws for a bad mail; anything else
+   * is logged so one mailbox can never block the invoice recipients.
+   */
+  private async routeWorkflowMailboxes(delivery: Delivery, transport: DocumentEmailTransport, signal: AbortSignal): Promise<void> {
+    const domain = this.binding().domain;
+    const recipients = delivery.recipients.filter((recipient) => /^flujos-[0-9a-f]{32}@[^@]+$/.test(recipient) && recipient.endsWith('@' + domain));
+    if (!recipients.length) return;
+    let receiver: WorkflowMailboxReceiver;
+    try { receiver = this.moduleRef!.get<WorkflowMailboxReceiver>(WORKFLOW_MAILBOX_RECEIVER, { strict: false }); }
+    catch { this.logger.warn('Workflow mailbox receiver is not available; mail for flujos- addresses was skipped.'); return; }
+    for (const recipient of recipients) {
+      try {
+        await receiver.receive({ recipient, ses_message_id: delivery.ses_id, from_header: delivery.from_header,
+          facts: { virus_status: delivery.facts.virus_status, spam_status: delivery.facts.spam_status },
+          openRaw: () => transport.readRaw(delivery.bucket, delivery.key, signal), signal });
+      } catch { this.logger.warn('Workflow mailbox delivery failed.'); }
+    }
   }
 
   /** Enqueue metadata-only internal retry. Consumer reloads all pointers/security facts from DB. */
@@ -326,7 +351,7 @@ export class DocumentEmailSqsConsumerService implements OnModuleInit, OnModuleDe
       gmail_authenticated: googleFrom && this.verdict(receipt.dkimVerdict) === 'PASS' && this.verdict(receipt.dmarcVerdict) === 'PASS' };
     const rfcId = headers?.messageId;
     return { ses_id: mail.messageId, sns_id: envelope.MessageId, bucket: binding.bucket, key: action.objectKey as string,
-      recipients: [...new Set(receipt.recipients as string[])], received_at: receivedAt, facts, sender: this.sanitizeText(Array.isArray(from) ? from[0] : null),
+      recipients: [...new Set(receipt.recipients as string[])], received_at: receivedAt, facts, sender: this.sanitizeText(Array.isArray(from) ? from[0] : null), from_header: Array.isArray(from) && typeof from[0] === 'string' ? from[0].slice(0, 320) : null,
       subject: googleFrom ? 'Confirmación de reenvío de Gmail' : this.sanitizeText(headers?.subject),
       rfc_hash: typeof rfcId === 'string' && rfcId.length <= 1024 ? createHash('sha256').update(rfcId).digest('hex') : null };
   }
