@@ -68,4 +68,13 @@ describe('DocumentRetentionCron (P4.4)', () => {
     await cron.runOnce(NOW);
     expect(await cron.runOnce(new Date('2027-01-01T08:00:00Z'))).toBe(1);
   });
+
+  it('a las 03:00Z del día 1 (aún día 31 en Bogotá) corre en dos meses seguidos', async () => {
+    seedFor(1);
+    expect(await cron.runOnce(new Date('2026-10-01T03:00:00Z'))).toBe(1);
+    expect(await cron.runOnce(new Date('2026-11-01T03:00:00Z'))).toBe(1);
+    expect(await cron.runOnce(new Date('2026-12-01T03:00:00Z'))).toBe(1);
+    expect(await cron.runOnce(new Date('2026-12-01T04:00:00Z'))).toBe(0);
+    expect(kit.db.table('document_purge_runs').filter((r) => r.trigger === 'schedule')).toHaveLength(3);
+  });
 });
