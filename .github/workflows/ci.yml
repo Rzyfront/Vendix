@@ -347,6 +347,7 @@ jobs:
           src/common/workflows/contract/workflow-validator.spec.ts
           src/domains/store/cash-registers/sessions/sessions.service.spec.ts
           src/domains/store/inventory/adjustments/inventory-adjustments.service.spec.ts
+          src/domains/store/inventory/adjustments/inventory-adjustments-bulk.service.spec.ts
           src/domains/store/inventory/shared/services/stock-level-manager-negative-available.spec.ts
           src/domains/store/inventory/shared/services/stock-level-manager.service.spec.ts
           src/domains/store/invoicing/credit-notes/credit-notes.b1-partial-kernel.spec.ts
@@ -359,13 +360,19 @@ jobs:
           src/domains/store/invoicing/invoicing.service.spec.ts
           src/domains/store/invoicing/invoicing.service.unclosed-residual.spec.ts
           src/domains/store/orders/order-flow/order-flow.history.spec.ts
+          src/domains/store/orders/orders.editor-discount.spec.ts
+          src/domains/store/orders/orders.service.spec.ts
           src/domains/store/orders/purchase-orders/purchase-orders.attachments.spec.ts
           src/domains/store/orders/purchase-orders/purchase-orders.multi-tax.spec.ts
           src/domains/store/orders/purchase-orders/purchase-orders.service.spec.ts
           src/domains/store/orders/purchase-orders/purchase-orders.uom-config.spec.ts
+          src/domains/store/payments/payments.service.spec.ts
           src/domains/store/payroll/employees/employees.service.email.spec.ts
           src/domains/store/payroll/employees/employees.service.spec.ts
           src/domains/store/payroll/payroll-runs/payroll-flow.service.spec.ts
+          src/domains/store/products/products-bulk.service.spec.ts
+          src/domains/store/products/products.service.spec.ts
+          src/domains/store/products/services/product-variant.service.spec.ts
           src/domains/store/reservations/reservations.service.spec.ts
           src/domains/store/workflows/engine/actions/operations.actions.spec.ts
           src/domains/store/workflows/engine/actions/people.actions.spec.ts
