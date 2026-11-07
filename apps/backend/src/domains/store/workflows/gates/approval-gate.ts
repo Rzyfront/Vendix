@@ -18,6 +18,14 @@ export const GATE_RESOLVED_OUTBOX_KIND = 'gate_resolved';
 
 export type GateContext = Record<string, string | number | boolean | null>;
 
+/**
+ * `request.method` of a `defer` operation the worker must NOT run for the
+ * requester (a POS sale needs the customer and the cash at the counter): its
+ * `args` only identify the request. Once approved, the requester repeats the
+ * same operation and the approval lets it through once.
+ */
+export const GATE_RETRY_BY_REQUESTER = 'retry_by_requester';
+
 /** A deferred operation: the replayer method and its JSON arguments. */
 export interface GateDeferredRequest {
   method: string;

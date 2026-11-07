@@ -3,10 +3,14 @@ import { inject } from '@angular/core';
 import { catchError, throwError } from 'rxjs';
 import { ToastService } from '../../shared/components/toast/toast.service';
 
-/** Codes the approval gate answers with (HTTP 409) while a request decides. */
+/**
+ * Codes the approval gate answers with (HTTP 409): a request deciding, a
+ * rejected one, or a route that cannot ask approval (use the one that does).
+ */
 export const APPROVAL_GATE_CODES: readonly string[] = [
   'WORKFLOW_APPROVAL_PENDING',
   'WORKFLOW_APPROVAL_REJECTED',
+  'WORKFLOW_APPROVAL_REQUIRED',
 ];
 
 /**

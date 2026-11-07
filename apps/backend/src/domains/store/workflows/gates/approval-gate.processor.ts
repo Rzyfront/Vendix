@@ -26,6 +26,7 @@ import {
 } from '../engine/workflow-engine.types';
 import { storeAllowsFlows } from '../engine/workflow-industry';
 import {
+  GATE_RETRY_BY_REQUESTER,
   GATE_RESOLVED_OUTBOX_KIND,
   GateDeferredRequest,
   GateRow,
@@ -231,6 +232,8 @@ export class ApprovalGateProcessor {
 
   private async replay(gate: GateRow): Promise<GateEffect> {
     const request = gate.request as unknown as (GateDeferredRequest & { hash?: string }) | null;
+    // Nothing runs in the worker: the requester is told to repeat it.
+    if (request?.method === GATE_RETRY_BY_REQUESTER) return { kind: 'none' };
     const replayer = request ? this.replayers[`${gate.operation}:${request.method}`] : undefined;
     const userId = gate.requested_by_user_id;
     if (!request || !replayer || userId === null) {

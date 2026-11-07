@@ -5,6 +5,7 @@ import {
   seedPeople,
 } from '../../../../testing/workflows/workflow-test-kit';
 import {
+  GATE_RETRY_BY_REQUESTER,
   consumeApproval,
   enforceApproval,
   requestApproval,
@@ -359,6 +360,54 @@ describe('approval gate (P1.3)', () => {
       await drain();
       expect(adjustments.createAdjustment).not.toHaveBeenCalled();
       expect(kit.db.table('workflow_instance_events').map((e) => e.type)).toContain('gate_effect_failed');
+    });
+  });
+
+  describe('defer, repeated by the requester: a POS sale with a governed discount', () => {
+    const discountFlow = (): WorkflowDefinitionV1 => {
+      const d = governingFlow(100_000) as any;
+      d.key = 'descuentos';
+      d.subject = undefined;
+      d.governs = { operation: 'order.discount', min_amount: 100_000 };
+      return d;
+    };
+    const sale = { sale: 'pos', items: [[3, null, 1, 1_000_000]], discount_amount: 400_000 };
+    const DISCOUNT = () => ({
+      operation: 'order.discount' as const,
+      entity_type: 'order',
+      entity_id: 0,
+      amount: 400_000,
+      context: { order_id: null, discount_amount: 400_000, grand_total: 600_000 },
+      request: { method: GATE_RETRY_BY_REQUESTER, args: [sale] },
+    });
+
+    it('the worker runs nothing; the requester is told to repeat the sale, which then passes once', async () => {
+      seedDefinition(kit.db, discountFlow());
+      await expect(enforceApproval(kit.prisma, DISCOUNT())).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'WORKFLOW_APPROVAL_PENDING' }),
+      });
+      await drain();
+      await decide('approve');
+      await drain();
+      const types = kit.db.table('workflow_instance_events').map((e) => e.type);
+      expect(types).not.toContain('gate_executed');
+      expect(types).not.toContain('gate_effect_failed');
+      expect(notifications.sendToUser).toHaveBeenCalledWith(
+        1,
+        4,
+        'workflow_task',
+        expect.any(String),
+        expect.stringContaining('ya puedes continuar con la operación'),
+        expect.anything(),
+      );
+      kit.as({ user_id: 4 });
+      const decision = await enforceApproval(kit.prisma, DISCOUNT());
+      expect(decision.status).toBe('approved');
+      await kit.prisma.$transaction((tx: any) => consumeApproval(tx, decision));
+      // Used once: the next identical sale asks again.
+      await expect(enforceApproval(kit.prisma, DISCOUNT())).rejects.toMatchObject({
+        response: expect.objectContaining({ error_code: 'WORKFLOW_APPROVAL_PENDING' }),
+      });
     });
   });
 });

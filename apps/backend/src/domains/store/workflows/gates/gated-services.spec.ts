@@ -7,6 +7,7 @@ import { InventoryAdjustmentsService } from '../../inventory/adjustments/invento
 import { CreditNotesService } from '../../invoicing/credit-notes/credit-notes.service';
 import { InvoiceFlowService } from '../../invoicing/invoice-flow/invoice-flow.service';
 import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
+import { PaymentsService } from '../../payments/payments.service';
 
 const mockGoverned = jest.fn<Promise<boolean>, unknown[]>();
 const mockEnforce = jest.fn();
@@ -517,6 +518,53 @@ describe('governed domain services (P1.3)', () => {
         ),
       ).resolves.toEqual([{ status: 'free' }]);
       expect(mockRequest).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POS sale with a governed discount (order.discount, review r1)', () => {
+    const dto = {
+      customer_id: 30,
+      coupon_code: 'VIP40',
+      items: [{ product_id: 3, quantity: 2, unit_price: 500000 }],
+    };
+    const gateOf = (svc: PaymentsService, order: Record<string, unknown>) =>
+      (
+        svc as unknown as {
+          enforcePosDiscountApproval(d: unknown, o: unknown): Promise<unknown>;
+        }
+      ).enforcePosDiscountApproval(dto, order);
+
+    it('a discount over the threshold is held (409) and repeating the same sale asks the same request', async () => {
+      const svc = bare(PaymentsService, { prisma: {} });
+      const order = { order_number: 'POS-9', discount_amount: 400000, grand_total: 600000 };
+      await expect(inStore(() => gateOf(svc, order))).rejects.toMatchObject({
+        errorCode: 'WORKFLOW_APPROVAL_PENDING',
+      });
+      await expect(inStore(() => gateOf(svc, order))).rejects.toBeDefined();
+      expect(mockGoverned).toHaveBeenCalledWith({}, 'order.discount', 400000);
+      const [first, second] = mockEnforce.mock.calls.map((c) => c[1]);
+      expect(first).toMatchObject({
+        operation: 'order.discount',
+        entity_type: 'order',
+        entity_id: 0,
+        amount: 400000,
+        context: { order_id: null, order_number: null, discount_amount: 400000 },
+        request: { method: 'retry_by_requester' },
+      });
+      expect(second.request).toEqual(first.request);
+    });
+
+    it('a sale without a discount, or with no governing flow, is never held', async () => {
+      const svc = bare(PaymentsService, { prisma: {} });
+      await expect(
+        inStore(() => gateOf(svc, { discount_amount: 0, grand_total: 1000 })),
+      ).resolves.toEqual({ status: 'free' });
+      expect(mockGoverned).not.toHaveBeenCalled();
+      mockGoverned.mockResolvedValue(false);
+      await expect(
+        inStore(() => gateOf(svc, { discount_amount: 50, grand_total: 950 })),
+      ).resolves.toEqual({ status: 'free' });
+      expect(mockEnforce).not.toHaveBeenCalled();
     });
   });
 });
