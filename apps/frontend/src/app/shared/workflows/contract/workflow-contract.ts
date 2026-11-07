@@ -33,6 +33,14 @@ export const WORKFLOW_LIMITS = {
   maxActionRetries: 5,
   /** P2.10: schedule triggers per flow. */
   maxSchedules: 5,
+  /** P3.4: steps of a multi-step form; files above 25 MB use chunked upload. */
+  maxFormSteps: 10,
+  maxFileSizeMb: 100,
+  /** P3.2: HTTP node timeout (seconds) and response fields it may map. */
+  maxHttpTimeoutSeconds: 30,
+  maxHttpOutputs: 20,
+  /** P3.6: how many days before a record date a flow may start. */
+  maxRecordDateDaysBefore: 365,
 } as const;
 
 /** Keys of fields, stages, requirements and the definition itself. */
@@ -156,7 +164,7 @@ export interface WorkflowFieldDef {
   options?: { value: string; label: string }[];
   /** file only: mime types or `type/*`. */
   accept?: string[];
-  /** file only: 1..25. */
+  /** file only: 1..100 (above 25 MB the upload goes in chunks). */
   max_size_mb?: number;
   visible_when?: WorkflowConditionGroup;
   /**
@@ -370,6 +378,11 @@ export type WorkflowRequirementDef =
       max_size_mb?: number;
       /** Default true. */
       blocks_exit?: boolean;
+      /**
+       * P3.5: the external requester sees it as "Falta: <label>" on the
+       * tracking link and may upload it there.
+       */
+      external?: boolean;
     }
   | { kind: "file_field"; key: string; label: string; field: string }
   | {
@@ -783,6 +796,8 @@ export interface WorkflowActionInputSpec {
   min?: number;
   /** `enum` only. */
   values?: readonly string[];
+  /** `int` / `number` / `money`: maximum literal value. */
+  max?: number;
 }
 
 /** Declarative entry of the Vendix action registry (P1.2). */
@@ -1119,6 +1134,73 @@ export const WORKFLOW_ACTION_CATALOG = {
       assignee: { label: "Responsable", type: "assignee" },
     },
   },
+  // ---- P3: external systems (connectors, see WORKFLOW_CONNECTOR_CATALOG) ----
+  /**
+   * P3.2: generic HTTP call. `url`, `headers` (one "Name: value" per line) and
+   * `body` accept `{{secrets.<NAME>}}`, resolved only when the call runs (never
+   * stored in the outbox). The URL passes the SSRF policy (no private, loopback
+   * or metadata addresses). The action's `output` maps response paths to
+   * declared fields.
+   */
+  "vendix.http.request": {
+    label: "Llamada HTTP",
+    module: "Integraciones",
+    permission: "store:workflows:manage",
+    idempotency: "at_most_once",
+    inputs: {
+      method: {
+        label: "Método",
+        type: "enum",
+        required: true,
+        values: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      },
+      url: inText("URL", true),
+      headers: inText("Encabezados (uno por línea: Nombre: valor)"),
+      body: inText("Cuerpo"),
+      timeout_seconds: {
+        label: "Tiempo máximo (segundos)",
+        type: "int",
+        min: 1,
+        max: 30,
+      },
+    },
+  },
+  /** P3.3: outbound email with the store's layout; `body` is the template. */
+  "vendix.email.send": {
+    label: "Enviar correo",
+    module: "Conectores",
+    permission: "store:workflows:manage",
+    idempotency: "at_most_once",
+    inputs: {
+      to: inText("Para (correo)", true),
+      subject: inText("Asunto", true),
+      body: inText("Mensaje (plantilla con variables)", true),
+    },
+  },
+  /**
+   * P3.3: WhatsApp through the store's own connected channel. Outside the
+   * 24-hour window Meta only accepts approved templates, so it sends one.
+   */
+  "vendix.whatsapp.send": {
+    label: "Enviar WhatsApp (plantilla)",
+    module: "Conectores",
+    permission: "store:crm_campaigns:send",
+    idempotency: "at_most_once",
+    inputs: {
+      to: inText("Teléfono (con indicativo)", true),
+      template: inText("Plantilla aprobada", true),
+      language: inText("Idioma de la plantilla (es, es_CO…)"),
+      params: inText("Parámetros (separados por |)"),
+    },
+  },
+  /** P3.3: issues the electronic invoice of a sale to the DIAN (Vendix module). */
+  "vendix.invoice.emit_order": {
+    label: "Emitir factura electrónica DIAN de una venta",
+    module: "Facturación",
+    permission: "invoicing:write",
+    idempotency: "at_most_once",
+    inputs: { order_id: inId("Venta") },
+  },
 } as const satisfies Record<string, WorkflowActionSpec>;
 
 /** Actions the engine writes to the outbox instead of running inline. */
@@ -1177,7 +1259,100 @@ export type WorkflowActionDef =
       action: WorkflowVendixActionName;
       map: Record<string, WorkflowActionMapValue>;
       on_error?: WorkflowActionErrorPolicy;
+      /**
+       * P3.2: `vendix.http.request` only. Declared field ← response path:
+       * `status`, `body`, `body.<a.b.0.c>` or `headers.<name>`.
+       */
+      output?: Record<string, string>;
     };
+
+/** P3.2: response paths an HTTP node may map to fields. */
+export const WORKFLOW_HTTP_OUTPUT_PATH =
+  /^(status|body|body(\.[A-Za-z0-9_-]{1,60}){1,8}|headers\.[a-z0-9-]{1,60})$/;
+
+/** P3.2: `{{secrets.<NAME>}}`; names are upper snake case. */
+export const WORKFLOW_SECRET_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,59}$/;
+
+/** P3.2: inputs of the HTTP node that may carry `{{secrets.<NAME>}}`. */
+export const WORKFLOW_SECRET_INPUTS: Partial<
+  Record<WorkflowVendixActionName, readonly string[]>
+> = {
+  "vendix.http.request": ["url", "headers", "body"],
+};
+
+/** How a connector reaches the outside (what its connection page shows). */
+export type WorkflowConnectionKind =
+  | "none"
+  | "secrets"
+  | "inbound_webhook"
+  | "mailbox"
+  | "whatsapp_channel"
+  | "dian";
+
+/** Pluggable connector (P3.3, R6): schema = its actions and triggers. */
+export interface WorkflowConnectorSpec {
+  label: string;
+  description: string;
+  connection: WorkflowConnectionKind;
+  actions: readonly WorkflowVendixActionName[];
+  triggers: readonly string[];
+}
+
+/**
+ * Connector registry (P3.3, R6). A connector groups actions of the registry
+ * (same outbox, permission, idempotency and error policy) and trigger kinds;
+ * each has its connection page and its test. Declaring an action or trigger
+ * here without an executor fails the connector spec (R1).
+ */
+export const WORKFLOW_CONNECTOR_CATALOG = {
+  http: {
+    label: "HTTP genérico",
+    description:
+      "Consulta o envía datos a cualquier servicio con una URL pública, con secretos guardados por tienda.",
+    connection: "secrets",
+    actions: ["vendix.http.request"],
+    triggers: [],
+  },
+  inbound_webhook: {
+    label: "Webhook de entrada",
+    description:
+      "Otro sistema inicia una solicitud con una llamada firmada (HMAC) a la URL del flujo.",
+    connection: "inbound_webhook",
+    actions: [],
+    triggers: ["webhook"],
+  },
+  email_out: {
+    label: "Correo saliente",
+    description: "Envía correos con plantilla y variables de la solicitud.",
+    connection: "none",
+    actions: ["vendix.email.send"],
+    triggers: [],
+  },
+  email_in: {
+    label: "Correo entrante",
+    description:
+      "Un correo al buzón del flujo crea una solicitud y guarda sus adjuntos en el expediente.",
+    connection: "mailbox",
+    actions: [],
+    triggers: ["email"],
+  },
+  whatsapp: {
+    label: "WhatsApp",
+    description: "Envía plantillas aprobadas por el canal de WhatsApp conectado de la tienda.",
+    connection: "whatsapp_channel",
+    actions: ["vendix.whatsapp.send"],
+    triggers: [],
+  },
+  dian: {
+    label: "Facturación DIAN",
+    description: "Emite la factura electrónica de una venta con el módulo de facturación de Vendix.",
+    connection: "dian",
+    actions: ["vendix.invoice.emit_order"],
+    triggers: [],
+  },
+} as const satisfies Record<string, WorkflowConnectorSpec>;
+
+export type WorkflowConnectorKey = keyof typeof WORKFLOW_CONNECTOR_CATALOG;
 
 /** P2.6: every hook point of a stage, in the order they run. */
 export const WORKFLOW_HOOK_POINTS = [
@@ -1368,6 +1543,12 @@ export interface WorkflowGovernsDef {
   map?: Record<string, string>;
 }
 
+/** P3.4: one page of a multi-step form. */
+export interface WorkflowFormStepDef {
+  title: string;
+  fields: string[];
+}
+
 export interface WorkflowStageDef {
   key: string;
   name: string;
@@ -1378,7 +1559,11 @@ export interface WorkflowStageDef {
   outcome?: WorkflowEndOutcome;
   assignee?: WorkflowAssigneeDef;
   quorum?: WorkflowQuorumDef;
-  form?: { fields: string[] };
+  /**
+   * `steps` (P3.4, start stage of a public form): the form split in pages;
+   * together they list exactly `fields`, each field once, in order.
+   */
+  form?: { fields: string[]; steps?: WorkflowFormStepDef[] };
   requirements?: WorkflowRequirementDef[];
   transitions?: WorkflowTransitionDef[];
   due?: WorkflowDueDef;
@@ -1420,7 +1605,69 @@ export type WorkflowTriggerDef =
    * P2.10: starts the flow as actor `system` on a 5-field cron expression
    * (minute hour day-of-month month day-of-week) in the store's time zone.
    */
-  | { kind: "schedule"; cron: string };
+  | { kind: "schedule"; cron: string }
+  /**
+   * P3.1: another system starts the flow (actor `system`) with a signed call
+   * to the flow's inbound webhook. The body `values` are checked against the
+   * declared fields (same rules as a form).
+   */
+  | { kind: "webhook" }
+  /**
+   * P3.3: an email to the flow's mailbox starts it (actor `system`). `map`
+   * fills declared fields from `{{email.<token>}}` (WORKFLOW_EMAIL_TOKENS) or
+   * literals; attachments go to the dossier.
+   */
+  | { kind: "email"; map?: Record<string, string> }
+  /**
+   * P3.6: starts `days_before` days before the date `field` of each record of
+   * the flow's collection (`subject.collection`), once per record and date.
+   * `map` fills declared fields from `{{record.<field>}}`, `{{record.title}}`
+   * and `{{record.reference}}`.
+   */
+  | {
+      kind: "record_date";
+      field: string;
+      days_before: number;
+      map?: Record<string, string>;
+    };
+
+/** P3.3: variables of an inbound email (`{{email.<key>}}`). */
+export const WORKFLOW_EMAIL_TOKENS: readonly WorkflowCatalogToken[] = [
+  { key: "subject", label: "Asunto", type: "text" },
+  { key: "from", label: "Correo del remitente", type: "text" },
+  { key: "from_name", label: "Nombre del remitente", type: "text" },
+  { key: "text", label: "Texto del mensaje", type: "text" },
+];
+
+/** P3.6: fixed variables of a record besides `{{record.<field>}}`. */
+export const WORKFLOW_RECORD_TOKENS: readonly string[] = [
+  "record.title",
+  "record.reference",
+];
+
+/** P3.6: field types a custom collection may declare. */
+export const WORKFLOW_RECORD_FIELD_TYPES = [
+  "text",
+  "textarea",
+  "number",
+  "money",
+  "date",
+  "boolean",
+  "select",
+  "email",
+  "phone",
+] as const;
+export type WorkflowRecordFieldType = (typeof WORKFLOW_RECORD_FIELD_TYPES)[number];
+
+/** P3.6: one field of a custom collection. */
+export interface WorkflowRecordFieldDef {
+  key: string;
+  label: string;
+  type: WorkflowRecordFieldType;
+  required?: boolean;
+  /** select only. */
+  options?: { value: string; label: string }[];
+}
 
 export type WorkflowSubjectType =
   | "none"
@@ -1431,7 +1678,9 @@ export type WorkflowSubjectType =
   | "purchase_order"
   | "expense"
   | "invoice"
-  | "payroll_run";
+  | "payroll_run"
+  /** P3.6: a record of a custom collection (`subject.collection`). */
+  | "custom_record";
 
 export const WORKFLOW_SUBJECT_TYPES: readonly WorkflowSubjectType[] = [
   "none",
@@ -1443,6 +1692,7 @@ export const WORKFLOW_SUBJECT_TYPES: readonly WorkflowSubjectType[] = [
   "expense",
   "invoice",
   "payroll_run",
+  "custom_record",
 ];
 
 export interface WorkflowDefinitionV1 {
@@ -1450,7 +1700,8 @@ export interface WorkflowDefinitionV1 {
   key: string;
   name: string;
   description?: string;
-  subject?: { type: WorkflowSubjectType };
+  /** `collection`: key of the custom collection (subject `custom_record` only). */
+  subject?: { type: WorkflowSubjectType; collection?: string };
   fields: WorkflowFieldDef[];
   stages: WorkflowStageDef[];
   triggers?: WorkflowTriggerDef[];
@@ -1476,7 +1727,10 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
       type: "object",
       additionalProperties: false,
       required: ["type"],
-      properties: { type: { enum: [...WORKFLOW_SUBJECT_TYPES] } },
+      properties: {
+        type: { enum: [...WORKFLOW_SUBJECT_TYPES] },
+        collection: { $ref: "#/$defs/key" },
+      },
     },
     fields: {
       type: "array",
@@ -1529,6 +1783,39 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
               cron: { type: "string", minLength: 9, maxLength: 120 },
             },
           },
+          {
+            additionalProperties: false,
+            required: ["kind"],
+            properties: { kind: { const: "webhook" } },
+          },
+          {
+            additionalProperties: false,
+            required: ["kind"],
+            properties: {
+              kind: { const: "email" },
+              map: {
+                type: "object",
+                additionalProperties: { type: "string", maxLength: 500 },
+              },
+            },
+          },
+          {
+            additionalProperties: false,
+            required: ["kind", "field", "days_before"],
+            properties: {
+              kind: { const: "record_date" },
+              field: { $ref: "#/$defs/key" },
+              days_before: {
+                type: "integer",
+                minimum: 0,
+                maximum: WORKFLOW_LIMITS.maxRecordDateDaysBefore,
+              },
+              map: {
+                type: "object",
+                additionalProperties: { type: "string", maxLength: 500 },
+              },
+            },
+          },
         ],
       },
     },
@@ -1575,7 +1862,11 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
           },
         },
         accept: { type: "array", items: { type: "string" } },
-        max_size_mb: { type: "number", minimum: 1, maximum: 25 },
+        max_size_mb: {
+              type: "number",
+              minimum: 1,
+              maximum: WORKFLOW_LIMITS.maxFileSizeMb,
+            },
         visible_when: { $ref: "#/$defs/conditionGroup" },
         compute: {
           type: "string",
@@ -1720,8 +2011,13 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
             key: { $ref: "#/$defs/key" },
             label: { type: "string", minLength: 1 },
             accept: { type: "array", items: { type: "string" } },
-            max_size_mb: { type: "number", minimum: 1, maximum: 25 },
+            max_size_mb: {
+              type: "number",
+              minimum: 1,
+              maximum: WORKFLOW_LIMITS.maxFileSizeMb,
+            },
             blocks_exit: { type: "boolean" },
+            external: { type: "boolean" },
           },
         },
         {
@@ -1812,6 +2108,11 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
                 route_to: { $ref: "#/$defs/key" },
               },
             },
+            output: {
+              type: "object",
+              maxProperties: WORKFLOW_LIMITS.maxHttpOutputs,
+              additionalProperties: { type: "string", maxLength: 200 },
+            },
           },
         },
       ],
@@ -1840,6 +2141,19 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
           required: ["fields"],
           properties: {
             fields: { type: "array", items: { $ref: "#/$defs/key" } },
+            steps: {
+              type: "array",
+              maxItems: WORKFLOW_LIMITS.maxFormSteps,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["title", "fields"],
+                properties: {
+                  title: { type: "string", minLength: 1, maxLength: 80 },
+                  fields: { type: "array", items: { $ref: "#/$defs/key" } },
+                },
+              },
+            },
           },
         },
         requirements: {

@@ -1,6 +1,7 @@
 import {
   Component,
   DestroyRef,
+  computed,
   effect,
   inject,
   input,
@@ -9,6 +10,7 @@ import {
   untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormsModule } from '@angular/forms';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import {
   AlertBannerComponent,
@@ -16,19 +18,40 @@ import {
   ButtonComponent,
   DialogService,
   IconComponent,
+  InputComponent,
   ModalComponent,
   ToastService,
+  ToggleComponent,
 } from '../../../../../shared/components/index';
 import { formatStoreDateTime } from '../../../../../shared/utils/date.util';
 import { WorkflowDefinitionRow } from '../interfaces/workflow.interfaces';
-import { PublicLinkStatus } from '../interfaces/workflow-ops.interfaces';
+import { PublicLinkCreated, PublicLinkStatus } from '../interfaces/workflow-ops.interfaces';
+import {
+  PublicLinkSettingsStatus,
+  WorkflowLinksApiService,
+} from '../services/workflow-links-api.service';
 import { WorkflowsApiService } from '../services/workflows-api.service';
 import { toWorkflowError } from '../utils/workflow-errors.util';
+
+/** Calendar day (browser local) of an ISO instant, for `<input type="date">`. */
+function localDateInput(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** The link stops working at the end of the chosen day (browser local time). */
+function endOfDayIso(date: string): string {
+  return new Date(`${date}T23:59:59`).toISOString();
+}
 
 /**
  * "Enlace público": one active link per flow that opens the public request
  * form (`/flujos/<token>`) on the store's own domain. The raw token only
- * exists in the response of create/rotate, so it is shown once here.
+ * exists in the response of create/rotate, so it is shown once here, with its
+ * QR (PNG download). Expiry and "Exigir captcha" apply to the active link.
  */
 @Component({
   selector: 'app-workflow-public-link-modal',
@@ -39,6 +62,9 @@ import { toWorkflowError } from '../utils/workflow-errors.util';
     BadgeComponent,
     IconComponent,
     AlertBannerComponent,
+    FormsModule,
+    InputComponent,
+    ToggleComponent,
   ],
   template: `
     <app-modal
@@ -71,18 +97,34 @@ import { toWorkflowError } from '../utils/workflow-errors.util';
           <div class="mt-4 rounded-xl border border-border p-3" data-testid="new-link">
             <p class="text-sm font-semibold text-text-primary">Tu enlace</p>
             <p class="mt-1 break-all rounded-lg bg-background px-2 py-1.5 font-mono text-xs">
-              {{ fullUrl(link.url_path) }}
+              {{ fullUrl(link) }}
             </p>
-            <p class="mt-1 text-xs text-text-secondary">
-              Va después del dominio público de tu tienda, por ejemplo
-              <span class="font-mono">https://tu-tienda.com{{ link.url_path }}</span>.
-            </p>
+            @if (!link.url) {
+              <p class="mt-1 text-xs text-text-secondary">
+                Va después del dominio público de tu tienda, por ejemplo
+                <span class="font-mono">https://tu-tienda.com{{ link.url_path }}</span>.
+              </p>
+            }
             <div class="mt-2 flex justify-end">
-              <app-button variant="outline" size="sm" (clicked)="copy(link.url_path)">
+              <app-button variant="outline" size="sm" (clicked)="copy(link)">
                 <app-icon name="copy" [size]="14" slot="icon" />
                 Copiar enlace
               </app-button>
             </div>
+            @if (qrDataUrl(); as qr) {
+              <div class="mt-3 flex flex-col items-center gap-2" data-testid="qr">
+                <img [src]="qr" alt="Código QR del enlace público"
+                  class="h-44 w-44 rounded-lg border border-border bg-white" />
+                <app-button variant="outline" size="sm" (clicked)="downloadQr()">
+                  <app-icon name="download" [size]="14" slot="icon" />
+                  Descargar QR
+                </app-button>
+              </div>
+            } @else if (!link.url) {
+              <p class="mt-3 text-xs text-text-secondary">
+                Para generar el código QR tu tienda necesita un dominio público activo.
+              </p>
+            }
           </div>
           <app-alert-banner variant="warning" icon="alert-triangle" class="mt-3">
             Cópialo ahora: por seguridad solo se muestra esta vez. Si lo pierdes, rota el enlace
@@ -93,6 +135,37 @@ import { toWorkflowError } from '../utils/workflow-errors.util';
             El enlace ya existe, pero no se puede volver a mostrar. Si lo perdiste, rótalo: el
             anterior dejará de funcionar.
           </app-alert-banner>
+        }
+        @if (status()?.active) {
+          <div class="mt-4 rounded-xl border border-border p-3" data-testid="link-settings">
+            <p class="text-sm font-semibold text-text-primary">Ajustes del enlace</p>
+            <div class="mt-2 grid gap-3 sm:grid-cols-2">
+              <app-input
+                type="date"
+                label="Vence el"
+                helperText="Vacío: no vence. El enlace deja de funcionar al terminar ese día."
+                [ngModel]="expiryDate()"
+                [ngModelOptions]="{ standalone: true }"
+                (ngModelChange)="expiryDate.set($event ?? '')"
+              />
+              <div class="flex flex-col gap-1">
+                <app-toggle
+                  label="Exigir captcha"
+                  [checked]="captchaRequired()"
+                  (toggled)="captchaRequired.set($event)"
+                />
+                <span class="text-xs text-text-secondary">
+                  La persona resuelve una verificación automática antes de enviar.
+                </span>
+              </div>
+            </div>
+            <div class="mt-3 flex justify-end">
+              <app-button variant="outline" size="sm" [loading]="savingSettings()"
+                [disabled]="!settingsDirty()" (clicked)="saveSettings()">
+                Guardar ajustes
+              </app-button>
+            </div>
+          </div>
         }
         @if (errorMessage()) {
           <p class="mt-3 text-sm text-error" role="alert">{{ errorMessage() }}</p>
@@ -119,6 +192,7 @@ import { toWorkflowError } from '../utils/workflow-errors.util';
 })
 export class WorkflowPublicLinkModalComponent {
   private readonly api = inject(WorkflowsApiService);
+  private readonly linksApi = inject(WorkflowLinksApiService);
   private readonly toast = inject(ToastService);
   private readonly dialog = inject(DialogService);
   private readonly settings = inject(StoreSettingsFacade);
@@ -127,8 +201,21 @@ export class WorkflowPublicLinkModalComponent {
   readonly isOpen = model<boolean>(false);
   readonly definition = input<WorkflowDefinitionRow | null>(null);
 
-  readonly status = signal<PublicLinkStatus | null>(null);
-  readonly created = signal<{ url_path: string; token: string } | null>(null);
+  readonly status = signal<(PublicLinkStatus & { captcha_required?: boolean }) | null>(null);
+  readonly created = signal<PublicLinkCreated | null>(null);
+  readonly qrDataUrl = signal<string | null>(null);
+  readonly expiryDate = signal('');
+  readonly captchaRequired = signal(false);
+  readonly savingSettings = signal(false);
+  /** The inputs differ from what the server has for the active link. */
+  readonly settingsDirty = computed(() => {
+    const s = this.status();
+    return (
+      !!s &&
+      (this.expiryDate() !== localDateInput(s.expires_at) ||
+        this.captchaRequired() !== (s.captcha_required ?? false))
+    );
+  });
   readonly loading = signal(false);
   readonly busy = signal(false);
   readonly errorMessage = signal('');
@@ -147,6 +234,7 @@ export class WorkflowPublicLinkModalComponent {
     this.isOpen.set(open);
     if (!open) {
       this.created.set(null);
+      this.qrDataUrl.set(null);
       this.status.set(null);
       this.errorMessage.set('');
     }
@@ -160,13 +248,13 @@ export class WorkflowPublicLinkModalComponent {
    * The admin does not know the store's public host, so the link is the path
    * under that domain; the hint in the template says where to prepend it.
    */
-  fullUrl(path: string): string {
-    return path;
+  fullUrl(link: { url_path: string; url?: string | null }): string {
+    return link.url ?? link.url_path;
   }
 
-  async copy(path: string): Promise<void> {
+  async copy(link: { url_path: string; url?: string | null }): Promise<void> {
     try {
-      await navigator.clipboard.writeText(this.fullUrl(path));
+      await navigator.clipboard.writeText(this.fullUrl(link));
       this.toast.success('Enlace copiado');
     } catch {
       this.toast.warning('No se pudo copiar; selecciona el texto y cópialo a mano.');
@@ -192,15 +280,22 @@ export class WorkflowPublicLinkModalComponent {
       .createPublicLink(definition.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (link) => {
+        next: (link: PublicLinkCreated) => {
           this.busy.set(false);
           this.created.set(link);
-          this.status.update((s) => ({
+          // Rotating keeps the expiry and captcha of the replaced link.
+          const expiresAt = link.expires_at ?? null;
+          const captcha = link.captcha_required ?? false;
+          this.status.set({
             active: true,
             created_at: new Date().toISOString(),
-            expires_at: s?.expires_at ?? null,
+            expires_at: expiresAt,
             last_used_at: null,
-          }));
+            captcha_required: captcha,
+          });
+          this.expiryDate.set(localDateInput(expiresAt));
+          this.captchaRequired.set(captcha);
+          void this.buildQr(link.url ?? null);
         },
         error: (error) => {
           this.busy.set(false);
@@ -221,6 +316,7 @@ export class WorkflowPublicLinkModalComponent {
         next: () => {
           this.busy.set(false);
           this.created.set(null);
+          this.qrDataUrl.set(null);
           this.status.update((s) => (s ? { ...s, active: false } : s));
           this.toast.success('Enlace desactivado');
         },
@@ -231,14 +327,72 @@ export class WorkflowPublicLinkModalComponent {
       });
   }
 
+  saveSettings(): void {
+    const definition = this.definition();
+    if (!definition || this.savingSettings() || !this.settingsDirty()) return;
+    this.savingSettings.set(true);
+    this.errorMessage.set('');
+    this.linksApi
+      .updatePublicLinkSettings(definition.id, {
+        captcha_required: this.captchaRequired(),
+        expires_at: this.expiryDate() ? endOfDayIso(this.expiryDate()) : null,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (status: PublicLinkSettingsStatus) => {
+          this.savingSettings.set(false);
+          this.status.set(status);
+          this.expiryDate.set(localDateInput(status.expires_at));
+          this.captchaRequired.set(status.captcha_required);
+          this.toast.success('Ajustes del enlace guardados');
+        },
+        error: (error) => {
+          this.savingSettings.set(false);
+          this.errorMessage.set(toWorkflowError(error).message);
+        },
+      });
+  }
+
+  downloadQr(): void {
+    const dataUrl = this.qrDataUrl();
+    if (!dataUrl) return;
+    const anchor = document.createElement('a');
+    anchor.href = dataUrl;
+    anchor.download = `qr-${this.definition()?.key ?? 'flujo'}.png`;
+    anchor.click();
+  }
+
+  /** QR of the full public URL (needs an active public domain of the store). */
+  private async buildQr(url: string | null): Promise<void> {
+    this.qrDataUrl.set(null);
+    if (!url) return;
+    try {
+      // `qrcode` is CommonJS: the browser bundle exposes it only as `default`.
+      const mod: typeof import('qrcode') & { default?: typeof import('qrcode') } =
+        await import('qrcode');
+      const QRCode = mod.default ?? mod;
+      this.qrDataUrl.set(
+        await QRCode.toDataURL(url, {
+          width: 480,
+          margin: 2,
+          color: { dark: '#0f172a', light: '#ffffff' },
+        }),
+      );
+    } catch {
+      this.toast.warning('No se pudo generar el código QR.');
+    }
+  }
+
   private load(id: number): void {
     this.loading.set(true);
     this.api
       .getPublicLink(id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (status) => {
+        next: (status: PublicLinkStatus & { captcha_required?: boolean }) => {
           this.status.set(status);
+          this.expiryDate.set(localDateInput(status.expires_at));
+          this.captchaRequired.set(status.captcha_required ?? false);
           this.loading.set(false);
         },
         error: (error) => {

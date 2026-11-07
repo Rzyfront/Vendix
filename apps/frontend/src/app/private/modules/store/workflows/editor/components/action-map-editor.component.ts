@@ -15,6 +15,7 @@ import {
 } from '../../../../../../shared/workflows/contract/workflow-contract';
 import { actionTokenOptions } from '../workflow-editor-triggers.utils';
 import { AssigneeEditorComponent } from './assignee-editor.component';
+import { HttpActionEditorComponent } from './http-action/http-action-editor.component';
 
 const LITERAL = '__literal__';
 const NONE = '__none__';
@@ -37,9 +38,18 @@ interface MapKey {
 @Component({
   selector: 'app-action-map-editor',
   standalone: true,
-  imports: [FormsModule, ButtonComponent, InputComponent, SelectorComponent, AssigneeEditorComponent],
+  imports: [FormsModule, ButtonComponent, InputComponent, SelectorComponent, AssigneeEditorComponent, HttpActionEditorComponent],
   template: `
     <div class="flex flex-col gap-3" data-testid="action-map">
+      @if (action() === 'vendix.http.request') {
+        <app-http-action-editor
+          [map]="map()"
+          [outputMap]="outputMap()"
+          [fields]="fields()"
+          (mapChange)="mapChange.emit($event)"
+          (outputMapChange)="outputMapChange.emit($event)"
+        />
+      } @else {
       @for (key of keys(); track key.name) {
         @if (key.spec.type === 'assignee') {
           <div class="flex flex-col gap-2">
@@ -86,6 +96,7 @@ interface MapKey {
           </div>
         }
       }
+      }
     </div>
   `,
 })
@@ -93,7 +104,10 @@ export class ActionMapEditorComponent {
   readonly action = input.required<WorkflowVendixActionName>();
   readonly map = input<Record<string, WorkflowActionMapValue>>({});
   readonly fields = input<WorkflowFieldDef[]>([]);
+  /** P3.2: response mapping of `vendix.http.request` (field ← path). */
+  readonly outputMap = input<Record<string, string> | undefined>(undefined);
   readonly mapChange = output<Record<string, WorkflowActionMapValue>>();
+  readonly outputMapChange = output<Record<string, string> | undefined>();
 
   readonly literal = LITERAL;
   /** Keys the user switched to "Texto fijo" but has not typed yet. */

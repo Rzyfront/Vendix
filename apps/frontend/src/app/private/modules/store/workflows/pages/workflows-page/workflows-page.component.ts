@@ -286,6 +286,8 @@ export class WorkflowsPageComponent implements OnInit {
   ];
   readonly headerActions = [
     { id: 'inbox', label: 'Mis tareas', icon: 'inbox', variant: 'outline' as const },
+    { id: 'records', label: 'Registros', icon: 'folder-open', variant: 'outline' as const },
+    { id: 'connectors', label: 'Conectores', icon: 'zap', variant: 'outline' as const },
     { id: 'integrations', label: 'Integraciones', icon: 'plug', variant: 'outline' as const },
     { id: 'import', label: 'Nuevo desde JSON', icon: 'plus', variant: 'primary' as const },
   ];
@@ -496,6 +498,8 @@ export class WorkflowsPageComponent implements OnInit {
   onHeaderAction(id: string): void {
     if (id === 'import') this.importOpen.set(true);
     if (id === 'inbox') this.router.navigate(['/admin/workflows/inbox']);
+    if (id === 'records') this.router.navigate(['/admin/workflows/records']);
+    if (id === 'connectors') this.router.navigate(['/admin/workflows/connectors']);
     if (id === 'integrations') this.router.navigate(['/admin/workflows/integrations']);
   }
 

@@ -40,6 +40,12 @@ import {
   WORKFLOW_ERROR_THEN,
   SYSTEM_STAGE_TYPES,
   WorkflowFieldType,
+  WORKFLOW_EMAIL_TOKENS,
+  WORKFLOW_HTTP_OUTPUT_PATH,
+  WORKFLOW_RECORD_TOKENS,
+  WORKFLOW_SECRET_INPUTS,
+  WORKFLOW_SECRET_NAME_PATTERN,
+  WORKFLOW_KEY_PATTERN as RECORD_KEY_PATTERN,
 } from "./workflow-contract";
 
 export const WORKFLOW_ISSUE_CODES = [
@@ -89,6 +95,11 @@ export const WORKFLOW_ISSUE_CODES = [
   "COMPUTE_CYCLE",
   "SCHEDULE_INVALID",
   "ERROR_POLICY_INVALID",
+  "TRIGGER_INVALID",
+  "HTTP_OUTPUT_INVALID",
+  "SECRET_UNKNOWN",
+  "FORM_STEPS_INVALID",
+  "COLLECTION_UNKNOWN",
 ] as const;
 
 export type WorkflowIssueCode = (typeof WORKFLOW_ISSUE_CODES)[number];
@@ -119,6 +130,18 @@ export interface WorkflowValidationContext {
    * check (the editor without a store); the server always passes it.
    */
   flowKeys?: readonly string[];
+  /**
+   * P3.6: the store's custom collections and their fields. Undefined skips
+   * the check (the editor without a store); the server always passes it.
+   */
+  collections?: Readonly<
+    Record<string, readonly { key: string; type: string }[]>
+  >;
+  /**
+   * P3.2: names of the store's secrets. Undefined skips the check; the server
+   * passes it on publish.
+   */
+  secretNames?: readonly string[];
 }
 
 type Json = Record<string, unknown>;
@@ -220,11 +243,16 @@ function checkMaxSize(
   stageKey?: string,
 ) {
   if (v === undefined) return;
-  if (typeof v !== "number" || !Number.isFinite(v) || v < 1 || v > 25) {
+  if (
+    typeof v !== "number" ||
+    !Number.isFinite(v) ||
+    v < 1 ||
+    v > WORKFLOW_LIMITS.maxFileSizeMb
+  ) {
     c.err(
       "SHAPE_INVALID",
       path,
-      "El tamaño máximo debe estar entre 1 y 25 MB.",
+      `El tamaño máximo debe estar entre 1 y ${WORKFLOW_LIMITS.maxFileSizeMb} MB.`,
       stageKey,
     );
   }
@@ -554,7 +582,8 @@ function run(input: unknown, ctx: WorkflowValidationContext, c: Collector) {
         `El sujeto debe ser uno de: ${WORKFLOW_SUBJECT_TYPES.join(", ")}.`,
       );
     } else {
-      checkKeys(c, s, ["type"], "subject");
+      checkKeys(c, s, ["type", "collection"], "subject");
+      checkSubjectCollection(s, ctx, c);
     }
   }
   if (input["triggers"] !== undefined) {
@@ -572,24 +601,44 @@ function run(input: unknown, ctx: WorkflowValidationContext, c: Collector) {
               : t["kind"] === "schedule"
                 ? Object.keys(t).every((k) => k === "kind" || k === "cron") &&
                   isStr(t["cron"])
-                : t["kind"] === "public_form" &&
-                  Object.keys(t).every((k) => k === "kind" || k === "stage") &&
-                  (t["stage"] === undefined || isStr(t["stage"]))),
+                : t["kind"] === "webhook"
+                  ? Object.keys(t).length === 1
+                  : t["kind"] === "email"
+                    ? Object.keys(t).every((k) => k === "kind" || k === "map")
+                    : t["kind"] === "record_date"
+                      ? Object.keys(t).every(
+                          (k) =>
+                            k === "kind" ||
+                            k === "field" ||
+                            k === "days_before" ||
+                            k === "map",
+                        )
+                      : t["kind"] === "public_form" &&
+                        Object.keys(t).every(
+                          (k) => k === "kind" || k === "stage",
+                        ) &&
+                        (t["stage"] === undefined || isStr(t["stage"]))),
       )
     ) {
       c.err(
         "SHAPE_INVALID",
         "triggers",
-        'Los disparadores permitidos son {"kind":"manual"}, {"kind":"public_form"}, {"kind":"event"} y {"kind":"schedule","cron":"…"}.',
+        'Los disparadores permitidos son {"kind":"manual"}, {"kind":"public_form"}, {"kind":"event"}, {"kind":"schedule","cron":"…"}, {"kind":"webhook"}, {"kind":"email"} y {"kind":"record_date","field":"…","days_before":N}.',
       );
-    } else if (
-      input["triggers"].filter((t) => t["kind"] === "public_form").length > 1
-    ) {
-      c.err(
-        "SHAPE_INVALID",
-        "triggers",
-        "Solo puede haber un disparador de formulario público.",
-      );
+    } else {
+      for (const kind of ["public_form", "webhook", "email"]) {
+        if (input["triggers"].filter((t) => t["kind"] === kind).length > 1) {
+          c.err(
+            "SHAPE_INVALID",
+            "triggers",
+            kind === "public_form"
+              ? "Solo puede haber un disparador de formulario público."
+              : kind === "webhook"
+                ? "Solo puede haber un disparador de webhook de entrada."
+                : "Solo puede haber un disparador de correo entrante.",
+          );
+        }
+      }
     }
   }
   if (input["start_roles"] !== undefined) {
@@ -622,7 +671,164 @@ function run(input: unknown, ctx: WorkflowValidationContext, c: Collector) {
   checkPublicFormTrigger(input, c);
   checkEventTriggers(input, fields, c);
   checkScheduleTriggers(input, c);
+  checkExternalTriggers(input, fields, ctx, c);
   checkGoverns(input, fields, c);
+}
+
+/** P3.6: `subject.collection` names a collection, only for `custom_record`. */
+function checkSubjectCollection(
+  s: Json,
+  ctx: WorkflowValidationContext,
+  c: Collector,
+) {
+  const collection = s["collection"];
+  if (s["type"] !== "custom_record") {
+    if (collection !== undefined) {
+      c.err(
+        "SHAPE_INVALID",
+        "subject.collection",
+        "Solo un flujo sobre un registro personalizado indica su colección.",
+      );
+    }
+    return;
+  }
+  if (!isStr(collection) || !RECORD_KEY_PATTERN.test(collection)) {
+    c.err(
+      "COLLECTION_UNKNOWN",
+      "subject.collection",
+      "Un flujo sobre un registro personalizado necesita la clave de su colección.",
+    );
+    return;
+  }
+  if (ctx.collections && !ctx.collections[collection]) {
+    c.err(
+      "COLLECTION_UNKNOWN",
+      "subject.collection",
+      `La colección "${collection}" no existe en la tienda.`,
+    );
+  }
+}
+
+/**
+ * P3.1 / P3.3 / P3.6: webhook, email and record-date triggers start as
+ * `system` (nobody "initiates" them). Email and record-date maps only use
+ * their own tokens; a record-date trigger needs a date field of the flow's
+ * collection and 0..365 days.
+ */
+function checkExternalTriggers(
+  input: Json,
+  fields: FieldMap,
+  ctx: WorkflowValidationContext,
+  c: Collector,
+) {
+  const triggers = input["triggers"];
+  if (!Array.isArray(triggers)) return;
+  const stages = Array.isArray(input["stages"])
+    ? (input["stages"] as unknown[]).filter(isObj)
+    : [];
+  const start = stages.find((st) => st["start"] === true);
+  const subject = isObj(input["subject"]) ? input["subject"] : undefined;
+  const recordDateFields = new Set<string>();
+  triggers.forEach((t, index) => {
+    if (!isObj(t)) return;
+    const kind = t["kind"];
+    if (kind !== "webhook" && kind !== "email" && kind !== "record_date") {
+      return;
+    }
+    const path = `triggers[${index}]`;
+    const assignee = start?.["assignee"];
+    if (start && isObj(assignee) && assignee["kind"] === "initiator") {
+      c.err(
+        "ASSIGNEE_NOT_ALLOWED",
+        path,
+        "Este disparador no tiene a nadie que inicie la solicitud: la etapa inicial no puede estar asignada a quien inicia (usa un rol, un grupo, un usuario o un campo).",
+        isStr(start["key"]) ? start["key"] : undefined,
+      );
+    }
+    if (kind === "email") {
+      checkTokenMap(
+        t["map"],
+        `${path}.map`,
+        fields,
+        WORKFLOW_EMAIL_TOKENS.map((e) => `email.${e.key}`),
+        "un correo entrante",
+        c,
+      );
+      return;
+    }
+    if (kind !== "record_date") return;
+    const days = t["days_before"];
+    if (!isInt(days) || days < 0 || days > WORKFLOW_LIMITS.maxRecordDateDaysBefore) {
+      c.err(
+        "TRIGGER_INVALID",
+        `${path}.days_before`,
+        `Los días de anticipación deben ser un entero entre 0 y ${WORKFLOW_LIMITS.maxRecordDateDaysBefore}.`,
+      );
+    }
+    const collection =
+      subject?.["type"] === "custom_record" && isStr(subject["collection"])
+        ? subject["collection"]
+        : undefined;
+    if (!collection) {
+      c.err(
+        "TRIGGER_INVALID",
+        path,
+        "El disparador por fecha de un registro necesita un flujo sobre un registro personalizado (sujeto con su colección).",
+      );
+      return;
+    }
+    const recordFields = ctx.collections?.[collection];
+    if (!isStr(t["field"]) || !RECORD_KEY_PATTERN.test(t["field"])) {
+      c.err(
+        "TRIGGER_INVALID",
+        `${path}.field`,
+        "El disparador por fecha necesita el campo de fecha del registro.",
+      );
+    } else {
+      // One request per record and date: a second trigger on the same field
+      // would never start (same key) nor use its own map.
+      if (recordDateFields.has(t["field"])) {
+        c.err(
+          "TRIGGER_INVALID",
+          `${path}.field`,
+          `Ya hay un disparador por la fecha "${t["field"]}": cada fecha inicia una sola solicitud. Usa otro campo de fecha.`,
+        );
+      }
+      recordDateFields.add(t["field"]);
+      const f = recordFields?.find((rf) => rf.key === t["field"]);
+      if (recordFields && (!f || f.type !== "date")) {
+        c.err(
+          "TRIGGER_INVALID",
+          `${path}.field`,
+          `El campo "${t["field"]}" no es un campo de fecha de la colección "${collection}".`,
+        );
+      }
+    }
+    const allowed = [
+      ...WORKFLOW_RECORD_TOKENS,
+      ...(recordFields ?? []).map((rf) => `record.${rf.key}`),
+    ];
+    if (recordFields) {
+      checkTokenMap(t["map"], `${path}.map`, fields, allowed, "un registro", c);
+    } else if (t["map"] !== undefined) {
+      // Without the store's collections only the shape and fixed tokens are
+      // known: any `{{record.<key>}}` passes here, the server re-checks it.
+      checkTokenMap(
+        t["map"],
+        `${path}.map`,
+        fields,
+        [
+          ...allowed,
+          ...Object.values(isObj(t["map"]) ? t["map"] : {})
+            .filter(isStr)
+            .flatMap((v) => tokensOf(v))
+            .filter((tok) => /^record\.[a-z][a-z0-9_-]{0,79}$/.test(tok)),
+        ],
+        "un registro",
+        c,
+      );
+    }
+  });
 }
 
 /** P2.10: cron triggers start as `system`, so nobody "initiates" them. */
@@ -1363,7 +1569,8 @@ function checkStages(
           sk,
         );
       else {
-        checkKeys(c, s["form"], ["fields"], `${p}.form`, sk);
+        checkKeys(c, s["form"], ["fields", "steps"], `${p}.form`, sk);
+        checkFormSteps(s["form"], `${p}.form`, L, sk, c);
         const used = new Set<string>();
         (s["form"]["fields"] as string[]).forEach((fk, j) => {
           if (!fields.has(fk))
@@ -1717,12 +1924,28 @@ function checkRequirements(
         checkKeys(
           c,
           r,
-          ["kind", "key", "label", "accept", "max_size_mb", "blocks_exit"],
+          [
+            "kind",
+            "key",
+            "label",
+            "accept",
+            "max_size_mb",
+            "blocks_exit",
+            "external",
+          ],
           p,
           sk,
         );
         checkAccept(c, r["accept"], `${p}.accept`, sk);
         checkMaxSize(c, r["max_size_mb"], `${p}.max_size_mb`, sk);
+        if (r["external"] !== undefined && typeof r["external"] !== "boolean") {
+          c.err(
+            "REQUIREMENT_INVALID",
+            `${p}.external`,
+            `${L}: "external" debe ser verdadero o falso.`,
+            sk,
+          );
+        }
         break;
       case "file_field": {
         checkKeys(c, r, ["kind", "key", "label", "field"], p, sk);
@@ -1910,6 +2133,9 @@ function literalError(spec: WorkflowActionInputSpec, value: unknown): string | n
       ) {
         return `debe ser un número${integer ? " entero" : ""}${min !== undefined ? ` mayor o igual a ${min}` : ""}`;
       }
+      if (spec.max !== undefined && n > spec.max) {
+        return `debe ser menor o igual a ${spec.max}`;
+      }
       return null;
     }
     case "date":
@@ -1932,6 +2158,61 @@ function literalError(spec: WorkflowActionInputSpec, value: unknown): string | n
 }
 
 /**
+ * P3.2: `output` of the HTTP node maps response paths (`status`, `body`,
+ * `body.<path>`, `headers.<name>`) to declared, non-file fields. Any other
+ * action rejects it.
+ */
+function checkHttpOutput(
+  a: Json,
+  name: WorkflowVendixActionName,
+  p: string,
+  L: string,
+  sk: string | undefined,
+  fields: FieldMap,
+  c: Collector,
+) {
+  const output = a["output"];
+  if (output === undefined) return;
+  if (name !== "vendix.http.request") {
+    c.err(
+      "HTTP_OUTPUT_INVALID",
+      p,
+      `${L}: solo la llamada HTTP guarda su respuesta en campos.`,
+      sk,
+    );
+    return;
+  }
+  if (!isObj(output) || Object.keys(output).length > WORKFLOW_LIMITS.maxHttpOutputs) {
+    c.err(
+      "HTTP_OUTPUT_INVALID",
+      p,
+      `${L}: la respuesta se guarda en un objeto campo → ruta de hasta ${WORKFLOW_LIMITS.maxHttpOutputs} entradas.`,
+      sk,
+    );
+    return;
+  }
+  for (const [field, path] of Object.entries(output)) {
+    const f = fields.get(field);
+    if (!f || f.type === "file" || f.type === "user" || f.type === "multiselect") {
+      c.err(
+        "FIELD_UNKNOWN",
+        `${p}.${field}`,
+        `${L}: la respuesta no puede guardarse en "${field}" (debe ser un campo declarado de texto, número, fecha, booleano o selección).`,
+        sk,
+      );
+    }
+    if (!isStr(path) || !WORKFLOW_HTTP_OUTPUT_PATH.test(path)) {
+      c.err(
+        "HTTP_OUTPUT_INVALID",
+        `${p}.${field}`,
+        `${L}: "${String(path)}" no es una ruta de respuesta válida (status, body, body.a.b o headers.nombre).`,
+        sk,
+      );
+    }
+  }
+}
+
+/**
  * `vendix.*` actions: `map` values are literals or tokens of the closed
  * catalog `{{fields.<declared field>}}`, `{{instance.reference}}`,
  * `{{instance.title}}`. Required keys must be present; unknown keys and tokens
@@ -1947,8 +2228,10 @@ function checkVendixAction(
   c: Collector,
 ) {
   const name = a["action"] as WorkflowVendixActionName;
-  checkKeys(c, a, ["action", "map", "on_error"], p, sk);
+  checkKeys(c, a, ["action", "map", "on_error", "output"], p, sk);
   if (a["on_error"] !== undefined) checkErrorPolicy(a["on_error"], `${p}.on_error`, L, sk, c);
+  checkHttpOutput(a, name, `${p}.output`, L, sk, fields, c);
+  const secretInputs = WORKFLOW_SECRET_INPUTS[name] ?? [];
   const map = a["map"];
   if (!isObj(map)) {
     c.err(
@@ -2009,13 +2292,33 @@ function checkVendixAction(
         c.err("MAP_INVALID", vp, `${L}: el valor de "${key}" supera los 2000 caracteres.`, sk);
         continue;
       }
-      if (hasStrayBraces(value)) {
+      // The HTTP body is usually JSON: its braces are content, not tokens.
+      if (!secretInputs.includes(key) && hasStrayBraces(value)) {
         c.err("TOKEN_UNKNOWN", vp, `${L}: el valor de "${key}" tiene llaves que no forman un token válido {{...}}.`, sk);
       }
       const tokens = tokensOf(value);
       for (const tok of tokens) {
         const isField =
           tok.startsWith("fields.") && fields.has(tok.slice("fields.".length));
+        if (tok.startsWith("secrets.") && secretInputs.includes(key)) {
+          const secret = tok.slice("secrets.".length);
+          if (!WORKFLOW_SECRET_NAME_PATTERN.test(secret)) {
+            c.err(
+              "SECRET_UNKNOWN",
+              vp,
+              `${L}: "{{${tok}}}" no es un nombre de secreto válido (MAYÚSCULAS, números y "_").`,
+              sk,
+            );
+          } else if (ctx.secretNames && !ctx.secretNames.includes(secret)) {
+            c.err(
+              "SECRET_UNKNOWN",
+              vp,
+              `${L}: el secreto "${secret}" no existe en la tienda.`,
+              sk,
+            );
+          }
+          continue;
+        }
         if (!isField && !WORKFLOW_INSTANCE_TOKENS.includes(tok)) {
           c.err(
             "TOKEN_UNKNOWN",
@@ -2325,6 +2628,55 @@ function checkTypeConfig(
   if (t === "subflow") checkSubflow(s["subflow"], `${p}.subflow`, L, sk, fields, ctx, c);
   if (t === "wait") checkWait(s["wait"], `${p}.wait`, L, sk, fields, c);
   if (t === "loop") checkLoop(s["loop"], `${p}.loop`, L, sk, fields, c);
+}
+
+/** P3.4: steps list exactly the form's fields, each once and in order. */
+function checkFormSteps(
+  form: Json,
+  path: string,
+  L: string,
+  sk: string | undefined,
+  c: Collector,
+) {
+  const steps = form["steps"];
+  if (steps === undefined) return;
+  const p = `${path}.steps`;
+  if (
+    !Array.isArray(steps) ||
+    steps.length < 1 ||
+    steps.length > WORKFLOW_LIMITS.maxFormSteps ||
+    !steps.every(
+      (st) =>
+        isObj(st) &&
+        isNonEmptyStr(st["title"]) &&
+        (st["title"] as string).length <= 80 &&
+        Array.isArray(st["fields"]) &&
+        st["fields"].length > 0 &&
+        st["fields"].every(isStr) &&
+        Object.keys(st).every((k) => k === "title" || k === "fields"),
+    )
+  ) {
+    c.err(
+      "FORM_STEPS_INVALID",
+      p,
+      `${L}: los pasos del formulario deben ser de 1 a ${WORKFLOW_LIMITS.maxFormSteps}, cada uno con un título (máximo 80) y al menos un campo.`,
+      sk,
+    );
+    return;
+  }
+  const flat = (steps as Json[]).flatMap((st) => st["fields"] as string[]);
+  const fields = form["fields"] as string[];
+  if (
+    flat.length !== fields.length ||
+    flat.some((fk, i) => fk !== fields[i])
+  ) {
+    c.err(
+      "FORM_STEPS_INVALID",
+      p,
+      `${L}: los pasos deben repartir exactamente los campos del formulario, cada uno una vez y en el mismo orden.`,
+      sk,
+    );
+  }
 }
 
 function checkFormFields(

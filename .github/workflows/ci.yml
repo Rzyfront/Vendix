@@ -354,6 +354,42 @@ jobs:
           src/domains/store/workflows/instances/workflow-instances.service.spec.ts
           src/domains/store/workflows/inbox/workflow-inbox.service.spec.ts
           src/domains/ecommerce/workflows-public/workflow-public-form.service.spec.ts
+      # Externos e inéditos (Flujos P3): webhook de entrada, nodo HTTP y
+      # secretos, conectores, formularios públicos con subida por partes y
+      # captcha, portal de seguimiento y registros personalizados.
+      - name: Jest — externos e inéditos (Flujos P3)
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js --runTestsByPath
+          src/common/services/s3.service.multipart.spec.ts
+          src/common/workflows/contract/workflow-validator.p3.spec.ts
+          src/common/workflows/contract/workflow-validator.spec.ts
+          src/domains/ecommerce/workflows-public/workflow-public-captcha.service.spec.ts
+          src/domains/ecommerce/workflows-public/workflow-public-form.p3.spec.ts
+          src/domains/ecommerce/workflows-public/workflow-public-form.service.spec.ts
+          src/domains/ecommerce/workflows-public/workflow-tracking.spec.ts
+          src/domains/received-documents/services/document-email-sqs-consumer.service.spec.ts
+          src/domains/store/workflows/connectors/connectors.controller.spec.ts
+          src/domains/store/workflows/connectors/connectors.service.spec.ts
+          src/domains/store/workflows/definitions/workflow-definitions.service.spec.ts
+          src/domains/store/workflows/engine/actions/connectors.actions.spec.ts
+          src/domains/store/workflows/engine/actions/http.actions.spec.ts
+          src/domains/store/workflows/engine/workflow-action-registry.spec.ts
+          src/domains/store/workflows/engine/workflow-actions.spec.ts
+          src/domains/store/workflows/engine/workflow-external-start.spec.ts
+          src/domains/store/workflows/engine/workflow-http-output.spec.ts
+          src/domains/store/workflows/engine/workflow-record-date.cron.spec.ts
+          src/domains/store/workflows/inbound/workflow-inbound-admin.spec.ts
+          src/domains/store/workflows/inbound/workflow-inbound-receiver.service.spec.ts
+          src/domains/store/workflows/inbound/workflow-inbound.controller.spec.ts
+          src/domains/store/workflows/inbound/workflow-mailbox-receiver.service.spec.ts
+          src/domains/store/workflows/public-link/workflow-public-links.service.spec.ts
+          src/domains/store/workflows/records/workflow-collections.service.spec.ts
+          src/domains/store/workflows/records/workflow-records.dto.spec.ts
+          src/domains/store/workflows/records/workflow-records.service.spec.ts
+          src/domains/store/workflows/secrets/workflow-http-test.service.spec.ts
+          src/domains/store/workflows/secrets/workflow-secrets.service.spec.ts
+          src/prisma/services/store-prisma.workflows.spec.ts
       # Specs que toca la fase P1 de Flujos (acciones, productores y servicios
       # de dominio gobernados): con más de 25 specs cambiados el job de
       # regresiones los omite, así que corren aquí, de forma explícita.

@@ -26,6 +26,7 @@ import { TriggersPanelComponent } from './components/triggers-panel.component';
 import { StagePropertiesComponent } from './components/stage-properties.component';
 import { TransitionMatrixComponent } from './components/transition-matrix.component';
 import { ValidationPanelComponent } from './components/validation-panel.component';
+import { WorkflowConnectionsComponent } from '../inbound/workflow-connections.component';
 import { WorkflowEditorLookups } from './workflow-editor-lookups.service';
 import { WorkflowEditorStore } from './workflow-editor.store';
 
@@ -55,6 +56,7 @@ type CenterView = 'map' | 'matrix';
     TriggersPanelComponent,
     ApprovalGatePanelComponent,
     ValidationPanelComponent,
+    WorkflowConnectionsComponent,
   ],
   template: `
     <div class="flex w-full flex-col gap-3 overflow-x-hidden p-2 md:p-4">
@@ -117,6 +119,17 @@ type CenterView = 'map' | 'matrix';
           <app-card [responsive]="true" class="lg:w-96 lg:shrink-0"><app-stage-properties /></app-card>
         </div>
         <app-card [responsive]="true"><app-triggers-panel /></app-card>
+        @if (hasWebhook() || hasEmail() || store.isPublished()) {
+          <!-- Renders its own card, also for a connection still active after its trigger was switched off. -->
+          <app-workflow-connections
+            [definitionId]="id()"
+            [hasWebhook]="hasWebhook()"
+            [hasEmail]="hasEmail()"
+            [published]="store.isPublished()"
+            [hasUnpublishedChanges]="store.hasUnpublished()"
+            [fieldKeys]="fieldKeys()"
+          />
+        }
         <app-card [responsive]="true"><app-approval-gate-panel /></app-card>
 
         <app-simulator-panel [(isOpen)]="simulateOpen" [definitionId]="id()" />
@@ -142,6 +155,12 @@ export class WorkflowEditorPageComponent implements OnInit {
   ];
   readonly view = signal<CenterView>('map');
   readonly id = computed(() => this.store.definitionId() ?? 0);
+  /** Draft triggers that need a connection card (webhook URL, mailbox). */
+  readonly hasWebhook = computed(() => (this.store.draft()?.triggers ?? []).some((t) => t.kind === 'webhook'));
+  readonly hasEmail = computed(() => (this.store.draft()?.triggers ?? []).some((t) => t.kind === 'email'));
+  readonly fieldKeys = computed(() =>
+    (this.store.draft()?.fields ?? []).filter((f) => f.type !== 'file').map((f) => f.key),
+  );
   readonly simulateOpen = signal(false);
   readonly jsonOpen = signal(false);
   readonly historyOpen = signal(false);
