@@ -53,6 +53,9 @@ const UNIQUES: Record<string, string[][]> = {
 };
 
 const DEFAULTS: Record<string, Row> = {
+  workflow_definitions: {
+    is_enabled: true,
+  },
   workflow_approval_gates: {
     instance_id: null,
     revision: 1,
@@ -75,6 +78,7 @@ const DEFAULTS: Record<string, Row> = {
     outcome_comment: null,
     completed_by_user_id: null,
     completed_at: null,
+    branch_key: null,
   },
   workflow_instances: {
     status: 'active',
@@ -88,6 +92,10 @@ const DEFAULTS: Record<string, Row> = {
     completed_at: null,
     row_version: 0,
     data: {},
+    runtime: {},
+    parent_instance_id: null,
+    parent_stage_key: null,
+    parent_entry_seq: null,
   },
   workflow_outbox: {
     status: 'pending',

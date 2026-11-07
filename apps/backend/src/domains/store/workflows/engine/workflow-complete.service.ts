@@ -1,21 +1,28 @@
 import { Injectable } from '@nestjs/common';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import {
+  WorkflowDefinitionV1,
+  WorkflowStageDef,
+  applyComputedFields,
   resolveTransition,
   stageOutcomes,
   validateFormValues,
 } from '@common/workflows/contract';
+import { firedGuard } from './workflow-guards';
 import { WorkflowAdvanceService } from './workflow-advance.service';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import {
   CompleteTaskInput,
   WorkflowActor,
   WorkflowCommandResult,
+  WorkflowInstanceRow,
   WorkflowRequirementsService,
+  WorkflowTaskRow,
   WorkflowTx,
 } from './workflow-engine.types';
 import { COMPLETE_EVENT_TYPES } from './workflow-idempotency';
 import { WorkflowEventsService } from './workflow-events.service';
+import { WorkflowStageService } from './workflow-stage.service';
 import {
   WorkflowCallContext,
   WorkflowLoaderService,
@@ -33,6 +40,7 @@ export class WorkflowCompleteService {
     private readonly requirements: WorkflowRequirementsService,
     private readonly advancer: WorkflowAdvanceService,
     private readonly events: WorkflowEventsService,
+    private readonly stages: WorkflowStageService,
   ) {}
 
   async execute(
@@ -73,6 +81,9 @@ export class WorkflowCompleteService {
     if (stage.key !== task.stage_key || task.stage_entry_seq !== instance.stage_entry_seq) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_TASK_CLOSED);
     }
+    if (stage.type === 'parallel') {
+      return this.completeBranch(tx, ctx, actor, input, { task, instance, definition, stage });
+    }
     if (!stageOutcomes(stage).includes(input.outcome)) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_OUTCOME_INVALID);
     }
@@ -93,6 +104,14 @@ export class WorkflowCompleteService {
         });
       }
       data = { ...data, ...form.values };
+    }
+    data = applyComputedFields(definition, data);
+    // P2.5: a guard blocks with its message or sends the request elsewhere.
+    const guard = firedGuard(stage, input.outcome, data, definition.fields);
+    if (guard && !guard.redirect_to) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_GUARD_BLOCKED, guard.message, {
+        stage_key: stage.key,
+      });
     }
 
     // 4. Quorum.
@@ -195,10 +214,12 @@ export class WorkflowCompleteService {
         );
       }
     }
-    // 6. Transition.
-    const transition = resolveTransition(stage, input.outcome, data, definition.fields);
+    // 6. Transition (a redirecting guard wins over the declared branches).
+    const transition = guard?.redirect_to
+      ? { to: guard.redirect_to, on: input.outcome }
+      : resolveTransition(stage, input.outcome, data, definition.fields);
     if (!transition) throw new VendixHttpException(ErrorCodes.WORKFLOW_NO_TRANSITION);
-    if (transition.require_comment && !input.comment?.trim()) {
+    if ('require_comment' in transition && transition.require_comment && !input.comment?.trim()) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_COMMENT_REQUIRED);
     }
     // 7–11.
@@ -212,6 +233,7 @@ export class WorkflowCompleteService {
       actor,
       expectedRowVersion: expected,
       runExitHooks: true,
+      resolved: { submitted: input.outcome === 'submit' || input.outcome === 'approve' },
       doneTaskId: task.id,
       event: {
         type: 'task_completed',
@@ -221,6 +243,7 @@ export class WorkflowCompleteService {
           outcome: input.outcome,
           comment: input.comment ?? null,
           advanced: true,
+          ...(guard ? { guard_message: guard.message } : {}),
         },
       },
       onCas: async () => {
@@ -261,6 +284,17 @@ export class WorkflowCompleteService {
         }
       },
     });
+    if (guard) {
+      await this.events.append(tx, {
+        store_id: ctx.store_id,
+        instance_id: instance.id,
+        type: 'guard_redirected',
+        from_stage_key: stage.key,
+        to_stage_key: transition.to,
+        actor,
+        payload: { message: guard.message, to: transition.to },
+      });
+    }
     return {
       instance: updated,
       task: await this.loader.loadTask(tx, task.id),
@@ -269,6 +303,211 @@ export class WorkflowCompleteService {
       from_stage_key: stage.key,
       to_stage_key: transition.to,
     };
+  }
+
+  /**
+   * P2.1: a branch of a parallel stage submits its part. Concurrent branches
+   * serialize on the instance row (bump first, then read fresh, like the
+   * quorum), so the branch that completes the join always sees the others and
+   * the join fires exactly once.
+   */
+  private async completeBranch(
+    tx: WorkflowTx,
+    ctx: WorkflowCallContext,
+    actor: WorkflowActor,
+    input: CompleteTaskInput,
+    loaded: {
+      task: WorkflowTaskRow;
+      instance: WorkflowInstanceRow;
+      definition: WorkflowDefinitionV1;
+      stage: WorkflowStageDef;
+    },
+  ): Promise<WorkflowCommandResult> {
+    const { definition, stage } = loaded;
+    const parallel = stage.parallel;
+    const branch = parallel?.branches.find((b) => b.key === loaded.task.branch_key);
+    if (!parallel || !branch) throw new VendixHttpException(ErrorCodes.WORKFLOW_TASK_CLOSED);
+    if (input.outcome !== 'submit') {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_OUTCOME_INVALID);
+    }
+    const form = validateFormValues(
+      definition,
+      { ...stage, form: branch.form ?? { fields: [] } },
+      input.values ?? {},
+    );
+    if (!form.ok) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_FORM_INVALID, undefined, {
+        errors: form.errors,
+      });
+    }
+
+    const lock = await tx.workflow_instances.updateMany({
+      where: {
+        id: loaded.instance.id,
+        store_id: ctx.store_id,
+        status: 'active',
+        current_stage_key: stage.key,
+        stage_entry_seq: loaded.instance.stage_entry_seq,
+      },
+      data: { row_version: { increment: 1 } },
+    });
+    if (lock.count === 0) throw new VendixHttpException(ErrorCodes.WORKFLOW_STALE);
+    const fresh = await this.loader.loadInstance(tx, loaded.instance.id);
+    const done = await tx.workflow_tasks.updateMany({
+      where: { id: loaded.task.id, store_id: ctx.store_id, status: { in: ['open', 'claimed'] } },
+      data: {
+        status: 'done',
+        outcome: 'submit',
+        outcome_comment: input.comment ?? null,
+        completed_by_user_id: ctx.user_id,
+        completed_at: new Date(),
+        ...(loaded.task.assignee_user_id === null && { assignee_user_id: ctx.user_id }),
+      },
+    });
+    if (done.count === 0) throw new VendixHttpException(ErrorCodes.WORKFLOW_TASK_CLOSED);
+
+    // The branch's values and `on_submit` hooks, written under the lock.
+    const submitted = this.stagesApply(stage, { ...(fresh.data ?? {}), ...form.values }, fresh);
+    const data = applyComputedFields(definition, submitted.data);
+    const saved = await tx.workflow_instances.updateMany({
+      where: { id: fresh.id, store_id: ctx.store_id, row_version: fresh.row_version },
+      data: { data, row_version: { increment: 1 } },
+    });
+    if (saved.count === 0) throw new VendixHttpException(ErrorCodes.WORKFLOW_STALE);
+    let instance: WorkflowInstanceRow = { ...fresh, data, row_version: fresh.row_version + 1 };
+    await this.stagesEnqueue(tx, instance, stage.key, submitted);
+
+    const doneCount = await tx.workflow_tasks.count({
+      where: {
+        store_id: ctx.store_id,
+        instance_id: instance.id,
+        stage_key: stage.key,
+        stage_entry_seq: instance.stage_entry_seq,
+        branch_key: { not: null },
+        status: 'done',
+      },
+    });
+    const total = parallel.branches.length;
+    const needed =
+      parallel.join === 'any' ? 1 : parallel.join === 'n_of_m' ? (parallel.required ?? total) : total;
+    const joined = doneCount >= needed;
+    await this.events.append(tx, {
+      store_id: ctx.store_id,
+      instance_id: instance.id,
+      type: 'branch_completed',
+      from_stage_key: stage.key,
+      to_stage_key: stage.key,
+      actor,
+      payload: {
+        task_id: loaded.task.id,
+        branch_key: branch.key,
+        branch_name: branch.name,
+        comment: input.comment ?? null,
+        done: doneCount,
+        total,
+        needed,
+        advanced: false,
+      },
+      idempotencyKey: input.idempotencyKey ?? null,
+    });
+    await this.events.emitWebhook(tx, instance, 'workflow.task.completed', {
+      task_id: loaded.task.id,
+      stage_key: stage.key,
+      outcome: 'submit',
+      branch_key: branch.key,
+    });
+    const task = await this.loader.loadTask(tx, loaded.task.id);
+    if (!joined) {
+      return {
+        instance,
+        task,
+        advanced: false,
+        replayed: false,
+        from_stage_key: stage.key,
+        to_stage_key: stage.key,
+      };
+    }
+
+    const guard = firedGuard(stage, 'joined', data, definition.fields);
+    if (guard && !guard.redirect_to) {
+      // The join is reached but held: the timeline says why; a manager moves it.
+      await this.events.append(tx, {
+        store_id: ctx.store_id,
+        instance_id: instance.id,
+        type: 'guard_blocked',
+        from_stage_key: stage.key,
+        to_stage_key: stage.key,
+        actor: { type: 'system', id: null },
+        payload: { message: guard.message },
+      });
+      return {
+        instance,
+        task,
+        advanced: false,
+        replayed: false,
+        from_stage_key: stage.key,
+        to_stage_key: stage.key,
+      };
+    }
+    const transition = guard?.redirect_to
+      ? { to: guard.redirect_to }
+      : resolveTransition(stage, 'joined', data, definition.fields);
+    if (!transition) throw new VendixHttpException(ErrorCodes.WORKFLOW_NO_TRANSITION);
+    instance = await this.advancer.advance({
+      tx,
+      instance,
+      definition,
+      fromStage: stage,
+      toStageKey: transition.to,
+      data,
+      actor: { type: 'system', id: null },
+      expectedRowVersion: instance.row_version,
+      runExitHooks: true,
+      resolved: { submitted: false },
+      doneTaskId: loaded.task.id,
+      event: {
+        type: guard ? 'guard_redirected' : 'joined',
+        payload: {
+          join: parallel.join,
+          done: doneCount,
+          total,
+          ...(guard ? { message: guard.message, to: transition.to } : {}),
+        },
+      },
+    });
+    return {
+      instance,
+      task,
+      advanced: true,
+      replayed: false,
+      from_stage_key: stage.key,
+      to_stage_key: transition.to,
+    };
+  }
+
+  private stagesApply(
+    stage: WorkflowStageDef,
+    data: Record<string, unknown>,
+    instance: WorkflowInstanceRow,
+  ) {
+    return this.stages.applyHooks([stage.on_submit], data, instance);
+  }
+
+  private async stagesEnqueue(
+    tx: WorkflowTx,
+    instance: WorkflowInstanceRow,
+    stageKey: string,
+    applied: ReturnType<WorkflowStageService['applyHooks']>,
+  ): Promise<void> {
+    for (const payload of applied.notifies) {
+      await this.events.enqueue(tx, {
+        store_id: instance.store_id,
+        instance_id: instance.id,
+        kind: 'notify',
+        payload: payload as unknown as Record<string, unknown>,
+      });
+    }
+    await this.stages.enqueueVendixActions(tx, instance, stageKey, applied.vendix);
   }
 
   /**

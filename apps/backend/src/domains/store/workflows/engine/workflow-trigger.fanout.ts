@@ -42,6 +42,7 @@ export class WorkflowTriggerFanout {
       where: {
         store_id: storeId,
         status: 'active',
+        is_enabled: true,
         published_version_id: { not: null },
       },
       select: { id: true, published_version_id: true },

@@ -3,6 +3,7 @@ import { ErrorCodes, VendixHttpException } from '@common/errors';
 import {
   WorkflowDefinitionV1,
   WorkflowStageDef,
+  applyComputedFields,
   findStage,
 } from '@common/workflows/contract';
 import { WorkflowEventsService } from './workflow-events.service';
@@ -14,6 +15,7 @@ import {
 import {
   WorkflowActor,
   WorkflowInstanceRow,
+  WorkflowInstanceRuntime,
   WorkflowTx,
 } from './workflow-engine.types';
 
@@ -29,6 +31,13 @@ export interface AdvanceArgs {
   expectedRowVersion: number;
   /** Forced transitions skip the `on_exit` hooks of the stage left. */
   runExitHooks: boolean;
+  /**
+   * P2.6: the stage resolved with an outcome (not a forced move): its
+   * `on_complete` hooks run, preceded by `on_submit` when a person submitted.
+   */
+  resolved?: { submitted: boolean };
+  /** P2.4: engine state written together with the move (loop counters). */
+  runtime?: WorkflowInstanceRuntime;
   event: {
     type: string;
     payload: Record<string, unknown>;
@@ -58,10 +67,19 @@ export class WorkflowAdvanceService {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_STAGE_NOT_FOUND);
     }
     const now = new Date();
-    const exit = a.runExitHooks
-      ? this.stages.applyActions(a.fromStage.on_exit, a.data, a.instance)
-      : { data: a.data, notifies: [], vendix: [] };
-    const enter = this.stages.applyActions(toStage.on_enter, exit.data, a.instance);
+    // P2.6: on_submit → on_complete → on_exit → on_enter, data threaded through.
+    const hooks = this.stages.applyHooks(
+      [
+        a.resolved?.submitted ? a.fromStage.on_submit : undefined,
+        a.resolved ? a.fromStage.on_complete : undefined,
+        a.runExitHooks ? a.fromStage.on_exit : undefined,
+        toStage.on_enter,
+      ],
+      a.data,
+      a.instance,
+    );
+    // P2.9: calculated fields follow every write.
+    const enter = { ...hooks, data: applyComputedFields(a.definition, hooks.data) };
     const patch = this.stages.stagePatch(toStage, now, a.instance.stage_entry_seq);
 
     // 7. CAS. Nothing else is written before it succeeds.
@@ -76,6 +94,7 @@ export class WorkflowAdvanceService {
       data: {
         ...patch,
         data: enter.data,
+        ...(a.runtime ? { runtime: a.runtime } : {}),
         row_version: { increment: 1 },
       },
     });
@@ -86,6 +105,7 @@ export class WorkflowAdvanceService {
       ...a.instance,
       ...(patch as unknown as Partial<WorkflowInstanceRow>),
       data: enter.data,
+      ...(a.runtime ? { runtime: a.runtime } : {}),
       row_version: a.expectedRowVersion + 1,
     };
     if (a.onCas) await a.onCas();
@@ -121,8 +141,8 @@ export class WorkflowAdvanceService {
       instance: updated,
       stage: toStage,
       actor: a.actor,
-      notifies: [...exit.notifies, ...enter.notifies],
-      vendix: [...exit.vendix, ...enter.vendix],
+      notifies: enter.notifies,
+      vendix: enter.vendix,
     });
     if (toStage.type === 'end') {
       // P1.3: the gates this request decides close with it, atomically.

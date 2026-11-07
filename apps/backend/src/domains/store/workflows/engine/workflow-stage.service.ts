@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import {
   WorkflowActionDef,
+  WorkflowBranchDef,
   WorkflowDefinitionV1,
   WorkflowStageDef,
+  computeWaitUntil,
   isHumanStage,
 } from '@common/workflows/contract';
+import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { OUTBOX_MAX_ATTEMPTS } from './workflow-outbox.dispatcher.constants';
 import { AppliedVendixAction, applyActionList } from './workflow-rules';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import { WorkflowEventsService } from './workflow-events.service';
@@ -14,6 +18,11 @@ import {
   WorkflowNotifyPayload,
   WorkflowTx,
 } from './workflow-engine.types';
+
+/** Outbox kinds of the P2 engine. */
+export const SUBFLOW_START_OUTBOX_KIND = 'subflow_start';
+export const SUBFLOW_CLOSED_OUTBOX_KIND = 'subflow_closed';
+export const DEFAULT_STORE_TIMEZONE = 'America/Bogota';
 
 export interface InstanceStagePatch {
   current_stage_key: string;
@@ -32,7 +41,41 @@ export class WorkflowStageService {
   constructor(
     private readonly assignment: WorkflowAssignmentService,
     private readonly events: WorkflowEventsService,
+    private readonly prisma: StorePrismaService,
   ) {}
+
+  /** Runs several hook lists in order, threading the data through them. */
+  applyHooks(
+    lists: (WorkflowActionDef[] | undefined)[],
+    data: Record<string, unknown>,
+    instance: Pick<WorkflowInstanceRow, 'reference' | 'title'> & {
+      subject_id?: number | null;
+    },
+  ): {
+    data: Record<string, unknown>;
+    notifies: WorkflowNotifyPayload[];
+    vendix: AppliedVendixAction[];
+  } {
+    let acc = { data, notifies: [] as WorkflowNotifyPayload[], vendix: [] as AppliedVendixAction[] };
+    for (const list of lists) {
+      if (!list?.length) continue;
+      const r = this.applyActions(list, acc.data, instance);
+      acc = {
+        data: r.data,
+        notifies: [...acc.notifies, ...r.notifies],
+        vendix: [...acc.vendix, ...r.vendix],
+      };
+    }
+    return acc;
+  }
+
+  /** Store time zone for wall-clock waits and schedules. */
+  async storeTimezone(storeId: number): Promise<string> {
+    const store = await this.prisma
+      .withoutScope()
+      .stores.findFirst({ where: { id: storeId }, select: { timezone: true } });
+    return store?.timezone || DEFAULT_STORE_TIMEZONE;
+  }
 
   /** `set_field` mutates a copy of `data`; `notify` becomes an outbox payload. */
   applyActions(
@@ -92,6 +135,7 @@ export class WorkflowStageService {
     actions: AppliedVendixAction[] | undefined,
   ): Promise<void> {
     for (const a of actions ?? []) {
+      const retries = a.on_error?.retries;
       await this.events.enqueue(tx, {
         store_id: instance.store_id,
         instance_id: instance.id,
@@ -100,6 +144,10 @@ export class WorkflowStageService {
           action: a.action,
           map_resolved: a.map_resolved,
           stage_key: stageKey,
+          // P2.7: attempts before the error policy applies (dead-letter).
+          max_attempts:
+            retries === undefined ? OUTBOX_MAX_ATTEMPTS : Math.min(retries + 1, OUTBOX_MAX_ATTEMPTS),
+          ...(a.on_error ? { on_error: a.on_error } : {}),
         },
       });
     }
@@ -150,7 +198,25 @@ export class WorkflowStageService {
       });
     }
     await this.enqueueVendixActions(tx, instance, stage.key, args.vendix);
-    if (stage.type === 'automatic') {
+    if (stage.type === 'end') {
+      await this.notifyParent(tx, instance);
+      return;
+    }
+    if (stage.type === 'wait' && stage.wait) {
+      await this.enterWait(tx, instance, stage);
+      return;
+    }
+    if (stage.type === 'subflow' && stage.subflow) {
+      await this.enterSubflow(tx, instance, stage);
+      return;
+    }
+    if (stage.type === 'parallel' && stage.parallel) {
+      for (const branch of stage.parallel.branches) {
+        await this.createTask(tx, args, branch);
+      }
+      return;
+    }
+    if (stage.type === 'automatic' || stage.type === 'loop') {
       await this.events.enqueue(tx, {
         store_id: instance.store_id,
         instance_id: instance.id,
@@ -164,8 +230,25 @@ export class WorkflowStageService {
       return;
     }
     if (!isHumanStage(stage)) return;
+    await this.createTask(tx, args, null);
+  }
 
-    const assigned = await this.assignment.resolveForStage(tx, stage, instance);
+  /** One task for a human stage, or one per branch of a parallel stage (P2.1). */
+  private async createTask(
+    tx: WorkflowTx,
+    args: {
+      instance: WorkflowInstanceRow;
+      stage: WorkflowStageDef;
+      actor: WorkflowActor;
+    },
+    branch: WorkflowBranchDef | null,
+  ): Promise<void> {
+    const { instance, stage, actor } = args;
+    const assignable: WorkflowStageDef = branch
+      ? { key: stage.key, name: branch.name, type: 'form', assignee: branch.assignee }
+      : stage;
+    const kind = branch ? 'form' : stage.type;
+    const assigned = await this.assignment.resolveForStage(tx, assignable, instance);
     const task = await tx.workflow_tasks.create({
       data: {
         organization_id: instance.organization_id,
@@ -173,7 +256,8 @@ export class WorkflowStageService {
         instance_id: instance.id,
         stage_key: stage.key,
         stage_entry_seq: instance.stage_entry_seq,
-        kind: stage.type,
+        ...(branch ? { branch_key: branch.key } : {}),
+        kind,
         status: 'open',
         ...assigned.fields,
         due_at: instance.stage_due_at,
@@ -182,7 +266,8 @@ export class WorkflowStageService {
     await this.events.emitWebhook(tx, instance, 'workflow.task.created', {
       task_id: task.id,
       stage_key: stage.key,
-      kind: stage.type,
+      kind,
+      ...(branch ? { branch_key: branch.key } : {}),
       due_at: instance.stage_due_at ? instance.stage_due_at.toISOString() : null,
     });
     if (assigned.unassigned) {
@@ -212,10 +297,104 @@ export class WorkflowStageService {
         kind: 'notify',
         payload: {
           title: `${instance.reference} · ${instance.title}`,
-          message: `Tienes una tarea pendiente: ${stage.name}`,
+          message: branch
+            ? `Tienes una tarea pendiente: ${stage.name} · ${branch.name}`
+            : `Tienes una tarea pendiente: ${stage.name}`,
           task_ids: [task.id],
         } satisfies WorkflowNotifyPayload as unknown as Record<string, unknown>,
       });
     }
+  }
+
+  /**
+   * P2.3: the resume instant goes to `stage_due_at`; the timers cron ticks the
+   * instance when it passes and the tick resolves `elapsed`.
+   */
+  private async enterWait(
+    tx: WorkflowTx,
+    instance: WorkflowInstanceRow,
+    stage: WorkflowStageDef,
+  ): Promise<void> {
+    const until = computeWaitUntil(stage.wait!, {
+      now: new Date(),
+      timeZone: await this.storeTimezone(instance.store_id),
+      data: instance.data ?? {},
+    });
+    await tx.workflow_instances.updateMany({
+      where: {
+        id: instance.id,
+        store_id: instance.store_id,
+        current_stage_key: stage.key,
+        stage_entry_seq: instance.stage_entry_seq,
+      },
+      data: { stage_due_at: until },
+    });
+    instance.stage_due_at = until;
+    await this.events.append(tx, {
+      store_id: instance.store_id,
+      instance_id: instance.id,
+      type: 'waiting',
+      to_stage_key: stage.key,
+      actor: { type: 'system', id: null },
+      payload: { until: until.toISOString(), kind: stage.wait!.kind },
+    });
+  }
+
+  /**
+   * P2.2: each child starts from its own outbox row (its own transaction and
+   * idempotency key). A stage that does not wait resolves `completed` at once.
+   */
+  private async enterSubflow(
+    tx: WorkflowTx,
+    instance: WorkflowInstanceRow,
+    stage: WorkflowStageDef,
+  ): Promise<void> {
+    const flows = stage.subflow!.flows;
+    for (let index = 0; index < flows.length; index++) {
+      await this.events.enqueue(tx, {
+        store_id: instance.store_id,
+        instance_id: instance.id,
+        kind: SUBFLOW_START_OUTBOX_KIND,
+        payload: {
+          parent_id: instance.id,
+          stage_key: stage.key,
+          stage_entry_seq: instance.stage_entry_seq,
+          index,
+        },
+      });
+    }
+    if (stage.subflow!.wait === false) {
+      await this.events.enqueue(tx, {
+        store_id: instance.store_id,
+        instance_id: instance.id,
+        kind: 'advance',
+        payload: {
+          instance_id: instance.id,
+          stage_key: stage.key,
+          stage_entry_seq: instance.stage_entry_seq,
+        },
+      });
+    }
+  }
+
+  /** P2.2: a child that closed (any outcome) wakes its waiting parent. */
+  async notifyParent(
+    tx: WorkflowTx,
+    instance: Pick<
+      WorkflowInstanceRow,
+      'id' | 'store_id' | 'parent_instance_id' | 'parent_entry_seq'
+    >,
+  ): Promise<void> {
+    if (!instance.parent_instance_id) return;
+    await this.events.enqueue(tx, {
+      store_id: instance.store_id,
+      instance_id: instance.parent_instance_id,
+      kind: SUBFLOW_CLOSED_OUTBOX_KIND,
+      payload: {
+        parent_id: instance.parent_instance_id,
+        child_id: instance.id,
+        stage_entry_seq: instance.parent_entry_seq ?? null,
+      },
+    });
   }
 }

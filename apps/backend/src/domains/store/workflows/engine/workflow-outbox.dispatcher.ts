@@ -32,6 +32,10 @@ import {
   GATE_RESOLVED_OUTBOX_KIND,
   GATE_START_OUTBOX_KIND,
 } from '../gates/approval-gate';
+import {
+  SUBFLOW_CLOSED_OUTBOX_KIND,
+  SUBFLOW_START_OUTBOX_KIND,
+} from './workflow-stage.service';
 
 export {
   OUTBOX_BACKOFF_MINUTES,
@@ -210,8 +214,13 @@ export class WorkflowOutboxDispatcher {
     now: Date,
   ): Promise<'retried' | 'dead'> {
     const message = ((error as Error)?.message ?? String(error)).slice(0, 1000);
-    const dead =
-      row.attempts >= OUTBOX_MAX_ATTEMPTS || error instanceof WorkflowNonRetryableError;
+    // P2.7: an action may ask for fewer retries before its error policy applies.
+    const own = row.payload?.max_attempts;
+    const maxAttempts =
+      typeof own === 'number' && Number.isInteger(own) && own >= 1
+        ? Math.min(own, OUTBOX_MAX_ATTEMPTS)
+        : OUTBOX_MAX_ATTEMPTS;
+    const dead = row.attempts >= maxAttempts || error instanceof WorkflowNonRetryableError;
     const delayMin =
       OUTBOX_BACKOFF_MINUTES[Math.min(row.attempts, OUTBOX_BACKOFF_MINUTES.length) - 1];
     await this.prisma.withoutScope().workflow_outbox.updateMany({
@@ -258,11 +267,12 @@ export class WorkflowOutboxDispatcher {
           is_super_admin: false,
           is_owner: false,
         },
-        () =>
-          this.actions.recordFailure(
-            row,
-            ((error as Error)?.message ?? String(error)).slice(0, 500),
-          ),
+        async () => {
+          const message = ((error as Error)?.message ?? String(error)).slice(0, 500);
+          await this.actions.recordFailure(row, message);
+          // P2.7: alert the flow owner and apply the action's error policy.
+          await this.engine.onActionDead(row, message);
+        },
       );
     } catch (e) {
       this.logger.error(
@@ -294,7 +304,9 @@ export class WorkflowOutboxDispatcher {
     } catch (e) {
       if (
         e instanceof VendixHttpException &&
-        ['WORKFLOW_NOT_ACTIVE', 'WORKFLOW_DEFINITION_NOT_FOUND'].includes(e.errorCode)
+        ['WORKFLOW_NOT_ACTIVE', 'WORKFLOW_DEFINITION_NOT_FOUND', 'WORKFLOW_DISABLED'].includes(
+          e.errorCode,
+        )
       ) {
         this.logger.warn(
           `start_instance ${row.id} skipped: ${e.errorCode} (definition ${String(p.definition_id)})`,
@@ -348,6 +360,22 @@ export class WorkflowOutboxDispatcher {
           await this.gates.start(row);
         } else if (row.kind === GATE_RESOLVED_OUTBOX_KIND) {
           await this.gates.resolved(row);
+        } else if (row.kind === SUBFLOW_START_OUTBOX_KIND) {
+          await this.engine.startSubflow({
+            parentId: Number(row.payload.parent_id),
+            stageKey: String(row.payload.stage_key),
+            entrySeq: Number(row.payload.stage_entry_seq),
+            index: Number(row.payload.index),
+          });
+        } else if (row.kind === SUBFLOW_CLOSED_OUTBOX_KIND) {
+          await this.engine.subflowClosed({
+            parentId: Number(row.payload.parent_id),
+            childId: Number(row.payload.child_id),
+            entrySeq:
+              row.payload.stage_entry_seq === null || row.payload.stage_entry_seq === undefined
+                ? null
+                : Number(row.payload.stage_entry_seq),
+          });
         } else {
           throw new Error(`Unsupported outbox kind: ${row.kind}`);
         }

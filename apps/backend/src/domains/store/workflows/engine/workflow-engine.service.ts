@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
-import { WorkflowStageDef, findStage } from '@common/workflows/contract';
+import {
+  WORKFLOW_ACTION_CATALOG,
+  WorkflowActionErrorPolicy,
+  WorkflowStageDef,
+  WorkflowVendixActionName,
+  findStage,
+} from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { WorkflowAdvanceService } from './workflow-advance.service';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
@@ -153,6 +159,215 @@ export class WorkflowEngineService {
     }
   }
 
+  // ---- P2: schedules, subflows, error policy -----------------------------
+
+  /** P2.10: one fire of a cron trigger (the schedule cron calls it). */
+  async startScheduled(input: {
+    definitionId: number;
+    cron: string;
+    fireAt: string;
+  }): Promise<WorkflowCommandResult | null> {
+    const ctx = this.loader.context();
+    try {
+      return await this.prisma.$transaction((tx: WorkflowTx) =>
+        this.starter.executeSchedule(tx, ctx, input),
+      );
+    } catch (e) {
+      if (e instanceof WorkflowIdempotencyConflict) {
+        return this.events.replay(this.prisma, e.idempotencyKey, {
+          actor: { type: 'system', id: null },
+          types: START_EVENT_TYPES,
+        });
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * P2.2: starts one child of a subflow stage (outbox `subflow_start`) and
+   * records it in the parent's timeline. When the child cannot start, the
+   * parent's stage is marked failed for this entry and resolves `rejected`.
+   */
+  async startSubflow(input: {
+    parentId: number;
+    stageKey: string;
+    entrySeq: number;
+    index: number;
+  }): Promise<void> {
+    const ctx = this.loader.context();
+    let outcome: Awaited<ReturnType<WorkflowStartService['executeChild']>>;
+    try {
+      outcome = await this.prisma.$transaction(async (tx: WorkflowTx) => {
+        const res = await this.starter.executeChild(tx, ctx, input);
+        if (!res) return res;
+        await this.events.lockInstance(tx, ctx.store_id, input.parentId);
+        if ('started' in res) {
+          if (!res.started.replayed) {
+            await this.events.append(tx, {
+              store_id: ctx.store_id,
+              instance_id: input.parentId,
+              type: 'subflow_started',
+              from_stage_key: input.stageKey,
+              to_stage_key: input.stageKey,
+              actor: { type: 'system', id: null },
+              payload: {
+                child_id: res.started.instance.id,
+                child_reference: res.started.instance.reference,
+                flow_key: res.flowKey,
+                index: input.index,
+              },
+            });
+          }
+          return res;
+        }
+        const parent = await this.loader.loadInstance(tx, input.parentId);
+        const failedKey = `${input.stageKey}:${input.entrySeq}`;
+        await tx.workflow_instances.updateMany({
+          where: { id: parent.id, store_id: ctx.store_id, stage_entry_seq: input.entrySeq },
+          data: {
+            runtime: {
+              ...(parent.runtime ?? {}),
+              subflow_failed: { ...(parent.runtime?.subflow_failed ?? {}), [failedKey]: res.error },
+            },
+          },
+        });
+        await this.events.append(tx, {
+          store_id: ctx.store_id,
+          instance_id: parent.id,
+          type: 'subflow_failed',
+          from_stage_key: input.stageKey,
+          to_stage_key: input.stageKey,
+          actor: { type: 'system', id: null },
+          payload: { flow_key: res.flowKey, error: res.error, index: input.index },
+        });
+        return res;
+      });
+    } catch (e) {
+      if (e instanceof WorkflowIdempotencyConflict) return; // already started
+      throw e;
+    }
+    if (outcome && 'error' in outcome) {
+      await this.ticker.tick(input.parentId, { expectStageEntrySeq: input.entrySeq });
+    }
+  }
+
+  /** P2.2: a child closed; the parent records it and re-evaluates its stage. */
+  async subflowClosed(input: {
+    parentId: number;
+    childId: number;
+    entrySeq: number | null;
+  }): Promise<void> {
+    const ctx = this.loader.context();
+    await this.prisma.$transaction(async (tx: WorkflowTx) => {
+      const child = (await tx.workflow_instances.findFirst({
+        where: { id: input.childId, store_id: ctx.store_id, parent_instance_id: input.parentId },
+      })) as WorkflowInstanceRow | null;
+      if (!child) return;
+      const key = systemIdempotencyKey(`subflow_closed:${input.parentId}:${child.id}`);
+      const seen = await tx.workflow_instance_events.findFirst({
+        where: { store_id: ctx.store_id, idempotency_key: key },
+        select: { id: true },
+      });
+      if (seen) return;
+      await this.events.lockInstance(tx, ctx.store_id, input.parentId);
+      await this.events.append(tx, {
+        store_id: ctx.store_id,
+        instance_id: input.parentId,
+        type: 'subflow_closed',
+        from_stage_key: child.parent_stage_key ?? null,
+        to_stage_key: child.parent_stage_key ?? null,
+        actor: { type: 'system', id: null },
+        payload: { child_id: child.id, child_reference: child.reference, outcome: child.status },
+        idempotencyKey: key,
+      });
+    });
+    await this.ticker.tick(input.parentId, {
+      ...(input.entrySeq !== null ? { expectStageEntrySeq: input.entrySeq } : {}),
+    });
+  }
+
+  /**
+   * P2.7: a `vendix.*` action exhausted its retries (dead-letter). The flow
+   * owner is alerted, and the action's policy decides: `continue` (nothing
+   * else), `route` (the request goes to the error stage from wherever it is)
+   * or `fail` (the request ends as failed). Closed requests are left alone.
+   */
+  async onActionDead(row: {
+    id: number;
+    instance_id: number | null;
+    payload: Record<string, unknown>;
+  }, message: string): Promise<void> {
+    if (!row.instance_id) return;
+    const ctx = this.loader.context();
+    const action = String(row.payload.action ?? '');
+    const policy = (row.payload.on_error ?? {}) as WorkflowActionErrorPolicy;
+    const label =
+      WORKFLOW_ACTION_CATALOG[action as WorkflowVendixActionName]?.label ?? action;
+    await this.prisma.$transaction(async (tx: WorkflowTx) => {
+      const instance = (await tx.workflow_instances.findFirst({
+        where: { id: row.instance_id, store_id: ctx.store_id },
+      })) as WorkflowInstanceRow | null;
+      if (!instance) return;
+      const owners = await this.flowOwners(tx, instance);
+      if (owners.length > 0) {
+        await this.events.enqueue(tx, {
+          store_id: ctx.store_id,
+          instance_id: instance.id,
+          kind: 'notify',
+          payload: {
+            title: `${instance.reference} · ${instance.title}`,
+            message: `Acción fallida: ${label}. ${message.slice(0, 200)} Puedes reintentarla desde la solicitud.`,
+            user_ids: owners,
+          },
+        });
+      }
+      if (instance.status !== 'active') return;
+      if (policy.then === 'route' && policy.route_to) {
+        const definition = await this.loader.loadDefinition(tx, instance.version_id);
+        const from = this.loader.currentStage(definition, instance);
+        if (from.key === policy.route_to || !findStage(definition, policy.route_to)) return;
+        await this.advancer.advance({
+          tx,
+          instance,
+          definition,
+          fromStage: from,
+          toStageKey: policy.route_to,
+          data: instance.data ?? {},
+          actor: { type: 'system', id: null },
+          expectedRowVersion: instance.row_version,
+          runExitHooks: false,
+          event: {
+            type: 'error_routed',
+            payload: { action, label, outbox_id: row.id, to: policy.route_to, error: message.slice(0, 300) },
+          },
+        });
+      } else if (policy.then === 'fail') {
+        await this.ticker.fail(tx, instance, `action_failed:${action}`, new Date());
+      }
+    });
+  }
+
+  /** Who owns a flow: its creator and whoever published the running version. */
+  private async flowOwners(tx: WorkflowTx, instance: WorkflowInstanceRow): Promise<number[]> {
+    const [def, version] = await Promise.all([
+      tx.workflow_definitions.findFirst({
+        where: { id: instance.definition_id, store_id: instance.store_id },
+        select: { created_by_user_id: true },
+      }),
+      tx.workflow_versions.findFirst({
+        where: { id: instance.version_id, store_id: instance.store_id },
+        select: { published_by_user_id: true },
+      }),
+    ]);
+    return [
+      ...new Set(
+        [def?.created_by_user_id, version?.published_by_user_id].filter(
+          (id): id is number => typeof id === 'number',
+        ),
+      ),
+    ];
+  }
+
   // ---- completeTask ------------------------------------------------------
 
   async completeTask(raw: CompleteTaskInput): Promise<WorkflowCommandResult> {
@@ -295,6 +510,7 @@ export class WorkflowEngineService {
       });
       if (cas.count === 0) throw new VendixHttpException(ErrorCodes.WORKFLOW_STALE);
       await this.stages.cancelOpenTasks(tx, ctx.store_id, instance.id);
+      await this.stages.notifyParent(tx, instance);
       // P1.3: a cancelled request frees its gates; a new attempt asks again.
       await resolveInstanceGates(tx, instance, 'cancelled', input.reason);
       await this.events.append(tx, {

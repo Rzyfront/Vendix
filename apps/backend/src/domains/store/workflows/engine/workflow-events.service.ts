@@ -24,7 +24,7 @@ export interface AppendEventInput {
 export interface EnqueueInput {
   store_id: number;
   instance_id: number | null;
-  kind: 'notify' | 'advance' | 'start_instance' | 'action';
+  kind: 'notify' | 'advance' | 'start_instance' | 'action' | 'subflow_start' | 'subflow_closed';
   payload: Record<string, unknown>;
   available_at?: Date;
 }

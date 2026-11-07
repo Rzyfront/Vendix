@@ -1,6 +1,7 @@
 import {
   WORKFLOW_VENDIX_ACTIONS,
   WorkflowActionDef,
+  WorkflowActionErrorPolicy,
   WorkflowActionMapValue,
   WorkflowAssigneeDef,
   WorkflowRequirementDef,
@@ -22,6 +23,8 @@ export interface AppliedNotify {
 export interface AppliedVendixAction {
   action: WorkflowVendixActionName;
   map_resolved: Record<string, string | WorkflowAssigneeDef>;
+  /** P2.7: what happens when it keeps failing. */
+  on_error?: WorkflowActionErrorPolicy;
 }
 
 /** What `{{instance.*}}` resolves to while applying a hook. */
@@ -75,6 +78,7 @@ export function applyActionList(
       vendix.push({
         action: v.action,
         map_resolved: resolveMap(v.map, next, instance),
+        ...(v.on_error ? { on_error: v.on_error } : {}),
       });
     }
   }
