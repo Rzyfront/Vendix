@@ -1,4 +1,4 @@
-import { Component, computed, inject, input } from '@angular/core';
+import { Component, computed, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
   ButtonComponent,
@@ -21,6 +21,14 @@ import { removeAt, replaceAt } from '../../../workflow-editor.utils';
 interface MapRow {
   child: string;
   template: string;
+}
+
+/** First `campo_N` no row uses yet. */
+export function freeKey(rows: MapRow[]): string {
+  const used = new Set(rows.map((r) => r.child));
+  let n = rows.length + 1;
+  while (used.has(`campo_${n}`)) n++;
+  return `campo_${n}`;
 }
 
 /** Configuración of a Subflujo stage: child flows, their inputs and the values brought back. */
@@ -56,7 +64,12 @@ interface MapRow {
           @for (row of mapRows(child); track $index; let r = $index) {
             <div class="flex flex-col gap-2 rounded-lg border border-border p-2 sm:flex-row sm:items-end">
               <div class="sm:w-1/3">
-                <app-input label="Campo del hijo" [ngModel]="row.child" (ngModelChange)="setMapRow(i, r, { child: $event })" />
+                <app-input
+                  label="Campo del hijo"
+                  [ngModel]="row.child"
+                  [error]="keyError()?.flow === i && keyError()?.row === r ? keyError()!.message : undefined"
+                  (ngModelChange)="setMapRow(i, r, { child: $event })"
+                />
               </div>
               <div class="min-w-0 flex-1">
                 <app-input label="Valor (puedes usar datos de esta solicitud)" [ngModel]="row.template" (ngModelChange)="setMapRow(i, r, { template: $event })" />
@@ -107,6 +120,7 @@ interface MapRow {
                   placeholder="Elige un campo"
                   [options]="fieldOptions()"
                   [value]="row.child || null"
+                  [errorText]="outputError()?.row === o ? outputError()!.message : ''"
                   (valueChange)="setOutputRow(o, { child: str($event) })"
                 />
               </div>
@@ -150,6 +164,9 @@ export class StageSubflowConfigComponent {
     return this.lookups.flows().filter((f) => f.value !== own);
   });
   readonly fields = computed(() => this.store.draft()?.fields ?? []);
+  /** Rename refused because the key is taken (the row keeps its previous key). */
+  readonly keyError = signal<{ flow: number; row: number; message: string } | null>(null);
+  readonly outputError = signal<{ row: number; message: string } | null>(null);
   readonly fieldOptions = computed(() => this.fields().map((f) => ({ value: f.key, label: f.label })));
   readonly tokens = computed(() => actionTokenOptions(this.fields()));
   /** Rows of `output`: parent field ← "flujo.campo" (reusing MapRow: child = parent field). */
@@ -196,15 +213,22 @@ export class StageSubflowConfigComponent {
 
   addMapRow(index: number): void {
     const rows = this.mapRows(this.flows()[index]);
-    this.setChildRows(index, [...rows, { child: `campo_${rows.length + 1}`, template: '' }]);
+    this.setChildRows(index, [...rows, { child: freeKey(rows), template: '' }]);
   }
 
+  /** A child field name already used by another row is refused with a message (a map has unique keys). */
   setMapRow(index: number, row: number, change: Partial<MapRow>): void {
     const rows = this.mapRows(this.flows()[index]);
+    if (change.child !== undefined && rows.some((r, j) => j !== row && r.child === change.child)) {
+      this.keyError.set({ flow: index, row, message: `El campo "${change.child}" ya recibe un dato.` });
+      return;
+    }
+    this.keyError.set(null);
     this.setChildRows(index, replaceAt(rows, row, { ...rows[row], ...change }));
   }
 
   removeMapRow(index: number, row: number): void {
+    this.keyError.set(null);
     this.setChildRows(index, removeAt(this.mapRows(this.flows()[index]), row));
   }
 
@@ -232,10 +256,17 @@ export class StageSubflowConfigComponent {
   }
 
   setOutputRow(index: number, change: Partial<MapRow>): void {
+    const rows = this.outputRows();
+    if (change.child !== undefined && rows.some((r, j) => j !== index && r.child === change.child)) {
+      this.outputError.set({ row: index, message: 'Ese campo ya trae un dato de vuelta.' });
+      return;
+    }
+    this.outputError.set(null);
     this.setOutput(replaceAt(this.outputRows(), index, { ...this.outputRows()[index], ...change }));
   }
 
   removeOutputRow(index: number): void {
+    this.outputError.set(null);
     this.setOutput(removeAt(this.outputRows(), index));
   }
 }
