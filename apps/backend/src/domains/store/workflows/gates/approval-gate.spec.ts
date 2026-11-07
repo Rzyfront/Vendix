@@ -9,7 +9,7 @@ import {
   enforceApproval,
   requestApproval,
 } from './approval-gate';
-import { ApprovalGateProcessor } from './approval-gate.processor';
+import { ApprovalGateProcessor, GateOutboxRow } from './approval-gate.processor';
 
 const mockPermissions = jest.fn<Promise<string[]>, unknown[]>();
 jest.mock('../../../../common/utils/user-store-permissions.util', () => ({
@@ -86,17 +86,17 @@ describe('approval gate (P1.3)', () => {
   /** What the worker does with the gate rows (start, then resolve). */
   async function drain() {
     for (const row of outbox('gate_start').filter((r) => !r.done)) {
-      await processor.start(row);
+      await processor.start(row as GateOutboxRow);
       row.done = true;
     }
     for (const row of outbox('gate_resolved').filter((r) => !r.done)) {
-      await processor.resolved(row);
+      await processor.resolved(row as GateOutboxRow);
       row.done = true;
     }
   }
   async function decide(outcome: 'approve' | 'reject', comment?: string) {
     const instance = kit.db.table('workflow_instances')[0];
-    const task = kit.db.table('workflow_tasks').find((t) => t.instance_id === instance.id && t.status === 'open');
+    const task = kit.db.table('workflow_tasks').find((t) => t.instance_id === instance.id && t.status === 'open')!;
     kit.as({ user_id: 2, permissions: ['store:workflows:task'] });
     await kit.engine.completeTask({
       taskId: task.id,
@@ -266,7 +266,7 @@ describe('approval gate (P1.3)', () => {
   it('a flow that stopped governing before the request opened cancels the gate instead of hanging', async () => {
     const { definitionId } = seedDefinition(kit.db, governingFlow());
     await requestApproval(kit.prisma, PO_INPUT());
-    kit.db.table('workflow_definitions').find((d) => d.id === definitionId).status = 'archived';
+    kit.db.table('workflow_definitions').find((d) => d.id === definitionId)!.status = 'archived';
     await drain();
     expect(gates()[0]).toMatchObject({ status: 'cancelled' });
     expect(kit.db.table('workflow_instances')).toHaveLength(0);
@@ -329,7 +329,7 @@ describe('approval gate (P1.3)', () => {
       expect(adjustments.createAdjustment).toHaveBeenCalledTimes(1);
       expect(adjustments.createAdjustment).toHaveBeenCalledWith(dto);
       expect(gates()[0].consumed_at).toBeInstanceOf(Date);
-      const executed = kit.db.table('workflow_instance_events').find((e) => e.type === 'gate_executed');
+      const executed = kit.db.table('workflow_instance_events').find((e) => e.type === 'gate_executed')!;
       expect(executed.payload).toMatchObject({ record_id: 321 });
     });
 

@@ -7,7 +7,7 @@ import {
 } from '../../../../testing/workflows/workflow-test-kit';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WORKFLOW_VENDIX_ACTIONS } from '@common/workflows/contract';
-import { WorkflowActionsExecutor } from './workflow-actions.executor';
+import { ActionOutboxRow, WorkflowActionsExecutor } from './workflow-actions.executor';
 import { WorkflowNonRetryableError } from './workflow-engine.types';
 import { WorkflowActionInputError } from './actions/workflow-action.types';
 import { WorkflowPeopleActions } from './actions/people.actions';
@@ -309,7 +309,7 @@ describe('WorkflowActionsExecutor (registry P1.2)', () => {
   it('a retry after a failure later than the effect does NOT repeat it (created_id in the payload)', async () => {
     const row = outboxRow('vendix.expense.create', {});
     await inStore(() => executor.execute(row));
-    const saved = kit.db.table('workflow_outbox').find((o) => o.id === row.id);
+    const saved = kit.db.table('workflow_outbox').find((o) => o.id === row.id) as ActionOutboxRow;
     expect(saved.payload.created_id).toBe(9);
     await inStore(() => executor.execute(saved));
     expect(createExpense).toHaveBeenCalledTimes(1);
@@ -320,7 +320,7 @@ describe('WorkflowActionsExecutor (registry P1.2)', () => {
     createExpense.mockResolvedValueOnce({ record_id: null });
     const row = outboxRow('vendix.expense.create', {});
     await inStore(() => executor.execute(row));
-    const saved = kit.db.table('workflow_outbox').find((o) => o.id === row.id);
+    const saved = kit.db.table('workflow_outbox').find((o) => o.id === row.id) as ActionOutboxRow;
     expect(saved.payload.created_id).toBeNull();
     await inStore(() => executor.execute(saved));
     expect(createExpense).toHaveBeenCalledTimes(1);

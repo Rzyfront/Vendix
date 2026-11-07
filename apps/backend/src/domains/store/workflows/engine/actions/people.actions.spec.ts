@@ -1,11 +1,8 @@
 import { RequestContextService } from '@common/context/request-context.service';
 import { WorkflowInstanceRow } from '../workflow-engine.types';
 import { WorkflowPeopleActions } from './people.actions';
-import {
-  WorkflowActionContext,
-  WorkflowActionInputError,
-  WorkflowVendixActionName,
-} from './workflow-action.types';
+import { WorkflowVendixActionName } from '@common/workflows/contract';
+import { WorkflowActionContext, WorkflowActionInputError } from './workflow-action.types';
 
 type Seen = { user_id?: number; store_id?: number; permissions?: string[] };
 

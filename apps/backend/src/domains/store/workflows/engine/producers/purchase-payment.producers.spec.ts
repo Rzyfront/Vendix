@@ -46,7 +46,7 @@ describe('Flujos P1.1 producer: supplier_payment.registered (PurchaseOrdersServi
         recalculatePaymentStatus: jest.fn().mockResolvedValue('partial'),
         emitPurchaseOrderPaymentEvent: jest.fn().mockResolvedValue(undefined),
       },
-    );
+    ) as unknown as PurchaseOrdersService;
     return { tx, service };
   };
   const dto = {
