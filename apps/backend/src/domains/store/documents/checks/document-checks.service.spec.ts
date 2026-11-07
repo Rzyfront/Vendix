@@ -7,6 +7,7 @@ import {
 } from '../../../../testing/workflows/workflow-test-kit';
 import {
   AI_TIMEOUT_MS,
+  buildResult,
   DOCUMENT_EXTRACT_APP_KEY,
   DOCUMENT_EXTRACT_PROMPT_VERSION,
   DocumentChecksService,
@@ -398,5 +399,40 @@ describe('DocumentChecksService · Leer con IA', () => {
       kit.as({ store_id: 2, user_id: 7, permissions: ['store:workflows:manage'] });
       expect(await codeOf(service.review(c.id))).toBe('DOCUMENT_CHECK_NOT_FOUND');
     });
+  });
+});
+
+describe('buildResult · región de procedencia', () => {
+  const field = {
+    key: 'total',
+    label: 'Total',
+    type: 'money',
+    def: { key: 'total', label: 'Total', type: 'money' },
+  } as unknown as Parameters<typeof buildResult>[1][number];
+  const regionFor = (region: unknown) =>
+    buildResult(
+      {
+        doc_type: 'factura',
+        legibility: 'good',
+        matches_request: true,
+        mismatch_reasons: [],
+        valid_until: null,
+        text: '',
+        fields: { total: { value: '100', confidence: 0.9, page: 1, region } },
+      },
+      [field],
+      1,
+    ).fields['total']?.region;
+
+  it('keeps a region inside the page', () => {
+    expect(regionFor({ x: 0.7, y: 0.8, w: 0.2, h: 0.03 })).toEqual({ x: 0.7, y: 0.8, w: 0.2, h: 0.03 });
+  });
+
+  it.each([
+    ['sale de la página', { x: 1, y: 1, w: 1, h: 1 }],
+    ['en píxeles', { x: 120, y: 340, w: 200, h: 30 }],
+    ['sin área', { x: 0.2, y: 0.2, w: 0, h: 0.1 }],
+  ])('drops a region that %s', (_label, region) => {
+    expect(regionFor(region)).toBeNull();
   });
 });

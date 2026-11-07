@@ -76,11 +76,19 @@ function clamp01(n: unknown): number | null {
   return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : null;
 }
 
+/**
+ * Normalized region of a value on its page (0..1). A region outside the page,
+ * in pixels or without area is dropped (the page alone remains as provenance)
+ * instead of being clamped into a misleading box.
+ */
 function regionOf(raw: unknown): CheckRegion | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  const [x, y, w, h] = [clamp01(r.x), clamp01(r.y), clamp01(r.w), clamp01(r.h)];
-  if (x === null || y === null || w === null || h === null) return null;
+  const [x, y, w, h] = [r.x, r.y, r.w, r.h].map((v) => (typeof v === 'number' ? v : Number(v)));
+  const inUnit = (v: number) => Number.isFinite(v) && v >= 0 && v <= 1;
+  if (![x, y, w, h].every(inUnit) || w === 0 || h === 0) return null;
+  const EPS = 0.001;
+  if (x + w > 1 + EPS || y + h > 1 + EPS) return null;
   return { x, y, w, h };
 }
 
