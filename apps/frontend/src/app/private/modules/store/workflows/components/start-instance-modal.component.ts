@@ -57,7 +57,6 @@ const NO_LOCATION = 'none';
         <div class="mt-3">
           <app-selector
             label="Sede"
-            placeholder="Sin sede"
             [options]="locationOptions()"
             [value]="locationId()"
             (valueChange)="onLocation($event)"

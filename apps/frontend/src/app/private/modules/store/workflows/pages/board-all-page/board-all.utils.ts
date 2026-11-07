@@ -1,4 +1,4 @@
-import { BoardAllColumn, BoardAllQuery } from '../../interfaces/workflow-board.interfaces';
+import { BoardAllCard, BoardAllColumn, BoardAllQuery } from '../../interfaces/workflow-board.interfaces';
 
 /** The filter bar state; `all` means "no filter". */
 export interface BoardAllFilters {
@@ -30,4 +30,22 @@ export function appendColumnPage(current: BoardAllColumn, next: BoardAllColumn):
     cards: [...current.cards, ...next.cards.filter((c) => !seen.has(c.id))],
     next_cursor: next.next_cursor,
   };
+}
+
+/** Spanish names of the system roles; a custom role keeps the name its owner gave it. */
+const SYSTEM_ROLE_NAME: Record<string, string> = {
+  owner: 'Dueño',
+  admin: 'Administrador',
+  manager: 'Gerente',
+  employee: 'Empleado',
+};
+
+export function roleName(name: string): string {
+  return SYSTEM_ROLE_NAME[name] ?? name;
+}
+
+/** Who must act on a card: the person, or the role in Spanish. */
+export function assigneeText(assignee: BoardAllCard['assignee']): string {
+  if (!assignee?.name) return 'Sin responsable';
+  return assignee.type === 'role' ? `Rol: ${roleName(assignee.name)}` : assignee.name;
 }

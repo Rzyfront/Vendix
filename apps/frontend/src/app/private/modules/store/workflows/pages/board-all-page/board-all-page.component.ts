@@ -21,7 +21,7 @@ import { WorkflowBoardApiService } from '../../services/workflow-board-api.servi
 import { WorkflowLiveService } from '../../services/workflow-live.service';
 import { toWorkflowError } from '../../utils/workflow-errors.util';
 import { dueText } from '../../utils/workflow-labels.util';
-import { ALL_OPTION, appendColumnPage, buildBoardQuery } from './board-all.utils';
+import { ALL_OPTION, appendColumnPage, assigneeText, buildBoardQuery, roleName } from './board-all.utils';
 
 const toOptions = (all: string, rows: BoardFilterOption[]) => [
   { value: ALL_OPTION, label: all },
@@ -111,7 +111,7 @@ const toOptions = (all: string, rows: BoardFilterOption[]) => [
               >
                 <header class="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
                   <h2 class="text-sm font-semibold text-text-primary">{{ column.name }}</h2>
-                  <span class="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-text-secondary">{{
+                  <span class="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{{
                     column.count
                   }}</span>
                 </header>
@@ -131,7 +131,7 @@ const toOptions = (all: string, rows: BoardFilterOption[]) => [
                         <app-icon name="layers" [size]="12" /> {{ card.stage_name ?? card.stage_key }}
                       </p>
                       <p class="flex items-center gap-1 text-xs text-text-secondary">
-                        <app-icon name="user" [size]="12" /> {{ card.assignee?.name ?? 'Sin responsable' }}
+                        <app-icon name="user" [size]="12" /> {{ assignee(card) }}
                       </p>
                       @if (card.status === 'active' && card.stage_due_at) {
                         <p
@@ -200,7 +200,9 @@ export class BoardAllPageComponent implements OnInit {
       .subscribe({
         next: (f) => {
           this.definitionOptions.set(toOptions('Todos los flujos', f.definitions));
-          this.roleOptions.set(toOptions('Todos los roles', f.roles));
+          this.roleOptions.set(
+            toOptions('Todos los roles', f.roles.map((r) => ({ ...r, name: roleName(r.name) }))),
+          );
           this.locationOptions.set(toOptions('Todas las sedes', f.locations));
         },
         // Only the filter options: the board below reports its own load error.
@@ -236,6 +238,10 @@ export class BoardAllPageComponent implements OnInit {
 
   due(card: BoardAllCard): string {
     return dueText(card.stage_due_at);
+  }
+
+  assignee(card: BoardAllCard): string {
+    return assigneeText(card.assignee);
   }
 
   open(card: BoardAllCard): void {

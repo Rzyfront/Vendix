@@ -87,7 +87,7 @@ describe('BoardAllPageComponent', () => {
     expect(t).toContain('FLU-000011');
     expect(t).toContain('Compras');
     expect(t).toContain('Gerencia');
-    expect(t).toContain('manager');
+    expect(t).toContain('Rol: Gerente');
     expect(t).toContain('Bodega principal');
   });
 

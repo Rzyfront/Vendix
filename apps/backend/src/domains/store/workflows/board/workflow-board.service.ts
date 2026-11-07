@@ -202,7 +202,7 @@ export class WorkflowBoardService {
           }),
         ]);
         const hasMore = rows.length > limit;
-        const page: any[] = hasMore ? rows.slice(0, limit) : rows;
+        const page: Json[] = hasMore ? rows.slice(0, limit) : rows;
         return {
           key: spec.key,
           name: spec.name,
@@ -313,7 +313,7 @@ export class WorkflowBoardService {
     return and;
   }
 
-  private async allCards(store_id: number, page: any[], now: Date) {
+  private async allCards(store_id: number, page: Json[], now: Date) {
     if (!page.length) return [];
     const ids = (k: string) => [...new Set(page.map((r) => r[k] as number | null).filter((v): v is number => !!v))];
     const [assignees, definitions, versions, locations] = await Promise.all([

@@ -1,5 +1,5 @@
 import { BoardAllCard, BoardAllColumn } from '../../interfaces/workflow-board.interfaces';
-import { appendColumnPage, buildBoardQuery } from './board-all.utils';
+import { appendColumnPage, assigneeText, buildBoardQuery, roleName } from './board-all.utils';
 
 const card = (id: number): BoardAllCard => ({
   id,
@@ -35,5 +35,17 @@ describe('board-all utils', () => {
     const merged = appendColumnPage(current, next);
     expect(merged.cards.map((c) => c.id)).toEqual([3, 2, 1]);
     expect(merged.next_cursor).toBeNull();
+  });
+
+  it('roleName traduce los roles de sistema y deja los propios como están', () => {
+    expect(roleName('manager')).toBe('Gerente');
+    expect(roleName('owner')).toBe('Dueño');
+    expect(roleName('Auxiliar contable')).toBe('Auxiliar contable');
+  });
+
+  it('assigneeText muestra la persona, el rol en español o "Sin responsable"', () => {
+    expect(assigneeText({ type: 'user', id: 2, name: 'Carlos Rodríguez' })).toBe('Carlos Rodríguez');
+    expect(assigneeText({ type: 'role', id: 3, name: 'admin' })).toBe('Rol: Administrador');
+    expect(assigneeText(null)).toBe('Sin responsable');
   });
 });
