@@ -242,7 +242,7 @@ describe('governed domain services (P1.3)', () => {
       entity_type: 'product',
       entity_id: 3,
       amount: 40,
-      context: expect.objectContaining({ quantity_change: -40 }),
+      context: expect.objectContaining({ quantity_change: -40, quantity_after: 2 }),
       request: { method: 'createAdjustment', args: [dto] },
     });
   });

@@ -1112,6 +1112,7 @@ export const WORKFLOW_GATE_OPERATIONS = {
       tok("product_name", "Producto"),
       tok("location_id", "Id de la bodega", "id"),
       tok("quantity_change", "Cambio de cantidad", "number"),
+      tok("quantity_after", "Cantidad final", "number"),
       tok("adjustment_type", "Tipo de ajuste"),
       tok("reason", "Motivo"),
       tok("requested_by", "Solicitado por"),

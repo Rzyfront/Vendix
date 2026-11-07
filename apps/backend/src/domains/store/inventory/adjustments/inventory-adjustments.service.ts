@@ -295,6 +295,11 @@ export class InventoryAdjustmentsService {
         product_name: product?.name ?? null,
         location_id: data.location_id,
         quantity_change: change,
+        // What the approved request applies is this final quantity (the
+        // adjustment sets the count), not the change: if stock moved in the
+        // meantime, a smaller change applies as is and a bigger one asks a
+        // new approval (the gate compares units moved with the approved ones).
+        quantity_after: Number(data.quantity_after),
         adjustment_type: data.type,
         reason: data.description ?? null,
       },
