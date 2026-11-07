@@ -25,6 +25,8 @@ export interface CreateDefinitionInput {
   description?: string | null;
   category?: string | null;
   definition?: Json;
+  /** P5.4: gallery template the flow was activated from. */
+  source_template_key?: string | null;
 }
 
 export interface ListDefinitionsInput {
@@ -224,6 +226,7 @@ export class WorkflowDefinitionsService {
       name,
       description: input.description ?? null,
       category: input.category ?? null,
+      source_template_key: input.source_template_key ?? null,
       draft,
     });
     return this.present(row, null);
@@ -539,6 +542,7 @@ export class WorkflowDefinitionsService {
     name: string;
     description: string | null;
     category: string | null;
+    source_template_key?: string | null;
     draft: Json;
   }) {
     try {
@@ -550,6 +554,7 @@ export class WorkflowDefinitionsService {
           name: p.name.slice(0, 160),
           description: p.description,
           category: p.category,
+          source_template_key: p.source_template_key ?? null,
           status: 'draft',
           draft_definition: p.draft,
           draft_updated_at: new Date(),
