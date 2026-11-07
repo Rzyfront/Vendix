@@ -1,4 +1,5 @@
 import { VendixHttpException } from '@common/errors';
+import type { WorkflowBoardService } from './workflow-board.service';
 import {
   buildWorkflowKit,
   purchaseDefinition,
@@ -203,8 +204,10 @@ describe('WorkflowBoardService', () => {
     expect(await kit.board.board(defId)).toEqual({ definition: { id: defId, name: 'Compra', version: null }, columns: [] });
   });
   describe('boardAll (P5.5)', () => {
-    const colAll = (r: any, key: string) => r.columns.find((c: any) => c.key === key);
-    const ids = (r: any, key: string) => colAll(r, key).cards.map((c: any) => c.id).sort();
+    type BoardAll = Awaited<ReturnType<WorkflowBoardService['boardAll']>>;
+    type BoardAllCol = BoardAll['columns'][number];
+    const colAll = (r: BoardAll, key: string): BoardAllCol => r.columns.find((c) => c.key === key)!;
+    const ids = (r: BoardAll, key: string) => colAll(r, key).cards.map((c) => c.id).sort();
 
     beforeEach(() => {
       table('inventory_locations').push(
@@ -217,15 +220,15 @@ describe('WorkflowBoardService', () => {
     it('cuatro columnas con tarjetas de varios flujos, sede y etapa', async () => {
       owner();
       const r = await kit.board.boardAll();
-      expect(r.columns.map((c: any) => [c.key, c.name])).toEqual([
+      expect(r.columns.map((c) => [c.key, c.name])).toEqual([
         ['pending', 'Por atender'],
         ['in_progress', 'En curso'],
         ['system', 'En espera (sistema)'],
         ['closed', 'Cerradas (30 días)'],
       ]);
-      expect(r.columns.map((c: any) => c.count)).toEqual([5, 0, 0, 1]);
+      expect(r.columns.map((c) => c.count)).toEqual([5, 0, 0, 1]);
       expect(ids(r, 'closed')).toEqual([done]);
-      const card = colAll(r, 'pending').cards.find((c: any) => c.id === inManager);
+      const card = colAll(r, 'pending').cards.find((c) => c.id === inManager);
       expect(card).toEqual({
         id: inManager,
         reference: row(inManager).reference,
@@ -260,10 +263,10 @@ describe('WorkflowBoardService', () => {
     it('filtra por rol, sede y vencidas', async () => {
       owner();
       const byRole = await kit.board.boardAll({ role_id: 2 });
-      expect(byRole.columns.map((c: any) => c.count)).toEqual([1, 0, 0, 0]);
+      expect(byRole.columns.map((c) => c.count)).toEqual([1, 0, 0, 0]);
       expect(ids(byRole, 'pending')).toEqual([inManager]);
       const bySede = await kit.board.boardAll({ location_id: 1 });
-      expect(bySede.columns.map((c: any) => c.count)).toEqual([1, 0, 0, 0]);
+      expect(bySede.columns.map((c) => c.count)).toEqual([1, 0, 0, 0]);
       row(inForm[0]).stage_due_at = new Date(Date.now() - 3_600_000);
       const late = await kit.board.boardAll({ overdue: true });
       expect(ids(late, 'pending')).toEqual([inForm[0]]);
@@ -286,21 +289,21 @@ describe('WorkflowBoardService', () => {
       expect(await codeOf(kit.board.boardAll({ definition_id: 999 }))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
       kit.as({ user_id: 7, store_id: 2, is_owner: true, permissions: [] });
       const other = await kit.board.boardAll();
-      expect(other.columns.every((c: any) => c.count === 0)).toBe(true);
+      expect(other.columns.every((c) => c.count === 0)).toBe(true);
       expect(await codeOf(kit.board.boardAll({ definition_id: defId }))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
     });
 
     it('quien no es manager solo ve lo suyo', async () => {
       kit.as({ user_id: 5, store_id: 1, permissions: ['store:workflows:read'] });
       const r = await kit.board.boardAll();
-      expect(r.columns.map((c: any) => c.count)).toEqual([2, 0, 0, 0]);
+      expect(r.columns.map((c) => c.count)).toEqual([2, 0, 0, 0]);
     });
 
     it('filters: flujos, roles y sedes activas de la tienda', async () => {
       owner();
       const f = await kit.board.filters();
       expect(f.definitions).toEqual([{ id: defId, name: 'Compra' }]);
-      expect(f.roles.map((x: any) => x.name)).toEqual(expect.arrayContaining(['manager', 'owner']));
+      expect(f.roles.map((x) => x.name)).toEqual(expect.arrayContaining(['manager', 'owner']));
       expect(f.locations).toEqual([{ id: 1, name: 'Bodega principal' }]);
     });
   });
