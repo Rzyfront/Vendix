@@ -335,6 +335,63 @@ describeDestructiveE2E('Flujos contra Postgres real (M5)', () => {
     });
   });
 
+  describe('aislamiento de los titulares de un rol', () => {
+    it('un rol de sistema sin tienda solo alcanza a gente de esta tienda u organización, nunca a otra empresa', async () => {
+      const role = await db.roles.create({
+        data: { name: `owner-it-${run}`, organization_id: null },
+      });
+      const otherOrg = await db.organizations.create({
+        data: { name: `Otra ${run}`, slug: `otra-${run}`, email: `otra-${run}@example.com` },
+      });
+      const stranger = await db.users.create({
+        data: {
+          username: `otra-${run}`,
+          password: 'x',
+          first_name: 'Otra',
+          last_name: 'Empresa',
+          organization_id: otherOrg.id,
+        },
+      });
+      const notMember = await db.users.create({
+        data: {
+          username: `nomember-${run}`,
+          password: 'x',
+          first_name: 'Sin',
+          last_name: 'Tienda',
+          organization_id: organizationId,
+        },
+      });
+      for (const user_id of [users[0], stranger.id, notMember.id]) {
+        await db.user_roles.create({ data: { user_id, role_id: role.id } });
+      }
+      const instance = {
+        id: 0,
+        store_id: storeId,
+        organization_id: organizationId,
+      } as never;
+      const task = {
+        assignee_user_id: null,
+        assignee_group_id: null,
+        assignee_role_id: role.id,
+      } as never;
+      const recipients = await assignment.resolveUserIds(
+        db as never,
+        { def: { kind: 'role', role_key: role.name } } as never,
+        instance,
+      );
+      expect(recipients).toEqual([users[0]]);
+      expect(
+        await assignment.canAct(db as never, task, stranger.id, storeId, organizationId),
+      ).toBe(false);
+      expect(
+        await assignment.canAct(db as never, task, notMember.id, storeId, organizationId),
+      ).toBe(false);
+      expect(
+        await assignment.canAct(db as never, task, users[0], storeId, organizationId),
+      ).toBe(true);
+    });
+  });
+
   describe('outbox', () => {
     const dispatcherWith = (tick: jest.Mock) =>
       new WorkflowOutboxDispatcher(

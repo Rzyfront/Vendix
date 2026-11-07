@@ -21,6 +21,9 @@ const NONE: AssigneeFields = {
 const OPEN_STATUSES = ['open', 'claimed'];
 
 /** Resolves a `WorkflowAssigneeDef` to task assignee fields and to user ids. */
+/** Owners reach every store of their organization without a store row. */
+const OWNER_ROLE = 'owner';
+
 @Injectable()
 export class WorkflowAssignmentService {
   constructor(private readonly groups: WorkGroupsService) {}
@@ -233,27 +236,53 @@ export class WorkflowAssignmentService {
     storeId: number,
     organizationId: number,
   ): Promise<number[]> {
-    // `user_roles` is not store scoped: bind the store, and require the role to
-    // be a system role or one of this organization.
+    // `user_roles` is not tenant scoped and a system role has rows of every
+    // organization: a row without a store only counts for someone who belongs
+    // to this store, or for an owner of this organization.
     const rows: Array<{
       user_id: number | null;
-      roles: { organization_id: number | null } | null;
+      store_id: number | null;
+      roles: { name: string; organization_id: number | null } | null;
     }> = await tx.user_roles.findMany({
       where: {
         role_id: roleId,
         OR: [{ store_id: storeId }, { store_id: null }],
       },
-      select: { user_id: true, roles: { select: { organization_id: true } } },
+      select: {
+        user_id: true,
+        store_id: true,
+        roles: { select: { name: true, organization_id: true } },
+      },
     });
-    return rows
-      .filter(
-        (r) =>
-          r.roles &&
-          (r.roles.organization_id === null ||
-            r.roles.organization_id === organizationId),
-      )
-      .map((r) => r.user_id)
-      .filter((u): u is number => !!u);
+    const allowed = rows.filter(
+      (r) =>
+        r.user_id &&
+        r.roles &&
+        (r.roles.organization_id === null ||
+          r.roles.organization_id === organizationId),
+    );
+    const bound = allowed.filter((r) => r.store_id === storeId);
+    const orgWide = allowed.filter((r) => r.store_id === null);
+    const holders = new Set(bound.map((r) => r.user_id as number));
+    if (orgWide.length > 0) {
+      const candidates = orgWide.map((r) => r.user_id as number);
+      const members: Array<{ user_id: number }> = await tx.store_users.findMany({
+        where: { store_id: storeId, user_id: { in: candidates } },
+        select: { user_id: true },
+      });
+      members.forEach((m) => holders.add(m.user_id));
+      const owners = orgWide
+        .filter((r) => r.roles?.name === OWNER_ROLE)
+        .map((r) => r.user_id as number);
+      if (owners.length > 0) {
+        const sameOrg: Array<{ id: number }> = await tx.users.findMany({
+          where: { id: { in: owners }, organization_id: organizationId },
+          select: { id: true },
+        });
+        sameOrg.forEach((u) => holders.add(u.id));
+      }
+    }
+    return [...holders];
   }
 
   private async groupFields(
