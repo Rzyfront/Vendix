@@ -12,7 +12,7 @@ describe('workflow-labels.util — motor avanzado (P2)', () => {
     for (const type of [
       'branch_completed', 'joined', 'subflow_started', 'subflow_closed', 'subflow_failed', 'waiting',
       'loop_iteration', 'loop_done', 'guard_redirected', 'guard_blocked', 'action_failed',
-      'action_retried', 'error_routed', 'migrated',
+      'action_executed', 'action_retried', 'error_routed', 'migrated',
     ]) {
       expect(eventLabel(type)).not.toBe(type);
     }
@@ -25,6 +25,10 @@ describe('workflow-labels.util — motor avanzado (P2)', () => {
     );
     expect(eventDescription('subflow_started', { child_reference: 'FLU-12', flow_key: 'alta' })).toContain('FLU-12');
     expect(eventDescription('migrated', { from_version: 1, to_version: 2 })).toBe('Migrada de v1 a v2');
+    // A manual retry only re-queues the action: it is not "executed" yet.
+    expect(eventDescription('action_retried', { action: 'vendix.crm_task.create' })).toBe(
+      'Acción reenviada: vendix.crm_task.create',
+    );
     expect(eventDescription('guard_redirected', { message: 'Excede el presupuesto' })).toBe(
       'Redirigida por guarda: Excede el presupuesto',
     );

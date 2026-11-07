@@ -71,8 +71,9 @@ export const EVENT_LABEL: Record<string, string> = {
   loop_done: 'Bucle terminado',
   guard_redirected: 'Redirigida por guarda',
   guard_blocked: 'Bloqueada por guarda',
+  action_executed: 'Acción ejecutada',
   action_failed: 'Acción fallida',
-  action_retried: 'Acción ejecutada',
+  action_retried: 'Acción reenviada',
   error_routed: 'Enviada a la ruta de error',
   migrated: 'Solicitud migrada',
 };
@@ -118,6 +119,7 @@ export function eventDescription(
       return p['message'] ? `${label}: ${text(p['message'])}` : label;
     case 'action_failed':
       return `${label}: ${text(p['action'])}${p['error'] ? ' — ' + text(p['error']) : ''}`;
+    case 'action_executed':
     case 'action_retried':
       return `${label}: ${text(p['action'])}`;
     case 'error_routed':

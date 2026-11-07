@@ -763,7 +763,7 @@ export class InstanceDetailPageComponent implements OnInit {
       .subscribe({
         next: () => {
           this.retryingId.set(null);
-          this.toast.success('Acción ejecutada');
+          this.toast.success('Acción reenviada a la cola');
           this.reload();
         },
         error: (error) => {
