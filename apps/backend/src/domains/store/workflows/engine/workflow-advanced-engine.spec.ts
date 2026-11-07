@@ -315,6 +315,82 @@ describe('Advanced engine (flujos-adm P2)', () => {
       expect(instance(id).current_stage_key).toBe('fin');
       expect(kit.db.table('workflow_instances').some((i) => i.parent_instance_id === id)).toBe(true);
     });
+
+    it('a subflow that does not wait still starts its child when the start is retried after the parent moved on', async () => {
+      seedDefinition(kit.db, child);
+      seedDefinition(kit.db, parent(false));
+      kit.as({ user_id: 1 });
+      const started = await kit.engine.start({ definitionKey: 'compra' });
+      await kit.engine.completeTask({
+        taskId: openTasks(started.instance.id)[0].id,
+        outcome: 'submit',
+        values: { monto: 10, nombre: 'Acme' },
+        expectedRowVersion: started.instance.row_version,
+      });
+      const id = started.instance.id;
+      // The `advance` runs first (the start failed once and was rescheduled).
+      const advance = kit.db
+        .table('workflow_outbox')
+        .find((r) => r.kind === 'advance' && r.status === 'pending' && r.instance_id === id)!;
+      advance.status = 'done';
+      await kit.engine.tick(id, { expectStageEntrySeq: advance.payload.stage_entry_seq });
+      expect(instance(id).current_stage_key).toBe('fin');
+      await drain();
+      const kid = kit.db.table('workflow_instances').find((i) => i.parent_instance_id === id);
+      expect(kid?.status).toBe('active');
+      expect(events(id).some((e) => e.type === 'subflow_started')).toBe(true);
+    });
+
+    it('a dead child start does not leave the waiting parent stuck: it goes "rejected" and the owner is alerted', async () => {
+      seedDefinition(kit.db, child);
+      seedDefinition(kit.db, parent());
+      kit.as({ user_id: 1 });
+      const started = await kit.engine.start({ definitionKey: 'compra' });
+      await kit.engine.completeTask({
+        taskId: openTasks(started.instance.id)[0].id,
+        outcome: 'submit',
+        values: { monto: 10, nombre: 'Acme' },
+        expectedRowVersion: started.instance.row_version,
+      });
+      const id = started.instance.id;
+      const row = kit.db
+        .table('workflow_outbox')
+        .find((r) => r.kind === 'subflow_start' && r.instance_id === id)!;
+      row.status = 'dead';
+      await kit.engine.onSubflowDead(
+        { id: row.id, kind: row.kind, instance_id: id, payload: row.payload },
+        'deadlock detected',
+      );
+      expect(events(id).find((e) => e.type === 'subflow_failed')?.payload.error).toContain('deadlock');
+      expect(instance(id).current_stage_key).toBe('rechazo');
+      const alert = kit.db
+        .table('workflow_outbox')
+        .find((r) => r.kind === 'notify' && Array.isArray(r.payload.user_ids));
+      expect(alert?.payload.message).toContain('Subflujo');
+    });
+
+    it('a dead "child closed" row still wakes the waiting parent', async () => {
+      seedDefinition(kit.db, child);
+      seedDefinition(kit.db, parent());
+      const { id } = await startAndSubmit('compra', { monto: 10, nombre: 'Acme' });
+      const kid = kit.db.table('workflow_instances').find((i) => i.parent_instance_id === id)!;
+      kit.as({ user_id: 5 });
+      await kit.engine.completeTask({
+        taskId: openTasks(kid.id)[0].id,
+        outcome: 'submit',
+        values: { nit: '900123' },
+        expectedRowVersion: kid.row_version,
+      });
+      const closed = kit.db
+        .table('workflow_outbox')
+        .find((r) => r.kind === 'subflow_closed' && r.status === 'pending')!;
+      closed.status = 'dead';
+      await kit.engine.onSubflowDead(
+        { id: closed.id, kind: closed.kind, instance_id: closed.instance_id, payload: closed.payload },
+        'connection lost',
+      );
+      expect(instance(id)).toMatchObject({ current_stage_key: 'fin', status: 'completed' });
+    });
   });
 
   describe('P2.3 waits', () => {

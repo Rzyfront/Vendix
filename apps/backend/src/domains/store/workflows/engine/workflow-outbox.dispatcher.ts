@@ -239,7 +239,10 @@ export class WorkflowOutboxDispatcher {
     return dead ? 'dead' : 'retried';
   }
 
-  /** An exhausted `action` row leaves `action_failed` in the instance history. */
+  /**
+   * An exhausted `action` row leaves `action_failed` in the instance history;
+   * an exhausted subflow row resolves or wakes its parent.
+   */
   private async afterDead(row: ClaimedOutboxRow, error: unknown): Promise<void> {
     if (row.kind === GATE_START_OUTBOX_KIND) {
       try {
@@ -254,7 +257,9 @@ export class WorkflowOutboxDispatcher {
       }
       return;
     }
-    if (row.kind !== 'action') return;
+    const subflow =
+      row.kind === SUBFLOW_START_OUTBOX_KIND || row.kind === SUBFLOW_CLOSED_OUTBOX_KIND;
+    if (row.kind !== 'action' && !subflow) return;
     try {
       const store = await this.prisma
         .withoutScope()
@@ -269,6 +274,11 @@ export class WorkflowOutboxDispatcher {
         },
         async () => {
           const message = ((error as Error)?.message ?? String(error)).slice(0, 500);
+          if (subflow) {
+            // P2.2: a dead subflow row must not leave the parent waiting forever.
+            await this.engine.onSubflowDead(row, message);
+            return;
+          }
           await this.actions.recordFailure(row, message);
           // P2.7: alert the flow owner and apply the action's error policy.
           await this.engine.onActionDead(row, message);
@@ -276,7 +286,7 @@ export class WorkflowOutboxDispatcher {
       );
     } catch (e) {
       this.logger.error(
-        `Could not record action_failed for outbox ${row.id}: ${(e as Error)?.message}`,
+        `Could not handle dead outbox ${row.id} (${row.kind}): ${(e as Error)?.message}`,
       );
     }
   }

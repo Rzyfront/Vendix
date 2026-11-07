@@ -17,6 +17,7 @@ describe('WorkflowOutboxDispatcher', () => {
   const engine = {
     tick: jest.fn(),
     onActionDead: jest.fn(),
+    onSubflowDead: jest.fn(),
     startSubflow: jest.fn(),
     subflowClosed: jest.fn(),
   };
@@ -42,6 +43,7 @@ describe('WorkflowOutboxDispatcher', () => {
     });
     engine.tick.mockReset().mockResolvedValue({ action: 'advanced' });
     engine.onActionDead.mockReset().mockResolvedValue(undefined);
+    engine.onSubflowDead.mockReset().mockResolvedValue(undefined);
     engine.startSubflow.mockReset().mockResolvedValue(undefined);
     engine.subflowClosed.mockReset().mockResolvedValue(undefined);
     notifications.sendToUser.mockReset().mockResolvedValue({ id: 1 });
@@ -115,6 +117,21 @@ describe('WorkflowOutboxDispatcher', () => {
     await dispatcher.dispatchBatch();
     expect(engine.startSubflow).toHaveBeenCalledWith({ parentId: 1, stageKey: 'alta', entrySeq: 2, index: 0 });
     expect(engine.subflowClosed).toHaveBeenCalledWith({ parentId: 1, childId: 7, entrySeq: 2 });
+  });
+
+  it('P2.2: a subflow row that dies is handed to the engine so the parent is never stuck', async () => {
+    engine.startSubflow.mockRejectedValue(new Error('deadlock'));
+    enqueue('subflow_start', { parent_id: 1, stage_key: 'alta', stage_entry_seq: 2, index: 0 });
+    for (let attempt = 1; attempt < OUTBOX_MAX_ATTEMPTS; attempt++) {
+      await dispatcher.dispatchBatch();
+      row().available_at = past();
+    }
+    expect(await dispatcher.dispatchBatch()).toMatchObject({ dead: 1 });
+    expect(engine.onSubflowDead).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'subflow_start', payload: expect.objectContaining({ index: 0 }) }),
+      'deadlock',
+    );
+    expect(actions.recordFailure).not.toHaveBeenCalled();
   });
 
   it('no toma filas con available_at en el futuro ni ya terminadas', async () => {

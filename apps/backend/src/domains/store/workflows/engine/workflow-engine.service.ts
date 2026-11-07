@@ -36,7 +36,7 @@ import {
 } from './workflow-loader.service';
 import { WorkflowCompleteService } from './workflow-complete.service';
 import { WorkflowStartService } from './workflow-start.service';
-import { WorkflowStageService } from './workflow-stage.service';
+import { SUBFLOW_CLOSED_OUTBOX_KIND, WorkflowStageService } from './workflow-stage.service';
 import { WorkflowTickService } from './workflow-tick.service';
 import { resolveInstanceGates } from '../gates/gate-resolution';
 
@@ -220,26 +220,7 @@ export class WorkflowEngineService {
           }
           return res;
         }
-        const parent = await this.loader.loadInstance(tx, input.parentId);
-        const failedKey = `${input.stageKey}:${input.entrySeq}`;
-        await tx.workflow_instances.updateMany({
-          where: { id: parent.id, store_id: ctx.store_id, stage_entry_seq: input.entrySeq },
-          data: {
-            runtime: {
-              ...(parent.runtime ?? {}),
-              subflow_failed: { ...(parent.runtime?.subflow_failed ?? {}), [failedKey]: res.error },
-            },
-          },
-        });
-        await this.events.append(tx, {
-          store_id: ctx.store_id,
-          instance_id: parent.id,
-          type: 'subflow_failed',
-          from_stage_key: input.stageKey,
-          to_stage_key: input.stageKey,
-          actor: { type: 'system', id: null },
-          payload: { flow_key: res.flowKey, error: res.error, index: input.index },
-        });
+        await this.recordSubflowFailure(tx, ctx.store_id, input, res.flowKey, res.error);
         return res;
       });
     } catch (e) {
@@ -249,6 +230,84 @@ export class WorkflowEngineService {
     if (outcome && 'error' in outcome) {
       await this.ticker.tick(input.parentId, { expectStageEntrySeq: input.entrySeq });
     }
+  }
+
+  /** P2.2: marks this entry of the parent's subflow stage as failed (it resolves `rejected`). */
+  private async recordSubflowFailure(
+    tx: WorkflowTx,
+    storeId: number,
+    input: { parentId: number; stageKey: string; entrySeq: number; index: number },
+    flowKey: string,
+    error: string,
+  ): Promise<WorkflowInstanceRow> {
+    const parent = await this.loader.loadInstance(tx, input.parentId);
+    const failedKey = `${input.stageKey}:${input.entrySeq}`;
+    await tx.workflow_instances.updateMany({
+      where: { id: parent.id, store_id: storeId, stage_entry_seq: input.entrySeq },
+      data: {
+        runtime: {
+          ...(parent.runtime ?? {}),
+          subflow_failed: { ...(parent.runtime?.subflow_failed ?? {}), [failedKey]: error },
+        },
+      },
+    });
+    await this.events.append(tx, {
+      store_id: storeId,
+      instance_id: parent.id,
+      type: 'subflow_failed',
+      from_stage_key: input.stageKey,
+      to_stage_key: input.stageKey,
+      actor: { type: 'system', id: null },
+      payload: { flow_key: flowKey, error, index: input.index },
+    });
+    return parent;
+  }
+
+  /**
+   * P2.2/P2.7: a `subflow_start` or `subflow_closed` row exhausted its retries.
+   * Nothing may stay stuck in silence: a dead start marks the stage failed (a
+   * waiting parent resolves `rejected`) and alerts the flow owner; a dead
+   * "child closed" still wakes the parent, which re-reads its children.
+   */
+  async onSubflowDead(
+    row: { id: number; kind: string; instance_id: number | null; payload: Record<string, unknown> },
+    message: string,
+  ): Promise<void> {
+    const ctx = this.loader.context();
+    const parentId = Number(row.payload.parent_id ?? row.instance_id);
+    if (!parentId) return;
+    if (row.kind === SUBFLOW_CLOSED_OUTBOX_KIND) {
+      const seq = row.payload.stage_entry_seq;
+      await this.ticker.tick(parentId, {
+        ...(seq !== null && seq !== undefined ? { expectStageEntrySeq: Number(seq) } : {}),
+      });
+      return;
+    }
+    const input = {
+      parentId,
+      stageKey: String(row.payload.stage_key),
+      entrySeq: Number(row.payload.stage_entry_seq),
+      index: Number(row.payload.index),
+    };
+    const error = `No se pudo iniciar el subflujo: ${message.slice(0, 200)}`;
+    await this.prisma.$transaction(async (tx: WorkflowTx) => {
+      await this.events.lockInstance(tx, ctx.store_id, parentId);
+      const parent = await this.recordSubflowFailure(tx, ctx.store_id, input, '', error);
+      const owners = await this.flowOwners(tx, parent);
+      if (owners.length > 0) {
+        await this.events.enqueue(tx, {
+          store_id: ctx.store_id,
+          instance_id: parent.id,
+          kind: 'notify',
+          payload: {
+            title: `${parent.reference} · ${parent.title}`,
+            message: `Subflujo fallido en la etapa "${input.stageKey}": ${message.slice(0, 200).replace(/[.\s]+$/, '')}.`,
+            user_ids: owners,
+          },
+        });
+      }
+    });
+    await this.ticker.tick(parentId, { expectStageEntrySeq: input.entrySeq });
   }
 
   /** P2.2: a child closed; the parent records it and re-evaluates its stage. */
