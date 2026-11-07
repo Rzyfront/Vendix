@@ -334,11 +334,15 @@ jobs:
           src/domains/store/workflows/engine/workflow-assignment.spec.ts
           src/domains/store/workflows/engine/workflow-trigger.fanout.spec.ts
           src/domains/store/workflows/engine/workflow-timers.cron.spec.ts
+          src/domains/store/workflows/engine/workflow-actions.spec.ts
+          src/domains/store/workflows/gates/approval-gate.spec.ts
+          src/domains/store/workflows/gates/gated-services.spec.ts
       - name: Jest — motor de Flujos contra Postgres
         working-directory: apps/backend
         run: >-
           npx jest --ci --runInBand --forceExit --config jest.isolated.config.js --runTestsByPath
           src/domains/store/workflows/engine/workflow-postgres.integration.spec.ts
+          src/domains/store/workflows/gates/approval-gate.postgres.integration.spec.ts
 
   frontend:
     name: Frontend
