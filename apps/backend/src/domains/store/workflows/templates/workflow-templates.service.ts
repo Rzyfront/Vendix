@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -32,6 +32,8 @@ export interface WorkflowTemplateActivation {
 /** Gallery of ready-made Administration flows and their one-click activation (P5.4). */
 @Injectable()
 export class WorkflowTemplatesService {
+  private readonly logger = new Logger(WorkflowTemplatesService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly definitions: WorkflowDefinitionsService,
@@ -89,7 +91,12 @@ export class WorkflowTemplatesService {
       // create and publish run in separate transactions: if publish still
       // fails (e.g. a concurrent change), archive the fresh draft so the
       // gallery never leaves an active half-made flow.
-      await this.definitions.archive(created.id).catch(() => undefined);
+      await this.definitions.archive(created.id).catch((archiveError: unknown) => {
+        this.logger.error(
+          `Template "${template.key}": publish failed and draft definition ${created.id} could not be archived`,
+          archiveError instanceof Error ? archiveError.stack : String(archiveError),
+        );
+      });
       throw error;
     }
     return {

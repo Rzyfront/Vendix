@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 import { WorkflowTemplatesService } from './workflow-templates.service';
@@ -98,6 +99,18 @@ describe('WorkflowTemplatesService', () => {
     definitions.publish.mockRejectedValue(new Error('invalid'));
     await expect(run(() => service.activate('pqr'))).rejects.toThrow('invalid');
     expect(definitions.archive).toHaveBeenCalledWith(41);
+  });
+
+  it('logs the archive failure and still surfaces the publish error', async () => {
+    const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    definitions.publish.mockRejectedValue(new Error('invalid'));
+    definitions.archive.mockRejectedValue(new Error('db down'));
+    await expect(run(() => service.activate('pqr'))).rejects.toThrow('invalid');
+    expect(logged).toHaveBeenCalledWith(
+      expect.stringContaining('draft definition 41 could not be archived'),
+      expect.stringContaining('db down'),
+    );
+    logged.mockRestore();
   });
 
   it('validates before writing: an invalid template creates no draft', async () => {
