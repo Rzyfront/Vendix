@@ -114,13 +114,13 @@ export interface IssuableRequirement {
                       Descargar
                     </app-button>
                   }
-                  @if (canReissue(doc)) {
+                  @if (canManage() && canReissue(doc)) {
                     <app-button variant="outline" size="sm" [loading]="busy() === doc.id" (clicked)="reissue(doc)">
                       <app-icon name="refresh-cw" [size]="14" slot="icon" />
                       Reemitir
                     </app-button>
                   }
-                  @if (canVoid(doc)) {
+                  @if (canManage() && canVoid(doc)) {
                     <app-button variant="outline-danger" size="sm" (clicked)="openVoid(doc)">
                       <app-icon name="ban" [size]="14" slot="icon" />
                       Anular
@@ -141,18 +141,20 @@ export interface IssuableRequirement {
           }
         </ul>
 
-        <div class="flex flex-wrap gap-2">
-          @for (req of issuable(); track req.key) {
-            <app-button variant="primary" size="sm" [loading]="busy() === req.key" (clicked)="emitRequirement(req)">
-              <app-icon name="file-plus" [size]="14" slot="icon" />
-              Emitir {{ req.label }}
+        @if (canManage()) {
+          <div class="flex flex-wrap gap-2">
+            @for (req of issuable(); track req.key) {
+              <app-button variant="primary" size="sm" [loading]="busy() === req.key" (clicked)="emitRequirement(req)">
+                <app-icon name="file-plus" [size]="14" slot="icon" />
+                Emitir {{ req.label }}
+              </app-button>
+            }
+            <app-button variant="outline" size="sm" (clicked)="openEmit()">
+              <app-icon name="file-text" [size]="14" slot="icon" />
+              Emitir desde una plantilla
             </app-button>
-          }
-          <app-button variant="outline" size="sm" (clicked)="openEmit()">
-            <app-icon name="file-text" [size]="14" slot="icon" />
-            Emitir desde una plantilla
-          </app-button>
-        </div>
+          </div>
+        }
       }
     </div>
 
@@ -225,6 +227,8 @@ export class IssuedDocumentsPanelComponent implements OnInit {
   readonly requirements = input<IssuableRequirement[]>([]);
   /** Keys of the requirements still pending: only those get an "Emitir" button. */
   readonly pendingKeys = input<ReadonlySet<string>>(new Set());
+  /** Issue, reissue and void need `store:workflows:manage`; without it the panel is read-only. */
+  readonly canManage = input(false);
   readonly changed = output<void>();
 
   /** Optional `<ng-template #docActions let-doc>` projected by the host. */

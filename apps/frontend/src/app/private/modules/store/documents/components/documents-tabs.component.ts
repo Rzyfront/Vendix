@@ -1,5 +1,6 @@
 import { Component, inject, input } from '@angular/core';
 import { Router } from '@angular/router';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   ScrollableTab,
   ScrollableTabsComponent,
@@ -51,9 +52,13 @@ const TABS: ScrollableTab[] = [
 })
 export class DocumentsTabsComponent {
   private readonly router = inject(Router);
+  private readonly auth = inject(AuthFacade);
 
   readonly active = input.required<DocumentsTabId>();
-  readonly tabs = TABS;
+  /** Every retention endpoint needs `store:workflows:design`: without it the tab is hidden. */
+  readonly tabs = TABS.filter(
+    (t) => t.id !== 'retention' || this.auth.isOwner() || this.auth.hasPermission('store:workflows:design'),
+  );
 
   onTab(id: string): void {
     const route = TAB_ROUTE[id as DocumentsTabId];

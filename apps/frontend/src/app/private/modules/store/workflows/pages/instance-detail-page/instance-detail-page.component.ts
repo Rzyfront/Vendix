@@ -39,6 +39,7 @@ import {
 } from '../../interfaces/workflow.interfaces';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { apiErrorMessage, isStaleCode, toWorkflowError } from '../../utils/workflow-errors.util';
 import {
   countdownText,
@@ -421,18 +422,23 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
               />
             </app-card>
 
-            <app-card title="Documentos emitidos" [responsivePadding]="true" overflow="visible">
-              <app-issued-documents-panel
-                [instanceId]="d.id"
-                [requirements]="issuableRequirements()"
-                [pendingKeys]="pendingKeys()"
-                (changed)="onDocumentsChanged()"
-              />
-            </app-card>
+            @if (canSeeIssuedDocuments) {
+              <app-card title="Documentos emitidos" [responsivePadding]="true" overflow="visible">
+                <app-issued-documents-panel
+                  [instanceId]="d.id"
+                  [requirements]="issuableRequirements()"
+                  [pendingKeys]="pendingKeys()"
+                  [canManage]="canManageDocuments"
+                  (changed)="onDocumentsChanged()"
+                />
+              </app-card>
+            }
 
-            <app-card title="Firma electrónica" [responsivePadding]="true" overflow="visible">
-              <app-signature-requests-panel [instanceId]="d.id" />
-            </app-card>
+            @if (canSeeSignatures) {
+              <app-card title="Firma electrónica" [responsivePadding]="true" overflow="visible">
+                <app-signature-requests-panel [instanceId]="d.id" [canManage]="canManageDocuments" />
+              </app-card>
+            }
 
             <app-tracking-links-card [instanceId]="d.id" />
 
@@ -483,6 +489,17 @@ export class InstanceDetailPageComponent implements OnInit {
   private readonly toast = inject(ToastService);
   private readonly settings = inject(StoreSettingsFacade);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly auth = inject(AuthFacade);
+
+  /** Same permissions as the backend: list issued documents with `documents:read` or `workflows:manage`. */
+  readonly canSeeIssuedDocuments =
+    this.auth.isOwner() ||
+    this.auth.hasPermission('store:documents:read') ||
+    this.auth.hasPermission('store:workflows:manage');
+  /** Signature requests are listed with `store:documents:read`. */
+  readonly canSeeSignatures = this.auth.isOwner() || this.auth.hasPermission('store:documents:read');
+  /** Issue, void, send to sign and cancel need `store:workflows:manage`. */
+  readonly canManageDocuments = this.auth.isOwner() || this.auth.hasPermission('store:workflows:manage');
 
   private readonly stageForm = viewChild(WorkflowStageFormComponent);
 

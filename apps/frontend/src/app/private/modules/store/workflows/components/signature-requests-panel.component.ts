@@ -128,7 +128,7 @@ const emptySigner = (): SignerForm => ({
                 <p class="truncate text-sm font-semibold text-text-primary">{{ doc.reference }} · {{ doc.title }}</p>
                 <app-badge [variant]="documentTone(doc.status)" size="xs">{{ documentLabel(doc.status) }}</app-badge>
               </div>
-              @if (doc.status === 'issued') {
+              @if (canManage() && doc.status === 'issued') {
                 <app-button variant="primary" size="sm" (clicked)="openSend(doc)">
                   <app-icon name="pen-line" [size]="14" slot="icon" />
                   Enviar a firmar
@@ -152,7 +152,7 @@ const emptySigner = (): SignerForm => ({
                         PDF firmado
                       </app-button>
                     }
-                    @if (isOpen(req)) {
+                    @if (canManage() && isOpen(req)) {
                       <app-button variant="outline" size="sm" (clicked)="openCancel(req)">Cancelar</app-button>
                     }
                   </div>
@@ -292,6 +292,8 @@ export class SignatureRequestsPanelComponent implements OnInit {
 
   /** Id of the workflow request whose issued documents are listed. */
   readonly instanceId = input.required<number>();
+  /** Send and cancel need `store:workflows:manage`; without it the panel is read-only. */
+  readonly canManage = input(false);
 
   readonly maxSigners = MAX_SIGNERS;
   readonly documents = signal<SignableDocumentView[]>([]);
