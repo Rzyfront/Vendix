@@ -38,6 +38,7 @@ import { CashRegistersModule } from './cash-registers/cash-registers.module';
 import { KdsModule } from './kds/kds.module';
 import { LayawayModule } from './layaway/layaway.module';
 import { DocumentsModule } from './documents/documents.module';
+import { DocumentChecksModule } from './documents/checks/document-checks.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { WithholdingTaxModule } from './withholding-tax/withholding-tax.module';
 import { ExogenousModule } from './exogenous/exogenous.module';
@@ -138,6 +139,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     LayawayModule,
     WorkflowsModule,
     DocumentsModule,
+    DocumentChecksModule,
     WithholdingTaxModule,
     ExogenousModule,
     ReservationsModule,

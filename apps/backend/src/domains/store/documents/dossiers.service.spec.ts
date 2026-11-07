@@ -68,6 +68,53 @@ describe.each([
     expect(kit.db.table('dossier_items')).toHaveLength(before);
   });
 
+  it('P4: addDocumentItem archiva el documento emitido y reemplaza el anterior del mismo requisito', async () => {
+    const d = await create(1);
+    const f1 = file(1);
+    const f2 = file(1);
+    const add = (fileId: number, docId: number) =>
+      kit.prisma.$transaction((tx: any) =>
+        kit.dossiers.addDocumentItem(tx, {
+          dossier_id: d.id,
+          kind: 'issued_document',
+          issued_document_id: docId,
+          file_id: fileId,
+          stage_key: 'contrato',
+          requirement_key: 'contrato',
+          actor,
+        }),
+      );
+    const first = await add(f1.id, 11);
+    const second = await add(f2.id, 12);
+    const rows = kit.db.table('dossier_items').filter((i: any) => i.dossier_id === d.id);
+    expect(rows.find((i: any) => i.id === first.id)?.status).toBe('superseded');
+    expect(second).toMatchObject({
+      kind: 'issued_document',
+      issued_document_id: 12,
+      status: 'received',
+      supersedes_id: first.id,
+    });
+  });
+
+  it('P4: addDocumentItem rechaza un expediente de otra tienda', async () => {
+    const theirs = await create(2, 2);
+    kit.as({ store_id: 1 });
+    const f = file(1);
+    expect(
+      await codeOf(
+        kit.prisma.$transaction((tx: any) =>
+          kit.dossiers.addDocumentItem(tx, {
+            dossier_id: theirs.id,
+            kind: 'issued_document',
+            issued_document_id: 1,
+            file_id: f.id,
+            actor,
+          }),
+        ),
+      ),
+    ).toBe('DOCUMENT_NOT_FOUND');
+  });
+
   it('createForInstance: EXP- correlativo por tienda, atado a la instancia', async () => {
     const a = await create(1);
     const b = await create(2);
@@ -151,6 +198,8 @@ describe.each([
       mime_type: 'application/pdf',
       size_bytes: 10,
       sha256: 'a'.repeat(64),
+      purged_at: null,
+      purge_policy_name: null,
     });
   });
 
@@ -214,5 +263,38 @@ describe.each([
     const rows = (await kit.dossiers.list()).data as Array<{ id: number; items_count: number }>;
     expect(rows.find((r) => r.id === d.id)?.items_count).toBe(2);
     expect(rows.find((r) => r.id === empty.id)?.items_count).toBe(0);
+  });
+
+  it('P4.7: el expediente de una solicitud lleva el sujeto de la solicitud', async () => {
+    kit.as({ store_id: 1 });
+    const d = await kit.prisma.$transaction((tx: any) =>
+      kit.dossiers.createForInstance(tx, { ...instanceRef(1), subject_type: 'custom_record', subject_id: 7 }),
+    );
+    expect(d).toMatchObject({ subject_type: 'custom_record', subject_id: 7 });
+  });
+
+  it('P4.4: un archivo purgado se muestra con la fecha y la política, y uno vivo no', async () => {
+    const d = await create(1);
+    kit.as({ store_id: 1 });
+    const live = file();
+    const gone = file();
+    const purgedAt = new Date('2026-11-01T03:00:00Z');
+    gone.purged_at = purgedAt;
+    const policy = kit.db.insert('document_retention_policies', {
+      organization_id: 1, store_id: 1, key: 'laboral', name: 'Laboral', retain_days: 30, created_by_user_id: 1,
+    });
+    const run = kit.db.insert('document_purge_runs', { organization_id: 1, store_id: 1, trigger: 'manual' });
+    kit.db.insert('document_purge_items', {
+      store_id: 1, run_id: run.id, file_id: gone.id, policy_id: policy.id, outcome: 'purged',
+      original_name: gone.original_name, size_bytes: 10, sha256: 'a'.repeat(64), reason: 'x',
+    });
+    const base = { dossier_id: d.id, stage_key: 'intake', actor };
+    await kit.dossiers.addFileItem(undefined, { ...base, field_key: 'a', file_id: live.id });
+    await kit.dossiers.addFileItem(undefined, { ...base, field_key: 'b', file_id: gone.id });
+
+    const items = await kit.dossiers.items(d.id);
+    const byFile = (id: number) => items.find((i: any) => i.file?.id === id)!.file!;
+    expect(byFile(gone.id)).toMatchObject({ purged_at: purgedAt, purge_policy_name: 'Laboral' });
+    expect(byFile(live.id)).toMatchObject({ purged_at: null, purge_policy_name: null });
   });
 });

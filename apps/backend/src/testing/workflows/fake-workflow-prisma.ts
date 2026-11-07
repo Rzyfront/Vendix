@@ -28,7 +28,16 @@ const SCOPED = new Set([
   'workflow_webhook_endpoints',
   'workflow_webhook_deliveries',
   'workflow_approval_gates',
+  'signature_requests',
+  'signature_signers',
+  'signature_evidence_events',
+  'issued_documents',
   'store_users',
+  'document_checks',
+  'document_file_profiles',
+  'document_retention_policies',
+  'document_purge_runs',
+  'document_purge_items',
 ]);
 
 const UNIQUES: Record<string, string[][]> = {
@@ -39,6 +48,10 @@ const UNIQUES: Record<string, string[][]> = {
   workflow_task_votes: [['task_id', 'user_id']],
   workflow_webhook_deliveries: [['endpoint_id', 'event_id']],
   workflow_public_links: [['token_hash']],
+  signature_signers: [['token_hash']],
+  signature_evidence_events: [['request_id', 'seq']],
+  document_file_profiles: [['file_id']],
+  document_retention_policies: [['store_id', 'key']],
   workflow_instances: [['store_id', 'reference']],
   workflow_definitions: [['store_id', 'key']],
   workflow_versions: [['definition_id', 'version']],
@@ -116,6 +129,7 @@ const DEFAULTS: Record<string, Row> = {
     retention_until: null,
     legal_hold: false,
     deleted_at: null,
+    purged_at: null,
   },
   dossiers: {
     subject_type: null,
@@ -145,6 +159,54 @@ const DEFAULTS: Record<string, Row> = {
   },
   workflow_public_links: { is_active: true, expires_at: null, last_used_at: null },
   work_groups: { is_active: true },
+  document_file_profiles: {
+    doc_type: null,
+    tags: [],
+    extracted_text: null,
+    valid_until: null,
+    expiry_alerted_for: null,
+    expiry_alerted_at: null,
+    updated_by_user_id: null,
+  },
+  document_retention_policies: { subject_type: null, doc_type: null, is_active: true },
+  document_purge_runs: {
+    status: 'running',
+    files_purged: 0,
+    bytes_purged: 0,
+    skipped_legal_hold: 0,
+    error: null,
+    started_by_user_id: null,
+    finished_at: null,
+  },
+  signature_requests: {
+    status: 'pending',
+    sealed_file_id: null,
+    sealed_sha256: null,
+    created_by_id: null,
+    completed_at: null,
+    cancelled_at: null,
+  },
+  signature_signers: {
+    order: 1,
+    status: 'pending',
+    document_number: null,
+    email: null,
+    phone: null,
+    role_label: null,
+    slot_key: null,
+    otp_hash: null,
+    otp_attempts: 0,
+    otp_sent_at: null,
+    otp_expires_at: null,
+    otp_verified_at: null,
+    viewed_at: null,
+    signed_at: null,
+    signed_ip: null,
+    signed_user_agent: null,
+    signature_file_id: null,
+    declined_reason: null,
+  },
+  signature_evidence_events: { signer_id: null, ip_address: null, user_agent: null, payload: {}, prev_hash: null },
 };
 
 /** Columns Prisma fills with `now()` when the caller omits them. */
@@ -161,6 +223,13 @@ const TIMESTAMPS: Record<string, string[]> = {
   dossier_items: ['created_at'],
   workflow_webhook_endpoints: ['created_at', 'updated_at'],
   workflow_webhook_deliveries: ['created_at'],
+  document_file_profiles: ['created_at', 'updated_at'],
+  document_retention_policies: ['created_at', 'updated_at'],
+  document_purge_runs: ['started_at'],
+  document_purge_items: ['created_at'],
+  signature_requests: ['created_at', 'updated_at'],
+  signature_signers: ['created_at', 'updated_at'],
+  signature_evidence_events: ['occurred_at'],
 };
 
 function eq(a: any, b: any): boolean {
@@ -197,7 +266,13 @@ function matchValue(actual: any, cond: any): boolean {
         case 'not':
           return !matchValue(actual, v);
         case 'equals':
-          return eq(actual, v);
+          return (
+            eq(actual, v) ||
+            (cond.mode === 'insensitive' &&
+              typeof actual === 'string' &&
+              typeof v === 'string' &&
+              actual.toLowerCase() === v.toLowerCase())
+          );
         case 'contains':
           return (
             typeof actual === 'string' &&
@@ -205,6 +280,8 @@ function matchValue(actual: any, cond: any): boolean {
           );
         case 'mode':
           return true;
+        case 'some':
+          return Array.isArray(actual) && actual.some((x) => matches(x, v as Row));
         case 'has':
           return Array.isArray(actual) && actual.includes(v);
         case 'lte':
@@ -217,7 +294,8 @@ function matchValue(actual: any, cond: any): boolean {
           return actual != null && cmp(actual, v) > 0;
         default:
           // Relation filter: `{ location: { store_id: 1 } }` on a seeded nested row.
-          if (actual !== null && typeof actual === 'object') {
+          if (actual === null || actual === undefined) return false;
+          if (typeof actual === 'object') {
             return matches(actual, { [op]: v });
           }
           throw new Error(`fake prisma: unsupported operator ${op}`);
@@ -284,6 +362,32 @@ export class FakeWorkflowDb {
     }
   }
 
+  /** Relations the document queries filter through, resolved from the tables. */
+  withRelations(name: string, row: Row): Row {
+    if (name === 'stored_files') {
+      return {
+        ...row,
+        profile: this.table('document_file_profiles').find((p) => p.file_id === row.id) ?? null,
+        items: this.table('dossier_items')
+          .filter((i) => i.file_id === row.id)
+          .map((i) => ({ ...i, dossier: this.table('dossiers').find((d) => d.id === i.dossier_id) ?? null })),
+      };
+    }
+    if (name === 'dossier_items') {
+      return { ...row, file: this.table('stored_files').find((f) => f.id === row.file_id) ?? null };
+    }
+    if (name === 'document_file_profiles') {
+      return { ...row, file: this.table('stored_files').find((f) => f.id === row.file_id) ?? null };
+    }
+    if (name === 'dossiers') {
+      return {
+        ...row,
+        instance: this.table('workflow_instances').find((i) => i.id === row.workflow_instance_id) ?? null,
+      };
+    }
+    return row;
+  }
+
   private scopeStore(): number | undefined {
     return RequestContextService.getContext()?.store_id;
   }
@@ -314,7 +418,7 @@ export class FakeWorkflowDb {
       return out;
     };
     const find = (args: Row = {}) => {
-      let rows = db.table(name).filter((r) => matches(r, scopeWhere(args.where)));
+      let rows = db.table(name).filter((r) => matches(db.withRelations(name, r), scopeWhere(args.where)));
       if (args.orderBy) {
         const keys = (Array.isArray(args.orderBy) ? args.orderBy : [args.orderBy]).flatMap(
           (o: Row) => Object.entries(o) as [string, string][],

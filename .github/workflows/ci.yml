@@ -147,8 +147,10 @@ jobs:
       # nest build excluye specs; este paso mantiene el gate de tipos de tests.
       - name: Typecheck de specs (buildcheck:types)
         working-directory: apps/backend
+        # 8 GB: el cliente Prisma (más de 400 modelos) ya ponía el chequeo
+        # completo al borde de 6 GB; el runner ubuntu-latest tiene 16 GB.
         env:
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: --max-old-space-size=8192
         run: npm run buildcheck:types
       - name: nest build
         working-directory: apps/backend
@@ -389,6 +391,48 @@ jobs:
           src/domains/store/workflows/records/workflow-records.service.spec.ts
           src/domains/store/workflows/secrets/workflow-http-test.service.spec.ts
           src/domains/store/workflows/secrets/workflow-secrets.service.spec.ts
+          src/prisma/services/store-prisma.workflows.spec.ts
+      # Documental completo (Flujos P4): plantillas y render PDF, firma
+      # electrónica simple con evidencia, lectura con IA, retención y purga,
+      # vencimientos, búsqueda y carpetas.
+      - name: Jest — documental completo (Flujos P4)
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js --runTestsByPath
+          src/common/workflows/contract/workflow-contract.parity.spec.ts
+          src/domains/ecommerce/workflows-public/ecommerce-documents-signing.controller.spec.ts
+          src/domains/received-documents/services/received-document-pages.service.spec.ts
+          src/domains/store/documents/checks/document-check-normalizers.spec.ts
+          src/domains/store/documents/checks/document-checks.service.spec.ts
+          src/domains/store/documents/dossiers.service.spec.ts
+          src/domains/store/documents/profiles/document-expiry.service.spec.ts
+          src/domains/store/documents/profiles/document-file-profiles.service.spec.ts
+          src/domains/store/documents/retention/document-retention.cron.spec.ts
+          src/domains/store/documents/retention/document-retention.service.spec.ts
+          src/domains/store/documents/search/document-library.controllers.spec.ts
+          src/domains/store/documents/search/document-search.service.spec.ts
+          src/domains/store/documents/signatures/signature-evidence.service.spec.ts
+          src/domains/store/documents/signatures/signature-public.service.spec.ts
+          src/domains/store/documents/signatures/signature-requests.service.spec.ts
+          src/domains/store/documents/stored-files.service.spec.ts
+          src/domains/store/documents/templates/base-pdf-pages.service.spec.ts
+          src/domains/store/documents/templates/document-templates.service.spec.ts
+          src/domains/store/documents/templates/issued-document-renderer.impl.spec.ts
+          src/domains/store/documents/templates/issued-documents.queue.spec.ts
+          src/domains/store/documents/templates/issued-documents.service.spec.ts
+          src/domains/store/documents/templates/template-body.spec.ts
+          src/domains/store/documents/templates/template-pdf.spec.ts
+          src/domains/store/documents/templates/template-tokens.spec.ts
+          src/domains/store/workflows/definitions/workflow-definitions.service.spec.ts
+          src/domains/store/workflows/engine/actions/documents-issue.actions.spec.ts
+          src/domains/store/workflows/engine/actions/documents-sign.actions.spec.ts
+          src/domains/store/workflows/engine/workflow-action-registry.spec.ts
+          src/domains/store/workflows/engine/workflow-actions.spec.ts
+          src/domains/store/workflows/engine/workflow-document-stage.spec.ts
+          src/domains/store/workflows/engine/workflow-engine.spec.ts
+          src/domains/store/workflows/engine/workflow-http-output.spec.ts
+          src/domains/store/workflows/engine/workflow-requirements.service.spec.ts
+          src/domains/store/workflows/engine/workflow-trigger.events.spec.ts
           src/prisma/services/store-prisma.workflows.spec.ts
       # Specs que toca la fase P1 de Flujos (acciones, productores y servicios
       # de dominio gobernados): con más de 25 specs cambiados el job de

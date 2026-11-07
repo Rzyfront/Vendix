@@ -988,6 +988,17 @@ model stores {
   stored_files               stored_files[]
   dossiers                   dossiers[]
   dossier_items              dossier_items[]
+  document_templates         document_templates[]
+  document_template_versions document_template_versions[]
+  issued_documents           issued_documents[]
+  signature_requests         signature_requests[]
+  signature_signers          signature_signers[]
+  signature_evidence_events  signature_evidence_events[]
+  document_checks            document_checks[]
+  document_file_profiles     document_file_profiles[]
+  document_retention_policies document_retention_policies[]
+  document_purge_runs        document_purge_runs[]
+  document_purge_items       document_purge_items[]
   financial_splits order_financial_splits[]
   financial_accounts order_financial_accounts[]
   financial_lines order_financial_lines[]
@@ -15823,11 +15834,17 @@ enum stored_file_source_enum {
   upload
   generated
   public_form
+  /// P4.2: drawn signature stroke (PNG).
+  signature_image
 }
 
 enum dossier_item_kind_enum {
   uploaded_file
   note
+  /// P4.1: PDF rendered from a document template.
+  issued_document
+  /// P4.2: sealed PDF with the signatures and the evidence sheet.
+  signed_document
 }
 
 enum dossier_item_status_enum {
@@ -15853,11 +15870,15 @@ model stored_files {
   retention_until  DateTime?                @db.Timestamp(6)
   legal_hold       Boolean                  @default(false)
   deleted_at       DateTime?                @db.Timestamp(6)
+  /// P4.4: the S3 object was deleted by a retention purge; the row and its
+  /// hash stay as evidence and the file is no longer downloadable.
+  purged_at        DateTime?                @db.Timestamp(6)
   created_at       DateTime                 @default(now()) @db.Timestamp(6)
 
   organization organizations   @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   store        stores          @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   items        dossier_items[]
+  profile      document_file_profiles?
 
   @@index([store_id, sha256])
 }
@@ -15881,6 +15902,7 @@ model dossiers {
   store        stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   instance     workflow_instances? @relation(fields: [workflow_instance_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   items        dossier_items[]
+  issued_documents issued_documents[]
 
   @@unique([store_id, reference])
   @@index([store_id, subject_type, subject_id])
@@ -15897,6 +15919,8 @@ model dossier_items {
   stage_key       String?                  @db.VarChar(80)
   field_key       String?                  @db.VarChar(80)
   file_id         Int?
+  /// P4.1/P4.2: issued document this item shows (issued or signed PDF).
+  issued_document_id Int?
   note            String?
   status          dossier_item_status_enum @default(received)
   supersedes_id   Int?
@@ -15907,6 +15931,7 @@ model dossier_items {
   store      stores          @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   dossier    dossiers        @relation(fields: [dossier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   file       stored_files?   @relation(fields: [file_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  issued_document issued_documents? @relation(fields: [issued_document_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   supersedes dossier_items?  @relation("dossier_item_supersedes", fields: [supersedes_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   superseded_by dossier_items[] @relation("dossier_item_supersedes")
 
@@ -16449,4 +16474,369 @@ model workflow_records {
 
   @@unique([collection_id, reference])
   @@index([store_id, collection_id, archived_at])
+}
+
+// ---------------------------------------------------------------------------
+// Documental completo (flujos-adm P4, odd/tasks/flujos-adm-P4.md)
+// Migración aditiva: prisma/migrations/20261120090000_workflow_documents_p4
+// ---------------------------------------------------------------------------
+
+enum document_template_kind_enum {
+  /// Block body rendered with pdfkit (P4.1).
+  blocks
+  /// Fields overlaid on the pages of a base PDF (P4.5).
+  base_pdf
+}
+
+enum document_template_status_enum {
+  draft
+  published
+  archived
+}
+
+enum issued_document_status_enum {
+  rendering
+  issued
+  pending_signature
+  signed
+  voided
+  superseded
+  failed
+}
+
+enum signature_request_status_enum {
+  pending
+  partially_signed
+  completed
+  declined
+  expired
+  cancelled
+}
+
+enum signature_signer_status_enum {
+  pending
+  viewed
+  signed
+  declined
+  expired
+  blocked
+}
+
+enum signature_method_enum {
+  otp_email
+  otp_whatsapp
+}
+
+enum document_check_status_enum {
+  running
+  done
+  failed
+}
+
+enum document_check_verdict_enum {
+  pass
+  warn
+  fail
+  needs_review
+}
+
+/// P4.1: document template. `draft_body` is editable; publishing freezes a
+/// `document_template_versions` row.
+model document_templates {
+  id                   Int                           @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int
+  key                  String                        @db.VarChar(80)
+  name                 String                        @db.VarChar(160)
+  category             String                        @default("other") @db.VarChar(40)
+  kind                 document_template_kind_enum   @default(blocks)
+  status               document_template_status_enum @default(draft)
+  draft_body           Json                          @default("{}")
+  /// P4.5: base PDF of a `base_pdf` template (draft).
+  base_file_id         Int?
+  published_version_id Int?                          @unique
+  created_by_user_id   Int
+  created_at           DateTime                      @default(now()) @db.Timestamp(6)
+  updated_at           DateTime                      @default(now()) @updatedAt @db.Timestamp(6)
+
+  store             stores                       @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  published_version document_template_versions?  @relation("document_template_published", fields: [published_version_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  versions          document_template_versions[] @relation("document_template_versions")
+  issued_documents  issued_documents[]
+
+  @@unique([store_id, key])
+  @@index([store_id, status])
+}
+
+/// P4.1: immutable published version of a template.
+model document_template_versions {
+  id                   Int                         @id @default(autoincrement())
+  store_id             Int
+  template_id          Int
+  version              Int
+  kind                 document_template_kind_enum
+  body                 Json
+  /// Tokens the body uses: [{ path, label?, required }].
+  token_schema         Json                        @default("[]")
+  body_hash            String                      @db.Char(64)
+  base_file_id         Int?
+  published_by_user_id Int
+  published_at         DateTime                    @default(now()) @db.Timestamp(6)
+
+  store            stores              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  template         document_templates  @relation("document_template_versions", fields: [template_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  published_of     document_templates? @relation("document_template_published")
+  issued_documents issued_documents[]
+
+  @@unique([template_id, version])
+}
+
+/// P4.1: document issued from a template version with a frozen data snapshot.
+model issued_documents {
+  id                  Int                         @id @default(autoincrement())
+  organization_id     Int
+  store_id            Int
+  /// "DOC-000001", correlativo por tienda.
+  reference           String                      @db.VarChar(30)
+  title               String                      @db.VarChar(200)
+  template_id         Int
+  template_version_id Int
+  dossier_id          Int?
+  workflow_instance_id Int?
+  requirement_key     String?                     @db.VarChar(80)
+  stage_key           String?                     @db.VarChar(80)
+  data_snapshot       Json                        @default("{}")
+  data_hash           String                      @db.Char(64)
+  file_id             Int?
+  pdf_sha256          String?                     @db.Char(64)
+  status              issued_document_status_enum @default(rendering)
+  error               String?                     @db.VarChar(500)
+  render_attempts     Int                         @default(0)
+  supersedes_id       Int?
+  void_reason         String?                     @db.VarChar(500)
+  issued_by_type      workflow_actor_type_enum
+  issued_by_id        Int?
+  issued_at           DateTime?                   @db.Timestamp(6)
+  created_at          DateTime                    @default(now()) @db.Timestamp(6)
+  updated_at          DateTime                    @default(now()) @updatedAt @db.Timestamp(6)
+
+  store              stores                     @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  template           document_templates         @relation(fields: [template_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  template_version   document_template_versions @relation(fields: [template_version_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  dossier            dossiers?                  @relation(fields: [dossier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  supersedes         issued_documents?          @relation("issued_document_supersedes", fields: [supersedes_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  superseded_by      issued_documents[]         @relation("issued_document_supersedes")
+  dossier_items      dossier_items[]
+  signature_requests signature_requests[]
+
+  @@unique([store_id, reference])
+  @@index([store_id, status])
+  @@index([workflow_instance_id, requirement_key])
+}
+
+/// P4.2: simple electronic signature request over one issued document. The
+/// signed hash is frozen at creation.
+model signature_requests {
+  id                   Int                           @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int
+  issued_document_id   Int
+  document_sha256      String                        @db.Char(64)
+  status               signature_request_status_enum @default(pending)
+  expires_at           DateTime                      @db.Timestamp(6)
+  consent_text         String
+  consent_text_version String                        @db.VarChar(20)
+  sealed_file_id       Int?
+  sealed_sha256        String?                       @db.Char(64)
+  created_by_type      workflow_actor_type_enum
+  created_by_id        Int?
+  created_at           DateTime                      @default(now()) @db.Timestamp(6)
+  updated_at           DateTime                      @default(now()) @updatedAt @db.Timestamp(6)
+  completed_at         DateTime?                     @db.Timestamp(6)
+  cancelled_at         DateTime?                     @db.Timestamp(6)
+
+  store           stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  issued_document issued_documents            @relation(fields: [issued_document_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  signers         signature_signers[]
+  events          signature_evidence_events[]
+
+  @@index([store_id, status, expires_at])
+  @@index([issued_document_id])
+}
+
+/// P4.2: one signer of a request, with a hashed magic-link token and OTP.
+model signature_signers {
+  id                Int                          @id @default(autoincrement())
+  store_id          Int
+  request_id        Int
+  order             Int                          @default(1)
+  name              String                       @db.VarChar(160)
+  document_number   String?                      @db.VarChar(30)
+  email             String?                      @db.VarChar(160)
+  phone             String?                      @db.VarChar(30)
+  role_label        String?                      @db.VarChar(80)
+  /// Signature box (`signature_slots[].key`) of the template this signer fills.
+  slot_key          String?                      @db.VarChar(80)
+  method            signature_method_enum
+  token_hash        String                       @unique @db.Char(64)
+  otp_hash          String?                      @db.Char(64)
+  otp_attempts      Int                          @default(0)
+  otp_sent_at       DateTime?                    @db.Timestamp(6)
+  otp_expires_at    DateTime?                    @db.Timestamp(6)
+  otp_verified_at   DateTime?                    @db.Timestamp(6)
+  status            signature_signer_status_enum @default(pending)
+  viewed_at         DateTime?                    @db.Timestamp(6)
+  signed_at         DateTime?                    @db.Timestamp(6)
+  signed_ip         String?                      @db.VarChar(64)
+  signed_user_agent String?                      @db.VarChar(400)
+  signature_file_id Int?
+  declined_reason   String?                      @db.VarChar(500)
+  created_at        DateTime                     @default(now()) @db.Timestamp(6)
+  updated_at        DateTime                     @default(now()) @updatedAt @db.Timestamp(6)
+
+  store   stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  request signature_requests          @relation(fields: [request_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  events  signature_evidence_events[]
+
+  @@index([request_id, order])
+}
+
+/// P4.2: append-only (DB trigger), hash-chained evidence of a request.
+model signature_evidence_events {
+  id          BigInt   @id @default(autoincrement())
+  store_id    Int
+  request_id  Int
+  signer_id   Int?
+  seq         Int
+  type        String   @db.VarChar(40)
+  ip_address  String?  @db.VarChar(64)
+  user_agent  String?  @db.VarChar(400)
+  payload     Json     @default("{}")
+  prev_hash   String?  @db.Char(64)
+  event_hash  String   @db.Char(64)
+  occurred_at DateTime @default(now()) @db.Timestamp(6)
+
+  store   stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  request signature_requests @relation(fields: [request_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  signer  signature_signers? @relation(fields: [signer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([request_id, seq])
+}
+
+/// P4.3: OCR / AI validation of a stored file, with provenance per field.
+model document_checks {
+  id                   Int                          @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int
+  file_id              Int
+  workflow_instance_id Int?
+  check_type           String                       @default("extract") @db.VarChar(40)
+  status               document_check_status_enum   @default(running)
+  app_key              String                       @db.VarChar(60)
+  model                String?                      @db.VarChar(80)
+  prompt_version       String                       @db.VarChar(20)
+  /// sha256 of the file bytes + the requested field list (cache key).
+  input_sha256         String                       @db.Char(64)
+  result               Json                         @default("{}")
+  verdict              document_check_verdict_enum?
+  tokens_used          Int?
+  error                String?                      @db.VarChar(500)
+  requested_by_user_id Int?
+  reviewed_by_user_id  Int?
+  reviewed_at          DateTime?                    @db.Timestamp(6)
+  created_at           DateTime                     @default(now()) @db.Timestamp(6)
+  updated_at           DateTime                     @default(now()) @updatedAt @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([store_id, file_id])
+  @@index([store_id, input_sha256, prompt_version])
+}
+
+/// P4.6/P4.7: editable metadata of a stored file (dossier items are
+/// append-only): type, tags, OCR text and expiry.
+model document_file_profiles {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int
+  file_id             Int       @unique
+  doc_type            String?   @db.VarChar(60)
+  tags                String[]  @default([])
+  extracted_text      String?
+  valid_until         DateTime? @db.Date
+  /// Expiry already alerted for this `valid_until` (idempotency).
+  expiry_alerted_for  DateTime? @db.Date
+  expiry_alerted_at   DateTime? @db.Timestamp(6)
+  updated_by_user_id  Int?
+  created_at          DateTime  @default(now()) @db.Timestamp(6)
+  updated_at          DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  store stores       @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  file  stored_files @relation(fields: [file_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([store_id, valid_until])
+  @@index([store_id, doc_type])
+}
+
+/// P4.4: how long the files of a kind of dossier are kept after it closes.
+model document_retention_policies {
+  id                 Int      @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int
+  key                String   @db.VarChar(80)
+  name               String   @db.VarChar(160)
+  /// Dossier subject it applies to (null = any).
+  subject_type       String?  @db.VarChar(40)
+  /// File type (`document_file_profiles.doc_type`) it applies to (null = any).
+  doc_type           String?  @db.VarChar(60)
+  retain_days        Int
+  is_active          Boolean  @default(true)
+  created_by_user_id Int
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, key])
+}
+
+/// P4.4: one purge run (scheduled or manual) and its report totals.
+model document_purge_runs {
+  id                  Int       @id @default(autoincrement())
+  organization_id     Int
+  store_id            Int
+  trigger             String    @db.VarChar(20)
+  status              String    @default("running") @db.VarChar(20)
+  files_purged        Int       @default(0)
+  bytes_purged        BigInt    @default(0)
+  skipped_legal_hold  Int       @default(0)
+  error               String?   @db.VarChar(500)
+  started_by_user_id  Int?
+  started_at          DateTime  @default(now()) @db.Timestamp(6)
+  finished_at         DateTime? @db.Timestamp(6)
+
+  store stores                 @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  items document_purge_items[]
+
+  @@index([store_id, started_at])
+}
+
+/// P4.4: one file of a purge run (purged, or skipped by legal hold).
+model document_purge_items {
+  id            Int      @id @default(autoincrement())
+  store_id      Int
+  run_id        Int
+  file_id       Int
+  policy_id     Int?
+  outcome       String   @db.VarChar(20)
+  original_name String   @db.VarChar(255)
+  size_bytes    Int
+  sha256        String   @db.Char(64)
+  reason        String   @db.VarChar(200)
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+
+  store stores              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  run   document_purge_runs @relation(fields: [run_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([run_id])
+  @@index([store_id, file_id])
 }

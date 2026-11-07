@@ -11,6 +11,9 @@ import {
 
 const isFilled = isFilledValue;
 
+/** Issued-document statuses that satisfy an `issued_document` requirement. */
+const ISSUED_OK = new Set(['issued', 'pending_signature', 'signed']);
+
 function fileIdsOf(v: unknown): number[] {
   const list = Array.isArray(v) ? v : [v];
   return list.filter((x): x is number => Number.isInteger(x) && (x as number) > 0);
@@ -24,9 +27,11 @@ function fileIdsOf(v: unknown): number[] {
  *   blocks (it is not reported as pending).
  * - `file_field`: the instance data field is non-empty AND every file id in it
  *   is a stored file of this store that belongs to the instance dossier.
- * - `issued_document` / `signature`: still pending whenever they block the
- *   exit (issuing and signing arrive with later documents tasks; the validator
- *   already refuses to publish an `issued_document` without a published template).
+ * - `issued_document` (P4.1): satisfied when the instance's current issued
+ *   document for that key is rendered (`issued`, `pending_signature` or
+ *   `signed`); `rendering` and `failed` stay pending.
+ * - `signature` (P4.2): satisfied when the current issued document of `of` is
+ *   `signed` (sealed). `blocks_exit: false` never blocks.
  */
 @Injectable()
 export class DossierWorkflowRequirementsService extends WorkflowRequirementsService {
@@ -73,12 +78,17 @@ export class DossierWorkflowRequirementsService extends WorkflowRequirementsServ
           if (!done) pending.push({ key: req.key, label: req.label });
           break;
         }
-        case 'signature':
-          if (req.blocks_exit !== false) pending.push({ key: req.key, label: req.label });
+        case 'signature': {
+          if (req.blocks_exit === false) break;
+          const status = await this.dossiers.currentIssuedStatus(instance.id, req.of, tx);
+          if (status !== 'signed') pending.push({ key: req.key, label: req.label });
           break;
-        case 'issued_document':
-          pending.push({ key: req.key, label: req.label });
+        }
+        case 'issued_document': {
+          const status = await this.dossiers.currentIssuedStatus(instance.id, req.key, tx);
+          if (!status || !ISSUED_OK.has(status)) pending.push({ key: req.key, label: req.label });
           break;
+        }
       }
     }
     return pending;

@@ -15,6 +15,7 @@ import {
   WorkflowInstanceRow,
   WorkflowInstanceRuntime,
   WorkflowNotifyPayload,
+  WorkflowRequirementsService,
   WorkflowTx,
 } from './workflow-engine.types';
 import { WorkflowEventsService } from './workflow-events.service';
@@ -46,6 +47,8 @@ export class WorkflowTickService {
     private readonly advancer: WorkflowAdvanceService,
     private readonly stages: WorkflowStageService,
     private readonly events: WorkflowEventsService,
+    // P4.1: an automatic stage waits for its documents (absent = never waits).
+    private readonly requirements?: WorkflowRequirementsService,
   ) {}
 
   async tick(
@@ -69,6 +72,9 @@ export class WorkflowTickService {
       const stage = this.loader.currentStage(definition, instance);
 
       if (stage.type === 'automatic') {
+        if (await this.waitingForDocuments(tx, instance, stage)) {
+          return { action: 'blocked', reminded: false, escalated: false };
+        }
         if (await this.exceededAutomaticHops(tx, instance)) {
           return this.fail(tx, instance, 'automatic_loop', now);
         }
@@ -94,6 +100,28 @@ export class WorkflowTickService {
       if (!instance.stage_due_at || instance.stage_due_at > now) return NOOP;
       return this.overdue(tx, instance, stage.due?.on_overdue, now);
     });
+  }
+
+  /**
+   * P4.1/P4.2: an automatic stage with `issued_document` / `signature`
+   * requirements does not leave until they are met. Issuing a document queues
+   * a new `advance` row when it is ready, so the request resumes by itself.
+   */
+  private async waitingForDocuments(
+    tx: WorkflowTx,
+    instance: WorkflowInstanceRow,
+    stage: WorkflowStageDef,
+  ): Promise<boolean> {
+    const documents = (stage.requirements ?? []).filter(
+      (r) => r.kind === 'issued_document' || r.kind === 'signature',
+    );
+    if (!this.requirements || documents.length === 0) return false;
+    const pending = await this.requirements.pendingRequirements(
+      instance,
+      { ...stage, requirements: documents },
+      tx,
+    );
+    return pending.length > 0;
   }
 
   /**

@@ -195,7 +195,7 @@ const SCHEMA_RULES_ES = [
   'Las claves (flujo, etapas, campos, requisitos) cumplen `key_pattern`.',
   'Condiciones: solo campos declarados en `fields` y operadores válidos para su tipo (`ops_by_field_type`).',
   'Solo `role_key` y `group_key` de las listas de la tienda (`role_keys`, `group_keys`). Nunca inventes roles ni grupos: si no hay uno adecuado, usa `initiator` y avisa a la persona.',
-  'Requisitos: por ahora usa solo `upload` y `file_field`; `issued_document` y `signature` requieren plantillas publicadas que aún no existen.',
+  'Requisitos: `upload` y `file_field` siempre; `issued_document` solo con una `template_key` de las plantillas publicadas de la tienda (`published_template_keys`; con `auto_issue_on_enter: true` se emite al entrar a la etapa), y `signature` solo con `of` = clave de un `issued_document` de la misma etapa. Nunca inventes una plantilla: si no está publicada, avisa a la persona.',
   '`quorum.required` solo en aprobaciones. Un rechazo siempre rechaza.',
   'Tú propones el JSON; la validez la decide siempre el validador, nunca tú.',
 ];
@@ -247,6 +247,7 @@ function schemaReference(ctx: WorkflowValidationContext) {
     rules: SCHEMA_RULES_ES,
     role_keys: [...(ctx.roleKeys ?? [])],
     group_keys: [...(ctx.groupKeys ?? [])],
+    published_template_keys: [...(ctx.publishedTemplateKeys ?? [])],
     example: WORKFLOW_EXAMPLE_PURCHASE_APPROVAL,
   };
 }

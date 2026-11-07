@@ -50,8 +50,8 @@ describe('workflow trigger events: registry and payload reader', () => {
     }
   });
 
-  it('builds the closed context (exactly the tokens) for all 28 events', () => {
-    expect(WORKFLOW_TRIGGER_EVENTS).toHaveLength(28);
+  it('builds the closed context (exactly the tokens) for all 29 events', () => {
+    expect(WORKFLOW_TRIGGER_EVENTS).toHaveLength(29);
     for (const event of WORKFLOW_TRIGGER_EVENTS) {
       if (event === 'pqr.created') continue; // reads a nested ticket payload
       const info = extractTriggerEvent(event, fullPayload(event));
@@ -61,6 +61,22 @@ describe('workflow trigger events: registry and payload reader', () => {
         [...WORKFLOW_EVENT_TOKENS[event]].sort(),
       );
     }
+  });
+
+  it('document.expiring: the file and its expiry date are the business id', () => {
+    const info = extractTriggerEvent('document.expiring', {
+      store_id: 11,
+      file_id: 77,
+      file_name: 'poliza.pdf',
+      doc_type: 'Póliza',
+      valid_until: '2026-12-07',
+      days_left: 30,
+      dossier_reference: 'EXP-000004',
+      subject_type: 'supplier',
+      subject_id: 5,
+    });
+    expect(info?.business_id).toBe('77:2026-12-07');
+    expect(info?.context['valid_until']).toBe('2026-12-07');
   });
 
   it('order.status_changed: Decimals become strings and the transition id is part of the business id', () => {

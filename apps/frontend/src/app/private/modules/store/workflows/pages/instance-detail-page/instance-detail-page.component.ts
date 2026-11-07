@@ -25,6 +25,8 @@ import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { WorkflowInstanceCommentsComponent } from '../../components/instance-comments.component';
 import { DossierItemsListComponent } from '../../components/dossier-items-list.component';
+import { IssuedDocumentsPanelComponent } from '../../components/issued-documents-panel.component';
+import { SignatureRequestsPanelComponent } from '../../components/signature-requests-panel.component';
 import { WorkflowStageFormComponent } from '../../components/stage-form.component';
 import { TrackingLinksCardComponent } from '../../tracking/tracking-links-card.component';
 import {
@@ -37,6 +39,7 @@ import {
 } from '../../interfaces/workflow.interfaces';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { apiErrorMessage, isStaleCode, toWorkflowError } from '../../utils/workflow-errors.util';
 import {
   countdownText,
@@ -80,6 +83,8 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
     AlertBannerComponent,
     WorkflowStageFormComponent,
     DossierItemsListComponent,
+    IssuedDocumentsPanelComponent,
+    SignatureRequestsPanelComponent,
     WorkflowInstanceCommentsComponent,
     TrackingLinksCardComponent,
   ],
@@ -417,6 +422,24 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
               />
             </app-card>
 
+            @if (canSeeIssuedDocuments) {
+              <app-card title="Documentos emitidos" [responsivePadding]="true" overflow="visible">
+                <app-issued-documents-panel
+                  [instanceId]="d.id"
+                  [requirements]="issuableRequirements()"
+                  [pendingKeys]="pendingKeys()"
+                  [canManage]="canManageDocuments"
+                  (changed)="onDocumentsChanged()"
+                />
+              </app-card>
+            }
+
+            @if (canSeeSignatures) {
+              <app-card title="Firma electrónica" [responsivePadding]="true" overflow="visible">
+                <app-signature-requests-panel [instanceId]="d.id" [canManage]="canManageDocuments" />
+              </app-card>
+            }
+
             <app-tracking-links-card [instanceId]="d.id" />
 
             <app-card title="Comentarios" [responsivePadding]="true" overflow="visible">
@@ -466,6 +489,17 @@ export class InstanceDetailPageComponent implements OnInit {
   private readonly toast = inject(ToastService);
   private readonly settings = inject(StoreSettingsFacade);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly auth = inject(AuthFacade);
+
+  /** Same permissions as the backend: list issued documents with `documents:read` or `workflows:manage`. */
+  readonly canSeeIssuedDocuments =
+    this.auth.isOwner() ||
+    this.auth.hasPermission('store:documents:read') ||
+    this.auth.hasPermission('store:workflows:manage');
+  /** Signature requests are listed with `store:documents:read`. */
+  readonly canSeeSignatures = this.auth.isOwner() || this.auth.hasPermission('store:documents:read');
+  /** Issue, void, send to sign and cancel need `store:workflows:manage`. */
+  readonly canManageDocuments = this.auth.isOwner() || this.auth.hasPermission('store:workflows:manage');
 
   private readonly stageForm = viewChild(WorkflowStageFormComponent);
 
@@ -549,6 +583,13 @@ export class InstanceDetailPageComponent implements OnInit {
     (this.detail()?.pending_requirements ?? []).map((p) => p.label).join(', '),
   );
   readonly blocked = computed(() => this.pendingKeys().size > 0);
+
+  /** `issued_document` requirements of the current stage (for "Emitir <requisito>"). */
+  readonly issuableRequirements = computed(() =>
+    (this.detail()?.stage?.requirements ?? [])
+      .filter((r) => r.kind === 'issued_document')
+      .map((r) => ({ key: r.key, label: r.label })),
+  );
 
   readonly requirementLabels = computed<Record<string, string>>(() => {
     const labels: Record<string, string> = {};
@@ -707,6 +748,13 @@ export class InstanceDetailPageComponent implements OnInit {
         return 'Respuesta del solicitante';
       case 'email_received':
         return 'Correo recibido';
+      // P4.1: documents issued from templates.
+      case 'document_issued':
+        return `Documento emitido: ${String(payload['reference'] ?? '')}`;
+      case 'document_failed':
+        return `No se pudo emitir ${String(payload['reference'] ?? 'el documento')}: ${String(payload['error'] ?? 'error desconocido')}`;
+      case 'document_voided':
+        return `Documento anulado: ${String(payload['reference'] ?? '')}${payload['reason'] ? ` — ${String(payload['reason'])}` : ''}`;
       default:
         return eventDescription(event.type, event.payload);
     }
@@ -920,6 +968,11 @@ export class InstanceDetailPageComponent implements OnInit {
   }
 
   // ─── Loading ─────────────────────────────────────────────────────────
+
+  /** A document was issued, reissued or voided: the requirements may have changed. */
+  onDocumentsChanged(): void {
+    this.reload();
+  }
 
   private reload(initial = false): void {
     if (initial) this.loading.set(true);

@@ -100,7 +100,7 @@ describeDestructiveE2E('Flujos contra Postgres real (M5)', () => {
     advancer,
     stages,
     events,
-    new WorkflowTickService(prisma, loader, assignment, advancer, stages, events),
+    new WorkflowTickService(prisma, loader, assignment, advancer, stages, events, requirements),
   );
   const instances = new WorkflowInstancesService(prisma, assignment, requirements, dossiers, events);
   const comments = new WorkflowCommentsService(prisma, instances, events);

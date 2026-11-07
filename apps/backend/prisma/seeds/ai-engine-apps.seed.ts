@@ -2,6 +2,7 @@ import { PrismaClient, ai_model_type_enum } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
 import { RECEIVED_DOCUMENT_OCR_APPLICATION } from './received-document-ocr.application';
 import { INVOICE_DRAFT_OCR_APPLICATION } from './invoice-draft-ocr.application';
+import { WORKFLOW_DOCUMENT_EXTRACT_APPLICATION } from './workflow-document-extract.application';
 
 export interface SeedAIEngineAppsResult {
   appsCreated: number;
@@ -142,6 +143,7 @@ Example D — a line with "IBUA $65/u" in an "Otros imp." column (value per unit
       prompt_template: null,
     },
     RECEIVED_DOCUMENT_OCR_APPLICATION,
+    WORKFLOW_DOCUMENT_EXTRACT_APPLICATION,
     {
       key: 'invoice_ocr_ingredient',
       ai_feature_category: 'async_queue',
@@ -1743,6 +1745,7 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
       'member_roster_ocr',
       'inventory_count_ocr',
       'invoice_draft_ocr',
+      'workflow_document_extract',
     ]) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
@@ -1975,6 +1978,7 @@ async function linkTextAppsWhenNoDefault(
       'member_roster_ocr',
       'inventory_count_ocr',
       'invoice_draft_ocr',
+      'workflow_document_extract',
     ]);
     const textAppKeys = apps
       .filter(

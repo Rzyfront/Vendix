@@ -764,6 +764,24 @@ export const WORKFLOW_EVENT_CATALOG = {
       tok("contact_email", "Correo del contacto"),
     ],
   },
+  /**
+   * P4.6: a dossier file reaches its expiry window (30 days before
+   * `valid_until`), once per file and expiry date. Starts renewal flows.
+   */
+  "document.expiring": {
+    label: "Documento por vencer",
+    module: "Documentos",
+    tokens: [
+      tok("file_id", "Id del archivo", "id"),
+      tok("file_name", "Nombre del archivo"),
+      tok("doc_type", "Tipo de documento"),
+      tok("valid_until", "Vence el", "date"),
+      tok("days_left", "Días restantes", "int"),
+      tok("dossier_reference", "Expediente"),
+      tok("subject_type", "Tipo de sujeto"),
+      tok("subject_id", "Id del sujeto", "id"),
+    ],
+  },
 } as const satisfies Record<string, WorkflowEventSpec>;
 
 export type WorkflowTriggerEvent = keyof typeof WORKFLOW_EVENT_CATALOG;
@@ -1200,6 +1218,47 @@ export const WORKFLOW_ACTION_CATALOG = {
     permission: "invoicing:write",
     idempotency: "at_most_once",
     inputs: { order_id: inId("Venta") },
+  },
+  /**
+   * P4.1: issues a document from a published template with the request data
+   * (rendered in the queue) and files it in the dossier. `requirement_key`
+   * ties it to an `issued_document` requirement of the current stage.
+   */
+  "vendix.document.issue": {
+    label: "Emitir documento desde plantilla",
+    module: "Documentos",
+    permission: "store:workflows:manage",
+    idempotency: "at_most_once",
+    inputs: {
+      template_key: inText("Plantilla (clave)", true),
+      title: inText("Título del documento"),
+      requirement_key: inText("Requisito que cumple (clave)"),
+    },
+  },
+  /**
+   * P4.2: sends the latest issued document of `document_key` (an
+   * `issued_document` requirement of the request) to sign with a link and an
+   * OTP by email or WhatsApp.
+   */
+  "vendix.document.request_signature": {
+    label: "Enviar documento a firmar",
+    module: "Documentos",
+    permission: "store:workflows:manage",
+    idempotency: "at_most_once",
+    inputs: {
+      document_key: inText("Documento (clave del requisito)", true),
+      signer_name: inText("Nombre del firmante", true),
+      signer_document: inText("Documento del firmante"),
+      signer_email: inText("Correo del firmante"),
+      signer_phone: inText("Celular del firmante (con indicativo)"),
+      role_label: inText("Rol del firmante"),
+      method: {
+        label: "Código por",
+        type: "enum",
+        required: true,
+        values: ["email", "whatsapp"],
+      },
+    },
   },
 } as const satisfies Record<string, WorkflowActionSpec>;
 
