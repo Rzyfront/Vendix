@@ -195,6 +195,10 @@ function matchValue(actual: any, cond: any): boolean {
         case 'gt':
           return actual != null && cmp(actual, v) > 0;
         default:
+          // Relation filter: `{ location: { store_id: 1 } }` on a seeded nested row.
+          if (actual !== null && typeof actual === 'object') {
+            return matches(actual, { [op]: v });
+          }
           throw new Error(`fake prisma: unsupported operator ${op}`);
       }
     });

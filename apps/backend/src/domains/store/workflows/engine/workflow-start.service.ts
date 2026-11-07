@@ -465,13 +465,22 @@ export class WorkflowStartService {
         break;
       case 'purchase_order':
         found = await tx.purchase_orders.findFirst({
-          where: { id, organization_id: ctx.organization_id },
+          where: {
+            id,
+            organization_id: ctx.organization_id,
+            location: { store_id: ctx.store_id },
+          },
           ...select,
         });
         break;
       case 'supplier':
+        // A supplier without a store is shared across the organization.
         found = await tx.suppliers.findFirst({
-          where: { id, organization_id: ctx.organization_id },
+          where: {
+            id,
+            organization_id: ctx.organization_id,
+            OR: [{ store_id: null }, { store_id: ctx.store_id }],
+          },
           ...select,
         });
         break;

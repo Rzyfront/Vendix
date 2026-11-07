@@ -720,8 +720,8 @@ describe('WorkflowEngineService', () => {
 
       it.each([
         ['order', 'orders', { id: 50, store_id: 1 }, { id: 51, store_id: 2 }],
-        ['purchase_order', 'purchase_orders', { id: 50, organization_id: 1 }, { id: 51, organization_id: 2 }],
-        ['supplier', 'suppliers', { id: 50, organization_id: 1 }, { id: 51, organization_id: 2 }],
+        ['purchase_order', 'purchase_orders', { id: 50, organization_id: 1, location: { store_id: 1 } }, { id: 51, organization_id: 1, location: { store_id: 2 } }],
+        ['supplier', 'suppliers', { id: 50, organization_id: 1, store_id: 1 }, { id: 51, organization_id: 1, store_id: 2 }],
         ['employee', 'employees', { id: 50, organization_id: 1 }, { id: 51, organization_id: 2 }],
       ])('%s propio inicia; ajeno o inexistente da 404', async (type, table, mine, theirs) => {
         kit.db.table(table).push(mine, theirs);
@@ -731,6 +731,16 @@ describe('WorkflowEngineService', () => {
         expect(await codeOf(withSubject(type, 51))).toBe('WORKFLOW_SUBJECT_NOT_FOUND');
         expect(await codeOf(withSubject(type, 999))).toBe('WORKFLOW_SUBJECT_NOT_FOUND');
         expect(kit.db.table('workflow_instances')).toHaveLength(before);
+      });
+
+      it('un proveedor compartido de la organización sí vale; el de otra empresa no', async () => {
+        kit.db.table('suppliers').push(
+          { id: 60, organization_id: 1, store_id: null },
+          { id: 61, organization_id: 2, store_id: null },
+        );
+        const ok = await withSubject('supplier', 60);
+        expect(ok.instance.subject_id).toBe(60);
+        expect(await codeOf(withSubject('supplier', 61))).toBe('WORKFLOW_SUBJECT_NOT_FOUND');
       });
 
       it('customer se valida por su pertenencia a la tienda', async () => {
