@@ -29,6 +29,8 @@ interface InboxRowView extends InboxTaskRow {
   definition_label: string;
   due_text: string;
   assignee_text: string;
+  /** Stage name plus the branch of a parallel stage: "Alistamiento · Rama: TI". */
+  stage_label: string;
 }
 
 /** Outcomes that must carry a comment (the backend requires it too). */
@@ -229,6 +231,7 @@ export class InboxPageComponent implements OnInit {
       definition_label: t.definition.name ?? '—',
       due_text: dueText(t.due_at),
       assignee_text: t.assignee?.name ?? 'Sin responsable',
+      stage_label: t.branch_name ? `${t.stage_name} · Rama: ${t.branch_name}` : t.stage_name,
     })),
   );
 
@@ -236,7 +239,7 @@ export class InboxPageComponent implements OnInit {
     { key: 'reference', label: 'Referencia', priority: 1, width: '130px' },
     { key: 'title', label: 'Solicitud', priority: 1 },
     { key: 'definition_label', label: 'Flujo', priority: 3 },
-    { key: 'stage_name', label: 'Etapa', priority: 2 },
+    { key: 'stage_label', label: 'Etapa', priority: 2 },
     {
       key: 'due_text',
       label: 'Vence',
@@ -253,7 +256,7 @@ export class InboxPageComponent implements OnInit {
     avatarShape: 'square',
     detailKeys: [
       { key: 'definition_label', label: 'Flujo', icon: 'git-branch' },
-      { key: 'stage_name', label: 'Etapa', icon: 'layers' },
+      { key: 'stage_label', label: 'Etapa', icon: 'layers' },
       { key: 'due_text', label: 'Vence', icon: 'clock' },
     ],
   };

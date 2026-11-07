@@ -9,6 +9,7 @@ import { SelectorComponent } from '../../../../shared/components/selector/select
 import { TextareaComponent } from '../../../../shared/components/textarea/textarea.component';
 import { ToggleComponent } from '../../../../shared/components/toggle/toggle.component';
 import { WorkflowFieldDef } from '../../../../shared/workflows/contract/workflow-contract';
+import { applyComputedFields } from '../../../../shared/workflows/contract/workflow-expression';
 import { evaluateCondition } from '../../../../shared/workflows/contract/workflow-runtime';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 import {
@@ -82,7 +83,12 @@ const UNSUPPORTED = ['file', 'user'];
             <form class="mt-6 flex flex-col gap-4" (ngSubmit)="submit()" novalidate>
               @for (field of visibleFields(); track field.key) {
                 <div [attr.data-field]="field.key">
-                  @switch (field.type) {
+                  @switch (field.compute ? 'computed' : field.type) {
+                    @case ('computed') {
+                      <app-input [label]="field.label" [readonly]="true"
+                        [helperText]="field.help || 'Se calcula solo.'"
+                        [ngModel]="computedText(field)" [ngModelOptions]="{standalone: true}" />
+                    }
                     @case ('textarea') {
                       <app-textarea [label]="labelOf(field)" [rows]="4" [helperText]="field.help"
                         [error]="errors()[field.key]" [ngModel]="raw(field.key)" [ngModelOptions]="{standalone: true}"
@@ -208,9 +214,15 @@ export class WorkflowPublicFormComponent implements OnInit {
   private readonly fields = computed(() =>
     (this.form()?.fields ?? []).filter((f) => !UNSUPPORTED.includes(f.type)),
   );
+  /** P2.9: what the person typed plus the calculated fields, recomputed live. */
+  readonly liveData = computed<Values>(() =>
+    applyComputedFields({ fields: this.fields() }, this.values(), {
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }),
+  );
   readonly visibleFields = computed<WorkflowFieldDef[]>(() => {
     const all = this.form()?.fields ?? [];
-    const data = this.values();
+    const data = this.liveData();
     return this.fields().filter(
       (f) => !f.visible_when || evaluateCondition(f.visible_when, data, all),
     );
@@ -238,6 +250,14 @@ export class WorkflowPublicFormComponent implements OnInit {
 
   labelOf(field: WorkflowFieldDef): string {
     return field.required ? `${field.label} *` : field.label;
+  }
+
+  /** Calculated value as text for the read-only input ('' while it cannot be computed). */
+  computedText(field: WorkflowFieldDef): string {
+    const value = this.liveData()[field.key];
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'number' && field.type === 'money') return value.toLocaleString('es-CO');
+    return String(value);
   }
 
   raw(key: string): unknown {
@@ -305,6 +325,8 @@ export class WorkflowPublicFormComponent implements OnInit {
     const out: Values = {};
     const raw = this.values();
     for (const field of this.visibleFields()) {
+      // Calculated fields are read-only: the server computes them, never sent.
+      if (field.compute) continue;
       const value = raw[field.key];
       const empty =
         value === undefined ||

@@ -125,6 +125,11 @@ export class WorkflowInboxService {
           overdue: !!t.due_at && new Date(t.due_at).getTime() < now,
           stage_key: t.stage_key,
           stage_name: stage?.name ?? null,
+          // P2.1: branch of a parallel stage.
+          branch_key: t.branch_key ?? null,
+          branch_name: t.branch_key
+            ? (stage?.parallel?.branches.find((b) => b.key === t.branch_key)?.name ?? null)
+            : null,
           instance: {
             id: instance.id,
             reference: instance.reference,

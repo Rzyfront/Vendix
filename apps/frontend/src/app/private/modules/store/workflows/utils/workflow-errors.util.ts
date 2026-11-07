@@ -35,3 +35,15 @@ export function toWorkflowError(error: unknown): WorkflowApiError {
 export function isStaleCode(code: string | null): boolean {
   return code === 'WORKFLOW_STALE' || code === 'WORKFLOW_TASK_CLOSED';
 }
+
+/**
+ * The message the API itself sent (permission refusals included), else the
+ * normalized one. For errors whose own text matters to the person (403s).
+ */
+export function apiErrorMessage(error: unknown): string {
+  const raw = error as { error?: { message?: unknown } } | null;
+  const message = raw?.error?.message;
+  if (typeof message === 'string' && message.trim().length > 0) return message;
+  if (Array.isArray(message) && typeof message[0] === 'string') return message[0];
+  return toWorkflowError(error).message;
+}

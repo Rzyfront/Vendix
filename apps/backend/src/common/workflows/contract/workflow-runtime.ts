@@ -345,8 +345,13 @@ export function validateFormValues(
   }
   const formKeys = new Set(stage.form?.fields ?? []);
   const visible = new Set(visibleFieldKeys(def, stage, values));
+  // P2.9: calculated fields are read-only; the engine recomputes them.
+  const computed = new Set(
+    def.fields.filter((f) => typeof f.compute === "string").map((f) => f.key),
+  );
 
   for (const key of Object.keys(values)) {
+    if (computed.has(key) && formKeys.has(key)) continue;
     if (!formKeys.has(key)) {
       errors.push({
         field: key,
@@ -362,7 +367,7 @@ export function validateFormValues(
 
   for (const key of visible) {
     const f = def.fields.find((x) => x.key === key);
-    if (!f) continue;
+    if (!f || computed.has(key)) continue;
     const v = values[key];
     if (isEmptyValue(v)) {
       if (f.required) {
@@ -482,7 +487,16 @@ export function normalizeDefinition(
     if (s.due?.on_overdue?.escalate_to) {
       s.due.on_overdue.escalate_to = normAssignee(s.due.on_overdue.escalate_to);
     }
-    for (const a of [...(s.on_enter ?? []), ...(s.on_exit ?? [])]) {
+    for (const b of s.parallel?.branches ?? []) {
+      b.assignee = normAssignee(b.assignee);
+    }
+    if (s.subflow && s.subflow.wait === undefined) s.subflow.wait = true;
+    for (const a of [
+      ...(s.on_enter ?? []),
+      ...(s.on_submit ?? []),
+      ...(s.on_complete ?? []),
+      ...(s.on_exit ?? []),
+    ]) {
       if (a.action === "notify") a.to = normAssignee(a.to);
       if (
         a.action === "vendix.crm_task.create" &&

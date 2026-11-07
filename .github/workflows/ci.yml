@@ -337,6 +337,23 @@ jobs:
           src/domains/store/workflows/engine/workflow-actions.spec.ts
           src/domains/store/workflows/gates/approval-gate.spec.ts
           src/domains/store/workflows/gates/gated-services.spec.ts
+      # Motor avanzado (Flujos P2): contrato, expresiones, paralelo, subflujos,
+      # esperas, bucles, guardas, política de error, migración y programación.
+      - name: Jest — motor avanzado (Flujos P2)
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js --runTestsByPath
+          src/common/workflows/contract/workflow-expression.spec.ts
+          src/common/workflows/contract/workflow-validator.p2.spec.ts
+          src/common/workflows/contract/workflow-contract.parity.spec.ts
+          src/domains/store/workflows/engine/workflow-advanced-engine.spec.ts
+          src/domains/store/workflows/engine/workflow-outbox.dispatcher.spec.ts
+          src/domains/store/workflows/engine/workflow-system-start.spec.ts
+          src/domains/store/workflows/definitions/workflow-simulator.service.spec.ts
+          src/domains/store/workflows/definitions/workflow-definitions.service.spec.ts
+          src/domains/store/workflows/instances/workflow-instances.service.spec.ts
+          src/domains/store/workflows/inbox/workflow-inbox.service.spec.ts
+          src/domains/ecommerce/workflows-public/workflow-public-form.service.spec.ts
       # Specs que toca la fase P1 de Flujos (acciones, productores y servicios
       # de dominio gobernados): con más de 25 specs cambiados el job de
       # regresiones los omite, así que corren aquí, de forma explícita.

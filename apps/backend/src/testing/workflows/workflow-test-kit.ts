@@ -45,7 +45,7 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
   const events = new WorkflowEventsService(new WorkflowWebhookEmitter());
   const references = new WorkflowReferenceService();
   const assignment = new WorkflowAssignmentService(groups);
-  const stages = new WorkflowStageService(assignment, events);
+  const stages = new WorkflowStageService(assignment, events, prisma);
   const advancer = new WorkflowAdvanceService(stages, events);
   const dossiers = new DossiersService(prisma);
   const requirements = new DossierWorkflowRequirementsService(dossiers);
@@ -64,6 +64,7 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     requirements,
     advancer,
     events,
+    stages,
   );
   const ticker = new WorkflowTickService(
     prisma,
@@ -84,7 +85,7 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     events,
     ticker,
   );
-  const instances = new WorkflowInstancesService(prisma, assignment, requirements, dossiers);
+  const instances = new WorkflowInstancesService(prisma, assignment, requirements, dossiers, events);
   const workflowFiles = new WorkflowFilesService(
     prisma,
     loader,
@@ -127,6 +128,8 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     audit,
     assignment,
     ticker,
+    events,
+    stages,
     as(next: Partial<TestCtx>) {
       ctx = { ...ctx, ...next };
     },

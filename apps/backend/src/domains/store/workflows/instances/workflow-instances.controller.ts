@@ -129,6 +129,19 @@ export class WorkflowInstancesController {
     return this.responseService.updated(result);
   }
 
+  /** P2.7: re-queues a dead `vendix.*` action of the request (dead-letter). */
+  @Post(':id/failed-actions/:actionId/retry')
+  @Permissions('store:workflows:manage')
+  async retryFailedAction(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('actionId', ParseIntPipe) actionId: number,
+  ) {
+    return this.responseService.success(
+      await this.instances.retryFailedAction(id, actionId),
+      'Acción reenviada a la cola',
+    );
+  }
+
   /**
    * Adjunta un archivo a la etapa ACTUAL: `requirement_key` (requisito `upload`)
    * XOR `field_key` (campo `file` del formulario; devuelve `file_id` para que el

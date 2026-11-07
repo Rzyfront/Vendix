@@ -14,7 +14,13 @@ import {
 describe('WorkflowOutboxDispatcher', () => {
   let db: FakeWorkflowDb;
   let dispatcher: WorkflowOutboxDispatcher;
-  const engine = { tick: jest.fn() };
+  const engine = {
+    tick: jest.fn(),
+    onActionDead: jest.fn(),
+    onSubflowDead: jest.fn(),
+    startSubflow: jest.fn(),
+    subflowClosed: jest.fn(),
+  };
   const notifications = { sendToUser: jest.fn() };
   const actions = { execute: jest.fn(), recordFailure: jest.fn() };
   const fanout = { fanOut: jest.fn() };
@@ -36,6 +42,10 @@ describe('WorkflowOutboxDispatcher', () => {
       current_stage_key: 'a', stage_entry_seq: 1, started_by_type: 'user', started_by_id: 1,
     });
     engine.tick.mockReset().mockResolvedValue({ action: 'advanced' });
+    engine.onActionDead.mockReset().mockResolvedValue(undefined);
+    engine.onSubflowDead.mockReset().mockResolvedValue(undefined);
+    engine.startSubflow.mockReset().mockResolvedValue(undefined);
+    engine.subflowClosed.mockReset().mockResolvedValue(undefined);
     notifications.sendToUser.mockReset().mockResolvedValue({ id: 1 });
     mailer.send.mockReset().mockResolvedValue('sent');
     actions.execute.mockReset();
@@ -82,6 +92,46 @@ describe('WorkflowOutboxDispatcher', () => {
     expect(engine.tick).toHaveBeenCalledWith(1, { expectStageEntrySeq: 3 });
     expect(seen).toMatchObject({ store_id: 1, organization_id: 1, is_super_admin: false });
     expect(row().status).toBe('done');
+  });
+
+  it('P2.7: an action that asked for 2 retries dies on its 3rd attempt and its policy runs', async () => {
+    actions.execute.mockRejectedValue(new Error('caído'));
+    const payload = { action: 'vendix.crm_task.create', max_attempts: 3, on_error: { then: 'fail' } };
+    enqueue('action', payload);
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      expect(await dispatcher.dispatchBatch()).toMatchObject({ retried: 1, dead: 0 });
+      row().available_at = past();
+    }
+    expect(await dispatcher.dispatchBatch()).toMatchObject({ retried: 0, dead: 1 });
+    expect(row()).toMatchObject({ status: 'dead', attempts: 3 });
+    expect(actions.recordFailure).toHaveBeenCalledTimes(1);
+    expect(engine.onActionDead).toHaveBeenCalledWith(
+      expect.objectContaining({ id: row().id, instance_id: 1, payload: expect.objectContaining(payload) }),
+      'caído',
+    );
+  });
+
+  it('P2.2: subflow_start and subflow_closed rows reach the engine under the row store', async () => {
+    enqueue('subflow_start', { parent_id: 1, stage_key: 'alta', stage_entry_seq: 2, index: 0 });
+    enqueue('subflow_closed', { parent_id: 1, child_id: 7, stage_entry_seq: 2 });
+    await dispatcher.dispatchBatch();
+    expect(engine.startSubflow).toHaveBeenCalledWith({ parentId: 1, stageKey: 'alta', entrySeq: 2, index: 0 });
+    expect(engine.subflowClosed).toHaveBeenCalledWith({ parentId: 1, childId: 7, entrySeq: 2 });
+  });
+
+  it('P2.2: a subflow row that dies is handed to the engine so the parent is never stuck', async () => {
+    engine.startSubflow.mockRejectedValue(new Error('deadlock'));
+    enqueue('subflow_start', { parent_id: 1, stage_key: 'alta', stage_entry_seq: 2, index: 0 });
+    for (let attempt = 1; attempt < OUTBOX_MAX_ATTEMPTS; attempt++) {
+      await dispatcher.dispatchBatch();
+      row().available_at = past();
+    }
+    expect(await dispatcher.dispatchBatch()).toMatchObject({ dead: 1 });
+    expect(engine.onSubflowDead).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'subflow_start', payload: expect.objectContaining({ index: 0 }) }),
+      'deadlock',
+    );
+    expect(actions.recordFailure).not.toHaveBeenCalled();
   });
 
   it('no toma filas con available_at en el futuro ni ya terminadas', async () => {

@@ -1,27 +1,39 @@
 import { Component, computed, inject } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import {
   AlertBannerComponent,
   ButtonComponent,
   IconComponent,
+  InputComponent,
   SelectorComponent,
   ToggleComponent,
 } from '../../../../../../shared/components/index';
 import {
+  WORKFLOW_LIMITS,
   WORKFLOW_TRIGGER_EVENTS,
   WorkflowTriggerDef,
   WorkflowTriggerEvent,
-} from '../../../../../../shared/workflows/contract/workflow-contract';
+  describeCron,
+  parseCron,
+} from '../../../../../../shared/workflows/contract';
 import { WorkflowEditorStore } from '../workflow-editor.store';
 import { removeAt, replaceAt } from '../workflow-editor.utils';
 import { eventOptions, eventTokenOptions } from '../workflow-editor-triggers.utils';
 
 type EventTrigger = Extract<WorkflowTriggerDef, { kind: 'event' }>;
+type ScheduleTrigger = Extract<WorkflowTriggerDef, { kind: 'schedule' }>;
+
+const CRON_PRESETS: { label: string; cron: string }[] = [
+  { label: 'Cada lunes 8 a. m.', cron: '0 8 * * 1' },
+  { label: 'Todos los días 8 a. m.', cron: '0 8 * * *' },
+  { label: 'Día 1 de cada mes', cron: '0 8 1 * *' },
+];
 
 /** "Disparadores": how a request of this flow can start (manual, public form, events). */
 @Component({
   selector: 'app-triggers-panel',
   standalone: true,
-  imports: [AlertBannerComponent, ButtonComponent, IconComponent, SelectorComponent, ToggleComponent],
+  imports: [FormsModule, AlertBannerComponent, ButtonComponent, IconComponent, InputComponent, SelectorComponent, ToggleComponent],
   template: `
     <section class="flex flex-col gap-4" aria-label="Disparadores">
       <div>
@@ -37,6 +49,45 @@ type EventTrigger = Extract<WorkflowTriggerDef, { kind: 'event' }>;
       <div class="flex flex-col gap-1 rounded-xl border border-border bg-surface p-3">
         <app-toggle label="Formulario público" [checked]="hasPublicForm()" (toggled)="setPublicForm($event)" />
         <p class="text-xs text-text-secondary">El enlace público se crea y se administra desde la lista de flujos (acción "Enlace público").</p>
+      </div>
+
+      <div class="flex flex-col gap-3">
+        <p class="text-sm font-semibold text-text-primary">Programado</p>
+        @for (trigger of schedules(); track $index; let i = $index) {
+          <div class="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3" data-testid="schedule-trigger">
+            <div class="flex items-end gap-2">
+              <div class="min-w-0 flex-1">
+                <app-input
+                  label="Expresión cron (minuto hora día mes día-semana)"
+                  [error]="cronError(trigger.cron)"
+                  [ngModel]="trigger.cron"
+                  (ngModelChange)="setCron(i, $event)"
+                />
+              </div>
+              <app-button variant="outline-danger" size="xsm" ariaLabel="Quitar programación" (clicked)="removeSchedule(i)">
+                <app-icon name="trash-2" [size]="12" slot="icon" />
+              </app-button>
+            </div>
+            <div class="flex flex-wrap gap-2" role="group" aria-label="Programaciones frecuentes">
+              @for (preset of presets; track preset.cron) {
+                <app-button variant="outline" size="xsm" (clicked)="setCron(i, preset.cron)">{{ preset.label }}</app-button>
+              }
+            </div>
+            @if (!cronError(trigger.cron)) {
+              <p class="text-xs text-text-secondary" data-testid="cron-preview">
+                <app-icon name="clock" [size]="12" class="mr-1 inline" />{{ describe(trigger.cron) }}
+              </p>
+            }
+          </div>
+        } @empty {
+          <p class="text-sm text-text-secondary">Sin programación: la solicitud no se crea sola.</p>
+        }
+        <div>
+          <app-button variant="outline" size="sm" [disabled]="schedules().length >= maxSchedules" (clicked)="addSchedule()">
+            <app-icon name="plus" [size]="14" slot="icon" />
+            Agregar programación
+          </app-button>
+        </div>
       </div>
 
       <div class="flex flex-col gap-3">
@@ -95,6 +146,10 @@ export class TriggersPanelComponent {
 
   readonly triggers = computed<WorkflowTriggerDef[]>(() => this.store.draft()?.triggers ?? [{ kind: 'manual' }]);
   readonly events = computed(() => this.triggers().filter((t): t is EventTrigger => t.kind === 'event'));
+  readonly schedules = computed(() => this.triggers().filter((t): t is ScheduleTrigger => t.kind === 'schedule'));
+  readonly presets = CRON_PRESETS;
+  /** Validator limit of schedule triggers per flow. */
+  readonly maxSchedules = WORKFLOW_LIMITS.maxSchedules;
   readonly hasPublicForm = computed(() => this.triggers().some((t) => t.kind === 'public_form'));
   readonly available = computed(() => {
     const used = new Set(this.events().map((t) => t.event));
@@ -117,11 +172,25 @@ export class TriggersPanelComponent {
     return [{ value: '', label: 'Sin llenar' }, ...eventTokenOptions(event)];
   }
 
-  private commit(events: EventTrigger[], publicForm = this.hasPublicForm()): void {
+  describe(cron: string): string {
+    return describeCron(cron);
+  }
+
+  cronError(cron: string): string | undefined {
+    const parsed = parseCron(cron);
+    return parsed.ok ? undefined : parsed.error;
+  }
+
+  private commit(
+    events: EventTrigger[],
+    publicForm = this.hasPublicForm(),
+    schedules: ScheduleTrigger[] = this.schedules(),
+  ): void {
     const existing = this.triggers().find((t) => t.kind === 'public_form');
     const next: WorkflowTriggerDef[] = [
       { kind: 'manual' },
       ...(publicForm ? [existing ?? ({ kind: 'public_form' } as WorkflowTriggerDef)] : []),
+      ...schedules,
       ...events,
     ];
     this.store.patchDefinition({ triggers: next });
@@ -129,6 +198,18 @@ export class TriggersPanelComponent {
 
   setPublicForm(on: boolean): void {
     this.commit(this.events(), on);
+  }
+
+  addSchedule(): void {
+    this.commit(this.events(), this.hasPublicForm(), [...this.schedules(), { kind: 'schedule', cron: CRON_PRESETS[0].cron }]);
+  }
+
+  removeSchedule(index: number): void {
+    this.commit(this.events(), this.hasPublicForm(), removeAt(this.schedules(), index));
+  }
+
+  setCron(index: number, cron: string): void {
+    this.commit(this.events(), this.hasPublicForm(), replaceAt(this.schedules(), index, { kind: 'schedule', cron }));
   }
 
   add(): void {

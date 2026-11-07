@@ -44,6 +44,19 @@ export interface WorkflowInstanceRow {
   started_by_id: number | null;
   row_version: number;
   completed_at: Date | null;
+  /** P2: engine state (loop counters, failed subflow entries). */
+  runtime?: WorkflowInstanceRuntime | null;
+  /** P2.2: the request that launched this one as a subflow. */
+  parent_instance_id?: number | null;
+  parent_stage_key?: string | null;
+  parent_entry_seq?: number | null;
+}
+
+export interface WorkflowInstanceRuntime {
+  /** Laps taken by each loop stage since it last finished. */
+  loops?: Record<string, number>;
+  /** Stage entry seq (as string key `<stage>:<seq>`) whose subflow could not start. */
+  subflow_failed?: Record<string, string>;
 }
 
 export type WorkflowTaskStatus =
@@ -71,6 +84,8 @@ export interface WorkflowTaskRow {
   outcome_comment: string | null;
   completed_by_user_id: number | null;
   completed_at: Date | null;
+  /** P2.1: branch of a parallel stage. */
+  branch_key?: string | null;
 }
 
 export interface AssigneeFields {

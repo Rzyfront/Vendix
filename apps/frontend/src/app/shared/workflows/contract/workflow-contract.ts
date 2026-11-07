@@ -19,6 +19,20 @@ export const WORKFLOW_LIMITS = {
   maxActionsPerHook: 10,
   maxRequirementsPerStage: 20,
   maxSelectOptions: 100,
+  /** P2: parallel branches per stage, children per subflow stage, guards. */
+  maxBranches: 10,
+  maxSubflows: 10,
+  maxGuards: 10,
+  /** P2.4: hard cap of `loop.max_iterations`. */
+  maxLoopIterations: 100,
+  /** P2.9: characters of a `compute` expression. */
+  maxExpressionLength: 500,
+  /** P2.2: nesting of subflows (a child of a child…). */
+  maxSubflowDepth: 5,
+  /** P2.7: retries an action may ask for before its error policy applies. */
+  maxActionRetries: 5,
+  /** P2.10: schedule triggers per flow. */
+  maxSchedules: 5,
 } as const;
 
 /** Keys of fields, stages, requirements and the definition itself. */
@@ -145,6 +159,13 @@ export interface WorkflowFieldDef {
   /** file only: 1..25. */
   max_size_mb?: number;
   visible_when?: WorkflowConditionGroup;
+  /**
+   * P2.9: calculated field. A closed, safe expression (see
+   * `evaluateExpression` in workflow-expression.ts): arithmetic, comparisons,
+   * text and date functions over other fields. Read-only in forms; the engine
+   * recomputes it on every write. Types number, money, text and date only.
+   */
+  compute?: string;
 }
 
 export type WorkflowStageType =
@@ -152,6 +173,10 @@ export type WorkflowStageType =
   | "approval"
   | "review"
   | "automatic"
+  | "parallel"
+  | "subflow"
+  | "wait"
+  | "loop"
   | "end";
 
 export const WORKFLOW_STAGE_TYPES: readonly WorkflowStageType[] = [
@@ -159,16 +184,39 @@ export const WORKFLOW_STAGE_TYPES: readonly WorkflowStageType[] = [
   "approval",
   "review",
   "automatic",
+  "parallel",
+  "subflow",
+  "wait",
+  "loop",
   "end",
 ];
 
+/**
+ * Outcomes each stage type resolves with (the `on` of its transitions).
+ * parallel → `joined` when its join rule is met; subflow → `completed` when
+ * every child completed (or at once when it does not wait), `rejected` when a
+ * child was rejected, cancelled or failed; wait → `elapsed`; loop →
+ * `continue` (another lap) or `done` (condition false or limit reached).
+ */
 export const STAGE_OUTCOMES: Record<WorkflowStageType, readonly string[]> = {
   form: ["submit"],
   approval: ["approve", "reject"],
   review: ["approve", "reject", "return"],
   automatic: ["auto"],
+  parallel: ["joined"],
+  subflow: ["completed", "rejected"],
+  wait: ["elapsed"],
+  loop: ["continue", "done"],
   end: [],
 };
+
+/** Stages the engine resolves by itself (no task of their own). */
+export const SYSTEM_STAGE_TYPES: readonly WorkflowStageType[] = [
+  "automatic",
+  "subflow",
+  "wait",
+  "loop",
+];
 
 export const HUMAN_STAGE_TYPES: readonly WorkflowStageType[] = [
   "form",
@@ -211,6 +259,98 @@ export interface WorkflowDueDef {
     escalate_to?: WorkflowAssigneeDef;
   };
 }
+
+/** P2.1: one branch of a parallel stage = one human task, all at once. */
+export interface WorkflowBranchDef {
+  key: string;
+  name: string;
+  assignee: WorkflowAssigneeDef;
+  /** Fields the branch fills when it submits (declared fields). */
+  form?: { fields: string[] };
+}
+
+export type WorkflowJoinRule = "all" | "any" | "n_of_m";
+
+export interface WorkflowParallelDef {
+  /** 2..maxBranches */
+  branches: WorkflowBranchDef[];
+  /** all: every branch; any: the first; n_of_m: `required` branches. */
+  join: WorkflowJoinRule;
+  /** n_of_m only: 1..branches.length. */
+  required?: number;
+}
+
+/** P2.2: a child request of another published flow of the store. */
+export interface WorkflowSubflowChildDef {
+  /** Key of the child flow definition. */
+  flow_key: string;
+  /** Child field ← template with `{{fields.*}}` / `{{instance.*}}` of the parent. */
+  map?: Record<string, string>;
+}
+
+export interface WorkflowSubflowDef {
+  /** 1..maxSubflows children started together. */
+  flows: WorkflowSubflowChildDef[];
+  /** Default true: the stage waits until every child closes. */
+  wait?: boolean;
+  /**
+   * Waiting only: parent field ← `"<flow_key>.<child field>"`, copied when the
+   * children complete.
+   */
+  output?: Record<string, string>;
+}
+
+/** P2.3: when a wait stage resumes. Times are HH:mm in the store's time zone. */
+export type WorkflowWaitDef =
+  | { kind: "duration"; days?: number; hours?: number; minutes?: number }
+  | { kind: "date"; date: string; time?: string }
+  /** A date field of the request, plus `offset_days` (may be negative). */
+  | { kind: "field"; field: string; offset_days?: number; time?: string }
+  /** N business days (Mon–Fri, Colombian holidays excluded). */
+  | { kind: "business_days"; days: number; time?: string }
+  /** Next occurrence of day `day` (1..28) of a month. */
+  | { kind: "day_of_month"; day: number; time?: string };
+
+export const WORKFLOW_WAIT_KINDS = [
+  "duration",
+  "date",
+  "field",
+  "business_days",
+  "day_of_month",
+] as const;
+
+/** P2.4: repeats while `while` holds, never more than `max_iterations` laps. */
+export interface WorkflowLoopDef {
+  while: WorkflowConditionGroup;
+  /** Required hard limit: 1..maxLoopIterations. */
+  max_iterations: number;
+}
+
+/**
+ * P2.5: checked before the stage resolves with a forward outcome. When `when`
+ * holds the guard fires: it blocks with `message` or, with `redirect_to`,
+ * sends the request to that stage instead.
+ */
+export interface WorkflowGuardDef {
+  when: WorkflowConditionGroup;
+  message: string;
+  redirect_to?: string;
+}
+
+/** P2.7: what happens when a `vendix.*` action fails. */
+export interface WorkflowActionErrorPolicy {
+  /** Retries with exponential backoff before giving up: 0..maxActionRetries. Default maxActionRetries. */
+  retries?: number;
+  /**
+   * After the last retry: `continue` (record and alert, default), `route` (go
+   * to `route_to`) or `fail` (the request ends as failed). Always alerts the
+   * flow owner and can be retried by hand.
+   */
+  then?: "continue" | "route" | "fail";
+  route_to?: string;
+}
+
+export const WORKFLOW_ERROR_THEN = ["continue", "route", "fail"] as const;
 
 export interface WorkflowTransitionDef {
   to: string;
@@ -1036,7 +1176,17 @@ export type WorkflowActionDef =
   | {
       action: WorkflowVendixActionName;
       map: Record<string, WorkflowActionMapValue>;
+      on_error?: WorkflowActionErrorPolicy;
     };
+
+/** P2.6: every hook point of a stage, in the order they run. */
+export const WORKFLOW_HOOK_POINTS = [
+  "on_submit",
+  "on_complete",
+  "on_exit",
+  "on_enter",
+] as const;
+export type WorkflowHookPoint = (typeof WORKFLOW_HOOK_POINTS)[number];
 
 /**
  * Tokens usable in action maps: `{{fields.<declared field>}}` plus these.
@@ -1232,8 +1382,24 @@ export interface WorkflowStageDef {
   requirements?: WorkflowRequirementDef[];
   transitions?: WorkflowTransitionDef[];
   due?: WorkflowDueDef;
+  /** Runs when the request enters the stage. */
   on_enter?: WorkflowActionDef[];
+  /** P2.6: runs when a person submits the stage (outcome submit / approve). */
+  on_submit?: WorkflowActionDef[];
+  /** P2.6: runs when the stage resolves, whatever the outcome. */
+  on_complete?: WorkflowActionDef[];
+  /** Runs when the request leaves the stage (not on a forced move). */
   on_exit?: WorkflowActionDef[];
+  /** P2.5 */
+  guards?: WorkflowGuardDef[];
+  /** P2.1: `parallel` stages only (required there). */
+  parallel?: WorkflowParallelDef;
+  /** P2.2: `subflow` stages only (required there). */
+  subflow?: WorkflowSubflowDef;
+  /** P2.3: `wait` stages only (required there). */
+  wait?: WorkflowWaitDef;
+  /** P2.4: `loop` stages only (required there). */
+  loop?: WorkflowLoopDef;
 }
 
 export type WorkflowTriggerDef =
@@ -1249,7 +1415,12 @@ export type WorkflowTriggerDef =
       kind: "event";
       event: WorkflowTriggerEvent;
       map?: Record<string, string>;
-    };
+    }
+  /**
+   * P2.10: starts the flow as actor `system` on a 5-field cron expression
+   * (minute hour day-of-month month day-of-week) in the store's time zone.
+   */
+  | { kind: "schedule"; cron: string };
 
 export type WorkflowSubjectType =
   | "none"
@@ -1350,6 +1521,14 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
               },
             },
           },
+          {
+            additionalProperties: false,
+            required: ["kind", "cron"],
+            properties: {
+              kind: { const: "schedule" },
+              cron: { type: "string", minLength: 9, maxLength: 120 },
+            },
+          },
         ],
       },
     },
@@ -1398,6 +1577,11 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
         accept: { type: "array", items: { type: "string" } },
         max_size_mb: { type: "number", minimum: 1, maximum: 25 },
         visible_when: { $ref: "#/$defs/conditionGroup" },
+        compute: {
+          type: "string",
+          minLength: 1,
+          maxLength: WORKFLOW_LIMITS.maxExpressionLength,
+        },
       },
     },
     conditionRule: {
@@ -1505,7 +1689,21 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
       required: ["to", "on"],
       properties: {
         to: { $ref: "#/$defs/key" },
-        on: { enum: ["submit", "approve", "reject", "return", "auto"] },
+        on: {
+          enum: [
+            "submit",
+            "approve",
+            "reject",
+            "return",
+            "auto",
+            "joined",
+            "completed",
+            "rejected",
+            "elapsed",
+            "continue",
+            "done",
+          ],
+        },
         when: { $ref: "#/$defs/conditionGroup" },
         require_comment: { type: "boolean" },
         label: { type: "string", maxLength: 200 },
@@ -1601,6 +1799,19 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
                 ],
               },
             },
+            on_error: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                retries: {
+                  type: "integer",
+                  minimum: 0,
+                  maximum: WORKFLOW_LIMITS.maxActionRetries,
+                },
+                then: { enum: [...WORKFLOW_ERROR_THEN] },
+                route_to: { $ref: "#/$defs/key" },
+              },
+            },
           },
         },
       ],
@@ -1666,10 +1877,113 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
           maxItems: WORKFLOW_LIMITS.maxActionsPerHook,
           items: { $ref: "#/$defs/action" },
         },
+        on_submit: {
+          type: "array",
+          maxItems: WORKFLOW_LIMITS.maxActionsPerHook,
+          items: { $ref: "#/$defs/action" },
+        },
+        on_complete: {
+          type: "array",
+          maxItems: WORKFLOW_LIMITS.maxActionsPerHook,
+          items: { $ref: "#/$defs/action" },
+        },
         on_exit: {
           type: "array",
           maxItems: WORKFLOW_LIMITS.maxActionsPerHook,
           items: { $ref: "#/$defs/action" },
+        },
+        guards: {
+          type: "array",
+          maxItems: WORKFLOW_LIMITS.maxGuards,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["when", "message"],
+            properties: {
+              when: { $ref: "#/$defs/conditionGroup" },
+              message: { type: "string", minLength: 1, maxLength: 300 },
+              redirect_to: { $ref: "#/$defs/key" },
+            },
+          },
+        },
+        parallel: {
+          type: "object",
+          additionalProperties: false,
+          required: ["branches", "join"],
+          properties: {
+            branches: {
+              type: "array",
+              minItems: 2,
+              maxItems: WORKFLOW_LIMITS.maxBranches,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["key", "name", "assignee"],
+                properties: {
+                  key: { $ref: "#/$defs/key" },
+                  name: { type: "string", minLength: 1, maxLength: 200 },
+                  assignee: { $ref: "#/$defs/assignee" },
+                  form: {
+                    type: "object",
+                    additionalProperties: false,
+                    required: ["fields"],
+                    properties: {
+                      fields: { type: "array", items: { $ref: "#/$defs/key" } },
+                    },
+                  },
+                },
+              },
+            },
+            join: { enum: ["all", "any", "n_of_m"] },
+            required: { type: "integer", minimum: 1 },
+          },
+        },
+        subflow: {
+          type: "object",
+          additionalProperties: false,
+          required: ["flows"],
+          properties: {
+            flows: {
+              type: "array",
+              minItems: 1,
+              maxItems: WORKFLOW_LIMITS.maxSubflows,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["flow_key"],
+                properties: {
+                  flow_key: { $ref: "#/$defs/key" },
+                  map: {
+                    type: "object",
+                    additionalProperties: { type: "string", maxLength: 500 },
+                  },
+                },
+              },
+            },
+            wait: { type: "boolean" },
+            output: {
+              type: "object",
+              additionalProperties: { type: "string", maxLength: 170 },
+            },
+          },
+        },
+        wait: {
+          type: "object",
+          required: ["kind"],
+          properties: { kind: { enum: [...WORKFLOW_WAIT_KINDS] } },
+        },
+        loop: {
+          type: "object",
+          additionalProperties: false,
+          required: ["while", "max_iterations"],
+          properties: {
+            while: { $ref: "#/$defs/conditionGroup" },
+            max_iterations: {
+              type: "integer",
+              minimum: 1,
+              maximum: WORKFLOW_LIMITS.maxLoopIterations,
+            },
+          },
         },
       },
     },

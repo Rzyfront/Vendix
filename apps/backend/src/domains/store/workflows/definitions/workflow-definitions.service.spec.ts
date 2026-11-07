@@ -2,6 +2,7 @@ import { VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionsService } from './workflow-definitions.service';
 import {
   buildWorkflowKit,
+  seedDefinition,
   purchaseDefinition,
   seedPeople,
   seedWorkGroup,
@@ -113,6 +114,25 @@ describe('WorkflowDefinitionsService', () => {
       const def = purchaseDefinition();
       (def.stages[2] as any).assignee = { kind: 'group', group_key: 'vacio', strategy: 'any' };
       expect((await svc.validateDefinition(def)).errors.map((e) => e.code)).toContain('GROUP_UNKNOWN');
+    });
+
+    it('P2.2: a subflow may only launch a published flow (a draft fails the validation, not the run)', async () => {
+      await svc.create({ name: 'Alta de proveedor', key: 'alta' });
+      const def = purchaseDefinition();
+      const subflow = (key: string) => ({
+        key: 'sub',
+        name: 'Sub',
+        type: 'subflow',
+        subflow: { flows: [{ flow_key: key }], wait: false },
+        transitions: [{ to: def.stages[1].key, on: 'completed' }],
+      });
+      (def.stages as any).push(subflow('alta'));
+      const draft = await svc.validateDefinition(def);
+      expect(draft.errors.find((e) => e.code === 'SUBFLOW_INVALID')?.message).toContain('no está publicado');
+
+      seedDefinition(kit.db, { ...purchaseDefinition(), key: 'alta-publicada' } as any);
+      (def.stages as any)[def.stages.length - 1] = subflow('alta-publicada');
+      expect((await svc.validateDefinition(def)).errors.map((e) => e.code)).not.toContain('SUBFLOW_INVALID');
     });
   });
 

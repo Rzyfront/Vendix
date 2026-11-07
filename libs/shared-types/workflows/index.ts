@@ -12,3 +12,4 @@
 export * from "./workflow-contract";
 export * from "./workflow-validator";
 export * from "./workflow-runtime";
+export * from "./workflow-expression";

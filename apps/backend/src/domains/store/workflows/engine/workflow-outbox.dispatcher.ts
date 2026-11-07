@@ -32,6 +32,10 @@ import {
   GATE_RESOLVED_OUTBOX_KIND,
   GATE_START_OUTBOX_KIND,
 } from '../gates/approval-gate';
+import {
+  SUBFLOW_CLOSED_OUTBOX_KIND,
+  SUBFLOW_START_OUTBOX_KIND,
+} from './workflow-stage.service';
 
 export {
   OUTBOX_BACKOFF_MINUTES,
@@ -210,8 +214,13 @@ export class WorkflowOutboxDispatcher {
     now: Date,
   ): Promise<'retried' | 'dead'> {
     const message = ((error as Error)?.message ?? String(error)).slice(0, 1000);
-    const dead =
-      row.attempts >= OUTBOX_MAX_ATTEMPTS || error instanceof WorkflowNonRetryableError;
+    // P2.7: an action may ask for fewer retries before its error policy applies.
+    const own = row.payload?.max_attempts;
+    const maxAttempts =
+      typeof own === 'number' && Number.isInteger(own) && own >= 1
+        ? Math.min(own, OUTBOX_MAX_ATTEMPTS)
+        : OUTBOX_MAX_ATTEMPTS;
+    const dead = row.attempts >= maxAttempts || error instanceof WorkflowNonRetryableError;
     const delayMin =
       OUTBOX_BACKOFF_MINUTES[Math.min(row.attempts, OUTBOX_BACKOFF_MINUTES.length) - 1];
     await this.prisma.withoutScope().workflow_outbox.updateMany({
@@ -230,7 +239,10 @@ export class WorkflowOutboxDispatcher {
     return dead ? 'dead' : 'retried';
   }
 
-  /** An exhausted `action` row leaves `action_failed` in the instance history. */
+  /**
+   * An exhausted `action` row leaves `action_failed` in the instance history;
+   * an exhausted subflow row resolves or wakes its parent.
+   */
   private async afterDead(row: ClaimedOutboxRow, error: unknown): Promise<void> {
     if (row.kind === GATE_START_OUTBOX_KIND) {
       try {
@@ -245,7 +257,9 @@ export class WorkflowOutboxDispatcher {
       }
       return;
     }
-    if (row.kind !== 'action') return;
+    const subflow =
+      row.kind === SUBFLOW_START_OUTBOX_KIND || row.kind === SUBFLOW_CLOSED_OUTBOX_KIND;
+    if (row.kind !== 'action' && !subflow) return;
     try {
       const store = await this.prisma
         .withoutScope()
@@ -258,15 +272,21 @@ export class WorkflowOutboxDispatcher {
           is_super_admin: false,
           is_owner: false,
         },
-        () =>
-          this.actions.recordFailure(
-            row,
-            ((error as Error)?.message ?? String(error)).slice(0, 500),
-          ),
+        async () => {
+          const message = ((error as Error)?.message ?? String(error)).slice(0, 500);
+          if (subflow) {
+            // P2.2: a dead subflow row must not leave the parent waiting forever.
+            await this.engine.onSubflowDead(row, message);
+            return;
+          }
+          await this.actions.recordFailure(row, message);
+          // P2.7: alert the flow owner and apply the action's error policy.
+          await this.engine.onActionDead(row, message);
+        },
       );
     } catch (e) {
       this.logger.error(
-        `Could not record action_failed for outbox ${row.id}: ${(e as Error)?.message}`,
+        `Could not handle dead outbox ${row.id} (${row.kind}): ${(e as Error)?.message}`,
       );
     }
   }
@@ -294,7 +314,9 @@ export class WorkflowOutboxDispatcher {
     } catch (e) {
       if (
         e instanceof VendixHttpException &&
-        ['WORKFLOW_NOT_ACTIVE', 'WORKFLOW_DEFINITION_NOT_FOUND'].includes(e.errorCode)
+        ['WORKFLOW_NOT_ACTIVE', 'WORKFLOW_DEFINITION_NOT_FOUND', 'WORKFLOW_DISABLED'].includes(
+          e.errorCode,
+        )
       ) {
         this.logger.warn(
           `start_instance ${row.id} skipped: ${e.errorCode} (definition ${String(p.definition_id)})`,
@@ -348,6 +370,22 @@ export class WorkflowOutboxDispatcher {
           await this.gates.start(row);
         } else if (row.kind === GATE_RESOLVED_OUTBOX_KIND) {
           await this.gates.resolved(row);
+        } else if (row.kind === SUBFLOW_START_OUTBOX_KIND) {
+          await this.engine.startSubflow({
+            parentId: Number(row.payload.parent_id),
+            stageKey: String(row.payload.stage_key),
+            entrySeq: Number(row.payload.stage_entry_seq),
+            index: Number(row.payload.index),
+          });
+        } else if (row.kind === SUBFLOW_CLOSED_OUTBOX_KIND) {
+          await this.engine.subflowClosed({
+            parentId: Number(row.payload.parent_id),
+            childId: Number(row.payload.child_id),
+            entrySeq:
+              row.payload.stage_entry_seq === null || row.payload.stage_entry_seq === undefined
+                ? null
+                : Number(row.payload.stage_entry_seq),
+          });
         } else {
           throw new Error(`Unsupported outbox kind: ${row.kind}`);
         }

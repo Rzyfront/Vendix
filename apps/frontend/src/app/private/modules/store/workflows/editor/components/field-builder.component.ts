@@ -9,14 +9,23 @@ import {
   ToggleComponent,
 } from '../../../../../../shared/components/index';
 import {
+  WORKFLOW_EXPR_FUNCTIONS,
   WORKFLOW_FIELD_TYPES,
   WorkflowConditionGroup,
   WorkflowFieldDef,
   WorkflowFieldType,
-} from '../../../../../../shared/workflows/contract/workflow-contract';
+  parseExpression,
+} from '../../../../../../shared/workflows/contract';
 import { FIELD_TYPE_TEXT, uniqueKey } from '../workflow-editor.utils';
 import { ConditionBuilderComponent } from './condition-builder.component';
 import { FileLimits, FileLimitsComponent } from './file-limits.component';
+
+/** Types a calculated field may have (contract rule). */
+const COMPUTABLE_TYPES: readonly WorkflowFieldType[] = ['number', 'money', 'text', 'date'];
+
+const EXPR_FUNCTIONS_TEXT = Object.keys(WORKFLOW_EXPR_FUNCTIONS)
+  .map((name) => `${name}()`)
+  .join(', ');
 
 const TYPE_OPTIONS = WORKFLOW_FIELD_TYPES.map((t) => ({ value: t, label: FIELD_TYPE_TEXT[t] }));
 
@@ -73,6 +82,19 @@ const TYPE_OPTIONS = WORKFLOW_FIELD_TYPES.map((t) => ({ value: t, label: FIELD_T
           (ngModelChange)="onOptions($event)"
         />
       }
+      @if (computable()) {
+        <div class="flex flex-col gap-1" data-testid="field-compute">
+          <app-textarea
+            label="Fórmula (campo calculado)"
+            [rows]="2"
+            [error]="computeError()"
+            helperText="Opcional. Usa las claves de otros campos, por ejemplo: round(subtotal * 1.19, 2). El campo queda de solo lectura."
+            [ngModel]="field().compute ?? ''"
+            (ngModelChange)="onCompute($event)"
+          />
+          <p class="text-xs text-text-secondary">Funciones: {{ functionsText }}</p>
+        </div>
+      }
       @if (field().type === 'file') {
         <app-file-limits [accept]="field().accept" [maxSize]="field().max_size_mb" (changed)="onLimits($event)" />
       }
@@ -106,7 +128,16 @@ export class FieldBuilderComponent {
   readonly remove = output<void>();
 
   readonly typeOptions = TYPE_OPTIONS;
+  readonly functionsText = EXPR_FUNCTIONS_TEXT;
   readonly optionsText = signal('');
+  readonly computable = computed(() => COMPUTABLE_TYPES.includes(this.field().type));
+  /** Live parse of the formula; the same parser the server runs. */
+  readonly computeError = computed(() => {
+    const formula = this.field().compute;
+    if (!formula) return undefined;
+    const parsed = parseExpression(formula);
+    return parsed.ok ? undefined : parsed.error;
+  });
   readonly otherFields = computed(() => this.allFields().filter((f) => f.key !== this.field().key));
   readonly hasOptions = computed(() => ['select', 'multiselect'].includes(this.field().type));
   readonly keyError = computed(() => {
@@ -149,12 +180,19 @@ export class FieldBuilderComponent {
 
   onType(value: string | number | null): void {
     const type = value as WorkflowFieldType;
-    const { options: _o, accept: _a, max_size_mb: _m, ...rest } = this.field();
+    const { options: _o, accept: _a, max_size_mb: _m, compute, ...rest } = this.field();
     this.seededFor = '';
     this.fieldChange.emit({
-      field: { ...rest, type, ...(type === 'select' || type === 'multiselect' ? { options: [] } : {}) },
+      field: {
+        ...rest,
+        ...(compute && COMPUTABLE_TYPES.includes(type) ? { compute } : {}),
+        type, ...(type === 'select' || type === 'multiselect' ? { options: [] } : {}) },
       previousKey: this.field().key,
     });
+  }
+
+  onCompute(text: string): void {
+    this.patch({ compute: text.trim() ? text : undefined });
   }
 
   onOptions(text: string): void {

@@ -34,6 +34,8 @@ import { WorkflowStageService } from './engine/workflow-stage.service';
 import { WorkflowStartService } from './engine/workflow-start.service';
 import { WorkflowTickService } from './engine/workflow-tick.service';
 import { WorkflowTimersCron } from './engine/workflow-timers.cron';
+import { WorkflowScheduleCron } from './engine/workflow-schedule.cron';
+import { WorkflowMigrationService } from './definitions/workflow-migration.service';
 import { WorkGroupsController } from './work-groups.controller';
 import { WorkGroupsService } from './work-groups.service';
 import { WorkflowDefinitionsController } from './definitions/workflow-definitions.controller';
@@ -120,6 +122,7 @@ import { OrdersModule } from '../orders/orders.module';
     WorkGroupsService,
     WorkflowDefinitionsService,
     WorkflowSimulatorService,
+    WorkflowMigrationService,
     WorkflowInstancesService,
     WorkflowMetricsService,
     WorkflowAnalyticsService,
@@ -141,6 +144,7 @@ import { OrdersModule } from '../orders/orders.module';
     WorkflowEngineService,
     WorkflowOutboxDispatcher,
     WorkflowTimersCron,
+    WorkflowScheduleCron,
     // Bloque 13: webhooks salientes, disparadores por evento y acciones Vendix.
     EncryptionService,
     WorkflowWebhookEmitter,

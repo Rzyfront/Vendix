@@ -1,6 +1,7 @@
 import { Component, DestroyRef, effect, inject, input, model, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ButtonComponent, IconComponent, ModalComponent } from '../../../../../../shared/components/index';
+import { MigrationModalComponent } from './migration-modal.component';
 import { WorkflowVersionRow } from '../../interfaces/workflow.interfaces';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { toWorkflowError } from '../../utils/workflow-errors.util';
@@ -10,7 +11,7 @@ import { shortHash } from '../../utils/workflow-labels.util';
 @Component({
   selector: 'app-history-modal',
   standalone: true,
-  imports: [ButtonComponent, IconComponent, ModalComponent],
+  imports: [ButtonComponent, IconComponent, ModalComponent, MigrationModalComponent],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -50,8 +51,21 @@ import { shortHash } from '../../utils/workflow-labels.util';
             <li class="text-sm text-text-secondary">Este flujo aún no se ha publicado.</li>
           }
         </ul>
+        @if (versions().length > 1) {
+          <div class="mt-3">
+            <app-button variant="outline" size="sm" (clicked)="openMigration()">
+              <app-icon name="arrow-right-left" [size]="14" slot="icon" />
+              Migrar solicitudes
+            </app-button>
+          </div>
+        }
       }
     </app-modal>
+    <app-migration-modal
+      [(isOpen)]="migrationOpen"
+      [definitionId]="definitionId()"
+      [versions]="versions()"
+    />
   `,
 })
 export class HistoryModalComponent {
@@ -65,6 +79,7 @@ export class HistoryModalComponent {
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
   readonly viewing = signal<number | null>(null);
+  readonly migrationOpen = signal(false);
   readonly json = signal('');
 
   constructor() {
@@ -87,6 +102,12 @@ export class HistoryModalComponent {
         });
       });
     });
+  }
+
+  /** One modal at a time: the history closes, the migration opens over the editor. */
+  openMigration(): void {
+    this.isOpen.set(false);
+    this.migrationOpen.set(true);
   }
 
   hash(value: string): string {

@@ -9,6 +9,9 @@ import {
   DefinitionDraft,
   ExportDefinitionResult,
   FileDownloadResult,
+  MigrationBody,
+  MigrationPreview,
+  MigrationResult,
   PaginatedApiResponse,
   PublishResult,
   SaveDraftResult,
@@ -104,6 +107,32 @@ export class WorkflowsApiService {
 
   unarchiveDefinition(id: number): Observable<unknown> {
     return this.http.post(`${this.base}/definitions/${id}/unarchive`, {});
+  }
+
+  /** P2.11: turns a flow on or off without deleting it. */
+  setDefinitionEnabled(id: number, enabled: boolean): Observable<WorkflowDefinitionRow> {
+    return this.http
+      .patch<ApiResponse<WorkflowDefinitionRow>>(`${this.base}/definitions/${id}/enabled`, {
+        enabled,
+      })
+      .pipe(map((res) => res.data));
+  }
+
+  // ─── Migration between versions (P2.8) ───────────────────────────────
+
+  previewMigration(id: number, body: MigrationBody): Observable<MigrationPreview> {
+    return this.http
+      .post<ApiResponse<MigrationPreview>>(
+        `${this.base}/definitions/${id}/migrations/preview`,
+        body,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  migrateInstances(id: number, body: MigrationBody): Observable<MigrationResult> {
+    return this.http
+      .post<ApiResponse<MigrationResult>>(`${this.base}/definitions/${id}/migrations`, body)
+      .pipe(map((res) => res.data));
   }
 
   // ─── Editor ──────────────────────────────────────────────────────────
@@ -250,6 +279,16 @@ export class WorkflowsApiService {
     return this.http.post(`${this.base}/tasks/${taskId}/complete`, body, {
       headers: this.idempotency(idempotencyKey),
     });
+  }
+
+  /** P2.7: runs a failed automatic action again (needs the manage permission). */
+  retryFailedAction(instanceId: number, actionId: number): Observable<{ retried: boolean }> {
+    return this.http
+      .post<ApiResponse<{ retried: boolean }>>(
+        `${this.base}/instances/${instanceId}/failed-actions/${actionId}/retry`,
+        {},
+      )
+      .pipe(map((res) => res.data));
   }
 
   // ─── Inbox, board, comments, public link ─────────────────────────────

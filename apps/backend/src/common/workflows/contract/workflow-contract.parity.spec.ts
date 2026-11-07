@@ -7,6 +7,7 @@ const FILES = [
   'workflow-contract.ts',
   'workflow-validator.ts',
   'workflow-runtime.ts',
+  'workflow-expression.ts',
   'index.ts',
 ];
 const FOLDERS = [

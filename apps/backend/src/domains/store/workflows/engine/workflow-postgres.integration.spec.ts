@@ -79,7 +79,7 @@ describeDestructiveE2E('Flujos contra Postgres real (M5)', () => {
   const loader = new WorkflowLoaderService();
   const events = new WorkflowEventsService(new WorkflowWebhookEmitter());
   const assignment = new WorkflowAssignmentService(groups);
-  const stages = new WorkflowStageService(assignment, events);
+  const stages = new WorkflowStageService(assignment, events, prisma);
   const advancer = new WorkflowAdvanceService(stages, events);
   const dossiers = new DossiersService(prisma);
   const requirements = new DossierWorkflowRequirementsService(dossiers);
@@ -96,13 +96,13 @@ describeDestructiveE2E('Flujos contra Postgres real (M5)', () => {
     loader,
     assignment,
     starter,
-    new WorkflowCompleteService(loader, assignment, requirements, advancer, events),
+    new WorkflowCompleteService(loader, assignment, requirements, advancer, events, stages),
     advancer,
     stages,
     events,
     new WorkflowTickService(prisma, loader, assignment, advancer, stages, events),
   );
-  const instances = new WorkflowInstancesService(prisma, assignment, requirements, dossiers);
+  const instances = new WorkflowInstancesService(prisma, assignment, requirements, dossiers, events);
   const comments = new WorkflowCommentsService(prisma, instances, events);
 
   const as = <T>(userIndex: number | null, fn: () => Promise<T>): Promise<T> =>
@@ -240,6 +240,59 @@ describeDestructiveE2E('Flujos contra Postgres real (M5)', () => {
       const log = await seq(instance.id);
       expect(log.filter((e) => e.type === 'task_completed')).toHaveLength(1);
       expect(log.map((e) => e.seq)).toEqual(log.map((_, i) => i + 1));
+    });
+
+    it('P2.1: tres ramas paralelas que terminan a la vez unen una sola vez', async () => {
+      for (const [join, required] of [['all', undefined], ['n_of_m', 2]] as const) {
+        const key = `parallel-${join}-${run}`;
+        await publish({
+          schema: 'vendix.workflow/v1',
+          key,
+          name: key,
+          fields: [],
+          stages: [
+            {
+              key: 'prep',
+              name: 'Alistamiento',
+              type: 'parallel',
+              start: true,
+              parallel: {
+                branches: [1, 2, 3].map((n) => ({
+                  key: `b${n}`,
+                  name: `Rama ${n}`,
+                  assignee: { kind: 'user', user_id: users[n] },
+                })),
+                join,
+                ...(required ? { required } : {}),
+              },
+              transitions: [{ on: 'joined', to: 'done' }],
+            },
+            { key: 'done', name: 'Fin', type: 'end', outcome: 'completed' },
+          ],
+        } as unknown as WorkflowDefinitionV1);
+        const { instance } = await as(0, () => engine.start({ definitionKey: key }));
+        const tasks = await db.workflow_tasks.findMany({
+          where: { instance_id: instance.id, status: 'open' },
+          orderBy: { id: 'asc' },
+        });
+        expect(tasks.map((t) => t.branch_key)).toEqual(['b1', 'b2', 'b3']);
+        const results = await Promise.all(
+          tasks.map((t, i) =>
+            outcome(
+              as(i + 1, () =>
+                engine.completeTask({ taskId: t.id, outcome: 'submit', values: {}, expectedRowVersion: 0 }),
+              ),
+            ),
+          ),
+        );
+        if (join === 'all') expect(results).toEqual(['ok', 'ok', 'ok']);
+        else expect(results.filter((r) => r === 'ok').length).toBeGreaterThanOrEqual(2);
+        const row = await db.workflow_instances.findUniqueOrThrow({ where: { id: instance.id } });
+        expect(row).toMatchObject({ status: 'completed', current_stage_key: 'done' });
+        const log = await seq(instance.id);
+        expect(log.filter((e) => e.type === 'joined')).toHaveLength(1);
+        expect(log.map((e) => e.seq)).toEqual(log.map((_, i) => i + 1));
+      }
     });
 
     it('B1: doble voto simultáneo de la misma persona: un voto, WORKFLOW_ALREADY_VOTED y nunca P2002', async () => {

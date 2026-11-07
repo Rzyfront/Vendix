@@ -23,4 +23,4 @@ export function systemIdempotencyKey(raw: string): string {
 }
 
 export const START_EVENT_TYPES = ['started', 'submitted'];
-export const COMPLETE_EVENT_TYPES = ['task_completed', 'vote'];
+export const COMPLETE_EVENT_TYPES = ['task_completed', 'vote', 'branch_completed'];

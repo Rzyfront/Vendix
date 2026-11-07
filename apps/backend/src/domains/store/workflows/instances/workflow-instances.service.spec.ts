@@ -51,6 +51,7 @@ describe('WorkflowInstancesService', () => {
       kit.assignment,
       kit.requirements,
       kit.dossiers,
+      kit.events,
     );
     A = await startAs(4, 5000);
     B = await startAs(5, 500);
