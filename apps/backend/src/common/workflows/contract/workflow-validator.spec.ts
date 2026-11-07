@@ -407,7 +407,7 @@ describe('validateWorkflowDefinition — conditions', () => {
   it('select fields need options; file-only props rejected elsewhere', () => {
     expect(has(run((d) => d.fields.push({ key: 's', type: 'select', label: 'S' })), 'SHAPE_INVALID')).toBe(true);
     expect(has(run((d) => (d.fields[0].accept = ['image/*'])), 'SHAPE_INVALID')).toBe(true);
-    expect(has(run((d) => (d.fields[2].max_size_mb = 99)), 'SHAPE_INVALID')).toBe(true);
+    expect(has(run((d) => (d.fields[2].max_size_mb = 101)), 'SHAPE_INVALID')).toBe(true);
   });
 });
 
@@ -579,7 +579,7 @@ describe('trigger public_form', () => {
     expect(
       has(run((d) => (d.triggers = [{ kind: 'public_form', extra: 1 }])), 'SHAPE_INVALID'),
     ).toBe(true);
-    expect(has(run((d) => (d.triggers = [{ kind: 'webhook' }])), 'SHAPE_INVALID')).toBe(true);
+    expect(has(run((d) => (d.triggers = [{ kind: 'pigeon' }])), 'SHAPE_INVALID')).toBe(true);
   });
 });
 

@@ -976,6 +976,15 @@ model stores {
   store_api_keys             store_api_keys[]
   workflow_webhook_endpoints workflow_webhook_endpoints[]
   workflow_webhook_deliveries workflow_webhook_deliveries[]
+  workflow_inbound_hooks     workflow_inbound_hooks[]
+  workflow_inbound_requests  workflow_inbound_requests[]
+  workflow_secrets           workflow_secrets[]
+  workflow_mailboxes         workflow_mailboxes[]
+  workflow_mailbox_messages  workflow_mailbox_messages[]
+  workflow_upload_sessions   workflow_upload_sessions[]
+  workflow_tracking_links    workflow_tracking_links[]
+  workflow_collections       workflow_collections[]
+  workflow_records           workflow_records[]
   stored_files               stored_files[]
   dossiers                   dossiers[]
   dossier_items              dossier_items[]
@@ -15537,6 +15546,8 @@ model workflow_definitions {
   instances         workflow_instances[]
   public_links      workflow_public_links[]
   approval_gates    workflow_approval_gates[]
+  inbound_hook      workflow_inbound_hooks?
+  mailbox           workflow_mailboxes?
 
   @@unique([store_id, key])
   @@index([store_id, status])
@@ -15652,6 +15663,7 @@ model workflow_instances {
   dossier      dossiers?
   comments     workflow_instance_comments[]
   approval_gates workflow_approval_gates[]
+  tracking_links workflow_tracking_links[]
   parent       workflow_instances?       @relation("workflow_instance_children", fields: [parent_instance_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   children     workflow_instances[]      @relation("workflow_instance_children")
 
@@ -15942,6 +15954,8 @@ model workflow_public_links {
   token_hash         String    @unique @db.Char(64)
   is_active          Boolean   @default(true)
   expires_at         DateTime? @db.Timestamp(6)
+  /// P3.4: el envío exige resolver el captcha (prueba de trabajo propia).
+  captcha_required   Boolean   @default(false)
   created_by_user_id Int
   created_at         DateTime  @default(now()) @db.Timestamp(6)
   last_used_at       DateTime? @db.Timestamp(6)
@@ -16226,4 +16240,213 @@ model payment_requests {
   @@index([store_id, status])
   @@index([store_id, created_at])
   @@map("payment_requests")
+}
+
+// ---------------------------------------------------------------------------
+// Flujos adm P3 · Externos e inéditos (odd/tasks/flujos-adm-P3.md)
+// Migración aditiva: prisma/migrations/20261119090000_workflow_external_records
+// Todas llevan `store_id` propio NOT NULL (scoping por tienda).
+// ---------------------------------------------------------------------------
+
+/// P3.1: webhook de entrada de un flujo. `public_id` va en la URL; el secreto
+/// HMAC se guarda cifrado y solo se muestra al crearlo o rotarlo.
+model workflow_inbound_hooks {
+  id                    Int       @id @default(autoincrement())
+  organization_id       Int
+  store_id              Int
+  definition_id         Int       @unique
+  public_id             String    @unique @db.VarChar(40)
+  secret_enc            String
+  is_active             Boolean   @default(true)
+  rate_limit_per_minute Int       @default(60)
+  created_by_user_id    Int
+  last_used_at          DateTime? @db.Timestamp(6)
+  created_at            DateTime  @default(now()) @db.Timestamp(6)
+  updated_at            DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  store      stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  definition workflow_definitions        @relation(fields: [definition_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  requests   workflow_inbound_requests[]
+
+  @@index([store_id])
+}
+
+/// P3.1: rastro e idempotencia de las llamadas de entrada (una por clave).
+model workflow_inbound_requests {
+  id              BigInt   @id @default(autoincrement())
+  store_id        Int
+  hook_id         Int
+  idempotency_key String   @db.VarChar(120)
+  instance_id     Int?
+  /// accepted | rejected
+  status          String   @db.VarChar(20)
+  error           String?
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+
+  store stores                 @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  hook  workflow_inbound_hooks @relation(fields: [hook_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([hook_id, idempotency_key])
+  @@index([hook_id, created_at])
+  @@index([store_id])
+}
+
+/// P3.2: secretos por tienda para el nodo HTTP (`{{secrets.NOMBRE}}`).
+/// Solo se guarda cifrado; la API nunca devuelve el valor.
+model workflow_secrets {
+  id                 Int       @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int
+  name               String    @db.VarChar(60)
+  value_enc          String
+  description        String?   @db.VarChar(200)
+  created_by_user_id Int
+  last_used_at       DateTime? @db.Timestamp(6)
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+  updated_at         DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, name])
+}
+
+/// P3.3: buzón de correo entrante de un flujo (`<local_part>@<domain>`).
+model workflow_mailboxes {
+  id                 Int       @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int
+  definition_id      Int       @unique
+  local_part         String    @unique @db.VarChar(64)
+  domain             String    @db.VarChar(120)
+  is_active          Boolean   @default(true)
+  created_by_user_id Int
+  last_received_at   DateTime? @db.Timestamp(6)
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+  updated_at         DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  store      stores                      @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  definition workflow_definitions        @relation(fields: [definition_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  messages   workflow_mailbox_messages[]
+
+  @@index([store_id])
+}
+
+/// P3.3: correos recibidos por un buzón (uno por id de mensaje).
+model workflow_mailbox_messages {
+  id          BigInt   @id @default(autoincrement())
+  store_id    Int
+  mailbox_id  Int
+  message_id  String   @db.VarChar(255)
+  from_email  String?  @db.VarChar(255)
+  subject     String?  @db.VarChar(300)
+  instance_id Int?
+  /// accepted | rejected
+  status      String   @db.VarChar(20)
+  error       String?
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+
+  store   stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  mailbox workflow_mailboxes @relation(fields: [mailbox_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([mailbox_id, message_id])
+  @@index([store_id])
+}
+
+/// P3.4/P3.5: subida por partes (S3 multipart) desde un enlace público o de
+/// seguimiento. `public_id` es el id que ve el cliente.
+model workflow_upload_sessions {
+  id               Int      @id @default(autoincrement())
+  organization_id  Int
+  store_id         Int
+  public_id        String   @unique @db.VarChar(40)
+  public_link_id   Int?
+  tracking_link_id Int?
+  field_key        String?  @db.VarChar(80)
+  requirement_key  String?  @db.VarChar(80)
+  s3_key           String   @db.VarChar(512)
+  s3_upload_id     String?  @db.VarChar(1024)
+  original_name    String   @db.VarChar(255)
+  mime_type        String   @db.VarChar(120)
+  size_bytes       Int
+  chunk_size       Int
+  parts            Json     @default("[]")
+  /// open | completed | consumed | aborted
+  status           String   @default("open") @db.VarChar(20)
+  stored_file_id   Int?
+  expires_at       DateTime @db.Timestamp(6)
+  created_at       DateTime @default(now()) @db.Timestamp(6)
+  updated_at       DateTime @default(now()) @updatedAt @db.Timestamp(6)
+
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([store_id, status, expires_at])
+}
+
+/// P3.5: enlace mágico del solicitante externo (solo el hash del token).
+model workflow_tracking_links {
+  id              Int       @id @default(autoincrement())
+  organization_id Int
+  store_id        Int
+  instance_id     Int
+  token_hash      String    @unique @db.Char(64)
+  contact_name    String?   @db.VarChar(160)
+  contact_email   String?   @db.VarChar(200)
+  expires_at      DateTime  @db.Timestamp(6)
+  revoked_at      DateTime? @db.Timestamp(6)
+  last_used_at    DateTime? @db.Timestamp(6)
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+
+  store    stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  instance workflow_instances @relation(fields: [instance_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([store_id, instance_id])
+}
+
+/// P3.6: colección definida por el cliente (contratos, activos, pólizas…).
+/// `fields` sigue WorkflowRecordFieldDef[] del contrato.
+model workflow_collections {
+  id                 Int      @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int
+  key                String   @db.VarChar(80)
+  name               String   @db.VarChar(120)
+  item_name          String   @db.VarChar(120)
+  description        String?  @db.VarChar(500)
+  icon               String?  @db.VarChar(40)
+  fields             Json     @default("[]")
+  title_field        String?  @db.VarChar(80)
+  reference_prefix   String   @db.VarChar(10)
+  next_number        Int      @default(1)
+  is_archived        Boolean  @default(false)
+  created_by_user_id Int
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamp(6)
+
+  store   stores             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  records workflow_records[]
+
+  @@unique([store_id, key])
+}
+
+/// P3.6: registro de una colección. Su expediente es un `dossiers` con
+/// subject_type "custom_record" y subject_id = id.
+model workflow_records {
+  id                 Int       @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int
+  collection_id      Int
+  reference          String    @db.VarChar(30)
+  title              String    @db.VarChar(200)
+  data               Json      @default("{}")
+  created_by_user_id Int
+  updated_by_user_id Int?
+  archived_at        DateTime? @db.Timestamp(6)
+  created_at         DateTime  @default(now()) @db.Timestamp(6)
+  updated_at         DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  store      stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  collection workflow_collections @relation(fields: [collection_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([collection_id, reference])
+  @@index([store_id, collection_id, archived_at])
 }
