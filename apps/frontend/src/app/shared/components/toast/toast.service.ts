@@ -29,6 +29,8 @@ export interface Toast {
 export class ToastService {
   private toastsSig = signal<Toast[]>([]);
   readonly toasts = this.toastsSig.asReadonly();
+  /** Last approval-gate warning, so the screen's own red toast is not repeated. */
+  private lastGateWarning: { message: string; at: number } | null = null;
 
   show(
     input: Partial<Toast> & {
@@ -84,10 +86,23 @@ export class ToastService {
     this.show({ title, description: msg, variant: 'success', duration });
   }
   error(msg: string, title?: string, duration = 2000) {
+    // The approval gate interceptor already warned with this same message.
+    if (
+      this.lastGateWarning &&
+      Date.now() - this.lastGateWarning.at < 3000 &&
+      msg.startsWith(this.lastGateWarning.message)
+    ) {
+      return;
+    }
     this.show({ title, description: msg, variant: 'error', duration });
   }
   warning(msg: string, title?: string, duration = 1750) {
     this.show({ title, description: msg, variant: 'warning', duration });
+  }
+  /** Warning of the approval gate (P1.3): the same error toast right after is dropped. */
+  approvalWarning(msg: string, title?: string, duration = 4000) {
+    this.lastGateWarning = { message: msg, at: Date.now() };
+    this.warning(msg, title, duration);
   }
   info(msg: string, title?: string, duration = 1500) {
     this.show({ title, description: msg, variant: 'info', duration });

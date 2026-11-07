@@ -45,6 +45,7 @@ import {
   computePendingSessionFingerprint,
   getUnpaidBalanceForFinish,
 } from '../../orders/order-flow/order-action-policy.util';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 
 /** Dinero en céntimos enteros: evita acumular floats. */
 const toCents = (v: unknown): number => Math.round(Number(v ?? 0) * 100);
@@ -385,6 +386,15 @@ export class SessionsService {
         },
       });
 
+      // Flujos P1.1: cash_session.opened in the same transaction
+      await recordTriggerEvent(tx, 'cash_session.opened', {
+        store_id: created_session.store_id,
+        session_id: created_session.id,
+        register_id: created_session.cash_register_id,
+        user_id: created_session.opened_by,
+        opening_amount: created_session.opening_amount,
+      });
+
       return created_session;
     }).catch((error: unknown) => {
       throw this.translateOpenSessionConflict(error);
@@ -682,6 +692,16 @@ export class SessionsService {
       if (!updated_session) {
         throw new NotFoundException('Sesión de caja no encontrada');
       }
+
+      // Flujos P1.1: cash_session.closed in the same transaction
+      await recordTriggerEvent(tx, 'cash_session.closed', {
+        store_id: updated_session.store_id,
+        session_id: updated_session.id,
+        register_id: updated_session.cash_register_id,
+        user_id: updated_session.closed_by,
+        closing_amount: updated_session.actual_closing_amount,
+        difference: updated_session.difference,
+      });
 
       return updated_session;
     });

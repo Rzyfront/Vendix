@@ -1,6 +1,14 @@
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { PayrollFlowService } from './payroll-flow.service';
 
+// Flujos P1.3: no flow governs operations in these unit doubles.
+jest.mock('../../workflows/gates/approval-gate', () => ({
+  ...jest.requireActual('../../workflows/gates/approval-gate'),
+  operationIsGoverned: jest.fn(async () => false),
+}));
+
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
+
 describe('PayrollFlowService fiscal accounting gate', () => {
   const runFixture = (overrides: any = {}) => ({
     id: 50,
@@ -45,7 +53,9 @@ describe('PayrollFlowService fiscal accounting gate', () => {
   });
 
   const createService = (run: any, providerResponse: any = null) => {
-    const prisma = {
+    const prisma: any = {
+      // Flujos P1.1: approve/pay write the state and the event in a transaction.
+      $transaction: jest.fn(async (cb: (tx: unknown) => unknown) => cb(prisma)),
       payroll_runs: {
         findFirst: jest.fn().mockResolvedValue(run),
         update: jest.fn().mockImplementation(({ data }) =>

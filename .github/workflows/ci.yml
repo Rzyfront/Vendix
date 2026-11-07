@@ -289,7 +289,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: audits
     if: needs.audits.outputs.run_ci == 'true' && needs.audits.outputs.backend == 'true'
-    timeout-minutes: 10
+    timeout-minutes: 20
     services:
       postgres:
         image: pgvector/pgvector:0.8.2-pg15
@@ -334,11 +334,64 @@ jobs:
           src/domains/store/workflows/engine/workflow-assignment.spec.ts
           src/domains/store/workflows/engine/workflow-trigger.fanout.spec.ts
           src/domains/store/workflows/engine/workflow-timers.cron.spec.ts
+          src/domains/store/workflows/engine/workflow-actions.spec.ts
+          src/domains/store/workflows/gates/approval-gate.spec.ts
+          src/domains/store/workflows/gates/gated-services.spec.ts
+      # Specs que toca la fase P1 de Flujos (acciones, productores y servicios
+      # de dominio gobernados): con más de 25 specs cambiados el job de
+      # regresiones los omite, así que corren aquí, de forma explícita.
+      - name: Jest — acciones, productores y servicios gobernados (Flujos P1)
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js --runTestsByPath
+          src/common/workflows/contract/workflow-validator.spec.ts
+          src/domains/store/cash-registers/sessions/sessions.service.spec.ts
+          src/domains/store/inventory/adjustments/inventory-adjustments.service.spec.ts
+          src/domains/store/inventory/adjustments/inventory-adjustments-bulk.service.spec.ts
+          src/domains/store/inventory/shared/services/stock-level-manager-negative-available.spec.ts
+          src/domains/store/inventory/shared/services/stock-level-manager.service.spec.ts
+          src/domains/store/invoicing/credit-notes/credit-notes.b1-partial-kernel.spec.ts
+          src/domains/store/invoicing/credit-notes/credit-notes.recalculation.spec.ts
+          src/domains/store/invoicing/credit-notes/credit-notes.service.createnote.spec.ts
+          src/domains/store/invoicing/credit-notes/credit-notes.tax-type.spec.ts
+          src/domains/store/invoicing/credit-notes/credit-notes.validator-integration.spec.ts
+          src/domains/store/invoicing/invoicing.service.calculator-wiring.spec.ts
+          src/domains/store/invoicing/invoicing.service.line-taxes.spec.ts
+          src/domains/store/invoicing/invoicing.service.spec.ts
+          src/domains/store/invoicing/invoicing.service.unclosed-residual.spec.ts
+          src/domains/store/orders/order-flow/order-flow.history.spec.ts
+          src/domains/store/orders/orders.editor-discount.spec.ts
+          src/domains/store/orders/orders.service.spec.ts
+          src/domains/store/orders/purchase-orders/purchase-orders.attachments.spec.ts
+          src/domains/store/orders/purchase-orders/purchase-orders.multi-tax.spec.ts
+          src/domains/store/orders/purchase-orders/purchase-orders.service.spec.ts
+          src/domains/store/orders/purchase-orders/purchase-orders.uom-config.spec.ts
+          src/domains/store/payments/payments.service.spec.ts
+          src/domains/store/payroll/employees/employees.service.email.spec.ts
+          src/domains/store/payroll/employees/employees.service.spec.ts
+          src/domains/store/payroll/payroll-runs/payroll-flow.service.spec.ts
+          src/domains/store/products/products-bulk.service.spec.ts
+          src/domains/store/products/products.service.spec.ts
+          src/domains/store/products/services/product-variant.service.spec.ts
+          src/domains/store/reservations/reservations.service.spec.ts
+          src/domains/store/workflows/engine/actions/operations.actions.spec.ts
+          src/domains/store/workflows/engine/actions/people.actions.spec.ts
+          src/domains/store/workflows/engine/actions/purchasing.actions.spec.ts
+          src/domains/store/workflows/engine/producers/finance.producers.spec.ts
+          src/domains/store/workflows/engine/producers/inventory.producers.spec.ts
+          src/domains/store/workflows/engine/producers/invoice-void.producers.spec.ts
+          src/domains/store/workflows/engine/producers/order-status.producers.spec.ts
+          src/domains/store/workflows/engine/producers/purchase-payment.producers.spec.ts
+          src/domains/store/workflows/engine/workflow-outbox.dispatcher.kinds.spec.ts
+          src/domains/store/workflows/engine/workflow-outbox.dispatcher.spec.ts
+          src/domains/store/workflows/engine/workflow-trigger.events.spec.ts
+          src/domains/store/workflows/instances/workflow-instances.service.spec.ts
       - name: Jest — motor de Flujos contra Postgres
         working-directory: apps/backend
         run: >-
           npx jest --ci --runInBand --forceExit --config jest.isolated.config.js --runTestsByPath
           src/domains/store/workflows/engine/workflow-postgres.integration.spec.ts
+          src/domains/store/workflows/gates/approval-gate.postgres.integration.spec.ts
 
   frontend:
     name: Frontend

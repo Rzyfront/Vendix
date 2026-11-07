@@ -15,6 +15,9 @@ import {
   resolveLocalDateOnlyRange,
   resolveStoreTimezone,
 } from '../../../common/utils/store-timezone.util';
+import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
+import { requestApproval } from '../workflows/gates/approval-gate';
+import { expenseApprovalGateInput } from './expense-approval-gate';
 
 @Injectable()
 export class ExpensesService {
@@ -160,35 +163,51 @@ export class ExpensesService {
       }
     }
 
-    const expense = await this.prisma.expenses.create({
-      data: {
-        ...data,
-        amount: new Prisma.Decimal(data.amount),
-        store_id: context.store_id,
-        organization_id: context.organization_id,
-        category_id,
-        created_by_user_id: context.user_id,
-        expense_date: new Date(createExpenseDto.expense_date),
-        expense_items: items?.length
-          ? {
-              create: items.map((it, idx) => ({
-                description: it.description,
-                quantity: new Prisma.Decimal(it.quantity),
-                unit_price: new Prisma.Decimal(it.unit_price),
-                amount: new Prisma.Decimal(it.amount),
-                line_index: it.line_index ?? idx,
-              })),
-            }
-          : undefined,
-      },
-      include: {
-        expense_categories: true,
-        expense_items: { orderBy: { line_index: 'asc' } },
-        created_by_user: {
-          select: { id: true, first_name: true, last_name: true },
+    const expense = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.expenses.create({
+        data: {
+          ...data,
+          amount: new Prisma.Decimal(data.amount),
+          store_id: context.store_id,
+          organization_id: context.organization_id,
+          category_id,
+          created_by_user_id: context.user_id,
+          expense_date: new Date(createExpenseDto.expense_date),
+          expense_items: items?.length
+            ? {
+                create: items.map((it, idx) => ({
+                  description: it.description,
+                  quantity: new Prisma.Decimal(it.quantity),
+                  unit_price: new Prisma.Decimal(it.unit_price),
+                  amount: new Prisma.Decimal(it.amount),
+                  line_index: it.line_index ?? idx,
+                })),
+              }
+            : undefined,
         },
-      },
+        include: {
+          expense_categories: true,
+          expense_items: { orderBy: { line_index: 'asc' } },
+          created_by_user: {
+            select: { id: true, first_name: true, last_name: true },
+          },
+        },
+      });
+      // Flujos P1.1: expense.created in the same transaction
+      await recordTriggerEvent(tx, 'expense.created', {
+        store_id: created.store_id,
+        expense_id: created.id,
+        amount: created.amount,
+        category_id: created.category_id,
+        description: created.description,
+      });
+      return created;
     });
+
+    // Flujos P1.3: an expense a flow governs is born held until its request
+    // is approved; `ExpenseFlowService.approve` enforces it.
+    const gateInput = await expenseApprovalGateInput(this.prisma, expense.id);
+    if (gateInput) await requestApproval(this.prisma, gateInput);
 
     return expense;
   }

@@ -32,7 +32,7 @@ import { WorkflowCompleteService } from './workflow-complete.service';
 import { WorkflowStartService } from './workflow-start.service';
 import { WorkflowStageService } from './workflow-stage.service';
 import { WorkflowTickService } from './workflow-tick.service';
-
+import { resolveInstanceGates } from '../gates/gate-resolution';
 
 const CLOSED_TASK = ['done', 'cancelled', 'expired'];
 
@@ -40,6 +40,7 @@ const CLOSED_TASK = ['done', 'cancelled', 'expired'];
  * The ONLY write commands of Flujos. Each runs in one `$transaction` on the
  * scoped client; the actor always comes from `RequestContextService`.
  */
+
 @Injectable()
 export class WorkflowEngineService {
   constructor(
@@ -115,6 +116,30 @@ export class WorkflowEngineService {
     try {
       return await this.prisma.$transaction((tx: WorkflowTx) =>
         this.starter.executeSystem(tx, ctx, input),
+      );
+    } catch (e) {
+      if (e instanceof WorkflowIdempotencyConflict) {
+        const prev = await this.events.replay(this.prisma, e.idempotencyKey, {
+          actor: { type: 'system', id: null },
+          types: START_EVENT_TYPES,
+        });
+        if (prev) return prev;
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Starts the request of a pending approval gate (P1.3) as actor `system`.
+   * Returns null when the gate no longer needs one (already started, resolved,
+   * or its definition stopped governing the operation).
+   */
+  async startGate(gateId: number): Promise<WorkflowCommandResult | null> {
+    const ctx = this.loader.context();
+    const idempotencyKey = systemIdempotencyKey(`gate:${gateId}`);
+    try {
+      return await this.prisma.$transaction((tx: WorkflowTx) =>
+        this.starter.executeGate(tx, ctx, { gateId, idempotencyKey }),
       );
     } catch (e) {
       if (e instanceof WorkflowIdempotencyConflict) {
@@ -270,6 +295,8 @@ export class WorkflowEngineService {
       });
       if (cas.count === 0) throw new VendixHttpException(ErrorCodes.WORKFLOW_STALE);
       await this.stages.cancelOpenTasks(tx, ctx.store_id, instance.id);
+      // P1.3: a cancelled request frees its gates; a new attempt asks again.
+      await resolveInstanceGates(tx, instance, 'cancelled', input.reason);
       await this.events.append(tx, {
         store_id: ctx.store_id,
         instance_id: instance.id,

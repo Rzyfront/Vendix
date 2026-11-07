@@ -138,6 +138,13 @@ import { OrderHistoryService } from '../orders/order-history/order-history.servi
 import { ProcessReservedPosPaymentDto } from './dto/create-payment.dto';
 import { WalletBalanceService } from '../wallet/services/wallet-balance.service';
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
+import {
+  GATE_RETRY_BY_REQUESTER,
+  GateDecision,
+  consumeApproval,
+  enforceApproval,
+  operationIsGoverned,
+} from '../workflows/gates/approval-gate';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -1213,6 +1220,14 @@ export class PaymentsService {
           user,
         ))!;
         const order = orderCreation.order;
+        // Flujos P1.3: a POS sale whose discount a flow governs is not saved
+        // until its request is approved (409 while pending; the request
+        // commits on its own). Once approved, the cashier repeats the same
+        // sale and the approval is used once, in this transaction.
+        await consumeApproval(
+          tx,
+          await this.enforcePosDiscountApproval(createPosPaymentDto, order),
+        );
         // Pedido programado: toma el cupo bajo el bloqueo de la tienda en la
         // misma transacción; franja llena o sin anticipación revierte la venta.
         if (createPosPaymentDto.schedule && !createPosPaymentDto.is_draft) {
@@ -3250,6 +3265,63 @@ export class PaymentsService {
         'No tienes permiso para realizar esta operación en POS.',
       );
     }
+  }
+
+  /**
+   * Flujos P1.3 (`order.discount`): the discount of a POS sale (promotions +
+   * coupon, as the server computed it) against the governing threshold. The
+   * request is identified by what the cashier is charging, so repeating the
+   * same sale finds the same request; nothing is replayed by the worker.
+   */
+  private async enforcePosDiscountApproval(
+    dto: CreatePosPaymentDto,
+    order: {
+      order_number?: string | null;
+      discount_amount?: unknown;
+      grand_total?: unknown;
+    },
+  ): Promise<GateDecision> {
+    const discount = this.roundMoney(Number(order.discount_amount ?? 0));
+    if (!(discount > 0)) return { status: 'free' };
+    if (!(await operationIsGoverned(this.prisma, 'order.discount', discount))) {
+      return { status: 'free' };
+    }
+    const grandTotal = this.roundMoney(Number(order.grand_total ?? 0));
+    const existingOrderId = dto.order_id ?? null;
+    return enforceApproval(this.prisma, {
+      operation: 'order.discount',
+      entity_type: 'order',
+      entity_id: existingOrderId ?? 0,
+      amount: discount,
+      context: {
+        order_id: existingOrderId,
+        // A new sale has no number until it is saved.
+        order_number: existingOrderId ? (order.order_number ?? null) : null,
+        discount_amount: discount,
+        grand_total: grandTotal,
+      },
+      request: {
+        method: GATE_RETRY_BY_REQUESTER,
+        args: [
+          {
+            sale: 'pos',
+            order_id: existingOrderId,
+            table_id: dto.table_id ?? null,
+            table_session_id: dto.table_session_id ?? null,
+            customer_id: dto.customer_id ?? null,
+            coupon_code: dto.coupon_code ?? null,
+            items: (dto.items ?? []).map((item) => [
+              item.product_id ?? null,
+              item.product_variant_id ?? null,
+              Number(item.quantity),
+              Number(item.unit_price),
+            ]),
+            discount_amount: discount,
+            grand_total: grandTotal,
+          },
+        ],
+      },
+    });
   }
 
   private roundMoney(value: number): number {

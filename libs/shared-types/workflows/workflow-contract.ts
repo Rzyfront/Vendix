@@ -257,56 +257,774 @@ export const WORKFLOW_REQUIREMENT_KINDS = [
   "signature",
 ] as const;
 
+/**
+ * Type of a catalog token or action input. `id` is a positive integer that
+ * names a Vendix record; `money` and `number` are decimals; `date` is
+ * YYYY-MM-DD; `enum` takes one of `values`; `assignee` is an assignee def.
+ */
+export type WorkflowValueType =
+  | "id"
+  | "int"
+  | "number"
+  | "money"
+  | "text"
+  | "date"
+  | "boolean"
+  | "enum"
+  | "assignee";
+
+/** One `{{event.<key>}}` variable of a business event (or a gated operation). */
+export interface WorkflowCatalogToken {
+  key: string;
+  label: string;
+  type: WorkflowValueType;
+}
+
+/** Declarative entry of the business event registry (P1.1). */
+export interface WorkflowEventSpec {
+  label: string;
+  /** Vendix module that emits it (groups the editor list). */
+  module: string;
+  /** Record the instance is about when the definition's subject matches. */
+  subject?: { type: WorkflowSubjectType; key: string };
+  tokens: readonly WorkflowCatalogToken[];
+}
+
+const tok = (
+  key: string,
+  label: string,
+  type: WorkflowValueType = "text",
+): WorkflowCatalogToken => ({ key, label, type });
+
+/**
+ * Business event registry (P1.1). Adding an event is declaring it here and
+ * emitting it with `recordTriggerEvent(tx, '<name>', payload)` inside the
+ * domain transaction; the editor lists it with its variables on its own.
+ * Every event carries a store id; the payload is read through `tokens` only.
+ */
+export const WORKFLOW_EVENT_CATALOG = {
+  "order.created": {
+    label: "Venta creada",
+    module: "Ventas",
+    subject: { type: "order", key: "order_id" },
+    tokens: [
+      tok("order_id", "Id de la venta", "id"),
+      tok("order_number", "Número de la venta"),
+      tok("grand_total", "Total", "money"),
+      tok("currency", "Moneda"),
+      tok("channel", "Canal"),
+    ],
+  },
+  "order.paid": {
+    label: "Venta pagada",
+    module: "Ventas",
+    subject: { type: "order", key: "order_id" },
+    tokens: [
+      tok("order_id", "Id de la venta", "id"),
+      tok("payment_id", "Id del pago", "id"),
+      tok("grand_total", "Total", "money"),
+      tok("currency", "Moneda"),
+    ],
+  },
+  "order.status_changed": {
+    label: "Venta cambió de estado",
+    module: "Ventas",
+    subject: { type: "order", key: "order_id" },
+    tokens: [
+      tok("order_id", "Id de la venta", "id"),
+      tok("order_number", "Número de la venta"),
+      tok("from_state", "Estado anterior"),
+      tok("to_state", "Estado nuevo"),
+      tok("grand_total", "Total", "money"),
+    ],
+  },
+  "invoice.created": {
+    label: "Factura creada",
+    module: "Facturación",
+    subject: { type: "invoice", key: "invoice_id" },
+    tokens: [
+      tok("invoice_id", "Id de la factura", "id"),
+      tok("invoice_number", "Número de la factura"),
+      tok("invoice_type", "Tipo de documento"),
+      tok("customer_name", "Cliente"),
+      tok("total_amount", "Total", "money"),
+    ],
+  },
+  "invoice.voided": {
+    label: "Factura anulada",
+    module: "Facturación",
+    subject: { type: "invoice", key: "invoice_id" },
+    tokens: [
+      tok("invoice_id", "Id de la factura", "id"),
+      tok("invoice_number", "Número de la factura"),
+      tok("total_amount", "Total", "money"),
+      tok("reason", "Motivo"),
+    ],
+  },
+  "credit_note.created": {
+    label: "Nota crédito creada",
+    module: "Facturación",
+    subject: { type: "invoice", key: "credit_note_id" },
+    tokens: [
+      tok("credit_note_id", "Id de la nota crédito", "id"),
+      tok("invoice_number", "Número de la nota"),
+      tok("related_invoice_id", "Id de la factura origen", "id"),
+      tok("total_amount", "Total", "money"),
+      tok("reason", "Motivo"),
+    ],
+  },
+  "supplier_payment.registered": {
+    label: "Pago a proveedor registrado",
+    module: "Pagos",
+    subject: { type: "purchase_order", key: "purchase_order_id" },
+    tokens: [
+      tok("payment_id", "Id del pago", "id"),
+      tok("purchase_order_id", "Id de la orden de compra", "id"),
+      tok("supplier_id", "Id del proveedor", "id"),
+      tok("amount", "Monto", "money"),
+      tok("payment_method", "Medio de pago"),
+    ],
+  },
+  "payable.payment_registered": {
+    label: "Abono a cuenta por pagar",
+    module: "Pagos",
+    tokens: [
+      tok("payable_id", "Id de la cuenta por pagar", "id"),
+      tok("payment_id", "Id del abono", "id"),
+      tok("supplier_id", "Id del proveedor", "id"),
+      tok("amount", "Monto", "money"),
+      tok("status", "Estado de la cuenta"),
+    ],
+  },
+  "purchase_order.created": {
+    label: "Orden de compra creada",
+    module: "Compras",
+    subject: { type: "purchase_order", key: "purchase_order_id" },
+    tokens: [
+      tok("purchase_order_id", "Id de la orden de compra", "id"),
+      tok("order_number", "Número de la orden"),
+      tok("supplier_id", "Id del proveedor", "id"),
+      tok("total_amount", "Total", "money"),
+    ],
+  },
+  "purchase_order.approved": {
+    label: "Orden de compra aprobada",
+    module: "Compras",
+    subject: { type: "purchase_order", key: "purchase_order_id" },
+    tokens: [
+      tok("purchase_order_id", "Id de la orden de compra", "id"),
+      tok("order_number", "Número de la orden"),
+      tok("supplier_id", "Id del proveedor", "id"),
+      tok("total_amount", "Total", "money"),
+    ],
+  },
+  "purchase_order.received": {
+    label: "Orden de compra recibida",
+    module: "Recepciones",
+    subject: { type: "purchase_order", key: "purchase_order_id" },
+    tokens: [
+      tok("purchase_order_id", "Id de la orden de compra", "id"),
+      tok("supplier_id", "Id del proveedor", "id"),
+      tok("total_amount", "Valor recibido", "money"),
+    ],
+  },
+  "expense.created": {
+    label: "Gasto registrado",
+    module: "Gastos",
+    subject: { type: "expense", key: "expense_id" },
+    tokens: [
+      tok("expense_id", "Id del gasto", "id"),
+      tok("amount", "Monto", "money"),
+      tok("category_id", "Id de la categoría", "id"),
+      tok("description", "Descripción"),
+    ],
+  },
+  "expense.approved": {
+    label: "Gasto aprobado",
+    module: "Gastos",
+    subject: { type: "expense", key: "expense_id" },
+    tokens: [
+      tok("expense_id", "Id del gasto", "id"),
+      tok("amount", "Monto", "money"),
+      tok("category_id", "Id de la categoría", "id"),
+    ],
+  },
+  "expense.paid": {
+    label: "Gasto pagado",
+    module: "Gastos",
+    subject: { type: "expense", key: "expense_id" },
+    tokens: [
+      tok("expense_id", "Id del gasto", "id"),
+      tok("amount", "Monto", "money"),
+      tok("category_id", "Id de la categoría", "id"),
+    ],
+  },
+  "payroll_run.approved": {
+    label: "Nómina aprobada",
+    module: "Nómina",
+    subject: { type: "payroll_run", key: "payroll_run_id" },
+    tokens: [
+      tok("payroll_run_id", "Id de la nómina", "id"),
+      tok("payroll_number", "Número de la nómina"),
+      tok("total_net", "Neto a pagar", "money"),
+      tok("period_start", "Inicio del periodo", "date"),
+      tok("period_end", "Fin del periodo", "date"),
+    ],
+  },
+  "payroll_run.paid": {
+    label: "Nómina pagada",
+    module: "Nómina",
+    subject: { type: "payroll_run", key: "payroll_run_id" },
+    tokens: [
+      tok("payroll_run_id", "Id de la nómina", "id"),
+      tok("payroll_number", "Número de la nómina"),
+      tok("total_net", "Neto pagado", "money"),
+    ],
+  },
+  "inventory.adjusted": {
+    label: "Ajuste de inventario",
+    module: "Inventario",
+    tokens: [
+      tok("adjustment_id", "Id del ajuste", "id"),
+      tok("product_id", "Id del producto", "id"),
+      tok("location_id", "Id de la bodega", "id"),
+      tok("quantity_change", "Cambio de cantidad", "number"),
+      tok("adjustment_type", "Tipo de ajuste"),
+    ],
+  },
+  "inventory.transferred": {
+    label: "Traslado de inventario completado",
+    module: "Inventario",
+    tokens: [
+      tok("transfer_id", "Id del traslado", "id"),
+      tok("transfer_number", "Número del traslado"),
+      tok("from_location_id", "Id de la bodega origen", "id"),
+      tok("to_location_id", "Id de la bodega destino", "id"),
+    ],
+  },
+  "stock.low": {
+    label: "Stock bajo",
+    module: "Inventario",
+    tokens: [
+      tok("product_id", "Id del producto", "id"),
+      tok("product_name", "Producto"),
+      tok("location_id", "Id de la bodega", "id"),
+      tok("quantity_available", "Disponible", "number"),
+      tok("reorder_point", "Punto de reorden", "number"),
+    ],
+  },
+  "journal_entry.posted": {
+    label: "Asiento contable contabilizado",
+    module: "Contabilidad",
+    tokens: [
+      tok("journal_entry_id", "Id del asiento", "id"),
+      tok("entry_number", "Número del asiento"),
+      tok("entry_type", "Tipo de asiento"),
+      tok("total_debit", "Total débito", "money"),
+    ],
+  },
+  "fiscal_period.closed": {
+    label: "Periodo contable cerrado",
+    module: "Contabilidad",
+    tokens: [
+      tok("fiscal_period_id", "Id del periodo", "id"),
+      tok("name", "Periodo"),
+      tok("end_date", "Fecha de cierre", "date"),
+    ],
+  },
+  "cash_session.opened": {
+    label: "Caja abierta",
+    module: "Caja",
+    tokens: [
+      tok("session_id", "Id de la sesión", "id"),
+      tok("register_id", "Id de la caja", "id"),
+      tok("user_id", "Id del cajero", "id"),
+      tok("opening_amount", "Base de apertura", "money"),
+    ],
+  },
+  "cash_session.closed": {
+    label: "Caja cerrada",
+    module: "Caja",
+    tokens: [
+      tok("session_id", "Id de la sesión", "id"),
+      tok("register_id", "Id de la caja", "id"),
+      tok("user_id", "Id del cajero", "id"),
+      tok("closing_amount", "Monto contado", "money"),
+      tok("difference", "Diferencia", "money"),
+    ],
+  },
+  "customer.created": {
+    label: "Cliente creado",
+    module: "Clientes",
+    subject: { type: "customer", key: "customer_id" },
+    tokens: [
+      tok("customer_id", "Id del cliente", "id"),
+      tok("first_name", "Nombre"),
+      tok("last_name", "Apellido"),
+      tok("email", "Correo"),
+    ],
+  },
+  "supplier.created": {
+    label: "Proveedor creado",
+    module: "Proveedores",
+    subject: { type: "supplier", key: "supplier_id" },
+    tokens: [
+      tok("supplier_id", "Id del proveedor", "id"),
+      tok("name", "Nombre"),
+      tok("tax_id", "NIT"),
+      tok("email", "Correo"),
+    ],
+  },
+  "employee.created": {
+    label: "Empleado creado",
+    module: "Empleados",
+    subject: { type: "employee", key: "employee_id" },
+    tokens: [
+      tok("employee_id", "Id del empleado", "id"),
+      tok("first_name", "Nombre"),
+      tok("last_name", "Apellido"),
+      tok("document_number", "Documento"),
+      tok("position", "Cargo"),
+    ],
+  },
+  "booking.created": {
+    label: "Reserva creada",
+    module: "Reservas",
+    tokens: [
+      tok("booking_id", "Id de la reserva", "id"),
+      tok("booking_number", "Número de la reserva"),
+      tok("customer_id", "Id del cliente", "id"),
+      tok("date", "Fecha", "date"),
+      tok("start_time", "Hora de inicio"),
+    ],
+  },
+  "pqr.created": {
+    label: "PQR recibida",
+    module: "PQR",
+    tokens: [
+      tok("ticket_id", "Id del ticket", "id"),
+      tok("ticket_number", "Número del ticket"),
+      tok("title", "Asunto"),
+      tok("description", "Descripción"),
+      tok("category", "Categoría"),
+      tok("contact_name", "Nombre del contacto"),
+      tok("contact_email", "Correo del contacto"),
+    ],
+  },
+} as const satisfies Record<string, WorkflowEventSpec>;
+
+export type WorkflowTriggerEvent = keyof typeof WORKFLOW_EVENT_CATALOG;
+
+/** Every registered business event (order of the registry). */
+export const WORKFLOW_TRIGGER_EVENTS = Object.keys(
+  WORKFLOW_EVENT_CATALOG,
+) as readonly WorkflowTriggerEvent[];
+
+/**
+ * Closed catalog of `{{event.<key>}}` tokens per event. The producer builds a
+ * flat context with exactly these keys, so nothing else of the payload is ever
+ * reachable from a definition.
+ */
+export const WORKFLOW_EVENT_TOKENS = Object.fromEntries(
+  WORKFLOW_TRIGGER_EVENTS.map((e) => [
+    e,
+    (WORKFLOW_EVENT_CATALOG[e].tokens as readonly WorkflowCatalogToken[]).map(
+      (t) => t.key,
+    ),
+  ]),
+) as unknown as Record<WorkflowTriggerEvent, readonly string[]>;
+
+/** One input of a Vendix action. */
+export interface WorkflowActionInputSpec {
+  label: string;
+  type: WorkflowValueType;
+  required?: boolean;
+  /** `int` / `number` / `money`: minimum literal value. */
+  min?: number;
+  /** `enum` only. */
+  values?: readonly string[];
+}
+
+/** Declarative entry of the Vendix action registry (P1.2). */
+export interface WorkflowActionSpec {
+  label: string;
+  module: string;
+  /** Store permission the publisher must hold (the same as the UI route). */
+  permission: string;
+  /**
+   * What a retry may do (P1.2). `replay_safe`: running it again leaves the
+   * same result (field updates, tags). `at_most_once`: it creates a record,
+   * moves money or stock, sends something or changes a state; the executor
+   * marks it started before the effect, and a run interrupted after that mark
+   * fails on the timeline instead of repeating the effect.
+   */
+  idempotency: WorkflowActionIdempotency;
+  inputs: Record<string, WorkflowActionInputSpec>;
+}
+
+export type WorkflowActionIdempotency = "replay_safe" | "at_most_once";
+
+const inId = (label: string, required = true): WorkflowActionInputSpec => ({
+  label,
+  type: "id",
+  required,
+});
+const inText = (label: string, required = false): WorkflowActionInputSpec => ({
+  label,
+  type: "text",
+  required,
+});
+const inMoney = (label: string, required = true): WorkflowActionInputSpec => ({
+  label,
+  type: "money",
+  required,
+  min: 0,
+});
+
+/**
+ * Vendix action registry (P1.2). Each action runs through the SAME domain
+ * service the UI uses, acting as the publisher of the flow version, who must
+ * hold `permission`. The engine writes it to the outbox; the executor stores
+ * the result so a retry never repeats the effect. An action declared here
+ * without an executor fails the registry spec (R1).
+ */
+export const WORKFLOW_ACTION_CATALOG = {
+  "vendix.customer.create": {
+    label: "Crear cliente",
+    module: "Clientes",
+    permission: "store:customers:create",
+    idempotency: "at_most_once",
+    inputs: {
+      first_name: inText("Nombre", true),
+      last_name: inText("Apellido", true),
+      email: inText("Correo", true),
+      phone: inText("Teléfono"),
+      document_type: inText("Tipo de documento"),
+      document_number: inText("Número de documento"),
+    },
+  },
+  "vendix.customer.update": {
+    label: "Actualizar cliente",
+    module: "Clientes",
+    permission: "store:customers:update",
+    idempotency: "replay_safe",
+    inputs: {
+      customer_id: inId("Cliente"),
+      first_name: inText("Nombre"),
+      last_name: inText("Apellido"),
+      phone: inText("Teléfono"),
+    },
+  },
+  "vendix.customer.add_tag": {
+    label: "Asignar etiqueta al cliente",
+    module: "Clientes",
+    permission: "store:customers:update",
+    idempotency: "replay_safe",
+    inputs: {
+      customer_id: inId("Cliente"),
+      tag_id: inId("Etiqueta"),
+    },
+  },
+  "vendix.supplier.create": {
+    label: "Crear proveedor",
+    module: "Proveedores",
+    permission: "store:inventory:suppliers:create",
+    idempotency: "at_most_once",
+    inputs: {
+      name: inText("Nombre", true),
+      tax_id: inText("NIT"),
+      email: inText("Correo"),
+      phone: inText("Teléfono"),
+      contact_person: inText("Persona de contacto"),
+    },
+  },
+  "vendix.supplier.update": {
+    label: "Actualizar proveedor",
+    module: "Proveedores",
+    permission: "store:inventory:suppliers:update",
+    idempotency: "replay_safe",
+    inputs: {
+      supplier_id: inId("Proveedor"),
+      name: inText("Nombre"),
+      email: inText("Correo"),
+      phone: inText("Teléfono"),
+      contact_person: inText("Persona de contacto"),
+    },
+  },
+  "vendix.employee.create": {
+    label: "Crear empleado",
+    module: "Empleados",
+    permission: "store:payroll:employees:create",
+    idempotency: "at_most_once",
+    inputs: {
+      first_name: inText("Nombre", true),
+      last_name: inText("Apellido", true),
+      document_type: inText("Tipo de documento", true),
+      document_number: inText("Número de documento", true),
+      hire_date: { label: "Fecha de ingreso", type: "date", required: true },
+      base_salary: inMoney("Salario base"),
+      position: inText("Cargo"),
+      email: inText("Correo"),
+    },
+  },
+  "vendix.employee.update": {
+    label: "Actualizar empleado",
+    module: "Empleados",
+    permission: "store:payroll:employees:update",
+    idempotency: "replay_safe",
+    inputs: {
+      employee_id: inId("Empleado"),
+      position: inText("Cargo"),
+      base_salary: inMoney("Salario base", false),
+      email: inText("Correo"),
+      phone: inText("Teléfono"),
+    },
+  },
+  "vendix.expense.create": {
+    label: "Crear gasto",
+    module: "Gastos",
+    permission: "store:expenses:create",
+    idempotency: "at_most_once",
+    inputs: {
+      amount: inMoney("Monto"),
+      category_id: inId("Categoría", false),
+      description: inText("Descripción", true),
+      expense_date: { label: "Fecha del gasto", type: "date" },
+    },
+  },
+  "vendix.expense.approve": {
+    label: "Aprobar gasto",
+    module: "Gastos",
+    permission: "store:expenses:approve",
+    idempotency: "at_most_once",
+    inputs: { expense_id: inId("Gasto") },
+  },
+  "vendix.expense.pay": {
+    label: "Marcar gasto como pagado",
+    module: "Gastos",
+    permission: "store:expenses:pay",
+    idempotency: "at_most_once",
+    inputs: { expense_id: inId("Gasto") },
+  },
+  "vendix.purchase_order.create_draft": {
+    label: "Crear orden de compra (borrador)",
+    module: "Compras",
+    permission: "store:orders:purchase_orders:create",
+    idempotency: "at_most_once",
+    inputs: {
+      supplier_id: inId("Proveedor"),
+      location_id: inId("Bodega"),
+      product_id: inId("Producto"),
+      quantity: { label: "Cantidad", type: "int", required: true, min: 1 },
+      unit_price: inMoney("Precio unitario"),
+      notes: inText("Notas"),
+      expected_date: { label: "Fecha esperada", type: "date" },
+    },
+  },
+  "vendix.purchase_order.approve": {
+    label: "Aprobar orden de compra",
+    module: "Compras",
+    permission: "store:orders:purchase_orders:approve",
+    idempotency: "at_most_once",
+    inputs: { purchase_order_id: inId("Orden de compra") },
+  },
+  "vendix.purchase_order.cancel": {
+    label: "Anular orden de compra",
+    module: "Compras",
+    permission: "store:orders:purchase_orders:cancel",
+    idempotency: "at_most_once",
+    inputs: {
+      purchase_order_id: inId("Orden de compra"),
+      reason: inText("Motivo"),
+    },
+  },
+  "vendix.purchase_order.register_payment": {
+    label: "Registrar pago a proveedor",
+    module: "Pagos",
+    permission: "store:orders:purchase_orders:pay",
+    idempotency: "at_most_once",
+    inputs: {
+      purchase_order_id: inId("Orden de compra"),
+      amount: inMoney("Monto"),
+      payment_method: inText("Medio de pago", true),
+      reference: inText("Referencia"),
+    },
+  },
+  "vendix.payable.register_payment": {
+    label: "Abonar a cuenta por pagar",
+    module: "Pagos",
+    permission: "store:accounts_payable:payment",
+    idempotency: "at_most_once",
+    inputs: {
+      payable_id: inId("Cuenta por pagar"),
+      amount: inMoney("Monto"),
+      payment_method: inText("Medio de pago", true),
+      reference: inText("Referencia"),
+    },
+  },
+  "vendix.inventory.adjust": {
+    label: "Ajuste de inventario",
+    module: "Inventario",
+    permission: "store:inventory:adjustments:create",
+    idempotency: "at_most_once",
+    inputs: {
+      product_id: inId("Producto"),
+      location_id: inId("Bodega"),
+      quantity_after: {
+        label: "Cantidad final",
+        type: "int",
+        required: true,
+        min: 0,
+      },
+      adjustment_type: {
+        label: "Tipo de ajuste",
+        type: "enum",
+        required: true,
+        values: [
+          "damage",
+          "loss",
+          "theft",
+          "expiration",
+          "count_variance",
+          "manual_correction",
+        ],
+      },
+      reason: inText("Motivo"),
+    },
+  },
+  "vendix.inventory.transfer": {
+    label: "Traslado de inventario (borrador)",
+    module: "Inventario",
+    permission: "store:stock-transfers:create",
+    idempotency: "at_most_once",
+    inputs: {
+      from_location_id: inId("Bodega origen"),
+      to_location_id: inId("Bodega destino"),
+      product_id: inId("Producto"),
+      quantity: { label: "Cantidad", type: "int", required: true, min: 1 },
+      notes: inText("Notas"),
+    },
+  },
+  "vendix.invoice.create_from_order": {
+    label: "Crear factura desde una venta",
+    module: "Facturación",
+    permission: "invoicing:write",
+    idempotency: "at_most_once",
+    inputs: { order_id: inId("Venta") },
+  },
+  "vendix.credit_note.create": {
+    label: "Crear nota crédito (total)",
+    module: "Facturación",
+    permission: "invoicing:write",
+    idempotency: "at_most_once",
+    inputs: {
+      invoice_id: inId("Factura"),
+      reason: inText("Motivo", true),
+    },
+  },
+  "vendix.invoice.send_email": {
+    label: "Enviar factura por correo",
+    module: "Facturación",
+    permission: "invoicing:write",
+    idempotency: "at_most_once",
+    inputs: {
+      invoice_id: inId("Factura"),
+      email: inText("Correo (opcional: el del cliente)"),
+    },
+  },
+  "vendix.order.register_payment": {
+    label: "Registrar pago de una venta",
+    module: "Pagos",
+    permission: "store:orders:order_flow:create",
+    idempotency: "at_most_once",
+    inputs: {
+      order_id: inId("Venta"),
+      store_payment_method_id: inId("Medio de pago de la tienda"),
+      amount: inMoney("Monto"),
+      reference: inText("Referencia"),
+    },
+  },
+  "vendix.order.change_status": {
+    label: "Cambiar estado de una venta",
+    module: "Ventas",
+    permission: "store:orders:order_flow:create",
+    idempotency: "at_most_once",
+    inputs: {
+      order_id: inId("Venta"),
+      to_state: {
+        label: "Estado nuevo",
+        type: "enum",
+        required: true,
+        values: ["shipped", "delivered", "cancelled"],
+      },
+      reason: inText("Motivo (anulación)"),
+    },
+  },
+  "vendix.booking.confirm": {
+    label: "Confirmar reserva",
+    module: "Reservas",
+    permission: "store:reservations:update",
+    idempotency: "at_most_once",
+    inputs: { booking_id: inId("Reserva") },
+  },
+  "vendix.crm_task.create": {
+    label: "Crear tarea CRM",
+    module: "CRM",
+    permission: "store:crm_tasks:manage",
+    idempotency: "at_most_once",
+    inputs: {
+      title: inText("Título", true),
+      description: inText("Descripción"),
+      due_in_days: { label: "Vence en (días)", type: "int", min: 0 },
+      assignee: { label: "Responsable", type: "assignee" },
+    },
+  },
+} as const satisfies Record<string, WorkflowActionSpec>;
+
+/** Actions the engine writes to the outbox instead of running inline. */
+export type WorkflowVendixActionName = keyof typeof WORKFLOW_ACTION_CATALOG;
+
+export const WORKFLOW_VENDIX_ACTIONS = Object.keys(
+  WORKFLOW_ACTION_CATALOG,
+) as readonly WorkflowVendixActionName[];
+
 export const WORKFLOW_ACTIONS = [
   "notify",
   "set_field",
-  "vendix.purchase_order.create_draft",
-  "vendix.crm_task.create",
+  ...WORKFLOW_VENDIX_ACTIONS,
 ] as const;
 
-/** Actions the engine writes to the outbox instead of running inline. */
-export const WORKFLOW_VENDIX_ACTIONS = [
-  "vendix.purchase_order.create_draft",
-  "vendix.crm_task.create",
-] as const;
-
-export type WorkflowVendixActionName = (typeof WORKFLOW_VENDIX_ACTIONS)[number];
+/** Required and optional `map` keys of each Vendix action (from the registry). */
+export const WORKFLOW_VENDIX_ACTION_MAP_KEYS = Object.fromEntries(
+  WORKFLOW_VENDIX_ACTIONS.map((name) => {
+    const inputs = WORKFLOW_ACTION_CATALOG[name].inputs as Record<
+      string,
+      WorkflowActionInputSpec
+    >;
+    const keys = Object.keys(inputs);
+    return [
+      name,
+      {
+        required: keys.filter((k) => inputs[k].required === true),
+        optional: keys.filter((k) => inputs[k].required !== true),
+      },
+    ];
+  }),
+) as unknown as Record<
+  WorkflowVendixActionName,
+  { required: readonly string[]; optional: readonly string[] }
+>;
 
 /**
  * `map` of a Vendix action: a literal (string, number, boolean) or a string
- * with `{{tokens}}` of the closed catalog (see WORKFLOW_ACTION_TOKEN_PREFIXES);
- * `assignee` (CRM task only) is an assignee definition.
+ * with `{{tokens}}` of the closed catalog (`{{fields.<field>}}` and
+ * WORKFLOW_INSTANCE_TOKENS); an `assignee` input is an assignee definition.
  */
 export type WorkflowActionMapValue =
   | string
   | number
   | boolean
   | WorkflowAssigneeDef;
-
-/**
- * Keys accepted by each Vendix action. The purchase order is a one-line DRAFT:
- * the purchase-order service needs a supplier, a receiving location and a line
- * (product, quantity, unit price), so those are required.
- */
-export const WORKFLOW_VENDIX_ACTION_MAP_KEYS: Record<
-  WorkflowVendixActionName,
-  { required: readonly string[]; optional: readonly string[] }
-> = {
-  "vendix.purchase_order.create_draft": {
-    required: [
-      "supplier_id",
-      "location_id",
-      "product_id",
-      "quantity",
-      "unit_price",
-    ],
-    optional: ["notes", "expected_date"],
-  },
-  "vendix.crm_task.create": {
-    required: ["title"],
-    optional: ["description", "due_in_days", "assignee"],
-  },
-};
 
 export type WorkflowActionDef =
   | { action: "notify"; to: WorkflowAssigneeDef; message: string }
@@ -316,71 +1034,189 @@ export type WorkflowActionDef =
       value: string | number | boolean | null;
     }
   | {
-      action: "vendix.purchase_order.create_draft";
-      map: Record<string, WorkflowActionMapValue>;
-    }
-  | {
-      action: "vendix.crm_task.create";
+      action: WorkflowVendixActionName;
       map: Record<string, WorkflowActionMapValue>;
     };
 
-/** Tokens usable in action maps: `{{fields.<declared field>}}` plus these. */
+/**
+ * Tokens usable in action maps: `{{fields.<declared field>}}` plus these.
+ * `instance.subject_id` is the id of the record the request is about (the
+ * gated purchase order, the customer of the event…), empty when there is none.
+ */
 export const WORKFLOW_INSTANCE_TOKENS: readonly string[] = [
   "instance.reference",
   "instance.title",
+  "instance.subject_id",
 ];
 
-/** Business events that can start a flow (6 of them, all carry a store id). */
-export const WORKFLOW_TRIGGER_EVENTS = [
-  "order.created",
-  "order.paid",
-  "purchase_order.received",
-  "expense.approved",
-  "customer.created",
-  "pqr.created",
-] as const;
-
-export type WorkflowTriggerEvent = (typeof WORKFLOW_TRIGGER_EVENTS)[number];
+/** Declarative entry of the governable operations (approval gate, P1.3). */
+export interface WorkflowGateOperationSpec {
+  label: string;
+  module: string;
+  /** What `min_amount` is compared with. */
+  amount_label: string;
+  /**
+   * `hold`: the record exists and the operation waits (approve a purchase
+   * order); a rejection voids the record. `defer`: nothing is created until
+   * the request is approved, then the operation runs as the requester.
+   */
+  mode: "hold" | "defer";
+  subject: WorkflowSubjectType;
+  tokens: readonly WorkflowCatalogToken[];
+}
 
 /**
- * Closed catalog of `{{event.<path>}}` tokens per event. The listener builds a
- * flat context with exactly these keys, so nothing else of the payload is ever
- * reachable from a definition.
+ * Governable operations (P1.3). A definition with `governs` holds the
+ * operation while its request is open; the domain service enforces it, so no
+ * route (UI, API, AI, another flow) can run a pending operation.
  */
-export const WORKFLOW_EVENT_TOKENS: Record<
-  WorkflowTriggerEvent,
-  readonly string[]
-> = {
-  "order.created": [
-    "order_id",
-    "order_number",
-    "grand_total",
-    "currency",
-    "channel",
-  ],
-  "order.paid": ["order_id", "payment_id", "grand_total", "currency"],
-  "purchase_order.received": [
-    "purchase_order_id",
-    "supplier_id",
-    "total_amount",
-  ],
-  "expense.approved": ["expense_id", "amount", "category_id"],
-  "customer.created": [
-    "customer_id",
-    "first_name",
-    "last_name",
-    "email",
-  ],
-  "pqr.created": [
-    "ticket_id",
-    "ticket_number",
-    "title",
-    "description",
-    "category",
-    "contact_name",
-    "contact_email",
-  ],
-};
+export const WORKFLOW_GATE_OPERATIONS = {
+  "purchase_order.approve": {
+    label: "Compras: aprobar orden de compra",
+    module: "Compras",
+    amount_label: "Total de la orden",
+    mode: "hold",
+    subject: "purchase_order",
+    tokens: [
+      tok("purchase_order_id", "Id de la orden de compra", "id"),
+      tok("order_number", "Número de la orden"),
+      tok("supplier_id", "Id del proveedor", "id"),
+      tok("supplier_name", "Proveedor"),
+      tok("total_amount", "Total", "money"),
+      tok("products", "Productos"),
+      tok("requested_by", "Solicitado por"),
+    ],
+  },
+  "expense.approve": {
+    label: "Gastos: aprobar gasto",
+    module: "Gastos",
+    amount_label: "Monto del gasto",
+    mode: "hold",
+    subject: "expense",
+    tokens: [
+      tok("expense_id", "Id del gasto", "id"),
+      tok("amount", "Monto", "money"),
+      tok("category_name", "Categoría"),
+      tok("description", "Descripción"),
+      tok("requested_by", "Solicitado por"),
+    ],
+  },
+  "inventory_adjustment.create": {
+    label: "Inventario: ajuste de inventario",
+    module: "Inventario",
+    amount_label: "Unidades ajustadas (valor absoluto)",
+    mode: "defer",
+    subject: "none",
+    tokens: [
+      tok("product_id", "Id del producto", "id"),
+      tok("product_name", "Producto"),
+      tok("location_id", "Id de la bodega", "id"),
+      tok("quantity_change", "Cambio de cantidad", "number"),
+      tok("quantity_after", "Cantidad final", "number"),
+      tok("adjustment_type", "Tipo de ajuste"),
+      tok("reason", "Motivo"),
+      tok("requested_by", "Solicitado por"),
+    ],
+  },
+  "credit_note.create": {
+    label: "Facturación: nota crédito",
+    module: "Facturación",
+    amount_label: "Total de la nota",
+    mode: "defer",
+    subject: "invoice",
+    tokens: [
+      tok("invoice_id", "Id de la factura", "id"),
+      tok("invoice_number", "Número de la factura"),
+      tok("total_amount", "Total de la nota", "money"),
+      tok("reason", "Motivo"),
+      tok("requested_by", "Solicitado por"),
+    ],
+  },
+  "invoice.void": {
+    label: "Facturación: anular factura",
+    module: "Facturación",
+    amount_label: "Total de la factura",
+    mode: "defer",
+    subject: "invoice",
+    tokens: [
+      tok("invoice_id", "Id de la factura", "id"),
+      tok("invoice_number", "Número de la factura"),
+      tok("total_amount", "Total", "money"),
+      tok("reason", "Motivo"),
+      tok("requested_by", "Solicitado por"),
+    ],
+  },
+  "order.discount": {
+    label: "Ventas: descuento sobre el umbral",
+    module: "Ventas",
+    amount_label: "Valor del descuento",
+    mode: "defer",
+    subject: "order",
+    tokens: [
+      tok("order_id", "Id de la venta", "id"),
+      tok("order_number", "Número de la venta"),
+      tok("discount_amount", "Descuento", "money"),
+      tok("grand_total", "Total", "money"),
+      tok("requested_by", "Solicitado por"),
+    ],
+  },
+  "supplier_payment.register": {
+    label: "Pagos: pago a proveedor",
+    module: "Pagos",
+    amount_label: "Monto del pago",
+    mode: "defer",
+    subject: "purchase_order",
+    tokens: [
+      tok("purchase_order_id", "Id de la orden de compra", "id"),
+      tok("payable_id", "Id de la cuenta por pagar", "id"),
+      tok("supplier_id", "Id del proveedor", "id"),
+      tok("amount", "Monto", "money"),
+      tok("payment_method", "Medio de pago"),
+      tok("requested_by", "Solicitado por"),
+    ],
+  },
+  "payroll_run.approve": {
+    label: "Nómina: aprobar liquidación de nómina",
+    module: "Nómina",
+    amount_label: "Neto de la nómina",
+    mode: "hold",
+    subject: "payroll_run",
+    tokens: [
+      tok("payroll_run_id", "Id de la nómina", "id"),
+      tok("payroll_number", "Número de la nómina"),
+      tok("total_net", "Neto a pagar", "money"),
+      tok("period_start", "Inicio del periodo", "date"),
+      tok("period_end", "Fin del periodo", "date"),
+      tok("requested_by", "Solicitado por"),
+    ],
+  },
+} as const satisfies Record<string, WorkflowGateOperationSpec>;
+
+export type WorkflowGateOperation = keyof typeof WORKFLOW_GATE_OPERATIONS;
+
+export const WORKFLOW_GATE_OPERATION_KEYS = Object.keys(
+  WORKFLOW_GATE_OPERATIONS,
+) as readonly WorkflowGateOperation[];
+
+/** `{{event.<key>}}` tokens of a governed operation. */
+export function gateOperationTokens(op: WorkflowGateOperation): string[] {
+  return (
+    WORKFLOW_GATE_OPERATIONS[op].tokens as readonly WorkflowCatalogToken[]
+  ).map((t) => t.key);
+}
+
+/**
+ * "This flow governs: <operation> from <min_amount>". The request starts as
+ * actor `system` with `map` filling declared fields from `{{event.<key>}}`
+ * tokens of the operation; an end stage `completed` releases the operation,
+ * `rejected` voids it (hold) or drops it (defer).
+ */
+export interface WorkflowGovernsDef {
+  operation: WorkflowGateOperation;
+  /** Operations with an amount below this are not held. Default 0. */
+  min_amount?: number;
+  map?: Record<string, string>;
+}
 
 export interface WorkflowStageDef {
   key: string;
@@ -421,7 +1257,10 @@ export type WorkflowSubjectType =
   | "supplier"
   | "employee"
   | "order"
-  | "purchase_order";
+  | "purchase_order"
+  | "expense"
+  | "invoice"
+  | "payroll_run";
 
 export const WORKFLOW_SUBJECT_TYPES: readonly WorkflowSubjectType[] = [
   "none",
@@ -430,6 +1269,9 @@ export const WORKFLOW_SUBJECT_TYPES: readonly WorkflowSubjectType[] = [
   "employee",
   "order",
   "purchase_order",
+  "expense",
+  "invoice",
+  "payroll_run",
 ];
 
 export interface WorkflowDefinitionV1 {
@@ -441,6 +1283,8 @@ export interface WorkflowDefinitionV1 {
   fields: WorkflowFieldDef[];
   stages: WorkflowStageDef[];
   triggers?: WorkflowTriggerDef[];
+  /** Approval gate (P1.3): the operation this flow governs. */
+  governs?: WorkflowGovernsDef;
   start_roles?: string[];
 }
 
@@ -507,6 +1351,19 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
             },
           },
         ],
+      },
+    },
+    governs: {
+      type: "object",
+      additionalProperties: false,
+      required: ["operation"],
+      properties: {
+        operation: { enum: [...WORKFLOW_GATE_OPERATION_KEYS] },
+        min_amount: { type: "number", minimum: 0 },
+        map: {
+          type: "object",
+          additionalProperties: { type: "string", maxLength: 500 },
+        },
       },
     },
     start_roles: { type: "array", items: { $ref: "#/$defs/key" } },

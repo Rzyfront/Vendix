@@ -334,6 +334,13 @@ export class WorkflowInstancesService {
       stage_due_at: instance.stage_due_at,
       cancel_reason: instance.cancel_reason,
       data: instance.data ?? {},
+      // P1.5: labels and types of the declared fields, so the screen shows the
+      // data a request was born with even when the current stage has no form.
+      data_fields: (definition?.fields ?? []).map((f) => ({
+        key: f.key,
+        label: f.label,
+        type: f.type,
+      })),
       subject_type: instance.subject_type,
       subject_id: instance.subject_id,
       started_by: {

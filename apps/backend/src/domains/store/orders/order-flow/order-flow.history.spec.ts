@@ -9,6 +9,7 @@ import {
 } from 'src/testing/prisma-mock';
 import { buildOrder, buildPayment } from 'src/testing/money-fixtures';
 import { OrderHistoryService } from '../order-history/order-history.service';
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 /**
  * Plan order-truth-and-invoice-tz — paso 6 verificación. `OrderHistoryService
@@ -1200,6 +1201,8 @@ describe('OrderFlowService.reconcileOrderFromDispatch — source listener', () =
 
   it('parcial (anyFulfilled, !allFulfilled) → shipped: registra state_changed con source listener', async () => {
     const prismaMock: any = {
+      // Flujos P1.1: the generic state write runs in a transaction.
+      $transaction: jest.fn(async (cb: (tx: unknown) => unknown) => cb(prismaMock)),
       invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       orders: {
         findFirst: jest.fn().mockResolvedValue({

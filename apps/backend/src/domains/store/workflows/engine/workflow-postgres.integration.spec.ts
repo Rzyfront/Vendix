@@ -442,6 +442,7 @@ describeDestructiveE2E('Flujos contra Postgres real (M5)', () => {
         {} as never,
         {} as never,
         new WorkflowTriggerFanout(prisma),
+        {} as never,
       );
 
     it('dos workers a la vez: SKIP LOCKED no entrega ninguna fila dos veces', async () => {
@@ -529,6 +530,7 @@ describeDestructiveE2E('Flujos contra Postgres real (M5)', () => {
             {} as never,
             {} as never,
             new WorkflowTriggerFanout(prisma),
+            {} as never,
           );
         await worker().dispatchBatch();
         await worker().dispatchBatch();

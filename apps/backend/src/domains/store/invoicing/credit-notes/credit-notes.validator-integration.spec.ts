@@ -9,6 +9,13 @@ import { buildInvoice } from '../../../../testing/money-fixtures';
 import { FiscalDocumentValidator } from '../validators/fiscal-document.validator';
 import { InvoiceCalculatorService } from '../services/invoice-calculator.service';
 
+// Flujos P1.3: no flow governs operations in these unit doubles.
+jest.mock('../../workflows/gates/approval-gate', () => ({
+  ...jest.requireActual('../../workflows/gates/approval-gate'),
+  operationIsGoverned: jest.fn(async () => false),
+}));
+
+
 /**
  * Agente E, Task 2 — integra `createNote` (nota crédito) con el prevalidador
  * REAL (`FiscalDocumentValidator`), no con aritmética propia del test. Cada

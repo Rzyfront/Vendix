@@ -3,6 +3,7 @@ import { RequestContextService } from '../../../common/context/request-context.s
 import { InvoicingService } from './invoicing.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceCalculatorService } from './services/invoice-calculator.service';
+jest.mock('../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 /**
  * EL CABLEADO, no la aritmética.
@@ -77,7 +78,9 @@ describe('InvoicingService · cableado del motor aritmético', () => {
           TAX_RATE_CATALOG.filter((row) => where.id.in.includes(row.id)),
         ),
       );
-    const prisma = {
+    // Flujos P1.1: the invoice insert runs in a transaction with its event.
+    const prisma: any = {
+      $transaction: jest.fn(async (cb: (tx: unknown) => unknown) => cb(prisma)),
       invoices: {
         create: jest.fn().mockImplementation(({ data }) => {
           created.push(data);

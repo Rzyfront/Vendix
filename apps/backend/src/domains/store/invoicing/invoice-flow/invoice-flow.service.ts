@@ -126,6 +126,9 @@ import { tryResolveInvoiceControl } from '../../../../common/helpers/invoice-con
 import { assertNoteOriginalHasNoAcceptedRadianEvent } from '../utils/invoice-radian-note-coherence';
 import { markContractFiscalAcceptance } from '../../contracts/contract-invoice-lifecycle';
 import { isMutualAgreementFinalConsumerInvoice } from '../../payments/order-payment-means.contract';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
+import { consumeApproval } from '../../workflows/gates/approval-gate';
+import { enforceInvoiceVoidApproval } from '../invoice-approval-gate';
 
 /**
  * Re-export del hallazgo unificado. La definición vive en
@@ -5386,6 +5389,11 @@ export class InvoiceFlowService {
       'void',
     );
 
+    // Flujos P1.3: a governed void waits for its approval request (after the
+    // state and period checks, so a request is never opened for a void that
+    // could not happen). Credit/debit notes are not governed here.
+    const gate = await enforceInvoiceVoidApproval(this.prisma, id);
+
     const updated = invoice.invoice_type === 'credit_note' || invoice.invoice_type === 'debit_note'
       ? await this.creditNoteBalance.transition(
           id,
@@ -5394,10 +5402,22 @@ export class InvoiceFlowService {
           'pretransmission_cancel',
           invoice.status,
         )
-      : await this.prisma.invoices.update({
-          where: { id },
-          data: { status: 'voided' },
-          include: INVOICE_INCLUDE,
+      : await this.prisma.$transaction(async (tx) => {
+          await consumeApproval(tx, gate);
+          const voided = await tx.invoices.update({
+            where: { id },
+            data: { status: 'voided' },
+            include: INVOICE_INCLUDE,
+          });
+          // Flujos P1.1: invoice.voided in the same transaction
+          await recordTriggerEvent(tx, 'invoice.voided', {
+            store_id: voided.store_id,
+            invoice_id: voided.id,
+            invoice_number: voided.invoice_number,
+            total_amount: voided.total_amount,
+            reason: null,
+          });
+          return voided;
         });
 
     this.logger.log(`Invoice #${id} (${updated.invoice_number}) voided`);

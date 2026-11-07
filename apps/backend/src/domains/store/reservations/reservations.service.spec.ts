@@ -1,6 +1,8 @@
 import { ReservationsService } from './reservations.service';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
+import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
+jest.mock('../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 /**
  * Smoke tests covering the appointment-design state-machine additions:
@@ -509,6 +511,31 @@ describe('ReservationsService — create (QUI-649 atomicity)', () => {
     });
     expect(ctx.ordersService.create).not.toHaveBeenCalled();
     expect(ctx.bookings.length).toBe(0);
+  });
+
+  it('Flujos P1.1: booking.created se registra con la transacción de la reserva', async () => {
+    (recordTriggerEvent as jest.Mock).mockClear();
+    const ctx = buildServiceForCreate();
+
+    await ctx.service.create(baseDto);
+
+    expect(recordTriggerEvent).toHaveBeenCalledTimes(1);
+    expect(recordTriggerEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ bookings: expect.any(Object) }),
+      'booking.created',
+      expect.objectContaining({
+        booking_id: 999,
+        customer_id: 1,
+        start_time: '10:00',
+      }),
+    );
+  });
+
+  it('Flujos P1.1: si el evento falla, no queda reserva persistida', async () => {
+    const ctx = buildServiceForCreate();
+    (recordTriggerEvent as jest.Mock).mockRejectedValueOnce(new Error('outbox down'));
+
+    await expect(ctx.service.create(baseDto)).rejects.toThrow('outbox down');
   });
 
   it('acepta reservar un producto de Venta', async () => {

@@ -60,6 +60,14 @@ describe('WorkflowInstancesService', () => {
 
   const ids = async (input = {}) => (await svc.list(input)).data.map((r: any) => r.id).sort();
 
+  it('P1.5: el detalle trae etiqueta y tipo de cada campo para mostrar los datos con que nació', async () => {
+    kit.as({ user_id: 1, is_owner: true } as any);
+    const d: any = await svc.get(A);
+    expect(d.data_fields).toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: 'amount', label: 'Monto', type: 'money' })]),
+    );
+  });
+
   describe('visibilidad (§5.5)', () => {
     it('owner y quien tiene manage ven todas', async () => {
       kit.as({ user_id: 1, is_owner: true, permissions: [] });
