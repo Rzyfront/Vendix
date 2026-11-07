@@ -19,7 +19,7 @@ export interface MigrationInput {
   stage_map?: Record<string, string>;
 }
 
-interface MigrationPlanStage {
+export interface MigrationPlanStage {
   from_stage_key: string;
   from_stage_name: string;
   count: number;
