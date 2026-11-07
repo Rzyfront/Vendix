@@ -41,6 +41,11 @@ export interface UploadAccess {
   remember(grant: string): void;
 }
 
+/** `POST …/uploads`: the session, plus the upload grant on a captcha link. */
+interface UploadInitResponse {
+  data: { upload_id: string; chunk_size: number; total_parts: number; upload_grant?: string };
+}
+
 const OCTET_STREAM = new HttpHeaders({ 'Content-Type': 'application/octet-stream' });
 
 /** Anonymous client of `ecommerce/workflows/forms/:token` (store resolved by the domain). */
@@ -77,14 +82,17 @@ export class WorkflowPublicFormService {
       init: (input) =>
         from(access?.credentials() ?? Promise.resolve({})).pipe(
           switchMap((credentials) =>
-            this.http.post<{
-              data: { upload_id: string; chunk_size: number; total_parts: number; upload_grant?: string };
-            }>(this.url(token, '/uploads'), { field_key: fieldKey, ...input, ...credentials }),
+            this.http.post<UploadInitResponse>(this.url(token, '/uploads'), {
+              field_key: fieldKey,
+              ...input,
+              ...credentials,
+            }),
           ),
-          map((res) => res.data),
-          tap((session) => {
-            if (session.upload_grant) access?.remember(session.upload_grant);
+          // Read the grant on the raw response: the adapter's session type does not carry it.
+          tap((res: UploadInitResponse) => {
+            if (res.data.upload_grant) access?.remember(res.data.upload_grant);
           }),
+          map((res) => res.data),
         ),
       putPart: (uploadId, n, body) =>
         this.http.put(this.url(token, `/uploads/${encodeURIComponent(uploadId)}/parts/${n}`), body, {
