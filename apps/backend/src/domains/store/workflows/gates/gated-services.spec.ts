@@ -10,6 +10,7 @@ import { AccountsPayableService } from '../../accounts-payable/accounts-payable.
 import { PaymentsService } from '../../payments/payments.service';
 import { ProductVariantService } from '../../products/services/product-variant.service';
 import { ProductsService } from '../../products/products.service';
+import { OrdersService } from '../../orders/orders.service';
 
 const mockGoverned = jest.fn<Promise<boolean>, unknown[]>();
 const mockEnforce = jest.fn();
@@ -664,6 +665,41 @@ describe('governed domain services (P1.3)', () => {
       );
       mockGoverned.mockResolvedValue(false);
       await expect(inStore(() => guard(-10))).resolves.toBeUndefined();
+    });
+  });
+
+  describe('discount typed into the order by API (order.discount, review r2)', () => {
+    const svc = bare(OrdersService, { prisma: {} });
+    const guard = (discount: number, previous: number, route: 'create' | 'edit') =>
+      (
+        svc as unknown as {
+          assertApiDiscountNotGoverned(
+            d: number,
+            p: number,
+            r: 'create' | 'edit',
+          ): Promise<void>;
+        }
+      ).assertApiDiscountNotGoverned(discount, previous, route);
+
+    it('POST orders with a governed discount: 409, the order is not created', async () => {
+      await expect(inStore(() => guard(400000, 0, 'create'))).rejects.toMatchObject({
+        errorCode: 'WORKFLOW_APPROVAL_REQUIRED',
+      });
+      expect(mockGoverned).toHaveBeenCalledWith({}, 'order.discount', 400000);
+    });
+
+    it('PUT orders/:id/items and PATCH orders/:id raising the discount to a governed amount: 409', async () => {
+      await expect(inStore(() => guard(400000, 50000, 'edit'))).rejects.toMatchObject({
+        errorCode: 'WORKFLOW_APPROVAL_REQUIRED',
+      });
+    });
+
+    it('keeping or lowering a discount, or no governing flow, always passes', async () => {
+      await expect(inStore(() => guard(400000, 400000, 'edit'))).resolves.toBeUndefined();
+      await expect(inStore(() => guard(0, 0, 'create'))).resolves.toBeUndefined();
+      expect(mockGoverned).not.toHaveBeenCalled();
+      mockGoverned.mockResolvedValue(false);
+      await expect(inStore(() => guard(400000, 0, 'create'))).resolves.toBeUndefined();
     });
   });
 });

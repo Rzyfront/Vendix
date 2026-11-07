@@ -16,6 +16,9 @@ describe('OrdersService — bloqueo por factura (ORD_INVOICED_LOCKED_001)', () =
     accounts_receivable: { findFirst: jest.fn() },
     shipping_methods: { findFirst: jest.fn() },
     table_sessions: { findFirst: jest.fn() },
+    // Flujos P1.3: a discount in the PATCH asks whether a flow governs it;
+    // this store has none.
+    withoutScope: () => ({ stores: { findFirst: async () => null } }),
   };
   const service: any = new OrdersService(
     prisma,
