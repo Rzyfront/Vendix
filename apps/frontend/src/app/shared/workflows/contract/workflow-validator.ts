@@ -632,11 +632,11 @@ function checkScheduleTriggers(input: Json, c: Collector) {
   const schedules = triggers.filter(
     (t) => isObj(t) && t["kind"] === "schedule",
   );
-  if (schedules.length > 5) {
+  if (schedules.length > WORKFLOW_LIMITS.maxSchedules) {
     c.err(
       "SCHEDULE_INVALID",
       "triggers",
-      "Un flujo admite hasta 5 disparadores programados.",
+      `Un flujo admite hasta ${WORKFLOW_LIMITS.maxSchedules} disparadores programados.`,
     );
   }
   triggers.forEach((t, index) => {

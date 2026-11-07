@@ -9,6 +9,7 @@ import {
   ToggleComponent,
 } from '../../../../../../shared/components/index';
 import {
+  WORKFLOW_LIMITS,
   WORKFLOW_TRIGGER_EVENTS,
   WorkflowTriggerDef,
   WorkflowTriggerEvent,
@@ -148,7 +149,7 @@ export class TriggersPanelComponent {
   readonly schedules = computed(() => this.triggers().filter((t): t is ScheduleTrigger => t.kind === 'schedule'));
   readonly presets = CRON_PRESETS;
   /** Validator limit of schedule triggers per flow. */
-  readonly maxSchedules = 5;
+  readonly maxSchedules = WORKFLOW_LIMITS.maxSchedules;
   readonly hasPublicForm = computed(() => this.triggers().some((t) => t.kind === 'public_form'));
   readonly available = computed(() => {
     const used = new Set(this.events().map((t) => t.event));

@@ -185,7 +185,7 @@ export interface InstanceChildView extends InstanceLinkView {
   status: WorkflowInstanceStatus;
   current_stage_key: string | null;
   current_stage_name: string | null;
-  definition_name: string;
+  definition_name: string | null;
 }
 
 export interface InstanceWaitView {
@@ -214,7 +214,7 @@ export interface FailedActionView {
   action: string;
   label: string;
   stage_key: string | null;
-  error: string;
+  error: string | null;
   attempts: number;
   failed_at: string;
 }

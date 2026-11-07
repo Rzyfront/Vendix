@@ -276,7 +276,11 @@ export class WorkflowTickService {
     for (const [parentField, source] of Object.entries(sub.output ?? {})) {
       const [flowKey, childField] = source.split('.');
       const child = children.find((c) => c.flow_key === flowKey);
-      const value = child?.data?.[childField];
+      const childData = child?.data ?? {};
+      // Own keys only: "constructor" or "toString" must not leak from the prototype.
+      const value = Object.prototype.hasOwnProperty.call(childData, childField)
+        ? childData[childField]
+        : undefined;
       if (value !== undefined && value !== null) data[parentField] = value;
     }
     return this.resolveSystem(

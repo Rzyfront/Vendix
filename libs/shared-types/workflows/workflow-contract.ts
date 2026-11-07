@@ -31,6 +31,8 @@ export const WORKFLOW_LIMITS = {
   maxSubflowDepth: 5,
   /** P2.7: retries an action may ask for before its error policy applies. */
   maxActionRetries: 5,
+  /** P2.10: schedule triggers per flow. */
+  maxSchedules: 5,
 } as const;
 
 /** Keys of fields, stages, requirements and the definition itself. */
