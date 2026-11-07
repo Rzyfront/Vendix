@@ -93,8 +93,8 @@ export class WorkflowInstanceDebugService {
         select: { definition: true },
       }),
     ]);
-    const actorIds = [
-      ...new Set(
+    const actorIds: number[] = [
+      ...new Set<number>(
         rows
           .filter((r) => r.actor_type === 'user' && r.actor_id)
           .map((r) => r.actor_id as number),

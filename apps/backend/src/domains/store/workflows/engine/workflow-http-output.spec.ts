@@ -212,9 +212,15 @@ describe('nodo HTTP en el motor: secretos fuera del outbox y respuesta a campos'
     expect(ev).toHaveLength(1);
     expect(ev[0].payload.fields.sort()).toEqual(['activo', 'crm_id', 'monto', 'vence']);
     expect(ev[0].payload.fields_dropped.sort()).toEqual(['estado', 'nope', 'total_calc']);
-    const blob = JSON.stringify(ev) + JSON.stringify(kit.db.table('workflow_outbox'));
-    expect(blob).not.toContain(SECRET);
-    expect(blob).not.toContain('crm-9');
+    const outbox = JSON.stringify(kit.db.table('workflow_outbox'));
+    expect(JSON.stringify(ev) + outbox).not.toContain(SECRET);
+    // The payload and the outbox keep only keys, never response values.
+    const payloads = JSON.stringify(ev.map((e) => ({ ...e, data_snapshot: undefined })));
+    expect(payloads + outbox).not.toContain('crm-9');
+    // P5.2: the debugger snapshot holds the request variables (mapped fields
+    // only); dropped response values such as body.state never reach it.
+    expect(ev[0].data_snapshot).toEqual(instance().data);
+    expect(JSON.stringify(ev[0].data_snapshot)).not.toContain('closed');
   });
 
   it('un reintento tras escribir no repite la llamada ni los campos', async () => {

@@ -10,12 +10,13 @@ describe('WorkflowLiveController', () => {
 
   beforeEach(async () => {
     jest.useFakeTimers();
-    let onNotification: (msg: { channel: string; payload?: string }) => void = () => undefined;
+    type NotificationCb = (msg: { channel: string; payload?: string }) => void;
+    let onNotification: NotificationCb = () => undefined;
     const client: WorkflowListenClient = {
       connect: async () => undefined,
       query: async () => undefined,
-      on: (event: string, cb: (arg?: never) => void) => {
-        if (event === 'notification') onNotification = cb as typeof onNotification;
+      on: (event: 'notification' | 'error' | 'end', cb: NotificationCb | ((err?: Error) => void)) => {
+        if (event === 'notification') onNotification = cb as NotificationCb;
         return client;
       },
       removeAllListeners: () => client,
