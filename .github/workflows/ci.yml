@@ -598,6 +598,7 @@ jobs:
           --include='**/workflows/services/workflow-debug-api.service.spec.ts'
           --include='**/workflows/services/workflow-live.service.spec.ts'
           --include='**/workflows/services/workflow-templates-api.service.spec.ts'
+          --include='**/integrations-page/integrations-page.component.spec.ts'
           --include='**/ecommerce/services/checkout-payment-receipt.spec.ts'
           --include='**/ecommerce/pages/account/order-detail/order-detail.component.spec.ts'
           --include='**/reports/services/reports-data.service.spec.ts'
