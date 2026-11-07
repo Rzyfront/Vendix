@@ -13,6 +13,13 @@ import { WorkflowInstanceRow } from '../workflow-engine.types';
 export interface WorkflowActionContext {
   instance: WorkflowInstanceRow;
   map: Record<string, unknown>;
+  /** P3.2: `output` of the action (field ← response path), when it declares one. */
+  output?: Record<string, string>;
+  /**
+   * Outbox row being run: stable across its retries, so an effect may hand it
+   * to the destination as an idempotency key.
+   */
+  outboxId?: number;
   /** Person who published the version: the effect acts as them. */
   actingUserId: number;
   /** Their REAL store permissions (never widened by the flow). */
@@ -28,6 +35,11 @@ export interface WorkflowActionContext {
 /** Id of the record created or touched (stored so a retry never repeats it). */
 export interface WorkflowActionResult {
   record_id: number | null;
+  /**
+   * P3.2: values the action produced for declared instance fields (raw: the
+   * executor coerces each one to its field type and drops invalid ones).
+   */
+  fields?: Record<string, unknown>;
 }
 
 export type WorkflowActionHandler = (

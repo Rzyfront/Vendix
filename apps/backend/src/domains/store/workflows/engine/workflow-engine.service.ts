@@ -14,6 +14,7 @@ import { WorkflowAssignmentService } from './workflow-assignment.service';
 import {
   CompleteTaskInput,
   StartPublicWorkflowInput,
+  StartExternalWorkflowInput,
   StartSystemWorkflowInput,
   StartWorkflowInput,
   WorkflowActor,
@@ -123,6 +124,33 @@ export class WorkflowEngineService {
     try {
       return await this.prisma.$transaction((tx: WorkflowTx) =>
         this.starter.executeSystem(tx, ctx, input),
+      );
+    } catch (e) {
+      if (e instanceof WorkflowIdempotencyConflict) {
+        const prev = await this.events.replay(this.prisma, e.idempotencyKey, {
+          actor: { type: 'system', id: null },
+          types: START_EVENT_TYPES,
+        });
+        if (prev) return prev;
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * P3: start from outside Vendix (inbound webhook, mailbox, record date) as
+   * actor `system`. The caller runs it inside the store context. A repeated
+   * key returns the first result (`replayed: true`).
+   */
+  async startExternal(raw: StartExternalWorkflowInput): Promise<WorkflowCommandResult> {
+    const ctx = this.loader.context();
+    const input = {
+      ...raw,
+      idempotencyKey: systemIdempotencyKey(`${raw.kind}:${raw.idempotencyKey}`),
+    };
+    try {
+      return await this.prisma.$transaction((tx: WorkflowTx) =>
+        this.starter.executeExternal(tx, ctx, input),
       );
     } catch (e) {
       if (e instanceof WorkflowIdempotencyConflict) {

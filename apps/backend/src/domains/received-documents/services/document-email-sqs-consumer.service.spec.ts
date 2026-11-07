@@ -286,3 +286,47 @@ describe('DocumentEmailSqsConsumerService durable SQS protocol', () => {
     const h = harness(); const clients = jest.spyOn(h.service as any, 'clients'); const localPoll = jest.spyOn(h.service as any, 'poll'); h.service.onModuleInit(); expect(localPoll).not.toHaveBeenCalled(); await receive(h); expect(clients).not.toHaveBeenCalled();
   });
 });
+
+describe('DocumentEmailSqsConsumerService workflow mailbox routing (Flujos P3)', () => {
+  const flujos = 'flujos-ffeeddccbbaa99887766554433221100';
+  function withReceiver(h: ReturnType<typeof harness>) {
+    const receiver = { receive: jest.fn().mockResolvedValue({ status: 'accepted', instance_id: 9 }) };
+    Object.assign(h.service, { moduleRef: { get: jest.fn(() => receiver) } });
+    return receiver;
+  }
+
+  it('routes flujos- recipients to the workflow mailbox and never to the document pipeline', async () => {
+    const h = harness(); const receiver = withReceiver(h);
+    const body = envelope((n) => { n.receipt.recipients = [`${flujos}@${domain}`]; });
+    expect(await receive(h, body)).toEqual({ acknowledged: true, handled: 0 });
+    expect(receiver.receive).toHaveBeenCalledTimes(1);
+    expect(receiver.receive).toHaveBeenCalledWith(expect.objectContaining({ recipient: `${flujos}@${domain}`, ses_message_id: 'synthetic-ses-invoice', facts: { virus_status: 'PASS', spam_status: 'PASS' } }));
+    expect(h.rows.size).toBe(0); expect(h.processor.processEmail).not.toHaveBeenCalled();
+    expect(h.transport.readRaw).not.toHaveBeenCalled(); expect(h.transport.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the facturas- path exactly as before and never calls the mailbox receiver', async () => {
+    const h = harness(); const receiver = withReceiver(h);
+    expect(await receive(h)).toEqual({ acknowledged: true, handled: 1 });
+    expect(receiver.receive).not.toHaveBeenCalled(); expect(h.rows.size).toBe(1); expect(h.processor.processEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('a mixed delivery serves both recipients; a mailbox that throws (transient) keeps the message for a retry without blocking the invoice', async () => {
+    const h = harness(); const receiver = withReceiver(h); receiver.receive.mockRejectedValueOnce(new Error('boom'));
+    const body = envelope((n) => { n.receipt.recipients = [`${flujos}@${domain}`, `${alias}@${domain}`]; });
+    expect(await receive(h, body)).toEqual({ acknowledged: false, handled: 1 });
+    expect(receiver.receive).toHaveBeenCalledTimes(1); expect(h.processor.processEmail).toHaveBeenCalledTimes(1);
+    expect(h.transport.delete).not.toHaveBeenCalled();
+    // The redelivery serves the mailbox and does not process the invoice twice.
+    expect(await receive(h, body)).toEqual({ acknowledged: true, handled: 1 });
+    expect(receiver.receive).toHaveBeenCalledTimes(2); expect(h.processor.processEmail).toHaveBeenCalledTimes(1);
+    expect(h.transport.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('a flujos- address on another domain is ignored', async () => {
+    const h = harness(); const receiver = withReceiver(h);
+    const body = envelope((n) => { n.receipt.recipients = [`${flujos}@evil.example`]; });
+    expect(await receive(h, body)).toEqual({ acknowledged: true, handled: 0 });
+    expect(receiver.receive).not.toHaveBeenCalled();
+  });
+});

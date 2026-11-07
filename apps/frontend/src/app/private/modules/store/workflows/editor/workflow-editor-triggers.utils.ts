@@ -1,14 +1,17 @@
 import {
   WORKFLOW_ACTION_CATALOG,
+  WORKFLOW_EMAIL_TOKENS,
   WORKFLOW_EVENT_CATALOG,
   WORKFLOW_GATE_OPERATIONS,
   WORKFLOW_INSTANCE_TOKENS,
+  WORKFLOW_RECORD_TOKENS,
   WORKFLOW_TRIGGER_EVENTS,
   WORKFLOW_VENDIX_ACTIONS,
   WorkflowActionInputSpec,
   WorkflowCatalogToken,
   WorkflowFieldDef,
   WorkflowGateOperation,
+  WorkflowRecordFieldDef,
   WorkflowTriggerEvent,
   WorkflowVendixActionName,
 } from '../../../../../shared/workflows/contract/workflow-contract';
@@ -106,7 +109,30 @@ export function eventTokenOptions(event: WorkflowTriggerEvent): EditorOption[] {
   return catalogTokenOptions(WORKFLOW_EVENT_CATALOG[event].tokens);
 }
 
+/** Tokens offered by an inbound-email trigger map (`{{email.<key>}}`). */
+export function emailTokenOptions(): EditorOption[] {
+  return WORKFLOW_EMAIL_TOKENS.map((t) => ({ value: `{{email.${t.key}}}`, label: t.label }));
+}
+
 /** Tokens offered by the approval gate map of an operation. */
 export function gateTokenOptions(operation: WorkflowGateOperation): EditorOption[] {
   return catalogTokenOptions(WORKFLOW_GATE_OPERATIONS[operation].tokens);
+}
+
+const RECORD_TOKEN_LABEL: Record<string, string> = {
+  'record.title': 'Título del registro',
+  'record.reference': 'Referencia del registro',
+};
+
+/** Tokens offered by a record-date trigger map (`{{record.<key>}}`): fixed ones plus the collection's fields. */
+export function recordTokenOptions(fields: readonly WorkflowRecordFieldDef[]): EditorOption[] {
+  return [
+    ...WORKFLOW_RECORD_TOKENS.map((t) => ({ value: `{{${t}}}`, label: RECORD_TOKEN_LABEL[t] ?? t })),
+    ...fields.map((f) => ({ value: `{{record.${f.key}}}`, label: `Registro: ${f.label}` })),
+  ];
+}
+
+/** Date fields of a collection: the only ones a record-date trigger can watch. */
+export function recordDateFieldOptions(fields: readonly WorkflowRecordFieldDef[]): EditorOption[] {
+  return fields.filter((f) => f.type === 'date').map((f) => ({ value: f.key, label: f.label }));
 }

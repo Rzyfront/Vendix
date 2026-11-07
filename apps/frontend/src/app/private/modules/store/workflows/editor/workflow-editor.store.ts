@@ -24,12 +24,28 @@ import {
   uniqueKey,
 } from './workflow-editor.utils';
 
+/**
+ * Applies `change` to a form's fields and to each of its steps (P3.4);
+ * steps left without fields are dropped, and so is `steps` when none remain.
+ */
+function mapForm(
+  form: NonNullable<WorkflowStageDef['form']>,
+  change: (keys: string[]) => string[],
+): NonNullable<WorkflowStageDef['form']> {
+  const fields = change(form.fields);
+  if (!form.steps) return { fields };
+  const steps = form.steps
+    .map((st) => ({ ...st, fields: change(st.fields) }))
+    .filter((st) => st.fields.length > 0);
+  return steps.length > 0 ? { fields, steps } : { fields };
+}
+
 /** Applies `change` to the field keys of the stage form and of every parallel branch form. */
 function mapStageFieldKeys(
   stage: WorkflowStageDef,
   change: (keys: string[]) => string[],
 ): WorkflowStageDef {
-  const withForm = stage.form ? { ...stage, form: { fields: change(stage.form.fields) } } : stage;
+  const withForm = stage.form ? { ...stage, form: mapForm(stage.form, change) } : stage;
   const parallel = withForm.parallel;
   if (!parallel) return withForm;
   return {

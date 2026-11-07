@@ -7,9 +7,15 @@ import {
   HeadObjectCommand,
   DeleteObjectCommand,
   ObjectCannedACL,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
+import { createHash } from 'crypto';
+import type { Readable } from 'stream';
 const sharp: typeof import('sharp').default = require('sharp'); // eslint-disable-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment -- sharp 0.35 types are ESM-only (export default) but CJS runtime exports the function
 import {
   ImageContext,
@@ -290,6 +296,105 @@ export class S3Service {
       this.logger.error(`Error downloading ${key} from S3: ${error.message}`);
       throw error;
     }
+  }
+
+  /**
+   * Starts a multipart upload (chunked public uploads). Returns the S3
+   * `UploadId`; every part but the last must be at least 5 MiB.
+   */
+  async createMultipartUpload(key: string, contentType: string): Promise<string> {
+    this.validateS3Key(key);
+    const res = await this.s3Client.send(
+      new CreateMultipartUploadCommand({
+        Bucket: this.bucketName,
+        Key: key,
+        ContentType: contentType,
+      }),
+    );
+    if (!res.UploadId) throw new Error('S3 did not return an UploadId');
+    return res.UploadId;
+  }
+
+  /** Uploads one part (1-based) and returns its ETag. */
+  async uploadMultipartPart(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    body: Buffer,
+  ): Promise<string> {
+    this.validateS3Key(key);
+    const res = await this.s3Client.send(
+      new UploadPartCommand({
+        Bucket: this.bucketName,
+        Key: key,
+        UploadId: uploadId,
+        PartNumber: partNumber,
+        Body: body,
+        ContentLength: body.length,
+      }),
+    );
+    if (!res.ETag) throw new Error('S3 did not return an ETag for the part');
+    return res.ETag;
+  }
+
+  /** Joins the parts (ordered by number) into the final object. */
+  async completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: Array<{ partNumber: number; etag: string }>,
+  ): Promise<void> {
+    this.validateS3Key(key);
+    await this.s3Client.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: this.bucketName,
+        Key: key,
+        UploadId: uploadId,
+        MultipartUpload: {
+          Parts: [...parts]
+            .sort((a, b) => a.partNumber - b.partNumber)
+            .map((p) => ({ PartNumber: p.partNumber, ETag: p.etag })),
+        },
+      }),
+    );
+  }
+
+  /** Drops an unfinished multipart upload (best effort: never throws). */
+  async abortMultipartUpload(key: string, uploadId: string): Promise<void> {
+    try {
+      this.validateS3Key(key);
+      await this.s3Client.send(
+        new AbortMultipartUploadCommand({
+          Bucket: this.bucketName,
+          Key: key,
+          UploadId: uploadId,
+        }),
+      );
+    } catch (error: any) {
+      this.logger.warn(`Could not abort multipart upload of ${key}: ${error?.message}`);
+    }
+  }
+
+  /**
+   * Streams an object and returns its sha256 and byte length without holding
+   * it in memory (files assembled from parts are never hashed by the API).
+   */
+  async hashObject(key: string): Promise<{ sha256: string; size: number }> {
+    this.validateS3Key(key);
+    const res = await this.s3Client.send(
+      new GetObjectCommand({ Bucket: this.bucketName, Key: key }),
+    );
+    const body = res.Body as Readable | undefined;
+    if (!body || typeof (body as any)[Symbol.asyncIterator] !== 'function') {
+      throw new Error('S3 response body is not readable');
+    }
+    const hash = createHash('sha256');
+    let size = 0;
+    for await (const chunk of body) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      size += buf.length;
+      hash.update(buf);
+    }
+    return { sha256: hash.digest('hex'), size };
   }
 
   /**

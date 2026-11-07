@@ -288,6 +288,14 @@ export const storeEcommercePublicRoutes: Routes = [
           ),
       },
       {
+        // Flujos: tracking portal of the external requester (magic link, no login).
+        path: 'flujos/seguimiento/:token',
+        loadComponent: () =>
+          import('../../public/ecommerce/pages/workflow-tracking/workflow-tracking.component').then(
+            (c) => c.WorkflowTrackingComponent,
+          ),
+      },
+      {
         path: 'pqr',
         loadComponent: () =>
           import('../../public/ecommerce/pages/pqr/pqr-submit.component').then(

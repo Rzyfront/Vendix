@@ -65,6 +65,14 @@ export const storeLandingPublicRoutes: Routes = [
             (c) => c.WorkflowPublicFormComponent,
           ),
     },
+    {
+        // Flujos: tracking portal of the external requester (magic link, no login).
+        path: 'flujos/seguimiento/:token',
+        loadComponent: () =>
+          import('../../public/ecommerce/pages/workflow-tracking/workflow-tracking.component').then(
+            (c) => c.WorkflowTrackingComponent,
+          ),
+    },
     ...pricingRoutes,
     {
         path: '',

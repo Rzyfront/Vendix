@@ -20,6 +20,7 @@ import {
 } from '@common/workflows/contract';
 import { DossiersService } from '../../documents/dossiers.service';
 import {
+  StartExternalWorkflowInput,
   StartPublicWorkflowInput,
   StartSystemWorkflowInput,
   StartWorkflowInput,
@@ -129,7 +130,9 @@ export class WorkflowStartService {
     const patch = this.stages.stagePatch(stage, now, 0);
     const subject =
       input.subject && input.subject.type !== 'none' ? input.subject : null;
-    if (subject) await this.assertSubjectInStore(tx, ctx, subject);
+    if (subject) {
+      await this.assertSubjectInStore(tx, ctx, subject, definition.subject?.collection);
+    }
 
     const created = (await tx.workflow_instances.create({
       data: {
@@ -230,14 +233,33 @@ export class WorkflowStartService {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_PUBLIC_NOT_FOUND);
     }
 
-    // Public uploads are out of scope: file fields are never accepted here.
+    // P3.4: file fields never travel in the values; the caller passes the
+    // ones with a completed upload of this link (they join the dossier after
+    // the start), and a required one without its upload fails like any field.
     const fileKeys = new Set(
       definition.fields.filter((f) => f.type === 'file').map((f) => f.key),
     );
     const submitted = Object.fromEntries(
       Object.entries(input.values ?? {}).filter(([k]) => !fileKeys.has(k)),
     );
-    const form = validateFormValues(definition, stage, submitted);
+    const uploaded = new Set(input.fileFields ?? []);
+    const form = validateFormValues(
+      definition,
+      {
+        ...stage,
+        form: stage.form
+          ? { ...stage.form, fields: stage.form.fields.filter((k) => !fileKeys.has(k)) }
+          : stage.form,
+      },
+      submitted,
+    );
+    for (const key of stage.form?.fields ?? []) {
+      const f = definition.fields.find((x) => x.key === key);
+      if (f?.type === 'file' && f.required && !uploaded.has(key)) {
+        form.ok = false;
+        form.errors.push({ field: key, message: `El campo "${f.label}" es obligatorio.` });
+      }
+    }
     if (!form.ok) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_FORM_INVALID, undefined, {
         errors: form.errors,
@@ -399,6 +421,98 @@ export class WorkflowStartService {
       subject,
       idempotencyKey: input.idempotencyKey,
       started: { via: 'event', event: input.event },
+    });
+  }
+
+  /**
+   * P3.1 / P3.3 / P3.6: starts an instance from outside Vendix (actor
+   * `system`): an inbound webhook, an email to the flow's mailbox or the date
+   * of a custom record. Closed path: the store's active, switched-on
+   * definition must declare a trigger of that kind (and, for `record_date`,
+   * on that field); the start stage cannot belong to "the initiator". Webhook
+   * values go through the form rules over every declared non-file field
+   * (422 with the field errors); email and record data only reach fields
+   * through the trigger `map`. The start form is not auto-submitted.
+   */
+  async executeExternal(
+    tx: WorkflowTx,
+    ctx: WorkflowCallContext,
+    input: StartExternalWorkflowInput,
+  ): Promise<WorkflowCommandResult> {
+    const prev = await this.events.replay(tx, input.idempotencyKey, {
+      actor: { type: 'system', id: null },
+      types: START_EVENT_TYPES,
+    });
+    if (prev) return prev;
+
+    const def = await tx.workflow_definitions.findFirst({
+      where: { id: input.definitionId, store_id: ctx.store_id },
+    });
+    if (!def) throw new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND);
+    if (def.status !== 'active' || !def.published_version_id) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_ACTIVE);
+    }
+    if (def.is_enabled === false) throw new VendixHttpException(ErrorCodes.WORKFLOW_DISABLED);
+    const definition = await this.loader.loadDefinition(tx, def.published_version_id);
+    const trigger = (definition.triggers ?? []).find(
+      (t) =>
+        t.kind === input.kind &&
+        (t.kind !== 'record_date' || t.field === input.recordField),
+    );
+    const stage = startStage(definition);
+    if (!trigger || !stage || stage.assignee?.kind === 'initiator') {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_ACTIVE);
+    }
+
+    let initial: Record<string, unknown> = {};
+    if (trigger.kind === 'webhook') {
+      const accepted = definition.fields
+        .filter((f) => f.type !== 'file' && typeof f.compute !== 'string')
+        .map((f) => f.key);
+      const form = validateFormValues(
+        definition,
+        { ...stage, form: { fields: accepted } },
+        input.values ?? {},
+      );
+      if (!form.ok) {
+        throw new VendixHttpException(ErrorCodes.WORKFLOW_FORM_INVALID, undefined, {
+          errors: form.errors,
+        });
+      }
+      initial = form.values;
+    } else if (trigger.kind === 'email' || trigger.kind === 'record_date') {
+      const root = trigger.kind === 'email' ? 'email' : 'record';
+      const context = input.context ?? {};
+      const map = Object.fromEntries(
+        Object.entries(trigger.map ?? {}).map(([field, template]) => [
+          field,
+          template.replace(new RegExp(`\\{\\{\\s*${root}\\.`, 'g'), '{{event.'),
+        ]),
+      );
+      initial = this.mapInitial(
+        definition,
+        map,
+        context,
+        Object.keys(context).map((k) => `event.${k}`),
+      );
+    }
+
+    const subject =
+      input.subject && definition.subject?.type === input.subject.type
+        ? input.subject
+        : null;
+    if (subject) {
+      await this.assertSubjectInStore(tx, ctx, subject, definition.subject?.collection);
+    }
+    return this.createSystemInstance(tx, ctx, {
+      def,
+      definition,
+      stage,
+      initial,
+      subject,
+      idempotencyKey: input.idempotencyKey,
+      started: { ...(input.started ?? {}), via: input.kind },
+      title: input.title,
     });
   }
 
@@ -652,6 +766,8 @@ export class WorkflowStartService {
       subject: { type: string; id: number } | null;
       idempotencyKey: string;
       started: Record<string, unknown>;
+      /** P3: title given by the caller (default: the flow name). */
+      title?: string;
       /** P2.2: a child keeps the parent's starter, so `initiator` still means someone. */
       startedBy?: { type: WorkflowActor['type']; id: number | null };
       parent?: { id: number; stage_key: string; entry_seq: number };
@@ -660,7 +776,7 @@ export class WorkflowStartService {
     const actor: WorkflowActor = { type: 'system', id: null };
     const now = new Date();
     const reference = await this.references.next(tx, ctx.store_id);
-    const title = a.definition.name.slice(0, 200);
+    const title = (a.title?.trim() || a.definition.name).slice(0, 200);
     const enter = this.stages.applyActions(a.stage.on_enter, a.initial, {
       reference,
       title,
@@ -737,6 +853,8 @@ export class WorkflowStartService {
     tx: WorkflowTx,
     ctx: WorkflowCallContext,
     subject: { type: string; id?: number | null },
+    /** P3.6: a custom record must belong to the flow's collection. */
+    collection?: string,
   ) {
     const id = subject.id ?? null;
     if (id === null) return;
@@ -781,6 +899,19 @@ export class WorkflowStartService {
           where: { user_id: id, store_id: ctx.store_id },
           ...select,
         });
+        break;
+      case 'custom_record':
+        found = collection
+          ? await tx.workflow_records.findFirst({
+              where: {
+                id,
+                store_id: ctx.store_id,
+                archived_at: null,
+                collection: { key: collection, store_id: ctx.store_id },
+              },
+              ...select,
+            })
+          : null;
         break;
       default:
         throw new VendixHttpException(ErrorCodes.WORKFLOW_SUBJECT_NOT_FOUND);
