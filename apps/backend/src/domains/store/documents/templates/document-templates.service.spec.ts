@@ -134,6 +134,18 @@ describe('DocumentTemplatesService', () => {
     expect(versions).toHaveLength(1);
   });
 
+  it('a publish that read the template before another publish finished creates no duplicate version', async () => {
+    const { service, run, versions, prisma, templates } = setup();
+    const t = await run(() => service.create({ key: 'a1', name: 'A1', kind: 'blocks' }));
+    const stale = { ...templates[0], published_version: null };
+    await run(() => service.publish(t.id));
+    // The second publisher read the row before the first one committed.
+    prisma.document_templates.findFirst.mockResolvedValueOnce(stale);
+    const again = await run(() => service.publish(t.id));
+    expect(again).toMatchObject({ created: false, version: 1 });
+    expect(versions).toHaveLength(1);
+  });
+
   it('a template of another store is a 404 for every operation', async () => {
     const { service, run } = setup();
     const t = await run(() => service.create({ key: 'a1', name: 'A1', kind: 'blocks' }));

@@ -253,9 +253,15 @@ export class DocumentTemplatesService {
     return this.prisma.$transaction(async (tx: any) => {
       // The template row is the lock: two publishers of one template queue up.
       await tx.document_templates.updateMany({ where: { id, store_id: c.store_id }, data: { updated_at: new Date() } });
-      const current = row.published_version_id
+      // Read again under the lock: a publish that ran meanwhile already moved it.
+      const locked = await tx.document_templates.findFirst({
+        where: { id, store_id: c.store_id },
+        select: { published_version_id: true },
+      });
+      const publishedId: number | null = locked?.published_version_id ?? null;
+      const current = publishedId
         ? await tx.document_template_versions.findFirst({
-            where: { id: row.published_version_id, store_id: c.store_id },
+            where: { id: publishedId, store_id: c.store_id },
             select: { id: true, version: true, body_hash: true, published_at: true },
           })
         : null;
