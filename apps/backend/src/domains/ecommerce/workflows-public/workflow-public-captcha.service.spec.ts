@@ -3,6 +3,7 @@ import { VendixHttpException } from '@common/errors';
 import {
   CAPTCHA_DIFFICULTY_BITS,
   CAPTCHA_TTL_MS,
+  UPLOAD_GRANT_TTL_MS,
   WorkflowPublicCaptchaService,
   leadingZeroBits,
 } from './workflow-public-captcha.service';
@@ -87,5 +88,19 @@ describe('WorkflowPublicCaptchaService (proof of work)', () => {
       seen.add(key);
       return 'OK';
     });
+  });
+
+  it('issues an upload grant bound to its link that expires and rejects tampering', () => {
+    const now = Date.now();
+    const grant = service.issueUploadGrant(7, now);
+    expect(service.verifyUploadGrant(7, grant, now + 1000)).toBe(true);
+    expect(service.verifyUploadGrant(8, grant, now + 1000)).toBe(false);
+    expect(service.verifyUploadGrant(7, grant, now + UPLOAD_GRANT_TTL_MS + 1)).toBe(false);
+    expect(service.verifyUploadGrant(7, `${grant}0`, now + 1000)).toBe(false);
+    expect(service.verifyUploadGrant(7, grant.replace(/^\d+/, String(now + 10 * UPLOAD_GRANT_TTL_MS)), now)).toBe(false);
+    expect(service.verifyUploadGrant(7, undefined)).toBe(false);
+    expect(service.verifyUploadGrant(7, 'garbage')).toBe(false);
+    const other = new WorkflowPublicCaptchaService(config('s2') as never, redis as never);
+    expect(other.verifyUploadGrant(7, grant, now + 1000)).toBe(false);
   });
 });

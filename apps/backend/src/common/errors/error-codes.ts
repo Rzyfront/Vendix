@@ -125,6 +125,8 @@ export const ErrorCodes = {
   WORKFLOW_RECORD_INVALID: { code: 'WORKFLOW_RECORD_INVALID', httpStatus: 422, devMessage: 'Los datos del registro no son válidos.' },
   // Flujos P3 · T4
   WORKFLOW_PUBLIC_CAPTCHA_INVALID: { code: 'WORKFLOW_PUBLIC_CAPTCHA_INVALID', httpStatus: 422, devMessage: 'No pudimos verificar que no eres un robot. Intenta de nuevo.' },
+  WORKFLOW_PUBLIC_UPLOAD_PROOF_REQUIRED: { code: 'WORKFLOW_PUBLIC_UPLOAD_PROOF_REQUIRED', httpStatus: 403, devMessage: 'Resuelve la verificación antes de subir archivos.' },
+  WORKFLOW_UPLOAD_TOO_MANY: { code: 'WORKFLOW_UPLOAD_TOO_MANY', httpStatus: 429, devMessage: 'Demasiadas subidas abiertas en este enlace. Termina o espera a que venzan las anteriores.' },
   WORKFLOW_UPLOAD_INVALID: { code: 'WORKFLOW_UPLOAD_INVALID', httpStatus: 422, devMessage: 'La subida del archivo no es válida.' },
   WORKFLOW_UPLOAD_NOT_FOUND: { code: 'WORKFLOW_UPLOAD_NOT_FOUND', httpStatus: 404, devMessage: 'La subida no existe o ya venció.' },
   WORKFLOW_TRACKING_LINK_NOT_FOUND: { code: 'WORKFLOW_TRACKING_LINK_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró el enlace de seguimiento.' },

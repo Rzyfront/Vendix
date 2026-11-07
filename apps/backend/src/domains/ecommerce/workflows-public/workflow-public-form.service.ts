@@ -76,11 +76,21 @@ export class WorkflowPublicFormService {
         `El campo "${input.field_key ?? ''}" no es un campo de archivo de este formulario.`,
       );
     }
-    return this.uploads.init(
+    const grant = link.captcha_required ? await this.uploadGrant(link.id, input) : undefined;
+    const session = await this.uploads.init(
       this.uploadScope(link, field.key),
       { accept: field.accept, max_size_mb: field.max_size_mb },
       input,
     );
+    return grant ? { ...session, upload_grant: grant } : session;
+  }
+
+  /** A valid grant is reused as is; otherwise a solved proof is spent to issue one. */
+  private async uploadGrant(linkId: number, input: InitPublicUploadDto): Promise<string> {
+    if (this.captcha.verifyUploadGrant(linkId, input.upload_grant)) return input.upload_grant!;
+    if (!input.captcha) throw new VendixHttpException(ErrorCodes.WORKFLOW_PUBLIC_UPLOAD_PROOF_REQUIRED);
+    await this.captcha.verify(linkId, input.captcha);
+    return this.captcha.issueUploadGrant(linkId);
   }
 
   async putUploadPart(token: string, uploadId: string, n: number, body: Buffer) {

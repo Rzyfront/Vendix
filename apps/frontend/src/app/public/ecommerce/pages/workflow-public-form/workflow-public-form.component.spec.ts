@@ -4,11 +4,12 @@ import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { provideMockStore } from '@ngrx/store/testing';
-import { NEVER, of, throwError } from 'rxjs';
+import { NEVER, from, map, of, tap, throwError } from 'rxjs';
 import { CaptchaChallenge } from './workflow-captcha';
 import { WorkflowPublicFormComponent } from './workflow-public-form.component';
 import {
   PublicFormDefinition,
+  UploadAccess,
   WorkflowPublicFormService,
 } from './workflow-public-form.service';
 
@@ -279,6 +280,46 @@ describe('WorkflowPublicFormComponent', () => {
       expect(body.captcha).toEqual(jasmine.objectContaining({ salt: challenge.salt, signature: 'firma' }));
       expect(Number.isInteger(body.captcha?.number)).toBeTrue();
       expect(c.verifying()).toBeFalse();
+    });
+
+    it('con captcha_required resuelve la verificación antes de la primera subida y las siguientes reutilizan la concesión', async () => {
+      const challenge: CaptchaChallenge = {
+        challenge: 'c', salt: '0123456789abcdef0123456789abcdef', algorithm: 'SHA-256',
+        difficulty: 4, expires_at: '2030-01-01T00:00:00.000Z', signature: 'firma',
+      };
+      api.get.and.returnValue(of({ ...FORM, captcha_required: true }));
+      api.captcha.and.returnValue(of(challenge));
+      const sent: Array<{ upload_grant?: string; captcha?: unknown }> = [];
+      api.uploader.and.callFake((_token: string, _key: string, access?: UploadAccess) => ({
+        init: () =>
+          from(access!.credentials()).pipe(
+            tap((credentials) => sent.push(credentials)),
+            map(() => {
+              access!.remember('grant-1');
+              return { upload_id: `u${sent.length}`, chunk_size: 10, total_parts: 1 };
+            }),
+          ),
+        putPart: () => of(null),
+        complete: () => of(null),
+      }));
+      setup();
+      await render();
+      const c = fixture.componentInstance;
+      const pick = async (verifies: boolean) => {
+        const input = { files: [new File(['abc'], 'a.png', { type: 'image/png' })], value: 'x' };
+        c.onFile({ key: 'soporte', type: 'file', label: 'Soporte' } as never, { target: input } as unknown as Event);
+        expect(c.verifying()).toBe(verifies);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(c.verifying()).toBeFalse();
+      };
+      await pick(true);
+      c.removeFile('soporte');
+      await pick(false);
+      expect(api.captcha).toHaveBeenCalledTimes(1);
+      expect(sent[0].captcha).toEqual(jasmine.objectContaining({ signature: 'firma' }));
+      expect(sent[0].upload_grant).toBeUndefined();
+      expect(sent[1]).toEqual({ upload_grant: 'grant-1' });
+      expect(c.uploads()['soporte']?.status).toBe('done');
     });
 
     it('sin captcha_required no pide el reto', async () => {

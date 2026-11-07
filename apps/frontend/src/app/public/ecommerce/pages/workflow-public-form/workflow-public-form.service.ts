@@ -1,6 +1,6 @@
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, map } from 'rxjs';
+import { Observable, from, map, switchMap, tap } from 'rxjs';
 import { environment } from '../../../../../environments/environment';
 import {
   WorkflowFieldDef,
@@ -35,6 +35,12 @@ export interface PublicFormResult {
   tracking_url: string | null;
 }
 
+/** What a captcha link asks before opening an upload: the grant of an earlier one or a fresh proof. */
+export interface UploadAccess {
+  credentials(): Promise<{ upload_grant?: string; captcha?: CaptchaProof }>;
+  remember(grant: string): void;
+}
+
 const OCTET_STREAM = new HttpHeaders({ 'Content-Type': 'application/octet-stream' });
 
 /** Anonymous client of `ecommerce/workflows/forms/:token` (store resolved by the domain). */
@@ -66,15 +72,20 @@ export class WorkflowPublicFormService {
   }
 
   /** Chunked upload of one `file` field of the form. */
-  uploader(token: string, fieldKey: string): ChunkedUploadAdapter {
+  uploader(token: string, fieldKey: string, access?: UploadAccess): ChunkedUploadAdapter {
     return {
       init: (input) =>
-        this.http
-          .post<{ data: { upload_id: string; chunk_size: number; total_parts: number } }>(
-            this.url(token, '/uploads'),
-            { field_key: fieldKey, ...input },
-          )
-          .pipe(map((res) => res.data)),
+        from(access?.credentials() ?? Promise.resolve({})).pipe(
+          switchMap((credentials) =>
+            this.http.post<{
+              data: { upload_id: string; chunk_size: number; total_parts: number; upload_grant?: string };
+            }>(this.url(token, '/uploads'), { field_key: fieldKey, ...input, ...credentials }),
+          ),
+          map((res) => res.data),
+          tap((session) => {
+            if (session.upload_grant) access?.remember(session.upload_grant);
+          }),
+        ),
       putPart: (uploadId, n, body) =>
         this.http.put(this.url(token, `/uploads/${encodeURIComponent(uploadId)}/parts/${n}`), body, {
           headers: OCTET_STREAM,

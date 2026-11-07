@@ -4,8 +4,9 @@ import { WorkflowPublicUploadsService } from './workflow-public-uploads.service'
 
 /**
  * Hourly: open chunked-upload sessions past their 24 h life are aborted in S3
- * (so no orphan multipart parts keep costing) and marked `aborted`. Runs only
- * in the worker (the API unmounts crons).
+ * (so no orphan multipart parts keep costing) and marked `aborted`; completed
+ * ones never consumed by a submit lose their object and `stored_files` row.
+ * Runs only in the worker (the API unmounts crons).
  */
 @Injectable()
 export class WorkflowUploadSessionsCron {

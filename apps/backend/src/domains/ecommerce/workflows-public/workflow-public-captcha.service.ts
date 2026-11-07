@@ -8,6 +8,8 @@ import { REDIS_CLIENT } from '@common/redis/redis.module';
 /** Leading zero bits of sha256(salt + number): ~2^18 hashes on average. */
 export const CAPTCHA_DIFFICULTY_BITS = 18;
 export const CAPTCHA_TTL_MS = 5 * 60_000;
+/** Life of the upload grant issued after the first solved proof of a form. */
+export const UPLOAD_GRANT_TTL_MS = 30 * 60_000;
 const CAPTCHA_ALGORITHM = 'SHA-256';
 
 export interface CaptchaChallenge {
@@ -100,6 +102,28 @@ export class WorkflowPublicCaptchaService {
     const digest = createHash('sha256').update(`${proof.salt}${proof.number}`).digest();
     if (leadingZeroBits(digest) < CAPTCHA_DIFFICULTY_BITS) throw invalid();
     if (!(await this.markUsed(proof.salt, expires - now))) throw invalid();
+  }
+
+  /** `<expires ms>.<hmac>` bound to the link: lets later uploads of one form skip the captcha. */
+  issueUploadGrant(linkId: number, now = Date.now()): string {
+    const expires = now + UPLOAD_GRANT_TTL_MS;
+    return `${expires}.${this.signGrant(linkId, expires)}`;
+  }
+
+  /** true only for an unexpired grant signed by this server for this very link. */
+  verifyUploadGrant(linkId: number, grant: string | undefined, now = Date.now()): boolean {
+    if (typeof grant !== 'string' || grant.length > 100) return false;
+    const [rawExpires, signature, extra] = grant.split('.');
+    if (extra !== undefined || !/^\d{1,15}$/.test(rawExpires ?? '') || !signature) return false;
+    const expires = Number(rawExpires);
+    if (expires <= now || expires - now > UPLOAD_GRANT_TTL_MS) return false;
+    const expected = Buffer.from(this.signGrant(linkId, expires));
+    const given = Buffer.from(signature);
+    return expected.length === given.length && timingSafeEqual(expected, given);
+  }
+
+  private signGrant(linkId: number, expires: number): string {
+    return createHmac('sha256', this.key).update(`upload-grant|${linkId}|${expires}`).digest('hex');
   }
 
   private sign(salt: string, difficulty: number, expiresAt: string, linkId: number): string {

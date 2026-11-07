@@ -1,6 +1,6 @@
 import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { from, switchMap } from 'rxjs';
+import { firstValueFrom, from, switchMap } from 'rxjs';
 import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -17,6 +17,7 @@ import { CaptchaProof, solveCaptcha } from './workflow-captcha';
 import { uploadInChunks } from './workflow-chunked-upload';
 import {
   PublicFormDefinition,
+  UploadAccess,
   WorkflowPublicFormService,
 } from './workflow-public-form.service';
 
@@ -40,8 +41,8 @@ interface UploadState {
  * Mobile-first (360 px), no login. `submission_id` is generated once per page
  * load and reused on retry, so a double click never creates two requests.
  * Multi-step forms are presentational (the server validates the whole form);
- * files go up in chunks; a proof-of-work captcha is solved on submit when the
- * link asks for it.
+ * files go up in chunks; when the link asks for it, a proof-of-work captcha is
+ * solved before the first upload (later ones reuse the server grant) and on submit.
  */
 @Component({
   selector: 'app-workflow-public-form',
@@ -302,6 +303,8 @@ export class WorkflowPublicFormComponent implements OnInit {
   /** One per page load; reused on retry (backend makes it idempotent). */
   private readonly submissionId = crypto.randomUUID();
   private token = '';
+  /** Short-lived grant the server returns on the first upload of a captcha link. */
+  private uploadGrant: string | null = null;
 
   readonly state = signal<PageState>('loading');
   readonly form = signal<PublicFormDefinition | null>(null);
@@ -454,17 +457,37 @@ export class WorkflowPublicFormComponent implements OnInit {
     if (!file.type) return fail('No reconocemos el tipo de este archivo.');
     if (file.size > maxMb * 1024 * 1024) return fail(`El archivo supera el máximo de ${maxMb} MB.`);
     this.setUpload(key, { name: file.name, progress: 0, status: 'uploading' });
-    uploadInChunks(file, this.api.uploader(this.token, key), {
+    uploadInChunks(file, this.api.uploader(this.token, key, this.uploadAccess), {
       onProgress: (progress) => this.setUpload(key, { name: file.name, progress, status: 'uploading' }),
     })
       .then((uploadId) => {
         this.setValue(key, uploadId);
         this.setUpload(key, { name: file.name, progress: 100, status: 'done' });
       })
-      .catch((error: unknown) =>
-        fail(error instanceof HttpErrorResponse ? this.messageOf(error) : 'No pudimos subir el archivo.'),
-      );
+      .catch((error: unknown) => {
+        // A rejected or expired grant is dropped so the next attempt solves the captcha again.
+        if (error instanceof HttpErrorResponse && error.status === 403) this.uploadGrant = null;
+        fail(error instanceof HttpErrorResponse ? this.messageOf(error) : 'No pudimos subir el archivo.');
+      });
   }
+
+  /** Captcha links: the first upload solves the verification, later ones reuse its grant. */
+  private readonly uploadAccess: UploadAccess = {
+    credentials: async () => {
+      if (!this.form()?.captcha_required) return {};
+      if (this.uploadGrant) return { upload_grant: this.uploadGrant };
+      this.verifying.set(true);
+      try {
+        const challenge = await firstValueFrom(this.api.captcha(this.token));
+        return { captcha: await solveCaptcha(challenge) };
+      } finally {
+        this.verifying.set(false);
+      }
+    },
+    remember: (grant) => {
+      this.uploadGrant = grant;
+    },
+  };
 
   removeFile(key: string): void {
     this.uploads.update((current) => {
@@ -632,7 +655,9 @@ export class WorkflowPublicFormComponent implements OnInit {
   }
 
   private messageOf(error: HttpErrorResponse): string {
-    if (error.status === 429) return 'Demasiados envíos; intenta en un minuto.';
+    if (error.status === 429 && parseApiError(error).errorCode !== 'WORKFLOW_UPLOAD_TOO_MANY') {
+      return 'Demasiados envíos; intenta en un minuto.';
+    }
     if (error.status === 0) return 'Sin conexión. Revisa tu internet e intenta de nuevo.';
     return parseApiError(error).userMessage;
   }

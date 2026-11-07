@@ -338,6 +338,68 @@ describe('Public form P3.4: steps, captcha and chunked uploads', () => {
     });
   });
 
+  describe('captcha before opening an upload', () => {
+    const fileInit = { field_key: 'adjunto', file_name: 'foto.png', mime_type: 'image/png', size_bytes: 20 };
+
+    beforeEach(async () => {
+      await setup();
+      links()[0].captcha_required = true;
+    });
+
+    it('refuses to open an upload without proof or grant and creates no session', async () => {
+      expect(await codeOf(kit.form.initUpload(token, fileInit))).toBe('WORKFLOW_PUBLIC_UPLOAD_PROOF_REQUIRED');
+      expect(await codeOf(kit.form.initUpload(token, { ...fileInit, upload_grant: 'x.y' }))).toBe(
+        'WORKFLOW_PUBLIC_UPLOAD_PROOF_REQUIRED',
+      );
+      expect(sessions()).toHaveLength(0);
+      expect(kit.s3Multipart.createMultipartUpload).not.toHaveBeenCalled();
+    });
+
+    it('a valid proof opens the upload and returns a grant that later uploads reuse without a new proof', async () => {
+      const proof = solveCaptcha(await kit.form.captchaChallenge(token));
+      const first = (await kit.form.initUpload(token, { ...fileInit, captcha: proof })) as any;
+      expect(first.upload_grant).toEqual(expect.any(String));
+      // the proof itself stays single use
+      expect(await codeOf(kit.form.initUpload(token, { ...fileInit, captcha: proof }))).toBe(
+        'WORKFLOW_PUBLIC_CAPTCHA_INVALID',
+      );
+      const second = (await kit.form.initUpload(token, { ...fileInit, upload_grant: first.upload_grant })) as any;
+      expect(second.upload_id).not.toBe(first.upload_id);
+      expect(second.upload_grant).toBe(first.upload_grant);
+      expect(sessions()).toHaveLength(2);
+    });
+
+    it('a tampered or an expired grant does not open an upload', async () => {
+      const proof = solveCaptcha(await kit.form.captchaChallenge(token));
+      const { upload_grant } = (await kit.form.initUpload(token, { ...fileInit, captcha: proof })) as any;
+      const tampered = `${upload_grant.slice(0, -1)}${upload_grant.endsWith('0') ? '1' : '0'}`;
+      expect(await codeOf(kit.form.initUpload(token, { ...fileInit, upload_grant: tampered }))).toBe(
+        'WORKFLOW_PUBLIC_UPLOAD_PROOF_REQUIRED',
+      );
+      const real = Date.now;
+      Date.now = () => real() + 31 * 60_000;
+      try {
+        expect(await codeOf(kit.form.initUpload(token, { ...fileInit, upload_grant }))).toBe(
+          'WORKFLOW_PUBLIC_UPLOAD_PROOF_REQUIRED',
+        );
+      } finally {
+        Date.now = real;
+      }
+    });
+
+    it('the submit still needs its own proof even with a grant', async () => {
+      const proof = solveCaptcha(await kit.form.captchaChallenge(token));
+      await kit.form.initUpload(token, { ...fileInit, captcha: proof });
+      expect(await codeOf(kit.form.submit(token, body()))).toBe('WORKFLOW_PUBLIC_CAPTCHA_INVALID');
+    });
+
+    it('a link without captcha_required opens uploads as before and returns no grant', async () => {
+      links()[0].captcha_required = false;
+      const init = (await kit.form.initUpload(token, fileInit)) as any;
+      expect(init.upload_grant).toBeUndefined();
+    });
+  });
+
   describe('controller', () => {
     it('declares the captcha, upload and part routes with their own throttle', async () => {
       const { EcommerceWorkflowsPublicController: C } = await import('./ecommerce-workflows-public.controller');

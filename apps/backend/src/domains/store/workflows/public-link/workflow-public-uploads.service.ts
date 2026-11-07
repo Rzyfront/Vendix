@@ -16,7 +16,14 @@ import { sanitizeFileName } from '../../documents/stored-files.service';
 /** Every part but the last has exactly this size (S3 minimum is 5 MiB). */
 export const UPLOAD_CHUNK_BYTES = 5 * MB;
 export const UPLOAD_SESSION_TTL_MS = 24 * 3_600_000;
+/** Open (unexpired) sessions one public or tracking link may hold at once. */
+export const MAX_OPEN_UPLOADS_PER_LINK = 20;
 const SWEEP_BATCH = 100;
+
+function isNoSuchUpload(e: unknown): boolean {
+  const err = e as { name?: string; Code?: string } | null;
+  return err?.name === 'NoSuchUpload' || err?.Code === 'NoSuchUpload';
+}
 
 /** Who owns the session: a public form link or a tracking link. */
 export interface UploadScope {
@@ -148,6 +155,15 @@ export class WorkflowPublicUploadsService {
     ]);
     if (!store || !organization) throw new VendixHttpException(ErrorCodes.WORKFLOW_UPLOAD_NOT_FOUND);
     const folder = scope.folder.replace(/^\/+|\/+$/g, '');
+    const open = await db.workflow_upload_sessions.count({
+      where: {
+        store_id: scope.store_id,
+        ...this.owner(scope),
+        status: 'open',
+        expires_at: { gt: new Date() },
+      },
+    });
+    if (open >= MAX_OPEN_UPLOADS_PER_LINK) throw new VendixHttpException(ErrorCodes.WORKFLOW_UPLOAD_TOO_MANY);
     const key = `${this.paths.buildStorePath(organization, store)}/${folder}/${randomUUID()}.${ext}`;
     const s3UploadId = await this.s3.createMultipartUpload(key, mime);
     const publicId = randomBytes(18).toString('base64url');
@@ -233,11 +249,7 @@ export class WorkflowPublicUploadsService {
         );
       }
     }
-    await this.s3.completeMultipartUpload(
-      session.s3_key,
-      session.s3_upload_id,
-      parts.map((p) => ({ partNumber: p.n, etag: p.etag })),
-    );
+    await this.joinParts(session, parts);
     const { sha256, size } = await this.s3.hashObject(session.s3_key);
     if (size !== session.size_bytes) {
       await this.s3.deleteFile(session.s3_key).catch(() => undefined);
@@ -251,9 +263,13 @@ export class WorkflowPublicUploadsService {
         { declared_bytes: session.size_bytes, received_bytes: size },
       );
     }
-    let file: { id: number };
+    // A previous attempt may have stored the row before failing on the session update.
+    let file: { id: number } | null = await db.stored_files.findFirst({
+      where: { store_id: session.store_id, s3_key: session.s3_key },
+      select: { id: true },
+    });
     try {
-      file = await db.stored_files.create({
+      file ??= await db.stored_files.create({
         data: {
           organization_id: session.organization_id,
           store_id: session.store_id,
@@ -283,6 +299,31 @@ export class WorkflowPublicUploadsService {
       stored_file_id: file.id,
       status: 'completed',
     };
+  }
+
+  /**
+   * Joins the parts in S3. A retry after a join that already succeeded (a later
+   * step failed) gets `NoSuchUpload`: when the object exists the join is done.
+   */
+  private async joinParts(
+    session: { s3_key: string; s3_upload_id: string },
+    parts: StoredPart[],
+  ) {
+    try {
+      await this.s3.completeMultipartUpload(
+        session.s3_key,
+        session.s3_upload_id,
+        parts.map((p) => ({ partNumber: p.n, etag: p.etag })),
+      );
+    } catch (e) {
+      if (!isNoSuchUpload(e)) throw e;
+      if (!(await this.s3.headObject(session.s3_key))) {
+        throw new VendixHttpException(
+          ErrorCodes.WORKFLOW_UPLOAD_INVALID,
+          'La subida ya no está disponible. Sube el archivo de nuevo.',
+        );
+      }
+    }
   }
 
   /**
@@ -327,8 +368,20 @@ export class WorkflowPublicUploadsService {
     return res.count === 1;
   }
 
-  /** Cron: aborts the multipart of open sessions that expired. */
+  /**
+   * Cron: aborts the multipart of open sessions that expired, and deletes the
+   * object and `stored_files` row of completed ones nobody consumed within the
+   * window `completedForField` accepts them. Consumed sessions are never touched.
+   */
   async sweepExpired(now = new Date()): Promise<number> {
+    const aborted = await this.sweepOpen(now);
+    const dropped = await this.sweepCompleted(now);
+    if (aborted > 0) this.logger.log(`Aborted ${aborted} expired upload session(s)`);
+    if (dropped > 0) this.logger.log(`Deleted ${dropped} unconsumed upload(s)`);
+    return aborted + dropped;
+  }
+
+  private async sweepOpen(now: Date): Promise<number> {
     const db = this.prisma.withoutScope();
     const rows = await db.workflow_upload_sessions.findMany({
       where: { status: 'open', expires_at: { lte: now } },
@@ -342,8 +395,41 @@ export class WorkflowPublicUploadsService {
         data: { status: 'aborted' },
       });
     }
-    if (rows.length > 0) this.logger.log(`Aborted ${rows.length} expired upload session(s)`);
     return rows.length;
+  }
+
+  private async sweepCompleted(now: Date): Promise<number> {
+    const db = this.prisma.withoutScope();
+    const rows = await db.workflow_upload_sessions.findMany({
+      where: { status: 'completed', expires_at: { lte: now } },
+      take: SWEEP_BATCH,
+      orderBy: { id: 'asc' },
+    });
+    let dropped = 0;
+    for (const row of rows) {
+      // Claiming the row first leaves no window for a submit to consume it.
+      const claimed = await db.workflow_upload_sessions.updateMany({
+        where: { id: row.id, store_id: row.store_id, status: 'completed' },
+        data: { status: 'aborted', stored_file_id: null },
+      });
+      if (claimed.count !== 1) continue;
+      try {
+        await this.s3.deleteFile(row.s3_key);
+        if (row.stored_file_id) {
+          await db.stored_files.deleteMany({
+            where: { id: row.stored_file_id, store_id: row.store_id },
+          });
+        }
+        dropped++;
+      } catch (e) {
+        this.logger.warn(`Unconsumed upload ${row.id} not deleted, retrying later: ${(e as Error)?.message}`);
+        await db.workflow_upload_sessions.updateMany({
+          where: { id: row.id, store_id: row.store_id, status: 'aborted' },
+          data: { status: 'completed', stored_file_id: row.stored_file_id },
+        });
+      }
+    }
+    return dropped;
   }
 
   private async find(scope: UploadScope, uploadId: string) {

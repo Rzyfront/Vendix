@@ -36,7 +36,8 @@ export function fakeS3() {
       return `"etag-${part}"`;
     }),
     completeMultipartUpload: jest.fn(async (key: string, id: string) => {
-      const u = open.get(id)!;
+      const u = open.get(id);
+      if (!u) throw Object.assign(new Error('The specified upload does not exist.'), { name: 'NoSuchUpload' });
       objects.set(
         key,
         Buffer.concat([...u.parts.entries()].sort((a, b) => a[0] - b[0]).map(([, b]) => b)),
@@ -45,6 +46,10 @@ export function fakeS3() {
     }),
     abortMultipartUpload: jest.fn(async (_key: string, id: string) => {
       open.delete(id);
+    }),
+    headObject: jest.fn(async (key: string) => {
+      const buf = objects.get(key);
+      return buf ? { contentType: null, contentLength: buf.length } : null;
     }),
     hashObject: jest.fn(async (key: string) => {
       const buf = objects.get(key)!;
