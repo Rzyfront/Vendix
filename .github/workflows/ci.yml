@@ -325,10 +325,19 @@ jobs:
           psql -h localhost -U vendix -d vendix_test -c 'CREATE EXTENSION IF NOT EXISTS vector'
           npx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script > "$RUNNER_TEMP/schema.sql"
           psql -h localhost -U vendix -d vendix_test -v ON_ERROR_STOP=1 -q -f "$RUNNER_TEMP/schema.sql"
+      # Lista fija: "PR regressions" se omite cuando un PR cambia más de 25 specs.
+      - name: Jest — specs del motor y del fan-out
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js --runTestsByPath
+          src/domains/store/workflows/engine/workflow-engine.spec.ts
+          src/domains/store/workflows/engine/workflow-assignment.spec.ts
+          src/domains/store/workflows/engine/workflow-trigger.fanout.spec.ts
+          src/domains/store/workflows/engine/workflow-timers.cron.spec.ts
       - name: Jest — motor de Flujos contra Postgres
         working-directory: apps/backend
         run: >-
-          npx jest --ci --runInBand --forceExit --runTestsByPath
+          npx jest --ci --runInBand --forceExit --config jest.isolated.config.js --runTestsByPath
           src/domains/store/workflows/engine/workflow-postgres.integration.spec.ts
 
   frontend:
