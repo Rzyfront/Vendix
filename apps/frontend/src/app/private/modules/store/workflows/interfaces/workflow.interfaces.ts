@@ -373,6 +373,8 @@ export interface MigrationPreviewStage {
   to_stage_name: string | null;
   ok: boolean;
   reason: string | null;
+  /** Requests still waiting for live child requests: the migration skips them. */
+  waiting_children: number;
 }
 
 export interface MigrationPreview {

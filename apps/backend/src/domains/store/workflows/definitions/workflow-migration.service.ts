@@ -27,7 +27,13 @@ export interface MigrationPlanStage {
   to_stage_name: string | null;
   ok: boolean;
   reason: string | null;
+  /** Requests of this stage still waiting for live child requests: they are skipped. */
+  waiting_children: number;
 }
+
+/** Why a request that waits for its children is not moved. */
+export const MIGRATION_WAITING_CHILDREN =
+  'Espera solicitudes hijas en curso; ciérralas o cancélalas antes de migrarla.';
 
 /**
  * P2.8: moves the live requests of an older version to the published one with
@@ -67,9 +73,11 @@ export class WorkflowMigrationService {
         },
         _count: { _all: true },
       });
-    const stages: MigrationPlanStage[] = groups.map((g) =>
-      this.planStage(source, target, g.current_stage_key, g._count._all, input.stage_map),
-    );
+    const waiting = await this.waitingParents(store_id, definitionId, from.id);
+    const stages: MigrationPlanStage[] = groups.map((g) => ({
+      ...this.planStage(source, target, g.current_stage_key, g._count._all, input.stage_map),
+      waiting_children: waiting.filter((w) => w.stage_key === g.current_stage_key).length,
+    }));
     const total = stages.reduce((n, s) => n + s.count, 0);
     return {
       from_version: { id: from.id, version: from.version },
@@ -139,6 +147,18 @@ export class WorkflowMigrationService {
       where: { id, store_id: storeId },
     })) as WorkflowInstanceRow | null;
     if (!instance || instance.status !== 'active' || instance.version_id !== from.id) return false;
+    // P2.2: moving a parent off its subflow stage would orphan the children it
+    // waits for (their "closed" signal carries the old entry) or start them twice.
+    const liveChildren = await tx.workflow_instances.count({
+      where: {
+        store_id: storeId,
+        parent_instance_id: id,
+        parent_stage_key: instance.current_stage_key,
+        parent_entry_seq: instance.stage_entry_seq,
+        status: 'active',
+      },
+    });
+    if (liveChildren > 0) throw new Error(MIGRATION_WAITING_CHILDREN);
     const targetKey = map.get(instance.current_stage_key);
     if (!targetKey) return false;
     const version = await tx.workflow_versions.findFirst({
@@ -195,6 +215,42 @@ export class WorkflowMigrationService {
     return true;
   }
 
+  /** Live requests of the version whose current stage waits for active children. */
+  private async waitingParents(
+    storeId: number,
+    definitionId: number,
+    versionId: number,
+  ): Promise<Array<{ id: number; stage_key: string }>> {
+    const parents: Array<{ id: number; current_stage_key: string; stage_entry_seq: number }> =
+      await this.prisma.workflow_instances.findMany({
+        where: { store_id: storeId, definition_id: definitionId, version_id: versionId, status: 'active' },
+        select: { id: true, current_stage_key: true, stage_entry_seq: true },
+      });
+    if (parents.length === 0) return [];
+    const children: Array<{
+      parent_instance_id: number | null;
+      parent_stage_key: string | null;
+      parent_entry_seq: number | null;
+    }> = await this.prisma.workflow_instances.findMany({
+      where: {
+        store_id: storeId,
+        status: 'active',
+        parent_instance_id: { in: parents.map((p) => p.id) },
+      },
+      select: { parent_instance_id: true, parent_stage_key: true, parent_entry_seq: true },
+    });
+    return parents
+      .filter((p) =>
+        children.some(
+          (c) =>
+            c.parent_instance_id === p.id &&
+            c.parent_stage_key === p.current_stage_key &&
+            c.parent_entry_seq === p.stage_entry_seq,
+        ),
+      )
+      .map((p) => ({ id: p.id, stage_key: p.current_stage_key }));
+  }
+
   private planStage(
     source: WorkflowDefinitionV1,
     target: WorkflowDefinitionV1,
@@ -217,6 +273,7 @@ export class WorkflowMigrationService {
       to_stage_name: toStage?.name ?? null,
       ok: reason === null,
       reason,
+      waiting_children: 0,
     };
   }
 

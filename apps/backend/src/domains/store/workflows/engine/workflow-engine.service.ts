@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import {
   WORKFLOW_ACTION_CATALOG,
+  WORKFLOW_LIMITS,
   WorkflowActionErrorPolicy,
   WorkflowStageDef,
   WorkflowVendixActionName,
@@ -580,8 +581,61 @@ export class WorkflowEngineService {
         actor,
         payload: { reason: input.reason },
       });
+      await this.cancelWaitedChildren(tx, instance, actor, now, 1);
       return this.loader.loadInstance(tx, instance.id);
     });
+  }
+
+  /**
+   * P2.2: the children a cancelled parent was waiting for are cancelled too
+   * (and theirs, down the tree). Children of a subflow that does not wait
+   * live on by themselves.
+   */
+  private async cancelWaitedChildren(
+    tx: WorkflowTx,
+    parent: WorkflowInstanceRow,
+    actor: WorkflowActor,
+    now: Date,
+    depth: number,
+  ): Promise<void> {
+    if (depth > WORKFLOW_LIMITS.maxSubflowDepth) return;
+    const definition = await this.loader.loadDefinition(tx, parent.version_id);
+    const stage = findStage(definition, parent.current_stage_key);
+    if (stage?.type !== 'subflow' || stage.subflow?.wait === false) return;
+    const children = (await tx.workflow_instances.findMany({
+      where: {
+        store_id: parent.store_id,
+        parent_instance_id: parent.id,
+        parent_stage_key: parent.current_stage_key,
+        parent_entry_seq: parent.stage_entry_seq,
+        status: 'active',
+      },
+    })) as WorkflowInstanceRow[];
+    const reason = `Se canceló la solicitud padre ${parent.reference}.`;
+    for (const child of children) {
+      const done = await tx.workflow_instances.updateMany({
+        where: { id: child.id, store_id: parent.store_id, status: 'active' },
+        data: {
+          status: 'cancelled',
+          cancel_reason: reason,
+          completed_at: now,
+          stage_due_at: null,
+          row_version: { increment: 1 },
+        },
+      });
+      if (done.count === 0) continue;
+      await this.stages.cancelOpenTasks(tx, parent.store_id, child.id);
+      await resolveInstanceGates(tx, child, 'cancelled', reason);
+      await this.events.append(tx, {
+        store_id: parent.store_id,
+        instance_id: child.id,
+        type: 'cancelled',
+        from_stage_key: child.current_stage_key,
+        actor,
+        payload: { reason, parent_id: parent.id },
+      });
+      await this.cancelWaitedChildren(tx, child, actor, now, depth + 1);
+    }
   }
 
   /** Internal: automatic stages, overdue reminders and escalation. */

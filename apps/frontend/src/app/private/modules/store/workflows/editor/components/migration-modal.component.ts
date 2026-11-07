@@ -104,6 +104,11 @@ const NO_TARGET = '__none__';
                         <td class="py-1 pr-3 text-text-primary">{{ row.to_stage_name ?? '—' }}</td>
                         <td class="py-1" [class]="row.ok ? 'text-success' : 'text-error'">
                           {{ row.ok ? 'Lista' : (row.reason ?? 'Falta destino') }}
+                          @if (row.waiting_children > 0) {
+                            <span class="block text-xs text-warning">
+                              {{ row.waiting_children }} {{ row.waiting_children === 1 ? 'espera' : 'esperan' }} solicitudes hijas en curso y no se migra{{ row.waiting_children === 1 ? '' : 'n' }}
+                            </span>
+                          }
                         </td>
                       </tr>
                     }
@@ -112,7 +117,11 @@ const NO_TARGET = '__none__';
               </div>
               @if (!p.ready) {
                 <app-alert-banner variant="warning" icon="alert-triangle">
-                  Hay etapas con solicitudes sin un destino válido. Corrige el mapa y vuelve a pedir la vista previa.
+                  @if (p.total === 0) {
+                    No hay solicitudes en curso en esa versión.
+                  } @else {
+                    Hay etapas con solicitudes sin un destino válido. Corrige el mapa y vuelve a pedir la vista previa.
+                  }
                 </app-alert-banner>
               }
             </div>

@@ -391,6 +391,24 @@ describe('Advanced engine (flujos-adm P2)', () => {
       );
       expect(instance(id)).toMatchObject({ current_stage_key: 'fin', status: 'completed' });
     });
+
+    it('cancelling a parent cancels the children it waits for; children it does not wait for live on', async () => {
+      seedDefinition(kit.db, child);
+      seedDefinition(kit.db, parent());
+      const { id } = await startAndSubmit('compra', { monto: 10, nombre: 'Acme' });
+      const kid = kit.db.table('workflow_instances').find((i) => i.parent_instance_id === id)!;
+      kit.as({ user_id: 1, is_owner: true });
+      await kit.engine.cancel({ instanceId: id, reason: 'ya no se compra' });
+      expect(instance(kid.id)).toMatchObject({ status: 'cancelled' });
+      expect(instance(kid.id).cancel_reason).toContain(instance(id).reference);
+      expect(openTasks(kid.id)).toHaveLength(0);
+
+      kit.db.table('workflow_versions')[1].definition = parent(false);
+      const free = await startAndSubmit('compra', { monto: 10, nombre: 'Acme' });
+      expect(instance(free.id).status).toBe('completed');
+      const freeKid = kit.db.table('workflow_instances').find((i) => i.parent_instance_id === free.id)!;
+      expect(freeKid.status).toBe('active');
+    });
   });
 
   describe('P2.3 waits', () => {
@@ -722,6 +740,48 @@ describe('Advanced engine (flujos-adm P2)', () => {
       expect(events(id)).toHaveLength(historyBefore + 1);
       expect(events(id).at(-1)?.payload).toMatchObject({ from_version: 1, to_version: 2 });
       expect(openTasks(id).map((t) => t.assignee_user_id)).toEqual([3]);
+    });
+
+    it('a parent waiting for live children is reported and skipped, never orphaning them', async () => {
+      const child = flow('hijo', [], {
+        stages: [
+          { key: 'datos', name: 'Datos', type: 'form', start: true, assignee: user(5), form: { fields: ['nit'] }, transitions: [{ to: 'listo', on: 'submit' }] },
+          { key: 'listo', name: 'Listo', type: 'end', outcome: 'completed' },
+        ],
+      } as Partial<WorkflowDefinitionV1>);
+      seedDefinition(kit.db, child);
+      const sub: WorkflowStageDef = {
+        key: 'alta',
+        name: 'Alta',
+        type: 'subflow',
+        subflow: { flows: [{ flow_key: 'hijo' }], wait: true },
+        transitions: [
+          { to: 'fin', on: 'completed' },
+          { to: 'rechazo', on: 'rejected' },
+        ],
+      };
+      const { definitionId, versionId } = seedDefinition(kit.db, flow('padre', [sub]));
+      const { id } = await startAndSubmit('padre');
+      const kid = kit.db.table('workflow_instances').find((i) => i.parent_instance_id === id)!;
+      const v2row = kit.db.insert('workflow_versions', {
+        store_id: 1,
+        definition_id: definitionId,
+        version: 2,
+        schema_version: WORKFLOW_SCHEMA_V1,
+        definition: flow('padre', [{ ...sub, key: 'alta2', name: 'Alta 2' }]),
+        definition_hash: 'z'.repeat(64),
+        published_by_user_id: 1,
+      });
+      kit.db.table('workflow_definitions').find((d) => d.id === definitionId)!.published_version_id = v2row.id;
+      const svc = new WorkflowMigrationService(kit.prisma, kit.stages, kit.events);
+      kit.as({ user_id: 1, is_owner: true });
+      const plan = { from_version_id: versionId, stage_map: { alta: 'alta2' } };
+      expect((await svc.preview(definitionId, plan)).stages[0]).toMatchObject({ count: 1, waiting_children: 1 });
+      const res = await svc.migrate(definitionId, plan);
+      expect(res.migrated).toBe(0);
+      expect(res.failed[0].error).toContain('hijas en curso');
+      expect(instance(id)).toMatchObject({ version_id: versionId, current_stage_key: 'alta' });
+      expect(kit.db.table('workflow_instances').filter((i) => i.parent_instance_id === id)).toEqual([kid]);
     });
   });
 
