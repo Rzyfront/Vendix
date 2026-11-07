@@ -144,6 +144,31 @@ describe('Public signing (P4.2)', () => {
       expect(await codeOfError(k.publicSvc.sendOtp(tokens[0], META))).toBe('SIGNATURE_OTP_RATE_LIMIT');
     });
 
+    it('parallel requests send one code, and the delivered code is the stored one (r1 M2)', async () => {
+      const { tokens } = await createRequest();
+      const before = k.sent.length;
+      const results = await Promise.allSettled([0, 1, 2, 3].map(() => k.publicSvc.sendOtp(tokens[0], META)));
+      expect(results.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
+      const refused = results.filter((x): x is PromiseRejectedResult => x.status === 'rejected');
+      expect(refused.map((x) => x.reason.errorCode)).toEqual(Array(3).fill('SIGNATURE_OTP_RATE_LIMIT'));
+      expect(k.sent.length - before).toBe(1);
+      expect(types().filter((t) => t === 'otp_sent')).toHaveLength(1);
+      const code = k.codeOf(k.sent[k.sent.length - 1].text);
+      expect(await k.publicSvc.verifyOtp(tokens[0], code, META)).toMatchObject({ verified: true });
+    });
+
+    it('a failed delivery stores no code, writes no evidence and lets the signer ask again at once (r1 M2)', async () => {
+      const { tokens } = await createRequest();
+      k.email.sendEmail.mockRejectedValueOnce(new Error('smtp down'));
+      await expect(k.publicSvc.sendOtp(tokens[0], META)).rejects.toThrow();
+      const signer = table('signature_signers')[0];
+      expect(signer.otp_hash).toBeNull();
+      expect(signer.otp_sent_at ?? null).toBeNull();
+      expect(types()).not.toContain('otp_sent');
+      expect(await k.publicSvc.sendOtp(tokens[0], META)).toMatchObject({ sent: true });
+      expect(types().filter((t) => t === 'otp_sent')).toHaveLength(1);
+    });
+
     it('sends the code by WhatsApp when that is the method', async () => {
       const { tokens } = await createRequest([{ name: 'Mario', phone: '+573001234567', method: 'otp_whatsapp' }]);
       await k.publicSvc.sendOtp(tokens[0], META);

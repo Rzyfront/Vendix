@@ -125,43 +125,81 @@ export class SignaturePublicService {
 
   // ---- one-time code -----------------------------------------------------
 
+  /**
+   * Sends a one-time code. The limits (wait between codes, cap of codes) are
+   * checked and the code is stored under the request lock, with a conditional
+   * claim on `otp_sent_at`, before anything is delivered: parallel calls send
+   * one code, and every delivered code is the stored one. The `otp_sent`
+   * evidence is written once the code was delivered; a failed delivery
+   * releases the claim so the signer can ask again.
+   */
   async sendOtp(token: string, meta: ClientMeta) {
     const r = await this.resolveOpen(token);
     return this.inContext(r, async () => {
-      const sends = await this.prisma.signature_evidence_events.count({
-        where: { request_id: r.request.id, store_id: r.store_id, signer_id: r.signer.id, type: 'otp_sent' },
-      });
-      const sentAt: Date | null = r.signer.otp_sent_at;
-      if (
-        sends >= OTP_MAX_SENDS ||
-        (sentAt && Date.now() - new Date(sentAt).getTime() < OTP_RESEND_SECONDS * 1000)
-      ) {
-        throw new VendixHttpException(
-          ErrorCodes.SIGNATURE_OTP_RATE_LIMIT,
-          sends >= OTP_MAX_SENDS
-            ? 'Ya pediste el máximo de códigos. Pide un nuevo enlace a quien te envió el documento.'
-            : `Espera ${OTP_RESEND_SECONDS} segundos antes de pedir otro código.`,
-        );
-      }
       const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
-      const store = await this.prisma.withoutScope().stores.findFirst({
-        where: { id: r.store_id },
-        select: { name: true },
-      });
-      await this.delivery.sendOtp(r.signer, { store_id: r.store_id, store_name: store?.name ?? '', code });
+      const hash = otpHash(r.signer.token_hash, code);
       const now = new Date();
-      await this.prisma.$transaction(async (tx: any) => {
+      const previousSentAt: Date | null = await this.prisma.$transaction(async (tx: any) => {
         await this.evidence.lock(tx, r.request.id);
-        const touched = await tx.signature_signers.updateMany({
-          where: { id: r.signer.id, store_id: r.store_id, status: { in: ['pending', 'viewed'] } },
+        const signer = await tx.signature_signers.findFirst({
+          where: { id: r.signer.id, store_id: r.store_id },
+          select: { status: true, otp_sent_at: true },
+        });
+        if (!signer || !['pending', 'viewed'].includes(signer.status)) {
+          throw new VendixHttpException(ErrorCodes.SIGNATURE_REQUEST_CLOSED);
+        }
+        const sends = await tx.signature_evidence_events.count({
+          where: { request_id: r.request.id, store_id: r.store_id, signer_id: r.signer.id, type: 'otp_sent' },
+        });
+        const waitUntil = new Date(now.getTime() - OTP_RESEND_SECONDS * 1000);
+        const tooSoon = signer.otp_sent_at !== null && new Date(signer.otp_sent_at) > waitUntil;
+        if (sends >= OTP_MAX_SENDS || tooSoon) {
+          throw new VendixHttpException(
+            ErrorCodes.SIGNATURE_OTP_RATE_LIMIT,
+            sends >= OTP_MAX_SENDS
+              ? 'Ya pediste el máximo de códigos. Pide un nuevo enlace a quien te envió el documento.'
+              : `Espera ${OTP_RESEND_SECONDS} segundos antes de pedir otro código.`,
+          );
+        }
+        const claimed = await tx.signature_signers.updateMany({
+          where: {
+            id: r.signer.id,
+            store_id: r.store_id,
+            status: { in: ['pending', 'viewed'] },
+            OR: [{ otp_sent_at: null }, { otp_sent_at: { lte: waitUntil } }],
+          },
           data: {
-            otp_hash: otpHash(r.signer.token_hash, code),
+            otp_hash: hash,
             otp_sent_at: now,
             otp_expires_at: new Date(now.getTime() + OTP_TTL_MINUTES * 60_000),
             otp_verified_at: null,
           },
         });
-        if (touched.count === 0) throw new VendixHttpException(ErrorCodes.SIGNATURE_REQUEST_CLOSED);
+        if (claimed.count === 0) {
+          throw new VendixHttpException(
+            ErrorCodes.SIGNATURE_OTP_RATE_LIMIT,
+            `Espera ${OTP_RESEND_SECONDS} segundos antes de pedir otro código.`,
+          );
+        }
+        return signer.otp_sent_at;
+      });
+      const store = await this.prisma.withoutScope().stores.findFirst({
+        where: { id: r.store_id },
+        select: { name: true },
+      });
+      try {
+        await this.delivery.sendOtp(r.signer, { store_id: r.store_id, store_name: store?.name ?? '', code });
+      } catch (e) {
+        // Not delivered: the stored code is useless and the wait would block a retry.
+        await this.prisma.signature_signers.updateMany({
+          where: { id: r.signer.id, store_id: r.store_id, otp_hash: hash },
+          data: { otp_hash: null, otp_expires_at: null, otp_sent_at: previousSentAt },
+        });
+        throw e;
+      }
+      // Evidence of what was really delivered; the 60 s claim keeps parallel calls out meanwhile.
+      await this.prisma.$transaction(async (tx: any) => {
+        await this.evidence.lock(tx, r.request.id);
         await this.evidence.append(tx, {
           request_id: r.request.id,
           signer_id: r.signer.id,
