@@ -304,10 +304,13 @@ export class DocumentChecksService {
     }
     const { requested, context } = await this.resolveFields(input.instance_id, input.field_keys);
 
+    // The request context decides `matches_request`, so it is part of the key:
+    // the same file read for another request is a new reading.
     const inputSha = sha256(
       file.sha256,
       DOCUMENT_EXTRACT_PROMPT_VERSION,
       JSON.stringify(requested.map((r) => [r.key, r.type, r.label])),
+      JSON.stringify([context.workflow, context.stage, context.title]),
     );
     const hit: CheckRow | null = await this.prisma.document_checks.findFirst({
       where: {
@@ -320,7 +323,7 @@ export class DocumentChecksService {
     });
     if (hit) {
       const same: CheckRow | null =
-        hit.file_id === fileId
+        hit.file_id === fileId && hit.workflow_instance_id === input.instance_id
           ? hit
           : await this.prisma.document_checks.create({
               data: {

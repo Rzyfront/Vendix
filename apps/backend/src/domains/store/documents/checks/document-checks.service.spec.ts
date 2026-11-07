@@ -170,6 +170,18 @@ describe('DocumentChecksService · Leer con IA', () => {
     expect(ai.run).toHaveBeenCalledTimes(2);
   });
 
+  it('el mismo archivo en otra solicitud no reutiliza "coincide con la solicitud" (r1 M4)', async () => {
+    answer(aiJson());
+    const first = await read();
+    kit.db.table('workflow_instances').find((i) => i.id === instanceId)!.title = 'Factura de otro proveedor';
+    answer(aiJson());
+    const again = await read();
+    expect(ai.run).toHaveBeenCalledTimes(2);
+    expect(again).toMatchObject({ cached: false });
+    expect(again.id).not.toBe(first.id);
+    expect(ai.run.mock.calls[1][2][0].content[0].text).toContain('Factura de otro proveedor');
+  });
+
   it('el caché es de la tienda: una lectura de otra tienda no cuenta', async () => {
     answer(aiJson());
     const first = await read();
