@@ -15,6 +15,8 @@ import {
 import { hashTrackingToken } from './workflow-tracking-links.service';
 
 export const TRACKING_MESSAGE_MAX_LENGTH = 2000;
+/** Daily cap per request of replies and of re-uploads of an already fulfilled requirement. */
+export const TRACKING_DAILY_ACTION_LIMIT = 30;
 const PUBLIC_ACTOR = { type: 'public' as const, id: null };
 
 type UploadRequirement = Extract<
@@ -95,6 +97,10 @@ export class WorkflowTrackingPublicService {
   async initUpload(token: string, requirementKey: string, input: UploadInit) {
     const r = await this.resolveOpen(token);
     const req = this.externalRequirement(r.definition, r.instance.current_stage_key, requirementKey);
+    const dossier = await this.dossiers.getByInstance(r.instance.id);
+    if (dossier && (await this.dossiers.hasActiveItem(dossier.id, requirementKey))) {
+      await this.assertUnderDailyLimit(r, 'external_upload');
+    }
     return this.uploads.init(
       this.scope(r, requirementKey),
       { accept: req.accept, max_size_mb: req.max_size_mb },
@@ -171,6 +177,7 @@ export class WorkflowTrackingPublicService {
       );
     }
     const r = await this.resolveOpen(token);
+    await this.assertUnderDailyLimit(r, 'external_message');
     await this.inContext(r.link, () =>
       this.prisma.$transaction(async (tx: WorkflowTx) => {
         await this.events.lockInstance(tx, r.link.store_id, r.instance.id);
@@ -187,6 +194,27 @@ export class WorkflowTrackingPublicService {
   }
 
   // ---- internals ---------------------------------------------------------
+
+  /** Per-request cap counted from the stored events of the last 24 hours. */
+  private async assertUnderDailyLimit(
+    r: { link: { store_id: number }; instance: { id: number } },
+    type: 'external_upload' | 'external_message',
+  ) {
+    const used = await this.prisma.withoutScope().workflow_instance_events.count({
+      where: {
+        store_id: r.link.store_id,
+        instance_id: r.instance.id,
+        type,
+        occurred_at: { gte: new Date(Date.now() - 86_400_000) },
+      },
+    });
+    if (used >= TRACKING_DAILY_ACTION_LIMIT) {
+      throw new VendixHttpException(
+        ErrorCodes.RATE_LIMIT_001,
+        'Esta solicitud alcanzó el límite diario de envíos desde el enlace. Inténtalo de nuevo mañana o escríbenos.',
+      );
+    }
+  }
 
   private scope(
     r: { link: { id: number; store_id: number; organization_id: number }; instance: { id: number } },

@@ -1,12 +1,14 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormsModule } from '@angular/forms';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 import {
   BadgeComponent,
   ButtonComponent,
   CardComponent,
   DialogService,
+  InputComponent,
   ToastService,
 } from '../../../../../shared/components/index';
 import { formatStoreDateTime } from '../../../../../shared/utils/date.util';
@@ -17,6 +19,8 @@ import {
 } from '../services/workflow-links-api.service';
 import { toWorkflowError } from '../utils/workflow-errors.util';
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 const STATE_LABEL: Record<TrackingLinkState, string> = {
   active: 'Activo',
   revoked: 'Revocado',
@@ -25,16 +29,35 @@ const STATE_LABEL: Record<TrackingLinkState, string> = {
 
 /**
  * "Enlaces de seguimiento": the magic links the external requester received
- * (one per submission). The token is never shown; an admin can revoke it.
- * Hidden when there are none or the user cannot manage the request (403).
+ * The token is never shown; an admin can revoke it or generate and e-mail a new
+ * one (which revokes the previous), also for requests that have none yet.
+ * Hidden when the user cannot manage the request (403).
  */
 @Component({
   selector: 'app-tracking-links-card',
   standalone: true,
-  imports: [CardComponent, BadgeComponent, ButtonComponent],
+  imports: [FormsModule, CardComponent, BadgeComponent, ButtonComponent, InputComponent],
   template: `
     @if (visible()) {
       <app-card title="Enlaces de seguimiento" [responsivePadding]="true">
+        <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end" data-testid="tracking-link-send">
+          <div class="min-w-0 flex-1">
+            <app-input
+              label="Enviar enlace a"
+              type="email"
+              placeholder="correo@ejemplo.com"
+              [ngModel]="email()"
+              (ngModelChange)="email.set($event)"
+            />
+          </div>
+          <app-button variant="primary" size="sm" [loading]="sending()" [disabled]="!canSend()"
+            (clicked)="send()">
+            Generar y enviar enlace
+          </app-button>
+        </div>
+        @if (links().length === 0) {
+          <p class="text-sm text-text-secondary">Esta solicitud aún no tiene enlace de seguimiento.</p>
+        }
         <ul class="flex flex-col gap-2" data-testid="tracking-links">
           @for (link of links(); track link.id) {
             <li class="flex flex-col gap-1 rounded-xl border border-border p-2">
@@ -78,6 +101,9 @@ export class TrackingLinksCardComponent {
   readonly links = signal<TrackingLinkRow[]>([]);
   readonly visible = signal(false);
   readonly busyId = signal<number | null>(null);
+  readonly email = signal('');
+  readonly sending = signal(false);
+  readonly canSend = computed(() => EMAIL_PATTERN.test(this.email().trim()));
 
   constructor() {
     effect(() => {
@@ -96,6 +122,26 @@ export class TrackingLinksCardComponent {
 
   dateText(value: string): string {
     return formatStoreDateTime(value, this.settings.timezone());
+  }
+
+  send(): void {
+    if (this.sending() || !this.canSend()) return;
+    const email = this.email().trim();
+    this.sending.set(true);
+    this.api
+      .reissueTrackingLink(this.instanceId(), email)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.sending.set(false);
+          this.toast.success(`Enlace enviado a ${email}`);
+          this.load(this.instanceId());
+        },
+        error: (error: unknown) => {
+          this.sending.set(false);
+          this.toast.error(toWorkflowError(error).message);
+        },
+      });
   }
 
   async revoke(link: TrackingLinkRow): Promise<void> {
@@ -136,7 +182,8 @@ export class TrackingLinksCardComponent {
       .subscribe({
         next: (rows) => {
           this.links.set(rows);
-          this.visible.set(rows.length > 0);
+          this.visible.set(true);
+          if (!this.email() && rows[0]?.contact_email) this.email.set(rows[0].contact_email);
         },
         error: (error: unknown) => {
           // 403: the user may see the request but not manage it; nothing to show.

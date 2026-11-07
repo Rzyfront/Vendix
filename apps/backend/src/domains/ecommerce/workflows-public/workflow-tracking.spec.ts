@@ -240,12 +240,91 @@ describe('Tracking portal (P3.5)', () => {
     });
   });
 
+  describe('admin: generate and send a link', () => {
+    it('revokes the active links, creates a new one and mails it to the given address', async () => {
+      admin();
+      kit.email.sendEmail.mockClear();
+      const out = await kit.trackingLinks.reissue(instanceId, 'nuevo@example.com');
+      expect(out.contact_email).toBe('nuevo@example.com');
+      expect(JSON.stringify(out)).not.toContain('token_hash');
+      expect(links()).toHaveLength(2);
+      expect(links()[0].revoked_at).toBeInstanceOf(Date);
+      expect(links()[1].revoked_at).toBeUndefined();
+      expect(links()[1].contact_email).toBe('nuevo@example.com');
+      expect(kit.email.sendEmail).toHaveBeenCalledTimes(1);
+      const [to, , html] = kit.email.sendEmail.mock.calls[0] as unknown as string[];
+      expect(to).toBe('nuevo@example.com');
+      const fresh = /seguimiento\/([\w-]+)"/.exec(html)![1];
+      visitor();
+      expect(await codeOf(kit.tracking.get(tracking))).toBe('WORKFLOW_PUBLIC_NOT_FOUND');
+      expect((await kit.tracking.get(fresh)).reference).toBe('FLU-000001');
+    });
+
+    it('works for a request that has no link yet', async () => {
+      links().length = 0;
+      admin();
+      await kit.trackingLinks.reissue(instanceId, 'nuevo@example.com');
+      expect(links()).toHaveLength(1);
+      expect(kit.email.sendEmail).toHaveBeenCalled();
+    });
+
+    it('reports the failure instead of success when the e-mail is not sent', async () => {
+      admin();
+      kit.email.sendEmail.mockResolvedValueOnce({ success: false, error: 'smtp down' } as never);
+      expect(await codeOf(kit.trackingLinks.reissue(instanceId, 'nuevo@example.com'))).toBe('EMAIL_RECEPTION_UNAVAILABLE');
+    });
+
+    it('another store or an unknown request is a 404 and nothing changes', async () => {
+      admin(2);
+      expect(await codeOf(kit.trackingLinks.reissue(instanceId, 'x@example.com'))).toBe('WORKFLOW_NOT_FOUND');
+      admin(1);
+      expect(await codeOf(kit.trackingLinks.reissue(9999, 'x@example.com'))).toBe('WORKFLOW_NOT_FOUND');
+      expect(links()).toHaveLength(1);
+      expect(links()[0].revoked_at).toBeUndefined();
+    });
+
+    it('a replayed submit leaves one active link', async () => {
+      const input = {
+        store_id: 1, organization_id: 1, instance_id: instanceId, reference: 'FLU-000001',
+        flow_name: 'Solicitud de servicio', contact_name: null, contact_email: null, send_email: false,
+      };
+      await kit.trackingLinks.createForSubmit(input);
+      expect(links()).toHaveLength(2);
+      expect(links().filter((l) => !l.revoked_at)).toHaveLength(1);
+    });
+  });
+
+  describe('per-request caps', () => {
+    const fill = (type: string, n: number) => {
+      for (let i = 0; i < n; i++) {
+        events().push({
+          id: 5000 + i, store_id: 1, instance_id: instanceId, seq: 100 + i, type, actor_type: 'public',
+          actor_id: null, payload: {}, occurred_at: new Date(),
+        });
+      }
+    };
+
+    it('refuses the 31st reply of the day with a 429', async () => {
+      fill('external_message', 30);
+      expect(await codeOf(kit.tracking.reply(tracking, 'otra'))).toBe('RATE_LIMIT_001');
+    });
+
+    it('refuses a new upload of an already fulfilled requirement after 30 uploads of the day', async () => {
+      await uploadCedula();
+      fill('external_upload', 30);
+      expect(await codeOf(kit.tracking.initUpload(tracking, 'cedula', {
+        file_name: 'c.png', mime_type: 'image/png', size_bytes: 100,
+      }))).toBe('RATE_LIMIT_001');
+    });
+  });
+
   describe('controllers', () => {
     it('the admin routes need store:workflows:manage; the public ones are @Public with throttle', () => {
       const A = WorkflowTrackingController;
       expect(Reflect.getMetadata('path', A)).toBe('store/workflows/instances/:id/tracking-links');
       expect(Reflect.getMetadata('permissions', A.prototype.list)).toEqual(['store:workflows:manage']);
       expect(Reflect.getMetadata('permissions', A.prototype.revoke)).toEqual(['store:workflows:manage']);
+      expect(Reflect.getMetadata('permissions', A.prototype.reissue)).toEqual(['store:workflows:manage']);
       const P = EcommerceWorkflowsTrackingController;
       expect(Reflect.getMetadata('path', P)).toBe('ecommerce/workflows/tracking');
       expect(Reflect.getMetadata(IS_PUBLIC_KEY, P)).toBe(true);

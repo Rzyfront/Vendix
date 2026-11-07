@@ -94,6 +94,16 @@ export class WorkflowLinksApiService {
       .pipe(map((res) => res.data));
   }
 
+  /** Revokes the active links of the request and mails a new one to `email`. */
+  reissueTrackingLink(instanceId: number, email: string): Observable<TrackingLinkRow> {
+    return this.http
+      .post<ApiResponse<TrackingLinkRow>>(
+        `${this.workflowsBase}/instances/${instanceId}/tracking-links`,
+        { email },
+      )
+      .pipe(map((res) => res.data));
+  }
+
   revokeTrackingLink(instanceId: number, linkId: number): Observable<unknown> {
     return this.http.post(
       `${this.workflowsBase}/instances/${instanceId}/tracking-links/${linkId}/revoke`,
