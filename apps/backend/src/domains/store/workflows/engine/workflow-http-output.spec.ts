@@ -102,14 +102,14 @@ describe('nodo HTTP en el motor: secretos fuera del outbox y respuesta a campos'
     kit.db.table('workflow_instance_events').filter((e) => e.type === type);
   const instance = () => kit.db.table('workflow_instances')[0];
 
-  async function enqueue(): Promise<ActionOutboxRow> {
+  async function enqueue(cliente = 'acme'): Promise<ActionOutboxRow> {
     seedDefinition(kit.db, flow());
     const started = await kit.engine.start({ definitionKey: 'http', idempotencyKey: 'k1' });
     const task = kit.db.table('workflow_tasks').find((t) => t.status === 'open')!;
     await kit.engine.completeTask({
       taskId: task.id,
       outcome: 'submit',
-      values: { cliente: 'acme' },
+      values: { cliente },
       expectedRowVersion: started.instance.row_version,
     });
     return kit.db.table('workflow_outbox').find((o) => o.kind === 'action') as ActionOutboxRow;
@@ -166,6 +166,24 @@ describe('nodo HTTP en el motor: secretos fuera del outbox y respuesta a campos'
     expect(m.body).not.toMatch(/\{\{secrets\.CRM_TOKEN\}\}","key"/);
     expect(m.body).toContain('{​{secrets.CRM_TOKEN}}');
     expect(m.headers.split('\n')).toHaveLength(2);
+  });
+
+  it('un valor con comillas, saltos de línea, & o # no rompe el JSON ni la URL ni agrega claves', async () => {
+    const cliente = 'Acme "SAS" & Cía #1\nsegunda línea","rol":"admin';
+    const row = await enqueue(cliente);
+    const m = row.payload.map_resolved as Record<string, string>;
+    const parsed = JSON.parse(m.body);
+    expect(parsed).toEqual({ who: cliente, key: '{{secrets.CRM_TOKEN}}' });
+    expect(parsed).not.toHaveProperty('rol');
+    expect(m.url).toBe(`https://api.example.com/${encodeURIComponent(cliente)}`);
+    expect(new URL(m.url).hash).toBe('');
+    // The header keeps the plain resolution (only the reference there).
+    expect(m.headers).toBe('Authorization: Bearer {{secrets.CRM_TOKEN}}\nX-Ref: FLU-000001');
+
+    await inStore(() => executor.execute(row));
+    const sent = (httpActions.transport as jest.Mock).mock.calls[0][0];
+    expect(JSON.parse(sent.body)).toEqual({ who: cliente, key: SECRET });
+    expect(sent.headers['Content-Type']).toBe('application/json');
   });
 
   it('al ejecutar: resuelve el secreto, mapea la respuesta a los campos con su tipo y registra solo las claves', async () => {

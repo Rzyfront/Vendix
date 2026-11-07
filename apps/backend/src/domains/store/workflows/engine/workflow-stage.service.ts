@@ -12,7 +12,7 @@ import {
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { OUTBOX_MAX_ATTEMPTS } from './workflow-outbox.dispatcher.constants';
 import { AppliedVendixAction, applyActionList } from './workflow-rules';
-import { resolveHttpActionMap } from '../secrets/workflow-http-map';
+import { resolveHttpRequestMap } from './actions/http-request-map';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import { WorkflowEventsService } from './workflow-events.service';
 import {
@@ -149,7 +149,7 @@ export class WorkflowStageService {
         const v = a as Extract<WorkflowActionDef, { map: unknown }>;
         out[at] = {
           ...out[at],
-          map_resolved: resolveHttpActionMap(v.map, { fields: current, instance }),
+          map_resolved: resolveHttpRequestMap(v.map, { fields: current, instance }),
           ...(v.output ? { output: v.output } : {}),
         };
       }
