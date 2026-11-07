@@ -17,11 +17,31 @@ import { toWorkflowError } from '../utils/workflow-errors.util';
 import {
   EditorTab,
   STAGE_TYPE_LABEL,
+  defaultTypeConfig,
   issueStageKey,
   moveItem,
   tabForIssue,
   uniqueKey,
 } from './workflow-editor.utils';
+
+/** Applies `change` to the field keys of the stage form and of every parallel branch form. */
+function mapStageFieldKeys(
+  stage: WorkflowStageDef,
+  change: (keys: string[]) => string[],
+): WorkflowStageDef {
+  const withForm = stage.form ? { ...stage, form: { fields: change(stage.form.fields) } } : stage;
+  const parallel = withForm.parallel;
+  if (!parallel) return withForm;
+  return {
+    ...withForm,
+    parallel: {
+      ...parallel,
+      branches: parallel.branches.map((b) =>
+        b.form ? { ...b, form: { fields: change(b.form.fields) } } : b,
+      ),
+    },
+  };
+}
 
 export const AUTOSAVE_DELAY_MS = 3000;
 export const GENERAL_BUCKET = '__general__';
@@ -268,9 +288,10 @@ export class WorkflowEditorStore {
       name: STAGE_TYPE_LABEL[type],
       type,
       ...(type === 'end' ? { outcome: 'completed' as const } : {}),
-      ...(type === 'automatic' || type === 'end'
-        ? {}
-        : { assignee: { kind: 'initiator' as const } }),
+      ...(type === 'form' || type === 'approval' || type === 'review'
+        ? { assignee: { kind: 'initiator' as const } }
+        : {}),
+      ...defaultTypeConfig(type, draft.fields),
     };
     this.commit((d) => ({ ...d, stages: [...d.stages, stage] }));
     this.selectStage(key, 'general');
@@ -368,7 +389,7 @@ export class WorkflowEditorStore {
         ...d,
         fields,
         stages: d.stages.map((s) =>
-          s.form ? { ...s, form: { fields: s.form.fields.map((k) => (k === previousKey ? field.key : k)) } } : s,
+          mapStageFieldKeys(s, (keys) => keys.map((k) => (k === previousKey ? field.key : k))),
         ),
       };
     });
@@ -379,7 +400,7 @@ export class WorkflowEditorStore {
       ...d,
       fields: d.fields.filter((f) => f.key !== key),
       stages: d.stages.map((s) =>
-        s.form ? { ...s, form: { fields: s.form.fields.filter((k) => k !== key) } } : s,
+        mapStageFieldKeys(s, (keys) => keys.filter((k) => k !== key)),
       ),
     }));
   }

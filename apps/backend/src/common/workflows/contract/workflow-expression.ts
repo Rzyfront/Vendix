@@ -657,12 +657,12 @@ export function zonedParts(date: Date, timeZone: string): WorkflowZonedParts {
   const p: Record<string, string> = {};
   for (const part of fmt.formatToParts(date)) p[part.type] = part.value;
   return {
-    year: Number(p.year),
-    month: Number(p.month),
-    day: Number(p.day),
-    hour: Number(p.hour) % 24,
-    minute: Number(p.minute),
-    weekday: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p.weekday),
+    year: Number(p["year"]),
+    month: Number(p["month"]),
+    day: Number(p["day"]),
+    hour: Number(p["hour"]) % 24,
+    minute: Number(p["minute"]),
+    weekday: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(p["weekday"]),
   };
 }
 

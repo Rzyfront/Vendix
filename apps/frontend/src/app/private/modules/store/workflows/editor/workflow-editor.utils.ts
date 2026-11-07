@@ -1,5 +1,8 @@
 import {
+  OPS_BY_FIELD_TYPE,
+  STAGE_OUTCOMES,
   WORKFLOW_KEY_PATTERN,
+  WorkflowEndOutcome,
   WorkflowConditionGroup,
   WorkflowConditionNode,
   WorkflowConditionOp,
@@ -9,6 +12,7 @@ import {
   WorkflowFieldType,
   WorkflowStageDef,
   WorkflowStageType,
+  WorkflowWaitDef,
 } from '../../../../../shared/workflows/contract/workflow-contract';
 import { WorkflowIssueView } from '../interfaces/workflow.interfaces';
 
@@ -19,6 +23,8 @@ export type EditorTab =
   | 'requirements'
   | 'transitions'
   | 'due'
+  | 'config'
+  | 'guards'
   | 'actions';
 
 export const EDITOR_TABS: { id: EditorTab; label: string; icon: string }[] = [
@@ -28,14 +34,28 @@ export const EDITOR_TABS: { id: EditorTab; label: string; icon: string }[] = [
   { id: 'requirements', label: 'Requisitos', icon: 'paperclip' },
   { id: 'transitions', label: 'Transiciones', icon: 'git-branch' },
   { id: 'due', label: 'Plazos', icon: 'clock' },
+  { id: 'config', label: 'Configuración', icon: 'sliders-horizontal' },
+  { id: 'guards', label: 'Guardas', icon: 'shield-check' },
   { id: 'actions', label: 'Acciones', icon: 'zap' },
 ];
+
+/** Stage types that carry their own engine config (the "Configuración" tab). */
+export const CONFIG_STAGE_TYPES: readonly WorkflowStageType[] = ['parallel', 'subflow', 'wait', 'loop'];
+
+/** Tabs shown for a stage type: "Configuración" only where the type has config. */
+export function tabsForStage(type: WorkflowStageType): { id: EditorTab; label: string; icon: string }[] {
+  return EDITOR_TABS.filter((t) => t.id !== 'config' || CONFIG_STAGE_TYPES.includes(type));
+}
 
 export const STAGE_TYPE_LABEL: Record<WorkflowStageType, string> = {
   form: 'Formulario',
   approval: 'Aprobación',
   review: 'Revisión',
   automatic: 'Automática',
+  parallel: 'Paralelo',
+  subflow: 'Subflujo',
+  wait: 'Espera',
+  loop: 'Bucle',
   end: 'Fin',
 };
 
@@ -44,6 +64,10 @@ export const STAGE_TYPE_ICON: Record<WorkflowStageType, string> = {
   approval: 'check-circle',
   review: 'eye',
   automatic: 'zap',
+  parallel: 'git-merge',
+  subflow: 'git-branch',
+  wait: 'timer',
+  loop: 'repeat',
   end: 'flag',
 };
 
@@ -53,6 +77,12 @@ const OUTCOME_TEXT: Record<string, string> = {
   reject: 'Rechazar',
   return: 'Devolver',
   auto: 'Automática',
+  joined: 'Ramas unidas',
+  completed: 'Completada',
+  rejected: 'Rechazada',
+  elapsed: 'Espera cumplida',
+  continue: 'Otra vuelta',
+  done: 'Terminado',
 };
 
 export function outcomeText(outcome: string): string {
@@ -335,6 +365,9 @@ export function issueStageKey(
 
 export function tabForIssue(issue: WorkflowIssueView): EditorTab {
   const path = issue.path;
+  // Engine config and guards first: their paths also contain .assignee / .form.
+  if (/\.(parallel|subflow|wait|loop)(\.|$|\[)/.test(path)) return 'config';
+  if (path.includes('.guards')) return 'guards';
   if (path.includes('.assignee') || path.includes('.quorum')) return 'assignee';
   if (path.includes('.transitions') || issue.code.startsWith('DEFAULT_BRANCH')) {
     return 'transitions';
@@ -342,7 +375,7 @@ export function tabForIssue(issue: WorkflowIssueView): EditorTab {
   if (path.includes('.requirements')) return 'requirements';
   if (path.includes('.form') || path.startsWith('fields')) return 'form';
   if (path.includes('.due')) return 'due';
-  if (path.includes('.on_enter') || path.includes('.on_exit')) return 'actions';
+  if (/\.on_(enter|exit|submit|complete)/.test(path)) return 'actions';
   return 'general';
 }
 
@@ -372,4 +405,133 @@ export function moveItem<T>(items: readonly T[], from: number, to: number): T[] 
   const [moved] = copy.splice(from, 1);
   copy.splice(to, 0, moved);
   return copy;
+}
+
+// ─── Stage type changes (P2) ──────────────────────────────────────────
+
+const TYPE_CONFIG_PROPS = ['parallel', 'subflow', 'wait', 'loop'] as const;
+
+/** Default config of a stage type that carries its own (parallel, subflow, wait, loop). */
+export function defaultTypeConfig(
+  type: WorkflowStageType,
+  fields: WorkflowFieldDef[],
+): Partial<WorkflowStageDef> {
+  switch (type) {
+    case 'parallel':
+      return {
+        parallel: {
+          branches: [
+            { key: 'rama_1', name: 'Rama 1', assignee: { kind: 'initiator' } },
+            { key: 'rama_2', name: 'Rama 2', assignee: { kind: 'initiator' } },
+          ],
+          join: 'all',
+        },
+      };
+    case 'subflow':
+      return { subflow: { flows: [{ flow_key: '' }], wait: true } };
+    case 'wait':
+      return { wait: { kind: 'duration', days: 1 } };
+    case 'loop': {
+      const first = fields[0];
+      return {
+        loop: {
+          while: first ? { all: [{ field: first.key, op: OPS_BY_FIELD_TYPE[first.type][0] }] } : { all: [] },
+          max_iterations: 3,
+        },
+      };
+    }
+    default:
+      return {};
+  }
+}
+
+/**
+ * Returns `stage` as a stage of `type`: drops the config and properties the new
+ * type cannot hold (other types' config, transitions of other outcomes,
+ * assignee/form of non-human stages) and sets the default config of the new one.
+ */
+export function retypeStage(
+  stage: WorkflowStageDef,
+  type: WorkflowStageType,
+  fields: WorkflowFieldDef[],
+): WorkflowStageDef {
+  const outcomes = STAGE_OUTCOMES[type];
+  const {
+    outcome: _outcome,
+    assignee,
+    quorum,
+    due,
+    form,
+    requirements,
+    parallel: _p,
+    subflow: _s,
+    wait: _w,
+    loop: _l,
+    ...rest
+  } = stage;
+  const human = type === 'form' || type === 'approval' || type === 'review';
+  const engine = (TYPE_CONFIG_PROPS as readonly string[]).includes(type);
+  return {
+    ...rest,
+    type,
+    transitions: (stage.transitions ?? []).filter((t) => outcomes.includes(t.on)),
+    ...(type === 'end' ? { outcome: (stage.outcome ?? 'completed') as WorkflowEndOutcome } : {}),
+    ...(human ? { assignee: assignee ?? { kind: 'initiator' as const }, ...(due ? { due } : {}) } : {}),
+    ...(type === 'approval' && quorum ? { quorum } : {}),
+    ...(!engine && form ? { form } : {}),
+    ...(!engine && requirements ? { requirements } : {}),
+    ...defaultTypeConfig(type, fields),
+  };
+}
+
+/** Whole number from an input value, `undefined` when empty or not a number. */
+export function toWholeNumber(raw: unknown): number | undefined {
+  if (raw === '' || raw === null || raw === undefined) return undefined;
+  const parsed = Math.floor(Number(String(raw).replace(',', '.')));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export const WAIT_KIND_LABEL: Record<WorkflowWaitDef['kind'], string> = {
+  duration: 'Una duración',
+  date: 'Una fecha fija',
+  field: 'La fecha de un campo',
+  business_days: 'Días hábiles',
+  day_of_month: 'Un día del mes',
+};
+
+function atTime(time: string | undefined): string {
+  return time ? ` a las ${time}` : '';
+}
+
+/** "3 días y 2 h", "Hasta el 2026-12-01 a las 08:00"…: what the wait does, in words. */
+export function describeWait(wait: WorkflowWaitDef | undefined, fields: WorkflowFieldDef[]): string {
+  if (!wait) return '';
+  switch (wait.kind) {
+    case 'duration': {
+      const parts = [
+        wait.days ? `${wait.days} ${wait.days === 1 ? 'día' : 'días'}` : '',
+        wait.hours ? `${wait.hours} h` : '',
+        wait.minutes ? `${wait.minutes} min` : '',
+      ].filter((p) => p.length > 0);
+      return parts.length > 0 ? `Espera ${parts.join(' y ')}` : 'Define cuánto esperar';
+    }
+    case 'date':
+      return wait.date ? `Espera hasta el ${wait.date}${atTime(wait.time)}` : 'Elige la fecha';
+    case 'field': {
+      const label = fields.find((f) => f.key === wait.field)?.label ?? wait.field;
+      if (!wait.field) return 'Elige el campo de fecha';
+      const offset = wait.offset_days ?? 0;
+      const shift =
+        offset === 0
+          ? ''
+          : offset > 0
+            ? ` + ${offset} ${offset === 1 ? 'día' : 'días'}`
+            : ` − ${-offset} ${offset === -1 ? 'día' : 'días'}`;
+      return `Espera hasta «${label}»${shift}${atTime(wait.time)}`;
+    }
+    case 'business_days':
+      return `Espera ${wait.days} ${wait.days === 1 ? 'día hábil' : 'días hábiles'}${atTime(wait.time)} (calendario de Colombia)`;
+    case 'day_of_month':
+      return `Espera hasta el próximo día ${wait.day} del mes${atTime(wait.time)}`;
+  }
 }

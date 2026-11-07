@@ -3,8 +3,10 @@ import { ScrollableTabsComponent } from '../../../../../../shared/components/ind
 import { ScrollableTab } from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 import { WorkflowIssueView } from '../../interfaces/workflow.interfaces';
 import { WorkflowEditorStore } from '../workflow-editor.store';
-import { EDITOR_TABS, EditorTab, STAGE_TYPE_LABEL, tabForIssue } from '../workflow-editor.utils';
+import { EditorTab, STAGE_TYPE_LABEL, tabForIssue, tabsForStage } from '../workflow-editor.utils';
 import { StageActionsTabComponent } from './tabs/stage-actions-tab.component';
+import { StageConfigTabComponent } from './tabs/stage-config-tab.component';
+import { StageGuardsTabComponent } from './tabs/stage-guards-tab.component';
 import { StageAssigneeTabComponent } from './tabs/stage-assignee-tab.component';
 import { StageDueTabComponent } from './tabs/stage-due-tab.component';
 import { StageFormTabComponent } from './tabs/stage-form-tab.component';
@@ -25,6 +27,8 @@ import { StageTransitionsTabComponent } from './tabs/stage-transitions-tab.compo
     StageTransitionsTabComponent,
     StageDueTabComponent,
     StageActionsTabComponent,
+    StageConfigTabComponent,
+    StageGuardsTabComponent,
   ],
   template: `
     <section class="flex flex-col gap-3" aria-label="Propiedades de la etapa">
@@ -34,8 +38,8 @@ import { StageTransitionsTabComponent } from './tabs/stage-transitions-tab.compo
           <p class="text-xs text-text-secondary">{{ typeLabel(stage.type) }} · {{ stage.key }}</p>
         </header>
         <app-scrollable-tabs
-          [tabs]="tabs"
-          [activeTab]="store.activeTab()"
+          [tabs]="tabs()"
+          [activeTab]="activeTab()"
           size="sm"
           ariaLabel="Propiedades de la etapa"
           (tabChange)="setTab($event)"
@@ -52,13 +56,15 @@ import { StageTransitionsTabComponent } from './tabs/stage-transitions-tab.compo
           </ul>
         }
         @for (item of [stage]; track item.key) {
-          @switch (store.activeTab()) {
+          @switch (activeTab()) {
             @case ('general') { <app-stage-general-tab [stage]="item" /> }
             @case ('assignee') { <app-stage-assignee-tab [stage]="item" /> }
             @case ('form') { <app-stage-form-tab [stage]="item" /> }
             @case ('requirements') { <app-stage-requirements-tab [stage]="item" /> }
             @case ('transitions') { <app-stage-transitions-tab [stage]="item" /> }
             @case ('due') { <app-stage-due-tab [stage]="item" /> }
+            @case ('config') { <app-stage-config-tab [stage]="item" /> }
+            @case ('guards') { <app-stage-guards-tab [stage]="item" /> }
             @case ('actions') { <app-stage-actions-tab [stage]="item" /> }
           }
         }
@@ -70,7 +76,15 @@ import { StageTransitionsTabComponent } from './tabs/stage-transitions-tab.compo
 })
 export class StagePropertiesComponent {
   protected readonly store = inject(WorkflowEditorStore);
-  readonly tabs: ScrollableTab[] = EDITOR_TABS;
+  readonly tabs = computed<ScrollableTab[]>(() => {
+    const stage = this.store.selectedStage();
+    return stage ? tabsForStage(stage.type) : tabsForStage('form');
+  });
+  /** The "Configuración" tab only exists for some types; fall back to General elsewhere. */
+  readonly activeTab = computed<EditorTab>(() => {
+    const tab = this.store.activeTab();
+    return this.tabs().some((t) => t.id === tab) ? tab : 'general';
+  });
   readonly stageIssues = computed(
     () => this.store.issuesByStage().get(this.store.selectedKey() ?? '') ?? [],
   );

@@ -30,10 +30,11 @@ describe('WorkflowsPageComponent', () => {
       'listDefinitions',
       'listInstances',
       'publishDefinition',
+      'setDefinitionEnabled',
     ]);
     api.listDefinitions.and.returnValue(of(list([row])) as never);
     api.listInstances.and.returnValue(of(list([])) as never);
-    toast = jasmine.createSpyObj('ToastService', ['success', 'error']);
+    toast = jasmine.createSpyObj('ToastService', ['success', 'error', 'warning']);
     TestBed.configureTestingModule({
       imports: [WorkflowsPageComponent],
       providers: [
@@ -137,5 +138,33 @@ describe('WorkflowsPageComponent', () => {
     expect(cancelled).toBe(0);
     fixture.destroy();
     expect(cancelled).toBe(inFlight);
+  });
+
+  it('apagar un flujo llama al interruptor, lo marca apagado y avisa', async () => {
+    await render();
+    const c = fixture.componentInstance;
+    api.setDefinitionEnabled.and.returnValue(of({ ...row, is_enabled: false }) as never);
+    c.setEnabled(c.definitionRows()[0], false);
+    expect(api.setDefinitionEnabled).toHaveBeenCalledWith(3, false);
+    expect(c.definitions()[0].is_enabled).toBeFalse();
+    expect(c.definitionRows()[0].enabled_text).toBe('Apagado');
+    expect(toast.success).toHaveBeenCalled();
+  });
+
+  it('si el servidor rechaza el interruptor, la fila vuelve a como estaba', async () => {
+    await render();
+    const c = fixture.componentInstance;
+    api.setDefinitionEnabled.and.returnValue(
+      throwError(() => new HttpErrorResponse({ status: 403, error: { message: 'Sin permiso' } })) as never,
+    );
+    c.setEnabled(c.definitionRows()[0], false);
+    expect(c.definitions()[0].is_enabled).not.toBeFalse();
+    expect(toast.error).toHaveBeenCalled();
+  });
+
+  it('un flujo apagado muestra la insignia "Apagado" en la lista', async () => {
+    api.listDefinitions.and.returnValue(of(list([{ ...row, is_enabled: false }])) as never);
+    await render();
+    expect(text()).toContain('Apagado');
   });
 });

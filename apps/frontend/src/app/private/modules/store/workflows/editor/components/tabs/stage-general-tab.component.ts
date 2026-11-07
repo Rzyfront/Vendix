@@ -7,16 +7,14 @@ import {
   ToggleComponent,
 } from '../../../../../../../shared/components/index';
 import {
-  STAGE_OUTCOMES,
   WORKFLOW_END_OUTCOMES,
   WORKFLOW_KEY_PATTERN,
   WORKFLOW_STAGE_TYPES,
-  WorkflowEndOutcome,
   WorkflowStageDef,
   WorkflowStageType,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
-import { END_OUTCOME_LABEL, STAGE_TYPE_LABEL } from '../../workflow-editor.utils';
+import { END_OUTCOME_LABEL, STAGE_TYPE_LABEL, retypeStage } from '../../workflow-editor.utils';
 
 const TYPE_OPTIONS = WORKFLOW_STAGE_TYPES.map((t) => ({ value: t, label: STAGE_TYPE_LABEL[t] }));
 const END_OPTIONS = WORKFLOW_END_OUTCOMES.map((o) => ({ value: o, label: END_OUTCOME_LABEL[o] }));
@@ -129,21 +127,10 @@ export class StageGeneralTabComponent {
     if (on) this.store.setStart(this.stage().key);
   }
 
-  /** Changing the type drops what the new type cannot hold (transitions of other outcomes, assignee). */
+  /** Changing the type drops what the new type cannot hold and sets its default config. */
   changeType(value: string | number | null): void {
     const type = value as WorkflowStageType;
-    this.store.updateStage(this.stage().key, (s) => {
-      const outcomes = STAGE_OUTCOMES[type];
-      const { outcome: _outcome, assignee, quorum, due, ...rest } = s;
-      const human = type === 'form' || type === 'approval' || type === 'review';
-      return {
-        ...rest,
-        type,
-        transitions: (s.transitions ?? []).filter((t) => outcomes.includes(t.on)),
-        ...(type === 'end' ? { outcome: (s.outcome ?? 'completed') as WorkflowEndOutcome } : {}),
-        ...(human ? { assignee: assignee ?? { kind: 'initiator' as const }, ...(due ? { due } : {}) } : {}),
-        ...(type === 'approval' && quorum ? { quorum } : {}),
-      };
-    });
+    const fields = this.store.draft()?.fields ?? [];
+    this.store.updateStage(this.stage().key, (s) => retypeStage(s, type, fields));
   }
 }

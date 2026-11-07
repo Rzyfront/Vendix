@@ -3,6 +3,7 @@ import {
   DestroyRef,
   OnInit,
   computed,
+  effect,
   inject,
   signal,
   viewChild,
@@ -26,6 +27,8 @@ import { WorkflowInstanceCommentsComponent } from '../../components/instance-com
 import { DossierItemsListComponent } from '../../components/dossier-items-list.component';
 import { WorkflowStageFormComponent } from '../../components/stage-form.component';
 import {
+  FailedActionView,
+  ParallelBranchStatus,
   StageRequirementView,
   TaskView,
   TimelineEventView,
@@ -33,10 +36,11 @@ import {
 } from '../../interfaces/workflow.interfaces';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { isStaleCode, toWorkflowError } from '../../utils/workflow-errors.util';
+import { apiErrorMessage, isStaleCode, toWorkflowError } from '../../utils/workflow-errors.util';
 import {
+  countdownText,
   dueText,
-  eventLabel,
+  eventDescription,
   instanceStatusLabel,
   instanceSubject,
   instanceStatusTone,
@@ -114,8 +118,74 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
           </p>
         }
 
+        @if (d.parent; as parent) {
+          <p class="mb-3 px-1 text-sm" data-testid="instance-parent">
+            <a class="font-medium text-primary hover:underline" [routerLink]="['/admin/workflows/instances', parent.id]">
+              Hija de {{ parent.reference }}
+            </a>
+            <span class="text-text-secondary"> · {{ parent.title }}</span>
+          </p>
+        }
+
+        @if (d.definition.is_enabled === false && d.status === 'active') {
+          <app-alert-banner variant="info" icon="power" class="mb-3 block" data-testid="definition-disabled">
+            Este flujo está apagado: no inicia solicitudes nuevas, pero esta sigue su curso.
+          </app-alert-banner>
+        }
+
+        @if (d.failed_actions?.length) {
+          <div class="mb-3 flex flex-col gap-2" data-testid="failed-actions">
+            @for (fa of d.failed_actions; track fa.id) {
+              <app-alert-banner variant="danger" icon="alert-triangle">
+                <div class="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div class="min-w-0">
+                    <p class="text-sm font-semibold">Acción fallida · {{ fa.label }}</p>
+                    <p class="break-words text-xs">{{ fa.error }} ({{ fa.attempts }} {{ fa.attempts === 1 ? 'intento' : 'intentos' }}, {{ dateText(fa.failed_at) }})</p>
+                  </div>
+                  <app-button variant="outline" size="sm" [loading]="retryingId() === fa.id" [disabled]="retryingId() !== null" (clicked)="retryAction(fa)">
+                    <app-icon name="rotate-cw" [size]="14" slot="icon" />
+                    Reintentar
+                  </app-button>
+                </div>
+              </app-alert-banner>
+            }
+          </div>
+        }
+
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-5">
           <div class="flex flex-col gap-4 lg:col-span-3">
+            @if (d.wait; as wait) {
+              @if (d.status === 'active') {
+                <app-card title="Espera" [responsivePadding]="true">
+                  <div class="flex flex-col gap-1" data-testid="wait-card">
+                    <p class="text-base font-semibold text-text-primary">Espera: {{ countdown() }}</p>
+                    <p class="text-sm text-text-secondary">Reanuda el {{ dateText(wait.until) }}</p>
+                  </div>
+                </app-card>
+              }
+            }
+            @if (d.parallel; as parallel) {
+              <app-card title="Ramas en paralelo" [responsivePadding]="true">
+                <div class="flex flex-col gap-2" data-testid="parallel-card">
+                  <p class="text-base font-semibold text-text-primary">
+                    Ramas: {{ parallel.done }} de {{ parallel.total }}
+                    <span class="text-sm font-normal text-text-secondary">· {{ joinText() }}</span>
+                  </p>
+                  <ul class="flex flex-col gap-2">
+                    @for (branch of parallel.branches; track branch.key) {
+                      <li class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border p-2" [attr.data-branch]="branch.key">
+                        <span class="text-sm font-medium text-text-primary">{{ branch.name }}</span>
+                        <span class="flex items-center gap-2 text-xs text-text-secondary">
+                          @if (branch.completed_by_name) { {{ branch.completed_by_name }} · }
+                          @if (branch.completed_at) { {{ dateText(branch.completed_at) }} }
+                          <app-badge [variant]="branchTone(branch.status)" size="xs">{{ branchText(branch.status) }}</app-badge>
+                        </span>
+                      </li>
+                    }
+                  </ul>
+                </div>
+              </app-card>
+            }
             @if (requestData().length > 0) {
               <app-card title="Datos de la solicitud" [responsivePadding]="true">
                 <dl class="grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2" data-testid="instance-data">
@@ -153,7 +223,46 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
                   <p class="mb-3 text-sm text-text-secondary">{{ d.stage.description }}</p>
                 }
 
-                @if (actionableTask(); as task) {
+                @if (d.parallel && actionableTasks().length > 0) {
+                  <div class="flex flex-col gap-4" data-testid="branch-tasks">
+                    @for (task of actionableTasks(); track task.id) {
+                      <section class="flex flex-col gap-3 rounded-xl border border-border p-3" [attr.data-branch-task]="task.branch_key">
+                        <h3 class="text-sm font-semibold text-text-primary">Rama: {{ task.branch_name ?? task.branch_key }}</h3>
+                        @if (claimable(task)) {
+                          <div class="flex flex-wrap items-center gap-3 rounded-xl border border-border p-3">
+                            <p class="flex-1 text-sm text-text-secondary">
+                              Esta tarea es para {{ assigneeText(task) }}. Tómala para que nadie más la atienda.
+                            </p>
+                            <app-button variant="outline" [loading]="claiming()" (clicked)="claim(task)">
+                              <app-icon name="user-check" [size]="14" slot="icon" />
+                              Tomar tarea
+                            </app-button>
+                          </div>
+                        }
+                        <app-workflow-stage-form
+                          #branchForm
+                          [fields]="task.form_fields ?? []"
+                          [instanceData]="d.data"
+                          [instanceId]="d.id"
+                          [seedKey]="d.id + ':' + task.id"
+                        />
+                        <div class="flex justify-end">
+                          <app-button
+                            variant="primary"
+                            [disabled]="submitting() !== null"
+                            [loading]="submitting() === 'branch:' + task.id"
+                            (clicked)="submit(task, 'submit', branchForm, 'branch:' + task.id)"
+                          >
+                            Enviar rama
+                          </app-button>
+                        </div>
+                      </section>
+                    }
+                    @if (guardMessage(); as message) {
+                      <app-alert-banner variant="danger" icon="shield-check" data-testid="guard-blocked">{{ message }}</app-alert-banner>
+                    }
+                  </div>
+                } @else if (!d.parallel && actionableTask(); as task) {
                   @if (claimable(task)) {
                     <div class="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-border p-3">
                       <p class="flex-1 text-sm text-text-secondary">
@@ -239,6 +348,10 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
                     </p>
                   }
 
+                  @if (guardMessage(); as message) {
+                    <app-alert-banner variant="danger" icon="shield-check" class="mt-4 block" data-testid="guard-blocked">{{ message }}</app-alert-banner>
+                  }
+
                   <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
                     @for (outcome of d.allowed_outcomes; track outcome) {
                       <app-button
@@ -278,6 +391,23 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
           </div>
 
           <div class="flex flex-col gap-4 lg:col-span-2">
+            @if (d.children?.length) {
+              <app-card title="Subflujos" [responsivePadding]="true">
+                <ul class="flex flex-col gap-2" data-testid="children">
+                  @for (child of d.children; track child.id) {
+                    <li class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border p-2">
+                      <a class="min-w-0 text-sm font-medium text-primary hover:underline" [routerLink]="['/admin/workflows/instances', child.id]">
+                        {{ child.reference }} · {{ child.definition_name }}
+                      </a>
+                      <span class="flex items-center gap-2 text-xs text-text-secondary">
+                        @if (child.current_stage_name) { {{ child.current_stage_name }} }
+                        <app-badge [variant]="childTone(child.status)" size="xs">{{ statusLabel(child.status) }}</app-badge>
+                      </span>
+                    </li>
+                  }
+                </ul>
+              </app-card>
+            }
             <app-card title="Expediente" [responsivePadding]="true" overflow="visible">
               <app-dossier-items-list
                 [items]="d.dossier?.items ?? []"
@@ -297,6 +427,9 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
                 @for (event of timeline(); track event.seq) {
                   <li class="border-l-2 border-border pl-3">
                     <p class="text-sm font-medium text-text-primary">{{ eventText(event) }}</p>
+                    @if (eventChild(event); as child) {
+                      <a class="text-xs text-primary hover:underline" [routerLink]="['/admin/workflows/instances', child.id]">Ver {{ child.reference }}</a>
+                    }
                     <p class="text-xs text-text-secondary">
                       {{ event.actor_name ?? 'Sistema' }} · {{ dateText(event.occurred_at) }}
                     </p>
@@ -348,8 +481,58 @@ export class InstanceDetailPageComponent implements OnInit {
   readonly requirementErrors = signal<string[]>([]);
 
   /** One per user action; kept across retries of an uncertain failure. */
-  private completeKey: { outcome: string; key: string } | null = null;
+  private completeKey: { taskId: number; outcome: string; key: string } | null = null;
   private instanceId = 0;
+
+  /** P2.5: the guard message that blocked the last attempt; the task stays open. */
+  readonly guardMessage = signal<string | null>(null);
+  /** P2.7: the failed action being retried. */
+  readonly retryingId = signal<number | null>(null);
+  /** P2.3: ticks every second while the request waits, to draw the countdown. */
+  private readonly now = signal(Date.now());
+  private tick: ReturnType<typeof setInterval> | null = null;
+  private waitReload: ReturnType<typeof setTimeout> | null = null;
+
+  readonly countdown = computed(() => {
+    const until = this.detail()?.wait?.until;
+    return until ? this.countdownLabel(until) : '';
+  });
+
+  constructor() {
+    effect(() => {
+      const waiting = !!this.detail()?.wait && this.detail()?.status === 'active';
+      if (waiting && this.tick === null) {
+        this.tick = setInterval(() => this.onTick(), 1000);
+      } else if (!waiting) {
+        this.stopTimers();
+      }
+    });
+    this.destroyRef.onDestroy(() => this.stopTimers());
+  }
+
+  private onTick(): void {
+    this.now.set(Date.now());
+    const until = this.detail()?.wait?.until;
+    // At zero the engine resumes on its next timer pass: look again shortly.
+    if (until && new Date(until).getTime() <= Date.now() && this.waitReload === null) {
+      this.waitReload = setTimeout(() => {
+        this.waitReload = null;
+        this.reload();
+      }, 3000);
+    }
+  }
+
+  private stopTimers(): void {
+    if (this.tick !== null) clearInterval(this.tick);
+    if (this.waitReload !== null) clearTimeout(this.waitReload);
+    this.tick = null;
+    this.waitReload = null;
+  }
+
+  private countdownLabel(until: string): string {
+    const remaining = countdownText(until, this.now());
+    return remaining === 'Ya venció' ? 'venció, reanudando…' : `faltan ${remaining}`;
+  }
 
   readonly timeline = computed(() =>
     [...(this.detail()?.timeline ?? [])].sort((a, b) => b.seq - a.seq),
@@ -375,6 +558,21 @@ export class InstanceDetailPageComponent implements OnInit {
     return (
       tasks.find((t) => (t.status === 'open' || t.status === 'claimed') && t.can_act) ?? null
     );
+  });
+
+  /** Open tasks of the person: every branch of a parallel stage that is theirs. */
+  readonly actionableTasks = computed<TaskView[]>(() =>
+    (this.detail()?.tasks ?? []).filter(
+      (t) => (t.status === 'open' || t.status === 'claimed') && t.can_act,
+    ),
+  );
+
+  readonly joinText = computed(() => {
+    const p = this.detail()?.parallel;
+    if (!p) return '';
+    if (p.join === 'any') return 'avanza con la primera';
+    if (p.join === 'n_of_m') return `avanza con ${p.required ?? 1}`;
+    return 'avanza con todas';
   });
 
   readonly statusText = computed(() => instanceStatusLabel(this.detail()?.status ?? ''));
@@ -494,7 +692,31 @@ export class InstanceDetailPageComponent implements OnInit {
   }
 
   eventText(event: TimelineEventView): string {
-    return eventLabel(event.type);
+    return eventDescription(event.type, event.payload);
+  }
+
+  /** The child request a subflow event points to, for the link in the timeline. */
+  eventChild(event: TimelineEventView): { id: number; reference: string } | null {
+    if (event.type !== 'subflow_started' && event.type !== 'subflow_closed') return null;
+    const id = Number(event.payload?.['child_id']);
+    const reference = event.payload?.['child_reference'];
+    return Number.isInteger(id) && id > 0 && typeof reference === 'string' ? { id, reference } : null;
+  }
+
+  statusLabel(status: string): string {
+    return instanceStatusLabel(status);
+  }
+
+  childTone(status: string): 'info' | 'success' | 'error' | 'neutral' | 'warning' | 'primary' {
+    return instanceStatusTone(status);
+  }
+
+  branchText(status: ParallelBranchStatus): string {
+    return status === 'done' ? 'Hecha' : status === 'cancelled' ? 'Cancelada' : 'Pendiente';
+  }
+
+  branchTone(status: ParallelBranchStatus): 'success' | 'neutral' | 'warning' {
+    return status === 'done' ? 'success' : status === 'cancelled' ? 'neutral' : 'warning';
   }
 
   eventComment(event: TimelineEventView): string {
@@ -532,6 +754,26 @@ export class InstanceDetailPageComponent implements OnInit {
     });
   }
 
+  retryAction(action: FailedActionView): void {
+    if (this.retryingId() !== null) return;
+    this.retryingId.set(action.id);
+    this.api
+      .retryFailedAction(this.instanceId, action.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.retryingId.set(null);
+          this.toast.success('Acción ejecutada');
+          this.reload();
+        },
+        error: (error) => {
+          this.retryingId.set(null);
+          // A 403 carries its own wording (needs the manage permission).
+          this.toast.error(apiErrorMessage(error));
+        },
+      });
+  }
+
   onRequirementFile(req: StageRequirementView, event: Event): void {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0];
@@ -559,19 +801,29 @@ export class InstanceDetailPageComponent implements OnInit {
     });
   }
 
-  submit(task: TaskView, outcome: string): void {
+  /**
+   * `form`/`tag` let a branch of a parallel stage submit its own form; the
+   * default is the stage form and the outcome as the loading tag.
+   */
+  submit(
+    task: TaskView,
+    outcome: string,
+    form: WorkflowStageFormComponent | undefined = this.stageForm(),
+    tag: string = outcome,
+  ): void {
     const d = this.detail();
     if (!d || this.submitting() !== null) return;
-    const result = this.stageForm()?.collect() ?? { ok: true, values: {} };
+    this.guardMessage.set(null);
+    const result = form?.collect() ?? { ok: true, values: {} };
     if (!result.ok) {
       this.toast.warning('Revisa los campos marcados antes de continuar.');
       return;
     }
-    if (this.completeKey?.outcome !== outcome) {
-      this.completeKey = { outcome, key: crypto.randomUUID() };
+    if (this.completeKey?.outcome !== outcome || this.completeKey.taskId !== task.id) {
+      this.completeKey = { taskId: task.id, outcome, key: crypto.randomUUID() };
     }
     const comment = this.comment().trim();
-    this.submitting.set(outcome);
+    this.submitting.set(tag);
     this.api
       .completeTask(
         task.id,
@@ -594,12 +846,12 @@ export class InstanceDetailPageComponent implements OnInit {
         },
         error: (error) => {
           this.submitting.set(null);
-          this.handleCompleteError(error);
+          this.handleCompleteError(error, form);
         },
       });
   }
 
-  private handleCompleteError(error: unknown): void {
+  private handleCompleteError(error: unknown, form: WorkflowStageFormComponent | undefined): void {
     const parsed = toWorkflowError(error);
     // A 4xx is a definitive refusal; only an uncertain outcome keeps the key.
     if (parsed.status !== null && parsed.status >= 400 && parsed.status < 500) {
@@ -615,6 +867,11 @@ export class InstanceDetailPageComponent implements OnInit {
         this.toast.error(parsed.message);
         this.reload();
         return;
+      case 'WORKFLOW_GUARD_BLOCKED':
+        // The guard's own message; the task stays open.
+        this.guardMessage.set(parsed.message);
+        this.toast.error(parsed.message);
+        return;
       case 'WORKFLOW_COMMENT_REQUIRED':
         this.commentError.set(parsed.message);
         return;
@@ -625,7 +882,7 @@ export class InstanceDetailPageComponent implements OnInit {
         let placed = false;
         for (const issue of details?.errors ?? []) {
           if (issue.field && issue.message) {
-            this.stageForm()?.fail(issue.field, issue.message);
+            form?.fail(issue.field, issue.message);
             placed = true;
           }
         }
