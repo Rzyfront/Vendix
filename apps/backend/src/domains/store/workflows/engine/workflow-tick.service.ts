@@ -173,7 +173,16 @@ export class WorkflowTickService {
     const taskIds = openTasks.map((t) => t.id);
     const title = `${instance.reference} · ${instance.title}`;
 
-    if (onOverdue.escalate_to && !instance.stage_escalated_at) {
+    // With reminders configured the current assignee gets the first one and a
+    // full interval to act; only then does the task go up. Without reminders it
+    // goes up on the first tick.
+    const every = onOverdue.remind_every_hours;
+    const last = instance.stage_last_reminded_at;
+    const intervalMs = (every ?? 0) * 3_600_000;
+    const assigneeWarned =
+      !every || (!!last && now.getTime() - last.getTime() >= intervalMs);
+
+    if (onOverdue.escalate_to && !instance.stage_escalated_at && assigneeWarned) {
       const stamped = await tx.workflow_instances.updateMany({
         where: {
           id: instance.id,
@@ -181,7 +190,11 @@ export class WorkflowTickService {
           stage_entry_seq: instance.stage_entry_seq,
           stage_escalated_at: null,
         },
-        data: { stage_escalated_at: now },
+        // The escalation notice counts as a reminder for the new assignee.
+        data: {
+          stage_escalated_at: now,
+          ...(every ? { stage_last_reminded_at: now } : {}),
+        },
       });
       if (stamped.count === 1) {
         const target = await this.assignment.resolveDef(tx, onOverdue.escalate_to, instance);
@@ -224,11 +237,9 @@ export class WorkflowTickService {
       }
     }
 
-    const every = onOverdue.remind_every_hours;
     // Already escalated (or lost the escalation race) and no reminders: done.
     if (!every) return this.park(tx, instance, result, now);
-    const last = instance.stage_last_reminded_at;
-    if (!last || now.getTime() - last.getTime() >= every * 3_600_000) {
+    if (!last || now.getTime() - last.getTime() >= intervalMs) {
       const stamped = await tx.workflow_instances.updateMany({
         where: {
           id: instance.id,

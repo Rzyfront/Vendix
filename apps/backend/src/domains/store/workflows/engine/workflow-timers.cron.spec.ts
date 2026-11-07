@@ -110,14 +110,41 @@ describe('WorkflowTimersCron', () => {
     expect(kit.db.table('workflow_instance_events').filter((e) => e.type === 'escalated')).toHaveLength(1);
   });
 
-  it('escalamiento y recordatorio juntos: primero escala, luego recuerda', async () => {
-    await startOverdue({ remind_every_hours: 12, escalate_to: { kind: 'user', user_id: 1 } });
+  it('recordatorio y escalamiento juntos (P0.5): primero avisa al responsable y al vencer el intervalo sube', async () => {
+    await startOverdue({
+      remind_every_hours: 12,
+      escalate_to: { kind: 'user', user_id: 1 },
+    });
+    const task = kit.db.table('workflow_tasks')[0];
+    const assignee = task.assignee_user_id;
     const now = new Date();
+
+    // Primer tick: recordatorio al responsable, sin escalar.
     await cron.runOnce(now);
-    expect(notifies()).toHaveLength(1); // aviso de escalamiento
-    await cron.runOnce(new Date(now.getTime() + HOUR + 1));
-    expect(notifies()).toHaveLength(2); // primer recordatorio
-    expect(instance().stage_last_reminded_at).not.toBeNull();
+    expect(notifies()).toHaveLength(1);
+    expect(instance().stage_escalated_at).toBeNull();
+    expect(task.assignee_user_id).toBe(assignee);
+    expect(kit.db.table('workflow_instance_events').filter((e) => e.type === 'escalated')).toHaveLength(0);
+
+    // Antes de cumplirse el intervalo no pasa nada más.
+    await cron.runOnce(new Date(now.getTime() + 11 * HOUR));
+    expect(notifies()).toHaveLength(1);
+    expect(instance().stage_escalated_at).toBeNull();
+
+    // Cumplido el intervalo: sube, una vez, y avisa a quien la recibe.
+    const later = new Date(now.getTime() + 12 * HOUR);
+    await cron.runOnce(later);
+    expect(instance().stage_escalated_at).toEqual(later);
+    expect(task.assignee_user_id).toBe(1);
+    expect(notifies()).toHaveLength(2);
+    expect(kit.db.table('workflow_instance_events').filter((e) => e.type === 'escalated')).toHaveLength(1);
+
+    // El aviso de escalamiento cuenta como recordatorio: el siguiente espera su intervalo.
+    await cron.runOnce(new Date(later.getTime() + HOUR));
+    expect(notifies()).toHaveLength(2);
+    await cron.runOnce(new Date(later.getTime() + 12 * HOUR));
+    expect(notifies()).toHaveLength(3);
+    expect(kit.db.table('workflow_instance_events').filter((e) => e.type === 'escalated')).toHaveLength(1);
   });
 
   it('una instancia ya cerrada no se avanza', async () => {
