@@ -26,6 +26,7 @@ import {
   CreateWorkflowRecordDto,
   StartWorkflowOnRecordDto,
   UpdateWorkflowRecordDto,
+  WorkflowRecordGetQueryDto,
   WorkflowRecordsQueryDto,
 } from './workflow-records.dto';
 import { WorkflowRecordsService } from './workflow-records.service';
@@ -49,8 +50,8 @@ export class WorkflowRecordsController {
 
   @Get(':id')
   @Permissions('store:workflows:read')
-  async get(@Param('id', ParseIntPipe) id: number) {
-    return this.responseService.success(await this.records.get(id));
+  async get(@Param('id', ParseIntPipe) id: number, @Query() query: WorkflowRecordGetQueryDto) {
+    return this.responseService.success(await this.records.get(id, query));
   }
 
   @Post()

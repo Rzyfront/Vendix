@@ -73,6 +73,11 @@ export class WorkflowRecordsQueryDto {
   @IsOptional() @Transform(toBool) @IsBoolean() include_archived?: boolean;
 }
 
+/** `GET records/:id`: an archived record is only returned when asked for. */
+export class WorkflowRecordGetQueryDto {
+  @IsOptional() @Transform(toBool) @IsBoolean() include_archived?: boolean;
+}
+
 export class StartWorkflowOnRecordDto {
   @Type(() => Number) @IsInt() @Min(1) definition_id!: number;
 }

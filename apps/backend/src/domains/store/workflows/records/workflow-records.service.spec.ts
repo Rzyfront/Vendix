@@ -157,6 +157,14 @@ describe('WorkflowRecordsService (P3.6)', () => {
     expect((await failure(svc.create({ collection_id: collectionId + 99, values: {} })))?.code).toBe('WORKFLOW_COLLECTION_NOT_FOUND');
   });
 
+  it('an archived record listed with include_archived can be opened read-only with the same flag', async () => {
+    const r = await svc.create({ collection_id: collectionId, values: { cliente: 'Acme' } });
+    await svc.archive(r.id);
+    const detail = await svc.get(r.id, { include_archived: true });
+    expect(detail).toMatchObject({ id: r.id, title: 'Acme', archived_at: expect.any(Date) });
+    expect((await failure(svc.update(r.id, { values: { cliente: 'Otra' } })))?.code).toBe('WORKFLOW_RECORD_NOT_FOUND');
+  });
+
   it('refuses to create records in an archived collection', async () => {
     await collections.archive(collectionId);
     const f = await failure(svc.create({ collection_id: collectionId, values: { cliente: 'Acme' } }));
@@ -183,8 +191,20 @@ describe('WorkflowRecordsService (P3.6)', () => {
       const r = await svc.create({ collection_id: collectionId, values: { cliente: 'Acme' } });
       expect((await svc.get(r.id)).dossier).toBeNull();
 
+      // Each upload locks the record row before looking up its dossier, so two
+      // first uploads at once wait for each other instead of creating two dossiers.
+      const locks: unknown[][] = [];
+      kit.db.rawHandlers.push((text, values) => {
+        if (!(text.includes('FROM workflow_records') && text.includes('FOR NO KEY UPDATE'))) return undefined;
+        locks.push(values);
+        return [{ id: values[0] }];
+      });
       const first = await svc.uploadFile(r.id, pdf('contrato.pdf'));
       const second = await svc.uploadFile(r.id, pdf('anexo.pdf'));
+      expect(locks).toEqual([
+        [r.id, 1],
+        [r.id, 1],
+      ]);
 
       const dossiers = kit.db.table('dossiers');
       expect(dossiers).toHaveLength(1);

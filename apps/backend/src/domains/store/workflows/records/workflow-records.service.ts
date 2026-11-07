@@ -112,9 +112,13 @@ export class WorkflowRecordsService {
     return { data: (rows as WorkflowRecordRow[]).map(shape), total, page, limit };
   }
 
-  /** Record with its collection, dossier items and the requests about it. */
-  async get(id: number) {
-    const record = await this.load(id);
+  /**
+   * Record with its collection, dossier items and the requests about it. An
+   * archived record (listed with `include_archived`) is readable with the same
+   * flag; every write still treats it as gone.
+   */
+  async get(id: number, opts: { include_archived?: boolean } = {}) {
+    const record = await this.load(id, opts.include_archived === true);
     const collection = await this.collections.get(record.collection_id);
     const dossier = await this.findDossier(record.id);
     const { store_id } = this.ctx();
@@ -299,6 +303,8 @@ export class WorkflowRecordsService {
     });
     try {
       const item = await this.prisma.$transaction(async (tx: any) => {
+        // Serializes uploads of one record: two first files never create two dossiers.
+        await tx.$queryRaw`SELECT id FROM workflow_records WHERE id = ${record.id} AND store_id = ${store_id} FOR NO KEY UPDATE`;
         const dossier =
           (await tx.dossiers.findFirst({
             where: {
