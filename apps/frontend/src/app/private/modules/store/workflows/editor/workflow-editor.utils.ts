@@ -44,7 +44,14 @@ export const CONFIG_STAGE_TYPES: readonly WorkflowStageType[] = ['parallel', 'su
 
 /** Tabs shown for a stage type: "Configuración" only where the type has config. */
 export function tabsForStage(type: WorkflowStageType): { id: EditorTab; label: string; icon: string }[] {
-  return EDITOR_TABS.filter((t) => t.id !== 'config' || CONFIG_STAGE_TYPES.includes(type));
+  const engineStage = CONFIG_STAGE_TYPES.includes(type);
+  return EDITOR_TABS.filter((t) => {
+    if (t.id === 'config') return engineStage;
+    // The engine resolves these stages itself (a parallel stage assigns per
+    // branch): no stage assignee, form or deadline to edit.
+    if (engineStage && (t.id === 'assignee' || t.id === 'form' || t.id === 'due')) return false;
+    return true;
+  });
 }
 
 export const STAGE_TYPE_LABEL: Record<WorkflowStageType, string> = {

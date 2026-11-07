@@ -41,6 +41,10 @@ describe('workflow-editor.utils — etapas del motor avanzado (P2)', () => {
     expect(tabsForStage('parallel').some((t) => t.id === 'config')).toBeTrue();
     expect(tabsForStage('form').some((t) => t.id === 'config')).toBeFalse();
     expect(tabsForStage('form').some((t) => t.id === 'guards')).toBeTrue();
+    // A parallel stage assigns per branch: no stage assignee, form or deadline.
+    expect(tabsForStage('parallel').map((t) => t.id)).not.toContain('assignee');
+    expect(tabsForStage('wait').map((t) => t.id)).not.toContain('form');
+    expect(tabsForStage('approval').map((t) => t.id)).toContain('assignee');
   });
 
   it('los errores de guardas y del motor llevan a su pestaña', () => {

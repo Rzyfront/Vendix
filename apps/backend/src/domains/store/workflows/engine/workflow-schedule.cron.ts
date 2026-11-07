@@ -25,6 +25,8 @@ interface ScheduledRow {
   organization_id: number;
   triggers: WorkflowTriggerDef[] | null;
   timezone: string | null;
+  /** Last publish or switch change: earlier minutes never fire. */
+  since: Date | null;
 }
 
 /**
@@ -62,7 +64,8 @@ export class WorkflowScheduleCron {
   async runOnce(now: Date): Promise<number> {
     const rows = await this.prisma.$queryRaw<ScheduledRow[]>(Prisma.sql`
       SELECT d.id, d.store_id, d.organization_id,
-             v.definition->'triggers' AS triggers, s.timezone
+             v.definition->'triggers' AS triggers, s.timezone,
+             GREATEST(v.published_at, d.updated_at) AS since
       FROM workflow_definitions d
       JOIN workflow_versions v ON v.id = d.published_version_id
       JOIN stores s ON s.id = d.store_id
@@ -83,6 +86,11 @@ export class WorkflowScheduleCron {
           if (!parsed.ok) continue;
           for (let k = SCHEDULE_LOOKBACK_MINUTES - 1; k >= 0; k--) {
             const at = new Date(minute - k * 60_000);
+            // The look-back never fires minutes from before the flow was
+            // published or switched on.
+            if (row.since && at.getTime() < Math.floor(new Date(row.since).getTime() / 60_000) * 60_000) {
+              continue;
+            }
             if (!cronMatches(parsed.cron, zonedParts(at, tz))) continue;
             const result = await RequestContextService.runIsolated(
               {

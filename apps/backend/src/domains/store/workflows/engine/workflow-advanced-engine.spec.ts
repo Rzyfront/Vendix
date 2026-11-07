@@ -696,6 +696,11 @@ describe('Advanced engine (flujos-adm P2)', () => {
       engine.startScheduled.mockClear();
       expect(await cron.runOnce(new Date('2026-11-09T15:00:00Z'))).toBe(0);
       expect(engine.startScheduled).not.toHaveBeenCalled();
+      // Published (or switched on) at 08:01: the 08:00 fire inside the look-back is skipped.
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { id: 9, store_id: 1, organization_id: 1, timezone: 'America/Bogota', since: new Date('2026-11-09T13:01:10Z'), triggers: [{ kind: 'schedule', cron: '0 8 * * 1' }] },
+      ] as never);
+      expect(await cron.runOnce(new Date('2026-11-09T13:02:30Z'))).toBe(0);
     });
   });
 

@@ -316,7 +316,7 @@ export class WorkflowEngineService {
           kind: 'notify',
           payload: {
             title: `${instance.reference} · ${instance.title}`,
-            message: `Acción fallida: ${label}. ${message.slice(0, 200)} Puedes reintentarla desde la solicitud.`,
+            message: `Acción fallida: ${label}. ${message.slice(0, 200).replace(/[.\s]+$/, '')}. Puedes reintentarla desde la solicitud.`,
             user_ids: owners,
           },
         });
