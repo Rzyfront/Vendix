@@ -259,6 +259,16 @@ export class StorePrismaService extends BasePrismaService {
     'workflow_webhook_deliveries',
     // Candado de aprobación de Flujos (flujos-adm P1.3): `store_id` NOT NULL.
     'workflow_approval_gates',
+    // Externos e inéditos de Flujos (flujos-adm P3): todas con `store_id` NOT NULL.
+    'workflow_inbound_hooks',
+    'workflow_inbound_requests',
+    'workflow_secrets',
+    'workflow_mailboxes',
+    'workflow_mailbox_messages',
+    'workflow_upload_sessions',
+    'workflow_tracking_links',
+    'workflow_collections',
+    'workflow_records',
     // ===== CRM (PLAN-CRM §2.3) =====
     // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
     'crm_conversations',
@@ -1971,6 +1981,42 @@ export class StorePrismaService extends BasePrismaService {
 
   get workflow_webhook_deliveries() {
     return this.scoped_client.workflow_webhook_deliveries;
+  }
+
+  get workflow_inbound_hooks() {
+    return this.scoped_client.workflow_inbound_hooks;
+  }
+
+  get workflow_inbound_requests() {
+    return this.scoped_client.workflow_inbound_requests;
+  }
+
+  get workflow_secrets() {
+    return this.scoped_client.workflow_secrets;
+  }
+
+  get workflow_mailboxes() {
+    return this.scoped_client.workflow_mailboxes;
+  }
+
+  get workflow_mailbox_messages() {
+    return this.scoped_client.workflow_mailbox_messages;
+  }
+
+  get workflow_upload_sessions() {
+    return this.scoped_client.workflow_upload_sessions;
+  }
+
+  get workflow_tracking_links() {
+    return this.scoped_client.workflow_tracking_links;
+  }
+
+  get workflow_collections() {
+    return this.scoped_client.workflow_collections;
+  }
+
+  get workflow_records() {
+    return this.scoped_client.workflow_records;
   }
 
   get workflow_outbox() {

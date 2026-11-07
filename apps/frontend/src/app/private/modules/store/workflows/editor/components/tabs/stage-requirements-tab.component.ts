@@ -68,6 +68,11 @@ const KIND_TEXT: Record<string, string> = {
                   [checked]="req.blocks_exit !== false"
                   (toggled)="patch(i, { blocks_exit: $event })"
                 />
+                <app-toggle
+                  label="El solicitante externo lo sube desde su enlace de seguimiento"
+                  [checked]="req.external === true"
+                  (toggled)="patch(i, { external: $event ? true : undefined })"
+                />
               } @else if (req.kind === 'file_field') {
                 <app-selector
                   label="Campo de tipo archivo"

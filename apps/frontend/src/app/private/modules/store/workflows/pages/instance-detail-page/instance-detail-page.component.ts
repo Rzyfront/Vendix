@@ -26,6 +26,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
 import { WorkflowInstanceCommentsComponent } from '../../components/instance-comments.component';
 import { DossierItemsListComponent } from '../../components/dossier-items-list.component';
 import { WorkflowStageFormComponent } from '../../components/stage-form.component';
+import { TrackingLinksCardComponent } from '../../tracking/tracking-links-card.component';
 import {
   FailedActionView,
   ParallelBranchStatus,
@@ -80,6 +81,7 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
     WorkflowStageFormComponent,
     DossierItemsListComponent,
     WorkflowInstanceCommentsComponent,
+    TrackingLinksCardComponent,
   ],
   template: `
     <div class="w-full">
@@ -415,6 +417,8 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
               />
             </app-card>
 
+            <app-tracking-links-card [instanceId]="d.id" />
+
             <app-card title="Comentarios" [responsivePadding]="true" overflow="visible">
               <app-workflow-instance-comments
                 [instanceId]="d.id"
@@ -431,7 +435,7 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
                       <a class="text-xs text-primary hover:underline" [routerLink]="['/admin/workflows/instances', child.id]">Ver {{ child.reference }}</a>
                     }
                     <p class="text-xs text-text-secondary">
-                      {{ event.actor_name ?? 'Sistema' }} · {{ dateText(event.occurred_at) }}
+                      {{ actorText(event) }} · {{ dateText(event.occurred_at) }}
                     </p>
                     @if (eventComment(event); as note) {
                       <p class="mt-1 text-xs italic text-text-secondary">“{{ note }}”</p>
@@ -692,7 +696,28 @@ export class InstanceDetailPageComponent implements OnInit {
   }
 
   eventText(event: TimelineEventView): string {
-    return eventDescription(event.type, event.payload);
+    const payload = event.payload ?? {};
+    switch (event.type) {
+      // P3: events written by the tracking portal and the inbound mailbox.
+      case 'external_upload': {
+        const label = payload['label'];
+        return `Documento enviado por el solicitante${typeof label === 'string' ? `: ${label}` : ''}`;
+      }
+      case 'external_message':
+        return 'Respuesta del solicitante';
+      case 'email_received':
+        return 'Correo recibido';
+      default:
+        return eventDescription(event.type, event.payload);
+    }
+  }
+
+  /** Who did it: the person, the requester (public) or the system. */
+  actorText(event: TimelineEventView): string {
+    if (event.actor_name) return event.actor_name;
+    return event.type === 'external_upload' || event.type === 'external_message'
+      ? 'Solicitante externo'
+      : 'Sistema';
   }
 
   /** The child request a subflow event points to, for the link in the timeline. */
@@ -720,7 +745,7 @@ export class InstanceDetailPageComponent implements OnInit {
   }
 
   eventComment(event: TimelineEventView): string {
-    const note = event.payload?.['comment'];
+    const note = event.payload?.['comment'] ?? event.payload?.['message'];
     return typeof note === 'string' ? note : '';
   }
 

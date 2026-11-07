@@ -31,6 +31,16 @@ const WORKFLOW_MODELS = [
   // Webhooks salientes de Flujos (bloque 13)
   'workflow_webhook_endpoints',
   'workflow_webhook_deliveries',
+  // Externos e inéditos (flujos-adm P3)
+  'workflow_inbound_hooks',
+  'workflow_inbound_requests',
+  'workflow_secrets',
+  'workflow_mailboxes',
+  'workflow_mailbox_messages',
+  'workflow_upload_sessions',
+  'workflow_tracking_links',
+  'workflow_collections',
+  'workflow_records',
 ] as const;
 
 describe('StorePrismaService · aislamiento de Flujos', () => {

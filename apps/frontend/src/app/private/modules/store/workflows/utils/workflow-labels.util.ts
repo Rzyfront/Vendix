@@ -76,6 +76,9 @@ export const EVENT_LABEL: Record<string, string> = {
   action_retried: 'Acción reenviada',
   error_routed: 'Enviada a la ruta de error',
   migrated: 'Solicitud migrada',
+  external_upload: 'Documento enviado por el solicitante',
+  external_message: 'Respuesta del solicitante',
+  email_received: 'Correo recibido',
 };
 
 function text(value: unknown): string {

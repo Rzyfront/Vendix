@@ -1,14 +1,20 @@
 import { Module } from '@nestjs/common';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { DocumentsModule } from '../../store/documents/documents.module';
 import { WorkflowsModule } from '../../store/workflows/workflows.module';
 import { EcommerceWorkflowsPublicController } from './ecommerce-workflows-public.controller';
+import { EcommerceWorkflowsTrackingController } from './ecommerce-workflows-tracking.controller';
+import { WorkflowPublicCaptchaService } from './workflow-public-captcha.service';
 import { WorkflowPublicFormService } from './workflow-public-form.service';
 
-/** Public form by link of Flujos (no JWT; the store comes from the domain). */
+/**
+ * Public side of Flujos (no JWT; the store comes from the domain): the form by
+ * link with its captcha and chunked uploads, and the tracking portal.
+ */
 @Module({
-  imports: [PrismaModule, ResponseModule, WorkflowsModule],
-  controllers: [EcommerceWorkflowsPublicController],
-  providers: [WorkflowPublicFormService],
+  imports: [PrismaModule, ResponseModule, WorkflowsModule, DocumentsModule],
+  controllers: [EcommerceWorkflowsPublicController, EcommerceWorkflowsTrackingController],
+  providers: [WorkflowPublicFormService, WorkflowPublicCaptchaService],
 })
 export class EcommerceWorkflowsPublicModule {}

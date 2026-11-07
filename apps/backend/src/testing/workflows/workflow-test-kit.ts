@@ -20,7 +20,6 @@ import { WorkflowCommentsService } from '../../domains/store/workflows/instances
 import { WorkflowInboxService } from '../../domains/store/workflows/inbox/workflow-inbox.service';
 import { WorkflowBoardService } from '../../domains/store/workflows/board/workflow-board.service';
 import { WorkflowPublicLinksService } from '../../domains/store/workflows/public-link/workflow-public-links.service';
-import { WorkflowPublicFormService } from '../../domains/ecommerce/workflows-public/workflow-public-form.service';
 import { WorkflowFilesService } from '../../domains/store/workflows/files/workflow-files.service';
 import { WorkflowInstancesService } from '../../domains/store/workflows/instances/workflow-instances.service';
 import { WorkGroupsService } from '../../domains/store/workflows/work-groups.service';
@@ -98,7 +97,6 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
   const inbox = new WorkflowInboxService(prisma);
   const board = new WorkflowBoardService(prisma, instances, requirements);
   const publicLinks = new WorkflowPublicLinksService(prisma);
-  const publicForm = new WorkflowPublicFormService(prisma, engine);
   let ctx: TestCtx = {
     store_id: 1,
     organization_id: 1,
@@ -123,7 +121,6 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     inbox,
     board,
     publicLinks,
-    publicForm,
     s3,
     audit,
     assignment,

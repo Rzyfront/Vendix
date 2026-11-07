@@ -6,6 +6,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { resolveStoreTimezone } from '../../../common/utils/store-timezone.util';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseModule } from '@common/responses/response.module';
+import { S3Module } from '@common/services/s3.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { CustomerCrmModule } from '../customers/crm/customer-crm.module';
@@ -35,6 +36,11 @@ import { WorkflowStartService } from './engine/workflow-start.service';
 import { WorkflowTickService } from './engine/workflow-tick.service';
 import { WorkflowTimersCron } from './engine/workflow-timers.cron';
 import { WorkflowScheduleCron } from './engine/workflow-schedule.cron';
+import { WorkflowRecordDateCron } from './engine/workflow-record-date.cron';
+import { WorkflowCollectionsController } from './records/workflow-collections.controller';
+import { WorkflowCollectionsService } from './records/workflow-collections.service';
+import { WorkflowRecordsController } from './records/workflow-records.controller';
+import { WorkflowRecordsService } from './records/workflow-records.service';
 import { WorkflowMigrationService } from './definitions/workflow-migration.service';
 import { WorkGroupsController } from './work-groups.controller';
 import { WorkGroupsService } from './work-groups.service';
@@ -51,6 +57,12 @@ import { WorkflowInboxController } from './inbox/workflow-inbox.controller';
 import { WorkflowInboxService } from './inbox/workflow-inbox.service';
 import { WorkflowCommentsService } from './instances/workflow-comments.service';
 import { WorkflowPublicLinksService } from './public-link/workflow-public-links.service';
+import { WorkflowPublicLinkController } from './public-link/workflow-public-link.controller';
+import { WorkflowPublicUploadsService } from './public-link/workflow-public-uploads.service';
+import { WorkflowUploadSessionsCron } from './public-link/workflow-upload-sessions.cron';
+import { WorkflowTrackingController } from './tracking/workflow-tracking.controller';
+import { WorkflowTrackingLinksService } from './tracking/workflow-tracking-links.service';
+import { WorkflowTrackingPublicService } from './tracking/workflow-tracking-public.service';
 import { WorkflowMetricsService } from './metrics/workflow-metrics.service';
 import { WorkflowAnalyticsService } from './metrics/workflow-analytics.service';
 import { WorkflowAnalyticsController } from './metrics/workflow-analytics.controller';
@@ -58,6 +70,15 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
 import { WorkflowPeopleActions } from './engine/actions/people.actions';
 import { WorkflowPurchasingActions } from './engine/actions/purchasing.actions';
 import { WorkflowOperationsActions } from './engine/actions/operations.actions';
+import { WorkflowConnectorsActions } from './engine/actions/connectors.actions';
+import { WorkflowConnectorsController } from './connectors/connectors.controller';
+import { WorkflowConnectorsService } from './connectors/connectors.service';
+import { WorkflowHttpActions } from './engine/actions/http.actions';
+import { WorkflowSecretsController } from './secrets/workflow-secrets.controller';
+import { WorkflowSecretsService } from './secrets/workflow-secrets.service';
+import { WorkflowHttpTestController } from './secrets/workflow-http-test.controller';
+import { WorkflowHttpTestService } from './secrets/workflow-http-test.service';
+import { PermissionedWorkflowHttpTestService } from './engine/actions/action-test-permission';
 import { ApprovalGateProcessor } from './gates/approval-gate.processor';
 import { WorkflowLinksController } from './links/workflow-links.controller';
 import { WorkflowLinksService } from './links/workflow-links.service';
@@ -73,6 +94,14 @@ import { InvoicingModule } from '../invoicing/invoicing.module';
 import { InvoiceDeliveryModule } from '../invoicing/delivery/invoice-delivery.module';
 import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 import { OrdersModule } from '../orders/orders.module';
+import { DocumentEmailMimeService } from '../../received-documents/services/document-email-mime.service';
+import { WorkflowInboundController } from './inbound/workflow-inbound.controller';
+import { WorkflowInboundHooksService } from './inbound/workflow-inbound-hooks.service';
+import { WorkflowInboundPublicController } from './inbound/workflow-inbound-public.controller';
+import { WorkflowInboundReceiverService } from './inbound/workflow-inbound-receiver.service';
+import { WorkflowMailboxReceiverService } from './inbound/workflow-mailbox-receiver.service';
+import { WorkflowMailboxService } from './inbound/workflow-mailbox.service';
+import { WORKFLOW_MAILBOX_RECEIVER } from './inbound/workflow-mailbox.types';
 
 /**
  * Flujos: motor (start / completeTask / claim / transition / cancel / tick),
@@ -89,6 +118,7 @@ import { OrdersModule } from '../orders/orders.module';
     EmailModule,
     ResponseModule,
     DocumentsModule,
+    S3Module,
     // Bloque 13 / P1.2: acciones Vendix por los mismos servicios de la UI.
     // P1.3: los mismos servicios aplican el efecto de un candado resuelto.
     PurchaseOrdersModule,
@@ -117,6 +147,16 @@ import { OrdersModule } from '../orders/orders.module';
     DocumentFilesController,
     WorkflowWebhooksController,
     WorkflowLinksController,
+    WorkflowPublicLinkController,
+    WorkflowTrackingController,
+    WorkflowCollectionsController,
+    WorkflowRecordsController,
+    // P3.1 / P3.3: webhook de entrada y buzón por flujo (admin + público).
+    WorkflowInboundController,
+    WorkflowInboundPublicController,
+    WorkflowSecretsController,
+    WorkflowHttpTestController,
+    WorkflowConnectorsController,
   ],
   providers: [
     WorkGroupsService,
@@ -145,6 +185,10 @@ import { OrdersModule } from '../orders/orders.module';
     WorkflowOutboxDispatcher,
     WorkflowTimersCron,
     WorkflowScheduleCron,
+    // P3.6: registros personalizados y su disparador por fecha.
+    WorkflowCollectionsService,
+    WorkflowRecordsService,
+    WorkflowRecordDateCron,
     // Bloque 13: webhooks salientes, disparadores por evento y acciones Vendix.
     EncryptionService,
     WorkflowWebhookEmitter,
@@ -156,8 +200,31 @@ import { OrdersModule } from '../orders/orders.module';
     WorkflowPeopleActions,
     WorkflowPurchasingActions,
     WorkflowOperationsActions,
+    // P3.2: nodo HTTP genérico con secretos de la tienda.
+    WorkflowSecretsService,
+    WorkflowHttpActions,
+    // "Probar" del nodo HTTP: exige el permiso de la acción, no solo diseñar.
+    { provide: WorkflowHttpTestService, useClass: PermissionedWorkflowHttpTestService },
+    WorkflowConnectorsActions,
+    WorkflowConnectorsService,
     ApprovalGateProcessor,
     WorkflowLinksService,
+    // P3.4 / P3.5: subida por partes, limpieza de sesiones y portal de seguimiento.
+    WorkflowPublicUploadsService,
+    WorkflowUploadSessionsCron,
+    WorkflowTrackingLinksService,
+    WorkflowTrackingPublicService,
+    WorkflowInboundHooksService,
+    WorkflowInboundReceiverService,
+    WorkflowMailboxService,
+    WorkflowMailboxReceiverService,
+    // The reception consumer resolves the receiver by token (ModuleRef) to avoid a module cycle.
+    { provide: WORKFLOW_MAILBOX_RECEIVER, useExisting: WorkflowMailboxReceiverService },
+    // Mail attachments up to 25 MB (the document pipeline keeps its own 10 MB instance).
+    {
+      provide: DocumentEmailMimeService,
+      useFactory: () => new DocumentEmailMimeService({ part_bytes: 25 * 1024 * 1024 }),
+    },
     {
       provide: WorkflowRequirementsService,
       useClass: DossierWorkflowRequirementsService,
@@ -172,6 +239,10 @@ import { OrdersModule } from '../orders/orders.module';
     WorkflowDefinitionsService,
     WorkflowInstancesService,
     WorkflowInboxService,
+    // Used by the public form and the tracking portal (`ecommerce/workflows-public`).
+    WorkflowPublicUploadsService,
+    WorkflowTrackingLinksService,
+    WorkflowTrackingPublicService,
   ],
 })
 export class WorkflowsModule implements OnModuleInit {

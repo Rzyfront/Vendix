@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import { ApiResponse } from '../interfaces/workflow.interfaces';
+import { PublicLinkStatus } from '../interfaces/workflow-ops.interfaces';
 
 export type WorkflowGateStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
@@ -32,6 +33,29 @@ export interface WorkflowLinks {
   instances: WorkflowLinkInstance[];
 }
 
+/** Settings of the active public link of a flow (P3.4). */
+export type PublicLinkSettingsStatus = PublicLinkStatus & { captcha_required: boolean };
+
+export interface PublicLinkSettingsInput {
+  captcha_required?: boolean;
+  /** ISO date-time, or `null` to clear the expiry. */
+  expires_at?: string | null;
+}
+
+export type TrackingLinkState = 'active' | 'revoked' | 'expired';
+
+/** Tracking link of the external requester of one request (never carries the token). */
+export interface TrackingLinkRow {
+  id: number;
+  contact_name: string | null;
+  contact_email: string | null;
+  created_at: string;
+  expires_at: string;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  state: TrackingLinkState;
+}
+
 /** Requests and approval gates linked to a Vendix record (`/store/workflow-links`). */
 @Injectable({ providedIn: 'root' })
 export class WorkflowLinksApiService {
@@ -45,5 +69,45 @@ export class WorkflowLinksApiService {
     return this.http
       .get<ApiResponse<WorkflowLinks>>(this.base, { params })
       .pipe(map((res) => res.data));
+  }
+
+  private readonly workflowsBase = `${environment.apiUrl}/store/workflows`;
+
+  /** Expiry and captcha of the active public link of a flow. */
+  updatePublicLinkSettings(
+    definitionId: number,
+    body: PublicLinkSettingsInput,
+  ): Observable<PublicLinkSettingsStatus> {
+    return this.http
+      .patch<ApiResponse<PublicLinkSettingsStatus>>(
+        `${this.workflowsBase}/definitions/${definitionId}/public-link`,
+        body,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  listTrackingLinks(instanceId: number): Observable<TrackingLinkRow[]> {
+    return this.http
+      .get<ApiResponse<TrackingLinkRow[]>>(
+        `${this.workflowsBase}/instances/${instanceId}/tracking-links`,
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  /** Revokes the active links of the request and mails a new one to `email`. */
+  reissueTrackingLink(instanceId: number, email: string): Observable<TrackingLinkRow> {
+    return this.http
+      .post<ApiResponse<TrackingLinkRow>>(
+        `${this.workflowsBase}/instances/${instanceId}/tracking-links`,
+        { email },
+      )
+      .pipe(map((res) => res.data));
+  }
+
+  revokeTrackingLink(instanceId: number, linkId: number): Observable<unknown> {
+    return this.http.post(
+      `${this.workflowsBase}/instances/${instanceId}/tracking-links/${linkId}/revoke`,
+      {},
+    );
   }
 }
