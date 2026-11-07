@@ -56,15 +56,17 @@ const ALL_TABS: (ScrollableTab & { id: IntegrationsTab })[] = [
           />
         </div>
         <div class="p-2 md:p-4">
-          @switch (activeTab()) {
-            @case ('api_keys') {
-              <app-api-keys-panel />
-            }
-            @case ('webhooks') {
-              <app-webhooks-panel />
-            }
-            @case ('secrets') {
-              <app-secrets-panel />
+          @if (tabs.length) {
+            @switch (activeTab()) {
+              @case ('api_keys') {
+                <app-api-keys-panel />
+              }
+              @case ('webhooks') {
+                <app-webhooks-panel />
+              }
+              @case ('secrets') {
+                <app-secrets-panel />
+              }
             }
           }
         </div>
@@ -83,8 +85,10 @@ export class IntegrationsPageComponent {
   readonly tabs: ScrollableTab[] = ALL_TABS.filter(
     (tab) => this.auth.isOwner() || this.auth.hasPermission(TAB_PERMISSIONS[tab.id]),
   );
-  readonly activeTab = signal<IntegrationsTab | null>(
-    (this.tabs[0]?.id as IntegrationsTab | undefined) ?? null,
+  // The route gate admits only users holding one of the two permissions, so
+  // `tabs` is never empty there; the fallback only satisfies the type.
+  readonly activeTab = signal<IntegrationsTab>(
+    (this.tabs[0]?.id as IntegrationsTab | undefined) ?? 'api_keys',
   );
 
   onTabChange(tab: string): void {
