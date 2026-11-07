@@ -42,6 +42,7 @@ const THEN_OPTIONS = [
   { value: 'fail', label: 'Terminar la solicitud' },
 ];
 
+import { ActionTestButtonComponent } from '../action-test/action-test-button.component';
 /** Acciones tab: notify, set_field and Vendix actions for on_enter / on_exit. */
 @Component({
   selector: 'app-stage-actions-tab',
@@ -57,6 +58,7 @@ const THEN_OPTIONS = [
     AssigneeEditorComponent,
     ActionMapEditorComponent,
     VariablePickerComponent,
+    ActionTestButtonComponent,
   ],
   template: `
     <div class="flex flex-col gap-6">
@@ -132,6 +134,10 @@ const THEN_OPTIONS = [
                   (mapChange)="patch(hook.id, i, { map: $event })"
                   (outputMapChange)="patch(hook.id, i, { output: $event })"
                 />
+                @if (action.action !== 'vendix.http.request') {
+                  <!-- P5.2: HTTP has its own real test inside its editor. -->
+                  <div><app-action-test-button [action]="action" [definition]="store.draft()" /></div>
+                }
                 <div class="flex flex-col gap-3 rounded-lg border border-border p-3" data-testid="on-error">
                   <p class="text-xs font-semibold text-text-primary">Si falla</p>
                   <app-input
