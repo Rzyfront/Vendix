@@ -141,7 +141,10 @@ export function isBlockedAddress(ip: string): boolean {
  * Validates the shape of a webhook URL and returns the parsed URL. Throws
  * {@link WebhookUrlError} with a reason that is safe to show to the user.
  */
-export function assertWebhookUrl(raw: unknown): URL {
+export function assertWebhookUrl(
+  raw: unknown,
+  opts: { allowHttp?: boolean } = {},
+): URL {
   if (typeof raw !== 'string' || raw.trim() === '') {
     throw new WebhookUrlError('empty');
   }
@@ -156,15 +159,22 @@ export function assertWebhookUrl(raw: unknown): URL {
   } catch {
     throw new WebhookUrlError('malformed');
   }
-  if (url.protocol !== 'https:')
-    throw new WebhookUrlError('only https is allowed');
+  // P3.2: the generic HTTP node may also call plain http, but only on public
+  // addresses (the same blocklist applies); webhooks stay https only.
+  const httpOk = opts.allowHttp === true && url.protocol === 'http:';
+  if (url.protocol !== 'https:' && !httpOk) {
+    throw new WebhookUrlError(
+      opts.allowHttp ? 'only http and https are allowed' : 'only https is allowed',
+    );
+  }
   if (url.username || url.password) {
     throw new WebhookUrlError('credentials in the URL are not allowed');
   }
   if (url.port !== '') {
     const port = Number(url.port);
-    if (port !== 443 && port < 1024) {
-      throw new WebhookUrlError('port must be 443 or 1024 and above');
+    const standard = httpOk ? 80 : 443;
+    if (port !== standard && port < 1024) {
+      throw new WebhookUrlError(`port must be ${standard} or 1024 and above`);
     }
   }
   let host = url.hostname.toLowerCase();

@@ -115,7 +115,9 @@ const THEN_OPTIONS = [
                   [action]="action.action"
                   [map]="action.map"
                   [fields]="fields()"
+                  [outputMap]="action.output"
                   (mapChange)="patch(hook.id, i, { map: $event })"
+                  (outputMapChange)="patch(hook.id, i, { output: $event })"
                 />
                 <div class="flex flex-col gap-3 rounded-lg border border-border p-3" data-testid="on-error">
                   <p class="text-xs font-semibold text-text-primary">Si falla</p>

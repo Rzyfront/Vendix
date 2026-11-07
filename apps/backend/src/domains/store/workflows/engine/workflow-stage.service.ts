@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  WORKFLOW_VENDIX_ACTIONS,
   WorkflowActionDef,
   WorkflowBranchDef,
   WorkflowDefinitionV1,
@@ -11,6 +12,7 @@ import {
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { OUTBOX_MAX_ATTEMPTS } from './workflow-outbox.dispatcher.constants';
 import { AppliedVendixAction, applyActionList } from './workflow-rules';
+import { resolveHttpActionMap } from '../secrets/workflow-http-map';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import { WorkflowEventsService } from './workflow-events.service';
 import {
@@ -24,6 +26,11 @@ import {
 export const SUBFLOW_START_OUTBOX_KIND = 'subflow_start';
 export const SUBFLOW_CLOSED_OUTBOX_KIND = 'subflow_closed';
 export const DEFAULT_STORE_TIMEZONE = 'America/Bogota';
+
+/** P3.2: a staged `vendix.*` action; the HTTP node also carries its `output` map. */
+export type StagedVendixAction = AppliedVendixAction & {
+  output?: Record<string, string>;
+};
 
 export interface InstanceStagePatch {
   current_stage_key: string;
@@ -108,13 +115,46 @@ export class WorkflowStageService {
     const applied = applyActionList(actions, data, instance);
     return {
       data: applied.data,
-      vendix: applied.vendix,
+      vendix: this.stageHttpActions(actions, data, instance, applied.vendix),
       notifies: applied.notifies.map((n) => ({
         title: `${instance.reference} · ${instance.title}`,
         message: n.message,
         def: n.to,
       })),
     };
+  }
+
+  /**
+   * P3.2: `vendix.http.request` keeps `{{secrets.NAME}}` in its map (the
+   * generic resolver would blank it) and carries its `output` mapping. Every
+   * other action is untouched.
+   */
+  private stageHttpActions(
+    actions: WorkflowActionDef[] | undefined,
+    data: Record<string, unknown>,
+    instance: Pick<WorkflowInstanceRow, 'reference' | 'title'> & {
+      subject_id?: number | null;
+    },
+    vendix: AppliedVendixAction[],
+  ): StagedVendixAction[] {
+    const out: StagedVendixAction[] = [...vendix];
+    const current = { ...data };
+    let index = 0;
+    for (const a of actions ?? []) {
+      if (a.action === 'set_field') {
+        current[a.field] = a.value;
+      } else if ((WORKFLOW_VENDIX_ACTIONS as readonly string[]).includes(a.action)) {
+        const at = index++;
+        if (a.action !== 'vendix.http.request') continue;
+        const v = a as Extract<WorkflowActionDef, { map: unknown }>;
+        out[at] = {
+          ...out[at],
+          map_resolved: resolveHttpActionMap(v.map, { fields: current, instance }),
+          ...(v.output ? { output: v.output } : {}),
+        };
+      }
+    }
+    return out;
   }
 
   stagePatch(
@@ -152,6 +192,7 @@ export class WorkflowStageService {
   ): Promise<void> {
     for (const a of actions ?? []) {
       const retries = a.on_error?.retries;
+      const output = (a as StagedVendixAction).output;
       await this.events.enqueue(tx, {
         store_id: instance.store_id,
         instance_id: instance.id,
@@ -164,6 +205,7 @@ export class WorkflowStageService {
           max_attempts:
             retries === undefined ? OUTBOX_MAX_ATTEMPTS : Math.min(retries + 1, OUTBOX_MAX_ATTEMPTS),
           ...(a.on_error ? { on_error: a.on_error } : {}),
+          ...(output ? { output } : {}),
         },
       });
     }
