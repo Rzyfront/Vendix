@@ -180,6 +180,8 @@ export interface WorkflowInstanceDetail {
   data: Record<string, unknown>;
   subject_type?: string | null;
   subject_id?: number | null;
+  /** Declared fields (label and type) to show the request data. */
+  data_fields?: { key: string; label: string; type: string }[];
   started_by: { name: string } | null;
   created_at: string;
   completed_at: string | null;
