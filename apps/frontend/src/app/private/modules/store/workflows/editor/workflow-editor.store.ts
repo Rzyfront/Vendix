@@ -22,6 +22,7 @@ import {
   moveItem,
   tabForIssue,
   uniqueKey,
+  withStagePositions,
 } from './workflow-editor.utils';
 
 /**
@@ -314,6 +315,14 @@ export class WorkflowEditorStore {
     return key;
   }
 
+  /** Saves the canvas position (`ui`) of several stages in one edit. */
+  setStagePositions(positions: Record<string, { x: number; y: number }>): void {
+    this.commit((d) => ({
+      ...d,
+      stages: withStagePositions(d.stages, positions),
+    }));
+  }
+
   duplicateStage(key: string): void {
     const draft = this.draft();
     const source = draft?.stages.find((s) => s.key === key);
@@ -325,6 +334,8 @@ export class WorkflowEditorStore {
       name: `${source.name} (copia)`,
     };
     delete copy.start;
+    // Do not stack the copy exactly on top of the original on the canvas.
+    if (copy.ui) copy.ui = { x: Math.min(20000, copy.ui.x + 40), y: Math.min(20000, copy.ui.y + 40) };
     const index = draft.stages.findIndex((s) => s.key === key);
     this.commit((d) => ({
       ...d,

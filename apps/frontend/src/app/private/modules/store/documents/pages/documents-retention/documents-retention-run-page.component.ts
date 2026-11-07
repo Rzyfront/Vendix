@@ -13,7 +13,6 @@ import {
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { formatFileSize, shortHash } from '../../../workflows/utils/workflow-labels.util';
-import { DocumentsTabsComponent } from '../../components/documents-tabs.component';
 import { PurgeRunDetail } from '../../interfaces/document-library.interfaces';
 import {
   DocumentsLibraryApiService,
@@ -32,7 +31,6 @@ import {
     BadgeComponent,
     IconComponent,
     EmptyStateComponent,
-    DocumentsTabsComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -42,7 +40,6 @@ import {
         icon="folder-open"
         variant="glass"
       />
-      <app-documents-tabs active="retention" />
 
       <div class="px-2 pb-2 md:px-0">
         <a

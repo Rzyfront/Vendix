@@ -1,6 +1,8 @@
 import {
   Component,
   DestroyRef,
+  OnInit,
+  computed,
   inject,
   input,
   model,
@@ -13,11 +15,19 @@ import {
   ButtonComponent,
   InputComponent,
   ModalComponent,
+  SelectorComponent,
   ToastService,
 } from '../../../../../shared/components/index';
+import {
+  BoardFilterOption,
+  StartInstanceWithLocation,
+} from '../interfaces/workflow-board.interfaces';
 import { WorkflowDefinitionRow } from '../interfaces/workflow.interfaces';
+import { WorkflowBoardApiService } from '../services/workflow-board-api.service';
 import { WorkflowsApiService } from '../services/workflows-api.service';
 import { toWorkflowError } from '../utils/workflow-errors.util';
+
+const NO_LOCATION = 'none';
 
 /**
  * "Iniciar solicitud": asks for a title and starts an instance of the
@@ -27,7 +37,7 @@ import { toWorkflowError } from '../utils/workflow-errors.util';
 @Component({
   selector: 'app-start-instance-modal',
   standalone: true,
-  imports: [FormsModule, ModalComponent, ButtonComponent, InputComponent],
+  imports: [FormsModule, ModalComponent, ButtonComponent, InputComponent, SelectorComponent],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -43,6 +53,16 @@ import { toWorkflowError } from '../utils/workflow-errors.util';
         [ngModel]="title()"
         (ngModelChange)="title.set($event ?? '')"
       />
+      @if (locations().length > 0) {
+        <div class="mt-3">
+          <app-selector
+            label="Sede"
+            [options]="locationOptions()"
+            [value]="locationId()"
+            (valueChange)="onLocation($event)"
+          />
+        </div>
+      }
       @if (errorMessage()) {
         <p class="mt-3 text-sm text-error" role="alert">{{ errorMessage() }}</p>
       }
@@ -60,8 +80,9 @@ import { toWorkflowError } from '../utils/workflow-errors.util';
     </app-modal>
   `,
 })
-export class StartInstanceModalComponent {
+export class StartInstanceModalComponent implements OnInit {
   private readonly api = inject(WorkflowsApiService);
+  private readonly boardApi = inject(WorkflowBoardApiService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -70,15 +91,38 @@ export class StartInstanceModalComponent {
   readonly started = output<number>();
 
   readonly title = signal('');
+  /** P5.5: branches of the store; the select is hidden when there are none. */
+  readonly locations = signal<BoardFilterOption[]>([]);
+  readonly locationId = signal(NO_LOCATION);
+  readonly locationOptions = computed(() => [
+    { value: NO_LOCATION, label: 'Sin sede' },
+    ...this.locations().map((l) => ({ value: String(l.id), label: l.name })),
+  ]);
   readonly busy = signal(false);
   readonly errorMessage = signal('');
   /** Reused across retries of the same open dialog; cleared on a definitive outcome. */
   private idempotencyKey: string | null = null;
 
+  ngOnInit(): void {
+    this.boardApi
+      .listLocations()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => this.locations.set(rows),
+        // Optional field: without the list the request starts with no branch.
+        error: () => undefined,
+      });
+  }
+
+  onLocation(value: unknown): void {
+    this.locationId.set(value === null || value === undefined ? NO_LOCATION : String(value));
+  }
+
   onOpenChange(open: boolean): void {
     this.isOpen.set(open);
     if (!open) {
       this.title.set('');
+      this.locationId.set(NO_LOCATION);
       this.errorMessage.set('');
       this.idempotencyKey = null;
     }
@@ -91,11 +135,13 @@ export class StartInstanceModalComponent {
     this.busy.set(true);
     this.errorMessage.set('');
     const title = this.title().trim();
+    const body: StartInstanceWithLocation = {
+      definition_id: definition.id,
+      ...(title ? { title } : {}),
+      ...(this.locationId() !== NO_LOCATION ? { location_id: Number(this.locationId()) } : {}),
+    };
     this.api
-      .startInstance(
-        { definition_id: definition.id, ...(title ? { title } : {}) },
-        this.idempotencyKey,
-      )
+      .startInstance(body, this.idempotencyKey)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {

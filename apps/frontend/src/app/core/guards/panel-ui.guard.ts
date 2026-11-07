@@ -123,6 +123,13 @@ export const panelUiGuard: CanActivateFn = async (
   const gateKeys = menuFilter.resolveGateKeysForRoute(state.url, 'STORE_ADMIN');
   // Llegar aquí significa que el veredicto pre-F4 deja pasar.
   if (menuFilter.applyAccessGate(gateKeys, true, 'url', state.url)) {
+    // P5.7: a Flujos/Documentos child the role cannot use is closed by URL
+    // too, after the industry and panel layers (they explain the bigger lock).
+    const permissionBlock = menuFilter.administrationPermissionBlockForUrl(state.url);
+    if (permissionBlock) {
+      toast.info(permissionBlock.detail);
+      return redirect();
+    }
     return true;
   }
   // Plan layer (planes-matriz-accesos §3): the module is not in the plan →

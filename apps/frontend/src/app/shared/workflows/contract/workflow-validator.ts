@@ -1403,6 +1403,7 @@ function checkStages(
         "type",
         "description",
         "start",
+        "ui",
         "outcome",
         "assignee",
         "quorum",
@@ -1466,6 +1467,21 @@ function checkStages(
         `${L}: "start" debe ser verdadero o falso.`,
         sk,
       );
+    if (s["ui"] !== undefined) {
+      const ui = s["ui"];
+      const inRange = (v: unknown) =>
+        typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 20000;
+      if (!isObj(ui) || !inRange(ui["x"]) || !inRange(ui["y"])) {
+        c.err(
+          "SHAPE_INVALID",
+          `${p}.ui`,
+          `${L}: la posición en el lienzo debe tener "x" e "y" numéricos entre 0 y 20000.`,
+          sk,
+        );
+      } else {
+        checkKeys(c, ui, ["x", "y"], `${p}.ui`, sk);
+      }
+    }
     const type = s["type"];
     if (!(WORKFLOW_STAGE_TYPES as readonly unknown[]).includes(type)) {
       c.err("SHAPE_INVALID", `${p}.type`, `${L} tiene un tipo no válido.`, sk);

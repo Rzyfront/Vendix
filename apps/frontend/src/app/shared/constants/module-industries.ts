@@ -238,8 +238,22 @@ export const MODULE_INDUSTRIES: Readonly<Record<string, ModuleIndustryRule>> = {
   help_videos: 'all',
 
   // ── Administration suite (flujos-documental S1) ─────────────────────
+  // P5.7: one key per sidebar child, under the `flows`/`documents` parents.
   flows: ADMINISTRATION,
+  flows_list: ADMINISTRATION,
+  flows_inbox: ADMINISTRATION,
+  flows_board: ADMINISTRATION,
+  flows_templates: ADMINISTRATION,
+  flows_records: ADMINISTRATION,
+  flows_connectors: ADMINISTRATION,
+  flows_integrations: ADMINISTRATION,
   documents: ADMINISTRATION,
+  documents_dossiers: ADMINISTRATION,
+  documents_search: ADMINISTRATION,
+  documents_folders: ADMINISTRATION,
+  documents_expiring: ADMINISTRATION,
+  documents_retention: ADMINISTRATION,
+  documents_templates: ADMINISTRATION,
 
   // ── ORG_ADMIN only ───────────────────────────────────────────────────
   stores: 'all',
@@ -275,7 +289,20 @@ export const VERTICAL_MODULE_KEYS: readonly string[] = [
   'hospitality_reservations',
   'hospitality_rates',
   'flows',
+  'flows_list',
+  'flows_inbox',
+  'flows_board',
+  'flows_templates',
+  'flows_records',
+  'flows_connectors',
+  'flows_integrations',
   'documents',
+  'documents_dossiers',
+  'documents_search',
+  'documents_folders',
+  'documents_expiring',
+  'documents_retention',
+  'documents_templates',
 ];
 
 /**
@@ -309,10 +336,27 @@ export const LEGACY_INDUSTRY_GATED_KEYS: readonly string[] = [
 /**
  * Keys whose industry rule is ALWAYS enforced, whatever the access-gate mode
  * (flujos-documental S1). They belong to modules born after the F4 audit week:
- * no store used them before, so blocking from day one breaks nobody. The
+ * no store used them before, so blocking from day one breaks nobody (P5.7
+ * adds one key per sidebar child of both modules). The
  * backend answers 403 `MODULE_INDUSTRY_001`; the frontend shows the lock.
  */
-export const ENFORCED_INDUSTRY_KEYS: readonly string[] = ['flows', 'documents'];
+export const ENFORCED_INDUSTRY_KEYS: readonly string[] = [
+  'flows',
+  'flows_list',
+  'flows_inbox',
+  'flows_board',
+  'flows_templates',
+  'flows_records',
+  'flows_connectors',
+  'flows_integrations',
+  'documents',
+  'documents_dossiers',
+  'documents_search',
+  'documents_folders',
+  'documents_expiring',
+  'documents_retention',
+  'documents_templates',
+];
 
 /** `true` when the industry rule of `key` ignores the audit mode. */
 export function isIndustryAlwaysEnforced(key: string): boolean {

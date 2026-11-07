@@ -83,6 +83,7 @@ export const ErrorCodes = {
   WORKFLOW_GROUP_DUPLICATE: { code: 'WORKFLOW_GROUP_DUPLICATE', httpStatus: 409, devMessage: 'Ya existe un grupo con ese nombre o clave.' },
   WORKFLOW_GROUP_MEMBER_INVALID: { code: 'WORKFLOW_GROUP_MEMBER_INVALID', httpStatus: 422, devMessage: 'La persona no pertenece a esta tienda.' },
   WORKFLOW_KEY_TAKEN: { code: 'WORKFLOW_KEY_TAKEN', httpStatus: 409, devMessage: 'Ya existe un flujo con esa clave.' },
+  WORKFLOW_TEMPLATE_NOT_FOUND: { code: 'WORKFLOW_TEMPLATE_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró esa plantilla de flujo.' },
   WORKFLOW_DRAFT_CONFLICT: { code: 'WORKFLOW_DRAFT_CONFLICT', httpStatus: 409, devMessage: 'Otro usuario modificó el borrador; recarga para ver sus cambios.' },
   WORKFLOW_DRAFT_INVALID: { code: 'WORKFLOW_DRAFT_INVALID', httpStatus: 422, devMessage: 'El borrador debe ser un objeto JSON de hasta 256 KB.' },
   WORKFLOW_INVALID: { code: 'WORKFLOW_INVALID', httpStatus: 422, devMessage: 'La definición del flujo tiene errores; corrígelos para publicar.' },

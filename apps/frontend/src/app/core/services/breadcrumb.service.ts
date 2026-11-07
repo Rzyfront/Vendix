@@ -1105,6 +1105,18 @@ export class BreadcrumbService {
       icon: 'inbox',
     },
     {
+      path: '/admin/workflows/board',
+      title: 'Tablero general',
+      parent: 'Flujos',
+      icon: 'layout-dashboard',
+    },
+    {
+      path: '/admin/workflows/templates',
+      title: 'Galería de plantillas',
+      parent: 'Flujos',
+      icon: 'layout-template',
+    },
+    {
       path: '/admin/workflows/integrations',
       title: 'Integraciones',
       parent: 'Flujos',

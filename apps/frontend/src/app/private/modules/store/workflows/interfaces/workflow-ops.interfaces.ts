@@ -2,6 +2,11 @@
 
 export interface InboxTaskRow {
   task_id: number;
+  /** P5.5: what the mobile card needs to approve or reject from the list. */
+  stage_type?: string | null;
+  has_form?: boolean;
+  /** Outcomes that need only a comment to be done from the list. */
+  comment_outcomes?: string[];
   kind: string;
   status: string;
   due_at: string | null;

@@ -10,7 +10,8 @@ import {
   ToggleComponent,
 } from '../../../../../../shared/components/index';
 import { STAGE_OUTCOMES } from '../../../../../../shared/workflows/contract/workflow-contract';
-import { SimulatedAction, SimulationResult } from '../../interfaces/workflow.interfaces';
+import { SimulatedParallel, SimulatedStep, SimulationWithSteps } from '../../interfaces/workflow-debug.interfaces';
+import { SimulatedAction } from '../../interfaces/workflow.interfaces';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { toWorkflowError } from '../../utils/workflow-errors.util';
 import { WorkflowStageFormComponent } from '../../components/stage-form.component';
@@ -128,6 +129,49 @@ interface SimState {
                 @if (res.transition?.when_text) { <span class="font-normal text-text-secondary"> (por condición)</span> }
               </p>
               <p class="text-xs text-text-secondary">Ruta: {{ pathText(res) }}</p>
+              @for (step of res.steps ?? []; track step.stage_key) {
+                <section class="flex flex-col gap-2 rounded-lg border border-border p-2" [attr.data-testid]="'sim-step-' + step.stage_key" [attr.aria-label]="'Paso ' + step.stage_name">
+                  <p class="text-xs font-semibold text-text-primary">{{ step.stage_name }}</p>
+                  @if (step.parallel; as par) {
+                    <div class="flex flex-col gap-1" data-testid="sim-parallel">
+                      <p class="flex items-center gap-1 text-xs text-text-primary">
+                        <app-icon name="git-branch" [size]="12" />
+                        Ramas en paralelo ({{ par.branches.length }}). Unión: {{ joinText(par) }}; en la simulación se da por cumplida (resultado «joined»).
+                      </p>
+                      <ul class="list-disc pl-5 text-xs text-text-primary">
+                        @for (branch of par.branches; track branch.key) {
+                          <li>{{ branch.name }} → {{ branch.assignee?.label ?? 'Sin responsable' }}</li>
+                        }
+                      </ul>
+                    </div>
+                  }
+                  @if (variableRows(step).length > 0) {
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-left text-xs">
+                        <caption class="sr-only">Variables después de {{ step.stage_name }}</caption>
+                        <thead>
+                          <tr class="text-text-secondary">
+                            <th scope="col" class="py-0.5 pr-3 font-semibold">Variable</th>
+                            <th scope="col" class="py-0.5 font-semibold">Valor</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (row of variableRows(step); track row.key) {
+                            <tr [class]="row.changed ? 'bg-warning/10' : ''" [attr.data-changed]="row.changed">
+                              <th scope="row" class="py-0.5 pr-3 font-mono font-normal text-text-primary">{{ row.key }}</th>
+                              <td class="break-all py-0.5 text-text-primary" [class.font-semibold]="row.changed">
+                                {{ row.value }}@if (row.changed) { <span class="font-normal text-text-secondary"> (cambió)</span> }
+                              </td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  } @else {
+                    <p class="text-xs text-text-secondary">Sin variables todavía.</p>
+                  }
+                </section>
+              }
               @if (res.tasks.length > 0) {
                 <p class="text-xs font-semibold text-text-primary">Tareas que se crearían</p>
                 <ul class="list-disc pl-5 text-xs text-text-primary">
@@ -173,7 +217,7 @@ export class SimulatorPanelComponent {
   readonly definitionId = input.required<number>();
 
   readonly state = signal<SimState | null>(null);
-  readonly last = signal<SimulationResult | null>(null);
+  readonly last = signal<SimulationWithSteps | null>(null);
   readonly steps = signal(0);
   readonly satisfied = signal<ReadonlySet<string>>(new Set());
   readonly comment = signal('');
@@ -229,8 +273,27 @@ export class SimulatorPanelComponent {
     return detail ? `${label} (${detail})` : label;
   }
 
-  pathText(res: SimulationResult): string {
+  pathText(res: SimulationWithSteps): string {
     return res.path.map((k) => this.stageName(k)).join(' → ');
+  }
+
+  /** Rule of the join in words. */
+  joinText(par: SimulatedParallel): string {
+    if (par.join === 'any') return `basta con 1 de ${par.total} ramas`;
+    if (par.join === 'n_of_m') return `se necesitan ${par.needed} de ${par.total} ramas`;
+    return `se necesitan las ${par.total} ramas`;
+  }
+
+  /** Variables of a step; the keys it changed are flagged. */
+  variableRows(step: SimulatedStep): { key: string; value: string; changed: boolean }[] {
+    const changed = new Set(step.changed);
+    return [...new Set([...Object.keys(step.data), ...step.changed])]
+      .sort()
+      .map((key) => {
+        const v = step.data[key];
+        const value = v === null || v === undefined || v === '' ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+        return { key, value, changed: changed.has(key) };
+      });
   }
 
   mark(key: string, on: boolean): void {

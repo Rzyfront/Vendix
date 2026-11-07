@@ -50,6 +50,8 @@ export interface WorkflowInstanceRow {
   parent_instance_id?: number | null;
   parent_stage_key?: string | null;
   parent_entry_seq?: number | null;
+  /** P5.5: branch (`inventory_locations`) the request belongs to. */
+  location_id?: number | null;
 }
 
 export interface WorkflowInstanceRuntime {
@@ -154,6 +156,8 @@ export interface StartWorkflowInput {
   title?: string;
   data?: Record<string, unknown>;
   subject?: { type: string; id: number } | null;
+  /** P5.5: branch of the request; must belong to the store. */
+  locationId?: number | null;
   idempotencyKey?: string;
 }
 

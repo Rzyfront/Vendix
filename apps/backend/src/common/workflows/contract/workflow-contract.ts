@@ -1614,6 +1614,11 @@ export interface WorkflowStageDef {
   type: WorkflowStageType;
   description?: string;
   start?: boolean;
+  /**
+   * P5.1: position of the stage on the editor canvas (pixels, 0..20000).
+   * Presentation only: the engine ignores it.
+   */
+  ui?: { x: number; y: number };
   /** End stages only (required there). */
   outcome?: WorkflowEndOutcome;
   assignee?: WorkflowAssigneeDef;
@@ -2186,6 +2191,15 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
         type: { enum: [...WORKFLOW_STAGE_TYPES] },
         description: { type: "string", maxLength: 2000 },
         start: { type: "boolean" },
+        ui: {
+          type: "object",
+          additionalProperties: false,
+          required: ["x", "y"],
+          properties: {
+            x: { type: "number", minimum: 0, maximum: 20000 },
+            y: { type: "number", minimum: 0, maximum: 20000 },
+          },
+        },
         outcome: { enum: [...WORKFLOW_END_OUTCOMES] },
         assignee: { $ref: "#/$defs/assignee" },
         quorum: {

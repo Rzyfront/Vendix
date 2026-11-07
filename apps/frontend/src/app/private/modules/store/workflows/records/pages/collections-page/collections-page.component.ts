@@ -30,8 +30,6 @@ import { RecordsApiService } from '../../services/records-api.service';
         subtitle="Gestiona lo que Vendix no trae: contratos, activos, pólizas, trámites, con sus propios campos"
         icon="folder-open"
         variant="glass"
-        [showBackButton]="true"
-        backRoute="/admin/workflows"
         [actions]="headerActions"
         (actionClicked)="onHeaderAction($event)"
       />

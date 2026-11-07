@@ -189,4 +189,32 @@ describe('WorkflowInstancesService', () => {
       expect(b).toMatchObject({ status: 'completed', tasks: [], pending_requirements: [], allowed_outcomes: [] });
     });
   });
+  describe('sede (P5.5)', () => {
+    beforeEach(() => {
+      kit.db.table('inventory_locations').push(
+        { id: 1, store_id: 1, name: 'Bodega principal', is_active: true },
+        { id: 2, store_id: 2, name: 'Sede ajena', is_active: true },
+      );
+    });
+
+    it('el inicio manual guarda la sede de la tienda y el detalle la muestra', async () => {
+      kit.as({ user_id: 6, permissions: ['store:workflows:task'] });
+      const s = await kit.engine.start({ definitionKey: 'purchase', idempotencyKey: 'loc-1', locationId: 1 });
+      expect(s.instance.location_id).toBe(1);
+      expect((await svc.get(s.instance.id)).location).toEqual({ id: 1, name: 'Bodega principal' });
+    });
+
+    it('sin sede el detalle trae location null', async () => {
+      kit.as({ user_id: 6, permissions: [] });
+      expect((await svc.get(C)).location).toBeNull();
+    });
+
+    it('una sede de otra tienda o inexistente es 404 y no crea la solicitud', async () => {
+      kit.as({ user_id: 6, permissions: ['store:workflows:task'] });
+      const before = kit.db.table('workflow_instances').length;
+      expect(await codeOf(kit.engine.start({ definitionKey: 'purchase', idempotencyKey: 'loc-2', locationId: 2 }))).toBe('WORKFLOW_NOT_FOUND');
+      expect(await codeOf(kit.engine.start({ definitionKey: 'purchase', idempotencyKey: 'loc-3', locationId: 99 }))).toBe('WORKFLOW_NOT_FOUND');
+      expect(kit.db.table('workflow_instances')).toHaveLength(before);
+    });
+  });
 });

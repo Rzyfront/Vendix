@@ -434,6 +434,30 @@ jobs:
           src/domains/store/workflows/engine/workflow-requirements.service.spec.ts
           src/domains/store/workflows/engine/workflow-trigger.events.spec.ts
           src/prisma/services/store-prisma.workflows.spec.ts
+      # Constructor visual y experiencia (Flujos P5): lienzo y contrato, galería
+      # de plantillas, simulador y depurador, probar acción, tablero multi-flujo,
+      # bandeja móvil y actualización en vivo.
+      - name: Jest — constructor visual y experiencia (Flujos P5)
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js --runTestsByPath
+          src/common/workflows/contract/workflow-contract.parity.spec.ts
+          src/common/workflows/contract/workflow-validator.spec.ts
+          src/domains/store/workflows/board/workflow-board.service.spec.ts
+          src/domains/store/workflows/definitions/workflow-action-test.service.spec.ts
+          src/domains/store/workflows/definitions/workflow-definitions.service.spec.ts
+          src/domains/store/workflows/definitions/workflow-simulator.service.spec.ts
+          src/domains/store/workflows/engine/workflow-events.service.spec.ts
+          src/domains/store/workflows/engine/workflow-rules.spec.ts
+          src/domains/store/workflows/engine/workflow-system-start.spec.ts
+          src/domains/store/workflows/inbox/workflow-inbox.service.spec.ts
+          src/domains/store/workflows/instances/workflow-instance-debug.service.spec.ts
+          src/domains/store/workflows/instances/workflow-instances.service.spec.ts
+          src/domains/store/workflows/live/workflow-live.controller.spec.ts
+          src/domains/store/workflows/live/workflow-live.listener.spec.ts
+          src/domains/store/workflows/templates/workflow-templates.catalog.spec.ts
+          src/domains/store/workflows/templates/workflow-templates.service.spec.ts
+          src/domains/store/workflows/workflows.controllers.spec.ts
       # Specs que toca la fase P1 de Flujos (acciones, productores y servicios
       # de dominio gobernados): con más de 25 specs cambiados el job de
       # regresiones los omite, así que corren aquí, de forma explícita.
@@ -557,6 +581,24 @@ jobs:
           --include='**/workflows/pages/inbox-page/inbox-page.component.spec.ts'
           --include='**/workflows/pages/workflows-page/workflows-page.component.spec.ts'
           --include='**/workflows/services/workflows-api.service.spec.ts'
+          --include='**/workflows/components/instance-debugger/instance-debugger.component.spec.ts'
+          --include='**/workflows/components/instance-debugger/instance-debugger.utils.spec.ts'
+          --include='**/workflows/components/new-definition-modal.component.spec.ts'
+          --include='**/workflows/editor/components/action-test/action-test-button.component.spec.ts'
+          --include='**/workflows/editor/components/action-test/action-test.utils.spec.ts'
+          --include='**/workflows/editor/components/canvas/canvas.utils.spec.ts'
+          --include='**/workflows/editor/components/simulator-panel.component.spec.ts'
+          --include='**/workflows/editor/components/variable-picker/variable-picker.utils.spec.ts'
+          --include='**/workflows/editor/workflow-editor.utils.spec.ts'
+          --include='**/workflows/pages/board-all-page/board-all-page.component.spec.ts'
+          --include='**/workflows/pages/board-all-page/board-all.utils.spec.ts'
+          --include='**/workflows/pages/templates-gallery-page/templates-gallery-page.component.spec.ts'
+          --include='**/workflows/pages/templates-gallery-page/templates-gallery.util.spec.ts'
+          --include='**/workflows/services/workflow-board-api.service.spec.ts'
+          --include='**/workflows/services/workflow-debug-api.service.spec.ts'
+          --include='**/workflows/services/workflow-live.service.spec.ts'
+          --include='**/workflows/services/workflow-templates-api.service.spec.ts'
+          --include='**/integrations-page/integrations-page.component.spec.ts'
           --include='**/ecommerce/services/checkout-payment-receipt.spec.ts'
           --include='**/ecommerce/pages/account/order-detail/order-detail.component.spec.ts'
           --include='**/reports/services/reports-data.service.spec.ts'

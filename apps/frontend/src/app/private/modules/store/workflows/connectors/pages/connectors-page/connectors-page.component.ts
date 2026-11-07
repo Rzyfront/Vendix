@@ -1,6 +1,6 @@
 import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router, RouterLink } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import {
   AlertBannerComponent,
   BadgeComponent,
@@ -43,8 +43,6 @@ import {
         subtitle="Lo que tus flujos pueden usar: estado de cada conexión, sus acciones y disparadores"
         icon="plug"
         variant="glass"
-        [actions]="headerActions"
-        (actionClicked)="onHeaderAction($event)"
       />
 
       @if (errorMessage()) {
@@ -158,13 +156,7 @@ import {
 })
 export class ConnectorsPageComponent implements OnInit {
   private readonly api = inject(ConnectorsApiService);
-  private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
-
-  readonly headerActions = [
-    { id: 'back', label: 'Flujos', icon: 'git-branch', variant: 'outline' as const },
-    { id: 'integrations', label: 'Integraciones', icon: 'plug', variant: 'outline' as const },
-  ];
 
   readonly loading = signal(true);
   readonly errorMessage = signal('');
@@ -210,10 +202,5 @@ export class ConnectorsPageComponent implements OnInit {
   openTest(c: ConnectorView): void {
     this.testTarget.set(c);
     this.testOpen.set(true);
-  }
-
-  onHeaderAction(id: string): void {
-    if (id === 'back') this.router.navigate(['/admin/workflows']);
-    if (id === 'integrations') this.router.navigate(['/admin/workflows/integrations']);
   }
 }

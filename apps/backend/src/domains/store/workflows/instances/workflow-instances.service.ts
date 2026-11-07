@@ -274,6 +274,12 @@ export class WorkflowInstancesService {
         take: COMMENTS_IN_DETAIL,
       }),
     ]);
+    const location = instance.location_id
+      ? await this.prisma.inventory_locations.findFirst({
+          where: { id: instance.location_id, store_id: c.store_id },
+          select: { id: true, name: true },
+        })
+      : null;
     const definition = version?.definition as WorkflowDefinitionV1 | undefined;
     const stage = definition ? findStage(definition, instance.current_stage_key) : undefined;
     const active = instance.status === 'active';
@@ -373,6 +379,8 @@ export class WorkflowInstancesService {
       })),
       subject_type: instance.subject_type,
       subject_id: instance.subject_id,
+      // P5.5: branch of the request.
+      location: location ? { id: location.id, name: location.name } : null,
       started_by: {
         type: instance.started_by_type,
         id: instance.started_by_id,

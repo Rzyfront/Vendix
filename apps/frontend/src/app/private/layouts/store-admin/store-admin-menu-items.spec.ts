@@ -299,18 +299,19 @@ describe('STORE_ADMIN menu — Finanzas por etapa del wizard fiscal', () => {
 });
 
 describe('Administración (flujos-documental S6): entradas del sidebar', () => {
-  it('Flujos y Documentos son entradas de primer nivel con su key y su ruta', () => {
+  it('Flujos y Documentos son grupos de primer nivel con su key, su icono y sus hijos (P5.7)', () => {
     const flows = STORE_ADMIN_MENU_ITEMS.find((item) => item.label === 'Flujos');
     const documents = STORE_ADMIN_MENU_ITEMS.find((item) => item.label === 'Documentos');
-    expect(flows).toEqual(
-      jasmine.objectContaining({ route: '/admin/workflows', panelUiKey: 'flows', icon: 'git-branch' }),
-    );
+    expect(flows).toEqual(jasmine.objectContaining({ panelUiKey: 'flows', icon: 'git-branch' }));
     expect(documents).toEqual(
-      jasmine.objectContaining({
-        route: '/admin/documents',
-        panelUiKey: 'documents',
-        icon: 'folder-open',
-      }),
+      jasmine.objectContaining({ panelUiKey: 'documents', icon: 'folder-open' }),
     );
+    // Parents are groups: navigation lives in each child.
+    expect(flows?.route).toBeUndefined();
+    expect(documents?.route).toBeUndefined();
+    expect(flows?.children?.length).toBe(7);
+    expect(documents?.children?.length).toBe(6);
+    expect(flows?.children?.map((child) => child.route)).toContain('/admin/workflows');
+    expect(documents?.children?.map((child) => child.route)).toContain('/admin/documents');
   });
 });

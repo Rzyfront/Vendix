@@ -104,6 +104,14 @@ import { WorkflowInboundReceiverService } from './inbound/workflow-inbound-recei
 import { WorkflowMailboxReceiverService } from './inbound/workflow-mailbox-receiver.service';
 import { WorkflowMailboxService } from './inbound/workflow-mailbox.service';
 import { WORKFLOW_MAILBOX_RECEIVER } from './inbound/workflow-mailbox.types';
+import { WorkflowInstanceDebugController } from './instances/workflow-instance-debug.controller';
+import { WorkflowInstanceDebugService } from './instances/workflow-instance-debug.service';
+import { WorkflowActionTestController } from './definitions/workflow-action-test.controller';
+import { WorkflowActionTestService } from './definitions/workflow-action-test.service';
+import { WorkflowTemplatesController } from './templates/workflow-templates.controller';
+import { WorkflowTemplatesService } from './templates/workflow-templates.service';
+import { WorkflowLiveController } from './live/workflow-live.controller';
+import { WorkflowLiveListener } from './live/workflow-live.listener';
 
 /**
  * Flujos: motor (start / completeTask / claim / transition / cancel / tick),
@@ -159,9 +167,19 @@ import { WORKFLOW_MAILBOX_RECEIVER } from './inbound/workflow-mailbox.types';
     WorkflowSecretsController,
     WorkflowHttpTestController,
     WorkflowConnectorsController,
+    // P5.2: depurador de instancias y "probar esta acción"; P5.4: galería.
+    WorkflowInstanceDebugController,
+    WorkflowActionTestController,
+    WorkflowTemplatesController,
+    // P5.6: actualización en vivo (SSE sobre NOTIFY workflow_live).
+    WorkflowLiveController,
   ],
   providers: [
     WorkGroupsService,
+    WorkflowInstanceDebugService,
+    WorkflowActionTestService,
+    WorkflowTemplatesService,
+    WorkflowLiveListener,
     WorkflowDefinitionsService,
     WorkflowSimulatorService,
     WorkflowMigrationService,

@@ -18,7 +18,6 @@ import {
 } from '../../../../../../shared/components/index';
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
-import { DocumentsTabsComponent } from '../../components/documents-tabs.component';
 import { DossierFilesListComponent } from '../../components/dossier-files-list.component';
 import { toWorkflowError } from '../../../workflows/utils/workflow-errors.util';
 import { DossierDetail, DossierRow } from '../../interfaces/document.interfaces';
@@ -43,7 +42,6 @@ interface DossierView extends DossierRow {
     EmptyStateComponent,
     ModalComponent,
     ButtonComponent,
-    DocumentsTabsComponent,
     DossierFilesListComponent,
   ],
   template: `
@@ -54,7 +52,6 @@ interface DossierView extends DossierRow {
         icon="folder-open"
         variant="glass"
       />
-      <app-documents-tabs active="dossiers" />
 
       <div class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent">
         <app-stats

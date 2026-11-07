@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { WorkflowWebhookEmitter } from '../webhooks/workflow-webhook-emitter.service';
@@ -19,6 +20,12 @@ export interface AppendEventInput {
   actor: WorkflowActor;
   payload?: Record<string, unknown>;
   idempotencyKey?: string | null;
+  /**
+   * Variables to record with the event. By default the instance's current
+   * `data` is read inside `tx`, so callers that append before writing the
+   * data the event records must pass it.
+   */
+  dataSnapshot?: Record<string, unknown>;
 }
 
 export interface EnqueueInput {
@@ -97,6 +104,14 @@ export class WorkflowEventsService {
       orderBy: { seq: 'desc' },
       select: { seq: true },
     });
+    const snapshot = (input.dataSnapshot ??
+      (
+        await tx.workflow_instances.findFirst({
+          where: { id: input.instance_id, store_id: input.store_id },
+          select: { data: true },
+        })
+      )?.data ??
+      null) as Prisma.InputJsonValue | null;
     try {
       return await tx.workflow_instance_events.create({
         data: {
@@ -109,6 +124,7 @@ export class WorkflowEventsService {
           actor_type: input.actor.type,
           actor_id: input.actor.id,
           payload: input.payload ?? {},
+          data_snapshot: snapshot ?? Prisma.DbNull,
           idempotency_key: input.idempotencyKey ?? null,
         },
       });
