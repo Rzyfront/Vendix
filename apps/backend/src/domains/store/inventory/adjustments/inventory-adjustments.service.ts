@@ -232,7 +232,10 @@ export class InventoryAdjustmentsService {
       },
       select: { quantity_on_hand: true },
     });
-    const change = Number(data.quantity_after) - Number(level?.quantity_on_hand ?? 0);
+    // No stock record: the service rejects it on its own, so no request opens
+    // for an adjustment that could never run.
+    if (!level) return { status: 'free' };
+    const change = Number(data.quantity_after) - Number(level.quantity_on_hand);
     const product = await this.prisma.products.findFirst({
       where: { id: data.product_id },
       select: { name: true },

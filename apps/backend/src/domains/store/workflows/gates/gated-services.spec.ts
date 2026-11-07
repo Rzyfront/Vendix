@@ -139,14 +139,12 @@ describe('governed domain services (P1.3)', () => {
     const dto = { amount: 100, payment_method: 'cash' };
     const prisma = {
       accounts_payable: {
-        findFirst: jest
-          .fn()
-          .mockResolvedValue({
-            id: 3,
-            supplier_id: 7,
-            balance: 1000,
-            status: 'open',
-          }),
+        findFirst: jest.fn().mockResolvedValue({
+          id: 3,
+          supplier_id: 7,
+          balance: 1000,
+          status: 'open',
+        }),
       },
       $transaction: tx,
     };
@@ -248,6 +246,27 @@ describe('governed domain services (P1.3)', () => {
     });
   });
 
+  it('an adjustment without a stock record is left to the service (no request for one that cannot run)', async () => {
+    const prisma = {
+      stock_levels: { findFirst: jest.fn().mockResolvedValue(null) },
+      $transaction: jest
+        .fn()
+        .mockRejectedValue(new Error('reached the service')),
+    };
+    const svc = bare(InventoryAdjustmentsService, { prisma });
+    await expect(
+      inStore(() =>
+        svc.createAdjustment({
+          product_id: 9,
+          location_id: 1,
+          quantity_after: 900,
+          type: 'damage',
+        } as never),
+      ),
+    ).rejects.toThrow('reached the service');
+    expect(mockEnforce).not.toHaveBeenCalled();
+  });
+
   it('an initial stock load is not a correction and is never held', async () => {
     const prisma = {
       $transaction: jest.fn().mockRejectedValue(new Error('reached the write')),
@@ -274,13 +293,11 @@ describe('governed domain services (P1.3)', () => {
     };
     const prisma = {
       invoices: {
-        findFirst: jest
-          .fn()
-          .mockResolvedValue({
-            id: 70,
-            invoice_number: 'FV-70',
-            total_amount: 900000,
-          }),
+        findFirst: jest.fn().mockResolvedValue({
+          id: 70,
+          invoice_number: 'FV-70',
+          total_amount: 900000,
+        }),
       },
       users: { findFirst: jest.fn().mockResolvedValue(null) },
     };
@@ -301,27 +318,23 @@ describe('governed domain services (P1.3)', () => {
   it('invoice void (defer): checked after the state and period rules; no write while pending', async () => {
     const prisma = {
       invoices: {
-        findFirst: jest
-          .fn()
-          .mockResolvedValue({
-            id: 70,
-            invoice_number: 'FV-70',
-            total_amount: 900000,
-            invoice_type: 'sales_invoice',
-          }),
+        findFirst: jest.fn().mockResolvedValue({
+          id: 70,
+          invoice_number: 'FV-70',
+          total_amount: 900000,
+          invoice_type: 'sales_invoice',
+        }),
       },
       users: { findFirst: jest.fn().mockResolvedValue(null) },
       $transaction: tx,
     };
     const svc = bare(InvoiceFlowService, {
       prisma,
-      getInvoice: jest
-        .fn()
-        .mockResolvedValue({
-          id: 70,
-          status: 'rejected',
-          invoice_type: 'sales_invoice',
-        }),
+      getInvoice: jest.fn().mockResolvedValue({
+        id: 70,
+        status: 'rejected',
+        invoice_type: 'sales_invoice',
+      }),
       validateTransition: jest.fn(),
       assertFiscalPeriodOpen: jest.fn(),
     });
