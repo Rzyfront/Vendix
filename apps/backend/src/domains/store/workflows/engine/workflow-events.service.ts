@@ -36,6 +36,20 @@ export interface ReplayExpectation {
 }
 
 /** Append-only history (`seq`) and the transactional outbox. */
+/**
+ * With the pg driver adapter a P2002 carries no `meta.target`: the constraint
+ * name comes in `meta.driverAdapterError.cause.constraint`.
+ */
+function isIdempotencyKeyViolation(e: {
+  meta?: {
+    target?: unknown;
+    driverAdapterError?: { cause?: { constraint?: unknown } };
+  };
+}): boolean {
+  const named = [e.meta?.target, e.meta?.driverAdapterError?.cause?.constraint];
+  return JSON.stringify(named).includes('idempotency_key');
+}
+
 @Injectable()
 export class WorkflowEventsService {
   constructor(private readonly webhooks: WorkflowWebhookEmitter) {}
@@ -100,10 +114,7 @@ export class WorkflowEventsService {
       });
     } catch (e: any) {
       if (e?.code === 'P2002') {
-        const target: string[] = Array.isArray(e?.meta?.target)
-          ? e.meta.target
-          : [];
-        if (target.includes('idempotency_key') && input.idempotencyKey) {
+        if (input.idempotencyKey && isIdempotencyKeyViolation(e)) {
           throw new WorkflowIdempotencyConflict(input.idempotencyKey);
         }
         throw new VendixHttpException(ErrorCodes.WORKFLOW_STALE);
