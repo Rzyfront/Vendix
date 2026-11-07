@@ -728,6 +728,7 @@ function checkExternalTriggers(
     : [];
   const start = stages.find((st) => st["start"] === true);
   const subject = isObj(input["subject"]) ? input["subject"] : undefined;
+  const recordDateFields = new Set<string>();
   triggers.forEach((t, index) => {
     if (!isObj(t)) return;
     const kind = t["kind"];
@@ -783,9 +784,19 @@ function checkExternalTriggers(
         `${path}.field`,
         "El disparador por fecha necesita el campo de fecha del registro.",
       );
-    } else if (recordFields) {
-      const f = recordFields.find((rf) => rf.key === t["field"]);
-      if (!f || f.type !== "date") {
+    } else {
+      // One request per record and date: a second trigger on the same field
+      // would never start (same key) nor use its own map.
+      if (recordDateFields.has(t["field"])) {
+        c.err(
+          "TRIGGER_INVALID",
+          `${path}.field`,
+          `Ya hay un disparador por la fecha "${t["field"]}": cada fecha inicia una sola solicitud. Usa otro campo de fecha.`,
+        );
+      }
+      recordDateFields.add(t["field"]);
+      const f = recordFields?.find((rf) => rf.key === t["field"]);
+      if (recordFields && (!f || f.type !== "date")) {
         c.err(
           "TRIGGER_INVALID",
           `${path}.field`,

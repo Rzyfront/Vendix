@@ -85,6 +85,16 @@ describe('P3 validator — record-date trigger and custom subject (P3.6)', () =>
       codes(flow({ subject, triggers: [{ ...trigger, map: { nombre: '{{record.otro}}' } }] }), { collections }),
     ).toContain('TOKEN_UNKNOWN');
   });
+
+  it('rejects a second record-date trigger on the same field (one request per date)', () => {
+    const twice = flow({ subject, triggers: [trigger, { ...trigger, days_before: 7 }] });
+    const errors = validateWorkflowDefinition(twice, { collections }).errors;
+    expect(errors).toEqual([
+      expect.objectContaining({ code: 'TRIGGER_INVALID', path: 'triggers[1].field' }),
+    ]);
+    // Without the store context too.
+    expect(codes(twice)).toEqual(['TRIGGER_INVALID']);
+  });
 });
 
 describe('P3 validator — HTTP node, secrets and output (P3.2)', () => {
