@@ -107,7 +107,8 @@ type CenterView = 'canvas' | 'map' | 'matrix';
         }
 
         <div class="flex flex-col gap-3 lg:flex-row lg:items-start">
-          <app-card [responsive]="true" class="lg:w-72 lg:shrink-0"><app-stage-list /></app-card>
+          <!-- P5.1: the canvas already shows and edits the stages; on wide screens it takes this column too. -->
+          <app-card [responsive]="true" [class]="view() === 'canvas' ? 'lg:hidden' : 'lg:w-72 lg:shrink-0'"><app-stage-list /></app-card>
           <app-card [responsive]="true" class="min-w-0 flex-1">
             <div class="flex flex-col gap-3">
               <app-scrollable-tabs [tabs]="views" [activeTab]="view()" size="sm" ariaLabel="Vista de la ruta" (tabChange)="setView($event)" />

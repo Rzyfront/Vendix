@@ -6,9 +6,11 @@ import {
   CANVAS_MAX,
   CANVAS_NODE_H,
   CANVAS_NODE_W,
+  SLOT_COLUMNS,
   clampPoint,
   computeCanvas,
   connectStages,
+  setTransitionWhen,
   dropPosition,
   edgeId,
   missingPositions,
@@ -98,6 +100,15 @@ describe('canvas.utils', () => {
     expect(Math.abs(second.x - first.x) >= CANVAS_NODE_W || Math.abs(second.y - first.y) >= CANVAS_NODE_H).toBeTrue();
   });
 
+  it('nextFreePosition wraps new steps after SLOT_COLUMNS so they stay in view', () => {
+    const placed: { x: number; y: number }[] = [];
+    for (let i = 0; i < SLOT_COLUMNS + 1; i++) placed.push(nextFreePosition(placed));
+    const maxX = Math.max(...placed.map((p) => p.x));
+    expect(placed[SLOT_COLUMNS].x).toBe(placed[0].x);
+    expect(placed[SLOT_COLUMNS].y).toBeGreaterThan(placed[0].y);
+    expect(maxX + CANVAS_NODE_W).toBeLessThan(800);
+  });
+
   it('nodeAt finds the node under the pointer, topmost first', () => {
     const nodes = computeCanvas(def(stages)).nodes;
     const pedir = nodes[0];
@@ -146,5 +157,33 @@ describe('canvas.utils', () => {
       };
       expect(connectStages(many, 'submit', 'fin')).toBeNull();
     });
+  });
+
+  it('setTransitionWhen moves a branch that gets a condition ahead of the default of its outcome', () => {
+    const when = { all: [{ field: 'monto', op: 'gt' as const, value: 2000000 }] };
+    const transitions = [
+      { on: 'approve', to: 'done' },
+      { on: 'reject', to: 'fin' },
+      { on: 'approve', to: 'gerencia' },
+    ];
+    const out = setTransitionWhen(transitions, 2, when);
+    expect(out.transitions).toEqual([
+      { on: 'approve', to: 'gerencia', when },
+      { on: 'reject', to: 'fin' },
+      { on: 'approve', to: 'done' },
+    ]);
+    expect(out.index).toBe(0);
+  });
+
+  it('setTransitionWhen clearing a condition sends that branch after the conditional ones', () => {
+    const when = { all: [{ field: 'monto', op: 'gt' as const, value: 1 }] };
+    const out = setTransitionWhen(
+      [{ on: 'approve', to: 'a', when }, { on: 'approve', to: 'b', when }],
+      0,
+      undefined,
+    );
+    expect(out.transitions.map((t) => t.to)).toEqual(['b', 'a']);
+    expect(out.index).toBe(1);
+    expect(out.transitions[1].when).toBeUndefined();
   });
 });

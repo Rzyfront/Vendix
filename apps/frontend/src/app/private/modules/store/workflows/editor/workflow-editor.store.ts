@@ -22,6 +22,7 @@ import {
   moveItem,
   tabForIssue,
   uniqueKey,
+  withStagePositions,
 } from './workflow-editor.utils';
 
 /**
@@ -318,7 +319,7 @@ export class WorkflowEditorStore {
   setStagePositions(positions: Record<string, { x: number; y: number }>): void {
     this.commit((d) => ({
       ...d,
-      stages: d.stages.map((s) => (positions[s.key] ? { ...s, ui: positions[s.key] } : s)),
+      stages: withStagePositions(d.stages, positions),
     }));
   }
 

@@ -1,4 +1,13 @@
-import { Component, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  Injector,
+  afterNextRender,
+  computed,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import {
   ButtonComponent,
   DialogService,
@@ -10,7 +19,6 @@ import {
   WorkflowConditionGroup,
   WorkflowStageDef,
   WorkflowStageType,
-  WorkflowTransitionDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
 import { STAGE_TYPE_ICON, STAGE_TYPE_LABEL, outcomeText, removeAt } from '../../workflow-editor.utils';
@@ -26,6 +34,7 @@ import {
   clampPoint,
   computeCanvas,
   connectStages,
+  setTransitionWhen,
   dropPosition,
   edgeId,
   missingPositions,
@@ -269,6 +278,7 @@ export class WorkflowCanvasComponent {
   protected readonly store = inject(WorkflowEditorStore);
   private readonly dialog = inject(DialogService);
   private readonly toast = inject(ToastService);
+  private readonly injector = inject(Injector);
   private readonly surface = viewChild.required<ElementRef<HTMLElement>>('surface');
 
   readonly nodeW = CANVAS_NODE_W;
@@ -376,6 +386,20 @@ export class WorkflowCanvasComponent {
     if (!key) return;
     this.store.setStagePositions({ ...frozen, [key]: position });
     this.selectedEdge.set(null);
+    // A tapped step lands in the next free slot, which may be scrolled out of
+    // a narrow canvas: bring it into view once it is rendered.
+    if (!point) this.revealNode(key);
+  }
+
+  private revealNode(key: string): void {
+    afterNextRender(
+      () => {
+        this.surface()
+          .nativeElement.querySelector<HTMLElement>(`[data-testid="canvas-node-${key}"]`)
+          ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      },
+      { injector: this.injector },
+    );
   }
 
   onDragOver(event: DragEvent): void {
@@ -430,7 +454,7 @@ export class WorkflowCanvasComponent {
     const position = this.dragPos();
     this.drag = null;
     this.dragPos.set(null);
-    if (drag?.moved && position) this.persistPosition(position.key, position);
+    if (drag?.moved && position) this.persistPosition(position.key, { x: position.x, y: position.y });
   }
 
   onNodeKey(event: KeyboardEvent, node: CanvasNode): void {
@@ -553,14 +577,10 @@ export class WorkflowCanvasComponent {
   }
 
   setWhen(stage: WorkflowStageDef, index: number, when: WorkflowConditionGroup | undefined): void {
-    this.store.updateStage(stage.key, (s) => ({
-      ...s,
-      transitions: (s.transitions ?? []).map((t, i) => {
-        if (i !== index) return t;
-        const { when: _previous, ...rest } = t;
-        return (when ? { ...rest, when } : rest) as WorkflowTransitionDef;
-      }),
-    }));
+    const next = setTransitionWhen(stage.transitions ?? [], index, when);
+    this.store.updateStage(stage.key, (s) => ({ ...s, transitions: next.transitions }));
+    // The conditional branch moves ahead of the default: keep it selected.
+    this.selectedEdge.set(edgeId(stage.key, next.index));
   }
 
   removeEdge(stage: WorkflowStageDef, index: number): void {

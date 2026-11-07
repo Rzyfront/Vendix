@@ -4,6 +4,7 @@ import {
   WORKFLOW_STAGE_TYPES,
   WorkflowDefinitionV1,
   WorkflowStageDef,
+  WorkflowConditionGroup,
   WorkflowStageType,
   WorkflowTransitionDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
@@ -26,7 +27,8 @@ const CANVAS_MIN_H = 520;
 const CANVAS_MARGIN = 160;
 const SLOT_GAP_X = 56;
 const SLOT_GAP_Y = 40;
-const SLOT_COLUMNS = 5;
+/** New steps wrap after 3 columns so they land inside the visible canvas. */
+export const SLOT_COLUMNS = 3;
 const SLOT_START = 32;
 
 /** Icon bubble and left bar classes of each stage type (theme tokens only). */
@@ -267,6 +269,33 @@ export function nodeAt(nodes: readonly CanvasNode[], point: CanvasPoint): Canvas
 /** Outcomes a stage of `type` can be connected with (none for `end`). */
 export function outcomesOf(type: WorkflowStageType): readonly string[] {
   return STAGE_OUTCOMES[type] ?? [];
+}
+
+/**
+ * Sets (or clears) the condition of one transition and keeps the stage valid:
+ * among the transitions of the same outcome, the conditional ones stay in their
+ * order and the default (no condition) goes last, as the validator requires.
+ * Returns the new list and the new index of the edited transition.
+ */
+export function setTransitionWhen(
+  transitions: readonly WorkflowTransitionDef[],
+  index: number,
+  when: WorkflowConditionGroup | undefined,
+): { transitions: WorkflowTransitionDef[]; index: number } {
+  const edited = transitions.map((t, i) => {
+    if (i !== index) return t;
+    const { when: _previous, ...rest } = t;
+    return (when ? { ...rest, when } : rest) as WorkflowTransitionDef;
+  });
+  const target = edited[index];
+  if (!target) return { transitions: edited, index };
+  const slots = edited.map((t, i) => ({ t, i })).filter((o) => o.t.on === target.on);
+  const ordered = [...slots.filter((o) => o.t.when), ...slots.filter((o) => !o.t.when)];
+  const result = [...edited];
+  slots.forEach((slot, k) => {
+    result[slot.i] = ordered[k].t;
+  });
+  return { transitions: result, index: slots[ordered.findIndex((o) => o.i === index)].i };
 }
 
 /**

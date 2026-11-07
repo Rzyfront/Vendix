@@ -1,5 +1,13 @@
 import { WorkflowFieldDef, WorkflowStageDef } from '../../../../../shared/workflows/contract/workflow-contract';
-import { conditionFieldOptions, describeWait, retypeStage, tabForIssue, tabsForStage } from './workflow-editor.utils';
+import { validateWorkflowDefinition } from '../../../../../shared/workflows/contract/workflow-validator';
+import {
+  conditionFieldOptions,
+  describeWait,
+  retypeStage,
+  tabForIssue,
+  tabsForStage,
+  withStagePositions,
+} from './workflow-editor.utils';
 
 const fields: WorkflowFieldDef[] = [{ key: 'monto', type: 'money', label: 'Monto' }];
 
@@ -80,5 +88,26 @@ describe('workflow-editor.utils — selector de campos de la condición (P5.3)',
   it('omite el grupo que no tiene campos', () => {
     expect(conditionFieldOptions([])).toEqual([]);
     expect(conditionFieldOptions([{ key: 'a', type: 'text', label: 'A' }]).length).toBe(2);
+  });
+});
+
+describe('workflow-editor.utils — posiciones del lienzo (P5.1)', () => {
+  const stages: WorkflowStageDef[] = [
+    { key: 'a', name: 'A', type: 'form', start: true, assignee: { kind: 'initiator' }, transitions: [{ on: 'submit', to: 'b' }] },
+    { key: 'b', name: 'B', type: 'end', outcome: 'completed' },
+  ];
+
+  it('guarda solo x e y en ui, aunque la posición traiga otras claves (arrastre de un paso)', () => {
+    const dragged = { key: 'a', x: 232, y: 256 };
+    const out = withStagePositions(stages, { a: dragged });
+    expect(out[0].ui).toEqual({ x: 232, y: 256 });
+    expect(out[1]).toBe(stages[1]);
+    expect(validateWorkflowDefinition({
+      schema: 'vendix.workflow/v1',
+      key: 'k',
+      name: 'K',
+      fields: [],
+      stages: out,
+    }).valid).toBeTrue();
   });
 });

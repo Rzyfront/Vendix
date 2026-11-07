@@ -569,3 +569,18 @@ export function describeWait(wait: WorkflowWaitDef | undefined, fields: Workflow
       return `Espera hasta el próximo día ${wait.day} del mes${atTime(wait.time)}`;
   }
 }
+
+/**
+ * Stages with the given canvas positions applied. Only `x` and `y` are stored:
+ * `ui` is a closed object in the contract, so any other key (a node key, a
+ * drag offset) would make the draft fail validation.
+ */
+export function withStagePositions(
+  stages: readonly WorkflowStageDef[],
+  positions: Readonly<Record<string, { x: number; y: number }>>,
+): WorkflowStageDef[] {
+  return stages.map((s) => {
+    const p = positions[s.key];
+    return p ? { ...s, ui: { x: p.x, y: p.y } } : s;
+  });
+}
