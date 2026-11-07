@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { recordTriggerEvent } from '../../store/workflows/engine/workflow-trigger.outbox';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { CreatePqrPublicDto } from './dto/create-pqr-public.dto';
@@ -182,30 +183,47 @@ export class PqrService {
     const inferredLastName =
       nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
 
-    const ticket = await this.globalPrisma.support_tickets.create({
-      data: {
-        ticket_number: ticketNumber,
-        organization_id: owningOrgId,
-        store_id: dto.store_id ?? null,
-        created_by_user_id: anonUser.id,
-        title: dto.subject,
-        description,
-        category,
-        // Use the requester's urgency hint when present (validated to
-        // P1-P4 by the DTO), otherwise default to P3 (medium).
-        priority: dto.priority ?? ticket_priority_enum.P3,
-        status: ticket_status_enum.NEW,
-        source_channel: 'public_form',
-        tags: ['pqr', dto.pqr_type.toLowerCase(), `ip:${ip}`],
-        // Structured requester fields (preferred path)
-        requester_first_name: dto.requester_first_name ?? inferredFirstName,
-        requester_last_name: dto.requester_last_name ?? inferredLastName,
-        requester_email: dto.requester_email ?? dto.email,
-        requester_phone: dto.requester_phone ?? dto.phone ?? null,
-        requester_document_type: dto.requester_document_type ?? null,
-        requester_document_num: dto.requester_document_num ?? null,
-      },
-    });
+    const createTicket = async (tx: Prisma.TransactionClient) => {
+      const created = await tx.support_tickets.create({
+          data: {
+            ticket_number: ticketNumber,
+            organization_id: owningOrgId,
+            store_id: dto.store_id ?? null,
+            created_by_user_id: anonUser.id,
+            title: dto.subject,
+            description,
+            category,
+            // Use the requester's urgency hint when present (validated to
+            // P1-P4 by the DTO), otherwise default to P3 (medium).
+            priority: dto.priority ?? ticket_priority_enum.P3,
+            status: ticket_status_enum.NEW,
+            source_channel: 'public_form',
+            tags: ['pqr', dto.pqr_type.toLowerCase(), `ip:${ip}`],
+            // Structured requester fields (preferred path)
+            requester_first_name: dto.requester_first_name ?? inferredFirstName,
+            requester_last_name: dto.requester_last_name ?? inferredLastName,
+            requester_email: dto.requester_email ?? dto.email,
+            requester_phone: dto.requester_phone ?? dto.phone ?? null,
+            requester_document_type: dto.requester_document_type ?? null,
+            requester_document_num: dto.requester_document_num ?? null,
+          },
+        });
+      // Platform PQRs carry no store: the helper ignores them.
+      await recordTriggerEvent(tx, 'pqr.created', {
+        ticket: {
+          id: created.id,
+          ticket_number: created.ticket_number,
+          title: created.title,
+          description: created.description,
+          category: created.category,
+          store_id: created.store_id,
+        },
+        contact: { name: dto.name, email: dto.email },
+      });
+      return created;
+    };
+    const ticket: Awaited<ReturnType<typeof createTicket>> =
+      await this.globalPrisma.$transaction(createTicket);
     this.logger.log(
       `PQR created: ${ticket.ticket_number} (${dto.pqr_type}) from ${dto.email}`,
     );

@@ -3,6 +3,11 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { VendixHttpException } from '../../../common/errors';
 import * as bcrypt from 'bcrypt';
 
+// The durable outbox write has its own spec (workflow-trigger.fanout.spec.ts).
+jest.mock('../workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
+
 /**
  * `resolveInlineCustomer` — alta del cliente capturado en línea en
  * Facturas → Nueva factura (incidente Tecnicell: cliente NIT nuevo → 500).
@@ -13,6 +18,9 @@ import * as bcrypt from 'bcrypt';
  */
 describe('CustomersService.resolveInlineCustomer', () => {
   const prisma = {
+    withoutScope: () => ({
+      $transaction: (cb: (tx: unknown) => unknown) => cb(prisma),
+    }),
     stores: { findUnique: jest.fn() },
     users: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
     roles: { findFirst: jest.fn() },

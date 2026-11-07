@@ -6,12 +6,20 @@ import { RequestContextService } from '../../../common/context/request-context.s
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { ticket_priority_enum, ticket_status_enum } from '@prisma/client';
 
+// The durable outbox write has its own spec (workflow-trigger.fanout.spec.ts).
+jest.mock('../../store/workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
+
 describe('PqrService — QUI-791 multi-tenant PQR flow', () => {
   let service: PqrService;
   let prisma: GlobalPrismaService;
   let eventEmitter: EventEmitter2;
 
   const mockGlobalPrisma = {
+    $transaction: jest.fn(async (cb: (tx: unknown) => unknown) =>
+      cb(mockGlobalPrisma),
+    ),
     stores: {
       findUnique: jest.fn(),
     },

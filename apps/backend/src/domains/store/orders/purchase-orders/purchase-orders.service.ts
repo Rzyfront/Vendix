@@ -29,6 +29,7 @@ import {
   tax_type_enum,
   Prisma,
 } from '@prisma/client';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
@@ -5176,6 +5177,26 @@ export class PurchaseOrdersService {
           (sum, i) => sum + i.quantity_ordered * Number(i.unit_cost || 0),
           0,
         );
+
+        // The exact accounting batch is worked out after the commit; this is the
+        // received value of the batch with its share of prorated freight.
+        await recordTriggerEvent(tx, 'purchase_order.received', {
+          store_id:
+            updated_po.location?.store_id ?? RequestContextService.getStoreId(),
+          purchase_order_id: updated_po.id,
+          reception_id: reception.id,
+          supplier_id: updated_po.supplier_id,
+          total_amount:
+            Math.round(
+              (receivedBatchSubtotal +
+                Number(receivedBatchCapitalized ?? 0) +
+                (freightProrated && orderSubtotal > 0
+                  ? (receivedBatchSubtotal / orderSubtotal) *
+                    Number(updated_po.shipping_cost ?? 0)
+                  : 0)) *
+                100,
+            ) / 100,
+        });
 
         return {
           updated_po,

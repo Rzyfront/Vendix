@@ -11,6 +11,7 @@ describe('WorkflowOutboxDispatcher · webhook / start_instance / action', () => 
   const engine = { tick: jest.fn(), startSystem: jest.fn() };
   const webhooks = { deliver: jest.fn() };
   const actions = { execute: jest.fn(), recordFailure: jest.fn() };
+  const fanout = { fanOut: jest.fn() };
   const MIN = 60_000;
   const row = () => db.table('workflow_outbox')[0];
   const enqueue = (
@@ -43,6 +44,7 @@ describe('WorkflowOutboxDispatcher · webhook / start_instance / action', () => 
       {} as any,
       webhooks as any,
       actions as any,
+      fanout as any,
     );
   });
 

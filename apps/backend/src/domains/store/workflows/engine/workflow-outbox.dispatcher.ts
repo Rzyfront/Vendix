@@ -16,6 +16,11 @@ import { WorkflowActionsExecutor } from './workflow-actions.executor';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import { WorkflowEmailService } from './workflow-email.service';
 import { WorkflowEngineService } from './workflow-engine.service';
+import { WorkflowTriggerFanout } from './workflow-trigger.fanout';
+import {
+  BUSINESS_EVENT_OUTBOX_KIND,
+  BusinessEventOutboxPayload,
+} from './workflow-trigger.outbox';
 import {
   WorkflowInstanceRow,
   WorkflowNonRetryableError,
@@ -70,6 +75,7 @@ export class WorkflowOutboxDispatcher {
     private readonly mailer: WorkflowEmailService,
     private readonly webhooks: WorkflowWebhookDeliveryService,
     private readonly actions: WorkflowActionsExecutor,
+    private readonly fanout: WorkflowTriggerFanout,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -304,6 +310,11 @@ export class WorkflowOutboxDispatcher {
           await this.notify(row);
         } else if (row.kind === 'webhook') {
           await this.webhooks.deliver(row);
+        } else if (row.kind === BUSINESS_EVENT_OUTBOX_KIND) {
+          await this.fanout.fanOut(
+            row.store_id,
+            row.payload as BusinessEventOutboxPayload,
+          );
         } else if (row.kind === 'start_instance') {
           await this.startFromEvent(row);
         } else if (row.kind === 'action') {

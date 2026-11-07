@@ -20,6 +20,11 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
 import { VatResponsibilityService } from '@common/helpers/vat-responsibility.helper';
 
+// The durable outbox write has its own spec (workflow-trigger.fanout.spec.ts).
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
+
 /**
  * Step 5 — PurchaseOrdersService.receive() unit tests.
  *

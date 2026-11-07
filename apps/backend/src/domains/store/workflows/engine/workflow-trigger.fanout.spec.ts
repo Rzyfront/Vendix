@@ -9,7 +9,13 @@ import {
   extractTriggerEvent,
   triggerIdempotencyKey,
 } from './workflow-trigger.events';
-import { WorkflowTriggerListener } from './workflow-trigger.listener';
+import { WorkflowOutboxDispatcher } from './workflow-outbox.dispatcher';
+import { WorkflowTriggerFanout } from './workflow-trigger.fanout';
+import {
+  BUSINESS_EVENT_OUTBOX_KIND,
+  BusinessEventOutboxPayload,
+  recordTriggerEvent,
+} from './workflow-trigger.outbox';
 
 const onOrderCreated = (
   over: Partial<WorkflowDefinitionV1> = {},
@@ -147,24 +153,131 @@ describe('extractTriggerEvent', () => {
   });
 });
 
-describe('WorkflowTriggerListener', () => {
+/** The row the domain transaction writes, as the dispatcher hands it over. */
+const businessEvent = (
+  event: string,
+  raw: unknown,
+): { storeId: number; row: BusinessEventOutboxPayload } => {
+  const info = extractTriggerEvent(event, raw)!;
+  return {
+    storeId: info.store_id,
+    row: {
+      event: event as BusinessEventOutboxPayload['event'],
+      business_id: info.business_id,
+      context: info.context,
+    },
+  };
+};
+
+const orderPayload = {
+  store_id: 1,
+  order_id: 9,
+  order_number: 'ORD-9',
+  grand_total: 2500,
+  currency: 'COP',
+  channel: 'pos',
+};
+
+describe('recordTriggerEvent', () => {
   let kit: ReturnType<typeof buildWorkflowKit>;
-  let listener: WorkflowTriggerListener;
+  const rows = () =>
+    kit.db
+      .table('workflow_outbox')
+      .filter((o) => o.kind === BUSINESS_EVENT_OUTBOX_KIND);
+
+  beforeEach(() => {
+    kit = buildWorkflowKit();
+    seedPeople(kit.db);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('escribe una fila con el hecho de negocio y su contexto cerrado, usando el cliente que recibe', async () => {
+    seedDefinition(kit.db, asRoleStart(onOrderCreated()));
+    const tx = kit.prisma.withoutScope();
+    await expect(
+      recordTriggerEvent(tx as any, 'order.created', {
+        ...orderPayload,
+        password: 'x',
+      }),
+    ).resolves.toBe(true);
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toMatchObject({
+      store_id: 1,
+      instance_id: null,
+      status: 'pending',
+      payload: {
+        event: 'order.created',
+        business_id: '9',
+        context: {
+          order_id: 9,
+          order_number: 'ORD-9',
+          grand_total: 2500,
+          currency: 'COP',
+          channel: 'pos',
+        },
+      },
+    });
+    expect(JSON.stringify(rows()[0].payload)).not.toContain('password');
+  });
+
+  it('una tienda sin flujos activos no escribe nada', async () => {
+    seedDefinition(kit.db, asRoleStart(onOrderCreated()), 2);
+    await expect(
+      recordTriggerEvent(
+        kit.prisma.withoutScope() as any,
+        'order.created',
+        orderPayload,
+      ),
+    ).resolves.toBe(false);
+    expect(rows()).toHaveLength(0);
+  });
+
+  it('lo que no tiene tienda (PQR de plataforma) ni id no toca la base', async () => {
+    const tx = {
+      workflow_definitions: { findFirst: jest.fn() },
+      workflow_outbox: { create: jest.fn() },
+    };
+    await expect(
+      recordTriggerEvent(tx, 'pqr.created', {
+        ticket: { id: 1, store_id: null },
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      recordTriggerEvent(tx, 'order.created', { order_id: 1 }),
+    ).resolves.toBe(false);
+    expect(tx.workflow_definitions.findFirst).not.toHaveBeenCalled();
+    expect(tx.workflow_outbox.create).not.toHaveBeenCalled();
+  });
+
+  it('un error de base llega a la transacción del dominio para que aborte junta', async () => {
+    const tx = {
+      workflow_definitions: {
+        findFirst: jest.fn().mockResolvedValue({ id: 1 }),
+      },
+      workflow_outbox: {
+        create: jest.fn().mockRejectedValue(new Error('db down')),
+      },
+    };
+    await expect(
+      recordTriggerEvent(tx, 'order.created', orderPayload),
+    ).rejects.toThrow('db down');
+  });
+});
+
+describe('WorkflowTriggerFanout', () => {
+  let kit: ReturnType<typeof buildWorkflowKit>;
+  let fanout: WorkflowTriggerFanout;
   const outbox = () =>
     kit.db.table('workflow_outbox').filter((o) => o.kind === 'start_instance');
-  const payload = {
-    store_id: 1,
-    order_id: 9,
-    order_number: 'ORD-9',
-    grand_total: 2500,
-    currency: 'COP',
-    channel: 'pos',
+  const fan = (raw: unknown = orderPayload, event = 'order.created') => {
+    const { storeId, row } = businessEvent(event, raw);
+    return fanout.fanOut(storeId, row);
   };
 
   beforeEach(() => {
     kit = buildWorkflowKit();
     seedPeople(kit.db);
-    listener = new WorkflowTriggerListener(kit.prisma);
+    fanout = new WorkflowTriggerFanout(kit.prisma);
   });
   afterEach(() => jest.restoreAllMocks());
 
@@ -173,7 +286,7 @@ describe('WorkflowTriggerListener', () => {
       kit.db,
       asRoleStart(onOrderCreated()),
     );
-    expect(await listener.handle('order.created', payload)).toBe(1);
+    expect(await fan()).toBe(1);
     expect(outbox()).toHaveLength(1);
     expect(outbox()[0]).toMatchObject({
       store_id: 1,
@@ -196,17 +309,15 @@ describe('WorkflowTriggerListener', () => {
         },
       },
     });
-    // Solo escribe en el outbox: no crea instancias en el hilo del emisor.
     expect(kit.db.table('workflow_instances')).toHaveLength(0);
   });
 
   it('el mismo evento dos veces no duplica la fila (idempotente)', async () => {
     seedDefinition(kit.db, asRoleStart(onOrderCreated()));
-    await listener.handle('order.created', payload);
-    await listener.handle('order.created', payload);
+    await fan();
+    await fan();
     expect(outbox()).toHaveLength(1);
-    // Otro pedido sí genera otra.
-    await listener.handle('order.created', { ...payload, order_id: 10 });
+    await fan({ ...orderPayload, order_id: 10 });
     expect(outbox()).toHaveLength(2);
   });
 
@@ -245,7 +356,7 @@ describe('WorkflowTriggerListener', () => {
       .table('workflow_definitions')
       .find((d) => d.id === draft.definitionId)!.published_version_id = null;
 
-    expect(await listener.handle('order.created', payload)).toBe(0);
+    expect(await fan()).toBe(0);
     expect(outbox()).toHaveLength(0);
   });
 
@@ -256,7 +367,8 @@ describe('WorkflowTriggerListener', () => {
       asRoleStart(onOrderCreated({ key: 'theirs' })),
       2,
     );
-    await listener.handle('order.created', { ...payload, store_id: 2 });
+    kit.as({ store_id: 2 }); // el despachador corre bajo la tienda de la fila
+    await fan({ ...orderPayload, store_id: 2 });
     expect(outbox()).toHaveLength(1);
     expect(outbox()[0]).toMatchObject({
       store_id: 2,
@@ -267,46 +379,82 @@ describe('WorkflowTriggerListener', () => {
   it('varias definiciones con el mismo evento: una fila por definición', async () => {
     seedDefinition(kit.db, asRoleStart(onOrderCreated({ key: 'a' })));
     seedDefinition(kit.db, asRoleStart(onOrderCreated({ key: 'b' })));
-    expect(await listener.handle('order.created', payload)).toBe(2);
+    expect(await fan()).toBe(2);
   });
 
-  it('nunca lanza hacia el emisor: payload basura, evento ajeno o base caída', async () => {
-    await expect(listener.handle('order.created', undefined)).resolves.toBe(0);
-    await expect(
-      listener.handle('order.created', { store_id: 'x' }),
-    ).resolves.toBe(0);
-    await expect(listener.handle('nope', payload)).resolves.toBe(0);
-
+  it('un pedido cancelado antes del despacho (compensación del checkout) no arranca flujo', async () => {
     seedDefinition(kit.db, asRoleStart(onOrderCreated()));
-    const broken = new WorkflowTriggerListener({
+    kit.db.table('orders').push({ id: 9, store_id: 1, state: 'cancelled' });
+    expect(await fan()).toBe(0);
+    expect(outbox()).toHaveLength(0);
+    kit.db.table('orders').push({ id: 10, store_id: 1, state: 'created' });
+    expect(await fan({ ...orderPayload, order_id: 10 })).toBe(1);
+  });
+
+  it('un fallo de base se propaga para que el outbox reintente, en vez de perder el evento', async () => {
+    const broken = new WorkflowTriggerFanout({
       withoutScope: () => {
         throw new Error('db down');
       },
     } as any);
-    await expect(broken.handle('order.created', payload)).resolves.toBe(0);
-    await expect(broken.onOrderCreated(payload)).resolves.toBe(0);
+    const { storeId, row } = businessEvent('order.created', orderPayload);
+    await expect(broken.fanOut(storeId, row)).rejects.toThrow('db down');
   });
+});
 
-  it('los 6 @OnEvent delegan en handle con su nombre de evento', async () => {
-    const spy = jest.spyOn(listener, 'handle').mockResolvedValue(0);
-    await listener.onOrderCreated(1);
-    await listener.onOrderPaid(2);
-    await listener.onPurchaseOrderReceived(3);
-    await listener.onExpenseApproved(4);
-    await listener.onCustomerCreated(5);
-    await listener.onPqrCreated(6);
-    expect(spy.mock.calls.map((c) => c[0])).toEqual([
-      'order.created',
-      'order.paid',
-      'purchase_order.received',
-      'expense.approved',
-      'customer.created',
-      'pqr.created',
-    ]);
-    const meta = Reflect.getMetadata(
-      'EVENT_LISTENER_METADATA',
-      WorkflowTriggerListener.prototype.onOrderCreated,
+describe('disparador durable de punta a punta (P0.2)', () => {
+  let kit: ReturnType<typeof buildWorkflowKit>;
+  const restart = () =>
+    new WorkflowOutboxDispatcher(
+      kit.db.asStorePrisma(),
+      kit.engine,
+      {} as any,
+      { sendToUser: jest.fn() } as any,
+      { send: jest.fn().mockResolvedValue('sent') } as any,
+      {} as any,
+      {} as any,
+      new WorkflowTriggerFanout(kit.db.asStorePrisma()),
     );
-    expect(JSON.stringify(meta)).toContain('order.created');
+  const started = () =>
+    kit.db
+      .table('workflow_instances')
+      .filter((i) => i.started_by_type === 'system');
+
+  beforeEach(() => {
+    kit = buildWorkflowKit();
+    seedPeople(kit.db);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('el proceso cae tras el commit: al volver, el flujo se inicia una sola vez', async () => {
+    seedDefinition(kit.db, asRoleStart(onOrderCreated()));
+    // Commit del dominio y caída: solo sobrevive lo que escribió la transacción.
+    await recordTriggerEvent(
+      kit.prisma.withoutScope() as any,
+      'order.created',
+      orderPayload,
+    );
+    expect(started()).toHaveLength(0);
+
+    const worker = restart();
+    await worker.dispatchBatch(); // business_event → start_instance
+    await worker.dispatchBatch(); // start_instance → solicitud
+    expect(started()).toHaveLength(1);
+
+    // El mismo hecho otra vez (reintento, doble emisión) no crea otra solicitud.
+    await recordTriggerEvent(
+      kit.prisma.withoutScope() as any,
+      'order.created',
+      orderPayload,
+    );
+    const again = restart();
+    await again.dispatchBatch();
+    await again.dispatchBatch();
+    expect(started()).toHaveLength(1);
+    expect(
+      kit.db.table('workflow_outbox').filter((o) => o.kind === 'business_event'),
+    ).toEqual(
+      expect.arrayContaining([expect.objectContaining({ status: 'done' })]),
+    );
   });
 });

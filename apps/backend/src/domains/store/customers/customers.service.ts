@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import {
+  Prisma,
   address_type_enum,
   user_state_enum,
   persona_type_enum,
@@ -10,6 +11,7 @@ import {
 // `persona_type_enum` — the DTO does not export it, so it is redeclared here.
 type PersonaType = (typeof persona_type_enum)[keyof typeof persona_type_enum];
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { ResolveCustomerDto } from './dto/resolve-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
@@ -546,15 +548,17 @@ export class CustomersService {
       };
       try {
         const username = await this.generateUniqueUsername(normalizedEmail);
-        user = await this.prisma.users.create({
-          data: buildUserData(username),
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            email: true,
-          },
-        });
+        user = await this.createWithTrigger(store.id, normalizedEmail, (tx) =>
+          tx.users.create({
+            data: buildUserData(username),
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          }),
+        );
       } catch (error: any) {
         const isUsernameConflict =
           error?.code === 'P2002' &&
@@ -565,15 +569,17 @@ export class CustomersService {
 
         const retryUsername =
           await this.generateUniqueUsername(normalizedEmail);
-        user = await this.prisma.users.create({
-          data: buildUserData(retryUsername),
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            email: true,
-          },
-        });
+        user = await this.createWithTrigger(store.id, normalizedEmail, (tx) =>
+          tx.users.create({
+            data: buildUserData(retryUsername),
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          }),
+        );
       }
 
       this.eventEmitter.emit('customer.created', {
@@ -1212,10 +1218,12 @@ export class CustomersService {
     let user: { id: number; first_name: string; last_name: string | null };
     try {
       const username = await this.generateUniqueUsername(usernameSeed);
-      user = await this.prisma.users.create({
-        data: buildUserData(username),
-        select: { id: true, first_name: true, last_name: true },
-      });
+      user = await this.createWithTrigger(store.id, normalizedEmail, (tx) =>
+        tx.users.create({
+          data: buildUserData(username),
+          select: { id: true, first_name: true, last_name: true },
+        }),
+      );
     } catch (error: any) {
       const isUsernameConflict =
         error?.code === 'P2002' &&
@@ -1225,10 +1233,12 @@ export class CustomersService {
       if (!isUsernameConflict) throw error;
 
       const retryUsername = await this.generateUniqueUsername(usernameSeed);
-      user = await this.prisma.users.create({
-        data: buildUserData(retryUsername),
-        select: { id: true, first_name: true, last_name: true },
-      });
+      user = await this.createWithTrigger(store.id, normalizedEmail, (tx) =>
+        tx.users.create({
+          data: buildUserData(retryUsername),
+          select: { id: true, first_name: true, last_name: true },
+        }),
+      );
     }
 
     this.eventEmitter.emit('customer.created', {
@@ -1618,63 +1628,65 @@ export class CustomersService {
     }
 
     // Create user
-    const user = await this.prisma.users.create({
-      data: {
-        email: effectiveEmail,
-        password: hashedPassword,
-        first_name: formatted_first_name ?? '',
-        last_name: formatted_last_name ?? '',
-        legal_name: formatted_legal_name,
-        phone: this.normalizeOptionalString(dto.phone),
-        document_type: finalDocumentType as any,
-        document_number: finalDocumentNumber,
-        verification_digit: finalVerificationDigit,
-        tax_regime: this.normalizeOptionalString(dto.tax_regime) as any,
-        person_type: this.normalizeOptionalString(derivedPersonType) as any,
-        fiscal_responsibilities: dto.fiscal_responsibilities ?? [],
-        ciiu_code:
-          dto.ciiu_code !== undefined
-            ? this.normalizeOptionalString(dto.ciiu_code)
-            : null,
-        ...(dto.is_withholding_agent != null
-          ? { is_withholding_agent: dto.is_withholding_agent }
-          : {}),
-        username: username,
-        email_verified: false,
-        organizations: { connect: { id: store.organization_id } },
-        user_roles: {
-          create: {
-            role_id: customerRole.id,
-          },
-        },
-        store_users: {
-          create: {
-            store_id: store.id,
-            ...(priceTierId != null ? { price_tier_id: priceTierId } : {}),
-          },
-        },
-        user_settings: {
-          create: {
-            app_type: 'STORE_ECOMMERCE',
-            config: {
-              panel_ui: {
-                profile: true,
-                history: true,
-                dashboard: true,
-                favorites: true,
-                orders: true,
-                settings: true,
+    const user = await this.createWithTrigger(store.id, effectiveEmail, (tx) =>
+      tx.users.create({
+          data: {
+            email: effectiveEmail,
+            password: hashedPassword,
+            first_name: formatted_first_name ?? '',
+            last_name: formatted_last_name ?? '',
+            legal_name: formatted_legal_name,
+            phone: this.normalizeOptionalString(dto.phone),
+            document_type: finalDocumentType as any,
+            document_number: finalDocumentNumber,
+            verification_digit: finalVerificationDigit,
+            tax_regime: this.normalizeOptionalString(dto.tax_regime) as any,
+            person_type: this.normalizeOptionalString(derivedPersonType) as any,
+            fiscal_responsibilities: dto.fiscal_responsibilities ?? [],
+            ciiu_code:
+              dto.ciiu_code !== undefined
+                ? this.normalizeOptionalString(dto.ciiu_code)
+                : null,
+            ...(dto.is_withholding_agent != null
+              ? { is_withholding_agent: dto.is_withholding_agent }
+              : {}),
+            username: username,
+            email_verified: false,
+            organizations: { connect: { id: store.organization_id } },
+            user_roles: {
+              create: {
+                role_id: customerRole.id,
+              },
+            },
+            store_users: {
+              create: {
+                store_id: store.id,
+                ...(priceTierId != null ? { price_tier_id: priceTierId } : {}),
+              },
+            },
+            user_settings: {
+              create: {
+                app_type: 'STORE_ECOMMERCE',
+                config: {
+                  panel_ui: {
+                    profile: true,
+                    history: true,
+                    dashboard: true,
+                    favorites: true,
+                    orders: true,
+                    settings: true,
+                  },
+                },
               },
             },
           },
-        },
-      },
-      omit: CUSTOMER_PRIVATE_COLUMNS,
-      include: {
-        user_roles: true,
-        store_users: true,
-      },
-    });
+          omit: CUSTOMER_PRIVATE_COLUMNS,
+          include: {
+            user_roles: true,
+            store_users: true,
+          },
+        }),
+    );
 
     this.eventEmitter.emit('customer.created', {
       store_id: store.id,
@@ -1685,6 +1697,33 @@ export class CustomersService {
     });
 
     return user;
+  }
+
+  /**
+   * Creates the customer and its `customer.created` workflow trigger in one
+   * transaction. Unscoped client: `users` is not a store-scoped model and the
+   * store is explicit.
+   */
+  private createWithTrigger<
+    T extends { id: number; first_name: string; last_name: string | null },
+  >(
+    storeId: number,
+    email: string | null | undefined,
+    create: (tx: Prisma.TransactionClient) => Promise<T>,
+  ): Promise<T> {
+    return this.prisma
+      .withoutScope()
+      .$transaction(async (tx: Prisma.TransactionClient) => {
+        const user = await create(tx);
+        await recordTriggerEvent(tx, 'customer.created', {
+          store_id: storeId,
+          customer_id: user.id,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          email: email ?? null,
+        });
+        return user;
+      });
   }
 
   async findAll(

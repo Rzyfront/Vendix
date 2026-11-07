@@ -42,7 +42,8 @@ import {
 import { CustomersService } from '../store/customers/customers.service';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { organizations } from '@prisma/client';
+import { Prisma, organizations } from '@prisma/client';
+import { recordTriggerEvent } from '../store/workflows/engine/workflow-trigger.outbox';
 import { mergeStoreSettingsWithDefaults } from '../store/settings/defaults/default-store-settings';
 
 /**
@@ -1183,12 +1184,24 @@ export class AuthService {
     });
 
     // Asociar al usuario con la tienda mediante store_users
-    await this.prismaService.store_users.create({
-      data: {
-        store_id: store.id,
-        user_id: user.id,
+    // The customer belongs to the store from this row on.
+    await this.prismaService.$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        await tx.store_users.create({
+          data: {
+            store_id: store.id,
+            user_id: user.id,
+          },
+        });
+        await recordTriggerEvent(tx, 'customer.created', {
+          store_id: store.id,
+          customer_id: user.id,
+          first_name: formatted_first_name,
+          last_name: formatted_last_name,
+          email: user.email,
+        });
       },
-    });
+    );
 
     // Obtener usuario con roles incluidos
     const userWithRoles = await this.prismaService.users.findFirst({

@@ -15,6 +15,7 @@ import {
   ResolvedOptions,
 } from '../product-options/option-pricing.service';
 import { Prisma, payment_processing_mode_enum, table_status_enum, order_state_enum } from '@prisma/client';
+import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
@@ -2094,6 +2095,13 @@ export class PaymentsService {
           }
 
           // 4a. Emit order.created event
+          await recordTriggerEvent(tx, 'order.created', {
+            store_id: createPosPaymentDto.store_id,
+            order_id: order.id,
+            order_number: order.order_number,
+            grand_total: Number(order.grand_total),
+            currency: order.currency || createPosPaymentDto.currency,
+          });
           this.eventEmitter.emit('order.created', {
             store_id: createPosPaymentDto.store_id,
             order_id: order.id,
@@ -2548,6 +2556,14 @@ export class PaymentsService {
         if (refreshed) {
           order.state = refreshed.state;
         }
+        // Same fact as the `order.paid` emitted after the commit.
+        await recordTriggerEvent(tx, 'order.paid', {
+          store_id: ctxStoreId,
+          order_id: order.id,
+          payment_id: payment?.id ?? null,
+          grand_total: Number(order.grand_total || 0),
+          currency: order.currency,
+        });
         const settlementSnapshot = refreshed
           ? {
               ...(refreshed.grand_total?.isFinite()

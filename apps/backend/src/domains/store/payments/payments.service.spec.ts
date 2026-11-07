@@ -52,6 +52,11 @@ import * as tipUtil from '../../../common/utils/tip.util';
 // Plan order-truth-and-invoice-tz (Step 6) — writer único de order_events.
 import { OrderHistoryService } from '../orders/order-history/order-history.service';
 
+// The durable outbox write has its own spec (workflow-trigger.fanout.spec.ts).
+jest.mock('../workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
+
 /**
  * Tests for PaymentsService focused on the POS sale recalculation flow:
  *  - The backend (not the frontend) is the source of truth for promotional

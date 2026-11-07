@@ -30,6 +30,11 @@ import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-t
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
+// The durable outbox write has its own spec (workflow-trigger.fanout.spec.ts).
+jest.mock('../../store/workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
+
 /** Precio con impuesto por línea en las respuestas del checkout (aditivo). */
 const INC8_ROWS = [
   {
@@ -77,6 +82,8 @@ describe('CheckoutService — precio con impuesto por línea (gross)', () => {
       .mockReturnValue(undefined);
 
     prisma = {
+
+      $transaction: jest.fn(async (cb: (tx: unknown) => unknown) => cb(prisma)),
       carts: { findFirst: jest.fn().mockResolvedValue(null) },
       products: {
         findUnique: jest.fn(({ where }: any) =>

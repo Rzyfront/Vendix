@@ -33,6 +33,11 @@ import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availabil
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from 'src/common/errors';
 
+// The durable outbox write has its own spec (workflow-trigger.fanout.spec.ts).
+jest.mock('../../store/workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
+
 /**
  * Recálculo por distancia al confirmar (guest + producto físico).
  *
@@ -126,6 +131,8 @@ describe('CheckoutService - recálculo por distancia al confirmar', () => {
     };
 
     prisma = {
+
+      $transaction: jest.fn(async (cb: (tx: unknown) => unknown) => cb(prisma)),
       carts: { findFirst: jest.fn().mockResolvedValue(null) },
       products: {
         findUnique: jest.fn().mockResolvedValue({ ...PRODUCT }),

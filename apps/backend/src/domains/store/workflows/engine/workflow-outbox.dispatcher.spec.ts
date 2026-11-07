@@ -16,6 +16,7 @@ describe('WorkflowOutboxDispatcher', () => {
   const engine = { tick: jest.fn() };
   const notifications = { sendToUser: jest.fn() };
   const actions = { execute: jest.fn(), recordFailure: jest.fn() };
+  const fanout = { fanOut: jest.fn() };
   const mailer = { send: jest.fn() };
   const MIN = 60_000;
   const past = () => new Date(Date.now() - MIN);
@@ -47,6 +48,7 @@ describe('WorkflowOutboxDispatcher', () => {
       mailer as any,
       { deliver: jest.fn() } as any,
       actions as any,
+      fanout as any,
     );
   });
 
