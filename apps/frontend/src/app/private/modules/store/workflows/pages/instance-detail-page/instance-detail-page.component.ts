@@ -37,6 +37,7 @@ import {
   TimelineEventView,
   WorkflowInstanceDetail,
 } from '../../interfaces/workflow.interfaces';
+import { InstanceDebuggerComponent } from '../../components/instance-debugger/instance-debugger.component';
 import { WorkflowLiveService } from '../../services/workflow-live.service';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -68,7 +69,6 @@ const BADGE_COLOR: Record<string, StickyBadgeColor> = {
 /** Requirement kinds whose file the person uploads from this screen. */
 const UPLOADABLE_KINDS = ['upload', 'signature'];
 
-import { InstanceDebuggerComponent } from '../../components/instance-debugger/instance-debugger.component';
 @Component({
   selector: 'app-instance-detail-page',
   standalone: true,
