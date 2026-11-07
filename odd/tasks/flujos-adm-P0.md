@@ -39,7 +39,8 @@ Riesgo: migraciones y datos (D2, triggers), concurrencia (outbox, CAS), dinero (
 | T5 | S4 B1–B10 | inline | ✅ | `f42c322f5`, `011206df0`; además B11 |
 | T6 | S4 M6 | inline | ✅ | `1ffa0d84e`, `cb2d0147a`; 31 specs de Karma; B9 |
 | T7 | S5 | inline | ✅ | `cd4f7ea92`, `7bcce1ac9`; en vivo con worker: recordatorio, luego escalamiento; halló la fuga entre organizaciones |
-| T8 | S3 | inline | ◐ | 33 capturas en la carpeta del encargo; H1–H4, H6 y H7 pasan en navegador; H5 solo a nivel de herramienta (sin proveedor de IA en el entorno aislado) |
+| T8 | S3 | inline | ✅ | 38 capturas en la carpeta del encargo; H1–H7 pasan en navegador. H5: chat de Vexi con modelo real, borrador creado tras confirmar. H7: webhook creado en pantalla, entrega real HTTPS con firma HMAC verificada |
+| T9 | S4 B4, S5 | inline | ✅ | Revisión r1: `bc7532241` (CI con `isolatedModules`, 92 + 16 tests en GitHub), `99b2e316c` (`admin` de la organización), `01ebbed14` (B4 por tienda), `a19ee563e`, `005e7ad33` (B9) |
 
 ## Log
 
@@ -48,3 +49,4 @@ Riesgo: migraciones y datos (D2, triggers), concurrencia (outbox, CAS), dinero (
 - L3 (2026-11-07, decisión): con recordatorio y escalamiento juntos, primero se avisa y al cumplirse un intervalo sube (criterio textual de P0.5). Sin recordatorio sube al vencer.
 - L4 (2026-11-07, decisión): `purchase_order.received.total_amount` se calcula dentro de la transacción (valor recibido del lote con su parte de flete prorrateado). El monto contable exacto sigue calculándose después del commit.
 - L5 (2026-11-07, pendiente): B12 sigue abierto porque pide una columna nueva y no está en P0. El patrón `meta.target` falla con el adaptador pg en otros módulos fuera de Flujos.
+- L6 (2026-11-07, revisión r1, nota 81): CI del job de Postgres moría sin memoria; los `admin` de la organización quedaban fuera de los titulares de un rol; B4 validaba la OC y el proveedor por organización y no por tienda; faltaba el test de B9; H5 y H7 estaban parciales. Todo cerrado en T9 y T8. En el entorno de QA la clave de la configuración IA por defecto (`id=1`) da 401 en el proveedor, también en la base de desarrollo; el QA usó la configuración 9 en la copia scratch y la restauró después.
