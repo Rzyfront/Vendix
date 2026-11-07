@@ -119,17 +119,16 @@ type CenterView = 'map' | 'matrix';
           <app-card [responsive]="true" class="lg:w-96 lg:shrink-0"><app-stage-properties /></app-card>
         </div>
         <app-card [responsive]="true"><app-triggers-panel /></app-card>
-        @if (hasWebhook() || hasEmail()) {
-          <app-card [responsive]="true">
-            <app-workflow-connections
-              [definitionId]="id()"
-              [hasWebhook]="hasWebhook()"
-              [hasEmail]="hasEmail()"
-              [published]="store.isPublished()"
-              [hasUnpublishedChanges]="store.hasUnpublished()"
-              [fieldKeys]="fieldKeys()"
-            />
-          </app-card>
+        @if (hasWebhook() || hasEmail() || store.isPublished()) {
+          <!-- Renders its own card, also for a connection still active after its trigger was switched off. -->
+          <app-workflow-connections
+            [definitionId]="id()"
+            [hasWebhook]="hasWebhook()"
+            [hasEmail]="hasEmail()"
+            [published]="store.isPublished()"
+            [hasUnpublishedChanges]="store.hasUnpublished()"
+            [fieldKeys]="fieldKeys()"
+          />
         }
         <app-card [responsive]="true"><app-approval-gate-panel /></app-card>
 

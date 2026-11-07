@@ -1,4 +1,4 @@
-import { Component, DestroyRef, effect, inject, input, signal, untracked } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
@@ -6,6 +6,7 @@ import {
   AlertBannerComponent,
   BadgeComponent,
   ButtonComponent,
+  CardComponent,
   DialogService,
   IconComponent,
   InputComponent,
@@ -21,8 +22,9 @@ import { inboundCurlExample, inboundHookUrl, parseRateLimit } from './workflow-i
 
 /**
  * "Conexiones del flujo": the signed inbound webhook and the mailbox of a flow.
- * Shown by the editor only when the draft declares those triggers; activation
- * needs the flow published (the backend answers with the reason otherwise).
+ * A connection shows while the draft declares its trigger or while it is still
+ * active in the backend (the trigger was switched off in the draft), so it can
+ * always be switched off here. Activation needs the flow published.
  */
 @Component({
   selector: 'app-workflow-connections',
@@ -32,146 +34,161 @@ import { inboundCurlExample, inboundHookUrl, parseRateLimit } from './workflow-i
     AlertBannerComponent,
     BadgeComponent,
     ButtonComponent,
+    CardComponent,
     IconComponent,
     InputComponent,
     SecretOnceModalComponent,
   ],
   template: `
-    <section class="flex flex-col gap-4" aria-label="Conexiones del flujo">
-      <div>
-        <h2 class="text-sm font-bold text-text-primary">Conexiones del flujo</h2>
-        <p class="text-xs text-text-secondary">Lo que otros sistemas necesitan para iniciar solicitudes de este flujo.</p>
-      </div>
-
-      @if (!published()) {
-        <app-alert-banner variant="info" icon="info" data-testid="connections-unpublished">
-          Publica el flujo para poder activar sus conexiones.
-        </app-alert-banner>
-      } @else if (hasUnpublishedChanges()) {
-        <app-alert-banner variant="info" icon="info" data-testid="connections-unpublished-changes">
-          Los disparadores nuevos o quitados rigen desde que publiques la versión.
-        </app-alert-banner>
-      }
-
-      @if (hasWebhook()) {
-        <div class="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3" data-testid="webhook-connection">
-          <div class="flex flex-wrap items-center gap-2">
-            <p class="text-sm font-semibold text-text-primary">Webhook de entrada</p>
-            @if (hook(); as h) {
-              <app-badge [variant]="h.is_active ? 'success' : 'neutral'" size="sm">{{ h.is_active ? 'Activo' : 'Desactivado' }}</app-badge>
-            }
+    @if (showWebhook() || showEmail()) {
+      <app-card [responsive]="true">
+        <section class="flex flex-col gap-4" aria-label="Conexiones del flujo">
+          <div>
+            <h2 class="text-sm font-bold text-text-primary">Conexiones del flujo</h2>
+            <p class="text-xs text-text-secondary">Lo que otros sistemas necesitan para iniciar solicitudes de este flujo.</p>
           </div>
-          @if (hookError(); as message) {
-            <app-alert-banner variant="danger" icon="alert-circle">{{ message }}</app-alert-banner>
+
+          @if (!published()) {
+            <app-alert-banner variant="info" icon="info" data-testid="connections-unpublished">
+              Publica el flujo para poder activar sus conexiones.
+            </app-alert-banner>
+          } @else if (hasUnpublishedChanges()) {
+            <app-alert-banner variant="info" icon="info" data-testid="connections-unpublished-changes">
+              Los disparadores nuevos o quitados rigen desde que publiques la versión.
+            </app-alert-banner>
           }
-          @if (hook(); as h) {
-            <div class="flex flex-col gap-1">
-              <p class="text-xs font-semibold text-text-secondary">URL</p>
-              <div class="flex items-center gap-2">
-                <p class="min-w-0 flex-1 break-all rounded-lg bg-background px-2 py-1.5 font-mono text-xs text-text-primary" data-testid="hook-url">{{ hookUrl(h) }}</p>
-                <app-button variant="outline" size="xsm" ariaLabel="Copiar la URL" (clicked)="copy(hookUrl(h), 'URL copiada')">
-                  <app-icon name="copy" [size]="12" slot="icon" />
-                </app-button>
+
+          @if (showWebhook()) {
+            <div class="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3" data-testid="webhook-connection">
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="text-sm font-semibold text-text-primary">Webhook de entrada</p>
+                @if (hook(); as h) {
+                  <app-badge [variant]="h.is_active ? 'success' : 'neutral'" size="sm">{{ h.is_active ? 'Activo' : 'Desactivado' }}</app-badge>
+                }
               </div>
-            </div>
-            <p class="text-xs text-text-secondary">
-              {{ h.recent_requests_24h }} llamadas en las últimas 24 h
-              @if (h.last_used_at) { · Último uso: {{ dateText(h.last_used_at) }} }
-            </p>
-            <div class="flex items-end gap-2">
-              <div class="w-40">
-                <app-input
-                  label="Límite por minuto"
-                  type="number"
-                  min="1"
-                  max="600"
-                  size="sm"
-                  [error]="limitError()"
-                  [ngModel]="limit()"
-                  (ngModelChange)="limit.set($event)"
-                />
-              </div>
-              <app-button variant="outline" size="sm" [disabled]="busy() || !limitChanged(h)" (clicked)="saveLimit()">Guardar límite</app-button>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <app-button variant="outline" size="sm" [disabled]="busy()" (clicked)="rotate()">
-                <app-icon name="refresh-cw" [size]="14" slot="icon" />Rotar secreto
-              </app-button>
-              @if (h.is_active) {
-                <app-button variant="outline-danger" size="sm" [disabled]="busy()" (clicked)="setHookActive(false)">Desactivar</app-button>
+              @if (!hasWebhook()) {
+                <app-alert-banner variant="warning" icon="alert-triangle" data-testid="webhook-undeclared">
+                  El borrador ya no tiene este disparador, pero el webhook sigue activo. Desactívalo si ya no lo usas.
+                </app-alert-banner>
+              }
+              @if (hookError(); as message) {
+                <app-alert-banner variant="danger" icon="alert-circle">{{ message }}</app-alert-banner>
+              }
+              @if (hook(); as h) {
+                <div class="flex flex-col gap-1">
+                  <p class="text-xs font-semibold text-text-secondary">URL</p>
+                  <div class="flex items-center gap-2">
+                    <p class="min-w-0 flex-1 break-all rounded-lg bg-background px-2 py-1.5 font-mono text-xs text-text-primary" data-testid="hook-url">{{ hookUrl(h) }}</p>
+                    <app-button variant="outline" size="xsm" ariaLabel="Copiar la URL" (clicked)="copy(hookUrl(h), 'URL copiada')">
+                      <app-icon name="copy" [size]="12" slot="icon" />
+                    </app-button>
+                  </div>
+                </div>
+                <p class="text-xs text-text-secondary">
+                  {{ h.recent_requests_24h }} llamadas en las últimas 24 h
+                  @if (h.last_used_at) { · Último uso: {{ dateText(h.last_used_at) }} }
+                </p>
+                <div class="flex items-end gap-2">
+                  <div class="w-40">
+                    <app-input
+                      label="Límite por minuto"
+                      type="number"
+                      min="1"
+                      max="600"
+                      size="sm"
+                      [error]="limitError()"
+                      [ngModel]="limit()"
+                      (ngModelChange)="limit.set($event)"
+                    />
+                  </div>
+                  <app-button variant="outline" size="sm" [disabled]="busy() || !limitChanged(h)" (clicked)="saveLimit()">Guardar límite</app-button>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <app-button variant="outline" size="sm" [disabled]="busy()" (clicked)="rotate()">
+                    <app-icon name="refresh-cw" [size]="14" slot="icon" />Rotar secreto
+                  </app-button>
+                  @if (h.is_active) {
+                    <app-button variant="outline-danger" size="sm" [disabled]="busy()" (clicked)="setHookActive(false)">Desactivar</app-button>
+                  } @else {
+                    <app-button variant="outline" size="sm" [disabled]="busy()" (clicked)="activate()">Activar de nuevo</app-button>
+                  }
+                </div>
+                <div class="flex flex-col gap-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-xs font-semibold text-text-secondary">Ejemplo firmado (bash + openssl)</p>
+                    <app-button variant="outline" size="xsm" ariaLabel="Copiar el ejemplo" (clicked)="copy(curl(h), 'Ejemplo copiado')">
+                      <app-icon name="copy" [size]="12" slot="icon" />
+                    </app-button>
+                  </div>
+                  <pre class="overflow-x-auto rounded-lg bg-background p-2 font-mono text-xs text-text-primary" data-testid="hook-curl">{{ curl(h) }}</pre>
+                  <p class="text-xs text-text-secondary">
+                    Guarda el secreto en <span class="font-mono">VENDIX_WEBHOOK_SECRET</span>. La firma es el HMAC-SHA256 de
+                    <span class="font-mono">"marca de tiempo.cuerpo"</span> y la marca de tiempo no puede tener más de 5 minutos.
+                    Repetir la misma <span class="font-mono">Idempotency-Key</span> devuelve la misma referencia sin duplicar.
+                  </p>
+                </div>
+              } @else if (hookLoaded()) {
+                <p class="text-xs text-text-secondary">Aún no está activo. Al activarlo verás la URL y un secreto (se muestra una sola vez).</p>
+                <div>
+                  <app-button variant="primary" size="sm" [disabled]="busy() || !published()" (clicked)="activate()">Activar webhook</app-button>
+                </div>
               } @else {
-                <app-button variant="outline" size="sm" [disabled]="busy()" (clicked)="activate()">Activar de nuevo</app-button>
+                <p class="text-xs text-text-secondary" role="status">Cargando…</p>
               }
             </div>
-            <div class="flex flex-col gap-1">
-              <div class="flex items-center justify-between gap-2">
-                <p class="text-xs font-semibold text-text-secondary">Ejemplo firmado (bash + openssl)</p>
-                <app-button variant="outline" size="xsm" ariaLabel="Copiar el ejemplo" (clicked)="copy(curl(h), 'Ejemplo copiado')">
-                  <app-icon name="copy" [size]="12" slot="icon" />
-                </app-button>
-              </div>
-              <pre class="overflow-x-auto rounded-lg bg-background p-2 font-mono text-xs text-text-primary" data-testid="hook-curl">{{ curl(h) }}</pre>
-              <p class="text-xs text-text-secondary">
-                Guarda el secreto en <span class="font-mono">VENDIX_WEBHOOK_SECRET</span>. La firma es el HMAC-SHA256 de
-                <span class="font-mono">"marca de tiempo.cuerpo"</span> y la marca de tiempo no puede tener más de 5 minutos.
-                Repetir la misma <span class="font-mono">Idempotency-Key</span> devuelve la misma referencia sin duplicar.
-              </p>
-            </div>
-          } @else if (hookLoaded()) {
-            <p class="text-xs text-text-secondary">Aún no está activo. Al activarlo verás la URL y un secreto (se muestra una sola vez).</p>
-            <div>
-              <app-button variant="primary" size="sm" [disabled]="busy() || !published()" (clicked)="activate()">Activar webhook</app-button>
-            </div>
-          } @else {
-            <p class="text-xs text-text-secondary" role="status">Cargando…</p>
           }
-        </div>
-      }
 
-      @if (hasEmail()) {
-        <div class="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3" data-testid="mailbox-connection">
-          <div class="flex flex-wrap items-center gap-2">
-            <p class="text-sm font-semibold text-text-primary">Correo entrante</p>
-            @if (mailbox(); as m) {
-              <app-badge [variant]="m.is_active ? 'success' : 'neutral'" size="sm">{{ m.is_active ? 'Activo' : 'Desactivado' }}</app-badge>
-            }
-          </div>
-          @if (mailboxError(); as message) {
-            <app-alert-banner variant="danger" icon="alert-circle">{{ message }}</app-alert-banner>
-          }
-          @if (mailbox(); as m) {
-            <div class="flex flex-col gap-1">
-              <p class="text-xs font-semibold text-text-secondary">Dirección del buzón</p>
-              <div class="flex items-center gap-2">
-                <p class="min-w-0 flex-1 break-all rounded-lg bg-background px-2 py-1.5 font-mono text-xs text-text-primary" data-testid="mailbox-address">{{ m.address }}</p>
-                <app-button variant="outline" size="xsm" ariaLabel="Copiar la dirección" (clicked)="copy(m.address, 'Dirección copiada')">
-                  <app-icon name="copy" [size]="12" slot="icon" />
-                </app-button>
+          @if (showEmail()) {
+            <div class="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3" data-testid="mailbox-connection">
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="text-sm font-semibold text-text-primary">Correo entrante</p>
+                @if (mailbox(); as m) {
+                  <app-badge [variant]="m.is_active ? 'success' : 'neutral'" size="sm">{{ m.is_active ? 'Activo' : 'Desactivado' }}</app-badge>
+                }
               </div>
-            </div>
-            <p class="text-xs text-text-secondary">
-              {{ m.received_24h }} correos en las últimas 24 h
-              @if (m.last_received_at) { · Último: {{ dateText(m.last_received_at) }} }
-            </p>
-            <p class="text-xs text-text-secondary">Los adjuntos de hasta 25 MB quedan en el expediente de la solicitud.</p>
-            <div>
-              @if (m.is_active) {
-                <app-button variant="outline-danger" size="sm" [disabled]="busy()" (clicked)="setMailboxActive(false)">Desactivar buzón</app-button>
+              @if (!hasEmail()) {
+                <app-alert-banner variant="warning" icon="alert-triangle" data-testid="mailbox-undeclared">
+                  El borrador ya no tiene este disparador, pero el buzón sigue activo. Desactívalo si ya no lo usas.
+                </app-alert-banner>
+              }
+              @if (mailboxError(); as message) {
+                <app-alert-banner variant="danger" icon="alert-circle">{{ message }}</app-alert-banner>
+              }
+              @if (mailbox(); as m) {
+                <div class="flex flex-col gap-1">
+                  <p class="text-xs font-semibold text-text-secondary">Dirección del buzón</p>
+                  <div class="flex items-center gap-2">
+                    <p class="min-w-0 flex-1 break-all rounded-lg bg-background px-2 py-1.5 font-mono text-xs text-text-primary" data-testid="mailbox-address">{{ m.address }}</p>
+                    <app-button variant="outline" size="xsm" ariaLabel="Copiar la dirección" (clicked)="copy(m.address, 'Dirección copiada')">
+                      <app-icon name="copy" [size]="12" slot="icon" />
+                    </app-button>
+                  </div>
+                </div>
+                <p class="text-xs text-text-secondary">
+                  {{ m.received_24h }} correos en las últimas 24 h
+                  @if (m.last_received_at) { · Último: {{ dateText(m.last_received_at) }} }
+                </p>
+                <p class="text-xs text-text-secondary">Los adjuntos de hasta 25 MB quedan en el expediente de la solicitud.</p>
+                <div>
+                  @if (m.is_active) {
+                    <app-button variant="outline-danger" size="sm" [disabled]="busy()" (clicked)="setMailboxActive(false)">Desactivar buzón</app-button>
+                  } @else {
+                    <app-button variant="outline" size="sm" [disabled]="busy() || !published()" (clicked)="setMailboxActive(true)">Activar de nuevo</app-button>
+                  }
+                </div>
+              } @else if (mailboxLoaded()) {
+                <p class="text-xs text-text-secondary">Aún no tiene buzón. Al activarlo se crea una dirección propia de este flujo.</p>
+                <div>
+                  <app-button variant="primary" size="sm" [disabled]="busy() || !published()" (clicked)="activateMailbox()">Activar buzón</app-button>
+                </div>
               } @else {
-                <app-button variant="outline" size="sm" [disabled]="busy() || !published()" (clicked)="setMailboxActive(true)">Activar de nuevo</app-button>
+                <p class="text-xs text-text-secondary" role="status">Cargando…</p>
               }
             </div>
-          } @else if (mailboxLoaded()) {
-            <p class="text-xs text-text-secondary">Aún no tiene buzón. Al activarlo se crea una dirección propia de este flujo.</p>
-            <div>
-              <app-button variant="primary" size="sm" [disabled]="busy() || !published()" (clicked)="activateMailbox()">Activar buzón</app-button>
-            </div>
-          } @else {
-            <p class="text-xs text-text-secondary" role="status">Cargando…</p>
           }
-        </div>
-      }
-    </section>
+        </section>
+      </app-card>
+    }
 
     <app-secret-once-modal
       [(isOpen)]="secretOpen"
@@ -202,6 +219,8 @@ export class WorkflowConnectionsComponent {
   readonly hookLoaded = signal(false);
   readonly hookError = signal<string | null>(null);
   readonly mailbox = signal<MailboxState | null>(null);
+  readonly showWebhook = computed(() => this.hasWebhook() || this.hook()?.is_active === true);
+  readonly showEmail = computed(() => this.hasEmail() || this.mailbox()?.is_active === true);
   readonly mailboxLoaded = signal(false);
   readonly mailboxError = signal<string | null>(null);
   readonly busy = signal(false);
@@ -212,11 +231,12 @@ export class WorkflowConnectionsComponent {
   constructor() {
     effect(() => {
       const id = this.definitionId();
-      if (this.hasWebhook()) untracked(() => this.loadHook(id));
+      // A published flow may keep an active hook its draft no longer declares.
+      if (this.hasWebhook() || this.published()) untracked(() => this.loadHook(id));
     });
     effect(() => {
       const id = this.definitionId();
-      if (this.hasEmail()) untracked(() => this.loadMailbox(id));
+      if (this.hasEmail() || this.published()) untracked(() => this.loadMailbox(id));
     });
   }
 
