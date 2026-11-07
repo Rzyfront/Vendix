@@ -2472,7 +2472,7 @@ function checkSubflow(
     if (key === c.flowKey) {
       c.err("SUBFLOW_INVALID", `${fp}.flow_key`, `${L}: un flujo no puede lanzarse a sí mismo como subflujo.`, sk);
     } else if (ctx.flowKeys && !ctx.flowKeys.includes(key)) {
-      c.err("SUBFLOW_INVALID", `${fp}.flow_key`, `${L} lanza el flujo "${key}", que no existe en la tienda.`, sk);
+      c.err("SUBFLOW_INVALID", `${fp}.flow_key`, `${L} lanza el flujo "${key}", que no existe o no está publicado en la tienda.`, sk);
     }
     keys.add(key);
     const map = f["map"];

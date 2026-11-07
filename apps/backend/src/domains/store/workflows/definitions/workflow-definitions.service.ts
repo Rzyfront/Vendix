@@ -617,8 +617,9 @@ export class WorkflowDefinitionsService {
         where: { store_id: storeId },
         select: { user_id: true },
       }),
+      // P2.2: only a published, active flow can start as a child.
       db.workflow_definitions.findMany({
-        where: { store_id: storeId },
+        where: { store_id: storeId, status: 'active', published_version_id: { not: null } },
         select: { key: true },
       }),
     ]);
@@ -628,7 +629,7 @@ export class WorkflowDefinitionsService {
       groupKeys: groups.filter((g: any) => withMembers.has(g.id)).map((g: any) => g.key),
       userIds: storeUsers.map((u: any) => u.user_id),
       publishedTemplateKeys: [],
-      // P2.2: subflows may only launch flows of this store.
+      // P2.2: subflows may only launch published flows of this store.
       flowKeys: flows.map((f: any) => f.key),
     };
   }

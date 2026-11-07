@@ -52,7 +52,7 @@ export class WorkflowEditorLookups {
         next: (res) =>
           this.flows.set(
             res.data
-              .filter((d) => d.status !== 'archived')
+              .filter((d) => d.status === 'active' && d.published_version !== null)
               .map((d) => ({ value: d.key, label: d.name })),
           ),
         error: () => this.loadError.set('No se pudieron cargar los flujos de la tienda.'),
