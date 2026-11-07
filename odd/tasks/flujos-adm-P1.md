@@ -42,14 +42,14 @@ Riesgo (textual del plan): "Risk: item 1 (estado nuevo en entidades), 2 (permiso
 
 | ID | S# | Ruta | Estado | Evidencia |
 |---|---|---|---|---|
-| T1 | S1–S3 | inline | en curso | Contrato con catálogos, validador `governs`, migración del candado |
-| T2 | S2 | delegada (escritor A, paralelo) | pendiente | Acciones de personas y CRM |
-| T3 | S2 | delegada (escritor B, paralelo) | pendiente | Acciones de operaciones (gastos, compras, pagos, inventario, facturación, ventas) |
-| T4 | S1 | delegada (escritor C, paralelo) | pendiente | Productores de eventos en los dominios |
-| T5 | S3–S5 | inline | pendiente | Motor: arranque por candado, resolución, efectos, endpoint de vínculos |
-| T6 | S3 | inline (tras T4: mismos archivos) | pendiente | Aplicación del candado en los servicios de dominio |
-| T7 | S1–S5 | delegada (escritor D, paralelo) | pendiente | Frontend: editor, panel de candado, vínculo y avisos |
-| T8 | S1–S5 | inline | pendiente | Verificación en vivo (puerto 3099, base `vendix_flujos`) |
+| T1 | S1–S3 | inline | ✅ | `1941dd31a`; validador 92/92, paridad 8/8 |
+| T2 | S2 | delegada (escritor A, paralelo) | ✅ | `f1cbb937a`; 9 acciones, 19/19 |
+| T3 | S2 | delegada (escritores B1 y B2, paralelo) | ✅ | `f1cbb937a`; 15 acciones, 18/18 y 26/26; registro R1 14/14 |
+| T4 | S1 | delegada (escritor C, paralelo) | ✅ | `74c45fb1a`; 22 productores nuevos, 37 tests de productores; facturación rehecha a diff mínimo |
+| T5 | S3–S5 | inline | ✅ | `13a419888`; candado 14/14; Postgres real 4/4 (halló y corrigió una carrera de revisión) |
+| T6 | S3 | inline (tras T4: mismos archivos) | ✅ | `11bca6333`, `591212912`, `45eac45d6`; 11/11 servicios gobernados; specs de los servicios en verde |
+| T7 | S1–S5 | delegada (escritor D, paralelo) | ✅ | `f3cd7a5b6`, `7b572dd80`; Karma 15/15; `ngc` limpio |
+| T8 | S1–S5 | inline | ✅ | En vivo :3099 + vhost; capturas en `evidencia-P1/` |
 
 Motivo de delegación (Writer trigger a): T2, T3, T4 y T7 son unidades independientes con superficies disjuntas, cada una de varios archivos y >100 líneas, lanzadas juntas tras cerrar el contrato.
 
@@ -59,3 +59,8 @@ Motivo de delegación (Writer trigger a): T2, T3, T4 y T7 son unidades independi
 - L2 (2026-11-07, decisión): `pending_approval` vive en `workflow_approval_gates` y no como valor nuevo en el enum de cada entidad: aditivo, uno para las 8 operaciones y sin tocar listas, filtros ni reportes de cada módulo. En la OC (enum sin "enviada"), "Enviar" es "Aprobar" (borrador → aprobada).
 - L3 (2026-11-07, decisión): "liquidación de nómina" = aprobar la nómina (`payroll_run.approve`). Los descuentos de POS en caja no se retienen (una venta en mostrador no puede esperar); se gobierna el descuento de una venta editada o creada en el panel.
 - L4 (2026-11-07, decisión): con varios flujos que gobiernan la misma operación, manda el de mayor umbral no superior al monto (escalones).
+- L5 (2026-11-07, decisión): para un ajuste de inventario el umbral se mide en unidades movidas (valor absoluto), no en dinero. La carga inicial no se retiene. Un ajuste sin registro de inventario no abre solicitud (el servicio lo rechaza solo).
+- L6 (2026-11-07, decisión): rechazar una OC retenida la anula con el motivo en las notas internas; rechazar un gasto lo deja rechazado con el motivo en sus notas; rechazar una nómina la cancela. Cancelar la solicitud libera el candado y el siguiente intento pide otra aprobación.
+- L7 (2026-11-07, QA en vivo): H-P1 pasa por API y en navegador (OC de $3.000.000 pendiente, 409 por API, Aprobar deshabilitado con enlace, solicitud con proveedor/monto/productos, aprobación libera, rechazo anula con motivo). Evento `supplier.created` arranca un flujo; acciones `expense.create` y `supplier.update` con `{{instance.subject_id}}` ejecutadas. Ajuste diferido ejecutado una vez como el solicitante.
+- L8 (2026-11-07, hallazgo): la prueba contra Postgres mostró que dos intentos simultáneos podían abrir dos candados; la revisión ahora sale de la primera lectura y la restricción única los serializa.
+- L9 (2026-11-07, pendiente): espejo Engram no disponible en este entorno.
