@@ -57,6 +57,7 @@ function setup(overrides: { data?: Record<string, unknown>; template?: unknown; 
           published_version: { id: 31, version: 2, kind: 'blocks', body, token_schema: tokenSchemaOfBlocks(body), base_file_id: null },
         }
       : overrides.template;
+  const calls: string[] = [];
   const created = jest.fn(async ({ data }) => ({
     id: 99,
     created_at: new Date(),
@@ -68,8 +69,17 @@ function setup(overrides: { data?: Record<string, unknown>; template?: unknown; 
     ...data,
   }));
   const tx = {
-    $queryRaw: jest.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([{ n: 1 }]),
-    issued_documents: { findFirst: jest.fn().mockResolvedValue(overrides.previous ?? null), create: created },
+    $queryRaw: jest.fn(async (sql: TemplateStringsArray, ...values: unknown[]) => {
+      calls.push(`raw:${sql.join('?')}|${values.join(',')}`);
+      return sql.join('?').includes('MAX(') ? [{ n: 1 }] : [];
+    }),
+    issued_documents: {
+      findFirst: jest.fn(async () => {
+        calls.push('previous');
+        return overrides.previous ?? null;
+      }),
+      create: created,
+    },
     dossiers: { findFirst: jest.fn().mockResolvedValue({ id: 61 }) },
   };
   const prisma = {
@@ -97,7 +107,7 @@ function setup(overrides: { data?: Record<string, unknown>; template?: unknown; 
       { store_id: STORE, organization_id: 3, user_id: 9, is_super_admin: false, is_owner: false },
       fn,
     );
-  return { service, prisma, tx, queue, created, run };
+  return { service, prisma, tx, queue, created, run, calls };
 }
 
 const emitInput = { instance_id: 11, requirement_key: 'contrato', actor: { type: 'user' as const, id: 9 } };
@@ -150,6 +160,15 @@ describe('IssuedDocumentsService.emit', () => {
     const { service, created, run } = setup({ previous: { id: 50, status: 'issued' } });
     await run(() => service.emit(emitInput));
     expect(created.mock.calls[0][0].data.supersedes_id).toBe(50);
+  });
+
+  it('locks the request row before looking for the previous document (no two active documents for one requirement)', async () => {
+    const { service, run, calls } = setup();
+    await run(() => service.emit(emitInput));
+    const lock = calls.findIndex((c) => c.startsWith('raw:') && c.includes('FROM workflow_instances') && c.includes('FOR NO KEY UPDATE'));
+    expect(lock).toBeGreaterThanOrEqual(0);
+    expect(calls[lock]).toContain(`|11,${STORE}`);
+    expect(lock).toBeLessThan(calls.indexOf('previous'));
   });
 
   it('does not reissue while the previous document is rendering or waiting for signatures', async () => {

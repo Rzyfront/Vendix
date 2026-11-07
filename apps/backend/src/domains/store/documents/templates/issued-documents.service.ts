@@ -145,6 +145,9 @@ export class IssuedDocumentsService {
       : { requirement_key: null, template_id: template.id };
 
     const created = await this.prisma.$transaction(async (tx: any) => {
+      // Serializes emissions of one request (auto-issue on stage entry and a
+      // manual "Emitir" at once): the second one sees the first in `rendering`.
+      await tx.$queryRaw`SELECT id FROM workflow_instances WHERE id = ${instance.id} AND store_id = ${c.store_id} FOR NO KEY UPDATE`;
       const previous = await tx.issued_documents.findFirst({
         where: {
           store_id: c.store_id,
