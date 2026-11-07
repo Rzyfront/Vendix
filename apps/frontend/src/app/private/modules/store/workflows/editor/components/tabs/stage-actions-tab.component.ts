@@ -23,6 +23,8 @@ import { removeAt, replaceAt, toWholeNumber } from '../../workflow-editor.utils'
 import { vendixActionOptions } from '../../workflow-editor-triggers.utils';
 import { ActionMapEditorComponent } from '../action-map-editor.component';
 import { AssigneeEditorComponent } from '../assignee-editor.component';
+import { VariablePickerComponent } from '../variable-picker/variable-picker.component';
+import { buildVariableGroups } from '../variable-picker/variable-picker.utils';
 
 type Hook = WorkflowHookPoint;
 
@@ -54,6 +56,7 @@ const THEN_OPTIONS = [
     ToggleComponent,
     AssigneeEditorComponent,
     ActionMapEditorComponent,
+    VariablePickerComponent,
   ],
   template: `
     <div class="flex flex-col gap-6">
@@ -86,7 +89,17 @@ const THEN_OPTIONS = [
                   [fields]="fields()"
                   (valueChange)="patch(hook.id, i, { to: $event })"
                 />
-                <app-textarea label="Mensaje" [rows]="2" [ngModel]="action.message" (ngModelChange)="patch(hook.id, i, { message: $event })" />
+                <div class="flex flex-col gap-1" #messageBox>
+                  <app-textarea label="Mensaje" [rows]="2" [ngModel]="action.message" (ngModelChange)="patch(hook.id, i, { message: $event })" />
+                  <div>
+                    <app-variable-picker
+                      [groups]="variableGroups()"
+                      [container]="messageBox"
+                      [text]="action.message"
+                      (textChange)="patch(hook.id, i, { message: $event })"
+                    />
+                  </div>
+                </div>
               } @else if (action.action === 'set_field') {
                 <app-selector
                   label="Campo a cambiar"
@@ -184,6 +197,8 @@ export class StageActionsTabComponent {
     ...vendixActionOptions(),
   ];
   readonly fields = computed<WorkflowFieldDef[]>(() => this.store.draft()?.fields ?? []);
+  /** Hooks resolve `{{fields.*}}` and `{{instance.*}}`; the trigger event is not available there. */
+  readonly variableGroups = computed(() => buildVariableGroups(this.fields()));
   readonly fieldOptions = computed(() => this.fields().map((f) => ({ value: f.key, label: f.label })));
 
   list(hook: Hook): WorkflowActionDef[] {

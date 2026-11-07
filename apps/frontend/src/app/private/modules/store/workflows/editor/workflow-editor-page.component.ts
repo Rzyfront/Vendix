@@ -25,12 +25,13 @@ import { ApprovalGatePanelComponent } from './components/approval-gate-panel.com
 import { TriggersPanelComponent } from './components/triggers-panel.component';
 import { StagePropertiesComponent } from './components/stage-properties.component';
 import { TransitionMatrixComponent } from './components/transition-matrix.component';
+import { WorkflowCanvasComponent } from './components/canvas/workflow-canvas.component';
 import { ValidationPanelComponent } from './components/validation-panel.component';
 import { WorkflowConnectionsComponent } from '../inbound/workflow-connections.component';
 import { WorkflowEditorLookups } from './workflow-editor-lookups.service';
 import { WorkflowEditorStore } from './workflow-editor.store';
 
-type CenterView = 'map' | 'matrix';
+type CenterView = 'canvas' | 'map' | 'matrix';
 
 /** `/admin/workflows/:id/edit`: stages · route map · stage properties. */
 @Component({
@@ -53,6 +54,7 @@ type CenterView = 'map' | 'matrix';
     StageListComponent,
     StagePropertiesComponent,
     TransitionMatrixComponent,
+    WorkflowCanvasComponent,
     TriggersPanelComponent,
     ApprovalGatePanelComponent,
     ValidationPanelComponent,
@@ -109,7 +111,9 @@ type CenterView = 'map' | 'matrix';
           <app-card [responsive]="true" class="min-w-0 flex-1">
             <div class="flex flex-col gap-3">
               <app-scrollable-tabs [tabs]="views" [activeTab]="view()" size="sm" ariaLabel="Vista de la ruta" (tabChange)="setView($event)" />
-              @if (view() === 'map') {
+              @if (view() === 'canvas') {
+                <app-workflow-canvas />
+              } @else if (view() === 'map') {
                 <app-route-map />
               } @else {
                 <app-transition-matrix />
@@ -150,10 +154,11 @@ export class WorkflowEditorPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly views: ScrollableTab[] = [
+    { id: 'canvas', label: 'Lienzo', icon: 'layout-grid' },
     { id: 'map', label: 'Mapa de la ruta', icon: 'git-branch' },
     { id: 'matrix', label: 'Matriz de transiciones', icon: 'table' },
   ];
-  readonly view = signal<CenterView>('map');
+  readonly view = signal<CenterView>('canvas');
   readonly id = computed(() => this.store.definitionId() ?? 0);
   /** Draft triggers that need a connection card (webhook URL, mailbox). */
   readonly hasWebhook = computed(() => (this.store.draft()?.triggers ?? []).some((t) => t.kind === 'webhook'));
@@ -180,7 +185,7 @@ export class WorkflowEditorPageComponent implements OnInit {
   }
 
   setView(id: string): void {
-    this.view.set(id === 'matrix' ? 'matrix' : 'map');
+    this.view.set(id === 'matrix' ? 'matrix' : id === 'map' ? 'map' : 'canvas');
   }
 
   async validate(): Promise<void> {

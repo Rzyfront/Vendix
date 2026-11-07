@@ -117,6 +117,33 @@ export const FIELD_TYPE_TEXT: Record<WorkflowFieldType, string> = {
   user: 'Persona del equipo',
 };
 
+/** A field in a select: disabled group headers plus one entry per field ("Formulario", "Calculados"). */
+export interface ConditionFieldOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+/**
+ * Field choices of the condition builder. A condition only sees the instance
+ * data (`evaluateCondition` reads declared fields, calculated ones included),
+ * so request and event values are not offered here.
+ */
+export function conditionFieldOptions(fields: readonly WorkflowFieldDef[]): ConditionFieldOption[] {
+  const entry = (f: WorkflowFieldDef): ConditionFieldOption => ({
+    value: f.key,
+    label: `${f.label || f.key} · ${FIELD_TYPE_TEXT[f.type]}`,
+  });
+  const group = (id: string, title: string, members: readonly WorkflowFieldDef[]): ConditionFieldOption[] =>
+    members.length > 0
+      ? [{ value: `__group__${id}`, label: `— ${title} —`, disabled: true }, ...members.map(entry)]
+      : [];
+  return [
+    ...group('form', 'Formulario', fields.filter((f) => !f.compute)),
+    ...group('computed', 'Calculados', fields.filter((f) => !!f.compute)),
+  ];
+}
+
 export const OP_TEXT: Record<WorkflowConditionOp, string> = {
   eq: 'es igual a',
   neq: 'es distinto de',
