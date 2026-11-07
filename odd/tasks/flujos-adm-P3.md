@@ -51,12 +51,12 @@ Riesgo (textual del plan): "Risk: item 2 (endpoints públicos, secretos, SSRF) �
 | ID | S# | Ruta | Estado | Evidencia |
 |---|---|---|---|---|
 | T0 | S1–S6 | inline | ✅ | contrato + validador + esquema + migración `20261119090000_workflow_external_records`; validador P3 9/9, validador 92/92, P2 16/16, paridad 10/10, scoping 182/182 |
-| T1 | S1, S3 (correo entrante) | delegada (escritor, superficie disjunta, paralelo) | pendiente | |
-| T2 | S2 | delegada (escritor, superficie disjunta, paralelo) | pendiente | |
-| T3 | S3 (correo saliente, WhatsApp, DIAN, página de conectores) | delegada (escritor, superficie disjunta, paralelo) | pendiente | |
-| T4 | S4, S5 | delegada (escritor, superficie disjunta, paralelo) | pendiente | |
-| T5 | S6 | delegada (escritor, superficie disjunta, paralelo) | pendiente | |
-| T6 | todos | inline | pendiente | integración, verificación en vivo :3099 sobre `vendix_flujos` |
+| T1 | S1, S3 (correo entrante) | delegada (escritor, superficie disjunta, paralelo) | ✅ | `4525099df`; receptor 11/11, buzón 7/7, admin 10/10, controlador 8/8, consumidor SQS 45/45 |
+| T2 | S2 | delegada (escritor, superficie disjunta, paralelo) | ✅ | `a67ac6cb3`; nodo HTTP 16/16, salida 6/6, secretos 6/6, prueba 7/7, política URL 19/19 |
+| T3 | S3 (correo saliente, WhatsApp, DIAN, página de conectores) | delegada (escritor, superficie disjunta, paralelo) | ✅ | `8951c04d3`; acciones 22/22, registro 42/42, conectores 19/19 + 2/2 |
+| T4 | S4, S5 | delegada (escritor, superficie disjunta, paralelo) | ✅ | `6407e0a28`, `6a40b1ff3`; formulario P3 22/22, captcha 6/6, seguimiento 14/14, multipart S3 7/7, enlaces 12/12 |
+| T5 | S6 | delegada (escritor, superficie disjunta, paralelo) | ✅ | `8e3018d75`; colecciones 9/9, registros 17/17, DTO 2/2, cron 7/7 |
+| T6 | todos | inline | ✅ | `2738f44af`, `803394054`, `6a40b1ff3`; en vivo :3099 sobre `vendix_flujos` + UI por el vhost (Log L4) |
 
 Ruta: el disparador Writer se cumple (cinco unidades independientes con superficies disjuntas, cada una con varios archivos y >100 líneas, lanzadas juntas). El padre es dueño del contrato, el esquema, la migración, el registro de scoping y git.
 
@@ -64,3 +64,5 @@ Ruta: el disparador Writer se cumple (cinco unidades independientes con superfic
 
 - L1 (2026-11-07) Pedido: "Implementa TODA la fase P3 de PLAN.md §2 (todas sus filas y sus historias), cerrando cada requisito con código, specs y verificación. Excluye los conectores de Google (Sheets y Drive) por orden de Rafael; el resto de P3.3 sí va."
 - L2 Decisiones aditivas (sin Rafael, opción más simple): buzón de correo entrante por flujo dentro de la tienda (no uno compartido, para no adivinar qué flujo arranca); captcha propio de prueba de trabajo (no hay proveedor de captcha en el repo ni llaves); conectores = acciones del registro existente agrupadas en `WORKFLOW_CONNECTOR_CATALOG` (mismo outbox, permisos e idempotencia); el WhatsApp saliente usa plantillas aprobadas (fuera de la ventana de 24 h Meta no acepta texto libre); la subida por partes es del formulario público y del portal de seguimiento (la subida autenticada sigue ≤ 25 MB).
+- L3 Integración: el formulario público dejaba "no disponible" un flujo con archivo obligatorio (ahora se exige la subida por partes); el título del webhook no llegaba a la solicitud; los pasos del formulario se perdían al renombrar/borrar campos; el DTO de colecciones vaciaba los campos con la conversión implícita global (spec RED→GREEN); el QR no se generaba (el chunk de `qrcode` solo expone `default`); rotar el enlace público perdía captcha y vencimiento (spec RED→GREEN).
+- L4 Verificación en vivo (2026-11-07, :3099 sobre `vendix_flujos`, Redis temporal, S3 local con multipart, correo por consola): S1 201/200 repetido/401 sin firma y con firma de otro cuerpo/422 por campo/429/404; S2 respuesta real de un servicio público, SSRF bloqueado (169.254.169.254, 127.0.0.1, 10.x), acción en flujo llenó `crm_id`, el outbox guarda `{{secrets.CRM_TOKEN}}` y el valor no aparece en el log; S3 estados reales por conector, prueba de correo enviada, WhatsApp/DIAN dicen lo que falta, buzón activado; S4 3 pasos, PDF de 50 MB en 10 partes al expediente, captcha exigido y de un solo uso, QR y rotación con ajustes; S5 "Falta: RUT actualizado" → subido → recibido, respuesta en la línea de tiempo, revocado 404; S6 colección Contratos, CTR-000001 con PDF, el cron de las 10:00 creó una sola FLU-000041 con cliente y nota mapeados, "Iniciar flujo" desde el registro, flujo de otra colección 404. UI capturada en `evidencia-P3/`. No probado en vivo: llegada real de un correo (sin SES/SQS local; cubierto por specs).
