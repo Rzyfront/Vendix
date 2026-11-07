@@ -194,6 +194,27 @@ export interface StartPublicWorkflowInput {
  * outbox dispatcher from a `start_instance` row; the engine re-checks that the
  * published version still has a matching `event` trigger.
  */
+/**
+ * P3: start from outside Vendix (actor `system`). `webhook` checks `values`
+ * against the declared fields; `email` and `record_date` fill fields from the
+ * trigger `map` over `context` (`{{email.<key>}}` / `{{record.<key>}}`).
+ */
+export interface StartExternalWorkflowInput {
+  definitionId: number;
+  kind: 'webhook' | 'email' | 'record_date';
+  /** `webhook` only: field key → value, checked like a form. */
+  values?: Record<string, unknown>;
+  /** `email` / `record_date`: flat context the trigger map reads. */
+  context?: Record<string, unknown>;
+  /** `record_date` only: the date field of the trigger that fired. */
+  recordField?: string;
+  subject?: { type: string; id: number } | null;
+  /** Raw key; the engine namespaces it as a system key. */
+  idempotencyKey: string;
+  /** Extra data of the `started` event (`via` is set from `kind`). */
+  started?: Record<string, unknown>;
+}
+
 export interface StartSystemWorkflowInput {
   definitionId: number;
   event: string;
