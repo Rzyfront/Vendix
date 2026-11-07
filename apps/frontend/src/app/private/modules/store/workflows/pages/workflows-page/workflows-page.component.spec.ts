@@ -2,7 +2,7 @@ import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
 import { provideMockStore } from '@ngrx/store/testing';
 import { NEVER, Observable, of, throwError } from 'rxjs';
 import { ToastService } from '../../../../../../shared/components/index';
@@ -31,6 +31,7 @@ describe('WorkflowsPageComponent', () => {
       'listInstances',
       'publishDefinition',
       'setDefinitionEnabled',
+      'createDefinition',
     ]);
     api.listDefinitions.and.returnValue(of(list([row])) as never);
     api.listInstances.and.returnValue(of(list([])) as never);
@@ -166,5 +167,26 @@ describe('WorkflowsPageComponent', () => {
     api.listDefinitions.and.returnValue(of(list([{ ...row, is_enabled: false }])) as never);
     await render();
     expect(text()).toContain('Apagado');
+  });
+
+  it('"Nuevo flujo" pide solo el nombre y abre el editor del flujo creado', async () => {
+    await render();
+    const c = fixture.componentInstance;
+    const router = TestBed.inject(Router);
+    spyOn(router, 'navigate').and.resolveTo(true);
+    c.onHeaderAction('new');
+    expect(c.newOpen()).toBeTrue();
+    c.onNewCreated({ ...row, id: 9 } as never);
+    expect(router.navigate).toHaveBeenCalledWith(['/admin/workflows', 9, 'edit']);
+  });
+
+  it('el encabezado lleva a la galería y al tablero general', async () => {
+    await render();
+    const router = TestBed.inject(Router);
+    spyOn(router, 'navigate').and.resolveTo(true);
+    fixture.componentInstance.onHeaderAction('templates');
+    fixture.componentInstance.onHeaderAction('board');
+    expect(router.navigate).toHaveBeenCalledWith(['/admin/workflows/templates']);
+    expect(router.navigate).toHaveBeenCalledWith(['/admin/workflows/board']);
   });
 });

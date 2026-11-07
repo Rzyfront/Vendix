@@ -23,6 +23,7 @@ import {
 import { ScrollableTab } from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 import { WorkflowPublicLinkModalComponent } from '../../components/public-link-modal.component';
 import { ImportDefinitionModalComponent } from '../../components/import-definition-modal.component';
+import { NewDefinitionModalComponent } from '../../components/new-definition-modal.component';
 import { PublishIssuesModalComponent } from '../../components/publish-issues-modal.component';
 import { StartInstanceModalComponent } from '../../components/start-instance-modal.component';
 import {
@@ -79,6 +80,7 @@ const BADGE_LABEL: Record<string, string> = {
     PaginationComponent,
     EmptyStateComponent,
     ImportDefinitionModalComponent,
+    NewDefinitionModalComponent,
     PublishIssuesModalComponent,
     StartInstanceModalComponent,
     WorkflowPublicLinkModalComponent,
@@ -259,6 +261,10 @@ const BADGE_LABEL: Record<string, string> = {
     </ng-template>
 
     <app-import-definition-modal [(isOpen)]="importOpen" (created)="onCreated()" />
+    <app-new-definition-modal
+      [(isOpen)]="newOpen"
+      (created)="onNewCreated($event)"
+    />
     <app-publish-issues-modal
       [(isOpen)]="issuesOpen"
       [flowName]="issuesFlow()"
@@ -291,7 +297,8 @@ export class WorkflowsPageComponent implements OnInit {
     { id: 'records', label: 'Registros', icon: 'folder-open', variant: 'outline' as const },
     { id: 'connectors', label: 'Conectores', icon: 'zap', variant: 'outline' as const },
     { id: 'integrations', label: 'Integraciones', icon: 'plug', variant: 'outline' as const },
-    { id: 'import', label: 'Nuevo desde JSON', icon: 'plus', variant: 'primary' as const },
+    { id: 'import', label: 'Nuevo desde JSON', icon: 'upload', variant: 'outline' as const },
+    { id: 'new', label: 'Nuevo flujo', icon: 'plus', variant: 'primary' as const },
   ];
 
   readonly activeTab = signal<WorkflowsTab>('flows');
@@ -307,6 +314,7 @@ export class WorkflowsPageComponent implements OnInit {
   readonly statsLoading = signal(true);
 
   readonly importOpen = signal(false);
+  readonly newOpen = signal(false);
   readonly issuesOpen = signal(false);
   readonly issues = signal<string[]>([]);
   readonly issuesFlow = signal('');
@@ -497,8 +505,14 @@ export class WorkflowsPageComponent implements OnInit {
     this.load();
   }
 
+  /** P5.1: a blank flow opens straight in the editor (canvas tab). */
+  onNewCreated(row: WorkflowDefinitionRow): void {
+    this.router.navigate(['/admin/workflows', row.id, 'edit']);
+  }
+
   onHeaderAction(id: string): void {
     if (id === 'import') this.importOpen.set(true);
+    if (id === 'new') this.newOpen.set(true);
     if (id === 'inbox') this.router.navigate(['/admin/workflows/inbox']);
     if (id === 'board') this.router.navigate(['/admin/workflows/board']);
     if (id === 'templates') this.router.navigate(['/admin/workflows/templates']);
