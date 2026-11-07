@@ -366,17 +366,3 @@ export async function consumeApproval(
     );
   }
 }
-
-/** True while the record has a pending gate for `operation` (read-only). */
-export async function hasPendingApproval(
-  prisma: RootDb,
-  storeId: number,
-  operation: WorkflowGateOperation,
-  entityId: number,
-): Promise<boolean> {
-  const pending = await root(prisma).workflow_approval_gates.findFirst({
-    where: { store_id: storeId, operation, entity_id: entityId, status: 'pending' },
-    select: { id: true },
-  });
-  return !!pending;
-}
