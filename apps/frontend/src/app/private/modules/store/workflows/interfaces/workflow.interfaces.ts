@@ -32,6 +32,8 @@ export interface WorkflowDefinitionRow {
   status: WorkflowDefinitionStatus;
   published_version: { version: number; published_at: string } | null;
   has_unpublished_changes: boolean;
+  /** P2.11: a disabled flow starts no new requests; live ones keep going. */
+  is_enabled: boolean;
   updated_at: string;
 }
 
@@ -129,6 +131,11 @@ export interface TaskView {
   claimed_at: string | null;
   due_at: string | null;
   can_act: boolean;
+  /** P2.1: set on the task of one branch of a parallel stage. */
+  branch_key?: string | null;
+  branch_name?: string | null;
+  /** Fields this task asks for (the branch form, or the stage form). */
+  form_fields?: WorkflowFieldDef[];
 }
 
 export interface TimelineEventView {
@@ -168,6 +175,50 @@ export interface InstanceStageView {
   requirements: StageRequirementView[];
 }
 
+export interface InstanceLinkView {
+  id: number;
+  reference: string;
+  title: string;
+}
+
+export interface InstanceChildView extends InstanceLinkView {
+  status: WorkflowInstanceStatus;
+  current_stage_key: string | null;
+  current_stage_name: string | null;
+  definition_name: string | null;
+}
+
+export interface InstanceWaitView {
+  until: string;
+  kind: string;
+}
+
+export type ParallelBranchStatus = 'open' | 'done' | 'cancelled';
+
+export interface InstanceParallelView {
+  join: 'all' | 'any' | 'n_of_m';
+  required: number | null;
+  total: number;
+  done: number;
+  branches: {
+    key: string;
+    name: string;
+    status: ParallelBranchStatus;
+    completed_by_name: string | null;
+    completed_at: string | null;
+  }[];
+}
+
+export interface FailedActionView {
+  id: number;
+  action: string;
+  label: string;
+  stage_key: string | null;
+  error: string | null;
+  attempts: number;
+  failed_at: string;
+}
+
 export interface WorkflowInstanceDetail {
   id: number;
   reference: string;
@@ -185,7 +236,16 @@ export interface WorkflowInstanceDetail {
   started_by: { name: string } | null;
   created_at: string;
   completed_at: string | null;
-  definition: { id: number; name: string; version: number };
+  definition: { id: number; name: string; version: number; is_enabled?: boolean };
+  /** P2.2 */
+  parent?: InstanceLinkView | null;
+  children?: InstanceChildView[];
+  /** P2.3 */
+  wait?: InstanceWaitView | null;
+  /** P2.1 */
+  parallel?: InstanceParallelView | null;
+  /** P2.7 */
+  failed_actions?: FailedActionView[];
   stage: InstanceStageView | null;
   tasks: TaskView[];
   timeline: TimelineEventView[];
@@ -238,6 +298,8 @@ export interface SaveDraftResult {
 }
 
 export interface WorkflowVersionRow {
+  /** Id of the version row; the migration endpoints take it. */
+  id: number;
   version: number;
   published_at: string;
   published_by_user_id: number | null;
@@ -293,4 +355,38 @@ export interface SimulationResult {
   ended: { outcome: string } | null;
   loop_guard: boolean;
   watermark: string;
+}
+
+// ─── Migration of live requests between versions (P2.8) ────────────────
+
+export interface MigrationBody {
+  from_version_id: number;
+  /** Old stage key → stage key of the published version. */
+  stage_map: Record<string, string>;
+}
+
+export interface MigrationPreviewStage {
+  from_stage_key: string;
+  from_stage_name: string;
+  count: number;
+  to_stage_key: string | null;
+  to_stage_name: string | null;
+  ok: boolean;
+  reason: string | null;
+  /** Requests still waiting for live child requests: the migration skips them. */
+  waiting_children: number;
+}
+
+export interface MigrationPreview {
+  from_version: { id: number; version: number };
+  to_version: { id: number; version: number };
+  total: number;
+  ready: boolean;
+  stages: MigrationPreviewStage[];
+  target_stages: { key: string; name: string; type: string }[];
+}
+
+export interface MigrationResult {
+  migrated: number;
+  failed: { instance_id: number; reference: string; error: string }[];
 }

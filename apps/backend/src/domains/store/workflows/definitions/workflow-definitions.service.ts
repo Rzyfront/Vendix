@@ -44,6 +44,7 @@ const LIST_SELECT = {
   draft_updated_at: true,
   published_version_id: true,
   source_template_key: true,
+  is_enabled: true,
   created_by_user_id: true,
   updated_by_user_id: true,
   created_at: true,
@@ -392,6 +393,21 @@ export class WorkflowDefinitionsService {
     return this.setStatus(id, 'archived');
   }
 
+  /**
+   * P2.11: the switch. Off = no new requests from any trigger (manual, public
+   * form, events, schedule, subflows) and the flow governs no operation; live
+   * requests keep going.
+   */
+  async setEnabled(id: number, enabled: boolean) {
+    const { store_id, user_id } = this.ctx();
+    await this.load(this.prisma, store_id, id);
+    await this.prisma.workflow_definitions.updateMany({
+      where: { id, store_id },
+      data: { is_enabled: enabled, updated_by_user_id: user_id },
+    });
+    return this.get(id);
+  }
+
   /** Back to `active` when it has a published version, else `draft`. */
   async unarchive(id: number) {
     const { store_id } = this.ctx();
@@ -576,7 +592,7 @@ export class WorkflowDefinitionsService {
     storeId: number,
     organizationId: number,
   ): Promise<WorkflowValidationContext> {
-    const [roles, groups, members, storeUsers] = await Promise.all([
+    const [roles, groups, members, storeUsers, flows] = await Promise.all([
       db.roles.findMany({
         where: {
           OR: [
@@ -601,6 +617,11 @@ export class WorkflowDefinitionsService {
         where: { store_id: storeId },
         select: { user_id: true },
       }),
+      // P2.2: only a published, active flow can start as a child.
+      db.workflow_definitions.findMany({
+        where: { store_id: storeId, status: 'active', published_version_id: { not: null } },
+        select: { key: true },
+      }),
     ]);
     const withMembers = new Set<number>(members.map((m: any) => m.work_group_id));
     return {
@@ -608,6 +629,8 @@ export class WorkflowDefinitionsService {
       groupKeys: groups.filter((g: any) => withMembers.has(g.id)).map((g: any) => g.key),
       userIds: storeUsers.map((u: any) => u.user_id),
       publishedTemplateKeys: [],
+      // P2.2: subflows may only launch published flows of this store.
+      flowKeys: flows.map((f: any) => f.key),
     };
   }
 }

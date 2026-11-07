@@ -137,7 +137,13 @@ export async function findGoverningDefinition(
   });
   if (!store || !industryAllowsKey('flows', store.industries)) return null;
   const defs = await db.workflow_definitions.findMany({
-    where: { store_id: storeId, status: 'active', published_version_id: { not: null } },
+    // P2.11: a switched-off flow governs nothing.
+    where: {
+      store_id: storeId,
+      status: 'active',
+      is_enabled: true,
+      published_version_id: { not: null },
+    },
     select: { id: true, organization_id: true, published_version_id: true },
     orderBy: { id: 'asc' },
   });

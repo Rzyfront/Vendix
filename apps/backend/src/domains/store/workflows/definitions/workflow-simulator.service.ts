@@ -4,6 +4,8 @@ import {
   WorkflowDefinitionV1,
   WorkflowIssue,
   WorkflowStageDef,
+  applyComputedFields,
+  evaluateCondition,
   findStage,
   isHumanStage,
   normalizeDefinition,
@@ -11,6 +13,7 @@ import {
   stageOutcomes,
   startStage,
   validateFormValues,
+  WorkflowExprOptions,
 } from '@common/workflows/contract';
 import {
   AppliedVendixAction,
@@ -18,7 +21,10 @@ import {
   isBlockingRequirement,
   isFilledValue,
 } from '../engine/workflow-rules';
+import { firedGuard } from '../engine/workflow-guards';
 import { WorkflowDefinitionsService } from './workflow-definitions.service';
+import { WorkflowStageService } from '../engine/workflow-stage.service';
+import { RequestContextService } from '@common/context/request-context.service';
 
 const MAX_AUTOMATIC_HOPS = 20;
 const WATERMARK = 'SIMULACIÓN';
@@ -57,6 +63,8 @@ export interface SimulationResult {
   actions: AppliedVendixAction[];
   ended: { outcome: string } | null;
   loop_guard: boolean;
+  /** P2.5: message of the guard that would hold the request. */
+  guard_blocked?: string;
   watermark: typeof WATERMARK;
 }
 
@@ -115,6 +123,7 @@ function ruleText(when: unknown): string | undefined {
 export function simulateWorkflow(
   rawDefinition: WorkflowDefinitionV1,
   input: SimulateInput = {},
+  exprOptions: WorkflowExprOptions = {},
 ): SimulationResult {
   const def = normalizeDefinition(rawDefinition);
   const res = emptyResult();
@@ -157,6 +166,7 @@ export function simulateWorkflow(
       }
       data = { ...data, ...form.values };
     }
+    data = applyComputedFields(def, data, exprOptions);
     res.data = data;
 
     if (!stageOutcomes(current).includes(outcome)) {
@@ -176,15 +186,22 @@ export function simulateWorkflow(
       }
     }
 
-    const transition = resolveTransition(current, outcome, data, def.fields);
+    const guard = firedGuard(current, outcome, data, def.fields);
+    if (guard && !guard.redirect_to) {
+      res.guard_blocked = guard.message;
+      return res;
+    }
+    const transition = guard?.redirect_to
+      ? { to: guard.redirect_to, on: outcome }
+      : resolveTransition(current, outcome, data, def.fields);
     if (!transition) res.no_transition = true;
     else {
       res.transition = {
         on: transition.on,
-        ...(transition.label ? { label: transition.label } : {}),
-        ...(transition.when ? { when_text: ruleText(transition.when) } : {}),
+        ...('label' in transition && transition.label ? { label: transition.label } : {}),
+        ...('when' in transition && transition.when ? { when_text: ruleText(transition.when) } : {}),
       };
-      if (transition.require_comment && !input.comment?.trim()) {
+      if ('require_comment' in transition && transition.require_comment && !input.comment?.trim()) {
         res.comment_required = true;
       }
     }
@@ -197,37 +214,74 @@ export function simulateWorkflow(
       return res;
     }
 
-    const exit = applyActionList(current.on_exit, data, instanceRef);
+    const submitted = outcome === 'submit' || outcome === 'approve';
+    const exit = leaveStage(res, current, data, instanceRef, submitted);
     res.path = [current.key];
-    res.notifications.push(...notifyList(exit.notifies));
-    res.actions.push(...exit.vendix);
-    data = exit.data;
+    data = exit;
     current = enterStage(res, def, transition.to, data, instanceRef);
     if (!current) return res;
     data = res.data;
   }
 
-  // Automatic stages run on their own (the engine queues them; capped here).
+  // Stages the engine resolves by itself run on their own (capped here): a
+  // wait elapses at once, a subflow is assumed completed, a loop counts laps.
+  const SYSTEM_OUTCOME: Record<string, string> = {
+    automatic: 'auto',
+    wait: 'elapsed',
+    subflow: 'completed',
+  };
+  const laps: Record<string, number> = {};
   let hops = 0;
-  while (current && current.type === 'automatic') {
+  while (current && (SYSTEM_OUTCOME[current.type] || current.type === 'loop')) {
     if (hops++ >= MAX_AUTOMATIC_HOPS) {
       res.loop_guard = true;
       break;
     }
-    const t = resolveTransition(current, 'auto', data, def.fields);
+    let outcome = SYSTEM_OUTCOME[current.type];
+    if (current.type === 'loop' && current.loop) {
+      const n = laps[current.key] ?? 0;
+      const again = evaluateCondition(current.loop.while, data, def.fields) && n < current.loop.max_iterations;
+      laps[current.key] = again ? n + 1 : 0;
+      outcome = again ? 'continue' : 'done';
+    }
+    const guard = firedGuard(current, outcome, data, def.fields);
+    if (guard && !guard.redirect_to) {
+      res.guard_blocked = guard.message;
+      break;
+    }
+    const t = guard?.redirect_to
+      ? { to: guard.redirect_to }
+      : resolveTransition(current, outcome, data, def.fields);
     if (!t) {
       res.no_transition = true;
       break;
     }
-    const exit = applyActionList(current.on_exit, data, instanceRef);
-    res.notifications.push(...notifyList(exit.notifies));
-    res.actions.push(...exit.vendix);
-    current = enterStage(res, def, t.to, exit.data, instanceRef);
+    const exit = leaveStage(res, current, data, instanceRef, false);
+    current = enterStage(res, def, t.to, exit, instanceRef);
     if (!current) break;
     data = res.data;
   }
-  res.data = data;
+  res.data = applyComputedFields(def, data, exprOptions);
   return res;
+}
+
+/** P2.6: on_submit (when a person submitted) → on_complete → on_exit. */
+function leaveStage(
+  res: SimulationResult,
+  stage: WorkflowStageDef,
+  data: Record<string, unknown>,
+  instanceRef: { reference: string; title: string },
+  submitted: boolean,
+): Record<string, unknown> {
+  let next = data;
+  for (const list of [submitted ? stage.on_submit : undefined, stage.on_complete, stage.on_exit]) {
+    if (!list?.length) continue;
+    const applied = applyActionList(list, next, instanceRef);
+    res.notifications.push(...notifyList(applied.notifies));
+    res.actions.push(...applied.vendix);
+    next = applied.data;
+  }
+  return next;
 }
 
 function notifyList(
@@ -250,6 +304,13 @@ function collectEntry(
       stage_key: stage.key,
       kind: stage.type,
       assignee: describeAssignee(stage.assignee),
+    });
+  }
+  for (const branch of stage.parallel?.branches ?? []) {
+    res.tasks.push({
+      stage_key: stage.key,
+      kind: 'form',
+      assignee: describeAssignee(branch.assignee),
     });
   }
   if (stage.type === 'end') res.ended = { outcome: stage.outcome ?? 'completed' };
@@ -280,7 +341,10 @@ function enterStage(
 /** `POST store/workflows/definitions/:id/simulate`: validates, then simulates. */
 @Injectable()
 export class WorkflowSimulatorService {
-  constructor(private readonly definitions: WorkflowDefinitionsService) {}
+  constructor(
+    private readonly definitions: WorkflowDefinitionsService,
+    private readonly stages: WorkflowStageService,
+  ) {}
 
   async simulate(
     id: number,
@@ -292,7 +356,14 @@ export class WorkflowSimulatorService {
     if (!check.valid) {
       return { ...emptyResult(), valid: false, issues: check.errors };
     }
-    const result = simulateWorkflow(definition as unknown as WorkflowDefinitionV1, input);
+    // P2.9: `today()` follows the store's calendar, as in the engine.
+    const storeId = RequestContextService.getContext()?.store_id;
+    const timeZone = storeId ? await this.stages.storeTimezone(storeId) : undefined;
+    const result = simulateWorkflow(
+      definition as unknown as WorkflowDefinitionV1,
+      input,
+      timeZone ? { timeZone } : {},
+    );
     return { ...result, issues: check.warnings };
   }
 }

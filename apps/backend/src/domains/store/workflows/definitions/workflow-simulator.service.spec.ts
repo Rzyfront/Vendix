@@ -19,6 +19,8 @@ import { PERMISSIONS_KEY } from '../../../auth/decorators/permissions.decorator'
 
 const EX = WORKFLOW_EXAMPLE_PURCHASE_APPROVAL;
 
+const stages = { storeTimezone: jest.fn().mockResolvedValue('America/Bogota') };
+
 describe('simulateWorkflow', () => {
   it('start: etapa inicial y su tarea', () => {
     const r = simulateWorkflow(EX);
@@ -225,7 +227,7 @@ describe('WorkflowSimulatorService', () => {
       getDraft: jest.fn().mockResolvedValue({ definition: draft }),
       validateDefinition: jest.fn().mockResolvedValue({ valid, errors, warnings: [] }),
     };
-    return { definitions, svc: new WorkflowSimulatorService(definitions as any) };
+    return { definitions, svc: new WorkflowSimulatorService(definitions as any, stages as any) };
   };
 
   it('usa el borrador guardado cuando no llega definición', async () => {
@@ -310,7 +312,7 @@ describe('simulateWorkflow · acciones Vendix', () => {
     const kit = buildWorkflowKit();
     seedPeople(kit.db);
     const definitions = { getDraft: jest.fn(), validateDefinition: jest.fn().mockResolvedValue({ valid: true, errors: [], warnings: [] }) };
-    const service = new WorkflowSimulatorService(definitions as any);
+    const service = new WorkflowSimulatorService(definitions as any, stages as any);
     const r = await service.simulate(1, {
       definition: def() as any,
       state: { stage_key: 'solicitud', data: {} },
@@ -321,7 +323,7 @@ describe('simulateWorkflow · acciones Vendix', () => {
     const invalid = new WorkflowSimulatorService({
       getDraft: jest.fn(),
       validateDefinition: jest.fn().mockResolvedValue({ valid: false, errors: [{ code: 'TOKEN_UNKNOWN' }], warnings: [] }),
-    } as any);
+    } as any, stages as any);
     expect((await invalid.simulate(1, { definition: def() as any })).actions).toEqual([]);
   });
 });

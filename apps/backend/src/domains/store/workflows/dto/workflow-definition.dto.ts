@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  IsBoolean,
   IsArray,
   ValidateNested,
   IsIn,
@@ -69,4 +70,15 @@ export class SimulateWorkflowDto {
   @IsOptional() @IsString() @MaxLength(2000) comment?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(100) @IsString({ each: true })
   satisfied_requirements?: string[];
+}
+
+/** P2.11 */
+export class SetWorkflowEnabledDto {
+  @IsBoolean() enabled!: boolean;
+}
+
+/** P2.8: old stage key → stage key of the published version. */
+export class MigrateWorkflowInstancesDto {
+  @Type(() => Number) @IsInt() @Min(1) from_version_id!: number;
+  @IsOptional() @IsObject() stage_map?: Record<string, string>;
 }

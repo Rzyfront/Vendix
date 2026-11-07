@@ -61,7 +61,94 @@ export const EVENT_LABEL: Record<string, string> = {
   escalated: 'Escalada',
   unassigned: 'Sin responsable',
   failed: 'Error',
+  branch_completed: 'Rama completada',
+  joined: 'Ramas unidas',
+  subflow_started: 'Subflujo iniciado',
+  subflow_closed: 'Subflujo cerrado',
+  subflow_failed: 'Subflujo con error',
+  waiting: 'En espera',
+  loop_iteration: 'Vuelta del bucle',
+  loop_done: 'Bucle terminado',
+  guard_redirected: 'Redirigida por guarda',
+  guard_blocked: 'Bloqueada por guarda',
+  action_executed: 'Acción ejecutada',
+  action_failed: 'Acción fallida',
+  action_retried: 'Acción reenviada',
+  error_routed: 'Enviada a la ruta de error',
+  migrated: 'Solicitud migrada',
 };
+
+function text(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+}
+
+const CHILD_OUTCOME_LABEL: Record<string, string> = {
+  completed: 'completada',
+  rejected: 'rechazada',
+  cancelled: 'cancelada',
+  failed: 'con error',
+};
+
+/**
+ * Timeline line of an event: the label plus the details of its payload
+ * ("Subflujo iniciado: FLU-12", "Vuelta 1 de 3", "Rama completada: TI (2 de 3)").
+ */
+export function eventDescription(
+  type: string,
+  payload: Record<string, unknown> | null,
+): string {
+  const label = eventLabel(type);
+  const p = payload ?? {};
+  switch (type) {
+    case 'branch_completed':
+      return `${label}: ${text(p['branch_name'] ?? p['branch_key'])} (${text(p['done'])} de ${text(p['total'])})`;
+    case 'subflow_started':
+      return `${label}: ${text(p['child_reference'])}${p['flow_key'] ? ' · ' + text(p['flow_key']) : ''}`;
+    case 'subflow_closed':
+      return `${label}: ${text(p['child_reference'])} ${CHILD_OUTCOME_LABEL[text(p['outcome'])] ?? text(p['outcome'])}`;
+    case 'subflow_failed':
+      return `${label}: ${text(p['flow_key'])}${p['error'] ? ' — ' + text(p['error']) : ''}`;
+    case 'loop_iteration':
+      return `Vuelta ${text(p['iteration'])} de ${text(p['max'])}`;
+    case 'loop_done':
+      return p['limit_reached'] === true
+        ? `${label} al llegar al límite (${text(p['iterations'])} vueltas)`
+        : `${label} (${text(p['iterations'])} vueltas)`;
+    case 'guard_redirected':
+    case 'guard_blocked':
+      return p['message'] ? `${label}: ${text(p['message'])}` : label;
+    case 'action_failed':
+      return `${label}: ${text(p['action'])}${p['error'] ? ' — ' + text(p['error']) : ''}`;
+    case 'action_executed':
+    case 'action_retried':
+      return `${label}: ${text(p['action'])}`;
+    case 'error_routed':
+      return `${label}: ${text(p['action'])}`;
+    case 'migrated':
+      return `Migrada de v${text(p['from_version'])} a v${text(p['to_version'])}`;
+    case 'started':
+      if (p['via'] === 'schedule') return `${label} por Programación`;
+      return p['parent_reference'] ? `${label} desde ${text(p['parent_reference'])}` : label;
+    default:
+      return label;
+  }
+}
+
+/** "2 d 23 h", "5 h 10 min", "40 s": remaining time of a wait; "Ya venció" when over. */
+export function countdownText(untilIso: string, now: number = Date.now()): string {
+  const until = new Date(untilIso).getTime();
+  if (Number.isNaN(until)) return '—';
+  const total = Math.floor((until - now) / 1000);
+  if (total <= 0) return 'Ya venció';
+  const days = Math.floor(total / 86_400);
+  const hours = Math.floor((total % 86_400) / 3_600);
+  const minutes = Math.floor((total % 3_600) / 60);
+  const seconds = total % 60;
+  if (days > 0) return `${days} d ${hours} h`;
+  if (hours > 0) return `${hours} h ${minutes} min`;
+  if (minutes > 0) return `${minutes} min ${seconds} s`;
+  return `${seconds} s`;
+}
 
 export function eventLabel(type: string): string {
   return EVENT_LABEL[type] ?? type;
@@ -72,6 +159,12 @@ export const OUTCOME_LABEL: Record<string, string> = {
   approve: 'Aprobar',
   reject: 'Rechazar',
   return: 'Devolver',
+  joined: 'Unir ramas',
+  completed: 'Completada',
+  rejected: 'Rechazada',
+  elapsed: 'Espera cumplida',
+  continue: 'Otra vuelta',
+  done: 'Terminado',
 };
 
 export function outcomeLabel(outcome: string): string {

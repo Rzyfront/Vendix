@@ -8,6 +8,9 @@ export interface InboxTaskRow {
   overdue: boolean;
   stage_key: string;
   stage_name: string;
+  /** P2.1: the branch of a parallel stage this task belongs to. */
+  branch_key?: string | null;
+  branch_name?: string | null;
   instance: {
     id: number;
     reference: string;

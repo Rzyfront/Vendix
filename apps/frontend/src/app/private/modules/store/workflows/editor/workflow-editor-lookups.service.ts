@@ -18,6 +18,8 @@ export class WorkflowEditorLookups {
   /** `value` is the role name: the contract's `role_key` is the role name. */
   readonly roles = signal<LookupOption[]>([]);
   readonly groups = signal<LookupOption[]>([]);
+  /** Published flows of the store (`value` is the flow key) for the subflow picker. */
+  readonly flows = signal<LookupOption[]>([]);
   readonly loadError = signal<string | null>(null);
 
   load(): void {
@@ -43,5 +45,17 @@ export class WorkflowEditorLookups {
         ),
       error: () => this.loadError.set('No se pudieron cargar los grupos de trabajo.'),
     });
+    this.api
+      .listDefinitions({ limit: 100 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) =>
+          this.flows.set(
+            res.data
+              .filter((d) => d.status === 'active' && d.published_version !== null)
+              .map((d) => ({ value: d.key, label: d.name })),
+          ),
+        error: () => this.loadError.set('No se pudieron cargar los flujos de la tienda.'),
+      });
   }
 }

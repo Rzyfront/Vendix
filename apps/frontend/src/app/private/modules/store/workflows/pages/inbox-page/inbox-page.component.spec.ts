@@ -170,4 +170,18 @@ describe('InboxPageComponent', () => {
     fixture.destroy();
     expect(cancelled).toBe(inFlight);
   });
+
+  it('una tarea de rama muestra el nombre de la rama junto a la etapa', async () => {
+    api.listInbox.and.returnValue(
+      of(page([task({ stage_name: 'Alistamiento', branch_key: 'ti', branch_name: 'TI' })])) as never,
+    );
+    await render();
+    expect(fixture.componentInstance.rows()[0].stage_label).toBe('Alistamiento · Rama: TI');
+    expect(text()).toContain('Rama: TI');
+  });
+
+  it('una tarea sin rama muestra solo la etapa', async () => {
+    await render();
+    expect(fixture.componentInstance.rows()[0].stage_label).toBe('Aprobación');
+  });
 });

@@ -3,14 +3,18 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import {
   WorkflowDefinitionV1,
+  WorkflowStageDef,
   findStage,
   isHumanStage,
   stageOutcomes,
   visibleFieldKeys,
+  WORKFLOW_ACTION_CATALOG,
+  WorkflowVendixActionName,
 } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { DossiersService } from '../../documents/dossiers.service';
 import { WorkflowAssignmentService } from '../engine/workflow-assignment.service';
+import { WorkflowEventsService } from '../engine/workflow-events.service';
 import {
   WorkflowInstanceRow,
   WorkflowRequirementsService,
@@ -34,6 +38,10 @@ const OPEN = ['open', 'claimed'];
 export const COMMENTS_IN_DETAIL = 50;
 type Json = Record<string, any>;
 
+function stageName(def: WorkflowDefinitionV1 | undefined, key: string): string {
+  return (def ? findStage(def, key)?.name : undefined) ?? key;
+}
+
 /** Read model of Flujos instances (writes live in `WorkflowEngineService`). */
 @Injectable()
 export class WorkflowInstancesService {
@@ -42,6 +50,7 @@ export class WorkflowInstancesService {
     private readonly assignment: WorkflowAssignmentService,
     private readonly requirements: WorkflowRequirementsService,
     private readonly dossiers: DossiersService,
+    private readonly events: WorkflowEventsService,
   ) {}
 
   private ctx() {
@@ -239,7 +248,7 @@ export class WorkflowInstancesService {
     const [def, version, taskRows, eventRows, commentRows] = await Promise.all([
       this.prisma.workflow_definitions.findFirst({
         where: { id: instance.definition_id, store_id: c.store_id },
-        select: { id: true, key: true, name: true },
+        select: { id: true, key: true, name: true, is_enabled: true },
       }),
       this.prisma.workflow_versions.findFirst({
         where: { id: instance.version_id, store_id: c.store_id },
@@ -283,6 +292,14 @@ export class WorkflowInstancesService {
       this.names('work_groups', taskRows.map((t: any) => t.assignee_group_id), (g) => g.name, c.store_id),
     ]);
 
+    const branchOf = (key: string | null | undefined) =>
+      key ? (stage?.parallel?.branches.find((b) => b.key === key) ?? null) : null;
+    const fieldDefs = (keys: string[] | undefined) =>
+      definition
+        ? (keys ?? [])
+            .map((k) => definition.fields.find((f) => f.key === k))
+            .filter(Boolean)
+        : [];
     const tasks = await Promise.all(
       taskRows.map(async (t: WorkflowTaskRow) => {
         const assignee = t.assignee_user_id
@@ -308,9 +325,20 @@ export class WorkflowInstancesService {
           claimed_at: t.claimed_at,
           due_at: t.due_at,
           can_act,
+          // P2.1: the branch this task belongs to and the fields it fills.
+          branch_key: t.branch_key ?? null,
+          branch_name: branchOf(t.branch_key)?.name ?? null,
+          form_fields: t.branch_key
+            ? fieldDefs(branchOf(t.branch_key)?.form?.fields)
+            : stage && definition
+              ? visibleFieldKeys(definition, stage, instance.data ?? {})
+                  .map((k) => definition.fields.find((f) => f.key === k))
+                  .filter(Boolean)
+              : [],
         };
       }),
     );
+    const advanced = await this.advancedState(c.store_id, instance, stage, definition);
 
     const pending =
       active && stage
@@ -319,9 +347,11 @@ export class WorkflowInstancesService {
     const dossier = await this.dossiers.summaryForInstance(instance.id);
     const outcomes = new Set(stageOutcomes(stage ?? ({ type: 'end' } as any)));
     const allowed_outcomes =
-      active && human && stage
-        ? [...new Set((stage.transitions ?? []).map((t) => t.on))].filter((o) => outcomes.has(o))
-        : [];
+      active && stage?.type === 'parallel'
+        ? ['submit']
+        : active && human && stage
+          ? [...new Set((stage.transitions ?? []).map((t) => t.on))].filter((o) => outcomes.has(o))
+          : [];
 
     return {
       id: instance.id,
@@ -356,7 +386,9 @@ export class WorkflowInstancesService {
         name: def?.name ?? null,
         version_id: instance.version_id,
         version: version?.version ?? null,
+        is_enabled: def?.is_enabled ?? true,
       },
+      ...advanced,
       stage: stage
         ? {
             key: stage.key,
@@ -402,6 +434,173 @@ export class WorkflowInstancesService {
       pending_requirements: pending,
       dossier,
       allowed_outcomes,
+    };
+  }
+
+  /**
+   * P2.7: puts a dead `vendix.*` action of the request back in the queue
+   * (attempts reset). An interrupted action (unknown outcome) is retried too:
+   * a person asking for it is the confirmation the engine could not get.
+   */
+  async retryFailedAction(instanceId: number, actionId: number) {
+    const c = this.ctx();
+    if (!(await this.canSee(instanceId))) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_FOUND);
+    }
+    const row = await this.prisma.workflow_outbox.findFirst({
+      where: {
+        id: actionId,
+        store_id: c.store_id,
+        instance_id: instanceId,
+        kind: 'action',
+        status: 'dead',
+      },
+    });
+    if (!row) throw new VendixHttpException(ErrorCodes.WORKFLOW_ACTION_NOT_RETRYABLE);
+    const payload = { ...((row.payload ?? {}) as Record<string, unknown>) };
+    delete payload.effect_started_at;
+    const { count } = await this.prisma.workflow_outbox.updateMany({
+      where: { id: row.id, store_id: c.store_id, status: 'dead' },
+      data: {
+        status: 'pending',
+        attempts: 0,
+        available_at: new Date(),
+        last_error: null,
+        payload: { ...payload, retried_by_user_id: c.user_id, retried_at: new Date().toISOString() },
+      },
+    });
+    if (count === 0) throw new VendixHttpException(ErrorCodes.WORKFLOW_ACTION_NOT_RETRYABLE);
+    await this.prisma.$transaction(async (tx: any) => {
+      await this.events.lockInstance(tx, c.store_id, instanceId);
+      await this.events.append(tx, {
+        store_id: c.store_id,
+        instance_id: instanceId,
+        type: 'action_retried',
+        actor: c.user_id === null ? { type: 'system', id: null } : { type: 'user', id: c.user_id },
+        payload: { action: payload.action ?? null, outbox_id: actionId },
+      });
+    });
+    return { retried: true };
+  }
+
+  /** P2: parent/children, wait, parallel progress and dead actions of a request. */
+  private async advancedState(
+    storeId: number,
+    instance: WorkflowInstanceRow,
+    stage: WorkflowStageDef | undefined,
+    definition: WorkflowDefinitionV1 | undefined,
+  ) {
+    const [parent, children, branchTasks, dead] = await Promise.all([
+      instance.parent_instance_id
+        ? this.prisma.workflow_instances.findFirst({
+            where: { id: instance.parent_instance_id, store_id: storeId },
+            select: { id: true, reference: true, title: true },
+          })
+        : Promise.resolve(null),
+      this.prisma.workflow_instances.findMany({
+        where: { store_id: storeId, parent_instance_id: instance.id },
+        select: {
+          id: true,
+          reference: true,
+          title: true,
+          status: true,
+          current_stage_key: true,
+          version_id: true,
+          definition_id: true,
+        },
+        orderBy: { id: 'asc' },
+      }),
+      stage?.type === 'parallel'
+        ? this.prisma.workflow_tasks.findMany({
+            where: {
+              store_id: storeId,
+              instance_id: instance.id,
+              stage_key: stage.key,
+              stage_entry_seq: instance.stage_entry_seq,
+              branch_key: { not: null },
+            },
+            select: { branch_key: true, status: true, completed_by_user_id: true, completed_at: true },
+          })
+        : Promise.resolve([]),
+      this.prisma.workflow_outbox.findMany({
+        where: { store_id: storeId, instance_id: instance.id, kind: 'action', status: 'dead' },
+        orderBy: { id: 'asc' },
+        take: 50,
+      }),
+    ]);
+    const [childVersions, childDefs] = children.length
+      ? await Promise.all([
+          this.prisma.workflow_versions.findMany({
+            where: { store_id: storeId, id: { in: children.map((ch: any) => ch.version_id) } },
+            select: { id: true, definition: true },
+          }),
+          this.prisma.workflow_definitions.findMany({
+            where: { store_id: storeId, id: { in: children.map((ch: any) => ch.definition_id) } },
+            select: { id: true, name: true },
+          }),
+        ])
+      : [[], []];
+    const completers = await this.names(
+      'users',
+      branchTasks.map((t: { completed_by_user_id: number | null }) => t.completed_by_user_id),
+      (u) => `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim(),
+    );
+    const parallel = stage?.type === 'parallel' && stage.parallel ? stage.parallel : null;
+    const total = parallel?.branches.length ?? 0;
+    return {
+      parent: parent ?? null,
+      children: children.map((ch: any) => ({
+        id: ch.id,
+        reference: ch.reference,
+        title: ch.title,
+        status: ch.status,
+        current_stage_key: ch.current_stage_key,
+        current_stage_name:
+          stageName(
+            childVersions.find((v: any) => v.id === ch.version_id)?.definition as
+              | WorkflowDefinitionV1
+              | undefined,
+            ch.current_stage_key,
+          ),
+        definition_name: childDefs.find((d: any) => d.id === ch.definition_id)?.name ?? null,
+      })),
+      wait:
+        instance.status === 'active' && stage?.type === 'wait' && stage.wait && instance.stage_due_at
+          ? { until: instance.stage_due_at, kind: stage.wait.kind }
+          : null,
+      parallel: parallel
+        ? {
+            join: parallel.join,
+            required:
+              parallel.join === 'any' ? 1 : parallel.join === 'n_of_m' ? (parallel.required ?? total) : total,
+            total,
+            done: branchTasks.filter((t: { status: string }) => t.status === 'done').length,
+            branches: parallel.branches.map((b) => {
+              const t = branchTasks.find((x: { branch_key: string | null }) => x.branch_key === b.key) as
+                | { status: string; completed_by_user_id: number | null; completed_at: Date | null }
+                | undefined;
+              return {
+                key: b.key,
+                name: b.name,
+                status: t?.status === 'done' ? 'done' : t?.status === 'cancelled' ? 'cancelled' : 'open',
+                completed_by_name: t?.completed_by_user_id ? (completers.get(t.completed_by_user_id) ?? null) : null,
+                completed_at: t?.completed_at ?? null,
+              };
+            }),
+          }
+        : null,
+      failed_actions: dead.map((r: any) => {
+        const action = String(r.payload?.action ?? '');
+        return {
+          id: Number(r.id),
+          action,
+          label: WORKFLOW_ACTION_CATALOG[action as WorkflowVendixActionName]?.label ?? action,
+          stage_key: r.payload?.stage_key ?? null,
+          error: r.last_error ?? null,
+          attempts: r.attempts,
+          failed_at: r.created_at,
+        };
+      }),
     };
   }
 

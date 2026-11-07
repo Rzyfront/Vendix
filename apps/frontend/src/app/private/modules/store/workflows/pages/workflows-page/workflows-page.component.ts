@@ -1,8 +1,9 @@
-import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, signal, viewChild, TemplateRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import {
+  BadgeComponent,
   CardComponent,
   DialogService,
   EmptyStateComponent,
@@ -43,6 +44,9 @@ interface DefinitionView extends WorkflowDefinitionRow {
   /** Badge class key: published reads as `active`, archived as `inactive`. */
   status_badge: string;
   version_text: string;
+  /** P2.11: the on/off switch ("Encendido" / "Apagado"). */
+  enabled: boolean;
+  enabled_text: string;
 }
 
 interface InstanceView extends WorkflowInstanceRow {
@@ -80,6 +84,7 @@ const BADGE_LABEL: Record<string, string> = {
     WorkflowPublicLinkModalComponent,
     SelectorComponent,
     ToggleComponent,
+    BadgeComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -207,7 +212,7 @@ const BADGE_LABEL: Record<string, string> = {
             @if (activeTab() === 'flows') {
               <app-responsive-data-view
                 [data]="definitionRows()"
-                [columns]="definitionColumns"
+                [columns]="definitionColumns()"
                 [actions]="definitionActions"
                 [cardConfig]="definitionCard"
                 [sortable]="false"
@@ -238,6 +243,20 @@ const BADGE_LABEL: Record<string, string> = {
         }
       </app-card>
     </div>
+
+    <ng-template #enabledCell let-row>
+      <div class="flex items-center gap-2" data-testid="enabled-cell">
+        <app-toggle
+          [checked]="row.enabled"
+          [disabled]="row.status === 'archived'"
+          [ariaLabel]="'Interruptor de ' + row.name"
+          (toggled)="setEnabled(row, $event)"
+        />
+        @if (!row.enabled) {
+          <app-badge variant="warning" size="sm">Apagado</app-badge>
+        }
+      </div>
+    </ng-template>
 
     <app-import-definition-modal [(isOpen)]="importOpen" (created)="onCreated()" />
     <app-publish-issues-modal
@@ -312,6 +331,8 @@ export class WorkflowsPageComponent implements OnInit {
       status_badge:
         row.status === 'active' ? 'active' : row.status === 'archived' ? 'inactive' : 'draft',
       version_text: this.versionText(row),
+      enabled: row.is_enabled !== false,
+      enabled_text: row.is_enabled !== false ? 'Encendido' : 'Apagado',
     })),
   );
 
@@ -322,7 +343,9 @@ export class WorkflowsPageComponent implements OnInit {
     })),
   );
 
-  readonly definitionColumns: TableColumn[] = [
+  private readonly enabledCell = viewChild.required<TemplateRef<unknown>>('enabledCell');
+
+  readonly definitionColumns = computed<TableColumn[]>(() => [
     { key: 'name', label: 'Flujo', priority: 1 },
     { key: 'key', label: 'Clave', priority: 3, width: '160px' },
     {
@@ -335,7 +358,8 @@ export class WorkflowsPageComponent implements OnInit {
       transform: (value: string) => BADGE_LABEL[value] ?? value,
     },
     { key: 'version_text', label: 'Versión', priority: 2, width: '220px' },
-  ];
+    { key: 'enabled', label: 'Activo', priority: 1, width: '170px', template: this.enabledCell() },
+  ]);
 
   readonly definitionCard: ItemListCardConfig = {
     titleKey: 'name',
@@ -345,7 +369,10 @@ export class WorkflowsPageComponent implements OnInit {
     badgeKey: 'status_badge',
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (value: string) => BADGE_LABEL[value] ?? value,
-    detailKeys: [{ key: 'version_text', label: 'Versión', icon: 'layers' }],
+    detailKeys: [
+      { key: 'version_text', label: 'Versión', icon: 'layers' },
+      { key: 'enabled_text', label: 'Interruptor', icon: 'power' },
+    ],
   };
 
   readonly definitionActions: TableAction[] = [
@@ -585,6 +612,30 @@ export class WorkflowsPageComponent implements OnInit {
       },
       error: (error) => this.toast.error(toWorkflowError(error).message),
     });
+  }
+
+  /** P2.11: optimistic switch; the row goes back if the server refuses. */
+  setEnabled(row: DefinitionView | WorkflowDefinitionRow, enabled: boolean): void {
+    this.patchEnabled(row.id, enabled);
+    this.api
+      .setDefinitionEnabled(row.id, enabled)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updated) => {
+          this.patchEnabled(row.id, updated.is_enabled ?? enabled);
+          this.toast.success(enabled ? 'Flujo encendido' : 'Flujo apagado: no se inician solicitudes nuevas');
+        },
+        error: (error) => {
+          this.patchEnabled(row.id, !enabled);
+          this.toast.error(toWorkflowError(error).message);
+        },
+      });
+  }
+
+  private patchEnabled(id: number, enabled: boolean): void {
+    this.definitions.update((rows) =>
+      rows.map((r) => (r.id === id ? { ...r, is_enabled: enabled } : r)),
+    );
   }
 
   private versionText(row: WorkflowDefinitionRow): string {

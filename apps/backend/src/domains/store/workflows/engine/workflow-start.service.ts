@@ -15,6 +15,8 @@ import {
   resolveTransition,
   startStage,
   validateFormValues,
+  WORKFLOW_INSTANCE_TOKENS,
+  WORKFLOW_LIMITS,
 } from '@common/workflows/contract';
 import { DossiersService } from '../../documents/dossiers.service';
 import {
@@ -27,7 +29,8 @@ import {
   WorkflowTx,
 } from './workflow-engine.types';
 import { WorkflowAdvanceService } from './workflow-advance.service';
-import { START_EVENT_TYPES } from './workflow-idempotency';
+import { START_EVENT_TYPES, systemIdempotencyKey } from './workflow-idempotency';
+import { firedGuard } from './workflow-guards';
 import { WorkflowEventsService } from './workflow-events.service';
 import {
   WorkflowCallContext,
@@ -107,6 +110,8 @@ export class WorkflowStartService {
     if (def.status !== 'active' || !def.published_version_id) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_ACTIVE);
     }
+    // P2.11: a switched-off flow starts nothing new.
+    if (def.is_enabled === false) throw new VendixHttpException(ErrorCodes.WORKFLOW_DISABLED);
     const definition = await this.loader.loadDefinition(tx, def.published_version_id);
     await this.assertMayStart(tx, ctx, definition);
     const stage = startStage(definition);
@@ -134,7 +139,7 @@ export class WorkflowStartService {
         version_id: def.published_version_id,
         reference,
         title,
-        data: enter.data,
+        data: await this.stages.computeFields(definition, enter.data, ctx.store_id),
         subject_type: subject?.type ?? null,
         subject_id: subject?.id ?? null,
         started_by_type: actor.type,
@@ -210,7 +215,12 @@ export class WorkflowStartService {
     const def = await tx.workflow_definitions.findFirst({
       where: { id: input.definitionId, store_id: ctx.store_id },
     });
-    if (!def || def.status !== 'active' || !def.published_version_id) {
+    if (
+      !def ||
+      def.status !== 'active' ||
+      !def.published_version_id ||
+      def.is_enabled === false
+    ) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_PUBLIC_NOT_FOUND);
     }
     const definition = await this.loader.loadDefinition(tx, def.published_version_id);
@@ -237,8 +247,14 @@ export class WorkflowStartService {
     const reference = await this.references.next(tx, ctx.store_id);
     const title = `${definition.name} · ${input.contact.name}`.slice(0, 200);
     const enter = this.stages.applyActions(stage.on_enter, form.values, { reference, title });
-    const data = enter.data;
-    const transition = resolveTransition(stage, 'submit', data, definition.fields);
+    const data = await this.stages.computeFields(definition, enter.data, ctx.store_id);
+    const guard = firedGuard(stage, 'submit', data, definition.fields);
+    if (guard && !guard.redirect_to) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_GUARD_BLOCKED, guard.message);
+    }
+    const transition = guard?.redirect_to
+      ? { to: guard.redirect_to, require_comment: false }
+      : resolveTransition(stage, 'submit', data, definition.fields);
     if (!transition) throw new VendixHttpException(ErrorCodes.WORKFLOW_NO_TRANSITION);
     if (transition.require_comment) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_COMMENT_REQUIRED);
@@ -305,6 +321,7 @@ export class WorkflowStartService {
       actor,
       expectedRowVersion: created.row_version,
       runExitHooks: true,
+      resolved: { submitted: true },
       event: { type: 'submitted', payload: { outcome: 'submit', via: 'public_form' } },
     });
     await tx.workflow_public_links.updateMany({
@@ -347,6 +364,7 @@ export class WorkflowStartService {
     if (def.status !== 'active' || !def.published_version_id) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_ACTIVE);
     }
+    if (def.is_enabled === false) throw new VendixHttpException(ErrorCodes.WORKFLOW_DISABLED);
     const definition = await this.loader.loadDefinition(tx, def.published_version_id);
     const trigger = (definition.triggers ?? []).find(
       (t) => t.kind === 'event' && t.event === input.event,
@@ -409,7 +427,14 @@ export class WorkflowStartService {
     const def = await tx.workflow_definitions.findFirst({
       where: { id: gate.definition_id, store_id: ctx.store_id },
     });
-    if (!def || def.status !== 'active' || !def.published_version_id) return null;
+    if (
+      !def ||
+      def.status !== 'active' ||
+      !def.published_version_id ||
+      def.is_enabled === false
+    ) {
+      return null;
+    }
     const definition = await this.loader.loadDefinition(tx, def.published_version_id);
     const governs = definition.governs;
     const stage = startStage(definition);
@@ -446,6 +471,157 @@ export class WorkflowStartService {
     return result;
   }
 
+  /**
+   * P2.10: a cron trigger fired for `fireAt` (minute precision). The key makes
+   * each fire start exactly one request even with several workers or a replay
+   * of the same minute.
+   */
+  async executeSchedule(
+    tx: WorkflowTx,
+    ctx: WorkflowCallContext,
+    input: { definitionId: number; cron: string; fireAt: string },
+  ): Promise<WorkflowCommandResult | null> {
+    const idempotencyKey = systemIdempotencyKey(
+      `schedule:${input.definitionId}:${input.fireAt}`,
+    );
+    const prev = await this.events.replay(tx, idempotencyKey, {
+      actor: { type: 'system', id: null },
+      types: START_EVENT_TYPES,
+    });
+    if (prev) return prev;
+    const def = await tx.workflow_definitions.findFirst({
+      where: { id: input.definitionId, store_id: ctx.store_id },
+    });
+    if (!def || def.status !== 'active' || !def.published_version_id || def.is_enabled === false) {
+      return null;
+    }
+    const definition = await this.loader.loadDefinition(tx, def.published_version_id);
+    const stage = startStage(definition);
+    const declared = (definition.triggers ?? []).some(
+      (t) => t.kind === 'schedule' && t.cron === input.cron,
+    );
+    if (!declared || !stage || stage.assignee?.kind === 'initiator') return null;
+    return this.createSystemInstance(tx, ctx, {
+      def,
+      definition,
+      stage,
+      initial: {},
+      subject: null,
+      idempotencyKey,
+      started: { via: 'schedule', cron: input.cron, fire_at: input.fireAt },
+    });
+  }
+
+  /**
+   * P2.2: starts child `index` of the parent's subflow stage. Returns the
+   * reason when it cannot start (the caller resolves the parent `rejected`);
+   * null when the parent already moved on (nothing to do).
+   */
+  async executeChild(
+    tx: WorkflowTx,
+    ctx: WorkflowCallContext,
+    input: { parentId: number; stageKey: string; entrySeq: number; index: number },
+  ): Promise<
+    { started: WorkflowCommandResult; flowKey: string } | { error: string; flowKey: string } | null
+  > {
+    const idempotencyKey = systemIdempotencyKey(
+      `subflow:${input.parentId}:${input.entrySeq}:${input.index}`,
+    );
+    const prev = await this.events.replay(tx, idempotencyKey, {
+      actor: { type: 'system', id: null },
+      types: START_EVENT_TYPES,
+    });
+    if (prev) return { started: prev, flowKey: '' };
+    const parent = (await tx.workflow_instances.findFirst({
+      where: { id: input.parentId, store_id: ctx.store_id },
+    })) as WorkflowInstanceRow | null;
+    if (!parent) return null;
+    const parentDef = await this.loader.loadDefinition(tx, parent.version_id);
+    const subflow = parentDef.stages.find((s) => s.key === input.stageKey)?.subflow;
+    // A stage that does not wait moved the parent on in the same batch: its
+    // children still start (the idempotency key above prevents duplicates).
+    // A waiting stage only starts children while the parent is still there.
+    const stillThere =
+      parent.status === 'active' &&
+      parent.current_stage_key === input.stageKey &&
+      parent.stage_entry_seq === input.entrySeq;
+    if (!stillThere && (subflow?.wait !== false || parent.stage_entry_seq < input.entrySeq)) {
+      return null;
+    }
+    const child = subflow?.flows[input.index];
+    if (!child) return null;
+    const fail = (error: string) => ({ error, flowKey: child.flow_key });
+
+    let depth = 1;
+    let cursor: number | null | undefined = parent.parent_instance_id;
+    while (cursor) {
+      depth++;
+      if (depth >= WORKFLOW_LIMITS.maxSubflowDepth) {
+        return fail(`Se superó el máximo de ${WORKFLOW_LIMITS.maxSubflowDepth} niveles de subflujos.`);
+      }
+      const up: { parent_instance_id: number | null } | null =
+        await tx.workflow_instances.findFirst({
+          where: { id: cursor, store_id: ctx.store_id },
+          select: { parent_instance_id: true },
+        });
+      cursor = up?.parent_instance_id ?? null;
+    }
+    const def = await tx.workflow_definitions.findFirst({
+      where: { key: child.flow_key, store_id: ctx.store_id },
+    });
+    if (!def || def.status !== 'active' || !def.published_version_id) {
+      return fail(`El flujo "${child.flow_key}" no está publicado y activo.`);
+    }
+    if (def.is_enabled === false) return fail(`El flujo "${child.flow_key}" está apagado.`);
+    const definition = await this.loader.loadDefinition(tx, def.published_version_id);
+    const stage = startStage(definition);
+    if (!stage) return fail(`El flujo "${child.flow_key}" no tiene etapa inicial.`);
+    if (stage.assignee?.kind === 'initiator' && parent.started_by_type !== 'user') {
+      return fail(
+        `La etapa inicial de "${child.flow_key}" es de quien inicia y la solicitud padre no la inició una persona.`,
+      );
+    }
+    const parentTokens = [
+      ...parentDef.fields.map((f) => `fields.${f.key}`),
+      ...WORKFLOW_INSTANCE_TOKENS,
+    ];
+    const declared = new Map(definition.fields.map((f) => [f.key, f.type]));
+    const initial: Record<string, unknown> = {};
+    for (const [fieldKey, template] of Object.entries(child.map ?? {})) {
+      const type = declared.get(fieldKey);
+      if (!type) continue;
+      const value = coerceMapped(
+        type,
+        resolveTokens(template, {
+          fields: parent.data ?? {},
+          instance: {
+            reference: parent.reference,
+            title: parent.title,
+            subject_id: parent.subject_id,
+          },
+          allowed: parentTokens,
+        }),
+      );
+      if (value !== undefined) initial[fieldKey] = value;
+    }
+    const started = await this.createSystemInstance(tx, ctx, {
+      def,
+      definition,
+      stage,
+      initial,
+      subject: null,
+      idempotencyKey,
+      started: {
+        via: 'subflow',
+        parent_id: parent.id,
+        parent_reference: parent.reference,
+      },
+      startedBy: { type: parent.started_by_type, id: parent.started_by_id },
+      parent: { id: parent.id, stage_key: input.stageKey, entry_seq: input.entrySeq },
+    });
+    return { started, flowKey: child.flow_key };
+  }
+
   /** Declared fields ← `map` templates resolved against a closed context. */
   private mapInitial(
     definition: WorkflowDefinitionV1,
@@ -476,6 +652,9 @@ export class WorkflowStartService {
       subject: { type: string; id: number } | null;
       idempotencyKey: string;
       started: Record<string, unknown>;
+      /** P2.2: a child keeps the parent's starter, so `initiator` still means someone. */
+      startedBy?: { type: WorkflowActor['type']; id: number | null };
+      parent?: { id: number; stage_key: string; entry_seq: number };
     },
   ): Promise<WorkflowCommandResult> {
     const actor: WorkflowActor = { type: 'system', id: null };
@@ -497,11 +676,18 @@ export class WorkflowStartService {
         version_id: a.def.published_version_id,
         reference,
         title,
-        data: enter.data,
+        data: await this.stages.computeFields(a.definition, enter.data, ctx.store_id),
         subject_type: a.subject?.type ?? null,
         subject_id: a.subject?.id ?? null,
-        started_by_type: actor.type,
-        started_by_id: null,
+        started_by_type: a.startedBy?.type ?? actor.type,
+        started_by_id: a.startedBy?.id ?? null,
+        ...(a.parent
+          ? {
+              parent_instance_id: a.parent.id,
+              parent_stage_key: a.parent.stage_key,
+              parent_entry_seq: a.parent.entry_seq,
+            }
+          : {}),
         row_version: 0,
         ...patch,
         status: patch.status ?? 'active',

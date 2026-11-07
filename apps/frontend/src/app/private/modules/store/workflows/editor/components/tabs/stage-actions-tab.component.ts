@@ -12,21 +12,32 @@ import {
   WORKFLOW_LIMITS,
   WORKFLOW_VENDIX_ACTIONS,
   WorkflowActionDef,
+  WorkflowActionErrorPolicy,
+  WorkflowHookPoint,
   WorkflowAssigneeDef,
   WorkflowFieldDef,
   WorkflowStageDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
-import { removeAt, replaceAt } from '../../workflow-editor.utils';
+import { removeAt, replaceAt, toWholeNumber } from '../../workflow-editor.utils';
 import { vendixActionOptions } from '../../workflow-editor-triggers.utils';
 import { ActionMapEditorComponent } from '../action-map-editor.component';
 import { AssigneeEditorComponent } from '../assignee-editor.component';
 
-type Hook = 'on_enter' | 'on_exit';
+type Hook = WorkflowHookPoint;
 
+/** In the order they run on a stage: enviar → completar → salir → entrar (the next stage). */
 const HOOKS: { id: Hook; title: string; hint: string }[] = [
   { id: 'on_enter', title: 'Al entrar a la etapa', hint: 'Se ejecutan cuando la solicitud llega aquí.' },
+  { id: 'on_submit', title: 'Al enviar el formulario', hint: 'Se ejecutan cuando una persona envía o aprueba la etapa.' },
+  { id: 'on_complete', title: 'Al completar la etapa', hint: 'Se ejecutan cuando la etapa se resuelve, con cualquier resultado.' },
   { id: 'on_exit', title: 'Al salir de la etapa', hint: 'Se ejecutan cuando la solicitud avanza.' },
+];
+
+const THEN_OPTIONS = [
+  { value: 'continue', label: 'Seguir' },
+  { value: 'route', label: 'Ir a una etapa de error' },
+  { value: 'fail', label: 'Terminar la solicitud' },
 ];
 
 /** Acciones tab: notify, set_field and Vendix actions for on_enter / on_exit. */
@@ -106,6 +117,36 @@ const HOOKS: { id: Hook; title: string; hint: string }[] = [
                   [fields]="fields()"
                   (mapChange)="patch(hook.id, i, { map: $event })"
                 />
+                <div class="flex flex-col gap-3 rounded-lg border border-border p-3" data-testid="on-error">
+                  <p class="text-xs font-semibold text-text-primary">Si falla</p>
+                  <app-input
+                    label="Reintentos"
+                    type="number"
+                    min="0"
+                    [max]="maxRetries"
+                    [helperText]="'De 0 a ' + maxRetries + ', con espera creciente entre intentos.'"
+                    [ngModel]="action.on_error?.retries ?? maxRetries"
+                    (ngModelChange)="setRetries(hook.id, i, $event)"
+                  />
+                  <app-selector
+                    label="Luego"
+                    size="sm"
+                    [options]="thenOptions"
+                    [value]="action.on_error?.then ?? 'continue'"
+                    (valueChange)="setThen(hook.id, i, $event)"
+                  />
+                  @if (action.on_error?.then === 'route') {
+                    <app-selector
+                      label="Etapa de error"
+                      size="sm"
+                      placeholder="Elige una etapa"
+                      [options]="stageOptions()"
+                      [value]="action.on_error?.route_to ?? null"
+                      (valueChange)="setRoute(hook.id, i, $event)"
+                    />
+                  }
+                  <p class="text-xs text-text-secondary">Siempre se avisa al dueño del flujo y se puede reintentar a mano desde la solicitud.</p>
+                </div>
               }
             </div>
           } @empty {
@@ -127,6 +168,13 @@ export class StageActionsTabComponent {
   readonly stage = input.required<WorkflowStageDef>();
 
   readonly hooks = HOOKS;
+  readonly thenOptions = THEN_OPTIONS;
+  readonly maxRetries = WORKFLOW_LIMITS.maxActionRetries;
+  readonly stageOptions = computed(() =>
+    (this.store.draft()?.stages ?? [])
+      .filter((s) => s.key !== this.stage().key)
+      .map((s) => ({ value: s.key, label: s.name })),
+  );
   readonly maxActions = WORKFLOW_LIMITS.maxActionsPerHook;
   readonly actionOptions = [
     { value: 'notify', label: 'Enviar aviso' },
@@ -177,5 +225,28 @@ export class StageActionsTabComponent {
   setNumber(hook: Hook, index: number, raw: unknown): void {
     const parsed = Number(String(raw).replace(',', '.'));
     this.patch(hook, index, { value: raw === '' || raw === null || !Number.isFinite(parsed) ? null : parsed });
+  }
+
+  /** Edits the error policy of a Vendix action; `route_to` only lives with `then: route`. */
+  private setPolicy(hook: Hook, index: number, change: Partial<WorkflowActionErrorPolicy>): void {
+    const current = this.list(hook)[index];
+    if (current.action === 'notify' || current.action === 'set_field') return;
+    const merged: WorkflowActionErrorPolicy = { ...(current.on_error ?? {}), ...change };
+    if (merged.then !== 'route') delete merged.route_to;
+    this.set(hook, replaceAt(this.list(hook), index, { ...current, on_error: merged }));
+  }
+
+  setRetries(hook: Hook, index: number, raw: unknown): void {
+    const retries = toWholeNumber(raw);
+    if (retries === undefined) return;
+    this.setPolicy(hook, index, { retries: Math.min(Math.max(retries, 0), this.maxRetries) });
+  }
+
+  setThen(hook: Hook, index: number, value: string | number | null): void {
+    this.setPolicy(hook, index, { then: value as WorkflowActionErrorPolicy['then'] });
+  }
+
+  setRoute(hook: Hook, index: number, value: string | number | null): void {
+    this.setPolicy(hook, index, { route_to: value === null ? undefined : String(value) });
   }
 }

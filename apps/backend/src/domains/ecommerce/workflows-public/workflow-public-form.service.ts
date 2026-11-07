@@ -130,7 +130,10 @@ export class WorkflowPublicFormService {
     const def = await db.workflow_definitions.findFirst({
       where: { id: link.definition_id, store_id: storeId },
     });
-    if (!def || def.status !== 'active' || !def.published_version_id) throw notFound();
+    // P2.11: a switched-off flow shows its public form as unavailable.
+    if (!def || def.status !== 'active' || !def.published_version_id || def.is_enabled === false) {
+      throw notFound();
+    }
     const version = await db.workflow_versions.findFirst({
       where: { id: def.published_version_id, store_id: storeId },
       select: { definition: true },

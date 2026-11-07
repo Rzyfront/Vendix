@@ -21,7 +21,9 @@ import {
   CreateWorkflowDefinitionDto,
   ExportWorkflowQueryDto,
   ImportWorkflowDto,
+  MigrateWorkflowInstancesDto,
   PublishWorkflowDto,
+  SetWorkflowEnabledDto,
   SaveWorkflowDraftDto,
   SimulateWorkflowDto,
   ValidateWorkflowDto,
@@ -29,6 +31,7 @@ import {
 } from '../dto/workflow-definition.dto';
 import { WorkflowPublicLinksService } from '../public-link/workflow-public-links.service';
 import { WorkflowDefinitionsService } from './workflow-definitions.service';
+import { WorkflowMigrationService } from './workflow-migration.service';
 import { WorkflowSimulatorService } from './workflow-simulator.service';
 
 /** Definitions: drafts, validation, publishing, versions, export/import. */
@@ -41,6 +44,7 @@ export class WorkflowDefinitionsController {
     private readonly simulator: WorkflowSimulatorService,
     private readonly publicLinks: WorkflowPublicLinksService,
     private readonly responseService: ResponseService,
+    private readonly migrations: WorkflowMigrationService,
   ) {}
 
   // Static routes first: they must not be captured by `:id`.
@@ -171,6 +175,39 @@ export class WorkflowDefinitionsController {
   @Permissions('store:workflows:design')
   async revokePublicLink(@Param('id', ParseIntPipe) id: number) {
     return this.responseService.success(await this.publicLinks.revoke(id), 'Enlace revocado');
+  }
+
+  /** P2.11: on/off switch; off starts nothing new, live requests go on. */
+  @Patch(':id/enabled')
+  @Permissions('store:workflows:design')
+  async setEnabled(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SetWorkflowEnabledDto,
+  ) {
+    return this.responseService.updated(
+      await this.definitions.setEnabled(id, dto.enabled),
+      dto.enabled ? 'Flujo encendido' : 'Flujo apagado',
+    );
+  }
+
+  /** P2.8: what moving the live requests of an old version would do. */
+  @Post(':id/migrations/preview')
+  @Permissions('store:workflows:design')
+  async previewMigration(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: MigrateWorkflowInstancesDto,
+  ) {
+    return this.responseService.success(await this.migrations.preview(id, dto));
+  }
+
+  /** P2.8: moves the live requests of an old version to the published one. */
+  @Post(':id/migrations')
+  @Permissions('store:workflows:design')
+  async migrate(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: MigrateWorkflowInstancesDto,
+  ) {
+    return this.responseService.success(await this.migrations.migrate(id, dto));
   }
 
   @Post(':id/archive')

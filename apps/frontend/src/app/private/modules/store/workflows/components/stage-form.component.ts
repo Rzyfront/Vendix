@@ -21,6 +21,7 @@ import {
   ToggleComponent,
 } from '../../../../../shared/components/index';
 import { WorkflowFieldDef } from '../../../../../shared/workflows/contract/workflow-contract';
+import { applyComputedFields } from '../../../../../shared/workflows/contract/workflow-expression';
 import { evaluateCondition } from '../../../../../shared/workflows/contract/workflow-runtime';
 import { WorkflowsApiService } from '../services/workflows-api.service';
 import { toWorkflowError } from '../utils/workflow-errors.util';
@@ -56,7 +57,15 @@ type FieldValues = Record<string, unknown>;
     <div class="flex flex-col gap-4">
       @for (field of visibleFields(); track field.key) {
         <div class="flex flex-col gap-1" [attr.data-field]="field.key">
-          @switch (field.type) {
+          @switch (field.compute ? 'computed' : field.type) {
+            @case ('computed') {
+              <app-input
+                [label]="field.label"
+                [readonly]="true"
+                [helperText]="field.help || 'Se calcula solo.'"
+                [ngModel]="computedText(field)"
+              />
+            }
             @case ('textarea') {
               <app-textarea
                 [label]="labelOf(field)"
@@ -255,9 +264,19 @@ export class WorkflowStageFormComponent {
   readonly fileNames = signal<Record<string, string>>({});
   readonly uploading = signal<Record<string, boolean>>({});
 
+  /**
+   * P2.9: request data plus what the person typed, with the calculated fields
+   * recomputed (the same function the server runs), so they update live.
+   */
+  readonly liveData = computed<FieldValues>(() =>
+    applyComputedFields({ fields: this.fields() }, { ...this.instanceData(), ...this.values() }, {
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }),
+  );
+
   readonly visibleFields = computed(() => {
     const all = this.fields();
-    const data: FieldValues = { ...this.instanceData(), ...this.values() };
+    const data = this.liveData();
     return all.filter(
       (field) =>
         !field.visible_when || evaluateCondition(field.visible_when, data, all),
@@ -288,6 +307,14 @@ export class WorkflowStageFormComponent {
 
   acceptOf(field: WorkflowFieldDef): string | null {
     return field.accept?.length ? field.accept.join(',') : null;
+  }
+
+  /** Calculated value as text for the read-only input ('' while it cannot be computed). */
+  computedText(field: WorkflowFieldDef): string {
+    const value = this.liveData()[field.key];
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'number' && field.type === 'money') return value.toLocaleString('es-CO');
+    return String(value);
   }
 
   rawValue(key: string): unknown {
@@ -369,6 +396,8 @@ export class WorkflowStageFormComponent {
     }
     const raw = this.values();
     for (const field of this.visibleFields()) {
+      // Calculated fields are read-only: the server computes them, never sent.
+      if (field.compute) continue;
       const value = raw[field.key];
       const empty =
         value === undefined ||
