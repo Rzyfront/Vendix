@@ -1,8 +1,13 @@
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
 import { environment } from '../../../../../environments/environment';
-import { WorkflowFieldDef } from '../../../../shared/workflows/contract/workflow-contract';
+import {
+  WorkflowFieldDef,
+  WorkflowFormStepDef,
+} from '../../../../shared/workflows/contract/workflow-contract';
+import { CaptchaChallenge, CaptchaProof } from './workflow-captcha';
+import { ChunkedUploadAdapter } from './workflow-chunked-upload';
 
 export interface PublicFormDefinition {
   available: boolean;
@@ -12,6 +17,9 @@ export interface PublicFormDefinition {
   flow: { name: string; description: string | null };
   privacy_notice: string | null;
   fields: WorkflowFieldDef[];
+  /** Presentational pages of the form (the server validates the whole form). */
+  steps?: WorkflowFormStepDef[];
+  captcha_required?: boolean;
 }
 
 export interface PublicFormSubmission {
@@ -19,7 +27,15 @@ export interface PublicFormSubmission {
   values: Record<string, unknown>;
   contact: { name: string; email?: string; phone?: string };
   accept_privacy: true;
+  captcha?: CaptchaProof;
 }
+
+export interface PublicFormResult {
+  reference: string;
+  tracking_url: string | null;
+}
+
+const OCTET_STREAM = new HttpHeaders({ 'Content-Type': 'application/octet-stream' });
 
 /** Anonymous client of `ecommerce/workflows/forms/:token` (store resolved by the domain). */
 @Injectable({ providedIn: 'root' })
@@ -27,15 +43,44 @@ export class WorkflowPublicFormService {
   private readonly http = inject(HttpClient);
   private readonly base = `${environment.apiUrl}/ecommerce/workflows/forms`;
 
+  private url(token: string, path = ''): string {
+    return `${this.base}/${encodeURIComponent(token)}${path}`;
+  }
+
   get(token: string): Observable<PublicFormDefinition> {
     return this.http
-      .get<{ data: PublicFormDefinition }>(`${this.base}/${encodeURIComponent(token)}`)
+      .get<{ data: PublicFormDefinition }>(this.url(token))
       .pipe(map((res) => res.data));
   }
 
-  submit(token: string, body: PublicFormSubmission): Observable<{ reference: string }> {
+  captcha(token: string): Observable<CaptchaChallenge> {
     return this.http
-      .post<{ data: { reference: string } }>(`${this.base}/${encodeURIComponent(token)}`, body)
+      .get<{ data: CaptchaChallenge }>(this.url(token, '/captcha'))
       .pipe(map((res) => res.data));
+  }
+
+  submit(token: string, body: PublicFormSubmission): Observable<PublicFormResult> {
+    return this.http
+      .post<{ data: PublicFormResult }>(this.url(token), body)
+      .pipe(map((res) => res.data));
+  }
+
+  /** Chunked upload of one `file` field of the form. */
+  uploader(token: string, fieldKey: string): ChunkedUploadAdapter {
+    return {
+      init: (input) =>
+        this.http
+          .post<{ data: { upload_id: string; chunk_size: number; total_parts: number } }>(
+            this.url(token, '/uploads'),
+            { field_key: fieldKey, ...input },
+          )
+          .pipe(map((res) => res.data)),
+      putPart: (uploadId, n, body) =>
+        this.http.put(this.url(token, `/uploads/${encodeURIComponent(uploadId)}/parts/${n}`), body, {
+          headers: OCTET_STREAM,
+        }),
+      complete: (uploadId) =>
+        this.http.post(this.url(token, `/uploads/${encodeURIComponent(uploadId)}/complete`), {}),
+    };
   }
 }

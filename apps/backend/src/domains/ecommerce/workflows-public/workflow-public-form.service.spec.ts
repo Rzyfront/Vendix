@@ -3,11 +3,11 @@ import { randomUUID } from 'crypto';
 import { VendixHttpException } from '@common/errors';
 import { IS_PUBLIC_KEY } from '@common/decorators/public.decorator';
 import {
-  buildWorkflowKit,
   publicFormDefinition,
   seedDefinition,
   seedPeople,
 } from '../../../testing/workflows/workflow-test-kit';
+import { buildPublicKit } from './workflow-public.testkit';
 import { hashPublicToken } from '../../store/workflows/public-link/workflow-public-link.rules';
 import { EcommerceWorkflowsPublicController } from './ecommerce-workflows-public.controller';
 import { PUBLIC_FORM_MAX_VALUES_BYTES } from './workflow-public-form.service';
@@ -22,7 +22,7 @@ async function codeOf(p: Promise<unknown>) {
 }
 
 describe('WorkflowPublicFormService', () => {
-  let kit: ReturnType<typeof buildWorkflowKit>;
+  let kit: ReturnType<typeof buildPublicKit> & { publicForm: ReturnType<typeof buildPublicKit>['form'] };
   let defId: number;
   let token: string;
 
@@ -39,7 +39,8 @@ describe('WorkflowPublicFormService', () => {
   const links = () => kit.db.table('workflow_public_links');
 
   beforeEach(async () => {
-    kit = buildWorkflowKit();
+    const built = buildPublicKit();
+    kit = { ...built, publicForm: built.form };
     seedPeople(kit.db);
     kit.db.table('stores').find((s) => s.id === 1)!.name = 'Taller Central';
     defId = seedDefinition(kit.db, publicFormDefinition()).definitionId;
@@ -50,18 +51,24 @@ describe('WorkflowPublicFormService', () => {
   afterEach(() => jest.restoreAllMocks());
 
   describe('GET', () => {
-    it('devuelve tienda, flujo, campos (sin archivos) y aviso de privacidad', async () => {
+    it('devuelve tienda, flujo, campos (con los de archivo), pasos y aviso de privacidad', async () => {
       const r = await kit.publicForm.get(token);
       expect(r).toEqual({
         available: true,
         store: { name: 'Taller Central' },
         flow: { name: 'Solicitud de servicio', description: 'Cuéntanos qué necesitas.' },
         privacy_notice: expect.stringContaining('Taller Central'),
+        captcha_required: false,
+        steps: [{ title: 'Datos', fields: ['asunto', 'tipo', 'adjunto'] }],
         fields: [
           { key: 'asunto', type: 'text', label: 'Asunto', required: true, help: null, options: null, visible_when: null },
           {
             key: 'tipo', type: 'select', label: 'Tipo', required: false, help: null, visible_when: null,
             options: [{ value: 'a', label: 'A' }, { value: 'b', label: 'B' }],
+          },
+          {
+            key: 'adjunto', type: 'file', label: 'Adjunto', required: false, help: null, options: null,
+            visible_when: null, accept: null, max_size_mb: null,
           },
         ],
       });
@@ -89,14 +96,14 @@ describe('WorkflowPublicFormService', () => {
       expect(await codeOf(kit.publicForm.get(token))).toBe('WORKFLOW_PUBLIC_NOT_FOUND');
     });
 
-    it('un archivo obligatorio en el formulario inicial: available=false con motivo y sin campos', async () => {
+    it('P3.4: un archivo obligatorio queda disponible y, sin su subida, el envío responde 422 sin crear nada', async () => {
       const def = publicFormDefinition();
       def.fields[2].required = true;
       kit.db.table('workflow_versions')[0].definition = def;
       const r = await kit.publicForm.get(token);
-      expect(r).toMatchObject({ available: false, reason: 'required_file_field', fields: [] });
-      expect((r as any).message).toMatch(/archivo/);
-      expect(await codeOf(kit.publicForm.submit(token, body()))).toBe('WORKFLOW_PUBLIC_LINK_UNAVAILABLE');
+      expect(r).toMatchObject({ available: true });
+      expect((r as any).fields.map((f: any) => f.key)).toContain(def.fields[2].key);
+      expect(await codeOf(kit.publicForm.submit(token, body()))).toBe('WORKFLOW_FORM_INVALID');
       expect(instances()).toHaveLength(0);
     });
   });
@@ -122,7 +129,7 @@ describe('WorkflowPublicFormService', () => {
 
     it('inicia como actor public y aterriza en la etapa siguiente con su tarea, expediente y eventos', async () => {
       const r = await kit.publicForm.submit(token, body());
-      expect(r).toEqual({ reference: 'FLU-000001' });
+      expect(r).toEqual({ reference: 'FLU-000001', tracking_url: null });
       expect(instances()).toHaveLength(1);
       const inst = instances()[0];
       expect(inst).toMatchObject({
@@ -170,9 +177,13 @@ describe('WorkflowPublicFormService', () => {
       expect(kit.db.table('workflow_outbox')).toHaveLength(0);
     });
 
-    it('ignora valores de campos de archivo (la carga pública está fuera de alcance)', async () => {
-      await kit.publicForm.submit(token, body({ values: { asunto: 'x', adjunto: 123 } }));
+    it('un campo de archivo vacío no se guarda en los datos; un valor que no es una subida completa se rechaza', async () => {
+      await kit.publicForm.submit(token, body({ values: { asunto: 'x', adjunto: '' } }));
       expect(instances()[0].data).toEqual({ asunto: 'x' });
+      expect(await codeOf(kit.publicForm.submit(token, body({ values: { asunto: 'y', adjunto: 123 } })))).toBe(
+        'WORKFLOW_UPLOAD_INVALID',
+      );
+      expect(instances()).toHaveLength(1);
     });
 
     it('exige aceptar la privacidad y limita el tamaño', async () => {

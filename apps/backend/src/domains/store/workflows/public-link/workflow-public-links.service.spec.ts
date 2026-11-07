@@ -7,6 +7,11 @@ import {
   seedPeople,
 } from '../../../../testing/workflows/workflow-test-kit';
 import { hashPublicToken, publicFormAvailability } from './workflow-public-link.rules';
+import { WorkflowPublicFormService } from '../../../ecommerce/workflows-public/workflow-public-form.service';
+
+/** `get` only reads the link and the version: the P3 collaborators are not reached. */
+const buildPublicFormOn = (kit: ReturnType<typeof buildWorkflowKit>) =>
+  new WorkflowPublicFormService(kit.prisma, kit.engine, null as never, null as never, null as never, kit.dossiers);
 
 async function codeOf(p: Promise<unknown>) {
   try {
@@ -72,14 +77,11 @@ describe('WorkflowPublicLinksService', () => {
     expect(links()).toHaveLength(0);
   });
 
-  it('rechaza un flujo cuyo formulario inicial tiene un archivo obligatorio', async () => {
+  it('P3.4: acepta un flujo cuyo formulario inicial tiene un archivo obligatorio (se sube por partes)', async () => {
     const def = publicFormDefinition();
     def.fields[2].required = true;
     kit.db.table('workflow_versions')[0].definition = def;
-    await expect(kit.publicLinks.create(defId)).rejects.toMatchObject({
-      errorCode: 'WORKFLOW_PUBLIC_LINK_UNAVAILABLE',
-      response: { details: { reason: 'required_file_field' } },
-    });
+    await expect(kit.publicLinks.create(defId)).resolves.toBeDefined();
   });
 
   it('flujo no publicado o de otra tienda: errores claros', async () => {
@@ -104,6 +106,54 @@ describe('WorkflowPublicLinksService', () => {
       const comment = publicFormDefinition();
       (comment.stages[0] as any).transitions[0].require_comment = true;
       expect(publicFormAvailability(comment)).toEqual({ available: false, reason: 'comment_required' });
+    });
+  });
+  describe('settings: captcha and expiry (P3.4)', () => {
+    it('stores captcha_required and a future expiry on the active link and reports them in status', async () => {
+      await kit.publicLinks.create(defId);
+      const when = new Date(Date.now() + 86_400_000).toISOString();
+      const r = await kit.publicLinks.updateSettings(defId, { captcha_required: true, expires_at: when });
+      expect(r).toMatchObject({ active: true, captcha_required: true });
+      expect(new Date(r.expires_at as Date).toISOString()).toBe(when);
+      expect(links()[0]).toMatchObject({ captcha_required: true });
+      // null clears the expiry and an omitted key keeps the rest
+      const cleared = await kit.publicLinks.updateSettings(defId, { expires_at: null });
+      expect(cleared).toMatchObject({ captcha_required: true, expires_at: null });
+    });
+
+    it('create returns the full URL on the public domain of the store (null without one)', async () => {
+      expect((await kit.publicLinks.create(defId)).url).toBeNull();
+      kit.db.insert('domain_settings', {
+        store_id: 1, app_type: 'STORE_ADMIN', status: 'active', is_primary: true, hostname: 'admin.example.com',
+      });
+      kit.db.insert('domain_settings', {
+        store_id: 1, app_type: 'STORE_ECOMMERCE', status: 'active', is_primary: false, hostname: 'tienda.example.com',
+      });
+      const r = await kit.publicLinks.create(defId);
+      expect(r.url).toBe(`https://tienda.example.com/flujos/${r.token}`);
+    });
+
+    it('refuses a past expiry, answers 404 without an active link and never touches another store', async () => {
+      await kit.publicLinks.create(defId);
+      expect(await codeOf(kit.publicLinks.updateSettings(defId, { expires_at: new Date(Date.now() - 1000).toISOString() }))).toBe(
+        'WORKFLOW_PUBLIC_LINK_UNAVAILABLE',
+      );
+      await kit.publicLinks.revoke(defId);
+      expect(await codeOf(kit.publicLinks.updateSettings(defId, { captcha_required: true }))).toBe('WORKFLOW_PUBLIC_NOT_FOUND');
+      kit.as({ store_id: 2, user_id: 7, permissions: ['store:workflows:design'] });
+      expect(await codeOf(kit.publicLinks.updateSettings(defId, { captcha_required: true }))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+    });
+
+    it('an expired link and a deactivated one answer the same 404 to the public', async () => {
+      const { token } = await kit.publicLinks.create(defId);
+      kit.as({ store_id: 1, user_id: undefined, permissions: [] });
+      links()[0].expires_at = new Date(Date.now() - 1);
+      const publicForm = buildPublicFormOn(kit);
+      const expired = await codeOf(publicForm.get(token));
+      links()[0].expires_at = null;
+      links()[0].is_active = false;
+      const inactive = await codeOf(publicForm.get(token));
+      expect([expired, inactive]).toEqual(['WORKFLOW_PUBLIC_NOT_FOUND', 'WORKFLOW_PUBLIC_NOT_FOUND']);
     });
   });
 });
