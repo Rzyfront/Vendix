@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ResponseService } from '@common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
@@ -23,9 +24,14 @@ export class WorkflowConnectorsController {
     return this.responseService.success(await this.connectors.list());
   }
 
-  /** Real send / real check. Body only for WhatsApp; email and DIAN take none. */
+  /**
+   * Real send / real check. Body only for WhatsApp; email and DIAN take none.
+   * Each send also requires its action's own permission (the service checks
+   * it) and is throttled: a WhatsApp template is paid.
+   */
   @Post(':key/test')
   @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Permissions('store:workflows:manage')
   async test(@Param('key') key: string, @Body() dto: TestWhatsappConnectorDto) {
     return this.responseService.success(await this.connectors.test(key, dto));

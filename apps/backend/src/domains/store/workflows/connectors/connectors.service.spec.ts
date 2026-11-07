@@ -6,9 +6,10 @@ import { WORKFLOW_CONNECTOR_CATALOG } from '@common/workflows/contract';
 import { VendixHttpException } from '@common/errors';
 import { WorkflowConnectorsService } from './connectors.service';
 
-const inStore = <T>(store_id: number, fn: () => Promise<T>) =>
+const SENDER = ['store:workflows:manage', 'store:crm_campaigns:send'];
+const inStore = <T>(store_id: number, fn: () => Promise<T>, permissions: string[] = SENDER) =>
   RequestContextService.runIsolated(
-    { store_id, organization_id: 1, user_id: 7, is_super_admin: false, is_owner: false, permissions: [] },
+    { store_id, organization_id: 1, user_id: 7, is_super_admin: false, is_owner: false, permissions },
     fn,
   );
 
@@ -222,6 +223,26 @@ describe('WorkflowConnectorsService.test', () => {
     await expect(inStore(9, () => k.service.test('whatsapp'))).rejects.toMatchObject({ status: 422 });
     await expect(inStore(9, () => k.service.test('whatsapp', { to: '12', template: 'hola' }))).rejects.toBeInstanceOf(VendixHttpException);
     expect(k.messaging.sendTemplate).not.toHaveBeenCalled();
+  });
+
+  it('whatsapp is 403 without the permission of the action and sends nothing', async () => {
+    const k = build({ channel: { id: 1, display_phone_number: null } });
+    await expect(
+      inStore(
+        9,
+        () => k.service.test('whatsapp', { to: '+573001234567', template: 'hola' }),
+        ['store:workflows:manage'],
+      ),
+    ).rejects.toMatchObject({ status: 403, errorCode: 'AUTH_PERM_001' });
+    expect(k.messaging.sendTemplate).not.toHaveBeenCalled();
+  });
+
+  it('email_out is 403 without the permission of the action and sends nothing', async () => {
+    const k = build();
+    await expect(
+      inStore(1, () => k.service.test('email_out'), ['store:workflows:design']),
+    ).rejects.toMatchObject({ status: 403, errorCode: 'AUTH_PERM_001' });
+    expect(k.email.sendEmail).not.toHaveBeenCalled();
   });
 
   it('dian checks the configuration without emitting anything', async () => {

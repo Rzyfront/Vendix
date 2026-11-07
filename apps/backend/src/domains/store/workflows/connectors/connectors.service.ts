@@ -22,6 +22,7 @@ import {
   parseTemplateName,
   parseTemplateParams,
 } from './connector-delivery';
+import { requireActionPermission } from '../engine/actions/action-test-permission';
 
 export type ConnectorState = 'connected' | 'not_connected' | 'available';
 
@@ -111,8 +112,10 @@ export class WorkflowConnectorsService {
     const key = this.requireKey(keyRaw);
     switch (key) {
       case 'email_out':
+        requireActionPermission('vendix.email.send');
         return this.testEmail();
       case 'whatsapp':
+        requireActionPermission('vendix.whatsapp.send');
         return this.testWhatsapp(dto);
       case 'dian': {
         const report = await this.dianReport();

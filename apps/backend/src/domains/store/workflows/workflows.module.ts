@@ -78,6 +78,7 @@ import { WorkflowSecretsController } from './secrets/workflow-secrets.controller
 import { WorkflowSecretsService } from './secrets/workflow-secrets.service';
 import { WorkflowHttpTestController } from './secrets/workflow-http-test.controller';
 import { WorkflowHttpTestService } from './secrets/workflow-http-test.service';
+import { PermissionedWorkflowHttpTestService } from './engine/actions/action-test-permission';
 import { ApprovalGateProcessor } from './gates/approval-gate.processor';
 import { WorkflowLinksController } from './links/workflow-links.controller';
 import { WorkflowLinksService } from './links/workflow-links.service';
@@ -202,7 +203,8 @@ import { WORKFLOW_MAILBOX_RECEIVER } from './inbound/workflow-mailbox.types';
     // P3.2: nodo HTTP genérico con secretos de la tienda.
     WorkflowSecretsService,
     WorkflowHttpActions,
-    WorkflowHttpTestService,
+    // "Probar" del nodo HTTP: exige el permiso de la acción, no solo diseñar.
+    { provide: WorkflowHttpTestService, useClass: PermissionedWorkflowHttpTestService },
     WorkflowConnectorsActions,
     WorkflowConnectorsService,
     ApprovalGateProcessor,
