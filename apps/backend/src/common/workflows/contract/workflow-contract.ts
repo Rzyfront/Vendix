@@ -651,8 +651,18 @@ export interface WorkflowActionSpec {
   module: string;
   /** Store permission the publisher must hold (the same as the UI route). */
   permission: string;
+  /**
+   * What a retry may do (P1.2). `replay_safe`: running it again leaves the
+   * same result (field updates, tags). `at_most_once`: it creates a record,
+   * moves money or stock, sends something or changes a state; the executor
+   * marks it started before the effect, and a run interrupted after that mark
+   * fails on the timeline instead of repeating the effect.
+   */
+  idempotency: WorkflowActionIdempotency;
   inputs: Record<string, WorkflowActionInputSpec>;
 }
+
+export type WorkflowActionIdempotency = "replay_safe" | "at_most_once";
 
 const inId = (label: string, required = true): WorkflowActionInputSpec => ({
   label,
@@ -683,6 +693,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Crear cliente",
     module: "Clientes",
     permission: "store:customers:create",
+    idempotency: "at_most_once",
     inputs: {
       first_name: inText("Nombre", true),
       last_name: inText("Apellido", true),
@@ -696,6 +707,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Actualizar cliente",
     module: "Clientes",
     permission: "store:customers:update",
+    idempotency: "replay_safe",
     inputs: {
       customer_id: inId("Cliente"),
       first_name: inText("Nombre"),
@@ -707,6 +719,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Asignar etiqueta al cliente",
     module: "Clientes",
     permission: "store:customers:update",
+    idempotency: "replay_safe",
     inputs: {
       customer_id: inId("Cliente"),
       tag_id: inId("Etiqueta"),
@@ -716,6 +729,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Crear proveedor",
     module: "Proveedores",
     permission: "store:inventory:suppliers:create",
+    idempotency: "at_most_once",
     inputs: {
       name: inText("Nombre", true),
       tax_id: inText("NIT"),
@@ -728,6 +742,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Actualizar proveedor",
     module: "Proveedores",
     permission: "store:inventory:suppliers:update",
+    idempotency: "replay_safe",
     inputs: {
       supplier_id: inId("Proveedor"),
       name: inText("Nombre"),
@@ -740,6 +755,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Crear empleado",
     module: "Empleados",
     permission: "store:payroll:employees:create",
+    idempotency: "at_most_once",
     inputs: {
       first_name: inText("Nombre", true),
       last_name: inText("Apellido", true),
@@ -755,6 +771,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Actualizar empleado",
     module: "Empleados",
     permission: "store:payroll:employees:update",
+    idempotency: "replay_safe",
     inputs: {
       employee_id: inId("Empleado"),
       position: inText("Cargo"),
@@ -767,6 +784,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Crear gasto",
     module: "Gastos",
     permission: "store:expenses:create",
+    idempotency: "at_most_once",
     inputs: {
       amount: inMoney("Monto"),
       category_id: inId("Categoría", false),
@@ -778,18 +796,21 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Aprobar gasto",
     module: "Gastos",
     permission: "store:expenses:approve",
+    idempotency: "at_most_once",
     inputs: { expense_id: inId("Gasto") },
   },
   "vendix.expense.pay": {
     label: "Marcar gasto como pagado",
     module: "Gastos",
     permission: "store:expenses:pay",
+    idempotency: "at_most_once",
     inputs: { expense_id: inId("Gasto") },
   },
   "vendix.purchase_order.create_draft": {
     label: "Crear orden de compra (borrador)",
     module: "Compras",
     permission: "store:orders:purchase_orders:create",
+    idempotency: "at_most_once",
     inputs: {
       supplier_id: inId("Proveedor"),
       location_id: inId("Bodega"),
@@ -804,12 +825,14 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Aprobar orden de compra",
     module: "Compras",
     permission: "store:orders:purchase_orders:approve",
+    idempotency: "at_most_once",
     inputs: { purchase_order_id: inId("Orden de compra") },
   },
   "vendix.purchase_order.cancel": {
     label: "Anular orden de compra",
     module: "Compras",
     permission: "store:orders:purchase_orders:cancel",
+    idempotency: "at_most_once",
     inputs: {
       purchase_order_id: inId("Orden de compra"),
       reason: inText("Motivo"),
@@ -819,6 +842,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Registrar pago a proveedor",
     module: "Pagos",
     permission: "store:orders:purchase_orders:pay",
+    idempotency: "at_most_once",
     inputs: {
       purchase_order_id: inId("Orden de compra"),
       amount: inMoney("Monto"),
@@ -830,6 +854,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Abonar a cuenta por pagar",
     module: "Pagos",
     permission: "store:accounts_payable:payment",
+    idempotency: "at_most_once",
     inputs: {
       payable_id: inId("Cuenta por pagar"),
       amount: inMoney("Monto"),
@@ -841,6 +866,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Ajuste de inventario",
     module: "Inventario",
     permission: "store:inventory:adjustments:create",
+    idempotency: "at_most_once",
     inputs: {
       product_id: inId("Producto"),
       location_id: inId("Bodega"),
@@ -870,6 +896,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Traslado de inventario (borrador)",
     module: "Inventario",
     permission: "store:stock-transfers:create",
+    idempotency: "at_most_once",
     inputs: {
       from_location_id: inId("Bodega origen"),
       to_location_id: inId("Bodega destino"),
@@ -882,12 +909,14 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Crear factura desde una venta",
     module: "Facturación",
     permission: "invoicing:write",
+    idempotency: "at_most_once",
     inputs: { order_id: inId("Venta") },
   },
   "vendix.credit_note.create": {
     label: "Crear nota crédito (total)",
     module: "Facturación",
     permission: "invoicing:write",
+    idempotency: "at_most_once",
     inputs: {
       invoice_id: inId("Factura"),
       reason: inText("Motivo", true),
@@ -897,6 +926,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Enviar factura por correo",
     module: "Facturación",
     permission: "invoicing:write",
+    idempotency: "at_most_once",
     inputs: {
       invoice_id: inId("Factura"),
       email: inText("Correo (opcional: el del cliente)"),
@@ -906,6 +936,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Registrar pago de una venta",
     module: "Pagos",
     permission: "store:orders:order_flow:create",
+    idempotency: "at_most_once",
     inputs: {
       order_id: inId("Venta"),
       store_payment_method_id: inId("Medio de pago de la tienda"),
@@ -917,6 +948,7 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Cambiar estado de una venta",
     module: "Ventas",
     permission: "store:orders:order_flow:create",
+    idempotency: "at_most_once",
     inputs: {
       order_id: inId("Venta"),
       to_state: {
@@ -932,12 +964,14 @@ export const WORKFLOW_ACTION_CATALOG = {
     label: "Confirmar reserva",
     module: "Reservas",
     permission: "store:reservations:update",
+    idempotency: "at_most_once",
     inputs: { booking_id: inId("Reserva") },
   },
   "vendix.crm_task.create": {
     label: "Crear tarea CRM",
     module: "CRM",
     permission: "store:crm_tasks:manage",
+    idempotency: "at_most_once",
     inputs: {
       title: inText("Título", true),
       description: inText("Descripción"),

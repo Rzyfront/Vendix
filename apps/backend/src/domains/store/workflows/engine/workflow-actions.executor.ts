@@ -122,6 +122,8 @@ export class WorkflowActionsExecutor {
         instance.store_id,
       );
       requirePermission(permissions, spec.permission, spec.label.toLowerCase());
+      const claimed = spec.idempotency === 'at_most_once';
+      if (claimed) await this.claimEffect(row);
       try {
         const result = await handler({
           instance,
@@ -143,6 +145,9 @@ export class WorkflowActionsExecutor {
         });
         createdId = result.record_id;
       } catch (e) {
+        // The domain transaction rolled back: the effect did not happen, so a
+        // retry may run it.
+        if (claimed) await this.releaseEffect(row);
         if (isPermanent(e)) {
           throw new WorkflowNonRetryableError(
             (e as Error)?.message ?? String(e),
@@ -160,6 +165,36 @@ export class WorkflowActionsExecutor {
       action,
       created_id: createdId,
       stage_key: row.payload.stage_key ?? null,
+    });
+  }
+
+  /**
+   * `at_most_once` actions: marks the row as started BEFORE the effect. A row
+   * that already carries the mark and no result was interrupted between the
+   * effect and saving its result (worker crash, outbox write failure): the
+   * effect may have happened, so it is not repeated and the timeline says
+   * why.
+   */
+  private async claimEffect(row: ActionOutboxRow): Promise<void> {
+    if (row.payload.effect_started_at) {
+      throw new WorkflowNonRetryableError(
+        'La acción se interrumpió después de empezar y no se pudo confirmar si se ejecutó; revisa el registro antes de repetirla.',
+      );
+    }
+    row.payload = { ...row.payload, effect_started_at: new Date().toISOString() };
+    await this.prisma.withoutScope().workflow_outbox.updateMany({
+      where: { id: row.id },
+      data: { payload: row.payload },
+    });
+  }
+
+  private async releaseEffect(row: ActionOutboxRow): Promise<void> {
+    const payload = { ...row.payload };
+    delete payload.effect_started_at;
+    row.payload = payload;
+    await this.prisma.withoutScope().workflow_outbox.updateMany({
+      where: { id: row.id },
+      data: { payload },
     });
   }
 

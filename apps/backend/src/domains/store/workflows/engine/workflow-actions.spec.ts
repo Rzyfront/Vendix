@@ -6,7 +6,7 @@ import {
   seedPeople,
 } from '../../../../testing/workflows/workflow-test-kit';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
-import { WORKFLOW_VENDIX_ACTIONS } from '@common/workflows/contract';
+import { WORKFLOW_ACTION_CATALOG, WORKFLOW_VENDIX_ACTIONS } from '@common/workflows/contract';
 import { ActionOutboxRow, WorkflowActionsExecutor } from './workflow-actions.executor';
 import { WorkflowNonRetryableError } from './workflow-engine.types';
 import { WorkflowActionInputError } from './actions/workflow-action.types';
@@ -324,6 +324,56 @@ describe('WorkflowActionsExecutor (registry P1.2)', () => {
     expect(saved.payload.created_id).toBeNull();
     await inStore(() => executor.execute(saved));
     expect(createExpense).toHaveBeenCalledTimes(1);
+  });
+
+  it('P1.2 idempotency: a run interrupted after the effect started is not repeated (money, records)', async () => {
+    // A previous attempt marked the row and died before saving its result.
+    const row = outboxRow('vendix.expense.create', {}, {});
+    row.payload.effect_started_at = '2026-11-07T10:00:00.000Z';
+    await expect(inStore(() => executor.execute(row))).rejects.toThrow(
+      /no se pudo confirmar si se ejecutó/,
+    );
+    await expect(inStore(() => executor.execute(row))).rejects.toBeInstanceOf(
+      WorkflowNonRetryableError,
+    );
+    expect(createExpense).not.toHaveBeenCalled();
+    expect(actionEvents('action_executed')).toHaveLength(0);
+  });
+
+  it('P1.2 idempotency: the start mark is saved before the effect and cleared when the effect fails', async () => {
+    const row = outboxRow('vendix.expense.create', {});
+    const stored = () => kit.db.table('workflow_outbox').find((o) => o.id === row.id)!;
+    createExpense.mockImplementationOnce(async () => {
+      expect(stored().payload.effect_started_at).toEqual(expect.any(String));
+      throw new Error('db down');
+    });
+    await expect(inStore(() => executor.execute(row))).rejects.toThrow('db down');
+    expect(stored().payload.effect_started_at).toBeUndefined();
+    // The retry runs the effect, once.
+    await inStore(() => executor.execute(stored() as ActionOutboxRow));
+    expect(createExpense).toHaveBeenCalledTimes(2);
+    expect(actionEvents('action_executed')).toHaveLength(1);
+  });
+
+  it('P1.2 idempotency: the registry declares it; only field updates and tags may be replayed', () => {
+    const replaySafe = Object.entries(WORKFLOW_ACTION_CATALOG)
+      .filter(([, spec]) => spec.idempotency === 'replay_safe')
+      .map(([name]) => name)
+      .sort();
+    expect(replaySafe).toEqual([
+      'vendix.customer.add_tag',
+      'vendix.customer.update',
+      'vendix.employee.update',
+      'vendix.supplier.update',
+    ]);
+    for (const money of [
+      'vendix.order.register_payment',
+      'vendix.expense.create',
+      'vendix.payable.register_payment',
+      'vendix.purchase_order.register_payment',
+    ] as const) {
+      expect(WORKFLOW_ACTION_CATALOG[money].idempotency).toBe('at_most_once');
+    }
   });
 
   it('recordFailure leaves action_failed once with the error truncated', async () => {
