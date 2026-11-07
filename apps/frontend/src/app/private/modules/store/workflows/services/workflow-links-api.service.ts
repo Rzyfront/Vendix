@@ -21,7 +21,6 @@ export interface WorkflowLinkGate {
 export interface WorkflowLinkInstance {
   id: number;
   reference: string;
-  title: string;
   status: string;
   stage_name: string | null;
   definition_name: string;

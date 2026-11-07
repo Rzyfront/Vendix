@@ -51,11 +51,11 @@ const EMPTY: WorkflowLinks = { pending: false, gates: [], instances: [] };
                 class="font-medium text-primary hover:underline"
                 [routerLink]="['/admin/workflows/instances', instance.id]"
               >
-                {{ instance.reference }} · {{ instance.title }}
+                {{ instance.reference }} · {{ instance.definition_name }}
               </a>
-              <span class="-mt-1 text-xs text-text-secondary">
-                {{ instance.definition_name }}@if (instance.stage_name) { · etapa {{ instance.stage_name }} }
-              </span>
+              @if (instance.stage_name) {
+                <span class="-mt-1 text-xs text-text-secondary">etapa {{ instance.stage_name }}</span>
+              }
             }
           </div>
         }

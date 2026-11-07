@@ -80,7 +80,7 @@ describe('WorkflowEntityLinkComponent', () => {
       of({
         pending: false,
         gates: [],
-        instances: [{ id: 4, reference: 'FLU-000004', title: 'Compra', status: 'active', stage_name: 'Revisión', definition_name: 'Compras' }],
+        instances: [{ id: 4, reference: 'FLU-000004', status: 'active', stage_name: 'Revisión', definition_name: 'Compras' }],
       }),
     );
     expect(text()).toContain('Solicitudes relacionadas');

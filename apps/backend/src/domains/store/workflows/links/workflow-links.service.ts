@@ -31,7 +31,9 @@ export interface WorkflowLinkGate {
 export interface WorkflowLinks {
   pending: boolean;
   gates: WorkflowLinkGate[];
-  instances: Array<WorkflowLinkInstance & { title: string; definition_name: string }>;
+  // No `title`: it may carry request data, and any member of the store
+  // reads this answer (see the controller).
+  instances: Array<WorkflowLinkInstance & { definition_name: string }>;
 }
 
 const EMPTY: WorkflowLinks = { pending: false, gates: [], instances: [] };
@@ -67,7 +69,6 @@ export class WorkflowLinksService {
         select: {
           id: true,
           reference: true,
-          title: true,
           status: true,
           current_stage_key: true,
           version_id: true,
@@ -130,7 +131,6 @@ export class WorkflowLinksService {
       })),
       instances: subjectInstances.map((i) => ({
         ...linkOf(i),
-        title: i.title,
         definition_name: i.definition?.name ?? '',
       })),
     };
