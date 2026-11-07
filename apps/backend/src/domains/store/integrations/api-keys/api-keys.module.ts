@@ -23,6 +23,6 @@ import { StoreApiKeysService } from './store-api-keys.service';
     ApiKeyThrottlerGuard,
     StoreApiKeysService,
   ],
-  exports: [ApiKeyAuthService, ApiKeyGuard, ApiKeyThrottlerGuard],
+  exports: [ApiKeyAuthService, ApiKeyGuard, ApiKeyFailureLimiter, ApiKeyThrottlerGuard],
 })
 export class ApiKeysModule {}
