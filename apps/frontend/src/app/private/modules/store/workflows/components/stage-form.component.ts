@@ -25,6 +25,9 @@ import { applyComputedFields } from '../../../../../shared/workflows/contract/wo
 import { evaluateCondition } from '../../../../../shared/workflows/contract/workflow-runtime';
 import { WorkflowsApiService } from '../services/workflows-api.service';
 import { toWorkflowError } from '../utils/workflow-errors.util';
+import { DocumentAiReadComponent } from './document-ai-read.component';
+import { AiFieldNoteComponent } from './document-ai-read-note.component';
+import { AiAppliedResult, AiFieldHints } from './document-ai-read.util';
 
 export interface StageFormResult {
   ok: boolean;
@@ -52,11 +55,20 @@ type FieldValues = Record<string, unknown>;
     StoreUserSelectComponent,
     ButtonComponent,
     IconComponent,
+    DocumentAiReadComponent,
+    AiFieldNoteComponent,
   ],
   template: `
     <div class="flex flex-col gap-4">
       @for (field of visibleFields(); track field.key) {
-        <div class="flex flex-col gap-1" [attr.data-field]="field.key">
+        <div
+          class="flex flex-col gap-1 rounded-md"
+          [class.ring-2]="aiHints()[field.key]?.low"
+          [class.ring-warning]="aiHints()[field.key]?.low"
+          [class.bg-warning-light]="aiHints()[field.key]?.low"
+          [class.p-1]="aiHints()[field.key]?.low"
+          [attr.data-field]="field.key"
+        >
           @switch (field.compute ? 'computed' : field.type) {
             @case ('computed') {
               <app-input
@@ -218,6 +230,15 @@ type FieldValues = Record<string, unknown>;
                     >
                   }
                 </div>
+                @if (fileIdOf(field.key); as fileId) {
+                  <app-document-ai-read
+                    [instanceId]="instanceId()"
+                    [fileId]="fileId"
+                    [fields]="fields()"
+                    [values]="values()"
+                    (applied)="applyAi($event)"
+                  />
+                }
               }
               @if (field.help) {
                 <span class="text-xs text-text-secondary">{{
@@ -240,6 +261,7 @@ type FieldValues = Record<string, unknown>;
               />
             }
           }
+          <app-ai-field-note [hint]="aiHints()[field.key]" />
         </div>
       }
     </div>
@@ -263,6 +285,8 @@ export class WorkflowStageFormComponent {
   readonly errors = signal<Partial<Record<string, string>>>({});
   readonly fileNames = signal<Record<string, string>>({});
   readonly uploading = signal<Record<string, boolean>>({});
+  /** P4.3: provenance of the values written by "Leer con IA" (cleared on manual edit). */
+  readonly aiHints = signal<AiFieldHints>({});
 
   /**
    * P2.9: request data plus what the person typed, with the calculated fields
@@ -297,6 +321,7 @@ export class WorkflowStageFormComponent {
         this.values.set(seed);
         this.errors.set({});
         this.fileNames.set({});
+        this.aiHints.set({});
       });
     });
   }
@@ -333,8 +358,27 @@ export class WorkflowStageFormComponent {
     return typeof value === 'number' ? value : null;
   }
 
+  /** Stored file id of a file field, for "Leer con IA". */
+  fileIdOf(key: string): number | null {
+    const value = this.values()[key];
+    return typeof value === 'number' && value > 0 ? value : null;
+  }
+
+  /** P4.3: writes the AI values and remembers their confidence and page. */
+  applyAi(result: AiAppliedResult): void {
+    this.values.update((current) => ({ ...current, ...result.values }));
+    this.aiHints.update((current) => ({ ...current, ...result.hints }));
+  }
+
   setValue(key: string, value: unknown): void {
     this.values.update((current) => ({ ...current, [key]: value }));
+    if (this.aiHints()[key]) {
+      this.aiHints.update((current) => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+    }
     if (this.errors()[key]) {
       this.errors.update((current) => {
         const next = { ...current };
