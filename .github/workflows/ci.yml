@@ -280,6 +280,66 @@ jobs:
           npx jest --ci --runInBand --runTestsByPath
           src/common/workflows/contract/workflow-contract.parity.spec.ts
 
+  # Lo que un doble en memoria no prueba del motor de Flujos: concurrencia,
+  # SKIP LOCKED, idempotencia, triggers de evidencia y outbox transaccional.
+  # El esquema sale de `migrate diff` y no de `migrate deploy`: las migraciones
+  # antiguas asumen datos sembrados y no corren sobre una base vacía.
+  backend-workflows-postgres:
+    name: Backend Workflows Postgres
+    runs-on: ubuntu-latest
+    needs: audits
+    if: needs.audits.outputs.run_ci == 'true' && needs.audits.outputs.backend == 'true'
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg15
+        env:
+          POSTGRES_USER: vendix
+          POSTGRES_PASSWORD: vendix
+          POSTGRES_DB: vendix_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U vendix"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://vendix:vendix@localhost:5432/vendix_test?schema=public
+      VENDIX_DESTRUCTIVE_E2E: '1'
+      PGPASSWORD: vendix
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Generar Prisma Client
+        working-directory: apps/backend
+        run: npx prisma generate
+      - name: Crear el esquema
+        working-directory: apps/backend
+        run: |
+          set -euo pipefail
+          psql -h localhost -U vendix -d vendix_test -c 'CREATE EXTENSION IF NOT EXISTS vector'
+          npx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script > "$RUNNER_TEMP/schema.sql"
+          psql -h localhost -U vendix -d vendix_test -v ON_ERROR_STOP=1 -q -f "$RUNNER_TEMP/schema.sql"
+      # Lista fija: "PR regressions" se omite cuando un PR cambia más de 25 specs.
+      - name: Jest — specs del motor y del fan-out
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --config jest.isolated.config.js --runTestsByPath
+          src/domains/store/workflows/engine/workflow-engine.spec.ts
+          src/domains/store/workflows/engine/workflow-assignment.spec.ts
+          src/domains/store/workflows/engine/workflow-trigger.fanout.spec.ts
+          src/domains/store/workflows/engine/workflow-timers.cron.spec.ts
+      - name: Jest — motor de Flujos contra Postgres
+        working-directory: apps/backend
+        run: >-
+          npx jest --ci --runInBand --forceExit --config jest.isolated.config.js --runTestsByPath
+          src/domains/store/workflows/engine/workflow-postgres.integration.spec.ts
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
@@ -343,6 +403,10 @@ jobs:
           --include='**/orders/components/orders-list/orders-list.component.spec.ts'
           --include='**/inventory/inventory-dashboard.component.spec.ts'
           --include='**/ecommerce/pages/guest-order-summary/guest-order-summary.component.spec.ts'
+          --include='**/workflow-public-form/workflow-public-form.component.spec.ts'
+          --include='**/workflows/pages/inbox-page/inbox-page.component.spec.ts'
+          --include='**/workflows/pages/workflows-page/workflows-page.component.spec.ts'
+          --include='**/workflows/services/workflows-api.service.spec.ts'
           --include='**/ecommerce/services/checkout-payment-receipt.spec.ts'
           --include='**/ecommerce/pages/account/order-detail/order-detail.component.spec.ts'
           --include='**/reports/services/reports-data.service.spec.ts'

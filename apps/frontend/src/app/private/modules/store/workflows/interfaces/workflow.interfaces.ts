@@ -22,7 +22,7 @@ export interface ApiResponse<T> {
   data: T;
 }
 
-export type WorkflowDefinitionStatus = 'draft' | 'published' | 'archived';
+export type WorkflowDefinitionStatus = 'draft' | 'active' | 'archived';
 
 export interface WorkflowDefinitionRow {
   id: number;

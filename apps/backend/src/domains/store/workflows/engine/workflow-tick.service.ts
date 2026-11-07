@@ -20,6 +20,8 @@ export interface TickResult {
 }
 
 const SYSTEM: WorkflowActor = { type: 'system', id: null };
+/** Consecutive automatic transitions before the instance goes to `failed`. */
+export const MAX_AUTOMATIC_HOPS = 100;
 const NOOP: TickResult = { action: 'noop', reminded: false, escalated: false };
 
 /**
@@ -66,6 +68,9 @@ export class WorkflowTickService {
           definition.fields,
         );
         if (!transition) return this.fail(tx, instance, 'no_transition', now);
+        if (await this.exceededAutomaticHops(tx, instance)) {
+          return this.fail(tx, instance, 'automatic_loop', now);
+        }
         await this.advancer.advance({
           tx,
           instance,
@@ -84,6 +89,33 @@ export class WorkflowTickService {
       if (!instance.stage_due_at || instance.stage_due_at > now) return NOOP;
       return this.overdue(tx, instance, stage.due?.on_overdue, now);
     });
+  }
+
+  /**
+   * The validator rejects cycles without a human stage, but a definition from
+   * before that rule or a bug must not spin forever: consecutive automatic
+   * hops since the last human action are capped. The limit is above what a
+   * valid chain can reach (60 stages at most).
+   */
+  private async exceededAutomaticHops(
+    tx: WorkflowTx,
+    instance: WorkflowInstanceRow,
+  ): Promise<boolean> {
+    const recent: Array<{
+      actor_type: string;
+      payload: { automatic?: boolean } | null;
+    }> = await tx.workflow_instance_events.findMany({
+      where: { store_id: instance.store_id, instance_id: instance.id },
+      orderBy: { seq: 'desc' },
+      take: MAX_AUTOMATIC_HOPS * 3,
+      select: { actor_type: true, payload: true },
+    });
+    let hops = 0;
+    for (const event of recent) {
+      if (event.actor_type !== SYSTEM.type) break;
+      if (event.payload?.automatic === true) hops++;
+    }
+    return hops >= MAX_AUTOMATIC_HOPS;
   }
 
   private async fail(
@@ -141,7 +173,16 @@ export class WorkflowTickService {
     const taskIds = openTasks.map((t) => t.id);
     const title = `${instance.reference} · ${instance.title}`;
 
-    if (onOverdue.escalate_to && !instance.stage_escalated_at) {
+    // With reminders configured the current assignee gets the first one and a
+    // full interval to act; only then does the task go up. Without reminders it
+    // goes up on the first tick.
+    const every = onOverdue.remind_every_hours;
+    const last = instance.stage_last_reminded_at;
+    const intervalMs = (every ?? 0) * 3_600_000;
+    const assigneeWarned =
+      !every || (!!last && now.getTime() - last.getTime() >= intervalMs);
+
+    if (onOverdue.escalate_to && !instance.stage_escalated_at && assigneeWarned) {
       const stamped = await tx.workflow_instances.updateMany({
         where: {
           id: instance.id,
@@ -149,7 +190,11 @@ export class WorkflowTickService {
           stage_entry_seq: instance.stage_entry_seq,
           stage_escalated_at: null,
         },
-        data: { stage_escalated_at: now },
+        // The escalation notice counts as a reminder for the new assignee.
+        data: {
+          stage_escalated_at: now,
+          ...(every ? { stage_last_reminded_at: now } : {}),
+        },
       });
       if (stamped.count === 1) {
         const target = await this.assignment.resolveDef(tx, onOverdue.escalate_to, instance);
@@ -192,11 +237,9 @@ export class WorkflowTickService {
       }
     }
 
-    const every = onOverdue.remind_every_hours;
     // Already escalated (or lost the escalation race) and no reminders: done.
     if (!every) return this.park(tx, instance, result, now);
-    const last = instance.stage_last_reminded_at;
-    if (!last || now.getTime() - last.getTime() >= every * 3_600_000) {
+    if (!last || now.getTime() - last.getTime() >= intervalMs) {
       const stamped = await tx.workflow_instances.updateMany({
         where: {
           id: instance.id,

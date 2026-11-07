@@ -12,7 +12,7 @@ import { CustomerCrmModule } from '../customers/crm/customer-crm.module';
 import { PurchaseOrdersModule } from '../orders/purchase-orders/purchase-orders.module';
 import { EncryptionService } from '../../../common/services/encryption.service';
 import { WorkflowActionsExecutor } from './engine/workflow-actions.executor';
-import { WorkflowTriggerListener } from './engine/workflow-trigger.listener';
+import { WorkflowTriggerFanout } from './engine/workflow-trigger.fanout';
 import { WorkflowWebhookDeliveryService } from './webhooks/workflow-webhook-delivery.service';
 import { WorkflowWebhookEmitter } from './webhooks/workflow-webhook-emitter.service';
 import { WorkflowWebhooksController } from './webhooks/workflow-webhooks.controller';
@@ -114,7 +114,7 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
     WorkflowWebhookEmitter,
     WorkflowWebhookDeliveryService,
     WorkflowWebhooksService,
-    WorkflowTriggerListener,
+    WorkflowTriggerFanout,
     WorkflowActionsExecutor,
     {
       provide: WorkflowRequirementsService,

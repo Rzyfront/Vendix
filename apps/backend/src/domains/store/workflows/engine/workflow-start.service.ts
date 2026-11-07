@@ -120,6 +120,7 @@ export class WorkflowStartService {
     const patch = this.stages.stagePatch(stage, now, 0);
     const subject =
       input.subject && input.subject.type !== 'none' ? input.subject : null;
+    if (subject) await this.assertSubjectInStore(tx, ctx, subject);
 
     const created = (await tx.workflow_instances.create({
       data: {
@@ -443,6 +444,64 @@ export class WorkflowStartService {
       from_stage_key: null,
       to_stage_key: stage.key,
     };
+  }
+
+  /** A subject id from the caller must belong to this store: 404 otherwise. */
+  private async assertSubjectInStore(
+    tx: WorkflowTx,
+    ctx: WorkflowCallContext,
+    subject: { type: string; id?: number | null },
+  ) {
+    const id = subject.id ?? null;
+    if (id === null) return;
+    const select = { select: { id: true } };
+    let found: unknown = null;
+    switch (subject.type) {
+      case 'order':
+        found = await tx.orders.findFirst({
+          where: { id, store_id: ctx.store_id },
+          ...select,
+        });
+        break;
+      case 'purchase_order':
+        found = await tx.purchase_orders.findFirst({
+          where: {
+            id,
+            organization_id: ctx.organization_id,
+            location: { store_id: ctx.store_id },
+          },
+          ...select,
+        });
+        break;
+      case 'supplier':
+        // A supplier without a store is shared across the organization.
+        found = await tx.suppliers.findFirst({
+          where: {
+            id,
+            organization_id: ctx.organization_id,
+            OR: [{ store_id: null }, { store_id: ctx.store_id }],
+          },
+          ...select,
+        });
+        break;
+      case 'employee':
+        found = await tx.employees.findFirst({
+          where: { id, organization_id: ctx.organization_id },
+          ...select,
+        });
+        break;
+      case 'customer':
+        found = await tx.store_users.findFirst({
+          where: { user_id: id, store_id: ctx.store_id },
+          ...select,
+        });
+        break;
+      default:
+        throw new VendixHttpException(ErrorCodes.WORKFLOW_SUBJECT_NOT_FOUND);
+    }
+    if (!found) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_SUBJECT_NOT_FOUND);
+    }
   }
 
   private async assertMayStart(

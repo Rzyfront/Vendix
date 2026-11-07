@@ -71,6 +71,7 @@ export const ErrorCodes = {
   WORKFLOW_FORM_INVALID: { code: 'WORKFLOW_FORM_INVALID', httpStatus: 422, devMessage: 'Los datos del formulario no son válidos.' },
   WORKFLOW_OUTCOME_INVALID: { code: 'WORKFLOW_OUTCOME_INVALID', httpStatus: 422, devMessage: 'El resultado no es válido para esta etapa.' },
   WORKFLOW_NOT_ACTIVE: { code: 'WORKFLOW_NOT_ACTIVE', httpStatus: 409, devMessage: 'El flujo no está publicado y activo.' },
+  WORKFLOW_SUBJECT_NOT_FOUND: { code: 'WORKFLOW_SUBJECT_NOT_FOUND', httpStatus: 404, devMessage: 'El registro asociado a la solicitud no existe en esta tienda.' },
   WORKFLOW_START_FORBIDDEN: { code: 'WORKFLOW_START_FORBIDDEN', httpStatus: 403, devMessage: 'Tu rol no puede iniciar este flujo.' },
   WORKFLOW_INSTANCE_CLOSED: { code: 'WORKFLOW_INSTANCE_CLOSED', httpStatus: 409, devMessage: 'La solicitud ya está cerrada.' },
   WORKFLOW_STAGE_NOT_FOUND: { code: 'WORKFLOW_STAGE_NOT_FOUND', httpStatus: 422, devMessage: 'La etapa indicada no existe en este flujo.' },

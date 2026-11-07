@@ -83,11 +83,11 @@ export class WorkflowsApiService {
 
   publishDefinition(id: number, changelog?: string): Observable<PublishResult> {
     return this.http
-      .post<ApiResponse<PublishResult>>(
+      .post<ApiResponse<Omit<PublishResult, 'version'> & { version: { version: number } }>>(
         `${this.base}/definitions/${id}/publish`,
         changelog ? { changelog } : {},
       )
-      .pipe(map((res) => res.data));
+      .pipe(map((res) => ({ ...res.data, version: res.data.version.version })));
   }
 
   exportDefinition(id: number): Observable<ExportDefinitionResult> {
@@ -202,10 +202,18 @@ export class WorkflowsApiService {
     idempotencyKey: string,
   ): Observable<StartInstanceResult> {
     return this.http
-      .post<ApiResponse<StartInstanceResult>>(`${this.base}/instances`, body, {
+      .post<
+        ApiResponse<{ instance: { id: number; reference: string }; replayed: boolean }>
+      >(`${this.base}/instances`, body, {
         headers: this.idempotency(idempotencyKey),
       })
-      .pipe(map((res) => res.data));
+      .pipe(
+        map((res) => ({
+          id: res.data.instance.id,
+          reference: res.data.instance.reference,
+          replayed: res.data.replayed,
+        })),
+      );
   }
 
   uploadInstanceFile(

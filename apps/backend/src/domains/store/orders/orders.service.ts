@@ -21,6 +21,7 @@ import {
   order_delivery_type_enum,
   payments_state_enum,
 } from '@prisma/client';
+import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   DEFAULT_STORE_TIMEZONE,
@@ -1114,6 +1115,13 @@ export class OrdersService {
               )) continue;
             await this.reserveOrderItemStrict(item, createdOrder.id, store_id, creatingUser?.id, tx, allowOversell);
           }
+          await recordTriggerEvent(tx, 'order.created', {
+            store_id: createdOrder.store_id,
+            order_id: createdOrder.id,
+            order_number: createdOrder.order_number,
+            grand_total: createdOrder.grand_total,
+            currency: createdOrder.currency,
+          });
           return createdOrder;
         }, { timeout: 20_000, maxWait: 5_000 });
 

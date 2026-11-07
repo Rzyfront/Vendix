@@ -250,7 +250,10 @@ describe('StoredFilesService', () => {
       const row = await upload();
       const out = await kit.storedFiles.signedDownloadUrl(row.id);
       expect(out.expires_in).toBeLessThanOrEqual(300);
-      expect(kit.s3.getPresignedUrl).toHaveBeenCalledWith(row.s3_key, out.expires_in);
+      // Always a download: a stored HTML or SVG must not render on the bucket's origin.
+      expect(kit.s3.getPresignedUrl).toHaveBeenCalledWith(row.s3_key, out.expires_in, {
+        downloadName: 'contrato.pdf',
+      });
       expect(out).toMatchObject({
         original_name: 'contrato.pdf',
         mime_type: 'application/pdf',

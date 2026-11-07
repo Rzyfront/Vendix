@@ -73,6 +73,11 @@ function buildProduct(over: Record<string, unknown> = {}) {
   };
 }
 
+// The durable outbox write has its own spec (workflow-trigger.fanout.spec.ts).
+jest.mock('../../store/workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
+
 describe('CheckoutService — línea inclusiva por bruto de línea (A.2)', () => {
   let service: CheckoutService;
   let prisma: any;
@@ -91,6 +96,7 @@ describe('CheckoutService — línea inclusiva por bruto de línea (A.2)', () =>
       .mockReturnValue(undefined);
 
     prisma = {
+      $transaction: jest.fn(async (cb: (tx: unknown) => unknown) => cb(prisma)),
       carts: { findFirst: jest.fn().mockResolvedValue(null) },
       products: {
         findUnique: jest.fn(({ where }: any) =>

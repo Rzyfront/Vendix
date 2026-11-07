@@ -128,6 +128,31 @@ describe('WorkflowAssignmentService (vía start)', () => {
     expect(ev.payload).toMatchObject({ reason: 'user_not_in_store', fallback: 'owner' });
   });
 
+  describe('admin de la organización sin fila en la tienda', () => {
+    beforeEach(() => {
+      kit.db.insert('roles', { id: 30, name: 'admin', organization_id: null, store_id: null });
+      kit.db.insert('users', { id: 20, organization_id: 1 });
+      kit.db.insert('users', { id: 21, organization_id: 99 });
+      kit.db.insert('user_roles', { user_id: 20, role_id: 30, store_id: null });
+      kit.db.insert('user_roles', { user_id: 21, role_id: 30, store_id: null });
+      seedDefinition(kit.db, def({ kind: 'role', role_key: 'admin' }));
+    });
+
+    it('cuenta como titular, igual que el owner, y no se pierde el escalamiento', async () => {
+      await start();
+      expect(lastTask()).toMatchObject({ assignee_role_id: 30, assignee_user_id: null });
+      const task = lastTask() as never;
+      expect(await kit.assignment.canAct(kit.prisma.withoutScope(), task, 20, 1, 1)).toBe(true);
+    });
+
+    it('el admin de otra organización sigue sin alcanzar esta tienda', async () => {
+      await start();
+      expect(lastTask()).toMatchObject({ assignee_role_id: 30 });
+      const task = lastTask() as never;
+      expect(await kit.assignment.canAct(kit.prisma.withoutScope(), task, 21, 1, 1)).toBe(false);
+    });
+  });
+
   it('role sin titulares no se asigna (queda en el fallback)', async () => {
     kit.db.insert('roles', { id: 9, name: 'auditor', organization_id: null, store_id: null });
     seedDefinition(kit.db, def({ kind: 'role', role_key: 'auditor' }));

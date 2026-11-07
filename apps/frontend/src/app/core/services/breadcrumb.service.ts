@@ -1093,6 +1093,54 @@ export class BreadcrumbService {
 
     // Expenses
     {
+      path: '/admin/workflows',
+      title: 'Flujos',
+      parent: 'Tienda',
+      icon: 'git-branch',
+    },
+    {
+      path: '/admin/workflows/inbox',
+      title: 'Mis tareas',
+      parent: 'Flujos',
+      icon: 'inbox',
+    },
+    {
+      path: '/admin/workflows/integrations',
+      title: 'Integraciones',
+      parent: 'Flujos',
+      icon: 'plug',
+    },
+    {
+      path: '/admin/workflows/:id/board',
+      title: 'Tablero',
+      parent: 'Flujos',
+      icon: 'layout-dashboard',
+    },
+    {
+      path: '/admin/workflows/:id/analytics',
+      title: 'Analítica',
+      parent: 'Flujos',
+      icon: 'bar-chart-3',
+    },
+    {
+      path: '/admin/workflows/:id/edit',
+      title: 'Editor',
+      parent: 'Flujos',
+      icon: 'pencil',
+    },
+    {
+      path: '/admin/workflows/instances/:id',
+      title: 'Solicitud',
+      parent: 'Flujos',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/documents',
+      title: 'Documentos',
+      parent: 'Tienda',
+      icon: 'folder-open',
+    },
+    {
       path: '/admin/expenses',
       title: 'Gastos',
       parent: 'Tienda',

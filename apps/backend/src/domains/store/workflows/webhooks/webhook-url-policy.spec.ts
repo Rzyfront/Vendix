@@ -170,6 +170,16 @@ describe('assertWebhookUrl · tabla de URLs', () => {
 });
 
 describe('isBlockedAddress', () => {
+  it('B7: bloquea Teredo (2001::/32) y NAT64 local (64:ff9b:1::/48)', () => {
+    expect(isBlockedAddress('2001:0:4136:e378:8000:63bf:3fff:fdd2')).toBe(true);
+    expect(isBlockedAddress('2001::1')).toBe(true);
+    expect(isBlockedAddress('64:ff9b:1::1')).toBe(true);
+    expect(isBlockedAddress('64:ff9b:1:ffff::1')).toBe(true);
+    // Vecinos públicos: no se bloquean de más.
+    expect(isBlockedAddress('2001:4860:4860::8888')).toBe(false);
+    expect(isBlockedAddress('64:ff9b:2::1')).toBe(false);
+  });
+
   it('bloquea lo que no es una IP (falla cerrado) y lo privado', () => {
     expect(isBlockedAddress('not-an-ip')).toBe(true);
     expect(isBlockedAddress('')).toBe(true);

@@ -278,7 +278,7 @@ export class InboxPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.api
-      .listDefinitions({ limit: 100, status: 'published' })
+      .listDefinitions({ limit: 100, status: 'active' })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) =>
@@ -286,6 +286,8 @@ export class InboxPageComponent implements OnInit {
             { value: 'all', label: 'Todos los flujos' },
             ...(res.data ?? []).map((d) => ({ value: String(d.id), label: d.name })),
           ]),
+        // Only the filter options: the list below reports its own load error.
+        error: () => undefined,
       });
     this.load();
     this.loadStats();

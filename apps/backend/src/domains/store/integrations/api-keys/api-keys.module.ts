@@ -1,3 +1,4 @@
+import { ApiKeyFailureLimiter } from './api-key-failure-limiter';
 import { Module } from '@nestjs/common';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../../prisma/prisma.module';
@@ -18,9 +19,10 @@ import { StoreApiKeysService } from './store-api-keys.service';
   providers: [
     ApiKeyAuthService,
     ApiKeyGuard,
+    ApiKeyFailureLimiter,
     ApiKeyThrottlerGuard,
     StoreApiKeysService,
   ],
-  exports: [ApiKeyAuthService, ApiKeyGuard, ApiKeyThrottlerGuard],
+  exports: [ApiKeyAuthService, ApiKeyGuard, ApiKeyFailureLimiter, ApiKeyThrottlerGuard],
 })
 export class ApiKeysModule {}

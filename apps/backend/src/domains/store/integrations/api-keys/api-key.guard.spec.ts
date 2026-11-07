@@ -1,4 +1,5 @@
-import { VendixHttpException } from '../../../../common/errors';
+import { API_KEY_FAILURE_LIMIT, ApiKeyFailureLimiter } from './api-key-failure-limiter';
+import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 import { ApiKeyGuard } from './api-key.guard';
 
 const KEY = 'vdx_live_abc123_secretsecretsecret';
@@ -26,7 +27,7 @@ function build(
     ),
   };
   const gate: any = { isEnforce: () => opts.enforce ?? true };
-  return { guard: new ApiKeyGuard(auth, access, gate), auth, access };
+  return { guard: new ApiKeyGuard(auth, access, gate, new ApiKeyFailureLimiter()), auth, access };
 }
 
 function ctx(req: any, res: any = { setHeader: jest.fn() }) {
@@ -196,5 +197,56 @@ describe('ApiKeyGuard', () => {
         'grace_soft',
       );
     });
+  });
+});
+
+describe('ApiKeyGuard — límite de fallos por IP (B10)', () => {
+  const invalid = () => new VendixHttpException(ErrorCodes.API_KEY_INVALID);
+  const build = (authenticate: jest.Mock) => {
+    const access: any = { canUseModule: jest.fn(async () => ({ mode: 'allow' })) };
+    const gate: any = { isEnforce: () => true };
+    return new ApiKeyGuard({ authenticate } as any, access, gate, new ApiKeyFailureLimiter());
+  };
+  const reqFrom = (ip: string, key = 'vdx_live_abc123_zzzzzzzz') =>
+    ctx({ method: 'GET', headers: { 'x-api-key': key }, query: {}, ip, socket: { remoteAddress: ip } });
+  const code = (promise: Promise<unknown>) =>
+    promise.then(
+      () => 'ok',
+      (e) => e.errorCode,
+    );
+
+  it('tras el tope, la misma IP recibe 429 sin consultar la base; otra IP sigue con 401', async () => {
+    const authenticate = jest.fn(async () => {
+      throw invalid();
+    });
+    const guard = build(authenticate);
+    for (let i = 0; i < API_KEY_FAILURE_LIMIT.limit; i++) {
+      await expect(code(guard.canActivate(reqFrom('203.0.113.9')))).resolves.toBe('API_KEY_INVALID');
+    }
+    const lookups = authenticate.mock.calls.length;
+    await expect(code(guard.canActivate(reqFrom('203.0.113.9')))).resolves.toBe('API_KEY_RATE_LIMITED');
+    expect(authenticate.mock.calls.length).toBe(lookups);
+    await expect(code(guard.canActivate(reqFrom('203.0.113.10')))).resolves.toBe('API_KEY_INVALID');
+  });
+
+  it('las peticiones autenticadas no gastan el cupo de fallos de su IP', async () => {
+    const authenticate = jest.fn(async () => ({
+      api_key_id: 1,
+      user_id: 1,
+      organization_id: 1,
+      store_id: 1,
+      permissions: [],
+    }));
+    const guard = build(authenticate);
+    for (let i = 0; i < API_KEY_FAILURE_LIMIT.limit + 5; i++) {
+      await expect(code(guard.canActivate(reqFrom('203.0.113.11')))).resolves.toBe('ok');
+    }
+  });
+
+  it('el bloqueo se levanta al vencer la ventana', () => {
+    const limiter = new ApiKeyFailureLimiter();
+    for (let i = 0; i < API_KEY_FAILURE_LIMIT.limit; i++) limiter.recordFailure('a', 1000);
+    expect(limiter.isBlocked('a', 1000)).toBe(true);
+    expect(limiter.isBlocked('a', 1000 + API_KEY_FAILURE_LIMIT.ttlMs)).toBe(false);
   });
 });

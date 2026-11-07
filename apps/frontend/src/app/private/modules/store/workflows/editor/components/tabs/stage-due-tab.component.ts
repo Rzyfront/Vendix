@@ -38,6 +38,13 @@ import { AssigneeEditorComponent } from '../assignee-editor.component';
           <div class="flex flex-col gap-2">
             <app-toggle label="Escalar si vence" [checked]="!!due.on_overdue?.escalate_to" (toggled)="toggleEscalate($event)" />
             @if (due.on_overdue?.escalate_to; as target) {
+              <span class="text-xs text-text-secondary">
+                @if (due.on_overdue?.remind_every_hours) {
+                  Primero se avisa al responsable y, si pasan esas horas sin atenderla, la tarea sube.
+                } @else {
+                  La tarea sube apenas vence.
+                }
+              </span>
               <app-assignee-editor
                 label="Escalar a"
                 [value]="target"

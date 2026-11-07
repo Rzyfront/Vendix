@@ -48,6 +48,26 @@ describe.each([
   });
   afterEach(() => jest.restoreAllMocks());
 
+  it('B5: addFileItem rechaza un expediente o un archivo de otra tienda sin escribir nada', async () => {
+    const theirs = await create(2, 2);
+    const mine = await create(1);
+    const fileOther = file(2);
+    const fileMine = file(1);
+    const base = { stage_key: 'intake', actor, field_key: 'invoice' };
+    const before = kit.db.table('dossier_items').length;
+    expect(
+      await codeOf(
+        kit.dossiers.addFileItem(undefined, { ...base, dossier_id: mine.id, file_id: fileOther.id }),
+      ),
+    ).toBe('DOCUMENT_NOT_FOUND');
+    expect(
+      await codeOf(
+        kit.dossiers.addFileItem(undefined, { ...base, dossier_id: theirs.id, file_id: fileMine.id }),
+      ),
+    ).toBe('DOCUMENT_NOT_FOUND');
+    expect(kit.db.table('dossier_items')).toHaveLength(before);
+  });
+
   it('createForInstance: EXP- correlativo por tienda, atado a la instancia', async () => {
     const a = await create(1);
     const b = await create(2);

@@ -36,6 +36,20 @@ export interface ReplayExpectation {
 }
 
 /** Append-only history (`seq`) and the transactional outbox. */
+/**
+ * With the pg driver adapter a P2002 carries no `meta.target`: the constraint
+ * name comes in `meta.driverAdapterError.cause.constraint`.
+ */
+function isIdempotencyKeyViolation(e: {
+  meta?: {
+    target?: unknown;
+    driverAdapterError?: { cause?: { constraint?: unknown } };
+  };
+}): boolean {
+  const named = [e.meta?.target, e.meta?.driverAdapterError?.cause?.constraint];
+  return JSON.stringify(named).includes('idempotency_key');
+}
+
 @Injectable()
 export class WorkflowEventsService {
   constructor(private readonly webhooks: WorkflowWebhookEmitter) {}
@@ -55,6 +69,19 @@ export class WorkflowEventsService {
       instance_id: instance.id,
       type,
       data: { instance_id: instance.id, reference: instance.reference, ...data },
+    });
+  }
+
+  /**
+   * Serializes writers of one instance without bumping `row_version`, so a
+   * form open elsewhere stays valid. For commands that append an event without
+   * a CAS on the instance. Take it before touching tasks: the engine always
+   * locks the instance first, and the same order rules out deadlocks.
+   */
+  async lockInstance(tx: WorkflowTx, storeId: number, instanceId: number) {
+    await tx.workflow_instances.updateMany({
+      where: { id: instanceId, store_id: storeId },
+      data: { updated_at: new Date() },
     });
   }
 
@@ -87,10 +114,7 @@ export class WorkflowEventsService {
       });
     } catch (e: any) {
       if (e?.code === 'P2002') {
-        const target: string[] = Array.isArray(e?.meta?.target)
-          ? e.meta.target
-          : [];
-        if (target.includes('idempotency_key') && input.idempotencyKey) {
+        if (input.idempotencyKey && isIdempotencyKeyViolation(e)) {
           throw new WorkflowIdempotencyConflict(input.idempotencyKey);
         }
         throw new VendixHttpException(ErrorCodes.WORKFLOW_STALE);

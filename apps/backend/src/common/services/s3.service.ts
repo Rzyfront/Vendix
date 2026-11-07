@@ -297,12 +297,21 @@ export class S3Service {
    * @param key Path of the file in S3
    * @param expiresIn Expiration time in seconds (default 1 hour)
    */
-  async getPresignedUrl(key: string, expiresIn = 3600): Promise<string> {
+  async getPresignedUrl(
+    key: string,
+    expiresIn = 3600,
+    options?: { downloadName?: string },
+  ): Promise<string> {
     try {
       this.validateS3Key(key);
       const command = new GetObjectCommand({
         Bucket: this.bucketName,
         Key: key,
+        ...(options?.downloadName
+          ? {
+              ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(options.downloadName)}`,
+            }
+          : {}),
       });
 
       return await getSignedUrl(this.s3Client, command, { expiresIn });

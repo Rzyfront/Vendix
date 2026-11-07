@@ -147,8 +147,9 @@ export class WorkflowActionsExecutor {
     payload: Record<string, unknown>,
   ) {
     try {
-      await this.prisma.$transaction((tx: WorkflowTx) =>
-        this.events.append(tx, {
+      await this.prisma.$transaction(async (tx: WorkflowTx) => {
+        await this.events.lockInstance(tx, row.store_id, instance.id);
+        await this.events.append(tx, {
           store_id: row.store_id,
           instance_id: instance.id,
           type,
@@ -157,8 +158,8 @@ export class WorkflowActionsExecutor {
           actor: { type: 'system', id: null },
           payload,
           idempotencyKey: systemIdempotencyKey(`${type}:${row.id}`),
-        }),
-      );
+        });
+      });
     } catch (e) {
       if (e instanceof WorkflowIdempotencyConflict) return; // already recorded
       throw e;

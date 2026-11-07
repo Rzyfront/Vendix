@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import {
   Injectable,
   NotFoundException,
@@ -6,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 
 type ExpenseState =
@@ -87,15 +89,26 @@ export class ExpenseFlowService {
 
     this.validateTransition(expense.state, 'approved');
 
-    const updated = await this.prisma.expenses.update({
-      where: { id },
-      data: {
-        state: 'approved',
-        approved_by_user_id: context.user_id,
-        approved_at: new Date(),
-      },
-      include: EXPENSE_INCLUDE,
-    });
+    const approve = async (tx: Prisma.TransactionClient) => {
+      const approved = await tx.expenses.update({
+        where: { id },
+        data: {
+          state: 'approved',
+          approved_by_user_id: context.user_id,
+          approved_at: new Date(),
+        },
+        include: EXPENSE_INCLUDE,
+      });
+      await recordTriggerEvent(tx, 'expense.approved', {
+        store_id: context.store_id,
+        expense_id: approved.id,
+        amount: approved.amount,
+        category_id: approved.category_id,
+      });
+      return approved;
+    };
+    const updated: Awaited<ReturnType<typeof approve>> =
+      await this.prisma.$transaction(approve);
 
     this.logger.log(`Expense #${id} approved by user #${context.user_id}`);
 

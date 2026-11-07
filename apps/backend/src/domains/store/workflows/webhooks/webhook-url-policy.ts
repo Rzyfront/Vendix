@@ -123,6 +123,8 @@ function isBlockedV6(ip: string): boolean {
   if ((h[0] & 0xffc0) === 0xfec0) return true; // fec0::/10 site-local
   if ((h[0] & 0xff00) === 0xff00) return true; // ff00::/8 multicast
   if (h[0] === 0x2001 && h[1] === 0x0db8) return true; // documentation
+  if (h[0] === 0x2001 && h[1] === 0) return true; // 2001::/32 Teredo tunnels to IPv4
+  if (h[0] === 0x64 && h[1] === 0xff9b && h[2] === 1) return true; // 64:ff9b:1::/48 local NAT64
   if (h[0] === 0x0100 && h.slice(1, 4).every((x) => x === 0)) return true; // 100::/64 discard
   return false;
 }

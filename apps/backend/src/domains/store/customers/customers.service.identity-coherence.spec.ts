@@ -5,6 +5,11 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ErrorCodes } from '../../../common/errors';
 import * as bcrypt from 'bcrypt';
 
+// The durable outbox write has its own spec (workflow-trigger.fanout.spec.ts).
+jest.mock('../workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
+
 /**
  * Agente D — Task 1 (coherencia persona/documento) + Task 2 (completar la
  * ficha fiscal en el resolve de POS/orden).
@@ -20,6 +25,9 @@ describe('CustomersService — Task 1 identidad persona/documento + Task 2 compl
   let service: CustomersService;
 
   const mockPrismaService = {
+    withoutScope: () => ({
+      $transaction: (cb: (tx: unknown) => unknown) => cb(mockPrismaService),
+    }),
     stores: { findUnique: jest.fn() },
     users: {
       findFirst: jest.fn(),

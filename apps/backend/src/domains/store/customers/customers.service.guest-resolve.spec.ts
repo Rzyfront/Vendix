@@ -1,8 +1,16 @@
 import { CustomersService } from './customers.service';
 
+// The durable outbox write has its own spec (workflow-trigger.fanout.spec.ts).
+jest.mock('../workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
+
 describe('CustomersService.resolveGuestCustomerForCheckout — phone matching', () => {
   const createService = () => {
     const prisma = {
+      withoutScope: () => ({
+        $transaction: (cb: (tx: unknown) => unknown) => cb(prisma),
+      }),
       stores: { findUnique: jest.fn().mockResolvedValue({ id: 1, organization_id: 3 }) },
       users: {
         findFirst: jest.fn().mockResolvedValue(null),
