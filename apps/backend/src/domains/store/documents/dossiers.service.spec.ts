@@ -198,6 +198,8 @@ describe.each([
       mime_type: 'application/pdf',
       size_bytes: 10,
       sha256: 'a'.repeat(64),
+      purged_at: null,
+      purge_policy_name: null,
     });
   });
 
@@ -261,5 +263,38 @@ describe.each([
     const rows = (await kit.dossiers.list()).data as Array<{ id: number; items_count: number }>;
     expect(rows.find((r) => r.id === d.id)?.items_count).toBe(2);
     expect(rows.find((r) => r.id === empty.id)?.items_count).toBe(0);
+  });
+
+  it('P4.7: el expediente de una solicitud lleva el sujeto de la solicitud', async () => {
+    kit.as({ store_id: 1 });
+    const d = await kit.prisma.$transaction((tx: any) =>
+      kit.dossiers.createForInstance(tx, { ...instanceRef(1), subject_type: 'custom_record', subject_id: 7 }),
+    );
+    expect(d).toMatchObject({ subject_type: 'custom_record', subject_id: 7 });
+  });
+
+  it('P4.4: un archivo purgado se muestra con la fecha y la política, y uno vivo no', async () => {
+    const d = await create(1);
+    kit.as({ store_id: 1 });
+    const live = file();
+    const gone = file();
+    const purgedAt = new Date('2026-11-01T03:00:00Z');
+    gone.purged_at = purgedAt;
+    const policy = kit.db.insert('document_retention_policies', {
+      organization_id: 1, store_id: 1, key: 'laboral', name: 'Laboral', retain_days: 30, created_by_user_id: 1,
+    });
+    const run = kit.db.insert('document_purge_runs', { organization_id: 1, store_id: 1, trigger: 'manual' });
+    kit.db.insert('document_purge_items', {
+      store_id: 1, run_id: run.id, file_id: gone.id, policy_id: policy.id, outcome: 'purged',
+      original_name: gone.original_name, size_bytes: 10, sha256: 'a'.repeat(64), reason: 'x',
+    });
+    const base = { dossier_id: d.id, stage_key: 'intake', actor };
+    await kit.dossiers.addFileItem(undefined, { ...base, field_key: 'a', file_id: live.id });
+    await kit.dossiers.addFileItem(undefined, { ...base, field_key: 'b', file_id: gone.id });
+
+    const items = await kit.dossiers.items(d.id);
+    const byFile = (id: number) => items.find((i: any) => i.file?.id === id)!.file!;
+    expect(byFile(gone.id)).toMatchObject({ purged_at: purgedAt, purge_policy_name: 'Laboral' });
+    expect(byFile(live.id)).toMatchObject({ purged_at: null, purge_policy_name: null });
   });
 });

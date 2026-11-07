@@ -163,6 +163,9 @@ export interface DossierItemView {
     mime_type: string;
     size_bytes: number | string;
     sha256: string;
+    /** P4.4: purged by a retention policy (no download). */
+    purged_at?: string | null;
+    purge_policy_name?: string | null;
   } | null;
 }
 

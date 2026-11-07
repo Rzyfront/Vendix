@@ -13,6 +13,8 @@ import { WorkflowActionInputError } from './actions/workflow-action.types';
 import { WorkflowPeopleActions } from './actions/people.actions';
 import { WorkflowPurchasingActions } from './actions/purchasing.actions';
 import { WorkflowOperationsActions } from './actions/operations.actions';
+import { WorkflowDocumentSignActions } from './actions/documents-sign.actions';
+import { WorkflowDocumentsActions } from './actions/documents-issue.actions';
 import { WorkflowConnectorsActions } from './actions/connectors.actions';
 import { WorkflowHttpActions } from './actions/http.actions';
 
@@ -249,6 +251,8 @@ describe('WorkflowActionsExecutor (registry P1.2)', () => {
       { handlers: {} } as any,
       { handlers: {} } as any,
       { handlers: {} } as any,
+      { handlers: {} } as any,
+      { handlers: {} } as any,
     );
   });
   afterEach(() => jest.restoreAllMocks());
@@ -262,6 +266,8 @@ describe('WorkflowActionsExecutor (registry P1.2)', () => {
       new WorkflowOperationsActions({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any),
       new WorkflowHttpActions({} as any),
       new WorkflowConnectorsActions({} as any, {} as any, {} as any, {} as any),
+      new WorkflowDocumentSignActions({} as any, {} as any),
+      new WorkflowDocumentsActions({} as any),
     );
     expect([...real.registered()].sort()).toEqual([...WORKFLOW_VENDIX_ACTIONS].sort());
   });

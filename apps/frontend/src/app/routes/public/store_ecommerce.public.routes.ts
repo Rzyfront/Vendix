@@ -296,6 +296,14 @@ export const storeEcommercePublicRoutes: Routes = [
           ),
       },
       {
+        // Documentos: electronic signature of an issued document (link per signer, no login).
+        path: 'firmar/:token',
+        loadComponent: () =>
+          import('../../public/ecommerce/pages/document-signing/document-signing.component').then(
+            (c) => c.DocumentSigningComponent,
+          ),
+      },
+      {
         path: 'pqr',
         loadComponent: () =>
           import('../../public/ecommerce/pages/pqr/pqr-submit.component').then(

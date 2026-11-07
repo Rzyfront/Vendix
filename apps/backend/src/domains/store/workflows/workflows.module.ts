@@ -71,6 +71,8 @@ import { WorkflowPeopleActions } from './engine/actions/people.actions';
 import { WorkflowPurchasingActions } from './engine/actions/purchasing.actions';
 import { WorkflowOperationsActions } from './engine/actions/operations.actions';
 import { WorkflowConnectorsActions } from './engine/actions/connectors.actions';
+import { WorkflowDocumentSignActions } from './engine/actions/documents-sign.actions';
+import { WorkflowDocumentsActions } from './engine/actions/documents-issue.actions';
 import { WorkflowConnectorsController } from './connectors/connectors.controller';
 import { WorkflowConnectorsService } from './connectors/connectors.service';
 import { WorkflowHttpActions } from './engine/actions/http.actions';
@@ -206,6 +208,10 @@ import { WORKFLOW_MAILBOX_RECEIVER } from './inbound/workflow-mailbox.types';
     // "Probar" del nodo HTTP: exige el permiso de la acción, no solo diseñar.
     { provide: WorkflowHttpTestService, useClass: PermissionedWorkflowHttpTestService },
     WorkflowConnectorsActions,
+    // P4.2: enviar un documento emitido a firmar.
+    WorkflowDocumentSignActions,
+    // P4.1: emitir un documento desde una plantilla.
+    WorkflowDocumentsActions,
     WorkflowConnectorsService,
     ApprovalGateProcessor,
     WorkflowLinksService,

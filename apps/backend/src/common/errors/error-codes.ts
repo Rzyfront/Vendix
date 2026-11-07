@@ -138,6 +138,47 @@ export const ErrorCodes = {
   DOCUMENT_FILE_REQUIRED: { code: 'DOCUMENT_FILE_REQUIRED', httpStatus: 400, devMessage: 'Adjunta un archivo en el campo "file".' },
   DOCUMENT_TARGET_INVALID: { code: 'DOCUMENT_TARGET_INVALID', httpStatus: 422, devMessage: 'El requisito o campo indicado no corresponde a la etapa actual de la solicitud.' },
   DOCUMENT_RETAINED: { code: 'DOCUMENT_RETAINED', httpStatus: 409, devMessage: 'El archivo está bajo retención legal o su periodo de retención sigue vigente; no se puede borrar.' },
+  // Firma electrónica simple (flujos-adm P4.2)
+  SIGNATURE_DOCUMENT_NOT_SIGNABLE: { code: 'SIGNATURE_DOCUMENT_NOT_SIGNABLE', httpStatus: 409, devMessage: 'Solo se puede enviar a firmar un documento emitido.' },
+  SIGNATURE_REQUEST_NOT_FOUND: { code: 'SIGNATURE_REQUEST_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la solicitud de firma.' },
+  SIGNATURE_SIGNER_INVALID: { code: 'SIGNATURE_SIGNER_INVALID', httpStatus: 422, devMessage: 'Los datos del firmante no son válidos.' },
+  SIGNATURE_NO_WHATSAPP_CHANNEL: { code: 'SIGNATURE_NO_WHATSAPP_CHANNEL', httpStatus: 422, devMessage: 'La tienda no tiene un canal de WhatsApp conectado.' },
+  SIGNATURE_NO_PUBLIC_DOMAIN: { code: 'SIGNATURE_NO_PUBLIC_DOMAIN', httpStatus: 422, devMessage: 'La tienda no tiene un dominio público para enviar el enlace de firma.' },
+  SIGNATURE_DELIVERY_FAILED: { code: 'SIGNATURE_DELIVERY_FAILED', httpStatus: 502, devMessage: 'No se pudo enviar el mensaje al firmante.' },
+  SIGNATURE_REQUEST_CLOSED: { code: 'SIGNATURE_REQUEST_CLOSED', httpStatus: 409, devMessage: 'La solicitud de firma ya no admite cambios.' },
+  SIGNATURE_PUBLIC_NOT_FOUND: { code: 'SIGNATURE_PUBLIC_NOT_FOUND', httpStatus: 404, devMessage: 'Este enlace no está disponible.' },
+  SIGNATURE_OTP_INVALID: { code: 'SIGNATURE_OTP_INVALID', httpStatus: 422, devMessage: 'Código incorrecto.' },
+  SIGNATURE_OTP_REQUIRED: { code: 'SIGNATURE_OTP_REQUIRED', httpStatus: 422, devMessage: 'Verifica el código que te enviamos antes de firmar.' },
+  SIGNATURE_OTP_RATE_LIMIT: { code: 'SIGNATURE_OTP_RATE_LIMIT', httpStatus: 429, devMessage: 'Espera un momento antes de pedir otro código.' },
+  SIGNATURE_BLOCKED: { code: 'SIGNATURE_BLOCKED', httpStatus: 403, devMessage: 'Se superó el número de intentos. Pide un nuevo enlace a quien te envió el documento.' },
+  SIGNATURE_CONSENT_REQUIRED: { code: 'SIGNATURE_CONSENT_REQUIRED', httpStatus: 422, devMessage: 'Debes aceptar el consentimiento para firmar.' },
+  SIGNATURE_IMAGE_INVALID: { code: 'SIGNATURE_IMAGE_INVALID', httpStatus: 422, devMessage: 'El trazo de la firma no es válido.' },
+  SIGNATURE_ALREADY_SIGNED: { code: 'SIGNATURE_ALREADY_SIGNED', httpStatus: 409, devMessage: 'Este documento ya fue firmado con este enlace.' },
+  // Lectura con IA de documentos (flujos-adm P4.3)
+  DOCUMENT_CHECK_NOT_FOUND: { code: 'DOCUMENT_CHECK_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la lectura del documento.' },
+  DOCUMENT_CHECK_FIELDS_INVALID: { code: 'DOCUMENT_CHECK_FIELDS_INVALID', httpStatus: 422, devMessage: 'Los campos a leer no corresponden al formulario de la etapa actual de la solicitud.' },
+  DOCUMENT_CHECK_FILE_UNSUPPORTED: { code: 'DOCUMENT_CHECK_FILE_UNSUPPORTED', httpStatus: 422, devMessage: 'La IA solo puede leer imágenes y PDF.' },
+  DOCUMENT_CHECK_AI_FAILED: { code: 'DOCUMENT_CHECK_AI_FAILED', httpStatus: 502, devMessage: 'La IA no pudo leer el documento. Inténtalo de nuevo.' },
+  DOCUMENT_CHECK_AI_TIMEOUT: { code: 'DOCUMENT_CHECK_AI_TIMEOUT', httpStatus: 504, devMessage: 'La lectura del documento tardó demasiado. Inténtalo de nuevo.' },
+  // Documental P4.1 · plantillas y documentos emitidos
+  DOCTPL_NOT_FOUND: { code: 'DOCTPL_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la plantilla.' },
+  DOCTPL_KEY_TAKEN: { code: 'DOCTPL_KEY_TAKEN', httpStatus: 409, devMessage: 'Ya existe una plantilla con esa clave en la tienda.' },
+  DOCTPL_INVALID: { code: 'DOCTPL_INVALID', httpStatus: 422, devMessage: 'El contenido de la plantilla no es válido.' },
+  DOCTPL_ARCHIVED: { code: 'DOCTPL_ARCHIVED', httpStatus: 409, devMessage: 'La plantilla está archivada.' },
+  DOCTPL_NOT_PUBLISHED: { code: 'DOCTPL_NOT_PUBLISHED', httpStatus: 422, devMessage: 'La plantilla no tiene una versión publicada.' },
+  DOCTPL_BASE_PDF_REQUIRED: { code: 'DOCTPL_BASE_PDF_REQUIRED', httpStatus: 422, devMessage: 'Sube el PDF base de la plantilla antes de continuar.' },
+  DOCISSUE_DATA_MISSING: { code: 'DOCISSUE_DATA_MISSING', httpStatus: 422, devMessage: 'Falta un dato para emitir el documento.' },
+  DOCISSUE_NOT_FOUND: { code: 'DOCISSUE_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró el documento emitido.' },
+  DOCISSUE_STATE: { code: 'DOCISSUE_STATE', httpStatus: 409, devMessage: 'El documento no está en un estado que permita esta operación.' },
+  DOCISSUE_INSTANCE_CLOSED: { code: 'DOCISSUE_INSTANCE_CLOSED', httpStatus: 409, devMessage: 'La solicitud ya no está activa.' },
+
+  // Documental P4.4/P4.6/P4.7 · retención, vencimientos, perfil y búsqueda
+  DOCUMENT_PURGED: { code: 'DOCUMENT_PURGED', httpStatus: 410, devMessage: 'Documento purgado por política de retención.' },
+  DOCRET_POLICY_NOT_FOUND: { code: 'DOCRET_POLICY_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la política de retención.' },
+  DOCRET_POLICY_KEY_TAKEN: { code: 'DOCRET_POLICY_KEY_TAKEN', httpStatus: 409, devMessage: 'Ya existe una política de retención con esa clave en la tienda.' },
+  DOCRET_RUN_NOT_FOUND: { code: 'DOCRET_RUN_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la corrida de purga.' },
+  DOCRET_RUN_IN_PROGRESS: { code: 'DOCRET_RUN_IN_PROGRESS', httpStatus: 409, devMessage: 'Ya hay una purga en curso para esta tienda.' },
+  DOCPROFILE_INVALID: { code: 'DOCPROFILE_INVALID', httpStatus: 422, devMessage: 'Los datos del perfil del documento no son válidos.' },
 
   // System
   SYS_INTERNAL_001: {

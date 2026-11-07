@@ -104,6 +104,11 @@ export class DossiersService {
         })
       : [];
     const byId = new Map(files.map((f) => [f.id, f]));
+    const purgedBy = await this.purgePolicies(
+      db,
+      c.store_id,
+      files.filter((f) => f.purged_at).map((f) => f.id),
+    );
     const shape = (r: any) => {
       const f = r.file_id ? byId.get(r.file_id) : null;
       return {
@@ -125,6 +130,9 @@ export class DossiersService {
               mime_type: f.mime_type,
               size_bytes: f.size_bytes,
               sha256: f.sha256,
+              // P4.4: the object is gone; the row and its hash stay as evidence.
+              purged_at: f.purged_at ?? null,
+              purge_policy_name: f.purged_at ? (purgedBy.get(f.id) ?? null) : null,
             }
           : null,
       };
@@ -132,6 +140,30 @@ export class DossiersService {
     const active = rows.filter((r) => r.status !== 'superseded').map(shape);
     const superseded = rows.filter((r) => r.status === 'superseded').map(shape);
     return [...active, ...superseded];
+  }
+
+  /** Name of the retention policy that purged each file (P4.4), by file id. */
+  private async purgePolicies(db: any, storeId: number, fileIds: number[]) {
+    const out = new Map<number, string>();
+    if (fileIds.length === 0) return out;
+    const items: Array<{ file_id: number; policy_id: number | null }> =
+      await db.document_purge_items.findMany({
+        where: { store_id: storeId, file_id: { in: fileIds }, outcome: 'purged' },
+        orderBy: { id: 'asc' },
+      });
+    const policyIds = [...new Set(items.map((i) => i.policy_id).filter((v): v is number => v !== null))];
+    const policies: Array<{ id: number; name: string }> = policyIds.length
+      ? await db.document_retention_policies.findMany({
+          where: { store_id: storeId, id: { in: policyIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const names = new Map(policies.map((p) => [p.id, p.name]));
+    for (const i of items) {
+      const name = i.policy_id !== null ? names.get(i.policy_id) : undefined;
+      if (name) out.set(i.file_id, name);
+    }
+    return out;
   }
 
   async get(id: number) {

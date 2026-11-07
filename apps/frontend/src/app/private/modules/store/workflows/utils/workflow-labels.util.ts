@@ -79,6 +79,11 @@ export const EVENT_LABEL: Record<string, string> = {
   external_upload: 'Documento enviado por el solicitante',
   external_message: 'Respuesta del solicitante',
   email_received: 'Correo recibido',
+  signature_requested: 'Documento enviado a firmar',
+  signature_completed: 'Documento firmado',
+  signature_declined: 'Firma rechazada',
+  signature_cancelled: 'Firma cancelada',
+  signature_expired: 'Solicitud de firma vencida',
 };
 
 function text(value: unknown): string {
@@ -127,6 +132,9 @@ export function eventDescription(
       return `${label}: ${text(p['action'])}`;
     case 'error_routed':
       return `${label}: ${text(p['action'])}`;
+    case 'signature_declined':
+    case 'signature_cancelled':
+      return p['label'] ? text(p['label']) : label;
     case 'migrated':
       return `Migrada de v${text(p['from_version'])} a v${text(p['to_version'])}`;
     case 'started':

@@ -29,6 +29,8 @@ import { WorkflowHttpActions } from './actions/http.actions';
 import { coerceOutputFields } from './workflow-http-output';
 import { DEFAULT_STORE_TIMEZONE } from './workflow-stage.service';
 import { WorkflowConnectorsActions } from './actions/connectors.actions';
+import { WorkflowDocumentSignActions } from './actions/documents-sign.actions';
+import { WorkflowDocumentsActions } from './actions/documents-issue.actions';
 
 export interface ActionOutboxRow {
   id: number;
@@ -82,6 +84,8 @@ export class WorkflowActionsExecutor {
     operations: WorkflowOperationsActions,
     http: WorkflowHttpActions,
     connectors: WorkflowConnectorsActions,
+    documentSign: WorkflowDocumentSignActions,
+    documents: WorkflowDocumentsActions,
   ) {
     this.handlers = {
       ...people.handlers,
@@ -89,6 +93,8 @@ export class WorkflowActionsExecutor {
       ...operations.handlers,
       ...http.handlers,
       ...connectors.handlers,
+      ...documentSign.handlers,
+      ...documents.handlers,
     };
   }
 

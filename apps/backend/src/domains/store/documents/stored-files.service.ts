@@ -19,7 +19,7 @@ export interface UploadFileInput {
   buffer: Buffer;
   originalName: string;
   mimeType: string;
-  source?: 'upload' | 'generated' | 'public_form';
+  source?: 'upload' | 'generated' | 'public_form' | 'signature_image';
   /** MIME patterns of the requirement/field (`type/subtype` or `type/*`). */
   accept?: string[];
   /** Per-requirement limit in MB (clamped to the hard cap). */
@@ -42,6 +42,8 @@ export interface StoredFileRow {
   uploaded_by_type: string;
   uploaded_by_id: number | null;
   created_at: Date;
+  /** P4.4: set when a retention purge deleted the S3 object. */
+  purged_at?: Date | null;
 }
 
 /** Strips path parts and control characters; keeps a readable, bounded name. */
@@ -235,6 +237,7 @@ export class StoredFilesService {
       where: { id: fileId, store_id: c.store_id, deleted_at: null },
     });
     if (!row) throw new VendixHttpException(ErrorCodes.DOCUMENT_NOT_FOUND);
+    if (row.purged_at) throw new VendixHttpException(ErrorCodes.DOCUMENT_PURGED);
     return row as StoredFileRow;
   }
 

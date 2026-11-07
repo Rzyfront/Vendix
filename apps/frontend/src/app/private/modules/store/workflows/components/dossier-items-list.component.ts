@@ -65,7 +65,12 @@ import {
                 }
               </p>
             </div>
-            @if (item.file) {
+            @if (item.file?.purged_at) {
+              <span class="text-xs text-text-secondary" data-testid="purged-note">
+                Purgado por la política {{ item.file?.purge_policy_name ?? 'de retención' }} el
+                {{ dateText(item.file?.purged_at ?? '') }}
+              </span>
+            } @else if (item.file) {
               <app-button
                 variant="outline"
                 size="sm"
