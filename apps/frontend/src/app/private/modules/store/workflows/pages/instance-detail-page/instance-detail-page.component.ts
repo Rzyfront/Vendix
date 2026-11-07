@@ -450,7 +450,9 @@ export class InstanceDetailPageComponent implements OnInit {
 
   claim(task: TaskView): void {
     this.claiming.set(true);
-    this.api.claimTask(task.id).subscribe({
+    this.api.claimTask(task.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: () => {
         this.claiming.set(false);
         this.toast.success('Tarea tomada');
@@ -477,7 +479,9 @@ export class InstanceDetailPageComponent implements OnInit {
       return;
     }
     this.uploadingKey.set(req.key);
-    this.api.uploadInstanceFile(d.id, file, { requirement_key: req.key }).subscribe({
+    this.api.uploadInstanceFile(d.id, file, { requirement_key: req.key })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: () => {
         this.uploadingKey.set(null);
         this.toast.success('Archivo cargado');
@@ -514,6 +518,7 @@ export class InstanceDetailPageComponent implements OnInit {
         },
         this.completeKey.key,
       )
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.submitting.set(null);

@@ -459,6 +459,8 @@ export class WorkflowsPageComponent implements OnInit {
             { value: 'all', label: 'Todos los flujos' },
             ...(res.data ?? []).map((d) => ({ value: String(d.id), label: d.name })),
           ]),
+        // Only the filter options: the list below reports its own load error.
+        error: () => undefined,
       });
     this.loadStats();
     this.load();
@@ -519,7 +521,9 @@ export class WorkflowsPageComponent implements OnInit {
   }
 
   publish(row: WorkflowDefinitionRow): void {
-    this.api.publishDefinition(row.id).subscribe({
+    this.api.publishDefinition(row.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (result) => {
         this.toast.success(
           result.unchanged
@@ -547,7 +551,9 @@ export class WorkflowsPageComponent implements OnInit {
   }
 
   exportJson(row: WorkflowDefinitionRow): void {
-    this.api.exportDefinition(row.id).subscribe({
+    this.api.exportDefinition(row.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (result) =>
         downloadTextFile(`${row.key}.json`, JSON.stringify(result.definition, null, 2)),
       error: (error) => this.toast.error(toWorkflowError(error).message),
@@ -569,7 +575,9 @@ export class WorkflowsPageComponent implements OnInit {
     const request = archiving
       ? this.api.archiveDefinition(row.id)
       : this.api.unarchiveDefinition(row.id);
-    request.subscribe({
+    request
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: () => {
         this.toast.success(archiving ? 'Flujo archivado' : 'Flujo reactivado');
         this.load();

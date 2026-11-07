@@ -245,7 +245,9 @@ export class DocumentsPageComponent implements OnInit {
     this.modalOpen.set(true);
     if (this.details()[row.id]) return;
     this.detailLoading.set(true);
-    this.api.getDossier(row.id).subscribe({
+    this.api.getDossier(row.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (detail) => {
         this.details.update((current) => ({ ...current, [row.id]: detail }));
         this.detailLoading.set(false);
