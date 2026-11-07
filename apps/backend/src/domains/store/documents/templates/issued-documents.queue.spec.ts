@@ -127,6 +127,15 @@ describe('IssuedDocumentsRenderQueue.renderById', () => {
     expect(tx.workflow_instance_events.create.mock.calls[0][0].data).toMatchObject({ type: 'document_failed' });
   });
 
+  it('a document whose attempts were all claimed without finishing fails instead of rendering again', async () => {
+    const { queue, tx, renderer, prisma, run } = setup({ attempts: MAX_RENDER_ATTEMPTS });
+    expect(await run(() => queue.renderById(99))).toBe('failed');
+    expect(renderer.render).not.toHaveBeenCalled();
+    expect(prisma.issued_documents.updateMany).not.toHaveBeenCalled();
+    expect(tx.issued_documents.updateMany.mock.calls[0][0].data).toMatchObject({ status: 'failed' });
+    expect(tx.issued_documents.updateMany.mock.calls[0][0].data.error).toContain('No se pudo generar el PDF');
+  });
+
   it('a missing value fails at once, without retries, naming the data', async () => {
     const { queue, tx, run } = setup({ renderError: new MissingTokenError('fields.salario') });
     expect(await run(() => queue.renderById(99))).toBe('failed');

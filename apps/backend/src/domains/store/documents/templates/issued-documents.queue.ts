@@ -93,6 +93,12 @@ export class IssuedDocumentsRenderQueue {
       include: { template_version: true },
     });
     if (!doc || doc.status !== 'rendering') return 'skipped';
+    // Every attempt was claimed and none finished (the worker died mid-render):
+    // stop retrying instead of rendering forever.
+    if (doc.render_attempts >= MAX_RENDER_ATTEMPTS) {
+      await this.markFailed(doc, `No se pudo generar el PDF de '${doc.title}'. Reemítelo para intentarlo de nuevo.`);
+      return 'failed';
+    }
     const claimed = await this.prisma.issued_documents.updateMany({
       where: { id, store_id: storeId, status: 'rendering', render_attempts: doc.render_attempts },
       data: { render_attempts: { increment: 1 } },
