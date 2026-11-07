@@ -147,8 +147,10 @@ jobs:
       # nest build excluye specs; este paso mantiene el gate de tipos de tests.
       - name: Typecheck de specs (buildcheck:types)
         working-directory: apps/backend
+        # 8 GB: el cliente Prisma (más de 400 modelos) ya ponía el chequeo
+        # completo al borde de 6 GB; el runner ubuntu-latest tiene 16 GB.
         env:
-          NODE_OPTIONS: --max-old-space-size=6144
+          NODE_OPTIONS: --max-old-space-size=8192
         run: npm run buildcheck:types
       - name: nest build
         working-directory: apps/backend
