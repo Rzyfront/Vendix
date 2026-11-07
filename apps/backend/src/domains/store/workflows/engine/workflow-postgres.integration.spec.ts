@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionV1 } from '@common/workflows/contract';
+import { EcommercePrismaService } from '../../../../prisma/services/ecommerce-prisma.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import {
   assertDisposableDatabase,
@@ -447,6 +448,18 @@ describeDestructiveE2E('Flujos contra Postgres real (M5)', () => {
             payload: { path: ['business_id'], equals: String(orderId) },
           },
         });
+
+      it('la transacción con alcance de ecommerce (checkout) también escribe la fila', async () => {
+        await publish(definitionOf(`ecommerce-${run}`, {}));
+        const ecommerce = new EcommercePrismaService();
+        await as(null, () =>
+          ecommerce.$transaction((tx: never) =>
+            recordTriggerEvent(tx, 'order.created', order(910003)),
+          ),
+        );
+        expect(await rowsOf(910003)).toHaveLength(1);
+        await ecommerce.$disconnect();
+      });
 
       it('si el dominio revierte, no queda fila', async () => {
         await expect(

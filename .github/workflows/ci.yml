@@ -397,6 +397,7 @@ jobs:
           --include='**/workflow-public-form/workflow-public-form.component.spec.ts'
           --include='**/workflows/pages/inbox-page/inbox-page.component.spec.ts'
           --include='**/workflows/pages/workflows-page/workflows-page.component.spec.ts'
+          --include='**/workflows/services/workflows-api.service.spec.ts'
           --include='**/ecommerce/services/checkout-payment-receipt.spec.ts'
           --include='**/ecommerce/pages/account/order-detail/order-detail.component.spec.ts'
           --include='**/reports/services/reports-data.service.spec.ts'

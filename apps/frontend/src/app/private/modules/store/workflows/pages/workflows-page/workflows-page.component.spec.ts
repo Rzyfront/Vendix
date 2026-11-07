@@ -9,7 +9,7 @@ import { ToastService } from '../../../../../../shared/components/index';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { WorkflowsPageComponent } from './workflows-page.component';
 
-const row = { id: 3, key: 'compras', name: 'Compras', status: 'draft' };
+const row = { id: 3, key: 'compras', name: 'Compras', status: 'active', published_version: { version: 2 } };
 const list = (rows: unknown[]) => ({ data: rows, meta: { total: rows.length } });
 
 describe('WorkflowsPageComponent', () => {
@@ -76,6 +76,22 @@ describe('WorkflowsPageComponent', () => {
     await render();
     expect(toast.error).toHaveBeenCalled();
     expect(fixture.componentInstance.loading()).toBeFalse();
+  });
+
+  it('un flujo publicado se ve como publicado y ofrece iniciar solicitud', async () => {
+    await render();
+    const c = fixture.componentInstance;
+    const view = c.definitionRows()[0];
+    expect(view.status_badge).toBe('active');
+    const start = c.definitionActions.find((a) => a.label === 'Iniciar solicitud');
+    expect((start?.show as (r: unknown) => boolean)(view)).toBeTrue();
+  });
+
+  it('las métricas piden los estados que el backend acepta (active, nunca published)', async () => {
+    await render();
+    const statuses = api.listDefinitions.calls.allArgs().map(([q]) => q?.status);
+    expect(statuses).toContain('active');
+    expect(statuses).not.toContain('published' as never);
   });
 
   it('publicar dice la versión; republicar sin cambios lo dice también', async () => {

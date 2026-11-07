@@ -125,7 +125,7 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
                   @if (claimable(task)) {
                     <div class="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-border p-3">
                       <p class="flex-1 text-sm text-text-secondary">
-                        Esta tarea es de {{ assigneeText(task) }}. Tómala para que nadie más la atienda.
+                        Esta tarea es para {{ assigneeText(task) }}. Tómala para que nadie más la atienda.
                       </p>
                       <app-button variant="outline" [loading]="claiming()" (clicked)="claim(task)">
                         <app-icon name="user-check" [size]="14" slot="icon" />

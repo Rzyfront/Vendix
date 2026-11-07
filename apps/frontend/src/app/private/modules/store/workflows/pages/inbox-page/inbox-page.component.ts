@@ -278,7 +278,7 @@ export class InboxPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.api
-      .listDefinitions({ limit: 100, status: 'published' })
+      .listDefinitions({ limit: 100, status: 'active' })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) =>

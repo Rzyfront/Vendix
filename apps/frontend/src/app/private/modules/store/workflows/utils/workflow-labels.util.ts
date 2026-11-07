@@ -7,20 +7,20 @@ export type BadgeTone = 'success' | 'neutral' | 'error' | 'primary' | 'warning' 
 
 export const DEFINITION_STATUS_LABEL: Record<string, string> = {
   draft: 'Borrador',
-  published: 'Publicado',
+  active: 'Publicado',
   archived: 'Archivado',
 };
 
 /** "Borrador" / "Publicado v3" / "Archivado". */
 export function definitionStatusLabel(row: WorkflowDefinitionRow): string {
-  if (row.status === 'published' && row.published_version) {
+  if (row.status === 'active' && row.published_version) {
     return `Publicado v${row.published_version.version}`;
   }
   return DEFINITION_STATUS_LABEL[row.status] ?? row.status;
 }
 
 export function definitionStatusTone(status: string): BadgeTone {
-  if (status === 'published') return 'success';
+  if (status === 'active') return 'success';
   if (status === 'archived') return 'neutral';
   return 'warning';
 }

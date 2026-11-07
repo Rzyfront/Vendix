@@ -57,7 +57,7 @@ interface WorkflowStats {
 }
 
 const BADGE_LABEL: Record<string, string> = {
-  active: DEFINITION_STATUS_LABEL['published'],
+  active: DEFINITION_STATUS_LABEL['active'],
   draft: DEFINITION_STATUS_LABEL['draft'],
   inactive: DEFINITION_STATUS_LABEL['archived'],
 };
@@ -310,7 +310,7 @@ export class WorkflowsPageComponent implements OnInit {
     this.definitions().map((row) => ({
       ...row,
       status_badge:
-        row.status === 'published' ? 'active' : row.status === 'archived' ? 'inactive' : 'draft',
+        row.status === 'active' ? 'active' : row.status === 'archived' ? 'inactive' : 'draft',
       version_text: this.versionText(row),
     })),
   );
@@ -368,14 +368,14 @@ export class WorkflowsPageComponent implements OnInit {
       label: 'Iniciar solicitud',
       icon: 'play',
       variant: 'success',
-      show: (row: WorkflowDefinitionRow) => row.status === 'published',
+      show: (row: WorkflowDefinitionRow) => row.status === 'active',
       action: (row: WorkflowDefinitionRow) => this.openStart(row),
     },
     {
       label: 'Tablero',
       icon: 'layout-dashboard',
       variant: 'info',
-      show: (row: WorkflowDefinitionRow) => row.status === 'published',
+      show: (row: WorkflowDefinitionRow) => row.status === 'active',
       action: (row: WorkflowDefinitionRow) =>
         this.router.navigate(['/admin/workflows', row.id, 'board']),
     },
@@ -383,7 +383,7 @@ export class WorkflowsPageComponent implements OnInit {
       label: 'Analítica',
       icon: 'bar-chart-3',
       variant: 'info',
-      show: (row: WorkflowDefinitionRow) => row.status === 'published',
+      show: (row: WorkflowDefinitionRow) => row.status === 'active',
       action: (row: WorkflowDefinitionRow) =>
         this.router.navigate(['/admin/workflows', row.id, 'analytics']),
     },
@@ -391,7 +391,7 @@ export class WorkflowsPageComponent implements OnInit {
       label: 'Enlace público',
       icon: 'link',
       variant: 'info',
-      show: (row: WorkflowDefinitionRow) => row.status === 'published',
+      show: (row: WorkflowDefinitionRow) => row.status === 'active',
       action: (row: WorkflowDefinitionRow) => {
         this.linkTarget.set(row);
         this.linkOpen.set(true);
@@ -639,7 +639,7 @@ export class WorkflowsPageComponent implements OnInit {
   private loadStats(): void {
     this.statsLoading.set(true);
     forkJoin({
-      published: this.api.listDefinitions({ limit: 1, status: 'published' }),
+      published: this.api.listDefinitions({ limit: 1, status: 'active' }),
       drafts: this.api.listDefinitions({ limit: 1, status: 'draft' }),
       active: this.api.listInstances({ limit: 1, status: 'active' }),
       overdue: this.api.listInstances({ limit: 1, overdue: true }),
