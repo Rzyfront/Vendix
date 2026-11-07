@@ -1,3 +1,4 @@
+import { ApiKeyFailureLimiter } from './api-key-failure-limiter';
 import {
   CanActivate,
   ExecutionContext,
@@ -33,6 +34,7 @@ export class ApiKeyGuard implements CanActivate {
     private readonly auth: ApiKeyAuthService,
     private readonly subscriptionAccess: SubscriptionAccessService,
     private readonly gateConfig: SubscriptionGateConfig,
+    private readonly failures: ApiKeyFailureLimiter,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -45,13 +47,28 @@ export class ApiKeyGuard implements CanActivate {
     delete req.user;
     delete req.apiKey;
 
+    const ip = extractClientIp(req);
+    if (this.failures.isBlocked(ip)) {
+      throw new VendixHttpException(ErrorCodes.API_KEY_RATE_LIMITED);
+    }
     const secret = extractApiKey(req.headers as Record<string, unknown>);
-    if (!secret) throw new VendixHttpException(ErrorCodes.API_KEY_INVALID);
+    if (!secret) {
+      this.failures.recordFailure(ip);
+      throw new VendixHttpException(ErrorCodes.API_KEY_INVALID);
+    }
 
-    const principal = await this.auth.authenticate(
-      secret,
-      extractClientIp(req),
-    );
+    let principal: ApiKeyPrincipal;
+    try {
+      principal = await this.auth.authenticate(secret, ip);
+    } catch (e) {
+      if (
+        e instanceof VendixHttpException &&
+        e.errorCode === ErrorCodes.API_KEY_INVALID.code
+      ) {
+        this.failures.recordFailure(ip);
+      }
+      throw e;
+    }
 
     if (WRITE_METHODS.has((req.method ?? '').toUpperCase())) {
       await this.assertStoreCanOperate(

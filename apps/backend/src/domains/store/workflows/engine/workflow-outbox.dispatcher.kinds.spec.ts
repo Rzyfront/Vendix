@@ -48,6 +48,26 @@ describe('WorkflowOutboxDispatcher · webhook / start_instance / action', () => 
     );
   });
 
+  it('business_event: reparte el hecho bajo el contexto de la tienda de la fila', async () => {
+    let seen: any;
+    fanout.fanOut.mockImplementation(async () => {
+      seen = RequestContextService.getContext();
+      return 1;
+    });
+    const payload = { event: 'order.created', business_id: '9', context: { order_id: 9 } };
+    enqueue('business_event', payload, { instance_id: null });
+    expect(await dispatcher.dispatchBatch()).toMatchObject({ done: 1 });
+    expect(fanout.fanOut).toHaveBeenCalledWith(1, payload);
+    expect(seen).toMatchObject({ store_id: 1, organization_id: 1 });
+  });
+
+  it('business_event: un fallo reintenta por backoff, no pierde el evento', async () => {
+    fanout.fanOut.mockRejectedValue(new Error('db down'));
+    enqueue('business_event', { event: 'order.created' }, { instance_id: null });
+    expect(await dispatcher.dispatchBatch()).toMatchObject({ retried: 1, done: 0 });
+    fanout.fanOut.mockReset();
+  });
+
   it('webhook: delega en el servicio de entregas bajo el contexto de la tienda de la fila', async () => {
     let seen: any;
     webhooks.deliver.mockImplementation(async () => {

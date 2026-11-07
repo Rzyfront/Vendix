@@ -204,10 +204,17 @@ export class DossiersService {
       return this.prisma.$transaction((inner: any) => this.addFileItem(inner, input));
     }
     const c = this.ctx();
-    await tx.dossiers.updateMany({
+    const touched = await tx.dossiers.updateMany({
       where: { id: input.dossier_id, store_id: c.store_id },
       data: { updated_at: new Date() },
     });
+    const file = await tx.stored_files.findFirst({
+      where: { id: input.file_id, store_id: c.store_id, deleted_at: null },
+      select: { id: true },
+    });
+    if (touched.count === 0 || !file) {
+      throw new VendixHttpException(ErrorCodes.DOCUMENT_NOT_FOUND);
+    }
     const sameTarget = input.requirement_key
       ? { requirement_key: input.requirement_key }
       : { field_key: input.field_key };

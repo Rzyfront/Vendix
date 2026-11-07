@@ -104,10 +104,15 @@ export class WorkflowOutboxDispatcher {
     for (const row of rows) {
       try {
         await this.process(row, orgByStore);
-        await this.prisma.withoutScope().workflow_outbox.updateMany({
+        const { count } = await this.prisma.withoutScope().workflow_outbox.updateMany({
           where: { id: row.id, status: 'processing' },
           data: { status: 'done', last_error: null },
         });
+        if (count === 0) {
+          this.logger.warn(
+            `Outbox ${row.id} (${row.kind}) finished after being buried or reclaimed by another worker`,
+          );
+        }
         summary.done++;
       } catch (e) {
         const outcome = await this.fail(row, e, now);
@@ -135,6 +140,7 @@ export class WorkflowOutboxDispatcher {
     const db = this.prisma.withoutScope();
     const stale = await db.workflow_outbox.findMany({
       where,
+      take: OUTBOX_BATCH,
       select: {
         id: true,
         store_id: true,

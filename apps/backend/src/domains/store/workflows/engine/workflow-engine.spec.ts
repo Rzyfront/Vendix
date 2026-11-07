@@ -8,6 +8,8 @@ import {
   seedWorkGroup,
 } from '../../../../testing/workflows/workflow-test-kit';
 
+import { MAX_AUTOMATIC_HOPS } from './workflow-tick.service';
+
 async function codeOf(p: Promise<unknown>): Promise<string | undefined> {
   try {
     await p;
@@ -326,6 +328,20 @@ describe('WorkflowEngineService', () => {
       kit.as({ user_id: 4 });
       await approve(board.id);
       expect(await codeOf(approve(board.id))).toBe('WORKFLOW_ALREADY_VOTED');
+    });
+
+    it('doble clic simultáneo del mismo votante: un voto y WORKFLOW_ALREADY_VOTED, nunca un 500', async () => {
+      const { board } = await toBoard();
+      kit.as({ user_id: 4 });
+      const results = await Promise.all([
+        codeOf(approve(board.id, 'dbl-a')),
+        codeOf(approve(board.id, 'dbl-b')),
+      ]);
+      expect(results.filter((c) => c === undefined)).toHaveLength(1);
+      expect(results).toContain('WORKFLOW_ALREADY_VOTED');
+      expect(
+        kit.db.table('workflow_task_votes').filter((v) => v.user_id === 4),
+      ).toHaveLength(1);
     });
 
     it('un rechazo de cualquiera decide el rechazo', async () => {
@@ -650,6 +666,82 @@ describe('WorkflowEngineService', () => {
       const theirs = await kit.engine.start({ definitionKey: 'purchase', idempotencyKey: 'k' });
       expect(theirs.instance.id).not.toBe(mine.instance.id);
       expect(theirs.replayed).toBe(false);
+    });
+  });
+
+  describe('hallazgos B de la revisión del #1099', () => {
+    it('B2: tomar una tarea bloquea la solicitud sin subir row_version, antes de tocar la tarea', async () => {
+      const definition = purchaseDefinition();
+      definition.stages[0].assignee = { kind: 'role', role_key: 'manager' } as any;
+      kit.db.table('workflow_versions')[0].definition = definition;
+      kit.as({ user_id: 2 });
+      const { task, instance } = await startPurchase(0);
+      const before = kit.db.table('workflow_instances').find((i) => i.id === instance.id)!;
+      const version = before.row_version;
+      const lock = jest.spyOn((kit.engine as any).events, 'lockInstance');
+      await kit.engine.claimTask(task.id);
+      expect(lock).toHaveBeenCalledWith(expect.anything(), 1, instance.id);
+      expect(kit.db.table('workflow_instances').find((i) => i.id === instance.id)!.row_version).toBe(version);
+      expect(events(instance.id).map((e) => e.type)).toEqual(['started', 'claimed']);
+    });
+
+    it('B3: un ciclo de etapas automáticas se corta y deja la solicitud en failed con el motivo', async () => {
+      const looping = {
+        schema: 'vendix.workflow/v1',
+        key: 'loop',
+        name: 'Ciclo',
+        fields: [],
+        stages: [
+          { key: 'a', name: 'A', type: 'automatic', start: true, transitions: [{ on: 'auto', to: 'b' }] },
+          { key: 'b', name: 'B', type: 'automatic', transitions: [{ on: 'auto', to: 'a' }] },
+          { key: 'done', name: 'Fin', type: 'end', outcome: 'completed' },
+        ],
+      } as unknown as WorkflowDefinitionV1;
+      seedDefinition(kit.db, looping);
+      const { instance } = await kit.engine.start({ definitionKey: 'loop' });
+      let last = '';
+      let guard = 0;
+      while (last !== 'failed' && guard++ < MAX_AUTOMATIC_HOPS + 5) {
+        last = (await kit.engine.tick(instance.id)).action;
+      }
+      expect(last).toBe('failed');
+      expect(guard).toBe(MAX_AUTOMATIC_HOPS + 1);
+      const row = kit.db.table('workflow_instances').find((i) => i.id === instance.id)!;
+      expect(row.status).toBe('failed');
+      expect(events(instance.id).at(-1)).toMatchObject({
+        type: 'failed',
+        payload: { reason: 'automatic_loop' },
+      });
+    });
+
+    describe('B4: el registro asociado debe ser de la tienda', () => {
+      const withSubject = (type: string, id: number) =>
+        kit.engine.start({ definitionKey: 'purchase', subject: { type, id } });
+
+      it.each([
+        ['order', 'orders', { id: 50, store_id: 1 }, { id: 51, store_id: 2 }],
+        ['purchase_order', 'purchase_orders', { id: 50, organization_id: 1 }, { id: 51, organization_id: 2 }],
+        ['supplier', 'suppliers', { id: 50, organization_id: 1 }, { id: 51, organization_id: 2 }],
+        ['employee', 'employees', { id: 50, organization_id: 1 }, { id: 51, organization_id: 2 }],
+      ])('%s propio inicia; ajeno o inexistente da 404', async (type, table, mine, theirs) => {
+        kit.db.table(table).push(mine, theirs);
+        const ok = await withSubject(type, 50);
+        expect(ok.instance).toMatchObject({ subject_type: type, subject_id: 50 });
+        const before = kit.db.table('workflow_instances').length;
+        expect(await codeOf(withSubject(type, 51))).toBe('WORKFLOW_SUBJECT_NOT_FOUND');
+        expect(await codeOf(withSubject(type, 999))).toBe('WORKFLOW_SUBJECT_NOT_FOUND');
+        expect(kit.db.table('workflow_instances')).toHaveLength(before);
+      });
+
+      it('customer se valida por su pertenencia a la tienda', async () => {
+        const ok = await withSubject('customer', 2);
+        expect(ok.instance.subject_id).toBe(2);
+        expect(await codeOf(withSubject('customer', 7))).toBe('WORKFLOW_SUBJECT_NOT_FOUND');
+      });
+
+      it('un tipo que el contrato no conoce no pasa', async () => {
+        expect(await codeOf(withSubject('planet', 1))).toBe('WORKFLOW_SUBJECT_NOT_FOUND');
+      });
     });
   });
 });

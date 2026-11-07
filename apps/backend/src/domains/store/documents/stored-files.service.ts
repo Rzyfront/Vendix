@@ -242,7 +242,9 @@ export class StoredFilesService {
   async signedDownloadUrl(fileId: number) {
     const c = this.ctx();
     const file = await this.findOne(fileId);
-    const url = await this.s3.getPresignedUrl(file.s3_key, DOWNLOAD_URL_TTL_SECONDS);
+    const url = await this.s3.getPresignedUrl(file.s3_key, DOWNLOAD_URL_TTL_SECONDS, {
+      downloadName: file.original_name,
+    });
     await this.audit.log({
       userId: c.user_id ?? undefined,
       storeId: c.store_id,

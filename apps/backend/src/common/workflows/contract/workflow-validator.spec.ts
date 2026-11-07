@@ -342,6 +342,50 @@ describe('validateWorkflowDefinition — conditions', () => {
     expect(has(run(setWhen({ all: rules })), 'LIMIT_EXCEEDED')).toBe(true);
   });
 
+  it('B8: visible_when rejects cycles between fields, also through a chain', () => {
+    const when = (field: string) => ({ all: [{ field, op: 'is_not_empty' }] });
+    const pair = run((d) => {
+      d.fields.push({ key: 'a', type: 'text', label: 'A', visible_when: when('b') });
+      d.fields.push({ key: 'b', type: 'text', label: 'B', visible_when: when('a') });
+    });
+    expect(has(pair, 'VISIBILITY_CYCLE')).toBe(true);
+    expect(pair.errors.find((e) => e.code === 'VISIBILITY_CYCLE')?.message).toMatch(/"a", "b"/);
+    const chain = run((d) => {
+      d.fields.push({ key: 'a', type: 'text', label: 'A', visible_when: when('b') });
+      d.fields.push({ key: 'b', type: 'text', label: 'B', visible_when: when('c') });
+      d.fields.push({ key: 'c', type: 'text', label: 'C', visible_when: { any: [when('a')] } });
+    });
+    expect(has(chain, 'VISIBILITY_CYCLE')).toBe(true);
+    const line = run((d) => {
+      d.fields.push({ key: 'a', type: 'text', label: 'A', visible_when: when('b') });
+      d.fields.push({ key: 'b', type: 'text', label: 'B', visible_when: when('c') });
+      d.fields.push({ key: 'c', type: 'text', label: 'C' });
+    });
+    expect(has(line, 'VISIBILITY_CYCLE')).toBe(false);
+  });
+
+  it('B8: conditions on a select only accept its options', () => {
+    const select = (d: any) =>
+      d.fields.push({
+        key: 'tipo',
+        type: 'select',
+        label: 'Tipo',
+        options: [
+          { value: 'x', label: 'X' },
+          { value: 'y', label: 'Y' },
+        ],
+      });
+    const rule = (d: any, op: string, value: unknown) => {
+      select(d);
+      d.fields[2].visible_when = { all: [{ field: 'tipo', op, value }] };
+    };
+    expect(run((d) => rule(d, 'eq', 'x')).valid).toBe(true);
+    expect(run((d) => rule(d, 'in', ['x', 'y'])).valid).toBe(true);
+    expect(has(run((d) => rule(d, 'eq', 'z')), 'CONDITION_VALUE_INVALID')).toBe(true);
+    expect(has(run((d) => rule(d, 'in', ['x', 'z'])), 'CONDITION_VALUE_INVALID')).toBe(true);
+    expect(has(run((d) => rule(d, 'not_in', ['z'])), 'CONDITION_VALUE_INVALID')).toBe(true);
+  });
+
   it('visible_when references declared fields, not itself', () => {
     const ok = run((d) => (d.fields[2].visible_when = { all: [{ field: 'monto', op: 'gt', value: 5 }] }));
     expect(ok.valid).toBe(true);

@@ -6,6 +6,7 @@ import { WorkflowAssignmentService } from './workflow-assignment.service';
 import {
   OUTBOX_ABANDONED_ERROR,
   OUTBOX_BACKOFF_MINUTES,
+  OUTBOX_BATCH,
   OUTBOX_MAX_ATTEMPTS,
   WorkflowOutboxDispatcher,
 } from './workflow-outbox.dispatcher';
@@ -112,6 +113,32 @@ describe('WorkflowOutboxDispatcher', () => {
     const s = await dispatcher.dispatchBatch();
     expect(s.retried).toBe(1);
     expect(row().last_error).toMatch(/Unsupported outbox kind/);
+  });
+
+  it('B11: si otro worker enterró o tomó la fila mientras corría, lo deja en el log', async () => {
+    enqueue('advance', { instance_id: 1 });
+    engine.tick.mockImplementationOnce(async () => {
+      row().status = 'dead';
+    });
+    const warn = jest.spyOn((dispatcher as any).logger, 'warn').mockImplementation(() => undefined);
+    await dispatcher.dispatchBatch();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('finished after being buried'));
+    expect(row().status).toBe('dead');
+  });
+
+  it('B11: el entierro de filas abandonadas va por lotes', async () => {
+    const old = new Date(Date.now() - 11 * MIN);
+    for (let i = 0; i < OUTBOX_BATCH + 3; i++) {
+      enqueue('advance', { instance_id: 1 }, {
+        status: 'processing',
+        available_at: old,
+        attempts: OUTBOX_MAX_ATTEMPTS,
+      });
+    }
+    const first = await dispatcher.dispatchBatch();
+    expect(first.dead).toBe(OUTBOX_BATCH);
+    const second = await dispatcher.dispatchBatch();
+    expect(second.dead).toBe(3);
   });
 
   it('una fila "processing" abandonada hace más de 10 minutos se vuelve a tomar', async () => {

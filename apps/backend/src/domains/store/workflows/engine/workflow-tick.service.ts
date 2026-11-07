@@ -20,6 +20,8 @@ export interface TickResult {
 }
 
 const SYSTEM: WorkflowActor = { type: 'system', id: null };
+/** Consecutive automatic transitions before the instance goes to `failed`. */
+export const MAX_AUTOMATIC_HOPS = 100;
 const NOOP: TickResult = { action: 'noop', reminded: false, escalated: false };
 
 /**
@@ -66,6 +68,9 @@ export class WorkflowTickService {
           definition.fields,
         );
         if (!transition) return this.fail(tx, instance, 'no_transition', now);
+        if (await this.exceededAutomaticHops(tx, instance)) {
+          return this.fail(tx, instance, 'automatic_loop', now);
+        }
         await this.advancer.advance({
           tx,
           instance,
@@ -84,6 +89,33 @@ export class WorkflowTickService {
       if (!instance.stage_due_at || instance.stage_due_at > now) return NOOP;
       return this.overdue(tx, instance, stage.due?.on_overdue, now);
     });
+  }
+
+  /**
+   * The validator rejects cycles without a human stage, but a definition from
+   * before that rule or a bug must not spin forever: consecutive automatic
+   * hops since the last human action are capped. The limit is above what a
+   * valid chain can reach (60 stages at most).
+   */
+  private async exceededAutomaticHops(
+    tx: WorkflowTx,
+    instance: WorkflowInstanceRow,
+  ): Promise<boolean> {
+    const recent: Array<{
+      actor_type: string;
+      payload: { automatic?: boolean } | null;
+    }> = await tx.workflow_instance_events.findMany({
+      where: { store_id: instance.store_id, instance_id: instance.id },
+      orderBy: { seq: 'desc' },
+      take: MAX_AUTOMATIC_HOPS * 3,
+      select: { actor_type: true, payload: true },
+    });
+    let hops = 0;
+    for (const event of recent) {
+      if (event.actor_type !== SYSTEM.type) break;
+      if (event.payload?.automatic === true) hops++;
+    }
+    return hops >= MAX_AUTOMATIC_HOPS;
   }
 
   private async fail(

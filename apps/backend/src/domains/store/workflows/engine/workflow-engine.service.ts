@@ -185,6 +185,7 @@ export class WorkflowEngineService {
       if (stage?.quorum && stage.quorum.required > 1) {
         throw new VendixHttpException(ErrorCodes.WORKFLOW_CLAIM_NOT_ALLOWED);
       }
+      await this.events.lockInstance(tx, ctx.store_id, instance.id);
       const res = await tx.workflow_tasks.updateMany({
         where: { id: task.id, store_id: ctx.store_id, status: 'open' },
         data: { status: 'claimed', assignee_user_id: ctx.user_id, claimed_at: new Date() },

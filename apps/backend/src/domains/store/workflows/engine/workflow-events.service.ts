@@ -59,6 +59,19 @@ export class WorkflowEventsService {
   }
 
   /**
+   * Serializes writers of one instance without bumping `row_version`, so a
+   * form open elsewhere stays valid. For commands that append an event without
+   * a CAS on the instance. Take it before touching tasks: the engine always
+   * locks the instance first, and the same order rules out deadlocks.
+   */
+  async lockInstance(tx: WorkflowTx, storeId: number, instanceId: number) {
+    await tx.workflow_instances.updateMany({
+      where: { id: instanceId, store_id: storeId },
+      data: { updated_at: new Date() },
+    });
+  }
+
+  /**
    * Appends `seq = last + 1`. `@@unique([instance_id, seq])` is the second
    * lock: a concurrent writer collides and becomes `WORKFLOW_STALE`; a reused
    * `(store_id, idempotency_key)` becomes {@link WorkflowIdempotencyConflict},
