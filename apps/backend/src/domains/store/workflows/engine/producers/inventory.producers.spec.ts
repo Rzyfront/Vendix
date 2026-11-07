@@ -184,8 +184,12 @@ describe('Flujos P1.1 producer: inventory.adjusted (createAdjustmentInTransactio
     const stockLevelManager = {
       updateStock: jest.fn().mockResolvedValue({ cost_snapshot: { total_cost: 0 } }),
     };
+    // Flujos P1.3 gate lookup: a store without flows governs nothing.
+    const prisma = {
+      withoutScope: () => ({ stores: { findFirst: async () => null } }),
+    };
     const service = new InventoryAdjustmentsService(
-      {} as never,
+      prisma as never,
       stockLevelManager as never,
       { emit: jest.fn() } as never,
       {} as never,

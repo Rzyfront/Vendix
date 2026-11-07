@@ -44,6 +44,7 @@ import {
   InventoryAdjustmentsService,
   AdjustmentTransactionResult,
 } from '../inventory/adjustments/inventory-adjustments.service';
+import { CreateAdjustmentDto } from '../inventory/adjustments/dto/create-adjustment.dto';
 import { LocationsService } from '../inventory/locations/locations.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -5706,6 +5707,22 @@ export class ProductsService {
       const actorUserId = RequestContextService.getUserId() ?? null;
       const organizationId = RequestContextService.getOrganizationId() ?? null;
 
+      const writeOffs: CreateAdjustmentDto[] = plan.lines.map((line) => ({
+        product_id: id,
+        product_variant_id: line.product_variant_id ?? undefined,
+        location_id: line.location_id,
+        type: 'loss',
+        quantity_after: 0,
+        reason_code: 'product_archived',
+        description: `Baja de inventario por archivado del producto #${id} (${product.name})`,
+      }));
+      // Flujos P1.3: a write-off a flow governs is an adjustment like any
+      // other. Its request opens BEFORE the transaction; while one is pending
+      // (409) the product is not archived. Once approved, the request writes
+      // off that stock and the product can be archived again.
+      const approvals =
+        await this.inventoryAdjustments.requestAdjustmentApprovals(writeOffs);
+
       const { archived, adjustments } = await this.prisma.$transaction(
         async (tx) => {
           const results: AdjustmentTransactionResult[] = [];
@@ -5713,20 +5730,15 @@ export class ProductsService {
           // Las bajas van ANTES del cambio de estado (DB-16): el costeo de la
           // baja lee el producto vivo, y ningún producto queda archivado con
           // existencias ni por un instante dentro de la transacción.
-          for (const line of plan.lines) {
+          for (const [index, writeOff] of writeOffs.entries()) {
             const result =
               await this.inventoryAdjustments.createAdjustmentInTransaction(
                 tx,
+                writeOff,
                 {
-                  product_id: id,
-                  product_variant_id: line.product_variant_id ?? undefined,
-                  location_id: line.location_id,
-                  type: 'loss',
-                  quantity_after: 0,
-                  reason_code: 'product_archived',
-                  description: `Baja de inventario por archivado del producto #${id} (${product.name})`,
+                  approvedByUserId: actorUserId ?? undefined,
+                  approval: approvals[index],
                 },
-                { approvedByUserId: actorUserId ?? undefined },
               );
             results.push(result);
           }

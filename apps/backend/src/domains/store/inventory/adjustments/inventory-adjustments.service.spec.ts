@@ -12,6 +12,8 @@ jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTrigg
 describe('InventoryAdjustmentsService — searchAdjustableProducts (D.1)', () => {
   const mockPrisma = {
     stock_levels: { findMany: jest.fn() },
+    // Flujos P1.3 gate lookup: a store without flows governs nothing.
+    withoutScope: () => ({ stores: { findFirst: async () => null } }),
   };
   const mockSearchPath = { isKillSwitchOn: jest.fn() };
   let service: InventoryAdjustmentsService;
@@ -173,7 +175,8 @@ describe('InventoryAdjustmentsService — initial_load', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     service = new InventoryAdjustmentsService(
-      {} as any,
+      // Flujos P1.3 gate lookup: a store without flows governs nothing.
+      { withoutScope: () => ({ stores: { findFirst: async () => null } }) } as any,
       stockManager as any,
       { emit: jest.fn() } as any,
       {} as any,

@@ -33,10 +33,12 @@ import { CostingService } from '../shared/services/costing.service';
 import { CostingMethodResolverService } from '../shared/services/costing-method-resolver.service';
 import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 import {
+  ApprovalGateInput,
   GateDecision,
   consumeApproval,
   enforceApproval,
   operationIsGoverned,
+  requestApproval,
 } from '../../workflows/gates/approval-gate';
 
 /**
@@ -102,6 +104,11 @@ interface AdjustmentCreationOptions {
   approvedByUserId?: number;
   /** Solo importadores: una carga inicial obsoleta se convierte en conteo. */
   initialLoadFallback?: boolean;
+  /**
+   * Flujos P1.3: the approval decision the caller already asked for BEFORE
+   * opening its transaction. Without it, the adjustment asks for it itself.
+   */
+  approval?: GateDecision;
 }
 
 export type BatchAdjustmentOutcome =
@@ -198,10 +205,11 @@ export class InventoryAdjustmentsService {
     // corrían fuera. Los 5 s por defecto de Prisma se quedan cortos en un
     // producto con muchas ubicaciones o variantes.
     const adjustment_result = await this.prisma.$transaction(
-      async (prisma) => {
-        await consumeApproval(prisma, gate);
-        return this.createAdjustmentInTransaction(prisma, data, options);
-      },
+      async (prisma) =>
+        this.createAdjustmentInTransaction(prisma, data, {
+          ...options,
+          approval: gate,
+        }),
       { timeout: 30_000, maxWait: 10_000 },
     );
 
@@ -213,16 +221,53 @@ export class InventoryAdjustmentsService {
   /**
    * Flujos P1.3: an adjustment a flow governs (by units moved, absolute value)
    * is not applied until its request is approved; then the approved request
-   * runs once, as the person who asked, with this same DTO. Every user path
-   * (single, batch, bulk file) goes through `createAdjustment`, so each item
-   * is held on its own. An initial load is not a correction and is not held.
+   * runs once, as the person who asked, with this same DTO. The check lives
+   * in `createAdjustmentInTransaction`, under every path that writes an
+   * adjustment (single, batch, bulk file, bulk session, product archive), so
+   * each item is held on its own. An initial load is not a correction and is
+   * not held.
    */
   private async enforceAdjustmentApproval(
     data: CreateAdjustmentDto,
   ): Promise<GateDecision> {
-    if (data.type === 'initial_load') return { status: 'free' };
+    const input = await this.adjustmentGateInput(data);
+    return input ? enforceApproval(this.prisma, input) : { status: 'free' };
+  }
+
+  /**
+   * Asks approval for several adjustments at once, BEFORE the caller opens
+   * its transaction (archiving a product writes off every location in one).
+   * Every governed item gets its request; if any is pending or rejected,
+   * throws its 409 and nothing is applied. Returns one decision per item, to
+   * pass as `approval` to {@link createAdjustmentInTransaction}.
+   */
+  async requestAdjustmentApprovals(
+    items: CreateAdjustmentDto[],
+  ): Promise<GateDecision[]> {
+    const inputs: (ApprovalGateInput | null)[] = [];
+    const decisions: GateDecision[] = [];
+    for (const item of items) {
+      const input = await this.adjustmentGateInput(item);
+      inputs.push(input);
+      decisions.push(
+        input ? await requestApproval(this.prisma, input) : { status: 'free' },
+      );
+    }
+    const blocked = decisions.findIndex(
+      (d) => d.status === 'pending' || d.status === 'rejected',
+    );
+    // Same input, same request: this finds the gate just opened and throws
+    // its 409 with the request reference.
+    if (blocked >= 0) await enforceApproval(this.prisma, inputs[blocked]!);
+    return decisions;
+  }
+
+  private async adjustmentGateInput(
+    data: CreateAdjustmentDto,
+  ): Promise<ApprovalGateInput | null> {
+    if (data.type === 'initial_load') return null;
     if (!(await operationIsGoverned(this.prisma, 'inventory_adjustment.create'))) {
-      return { status: 'free' };
+      return null;
     }
     const level = await this.prisma.stock_levels.findFirst({
       where: {
@@ -234,13 +279,13 @@ export class InventoryAdjustmentsService {
     });
     // No stock record: the service rejects it on its own, so no request opens
     // for an adjustment that could never run.
-    if (!level) return { status: 'free' };
+    if (!level) return null;
     const change = Number(data.quantity_after) - Number(level.quantity_on_hand);
     const product = await this.prisma.products.findFirst({
       where: { id: data.product_id },
       select: { name: true },
     });
-    return enforceApproval(this.prisma, {
+    return {
       operation: 'inventory_adjustment.create',
       entity_type: 'product',
       entity_id: data.product_id,
@@ -254,7 +299,7 @@ export class InventoryAdjustmentsService {
         reason: data.description ?? null,
       },
       request: { method: 'createAdjustment', args: [data] },
-    });
+    };
   }
 
   /**
@@ -308,6 +353,13 @@ export class InventoryAdjustmentsService {
     // `prisma` es el handle de la transacción del llamador: todas las lecturas
     // y escrituras de aquí abajo viajan en ESE comprobante.
     const prisma = prismaTx;
+
+    // Flujos P1.3: the gate of a governed adjustment, whatever the path. A
+    // pending request throws 409 and the caller's transaction writes nothing;
+    // an approved one is used once, in this same transaction.
+    const gate =
+      options.approval ?? (await this.enforceAdjustmentApproval(data));
+    await consumeApproval(prisma, gate);
 
     // Ensure IDs are numbers (handling string payload from frontend)
     const productId = Number(data.product_id);
