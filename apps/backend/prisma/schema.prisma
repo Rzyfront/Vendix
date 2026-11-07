@@ -970,6 +970,7 @@ model stores {
   workflow_task_votes        workflow_task_votes[]
   workflow_instance_events   workflow_instance_events[]
   workflow_outbox            workflow_outbox[]
+  workflow_approval_gates    workflow_approval_gates[]
   workflow_instance_comments workflow_instance_comments[]
   workflow_public_links      workflow_public_links[]
   store_api_keys             store_api_keys[]
@@ -15533,6 +15534,7 @@ model workflow_definitions {
   versions          workflow_versions[]  @relation("workflow_definition_versions")
   instances         workflow_instances[]
   public_links      workflow_public_links[]
+  approval_gates    workflow_approval_gates[]
 
   @@unique([store_id, key])
   @@index([store_id, status])
@@ -15641,6 +15643,7 @@ model workflow_instances {
   events       workflow_instance_events[]
   dossier      dossiers?
   comments     workflow_instance_comments[]
+  approval_gates workflow_approval_gates[]
 
   @@unique([store_id, reference])
   @@index([store_id, definition_id, status, current_stage_key])
@@ -15723,6 +15726,51 @@ model workflow_instance_events {
 }
 
 /// Efectos diferidos (patrón outbox): notify | advance.
+/// Estado de un candado de aprobación (P1.3).
+enum workflow_gate_status_enum {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
+/// Candado de aprobación (P1.3): una operación sensible gobernada por un flujo.
+/// Mientras está `pending` la operación no se ejecuta por ninguna ruta. Cada
+/// intento nuevo tras un rechazo o cancelación abre una `revision` nueva.
+model workflow_approval_gates {
+  id                   Int                       @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int
+  definition_id        Int
+  instance_id          Int?
+  /// Operación gobernada, p. ej. `purchase_order.approve`.
+  operation            String                    @db.VarChar(60)
+  entity_type          String                    @db.VarChar(40)
+  entity_id            Int
+  revision             Int                       @default(1)
+  amount               Decimal?                  @db.Decimal(18, 2)
+  status               workflow_gate_status_enum @default(pending)
+  reason               String?
+  /// Contexto plano de la operación (los tokens `{{event.*}}` del mapa).
+  context              Json                      @default("{}")
+  /// Solo `defer`: la operación a ejecutar al aprobarse (método y argumentos).
+  request              Json?
+  requested_by_user_id Int?
+  resolved_at          DateTime?                 @db.Timestamp(6)
+  /// La operación aprobada ya se ejecutó (un candado aprobado se usa una vez).
+  consumed_at          DateTime?                 @db.Timestamp(6)
+  created_at           DateTime                  @default(now()) @db.Timestamp(6)
+  updated_at           DateTime                  @default(now()) @updatedAt @db.Timestamp(6)
+
+  store      stores               @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  definition workflow_definitions @relation(fields: [definition_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  instance   workflow_instances?  @relation(fields: [instance_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([store_id, operation, entity_id, revision])
+  @@index([store_id, entity_type, entity_id])
+  @@index([instance_id])
+}
+
 model workflow_outbox {
   id           BigInt                      @id @default(autoincrement())
   store_id     Int

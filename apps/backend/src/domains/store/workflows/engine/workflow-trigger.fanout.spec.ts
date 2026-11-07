@@ -414,6 +414,7 @@ describe('disparador durable de punta a punta (P0.2)', () => {
       {} as any,
       {} as any,
       new WorkflowTriggerFanout(kit.db.asStorePrisma()),
+      {} as any,
     );
   const started = () =>
     kit.db

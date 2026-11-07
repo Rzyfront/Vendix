@@ -27,6 +27,11 @@ import {
   WorkflowNotifyPayload,
 } from './workflow-engine.types';
 import { storeAllowsFlows } from './workflow-industry';
+import { ApprovalGateProcessor } from '../gates/approval-gate.processor';
+import {
+  GATE_RESOLVED_OUTBOX_KIND,
+  GATE_START_OUTBOX_KIND,
+} from '../gates/approval-gate';
 
 export {
   OUTBOX_BACKOFF_MINUTES,
@@ -76,6 +81,7 @@ export class WorkflowOutboxDispatcher {
     private readonly webhooks: WorkflowWebhookDeliveryService,
     private readonly actions: WorkflowActionsExecutor,
     private readonly fanout: WorkflowTriggerFanout,
+    private readonly gates: ApprovalGateProcessor,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -226,6 +232,19 @@ export class WorkflowOutboxDispatcher {
 
   /** An exhausted `action` row leaves `action_failed` in the instance history. */
   private async afterDead(row: ClaimedOutboxRow, error: unknown): Promise<void> {
+    if (row.kind === GATE_START_OUTBOX_KIND) {
+      try {
+        await this.gates.abandonStart(
+          row,
+          ((error as Error)?.message ?? String(error)).slice(0, 500),
+        );
+      } catch (e) {
+        this.logger.error(
+          `Could not abandon gate_start ${row.id}: ${(e as Error)?.message}`,
+        );
+      }
+      return;
+    }
     if (row.kind !== 'action') return;
     try {
       const store = await this.prisma
@@ -325,6 +344,10 @@ export class WorkflowOutboxDispatcher {
           await this.startFromEvent(row);
         } else if (row.kind === 'action') {
           await this.actions.execute(row);
+        } else if (row.kind === GATE_START_OUTBOX_KIND) {
+          await this.gates.start(row);
+        } else if (row.kind === GATE_RESOLVED_OUTBOX_KIND) {
+          await this.gates.resolved(row);
         } else {
           throw new Error(`Unsupported outbox kind: ${row.kind}`);
         }

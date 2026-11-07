@@ -45,6 +45,7 @@ describe('WorkflowOutboxDispatcher · webhook / start_instance / action', () => 
       webhooks as any,
       actions as any,
       fanout as any,
+      {} as any,
     );
   });
 

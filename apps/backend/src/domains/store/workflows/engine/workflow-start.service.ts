@@ -1,8 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import {
+  WORKFLOW_EVENT_CATALOG,
   WORKFLOW_EVENT_TOKENS,
+  WORKFLOW_GATE_OPERATIONS,
   WorkflowDefinitionV1,
+  WorkflowEventSpec,
+  WorkflowGateOperation,
+  WorkflowStageDef,
+  gateOperationTokens,
   WorkflowFieldType,
   WorkflowTriggerEvent,
   resolveTokens,
@@ -30,13 +36,11 @@ import {
 import { WorkflowReferenceService } from './workflow-reference.service';
 import { WorkflowStageService } from './workflow-stage.service';
 
-/** Events that identify a business record the flow can be about. */
-const EVENT_SUBJECT: Record<string, { type: string; key: string }> = {
-  'order.created': { type: 'order', key: 'order_id' },
-  'order.paid': { type: 'order', key: 'order_id' },
-  'purchase_order.received': { type: 'purchase_order', key: 'purchase_order_id' },
-  'customer.created': { type: 'customer', key: 'customer_id' },
-};
+/** Record an event is about, from the registry (P1.1). */
+function eventSubject(event: string): { type: string; key: string } | undefined {
+  const spec = (WORKFLOW_EVENT_CATALOG as Record<string, WorkflowEventSpec>)[event];
+  return spec?.subject;
+}
 
 /** Event values arrive as strings; coerce to the declared field type or drop. */
 function coerceMapped(type: WorkflowFieldType, raw: string): unknown {
@@ -360,25 +364,7 @@ export class WorkflowStartService {
     const allowed = (WORKFLOW_EVENT_TOKENS[trigger.event as WorkflowTriggerEvent] ?? []).map(
       (k) => `event.${k}`,
     );
-    const declared = new Map(definition.fields.map((f) => [f.key, f.type]));
-    const initial: Record<string, unknown> = {};
-    for (const [fieldKey, template] of Object.entries(trigger.map ?? {})) {
-      const type = declared.get(fieldKey);
-      if (!type) continue;
-      const value = coerceMapped(
-        type,
-        resolveTokens(template, { event: input.eventContext, allowed }),
-      );
-      if (value !== undefined) initial[fieldKey] = value;
-    }
-
-    const actor: WorkflowActor = { type: 'system', id: null };
-    const now = new Date();
-    const reference = await this.references.next(tx, ctx.store_id);
-    const title = definition.name.slice(0, 200);
-    const enter = this.stages.applyActions(stage.on_enter, initial, { reference, title });
-    const patch = this.stages.stagePatch(stage, now, 0);
-    const subjectSpec = EVENT_SUBJECT[input.event];
+    const subjectSpec = eventSubject(input.event);
     const subjectId = subjectSpec ? Number(input.eventContext[subjectSpec.key]) : NaN;
     const subject =
       subjectSpec &&
@@ -387,18 +373,133 @@ export class WorkflowStartService {
       subjectId > 0
         ? { type: subjectSpec.type, id: subjectId }
         : null;
+    return this.createSystemInstance(tx, ctx, {
+      def,
+      definition,
+      stage,
+      initial: this.mapInitial(definition, trigger.map, input.eventContext, allowed),
+      subject,
+      idempotencyKey: input.idempotencyKey,
+      started: { via: 'event', event: input.event },
+    });
+  }
+
+  /**
+   * Starts the request of an approval gate (P1.3, actor `system`). Closed path:
+   * the gate must be pending without a request yet, and its definition must
+   * still be active and still govern the operation; otherwise the caller marks
+   * the gate cancelled. The data comes from `governs.map` resolved against the
+   * gate context restricted to the operation's tokens; the subject is the held
+   * record. The gate gets the instance id in the same transaction.
+   */
+  async executeGate(
+    tx: WorkflowTx,
+    ctx: WorkflowCallContext,
+    input: { gateId: number; idempotencyKey: string },
+  ): Promise<WorkflowCommandResult | null> {
+    const prev = await this.events.replay(tx, input.idempotencyKey, {
+      actor: { type: 'system', id: null },
+      types: START_EVENT_TYPES,
+    });
+    if (prev) return prev;
+    const gate = await tx.workflow_approval_gates.findFirst({
+      where: { id: input.gateId, store_id: ctx.store_id },
+    });
+    if (!gate || gate.status !== 'pending' || gate.instance_id !== null) return null;
+    const def = await tx.workflow_definitions.findFirst({
+      where: { id: gate.definition_id, store_id: ctx.store_id },
+    });
+    if (!def || def.status !== 'active' || !def.published_version_id) return null;
+    const definition = await this.loader.loadDefinition(tx, def.published_version_id);
+    const governs = definition.governs;
+    const stage = startStage(definition);
+    if (
+      !governs ||
+      governs.operation !== gate.operation ||
+      !stage ||
+      stage.assignee?.kind === 'initiator'
+    ) {
+      return null;
+    }
+    const operation = gate.operation as WorkflowGateOperation;
+    const allowed = gateOperationTokens(operation).map((k) => `event.${k}`);
+    const context = (gate.context ?? {}) as Record<string, unknown>;
+    const subjectType = WORKFLOW_GATE_OPERATIONS[operation].subject;
+    const subject =
+      subjectType !== 'none' && gate.entity_id > 0
+        ? { type: subjectType, id: gate.entity_id }
+        : null;
+    const result = await this.createSystemInstance(tx, ctx, {
+      def,
+      definition,
+      stage,
+      initial: this.mapInitial(definition, governs.map, context, allowed),
+      subject,
+      idempotencyKey: input.idempotencyKey,
+      started: { via: 'approval_gate', operation, gate_id: gate.id },
+    });
+    const linked = await tx.workflow_approval_gates.updateMany({
+      where: { id: gate.id, status: 'pending', instance_id: null },
+      data: { instance_id: result.instance.id },
+    });
+    if (linked.count === 0) throw new VendixHttpException(ErrorCodes.WORKFLOW_STALE);
+    return result;
+  }
+
+  /** Declared fields ← `map` templates resolved against a closed context. */
+  private mapInitial(
+    definition: WorkflowDefinitionV1,
+    map: Record<string, string> | undefined,
+    context: Record<string, unknown>,
+    allowed: string[],
+  ): Record<string, unknown> {
+    const declared = new Map(definition.fields.map((f) => [f.key, f.type]));
+    const initial: Record<string, unknown> = {};
+    for (const [fieldKey, template] of Object.entries(map ?? {})) {
+      const type = declared.get(fieldKey);
+      if (!type) continue;
+      const value = coerceMapped(type, resolveTokens(template, { event: context, allowed }));
+      if (value !== undefined) initial[fieldKey] = value;
+    }
+    return initial;
+  }
+
+  /** Shared tail of the system starts (event and approval gate). */
+  private async createSystemInstance(
+    tx: WorkflowTx,
+    ctx: WorkflowCallContext,
+    a: {
+      def: { id: number; key: string; published_version_id: number | null };
+      definition: WorkflowDefinitionV1;
+      stage: WorkflowStageDef;
+      initial: Record<string, unknown>;
+      subject: { type: string; id: number } | null;
+      idempotencyKey: string;
+      started: Record<string, unknown>;
+    },
+  ): Promise<WorkflowCommandResult> {
+    const actor: WorkflowActor = { type: 'system', id: null };
+    const now = new Date();
+    const reference = await this.references.next(tx, ctx.store_id);
+    const title = a.definition.name.slice(0, 200);
+    const enter = this.stages.applyActions(a.stage.on_enter, a.initial, {
+      reference,
+      title,
+      subject_id: a.subject?.id ?? null,
+    });
+    const patch = this.stages.stagePatch(a.stage, now, 0);
 
     const created = (await tx.workflow_instances.create({
       data: {
         organization_id: ctx.organization_id,
         store_id: ctx.store_id,
-        definition_id: def.id,
-        version_id: def.published_version_id,
+        definition_id: a.def.id,
+        version_id: a.def.published_version_id,
         reference,
         title,
         data: enter.data,
-        subject_type: subject?.type ?? null,
-        subject_id: subject?.id ?? null,
+        subject_type: a.subject?.type ?? null,
+        subject_id: a.subject?.id ?? null,
         started_by_type: actor.type,
         started_by_id: null,
         row_version: 0,
@@ -411,27 +512,26 @@ export class WorkflowStartService {
       store_id: ctx.store_id,
       instance_id: created.id,
       type: 'started',
-      to_stage_key: stage.key,
+      to_stage_key: a.stage.key,
       actor,
       payload: {
         reference,
-        definition_key: def.key,
-        version_id: def.published_version_id,
-        via: 'event',
-        event: input.event,
+        definition_key: a.def.key,
+        version_id: a.def.published_version_id,
+        ...a.started,
       },
-      idempotencyKey: input.idempotencyKey,
+      idempotencyKey: a.idempotencyKey,
     });
     await this.events.emitWebhook(tx, created, 'workflow.instance.started', {
       title: created.title,
-      stage_key: stage.key,
-      definition_key: def.key,
-      via: 'event',
+      stage_key: a.stage.key,
+      definition_key: a.def.key,
+      via: a.started.via,
     });
     await this.stages.afterEnter(tx, {
-      definition,
+      definition: a.definition,
       instance: created,
-      stage,
+      stage: a.stage,
       actor,
       notifies: enter.notifies,
       vendix: enter.vendix,
@@ -442,7 +542,7 @@ export class WorkflowStartService {
       advanced: true,
       replayed: false,
       from_stage_key: null,
-      to_stage_key: stage.key,
+      to_stage_key: a.stage.key,
     };
   }
 

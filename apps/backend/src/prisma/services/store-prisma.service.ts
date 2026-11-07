@@ -257,6 +257,8 @@ export class StorePrismaService extends BasePrismaService {
     // Webhooks salientes de Flujos (bloque 13): ambas llevan `store_id` NOT NULL.
     'workflow_webhook_endpoints',
     'workflow_webhook_deliveries',
+    // Candado de aprobación de Flujos (flujos-adm P1.3): `store_id` NOT NULL.
+    'workflow_approval_gates',
     // ===== CRM (PLAN-CRM §2.3) =====
     // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
     'crm_conversations',
@@ -1973,6 +1975,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get workflow_outbox() {
     return this.scoped_client.workflow_outbox;
+  }
+
+  get workflow_approval_gates() {
+    return this.scoped_client.workflow_approval_gates;
   }
 
   get stored_files() {

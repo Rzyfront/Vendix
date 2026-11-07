@@ -8,6 +8,10 @@ import {
 import { WorkflowEventsService } from './workflow-events.service';
 import { WorkflowStageService } from './workflow-stage.service';
 import {
+  gateOutcomeOf,
+  resolveInstanceGates,
+} from '../gates/gate-resolution';
+import {
   WorkflowActor,
   WorkflowInstanceRow,
   WorkflowTx,
@@ -121,6 +125,14 @@ export class WorkflowAdvanceService {
       vendix: [...exit.vendix, ...enter.vendix],
     });
     if (toStage.type === 'end') {
+      // P1.3: the gates this request decides close with it, atomically.
+      const comment = a.event.payload?.['comment'];
+      await resolveInstanceGates(
+        a.tx,
+        updated,
+        gateOutcomeOf(toStage.outcome),
+        typeof comment === 'string' && comment.trim() !== '' ? comment.trim() : null,
+      );
       const finished =
         toStage.outcome === 'rejected'
           ? 'workflow.instance.rejected'
