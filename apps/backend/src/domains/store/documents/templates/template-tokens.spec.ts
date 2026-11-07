@@ -4,6 +4,7 @@ import {
   TokenSyntaxError,
   TokenValueError,
   buildTokenSchema,
+  lookup,
   missingPaths,
   numberToSpanishWords,
   renderText,
@@ -81,6 +82,11 @@ describe('template tokens', () => {
     expect(renderText('{{ row.name }}', scope({}, { name: 'Tornillo' }))).toBe('Tornillo');
   });
 
+  it('never reads inherited members of a value', () => {
+    expect(lookup(scope({ 'fields.obj': { a: 1 } }), 'fields.obj.toString')).toBeUndefined();
+    expect(lookup(scope({ 'fields.obj': { a: 1 } }), 'fields.obj.a')).toBe(1);
+  });
+
   it('never interprets markup or braces inside values', () => {
     expect(renderText('{{ fields.a }}', scope({ 'fields.a': '<b>{{ x }}</b>' }))).toBe('<b>{{ x }}</b>');
   });
@@ -92,6 +98,8 @@ describe('template tokens', () => {
     ["{{ fields.x | default:'a }}", 'Comilla'],
     ['{{ fields..x }}', 'no es válida'],
     ['{{ constructor.x }}', 'origen'],
+    ['{{ fields.__proto__ }}', 'no es válida'],
+    ['{{ fields.x.constructor }}', 'no es válida'],
   ])('rejects %s', (text, hint) => {
     expect(() => renderText(text, scope({}))).toThrow(TokenSyntaxError);
     expect(() => renderText(text, scope({}))).toThrow(new RegExp(hint));

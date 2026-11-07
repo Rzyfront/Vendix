@@ -58,6 +58,8 @@ export class TokenValueError extends Error {
 const TOKEN_RE = /\{\{([\s\S]*?)\}\}/g;
 const PATH_RE = /^[a-z_][a-z0-9_]*(\.[A-Za-z0-9_]+)*$/;
 const MAX_TOKEN_LENGTH = 200;
+/** Inherited object members are never data: a path through them is a syntax error. */
+const FORBIDDEN_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /** Splits on `|` outside quotes. */
 function splitPipes(source: string): string[] {
@@ -106,6 +108,9 @@ export function parseToken(inner: string): TokenRef {
   const root = path.split('.')[0];
   if (!(TOKEN_ROOTS as readonly string[]).includes(root)) {
     throw new TokenSyntaxError(`La variable '${path}' no empieza con un origen válido`);
+  }
+  if (path.split('.').some((seg) => FORBIDDEN_SEGMENTS.has(seg))) {
+    throw new TokenSyntaxError(`La variable '${path}' no es válida`);
   }
   return { path, filters: filters.map(parseFilter) };
 }
@@ -161,10 +166,14 @@ function isMissing(v: unknown): boolean {
   return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 }
 
+function hasOwn(obj: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 function deepGet(root: unknown, segments: string[]): unknown {
   let cur: unknown = root;
   for (const s of segments) {
-    if (cur === null || typeof cur !== 'object') return undefined;
+    if (cur === null || typeof cur !== 'object' || !hasOwn(cur, s)) return undefined;
     cur = (cur as Record<string, unknown>)[s];
   }
   return cur;
@@ -173,11 +182,11 @@ function deepGet(root: unknown, segments: string[]): unknown {
 /** Value of `path` in the scope: exact key, else the longest known prefix then a deep walk. */
 export function lookup(scope: TokenScope, path: string): unknown {
   if (isRowPath(path)) return deepGet(scope.row, path.split('.').slice(1));
-  if (path in scope.values) return scope.values[path];
+  if (hasOwn(scope.values, path)) return scope.values[path];
   const parts = path.split('.');
   for (let n = parts.length - 1; n >= 1; n--) {
     const prefix = parts.slice(0, n).join('.');
-    if (prefix in scope.values) return deepGet(scope.values[prefix], parts.slice(n));
+    if (hasOwn(scope.values, prefix)) return deepGet(scope.values[prefix], parts.slice(n));
   }
   return undefined;
 }
