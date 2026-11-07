@@ -101,7 +101,8 @@ describe('WorkflowRecordDateCron (P3.6)', () => {
         .table('workflow_records')
         .filter((r) => r.store_id === storeId && r.collection_id === collectionId)
         .filter((r) => r.archived_at === null && r.id > lastId)
-        .map((r) => ({ ...r, date: r.data?.[field] }))
+        // Object.assign keeps the row's index signature (a spread would drop it).
+        .map((r) => Object.assign({}, r, { date: r.data?.[field] }))
         .filter((r) => typeof r.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.date))
         .filter((r) => r.date >= from && r.date <= until)
         .sort((a, b) => a.id - b.id)
