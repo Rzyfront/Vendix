@@ -17,6 +17,8 @@
  *   precios-pricing /precios responde 301 a /pricing (solo en vendix.online)
  *   archivo-404     un archivo inexistente (/no-existe-<ts>.js) responde 404
  *   robots-200, sitemap-200, sitemap-hosts, sitemap-tokens
+ *   http-https      http://<host>/ responde 301/308 a https
+ *   hsts, nosniff, referrer-policy  cabeceras de seguridad de la portada
  *
  * Privacidad: el reporte nunca imprime una URL con ruta de token (pedido, order, factura);
  * solo cuenta cuántas hay. Esas URLs tampoco se piden.
@@ -35,17 +37,28 @@ const APEX_HOST = 'vendix.online';
 const TOKEN_SEGMENTS = ['pedido', 'order', 'factura'];
 const TOKEN_RE = new RegExp('/(' + TOKEN_SEGMENTS.join('|') + ')(/|$)', 'i');
 
-// Rutas públicas conocidas de la web comercial.
+// Rutas públicas conocidas de la web comercial (solo se evalúan en vendix.online).
+// /ayuda es noindex a propósito: el centro de ayuda no tiene contenido indexable
+// propio (registro de redirecciones R07, registro editorial U04).
 const KNOWN = [
   { path: '/', index: true },
   { path: '/pricing', index: true },
-  { path: '/ayuda', index: true },
+  { path: '/ayuda', index: false },
   { path: '/legal/terminos', index: true },
   { path: '/legal/privacidad', index: true },
   { path: '/legal/cookies', index: true },
   { path: '/pqr', index: false },
   { path: '/auth/login', index: false },
   { path: '/auth/register', index: false },
+];
+// Rutas públicas de una tienda (cualquier host distinto de vendix.online).
+// Las rutas comerciales (/pricing, /legal/*) no existen en las tiendas.
+const STORE_KNOWN = [
+  { path: '/', index: true },
+  { path: '/catalog', index: true },
+  { path: '/novedades', index: true },
+  { path: '/ofertas', index: true },
+  { path: '/cart', index: false },
 ];
 const UNKNOWN = '/ruta-que-no-existe-seo-smoke';
 
@@ -106,7 +119,7 @@ function createSmoke(opts = {}) {
   async function checkHost() {
     const alias = host.startsWith('www.') ? host.slice(4) : 'www.' + host;
     const http = await get('http://' + host + '/');
-    add('host', 'http → https', isRedirect(http.status) && (http.location || '').startsWith('https://') ? 'OK' : 'FALLA', http.status + ' → ' + http.location, { rec: http.rec });
+    add('host', 'http → https', isRedirect(http.status) && (http.location || '').startsWith('https://') ? 'OK' : 'FALLA', http.status + ' → ' + http.location, { id: 'http-https', rec: http.rec });
     try {
       const www = await get('https://' + alias + '/');
       const redirects = isRedirect(www.status) && (www.location || '').startsWith(base);
@@ -144,7 +157,8 @@ function createSmoke(opts = {}) {
 
   async function checkRoutes() {
     const seen = new Map();
-    for (const r of KNOWN) {
+    const routes = host === APEX_HOST ? KNOWN : STORE_KNOWN;
+    for (const r of routes) {
       const res = await get(base + r.path);
       add('status', r.path + ' responde 200', res.status === 200 ? 'OK' : 'FALLA', String(res.status), { rec: res.rec });
       if (res.status >= 300 && res.status < 400) continue;
@@ -215,8 +229,9 @@ function createSmoke(opts = {}) {
     // x-frame-options y CSP se omiten a propósito (infra/cloudfront/README-security-headers.md):
     // un DENY/SAMEORIGIN rompería el checkout de Wompi y las tiendas embebidas. Su ausencia es AVISO.
     const optional = ['x-frame-options', 'content-security-policy'];
+    const ids = { 'strict-transport-security': 'hsts', 'x-content-type-options': 'nosniff', 'referrer-policy': 'referrer-policy' };
     for (const name of ['strict-transport-security', 'x-content-type-options', 'referrer-policy', ...optional]) {
-      add('seguridad', 'cabecera ' + name, h(name) ? 'OK' : (optional.includes(name) ? 'AVISO' : 'FALLA'), h(name) || 'ausente', { rec: res.rec });
+      add('seguridad', 'cabecera ' + name, h(name) ? 'OK' : (optional.includes(name) ? 'AVISO' : 'FALLA'), h(name) || 'ausente', { id: ids[name] || null, rec: res.rec });
     }
     add('cache', 'HTML con revalidación', /max-age=0|no-cache/.test(h('cache-control') || '') ? 'OK' : 'AVISO', h('cache-control') || 'ausente');
   }
@@ -269,5 +284,5 @@ async function main() {
   process.exitCode = report.exitCode;
 }
 
-module.exports = { createSmoke, formatReport, parseArgs, TOKEN_RE, KNOWN };
+module.exports = { createSmoke, formatReport, parseArgs, TOKEN_RE, KNOWN, STORE_KNOWN };
 if (require.main === module) main();

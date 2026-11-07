@@ -9,6 +9,8 @@ const sectorGuideRoutes: Routes = SECTOR_GUIDES_ENABLED
       'preparar-demostracion',
       'cierre-de-caja',
       'control-de-inventario',
+      'elegir-software-pos',
+      'pasar-productos-excel-a-pos',
     ].map((guideKey) => ({
       path: `guias/${guideKey}`,
       loadComponent: () =>

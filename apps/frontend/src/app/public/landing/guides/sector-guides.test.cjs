@@ -18,7 +18,7 @@ test('preview gate is off in production and on in local development', () => {
   assert.match(prod, /sectorGuidesEnabled:\s*false/);
   assert.match(dev, /sectorGuidesEnabled:\s*true/);
 });
-const GUIDE_KEYS = ['comandas-restaurantes', 'ventas-mayoristas-al-detal', 'preparar-demostracion', 'cierre-de-caja', 'control-de-inventario'];
+const GUIDE_KEYS = ['comandas-restaurantes', 'ventas-mayoristas-al-detal', 'preparar-demostracion', 'cierre-de-caja', 'control-de-inventario', 'elegir-software-pos', 'pasar-productos-excel-a-pos'];
 test('every route fixture resolves to complete editorial content', () => {
   const guides = load();
   assert.deepEqual(Object.keys(guides).sort(), [...GUIDE_KEYS].sort());
@@ -51,4 +51,25 @@ test('guide routes are gated and absent from other public app route files', () =
   for (const file of fs.readdirSync(routes).filter(f => f.endsWith('.ts') && f !== 'vendix_landing.public.routes.ts')) {
     assert.doesNotMatch(fs.readFileSync(path.join(routes, file), 'utf8'), /sectorGuideRoutes|sector-guide\.component/);
   }
+});
+test('all seven guides exist and avoid unverified or forbidden claims', () => {
+  const guides = load();
+  assert.equal(Object.keys(guides).length, 7);
+  const forbidden = [/sin tarjeta/i, /gratuita/i, /siigo/i, /alegra/i, /offline/i, /sin conexi[oó]n/i];
+  const forbiddenNew = [/sin perder/i, /n[oó]mina/i, /empleados/i, /POR CONFIRMAR/i, /\/contacto/, /\/recursos\//];
+  for (const key of GUIDE_KEYS) {
+    const g = guides[key];
+    assert.ok(g.description.length <= 155, key + ' description too long');
+    const text = JSON.stringify(g);
+    for (const re of forbidden) assert.doesNotMatch(text, re, key + ' ' + re);
+    if (['elegir-software-pos', 'pasar-productos-excel-a-pos'].includes(key)) for (const re of forbiddenNew) assert.doesNotMatch(text, re, key + ' ' + re);
+    if (/Empresarial Pro/.test(text)) assert.match(text, /IA Business/, key);
+    for (const m of text.matchAll(/\/guias\/[a-z-]+/g)) assert.ok(guides[m[0].slice(7)], 'broken link ' + m[0]);
+  }
+});
+test('new guide routes stay inside the gated ternary', () => {
+  const routes = path.resolve(front, 'app/routes/public/vendix_landing.public.routes.ts');
+  const src = fs.readFileSync(routes, 'utf8');
+  const gated = src.slice(src.indexOf('= SECTOR_GUIDES_ENABLED'), src.indexOf('  : [];'));
+  for (const key of ['elegir-software-pos', 'pasar-productos-excel-a-pos']) assert.ok(gated.includes("'" + key + "'"));
 });

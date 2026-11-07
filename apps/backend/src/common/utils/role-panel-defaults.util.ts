@@ -103,6 +103,9 @@ export const ROLE_DEFAULT_PANEL_UI_KEYS: Record<
       'help_center',
       'help_videos',
       'help_pqrs',
+      // Flujos (industria administration; la compuerta es la industria).
+      'flows',
+      'documents',
     ],
 
     supervisor: [
@@ -146,6 +149,8 @@ export const ROLE_DEFAULT_PANEL_UI_KEYS: Record<
       'help_center',
       'help_videos',
       'help_pqrs',
+      // Flujos (industria administration; la compuerta es la industria).
+      'flows',
     ],
 
     cashier: [
@@ -172,6 +177,8 @@ export const ROLE_DEFAULT_PANEL_UI_KEYS: Record<
       'help_support',
       'help_center',
       'help_videos',
+      // Flujos (industria administration; la compuerta es la industria).
+      'flows',
     ],
 
     waiter: [
@@ -263,6 +270,8 @@ export const ROLE_DEFAULT_PANEL_UI_KEYS: Record<
       'help_support',
       'help_center',
       'help_videos',
+      // Flujos (industria administration; la compuerta es la industria).
+      'flows',
     ],
 
     fiscal_supervisor: [

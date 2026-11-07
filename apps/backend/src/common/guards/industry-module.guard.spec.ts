@@ -93,6 +93,31 @@ describe('IndustryModuleGuard', () => {
     );
   });
 
+  it('flows: blocks a non-administration store even in audit mode', async () => {
+    build('flows');
+    prisma.stores.findUnique.mockResolvedValue({ industries: ['retail'] });
+    let error: any;
+    try {
+      await guard.canActivate(makeCtx(user));
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('MODULE_INDUSTRY_001');
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({ decision: 'blocked', mode: 'audit', key: 'flows' }),
+    );
+  });
+
+  it('documents: passes for an administration store', async () => {
+    build('documents');
+    prisma.stores.findUnique.mockResolvedValue({
+      industries: ['retail', 'administration'],
+    });
+    await expect(guard.canActivate(makeCtx(user))).resolves.toBe(true);
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
   it('passes when there is no store in context or the store is unknown', async () => {
     await expect(
       guard.canActivate(makeCtx({ id: 1, store_id: null })),

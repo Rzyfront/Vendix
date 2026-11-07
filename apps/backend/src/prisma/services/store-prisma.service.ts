@@ -234,6 +234,29 @@ export class StorePrismaService extends BasePrismaService {
     // ===== Apps (odd/tasks/apps-module.md) =====
     // `store_id` propio NOT NULL → scoping directo por tienda.
     'store_apps',
+    // ===== Flujos y Documentos (odd/tasks/flujos-documental.md) =====
+    // Flujos (T3/S3): todas llevan `store_id` propio NOT NULL → scoping directo.
+    'workflow_definitions',
+    'workflow_versions',
+    'work_groups',
+    'work_group_members',
+    'workflow_instances',
+    'workflow_tasks',
+    'workflow_task_votes',
+    'workflow_instance_events',
+    'workflow_outbox',
+    // Documental D1 (T5/S5): todas llevan `store_id` propio NOT NULL.
+    'stored_files',
+    'dossiers',
+    'dossier_items',
+    // Operación de Flujos (bloque 8): ambas llevan `store_id` propio NOT NULL.
+    'workflow_instance_comments',
+    'workflow_public_links',
+    // API keys por tienda (bloque 13): `store_id` propio NOT NULL.
+    'store_api_keys',
+    // Webhooks salientes de Flujos (bloque 13): ambas llevan `store_id` NOT NULL.
+    'workflow_webhook_endpoints',
+    'workflow_webhook_deliveries',
     // ===== CRM (PLAN-CRM §2.3) =====
     // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
     'crm_conversations',
@@ -1901,6 +1924,75 @@ export class StorePrismaService extends BasePrismaService {
 
   get social_webhook_events() {
     return this.scoped_client.social_webhook_events;
+  }
+
+  // Flujos y Documentos (odd/tasks/flujos-documental.md)
+  get workflow_definitions() {
+    return this.scoped_client.workflow_definitions;
+  }
+
+  get workflow_versions() {
+    return this.scoped_client.workflow_versions;
+  }
+
+  get work_groups() {
+    return this.scoped_client.work_groups;
+  }
+
+  get work_group_members() {
+    return this.scoped_client.work_group_members;
+  }
+
+  get workflow_instances() {
+    return this.scoped_client.workflow_instances;
+  }
+
+  get workflow_tasks() {
+    return this.scoped_client.workflow_tasks;
+  }
+
+  get workflow_task_votes() {
+    return this.scoped_client.workflow_task_votes;
+  }
+
+  get workflow_instance_events() {
+    return this.scoped_client.workflow_instance_events;
+  }
+
+  get store_api_keys() {
+    return this.scoped_client.store_api_keys;
+  }
+
+  get workflow_webhook_endpoints() {
+    return this.scoped_client.workflow_webhook_endpoints;
+  }
+
+  get workflow_webhook_deliveries() {
+    return this.scoped_client.workflow_webhook_deliveries;
+  }
+
+  get workflow_outbox() {
+    return this.scoped_client.workflow_outbox;
+  }
+
+  get stored_files() {
+    return this.scoped_client.stored_files;
+  }
+
+  get dossiers() {
+    return this.scoped_client.dossiers;
+  }
+
+  get dossier_items() {
+    return this.scoped_client.dossier_items;
+  }
+
+  get workflow_instance_comments() {
+    return this.scoped_client.workflow_instance_comments;
+  }
+
+  get workflow_public_links() {
+    return this.scoped_client.workflow_public_links;
   }
 
   // CRM (PLAN-CRM §2.3)

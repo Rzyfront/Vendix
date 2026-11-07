@@ -34,6 +34,32 @@ const cases = [
   // Subdominios de vendix.online no se tocan (solo www.vendix.online, arriba).
   ['/', 'www.tienda.vendix.online', {}, '/index.html'],
   ['/', 'www.', {}, '/index.html'],
+  // SEO-TECH-03: en vendix.online las rutas desconocidas no se reescriben (S3 da 404 con index.html de cuerpo).
+  ['/ruta-que-no-existe-seo-smoke', 'vendix.online', {}, '/ruta-que-no-existe-seo-smoke'],
+  ['/blog', 'vendix.online', {}, '/blog'],
+  ['/pricingx', 'vendix.online', {}, '/pricingx'],
+  ['/administrador', 'vendix.online', {}, '/administrador'],
+  ['/pricing', 'vendix.online', { utm_source: { value: 'ig' } }, '/index.html'],
+  ['/pricing/', 'vendix.online', {}, '/index.html'],
+  ['/', 'vendix.online', {}, '/index.html'],
+  ['/ayuda', 'vendix.online', {}, '/index.html'],
+  ['/pqr/consultar/T-123', 'vendix.online', {}, '/index.html'],
+  ['/pqr/gracias/T-123', 'vendix.online', {}, '/index.html'],
+  ['/legal/cookies', 'vendix.online', {}, '/index.html'],
+  ['/guias/cierre-de-caja', 'vendix.online', {}, '/index.html'],
+  ['/auth/login', 'vendix.online', {}, '/index.html'],
+  ['/auth/verify-email', 'vendix.online', { token: { value: 'x' } }, '/index.html'],
+  ['/admin/dashboard', 'vendix.online', {}, '/index.html'],
+  ['/super-admin/dashboard', 'vendix.online', {}, '/index.html'],
+  ['/superadmin/dashboard', 'vendix.online', {}, '/index.html'],
+  ['/repartos/pool', 'vendix.online', {}, '/index.html'],
+  ['/onboarding', 'vendix.online', {}, '/index.html'],
+  ['/reset-password', 'vendix.online', { token: { value: 'x' } }, '/index.html'],
+  // Los prefijos de tienda siguen reescribiéndose en cualquier host (enlaces con token).
+  ['/pedido/0b6f5c1e', 'vendix.online', {}, '/index.html'],
+  // En tiendas no cambia nada: Angular decide.
+  ['/ruta-que-no-existe-seo-smoke', 'tienda-demo.vendix.online', {}, '/index.html'],
+  ['/ruta-que-no-existe-seo-smoke', 'mesura.beauty', {}, '/index.html'],
 ];
 
 for (const [uri, host, qs, expected] of cases) {

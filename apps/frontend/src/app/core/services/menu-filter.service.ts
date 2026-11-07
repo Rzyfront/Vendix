@@ -14,6 +14,7 @@ import {
   MODULE_INDUSTRIES,
   type ModuleIndustry,
   industryAllowsKey,
+  isIndustryAlwaysEnforced,
 } from '../../shared/constants/module-industries';
 import {
   MODULE_GATE_ROUTES,
@@ -361,6 +362,12 @@ export class MenuFilterService {
     // industria `hospitality` lo permita.
     Hotelería: 'hospitality',
     Habitaciones: 'hospitality_rooms',
+
+    // Administración (flujos-documental S6). Industria `administration`,
+    // siempre aplicada (ENFORCED_INDUSTRY_KEYS): el sidebar las deja visibles
+    // con candado cuando la tienda no tiene la industria.
+    Flujos: 'flows',
+    Documentos: 'documents',
 
     // ERP Modules
     Facturación: 'invoicing',
@@ -890,7 +897,7 @@ export class MenuFilterService {
         const auditOnlyItem: MenuItem = {
           ...item,
           _locked: locked,
-          _planLocked: this.isPlanLocked(this.gateKeysFor(item)),
+          _planLocked: this.isLockedForSidebar(this.gateKeysFor(item)),
         };
 
         // If it has children, recursively filter them (children can also be audit-only)
@@ -948,7 +955,7 @@ export class MenuFilterService {
           const filteredItem: MenuItem = {
             ...item,
             _locked: locked,
-            _planLocked: this.isPlanLocked(itemKeys),
+            _planLocked: this.isLockedForSidebar(itemKeys),
           };
 
           // Recursively filter children if present
@@ -1637,14 +1644,27 @@ export class MenuFilterService {
     const industryDenied = verdicts.every(
       (verdict) => !industryAllowsKey(verdict.key, verdict.industries),
     );
-    const block = industryDenied && this.accessGate.mode() === 'enforce';
+    // flujos-documental S1: modules born after the audit week (`flows`,
+    // `documents`) enforce their industry rule whatever the gate mode. Like the
+    // plan layer, the sidebar and the Apps card keep them visible with a lock
+    // (`isIndustryLocked`); a URL or a Vexi navigation is blocked and the
+    // caller opens the industry paywall. Every other key follows the mode.
+    const alwaysEnforced =
+      industryDenied &&
+      verdicts.every((verdict) => isIndustryAlwaysEnforced(verdict.key));
+    const block =
+      industryDenied && (alwaysEnforced || this.accessGate.mode() === 'enforce');
     const reported = industryDenied
       ? verdicts[0]
       : (verdicts.find((verdict) => verdict.layer !== 'industry') ?? verdicts[0]);
     const hides = surface === 'sidebar' || surface === 'apps_card';
+    // An always-enforced key stays visible with a lock on the sidebar and the
+    // Apps card, so it is logged as `would_hide`, never as `hidden`.
     const decision: AccessDecision = block
       ? hides
-        ? 'hidden'
+        ? alwaysEnforced
+          ? 'would_hide'
+          : 'hidden'
         : 'blocked'
       : hides
         ? 'would_hide'
@@ -1656,7 +1676,25 @@ export class MenuFilterService {
       surface,
       ...(route ? { route } : {}),
     });
-    return !block;
+    return !block || (alwaysEnforced && hides);
+  }
+
+  /**
+   * True when an always-enforced module (`flows`, `documents`) is closed by the
+   * store industries. The sidebar paints it with the same lock as a plan lock
+   * (`_planLocked`) and the route gate opens the industry paywall.
+   */
+  isIndustryLocked(keys: string[]): boolean {
+    if (!keys.length) return false;
+    const industries = this.gateIndustries(this.accessGate.currentApp());
+    return keys.every(
+      (key) => isIndustryAlwaysEnforced(key) && !industryAllowsKey(key, industries),
+    );
+  }
+
+  /** Lock painted on a sidebar item: plan lock or industry lock. */
+  private isLockedForSidebar(keys: string[]): boolean {
+    return this.isPlanLocked(keys) || this.isIndustryLocked(keys);
   }
 
   /** True when the plan in force does not include `key` (exempt keys never). */

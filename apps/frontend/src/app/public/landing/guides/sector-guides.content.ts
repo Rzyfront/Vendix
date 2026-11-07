@@ -264,4 +264,157 @@ export const SECTOR_GUIDES: Readonly<Record<string, SectorGuide>> = {
       'Conteo completo una o dos veces al año.',
     ],
   },
+  'elegir-software-pos': {
+    title: 'Cómo elegir un software POS para tu negocio en Colombia',
+    description:
+      'Nueve criterios para comparar un POS: facturación electrónica DIAN, inventario, sedes, lector, impresora, internet, soporte, migración y precio total.',
+    category: 'Punto de venta',
+    intro:
+      'Elegir un POS es decidir cómo vas a vender, cobrar y facturar durante años. Esta guía te da nueve criterios para comparar a cualquier proveedor, una prueba que puedes hacer en la demostración y una lista para puntuar. Al final explicamos cómo cumple Vendix cada criterio, con sus límites.',
+    sections: [
+      {
+        heading: 'Antes de comparar, escribe cómo vendes',
+        paragraphs: [
+          'Anota en media página cuántas cajas y cajeros tienes, si vendes por código de barras, por peso o con tallas y colores, cuántos locales o bodegas manejas, cómo te pagan (efectivo, tarjeta, transferencia) y quién te hace la factura hoy. Con eso evalúas lo que necesitas, no lo que el vendedor quiere mostrar.',
+        ],
+      },
+      {
+        heading: 'Criterios 1 a 3: facturación electrónica, inventario y sedes',
+        paragraphs: [
+          '1. Facturación electrónica DIAN y su plan. Pregunta qué documentos emite (factura electrónica de venta, notas crédito y, si tu actividad lo requiere, el documento equivalente del POS; confirma con tu contador cuál te corresponde), en qué plan viene, quién tramita el certificado digital y la habilitación ante la DIAN, y si cobran por folio. Desconfía de quien te promete una fecha de habilitación: el tiempo depende de la DIAN y de tu comercio.',
+          '2. Inventario. El stock debe bajar solo al vender, avisarte antes de agotarse y dejarte corregir diferencias con un motivo. Pregunta si permite vender sin existencias, si hay conteos y ajustes con historial y si maneja variantes como talla y color. Desconfía de un inventario que solo se actualiza al cierre del día.',
+          '3. Varias sedes. Pregunta si puedes tener bodega y local, o dos sedes, con traslados registrados, y si cada punto de venta descuenta de la ubicación correcta. Desconfía de quien cobra aparte por cada sede sin decírtelo desde el inicio.',
+        ],
+      },
+      {
+        heading: 'Criterios 4 a 6: lector, impresora e internet',
+        paragraphs: [
+          '4. Lector de códigos. Lo habitual es un lector USB o Bluetooth que escribe el código como si fuera un teclado. Pregunta si lo soporta, si hay que activarlo y si también lee con la cámara del celular. Desconfía de un «compatible con todo» sin demostración con tu lector.',
+          '5. Impresora. Hay dos caminos: imprimir desde el navegador, con la impresora instalada en tu equipo, o enviar comandos directos a una impresora térmica. Pregunta cuál usa y prueba tu modelo, en papel de rollo si es el que usas. Desconfía de un «100 % compatible» sin lista de modelos probados.',
+          '6. Internet requerido. Pregunta qué pasa cuando se cae la conexión y desconecta el wifi durante la demostración para verlo. Muchos POS en la nube necesitan conexión para vender; si te prometen otra cosa, pide verla funcionar. Ten siempre un plan B, como los datos del celular.',
+        ],
+      },
+      {
+        heading: 'Criterios 7 a 9: soporte, migración y precio total',
+        paragraphs: [
+          '7. Soporte. Pregunta por qué canales atienden, en qué horarios y qué tiempo de respuesta se comprometen por escrito. Desconfía de un «soporte garantizado» sin condiciones.',
+          '8. Migración. Pregunta qué datos entran (productos, clientes, existencias), en qué formato y quién los carga. Pregunta también qué no entra: casi nunca se trasladan el historial de ventas, las facturas ni la contabilidad, así que conserva tu sistema anterior para consulta. Revisa la guía para pasar tus productos de Excel a un POS (/guias/pasar-productos-excel-a-pos).',
+          '9. Precio total. Suma durante un año la suscripción, los usuarios o sedes adicionales, los folios de facturación, las comisiones por venta, los equipos (lector, impresora, tablet), la implementación o capacitación y el costo de salir (permanencia, exportación de tus datos). Compara ese total, no el precio de portada.',
+        ],
+      },
+      {
+        heading: 'Haz esta prueba en la demostración',
+        paragraphs: [
+          'Lleva 10 de tus productos: uno que se venda por peso, uno con variantes y uno con código de barras. Vende dos productos en efectivo y uno con tarjeta. Haz una devolución y revisa que el stock vuelva. Cierra la caja y mira si el efectivo esperado coincide con tu cuenta (guía de cierre de caja: /guias/cierre-de-caja). Imprime el comprobante en tu impresora y pide ver el flujo de facturación electrónica de principio a fin, con lo que falta para habilitarlo.',
+          'Después puntúa cada criterio de 1 a 5 y multiplícalo por el peso que le das según tu negocio. Compara hasta tres proveedores con la misma lista.',
+        ],
+      },
+      {
+        heading: 'Cómo cumple Vendix cada criterio',
+        paragraphs: [
+          'Facturación electrónica DIAN: está en los planes Empresarial Pro e IA Business; los planes Impulsa y Emprendedor no facturan electrónicamente. Requiere que tu comercio complete la habilitación: si ya configuraste la facturación electrónica, Vendix no deja emitir documentos que gasten numeración hasta que la habilitación esté en producción. No prometemos plazos de habilitación.',
+          'Inventario: el stock baja al cobrar y, por defecto, no deja vender más de lo que hay. Avisa con una notificación de stock bajo (umbral de 10 unidades, ajustable) y permite conteos, ajustes con motivo y traslados. Mira la guía de control de inventario (/guias/control-de-inventario). Varias sedes: maneja varias ubicaciones, como bodega y local, con traslados que se aprueban y se reciben; por defecto el POS descuenta de la bodega principal.',
+          'Lector e impresora: sirve un lector USB o Bluetooth que escriba como teclado y se activa en la configuración del POS, donde viene apagado; no lee con la cámara. Imprime con el diálogo de impresión del navegador, en papel de rollo u hoja, y no envía comandos directos a la impresora.',
+          'Internet: Vendix requiere conexión a internet para vender. Migración: importas productos y clientes desde Excel o CSV con plantillas; no se traen ventas, facturas ni contabilidad, y la carga la haces tú. Si prefieres que el equipo cargue muchos productos, se cotiza como implementación avanzada. Precio: consulta los planes y las condiciones de la prueba en /pricing.',
+        ],
+      },
+      {
+        heading: 'Preguntas frecuentes',
+        paragraphs: [
+          '¿Necesito un POS con facturación electrónica? Depende de si tu actividad está obligada a facturar electrónicamente. Confirma con tu contador antes de elegir; si lo estás, haz del criterio 1 el de mayor peso.',
+          '¿Un POS funciona sin internet? Depende del proveedor: pregúntalo y compruébalo desconectando el wifi en la demostración. En Vendix se necesita conexión para vender.',
+          '¿Cuánto cuesta un software POS? No hay un precio único. Calcula el costo total a un año con la lista del criterio 9 y compáralo entre proveedores.',
+          '¿Cuánto tarda cambiar de sistema? Depende de cuántos productos tengas y de qué tan limpia esté tu lista. Desconfía de plazos fijos prometidos sin ver tus datos; la habilitación ante la DIAN tampoco depende del proveedor.',
+        ],
+      },
+    ],
+    checklist: [
+      'Media página con cómo vendes: cajas, cajeros, sedes y medios de pago.',
+      'Los tres proveedores que vas a comparar y el peso de cada criterio.',
+      'Confirmación de tu contador sobre si debes facturar electrónicamente.',
+      'Diez productos de prueba: uno por peso, uno con variantes y uno con código de barras.',
+      'Tu lector de códigos y tu impresora para probarlos en la demostración.',
+      'Una prueba de cinco ventas: efectivo, tarjeta, devolución, cierre de caja e impresión.',
+      'El costo total a un año de cada proveedor, con equipos y salida incluidos.',
+    ],
+  },
+  'pasar-productos-excel-a-pos': {
+    title: 'Cómo pasar tus productos de Excel a un POS paso a paso',
+    description:
+      'Cómo preparar tu archivo, manejar variantes, cargar existencias por ubicación, evitar duplicados y validar con una muestra antes de migrar a un POS.',
+    category: 'Migración',
+    intro:
+      'Pasar tu catálogo a un sistema nuevo no es copiar y pegar: es limpiar, ordenar, probar y comparar. Si lo haces en ese orden, el día que empieces a vender los números coinciden. Esta guía sirve para cualquier POS y al final muestra cómo se hace en Vendix.',
+    sections: [
+      {
+        heading: 'Define qué pasas y qué no',
+        paragraphs: [
+          'Casi siempre se pueden pasar productos, variantes, precios, existencias y clientes. Casi nunca se pasan el historial de ventas, las facturas electrónicas emitidas, la contabilidad ni la cartera: esos datos los conservas en tu sistema anterior, o en archivos, para consultarlos. Haz un respaldo del archivo original y no lo modifiques: es tu punto de comparación.',
+        ],
+      },
+      {
+        heading: 'Prepara el archivo',
+        paragraphs: [
+          'Trabaja en una copia, con una fila por producto. Las columnas mínimas son: nombre claro; SKU único (si no tienes, invéntalo con un patrón como CAM-NEG-M); código de barras en formato texto, para no perder ceros iniciales ni terminar en notación científica; precio de venta solo con números (8500 u 8.500, sin signo de pesos); costo de compra, necesario para valorar el inventario; categoría y marca escritas siempre igual; unidad de venta; y la existencia contada, no un cálculo.',
+          'Borra las filas vacías, quita los productos que ya no vendes y corrige el mismo producto escrito de dos maneras antes de subir. «Papelería» y «Papeleria» serían dos categorías distintas.',
+        ],
+      },
+      {
+        heading: 'Variantes: un padre y varias hijas',
+        paragraphs: [
+          'Para tallas, colores o sabores, crea una fila padre (la camiseta) y una fila por variante (negro M, blanco M), cada una con su propio SKU y sus atributos (Color, Talla). Las variantes de un mismo padre deben usar los mismos nombres de atributo, escritos igual.',
+        ],
+      },
+      {
+        heading: 'Existencias iniciales por ubicación',
+        paragraphs: [
+          'Las existencias dependen de dónde están: no es lo mismo la bodega que el local. Cuenta el día del corte, ubicación por ubicación, y carga esa cifra como saldo, no como suma sobre lo anterior. Si sigues vendiendo en el sistema viejo mientras cargas, tus números nacen desactualizados: define un día y una hora de corte.',
+        ],
+      },
+      {
+        heading: 'Revisa duplicados y prueba con una muestra',
+        paragraphs: [
+          'Antes de subir, busca en tu hoja SKU repetidos, códigos de barras repetidos y nombres casi iguales, y decide cuál fila queda. Un duplicado que entra al sistema cuesta más corregirlo que prevenirlo.',
+          'Sube primero 10 filas que incluyan un producto simple, uno por peso, uno con variantes y uno sin inventario. Revisa cómo quedaron, haz una venta de prueba y solo entonces sube el archivo completo.',
+        ],
+      },
+      {
+        heading: 'Valida con tu lista de control',
+        paragraphs: [
+          'Productos: cuenta las filas del archivo y los productos en el sistema; deben ser iguales. Variantes: las filas hijas deben coincidir con las variantes creadas. Existencias: suma las unidades por ubicación y revisa 10 productos al azar contra tu conteo. Precios: revisa 10 productos al azar contra el archivo. Duplicados: sube el mismo archivo otra vez y comprueba que no se creen repetidos. Venta de prueba: vende un producto y verifica que su stock baje en 1.',
+        ],
+      },
+      {
+        heading: 'Cómo se hace en Vendix',
+        paragraphs: [
+          'Dónde y con qué archivo. En Productos, el menú tiene Carga Masiva y Descargar Plantilla con Productos Actuales. La carga acepta archivos .xlsx, .xls o .csv, lee la primera hoja y admite hasta 10.000 filas y 20 MB por archivo. Descarga la plantilla de Productos (la de Servicios es otra). Los encabezados se reconocen sin importar mayúsculas ni tildes, pero una columna con un nombre que Vendix no conoce se ignora en silencio: no cambies los nombres. Son obligatorios Nombre, SKU y Precio Venta.',
+          'Revisión antes de guardar. Pulsa Analizar Archivo: Vendix muestra cuántas filas están listas, con advertencias o con errores, y el análisis no guarda nada. Los errores más comunes son un precio que no es un número, un código de barras en notación científica o de más de 64 caracteres, y un código de barras ya usado por otro producto. Las categorías y marcas nuevas se crean solas, con aviso.',
+          'Variantes. En la fila de la variante escribe el SKU Padre (el SKU de la fila padre, que debe estar en el mismo archivo) y hasta tres pares Atributo y Valor. Sin padre en el archivo, la fila se rechaza; sin atributos o con SKU repetido, es un error.',
+          'Existencias de un producto simple. Con Cantidad Inicial y Precio Compra en la plantilla, Vendix carga el saldo en la ubicación principal (la bodega marcada como principal) como Carga inicial, y te pide marcar una confirmación porque cambia stock y costo. Si el saldo ya coincide, no hace nada.',
+          'Existencias por ubicación y por variante. La Cantidad Inicial no aplica a productos con variantes. Para eso, y para cargar una bodega distinta, usa Inventario, Ajustes de Stock, Carga Masiva: eliges la ubicación y el tipo de ajuste, descargas la plantilla de productos existentes (trae una fila por variante, con el SKU de la variante), llenas Cantidad Nueva y subes. Las entradas sin stock en esa bodega se registran como Carga inicial.',
+          'Duplicados. Un SKU que ya existe en tu tienda actualiza ese producto en vez de crear otro; si estaba archivado, lo reactiva con aviso. Un SKU repetido dentro del archivo genera una advertencia: corrígelo antes de guardar. Un código de barras repetido, en el archivo o ya en uso, es un error. En clientes, si el correo o el documento ya existe, la fila se rechaza: esta carga no actualiza clientes.',
+          'Al reimportar. Si subes el mismo archivo, los productos con el mismo SKU se actualizan. Ten cuidado con la Cantidad Inicial: si el saldo del archivo es distinto al actual, Vendix lo ajusta a la cantidad del archivo. La descarga con productos actuales trae la existencia en otra columna y deja vacía la Cantidad Inicial para no recargar. Las fotos se cargan aparte, con un ZIP asociado por SKU.',
+          'Lo que no se trae. No existe importador de historial de ventas, facturas, contabilidad, cartera ni proveedores, y Vendix no se conecta con tu programa anterior: exportas tus datos a Excel o CSV y los pasas a la plantilla. La carga la haces tú; si prefieres que el equipo cargue muchos productos, se cotiza como implementación avanzada. No compartas tu base completa por canales informales: para consultar un caso bastan pocas filas.',
+        ],
+      },
+      {
+        heading: 'Preguntas frecuentes',
+        paragraphs: [
+          '¿Puedo importar desde otro programa? Exporta tus datos a Excel o CSV y pásalos a la plantilla. No hay conexión directa entre programas.',
+          '¿Qué pasa si subo el mismo archivo dos veces? Los productos con el mismo SKU se actualizan, no se duplican. Los clientes repetidos se rechazan.',
+          '¿Cómo cargo existencias de varias bodegas o de productos con variantes? Con Ajustes de Stock, Carga Masiva, eligiendo la ubicación y usando el SKU de cada variante.',
+          '¿Se pasan mis facturas y mi contabilidad? No. Solo catálogo, clientes, existencias y fotos. Para saber cómo queda el inventario después, mira la guía de control de inventario (/guias/control-de-inventario).',
+        ],
+      },
+    ],
+    checklist: [
+      'Respaldo del archivo original, sin modificarlo.',
+      'Copia de trabajo con una fila por producto y SKU únicos.',
+      'Códigos de barras en formato texto y precios solo con números.',
+      'Filas padre y filas hijas para productos con variantes.',
+      'Día y hora de corte, con el conteo por ubicación.',
+      'Muestra de 10 filas subida y revisada antes del archivo completo.',
+      'Lista de control: productos, variantes, existencias, precios y venta de prueba.',
+    ],
+  },
 };

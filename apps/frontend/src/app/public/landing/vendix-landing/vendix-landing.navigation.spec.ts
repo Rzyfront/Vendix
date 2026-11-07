@@ -66,4 +66,40 @@ describe('VendixLandingComponent menu links (SEO-TECH-09)', () => {
     links[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     expect(fixture.componentInstance.mobileMenuOpen()).toBeFalse();
   });
+
+  function menuToggle(): HTMLButtonElement {
+    return fixture.debugElement.query(By.css('header button[aria-controls="landing-mobile-menu"]'))
+      .nativeElement as HTMLButtonElement;
+  }
+
+  it('exposes the mobile menu state to screen readers and closes it with Escape', async () => {
+    const toggle = menuToggle();
+    expect(toggle.type).toBe('button');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-label')).toBe('Abrir menú de navegación');
+    expect(fixture.nativeElement.querySelector('#landing-mobile-menu')).toBeNull();
+
+    toggle.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const menu = fixture.nativeElement.querySelector('#landing-mobile-menu') as HTMLElement;
+    expect(menu.tagName).toBe('NAV');
+    expect(menu.getAttribute('aria-label')).toBe('Menú principal');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-label')).toBe('Cerrar menú de navegación');
+
+    // Keyboard: every item in the drawer is a focusable button or link.
+    const items = Array.from(menu.querySelectorAll<HTMLElement>('a, button'));
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((el) => el.tabIndex === 0)).toBeTrue();
+
+    menu.querySelector('a')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.componentInstance.mobileMenuOpen()).toBeFalse();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(fixture.nativeElement.querySelector('#landing-mobile-menu')).toBeNull();
+  });
 });

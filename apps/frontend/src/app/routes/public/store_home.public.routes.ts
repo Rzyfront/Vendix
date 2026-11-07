@@ -20,4 +20,12 @@ export const storeHomePublicRoutes: Routes = [
         (c) => c.StoreHomeComponent,
       ),
   },
+  {
+    // Flujos: public request form by link (no login; store from the domain).
+    path: 'flujos/:token',
+    loadComponent: () =>
+      import('../../public/ecommerce/pages/workflow-public-form/workflow-public-form.component').then(
+        (c) => c.WorkflowPublicFormComponent,
+      ),
+  },
 ];
