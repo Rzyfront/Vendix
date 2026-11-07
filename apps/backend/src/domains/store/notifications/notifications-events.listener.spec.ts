@@ -452,6 +452,42 @@ describe('NotificationsEventsListener — CRM SMS spend cap', () => {
   });
 });
 
+describe('NotificationsEventsListener — comprobante de transferencia por confirmar', () => {
+  it('notifies the store with a link to the payment requests to review', async () => {
+    const notificationsService = { createAndBroadcast: jest.fn().mockResolvedValue({}) } as any;
+    const listener = new NotificationsEventsListener(
+      notificationsService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+      {} as any,
+    );
+
+    await listener.handlePaymentRequestReceiptSubmitted({
+      store_id: 10,
+      payment_request_id: 5,
+      amount: 400000,
+      purpose: 'service_deposit',
+      description: 'Anticipo Cava 3',
+    });
+
+    expect(notificationsService.createAndBroadcast).toHaveBeenCalledWith(
+      10,
+      'payment_received',
+      'Comprobante por confirmar',
+      'Un cliente subió el comprobante de transferencia de «Anticipo Cava 3». Revísalo para confirmar el pago.',
+      {
+        payment_request_id: 5,
+        amount: 400000,
+        purpose: 'service_deposit',
+        route: '/admin/reservations/payment-requests',
+      },
+    );
+  });
+});
+
 describe('NotificationsEventsListener — recordatorio de cuota de crédito (campana)', () => {
   const baseEvent = {
     store_id: 10,
@@ -554,6 +590,54 @@ describe('NotificationsEventsListener.handleBookingStarted — proveedor como us
     await listener.handleBookingStarted(event);
     expect(notificationsService.sendToUser).toHaveBeenCalledWith(
       1, 40, 'booking_attending', expect.any(String), expect.any(String), expect.any(Object),
+    );
+  });
+});
+
+describe('NotificationsEventsListener.handleOrderStatusChanged', () => {
+  function build() {
+    const notificationsService = {
+      createAndBroadcast: jest.fn().mockResolvedValue({}),
+    } as any;
+    const listener = new NotificationsEventsListener(
+      notificationsService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { emit: jest.fn() } as any,
+      { deliver: jest.fn() } as any,
+    );
+    return { listener, notificationsService };
+  }
+
+  it('does not notify when old_state equals new_state', async () => {
+    const { listener, notificationsService } = build();
+    await listener.handleOrderStatusChanged({
+      store_id: 1,
+      order_id: 10,
+      order_number: 'SVC-1',
+      old_state: 'created',
+      new_state: 'created',
+    } as any);
+    expect(notificationsService.createAndBroadcast).not.toHaveBeenCalled();
+  });
+
+  it('still notifies a real transition', async () => {
+    const { listener, notificationsService } = build();
+    await listener.handleOrderStatusChanged({
+      store_id: 1,
+      order_id: 10,
+      order_number: 'SVC-1',
+      old_state: 'created',
+      new_state: 'finished',
+    } as any);
+    expect(notificationsService.createAndBroadcast).toHaveBeenCalledWith(
+      1,
+      'order_status_change',
+      'Estado de Orden Actualizado',
+      'Orden #SVC-1: created → finished',
+      { order_id: 10, order_number: 'SVC-1' },
     );
   });
 });

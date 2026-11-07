@@ -8,6 +8,10 @@ import { getModulesHiddenByIndustries } from '../../../../../shared/constants/in
 import type { CartItem } from '../models/cart.model';
 import { catalogInclusiveDefault } from '../../products/utils/product-tax-inclusive.util';
 import { resolveLineUnits } from '../utils/line-units.util';
+import type {
+  ServiceStation,
+  SessionDepositInput,
+} from '../../reservations/components/service-stations/service-stations.service';
 
 /**
  * Tasa que el producto lleva INCLUIDA en su precio publicado (misma precedencia
@@ -89,6 +93,63 @@ export interface StationCartMapping {
   amount: number;
 }
 
+/** Duration variant of a rental plan (S2): "4 horas · $…". */
+export interface PosRentalVariant {
+  id: number;
+  name: string | null;
+  service_duration_minutes: number | null;
+  service_duration_unit: 'minute' | 'hour' | 'day' | null;
+  price: number | null;
+}
+
+/** Service product (rental plan) with its duration variants. */
+export interface PosRentalPlan {
+  id: number;
+  name: string;
+  variants: PosRentalVariant[];
+}
+
+/** Body of `POST /store/service-sessions` for a walk-in opened from the POS. */
+export interface PosOpenSessionPayload {
+  station_id: number;
+  product_id?: number;
+  /** Walk-in only: the backend rejects it together with `booking_id` (STATION_009). */
+  product_variant_id?: number;
+  customer_id?: number;
+  deposit?: SessionDepositInput;
+  /** Answers of the intake form (`entity_metadata_fields.id` -> value). */
+  intake_values?: Array<{ field_id: number; value: string | number | boolean | null }>;
+  subject?: { subject_type: string; label: string };
+}
+
+/**
+ * Label of a variant duration in its own unit: 240 min in unit "hour" -> "4 horas".
+ * Without a stored unit the largest exact unit is used.
+ */
+export function formatRentalDuration(
+  minutes: number | null | undefined,
+  unit?: 'minute' | 'hour' | 'day' | null,
+): string {
+  const total = Number(minutes ?? 0);
+  if (!Number.isFinite(total) || total <= 0) return '';
+  const size = { minute: 1, hour: 60, day: 1440 } as const;
+  const names = {
+    minute: ['minuto', 'minutos'],
+    hour: ['hora', 'horas'],
+    day: ['día', 'días'],
+  } as const;
+  const u:'minute' | 'hour' | 'day' =
+    unit && total % size[unit] === 0
+      ? unit
+      : total % 1440 === 0
+        ? 'day'
+        : total % 60 === 0
+          ? 'hour'
+          : 'minute';
+  const value = total / size[u];
+  return `${value} ${names[u][value === 1 ? 0 : 1]}`;
+}
+
 /** Máximo de líneas por llamada que acepta el endpoint bulk. */
 export const SERVICE_SESSION_BULK_MAX_LINES = 50;
 
@@ -135,6 +196,64 @@ export class PosServiceStationIntegrationService {
             ),
           );
         }),
+      );
+  }
+
+  /** Active stations without a live session: the ones the cashier can open now. */
+  listFreeStations(): Observable<ServiceStation[]> {
+    return this.http
+      .get<{ data?: ServiceStation[] } | ServiceStation[]>(
+        `${this.apiUrl}/store/service-stations`,
+        { params: { page: '1', limit: '100' } },
+      )
+      .pipe(
+        map((res) => {
+          const rows = Array.isArray(res) ? res : (res?.data ?? []);
+          return rows.filter((s) => s.status === 'active' && !s.active_session);
+        }),
+      );
+  }
+
+  /** Service products with their variants, to offer the duration choice. */
+  listRentalPlans(): Observable<PosRentalPlan[]> {
+    return this.http
+      .get<ApiResponse<any[]> | any[]>(
+        `${this.apiUrl}/store/products?product_type=service&include_variants=true&limit=100`,
+      )
+      .pipe(
+        map((res) => {
+          const rows: any[] = Array.isArray(res) ? res : (res?.data ?? []);
+          return rows.map((p) => ({
+            id: Number(p.id),
+            name: String(p.name ?? ''),
+            variants: (p.product_variants ?? p.variants ?? [])
+              .filter((v: any) => v?.is_active !== false)
+              .map((v: any) => ({
+                id: Number(v.id),
+                name: v.name ?? null,
+                service_duration_minutes: v.service_duration_minutes ?? null,
+                service_duration_unit: v.service_duration_unit ?? null,
+                price:
+                  v.final_price != null
+                    ? Number(v.final_price)
+                    : v.price_override != null
+                      ? Number(v.price_override)
+                      : null,
+              })),
+          }));
+        }),
+      );
+  }
+
+  /** Opens a walk-in session (optionally with the consumable deposit). */
+  openSession(payload: PosOpenSessionPayload): Observable<{ id: number }> {
+    return this.http
+      .post<ApiResponse<{ id: number }> | { id: number }>(
+        `${this.apiUrl}/store/service-sessions`,
+        payload,
+      )
+      .pipe(
+        map((res) => ('data' in res && res.data ? res.data : (res as { id: number }))),
       );
   }
 

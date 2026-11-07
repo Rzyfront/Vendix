@@ -1268,6 +1268,31 @@ describe('FinancialAnalyticsService', () => {
     });
   });
 
+  describe('getCashSessionsForExport — anticipos de reserva (S14)', () => {
+    it('un anticipo de reserva con tarjeta queda fuera de total_sales', async () => {
+      prisma.cash_register_sessions.findMany.mockResolvedValue([
+        {
+          status: 'closed', opened_at: new Date('2026-07-08T15:30:00.000Z'), closed_at: null,
+          opening_amount: 0, expected_closing_amount: 0, actual_closing_amount: 0, difference: 0,
+          register: { name: 'Caja 1' }, opened_by_user: null, closed_by_user: null,
+          movements: [
+            { type: 'sale', amount: 300, source_type: null },
+            { type: 'sale', amount: 400000, source_type: 'service_deposit' },
+          ],
+        },
+      ]);
+      const [row] = await service.getCashSessionsForExport(QUERY as any);
+      expect(row.total_sales).toBe(300);
+      expect(prisma.cash_register_sessions.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({
+            movements: { select: expect.objectContaining({ type: true, amount: true, source_type: true }) },
+          }),
+        }),
+      );
+    });
+  });
+
   describe('getCashSessionsReport (QUI-543)', () => {
     const SESSION_OPEN = {
       status: 'open',

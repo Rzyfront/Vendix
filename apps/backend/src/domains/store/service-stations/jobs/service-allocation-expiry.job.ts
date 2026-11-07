@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import { bookingIdFromRentalPurpose } from '../../reservations/rental-prepay/rental-prepay.service';
 
 /**
  * Frees timed station/provider holds so the PostgreSQL exclusion constraint
@@ -50,13 +51,43 @@ export class ServiceAllocationExpiryJob {
 
   private async runTick(tx: Prisma.TransactionClient): Promise<void> {
     const now = new Date();
+    const inReview = await this.bookingsWithReceiptInReview(tx);
     const result = await tx.service_allocations.updateMany({
       where: {
         state: { in: ['held', 'payment_pending'] },
         expires_at: { lte: now },
+        // A9: a hold whose transfer receipt is under review never expires. Explicit
+        // `booking_id: null` keeps session holds expiring (NOT IN drops NULL rows).
+        ...(inReview.length ? { OR: [{ booking_id: null }, { booking_id: { notIn: inReview } }] } : {}),
       },
       data: { state: 'expired', updated_at: now },
     });
     if (result.count) this.logger.log(`Expired ${result.count} service allocation hold(s)`);
+  }
+
+  /**
+   * Bookings whose payment request has a transfer receipt awaiting the admin:
+   * deposit requests (linked through `service_deposits`) and "cobro para reservar"
+   * requests (purpose `service_rental:<booking id>`). The deposit and prepay jobs
+   * already skip them; without this the slot would be freed under the customer.
+   */
+  private async bookingsWithReceiptInReview(tx: Prisma.TransactionClient): Promise<number[]> {
+    const [deposits, rentals] = await Promise.all([
+      tx.service_deposits.findMany({
+        where: { booking_id: { not: null }, payment_request: { status: 'awaiting_confirmation' } },
+        select: { booking_id: true },
+      }),
+      tx.payment_requests.findMany({
+        where: { purpose: { startsWith: 'service_rental:' }, status: 'awaiting_confirmation' },
+        select: { purpose: true },
+      }),
+    ]);
+    const ids = new Set<number>();
+    for (const row of deposits) if (row.booking_id != null) ids.add(row.booking_id);
+    for (const row of rentals) {
+      const bookingId = bookingIdFromRentalPurpose(row.purpose);
+      if (bookingId != null) ids.add(bookingId);
+    }
+    return [...ids];
   }
 }

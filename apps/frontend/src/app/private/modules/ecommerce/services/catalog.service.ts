@@ -147,6 +147,10 @@ export interface EcommerceProduct {
   pricing_type?: 'unit' | 'weight';
   product_type?: 'physical' | 'service';
   service_duration_minutes?: number | null;
+  /** Unit the duration is shown in; null/absent reads as 'minute'. */
+  service_duration_unit?: 'minute' | 'hour' | 'day' | null;
+  /** `station_rate` prices by station and start time (public quote); null otherwise. */
+  rental_pricing_mode?: 'fixed_price' | 'station_rate' | null;
   /**
    * Minutos de preparación del producto. `null`/ausente cuando no aplica.
    * Los consumidores solo lo pintan con el flag `show_preparation_time`
@@ -236,6 +240,8 @@ export interface ProductVariantDetail {
   image_url: string | null;
   is_on_sale: boolean;
   sale_price: number | null;
+  service_duration_minutes?: number | null;
+  service_duration_unit?: 'minute' | 'hour' | 'day' | null;
 }
 
 export interface ProductDetail extends EcommerceProduct {

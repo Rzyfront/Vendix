@@ -1,3 +1,4 @@
+import { formatDurationUnitShort } from '../../shared/utils/duration-unit.util';
 import type { EcommerceProduct } from '../../private/modules/ecommerce/services/catalog.service';
 
 /** A category filter chip of the service list. */
@@ -18,6 +19,7 @@ export type ServiceCardData = Pick<
   | 'final_price'
   | 'image_url'
   | 'service_duration_minutes'
+  | 'service_duration_unit'
   | 'service_modality'
   | 'requires_booking'
   | 'categories'
@@ -47,9 +49,17 @@ export function servicesInCategory<T extends ServiceLike>(
   return services.filter((s) => (s.categories ?? []).some((c) => c.id === categoryId));
 }
 
-/** "45 min", "1 h", "1 h 30 min"; `null` when the service has no duration. */
-export function formatDuration(minutes: number | null | undefined): string | null {
+/**
+ * "45 min", "2 h", "1 día", "1 h 30 min"; `null` when the service has no duration.
+ * With an hour or day unit that divides the value evenly it reads in that unit;
+ * a null unit keeps the minutes-based form.
+ */
+export function formatDuration(
+  minutes: number | null | undefined,
+  unit?: string | null,
+): string | null {
   if (!minutes || minutes <= 0) return null;
+  if (unit === 'hour' || unit === 'day') return formatDurationUnitShort(minutes, unit);
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   if (hours === 0) return `${rest} min`;

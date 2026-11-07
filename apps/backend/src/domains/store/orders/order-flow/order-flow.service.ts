@@ -155,6 +155,7 @@ import {
   WithholdingFlowService,
   type WithholdingResolution,
 } from '../../withholding-tax/withholding-flow.service';
+import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 
 type OrderState = order_state_enum;
 
@@ -2140,7 +2141,10 @@ export class OrderFlowService {
         where: { store_id: order.store_id ?? -1 },
         select: { settings: true },
       });
-      const pos = (settings?.settings as any)?.pos ?? {};
+      // Read with the defaults, as SettingsService and the panel do: a store whose `pos`
+      // section lacks the key opens anonymous tables, stations and POS sales, so its
+      // payment cannot be the one place that reads the absent key as "disabled".
+      const pos = mergeStoreSettingsWithDefaults(settings?.settings).pos;
       const allowAnonymous = pos?.allow_anonymous_sales === true;
       // QUI-737 (B.4) — una orden por alias (customer_id null + customer_alias
       // poblado) es otra venta legítima de "sin cliente formal": avanzar cuando
@@ -3423,6 +3427,39 @@ export class OrderFlowService {
   }
 
   /**
+   * Retained booking deposit (S17 `retain`): the `RSV-<booking>` order is born
+   * finished and paid with the deposit wallet. Run the POS invoice emitter on
+   * it like any paid presential sale; idempotent (an issued invoice is skipped).
+   */
+  async invoicePaidReservationFeeOrder(orderId: number): Promise<void> {
+    await this.emitPosSaleCompletedIfFullyPaid(orderId, 'reservation_fee.retained');
+  }
+
+  /**
+   * Rental order of a booking paid through its payment request (S1/S15, D6).
+   * It has no checkout draft invoice, so once fully paid the POS emitter
+   * issues it whatever its channel (see the `booking_rental` lane).
+   */
+  async invoicePaidBookingRentalOrder(orderId: number): Promise<void> {
+    await this.emitPosSaleCompletedIfFullyPaid(orderId, 'booking_rental.paid', 'booking_rental');
+  }
+
+  /**
+   * Station session settlement seam: once the deposit is applied and the
+   * order of a `service_sessions` row is fully paid, promote it like any
+   * paid POS order and run the invoice emitter (`invoicing.pos.auto_emit`).
+   * Idempotent; a no-op for an order that is not backed by a session. With
+   * a balance still open the cashier collects through the normal order
+   * payment flow, which already triggers invoicing.
+   */
+  async settlePaidServiceSessionOrder(orderId: number, actorUserId?: number): Promise<void> {
+    const order = await this.getOrder(orderId);
+    if (order.service_session_id == null) return;
+    await this.settlePaidSource(orderId, actorUserId, false, true);
+    await this.emitPosSaleCompletedIfFullyPaid(orderId, 'service_session.settled');
+  }
+
+  /**
    * B07/B11 — consumer of `finish_pending_after_payment`. Repeats the closing
    * step that failed after the money was taken, never the charge itself:
    * - `pay_finish`: `processing → finished` with the settled balance, voids
@@ -3667,11 +3704,11 @@ export class OrderFlowService {
     }
   }
 
-  private async settlePaidSource(orderId: number, actorUserId: number | undefined, requireSplit: boolean): Promise<void> {
+  private async settlePaidSource(orderId: number, actorUserId: number | undefined, requireSplit: boolean, serviceSession = false): Promise<void> {
     const context = RequestContextService.getContext();
     if (actorUserId && context?.user_id !== actorUserId) {
       return RequestContextService.runIsolated({ ...context!, user_id: actorUserId },
-        () => this.settlePaidSource(orderId, actorUserId, requireSplit));
+        () => this.settlePaidSource(orderId, actorUserId, requireSplit, serviceSession));
     }
     const order = await this.getOrder(orderId);
     if (['cancelled', 'refunded'].includes(order.state)) return;
@@ -3680,7 +3717,7 @@ export class OrderFlowService {
       .reduce((sum, p) => sum.plus(p.amount), new Prisma.Decimal(0));
     if (paid.lt(order.grand_total)) return;
     const table = await this.prisma.table_sessions.findFirst({ where: { order_id: orderId, store_id: order.store_id }, select: { id: true } });
-    if (!requireSplit && !table) return;
+    if (!requireSplit && !table && !serviceSession) return;
     if (order.state === 'draft') {
       if (table) {
         // Mesa: la promocion draft->created reserva solo lineas NO consumidas
@@ -7518,8 +7555,18 @@ export class OrderFlowService {
    * insumos consumidos al fire y `waste` los deja como merma. La decisión se
    * valida ANTES del claim para no dejar la orden en `cancelled` sin
    * decisión registrada. `force` aplica la misma ramificación.
+   *
+   * `options.keepGatewayFunds` (llamadores internos, nunca HTTP): las piernas
+   * de pasarela no se reversan por API porque el dinero se queda en la tienda
+   * (saldo a favor o retención de una reserva cancelada). Por defecto, igual
+   * que siempre.
    */
-  async cancelOrder(orderId: number, dto: CancelOrderDto, force = false) {
+  async cancelOrder(
+    orderId: number,
+    dto: CancelOrderDto,
+    force = false,
+    options: { keepGatewayFunds?: boolean } = {},
+  ) {
     const order = await this.getOrder(orderId);
     assertNoActiveFinancialSplit(order);
     await this.assertNoOpenTableForDraft(order);
@@ -8045,7 +8092,7 @@ export class OrderFlowService {
     if (nonCashRefunds.length > 0) {
       try {
         await this.refundFlowService!.completeCancellationNonCashRefunds(
-          order, nonCashRefunds,
+          order, nonCashRefunds, { keepGatewayFunds: options.keepGatewayFunds === true },
         );
       } catch (error) {
         this.logger.error(
@@ -11140,12 +11187,18 @@ export class OrderFlowService {
    * (`invoicing.pos.auto_emit ?? DEFAULT_POS_AUTO_EMIT`) y lo APLICA el
    * listener; no hay una segunda lectura del flag.
    *
+   * Carril `booking_rental` (orden de alquiler de una reserva pagada por su
+   * enlace de pago, S1/S15): no tiene borrador de checkout, así que entra a
+   * este emisor sea cual sea su canal; el flag sigue al carril de la venta
+   * (`invoicing.pos` en mostrador, `invoicing.ecommerce` en línea).
+   *
    * Nunca lanza: el pago ya está confirmado y la facturación no puede
    * revertirlo ni romper la respuesta del cobro.
    */
   private async emitPosSaleCompletedIfFullyPaid(
     orderId: number,
     source: string,
+    lane: 'presential' | 'booking_rental' = 'presential',
   ): Promise<void> {
     try {
       const order = await this.prisma.orders.findFirst({
@@ -11163,11 +11216,13 @@ export class OrderFlowService {
       });
       // cod-auto-invoicing S2 — un domicilio se factura al ENTREGARSE y
       // cobrarse, no al cobrarse: lo decide `emitDeliveredOrderInvoiceIfReady`.
-      if (order?.delivery_type === 'home_delivery') {
+      if (lane === 'presential' && order?.delivery_type === 'home_delivery') {
         await this.emitDeliveredOrderInvoiceIfReady(orderId, source);
         return;
       }
-      if (!order || !isPresentialPosSale(order)) return;
+      if (!order) return;
+      const presential = isPresentialPosSale(order);
+      if (!presential && lane !== 'booking_rental') return;
       if (order.active_financial_split_id != null) return;
 
       const paid = (order.payments ?? [])
@@ -11190,14 +11245,15 @@ export class OrderFlowService {
         return;
       }
 
-      let autoEmit = DEFAULT_POS_AUTO_EMIT;
+      let autoEmit = presential ? DEFAULT_POS_AUTO_EMIT : DEFAULT_ECOMMERCE_AUTO_EMIT;
       try {
         const settings = await this.settingsService.getSettings();
-        const flag = (settings as any)?.invoicing?.pos?.auto_emit;
+        const invoicing = (settings as any)?.invoicing;
+        const flag = presential ? invoicing?.pos?.auto_emit : invoicing?.ecommerce?.auto_emit;
         if (typeof flag === 'boolean') autoEmit = flag;
       } catch (settingsErr) {
         this.logger.warn(
-          `[pos invoice emit] order=${orderId}: no se pudieron leer los ajustes, se usa el default auto_emit=${DEFAULT_POS_AUTO_EMIT}: ${(settingsErr as Error).message}`,
+          `[pos invoice emit] order=${orderId}: no se pudieron leer los ajustes, se usa el default auto_emit=${autoEmit}: ${(settingsErr as Error).message}`,
         );
       }
 

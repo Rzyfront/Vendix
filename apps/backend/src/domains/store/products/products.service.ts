@@ -26,11 +26,13 @@ import {
   ProductImageDto,
   ProductState,
   ProductType,
+  BookingMode,
   resolveCatalogInclusiveDefault,
   resolveIsInclusive,
   validateTaxInclusiveMap,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import { assertProductFitsLinkedStations } from '../service-stations/station-duration-block.util';
 import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
 import {
   calculateVariantFinalPrice,
@@ -902,6 +904,18 @@ export class ProductsService {
    * Validates and normalizes product data based on product_type.
    * Services cannot have physical attributes (weight, inventory, serial numbers).
    */
+  /** S2 (T15): a rental pricing mode only makes sense for a service that requires a station. */
+  private assertRentalPricingMode(
+    mode: string | null | undefined,
+    isStationService: boolean,
+  ): void {
+    if (mode && !isStationService) {
+      throw new BadRequestException(
+        'El modo de precio del alquiler solo aplica a servicios que requieren estación',
+      );
+    }
+  }
+
   private validateByProductType(dto: Record<string, any>): void {
     if (dto.product_type !== ProductType.SERVICE) return;
 
@@ -1173,6 +1187,21 @@ export class ProductsService {
         throw new BadRequestException(
           'Solo los productos de tipo servicio pueden requerir una estación',
         );
+      }
+      this.assertRentalPricingMode(
+        sanitizedDto.rental_pricing_mode,
+        sanitizedDto.product_type === ProductType.SERVICE &&
+          !!sanitizedDto.requires_station,
+      );
+      // A station-rate service with no booking mode would stay offline-only
+      // ("provider_required"): default to free booking. An explicit value wins.
+      if (
+        sanitizedDto.product_type === ProductType.SERVICE &&
+        sanitizedDto.requires_station &&
+        sanitizedDto.rental_pricing_mode === 'station_rate' &&
+        sanitizedDto.booking_mode == null
+      ) {
+        sanitizedDto.booking_mode = BookingMode.FREE_BOOKING;
       }
 
       // Consultation validation
@@ -3017,6 +3046,7 @@ export class ProductsService {
                 stock_quantity: true,
                 track_inventory_override: true,
                 service_duration_minutes: true,
+                service_duration_unit: true,
                 service_pricing_type: true,
                 buffer_minutes: true,
                 preparation_time_minutes: true,
@@ -3482,6 +3512,7 @@ export class ProductsService {
                 effective_track_inventory: effectiveTracking,
                 track_inventory_override: variant.track_inventory_override,
                 service_duration_minutes: variant.service_duration_minutes,
+                service_duration_unit: variant.service_duration_unit ?? null,
                 service_pricing_type: variant.service_pricing_type,
                 buffer_minutes: variant.buffer_minutes,
                 preparation_time_minutes: variant.preparation_time_minutes,
@@ -3874,10 +3905,13 @@ export class ProductsService {
       allow_pos_price_override: product.allow_pos_price_override,
       // Service-specific fields
       service_duration_minutes: product.service_duration_minutes,
+      service_duration_unit: product.service_duration_unit,
       service_modality: product.service_modality,
       service_pricing_type: product.service_pricing_type,
       requires_booking: product.requires_booking,
       requires_station: product.requires_station,
+      // The edit form patches it: leaving it out reset a station rental to "none" on save.
+      rental_pricing_mode: product.rental_pricing_mode,
       is_recurring: product.is_recurring,
       recurrence_interval_days: product.recurrence_interval_days,
       service_instructions: product.service_instructions,
@@ -4117,6 +4151,57 @@ export class ProductsService {
       if (effectiveRequiresStation && effectiveProductType !== ProductType.SERVICE) {
         throw new BadRequestException(
           'Solo los productos de tipo servicio pueden requerir una estación',
+        );
+      }
+      const isStationService =
+        effectiveProductType === ProductType.SERVICE && !!effectiveRequiresStation;
+      this.assertRentalPricingMode(sanitizedDto.rental_pricing_mode, isStationService);
+      // A product that stops being a station service cannot keep a rental mode.
+      if (!isStationService && sanitizedDto.rental_pricing_mode === undefined) {
+        sanitizedDto.rental_pricing_mode = null;
+      }
+      // A product that becomes station_rate (or clears its mode) without a booking
+      // mode gets free booking; a plain edit never rewrites the stored mode.
+      const becomesStationRate =
+        isStationService &&
+        sanitizedDto.rental_pricing_mode === 'station_rate' &&
+        existingProduct.rental_pricing_mode !== 'station_rate';
+      if (
+        isStationService &&
+        sanitizedDto.rental_pricing_mode === 'station_rate' &&
+        (sanitizedDto.booking_mode === null ||
+          (sanitizedDto.booking_mode === undefined && becomesStationRate))
+      ) {
+        sanitizedDto.booking_mode = BookingMode.FREE_BOOKING;
+      }
+      // The duration of a station-rate service must be a whole number of blocks
+      // for every station it is linked to.
+      const effectiveRentalMode =
+        sanitizedDto.rental_pricing_mode !== undefined
+          ? sanitizedDto.rental_pricing_mode
+          : existingProduct.rental_pricing_mode;
+      // Only a change is checked: the form resends both fields on every save
+      // and a legacy misaligned service must stay editable.
+      if (
+        isStationService &&
+        ((sanitizedDto.service_duration_minutes !== undefined &&
+          sanitizedDto.service_duration_minutes !==
+            existingProduct.service_duration_minutes) ||
+          (sanitizedDto.rental_pricing_mode !== undefined &&
+            sanitizedDto.rental_pricing_mode !==
+              existingProduct.rental_pricing_mode))
+      ) {
+        await assertProductFitsLinkedStations(
+          this.prisma as any,
+          existingProduct.store_id,
+          id,
+          {
+            rental_pricing_mode: effectiveRentalMode,
+            service_duration_minutes:
+              sanitizedDto.service_duration_minutes !== undefined
+                ? sanitizedDto.service_duration_minutes
+                : existingProduct.service_duration_minutes,
+          },
         );
       }
       if (

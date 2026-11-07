@@ -11,6 +11,7 @@ const service = (id: number, name: string, over: Record<string, unknown> = {}) =
   sale_price: null,
   is_on_sale: false,
   service_duration_minutes: 60,
+  service_duration_unit: 'hour',
   service_modality: 'in_person',
   requires_booking: true,
   product_images: [],
@@ -87,6 +88,8 @@ describe('ServicePageViewService (F6-B)', () => {
       image_url: 'signed:k/1.jpg',
       categories: [{ id: 9, name: 'Rostro', slug: 'rostro' }],
       requires_booking: true,
+      service_duration_minutes: 60,
+      service_duration_unit: 'hour',
     });
     expect(data.products.map((p) => p.id)).toEqual([2, 3]);
     expect(data.products[1].image_url).toBe('signed:k/3.jpg');

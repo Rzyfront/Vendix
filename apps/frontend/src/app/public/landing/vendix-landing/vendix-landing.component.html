@@ -55,9 +55,13 @@
 
         <!-- Mobile Menu Toggle Button -->
         <button
+          type="button"
           (click)="toggleMobileMenu()"
+          (keydown.escape)="closeMobileMenu()"
           class="lg:hidden p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
-          aria-label="Abrir menú de navegación">
+          aria-controls="landing-mobile-menu"
+          [attr.aria-expanded]="mobileMenuOpen()"
+          [attr.aria-label]="mobileMenuOpen() ? 'Cerrar menú de navegación' : 'Abrir menú de navegación'">
           <app-icon [name]="mobileMenuOpen() ? 'x' : 'menu'" [size]="24"></app-icon>
         </button>
       </div>
@@ -65,7 +69,11 @@
 
     <!-- Mobile Drawer Navigation -->
     @if (mobileMenuOpen()) {
-      <div class="lg:hidden border-t border-slate-200 bg-white/98 px-4 pt-3 pb-6 space-y-2 shadow-xl animate-in fade-in slide-in-from-top-4 duration-200">
+      <nav
+        id="landing-mobile-menu"
+        aria-label="Menú principal"
+        (keydown.escape)="closeMobileMenu()"
+        class="lg:hidden border-t border-slate-200 bg-white/98 px-4 pt-3 pb-6 space-y-2 shadow-xl animate-in fade-in slide-in-from-top-4 duration-200">
         <button (click)="scrollToSection('hero-simulator')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
           Producto (POS en Vivo)
         </button>
@@ -91,7 +99,7 @@
             Comenzar 14 Días Gratis
           </a>
         </div>
-      </div>
+      </nav>
     }
   </header>
 
@@ -528,7 +536,7 @@
         <!-- Left column: Explanations & 4 Interactive Demo Cards -->
         <div class="lg:col-span-5 flex flex-col gap-space-md">
           <div class="inline-flex items-center gap-space-2xs px-space-sm py-1 bg-on-primary-fixed-variant rounded-full text-primary-fixed text-label-sm font-label-sm self-start">
-            <span class="material-symbols-outlined text-[16px]">psychology</span>
+            <app-icon name="brain" [size]="16"></app-icon>
             <span>EXCLUSIVO EN VENDIX</span>
           </div>
           <h2 class="font-headline-lg text-headline-lg text-on-primary tracking-tight">

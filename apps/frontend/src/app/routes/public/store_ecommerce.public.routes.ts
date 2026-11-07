@@ -236,6 +236,13 @@ export const storeEcommercePublicRoutes: Routes = [
           ),
       },
       {
+        path: 'pagar/:token',
+        loadComponent: () =>
+          import('../../public/payment-request/payment-request-page.component').then(
+            (c) => c.PaymentRequestPageComponent,
+          ),
+      },
+      {
         path: 'seguimiento-servicio/:token',
         loadComponent: () =>
           import('../../public/ecommerce/pages/service-session-progress/service-session-progress.component').then(

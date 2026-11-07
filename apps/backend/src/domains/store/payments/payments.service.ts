@@ -3861,6 +3861,35 @@ export class PaymentsService {
     return this.roundMoney(Number(raw));
   }
 
+  /**
+   * Server-held quote for a time-rated rental line. The submitted net price is
+   * accepted only when an open booking of this product carries exactly that
+   * `quoted_amount`, so a cashier cannot invent a rental price. Returns null
+   * when no booking matches: the line then follows the ordinary override guard.
+   */
+  private async resolveRentalQuotedBase(
+    tx: any,
+    storeId: number,
+    productId: number,
+    variantId: number | null,
+    item: any,
+  ): Promise<number | null> {
+    const submitted = Number(item?.unit_price);
+    if (!Number.isFinite(submitted) || submitted <= 0) return null;
+    const booking = await tx.bookings.findFirst({
+      where: {
+        store_id: storeId,
+        product_id: productId,
+        product_variant_id: variantId,
+        status: { in: ['pending', 'confirmed'] },
+        quoted_amount: submitted,
+      },
+      select: { quoted_amount: true },
+      orderBy: { id: 'desc' },
+    });
+    return booking?.quoted_amount != null ? Number(booking.quoted_amount) : null;
+  }
+
   private resolveCatalogUnitBasePrice(product: any, variant?: any): number {
     const productBase = Number(product.base_price || 0);
 
@@ -4202,6 +4231,9 @@ export class PaymentsService {
         // de la misma lectura que ya valida que el producto es de esta tienda:
         // la escala NO puede venir del cliente, es del catálogo.
         price_unit_quantity: true,
+        // Station rentals priced by time: the expected catalog price is the
+        // quote stored on the booking, not the "from" base price.
+        rental_pricing_mode: true,
       },
     });
 
@@ -4288,7 +4320,9 @@ export class PaymentsService {
           ],
           taxRate: 0,
         }).unitPrice
-      : this.resolveCatalogUnitBasePrice(product, variant);
+      : ((product as any).rental_pricing_mode === 'station_rate'
+          ? await this.resolveRentalQuotedBase(tx, dtoStoreId, product.id, variant?.id ?? null, item)
+          : null) ?? this.resolveCatalogUnitBasePrice(product, variant);
     const catalogUnitPrice = this.roundMoney(tierBaseUnitPrice);
     // `client: tx` explícito: sin él esta consulta saldría por otra conexión del
     // pool mientras la transacción del cobro sostiene locks, y con suficientes

@@ -23,6 +23,7 @@ import {
 import { Booking, BookingStatus } from '../../interfaces/reservation.interface';
 import { ReservationPrintService } from '../../services/reservation-print.service';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
+import { bookingSeriesLabel } from '../../utils/booking-display.util';
 
 @Component({
   selector: 'app-reservation-list',
@@ -45,6 +46,8 @@ export class ReservationListComponent {
   private printService = inject(ReservationPrintService);
 
   readonly serviceTemplate = viewChild<TemplateRef<any>>('serviceTemplate');
+  /** "Serie i/n" badge of a recurring booking (S19). */
+  protected readonly seriesLabel = bookingSeriesLabel;
 
   readonly bookings = input<Booking[]>([]);
   readonly loadingInput = input(false, { alias: 'loading' });
@@ -182,7 +185,9 @@ export class ReservationListComponent {
         key: 'product',
         label: 'Servicio',
         icon: 'package',
-        transform: (v: any) => v?.name || '-',
+        // A booking of a recurring series (S19) carries its position; each date still cancels on its own.
+        transform: (v: any, item?: any) =>
+          `${v?.name || '-'}${item?.series_id ? ` · ${bookingSeriesLabel(item)}` : ''}`,
         infoIconTransform: (v: any) => v?.is_consultation ? 'stethoscope' : undefined,
         infoIconVariantTransform: (v: any) => v?.is_consultation ? 'primary' : undefined,
       },

@@ -15,6 +15,13 @@ import {
 } from '@nestjs/common';
 import { order_channel_enum } from '@prisma/client';
 import { Public } from '@common/decorators/public.decorator';
+import { OptionalAuth } from '@common/decorators/optional-auth.decorator';
+import { RequestContextService } from '@common/context/request-context.service';
+import {
+  resolveStoreTimezone,
+  zonedWallClockToUtc,
+} from '../../../common/utils/store-timezone.util';
+import { RentalQuoteService } from '../../store/service-stations/rental-quote/rental-quote.service';
 import { AvailabilityService } from '../../store/reservations/availability.service';
 import { ReservationsService } from '../../store/reservations/reservations.service';
 import { ProvidersService } from '../../store/reservations/providers/providers.service';
@@ -26,6 +33,34 @@ import {
 } from '../../store/reservations/dto';
 import { CreateEcommerceBookingDto } from './dto/create-ecommerce-booking.dto';
 import { HoldBookingDto } from './dto/hold-booking.dto';
+import { GuestBookingService } from './guest-booking.service';
+
+/**
+ * What a visitor without a session gets back: the booking confirmation and the
+ * payment link, never the customer (it may be an existing account) nor any
+ * other stored field of the booking.
+ */
+const GUEST_BOOKING_FIELDS = [
+  'id',
+  'booking_number',
+  'status',
+  'date',
+  'start_time',
+  'end_time',
+  'end_date',
+  'expires_at',
+  'payment_path',
+  'payment_url',
+  'prepay_amount',
+] as const;
+
+function toGuestBookingView(booking: Record<string, any>) {
+  const view: Record<string, unknown> = {};
+  for (const key of GUEST_BOOKING_FIELDS) {
+    if (booking?.[key] !== undefined) view[key] = booking[key];
+  }
+  return view;
+}
 
 @Controller('ecommerce/reservations')
 export class EcommerceReservationsController {
@@ -34,7 +69,56 @@ export class EcommerceReservationsController {
     private readonly reservationsService: ReservationsService,
     private readonly providersService: ProvidersService,
     private readonly globalPrisma: GlobalPrismaService,
+    private readonly rentalQuote: RentalQuoteService,
+    private readonly guestBooking: GuestBookingService,
   ) {}
+
+  /**
+   * Public price quote for a station rental (storefront shows the amount
+   * before the customer picks a slot). Wall-clock date/time are read in the
+   * store timezone so the rate window matches what the admin configured.
+   */
+  @Public()
+  @Get('rental-quote/:productId')
+  @Header('Cache-Control', 'no-store')
+  async getRentalQuote(
+    @Param('productId', ParseIntPipe) productId: number,
+    @Query('station_id') stationIdRaw?: string,
+    @Query('date') date?: string,
+    @Query('start_time') startTime?: string,
+    @Query('product_variant_id') variantIdRaw?: string,
+  ) {
+    const stationId = parseInt(stationIdRaw ?? '', 10);
+    const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date ?? '');
+    const timeMatch = /^(\d{2}):(\d{2})/.exec(startTime ?? '');
+    if (!(stationId > 0) || !dateMatch || !timeMatch) {
+      throw new BadRequestException(
+        'station_id, date (YYYY-MM-DD) y start_time (HH:mm) son obligatorios',
+      );
+    }
+    const storeId = RequestContextService.getContext()?.store_id;
+    const tz = storeId
+      ? await resolveStoreTimezone(this.availabilityService['prisma'], storeId)
+      : 'America/Bogota';
+    const startAt = zonedWallClockToUtc(
+      Number(dateMatch[1]),
+      Number(dateMatch[2]),
+      Number(dateMatch[3]),
+      Number(timeMatch[1]),
+      Number(timeMatch[2]),
+      0,
+      0,
+      tz,
+    );
+    const variantId = parseInt(variantIdRaw ?? '', 10);
+    const quote = await this.rentalQuote.quote({
+      productId,
+      variantId: variantId > 0 ? variantId : null,
+      stationId,
+      startAt,
+    });
+    return { success: true, data: quote };
+  }
 
   @Public()
   @Get('availability/:productId')
@@ -52,6 +136,8 @@ export class EcommerceReservationsController {
         provider_id: providerId ? parseInt(providerId, 10) : undefined,
         product_variant_id: query.product_variant_id,
         station_id: query.station_id,
+        // S10: the chosen provider's preferred station is picked for the customer when free.
+        prefer_provider_station: true,
       },
     );
     return { success: true, data: slots };
@@ -304,7 +390,7 @@ export class EcommerceReservationsController {
     // cruzamos con `products.is_eligible_for_home_service` para que el
     // selector "¿Dónde se realiza el servicio?" reaccione al PRODUCTO
     // (no solo a la tienda). Ejemplo: "Corte de cabello" → true,
-    // "Tintura" → false → solo se permite "En el local del técnico".
+    // "Tintura" → false → solo se permite "En el establecimiento".
     let offerHomeServiceForProduct = offerHomeService;
     const productId = parseInt(productIdRaw ?? '', 10);
     if (offerHomeService && !isNaN(productId) && productId > 0) {
@@ -378,14 +464,29 @@ export class EcommerceReservationsController {
     return { success: true, data: created };
   }
 
+  /**
+   * Booking from the storefront. With a customer session it behaves as always.
+   * Without one it is only accepted when the store enabled
+   * `ecommerce.checkout.allow_guest_booking` (403 `STATION_BOOKING_013`
+   * otherwise) and the visitor sent name, email and phone (400
+   * `STATION_BOOKING_014`). The store comes from the domain context; any
+   * customer or store the body might carry is never read.
+   */
+  @OptionalAuth()
   @Post()
   async createBooking(@Req() req: any, @Body() dto: CreateEcommerceBookingDto) {
-    const customerId = req.user?.id;
-    if (!customerId) {
-      throw new ForbiddenException(
-        'Debe iniciar sesion para crear una reserva',
+    const sessionCustomerId: number | undefined = req.user?.id;
+    const isGuest = !sessionCustomerId;
+    if (isGuest && dto.service_location_type === 'home') {
+      // Home service needs one of the customer's saved addresses. Checked
+      // before resolving the guest so a refused visitor writes nothing.
+      throw new BadRequestException(
+        'Para reservar a domicilio debes iniciar sesión. Elige "En el establecimiento".',
       );
     }
+    const customerId =
+      sessionCustomerId ??
+      (await this.guestBooking.resolveCustomerId(dto.guest));
 
     // Appointment redesign phase 2 — gating per-product para
     // `service_location_type = 'home'`. Si el cliente eligió "En mi
@@ -405,7 +506,7 @@ export class EcommerceReservationsController {
       const eligible = !!product?.is_eligible_for_home_service;
       if (!eligible) {
         throw new BadRequestException(
-          'Este servicio no está disponible a domicilio. Por favor elige "En el local del técnico".',
+          'Este servicio no está disponible a domicilio. Por favor elige "En el establecimiento".',
         );
       }
     }
@@ -420,20 +521,26 @@ export class EcommerceReservationsController {
       channel: order_channel_enum.ecommerce,
       notes: dto.notes,
       service_location_type: dto.service_location_type ?? ('shop' as any),
-      service_address_id: dto.service_address_id,
+      service_address_id: isGuest ? undefined : dto.service_address_id,
       station_id: dto.station_id,
       provider_id: dto.provider_id,
     });
 
-    return { success: true, data: booking };
+    return {
+      success: true,
+      data: isGuest ? toGuestBookingView(booking) : booking,
+    };
   }
 
+  /** Same session/guest rules as `createBooking`; the booking waits for its payment page. */
+  @OptionalAuth()
   @Post('hold')
   async holdBooking(@Req() req: any, @Body() dto: HoldBookingDto) {
-    const customerId = req.user?.id;
-    if (!customerId) {
-      throw new ForbiddenException('Debe iniciar sesion para reservar');
-    }
+    const sessionCustomerId: number | undefined = req.user?.id;
+    const isGuest = !sessionCustomerId;
+    const customerId =
+      sessionCustomerId ??
+      (await this.guestBooking.resolveCustomerId(dto.guest));
 
     const hold = await this.reservationsService.hold({
       customer_id: customerId,
@@ -447,7 +554,7 @@ export class EcommerceReservationsController {
       provider_id: dto.provider_id,
     });
 
-    return { success: true, data: hold };
+    return { success: true, data: isGuest ? toGuestBookingView(hold) : hold };
   }
 
   @Post(':id/confirm-hold')
@@ -504,7 +611,8 @@ export class EcommerceReservationsController {
       );
     }
 
-    const result = await this.reservationsService.cancel(id);
+    // A paid booking is the store's decision: the customer gets STATION_BOOKING_020 (D7).
+    const result = await this.reservationsService.cancel(id, {}, 'customer');
     return { success: true, data: result };
   }
 

@@ -7,7 +7,9 @@ import {
   inject,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { EMPTY, of } from 'rxjs';
+import { catchError, distinctUntilChanged, switchMap } from 'rxjs/operators';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -15,6 +17,7 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import {
   EcommerceBookingService,
   AvailabilitySlot,
+  RentalQuote,
 } from '../../services/ecommerce-booking.service';
 import { CatalogService, ProductDetail, ProductVariantDetail } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
@@ -22,10 +25,14 @@ import { StoreUiService } from '../../services/store-ui.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { StepsLineComponent } from '../../../../../shared/components/steps-line/steps-line.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { InputComponent } from '../../../../../shared/components/input/input.component';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { toLocalDateString } from '../../../../../shared/utils/date.util';
+import { formatDurationUnit } from '../../../../../shared/utils/duration-unit.util';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 import { BookingCalendarComponent } from '../../components/booking/booking-calendar/booking-calendar.component';
 import {
@@ -47,6 +54,7 @@ import {
     RouterModule,
     StepsLineComponent,
     ButtonComponent,
+    InputComponent,
     IconComponent,
     ServiceLocationSelectorComponent,
     CurrencyPipe,
@@ -67,8 +75,49 @@ export class BookingComponent implements OnInit {
   private authFacade = inject(AuthFacade);
   private toast = inject(ToastService);
   private storeUiService = inject(StoreUiService);
+  private tenantFacade = inject(TenantFacade);
 
   private destroyRef = inject(DestroyRef);
+
+  constructor() {
+    // Quote once station, date and start time are chosen; switchMap drops stale calls.
+    toObservable(
+      computed(() => {
+        const slot = this.selectedSlot();
+        const date = this.selectedDate();
+        const stationId = slot?.station_id;
+        if (!this.isStationRate() || !slot || !date || !stationId) return null;
+        const variantId = this.selectedVariantId();
+        return `${this.productId()}|${stationId}|${date.split('T')[0]}|${slot.start_time}|${variantId ?? ''}`;
+      }),
+    )
+      .pipe(
+        distinctUntilChanged(),
+        switchMap((key) => {
+          this.rentalQuote.set(null);
+          if (!key) {
+            this.rentalQuoting.set(false);
+            return EMPTY;
+          }
+          const [productId, stationId, date, startTime, variantId] = key.split('|');
+          this.rentalQuoting.set(true);
+          return this.bookingService
+            .getRentalQuote(
+              Number(productId),
+              Number(stationId),
+              date,
+              startTime,
+              variantId ? Number(variantId) : undefined,
+            )
+            .pipe(catchError(() => of(null)));
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((quote) => {
+        this.rentalQuote.set(quote);
+        this.rentalQuoting.set(false);
+      });
+  }
 
   // State
   currentStep = signal(0);
@@ -89,6 +138,41 @@ export class BookingComponent implements OnInit {
     return this.variants().find((v) => v.id === id) ?? null;
   });
 
+  /** Minutes and unit of the chosen option; a variant overrides the product, a null unit reads as minutes. */
+  private readonly durationSource = computed(() => {
+    const variant = this.selectedVariant();
+    const product = this.product();
+    if (variant?.service_duration_minutes) {
+      return { minutes: variant.service_duration_minutes, unit: variant.service_duration_unit ?? null };
+    }
+    return {
+      minutes: product?.service_duration_minutes ?? null,
+      unit: product?.service_duration_unit ?? null,
+    };
+  });
+  readonly durationLabel = computed(() => {
+    const { minutes, unit } = this.durationSource();
+    return formatDurationUnit(minutes, unit);
+  });
+
+  readonly isStationRate = computed(() => this.product()?.rental_pricing_mode === 'station_rate');
+
+  /** Variant chips: "4 horas · $120.000". A station-rate price depends on the schedule, so it is not shown here. */
+  readonly variantChips = computed(() =>
+    this.variants().map((variant) => ({
+      variant,
+      label:
+        formatDurationUnit(variant.service_duration_minutes, variant.service_duration_unit) ||
+        variant.name ||
+        variant.sku,
+      price: !this.isStationRate() && variant.price_override ? variant.final_price : null,
+    })),
+  );
+
+  // Public quote for station-rate rentals (needs station, date and start time).
+  readonly rentalQuote = signal<RentalQuote | null>(null);
+  readonly rentalQuoting = signal(false);
+
   // Step 1 — Date
   selectedDate = signal<string | null>(null);
 
@@ -101,10 +185,24 @@ export class BookingComponent implements OnInit {
 
   // Free-booking fallback (when product has no provider scheduling).
   isFreeBooking = signal(false);
+  /**
+   * Synthetic 08:00-18:00 grid of a free-booking service. A station rental never uses it:
+   * its slots come from the station and store hours (S21) and carry the `station_id`
+   * the rental quote and the booking need.
+   */
+  readonly usesSyntheticSlots = computed(() => this.isFreeBooking() && !this.product()?.requires_station);
+
+  /**
+   * The chosen station requires a deposit or a payment to book (A12): the slot is held and
+   * paid on its payment page. The cart would sell it without that money, so checkout refuses it.
+   */
+  readonly chargesOnline = computed(
+    () => !this.usesSyntheticSlots() && this.selectedSlot()?.charges_online === true,
+  );
   freeBookingTime = signal<string | null>(null);
   freeBookingEndTime = signal<string | null>(null);
   readonly freeBookingSlots = computed(() => {
-    const duration = this.product()?.service_duration_minutes || 60;
+    const duration = this.durationSource().minutes || 60;
     const slots: { time: string; endTime: string }[] = [];
     for (let mins = 480; mins + duration <= 1080; mins += duration) {
       const h = Math.floor(mins / 60);
@@ -160,6 +258,27 @@ export class BookingComponent implements OnInit {
   guestName = signal('');
   guestEmail = signal('');
   guestPhone = signal('');
+  /**
+   * The store lets visitors book (and pay) without logging in
+   * (`ecommerce.checkout.allow_guest_booking`, opt-in: absent means off).
+   */
+  readonly guestBookingEnabled = computed(
+    () =>
+      !this.isLoggedIn() &&
+      this.tenantFacade.getCurrentDomainConfig()?.customConfig?.ecommerce?.checkout
+        ?.allow_guest_booking === true,
+  );
+  /** Missing/invalid contact data of a visitor, shown under the form (null = ready). */
+  readonly guestContactError = computed<string | null>(() => {
+    if (!this.guestBookingEnabled()) return null;
+    if (!this.guestName().trim()) return 'Escribe tu nombre.';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.guestEmail().trim())) {
+      return 'Escribe un correo válido.';
+    }
+    if (!this.guestPhone().trim()) return 'Escribe tu teléfono.';
+    return null;
+  });
+  readonly guestContactTouched = signal(false);
   bookingNotes = signal('');
 
   // Service location (where the technician will perform the work)
@@ -387,7 +506,7 @@ export class BookingComponent implements OnInit {
 
   onSlotSelected(slot: BookingSlot): void {
     this.selectedSlot.set(slot);
-    this.currentStep.set(3);
+    this.currentStep.set(this.confirmStep);
   }
 
   selectFreeBookingTime(slot: { time: string; endTime: string }): void {
@@ -399,9 +518,14 @@ export class BookingComponent implements OnInit {
   // --- Step 4: Confirm ---
 
   confirmBooking(): void {
-    if (!this.isLoggedIn()) {
+    const isGuest = this.guestBookingEnabled();
+    if (!this.isLoggedIn() && !isGuest) {
       this.errorMessage.set('Debes iniciar sesion para reservar');
       return;
+    }
+    if (isGuest) {
+      // A visitor has no saved addresses: the service is always at the establishment.
+      this.serviceLocation.set('shop');
     }
 
     // The customer must pick where the service will be performed before
@@ -418,7 +542,7 @@ export class BookingComponent implements OnInit {
     let startTime: string;
     let endTime: string;
 
-    if (this.isFreeBooking()) {
+    if (this.usesSyntheticSlots()) {
       startTime = this.freeBookingTime()!;
       endTime = this.freeBookingEndTime()!;
       if (!startTime || !endTime) return;
@@ -432,6 +556,20 @@ export class BookingComponent implements OnInit {
         return;
       }
     }
+
+    if (this.chargesOnline()) {
+      // The hold is created here, so a visitor gives the contact data now.
+      if (isGuest) {
+        this.guestContactTouched.set(true);
+        if (this.guestContactError()) return;
+      }
+      this.holdAndPay(date, startTime, endTime);
+      return;
+    }
+
+    // Without an online charge a visitor follows the same cart → checkout path
+    // as a customer: the checkout asks the contact data and the payment method
+    // (including paying at the establishment) and may include products.
 
     const variantId = this.selectedVariantId();
     const bookingSelection: Record<string, any> = {
@@ -505,6 +643,50 @@ export class BookingComponent implements OnInit {
     } else {
       this.router.navigate(['/checkout']);
     }
+  }
+
+  /** Contact data to send when the visitor has no session; undefined for a customer. */
+  private guestContact() {
+    if (!this.guestBookingEnabled()) return undefined;
+    return {
+      name: this.guestName().trim(),
+      email: this.guestEmail().trim(),
+      phone: this.guestPhone().trim(),
+    };
+  }
+
+  /** Holds the slot and opens its payment page; the booking is confirmed by that payment. */
+  private holdAndPay(date: string, startTime: string, endTime: string): void {
+    const slot = this.selectedSlot();
+    this.submitting.set(true);
+    this.errorMessage.set('');
+    this.bookingService
+      .holdBooking({
+        product_id: this.productId(),
+        product_variant_id: this.selectedVariantId() ?? undefined,
+        station_id: slot?.station_id,
+        provider_id: this.providerId() ?? undefined,
+        date,
+        start_time: startTime,
+        end_time: endTime,
+        guest: this.guestContact(),
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const path = response.data?.payment_path;
+          if (path) {
+            this.router.navigateByUrl(path);
+            return;
+          }
+          this.submitting.set(false);
+          this.toast.error('No se pudo abrir el pago de la reserva. Intenta de nuevo.');
+        },
+        error: (err) => {
+          this.submitting.set(false);
+          this.errorMessage.set(extractApiErrorMessage(err));
+        },
+      });
   }
 
   /**

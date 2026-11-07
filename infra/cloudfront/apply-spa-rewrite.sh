@@ -39,7 +39,7 @@ create_or_update() {
 # HOSTS: dominios a revisar en baseline/verify (separados por espacio).
 # Por defecto, vendix.online. Para la distribución multi-tenant, pasar los dominios de sus tenants.
 HOSTS="${HOSTS:-vendix.online}"
-PATHS=(/legal/privacidad /legal/terminos / /favicon.ico /no-existe.js /robots.txt /sitemap.xml /manifest.webmanifest /pwa/no-existe /precios)
+PATHS=(/legal/privacidad /legal/terminos / /favicon.ico /no-existe.js /robots.txt /sitemap.xml /manifest.webmanifest /pwa/no-existe /precios /ruta-que-no-existe-seo-smoke /auth/login)
 URLS=()
 for h in $HOSTS; do for p in "${PATHS[@]}"; do URLS+=("https://$h$p"); done; done
 BASELINE="$WORK/baseline-$DIST_ID.txt"
@@ -90,6 +90,11 @@ print("%s:%s" % (r["statusCode"], r["headers"]["location"]["value"]) if r else o
 / /index.html mesura.beauty
 / /index.html www.tienda.vendix.online
 /.well-known/acme-challenge/x /.well-known/acme-challenge/x www.mesura.beauty
+/ruta-que-no-existe-seo-smoke /ruta-que-no-existe-seo-smoke
+/auth/login /index.html
+/pqr/consultar/T-123 /index.html
+/super-admin/dashboard /index.html
+/ruta-que-no-existe-seo-smoke /index.html tienda-demo.vendix.online
 CASES
   return $fail
 }
@@ -171,6 +176,7 @@ PY
     echo "  ANTES  DESPUÉS  URL"
     paste -d' ' "$BASELINE" "$WORK/after-$DIST_ID.txt" | awk '{printf "  %s    %s     %s\n", $1, $3, $2}'
     echo "  Esperado: privacidad, términos y / pasan a 200; favicon igual; robots.txt, sitemap.xml y manifest igual que antes."
+    echo "  /ruta-que-no-existe-seo-smoke: pasa de 200 a 404 (SEO-TECH-03); /auth/login sigue en 200."
     echo "  /no-existe.js: debe quedar IGUAL que antes (404 si el bucket permite ListBucket; si antes ya era 200, lo causa la regla 403 → /index.html existente, no la función)."
     ;;
 

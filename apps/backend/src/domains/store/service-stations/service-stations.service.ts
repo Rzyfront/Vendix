@@ -14,9 +14,16 @@ import {
   SetStationProvidersDto,
   SetStationSchedulesDto,
   SetStationServicesDto,
+  StationDepositRulesDto,
   UpdateServiceStationDto,
 } from './dto/station.dto';
+import { validateWeeklyBlocks } from '../../../common/utils/schedule-window.util';
 import { StationListQueryDto } from './dto/station-list-query.dto';
+import { ACTIVE_ALLOCATION_STATES, NEXT_RESERVATION_SELECT, toNextReservation } from '../service-sessions/utils/next-reservation.util';
+import {
+  assertDurationFitsBlocks,
+  assertStationFitsLinkedServices,
+} from './station-duration-block.util';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 
 @Injectable()
@@ -48,12 +55,62 @@ export class ServiceStationsService {
       }),
       this.prisma.service_stations.count({ where }),
     ]);
+    const [withCaps, liveState] = await Promise.all([
+      Promise.all(stations.map((station) => this.withCapabilities(station))),
+      this.liveStateByStation(stations.map((station) => station.id)),
+    ]);
     return {
-      data: await Promise.all(stations.map((station) => this.withCapabilities(station))),
+      data: withCaps.map((station) => ({
+        ...station,
+        next_reservation: liveState.next.get(station.id) ?? null,
+        active_session: liveState.session.get(station.id) ?? null,
+      })),
       total,
       page,
       limit,
     };
+  }
+
+  /** Next reservation and active session per station, in three batched queries. */
+  private async liveStateByStation(stationIds: number[]) {
+    const next = new Map<number, ReturnType<typeof toNextReservation>>();
+    const session = new Map<number, { id: number; opened_at: Date; planned_end_at: string | null; status: string }>();
+    if (!stationIds.length) return { next, session };
+    const [upcoming, sessions] = await Promise.all([
+      this.prisma.service_allocations.findMany({
+        // An allocation already attached to a session (early arrival) is the
+        // current session, not the next reservation.
+        where: {
+          store_id: this.storeId,
+          station_id: { in: stationIds },
+          state: { in: ACTIVE_ALLOCATION_STATES.filter((state) => state !== 'in_service') },
+          session_id: null,
+          start_at: { gte: new Date() },
+        },
+        orderBy: [{ station_id: 'asc' }, { start_at: 'asc' }],
+        distinct: ['station_id'],
+        select: NEXT_RESERVATION_SELECT,
+      }),
+      this.prisma.service_sessions.findMany({
+        where: { store_id: this.storeId, station_id: { in: stationIds }, status: { in: ['open', 'paused'] } },
+        orderBy: { id: 'desc' },
+        select: { id: true, station_id: true, opened_at: true, status: true },
+      }),
+    ]);
+    for (const row of upcoming) next.set(row.station_id, toNextReservation(row));
+    const inService = sessions.length
+      ? await this.prisma.service_allocations.findMany({
+          where: { store_id: this.storeId, session_id: { in: sessions.map((row) => row.id) }, state: 'in_service' },
+          select: { session_id: true, end_at: true },
+        })
+      : [];
+    const endBySession = new Map<number | null, Date>(inService.map((row) => [row.session_id, row.end_at] as [number | null, Date]));
+    for (const row of sessions) {
+      if (session.has(row.station_id)) continue;
+      const end = endBySession.get(row.id);
+      session.set(row.station_id, { id: row.id, opened_at: row.opened_at, planned_end_at: end ? end.toISOString() : null, status: row.status });
+    }
+    return { next, session };
   }
 
   private async withCapabilities(station: any) {
@@ -114,18 +171,18 @@ export class ServiceStationsService {
   async getPublicUrl(id: number): Promise<string> {
     const station = await this.findOne(id);
     // app_type is the source of truth for app selection (domain_type is
-    // legacy). Same fallback as the session access URL: any active ecommerce
-    // domain first (primary preferred), then any primary active domain — the
-    // /estacion page also ships in the landing app, so either host works.
-    const domain = await this.prisma.domain_settings.findFirst({
-      where: { store_id: this.storeId, app_type: 'STORE_ECOMMERCE', status: 'active' },
-      orderBy: [{ is_primary: 'desc' }, { updated_at: 'desc' }],
-      select: { hostname: true },
-    }) ?? await this.prisma.domain_settings.findFirst({
-      where: { store_id: this.storeId, is_primary: true, status: 'active' },
-      orderBy: { updated_at: 'desc' },
-      select: { hostname: true },
-    });
+    // legacy). Only the apps that route /estacion may host the QR: an active
+    // ecommerce domain first, then an active landing domain (primary preferred
+    // in both). Any other host (e.g. the store admin) would print a broken QR.
+    let domain: { hostname: string | null } | null = null;
+    for (const appType of ['STORE_ECOMMERCE', 'STORE_LANDING'] as const) {
+      domain = await this.prisma.domain_settings.findFirst({
+        where: { store_id: this.storeId, app_type: appType, status: 'active' },
+        orderBy: [{ is_primary: 'desc' }, { updated_at: 'desc' }],
+        select: { hostname: true },
+      });
+      if (domain?.hostname) break;
+    }
     if (!domain?.hostname) {
       throw new VendixHttpException(
         ErrorCodes.STATION_014,
@@ -155,6 +212,7 @@ export class ServiceStationsService {
     await this.assertIntakeTemplate(dto.intake_template_id);
     // Impuesto del alquiler: misma validación que la tarifa de envío.
     await this.shippingTax.assertCategoryAssignable(dto.rental_tax_category_id, 'station_rental');
+    await this.shippingTax.assertCategoryAssignable(dto.reservation_fee_tax_category_id, 'station_rental');
     // Sin tipo explícito, la estación toma el tipo para el que se diseñó su plantilla.
     const template = !dto.station_type && dto.intake_template_id
       ? await this.prisma.data_collection_templates.findFirst({
@@ -177,6 +235,9 @@ export class ServiceStationsService {
           rental_tax_category_id: dto.rental_tax_category_id ?? null,
           rental_tax_is_inclusive: dto.rental_tax_is_inclusive ?? true,
           intake_template_id: dto.intake_template_id ?? null,
+          ...this.depositRulesData(dto),
+          // A new station books free-length by default; an explicit value wins.
+          booking_duration_mode: dto.booking_duration_mode ?? 'free',
         },
       });
       return this.findOne(station.id);
@@ -189,9 +250,27 @@ export class ServiceStationsService {
   }
 
   async update(id: number, dto: UpdateServiceStationDto) {
-    await this.findOne(id);
+    const current = await this.findOne(id);
     await this.assertIntakeTemplate(dto.intake_template_id);
     await this.shippingTax.assertCategoryAssignable(dto.rental_tax_category_id, 'station_rental');
+    await this.shippingTax.assertCategoryAssignable(dto.reservation_fee_tax_category_id, 'station_rental');
+    // The effective rule (what is stored plus what changes) must stay coherent.
+    const policy = dto.deposit_policy ?? current.deposit_policy ?? 'none';
+    const amount = dto.deposit_amount !== undefined ? dto.deposit_amount : current.deposit_amount;
+    const touchesDeposit = dto.deposit_policy !== undefined || dto.deposit_amount !== undefined;
+    if (touchesDeposit && policy !== 'none' && (amount === null || amount === undefined)) {
+      throw new BadRequestException('Indica el monto del anticipo para esta estación.');
+    }
+    this.assertPrepayCoherent(current, dto);
+    // A new block must keep every station_rate service linked here a whole number of blocks. The form
+    // resends the stored block on every save: only a change is checked, so legacy rows stay editable.
+    if (dto.rental_block_minutes && dto.rental_block_minutes !== current.rental_block_minutes) {
+      await assertStationFitsLinkedServices(this.prisma, this.storeId, {
+        id,
+        name: dto.name?.trim() || current.name,
+        rental_block_minutes: dto.rental_block_minutes,
+      });
+    }
     try {
       await this.prisma.service_stations.updateMany({
         where: { id, store_id: this.storeId },
@@ -207,6 +286,7 @@ export class ServiceStationsService {
           ...(dto.rental_tax_category_id !== undefined && { rental_tax_category_id: dto.rental_tax_category_id }),
           ...(dto.rental_tax_is_inclusive !== undefined && { rental_tax_is_inclusive: dto.rental_tax_is_inclusive }),
           ...(dto.intake_template_id !== undefined && { intake_template_id: dto.intake_template_id }),
+          ...this.depositRulesData(dto),
           updated_at: new Date(),
         },
       });
@@ -217,6 +297,70 @@ export class ServiceStationsService {
       throw error;
     }
     return this.findOne(id);
+  }
+
+  /**
+   * Deposit and booking rules to persist: only what the request carries, so a
+   * station saved without them keeps the column defaults. A policy of `none`
+   * never keeps an amount.
+   */
+  private depositRulesData(dto: Partial<StationDepositRulesDto>) {
+    return {
+      ...(dto.deposit_policy !== undefined && { deposit_policy: dto.deposit_policy }),
+      ...(dto.deposit_policy === 'none'
+        ? { deposit_amount: null }
+        : dto.deposit_amount !== undefined && { deposit_amount: dto.deposit_amount }),
+      ...(dto.deposit_exhausted_policy !== undefined && { deposit_exhausted_policy: dto.deposit_exhausted_policy }),
+      ...(dto.leftover_policy !== undefined && { leftover_policy: dto.leftover_policy }),
+      ...(dto.booking_duration_mode !== undefined && { booking_duration_mode: dto.booking_duration_mode }),
+      ...(dto.hold_minutes !== undefined && { hold_minutes: dto.hold_minutes }),
+      ...(dto.open_end_block_minutes !== undefined && { open_end_block_minutes: dto.open_end_block_minutes }),
+      ...(dto.cancel_refund_hours !== undefined && { cancel_refund_hours: dto.cancel_refund_hours }),
+      ...(dto.reservation_fee_tax_category_id !== undefined && { reservation_fee_tax_category_id: dto.reservation_fee_tax_category_id }),
+      ...(dto.rental_block_unit !== undefined && { rental_block_unit: dto.rental_block_unit }),
+      ...(dto.rental_billing_mode !== undefined && { rental_billing_mode: dto.rental_billing_mode }),
+      ...(dto.rental_charge_timing !== undefined && { rental_charge_timing: dto.rental_charge_timing }),
+      ...this.prepayData(dto),
+    };
+  }
+
+  /**
+   * Charge-to-book columns (S17). A mode in the body rewrites both values, so a
+   * partial rule never keeps the other kind and `none`/`full` keep neither.
+   */
+  private prepayData(dto: Partial<StationDepositRulesDto>) {
+    if (dto.booking_prepay_mode === 'partial') {
+      return {
+        booking_prepay_mode: dto.booking_prepay_mode,
+        booking_prepay_percent: dto.booking_prepay_percent ?? null,
+        booking_prepay_amount: dto.booking_prepay_amount ?? null,
+      };
+    }
+    if (dto.booking_prepay_mode !== undefined) {
+      return { booking_prepay_mode: dto.booking_prepay_mode, booking_prepay_percent: null, booking_prepay_amount: null };
+    }
+    return {
+      ...(dto.booking_prepay_percent !== undefined && { booking_prepay_percent: dto.booking_prepay_percent }),
+      ...(dto.booking_prepay_amount !== undefined && { booking_prepay_amount: dto.booking_prepay_amount }),
+    };
+  }
+
+  /** On update without a mode, loose percent/amount must fit the stored mode (the DTO checks the rest). */
+  private assertPrepayCoherent(
+    current: { booking_prepay_mode?: string | null; booking_prepay_percent?: unknown; booking_prepay_amount?: unknown },
+    dto: Partial<StationDepositRulesDto>,
+  ): void {
+    if (dto.booking_prepay_mode !== undefined) return;
+    if (dto.booking_prepay_percent === undefined && dto.booking_prepay_amount === undefined) return;
+    const percent = dto.booking_prepay_percent !== undefined ? dto.booking_prepay_percent : current.booking_prepay_percent;
+    const amount = dto.booking_prepay_amount !== undefined ? dto.booking_prepay_amount : current.booking_prepay_amount;
+    const mode = current.booking_prepay_mode ?? 'none';
+    const ok = mode === 'partial' ? (percent != null) !== (amount != null) : percent == null && amount == null;
+    if (!ok) {
+      throw new BadRequestException(
+        'El cobro parcial lleva un porcentaje o un monto (solo uno); el total o ninguno no llevan ninguno de los dos.',
+      );
+    }
   }
 
   /** Estaciones de la tienda que prestan este servicio. */
@@ -235,11 +379,15 @@ export class ServiceStationsService {
    * lista completa de UNA estación).
    */
   async setProductStations(productId: number, dto: SetProductStationsDto) {
-    await this.assertServiceProduct(productId);
+    const product = await this.assertServiceProduct(productId);
     const ids = dto.station_ids;
     if (ids.length) {
-      const count = await this.prisma.service_stations.count({ where: { id: { in: ids }, store_id: this.storeId } });
-      if (count !== ids.length) throw new NotFoundException('Una o más estaciones no pertenecen a esta tienda');
+      const stations = await this.prisma.service_stations.findMany({
+        where: { id: { in: ids }, store_id: this.storeId },
+        select: { id: true, name: true, rental_block_minutes: true },
+      });
+      if (stations.length !== ids.length) throw new NotFoundException('Una o más estaciones no pertenecen a esta tienda');
+      assertDurationFitsBlocks(product, stations);
     }
     await this.prisma.$transaction(async (tx: any) => {
       await tx.service_station_services.deleteMany({
@@ -258,12 +406,13 @@ export class ServiceStationsService {
   private async assertServiceProduct(productId: number) {
     const product = await this.prisma.products.findFirst({
       where: { id: productId, store_id: this.storeId },
-      select: { product_type: true },
+      select: { product_type: true, service_duration_minutes: true, rental_pricing_mode: true },
     });
     if (!product) throw new NotFoundException('Servicio no encontrado');
     if (product.product_type !== 'service') {
       throw new BadRequestException('Las estaciones solo pueden asignarse a productos de tipo servicio');
     }
+    return product;
   }
 
   async setServices(id: number, dto: SetStationServicesDto) {
@@ -272,7 +421,7 @@ export class ServiceStationsService {
     const products = ids.length
       ? await this.prisma.products.findMany({
           where: { id: { in: ids }, store_id: this.storeId },
-          select: { id: true, product_type: true },
+          select: { id: true, product_type: true, service_duration_minutes: true, rental_pricing_mode: true },
         })
       : [];
     if (products.length !== ids.length) {
@@ -280,6 +429,9 @@ export class ServiceStationsService {
     }
     if (products.some((product) => product.product_type !== 'service')) {
       throw new BadRequestException('Las estaciones solo pueden asignarse a productos de tipo servicio');
+    }
+    for (const product of products) {
+      assertDurationFitsBlocks(product, [station]);
     }
 
     await this.prisma.$transaction(async (tx: any) => {
@@ -364,6 +516,12 @@ export class ServiceStationsService {
       await tx.service_station_schedules.deleteMany({ where: { store_id: this.storeId, station_id: id } });
       await tx.service_station_services.deleteMany({ where: { store_id: this.storeId, station_id: id } });
       await tx.service_station_providers.deleteMany({ where: { store_id: this.storeId, station_id: id } });
+      // Both FKs are RESTRICT: rate windows are config of this station; a series keeps its history without it.
+      await tx.service_station_rate_windows.deleteMany({ where: { store_id: this.storeId, station_id: id } });
+      await tx.booking_series.updateMany({
+        where: { store_id: this.storeId, station_id: id },
+        data: { station_id: null },
+      });
       await tx.service_stations.delete({ where: { store_id_id: { store_id: this.storeId, id } } });
     });
     return station;
@@ -380,10 +538,17 @@ export class ServiceStationsService {
   async setSchedules(id: number, dto: SetStationSchedulesDto) {
     await this.findOne(id);
     const byWeekday = new Map<number, typeof dto.schedules>();
+    // S21: end <= start means the block ends the next day (00:00-00:00 = 24 h).
+    // Overlaps are checked on spans, including the previous day's overnight spill.
+    const invalid = validateWeeklyBlocks(dto.schedules.map((b) => ({ day: b.weekday, start_time: b.start_time, end_time: b.end_time })));
+    if (invalid) {
+      throw new BadRequestException(
+        invalid.reason === 'overlap'
+          ? `Los bloques del día ${invalid.day} no pueden superponerse`
+          : 'Cada bloque debe tener horas con formato HH:mm',
+      );
+    }
     for (const block of dto.schedules) {
-      if (block.start_time >= block.end_time) {
-        throw new BadRequestException('Cada bloque debe terminar después de su hora de inicio');
-      }
       const day = byWeekday.get(block.weekday) ?? [];
       day.push(block);
       byWeekday.set(block.weekday, day);
@@ -401,9 +566,6 @@ export class ServiceStationsService {
     for (const [weekday, blocks] of byWeekday) {
       blocks.sort((a, b) => a.start_time.localeCompare(b.start_time));
       for (let i = 0; i < blocks.length; i++) {
-        if (i > 0 && blocks[i].start_time < blocks[i - 1].end_time) {
-          throw new BadRequestException(`Los bloques del día ${weekday} no pueden superponerse`);
-        }
         rows.push({
           store_id: this.storeId,
           station_id: id,

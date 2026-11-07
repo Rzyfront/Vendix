@@ -16,6 +16,9 @@
       <div class="header-left">
         <span class="booking-number">#{{ b.booking_number }}</span>
         <span class="status-badge" [ngClass]="statusColor()">{{ statusLabel() }}</span>
+        @if (seriesLabel(b); as series) {
+          <span class="series-badge">{{ series }}</span>
+        }
       </div>
       <div class="header-actions">
         @if (!isTerminal() && !rescheduling()) {
@@ -175,6 +178,112 @@
                 Copiar link
               </button>
             </div>
+          }
+        </div>
+      }
+
+
+      <!-- Deposit block (S15 / S17) -->
+      @if (deposit(); as dep) {
+        <div class="deposit-block">
+          <div class="deposit-head">
+            <span class="info-label">
+              <app-icon name="wallet" [size]="13"></app-icon>
+              Anticipo
+            </span>
+            @if (dep.balance > 0) {
+              <span class="deposit-badge paid">Pagado</span>
+            } @else if (pendingDepositRequest()) {
+              <span class="deposit-badge pending">Esperando pago</span>
+            }
+          </div>
+          <div class="deposit-figures">
+            @if (dep.required != null) {
+              <span>Requerido <strong>{{ dep.required | currency }}</strong></span>
+            }
+            @if (dep.received > 0 || !hasPrepayPaid()) {
+              <span>Recibido <strong>{{ dep.received | currency }}</strong></span>
+            }
+            @if (dep.balance !== dep.received) {
+              <span>Saldo <strong>{{ dep.balance | currency }}</strong></span>
+            }
+          </div>
+
+          @if (pendingDepositRequest(); as pending) {
+            <p class="deposit-hint">
+              {{ pending.amount | currency }} por pagar.
+              @if (pending.expires_at) {
+                Apartada hasta {{ pending.expires_at | date:'dd/MM HH:mm' }}; si no se paga, se libera.
+              }
+            </p>
+            @if (depositLinkUrl(); as link) {
+              <div class="deposit-link-row">
+                <input class="deposit-link-input" readonly [value]="link" (focus)="$any($event.target).select()" aria-label="Enlace de pago" />
+                <button class="btn-ghost-sm" (click)="copyDepositLink()"><app-icon name="copy" [size]="14"></app-icon> Copiar</button>
+                <button class="btn-ghost-sm" (click)="shareDepositLink()"><app-icon name="share-2" [size]="14"></app-icon> Compartir</button>
+              </div>
+            }
+            <button class="btn-ghost-sm" [disabled]="depositLinkBusy()" (click)="generateDepositLink()">
+              <app-icon name="refresh-cw" [size]="14"></app-icon>
+              Generar nuevo enlace
+            </button>
+          }
+
+          @if (dep.decision_due_at && hasDepositBalance()) {
+            <p class="deposit-hint warn">El cliente no llegó: decide qué pasa con el anticipo.</p>
+          }
+          @if (canDecideDeposit()) {
+            <button class="btn-ghost-sm" (click)="depositDialog.set('decide')">
+              <app-icon name="wallet" [size]="14"></app-icon>
+              Decidir anticipo
+            </button>
+          }
+        </div>
+      }
+
+      <!-- Prepay ("cobro para reservar"): paid amount, link and in-person payment -->
+      @if (canRequestPrepay() || hasPrepayPaid()) {
+        <div class="deposit-block">
+          <div class="deposit-head">
+            <span class="info-label">
+              <app-icon name="credit-card" [size]="13"></app-icon>
+              Cobro para reservar
+            </span>
+            @if (hasPrepayPaid()) {
+              <span class="deposit-badge paid">Pagado</span>
+            }
+          </div>
+          @if (prepay(); as block) {
+            @if (block.paid_amount > 0) {
+              <div class="deposit-figures">
+                <span>Pagado <strong>{{ block.paid_amount | currency }}</strong></span>
+                @if (block.remaining > 0) {
+                  <span>Por cobrar <strong>{{ block.remaining | currency }}</strong></span>
+                }
+              </div>
+            }
+          }
+          @if (canRequestPrepay()) {
+            @if (prepayLinkUrl(); as link) {
+              @if (prepayAmount() != null) {
+                <p class="deposit-hint">{{ prepayAmount() | currency }} por pagar con este enlace.</p>
+              }
+              <div class="deposit-link-row">
+                <input class="deposit-link-input" readonly [value]="link" (focus)="$any($event.target).select()" aria-label="Enlace de pago para reservar" />
+                <button class="btn-ghost-sm" (click)="copyPrepayLink()"><app-icon name="copy" [size]="14"></app-icon> Copiar</button>
+                <button class="btn-ghost-sm" (click)="sharePrepayLink()"><app-icon name="share-2" [size]="14"></app-icon> Compartir</button>
+              </div>
+            }
+            <button class="btn-ghost-sm" [disabled]="prepayBusy()" (click)="generatePrepayLink()">
+              <app-icon name="link" [size]="14"></app-icon>
+              {{ prepayLinkUrl() ? 'Generar nuevo enlace' : 'Cobrar para reservar' }}
+            </button>
+            @if (prepay() && prepayHasRemaining()) {
+              <button class="btn-ghost-sm" (click)="registerPaymentOpen.set(true)">
+                <app-icon name="banknote" [size]="14"></app-icon>
+                Registrar pago
+              </button>
+            }
           }
         </div>
       }
@@ -366,7 +475,7 @@
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
         } @else if (f.status === 'pending') {
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
-          <button class="btn-footer danger-outline" (click)="cancelled.emit(f)">
+          <button class="btn-footer danger-outline" (click)="requestCancel(f)">
             <app-icon name="x" [size]="15"></app-icon>
             Cancelar
           </button>
@@ -382,7 +491,7 @@
           </button>
         } @else if (f.status === 'confirmed') {
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
-          <button class="btn-footer danger-outline" (click)="cancelled.emit(f)">
+          <button class="btn-footer danger-outline" (click)="requestCancel(f)">
             <app-icon name="x" [size]="15"></app-icon>
             Cancelar
           </button>
@@ -419,7 +528,7 @@
           }
         } @else if (f.status === 'arriving' || f.status === 'attending') {
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
-          <button class="btn-footer danger-outline" (click)="cancelled.emit(f)">
+          <button class="btn-footer danger-outline" (click)="requestCancel(f)">
             <app-icon name="x" [size]="15"></app-icon>
             Cancelar
           </button>
@@ -456,4 +565,23 @@
       </div>
     </ng-container>
   }
+
+  <app-booking-deposit-dialog
+    [isOpen]="depositDialog() !== null"
+    [booking]="booking()"
+    [deposit]="deposit()"
+    [prepay]="prepay()"
+    [mode]="depositDialog() ?? 'decide'"
+    (closed)="depositDialog.set(null)"
+    (done)="onDepositDialogDone()"
+  ></app-booking-deposit-dialog>
+
+  <app-register-prepay-dialog
+    [isOpen]="registerPaymentOpen()"
+    [bookingId]="booking()?.id ?? null"
+    [bookingNumber]="booking()?.booking_number ?? ''"
+    [prepay]="prepay()"
+    (closed)="registerPaymentOpen.set(false)"
+    (done)="onPrepayPaymentRegistered()"
+  ></app-register-prepay-dialog>
 </app-modal>

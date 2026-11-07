@@ -34,6 +34,7 @@ import type {
   ItemListCardConfig,
   StickyHeaderActionButton,
 } from '../../../../../../shared/components';
+import { windowMinutes } from '../../../../../../shared/utils/schedule-window.util';
 import { WeeklyScheduleEditorComponent } from './weekly-schedule-editor/weekly-schedule-editor.component';
 import { ExceptionsManagerComponent } from './exceptions-manager/exceptions-manager.component';
 import {
@@ -44,6 +45,8 @@ import {
   providerDisplayName,
   providerSubtitle,
 } from '../../../../../../shared/utils/provider-display-name';
+import type { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ProviderNamePipe } from '../../../../../../shared/pipes/provider-name/provider-name.pipe';
 import { STATION_TYPES_META } from '../service-stations/service-stations-page.component';
 
@@ -161,6 +164,17 @@ export class ScheduleManagementComponent {
   });
 
   assignedStationCount = computed(() => this.assignedStationIds().length);
+
+  // S10: preferred station of the selected provider (0 = none)
+  readonly NO_DEFAULT_STATION = 0;
+  savingDefaultStation = signal(false);
+  defaultStationValue = computed(() => this.selectedProvider()?.default_station_id ?? this.NO_DEFAULT_STATION);
+  defaultStationOptions = computed<SelectorOption[]>(() => [
+    { value: this.NO_DEFAULT_STATION, label: 'Sin estación asignada' },
+    ...this.allStations()
+      .filter((station) => this.assignedStationIds().includes(station.id))
+      .map((station) => ({ value: station.id, label: station.name })),
+  ]);
 
   // Live schedule stats (updated in real-time from editor)
   liveWeeklyHours = signal<number | null>(null);
@@ -484,9 +498,7 @@ export class ScheduleManagementComponent {
     let totalMinutes = 0;
     for (const s of provider.schedules) {
       if (!s.is_active) continue;
-      const [sh, sm] = s.start_time.split(':').map(Number);
-      const [eh, em] = s.end_time.split(':').map(Number);
-      totalMinutes += eh * 60 + em - (sh * 60 + sm);
+      totalMinutes += windowMinutes(s);
     }
     return Math.round(totalMinutes / 60);
   }
@@ -564,6 +576,46 @@ export class ScheduleManagementComponent {
       });
   }
 
+  setDefaultStation(value: string | number | null): void {
+    const provider = this.selectedProvider();
+    if (!provider) return;
+    const stationId = Number(value) || null;
+    if ((provider.default_station_id ?? null) === stationId) return;
+
+    this.savingDefaultStation.set(true);
+    this.reservationsService
+      .updateProvider(provider.id, { default_station_id: stationId })
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.savingDefaultStation.set(false)),
+      )
+      .subscribe({
+        next: (updated) => {
+          this.patchProviderDefaultStation(provider.id, updated.default_station_id ?? null);
+          this.toastService.success(
+            stationId ? 'Estación asignada al personal' : 'Estación asignada quitada',
+          );
+        },
+        error: (err) => this.toastService.error(extractApiErrorMessage(err)),
+      });
+  }
+
+  /** Mirrors the backend rule: the preferred station disappears with its link. */
+  private syncDefaultStation(providerId: number, linkedIds: number[]): void {
+    const current = this.selectedProvider()?.default_station_id ?? null;
+    if (current !== null && !linkedIds.includes(current)) {
+      this.patchProviderDefaultStation(providerId, null);
+    }
+  }
+
+  private patchProviderDefaultStation(providerId: number, stationId: number | null): void {
+    const patch = (p: ServiceProvider): ServiceProvider =>
+      p.id === providerId ? { ...p, default_station_id: stationId } : p;
+    const selected = this.selectedProvider();
+    if (selected) this.selectedProvider.set(patch(selected));
+    this.providers.set(this.providers().map(patch));
+  }
+
   isStationAssigned(stationId: number): boolean {
     return this.assignedStationIds().includes(stationId);
   }
@@ -590,6 +642,7 @@ export class ScheduleManagementComponent {
       )
       .subscribe({
         next: () => {
+          this.syncDefaultStation(provider.id, next);
           this.toastService.success(
             assign ? 'Estación vinculada al personal' : 'Estación desvinculada',
           );
@@ -617,6 +670,7 @@ export class ScheduleManagementComponent {
       .subscribe({
         next: (ids) => {
           this.assignedStationIds.set(ids);
+          this.syncDefaultStation(provider.id, ids);
           this.toastService.success(
             assignAll
               ? 'Todas las estaciones asignadas'

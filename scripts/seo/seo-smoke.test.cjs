@@ -6,7 +6,7 @@ const { createSmoke, parseArgs, TOKEN_RE } = require('./seo-smoke.cjs');
 const BASE = 'https://vendix.online';
 const NOW = Date.parse('2026-11-03T12:00:00Z');
 const SEC = { 'strict-transport-security': 'max-age=1', 'x-content-type-options': 'nosniff', 'referrer-policy': 'x', 'x-frame-options': 'DENY', 'cache-control': 'max-age=0' };
-const PAGES = [['/', true], ['/pricing', true], ['/ayuda', true], ['/legal/terminos', true], ['/legal/privacidad', true], ['/legal/cookies', true], ['/pqr', false], ['/auth/login', false], ['/auth/register', false]];
+const PAGES = [['/', true], ['/pricing', true], ['/ayuda', false], ['/legal/terminos', true], ['/legal/privacidad', true], ['/legal/cookies', true], ['/pqr', false], ['/auth/login', false], ['/auth/register', false]];
 
 function page(p, index) {
   const canon = index ? `<link rel="canonical" href="${BASE}${p}">` : '';
@@ -119,6 +119,21 @@ test('report + enforce de un control concreto: solo ese bloquea', async () => {
   assert.equal((await exec(t, { mode: 'report', enforceIds: ['www-apex'] })).exitCode, 1);
 });
 
+test('alerta: con SEO_SMOKE_ENFORCE de los controles estables, perder HSTS o el 301 http→https bloquea; las FALLA legacy no', async () => {
+  const stable = ['www-apex', 'precios-pricing', 'archivo-404', 'http-https', 'hsts', 'nosniff', 'referrer-policy', 'robots-200', 'sitemap-200', 'sitemap-hosts', 'sitemap-tokens'];
+  const sano = await exec(site({}), { mode: 'report', enforceIds: stable });
+  assert.equal(sano.exitCode, 0);
+  const sinHsts = await exec(site({ [BASE + '/']: { status: 200, headers: { 'content-type': 'text/html', 'strict-transport-security': '' }, body: page('/', true) } }), { mode: 'report', enforceIds: stable });
+  assert.equal(find(sinHsts, 'hsts').status, 'FALLA');
+  assert.equal(sinHsts.exitCode, 1);
+  const sinHttps = await exec(site({ 'http://vendix.online/': { status: 200, body: 'x' } }), { mode: 'report', enforceIds: stable });
+  assert.equal(find(sinHttps, 'http-https').status, 'FALLA');
+  assert.equal(sinHttps.exitCode, 1);
+  const soft404 = await exec(site({ [BASE + '/ruta-que-no-existe-seo-smoke']: { status: 200, headers: { 'content-type': 'text/html' }, body: page('/', true) } }), { mode: 'report', enforceIds: stable });
+  assert.ok(soft404.summary.falla > 0);
+  assert.equal(soft404.exitCode, 0);
+});
+
 test('sitio sano en enforce: código 0 y ninguna FALLA', async () => {
   const r = await exec(site(), { mode: 'enforce' });
   assert.equal(r.summary.falla, 0, JSON.stringify(r.results.filter(x => x.status === 'FALLA')));
@@ -168,4 +183,18 @@ test('cabeceras: x-frame-options ausente es AVISO (omitida a propósito por Womp
   assert.equal(r.results.find(x => x.check === 'cabecera strict-transport-security').status, 'OK');
   const noHsts = await exec(site({ [BASE + '/']: { status: 200, headers: { 'content-type': 'text/html', 'strict-transport-security': '' }, body: page('/', true) } }));
   assert.equal(noHsts.results.find(x => x.check === 'cabecera strict-transport-security').status, 'FALLA');
+});
+
+test('en una tienda se evalúan las rutas de tienda y no las comerciales', async () => {
+  const STORE = 'https://tienda-demo.vendix.online';
+  const SEC = { 'strict-transport-security': 'max-age=1', 'x-content-type-options': 'nosniff', 'referrer-policy': 'x', 'cache-control': 'max-age=0' };
+  const log = [];
+  const t = {};
+  for (const p of ['/', '/catalog', '/novedades', '/ofertas', '/cart']) t[STORE + p] = { status: 200, headers: { 'content-type': 'text/html', ...SEC }, body: '<html><head><title>T</title></head><body><h1>H</h1></body></html>' };
+  t[STORE + '/robots.txt'] = { status: 200, body: 'User-agent: *\nSitemap: ' + STORE + '/sitemap.xml\n' };
+  t[STORE + '/sitemap.xml'] = { status: 200, body: '<urlset></urlset>' };
+  const r = await createSmoke({ base: STORE, fetch: fakeFetch(t, log), now: () => NOW }).run();
+  const pedidas = log.map(l => l.replace(/^(GET|HEAD) /, ''));
+  for (const p of ['/pricing', '/ayuda', '/legal/terminos', '/legal/privacidad', '/legal/cookies', '/auth/login']) assert.ok(!pedidas.includes(STORE + p), p + ' no debe pedirse en una tienda');
+  for (const p of ['/catalog', '/novedades', '/ofertas']) assert.equal(r.results.find(x => x.check === p + ' responde 200').status, 'OK');
 });

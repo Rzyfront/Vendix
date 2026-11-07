@@ -68,7 +68,11 @@ export interface CartItem {
     product_type?: 'physical' | 'service';
     requires_booking?: boolean;
     service_duration_minutes?: number;
+    /** Unit the duration is shown in; absent reads as 'minute'. */
+    service_duration_unit?: 'minute' | 'hour' | 'day' | null;
     booking_mode?: 'provider_required' | 'free_booking';
+    /** `station_rate` is priced by the booked slot's quote (S18), not by the cart price. */
+    rental_pricing_mode?: 'fixed_price' | 'station_rate' | null;
   };
   variant: {
     name: string;
@@ -478,6 +482,8 @@ export class CartService {
                       requires_booking: product.requires_booking,
                       service_duration_minutes:
                         product.service_duration_minutes ?? undefined,
+                      service_duration_unit: product.service_duration_unit ?? null,
+                      rental_pricing_mode: product.rental_pricing_mode ?? null,
                     },
                     variant: localItem.product_variant_id
                       ? {

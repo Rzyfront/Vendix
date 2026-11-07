@@ -900,6 +900,9 @@
                               class="time-input"
                             />
                           </div>
+                          @if (closesNextDay(block.open, block.close)) {
+                            <span class="field__hint">Cierra al día siguiente</span>
+                          }
                           @if (getDayBlocks(day.key).length > 1) {
                             <button
                               type="button"

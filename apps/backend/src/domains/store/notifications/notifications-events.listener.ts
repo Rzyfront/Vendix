@@ -39,6 +39,7 @@ import { writeInvoiceDeliveryEvent } from '../invoicing/delivery/invoice-deliver
 import { InvoiceDeliveryService } from '../invoicing/delivery/invoice-delivery.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { SmsSpendLimitReachedEvent } from '../../../messaging/spend/sms-spend.service';
+import type { PaymentRequestReceiptSubmittedEvent } from '../../ecommerce/payment-requests/interfaces/payment-request-events.interface';
 
 @Injectable()
 export class NotificationsEventsListener {
@@ -152,6 +153,10 @@ export class NotificationsEventsListener {
     // marca LISTO (kitchen_ticket_ready). Silenciar SÓLO esta fuente
     // preserva el resto de notificaciones de estado en todo el sistema.
     if (event.source === 'kitchen_bridge') {
+      return;
+    }
+    // A no-op transition (created → created) carries no information.
+    if (event.old_state === event.new_state) {
       return;
     }
     await this.notifications_service.createAndBroadcast(
@@ -349,6 +354,24 @@ export class NotificationsEventsListener {
       'Pago Recibido',
       `Pago de $${event.amount} ${event.currency} para orden #${event.order_number}`,
       { order_id: event.order_id, payment_method: event.payment_method },
+    );
+  }
+
+  /** A customer uploaded a transfer receipt on a payment link; the admin confirms it in Reservas → Cobros. */
+  @OnEvent('payment_request.receipt_submitted')
+  async handlePaymentRequestReceiptSubmitted(event: PaymentRequestReceiptSubmittedEvent) {
+    const subject = event.description ? `de «${event.description}»` : 'de un cobro';
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'payment_received',
+      'Comprobante por confirmar',
+      `Un cliente subió el comprobante de transferencia ${subject}. Revísalo para confirmar el pago.`,
+      {
+        payment_request_id: event.payment_request_id,
+        amount: event.amount,
+        purpose: event.purpose,
+        route: '/admin/reservations/payment-requests',
+      },
     );
   }
 

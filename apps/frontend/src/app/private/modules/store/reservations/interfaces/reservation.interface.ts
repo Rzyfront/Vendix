@@ -8,6 +8,10 @@ export interface Booking {
   date: string;
   start_time: string;
   end_time: string;
+  /** Day the booking ends when it crosses midnight (S21); null/absent = same day. */
+  end_date?: string | null;
+  /** Booking without an end (D9). */
+  is_open_ended?: boolean;
   status: BookingStatus;
   channel: string;
   notes?: string;
@@ -32,6 +36,88 @@ export interface Booking {
   data_collection_submissions?: any[];
   metadata_snapshot?: any;
   consultation_notes?: any[];
+  /** Recurring series the booking belongs to (S19) and its position (0-based); absent for a single booking. */
+  series_id?: number | null;
+  series_index?: number | null;
+  /** Size of the series, for the "Serie i/n" badge. */
+  series?: { id: number; occurrences: number; frequency: 'daily' | 'weekly' | string } | null;
+  /** Deposit block of the detail endpoint and of the create answer; null when the booking never had one (S15). */
+  deposit?: BookingDeposit | null;
+  /** "Cobro para reservar" block of the detail endpoint; null/absent when the booking has no charge. */
+  prepay?: BookingPrepay | null;
+  /** Path of the payment page (`/pagar/:token`) returned when a `link` deposit was created. */
+  payment_path?: string | null;
+  /** Absolute payment page on the store's public domain; null when the store has none. */
+  payment_url?: string | null;
+}
+
+/** `deposit` block of a booking (field names mirror `BookingDepositBlock` of the backend). */
+export interface BookingDeposit {
+  required: number | null;
+  received: number;
+  balance: number;
+  pending_request: {
+    payment_request_id: number;
+    amount: number;
+    status: string;
+    expires_at: string | null;
+  } | null;
+  decision_due_at: string | null;
+}
+
+/** `prepay` block of the booking detail (mirrors `RentalPrepayService.summary` of the backend). */
+export interface BookingPrepay {
+  paid_amount: number;
+  order_total: number;
+  remaining: number;
+  pending_request: {
+    payment_request_id: number;
+    amount: number;
+    status: string;
+    expires_at: string | null;
+  } | null;
+}
+
+/** Body of `POST :id/prepay-payment`: the prepay collected in person. */
+export interface RegisterPrepayPaymentInput {
+  store_payment_method_id: number;
+  bank_account_id?: number;
+  amount?: number;
+  reference?: string;
+  /** One per dialog open: a double submit registers a single payment. */
+  request_id?: string;
+}
+
+export type CancelLeftoverAction = 'refund' | 'credit' | 'retain';
+
+/** Deposit taken with an admin booking: `desk` = received now, `link` = payment page + held slot. */
+export interface BookingDepositInput {
+  amount: number;
+  mode: 'desk' | 'link';
+  method?: string;
+  store_payment_method_id?: number;
+  request_id: string;
+}
+
+export type DepositRefundMethod = 'cash' | 'bank_transfer' | 'card' | 'wompi';
+export type DepositDecisionAction = 'retain' | 'reschedule' | 'refund' | 'credit';
+
+export interface CancelBookingInput {
+  leftover_action?: CancelLeftoverAction;
+  refund_method?: DepositRefundMethod;
+  /** Idempotency key: one per dialog open. */
+  request_id?: string;
+}
+
+export interface DepositDecisionInput {
+  action: DepositDecisionAction;
+  /** Idempotency key: one per dialog open. */
+  request_id: string;
+  refund_method?: DepositRefundMethod;
+  store_payment_method_id?: number;
+  new_date?: string;
+  new_start_time?: string;
+  new_end_time?: string;
 }
 
 export type BookingStatus = 'pending' | 'confirmed' | 'arriving' | 'attending' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
@@ -124,6 +210,7 @@ export interface CreateBookingDto {
   station_id?: number;
   skip_availability_check?: boolean;
   skip_order_creation?: boolean;
+  deposit?: BookingDepositInput;
 }
 
 export interface RescheduleBookingDto {
@@ -269,6 +356,8 @@ export interface ServiceProvider {
   avatar_url?: string;
   bio?: string;
   sort_order: number;
+  /** Preferred station (S10): booking with this provider tries it first. */
+  default_station_id?: number | null;
   employee?: { id: number; first_name: string; last_name: string; position?: string } | null;
   user?: ProviderUser | null;
   services?: ProviderServiceAssignment[];

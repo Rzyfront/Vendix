@@ -143,42 +143,42 @@ export class HelpCenterComponent {
       category: 'inventory',
       question: '¿Cómo agrego un nuevo producto a mi inventario?',
       answer:
-        'Ve a Inventario → Productos → Nuevo. Completa nombre, SKU, precio, stock inicial y al menos una imagen. Guarda y el producto aparece inmediatamente en tu catálogo online y en el POS.',
+        'Ve a Productos → Lista y crea un producto nuevo. Solo son obligatorios el nombre y el precio; el SKU, el stock inicial y las imágenes son opcionales. Puedes indicar si el producto estará disponible en tu tienda en línea.',
     },
     {
       id: 'inv-2',
       category: 'inventory',
       question: '¿Puedo gestionar varias bodegas?',
       answer:
-        'Sí. En Configuración → Bodegas crea las bodegas que necesites. Cada producto puede tener stock por bodega y Vendix calcula el stock total automáticamente. Útil para manejar tienda física, depósito y tienda online por separado.',
+        'Sí. En Inventario → Ubicaciones crea las bodegas, tiendas o ubicaciones que necesites. Cada producto lleva su stock por ubicación y puedes ver el detalle por bodega.',
     },
     {
       id: 'inv-3',
       category: 'inventory',
       question: '¿Cómo hago ajustes de inventario masivos?',
       answer:
-        'En Inventario → Productos selecciona varios productos (checkbox a la izquierda) y usa "Acción en lote" para cambiar precio, categoría o estado de todos a la vez. Para ajustes de stock usa el módulo de Movimientos.',
+        'Para cambiar precio, estado u otros campos de varios productos a la vez, usa la edición masiva de Productos. Para ajustar stock en bloque, ve a Inventario → Ajustes de Stock y carga la plantilla en Excel o CSV.',
     },
     {
       id: 'inv-4',
       category: 'inventory',
       question: '¿Qué pasa cuando un producto se queda sin stock?',
       answer:
-        'El producto se marca automáticamente como "Agotado" y se oculta del catálogo público. Si tienes activado el modo "permitir ventas sin stock", Vendix seguirá aceptando pedidos pero te avisará para hacer reposición.',
+        'Por defecto, los productos sin stock se ocultan del catálogo de tu tienda en línea (puedes elegir mostrarlos como "Agotado"). Si activas "Permitir sobreventa", podrás seguir vendiendo sin stock. Las alertas de stock bajo te llegan como notificación en el panel.',
     },
     {
       id: 'inv-5',
       category: 'inventory',
       question: '¿Puedo importar productos desde un Excel?',
       answer:
-        'Sí. En Inventario → Productos → Importar sube tu archivo CSV o Excel. Vendix detecta automáticamente las columnas y mapea con las del sistema. Si hay errores, te los muestra antes de confirmar la importación.',
+        'Sí. Desde Productos usa la carga masiva: descarga la plantilla, complétala y súbela en .xlsx, .xls o .csv (máximo 20 MB). Vendix revisa el archivo y te muestra los errores antes de confirmar la importación.',
     },
     {
       id: 'inv-6',
       category: 'inventory',
       question: '¿Cómo veo el historial de movimientos de un producto?',
       answer:
-        'En la ficha del producto, ve a la pestaña "Movimientos" para ver entradas, salidas, transferencias y ajustes con fecha, usuario responsable y motivo.',
+        'En Inventario → Movimientos busca el producto para ver sus entradas, salidas, transferencias y ajustes, con fecha, usuario responsable y motivo.',
     },
 
     // ── Online store (7) ─────────────────────────────────
@@ -194,42 +194,42 @@ export class HelpCenterComponent {
       category: 'online-store',
       question: '¿Puedo usar mi propio dominio?',
       answer:
-        'Sí. En Configuración → Dominio conecta tu dominio propio (ej. mitienda.com). Vendix te da los nameservers para apuntar y el certificado SSL se configura automáticamente.',
+        'Sí. En Configuración → Dominios agrega tu dominio (ej. mitienda.com). Vendix te indica los registros DNS que debes crear en tu proveedor de dominio y el certificado SSL se emite automáticamente.',
     },
     {
       id: 'store-3',
       category: 'online-store',
       question: '¿Qué métodos de pago aceptan?',
       answer:
-        'MercadoPago, Nequi, Daviplata, PSE, tarjetas crédito/débito (Visa, Mastercard, Amex), transferencia bancaria, pago contra entrega y efectivo en punto físico. La integración es automática, solo activas los que quieras ofrecer.',
+        'Con Wompi puedes recibir tarjetas débito y crédito, PSE, Nequi, Daviplata y Bancolombia. También puedes ofrecer efectivo, transferencia bancaria, datáfono y pago contra entrega. Actívalos en Configuración → Métodos de Pago; las pasarelas requieren tus credenciales.',
     },
     {
       id: 'store-4',
       category: 'online-store',
       question: '¿Cómo personalizo el diseño de mi tienda?',
       answer:
-        'En Tienda Online → Tema puedes elegir entre varios templates y ajustar colores, tipografías, banners y secciones. Todo se previsualiza en vivo antes de publicar.',
+        'En Tienda en línea sube tu logo y favicon, define los colores de tu marca y configura el slider y las secciones de la página de inicio.',
     },
     {
       id: 'store-5',
       category: 'online-store',
       question: '¿Cómo creo cupones de descuento?',
       answer:
-        'En Marketing → Cupones define un código, tipo de descuento (% o monto fijo), vigencia, monto mínimo y límites de uso. Se aplican automáticamente en el checkout.',
+        'En Marketing → Cupones define un código, el tipo de descuento (% o monto fijo), la vigencia, el monto mínimo y los límites de uso. Tu cliente escribe el código en el checkout y el descuento se aplica.',
     },
     {
       id: 'store-6',
       category: 'online-store',
       question: '¿Puedo vender sin tener tienda física?',
       answer:
-        'Por supuesto. Muchos de nuestros clientes son 100% online. Vendix incluye la pasarela de pagos, el catálogo público y la gestión de envíos sin que necesites un local físico.',
+        'Sí. Con la tienda en línea de Vendix tienes catálogo público, pagos en línea con Wompi y métodos de envío, sin necesidad de un local físico.',
     },
     {
       id: 'store-7',
       category: 'online-store',
       question: '¿Cómo funciona el checkout?',
       answer:
-        'El cliente agrega productos al carrito, llena sus datos, elige método de pago y envío, y confirma. El pedido entra automáticamente a tu panel de órdenes y al inventario. Recibirás una notificación por email.',
+        'El cliente agrega productos al carrito, llena sus datos, elige método de pago y envío, y confirma. El pedido entra a tus Órdenes y recibes una notificación en el panel.',
     },
 
     // ── Billing (6) ──────────────────────────────────────
@@ -238,42 +238,42 @@ export class HelpCenterComponent {
       category: 'billing',
       question: '¿Cuánto cuesta Vendix?',
       answer:
-        'Durante el periodo de acceso anticipado, todas las funcionalidades están incluidas sin costo. Cuando lancemos los planes pagos, publicaremos los precios en esta misma página y por correo a todos los usuarios activos.',
+        'Vendix funciona con planes de suscripción mensuales y anuales, con un periodo de prueba al registrarte. Consulta los planes y precios vigentes en la página de Planes y precios.',
     },
     {
       id: 'bill-2',
       category: 'billing',
       question: '¿Cómo configuro la facturación electrónica?',
       answer:
-        'En Configuración → Facturación electrónica sube tu resolución DIAN, rango de numeración y certificado digital. Vendix genera automáticamente las facturas con cada venta válida.',
+        'Ve a Finanzas → Activar facturación electrónica: carga tu certificado digital y tu resolución DIAN, y completa la habilitación. Después decides si las ventas del POS y de la tienda en línea se facturan automáticamente.',
     },
     {
       id: 'bill-3',
       category: 'billing',
       question: '¿Puedo facturar sin ser responsable de IVA?',
       answer:
-        'Sí. Configura tu perfil de empresa en Facturación → Perfil. Vendix ajusta las facturas según tu régimen (simplificado, común, gran contribuyente) automáticamente.',
+        'Sí. Registra tus datos fiscales y las responsabilidades de tu RUT (puedes escanear el RUT en el asistente fiscal). Vendix ajusta las facturas según seas o no responsable de IVA.',
     },
     {
       id: 'bill-4',
       category: 'billing',
       question: '¿Cómo emito una nota crédito?',
       answer:
-        'En la orden original, haz clic en "Emitir nota crédito" e ingresa el motivo. Vendix genera el documento con la numeración correcta y lo notifica al cliente por email.',
+        'Desde la factura (o desde la orden ya facturada) elige "Nota crédito" e indica el motivo. Vendix la emite ante la DIAN con la numeración correspondiente y, si el cliente tiene correo, se la envía.',
     },
     {
       id: 'bill-5',
       category: 'billing',
       question: '¿Puedo conciliar los pagos con mi banco?',
       answer:
-        'Vendix genera un archivo de conciliación con las transacciones diarias en el formato de tu banco. Configura los datos bancarios en Facturación → Conciliación y descárgalo cuando lo necesites.',
+        'Sí. En Contabilidad → Conciliación bancaria registra tus cuentas, importa el extracto de tu banco (CSV, OFX o MT940) y concilia los movimientos de forma automática o manual.',
     },
     {
       id: 'bill-6',
       category: 'billing',
       question: '¿Qué pasa si una factura es rechazada por la DIAN?',
       answer:
-        'La factura queda marcada como "Rechazada" y se generan los eventos correspondientes. Recibirás un email con el motivo. Puedes corregir los datos y reintentarlo sin afectar la numeración.',
+        'La factura queda como "Rechazada" y en su detalle ves el mensaje de la DIAN. Puedes corregir los datos y reenviarla, dentro del plazo permitido, conservando su número.',
     },
 
     // ── Reports (5) ───────────────────────────────────────
@@ -282,35 +282,35 @@ export class HelpCenterComponent {
       category: 'reports',
       question: '¿Qué reportes incluye Vendix?',
       answer:
-        'Ventas por período, top productos, ventas por categoría, ventas por vendedor, inventario valorizado, flujo de caja, devoluciones y muchos más. Todos exportables a Excel o PDF.',
+        'Ventas por producto, categoría, cliente, canal, vendedor y método de pago, inventario valorizado, movimientos, reembolsos, arqueo de caja, reportes contables y más. Todos se exportan a Excel (XLSX).',
     },
     {
       id: 'rep-2',
       category: 'reports',
       question: '¿Puedo ver ventas en tiempo real?',
       answer:
-        'Sí. El Dashboard principal se actualiza cada 5 minutos. Las ventas del día, ticket promedio, productos más vendidos y alertas de stock se actualizan automáticamente.',
+        'El Panel Principal muestra ingresos, ganancias, tendencia, ventas por canal y alertas operativas (incluido el stock bajo) del periodo que elijas. Los pedidos nuevos te llegan como notificación al instante.',
     },
     {
       id: 'rep-3',
       category: 'reports',
       question: '¿Puedo programar el envío automático de reportes?',
       answer:
-        'En Reportes → Programados configura reportes recurrentes (diarios, semanales, mensuales) y los destinatarios que los reciben por email. Útil para equipos administrativos.',
+        'Por ahora no se pueden programar envíos de reportes por correo. Vendix genera automáticamente un informe semanal de tu tienda que puedes ver en el panel, y puedes descargar cualquier reporte en Excel cuando lo necesites.',
     },
     {
       id: 'rep-4',
       category: 'reports',
       question: '¿Cómo comparo ventas entre períodos?',
       answer:
-        'En cualquier reporte de ventas selecciona dos rangos de fechas y haz clic en "Comparar". El sistema te muestra la variación % y absoluta para cada métrica.',
+        'Los reportes y analíticas de ventas muestran automáticamente la variación porcentual frente al periodo anterior equivalente.',
     },
     {
       id: 'rep-5',
       category: 'reports',
       question: '¿Puedo filtrar por vendedor, sucursal o canal?',
       answer:
-        'Sí. Todos los reportes tienen filtros por dimensiones: vendedor, sucursal, canal de venta (online/POS), método de pago, categoría y más. Los filtros se pueden combinar y guardar como vista recurrente.',
+        'Sí, con reportes dedicados por vendedor, por canal (en línea o POS), por método de pago y por categoría, todos filtrables por rango de fechas.',
     },
 
     // ── Users (5) ────────────────────────────────────────
@@ -319,35 +319,35 @@ export class HelpCenterComponent {
       category: 'users',
       question: '¿Cómo creo un usuario y asigno permisos?',
       answer:
-        'En Equipo → Usuarios → Nuevo. Ingresa nombre, email y rol. El sistema envía un email de invitación con un link para que el usuario configure su contraseña. Los permisos del rol se asignan al crear.',
+        'En Configuración → Usuarios crea el usuario con su nombre, correo, contraseña y rol. Los permisos del rol aplican de inmediato.',
     },
     {
       id: 'usr-2',
       category: 'users',
       question: '¿Qué roles incluye Vendix?',
       answer:
-        'Owner (acceso total), Administrador, Vendedor, Cajero, Inventarista y personalizado. Cada rol tiene permisos predefinidos que puedes ajustar granularmente.',
+        'Propietario, Administrador, Gerente, Supervisor, Empleado y Cajero, cada uno con permisos predefinidos. Si necesitas otra combinación, crea un rol personalizado.',
     },
     {
       id: 'usr-3',
       category: 'users',
       question: '¿Puedo crear roles personalizados?',
       answer:
-        'Sí. En Equipo → Roles → Nuevo rol defines un nombre y seleccionas los permisos específicos que ese rol tendrá. Útil para casos especiales como contador o auditor.',
+        'Sí. En Configuración → Roles crea un rol con su nombre y selecciona los permisos que tendrá. Útil para casos especiales como contador o auditor.',
     },
     {
       id: 'usr-4',
       category: 'users',
       question: '¿Cómo cambio el dueño de la tienda?',
       answer:
-        'El owner actual debe transferir la propiedad desde Equipo → Miembros → Owner → "Transferir propiedad". El nuevo owner debe aceptar por email. Por seguridad, ambos reciben una confirmación.',
+        'Para cambiar el propietario de la tienda, escríbenos desde Ayuda → Soporte y te acompañamos en el proceso.',
     },
     {
       id: 'usr-5',
       category: 'users',
       question: '¿Puedo limitar el acceso por horario?',
       answer:
-        'Sí. En Equipo → Configuración define horarios permitidos por usuario. Si alguien intenta entrar fuera de su horario, recibe un mensaje y se le bloquea el acceso hasta el siguiente período permitido.',
+        'Por ahora no es posible limitar el acceso por horario. Puedes desactivar usuarios o ajustar sus roles cuando lo necesites.',
     },
 
     // ── Shipping (5) ─────────────────────────────────────
@@ -356,35 +356,35 @@ export class HelpCenterComponent {
       category: 'shipping',
       question: '¿Cómo configuro mis transportadoras?',
       answer:
-        'En Despachos → Configuración → Transportadoras agrega cada una con su API key. Vendix se conecta con las principales transportadoras colombianas para generar guías automáticamente.',
+        'En Despacho → Métodos de Envío configura tus opciones: transportadora o tercero, flota propia o recogida en tienda, con sus tiempos estimados y tarifas. Vendix no se conecta con las transportadoras para generar guías.',
     },
     {
       id: 'ship-2',
       category: 'shipping',
       question: '¿Puedo hacer envíos masivos?',
       answer:
-        'Sí. Selecciona varias órdenes pendientes en Despachos → Por despachar y haz clic en "Generar guías en lote". El sistema genera las guías de cada transportadora y actualiza las órdenes.',
+        'Sí, en lote: selecciona varias órdenes o remisiones para imprimirlas, confirmarlas o marcarlas como entregadas, y agrúpalas en planillas de ruta.',
     },
     {
       id: 'ship-3',
       category: 'shipping',
       question: '¿Cómo calculo automáticamente el costo de envío?',
       answer:
-        'Configura zonas de envío en Despachos → Zonas con rangos de peso y destino. Al momento del checkout, Vendix calcula el costo según el destino y peso del pedido.',
+        'En Despacho → Métodos de Envío configura zonas (por país, región o ciudad) y tarifas fijas, por peso, por valor del pedido o gratis. Al momento del checkout, Vendix calcula el costo según el destino.',
     },
     {
       id: 'ship-4',
       category: 'shipping',
       question: '¿Puedo ofrecer recogida en tienda?',
       answer:
-        'Sí. Activa "Recogida en tienda" en Despachos → Configuración. Los clientes eligen en el checkout y reciben un email con la dirección y horarios cuando el pedido está listo.',
+        'Sí. Activa el método "Recogida en tienda" en Despacho → Métodos de Envío. El cliente lo elige en el checkout y tú marcas el pedido como listo para recoger.',
     },
     {
       id: 'ship-5',
       category: 'shipping',
       question: '¿Cómo rastreo un envío?',
       answer:
-        'En la orden, haz clic en "Rastrear envío". Vendix consulta el estado actualizado en tiempo real a la transportadora y muestra la línea de tiempo del paquete hasta la entrega.',
+        'Al marcar la orden como enviada, registra el número de guía y la transportadora. Para entregas con flota propia, sigue el recorrido desde Despacho → Rutas.',
     },
   ]);
 

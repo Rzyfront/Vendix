@@ -421,6 +421,14 @@ export class EcommerceCheckoutDto {
   @IsBoolean()
   require_registration?: boolean;
 
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Allow booking a service without logging in',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allow_guest_booking?: boolean;
+
   @ApiPropertyOptional({ example: true, description: 'Guest email required' })
   @IsOptional()
   @IsBoolean()

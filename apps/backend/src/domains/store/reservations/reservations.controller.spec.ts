@@ -2,6 +2,7 @@ import { ReservationsController } from './reservations.controller';
 import { BookingConfirmationService } from './booking-confirmation.service';
 import { AppointmentQueueService } from './appointment-queue/appointment-queue.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { PERMISSIONS_KEY } from '../../auth/decorators/permissions.decorator';
 
 describe('ReservationsController — appointment redesign endpoints (smoke)', () => {
   function buildController() {
@@ -12,6 +13,8 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
       markArriving: jest.fn().mockResolvedValue({ id: 1, status: 'arriving' }),
       markAttending: jest.fn().mockResolvedValue({ id: 1, status: 'attending' }),
       findOne: jest.fn().mockResolvedValue({ id: 1 }),
+      findOneDetail: jest.fn().mockResolvedValue({ id: 1, deposit: null }),
+      decideDeposit: jest.fn().mockResolvedValue({ id: 1 }),
       assignTable: jest.fn(),
       seatBooking: jest.fn(),
       reschedule: jest.fn(),
@@ -59,6 +62,15 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
     // que un stub vacío basta para satisfacer el constructor real.
     const prisma = {} as any;
 
+    const reservationDeposits = {
+      rotateLink: jest.fn().mockResolvedValue({ payment_path: '/pagar/abc', payment_request_id: 9 }),
+    } as any;
+
+    const rentalPrepay = {
+      openLink: jest.fn().mockResolvedValue({ payment_path: '/pagar/pre', payment_request_id: 12, amount: 75000, expires_at: null }),
+      registerInPerson: jest.fn().mockResolvedValue({ paid_amount: 75000, fully_paid: false }),
+    } as any;
+
     const controller = new ReservationsController(
       reservationsService,
       reservationsExportService,
@@ -67,9 +79,11 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
       appointmentQueueService,
       responseService,
       prisma,
+      reservationDeposits,
+      rentalPrepay,
     );
 
-    return { controller, reservationsService, bookingConfirmationService, appointmentQueueService, responseService };
+    return { controller, rentalPrepay, reservationDeposits, reservationsService, bookingConfirmationService, appointmentQueueService, responseService };
   }
 
   it('markArriving delegates to the service and wraps the response', async () => {
@@ -126,5 +140,76 @@ describe('ReservationsController — appointment redesign endpoints (smoke)', ()
     } finally {
       storeIdSpy.mockRestore();
     }
+  });
+
+  it('GET :id returns the booking detail with its deposit block', async () => {
+    const { controller, reservationsService, responseService } = buildController();
+    await controller.findOne(1);
+    expect(reservationsService.findOneDetail).toHaveBeenCalledWith(1);
+    expect(responseService.success).toHaveBeenCalledWith(
+      { id: 1, deposit: null },
+      expect.any(String),
+    );
+  });
+
+  it('cancel without a body keeps the old call and with a body forwards leftover_action', async () => {
+    const { controller, reservationsService } = buildController();
+    await controller.cancel(4);
+    expect(reservationsService.cancel).toHaveBeenCalledWith(4, {});
+    await controller.cancel(4, { leftover_action: 'refund' });
+    expect(reservationsService.cancel).toHaveBeenLastCalledWith(4, { leftover_action: 'refund' });
+  });
+
+  it('deposit-link returns the new payment_path of the pending request', async () => {
+    const { controller, reservationDeposits, responseService } = buildController();
+    await controller.depositLink(7);
+    expect(reservationDeposits.rotateLink).toHaveBeenCalledWith(7);
+    expect(responseService.success).toHaveBeenCalledWith(
+      { payment_path: '/pagar/abc', payment_request_id: 9 },
+      expect.any(String),
+    );
+  });
+
+  it('deposit-decision delegates the decision to the service', async () => {
+    const { controller, reservationsService } = buildController();
+    const dto = { action: 'retain' as const, request_id: 'r1' };
+    await controller.depositDecision(7, dto);
+    expect(reservationsService.decideDeposit).toHaveBeenCalledWith(7, dto);
+  });
+
+  it('deposit-link and deposit-decision require store:reservations:update', () => {
+    for (const handler of [
+      ReservationsController.prototype.depositLink,
+      ReservationsController.prototype.depositDecision,
+    ]) {
+      expect(Reflect.getMetadata(PERMISSIONS_KEY, handler)).toEqual(['store:reservations:update']);
+    }
+  });
+
+  it('prepay-link abre el cobro para reservar y devuelve la ruta de pago', async () => {
+    const { controller, rentalPrepay, responseService } = buildController();
+    await controller.prepayLink(7);
+    expect(rentalPrepay.openLink).toHaveBeenCalledWith(7);
+    expect(responseService.success).toHaveBeenCalledWith(
+      { payment_path: '/pagar/pre', payment_request_id: 12, amount: 75000, expires_at: null },
+      expect.any(String),
+    );
+  });
+
+  it('prepay-link requiere store:reservations:update', () => {
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, ReservationsController.prototype.prepayLink)).toEqual([
+      'store:reservations:update',
+    ]);
+  });
+
+  it('prepay-payment registra el cobro en persona con el cuerpo recibido y requiere store:reservations:update', async () => {
+    const { controller, rentalPrepay, responseService } = buildController();
+    const dto = { store_payment_method_id: 4, bank_account_id: 2, amount: 75000 };
+    await controller.prepayPayment(7, dto as any);
+    expect(rentalPrepay.registerInPerson).toHaveBeenCalledWith(7, dto);
+    expect(responseService.success).toHaveBeenCalledWith({ paid_amount: 75000, fully_paid: false }, 'Pago registrado');
+    expect(Reflect.getMetadata(PERMISSIONS_KEY, ReservationsController.prototype.prepayPayment)).toEqual([
+      'store:reservations:update',
+    ]);
   });
 });

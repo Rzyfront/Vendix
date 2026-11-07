@@ -15,6 +15,10 @@ import { API_HOSTS, normalizeHostname } from '@common/utils/tenant-hostname.util
 import { isValidSlug } from '@common/utils/slug.util';
 import { MARKETING_SITEMAP_PAGES, marketingSitemapVersion } from './marketing-sitemap.registry';
 
+// Protocolo sitemaps.org: un archivo admite como máximo 50.000 URL y 50 MB sin
+// comprimir (SEO-TECH-17). Una tienda nunca publica más; si las supera, se avisa en el log.
+export const SITEMAP_MAX_URLS = 50_000;
+
 interface DomainContext {
   app_type: string;
   base_url: string;
@@ -268,8 +272,8 @@ Disallow: /
         ? `https://${baseDomain}`
         : base_url;
 
-    // /ayuda, /pqr and /legal/* exist in the SPA, but the CDN currently serves
-    // them with HTTP 404; restore them to the sitemap when the CDN is fixed.
+    // Only indexable pages belong here (registry): /ayuda and /pqr render
+    // `noindex`; /legal/cookies has no active document.
 
     // Generation/cache time is not an editorial modification date.
     return this.buildSitemapXml(canonicalBase, MARKETING_SITEMAP_PAGES);
@@ -442,7 +446,8 @@ ${entries.join('\n')}
       { path: '/ofertas', priority: '0.8', changefreq: 'daily' },
     ];
 
-    // Fetch active ecommerce products
+    // Fetch active ecommerce products (los más recientes primero, sin pasar del tope del protocolo)
+    const product_limit = SITEMAP_MAX_URLS - static_urls.length;
     const store_products = context.store_id
       ? await this.globalPrisma.products.findMany({
           where: {
@@ -457,8 +462,15 @@ ${entries.join('\n')}
           },
           select: { slug: true, updated_at: true },
           orderBy: { updated_at: 'desc' },
+          take: product_limit,
         })
       : [];
+
+    if (store_products.length >= product_limit) {
+      this.logger.warn(
+        `Ecommerce sitemap: store ${context.store_id} reached the ${SITEMAP_MAX_URLS}-URL sitemap limit; older products are left out`,
+      );
+    }
 
     // Un slug vacío publicaría `/products/` (el listado) como producto, y uno con
     // caracteres fuera de `isValidSlug` no es una URL limpia: se omiten del sitemap.

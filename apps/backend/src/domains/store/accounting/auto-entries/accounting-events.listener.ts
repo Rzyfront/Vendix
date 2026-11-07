@@ -1436,6 +1436,81 @@ export class AccountingEventsListener {
     }
   }
 
+  // Station consumable deposit received (customer advance, 2805). Never `wallet.credited`:
+  // its handler dedupes by wallet_id and would skip later credits.
+  @OnEvent('service_deposit.received')
+  async handleServiceDepositReceived(event: {
+    store_id: number;
+    organization_id?: number;
+    deposit_id: number;
+    amount: number;
+    payment_method_type?: string;
+    customer_id?: number | null;
+    booking_id?: number | null;
+    session_id?: number | null;
+    user_id?: number | null;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onServiceDepositReceived({
+        deposit_id: event.deposit_id,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        payment_method_type: event.payment_method_type,
+        booking_id: event.booking_id ?? null,
+        session_id: event.session_id ?? null,
+        customer: event.customer_id ? { id: Number(event.customer_id), type: 'customer' } : undefined,
+        user_id: event.user_id ?? undefined,
+      });
+      this.logger.log(`Auto-entry created for service_deposit.received - deposit ${event.deposit_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for service_deposit.received - deposit ${event.deposit_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // Station consumable deposit refunded to the customer.
+  @OnEvent('service_deposit.refunded')
+  async handleServiceDepositRefunded(event: {
+    store_id: number;
+    organization_id?: number;
+    deposit_id: number;
+    amount: number;
+    payment_method_type?: string;
+    customer_id?: number | null;
+    booking_id?: number | null;
+    session_id?: number | null;
+    user_id?: number | null;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'payments', event.organization_id))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onServiceDepositRefunded({
+        deposit_id: event.deposit_id,
+        organization_id,
+        store_id: event.store_id,
+        amount: Number(event.amount),
+        payment_method_type: event.payment_method_type,
+        booking_id: event.booking_id ?? null,
+        session_id: event.session_id ?? null,
+        customer: event.customer_id ? { id: Number(event.customer_id), type: 'customer' } : undefined,
+        user_id: event.user_id ?? undefined,
+      });
+      this.logger.log(`Auto-entry created for service_deposit.refunded - deposit ${event.deposit_id}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for service_deposit.refunded - deposit ${event.deposit_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   // H3.5 — deposit retained as a cancellation / no-show penalty.
   @OnEvent('lodging.deposit.retained')
   async handleLodgingDepositRetained(event: {

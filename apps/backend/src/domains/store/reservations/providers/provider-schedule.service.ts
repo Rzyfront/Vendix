@@ -9,6 +9,10 @@ import {
   SCHEDULE_TIME_PATTERN,
 } from './dto/upsert-provider-schedule.dto';
 import { CreateProviderExceptionDto } from './dto/create-provider-exception.dto';
+import {
+  isOvernight,
+  validateWeeklyBlocks,
+} from '../../../../common/utils/schedule-window.util';
 
 const DAY_NAMES = [
   'domingo',
@@ -90,7 +94,7 @@ export class ProviderScheduleService {
   /**
    * Validates schedule items and resolves missing `block_order` values
    * with per-day counters. Throws `BadRequestException` (never a raw
-   * Prisma error) on: bad time format, end <= start, or a duplicated
+   * Prisma error) on: bad time format, overlapping overnight blocks, or a duplicated
    * (day_of_week, block_order) pair within the payload.
    */
   private normalizeScheduleItems(
@@ -98,7 +102,7 @@ export class ProviderScheduleService {
   ): ProviderScheduleItemDto[] {
     const usedByDay = new Map<number, Set<number>>();
 
-    return items.map((item) => {
+    const normalized = items.map((item) => {
       const dayName = DAY_NAMES[item.day_of_week] ?? `día ${item.day_of_week}`;
 
       if (
@@ -117,14 +121,6 @@ export class ProviderScheduleService {
           `La hora de fin del ${dayName} no es válida (usa HH:mm de 00:00 a 23:59)`,
         );
       }
-      const startMin = this.timeToMinutes(item.start_time);
-      const endMin = this.timeToMinutes(item.end_time);
-      if (endMin <= startMin) {
-        throw new BadRequestException(
-          `El bloque del ${dayName} (${item.start_time}–${item.end_time}) termina antes de empezar`,
-        );
-      }
-
       const used = usedByDay.get(item.day_of_week) ?? new Set<number>();
       let order = item.block_order;
       if (order === undefined || order === null) {
@@ -141,11 +137,26 @@ export class ProviderScheduleService {
 
       return { ...item, block_order: order };
     });
-  }
 
-  private timeToMinutes(time: string): number {
-    const [h, m] = time.split(':').map(Number);
-    return h * 60 + m;
+    // S21: end <= start means the block ends the next day (00:00-00:00 = 24 h).
+    // Blocks that cross midnight must not overlap another block of the same day
+    // nor the previous day's spill. Daytime-only payloads validate as before.
+    if (normalized.some((item) => isOvernight(item))) {
+      const invalid = validateWeeklyBlocks(
+        normalized.map((item) => ({
+          day: item.day_of_week,
+          start_time: item.start_time,
+          end_time: item.end_time,
+        })),
+      );
+      if (invalid) {
+        const dayName = DAY_NAMES[invalid.day] ?? `día ${invalid.day}`;
+        throw new BadRequestException(
+          `Los bloques del ${dayName} se cruzan entre sí o con el bloque que termina de madrugada del día anterior`,
+        );
+      }
+    }
+    return normalized;
   }
 
   async getExceptions(providerId: number, dateFrom?: string, dateTo?: string) {

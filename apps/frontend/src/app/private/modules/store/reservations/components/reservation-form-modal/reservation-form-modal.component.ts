@@ -1,6 +1,6 @@
 import { providerDisplayName } from '../../../../../../shared/utils/provider-display-name';
-import { Component, input, output, signal, computed, inject, DestroyRef } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
+import { Component, input, output, signal, computed, inject, DestroyRef, effect, untracked } from '@angular/core';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import {
@@ -15,13 +15,26 @@ import {
   SelectorComponent,
 } from '../../../../../../shared/components';
 import { ToastService } from '../../../../../../shared/components';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ReservationsService } from '../../services/reservations.service';
-import { AvailabilitySlot, Booking, CreateBookingDto } from '../../interfaces/reservation.interface';
+import { SeriesBase, SeriesFormComponent, seriesSummary } from './series-form/series-form.component';
+import { BookingSeriesResult } from '../../services/reservations.service';
+import { AvailabilitySlot, Booking, BookingDepositInput, CreateBookingDto, RegisterPrepayPaymentInput } from '../../interfaces/reservation.interface';
 import { ServiceStationsService, ServiceStation } from '../service-stations/service-stations.service';
 import { CalendarDayViewComponent, FreeSlot } from '../calendar/calendar-day-view/calendar-day-view.component';
 import { environment } from '../../../../../../../environments/environment';
 import { debounceTime, Subject, switchMap, of, forkJoin, finalize, map, catchError } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { bookingPaymentUrl } from '../../utils/booking-display.util';
+import { PaymentMethodsService } from '../../../settings/payments/services/payment-methods.service';
+import { PaymentMethodState, StorePaymentMethod } from '../../../settings/payments/interfaces/payment-methods.interface';
+import {
+  DepositMethodChoice,
+  defaultDepositMethod,
+  storePaymentMethodRows,
+  toDepositMethodChoices,
+} from '../service-stations/open-session-deposit/deposit-payment-methods.util';
 
 @Component({
   selector: 'app-reservation-form-modal',
@@ -37,7 +50,10 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
     InputComponent,
     SelectorComponent,
     CalendarDayViewComponent,
+    SeriesFormComponent,
     DecimalPipe,
+    DatePipe,
+    CurrencyPipe,
   ],
   templateUrl: './reservation-form-modal.component.html',
   styleUrls: ['./reservation-form-modal.component.scss'],
@@ -48,6 +64,7 @@ export class ReservationFormModalComponent {
   private serviceStationsService = inject(ServiceStationsService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
+  private paymentMethodsApi = inject(PaymentMethodsService);
 
   // Inputs / Outputs
   readonly isOpen = input<boolean>(false);
@@ -121,6 +138,94 @@ export class ReservationFormModalComponent {
   // Notes & Submit
   notes = signal('');
   submitting = signal(false);
+
+  // Deposit of the chosen station (S15): `desk` = received now, `link` = payment page + held slot.
+  readonly depositPolicy = computed(() => this.selectedStation()?.deposit_policy ?? 'none');
+  readonly depositMinimum = computed(() => Number(this.selectedStation()?.deposit_amount ?? 0));
+  readonly depositMode = signal<'none' | 'desk' | 'link'>('none');
+  readonly depositAmount = signal(0);
+  readonly depositMethod = signal<'cash' | 'bank_transfer' | 'card'>('cash');
+  readonly depositMethodOptions = [
+    { value: 'cash', label: 'Efectivo' },
+    { value: 'bank_transfer', label: 'Transferencia' },
+    { value: 'card', label: 'Tarjeta' },
+  ];
+  private depositRequestId = '';
+
+  // "Cobro para reservar" of the chosen station: "Cobrar ahora" creates the booking, then registers the payment.
+  readonly stationCharges = computed(
+    () => this.requiresStation() && (this.selectedStation()?.booking_prepay_mode ?? 'none') !== 'none',
+  );
+  readonly chargeNow = signal(false);
+  readonly prepayChoices = signal<DepositMethodChoice[]>([]);
+  private readonly prepayRows = signal<StorePaymentMethod[]>([]);
+  readonly prepayMethodId = signal<number | null>(null);
+  readonly prepayAccountId = signal<number | null>(null);
+  readonly prepayMethodOptions = computed(() => this.prepayChoices().map((c) => ({ value: c.id, label: c.label })));
+  readonly prepayAccountOptions = computed(() => {
+    const choice = this.prepayChoices().find((c) => c.id === this.prepayMethodId());
+    if (!choice || choice.type !== 'bank_transfer') return [];
+    const row = this.prepayRows().find((r) => Number(r.id) === choice.id);
+    const accounts = (row?.custom_config?.['accounts'] ?? []) as Array<{ id?: number; bank_name?: string; account_number?: string }>;
+    return accounts
+      .filter((a) => Number.isInteger(Number(a.id)) && Number(a.id) > 0)
+      .map((a) => ({ value: Number(a.id), label: [a.bank_name, a.account_number].filter(Boolean).join(' · ') || `Cuenta ${a.id}` }));
+  });
+  readonly chargeNowInvalid = computed(
+    () =>
+      this.chargeNow() &&
+      (this.prepayMethodId() == null || (this.prepayAccountOptions().length > 0 && this.prepayAccountId() == null)),
+  );
+
+  /** The hint is shown when the end is not after the start: the booking then ends the next day (S21). */
+  readonly endsNextDay = computed(() => {
+    const start = this.startTime();
+    const end = this.endTime();
+    return !!start && !!end && end <= start;
+  });
+  /** Booking created with a payment link: the modal stays open to hand the link over. */
+  readonly linkedBooking = signal<Booking | null>(null);
+  readonly paymentUrl = signal<string | null>(null);
+  readonly rotatingLink = signal(false);
+
+  /** Hold expiry of the unpaid deposit, shown next to the link. */
+  readonly holdExpiresAt = computed(() => this.linkedBooking()?.deposit?.pending_request?.expires_at ?? null);
+
+  readonly depositInvalid = computed(() => {
+    if (!this.requiresStation() || this.depositMode() === 'none') return this.depositPolicy() === 'required';
+    const amount = this.depositAmount();
+    return !(amount > 0) || amount < this.depositMinimum();
+  });
+
+  private readonly stationDepositDefaults = effect(() => {
+    const station = this.selectedStation();
+    untracked(() => {
+      const policy = station?.deposit_policy ?? 'none';
+      this.depositAmount.set(Number(station?.deposit_amount ?? 0));
+      this.depositMode.set(policy === 'required' ? 'link' : 'none');
+    });
+  });
+
+  // Repetir (S19): when on, the series form creates the bookings instead of the single "Crear Reserva".
+  repeating = signal(false);
+  readonly seriesBase = computed<SeriesBase | null>(() => {
+    const service = this.selectedService();
+    const customer = this.selectedCustomer();
+    const end = this.endTime() || this.getEndTime();
+    if (!service || !customer || !this.selectedDate() || !this.startTime() || !end) return null;
+    return {
+      customer_id: customer.id,
+      product_id: service.id,
+      product_variant_id: this.selectedVariant()?.id || undefined,
+      station_id: this.requiresStation() ? this.selectedStation()?.id : undefined,
+      provider_id: this.selectedProvider()?.id || undefined,
+      start_date: this.selectedDate(),
+      start_time: this.startTime(),
+      end_time: end,
+      notes: this.notes() || undefined,
+      channel: this.selectedChannel(),
+    };
+  });
 
   // Channel options
   readonly channelOptions = [
@@ -524,6 +629,15 @@ export class ReservationFormModalComponent {
     this.selectedCustomer.set(null);
     this.notes.set('');
     this.submitting.set(false);
+    this.linkedBooking.set(null);
+    this.paymentUrl.set(null);
+    this.depositMode.set('none');
+    this.depositAmount.set(0);
+    this.depositMethod.set('cash');
+    this.chargeNow.set(false);
+    this.prepayAccountId.set(null);
+    this.depositRequestId = crypto.randomUUID();
+    this.repeating.set(false);
     this.directBooking.set(false);
     this.providerScheduleBlocks.set([]);
     this.topCustomers.set([]);
@@ -551,7 +665,45 @@ export class ReservationFormModalComponent {
   }
 
   onClose(): void {
-    this.closed.emit();
+    // The booking already exists: closing after the link was handed over still refreshes the lists.
+    if (this.linkedBooking()) this.finishLinked();
+    else this.closed.emit();
+  }
+
+  finishLinked(): void {
+    this.created.emit(this.selectedCustomer());
+  }
+
+  generatePaymentLink(): void {
+    const booking = this.linkedBooking();
+    if (!booking || this.rotatingLink()) return;
+    this.rotatingLink.set(true);
+    this.reservationsService
+      .rotateDepositLink(booking.id)
+      .pipe(finalize(() => this.rotatingLink.set(false)), takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.paymentUrl.set(bookingPaymentUrl(result));
+          this.toastService.success('Enlace de pago generado');
+        },
+        error: (err) => this.toastService.error(extractApiErrorMessage(err)),
+      });
+  }
+
+  copyPaymentLink(): void {
+    const url = this.paymentUrl();
+    if (!url) return;
+    navigator.clipboard
+      .writeText(url)
+      .then(() => this.toastService.success('Enlace copiado'))
+      .catch(() => this.toastService.error('No se pudo copiar el enlace'));
+  }
+
+  sharePaymentLink(): void {
+    const url = this.paymentUrl();
+    if (!url) return;
+    if (navigator.share) navigator.share({ title: 'Pago del anticipo', url }).catch(() => undefined);
+    else this.copyPaymentLink();
   }
 
   loadServices(): void {
@@ -814,6 +966,12 @@ export class ReservationFormModalComponent {
     this.selectedProvider.set(provider);
     if (this.selectedStation() && !this.compatibleStations().some((station) => station.id === this.selectedStation()?.id)) {
       this.selectStation(null);
+    }
+    // S10: the provider's preferred station is preselected (still editable) when it can serve
+    // this service; the backend falls back to auto-assignment if it is busy at booking time.
+    const preferredStationId = provider?.default_station_id as number | null | undefined;
+    if (this.requiresStation() && preferredStationId && !this.selectedStation()) {
+      this.selectStation(preferredStationId);
     }
     // Load provider schedule for time validation
     if (provider?.id) {
@@ -1107,6 +1265,32 @@ export class ReservationFormModalComponent {
     this.selectedCustomer.set(null);
   }
 
+  onChargeNowChange(value: boolean): void {
+    this.chargeNow.set(value);
+    this.prepayAccountId.set(null);
+    if (!value || this.prepayChoices().length) return;
+    this.paymentMethodsApi
+      .getStorePaymentMethods({ state: PaymentMethodState.ENABLED, limit: 50 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          const rows = storePaymentMethodRows(res);
+          const choices = toDepositMethodChoices(rows).filter(
+            (c) => !['wompi', 'wallet', 'cash_on_delivery'].includes(c.type),
+          );
+          this.prepayRows.set(rows);
+          this.prepayChoices.set(choices);
+          if (this.prepayMethodId() == null) this.prepayMethodId.set(defaultDepositMethod(choices)?.id ?? null);
+        },
+        error: () => this.toastService.error('No fue posible cargar los medios de pago.'),
+      });
+  }
+
+  onPrepayMethodChange(value: unknown): void {
+    this.prepayMethodId.set(value == null || value === '' ? null : Number(value));
+    this.prepayAccountId.set(null);
+  }
+
   submit(): void {
     const service = this.selectedService();
     const customer = this.selectedCustomer();
@@ -1128,6 +1312,16 @@ export class ReservationFormModalComponent {
       skip_availability_check: this.skipAvailabilityCheck() || undefined,
     };
 
+    if (this.requiresStation() && this.depositMode() !== 'none') {
+      const deposit: BookingDepositInput = {
+        amount: this.depositAmount(),
+        mode: this.depositMode() as 'desk' | 'link',
+        request_id: this.depositRequestId || (this.depositRequestId = crypto.randomUUID()),
+        ...(this.depositMode() === 'desk' ? { method: this.depositMethod() } : {}),
+      };
+      dto.deposit = deposit;
+    }
+
     // QUI-649 — The backend's `POST /store/reservations` already auto-creates
     // the linked order atomically (see reservations.service.ts) when neither
     // `order_id` nor `skip_order_creation` is present. We removed
@@ -1136,18 +1330,63 @@ export class ReservationFormModalComponent {
     // order — the same behaviour that ecommerce and admin flows already
     // relied on.
 
+    const payNow = this.stationCharges() && this.chargeNow() && this.prepayMethodId() != null;
+    const payment: RegisterPrepayPaymentInput | null = payNow
+      ? {
+          store_payment_method_id: this.prepayMethodId() as number,
+          ...(this.prepayAccountId() != null ? { bank_account_id: this.prepayAccountId() as number } : {}),
+          request_id: crypto.randomUUID(),
+        }
+      : null;
+
     this.reservationsService.createReservation(dto).subscribe({
       next: (booking) => {
-        this.toastService.success('Reserva creada exitosamente');
+        // A payment link has to be handed to the customer before the modal closes (S15).
+        if (booking?.payment_path) {
+          this.submitting.set(false);
+          this.linkedBooking.set(booking);
+          this.paymentUrl.set(bookingPaymentUrl(booking));
+          return;
+        }
+        if (payment && booking?.id) {
+          this.reservationsService
+            .registerPrepayPayment(booking.id, payment)
+            .pipe(finalize(() => this.submitting.set(false)))
+            .subscribe({
+              next: () => {
+                this.toastService.success('Reserva creada y cobro registrado');
+                this.emitCreated(booking);
+              },
+              // The booking exists: say so, and leave the charge for "Registrar pago" in its detail.
+              error: (err) => {
+                this.toastService.warning(
+                  `Reserva creada, pero el cobro no se registró: ${extractApiErrorMessage(err)}. Regístralo desde el detalle de la reserva.`,
+                );
+                this.emitCreated(booking);
+              },
+            });
+          return;
+        }
         this.submitting.set(false);
-        this.created.emit(this.posMode() ? { booking, customer: this.selectedCustomer() } : this.selectedCustomer());
+        this.toastService.success('Reserva creada exitosamente');
+        this.emitCreated(booking);
       },
       error: (err) => {
-        const msg = err?.error?.message?.message || err?.error?.message || 'Error al crear la reserva';
-        this.toastService.error(msg);
+        this.toastService.error(extractApiErrorMessage(err) || 'Error al crear la reserva');
         this.submitting.set(false);
       },
     });
+  }
+
+  private emitCreated(booking: Booking): void {
+    this.created.emit(this.posMode() ? { booking, customer: this.selectedCustomer() } : this.selectedCustomer());
+  }
+
+  onSeriesCreated(result: BookingSeriesResult): void {
+    const message = seriesSummary(result);
+    if (result.conflicts.length > 0) this.toastService.warning(message);
+    else this.toastService.success(message);
+    this.created.emit(this.selectedCustomer());
   }
 
   goDirectBooking(): void {

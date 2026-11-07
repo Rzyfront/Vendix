@@ -554,8 +554,23 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DCOL_DELETE_001:
     'No se puede eliminar una plantilla que tiene formularios enviados.',
   DCOL_PRODUCT_001: 'El formulario de recepción solo se puede vincular a servicios de esta tienda.',
+  // Rejections a customer meets when booking a station online.
+  STATION_001: 'El servicio, el profesional y la estación elegidos no son compatibles.',
+  STATION_002: 'Ese horario de la estación ya fue tomado. Elige otro horario.',
+  STATION_004: 'La estación no existe en esta tienda.',
+  STATION_005: 'La estación ya tiene una atención abierta.',
+  STATION_006: 'La atención cambió mientras la editabas o no admite esa acción. Recarga e intenta de nuevo.',
+  STATION_007: 'Faltan datos obligatorios del cliente o de la ficha del servicio.',
+  STATION_008: 'Ese horario se cruza con otra asignación. Elige otro horario.',
+  STATION_003: 'El profesional ya tiene ocupado ese horario. Elige otro horario.',
+  STATION_011: 'El apartado de tu reserva venció. Vuelve a elegir el horario.',
+  STATION_012: 'Este servicio se reserva con una estación: elige un horario con estación disponible.',
   STATION_013: 'La atención incluye campos que no pertenecen al formulario de recepción del servicio.',
+  STATION_009: 'La duración o el horario elegido no es válido para esta estación (o ya pasó). Revisa la hora de inicio y de fin.',
   STATION_014: 'Para usar el QR público, configura y activa un dominio en Configuración > Dominios.',
+  STATION_016: 'Ese horario está fuera del horario de atención. Elige un horario dentro de la jornada de la estación.',
+  STATION_017: 'La duración del servicio debe ser múltiplo del bloque de reserva de la estación.',
+  STATION_018: 'La estación asignada a este profesional no puede atender esta reserva. Elige otra estación.',
 
   // Customer History
   CUST_HISTORY_001: 'Historial del cliente no encontrado.',

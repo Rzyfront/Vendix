@@ -755,3 +755,70 @@ describe('AccountingEventsListener installment_payment.received — withholding 
     expect(auto_entry_service.onInstallmentWithholdingApplied).not.toHaveBeenCalled();
   });
 });
+
+describe('AccountingEventsListener station consumable deposit', () => {
+  const build = (flowEnabled = true) => {
+    const auto_entry_service = {
+      onServiceDepositReceived: jest.fn().mockResolvedValue({ id: 1 }),
+      onServiceDepositRefunded: jest.fn().mockResolvedValue({ id: 2 }),
+      prisma: { stores: { findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }) } },
+    };
+    const fiscal_gate = { isSubflowEnabled: jest.fn().mockResolvedValue(flowEnabled) };
+    const listener = new AccountingEventsListener(
+      auto_entry_service as any,
+      { getMapping: jest.fn() } as any,
+      fiscal_gate as any,
+      {} as any,
+      { recordSkip: jest.fn(), recordFailure: jest.fn() } as any,
+    );
+    return { listener, auto_entry_service, fiscal_gate };
+  };
+
+  const event = {
+    store_id: 3,
+    deposit_id: 51,
+    amount: '400000.00' as unknown as number,
+    payment_method_type: 'cash',
+    customer_id: 9,
+    booking_id: 70,
+    session_id: null,
+    user_id: 42,
+  };
+
+  it('service_deposit.received books the deposit keyed by the ledger row, with the amount as a number', async () => {
+    const { listener, auto_entry_service } = build();
+
+    await listener.handleServiceDepositReceived(event);
+
+    expect(auto_entry_service.onServiceDepositReceived).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deposit_id: 51,
+        organization_id: 1,
+        store_id: 3,
+        amount: 400000,
+        payment_method_type: 'cash',
+        booking_id: 70,
+        customer: { id: 9, type: 'customer' },
+      }),
+    );
+  });
+
+  it('service_deposit.refunded books the refund, not the receipt', async () => {
+    const { listener, auto_entry_service } = build();
+
+    await listener.handleServiceDepositRefunded({ ...event, deposit_id: 52 });
+
+    expect(auto_entry_service.onServiceDepositRefunded).toHaveBeenCalledWith(
+      expect.objectContaining({ deposit_id: 52, amount: 400000 }),
+    );
+    expect(auto_entry_service.onServiceDepositReceived).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when the payments flow is disabled', async () => {
+    const { listener, auto_entry_service } = build(false);
+
+    await listener.handleServiceDepositReceived(event);
+
+    expect(auto_entry_service.onServiceDepositReceived).not.toHaveBeenCalled();
+  });
+});

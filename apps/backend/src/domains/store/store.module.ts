@@ -57,6 +57,7 @@ import { WalletModule } from './wallet/wallet.module';
 import { AccountsPayableModule } from './accounts-payable/accounts-payable.module';
 import { CommissionsModule } from './commissions/commissions.module';
 import { PaymentLinksModule } from './payment-links/payment-links.module';
+import { PaymentRequestsModule } from './payment-requests/payment-requests.module';
 import { CustomerQueueModule } from './customer-queue/customer-queue.module';
 import { InvoiceDataRequestsModule } from './invoicing/invoice-data-requests/invoice-data-requests.module';
 import { MetadataModule } from './metadata/metadata.module';
@@ -92,6 +93,7 @@ import { CrmModule } from './crm/crm.module';
 import { AppsModule } from './apps/apps.module';
 import { ServiceStationsModule } from './service-stations/service-stations.module';
 import { ServiceSessionsModule } from './service-sessions/service-sessions.module';
+import { ServiceDepositsModule } from './service-deposits/service-deposits.module';
 import { ServiceRemindersModule } from './service-reminders/service-reminders.module';
 import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
 
@@ -154,6 +156,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     AccountsPayableModule,
     CommissionsModule,
     PaymentLinksModule,
+    PaymentRequestsModule,
     CustomerQueueModule,
     InvoiceDataRequestsModule,
     MetadataModule,
@@ -189,6 +192,7 @@ import { ServiceBudgetsModule } from './service-budgets/service-budgets.module';
     AppsModule,
     ServiceStationsModule,
     ServiceSessionsModule,
+    ServiceDepositsModule,
     ServiceRemindersModule,
     ServiceBudgetsModule,
   ],

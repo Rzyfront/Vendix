@@ -164,6 +164,8 @@ export interface EcommerceConfig {
   };
   checkout?: {
     require_registration: boolean;
+    // Opt-in: reservar sin iniciar sesión. Ausente ⇒ apagado (`=== true`).
+    allow_guest_booking?: boolean;
     guest_email_required: boolean;
     create_account_after_order: boolean;
     terms_required: boolean;

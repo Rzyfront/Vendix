@@ -17,6 +17,7 @@ import { TableContextService } from '../../services/table-context.service';
 import { CartService } from '../../services/cart.service';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { formatDurationUnit } from '../../../../../shared/utils/duration-unit.util';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
@@ -155,7 +156,7 @@ import { prepMinutesOrNull } from '../../../../../public/ecommerce/components/st
             @if (product().service_duration_minutes) {
               <div class="service-indicator">
                 <app-icon name="clock" [size]="12"></app-icon>
-                <span>{{ product().service_duration_minutes }} min</span>
+                <span>{{ durationLabel() }}</span>
               </div>
             }
             @if (product().service_modality) {
@@ -182,6 +183,10 @@ import { prepMinutesOrNull } from '../../../../../public/ecommerce/components/st
             </div>
           }
           <div class="product-price">
+            @if (product().rental_pricing_mode === 'station_rate') {
+              <!-- A station rental is priced by the time slot it books (S18): no catalog price. -->
+              <span class="price-from-label">Precio según horario</span>
+            } @else {
             @if (hasSaleUnitChoice()) {
               <!-- Con varias presentaciones no hay UN precio: se anuncia el
                    más barato (price_from, resuelto por el backend) y la
@@ -217,6 +222,7 @@ import { prepMinutesOrNull } from '../../../../../public/ecommerce/components/st
               <a [routerLink]="['/products', product().slug]" class="tier-more-link">
                 +{{ extraTiersCount() }} más
               </a>
+            }
             }
           </div>
           <!-- Inline "next opening" block — surfaces WHEN the off-schedule
@@ -649,6 +655,10 @@ import { prepMinutesOrNull } from '../../../../../public/ecommerce/components/st
 })
 export class ProductCardComponent {
   readonly product = input.required<EcommerceProduct>();
+  /** Service duration in its unit: "45 min", "4 horas", "1 día". */
+  readonly durationLabel = computed(() =>
+    formatDurationUnit(this.product().service_duration_minutes, this.product().service_duration_unit),
+  );
   readonly show_variants = input<boolean>(true);
   readonly show_shipping_badge = input<boolean>(false);
   /**

@@ -53,9 +53,11 @@
         </div>
 
         <div class="confirmation-actions">
-          <app-button (clicked)="goToMyReservations()"
-            >Ver mis reservas</app-button
-          >
+          @if (isLoggedIn()) {
+            <app-button (clicked)="goToMyReservations()"
+              >Ver mis reservas</app-button
+            >
+          }
           <app-button (clicked)="goBack()" variant="outline"
             >Volver al inicio</app-button
           >
@@ -76,11 +78,17 @@
           <h1>{{ product()?.name || "Reservar" }}</h1>
           @if (product(); as p) {
             <p class="service-meta">
-              {{ p.final_price | currency }}
-              @if (p.service_duration_minutes) {
-                <span class="duration"
-                  >{{ p.service_duration_minutes }} min</span
-                >
+              @if (isStationRate()) {
+                @if (rentalQuote(); as quote) {
+                  {{ quote.amount | currency }}
+                } @else {
+                  Precio según horario
+                }
+              } @else {
+                {{ p.final_price | currency }}
+              }
+              @if (durationLabel(); as duration) {
+                <span class="duration">{{ duration }}</span>
               }
             </p>
           }
@@ -103,15 +111,15 @@
             <div class="variant-section">
               <h2 class="step-title">Selecciona una opción</h2>
               <div class="variant-list">
-                @for (variant of variants(); track variant.id) {
+                @for (chip of variantChips(); track chip.variant.id) {
                   <button
                     class="variant-btn"
-                    [class.selected]="selectedVariantId() === variant.id"
-                    (click)="onVariantSelected(variant)"
+                    [class.selected]="selectedVariantId() === chip.variant.id"
+                    (click)="onVariantSelected(chip.variant)"
                   >
-                    <span class="variant-name">{{ variant.name || variant.sku }}</span>
-                    @if (variant.price_override) {
-                      <span class="variant-price">{{ variant.final_price | currency }}</span>
+                    <span class="variant-name">{{ chip.label }}</span>
+                    @if (chip.price !== null) {
+                      <span class="variant-price">{{ chip.price | currency }}</span>
                     }
                   </button>
                 }
@@ -154,7 +162,7 @@
             {{ formatDateDisplay(selectedDate()!) }}
           </p>
 
-          @if (isFreeBooking()) {
+          @if (usesSyntheticSlots()) {
             <div class="slot-group">
               <h3 class="slot-group-label">
                 <app-icon name="clock" [size]="16" />
@@ -186,7 +194,7 @@
           }
 
           <div class="step-actions">
-            <app-button (clicked)="goToStep(1)" variant="outline" size="sm"
+            <app-button (clicked)="goToStep(isFreeBooking() ? 0 : 1)" variant="outline" size="sm"
               >Volver</app-button
             >
           </div>
@@ -208,7 +216,7 @@
             [storeAddress]="storeAddress()"
             [customerAddresses]="customerAddresses()"
             [selectedAddressId]="selectedAddressId()"
-            [offerHomeService]="offerHomeService()"
+            [offerHomeService]="offerHomeService() && !guestBookingEnabled()"
             [productEligibleForHomeService]="productEligibleForHomeService()"
             (valueChange)="onServiceLocationChange($event)"
             (addressChange)="onServiceAddressChange($event)"
@@ -224,6 +232,26 @@
               <div class="summary-row">
                 <span class="summary-label">Opción</span>
                 <span class="summary-value">{{ variant.name || variant.sku }}</span>
+              </div>
+            }
+            @if (durationLabel(); as duration) {
+              <div class="summary-row">
+                <span class="summary-label">Duración</span>
+                <span class="summary-value">{{ duration }}</span>
+              </div>
+            }
+            @if (isStationRate()) {
+              <div class="summary-row">
+                <span class="summary-label">Precio</span>
+                <span class="summary-value">
+                  @if (rentalQuote(); as quote) {
+                    {{ quote.amount | currency }}
+                  } @else if (rentalQuoting()) {
+                    Calculando…
+                  } @else {
+                    Precio según horario
+                  }
+                </span>
               </div>
             }
             @if (selectedProvider(); as provider) {
@@ -303,7 +331,7 @@
               <span class="summary-value"
                 >{{
                   formatTime(
-                    isFreeBooking()
+                    usesSyntheticSlots()
                       ? freeBookingTime()!
                       : selectedSlot()!.start_time
                   )
@@ -311,7 +339,7 @@
                 -
                 {{
                   formatTime(
-                    isFreeBooking()
+                    usesSyntheticSlots()
                       ? freeBookingEndTime()!
                       : selectedSlot()!.end_time
                   )
@@ -321,15 +349,24 @@
             @if (product(); as p) {
               <div class="summary-row summary-price">
                 <span class="summary-label">Precio</span>
-                <span class="summary-value price">{{
-                  p.final_price | currency
-                }}</span>
+                <!-- A station rental costs what the quote of the chosen slot says (S18). -->
+                <span class="summary-value price">
+                  @if (!isStationRate()) {
+                    {{ p.final_price | currency }}
+                  } @else if (rentalQuote(); as quote) {
+                    {{ quote.amount | currency }}
+                  } @else if (rentalQuoting()) {
+                    Calculando…
+                  } @else {
+                    Precio según horario
+                  }
+                </span>
               </div>
             }
           </div>
 
           <!-- Auth check -->
-          @if (!isLoggedIn()) {
+          @if (!isLoggedIn() && !guestBookingEnabled()) {
             <div class="login-prompt">
               <app-icon name="user" [size]="24" />
               <p>Inicia sesión para completar tu reserva</p>
@@ -338,24 +375,68 @@
               >
             </div>
           } @else {
-            <!-- Customer info (pre-filled) -->
-            <div class="customer-info">
-              <h3>Tus datos</h3>
-              <div class="info-row">
-                <app-icon name="user" [size]="16" />
-                <span>{{ guestName() }}</span>
+            @if (guestBookingEnabled() && !chargesOnline()) {
+              <!-- Visitor without session, no online charge: the checkout asks the contact data -->
+              <div class="customer-info" data-testid="guest-booking-checkout-hint">
+                <h3>Tus datos</h3>
+                <p class="text-sm text-text-secondary">
+                  Al continuar pasas al pago, donde escribes tus datos y eliges cómo pagar.
+                </p>
               </div>
-              <div class="info-row">
-                <app-icon name="mail" [size]="16" />
-                <span>{{ guestEmail() }}</span>
+            } @else if (guestBookingEnabled()) {
+              <!-- Visitor without session: contact data instead of the account -->
+              <div class="customer-info" data-testid="guest-booking-form">
+                <h3>Tus datos</h3>
+                <app-input
+                  label="Nombre"
+                  placeholder="Tu nombre"
+                  [required]="true"
+                  [ngModel]="guestName()"
+                  (ngModelChange)="guestName.set($event)"
+                />
+                <app-input
+                  label="Correo"
+                  type="email"
+                  placeholder="tucorreo@ejemplo.com"
+                  [required]="true"
+                  [ngModel]="guestEmail()"
+                  (ngModelChange)="guestEmail.set($event)"
+                />
+                <app-input
+                  label="Teléfono"
+                  type="tel"
+                  placeholder="300 123 4567"
+                  [required]="true"
+                  [ngModel]="guestPhone()"
+                  (ngModelChange)="guestPhone.set($event)"
+                />
+                @if (guestContactTouched() && guestContactError(); as contactError) {
+                  <div class="error-message">
+                    <app-icon name="alert-circle" [size]="16" />
+                    {{ contactError }}
+                  </div>
+                }
               </div>
-              @if (guestPhone()) {
+            } @else {
+              <!-- Customer info (pre-filled) -->
+              <div class="customer-info">
+                <h3>Tus datos</h3>
                 <div class="info-row">
-                  <app-icon name="phone" [size]="16" />
-                  <span>{{ guestPhone() }}</span>
+                  <app-icon name="user" [size]="16" />
+                  <span>{{ guestName() }}</span>
                 </div>
-              }
-            </div>
+                <div class="info-row">
+                  <app-icon name="mail" [size]="16" />
+                  <span>{{ guestEmail() }}</span>
+                </div>
+                @if (guestPhone()) {
+                  <div class="info-row">
+                    <app-icon name="phone" [size]="16" />
+                    <span>{{ guestPhone() }}</span>
+                  </div>
+                }
+              </div>
+            }
 
             <!-- Notes -->
             <div class="notes-field">
@@ -368,6 +449,13 @@
                 rows="3"
               ></textarea>
             </div>
+
+            @if (chargesOnline()) {
+              <p class="text-sm text-text-secondary" data-testid="booking-charges-online">
+                Esta estación cobra para reservar: te llevamos a la página de pago y el horario
+                queda apartado mientras pagas.
+              </p>
+            }
 
             @if (errorMessage()) {
               <div class="error-message">
@@ -387,7 +475,7 @@
                 (clicked)="confirmBooking()"
                 [loading]="submitting()"
                 [disabled]="submitting()"
-                >Confirmar Reserva</app-button
+                >{{ chargesOnline() ? 'Reservar y pagar' : 'Confirmar Reserva' }}</app-button
               >
             </div>
           }

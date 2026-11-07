@@ -1,0 +1,446 @@
+<div class="w-full overflow-x-hidden">
+  <app-sticky-header
+    [title]="stationName()"
+    [subtitle]="headerSubtitle()"
+    icon="warehouse"
+    variant="glass"
+    [showBackButton]="true"
+    backRoute="/admin/services/stations"
+    [badgeText]="clock()?.text ?? statusLabel()"
+    [badgeColor]="clockBadgeColor()"
+    [badgePulse]="clock()?.mode === 'overtime' && !isClosed()"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
+  />
+
+  <div class="px-4 pt-5 pb-24 md:pb-8 max-w-[1360px] mx-auto space-y-4">
+    @if (loading()) {
+      <div class="flex flex-col items-center gap-3 py-16 text-[var(--color-text-secondary)]">
+        <app-spinner size="md" />
+        <p class="text-sm">Cargando atención...</p>
+      </div>
+    } @else if (loadError(); as errorMessage) {
+      <div class="p-6 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-center space-y-3">
+        <p class="text-sm text-[var(--color-error)]">{{ errorMessage }}</p>
+        <app-button variant="outline" size="sm" (clicked)="retry()">
+          Reintentar
+        </app-button>
+      </div>
+    } @else if (session(); as current) {
+      @if (isClosed()) {
+        <div class="p-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] text-sm text-[var(--color-text-secondary)] flex items-center gap-2">
+          <app-icon name="info" [size]="16" />
+          Esta atención ya está cerrada. Solo puedes consultar su cuenta.
+        </div>
+      }
+
+      @if (nextReservationWarning(); as warning) {
+        <div class="p-3 rounded-xl border border-[var(--color-warning)] bg-[var(--color-warning-light)] text-sm text-[var(--color-text-primary)] flex items-center gap-2">
+          <app-icon name="alert-triangle" [size]="16" />
+          <span class="font-semibold">{{ warning }}</span>
+          @if (nextReservation()?.customer_name; as nextCustomer) {
+            <span class="text-[var(--color-text-secondary)]">· {{ nextCustomer }}</span>
+          }
+        </div>
+      }
+
+      <!-- Customer and status -->
+      <div class="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-sm flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-11 h-11 rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] flex items-center justify-center text-[var(--color-primary)] shrink-0">
+            <app-icon name="user" [size]="20" />
+          </div>
+          <div class="min-w-0">
+            <div class="font-bold text-sm text-[var(--color-text-primary)] truncate">{{ customerName() }}</div>
+            <div class="flex flex-wrap items-center gap-3 text-xs text-[var(--color-text-secondary)] mt-0.5">
+              @if (customerPhone(); as phone) {
+                <span class="flex items-center gap-1 font-mono"><app-icon name="phone" [size]="12" /> {{ phone }}</span>
+              }
+              @if (customerDoc(); as doc) {
+                <span class="flex items-center gap-1 font-mono"><app-icon name="credit-card" [size]="12" /> CC: {{ doc }}</span>
+              }
+              <span class="flex items-center gap-1">
+                <app-icon name="user-check" [size]="12" /> {{ current.allocation?.provider_name || 'Especialista asignado' }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <app-badge [variant]="isClosed() ? 'neutral' : isPaused() ? 'warning' : 'success'" size="sm">{{ statusLabel() }}</app-badge>
+          @if (clock(); as liveClock) {
+            <span
+              class="px-2.5 py-1 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] text-xs font-mono font-bold flex items-center gap-1.5"
+              [ngClass]="liveClock.mode === 'overtime' ? 'text-[var(--color-error)]' : 'text-[var(--color-text-primary)]'"
+            >
+              <app-icon name="clock" [size]="12" /> {{ liveClock.text }}
+            </span>
+          }
+        </div>
+      </div>
+
+      @if (intakeAnswers().length) {
+        <div class="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] space-y-2">
+          <span class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-secondary)] flex items-center gap-1.5">
+            <app-icon name="clipboard-list" [size]="14" class="text-[var(--color-primary)]" /> Datos de la atención
+          </span>
+          <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+            @for (answer of intakeAnswers(); track answer.field_id) {
+              <div class="flex gap-1.5 min-w-0">
+                <dt class="text-[var(--color-text-secondary)] shrink-0">{{ answer.label }}:</dt>
+                <dd class="font-medium text-[var(--color-text-primary)] break-words min-w-0">{{ formatIntakeAnswer(answer.field_type, answer.value) }}</dd>
+              </div>
+            }
+          </dl>
+        </div>
+      }
+
+      @if (current.deposit; as deposit) {
+        <app-deposit-panel [sessionId]="current.id" [deposit]="deposit" [readOnly]="isClosed()" (changed)="refreshSession()" />
+      }
+
+      <!-- Account -->
+      <div class="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] shadow-sm space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[var(--color-border)]">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)] text-[var(--color-primary)] flex items-center justify-center shrink-0">
+              <app-icon name="shopping-bag" [size]="16" />
+            </div>
+            <div>
+              <h4 class="font-bold text-sm text-[var(--color-text-primary)]">Cuenta de la estación</h4>
+              <p class="text-xs text-[var(--color-text-secondary)]">Orden #{{ order()?.order_number || ('SVC-' + current.id) }}</p>
+            </div>
+          </div>
+          <div class="text-right">
+            <span class="text-[11px] uppercase font-bold tracking-wider text-[var(--color-text-secondary)] block">Saldo por cobrar</span>
+            <span class="font-mono font-black text-lg text-[var(--color-text-primary)]">{{ accountDue() | currency }}</span>
+          </div>
+        </div>
+
+        @if (current.rental; as rentalPart) {
+          <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] flex flex-wrap items-center justify-between gap-2 text-xs" data-testid="rental-split">
+            <p class="text-[var(--color-text-primary)]">
+              <span class="font-semibold">Alquiler</span>
+              <span class="font-mono">{{ rentalPart.total | currency }}</span>
+              @if (rentalPaid()) {
+                <span class="text-[var(--color-text-secondary)]">(pagado)</span>
+              } @else {
+                <span class="text-[var(--color-text-secondary)]">(por cobrar <span class="font-mono">{{ rentalPart.remaining | currency }}</span>)</span>
+              }
+              <span class="text-[var(--color-text-secondary)]"> · </span>
+              <span class="font-semibold">Consumos</span>
+              <span class="font-mono">{{ (current.consumption?.total ?? 0) | currency }}</span>
+              <span class="text-[var(--color-text-secondary)]"> · </span>
+              <span class="font-semibold">Por cobrar</span>
+              <span class="font-mono">{{ accountDue() | currency }}</span>
+            </p>
+            @if (canCollectRental()) {
+              <app-button variant="outline" size="sm" [loading]="preparingRental()" (clicked)="openRentalCharge()">Cobrar alquiler</app-button>
+            }
+          </div>
+        }
+
+        @if (!isClosed() && accountLocked()) {
+          <p class="text-xs text-[var(--color-text-secondary)] flex items-center gap-1.5">
+            <app-icon name="lock" [size]="13" /> La cuenta ya fue cobrada: no admite nuevos ítems.
+          </p>
+        } @else if (!isClosed()) {
+          <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-2.5">
+            <span class="text-xs font-bold text-[var(--color-text-primary)] flex items-center gap-1.5">
+              <app-icon name="plus-circle" [size]="14" class="text-[var(--color-primary)]" /> Agregar producto o servicio
+            </span>
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+              <div class="sm:col-span-6">
+                <app-selector
+                  label="Producto / servicio del catálogo"
+                  [options]="catalogOptions()"
+                  [ngModel]="addProductId()"
+                  (ngModelChange)="onAddProductSelect($event)"
+                  placeholder="-- Seleccionar producto o servicio --"
+                />
+              </div>
+              @if (addVariantOptions().length) {
+                <div class="sm:col-span-12">
+                  <app-selector
+                    label="Variante"
+                    [options]="addVariantOptions()"
+                    [ngModel]="addVariantId()"
+                    (ngModelChange)="onAddVariantSelect($event)"
+                    placeholder="-- Elegir variante --"
+                    [required]="true"
+                  />
+                </div>
+              }
+              <div class="sm:col-span-2">
+                <app-input label="Cantidad" type="number" [ngModel]="addQuantity()" (ngModelChange)="addQuantity.set($event)" />
+              </div>
+              <div class="sm:col-span-2">
+                <app-input
+                  label="Precio unitario"
+                  type="number"
+                  [ngModel]="addUnitPrice()"
+                  (ngModelChange)="onAddUnitPriceChange($event)"
+                  [placeholder]="currencyCode() || 'COP'"
+                />
+              </div>
+              <div class="sm:col-span-2 pb-0.5">
+                <app-button variant="primary" size="md" class="w-full" [disabled]="!addProductId()" [loading]="addingItem()" (clicked)="addItem()">
+                  <app-icon name="plus" [size]="14" slot="icon" /> Agregar
+                </app-button>
+              </div>
+            </div>
+            <div class="flex justify-end text-xs text-[var(--color-text-secondary)]">
+              Total estimado al agregar: <strong class="ml-1 font-mono text-[var(--color-text-primary)]">{{ addEstimatedTotal() | currency }}</strong>
+            </div>
+          </div>
+        }
+
+        @if (order()?.order_items?.length) {
+          <div class="divide-y divide-[var(--color-border)]/60 rounded-xl border border-[var(--color-border)] overflow-hidden">
+            @for (item of order()!.order_items; track item.id) {
+              <div class="p-3 bg-[var(--color-surface)] flex items-center justify-between gap-3 text-xs">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <span class="px-2 py-0.5 rounded-md text-[11px] font-bold bg-[var(--color-background)] text-[var(--color-text-secondary)] border border-[var(--color-border)]">
+                    {{ item.item_type === 'physical' ? 'Producto' : 'Servicio' }}
+                  </span>
+                  <div class="min-w-0">
+                    <div class="font-bold text-[var(--color-text-primary)] truncate">{{ item.product_name }}</div>
+                    <div class="text-xs text-[var(--color-text-secondary)] font-mono">
+                      {{ item.quantity }} x {{ money(item.final_unit_price ?? item.unit_price) | currency }}
+                      @if (Number(item.tax_rate) > 0) {
+                        <span class="ml-1 text-[11px]">· IVA {{ Number(item.tax_rate) * 100 | number: '1.0-2' }}%</span>
+                      }
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="font-mono font-bold text-xs text-[var(--color-text-primary)]">{{ lineTotalWithTax(item) | currency }}</span>
+                  @if (!isClosed() && !accountLocked()) {
+                    <app-button variant="ghost" size="sm" (clicked)="removeItem(item.id)" ariaLabel="Eliminar ítem">
+                      <app-icon name="trash-2" [size]="13" class="text-[var(--color-error)]" />
+                    </app-button>
+                  }
+                </div>
+              </div>
+            }
+          </div>
+          <div class="p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] text-xs space-y-1 font-mono">
+            <div class="flex justify-between text-[var(--color-text-secondary)]">
+              <span>Subtotal</span><span>{{ money(order()?.subtotal_amount) | currency }}</span>
+            </div>
+            <div class="flex justify-between text-[var(--color-text-secondary)]">
+              <span>Impuestos</span><span>{{ money(order()?.tax_amount || 0) | currency }}</span>
+            </div>
+            <div class="flex justify-between font-bold text-[var(--color-text-primary)]">
+              <span>Total</span><span>{{ money(order()?.grand_total) | currency }}</span>
+            </div>
+            <div class="flex justify-between text-[var(--color-text-secondary)]">
+              <span>Pagado</span><span>{{ paidAmount() | currency }}</span>
+            </div>
+            <div class="flex justify-between font-bold text-[var(--color-text-primary)]">
+              <span>Saldo</span><span>{{ balance() | currency }}</span>
+            </div>
+          </div>
+          @if (budget() && Number(order()?.grand_total) > Number(budget()?.amount)) {
+            <div class="p-3 rounded-xl border border-[var(--color-warning)] bg-[var(--color-warning-light)] text-xs text-[var(--color-text-primary)] flex items-start gap-2">
+              <app-icon name="alert-triangle" [size]="14" class="shrink-0 mt-0.5" />
+              <span>La cuenta supera el presupuesto autorizado por el cliente ({{ money(budget()?.amount) | currency }}). Ajusta el techo abajo para poder cobrarla.</span>
+            </div>
+          }
+        } @else {
+          <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] text-center text-xs text-[var(--color-text-secondary)]">
+            La cuenta está abierta con el servicio inicial. Agrega productos, consumibles o servicios adicionales con el formulario de arriba.
+          </div>
+        }
+      </div>
+
+      @if (!isClosed()) {
+        <!-- Budget ceiling -->
+        <div class="p-4 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] space-y-3">
+          <div class="flex items-center justify-between">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
+              <app-icon name="dollar-sign" [size]="14" class="text-[var(--color-primary)]" />
+              Techo de presupuesto autorizado ({{ currencyCode() || 'COP' }})
+            </h4>
+            <span class="text-xs font-semibold text-[var(--color-text-secondary)]">Control POS</span>
+          </div>
+          <div class="flex items-center gap-3">
+            <app-input type="number" [ngModel]="budgetAmount()" (ngModelChange)="budgetAmount.set($event)" placeholder="Ej. 250000" />
+            <app-button variant="primary" size="md" class="shrink-0" [loading]="saving()" (clicked)="saveBudget()">Guardar tope</app-button>
+          </div>
+        </div>
+      }
+
+      <!-- Proposals -->
+      <div class="space-y-2.5">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
+          <app-icon name="file-text" [size]="14" /> Propuestas de trabajo adicional
+        </h4>
+        @if (proposals().length) {
+          <div class="space-y-2">
+            @for (prop of proposals(); track prop.id) {
+              <div class="p-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] flex items-center justify-between text-xs">
+                <div>
+                  <span class="font-bold text-[var(--color-text-primary)]">Versión {{ prop.version }}</span>
+                  <span class="text-[var(--color-text-secondary)] ml-2 font-mono">Total: {{ money(prop.total) | currency }}</span>
+                </div>
+                <app-badge [variant]="prop.status === 'approved' ? 'success' : prop.status === 'rejected' ? 'error' : 'warning'" size="xs">
+                  {{ prop.status === 'approved' ? 'Aprobada' : prop.status === 'rejected' ? 'Rechazada' : 'Pendiente' }}
+                </app-badge>
+              </div>
+            }
+          </div>
+        } @else {
+          <p class="text-xs text-[var(--color-text-secondary)] p-3 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)]">
+            No hay propuestas de trabajo adicional registradas en esta atención.
+          </p>
+        }
+      </div>
+
+      <!-- Access link -->
+      @if (!isClosed()) {
+        <div class="p-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-[var(--color-border)]">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-[var(--color-text-primary)] flex items-center gap-1.5">
+              <app-icon name="smartphone" [size]="14" class="text-[var(--color-primary)]" /> Compartir seguimiento con el cliente
+            </h4>
+            @if (accessUrl()) {
+              <app-badge variant="success" size="xs">Enlace activo</app-badge>
+            }
+          </div>
+          @if (accessUrl(); as url) {
+            <div class="flex flex-col sm:flex-row items-center gap-4">
+              @if (accessQrDataUrl(); as qr) {
+                <div class="p-2 rounded-xl bg-white border border-[var(--color-border)] shrink-0">
+                  <img [src]="qr" alt="QR de seguimiento" class="w-28 h-28 object-contain" />
+                </div>
+              } @else if (accessQrLoading()) {
+                <div class="w-28 h-28 flex items-center justify-center bg-[var(--color-background)] rounded-xl border border-[var(--color-border)] shrink-0">
+                  <app-spinner size="sm" />
+                </div>
+              }
+              <div class="flex-1 min-w-0 space-y-2 text-center sm:text-left">
+                <div class="p-2 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)] text-xs font-mono text-[var(--color-text-primary)] truncate select-all">{{ url }}</div>
+                <div class="flex flex-wrap items-center gap-2 pt-1 justify-center sm:justify-start">
+                  <app-button variant="outline" size="sm" (clicked)="copyAccessUrl()">
+                    <app-icon name="copy" [size]="13" slot="icon" /> Copiar enlace
+                  </app-button>
+                  <app-button variant="primary" size="sm" (clicked)="shareByWhatsApp()">
+                    <app-icon name="smartphone" [size]="13" slot="icon" /> Enviar por WhatsApp
+                  </app-button>
+                </div>
+              </div>
+            </div>
+          } @else {
+            <div class="p-3.5 rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] space-y-3">
+              <p>Por seguridad el enlace solo se muestra al abrir la atención. Si ya no lo tienes, genera uno nuevo: el anterior deja de funcionar.</p>
+              @if (current.contact_email) {
+                <label class="flex items-start gap-2 cursor-pointer text-[var(--color-text-primary)]">
+                  <input type="checkbox" class="mt-0.5" [checked]="reissueIdentityChecked()" (change)="reissueIdentityChecked.set($any($event.target).checked)" />
+                  <span>Verifiqué en persona que es el cliente ({{ current.contact_email }})</span>
+                </label>
+                <app-button variant="outline" size="sm" [disabled]="!reissueIdentityChecked()" [loading]="reissuingLink()" (clicked)="reissueLink()">
+                  <app-icon name="refresh-cw" [size]="14" slot="icon" /> Generar nuevo enlace
+                </app-button>
+              } @else {
+                <p class="italic">Esta atención no tiene correo de contacto, así que no se puede reemitir el enlace.</p>
+              }
+            </div>
+          }
+        </div>
+      }
+    }
+  </div>
+
+  <!-- Extend -->
+  <app-modal [(isOpen)]="showExtendModal" title="Extender atención" [subtitle]="stationName()" size="md">
+    <div class="space-y-4">
+      <p class="text-sm text-[var(--color-text-secondary)]">
+        Mueve la hora de fin. Nada se extiende ni se cierra solo; si hay otra reserva en la estación, el sistema te lo avisa.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        @for (option of extendQuickQuotes(); track option.minutes) {
+          <app-button variant="outline" size="md" [disabled]="extending()" (clicked)="extendBy(option.minutes)">
+            {{ option.label }}@if (option.price; as quote) { · +{{ quote }}}
+          </app-button>
+        }
+      </div>
+      @if (extendNote(); as note) {
+        <p class="text-xs text-[var(--color-text-secondary)]">{{ note }}</p>
+      }
+      <div class="space-y-1.5">
+        <label class="text-xs font-bold text-[var(--color-text-primary)]" for="extend-custom-end">Hora de fin personalizada</label>
+        <input
+          id="extend-custom-end"
+          type="datetime-local"
+          class="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-sm text-[var(--color-text-primary)]"
+          [value]="customEnd()"
+          (input)="customEnd.set($any($event.target).value)"
+        />
+      </div>
+    </div>
+    <div slot="footer" class="flex flex-wrap items-center justify-end gap-2.5">
+      <app-button variant="outline" [disabled]="extending()" (clicked)="showExtendModal.set(false)">Cancelar</app-button>
+      <app-button variant="primary" [loading]="extending()" (clicked)="extendToCustom()">
+        Extender hasta esa hora@if (customExtendQuote(); as quote) { · +{{ quote }}}
+      </app-button>
+    </div>
+  </app-modal>
+
+  <!-- Close with balance -->
+  <app-modal [(isOpen)]="showCloseDialog" title="Cerrar atención" [subtitle]="stationName()" size="md">
+    <div class="space-y-3">
+      <p class="text-sm text-[var(--color-text-primary)]">
+        La cuenta tiene <strong class="font-mono">{{ accountDue() | currency }}</strong> pendientes.
+      </p>
+      <p class="text-xs text-[var(--color-text-secondary)]">
+        Cóbrala ahora o, si tienes permiso y la atención tiene un cliente identificado, ciérrala y déjala por cobrar.
+      </p>
+    </div>
+    <div slot="footer" class="flex flex-wrap items-center justify-end gap-2.5">
+      <app-button variant="outline" [disabled]="saving()" (clicked)="showCloseDialog.set(false)">Cancelar</app-button>
+      @if (canCloseWithBalance()) {
+        <app-button variant="secondary" [loading]="saving()" (clicked)="closeLeavingBalance()">Cerrar y dejar por cobrar</app-button>
+      }
+      <app-button variant="primary" [disabled]="saving()" (clicked)="chargeFromCloseDialog()">Cobrar ahora</app-button>
+    </div>
+  </app-modal>
+
+  <!-- Recurring service without customer -->
+  <app-modal [(isOpen)]="showRecurringPrompt" title="¿A quién le recordamos el próximo servicio?" size="md">
+    <div class="space-y-3">
+      <p class="text-sm text-[var(--color-text-secondary)]">
+        Esta atención no tiene cliente registrado, así que no recibirá recordatorio. Búscalo o créalo; también puedes asignarlo después desde el Registro de servicios.
+      </p>
+      <app-customer-select label="Cliente" [selected]="closeCustomer()" (selectedChange)="closeCustomer.set($event)" />
+    </div>
+    <div slot="footer" class="flex flex-wrap items-center justify-end gap-2.5">
+      <app-button variant="outline" [disabled]="saving()" (clicked)="confirmRecurringClose(false)">Finalizar sin cliente</app-button>
+      <app-button variant="primary" [disabled]="!closeCustomer()" [loading]="saving()" (clicked)="confirmRecurringClose(true)">Asignar y finalizar</app-button>
+    </div>
+  </app-modal>
+
+  <!-- Charge in place -->
+  @if (showPayModal()) {
+    <app-order-payment-modal
+      [isOpen]="showPayModal()"
+      [order]="payOrder()"
+      [paymentMethods]="payMethods()"
+      [manualPaymentPending]="payHasPartial()"
+      [remainingBalance]="payBalance()"
+      [isProcessing]="paying()"
+      [paymentError]="payError()"
+      (isOpenChange)="$event ? showPayModal.set(true) : closePayModal()"
+      (closed)="closePayModal()"
+      (paymentSubmitted)="onPaymentSubmitted($event)"
+    />
+  }
+
+  <!-- Mobile bar with the clock and the main actions -->
+  @if (session() && !isClosed()) {
+    <div class="md:hidden fixed bottom-0 inset-x-0 z-20 px-3 py-2 bg-[var(--color-surface)] border-t border-[var(--color-border)] flex items-center gap-2" style="padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px))">
+      <span class="font-mono font-bold text-sm shrink-0" [ngClass]="clock()?.mode === 'overtime' ? 'text-[var(--color-error)]' : 'text-[var(--color-text-primary)]'">{{ clock()?.text }}</span>
+      <app-button variant="primary" size="sm" class="flex-1" [loading]="preparingCharge()" (clicked)="openCharge()">Cobrar</app-button>
+      <app-button variant="danger" size="sm" [loading]="saving()" (clicked)="requestClose()">Cerrar</app-button>
+    </div>
+  }
+</div>

@@ -31,6 +31,13 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { RentalQuoteService } from '../../store/service-stations/rental-quote/rental-quote.service';
+import type { FullTaxRow } from '../../store/orders/utils/catalog-line-pricing.util';
+import { STATION_CHARGES_ONLINE_WHERE } from '../../store/service-stations/station-online-charge.util';
+import {
+  resolveStoreTimezone,
+  zonedWallClockToUtc,
+} from '../../../common/utils/store-timezone.util';
 import { StockLevelManager } from '../../store/inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../../store/inventory/shared/services/stock-validator.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
@@ -58,6 +65,10 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
 import { FiscalStatusService } from '@common/services/fiscal-status.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import {
+  buildPaymentMethodsWhere,
+  toPublicPaymentMethod,
+} from './utils/online-payment-methods.util';
 import { CustomersService } from '../../store/customers/customers.service';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../../store/coupons/coupons.service';
@@ -204,7 +215,66 @@ export class CheckoutService {
     // Adiciones de producto. `@Optional()` por el mismo motivo.
     @Optional()
     private readonly optionPricingService?: OptionPricingService,
+    // Cotización de alquiler por estación. `@Optional()` por el mismo motivo.
+    @Optional()
+    private readonly rentalQuote?: RentalQuoteService,
   ) {}
+
+  /**
+   * Station rental priced by time: when the product is `station_rate`, the
+   * line price is the server-side quote for the submitted booking slot (never
+   * the catalog "from" price). Any other product keeps the resolved price.
+   * Returns the chosen station so the booking is created on the quoted one.
+   */
+  private async applyRentalQuote<T extends { net_unit_price: number; gross_unit_price: number; compare_at_price: number | null }>(
+    product: { id: number; rental_pricing_mode?: string | null; requires_station?: boolean | null } | null,
+    variantId: number | null | undefined,
+    bookings: Array<{ product_id: number; product_variant_id?: number | null; station_id?: number | null; date: string; start_time: string }> | undefined,
+    line: T,
+  ): Promise<T & { rental_tax_rows?: FullTaxRow[] }> {
+    if (!this.rentalQuote || !product || product.rental_pricing_mode !== 'station_rate') return line;
+    const booking = (bookings ?? []).find(
+      (b) => b.product_id === product.id && (b.product_variant_id ?? null) === (variantId ?? null),
+    );
+    const date = /^(\d{4})-(\d{2})-(\d{2})$/.exec(booking?.date ?? '');
+    const time = /^(\d{2}):(\d{2})/.exec(booking?.start_time ?? '');
+    if (!booking || !date || !time) return line;
+    const stationId = await this.resolveRentalStationId(product.id, booking.station_id);
+    if (!stationId) return line;
+    const storeId = RequestContextService.getContext()?.store_id;
+    const tz = storeId ? await resolveStoreTimezone(this.store_prisma, storeId) : 'America/Bogota';
+    const quote = await this.rentalQuote.quote({
+      productId: product.id,
+      variantId: variantId ?? null,
+      stationId,
+      startAt: zonedWallClockToUtc(Number(date[1]), Number(date[2]), Number(date[3]), Number(time[1]), Number(time[2]), 0, 0, tz),
+    });
+    if (quote.pricing_mode !== 'station_rate') return line;
+    // The quote is the gross of the line taxed with the STATION's rows (POS rule). The line is priced at the
+    // published amount and taxed with those rows, so its total is exactly the quote; the product's own taxes
+    // never apply to a station rental (they would tax the quote a second time).
+    return {
+      ...line,
+      net_unit_price: quote.published_amount ?? quote.amount,
+      gross_unit_price: quote.amount,
+      compare_at_price: null,
+      ...(quote.tax_rows ? { rental_tax_rows: quote.tax_rows } : {}),
+    };
+  }
+
+  /** Submitted station, or the first active station that offers the product. */
+  private async resolveRentalStationId(productId: number, submitted?: number | null): Promise<number | null> {
+    if (submitted) return submitted;
+    const station = await this.store_prisma.service_stations.findFirst({
+      where: {
+        status: 'active',
+        service_station_services_station_fkey: { some: { product_id: productId } },
+      },
+      orderBy: { id: 'asc' },
+      select: { id: true },
+    });
+    return station?.id ?? null;
+  }
 
   /**
    * Copia del impuesto del envío para una orden cuyo costo salió de la tarifa
@@ -888,91 +958,15 @@ export class CheckoutService {
 
     // store_id se aplica automáticamente por EcommercePrismaService
     const methods = await this.prisma.store_payment_methods.findMany({
-      where: {
-        state: 'enabled',
-        AND: [
-          { system_payment_method: { processing_mode: { in: allowedModes } } },
-          // QUI-850: 'cash' (efectivo) solo se expone en ecommerce para 'pickup' (recoger en tienda).
-          ...(isPickup
-            ? []
-            : [{ system_payment_method: { type: { not: 'cash' } } }]),
-          // Hide wallet from anonymous users — it requires a logged-in
-          // customer with a wallet_id.
-          ...(isAuthenticated
-            ? []
-            : [{ system_payment_method: { NOT: { type: 'wallet' } } }]),
-        ],
-      },
+      // QUI-850: 'cash' only for pickup; wallet hidden from anonymous users.
+      where: buildPaymentMethodsWhere({ allowedModes, isPickup, isAuthenticated }),
       include: {
         system_payment_method: true,
       },
       orderBy: { display_order: 'asc' },
     });
 
-    return methods.map((m) => {
-      const base: Record<string, any> = {
-        id: m.id,
-        name: m.display_name || m.system_payment_method.display_name,
-        type: m.system_payment_method.type,
-        provider: m.system_payment_method.provider,
-        processing_mode: m.system_payment_method.processing_mode,
-        logo_url: m.system_payment_method.logo_url,
-        min_amount: m.min_amount,
-        max_amount: m.max_amount,
-      };
-
-      const instructions = this.buildPaymentInstructions(
-        m.system_payment_method.type,
-        m.custom_config,
-      );
-      if (instructions) {
-        base.payment_instructions = instructions;
-      }
-
-      return base;
-    });
-  }
-
-  /**
-   * Returns a whitelisted subset of `custom_config` to expose publicly for
-   * payment methods whose `system_payment_method.type` is `bank_transfer` or
-   * `voucher`. Returns `null` when there is nothing to expose so the caller
-   * can omit the field entirely (we never return an empty `{}`).
-   *
-   * Whitelists:
-   *  - bank_transfer: bank_name, account_holder, account_number, account_type, instructions
-   *  - voucher:       voucher_instructions, redemption_phone, notes
-   */
-  private buildPaymentInstructions(
-    type: string,
-    customConfig: unknown,
-  ): Record<string, unknown> | null {
-    if (type !== 'bank_transfer' && type !== 'voucher') return null;
-    if (!customConfig || typeof customConfig !== 'object') return null;
-
-    const config = customConfig as Record<string, unknown>;
-    const whitelist: string[] =
-      type === 'bank_transfer'
-        ? [
-            'bank_name',
-            'account_holder',
-            'account_number',
-            'account_type',
-            'instructions',
-          ]
-        : ['voucher_instructions', 'redemption_phone', 'notes'];
-
-    const exposed: Record<string, unknown> = {};
-    for (const key of whitelist) {
-      if (Object.prototype.hasOwnProperty.call(config, key)) {
-        const value = config[key];
-        if (value !== null && value !== undefined && value !== '') {
-          exposed[key] = value;
-        }
-      }
-    }
-
-    return Object.keys(exposed).length > 0 ? exposed : null;
+    return methods.map((m) => toPublicPaymentMethod(m));
   }
 
   private async getCheckoutSettings(): Promise<{
@@ -980,6 +974,7 @@ export class CheckoutService {
     require_payment_receipt: boolean;
     whatsapp_checkout: boolean;
     whatsapp_number: string;
+    allow_guest_booking: boolean;
   }> {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) {
@@ -1004,6 +999,8 @@ export class CheckoutService {
         typeof checkout.whatsapp_number === 'string'
           ? checkout.whatsapp_number.trim()
           : '',
+      // Opt-in (default off): visitors may book services with a schedule.
+      allow_guest_booking: checkout.allow_guest_booking === true,
     };
   }
 
@@ -1710,21 +1707,32 @@ export class CheckoutService {
       }
       await this.scheduledOrdersService.preValidate(store_id_ctx, dto.schedule);
     }
-    let resolved_customer_id: number | null = user_id ?? null;
-    if (is_guest && guest_customer && store_id_ctx) {
-      const resolved =
-        await this.customersService.resolveGuestCustomerForCheckout(
-          store_id_ctx,
-          guest_customer,
-        );
-      resolved_customer_id = resolved?.customer_id ?? null;
-    }
-
-    if (is_guest && dto.bookings?.length) {
+    // A visitor may book a scheduled service only when the store enabled
+    // `ecommerce.checkout.allow_guest_booking`; the booking is then created
+    // for the guest customer resolved below. Checked first so a
+    // refused visitor never creates a guest customer.
+    if (
+      is_guest &&
+      dto.bookings?.length &&
+      !(await this.getCheckoutSettings()).allow_guest_booking
+    ) {
       throw new VendixHttpException(
         ErrorCodes.ECOM_CHECKOUT_001,
         'Debes iniciar sesión para reservar servicios con horario',
       );
+    }
+    let resolved_customer_id: number | null = user_id ?? null;
+    if (is_guest && guest_customer && store_id_ctx) {
+      // With bookings the guest is matched by email only (D1): the phone
+      // would attach the booking to (and rewrite) someone else's account.
+      // It is still stored on a newly created customer.
+      const resolved =
+        await this.customersService.resolveGuestCustomerForCheckout(
+          store_id_ctx,
+          guest_customer,
+          dto.bookings?.length ? { match_by_phone: false } : undefined,
+        );
+      resolved_customer_id = resolved?.customer_id ?? null;
     }
 
     // Guest checkout must never read store-scoped backend carts because there
@@ -1815,6 +1823,14 @@ export class CheckoutService {
         stationRequiredKeys.add(key);
       }
     }
+    // M-1: a station_rate cart line is priced with ONE booking's quote; several units would all be
+    // charged at the first booking's rate window. Each slot is bought on its own.
+    if (cart_items.some((item) => item.product?.rental_pricing_mode === 'station_rate' && Number(item.quantity) > 1)) {
+      throw new VendixHttpException(
+        ErrorCodes.SERVICE_BOOKING_001,
+        'Cada horario de una estación se compra por separado.',
+      );
+    }
     const submittedBookingUnits = new Map<string, number>();
     for (const booking of dto.bookings ?? []) {
       const key = `${booking.product_id}:${booking.product_variant_id ?? ''}`;
@@ -1834,6 +1850,48 @@ export class CheckoutService {
           ErrorCodes.SERVICE_BOOKING_001,
           'Cada unidad de servicio con estación requiere una reserva compatible antes del pago.',
         );
+      }
+    }
+
+    // A station that requires a deposit is booked from the hold + payment page flow
+    // (A12), never from the cart: the cart would sell the slot without the deposit.
+    if (requiredServiceUnits.size > 0) {
+      const stationProductIds = [
+        ...new Set(
+          cart_items
+            .filter((item) => item.product?.requires_station)
+            .map((item) => item.product_id),
+        ),
+      ];
+      // H-3: a booking that names its station is judged by THAT station only (the storefront already
+      // marks `charges_online` per station); a booking without one could land on any station that offers
+      // the product, so the product-wide check stays for it.
+      const stationBookings = (dto.bookings ?? []).filter((booking) =>
+        stationRequiredKeys.has(`${booking.product_id}:${booking.product_variant_id ?? ''}`),
+      );
+      const bookedStationIds = [
+        ...new Set(stationBookings.map((booking) => booking.station_id).filter((id): id is number => !!id)),
+      ];
+      const unassignedProductIds = [
+        ...new Set(stationBookings.filter((booking) => !booking.station_id).map((booking) => booking.product_id)),
+      ];
+      const chargingStationWheres: Prisma.service_stationsWhereInput[] = [];
+      if (bookedStationIds.length) {
+        chargingStationWheres.push({ id: { in: bookedStationIds } });
+      }
+      if (unassignedProductIds.length || !stationBookings.length) {
+        chargingStationWheres.push({
+          service_station_services_station_fkey: {
+            some: { product_id: { in: unassignedProductIds.length ? unassignedProductIds : stationProductIds } },
+          },
+        });
+      }
+      for (const scope of chargingStationWheres) {
+        const depositStation = await this.store_prisma.service_stations.findFirst({
+          where: { status: 'active', ...STATION_CHARGES_ONLINE_WHERE, ...scope },
+          select: { id: true },
+        });
+        if (depositStation) throw new VendixHttpException(ErrorCodes.STATION_BOOKING_010);
       }
     }
 
@@ -2171,12 +2229,18 @@ export class CheckoutService {
         // solo desdobla el inventario. Se pide la escala NETA (sin `taxRate`)
         // porque el checkout arma el impuesto aparte con `TaxesService`.
         const saleUnit = saleUnitsByIndex[index] ?? null;
-        const line = this.storefrontPrice.resolveLine({
+        const resolvedLine = this.storefrontPrice.resolveLine({
           product: productWithTaxes as any,
           variant: item.product_variant ?? null,
           saleUnit,
           quantity: item.quantity,
         });
+        const line = await this.applyRentalQuote(
+          productWithTaxes as any,
+          item.product_variant_id,
+          dto.bookings,
+          resolvedLine,
+        );
 
         // Adiciones (S3): delta FINAL (con impuestos) por unidad calculado en
         // el servidor sobre los `option_ids` de la línea, igual que en POS.
@@ -2187,10 +2251,26 @@ export class CheckoutService {
         const stockUnitsConsumed = line.stock_units_consumed;
         stockUnitsByIndex[index] = stockUnitsConsumed;
 
-        const baseTaxInfo = await this.taxes_service.calculateProductTaxes(
-          item.product_id,
-          line.net_unit_price,
-        );
+        // A station rental takes the station's tax rows, never the product's (H-2).
+        const rentalTaxRows = line.rental_tax_rows;
+        let stationTaxes: CatalogTaxRow[] | null = null;
+        if (rentalTaxRows) {
+          const stationTotals = resolveLineTotals(
+            line.net_unit_price,
+            rentalTaxRows.map((row) => ({ rate: row.rate, is_inclusive: row.is_inclusive })),
+          );
+          stationTaxes = rentalTaxRows.map((row, i) => ({
+            ...row,
+            amount: stationTotals.taxes[i].amount,
+            base: stationTotals.taxes[i].base,
+          }));
+        }
+        const baseTaxInfo: { taxes: CatalogTaxRow[] } = stationTaxes
+          ? { taxes: stationTaxes }
+          : await this.taxes_service.calculateProductTaxes(
+              item.product_id,
+              line.net_unit_price,
+            );
         // Con impuestos NO incluidos el precio del catálogo es neto: al neto
         // se suma solo la base del delta, para que el impuesto que se agrega
         // después no se cobre dos veces sobre la adición (POS = tienda en línea).
@@ -2207,7 +2287,7 @@ export class CheckoutService {
               ).base;
         const netPrice = line.net_unit_price + optionNet;
         const taxInfo =
-          optionDelta === 0
+          optionDelta === 0 || rentalTaxRows
             ? baseTaxInfo
             : await this.taxes_service.calculateProductTaxes(item.product_id, netPrice);
 
@@ -2437,11 +2517,23 @@ export class CheckoutService {
     const createdBookingIds: number[] = [];
     try {
       for (const booking of stationBookings) {
+        // A time-rated rental is booked on the station that was quoted.
+        let bookingStationId = booking.station_id ?? undefined;
+        if (!bookingStationId && this.rentalQuote) {
+          const rentalProduct = await this.prisma.products.findFirst({
+            where: { id: booking.product_id },
+            select: { rental_pricing_mode: true },
+          });
+          if (rentalProduct?.rental_pricing_mode === 'station_rate') {
+            bookingStationId =
+              (await this.resolveRentalStationId(booking.product_id)) ?? undefined;
+          }
+        }
         const created = await this.reservationsService.create({
           customer_id: resolved_customer_id ?? undefined,
           product_id: booking.product_id,
           product_variant_id: booking.product_variant_id,
-          station_id: booking.station_id,
+          station_id: bookingStationId,
           provider_id: booking.provider_id,
           date: booking.date,
           start_time: booking.start_time,

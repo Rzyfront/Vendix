@@ -17,6 +17,8 @@ import { Response } from 'express';
 import { ReservationsService } from './reservations.service';
 import { ReservationsExportService } from './reservations-export.service';
 import { AvailabilityService } from './availability.service';
+import { ReservationDepositsService } from './reservation-deposits.service';
+import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
 import {
   BookingQueryDto,
   AvailabilityQueryDto,
@@ -28,6 +30,9 @@ import {
   CreateRescheduleRequestDto,
   ApproveRescheduleRequestDto,
   RejectRescheduleRequestDto,
+  CancelBookingDto,
+  DepositDecisionDto,
+  RegisterPrepayPaymentDto,
 } from './dto';
 import { buildReportBuffer } from '@common/reports/report-builder';
 import {
@@ -83,6 +88,8 @@ export class ReservationsController {
     private readonly appointmentQueueService: AppointmentQueueService,
     private readonly responseService: ResponseService,
     private readonly prisma: StorePrismaService,
+    private readonly reservationDeposits: ReservationDepositsService,
+    private readonly rentalPrepay: RentalPrepayService,
   ) {}
 
   @Get()
@@ -488,7 +495,7 @@ export class ReservationsController {
   @Get(':id')
   @Permissions('store:reservations:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    const result = await this.reservationsService.findOne(id);
+    const result = await this.reservationsService.findOneDetail(id);
     return this.responseService.success(
       result,
       'Reserva obtenida exitosamente',
@@ -524,12 +531,54 @@ export class ReservationsController {
 
   @Patch(':id/cancel')
   @Permissions('store:reservations:update')
-  async cancel(@Param('id', ParseIntPipe) id: number) {
-    const result = await this.reservationsService.cancel(id);
+  async cancel(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto?: CancelBookingDto,
+  ) {
+    // The body is optional (A1): without it the booking is cancelled as always.
+    const result = await this.reservationsService.cancel(id, dto ?? {});
     return this.responseService.success(
       result,
       'Reserva cancelada exitosamente',
     );
+  }
+
+  /** Fresh payment link for a booking whose deposit request is still pending (S15). */
+  @Post(':id/deposit-link')
+  @Permissions('store:reservations:update')
+  async depositLink(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.reservationDeposits.rotateLink(id);
+    return this.responseService.success(result, 'Enlace de pago generado');
+  }
+
+  /** Payment link of the station's "cobro para reservar" (full or partial rental charge, T15). */
+  @Post(':id/prepay-link')
+  @Permissions('store:reservations:update')
+  async prepayLink(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.rentalPrepay.openLink(id);
+    return this.responseService.success(result, 'Enlace de pago generado');
+  }
+
+  /** The "cobro para reservar" collected in person: cash, card or transfer (S2). */
+  @Post(':id/prepay-payment')
+  @Permissions('store:reservations:update')
+  async prepayPayment(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RegisterPrepayPaymentDto,
+  ) {
+    const result = await this.rentalPrepay.registerInPerson(id, dto);
+    return this.responseService.success(result, 'Pago registrado');
+  }
+
+  /** What happens with the deposit of a booking that did not show up (S17). */
+  @Post(':id/deposit-decision')
+  @Permissions('store:reservations:update')
+  async depositDecision(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: DepositDecisionDto,
+  ) {
+    const result = await this.reservationsService.decideDeposit(id, dto);
+    return this.responseService.success(result, 'Decisión del anticipo registrada');
   }
 
   @Patch(':id/complete')

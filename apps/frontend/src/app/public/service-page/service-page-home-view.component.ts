@@ -217,7 +217,7 @@ export class ServicePageHomeViewComponent {
   });
 
   duration(service: ServiceCardData): string | null {
-    return formatDuration(service.service_duration_minutes);
+    return formatDuration(service.service_duration_minutes, service.service_duration_unit);
   }
 
   modality(service: ServiceCardData): string {

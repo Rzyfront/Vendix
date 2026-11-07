@@ -7,6 +7,13 @@ import { Routes } from '@angular/router';
  */
 export const storeHomePublicRoutes: Routes = [
   {
+    path: 'pagar/:token',
+    loadComponent: () =>
+      import('../../public/payment-request/payment-request-page.component').then(
+        (c) => c.PaymentRequestPageComponent,
+      ),
+  },
+  {
     path: '',
     loadComponent: () =>
       import('../../public/store-home/store-home.component').then(

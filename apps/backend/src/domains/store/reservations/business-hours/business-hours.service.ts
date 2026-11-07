@@ -1,6 +1,18 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { UpsertBusinessHoursDto } from './dto';
+import {
+  ClockWindow,
+  isClockTime,
+  isOvernight,
+  validateWeeklyBlocks,
+  windowSpan,
+} from '../../../../common/utils/schedule-window.util';
+
+const minutesToClock = (min: number) => {
+  const m = min % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+};
 
 /**
  * BusinessHoursService
@@ -64,15 +76,25 @@ export class BusinessHoursService {
    * Days omitted from the payload get deactivated (is_active = false)
    * via a delete-then-insert; we keep the operation transactional.
    *
-   * Validates that end_time > start_time per item to avoid garbage rows.
+   * end_time <= start_time is valid and means the block ends the next day (S21).
    */
   async upsertAll(storeId: number, dto: UpsertBusinessHoursDto) {
-    for (const item of dto.items) {
-      if (item.start_time >= item.end_time) {
-        throw new BadRequestException(
-          `Día ${item.day_of_week}: end_time (${item.end_time}) debe ser mayor que start_time (${item.start_time})`,
-        );
-      }
+    // S21: end <= start means the block ends the next day (00:00-00:00 = 24 h).
+    // Blocks must keep the HH:MM format and must not overlap, including the
+    // previous day's overnight spill.
+    const invalid = validateWeeklyBlocks(
+      dto.items.map((i) => ({
+        day: i.day_of_week,
+        start_time: i.start_time,
+        end_time: i.end_time,
+      })),
+    );
+    if (invalid) {
+      throw new BadRequestException(
+        invalid.reason === 'overlap'
+          ? `Día ${invalid.day}: el horario se cruza con otro bloque (incluido el que termina de madrugada del día anterior)`
+          : `Día ${invalid.day}: las horas deben tener formato HH:mm`,
+      );
     }
 
     const daysTouched = new Set(dto.items.map((i) => i.day_of_week));
@@ -105,44 +127,37 @@ export class BusinessHoursService {
   }
 
   /**
-   * Hot-path helper consumed by AvailabilityService. Loads all 7 day
-   * windows in a single query and returns them as a Map for O(1) lookup.
-   * Returns an empty Map if the store has never configured their hours.
+   * Hot-path helper consumed by AvailabilityService: the store windows per
+   * weekday (0 = Sunday), read from `settings.pos.business_hours` first and
+   * from the legacy `store_business_hours` table as a fallback. An empty Map
+   * means the store never configured its hours.
    *
-   * SOURCE OF TRUTH FIX: now reads from `store_settings.settings.business_hours`
-   * (the same JSON the POS settings form edits) instead of the legacy
-   * `store_business_hours` table. The store was forcing operators to keep
-   * two separate configs in sync — the POS one and the reservations one
-   * — and any drift between them produced truncated booking slots. The
-   * legacy table is still readable as a fallback (for stores that
-   * haven't migrated yet) but is no longer the primary source.
-   *
-   * Collapses each day's blocks to a single (earliest_open, latest_close)
-   * envelope — the slot generator has long assumed a single window per
-   * day. Callers that need to honor lunch breaks / split-shifts should
-   * use `loadStoreWindows` instead, which returns the per-day array of
-   * windows.
+   * A day whose blocks all stay inside the day collapses to the outer envelope
+   * [earliest open, latest close] — the historical behavior of the slot
+   * generator (it ignores lunch gaps). A day with a block that crosses
+   * midnight (S21) keeps every block, because an envelope would be ambiguous.
+   * Callers that need per-block fidelity use `loadStoreWindows`.
    */
   async loadStoreHours(
     storeId: number,
     prisma: StorePrismaService = this.prisma,
-  ): Promise<Map<number, { start_time: string; end_time: string }>> {
-    // Try the POS settings JSON first (single source of truth).
-    const fromPos = await this.loadStoreHoursFromPosSettings(storeId, prisma);
-    if (fromPos.size > 0) return fromPos;
-
-    // Fallback: legacy store_business_hours table for stores that
-    // haven't been migrated to the unified POS settings yet.
-    const rows = await prisma.store_business_hours.findMany({
-      where: { store_id: storeId, is_active: true },
-      select: { day_of_week: true, start_time: true, end_time: true },
-    });
-    return new Map(
-      rows.map((r) => [
-        r.day_of_week,
-        { start_time: r.start_time, end_time: r.end_time },
-      ]),
-    );
+  ): Promise<Map<number, ClockWindow[]>> {
+    const windows = await this.loadStoreWindows(storeId, prisma);
+    const out = new Map<number, ClockWindow[]>();
+    for (const [dow, list] of windows) {
+      if (list.some(isOvernight)) {
+        out.set(dow, list);
+        continue;
+      }
+      const spans = list.map(windowSpan);
+      out.set(dow, [
+        {
+          start_time: minutesToClock(Math.min(...spans.map((s) => s.startMin))),
+          end_time: minutesToClock(Math.max(...spans.map((s) => s.endMin))),
+        },
+      ]);
+    }
+    return out;
   }
 
   /**
@@ -188,7 +203,7 @@ export class BusinessHoursService {
 
   /**
    * POS-settings-backed variant of `loadStoreWindows`. Same JSON shape
-   * as `loadStoreHoursFromPosSettings` but preserves every block per
+   * as the old envelope reader but preserves every block per
    * day instead of collapsing to the outer envelope.
    *
    * For TIPO DE HORARIO = "Continuo" emits a single window per day.
@@ -243,9 +258,8 @@ export class BusinessHoursService {
         | undefined;
       if (Array.isArray(blocks) && blocks.length > 0) {
         for (const b of blocks) {
-          if (b?.open && b?.close && b.open < b.close) {
-            windows.push({ start_time: b.open, end_time: b.close });
-          }
+          const block = this.normalizeBlock(b?.open, b?.close);
+          if (block) windows.push(block);
         }
         windows.sort((a, b) =>
           a.start_time < b.start_time ? -1 : a.start_time > b.start_time ? 1 : 0,
@@ -253,8 +267,9 @@ export class BusinessHoursService {
       }
       const open = (value as any).open as string | undefined;
       const close = (value as any).close as string | undefined;
-      if (!windows.length && open && close && open < close) {
-        windows.push({ start_time: open, end_time: close });
+      if (!windows.length) {
+        const block = this.normalizeBlock(open, close);
+        if (block) windows.push(block);
       }
       if (windows.length) out.set(dow, windows);
     }
@@ -262,89 +277,12 @@ export class BusinessHoursService {
   }
 
   /**
-   * Reads the same `business_hours` JSON the POS settings form edits
-   * (continuous + split blocks per day) and projects it to the simple
-   * `{ day_of_week -> { start_time, end_time } }` shape that the slot
-   * generator expects.
-   *
-   * For TIPO DE HORARIO = "continuo" we collapse to a single window.
-   * For "split" we currently emit the outer envelope (open/close), which
-   * the slot generator can later refine to honor lunch breaks once we
-   * teach `clampToStoreHours` to accept an array of windows.
+   * A POS block is valid when both ends are HH:MM. `end <= start` is kept (it
+   * ends the next day, S21); `24:00` is read as `00:00`.
    */
-  private async loadStoreHoursFromPosSettings(
-    storeId: number,
-    prisma: StorePrismaService = this.prisma,
-  ): Promise<Map<number, { start_time: string; end_time: string }>> {
-    const row = await prisma.store_settings.findUnique({
-      where: { store_id: storeId },
-      select: { settings: true },
-    });
-    // POS business_hours live at settings.pos.business_hours (the POS
-    // settings card is rendered as a sub-section whose [settings]
-    // binding is `settings().pos`, and the save merges it back into
-    // settings.pos on the backend).
-    const businessHours = (row?.settings as any)?.pos?.business_hours as
-      | Record<
-          string,
-          | string
-          | {
-              open?: string;
-              close?: string;
-              is_active?: boolean;
-              blocks?: Array<{ open: string; close: string }>;
-            }
-        >
-      | undefined;
-    if (!businessHours) return new Map();
-
-    const out = new Map<number, { start_time: string; end_time: string }>();
-    // Day-of-week keys in store_settings use monday=1..sunday=7; the
-    // reservations schema uses sunday=0..saturday=6. Map via Date so the
-    // conversion stays correct regardless of locale / week start.
-    const dowMap: Record<string, number> = {
-      sunday: 0,
-      monday: 1,
-      tuesday: 2,
-      wednesday: 3,
-      thursday: 4,
-      friday: 5,
-      saturday: 6,
-    };
-    for (const [dayKey, value] of Object.entries(businessHours)) {
-      const dow = dowMap[dayKey.toLowerCase()];
-      if (dow === undefined) continue;
-      // Legacy/short form: just the open string ("09:00") — treat as closed.
-      if (typeof value === 'string') continue;
-      if (value?.is_active === false) continue;
-
-      // Customized (TIPO DE HORARIO = "Personalizado"): an array of
-      // {open, close} blocks per day. The reservations system today only
-      // honors a single window per day, so we collapse to the OUTER
-      // envelope [earliest open, latest close]. This intentionally drops
-      // any lunch-break gap inside the day, but it matches the previous
-      // behavior of the legacy store_business_hours table.
-      const blocks = (value as any).blocks as
-        | Array<{ open: string; close: string }>
-        | undefined;
-      if (Array.isArray(blocks) && blocks.length > 0) {
-        const opens = blocks.map((b) => b.open).filter(Boolean);
-        const closes = blocks.map((b) => b.close).filter(Boolean);
-        if (opens.length > 0 && closes.length > 0) {
-          const start = opens.reduce((a, b) => (a < b ? a : b));
-          const end = closes.reduce((a, b) => (a > b ? a : b));
-          out.set(dow, { start_time: start, end_time: end });
-          continue;
-        }
-      }
-
-      // Continuous (TIPO DE HORARIO = "Continuo"): a single
-      // {open, close} envelope per day.
-      const open = (value as any).open as string | undefined;
-      const close = (value as any).close as string | undefined;
-      if (!open || !close) continue;
-      out.set(dow, { start_time: open, end_time: close });
-    }
-    return out;
+  private normalizeBlock(open?: string, close?: string): ClockWindow | null {
+    const end = close === '24:00' ? '00:00' : close;
+    if (!isClockTime(open) || !isClockTime(end)) return null;
+    return { start_time: open, end_time: end };
   }
 }
