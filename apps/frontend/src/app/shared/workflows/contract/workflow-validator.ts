@@ -2626,6 +2626,9 @@ function checkLoop(
   }
 }
 
+/** Stage types a person submits: only there may a guard just block. */
+const GUARD_HUMAN_STAGE_TYPES: ReadonlySet<string> = new Set(["form", "approval", "review"]);
+
 function checkGuards(
   raw: unknown,
   t: string,
@@ -2672,7 +2675,16 @@ function checkGuards(
     if (!isNonEmptyStr(g["message"]) || g["message"].length > 300) {
       c.err("GUARD_INVALID", `${gp}.message`, `${L}: la guarda #${j + 1} necesita un mensaje de hasta 300 caracteres.`, sk);
     }
-    if (g["redirect_to"] !== undefined) {
+    if (g["redirect_to"] === undefined && !GUARD_HUMAN_STAGE_TYPES.has(t)) {
+      // Nobody submits a system stage: a guard that only blocks would leave the
+      // request stopped with no task and no notice.
+      c.err(
+        "GUARD_INVALID",
+        `${gp}.redirect_to`,
+        `${L}: nadie envía esta etapa, así que la guarda #${j + 1} debe redirigir a otra etapa.`,
+        sk,
+      );
+    } else if (g["redirect_to"] !== undefined) {
       if (!isStr(g["redirect_to"]) || !stageKeys.has(g["redirect_to"])) {
         c.err(
           "TRANSITION_TARGET_UNKNOWN",

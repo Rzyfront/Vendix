@@ -227,6 +227,22 @@ describe('P2 validator — guards, hook points, error policy, compute, schedule'
     ).toContain('TRANSITION_TARGET_UNKNOWN');
   });
 
+  it('a guard on a stage nobody submits must redirect (a blocked system stage would stay stuck)', () => {
+    const when = { all: [{ field: 'monto', op: 'gt', value: 5000000 }] };
+    const auto = (guard: Record<string, unknown>) =>
+      flow([
+        {
+          key: 'auto',
+          name: 'Auto',
+          type: 'automatic',
+          guards: [{ when, ...guard }],
+          transitions: [{ to: 'fin', on: 'auto' }],
+        },
+      ]);
+    expect(codes(auto({ message: 'Excede el presupuesto' }))).toContain('GUARD_INVALID');
+    expect(codes(auto({ message: 'Va a error', redirect_to: 'error' }))).toEqual([]);
+  });
+
   it('accepts the four hook points; on_submit only where people submit', () => {
     const set = [{ action: 'set_field', field: 'nit', value: '1' }];
     expect(

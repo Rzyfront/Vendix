@@ -18,6 +18,7 @@ import { removeAt, replaceAt } from '../../workflow-editor.utils';
 import { ConditionBuilderComponent } from '../condition-builder.component';
 
 const NO_REDIRECT = '__none__';
+const HUMAN_STAGE_TYPES: ReadonlySet<string> = new Set(['form', 'approval', 'review']);
 
 /** Guardas tab: rules checked before the stage advances; they block with a message or redirect. */
 @Component({
@@ -56,7 +57,7 @@ const NO_REDIRECT = '__none__';
             size="sm"
             [options]="redirectOptions()"
             [value]="guard.redirect_to ?? noRedirect"
-            helpText="Sin redirección, la guarda solo bloquea y la tarea sigue abierta."
+            [helpText]="humanStage() ? 'Sin redirección, la guarda solo bloquea y la tarea sigue abierta.' : 'Nadie envía esta etapa: la guarda debe redirigir a otra etapa.'"
             (valueChange)="setRedirect(i, $event)"
           />
         </div>
@@ -83,8 +84,10 @@ export class StageGuardsTabComponent {
   readonly maxGuards = WORKFLOW_LIMITS.maxGuards;
   readonly guards = computed(() => this.stage().guards ?? []);
   readonly fields = computed(() => this.store.draft()?.fields ?? []);
+  /** Only a stage a person submits may have a guard that just blocks. */
+  readonly humanStage = computed(() => HUMAN_STAGE_TYPES.has(this.stage().type));
   readonly redirectOptions = computed(() => [
-    { value: NO_REDIRECT, label: 'No redirigir (solo bloquear)' },
+    ...(this.humanStage() ? [{ value: NO_REDIRECT, label: 'No redirigir (solo bloquear)' }] : []),
     ...(this.store.draft()?.stages ?? [])
       .filter((s) => s.key !== this.stage().key)
       .map((s) => ({ value: s.key, label: s.name })),
