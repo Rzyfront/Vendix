@@ -57,6 +57,10 @@ Riesgo (textual del plan): "Risk: item 1 (estado nuevo en entidades), 2 (permiso
 | T13 | S3 | inline | ✅ | `db21fedaa`; descuento del POS retenido; candado 15/15, servicios 20/20, pagos 194/194 |
 | T14 | S2 | inline | ✅ | `0b2816d08`; idempotencia declarada y marca de inicio; acciones 17/17, paridad 8/8 |
 | T15 | S3–S4 | inline | ✅ | `041fd5ac5`, `734ffe7d5`, `2ab508dae`, `f6eb8c4f5`; bajos de la revisión r1 |
+| T16 | S3 | inline | ✅ | `3408f4a4b`; stock editado en el producto o la variante: 409 si un flujo lo gobierna; servicios gobernados 24/24, variantes 15/15, productos 157/157 |
+| T17 | S3 | inline | ✅ | `949443f7f`; descuento por API (crear, PATCH, PUT items): 409 si un flujo lo gobierna; órdenes 194/194, editor 4/4 |
+| T18 | S3 | inline | ✅ | `2cda026d1`; carga inicial que cae a diferencia de conteo pasa por el candado; ajustes 14/14 y 34/34, importación 142/142 |
+| T19 | — (CI) | inline | ✅ | `e012717ed`; specs de productos, variantes, órdenes, pagos e importación en el job de Flujos |
 
 Motivo de delegación (Writer trigger a): T2, T3, T4 y T7 son unidades independientes con superficies disjuntas, cada una de varios archivos y >100 líneas, lanzadas juntas tras cerrar el contrato.
 
@@ -78,3 +82,8 @@ Motivo de delegación (Writer trigger a): T2, T3, T4 y T7 son unidades independi
 - L14 (2026-11-07, decisión): idempotencia de acciones `replay_safe` (actualizar cliente, proveedor, empleado; etiqueta de cliente) o `at_most_once` (las demás). Una ejecución interrumpida tras la marca de inicio falla con motivo en vez de repetir el efecto; si el efecto falla, la marca se borra y el reintento corre.
 - L15 (2026-11-07, decisión): la restricción única del candado no lleva `entity_type` y cambiarla exige `DROP INDEX` (prohibido por el encargo); la regla vigente y el hash se leen con el tipo. `GET store/workflow-links` deja de devolver el título libre de la solicitud.
 - L16 (2026-11-07, pendiente declarado): anular una nota crédito o débito no emite `invoice.voided` (transición en el servicio fiscal de saldos de notas, fuera del alcance de la ronda).
+- L17 (2026-11-07, revisión r2, nota 76): el stock editado en el producto o la variante (página de producto, `PATCH products/variants/:id`, `stock_quantity`/`stock_by_location` de `PATCH products/:id`) aplicaba un ajuste sin candado; el `discount_amount` de `POST store/orders` y `PUT store/orders/:id/items` no se gobernaba; una carga inicial que caía a diferencia de conteo no pasaba por el candado.
+- L18 (2026-11-07, decisión): las ediciones en línea (stock del producto o la variante, descuento escrito por API al crear o editar la orden) no pueden esperar una solicitud. Si un flujo gobierna el cambio, responden 409 `WORKFLOW_APPROVAL_REQUIRED` sin escribir nada y mandan a la ruta que pide la aprobación: Ajustes de Stock o el editor de la orden. También aplica a `PATCH store/orders/:id`, a las herramientas de IA de órdenes y a convertir una cotización con descuento. Mantener o bajar un descuento siempre pasa.
+- L19 (2026-11-07, pendiente declarado, dueño: siguiente ronda de P1 sobre facturación): `invoice.voided` al anular notas crédito/débito (ver L16).
+- L20 (2026-11-07, pregunta abierta r2, sin auditar): `releaseEffect` borra la marca ante cualquier error del handler; si algún servicio de dominio de una acción `at_most_once` lanza después de su commit, el reintento repetiría el efecto. No se auditaron los 18 handlers en esta ronda.
+- L21 (2026-11-07, hallazgo fuera del alcance): en `develop`, `orders.service.history/shipping-tax/titular/invoice-lock` ya fallan porque su mock de prisma no tiene `$transaction` (los tests de `update`). No corren en CI y no se tocaron.
