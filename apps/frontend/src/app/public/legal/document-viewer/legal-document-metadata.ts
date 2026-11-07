@@ -3,7 +3,11 @@ import type { LegalDocument } from '../services/public-legal.service';
 
 const LEGAL_PATHS = new Set(['/legal/terminos', '/legal/privacidad', '/legal/cookies']);
 
-/** Marketing-only metadata. HTTP indexing remains blocked until hosting is fixed. */
+/**
+ * Marketing-only metadata. Since 2026-11-02 the CDN serves /legal/* with HTTP
+ * 200, so an available document is indexable (decision 2026-10-22: legal pages
+ * index with current text); loading or unavailable documents stay noindex.
+ */
 export function createLegalDocumentMetadata(document: Document, title: Title, meta: Meta) {
   const url = new URL(document.URL);
   if (!['vendix.online', 'www.vendix.online', 'vendix.com', 'www.vendix.com'].includes(url.hostname)
@@ -31,7 +35,7 @@ export function createLegalDocumentMetadata(document: Document, title: Title, me
       const description = available
         ? doc!.description?.trim() || 'Consulta el documento legal vigente de Vendix.'
         : loaded ? 'No hay una versión activa disponible de este documento.' : 'Consultando el documento legal de Vendix.';
-      for (const [name, content] of [['description', description], ['robots', 'noindex, follow']]) {
+      for (const [name, content] of [['description', description], ['robots', available ? 'index, follow' : 'noindex, follow']]) {
         meta.updateTag({ name, content });
         lastContent.set(name, content);
       }
