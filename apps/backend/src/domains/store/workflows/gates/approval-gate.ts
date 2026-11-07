@@ -103,16 +103,20 @@ export function gateContext(
   return out;
 }
 
-/** Same request (operation, record, requester and JSON arguments) → same hash. */
+/**
+ * Same request (operation, record type and id, requester and JSON arguments)
+ * → same hash.
+ */
 export function gateRequestHash(
   operation: string,
+  entityType: string,
   entityId: number,
   userId: number | null,
   request: GateDeferredRequest | undefined,
 ): string {
   const args = request ? JSON.parse(JSON.stringify(request)) : null;
   return createHash('sha256')
-    .update(canonicalJson({ operation, entityId, userId, args }))
+    .update(canonicalJson({ operation, entityType, entityId, userId, args }))
     .digest('hex');
 }
 
@@ -206,32 +210,35 @@ export async function requestApproval(
   const db = root(prisma);
   const spec = WORKFLOW_GATE_OPERATIONS[input.operation];
   const userId = ctx?.user_id ?? null;
+  const entityType = input.entity_type ?? spec.subject;
   const hash =
     spec.mode === 'defer'
-      ? gateRequestHash(input.operation, input.entity_id, userId, input.request)
+      ? gateRequestHash(input.operation, entityType, input.entity_id, userId, input.request)
       : null;
   const amount = Math.abs(Number.isFinite(input.amount) ? input.amount : 0);
 
   for (let attempt = 0; attempt < 3; attempt++) {
     // Read the top revision FIRST and derive the new revision from this same
     // read: a concurrent opener that this read missed is creating this very
-    // revision, so the unique (store, operation, record, revision) makes one
-    // of the two fail and re-read, never two gates for the same thing.
+    // revision, so the unique (store, operation, record id, revision) makes
+    // one of the two fail and re-read, never two gates for the same thing.
+    // The unique has no record type, so the numbering is shared by records of
+    // two types with the same id (an order and a payable, for supplier
+    // payments); which gate rules is always read WITH the type.
     const top = (await db.workflow_approval_gates.findFirst({
       where: { store_id: storeId, operation: input.operation, entity_id: input.entity_id },
       orderBy: { revision: 'desc' },
     })) as GateRow | null;
-    const latest = hash
-      ? ((await db.workflow_approval_gates.findFirst({
-          where: {
-            store_id: storeId,
-            operation: input.operation,
-            entity_id: input.entity_id,
-            request: { path: ['hash'], equals: hash },
-          },
-          orderBy: { revision: 'desc' },
-        })) as GateRow | null)
-      : top;
+    const latest = (await db.workflow_approval_gates.findFirst({
+      where: {
+        store_id: storeId,
+        operation: input.operation,
+        entity_type: entityType,
+        entity_id: input.entity_id,
+        ...(hash ? { request: { path: ['hash'], equals: hash } } : {}),
+      },
+      orderBy: { revision: 'desc' },
+    })) as GateRow | null;
 
     if (latest) {
       if (latest.status === 'pending') return { status: 'pending', gate: latest };
@@ -265,7 +272,7 @@ export async function requestApproval(
             store_id: storeId,
             definition_id: governing.id,
             operation: input.operation,
-            entity_type: input.entity_type ?? spec.subject,
+            entity_type: entityType,
             entity_id: input.entity_id,
             revision,
             amount,

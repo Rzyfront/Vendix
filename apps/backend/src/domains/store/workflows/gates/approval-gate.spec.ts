@@ -285,6 +285,29 @@ describe('approval gate (P1.3)', () => {
     ]);
   });
 
+  it('records of two types with the same id never share a request (order #7 vs payable #7)', async () => {
+    const d = governingFlow(10) as any;
+    d.key = 'pagos';
+    d.subject = undefined;
+    d.governs = { operation: 'supplier_payment.register', min_amount: 10 };
+    seedDefinition(kit.db, d);
+    const pay = (entity_type: string) => ({
+      operation: 'supplier_payment.register' as const,
+      entity_type,
+      entity_id: 7,
+      amount: 500,
+      context: { amount: 500 },
+      request: { method: 'pay', args: [7, { amount: 500 }] },
+    });
+    await expect(enforceApproval(kit.prisma, pay('purchase_order'))).rejects.toBeDefined();
+    await expect(enforceApproval(kit.prisma, pay('accounts_payable'))).rejects.toBeDefined();
+    await expect(enforceApproval(kit.prisma, pay('purchase_order'))).rejects.toBeDefined();
+    expect(gates().map((g) => [g.entity_type, g.revision])).toEqual([
+      ['purchase_order', 1],
+      ['accounts_payable', 2],
+    ]);
+  });
+
   it('a store without the administration industry is never held', async () => {
     seedDefinition(kit.db, governingFlow());
     kit.db.table('stores').forEach((s: any) => (s.industries = ['retail']));
