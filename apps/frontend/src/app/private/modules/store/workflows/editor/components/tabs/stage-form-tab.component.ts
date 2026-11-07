@@ -357,9 +357,9 @@ export class StageFormTabComponent {
   }
 
   removeFromFlow(key: string): void {
-    const steps = this.steps();
+    // The store drops the key from every form and its steps (a step left empty
+    // goes too); rewriting the steps read before the change would bring it back.
     this.store.removeField(key);
-    if (steps) this.setSteps(removeKeyFromSteps(steps, key));
     this.editing.set(null);
   }
 }
