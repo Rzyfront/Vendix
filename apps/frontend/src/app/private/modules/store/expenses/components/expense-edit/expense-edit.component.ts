@@ -8,6 +8,7 @@ import {
   FormsModule,
 } from '@angular/forms';
 import { Store } from '@ngrx/store';
+import { WorkflowEntityLinkComponent } from '../../../workflows/components/workflow-entity-link/workflow-entity-link.component';
 import { map } from 'rxjs';
 import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {
@@ -49,7 +50,8 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
     InputComponent,
     SelectorComponent,
     TextareaComponent,
-    FileUploadDropzoneComponent
+    FileUploadDropzoneComponent,
+    WorkflowEntityLinkComponent,
 ],
   template: `
     <app-modal
@@ -71,6 +73,11 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
       }
     
       <div class="p-4">
+        @if (expense(); as e) {
+          <div class="mb-3">
+            <app-workflow-entity-link entityType="expense" [entityId]="e.id" [refreshKey]="e" [(pending)]="approvalPending" />
+          </div>
+        }
         <!-- Refund Info -->
         @if (expense()?.state === 'refunded') {
           <div
@@ -202,6 +209,8 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
                       [fullWidth]="true"
                       (clicked)="onApprove()"
                       [loading]="loading() || false"
+                      [disabled]="approvalPending()"
+                      [ariaLabel]="approvalPending() ? 'Pendiente de aprobación' : ''"
                       >
                       Aprobar
                     </app-button>
@@ -363,6 +372,8 @@ export class ExpenseEditComponent {
   readonly isOpen = input<boolean>(false);
   readonly expense = input<Expense | null>(null);
   readonly isOpenChange = output<boolean>();
+  /** An approval gate holds this expense: Aprobar stays disabled. */
+  readonly approvalPending = signal(false);
 
   private expensesService = inject(ExpensesService);
   private fb = inject(FormBuilder);

@@ -178,6 +178,8 @@ export interface WorkflowInstanceDetail {
   stage_entered_at: string | null;
   stage_due_at: string | null;
   data: Record<string, unknown>;
+  subject_type?: string | null;
+  subject_id?: number | null;
   started_by: { name: string } | null;
   created_at: string;
   completed_at: string | null;

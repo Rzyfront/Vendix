@@ -4,6 +4,10 @@
  * El devMessage del backend NUNCA se muestra al usuario.
  */
 export const ERROR_MESSAGES: Record<string, string> = {
+  // Approval gate (flujos P1.3)
+  WORKFLOW_APPROVAL_PENDING: 'Pendiente de aprobación: esta operación espera la decisión de su solicitud.',
+  WORKFLOW_APPROVAL_REJECTED: 'La solicitud de aprobación de esta operación fue rechazada.',
+
   // System
   SYS_INTERNAL_001: 'Ocurrio un error inesperado. Intente de nuevo.',
   SYS_VALIDATION_001: 'Los datos ingresados no son validos.',

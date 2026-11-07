@@ -13,7 +13,7 @@ import {
 } from '../../../../../../shared/workflows/contract/workflow-contract';
 import { WorkflowEditorStore } from '../workflow-editor.store';
 import { removeAt, replaceAt } from '../workflow-editor.utils';
-import { TRIGGER_EVENT_LABEL, eventTokenOptions } from '../workflow-editor-triggers.utils';
+import { eventOptions, eventTokenOptions } from '../workflow-editor-triggers.utils';
 
 type EventTrigger = Extract<WorkflowTriggerDef, { kind: 'event' }>;
 
@@ -110,10 +110,7 @@ export class TriggersPanelComponent {
   });
 
   eventOptionsFor(current: WorkflowTriggerEvent): { value: string; label: string }[] {
-    return WORKFLOW_TRIGGER_EVENTS.filter((e) => e === current || this.available().includes(e)).map((e) => ({
-      value: e,
-      label: TRIGGER_EVENT_LABEL[e],
-    }));
+    return eventOptions(WORKFLOW_TRIGGER_EVENTS.filter((e) => e === current || this.available().includes(e)));
   }
 
   tokenOptions(event: WorkflowTriggerEvent): { value: string; label: string }[] {

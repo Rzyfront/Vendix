@@ -144,3 +144,41 @@ export function openUrlInNewTab(url: string): void {
   anchor.rel = 'noopener noreferrer';
   anchor.click();
 }
+
+const SUBJECT_LABEL: Record<string, string> = {
+  customer: 'Cliente',
+  supplier: 'Proveedor',
+  employee: 'Empleado',
+  order: 'Venta',
+  purchase_order: 'Orden de compra',
+  expense: 'Gasto',
+  invoice: 'Factura',
+  payroll_run: 'Período de nómina',
+};
+
+/** Screens that open one record; the other subjects have no detail route. */
+const SUBJECT_ROUTE: Record<string, string> = {
+  customer: '/admin/customers',
+  supplier: '/admin/inventory/suppliers',
+  order: '/admin/orders',
+  purchase_order: '/admin/orders/purchase-orders',
+};
+
+export interface InstanceSubjectView {
+  text: string;
+  /** Router link of the record's page, null when it has no detail route. */
+  link: string[] | null;
+}
+
+/** "Sobre: Orden de compra #12" and where it leads; null when there is no subject. */
+export function instanceSubject(
+  type: string | null | undefined,
+  id: number | null | undefined,
+): InstanceSubjectView | null {
+  if (!type || type === 'none' || id === null || id === undefined) return null;
+  const base = SUBJECT_ROUTE[type];
+  return {
+    text: `Sobre: ${SUBJECT_LABEL[type] ?? type} #${id}`,
+    link: base ? [base, String(id)] : null,
+  };
+}

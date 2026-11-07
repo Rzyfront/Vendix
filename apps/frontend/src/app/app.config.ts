@@ -18,6 +18,7 @@ import { firstValueFrom, timeout, catchError, of, filter } from 'rxjs';
 import { authInterceptorFn } from './core/interceptors/auth.interceptor';
 import { subscriptionPaywallInterceptor } from './core/interceptors/subscription-paywall.interceptor';
 import { fiscalGateInterceptor } from './core/interceptors/fiscal-gate.interceptor';
+import { approvalGateInterceptor } from './core/interceptors/approval-gate.interceptor';
 import { cacheBustingInterceptor } from './core/interceptors/cache-busting.interceptor';
 import { tenantStoreIdInterceptor } from './core/interceptors/tenant-store-id.interceptor';
 import { RouteManagerService } from './core/services/route-manager.service';
@@ -101,6 +102,8 @@ export const appConfig: ApplicationConfig = {
         subscriptionPaywallInterceptor,
         // F4 — abre el gate "no responsable de IVA" ante FISCAL_VAT_NOT_RESPONSIBLE_001.
         fiscalGateInterceptor,
+        // P1.3 — avisa (warning) cuando el candado de aprobación retiene una operación.
+        approvalGateInterceptor,
       ]),
     ),
 

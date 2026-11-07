@@ -18,7 +18,7 @@ import {
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
 import { removeAt, replaceAt } from '../../workflow-editor.utils';
-import { VENDIX_ACTION_LABEL } from '../../workflow-editor-triggers.utils';
+import { vendixActionOptions } from '../../workflow-editor-triggers.utils';
 import { ActionMapEditorComponent } from '../action-map-editor.component';
 import { AssigneeEditorComponent } from '../assignee-editor.component';
 
@@ -131,7 +131,7 @@ export class StageActionsTabComponent {
   readonly actionOptions = [
     { value: 'notify', label: 'Enviar aviso' },
     { value: 'set_field', label: 'Cambiar un campo' },
-    ...WORKFLOW_VENDIX_ACTIONS.map((a) => ({ value: a, label: VENDIX_ACTION_LABEL[a] })),
+    ...vendixActionOptions(),
   ];
   readonly fields = computed<WorkflowFieldDef[]>(() => this.store.draft()?.fields ?? []);
   readonly fieldOptions = computed(() => this.fields().map((f) => ({ value: f.key, label: f.label })));

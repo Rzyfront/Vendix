@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import {
   AlertBannerComponent,
   BadgeComponent,
@@ -37,6 +37,7 @@ import {
   dueText,
   eventLabel,
   instanceStatusLabel,
+  instanceSubject,
   instanceStatusTone,
   isOverdue,
   outcomeBlockedByRequirements,
@@ -62,6 +63,7 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
   standalone: true,
   imports: [
     FormsModule,
+    RouterLink,
     StickyHeaderComponent,
     CardComponent,
     ButtonComponent,
@@ -99,6 +101,16 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
             </span>
           }
         </div>
+
+        @if (subject(); as s) {
+          <p class="mb-3 px-1 text-sm" data-testid="instance-subject">
+            @if (s.link) {
+              <a class="font-medium text-primary hover:underline" [routerLink]="s.link">{{ s.text }}</a>
+            } @else {
+              <span class="text-text-secondary">{{ s.text }}</span>
+            }
+          </p>
+        }
 
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-5">
           <div class="flex flex-col gap-4 lg:col-span-3">
@@ -351,6 +363,10 @@ export class InstanceDetailPageComponent implements OnInit {
   );
   readonly overdue = computed(() => isOverdue(this.detail()?.stage_due_at ?? null));
   readonly dueLabel = computed(() => dueText(this.detail()?.stage_due_at ?? null));
+  readonly subject = computed(() => {
+    const d = this.detail();
+    return d ? instanceSubject(d.subject_type, d.subject_id) : null;
+  });
   readonly headerMeta = computed(() => {
     const d = this.detail();
     if (!d) return '';

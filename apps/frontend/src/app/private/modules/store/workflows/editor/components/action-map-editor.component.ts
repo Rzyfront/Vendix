@@ -6,17 +6,32 @@ import {
   SelectorComponent,
 } from '../../../../../../shared/components/index';
 import {
-  WORKFLOW_VENDIX_ACTION_MAP_KEYS,
+  WORKFLOW_ACTION_CATALOG,
+  WorkflowActionInputSpec,
   WorkflowActionMapValue,
   WorkflowAssigneeDef,
   WorkflowFieldDef,
   WorkflowVendixActionName,
 } from '../../../../../../shared/workflows/contract/workflow-contract';
-import { ACTION_MAP_KEY_LABEL, actionTokenOptions } from '../workflow-editor-triggers.utils';
+import { actionTokenOptions } from '../workflow-editor-triggers.utils';
 import { AssigneeEditorComponent } from './assignee-editor.component';
 
 const LITERAL = '__literal__';
 const NONE = '__none__';
+
+const TYPE_HINT: Partial<Record<WorkflowActionInputSpec['type'], string>> = {
+  id: 'Identificador numérico del registro',
+  int: 'Número entero',
+  number: 'Número',
+  money: 'Monto',
+  date: 'Fecha AAAA-MM-DD',
+  boolean: 'Verdadero o falso',
+};
+
+interface MapKey {
+  name: string;
+  spec: WorkflowActionInputSpec;
+}
 
 /** `map` editor of a Vendix action: each key takes a token, a fixed text or nothing. */
 @Component({
@@ -26,29 +41,40 @@ const NONE = '__none__';
   template: `
     <div class="flex flex-col gap-3" data-testid="action-map">
       @for (key of keys(); track key.name) {
-        @if (key.name === 'assignee') {
+        @if (key.spec.type === 'assignee') {
           <div class="flex flex-col gap-2">
             <app-assignee-editor
-              label="Responsable (opcional)"
-              [value]="assignee()"
+              [label]="label(key)"
+              [value]="assigneeOf(key.name)"
               [fields]="fields()"
-              (valueChange)="setValue('assignee', $event)"
+              (valueChange)="setValue(key.name, $event)"
             />
-            @if (assignee()) {
+            @if (assigneeOf(key.name)) {
               <div>
-                <app-button variant="outline" size="xsm" (clicked)="setValue('assignee', undefined)">Quitar responsable</app-button>
+                <app-button variant="outline" size="xsm" (clicked)="setValue(key.name, undefined)">Quitar responsable</app-button>
               </div>
             }
           </div>
+        } @else if (key.spec.type === 'enum') {
+          <app-selector
+            size="sm"
+            [label]="label(key)"
+            [options]="enumOptions(key)"
+            [value]="enumValue(key.name)"
+            (valueChange)="setEnum(key.name, $event)"
+          />
         } @else {
           <div class="flex flex-col gap-2">
             <app-selector
               size="sm"
-              [label]="label(key.name, key.required)"
-              [options]="optionsFor(key.required)"
+              [label]="label(key)"
+              [options]="optionsFor(key.spec.required === true)"
               [value]="modeOf(key.name)"
               (valueChange)="setMode(key.name, $event)"
             />
+            @if (hint(key); as text) {
+              <p class="text-xs text-text-secondary">{{ text }}</p>
+            }
             @if (modeOf(key.name) === literal) {
               <app-input
                 size="sm"
@@ -73,21 +99,42 @@ export class ActionMapEditorComponent {
   /** Keys the user switched to "Texto fijo" but has not typed yet. */
   private readonly pendingLiteral = signal<ReadonlySet<string>>(new Set());
 
-  readonly keys = computed(() => {
-    const def = WORKFLOW_VENDIX_ACTION_MAP_KEYS[this.action()];
-    return [
-      ...def.required.map((name) => ({ name, required: true })),
-      ...def.optional.map((name) => ({ name, required: false })),
-    ];
+  /** Every input of the registry entry: required first, then optional. */
+  readonly keys = computed<MapKey[]>(() => {
+    const inputs = WORKFLOW_ACTION_CATALOG[this.action()].inputs as Record<string, WorkflowActionInputSpec>;
+    const all = Object.entries(inputs).map(([name, spec]) => ({ name, spec }));
+    return [...all.filter((k) => k.spec.required === true), ...all.filter((k) => k.spec.required !== true)];
   });
   private readonly tokens = computed(() => actionTokenOptions(this.fields()));
-  readonly assignee = computed(() => {
-    const value = this.map()['assignee'];
-    return typeof value === 'object' ? (value as WorkflowAssigneeDef) : undefined;
-  });
 
-  label(name: string, required: boolean): string {
-    return `${ACTION_MAP_KEY_LABEL[name] ?? name}${required ? ' *' : ''}`;
+  assigneeOf(name: string): WorkflowAssigneeDef | undefined {
+    const value = this.map()[name];
+    return typeof value === 'object' ? (value as WorkflowAssigneeDef) : undefined;
+  }
+
+  label(key: MapKey): string {
+    return `${key.spec.label}${key.spec.required === true ? ' *' : ''}`;
+  }
+
+  hint(key: MapKey): string {
+    return TYPE_HINT[key.spec.type] ?? '';
+  }
+
+  enumOptions(key: MapKey): { value: string; label: string }[] {
+    return [
+      { value: NONE, label: key.spec.required === true ? 'Elige un valor' : 'Sin valor' },
+      ...(key.spec.values ?? []).map((v) => ({ value: v, label: v })),
+    ];
+  }
+
+  enumValue(name: string): string {
+    const value = this.map()[name];
+    return typeof value === 'string' ? value : NONE;
+  }
+
+  setEnum(name: string, value: string | number | null): void {
+    const next = String(value ?? NONE);
+    this.setValue(name, next === NONE ? undefined : next);
   }
 
   optionsFor(required: boolean): { value: string; label: string }[] {
