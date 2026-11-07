@@ -109,7 +109,7 @@ import { WORKFLOW_MAILBOX_RECEIVER } from './inbound/workflow-mailbox.types';
  * Controladores (bloque 4):
  * `store/workflows/{definitions,instances,tasks}` y `store/work-groups`.
  * `WorkflowRequirementsService` se evalúa contra el expediente de la instancia (`DocumentsModule`):
- * `upload` y `file_field` reales; `issued_document` / `signature` llegan en tareas documentales posteriores.
+ * `upload` y `file_field` por el expediente; `issued_document` / `signature` por el documento emitido vigente (P4).
  */
 @Module({
   imports: [

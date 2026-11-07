@@ -270,6 +270,30 @@ export class DossiersService {
     return !!found;
   }
 
+  /**
+   * P4.1/P4.2: status of the current issued document of an instance for an
+   * `issued_document` requirement (the newest one that is not superseded or
+   * voided), or null when none was issued.
+   */
+  async currentIssuedStatus(
+    instanceId: number,
+    requirementKey: string,
+    tx?: any,
+  ): Promise<string | null> {
+    const c = this.ctx();
+    const doc: { status: string } | null = await (tx ?? this.prisma).issued_documents.findFirst({
+      where: {
+        store_id: c.store_id,
+        workflow_instance_id: instanceId,
+        requirement_key: requirementKey,
+        status: { notIn: ['superseded', 'voided'] },
+      },
+      orderBy: { id: 'desc' },
+      select: { status: true },
+    });
+    return doc?.status ?? null;
+  }
+
   /** File ids (of the given list) that are NOT part of the dossier or not usable. */
   async missingFileIds(dossierId: number, fileIds: number[], tx?: any) {
     const c = this.ctx();
