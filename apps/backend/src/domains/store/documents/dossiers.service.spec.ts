@@ -68,6 +68,53 @@ describe.each([
     expect(kit.db.table('dossier_items')).toHaveLength(before);
   });
 
+  it('P4: addDocumentItem archiva el documento emitido y reemplaza el anterior del mismo requisito', async () => {
+    const d = await create(1);
+    const f1 = file(1);
+    const f2 = file(1);
+    const add = (fileId: number, docId: number) =>
+      kit.prisma.$transaction((tx: any) =>
+        kit.dossiers.addDocumentItem(tx, {
+          dossier_id: d.id,
+          kind: 'issued_document',
+          issued_document_id: docId,
+          file_id: fileId,
+          stage_key: 'contrato',
+          requirement_key: 'contrato',
+          actor,
+        }),
+      );
+    const first = await add(f1.id, 11);
+    const second = await add(f2.id, 12);
+    const rows = kit.db.table('dossier_items').filter((i: any) => i.dossier_id === d.id);
+    expect(rows.find((i: any) => i.id === first.id)?.status).toBe('superseded');
+    expect(second).toMatchObject({
+      kind: 'issued_document',
+      issued_document_id: 12,
+      status: 'received',
+      supersedes_id: first.id,
+    });
+  });
+
+  it('P4: addDocumentItem rechaza un expediente de otra tienda', async () => {
+    const theirs = await create(2, 2);
+    kit.as({ store_id: 1 });
+    const f = file(1);
+    expect(
+      await codeOf(
+        kit.prisma.$transaction((tx: any) =>
+          kit.dossiers.addDocumentItem(tx, {
+            dossier_id: theirs.id,
+            kind: 'issued_document',
+            issued_document_id: 1,
+            file_id: f.id,
+            actor,
+          }),
+        ),
+      ),
+    ).toBe('DOCUMENT_NOT_FOUND');
+  });
+
   it('createForInstance: EXP- correlativo por tienda, atado a la instancia', async () => {
     const a = await create(1);
     const b = await create(2);

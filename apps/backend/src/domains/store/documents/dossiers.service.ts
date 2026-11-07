@@ -27,6 +27,16 @@ export interface AddFileItemInput {
   actor: DocumentActor;
 }
 
+export interface AddDocumentItemInput {
+  dossier_id: number;
+  kind: 'issued_document' | 'signed_document';
+  issued_document_id: number;
+  file_id: number;
+  stage_key?: string | null;
+  requirement_key?: string | null;
+  actor: DocumentActor;
+}
+
 const ACTIVE = ['received', 'validated'];
 
 /** Dossier (expediente) per workflow instance and its items. */
@@ -246,6 +256,55 @@ export class DossiersService {
         stage_key: input.stage_key,
         field_key: input.field_key ?? null,
         file_id: input.file_id,
+        status: 'received',
+        supersedes_id: previous[0]?.id ?? null,
+        added_by_type: input.actor.type,
+        added_by_id: input.actor.id,
+      },
+    });
+  }
+
+  /**
+   * P4.1/P4.2: files an issued (or sealed) document in the dossier. A previous
+   * active item of the same kind for the same issued-document chain key
+   * (`requirement_key`, or the document title when there is none) becomes
+   * `superseded`. Runs in the caller's transaction.
+   */
+  async addDocumentItem(tx: any, input: AddDocumentItemInput) {
+    const c = this.ctx();
+    const touched = await tx.dossiers.updateMany({
+      where: { id: input.dossier_id, store_id: c.store_id },
+      data: { updated_at: new Date() },
+    });
+    if (touched.count === 0) throw new VendixHttpException(ErrorCodes.DOCUMENT_NOT_FOUND);
+    const previous: Array<{ id: number }> = input.requirement_key
+      ? await tx.dossier_items.findMany({
+          where: {
+            dossier_id: input.dossier_id,
+            store_id: c.store_id,
+            kind: input.kind,
+            requirement_key: input.requirement_key,
+            status: { in: ACTIVE },
+          },
+          orderBy: { id: 'desc' },
+          select: { id: true },
+        })
+      : [];
+    if (previous.length > 0) {
+      await tx.dossier_items.updateMany({
+        where: { id: { in: previous.map((p) => p.id) }, store_id: c.store_id },
+        data: { status: 'superseded' },
+      });
+    }
+    return tx.dossier_items.create({
+      data: {
+        store_id: c.store_id,
+        dossier_id: input.dossier_id,
+        kind: input.kind,
+        requirement_key: input.requirement_key ?? null,
+        stage_key: input.stage_key ?? null,
+        file_id: input.file_id,
+        issued_document_id: input.issued_document_id,
         status: 'received',
         supersedes_id: previous[0]?.id ?? null,
         added_by_type: input.actor.type,
