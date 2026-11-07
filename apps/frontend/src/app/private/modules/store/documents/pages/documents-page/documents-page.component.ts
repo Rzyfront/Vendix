@@ -18,7 +18,8 @@ import {
 } from '../../../../../../shared/components/index';
 import { formatStoreDateTime } from '../../../../../../shared/utils/date.util';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
-import { DossierItemsListComponent } from '../../../workflows/components/dossier-items-list.component';
+import { DocumentsTabsComponent } from '../../components/documents-tabs.component';
+import { DossierFilesListComponent } from '../../components/dossier-files-list.component';
 import { toWorkflowError } from '../../../workflows/utils/workflow-errors.util';
 import { DossierDetail, DossierRow } from '../../interfaces/document.interfaces';
 import { DocumentsApiService } from '../../services/documents-api.service';
@@ -42,7 +43,8 @@ interface DossierView extends DossierRow {
     EmptyStateComponent,
     ModalComponent,
     ButtonComponent,
-    DossierItemsListComponent,
+    DocumentsTabsComponent,
+    DossierFilesListComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -52,6 +54,7 @@ interface DossierView extends DossierRow {
         icon="folder-open"
         variant="glass"
       />
+      <app-documents-tabs active="dossiers" />
 
       <div class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent">
         <app-stats
@@ -138,7 +141,7 @@ interface DossierView extends DossierRow {
       @if (detailLoading()) {
         <p class="text-sm text-text-secondary">Cargando archivos...</p>
       } @else {
-        <app-dossier-items-list [items]="selectedItems()" />
+        <app-dossier-files-list [items]="selectedItems()" />
       }
       <div slot="footer" class="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <app-button variant="outline" (clicked)="modalOpen.set(false)">Cerrar</app-button>
