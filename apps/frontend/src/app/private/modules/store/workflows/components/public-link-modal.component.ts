@@ -25,7 +25,7 @@ import {
 } from '../../../../../shared/components/index';
 import { formatStoreDateTime } from '../../../../../shared/utils/date.util';
 import { WorkflowDefinitionRow } from '../interfaces/workflow.interfaces';
-import { PublicLinkStatus } from '../interfaces/workflow-ops.interfaces';
+import { PublicLinkCreated, PublicLinkStatus } from '../interfaces/workflow-ops.interfaces';
 import {
   PublicLinkSettingsStatus,
   WorkflowLinksApiService,
@@ -99,10 +99,12 @@ function endOfDayIso(date: string): string {
             <p class="mt-1 break-all rounded-lg bg-background px-2 py-1.5 font-mono text-xs">
               {{ fullUrl(link) }}
             </p>
-            <p class="mt-1 text-xs text-text-secondary">
-              Va después del dominio público de tu tienda, por ejemplo
-              <span class="font-mono">https://tu-tienda.com{{ link.url_path }}</span>.
-            </p>
+            @if (!link.url) {
+              <p class="mt-1 text-xs text-text-secondary">
+                Va después del dominio público de tu tienda, por ejemplo
+                <span class="font-mono">https://tu-tienda.com{{ link.url_path }}</span>.
+              </p>
+            }
             <div class="mt-2 flex justify-end">
               <app-button variant="outline" size="sm" (clicked)="copy(link)">
                 <app-icon name="copy" [size]="14" slot="icon" />
@@ -200,7 +202,7 @@ export class WorkflowPublicLinkModalComponent {
   readonly definition = input<WorkflowDefinitionRow | null>(null);
 
   readonly status = signal<(PublicLinkStatus & { captcha_required?: boolean }) | null>(null);
-  readonly created = signal<{ url_path: string; token: string; url?: string | null } | null>(null);
+  readonly created = signal<PublicLinkCreated | null>(null);
   readonly qrDataUrl = signal<string | null>(null);
   readonly expiryDate = signal('');
   readonly captchaRequired = signal(false);
@@ -278,19 +280,21 @@ export class WorkflowPublicLinkModalComponent {
       .createPublicLink(definition.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (link: { url_path: string; token: string; url?: string | null }) => {
+        next: (link: PublicLinkCreated) => {
           this.busy.set(false);
           this.created.set(link);
-          // A new link starts without expiry or captcha.
+          // Rotating keeps the expiry and captcha of the replaced link.
+          const expiresAt = link.expires_at ?? null;
+          const captcha = link.captcha_required ?? false;
           this.status.set({
             active: true,
             created_at: new Date().toISOString(),
-            expires_at: null,
+            expires_at: expiresAt,
             last_used_at: null,
-            captcha_required: false,
+            captcha_required: captcha,
           });
-          this.expiryDate.set('');
-          this.captchaRequired.set(false);
+          this.expiryDate.set(localDateInput(expiresAt));
+          this.captchaRequired.set(captcha);
           void this.buildQr(link.url ?? null);
         },
         error: (error) => {
@@ -363,7 +367,10 @@ export class WorkflowPublicLinkModalComponent {
     this.qrDataUrl.set(null);
     if (!url) return;
     try {
-      const QRCode = await import('qrcode');
+      // `qrcode` is CommonJS: the browser bundle exposes it only as `default`.
+      const mod: typeof import('qrcode') & { default?: typeof import('qrcode') } =
+        await import('qrcode');
+      const QRCode = mod.default ?? mod;
       this.qrDataUrl.set(
         await QRCode.toDataURL(url, {
           width: 480,

@@ -89,6 +89,12 @@ export class WorkflowPublicLinksService {
           { reason: availability.reason },
         );
       }
+      // Rotating replaces the token only: the new link keeps the captcha and
+      // the expiry of the one it replaces (a first link starts without them).
+      const previous = await tx.workflow_public_links.findFirst({
+        where: { store_id: c.store_id, definition_id: definitionId, is_active: true },
+        select: { captcha_required: true, expires_at: true },
+      });
       await tx.workflow_public_links.updateMany({
         where: { store_id: c.store_id, definition_id: definitionId, is_active: true },
         data: { is_active: false },
@@ -101,10 +107,17 @@ export class WorkflowPublicLinksService {
           definition_id: definitionId,
           token_hash: hash,
           is_active: true,
+          captcha_required: previous?.captcha_required ?? false,
+          expires_at: previous?.expires_at ?? null,
           created_by_user_id: c.user_id,
         },
       });
-      return { url_path: `/flujos/${token}`, token };
+      return {
+        url_path: `/flujos/${token}`,
+        token,
+        captcha_required: previous?.captcha_required ?? false,
+        expires_at: previous?.expires_at ?? null,
+      };
     });
     // Full URL on the store's public domain (for the QR); null without a domain.
     const origin = await publicStoreOrigin(this.prisma.withoutScope() as never, c.store_id);

@@ -109,6 +109,17 @@ describe('WorkflowPublicLinksService', () => {
     });
   });
   describe('settings: captcha and expiry (P3.4)', () => {
+    it('rotating keeps the captcha and the expiry of the link it replaces', async () => {
+      await kit.publicLinks.create(defId);
+      const when = new Date(Date.now() + 86_400_000).toISOString();
+      await kit.publicLinks.updateSettings(defId, { captcha_required: true, expires_at: when });
+      await kit.publicLinks.create(defId);
+      const active = links().filter((l: any) => l.is_active);
+      expect(active).toHaveLength(1);
+      expect(active[0]).toMatchObject({ captcha_required: true });
+      expect(new Date(active[0].expires_at).toISOString()).toBe(when);
+    });
+
     it('stores captcha_required and a future expiry on the active link and reports them in status', async () => {
       await kit.publicLinks.create(defId);
       const when = new Date(Date.now() + 86_400_000).toISOString();

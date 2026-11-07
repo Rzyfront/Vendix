@@ -92,6 +92,11 @@ export interface PublicLinkStatus {
 export interface PublicLinkCreated {
   url_path: string;
   token: string;
+  /** Full URL on the store's public domain (for the QR); null without one. */
+  url?: string | null;
+  /** P3.4: kept from the link it replaces when rotating. */
+  captcha_required?: boolean;
+  expires_at?: string | null;
 }
 
 /** KPIs of one flow (block 12). The same dataset feeds the screen and the XLSX. */
