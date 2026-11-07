@@ -141,6 +141,16 @@ describe('WorkflowInboxService', () => {
       expect((await inbox(2)).data[0].quick_outcomes).toEqual(['approve']);
     });
 
+    it('P5.5: reject que exige comentario va en comment_outcomes; expone stage_type y has_form', async () => {
+      const task = (await inbox(2)).data[0];
+      expect(task.comment_outcomes).toEqual(['reject']);
+      expect(task.stage_type).toBe('approval');
+      expect(task.has_form).toBe(false);
+      const form = (await inbox(6)).data[0];
+      expect(form.has_form).toBe(true);
+      expect(form.comment_outcomes).toEqual([]);
+    });
+
     it('requisito bloqueante en la etapa: approve deja de ser rápido', async () => {
       const def = purchaseDefinition();
       (def.stages.find((s) => s.key === 'manager') as any).requirements = [

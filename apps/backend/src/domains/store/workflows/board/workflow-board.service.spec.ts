@@ -202,4 +202,106 @@ describe('WorkflowBoardService', () => {
     table('workflow_definitions')[0].published_version_id = null;
     expect(await kit.board.board(defId)).toEqual({ definition: { id: defId, name: 'Compra', version: null }, columns: [] });
   });
+  describe('boardAll (P5.5)', () => {
+    const colAll = (r: any, key: string) => r.columns.find((c: any) => c.key === key);
+    const ids = (r: any, key: string) => colAll(r, key).cards.map((c: any) => c.id).sort();
+
+    beforeEach(() => {
+      table('inventory_locations').push(
+        { id: 1, store_id: 1, name: 'Bodega principal', is_active: true },
+        { id: 2, store_id: 2, name: 'Sede ajena', is_active: true },
+      );
+      row(inManager).location_id = 1;
+    });
+
+    it('cuatro columnas con tarjetas de varios flujos, sede y etapa', async () => {
+      owner();
+      const r = await kit.board.boardAll();
+      expect(r.columns.map((c: any) => [c.key, c.name])).toEqual([
+        ['pending', 'Por atender'],
+        ['in_progress', 'En curso'],
+        ['system', 'En espera (sistema)'],
+        ['closed', 'Cerradas (30 días)'],
+      ]);
+      expect(r.columns.map((c: any) => c.count)).toEqual([5, 0, 0, 1]);
+      expect(ids(r, 'closed')).toEqual([done]);
+      const card = colAll(r, 'pending').cards.find((c: any) => c.id === inManager);
+      expect(card).toEqual({
+        id: inManager,
+        reference: row(inManager).reference,
+        title: 'Compra',
+        status: 'active',
+        definition: { id: defId, name: 'Compra' },
+        stage_key: 'manager',
+        stage_name: expect.any(String),
+        assignee: { type: 'role', id: 2, name: 'manager' },
+        stage_due_at: null,
+        overdue: false,
+        location: { id: 1, name: 'Bodega principal' },
+      });
+    });
+
+    it('una tarea tomada va a "En curso"; sin tarea humana va a "En espera (sistema)"', async () => {
+      owner();
+      const task = table('workflow_tasks').find((t) => t.instance_id === inManager && t.status === 'open')!;
+      task.status = 'claimed';
+      task.assignee_user_id = 2;
+      table('workflow_instances').push({
+        id: 900, store_id: 1, organization_id: 1, definition_id: defId, version_id: 1, reference: 'FLU-0900',
+        title: 'auto', status: 'active', current_stage_key: 'request', stage_entered_at: new Date(),
+        started_by_type: 'system', started_by_id: null,
+      });
+      const r = await kit.board.boardAll();
+      expect(ids(r, 'in_progress')).toEqual([inManager]);
+      expect(ids(r, 'system')).toEqual([900]);
+      expect(colAll(r, 'pending').count).toBe(4);
+    });
+
+    it('filtra por rol, sede y vencidas', async () => {
+      owner();
+      const byRole = await kit.board.boardAll({ role_id: 2 });
+      expect(byRole.columns.map((c: any) => c.count)).toEqual([1, 0, 0, 0]);
+      expect(ids(byRole, 'pending')).toEqual([inManager]);
+      const bySede = await kit.board.boardAll({ location_id: 1 });
+      expect(bySede.columns.map((c: any) => c.count)).toEqual([1, 0, 0, 0]);
+      row(inForm[0]).stage_due_at = new Date(Date.now() - 3_600_000);
+      const late = await kit.board.boardAll({ overdue: true });
+      expect(ids(late, 'pending')).toEqual([inForm[0]]);
+      expect(colAll(late, 'pending').cards[0].overdue).toBe(true);
+    });
+
+    it('pagina una columna por cursor', async () => {
+      owner();
+      const p1 = await kit.board.boardAll({ column: 'pending', limit: 2 });
+      expect(p1.columns).toHaveLength(1);
+      expect(p1.columns[0].cards).toHaveLength(2);
+      const p2 = await kit.board.boardAll({ column: 'pending', limit: 2, cursor: p1.columns[0].next_cursor });
+      expect(p2.columns[0].cards[0].id).toBeLessThan(p1.columns[0].next_cursor);
+    });
+
+    it('ids ajenos dan 404 y otra tienda no ve tarjetas', async () => {
+      owner();
+      expect(await codeOf(kit.board.boardAll({ location_id: 2 }))).toBe('WORKFLOW_NOT_FOUND');
+      expect(await codeOf(kit.board.boardAll({ role_id: 999 }))).toBe('WORKFLOW_NOT_FOUND');
+      expect(await codeOf(kit.board.boardAll({ definition_id: 999 }))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+      kit.as({ user_id: 7, store_id: 2, is_owner: true, permissions: [] });
+      const other = await kit.board.boardAll();
+      expect(other.columns.every((c: any) => c.count === 0)).toBe(true);
+      expect(await codeOf(kit.board.boardAll({ definition_id: defId }))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+    });
+
+    it('quien no es manager solo ve lo suyo', async () => {
+      kit.as({ user_id: 5, store_id: 1, permissions: ['store:workflows:read'] });
+      const r = await kit.board.boardAll();
+      expect(r.columns.map((c: any) => c.count)).toEqual([2, 0, 0, 0]);
+    });
+
+    it('filters: flujos, roles y sedes activas de la tienda', async () => {
+      owner();
+      const f = await kit.board.filters();
+      expect(f.definitions).toEqual([{ id: defId, name: 'Compra' }]);
+      expect(f.roles.map((x: any) => x.name)).toEqual(expect.arrayContaining(['manager', 'owner']));
+      expect(f.locations).toEqual([{ id: 1, name: 'Bodega principal' }]);
+    });
+  });
 });

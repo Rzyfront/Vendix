@@ -37,6 +37,7 @@ import {
   TimelineEventView,
   WorkflowInstanceDetail,
 } from '../../interfaces/workflow.interfaces';
+import { WorkflowLiveService } from '../../services/workflow-live.service';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
@@ -67,6 +68,7 @@ const BADGE_COLOR: Record<string, StickyBadgeColor> = {
 /** Requirement kinds whose file the person uploads from this screen. */
 const UPLOADABLE_KINDS = ['upload', 'signature'];
 
+import { InstanceDebuggerComponent } from '../../components/instance-debugger/instance-debugger.component';
 @Component({
   selector: 'app-instance-detail-page',
   standalone: true,
@@ -87,6 +89,7 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
     SignatureRequestsPanelComponent,
     WorkflowInstanceCommentsComponent,
     TrackingLinksCardComponent,
+    InstanceDebuggerComponent,
   ],
   template: `
     <div class="w-full">
@@ -114,6 +117,13 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
             </span>
           }
         </div>
+
+        @if (location(); as place) {
+          <p class="mb-3 px-1 text-sm" data-testid="instance-location">
+            <span class="text-text-secondary">Sede:</span>
+            <span class="font-medium text-text-primary"> {{ place.name }}</span>
+          </p>
+        }
 
         @if (subject(); as s) {
           <p class="mb-3 px-1 text-sm" data-testid="instance-subject">
@@ -467,6 +477,23 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
                 }
               </ol>
             </app-card>
+
+            @if (canManageDocuments) {
+              <!-- P5.2: variables at each event, for managers. -->
+              <app-card title="Depurador" [responsivePadding]="true" overflow="visible">
+                @if (debuggerOpen()) {
+                  <app-instance-debugger [instanceId]="d.id" />
+                } @else {
+                  <p class="mb-3 text-sm text-text-secondary">
+                    Revisa las variables de la solicitud en cada evento y qué cambió en cada paso.
+                  </p>
+                  <app-button variant="outline" size="sm" (clicked)="debuggerOpen.set(true)">
+                    <app-icon name="play" [size]="14" slot="icon" />
+                    Abrir depurador
+                  </app-button>
+                }
+              </app-card>
+            }
           </div>
         </div>
       } @else if (loading()) {
@@ -489,6 +516,7 @@ export class InstanceDetailPageComponent implements OnInit {
   private readonly toast = inject(ToastService);
   private readonly settings = inject(StoreSettingsFacade);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly live = inject(WorkflowLiveService);
   private readonly auth = inject(AuthFacade);
 
   /** Same permissions as the backend: list issued documents with `documents:read` or `workflows:manage`. */
@@ -508,7 +536,12 @@ export class InstanceDetailPageComponent implements OnInit {
   ];
 
   readonly detail = signal<WorkflowInstanceDetail | null>(null);
+  /** P5.5: branch of the request, when it has one. */
+  readonly location = computed(
+    () => this.detail()?.location ?? null,
+  );
   readonly loading = signal(true);
+  readonly debuggerOpen = signal(false);
   readonly loadError = signal('');
 
   readonly comment = signal('');
@@ -650,6 +683,13 @@ export class InstanceDetailPageComponent implements OnInit {
       this.detail.set(null);
       this.reload(true);
     });
+    // P5.6: timeline and stage refresh by themselves when this request changes.
+    this.live
+      .changes((e) => e.instance_id === this.instanceId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.instanceId > 0) this.reload();
+      });
   }
 
   /**

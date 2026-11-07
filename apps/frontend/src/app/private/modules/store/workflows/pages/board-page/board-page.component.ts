@@ -24,6 +24,7 @@ import {
   BoardMove,
   BoardQuery,
 } from '../../interfaces/workflow-ops.interfaces';
+import { WorkflowLiveService } from '../../services/workflow-live.service';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { isStaleCode, toWorkflowError } from '../../utils/workflow-errors.util';
 
@@ -127,6 +128,7 @@ export class BoardPageComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly live = inject(WorkflowLiveService);
 
   readonly headerActions = [
     { id: 'analytics', label: 'Analítica', icon: 'bar-chart-3', variant: 'outline' as const },
@@ -183,6 +185,13 @@ export class BoardPageComponent implements OnInit {
       }
       this.loadAll();
     });
+    // P5.6: the board follows the stream; skipped while a card is being moved.
+    this.live
+      .changes()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.moving.size === 0 && this.definitionId > 0) this.loadAll(true);
+      });
   }
 
   onOverdue(value: boolean): void {
@@ -317,8 +326,9 @@ export class BoardPageComponent implements OnInit {
     };
   }
 
-  private loadAll(): void {
-    this.loading.set(true);
+  /** `background`: a live refresh keeps the board on screen instead of the spinner. */
+  private loadAll(background = false): void {
+    if (!background) this.loading.set(true);
     this.loadError.set('');
     this.api
       .getBoard(this.definitionId, this.filters())
@@ -331,7 +341,7 @@ export class BoardPageComponent implements OnInit {
         },
         error: (error) => {
           this.loading.set(false);
-          this.loadError.set(toWorkflowError(error).message);
+          if (!background) this.loadError.set(toWorkflowError(error).message);
         },
       });
   }

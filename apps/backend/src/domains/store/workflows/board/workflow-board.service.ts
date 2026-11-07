@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
-import { WorkflowDefinitionV1, WorkflowStageDef } from '@common/workflows/contract';
+import { WorkflowDefinitionV1, WorkflowStageDef, findStage } from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { hasBlockingRequirement, stageMoves } from '../engine/workflow-move-rules';
 import { WorkflowRequirementsService } from '../engine/workflow-engine.types';
@@ -16,6 +16,28 @@ export interface BoardQuery {
   from?: string | Date;
   to?: string | Date;
 }
+
+export interface BoardAllQuery {
+  column?: BoardAllColumn;
+  cursor?: number;
+  limit?: number;
+  definition_id?: number;
+  role_id?: number;
+  location_id?: number;
+  assignee_user_id?: number;
+  overdue?: boolean;
+}
+
+export type BoardAllColumn = 'pending' | 'in_progress' | 'system' | 'closed';
+
+const ALL_COLUMNS: Array<{ key: BoardAllColumn; name: string }> = [
+  { key: 'pending', name: 'Por atender' },
+  { key: 'in_progress', name: 'En curso' },
+  { key: 'system', name: 'En espera (sistema)' },
+  { key: 'closed', name: 'Cerradas (30 días)' },
+];
+/** Roles shown in the filter besides the store's own: the ones the templates assign to. */
+const SYSTEM_FILTER_ROLES = ['owner', 'admin', 'manager', 'employee'];
 
 export const BOARD_PAGE = 20;
 /** Finished instances stay on the board this long. */
@@ -130,6 +152,210 @@ export class WorkflowBoardService {
       }),
     );
     return { definition: header, columns };
+  }
+
+  /**
+   * P5.5: one board over every flow the caller may see. A request sits in
+   * "Por atender" while it has an unclaimed open task, in "En curso" while
+   * someone holds a claimed one, in "En espera (sistema)" when it is active
+   * with no human task, and in "Cerradas" for 30 days after it finished.
+   */
+  async boardAll(query: BoardAllQuery = {}) {
+    const c = RequestContextService.getContext();
+    if (!c?.store_id) throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_FOUND);
+    const store_id = c.store_id;
+    await this.assertFilterIds(store_id, c.organization_id, query);
+    const now = new Date();
+    const limit = Math.min(50, Math.max(1, query.limit ?? BOARD_PAGE));
+
+    const base = await this.allBaseWhere(store_id, query, now);
+    const open: Array<{ instance_id: number; status: string }> =
+      await this.prisma.workflow_tasks.findMany({
+        where: { store_id, status: { in: OPEN } },
+        select: { instance_id: true, status: true },
+      });
+    const pendingIds = new Set(open.filter((t) => t.status === 'open').map((t) => t.instance_id));
+    const claimedIds = new Set(
+      open.filter((t) => t.status === 'claimed' && !pendingIds.has(t.instance_id)).map((t) => t.instance_id),
+    );
+    const humanIds = [...new Set(open.map((t) => t.instance_id))];
+    const closedSince = new Date(now.getTime() - BOARD_CLOSED_DAYS * 86_400_000);
+    const columnWhere: Record<BoardAllColumn, Json[]> = {
+      pending: [{ status: 'active' }, { id: { in: [...pendingIds] } }],
+      in_progress: [{ status: 'active' }, { id: { in: [...claimedIds] } }],
+      system: [{ status: 'active' }, { id: { notIn: humanIds } }],
+      closed: [
+        { status: { in: ['completed', 'rejected', 'cancelled'] } },
+        { completed_at: { gte: closedSince } },
+      ],
+    };
+    const wanted = query.column ? ALL_COLUMNS.filter((x) => x.key === query.column) : ALL_COLUMNS;
+    const columns = await Promise.all(
+      wanted.map(async (spec) => {
+        const where = { AND: [...base, ...columnWhere[spec.key]] };
+        const [count, rows] = await Promise.all([
+          this.prisma.workflow_instances.count({ where }),
+          this.prisma.workflow_instances.findMany({
+            where: { AND: [...base, ...columnWhere[spec.key], ...(query.cursor ? [{ id: { lt: query.cursor } }] : [])] },
+            orderBy: { id: 'desc' },
+            take: limit + 1,
+          }),
+        ]);
+        const hasMore = rows.length > limit;
+        const page: any[] = hasMore ? rows.slice(0, limit) : rows;
+        return {
+          key: spec.key,
+          name: spec.name,
+          count,
+          cards: await this.allCards(store_id, page, now),
+          next_cursor: hasMore ? page[page.length - 1].id : null,
+        };
+      }),
+    );
+    return { columns };
+  }
+
+  /** Options for the filters of the general board; ids are the filter values. */
+  async filters() {
+    const c = RequestContextService.getContext();
+    if (!c?.store_id) throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_FOUND);
+    const store_id = c.store_id;
+    const [definitions, roles, locations] = await Promise.all([
+      this.prisma.workflow_definitions.findMany({
+        where: { store_id, status: 'active' },
+        select: { id: true, name: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.prisma.withoutScope().roles.findMany({
+        where: {
+          OR: [
+            { organization_id: null },
+            { organization_id: c.organization_id, OR: [{ store_id: null }, { store_id }] },
+          ],
+        },
+        select: { id: true, name: true, is_system_role: true },
+        orderBy: { name: 'asc' },
+      }),
+      this.locations(),
+    ]);
+    return {
+      definitions: definitions.map((d: Json) => ({ id: d.id, name: d.name })),
+      roles: roles
+        .filter((r: Json) => !r.is_system_role || SYSTEM_FILTER_ROLES.includes(r.name))
+        .map((r: Json) => ({ id: r.id, name: r.name })),
+      locations,
+    };
+  }
+
+  /** Active branches of the store (`inventory_locations`). */
+  async locations(): Promise<Array<{ id: number; name: string }>> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_FOUND);
+    const rows: Json[] = await this.prisma.inventory_locations.findMany({
+      where: { store_id, is_active: true },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+    return rows.map((l) => ({ id: l.id, name: l.name }));
+  }
+
+  /** Filter ids from another store (or unknown) are a 404, never an empty board. */
+  private async assertFilterIds(
+    store_id: number,
+    organization_id: number | undefined,
+    query: BoardAllQuery,
+  ): Promise<void> {
+    if (query.definition_id) {
+      const row = await this.prisma.workflow_definitions.findFirst({
+        where: { id: query.definition_id, store_id },
+        select: { id: true },
+      });
+      if (!row) throw new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND);
+    }
+    if (query.location_id) {
+      const row = await this.prisma.inventory_locations.findFirst({
+        where: { id: query.location_id, store_id },
+        select: { id: true },
+      });
+      if (!row) throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_FOUND);
+    }
+    if (query.role_id) {
+      const row = await this.prisma.withoutScope().roles.findFirst({
+        where: {
+          id: query.role_id,
+          OR: [
+            { organization_id: null },
+            { organization_id, OR: [{ store_id: null }, { store_id }] },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!row) throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_FOUND);
+    }
+  }
+
+  /** Store + visibility + filters; the column adds its own status condition. */
+  private async allBaseWhere(store_id: number, query: BoardAllQuery, now: Date): Promise<Json[]> {
+    const and: Json[] = [...(await this.instances.visibleWhere())];
+    if (query.definition_id) and.push({ definition_id: query.definition_id });
+    if (query.location_id) and.push({ location_id: query.location_id });
+    if (query.overdue) and.push({ status: 'active' }, { stage_due_at: { lt: now } });
+    const taskFilter: Json = {};
+    if (query.role_id) taskFilter.assignee_role_id = query.role_id;
+    if (query.assignee_user_id) taskFilter.assignee_user_id = query.assignee_user_id;
+    if (Object.keys(taskFilter).length) {
+      const tasks = await this.prisma.workflow_tasks.findMany({
+        where: { store_id, status: { in: OPEN }, ...taskFilter },
+        select: { instance_id: true },
+      });
+      and.push({ id: { in: tasks.map((t: Json) => t.instance_id) } });
+    }
+    return and;
+  }
+
+  private async allCards(store_id: number, page: any[], now: Date) {
+    if (!page.length) return [];
+    const ids = (k: string) => [...new Set(page.map((r) => r[k] as number | null).filter((v): v is number => !!v))];
+    const [assignees, definitions, versions, locations] = await Promise.all([
+      this.assignees(page.map((r) => r.id)),
+      this.prisma.workflow_definitions.findMany({
+        where: { store_id, id: { in: ids('definition_id') } },
+        select: { id: true, name: true },
+      }),
+      this.prisma.workflow_versions.findMany({
+        where: { store_id, id: { in: ids('version_id') } },
+        select: { id: true, definition: true },
+      }),
+      ids('location_id').length
+        ? this.prisma.inventory_locations.findMany({
+            where: { store_id, id: { in: ids('location_id') } },
+            select: { id: true, name: true },
+          })
+        : [],
+    ]);
+    const defName = new Map<number, string>(definitions.map((d: Json) => [d.id, d.name]));
+    const versionDef = new Map<number, WorkflowDefinitionV1>(
+      versions.map((v: Json) => [v.id, v.definition as WorkflowDefinitionV1]),
+    );
+    const locationName = new Map<number, string>(locations.map((l: Json) => [l.id, l.name]));
+    return page.map((r) => {
+      const def = versionDef.get(r.version_id);
+      return {
+        id: r.id,
+        reference: r.reference,
+        title: r.title,
+        status: r.status,
+        definition: { id: r.definition_id, name: defName.get(r.definition_id) ?? null },
+        stage_key: r.current_stage_key,
+        stage_name: (def ? findStage(def, r.current_stage_key)?.name : null) ?? null,
+        assignee: assignees.get(r.id) ?? null,
+        stage_due_at: r.stage_due_at,
+        overdue: r.status === 'active' && !!r.stage_due_at && new Date(r.stage_due_at) < now,
+        location: r.location_id
+          ? { id: r.location_id, name: locationName.get(r.location_id) ?? null }
+          : null,
+      };
+    });
   }
 
   /** Store + visibility + filters + the 30-day window of finished instances. */

@@ -3,9 +3,11 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { Router, provideRouter } from '@angular/router';
-import { NEVER, Observable, of, throwError } from 'rxjs';
+import { NEVER, Observable, Subject, of, throwError } from 'rxjs';
 import { ToastService } from '../../../../../../shared/components/index';
 import { InboxTaskRow } from '../../interfaces/workflow-ops.interfaces';
+import { WorkflowLiveEvent } from '../../interfaces/workflow-board.interfaces';
+import { WorkflowLiveService } from '../../services/workflow-live.service';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { InboxPageComponent } from './inbox-page.component';
 
@@ -32,6 +34,7 @@ describe('InboxPageComponent', () => {
   let api: jasmine.SpyObj<WorkflowsApiService>;
   let toast: jasmine.SpyObj<ToastService>;
   let navigate: jasmine.Spy;
+  let liveChanges: Subject<WorkflowLiveEvent>;
 
   const text = () => (fixture.nativeElement as HTMLElement).textContent ?? '';
   const render = async () => {
@@ -52,6 +55,7 @@ describe('InboxPageComponent', () => {
     api.listDefinitions.and.returnValue(of({ data: [] }) as never);
     api.listInbox.and.returnValue(of(page([task()])) as never);
     toast = jasmine.createSpyObj('ToastService', ['success', 'error']);
+    liveChanges = new Subject<WorkflowLiveEvent>();
     TestBed.configureTestingModule({
       imports: [InboxPageComponent],
       providers: [
@@ -60,6 +64,7 @@ describe('InboxPageComponent', () => {
         provideHttpClientTesting(),
         { provide: WorkflowsApiService, useValue: api },
         { provide: ToastService, useValue: toast },
+        { provide: WorkflowLiveService, useValue: { changes: () => liveChanges.asObservable() } },
         provideRouter([]),
       ],
     });
@@ -183,5 +188,74 @@ describe('InboxPageComponent', () => {
   it('una tarea sin rama muestra solo la etapa', async () => {
     await render();
     expect(fixture.componentInstance.rows()[0].stage_label).toBe('Aprobación');
+  });
+  describe('Mis tareas en el celular (P5.5)', () => {
+    const button = (label: string, scope = 'mobile-tasks') =>
+      Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll(`[data-testid="${scope}"] button`),
+      ).find((b) => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
+
+    it('una aprobación sin formulario muestra Aprobar y Rechazar grandes', async () => {
+      api.listInbox.and.returnValue(
+        of(page([task({ quick_outcomes: ['approve'], comment_outcomes: ['reject'], has_form: false } as never)])) as never,
+      );
+      await render();
+      expect(button('Aprobar')).toBeTruthy();
+      expect(button('Rechazar')).toBeTruthy();
+      expect(button('Abrir')).toBeTruthy();
+    });
+
+    it('Aprobar completa la tarea, avisa y la fila desaparece', async () => {
+      api.listInbox.and.returnValue(
+        of(page([task({ quick_outcomes: ['approve'], has_form: false } as never)])) as never,
+      );
+      api.completeTask.and.returnValue(of({}) as never);
+      await render();
+      button('Aprobar')!.click();
+      fixture.detectChanges();
+      expect(api.completeTask.calls.mostRecent().args[1]).toEqual({ outcome: 'approve', expected_row_version: 3 });
+      expect(toast.success).toHaveBeenCalledWith('Tarea completada');
+      expect(button('Abrir')).toBeUndefined();
+    });
+
+    it('Rechazar pide el motivo antes de enviar', async () => {
+      api.listInbox.and.returnValue(
+        of(page([task({ quick_outcomes: [], comment_outcomes: ['approve', 'reject'], has_form: false } as never)])) as never,
+      );
+      api.completeTask.and.returnValue(of({}) as never);
+      await render();
+      button('Rechazar')!.click();
+      expect(fixture.componentInstance.commentOpen()).toBeTrue();
+      expect(api.completeTask).not.toHaveBeenCalled();
+      button('Aprobar')!.click();
+      expect(fixture.componentInstance.commentOutcome()).toBe('approve');
+      expect(api.completeTask).not.toHaveBeenCalled();
+    });
+
+    it('una tarea con formulario solo ofrece Abrir', async () => {
+      api.listInbox.and.returnValue(
+        of(page([task({ quick_outcomes: ['approve'], has_form: true } as never)])) as never,
+      );
+      await render();
+      expect(button('Aprobar')).toBeUndefined();
+      expect(button('Rechazar')).toBeUndefined();
+      button('Abrir')!.click();
+      expect(navigate).toHaveBeenCalledWith(['/admin/workflows/instances', 11]);
+    });
+  });
+
+  describe('actualización en vivo (P5.6)', () => {
+    it('un evento recarga la lista sin pasar por el aviso de carga', async () => {
+      await render();
+      const before = api.listInbox.calls.count();
+      api.listInbox.and.returnValue(
+        of(page([task(), task({ task_id: 8, instance: { id: 12, reference: 'FLU-000012', title: 'Otra', row_version: 0 } })])) as never,
+      );
+      liveChanges.next({ kind: 'task', instance_id: 12, task_id: 8 });
+      fixture.detectChanges();
+      expect(api.listInbox.calls.count()).toBeGreaterThan(before);
+      expect(fixture.componentInstance.tasks().length).toBe(2);
+      expect(fixture.componentInstance.loading()).toBeFalse();
+    });
   });
 });
