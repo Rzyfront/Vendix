@@ -8,6 +8,11 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { ApQueryDto } from './dto/ap-query.dto';
 import { RegisterApPaymentDto } from './dto/register-ap-payment.dto';
 import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
+import {
+  consumeApproval,
+  enforceApproval,
+  operationIsGoverned,
+} from '../workflows/gates/approval-gate';
 
 @Injectable()
 export class AccountsPayableService {
@@ -192,7 +197,27 @@ export class AccountsPayableService {
       );
     }
 
+    // Flujos P1.3: a governed supplier payment is not registered until its
+    // request is approved; then it runs once, as the requester, with this
+    // same DTO (`registerPayablePayment` of the gate processor).
+    const gate = (await operationIsGoverned(this.prisma, 'supplier_payment.register'))
+      ? await enforceApproval(this.prisma, {
+          operation: 'supplier_payment.register',
+          entity_type: 'accounts_payable',
+          entity_id: ap_id,
+          amount: Number(dto.amount),
+          context: {
+            payable_id: ap_id,
+            supplier_id: ap.supplier_id,
+            amount: dto.amount,
+            payment_method: dto.payment_method,
+          },
+          request: { method: 'registerPayablePayment', args: [ap_id, dto] },
+        })
+      : ({ status: 'free' } as const);
+
     const result = await this.prisma.$transaction(async (tx) => {
+      await consumeApproval(tx, gate);
       // 1. Create ap_payment record
       const payment = await tx.ap_payments.create({
         data: {

@@ -116,16 +116,13 @@ export class WorkflowPurchasingActions implements WorkflowActionGroup {
     return { record_id: returnedId(updated, 'Purchase order approval') };
   }
 
-  /**
-   * The cancel route and service take no reason (the state change is audited
-   * with the publisher), so the optional `reason` has nowhere to be stored.
-   */
+  /** The reason goes to the order's internal notes; default names the request. */
   private async cancelPurchaseOrder(ctx: WorkflowActionContext): Promise<WorkflowActionResult> {
-    const id = must(
-      actionInputs('vendix.purchase_order.cancel', ctx.map).id('purchase_order_id'),
-      'purchase_order_id',
-    );
-    const updated = await ctx.asPublisher(() => this.purchaseOrders.cancel(id));
+    const input = actionInputs('vendix.purchase_order.cancel', ctx.map);
+    const id = must(input.id('purchase_order_id'), 'purchase_order_id');
+    const reason =
+      input.text('reason', 500) ?? `Anulada por el flujo ${ctx.instance.reference}`;
+    const updated = await ctx.asPublisher(() => this.purchaseOrders.cancel(id, reason));
     return { record_id: returnedId(updated, 'Purchase order cancellation') };
   }
 

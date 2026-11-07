@@ -252,8 +252,10 @@ describe('WorkflowPurchasingActions', () => {
           reason: 'duplicada',
         }),
       ).toEqual({ record_id: 503 });
-      expect(purchaseOrders.cancel).toHaveBeenCalledWith(8);
+      expect(purchaseOrders.cancel).toHaveBeenCalledWith(8, 'duplicada');
       expect(seen).toHaveLength(2);
+      await run('vendix.purchase_order.cancel', { purchase_order_id: 8 });
+      expect(purchaseOrders.cancel).toHaveBeenLastCalledWith(8, 'Anulada por el flujo FLU-000001');
       expectPublisherContext();
     });
 

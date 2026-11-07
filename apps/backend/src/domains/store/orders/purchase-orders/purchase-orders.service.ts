@@ -30,6 +30,13 @@ import {
   Prisma,
 } from '@prisma/client';
 import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
+import {
+  ApprovalGateInput,
+  consumeApproval,
+  enforceApproval,
+  operationIsGoverned,
+  requestApproval,
+} from '../../workflows/gates/approval-gate';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
@@ -2858,7 +2865,63 @@ export class PurchaseOrdersService {
       );
     }
 
+    // Flujos P1.3: a purchase order a flow governs is born held ("Pendiente de
+    // aprobación"). The gate commits on its own; `approve` enforces it.
+    const gateInput = await this.approvalGateInput(result.id);
+    if (gateInput) await requestApproval(this.prisma, gateInput);
+
     return result;
+  }
+
+  /**
+   * Flujos P1.3: the approval gate input of a purchase order (operation
+   * `purchase_order.approve`, amount = total). Null when it does not exist in
+   * this store.
+   */
+  private async approvalGateInput(id: number): Promise<ApprovalGateInput | null> {
+    if (!(await operationIsGoverned(this.prisma, 'purchase_order.approve'))) {
+      return null;
+    }
+    const po = await this.prisma.purchase_orders.findFirst({
+      where: { id },
+      select: {
+        id: true,
+        order_number: true,
+        supplier_id: true,
+        total_amount: true,
+        suppliers: { select: { name: true } },
+        purchase_order_items: {
+          select: { quantity_ordered: true, products: { select: { name: true } } },
+          take: 20,
+        },
+      },
+    });
+    if (!po) return null;
+    const userId = RequestContextService.getUserId();
+    const requester = userId
+      ? await this.prisma.users.findFirst({
+          where: { id: userId },
+          select: { first_name: true, last_name: true },
+        })
+      : null;
+    return {
+      operation: 'purchase_order.approve',
+      entity_id: po.id,
+      amount: Number(po.total_amount),
+      context: {
+        purchase_order_id: po.id,
+        order_number: po.order_number,
+        supplier_id: po.supplier_id,
+        supplier_name: po.suppliers?.name ?? null,
+        total_amount: po.total_amount,
+        products: po.purchase_order_items
+          .map((i) => `${i.products?.name ?? 'Producto'} x ${Number(i.quantity_ordered)}`)
+          .join(', '),
+        requested_by: requester
+          ? `${requester.first_name ?? ''} ${requester.last_name ?? ''}`.trim()
+          : null,
+      },
+    };
   }
 
   async findAll(query: PurchaseOrderQueryDto) {
@@ -3594,11 +3657,18 @@ export class PurchaseOrdersService {
     // Schema only carries `approved_by_user_id` (FK) — there is no
     // `approved_date` column. Audit timestamp is recorded via auditService.
     const approver_id = RequestContextService.getUserId() ?? null;
+    // Flujos P1.3: a governed order waits for its request (409 while pending,
+    // from any route: UI, API, AI or another flow). An approval is used once.
+    const gateInput = await this.approvalGateInput(id);
+    const gate = gateInput
+      ? await enforceApproval(this.prisma, gateInput)
+      : ({ status: 'free' } as const);
     // La lectura y la validación van en la misma transacción que la escritura:
     // fuera de ella dos aprobaciones concurrentes podrían pasar ambas el guard.
     const result = await this.prisma.$transaction(async (tx) => {
       const order = await this.loadOrderOrFail(tx, id);
       this.assertTransition(order, purchase_order_status_enum.approved);
+      await consumeApproval(tx, gate);
       const approved = await tx.purchase_orders.update({
         where: { id },
         data: {
@@ -3646,7 +3716,7 @@ export class PurchaseOrdersService {
     return result;
   }
 
-  async cancel(id: number) {
+  async cancel(id: number, reason?: string) {
     // Schema has no `cancelled_date` column — cancellation timestamp is
     // captured by the audit log entry below.
     // El guard rechaza `partial` y `received` con PO_CANCEL_RECEIVED_001: esa
@@ -3655,10 +3725,26 @@ export class PurchaseOrdersService {
     const result = await this.prisma.$transaction(async (tx) => {
       const order = await this.loadOrderOrFail(tx, id);
       this.assertTransition(order, purchase_order_status_enum.cancelled);
+      // Flujos P1.3: a rejected approval request voids the order with its
+      // reason, kept in the internal notes (there is no reason column).
+      const note = reason?.trim()
+        ? `Anulada: ${reason.trim().slice(0, 500)}`
+        : null;
+      const previousNotes = note
+        ? (
+            await tx.purchase_orders.findUnique({
+              where: { id },
+              select: { internal_notes: true },
+            })
+          )?.internal_notes
+        : null;
       return tx.purchase_orders.update({
         where: { id },
         data: {
           status: purchase_order_status_enum.cancelled,
+          ...(note && {
+            internal_notes: previousNotes ? `${previousNotes}\n${note}` : note,
+          }),
         },
         include: {
           suppliers: true,
@@ -6393,6 +6479,25 @@ export class PurchaseOrdersService {
       throw new NotFoundException('Purchase order not found');
     }
 
+    // Flujos P1.3: a governed supplier payment is not registered until its
+    // request is approved; then it runs once, as the requester, with this
+    // same DTO (`registerPurchaseOrderPayment` of the gate processor).
+    const gate = (await operationIsGoverned(this.prisma, 'supplier_payment.register'))
+      ? await enforceApproval(this.prisma, {
+          operation: 'supplier_payment.register',
+          entity_type: 'purchase_order',
+          entity_id: purchaseOrderId,
+          amount: Number(dto.amount),
+          context: {
+            purchase_order_id: purchaseOrderId,
+            supplier_id: po.supplier_id,
+            amount: dto.amount,
+            payment_method: dto.payment_method,
+          },
+          request: { method: 'registerPurchaseOrderPayment', args: [purchaseOrderId, dto] },
+        })
+      : ({ status: 'free' } as const);
+
     const userId = RequestContextService.getUserId();
 
     // Atomic: validate overpay → create payment row → recalc payment_status.
@@ -6401,6 +6506,7 @@ export class PurchaseOrdersService {
     // recompute rolls back the payment insert (no half-state on disk).
     const { payment, paymentStatus } = await this.prisma.$transaction(
       async (tx) => {
+        await consumeApproval(tx, gate);
         // Overpay guard — must run INSIDE the tx so a concurrent registerPayment
         // can't slip past the check (without the lock two payments summing to
         // > total_amount would each see the pre-state and both commit).

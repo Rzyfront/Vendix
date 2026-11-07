@@ -22,6 +22,12 @@ import {
   payments_state_enum,
 } from '@prisma/client';
 import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
+import {
+  GateDecision,
+  consumeApproval,
+  enforceApproval,
+  operationIsGoverned,
+} from '../workflows/gates/approval-gate';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   DEFAULT_STORE_TIMEZONE,
@@ -4583,7 +4589,29 @@ export class OrdersService {
 
     // 13) Transacción atómica: claim + replace items + order_promotions +
     //     cupón + reservas de stock + commit.
+    // Flujos P1.3: a discount raised to or past a governed threshold is not
+    // saved until its approval request is approved; then this same edit runs
+    // once, as the requester. Edits that do not raise the discount pass.
+    const discountGate: GateDecision =
+      grossDiscountTotal > Number(existingOrder.discount_amount ?? 0) &&
+      (await operationIsGoverned(this.prisma, 'order.discount'))
+        ? await enforceApproval(this.prisma, {
+            operation: 'order.discount',
+            entity_type: 'order',
+            entity_id: orderId,
+            amount: grossDiscountTotal,
+            context: {
+              order_id: orderId,
+              order_number: existingOrder.order_number,
+              discount_amount: grossDiscountTotal,
+              grand_total: grandTotal,
+            },
+            request: { method: 'updateOrderFromEditor', args: [orderId, dto] },
+          })
+        : { status: 'free' };
+
     const result = await this.prisma.$transaction(async (tx) => {
+      await consumeApproval(tx, discountGate);
       // 13-pre) ERR-07 / DB-14 — invariante "prepared + variantes exige
       //        variante". Mismo helper que `create` y `updateOrderItems`:
       //        una sola definición para que no vuelva a divergir.

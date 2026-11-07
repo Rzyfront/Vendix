@@ -1,5 +1,12 @@
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { PayrollFlowService } from './payroll-flow.service';
+
+// Flujos P1.3: no flow governs operations in these unit doubles.
+jest.mock('../../workflows/gates/approval-gate', () => ({
+  ...jest.requireActual('../../workflows/gates/approval-gate'),
+  operationIsGoverned: jest.fn(async () => false),
+}));
+
 jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 describe('PayrollFlowService fiscal accounting gate', () => {

@@ -152,6 +152,21 @@ export async function findGoverningDefinition(
   return best ? { id: best.id, organization_id: best.organization_id } : null;
 }
 
+/**
+ * Cheap pre-check for hot paths (bulk adjustments): whether any active flow
+ * of the current store governs `operation`, whatever the amount.
+ */
+export async function operationIsGoverned(
+  prisma: RootDb,
+  operation: WorkflowGateOperation,
+): Promise<boolean> {
+  const storeId = RequestContextService.getStoreId();
+  if (!storeId) return false;
+  return (
+    (await findGoverningDefinition(root(prisma), storeId, operation, Number.MAX_SAFE_INTEGER)) !== null
+  );
+}
+
 /** P2002 by code: with the pg adapter `meta.target` may be missing. */
 function isUniqueViolation(e: unknown): boolean {
   return (e as { code?: unknown } | null)?.code === 'P2002';
@@ -190,15 +205,25 @@ export async function requestApproval(
   const amount = Math.abs(Number.isFinite(input.amount) ? input.amount : 0);
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const latest = (await db.workflow_approval_gates.findFirst({
-      where: {
-        store_id: storeId,
-        operation: input.operation,
-        entity_id: input.entity_id,
-        ...(hash && { request: { path: ['hash'], equals: hash } }),
-      },
+    // Read the top revision FIRST and derive the new revision from this same
+    // read: a concurrent opener that this read missed is creating this very
+    // revision, so the unique (store, operation, record, revision) makes one
+    // of the two fail and re-read, never two gates for the same thing.
+    const top = (await db.workflow_approval_gates.findFirst({
+      where: { store_id: storeId, operation: input.operation, entity_id: input.entity_id },
       orderBy: { revision: 'desc' },
     })) as GateRow | null;
+    const latest = hash
+      ? ((await db.workflow_approval_gates.findFirst({
+          where: {
+            store_id: storeId,
+            operation: input.operation,
+            entity_id: input.entity_id,
+            request: { path: ['hash'], equals: hash },
+          },
+          orderBy: { revision: 'desc' },
+        })) as GateRow | null)
+      : top;
 
     if (latest) {
       if (latest.status === 'pending') return { status: 'pending', gate: latest };
@@ -223,7 +248,7 @@ export async function requestApproval(
     const governing = await findGoverningDefinition(db, storeId, input.operation, amount);
     if (!governing) return { status: 'free' };
 
-    const revision = await nextRevision(db, storeId, input.operation, input.entity_id);
+    const revision = (top?.revision ?? 0) + 1;
     try {
       const gate = await db.$transaction(async (tx) => {
         const created = (await tx.workflow_approval_gates.create({
@@ -265,20 +290,6 @@ export async function requestApproval(
     }
   }
   throw new VendixHttpException(ErrorCodes.WORKFLOW_STALE);
-}
-
-async function nextRevision(
-  db: Db,
-  storeId: number,
-  operation: string,
-  entityId: number,
-): Promise<number> {
-  const top = await db.workflow_approval_gates.findFirst({
-    where: { store_id: storeId, operation, entity_id: entityId },
-    orderBy: { revision: 'desc' },
-    select: { revision: true },
-  });
-  return (top?.revision ?? 0) + 1;
 }
 
 /** What the person reads when the operation is held. */

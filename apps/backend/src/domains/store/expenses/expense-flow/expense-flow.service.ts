@@ -8,6 +8,11 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
+import {
+  consumeApproval,
+  enforceApproval,
+} from '../../workflows/gates/approval-gate';
+import { expenseApprovalGateInput } from '../expense-approval-gate';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 
 type ExpenseState =
@@ -89,7 +94,15 @@ export class ExpenseFlowService {
 
     this.validateTransition(expense.state, 'approved');
 
+    // Flujos P1.3: a governed expense waits for its request (409 while
+    // pending, from any route). An approval is used once, with the write.
+    const gateInput = await expenseApprovalGateInput(this.prisma, id);
+    const gate = gateInput
+      ? await enforceApproval(this.prisma, gateInput)
+      : ({ status: 'free' } as const);
+
     const approve = async (tx: Prisma.TransactionClient) => {
+      await consumeApproval(tx, gate);
       const approved = await tx.expenses.update({
         where: { id },
         data: {
@@ -133,17 +146,24 @@ export class ExpenseFlowService {
     return updated;
   }
 
-  async reject(id: number) {
+  async reject(id: number, reason?: string) {
     const expense = await this.getExpense(id);
     const context = this.getContext();
 
     this.validateTransition(expense.state, 'rejected');
 
+    // Flujos P1.3: a rejected approval request keeps its reason in the notes.
+    const note = reason?.trim()
+      ? `Rechazado: ${reason.trim().slice(0, 500)}`
+      : null;
     const updated = await this.prisma.expenses.update({
       where: { id },
       data: {
         state: 'rejected',
         approved_by_user_id: context.user_id,
+        ...(note && {
+          notes: expense.notes ? `${expense.notes}\n${note}` : note,
+        }),
       },
       include: EXPENSE_INCLUDE,
     });

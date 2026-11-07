@@ -19,7 +19,8 @@ export function gateOutcomeOf(
  * transaction as the close: approved, rejected or cancelled together with the
  * request, never apart. Each resolved gate gets a `gate_resolved` outbox row
  * that applies the effect (void the held record, run the deferred operation)
- * and tells the requester. Returns how many gates were resolved.
+ * and tells the requester. Returns how many gates THIS call resolved
+ * (a concurrent close that lost the race resolves none).
  */
 export async function resolveInstanceGates(
   tx: Db,
@@ -33,6 +34,7 @@ export async function resolveInstanceGates(
   });
   if (gates.length === 0) return 0;
   const now = new Date();
+  let resolved = 0;
   for (const g of gates) {
     const updated = await tx.workflow_approval_gates.updateMany({
       where: { id: g.id, status: 'pending' },
@@ -43,6 +45,7 @@ export async function resolveInstanceGates(
       },
     });
     if (updated.count === 0) continue;
+    resolved++;
     await tx.workflow_outbox.create({
       data: {
         store_id: instance.store_id,
@@ -54,5 +57,5 @@ export async function resolveInstanceGates(
       },
     });
   }
-  return gates.length;
+  return resolved;
 }

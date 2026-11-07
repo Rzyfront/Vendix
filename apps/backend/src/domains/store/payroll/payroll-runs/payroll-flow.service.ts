@@ -13,6 +13,11 @@ import {
 } from '../providers/payroll-provider.interface';
 import { DianPayrollProvider } from '../providers/dian-payroll/dian-payroll.provider';
 import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
+import {
+  consumeApproval,
+  enforceApproval,
+  operationIsGoverned,
+} from '../../workflows/gates/approval-gate';
 
 type PayrollStatus =
   | 'draft'
@@ -397,7 +402,37 @@ export class PayrollFlowService {
 
     this.validateTransition(run.status, 'approved');
 
+    // Flujos P1.3: a governed payroll waits for its request (409 while
+    // pending, from any route, "Procesar completo" included). An approval is
+    // used once, with the write.
+    const governed = await operationIsGoverned(this.prisma, 'payroll_run.approve');
+    const requester =
+      governed && context.user_id
+        ? await this.prisma.users.findFirst({
+            where: { id: context.user_id },
+            select: { first_name: true, last_name: true },
+          })
+        : null;
+    const gate = governed
+      ? await enforceApproval(this.prisma, {
+          operation: 'payroll_run.approve',
+          entity_id: run.id,
+          amount: Number(run.total_net_pay ?? 0),
+          context: {
+            payroll_run_id: run.id,
+            payroll_number: run.payroll_number,
+            total_net: run.total_net_pay,
+            period_start: run.period_start,
+            period_end: run.period_end,
+            requested_by: requester
+              ? `${requester.first_name ?? ''} ${requester.last_name ?? ''}`.trim()
+              : null,
+          },
+        })
+      : ({ status: 'free' } as const);
+
     const updated = await this.prisma.$transaction(async (tx) => {
+      await consumeApproval(tx, gate);
       const approved = await tx.payroll_runs.update({
         where: { id },
         data: {

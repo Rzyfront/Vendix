@@ -45,6 +45,11 @@ import {
 import { REFUND_LEDGER_STATES } from '../../orders/order-flow/services/refund-calculation.service';
 import { prorateShippingTaxRefundCents } from '../../shipping/utils/shipping-tax.util';
 import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
+import {
+  GateDecision,
+  consumeApproval,
+} from '../../workflows/gates/approval-gate';
+import { enforceCreditNoteApproval } from '../invoice-approval-gate';
 
 /**
  * Este servicio NO necesita la ClTec: no calcula CUDE ni arma XML — eso lo hace
@@ -214,7 +219,9 @@ export class CreditNotesService {
   }
 
   async createCreditNote(dto: CreateCreditNoteDto) {
-    return this.createNote(dto, 'credit_note');
+    // Flujos P1.3: a governed credit note waits for its approval request.
+    const gate = await enforceCreditNoteApproval(this.prisma, dto);
+    return this.createNote(dto, 'credit_note', gate);
   }
 
   async createDebitNote(dto: CreateDebitNoteDto) {
@@ -457,6 +464,7 @@ export class CreditNotesService {
   private async createNote(
     dto: CreateCreditNoteDto | CreateDebitNoteDto,
     type: 'credit_note' | 'debit_note',
+    gate: GateDecision = { status: 'free' },
   ) {
     const context = this.getContext();
     if (typeof context.organization_id !== 'number' || typeof context.store_id !== 'number') {
@@ -705,6 +713,7 @@ export class CreditNotesService {
 
     try {
       const note = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await consumeApproval(tx, gate);
         const created = await tx.invoices.create({
           data: {
             organization_id: context.organization_id!,

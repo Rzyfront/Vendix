@@ -18,6 +18,13 @@ import { VatResponsibilityService } from '@common/helpers/vat-responsibility.hel
 
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
+
+// Flujos P1.3: no flow governs operations in these unit doubles.
+jest.mock('../../workflows/gates/approval-gate', () => ({
+  ...jest.requireActual('../../workflows/gates/approval-gate'),
+  operationIsGoverned: jest.fn(async () => false),
+}));
+
 jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 /**

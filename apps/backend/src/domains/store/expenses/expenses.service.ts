@@ -16,6 +16,12 @@ import {
   resolveStoreTimezone,
 } from '../../../common/utils/store-timezone.util';
 import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
+import {
+  consumeApproval,
+  enforceApproval,
+  requestApproval,
+} from '../workflows/gates/approval-gate';
+import { expenseApprovalGateInput } from './expense-approval-gate';
 
 @Injectable()
 export class ExpensesService {
@@ -202,6 +208,11 @@ export class ExpensesService {
       return created;
     });
 
+    // Flujos P1.3: an expense a flow governs is born held until its request
+    // is approved; `approve` enforces it.
+    const gateInput = await expenseApprovalGateInput(this.prisma, expense.id);
+    if (gateInput) await requestApproval(this.prisma, gateInput);
+
     return expense;
   }
 
@@ -260,22 +271,30 @@ export class ExpensesService {
       throw new ConflictException('Expense can only be approved when pending');
     }
 
-    return this.prisma.expenses.update({
-      where: { id },
-      data: {
-        state: 'approved',
-        approved_by_user_id: context.user_id,
-        approved_at: new Date(),
-      },
-      include: {
-        expense_categories: true,
-        created_by_user: {
-          select: { id: true, first_name: true, last_name: true },
+    // Flujos P1.3: same approval gate as ExpenseFlowService.approve.
+    const gateInput = await expenseApprovalGateInput(this.prisma, id);
+    const gate = gateInput
+      ? await enforceApproval(this.prisma, gateInput)
+      : ({ status: 'free' } as const);
+    return this.prisma.$transaction(async (tx) => {
+      await consumeApproval(tx, gate);
+      return tx.expenses.update({
+        where: { id },
+        data: {
+          state: 'approved',
+          approved_by_user_id: context.user_id,
+          approved_at: new Date(),
         },
-        approved_by_user: {
-          select: { id: true, first_name: true, last_name: true },
+        include: {
+          expense_categories: true,
+          created_by_user: {
+            select: { id: true, first_name: true, last_name: true },
+          },
+          approved_by_user: {
+            select: { id: true, first_name: true, last_name: true },
+          },
         },
-      },
+      });
     });
   }
 

@@ -32,6 +32,12 @@ import { Prisma } from '@prisma/client';
 import { CostingService } from '../shared/services/costing.service';
 import { CostingMethodResolverService } from '../shared/services/costing-method-resolver.service';
 import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
+import {
+  GateDecision,
+  consumeApproval,
+  enforceApproval,
+  operationIsGoverned,
+} from '../../workflows/gates/approval-gate';
 
 /**
  * D.1 — Set de recall del picker de ajustes: PARIDAD con el OR legacy
@@ -185,19 +191,67 @@ export class InventoryAdjustmentsService {
     options: AdjustmentCreationOptions = {},
   ): Promise<InventoryAdjustment> {
     const { organizationId, userId } = this.resolveAdjustmentActor();
+    const gate = await this.enforceAdjustmentApproval(data);
 
     // `timeout` explícito: ahora la transacción cubre también el movimiento de
     // stock, el espejo denormalizado y el snapshot de valoración, que antes
     // corrían fuera. Los 5 s por defecto de Prisma se quedan cortos en un
     // producto con muchas ubicaciones o variantes.
     const adjustment_result = await this.prisma.$transaction(
-      (prisma) => this.createAdjustmentInTransaction(prisma, data, options),
+      async (prisma) => {
+        await consumeApproval(prisma, gate);
+        return this.createAdjustmentInTransaction(prisma, data, options);
+      },
       { timeout: 30_000, maxWait: 10_000 },
     );
 
     this.emitInventoryAdjusted(adjustment_result, organizationId, userId);
 
     return adjustment_result.adjustment;
+  }
+
+  /**
+   * Flujos P1.3: an adjustment a flow governs (by units moved, absolute value)
+   * is not applied until its request is approved; then the approved request
+   * runs once, as the person who asked, with this same DTO. Every user path
+   * (single, batch, bulk file) goes through `createAdjustment`, so each item
+   * is held on its own. An initial load is not a correction and is not held.
+   */
+  private async enforceAdjustmentApproval(
+    data: CreateAdjustmentDto,
+  ): Promise<GateDecision> {
+    if (data.type === 'initial_load') return { status: 'free' };
+    if (!(await operationIsGoverned(this.prisma, 'inventory_adjustment.create'))) {
+      return { status: 'free' };
+    }
+    const level = await this.prisma.stock_levels.findFirst({
+      where: {
+        product_id: data.product_id,
+        product_variant_id: data.product_variant_id ?? null,
+        location_id: data.location_id,
+      },
+      select: { quantity_on_hand: true },
+    });
+    const change = Number(data.quantity_after) - Number(level?.quantity_on_hand ?? 0);
+    const product = await this.prisma.products.findFirst({
+      where: { id: data.product_id },
+      select: { name: true },
+    });
+    return enforceApproval(this.prisma, {
+      operation: 'inventory_adjustment.create',
+      entity_type: 'product',
+      entity_id: data.product_id,
+      amount: Math.abs(change),
+      context: {
+        product_id: data.product_id,
+        product_name: product?.name ?? null,
+        location_id: data.location_id,
+        quantity_change: change,
+        adjustment_type: data.type,
+        reason: data.description ?? null,
+      },
+      request: { method: 'createAdjustment', args: [data] },
+    });
   }
 
   /**
