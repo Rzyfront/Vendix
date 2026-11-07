@@ -113,6 +113,26 @@ describe('WorkflowRecordsService (P3.6)', () => {
     expect((await failure(svc.update(r.id, { values: { cliente: null } })))?.code).toBe('WORKFLOW_RECORD_INVALID');
   });
 
+  it('a record keeps being editable after a field is removed from the collection', async () => {
+    const r = await svc.create({
+      collection_id: collectionId,
+      values: { cliente: 'Acme', correo: 'ana@acme.co' },
+    });
+    await collections.update(collectionId, {
+      fields: FIELDS.filter((f) => f.key !== 'correo') as any,
+    });
+    const updated = await svc.update(r.id, { values: { cliente: 'Acme SAS' } });
+    expect(updated).toMatchObject({ title: 'Acme SAS', values: { cliente: 'Acme SAS' } });
+    // The removed field's value is kept (not validated, not lost).
+    expect(updated.values).toMatchObject({ correo: 'ana@acme.co' });
+    // A value for a field that is not declared is still rejected.
+    const bad = await failure(svc.update(r.id, { values: { correo: 'otro@acme.co' } }));
+    expect(bad?.code).toBe('WORKFLOW_RECORD_INVALID');
+    // Null clears the retired value.
+    const cleared = await svc.update(r.id, { values: { correo: null } });
+    expect(cleared.values).not.toHaveProperty('correo');
+  });
+
   it('lists with case-insensitive search by title or reference, pagination and sort', async () => {
     for (const cliente of ['Alfa', 'Beta', 'Gamma alfa']) {
       await svc.create({ collection_id: collectionId, values: { cliente } });

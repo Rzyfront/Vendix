@@ -231,21 +231,37 @@ export class WorkflowRecordsService {
     return shape(created as WorkflowRecordRow);
   }
 
-  /** `values` are merged over the stored ones; `null` clears an optional value. */
+  /**
+   * `values` are merged over the stored ones; `null` clears an optional value.
+   * Values of fields the collection no longer declares (a field was removed)
+   * are kept as they are and not validated: the form cannot show or send them,
+   * so they must not block editing the fields it does show.
+   */
   async update(id: number, dto: UpdateWorkflowRecordDto) {
     const { store_id, user_id } = this.ctx();
     const record = await this.load(id);
     const collection = await this.collections.get(record.collection_id);
-    const merged: Record<string, unknown> = { ...(record.data ?? {}) };
+    const declared = new Set(collection.fields.map((f) => f.key));
+    const merged: Record<string, unknown> = {};
+    // Stored values were validated when written: scalars only.
+    const retired: RecordValues = {};
+    for (const [k, v] of Object.entries(record.data ?? {})) {
+      if (declared.has(k)) merged[k] = v;
+      else retired[k] = v as RecordValues[string];
+    }
     for (const [k, v] of Object.entries(dto.values)) {
-      if (v === null) delete merged[k];
-      else merged[k] = v;
+      if (v === null) {
+        delete merged[k];
+        delete retired[k];
+      } else {
+        merged[k] = v;
+      }
     }
     const values = this.parseValues(collection, merged);
     await this.prisma.workflow_records.updateMany({
       where: { id, store_id, archived_at: null },
       data: {
-        data: values,
+        data: { ...retired, ...values },
         title: recordTitle(collection.title_field, values, record.reference),
         updated_by_user_id: user_id,
         updated_at: new Date(),
