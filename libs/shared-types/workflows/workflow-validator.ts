@@ -7,6 +7,7 @@
  * workflow-contract.parity.spec.ts (backend). Messages are user-facing Spanish.
  */
 import { WORKFLOW_TOKEN_PATTERN } from "./workflow-runtime";
+import { isWaitTime, parseCron, parseExpression } from "./workflow-expression";
 import {
   HUMAN_STAGE_TYPES,
   OPS_BY_FIELD_TYPE,
@@ -35,6 +36,9 @@ import {
   WORKFLOW_SCHEMA_V1,
   WORKFLOW_STAGE_TYPES,
   WORKFLOW_SUBJECT_TYPES,
+  WORKFLOW_WAIT_KINDS,
+  WORKFLOW_ERROR_THEN,
+  SYSTEM_STAGE_TYPES,
   WorkflowFieldType,
 } from "./workflow-contract";
 
@@ -76,6 +80,15 @@ export const WORKFLOW_ISSUE_CODES = [
   "GATE_OPERATION_UNKNOWN",
   "GATE_END_MISSING",
   "VISIBILITY_CYCLE",
+  "PARALLEL_INVALID",
+  "SUBFLOW_INVALID",
+  "WAIT_INVALID",
+  "LOOP_LIMIT_MISSING",
+  "GUARD_INVALID",
+  "EXPRESSION_INVALID",
+  "COMPUTE_CYCLE",
+  "SCHEDULE_INVALID",
+  "ERROR_POLICY_INVALID",
 ] as const;
 
 export type WorkflowIssueCode = (typeof WORKFLOW_ISSUE_CODES)[number];
@@ -101,6 +114,11 @@ export interface WorkflowValidationContext {
   userIds?: readonly number[];
   /** Undefined is treated as [] (fail closed). */
   publishedTemplateKeys?: readonly string[];
+  /**
+   * P2.2: keys of the store's flows a subflow may launch. Undefined skips the
+   * check (the editor without a store); the server always passes it.
+   */
+  flowKeys?: readonly string[];
 }
 
 type Json = Record<string, unknown>;
@@ -130,6 +148,10 @@ const isIsoDate = (v: unknown): boolean => {
 class Collector {
   errors: WorkflowIssue[] = [];
   warnings: WorkflowIssue[] = [];
+  /** Stage keys of the definition (error-policy routes check against them). */
+  stageKeys = new Set<string>();
+  /** Key of the definition (a subflow may not launch its own flow). */
+  flowKey = "";
   err(
     code: WorkflowIssueCode,
     path: string,
@@ -547,15 +569,18 @@ function run(input: unknown, ctx: WorkflowValidationContext, c: Collector) {
               ? Object.keys(t).every(
                   (k) => k === "kind" || k === "event" || k === "map",
                 )
-              : t["kind"] === "public_form" &&
-                Object.keys(t).every((k) => k === "kind" || k === "stage") &&
-                (t["stage"] === undefined || isStr(t["stage"]))),
+              : t["kind"] === "schedule"
+                ? Object.keys(t).every((k) => k === "kind" || k === "cron") &&
+                  isStr(t["cron"])
+                : t["kind"] === "public_form" &&
+                  Object.keys(t).every((k) => k === "kind" || k === "stage") &&
+                  (t["stage"] === undefined || isStr(t["stage"]))),
       )
     ) {
       c.err(
         "SHAPE_INVALID",
         "triggers",
-        'Los disparadores permitidos son {"kind":"manual"}, {"kind":"public_form"} y {"kind":"event"}.',
+        'Los disparadores permitidos son {"kind":"manual"}, {"kind":"public_form"}, {"kind":"event"} y {"kind":"schedule","cron":"…"}.',
       );
     } else if (
       input["triggers"].filter((t) => t["kind"] === "public_form").length > 1
@@ -590,12 +615,55 @@ function run(input: unknown, ctx: WorkflowValidationContext, c: Collector) {
     }
   }
 
+  c.flowKey = isStr(input["key"]) ? input["key"] : "";
   const fields = checkFields(input["fields"], c);
   const stages = checkStages(input["stages"], fields, ctx, c);
   checkGraph(stages, c);
   checkPublicFormTrigger(input, c);
   checkEventTriggers(input, fields, c);
+  checkScheduleTriggers(input, c);
   checkGoverns(input, fields, c);
+}
+
+/** P2.10: cron triggers start as `system`, so nobody "initiates" them. */
+function checkScheduleTriggers(input: Json, c: Collector) {
+  const triggers = input["triggers"];
+  if (!Array.isArray(triggers)) return;
+  const schedules = triggers.filter(
+    (t) => isObj(t) && t["kind"] === "schedule",
+  );
+  if (schedules.length > 5) {
+    c.err(
+      "SCHEDULE_INVALID",
+      "triggers",
+      "Un flujo admite hasta 5 disparadores programados.",
+    );
+  }
+  triggers.forEach((t, index) => {
+    if (!isObj(t) || t["kind"] !== "schedule") return;
+    const path = `triggers[${index}].cron`;
+    const parsed = parseCron(t["cron"]);
+    if (!parsed.ok) {
+      c.err(
+        "SCHEDULE_INVALID",
+        path,
+        `La programación no es válida: ${parsed.error}`,
+      );
+    }
+    const stages = Array.isArray(input["stages"])
+      ? (input["stages"] as unknown[]).filter(isObj)
+      : [];
+    const start = stages.find((s) => s["start"] === true);
+    const assignee = start?.["assignee"];
+    if (start && isObj(assignee) && assignee["kind"] === "initiator") {
+      c.err(
+        "ASSIGNEE_NOT_ALLOWED",
+        `triggers[${index}]`,
+        "Un disparador programado no tiene a nadie que inicie la solicitud: la etapa inicial no puede estar asignada a quien inicia (usa un rol, un grupo, un usuario o un campo).",
+        isStr(start["key"]) ? start["key"] : undefined,
+      );
+    }
+  });
 }
 
 /** Lists `{{path}}` tokens found in a string. */
@@ -877,6 +945,7 @@ function checkFields(raw: unknown, c: Collector): FieldMap {
         "accept",
         "max_size_mb",
         "visible_when",
+        "compute",
       ],
       p,
     );
@@ -999,7 +1068,75 @@ function checkFields(raw: unknown, c: Collector): FieldMap {
     });
   }
   checkVisibilityCycles(c, valid);
+  checkComputedFields(c, valid, map);
   return map;
+}
+
+const COMPUTABLE_TYPES = ["number", "money", "text", "date"];
+
+/** P2.9: closed-grammar formulas over declared fields, without cycles. */
+function checkComputedFields(
+  c: Collector,
+  valid: { f: Json; i: number }[],
+  map: FieldMap,
+) {
+  const deps = new Map<string, string[]>();
+  const index = new Map<string, number>();
+  for (const { f, i } of valid) {
+    if (f["compute"] === undefined) continue;
+    const key = f["key"] as string;
+    const L = `El campo "${String(f["label"] ?? key)}"`;
+    const path = `fields[${i}].compute`;
+    if (!COMPUTABLE_TYPES.includes(String(f["type"]))) {
+      c.err(
+        "EXPRESSION_INVALID",
+        path,
+        `${L} es de un tipo que no se puede calcular (solo número, dinero, texto o fecha).`,
+      );
+      continue;
+    }
+    const parsed = parseExpression(f["compute"]);
+    if (!parsed.ok) {
+      c.err("EXPRESSION_INVALID", path, `${L} tiene una fórmula no válida: ${parsed.error}`);
+      continue;
+    }
+    for (const ref of parsed.expr.refs) {
+      if (ref === key) {
+        c.err("COMPUTE_CYCLE", path, `${L} no puede usarse a sí mismo en su fórmula.`);
+      } else if (!map.has(ref)) {
+        c.err(
+          "FIELD_UNKNOWN",
+          path,
+          `${L} usa "${ref}" en su fórmula, que no es un campo declarado (las claves con "-" no se pueden usar en fórmulas).`,
+        );
+      }
+    }
+    deps.set(key, parsed.expr.refs.filter((r) => r !== key));
+    index.set(key, i);
+  }
+  const state = new Map<string, 1 | 2>();
+  const reported = new Set<string>();
+  const visit = (k: string, stack: string[]) => {
+    state.set(k, 1);
+    stack.push(k);
+    for (const d of deps.get(k) ?? []) {
+      if (!deps.has(d)) continue;
+      if (state.get(d) === 1) {
+        const cycle = stack.slice(stack.indexOf(d));
+        if (!cycle.some((x) => reported.has(x))) {
+          cycle.forEach((x) => reported.add(x));
+          c.err(
+            "COMPUTE_CYCLE",
+            `fields[${index.get(d)}].compute`,
+            `Las fórmulas de ${cycle.map((x) => `"${x}"`).join(" → ")} dependen unas de otras en círculo.`,
+          );
+        }
+      } else if (!state.has(d)) visit(d, stack);
+    }
+    stack.pop();
+    state.set(k, 2);
+  };
+  for (const k of deps.keys()) if (!state.has(k)) visit(k, []);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1042,6 +1179,7 @@ function checkStages(
     if (isObj(s) && isStr(s["key"]) && WORKFLOW_KEY_PATTERN.test(s["key"]))
       keys.add(s["key"]);
   });
+  c.stageKeys = keys;
   const seen = new Set<string>();
 
   raw.forEach((s, i) => {
@@ -1067,7 +1205,14 @@ function checkStages(
         "transitions",
         "due",
         "on_enter",
+        "on_submit",
+        "on_complete",
         "on_exit",
+        "guards",
+        "parallel",
+        "subflow",
+        "wait",
+        "loop",
       ],
       p,
     );
@@ -1149,7 +1294,7 @@ function checkStages(
         c.err(
           "ASSIGNEE_NOT_ALLOWED",
           `${p}.assignee`,
-          `${L} es ${t === "end" ? "final" : "automática"} y no debe tener responsable.`,
+          `${L} es ${t === "end" ? "final" : t === "parallel" ? "paralela (cada rama tiene su responsable)" : "automática"} y no debe tener responsable.`,
           sk,
         );
       else checkAssignee(s["assignee"], `${p}.assignee`, L, sk, fields, ctx, c);
@@ -1250,10 +1395,37 @@ function checkStages(
       c,
     );
     checkActions(s["on_enter"], `${p}.on_enter`, L, sk, fields, ctx, c);
+    checkActions(s["on_submit"], `${p}.on_submit`, L, sk, fields, ctx, c);
+    checkActions(s["on_complete"], `${p}.on_complete`, L, sk, fields, ctx, c);
     checkActions(s["on_exit"], `${p}.on_exit`, L, sk, fields, ctx, c);
+    if (
+      s["on_submit"] !== undefined &&
+      !human &&
+      t !== "parallel"
+    ) {
+      c.err(
+        "SHAPE_INVALID",
+        `${p}.on_submit`,
+        `${L} no recibe envíos de personas: "al enviar" solo aplica a etapas humanas o paralelas.`,
+        sk,
+      );
+    }
+
+    // P2.1 / P2.2 / P2.3 / P2.4: per-type configuration.
+    const targets: string[] = [];
+    checkTypeConfig(s, t, p, L, sk, fields, ctx, c);
+    checkGuards(s["guards"], t, p, L, sk, keys, fields, c, targets);
+    for (const hook of ["on_enter", "on_submit", "on_complete", "on_exit"]) {
+      const list = s[hook];
+      if (!Array.isArray(list)) continue;
+      for (const a of list) {
+        if (isObj(a) && isObj(a["on_error"]) && isStr(a["on_error"]["route_to"])) {
+          if (keys.has(a["on_error"]["route_to"])) targets.push(a["on_error"]["route_to"]);
+        }
+      }
+    }
 
     // transitions
-    const targets: string[] = [];
     if (t === "end") {
       if (
         s["transitions"] !== undefined &&
@@ -1267,7 +1439,13 @@ function checkStages(
         );
       }
     } else {
-      checkTransitions(s["transitions"], p, L, t, sk, keys, fields, c, targets);
+      const required =
+        t === "subflow" && isObj(s["subflow"]) && s["subflow"]["wait"] === false
+          ? ["completed"]
+          : (SYSTEM_STAGE_TYPES as readonly string[]).includes(t) || t === "parallel"
+            ? [...STAGE_OUTCOMES[t]]
+            : [];
+      checkTransitions(s["transitions"], p, L, t, sk, keys, fields, c, targets, required);
     }
 
     if (keyOk) {
@@ -1769,7 +1947,8 @@ function checkVendixAction(
   c: Collector,
 ) {
   const name = a["action"] as WorkflowVendixActionName;
-  checkKeys(c, a, ["action", "map"], p, sk);
+  checkKeys(c, a, ["action", "map", "on_error"], p, sk);
+  if (a["on_error"] !== undefined) checkErrorPolicy(a["on_error"], `${p}.on_error`, L, sk, c);
   const map = a["map"];
   if (!isObj(map)) {
     c.err(
@@ -1865,6 +2044,7 @@ function checkTransitions(
   fields: FieldMap,
   c: Collector,
   targets: string[],
+  requiredOutcomes: string[] = [],
 ) {
   const path = `${p}.transitions`;
   const list: unknown[] =
@@ -1968,11 +2148,14 @@ function checkTransitions(
       );
     }
   }
-  if (t === "automatic" && !byOn.has("auto")) {
+  for (const o of requiredOutcomes) {
+    if (byOn.has(o)) continue;
     c.err(
       "DEFAULT_BRANCH_MISSING",
       path,
-      `${L} es automática y necesita una transición por defecto para "auto".`,
+      t === "automatic"
+        ? `${L} es automática y necesita una transición por defecto para "auto".`
+        : `${L} necesita una transición para el resultado "${o}".`,
       sk,
     );
   }
@@ -2073,9 +2256,12 @@ function checkGraph(stages: StageInfo[], c: Collector) {
     }
   }
 
-  // Cycles made only of automatic stages.
+  // Cycles made only of stages the engine resolves by itself. A loop stage
+  // bounds its own cycle (`max_iterations`), so it breaks the chain.
   const auto = new Map(
-    stages.filter((s) => s.type === "automatic").map((s) => [s.key, s]),
+    stages
+      .filter((s) => s.type !== "loop" && (SYSTEM_STAGE_TYPES as readonly string[]).includes(s.type))
+      .map((s) => [s.key, s]),
   );
   const state = new Map<string, 1 | 2>();
   const reported = new Set<string>();
@@ -2092,7 +2278,7 @@ function checkGraph(stages: StageInfo[], c: Collector) {
           c.err(
             "AUTOMATIC_LOOP",
             `stages[${auto.get(t)!.index}]`,
-            `Las etapas automáticas ${names} forman un ciclo sin tarea humana y se repetirían sin fin.`,
+            `Las etapas automáticas ${names} forman un ciclo sin tarea humana ni bucle con límite y se repetirían sin fin.`,
             t,
           );
         }
@@ -2102,6 +2288,453 @@ function checkGraph(stages: StageInfo[], c: Collector) {
     state.set(key, 2);
   };
   for (const k of auto.keys()) if (!state.has(k)) visit(k, []);
+}
+
+/* ------------------------------------------------------------------ */
+/* P2: per-type configuration, guards and error policies               */
+/* ------------------------------------------------------------------ */
+
+const TYPE_CONFIG: Record<string, string> = {
+  parallel: "parallel",
+  subflow: "subflow",
+  wait: "wait",
+  loop: "loop",
+};
+
+function checkTypeConfig(
+  s: Json,
+  t: string,
+  p: string,
+  L: string,
+  sk: string | undefined,
+  fields: FieldMap,
+  ctx: WorkflowValidationContext,
+  c: Collector,
+) {
+  for (const [type, key] of Object.entries(TYPE_CONFIG)) {
+    if (s[key] !== undefined && t !== type) {
+      c.err(
+        "SHAPE_INVALID",
+        `${p}.${key}`,
+        `${L} no es de tipo "${type}" y no admite "${key}".`,
+        sk,
+      );
+    }
+  }
+  if (t === "parallel") checkParallel(s["parallel"], `${p}.parallel`, L, sk, fields, ctx, c);
+  if (t === "subflow") checkSubflow(s["subflow"], `${p}.subflow`, L, sk, fields, ctx, c);
+  if (t === "wait") checkWait(s["wait"], `${p}.wait`, L, sk, fields, c);
+  if (t === "loop") checkLoop(s["loop"], `${p}.loop`, L, sk, fields, c);
+}
+
+function checkFormFields(
+  form: unknown,
+  path: string,
+  L: string,
+  sk: string | undefined,
+  fields: FieldMap,
+  c: Collector,
+) {
+  if (form === undefined) return;
+  if (!isObj(form) || !Array.isArray(form["fields"]) || !form["fields"].every(isStr)) {
+    c.err("SHAPE_INVALID", `${path}.fields`, `${L}: el formulario debe listar las claves de campos.`, sk);
+    return;
+  }
+  checkKeys(c, form, ["fields"], path, sk);
+  const used = new Set<string>();
+  (form["fields"] as string[]).forEach((fk, j) => {
+    if (!fields.has(fk))
+      c.err("FIELD_UNKNOWN", `${path}.fields[${j}]`, `${L} usa el campo "${fk}", que no está declarado.`, sk);
+    else if (used.has(fk))
+      c.err("DUPLICATE_KEY", `${path}.fields[${j}]`, `${L} repite el campo "${fk}" en su formulario.`, sk);
+    used.add(fk);
+  });
+}
+
+function checkParallel(
+  raw: unknown,
+  path: string,
+  L: string,
+  sk: string | undefined,
+  fields: FieldMap,
+  ctx: WorkflowValidationContext,
+  c: Collector,
+) {
+  if (!isObj(raw)) {
+    c.err("PARALLEL_INVALID", path, `${L} es paralela y necesita sus ramas y su regla de unión.`, sk);
+    return;
+  }
+  checkKeys(c, raw, ["branches", "join", "required"], path, sk);
+  const branches = raw["branches"];
+  if (
+    !Array.isArray(branches) ||
+    branches.length < 2 ||
+    branches.length > WORKFLOW_LIMITS.maxBranches
+  ) {
+    c.err(
+      "PARALLEL_INVALID",
+      `${path}.branches`,
+      `${L} necesita entre 2 y ${WORKFLOW_LIMITS.maxBranches} ramas.`,
+      sk,
+    );
+  }
+  const list = Array.isArray(branches) ? branches : [];
+  const seen = new Set<string>();
+  list.forEach((b, j) => {
+    const bp = `${path}.branches[${j}]`;
+    if (!isObj(b)) {
+      c.err("PARALLEL_INVALID", bp, `${L}: la rama #${j + 1} no es válida.`, sk);
+      return;
+    }
+    checkKeys(c, b, ["key", "name", "assignee", "form"], bp, sk);
+    if (!isStr(b["key"]) || !WORKFLOW_KEY_PATTERN.test(b["key"])) {
+      c.err("KEY_INVALID", `${bp}.key`, `${L}: la rama #${j + 1} tiene una clave no válida.`, sk);
+    } else if (seen.has(b["key"])) {
+      c.err("DUPLICATE_KEY", `${bp}.key`, `${L} repite la rama "${b["key"]}".`, sk);
+    } else seen.add(b["key"]);
+    const BL = `${L}, rama "${isNonEmptyStr(b["name"]) ? b["name"] : `#${j + 1}`}"`;
+    if (!isNonEmptyStr(b["name"]) || b["name"].length > 200) {
+      c.err("SHAPE_INVALID", `${bp}.name`, `${L}: la rama #${j + 1} necesita un nombre.`, sk);
+    }
+    if (b["assignee"] === undefined) {
+      c.err("ASSIGNEE_MISSING", `${bp}.assignee`, `${BL} no tiene responsable.`, sk);
+    } else checkAssignee(b["assignee"], `${bp}.assignee`, BL, sk, fields, ctx, c);
+    checkFormFields(b["form"], `${bp}.form`, BL, sk, fields, c);
+  });
+  const join = raw["join"];
+  if (join !== "all" && join !== "any" && join !== "n_of_m") {
+    c.err(
+      "PARALLEL_INVALID",
+      `${path}.join`,
+      `${L}: la unión debe ser "all" (todas), "any" (cualquiera) o "n_of_m" (N de M).`,
+      sk,
+    );
+  } else if (join === "n_of_m") {
+    const r = raw["required"];
+    if (!isInt(r) || r < 1 || r > list.length) {
+      c.err(
+        "PARALLEL_INVALID",
+        `${path}.required`,
+        `${L}: con la unión "N de M" indica cuántas ramas bastan (1 a ${list.length}).`,
+        sk,
+      );
+    }
+  } else if (raw["required"] !== undefined) {
+    c.err(
+      "PARALLEL_INVALID",
+      `${path}.required`,
+      `${L}: "required" solo aplica a la unión "N de M".`,
+      sk,
+    );
+  }
+}
+
+function checkSubflow(
+  raw: unknown,
+  path: string,
+  L: string,
+  sk: string | undefined,
+  fields: FieldMap,
+  ctx: WorkflowValidationContext,
+  c: Collector,
+) {
+  if (!isObj(raw)) {
+    c.err("SUBFLOW_INVALID", path, `${L} es un subflujo y necesita los flujos que lanza.`, sk);
+    return;
+  }
+  checkKeys(c, raw, ["flows", "wait", "output"], path, sk);
+  const flows = raw["flows"];
+  if (!Array.isArray(flows) || flows.length < 1 || flows.length > WORKFLOW_LIMITS.maxSubflows) {
+    c.err(
+      "SUBFLOW_INVALID",
+      `${path}.flows`,
+      `${L} debe lanzar entre 1 y ${WORKFLOW_LIMITS.maxSubflows} flujos.`,
+      sk,
+    );
+  }
+  const keys = new Set<string>();
+  const parentTokens = [
+    ...[...fields.keys()].map((k) => `fields.${k}`),
+    ...WORKFLOW_INSTANCE_TOKENS,
+  ];
+  (Array.isArray(flows) ? flows : []).forEach((f, j) => {
+    const fp = `${path}.flows[${j}]`;
+    if (!isObj(f)) {
+      c.err("SUBFLOW_INVALID", fp, `${L}: el subflujo #${j + 1} no es válido.`, sk);
+      return;
+    }
+    checkKeys(c, f, ["flow_key", "map"], fp, sk);
+    const key = f["flow_key"];
+    if (!isStr(key) || !WORKFLOW_KEY_PATTERN.test(key)) {
+      c.err("SUBFLOW_INVALID", `${fp}.flow_key`, `${L}: el subflujo #${j + 1} necesita la clave de un flujo.`, sk);
+      return;
+    }
+    if (key === c.flowKey) {
+      c.err("SUBFLOW_INVALID", `${fp}.flow_key`, `${L}: un flujo no puede lanzarse a sí mismo como subflujo.`, sk);
+    } else if (ctx.flowKeys && !ctx.flowKeys.includes(key)) {
+      c.err("SUBFLOW_INVALID", `${fp}.flow_key`, `${L} lanza el flujo "${key}", que no existe en la tienda.`, sk);
+    }
+    keys.add(key);
+    const map = f["map"];
+    if (map === undefined) return;
+    if (!isObj(map)) {
+      c.err("MAP_INVALID", `${fp}.map`, `${L}: el mapa del subflujo debe ser un objeto.`, sk);
+      return;
+    }
+    for (const [childField, tpl] of Object.entries(map)) {
+      if (!WORKFLOW_KEY_PATTERN.test(childField)) {
+        c.err("MAP_INVALID", `${fp}.map.${childField}`, `${L}: "${childField}" no es una clave de campo válida del subflujo.`, sk);
+      }
+      if (!isStr(tpl) || tpl.length > 500) {
+        c.err("MAP_INVALID", `${fp}.map.${childField}`, `${L}: el valor de "${childField}" debe ser texto de hasta 500 caracteres.`, sk);
+        continue;
+      }
+      if (hasStrayBraces(tpl)) {
+        c.err("MAP_INVALID", `${fp}.map.${childField}`, `${L}: el valor de "${childField}" tiene llaves sueltas.`, sk);
+      }
+      for (const tok of tokensOf(tpl)) {
+        if (!parentTokens.includes(tok)) {
+          c.err("TOKEN_UNKNOWN", `${fp}.map.${childField}`, `${L}: la variable {{${tok}}} no existe en este flujo.`, sk);
+        }
+      }
+    }
+  });
+  if (raw["wait"] !== undefined && typeof raw["wait"] !== "boolean") {
+    c.err("SUBFLOW_INVALID", `${path}.wait`, `${L}: "wait" debe ser verdadero o falso.`, sk);
+  }
+  const output = raw["output"];
+  if (output === undefined) return;
+  if (raw["wait"] === false) {
+    c.err("SUBFLOW_INVALID", `${path}.output`, `${L} no espera a sus hijos, así que no puede recibir variables de vuelta.`, sk);
+    return;
+  }
+  if (!isObj(output)) {
+    c.err("MAP_INVALID", `${path}.output`, `${L}: las variables de vuelta deben ser un objeto.`, sk);
+    return;
+  }
+  for (const [parentField, src] of Object.entries(output)) {
+    if (!fields.has(parentField)) {
+      c.err("FIELD_UNKNOWN", `${path}.output.${parentField}`, `${L} devuelve al campo "${parentField}", que no está declarado.`, sk);
+    }
+    const parts = isStr(src) ? src.split(".") : [];
+    if (
+      parts.length !== 2 ||
+      !keys.has(parts[0]) ||
+      !WORKFLOW_KEY_PATTERN.test(parts[1])
+    ) {
+      c.err(
+        "MAP_INVALID",
+        `${path}.output.${parentField}`,
+        `${L}: la variable de vuelta de "${parentField}" debe tener la forma "<flujo>.<campo>" con un flujo que este subflujo lanza.`,
+        sk,
+      );
+    }
+  }
+}
+
+function checkWait(
+  raw: unknown,
+  path: string,
+  L: string,
+  sk: string | undefined,
+  fields: FieldMap,
+  c: Collector,
+) {
+  if (!isObj(raw) || !(WORKFLOW_WAIT_KINDS as readonly unknown[]).includes(raw["kind"])) {
+    c.err(
+      "WAIT_INVALID",
+      path,
+      `${L} es una espera y necesita su tipo (${WORKFLOW_WAIT_KINDS.join(", ")}).`,
+      sk,
+    );
+    return;
+  }
+  const bad = (field: string, msg: string) =>
+    c.err("WAIT_INVALID", `${path}.${field}`, `${L}: ${msg}`, sk);
+  const intIn = (v: unknown, lo: number, hi: number) => isInt(v) && v >= lo && v <= hi;
+  if (raw["time"] !== undefined && !isWaitTime(raw["time"])) {
+    bad("time", 'la hora debe tener la forma "HH:mm" (00:00 a 23:59).');
+  }
+  switch (raw["kind"]) {
+    case "duration": {
+      checkKeys(c, raw, ["kind", "days", "hours", "minutes"], path, sk);
+      const d = raw["days"] ?? 0;
+      const h = raw["hours"] ?? 0;
+      const m = raw["minutes"] ?? 0;
+      if (!intIn(d, 0, 365) || !intIn(h, 0, 8760) || !intIn(m, 0, 525600)) {
+        bad("days", "los días (0–365), horas y minutos deben ser enteros no negativos.");
+      } else if ((d as number) * 1440 + (h as number) * 60 + (m as number) < 1) {
+        bad("minutes", "la espera debe durar al menos 1 minuto.");
+      }
+      break;
+    }
+    case "date":
+      checkKeys(c, raw, ["kind", "date", "time"], path, sk);
+      if (!isIsoDate(raw["date"])) bad("date", "la fecha debe tener la forma AAAA-MM-DD.");
+      break;
+    case "field": {
+      checkKeys(c, raw, ["kind", "field", "offset_days", "time"], path, sk);
+      const f = isStr(raw["field"]) ? fields.get(raw["field"]) : undefined;
+      if (!f) bad("field", `el campo "${String(raw["field"])}" no está declarado.`);
+      else if (f.type !== "date") bad("field", `el campo "${String(raw["field"])}" debe ser de tipo fecha.`);
+      if (raw["offset_days"] !== undefined && !intIn(raw["offset_days"], -365, 365)) {
+        bad("offset_days", "el desfase debe ser un entero entre -365 y 365 días.");
+      }
+      break;
+    }
+    case "business_days":
+      checkKeys(c, raw, ["kind", "days", "time"], path, sk);
+      if (!intIn(raw["days"], 1, 365)) bad("days", "los días hábiles deben ser un entero entre 1 y 365.");
+      break;
+    case "day_of_month":
+      checkKeys(c, raw, ["kind", "day", "time"], path, sk);
+      if (!intIn(raw["day"], 1, 28)) bad("day", "el día del mes debe ser un entero entre 1 y 28.");
+      break;
+  }
+}
+
+function checkLoop(
+  raw: unknown,
+  path: string,
+  L: string,
+  sk: string | undefined,
+  fields: FieldMap,
+  c: Collector,
+) {
+  const o = isObj(raw) ? raw : {};
+  if (isObj(raw)) checkKeys(c, raw, ["while", "max_iterations"], path, sk);
+  const max = o["max_iterations"];
+  if (!isInt(max) || max < 1 || max > WORKFLOW_LIMITS.maxLoopIterations) {
+    c.err(
+      "LOOP_LIMIT_MISSING",
+      `${path}.max_iterations`,
+      `${L}: el bucle necesita un límite de vueltas (1 a ${WORKFLOW_LIMITS.maxLoopIterations}).`,
+      sk,
+    );
+  }
+  if (o["while"] === undefined) {
+    c.err("SHAPE_INVALID", `${path}.while`, `${L}: el bucle necesita la condición para repetir.`, sk);
+  } else {
+    checkCondition(o["while"], `${path}.while`, 1, {
+      c,
+      fields,
+      label: L,
+      stageKey: sk,
+      rules: 0,
+      tooDeepReported: false,
+    });
+  }
+}
+
+function checkGuards(
+  raw: unknown,
+  t: string,
+  p: string,
+  L: string,
+  sk: string | undefined,
+  stageKeys: Set<string>,
+  fields: FieldMap,
+  c: Collector,
+  targets: string[],
+) {
+  if (raw === undefined) return;
+  const path = `${p}.guards`;
+  if (t === "end") {
+    c.err("GUARD_INVALID", path, `${L} es final y no admite guardas.`, sk);
+    return;
+  }
+  if (!Array.isArray(raw)) {
+    c.err("GUARD_INVALID", path, `${L}: las guardas deben ser una lista.`, sk);
+    return;
+  }
+  if (raw.length > WORKFLOW_LIMITS.maxGuards) {
+    c.err("LIMIT_EXCEEDED", path, `${L} tiene ${raw.length} guardas y el máximo es ${WORKFLOW_LIMITS.maxGuards}.`, sk);
+  }
+  raw.forEach((g, j) => {
+    const gp = `${path}[${j}]`;
+    if (!isObj(g)) {
+      c.err("GUARD_INVALID", gp, `${L}: la guarda #${j + 1} no es válida.`, sk);
+      return;
+    }
+    checkKeys(c, g, ["when", "message", "redirect_to"], gp, sk);
+    if (g["when"] === undefined) {
+      c.err("GUARD_INVALID", `${gp}.when`, `${L}: la guarda #${j + 1} necesita su condición.`, sk);
+    } else {
+      checkCondition(g["when"], `${gp}.when`, 1, {
+        c,
+        fields,
+        label: L,
+        stageKey: sk,
+        rules: 0,
+        tooDeepReported: false,
+      });
+    }
+    if (!isNonEmptyStr(g["message"]) || g["message"].length > 300) {
+      c.err("GUARD_INVALID", `${gp}.message`, `${L}: la guarda #${j + 1} necesita un mensaje de hasta 300 caracteres.`, sk);
+    }
+    if (g["redirect_to"] !== undefined) {
+      if (!isStr(g["redirect_to"]) || !stageKeys.has(g["redirect_to"])) {
+        c.err(
+          "TRANSITION_TARGET_UNKNOWN",
+          `${gp}.redirect_to`,
+          `${L}: la guarda #${j + 1} redirige a "${String(g["redirect_to"])}", que no existe.`,
+          sk,
+        );
+      } else if (g["redirect_to"] === sk) {
+        c.err("GUARD_INVALID", `${gp}.redirect_to`, `${L}: una guarda no puede redirigir a su propia etapa.`, sk);
+      } else targets.push(g["redirect_to"]);
+    }
+  });
+}
+
+function checkErrorPolicy(
+  raw: unknown,
+  path: string,
+  L: string,
+  sk: string | undefined,
+  c: Collector,
+) {
+  if (!isObj(raw)) {
+    c.err("ERROR_POLICY_INVALID", path, `${L}: la política de error debe ser un objeto.`, sk);
+    return;
+  }
+  checkKeys(c, raw, ["retries", "then", "route_to"], path, sk);
+  const r = raw["retries"];
+  if (r !== undefined && (!isInt(r) || r < 0 || r > WORKFLOW_LIMITS.maxActionRetries)) {
+    c.err(
+      "ERROR_POLICY_INVALID",
+      `${path}.retries`,
+      `${L}: los reintentos deben ser un entero entre 0 y ${WORKFLOW_LIMITS.maxActionRetries}.`,
+      sk,
+    );
+  }
+  const then = raw["then"];
+  if (then !== undefined && !(WORKFLOW_ERROR_THEN as readonly unknown[]).includes(then)) {
+    c.err(
+      "ERROR_POLICY_INVALID",
+      `${path}.then`,
+      `${L}: tras fallar, la acción debe "continue" (seguir), "route" (ir a la ruta de error) o "fail" (terminar la solicitud).`,
+      sk,
+    );
+  }
+  if (then === "route") {
+    const to = raw["route_to"];
+    if (!isStr(to) || !c.stageKeys.has(to)) {
+      c.err(
+        "ERROR_POLICY_INVALID",
+        `${path}.route_to`,
+        `${L}: la ruta de error necesita una etapa existente en "route_to".`,
+        sk,
+      );
+    }
+  } else if (raw["route_to"] !== undefined) {
+    c.err(
+      "ERROR_POLICY_INVALID",
+      `${path}.route_to`,
+      `${L}: "route_to" solo aplica cuando la política es "route".`,
+      sk,
+    );
+  }
 }
 
 /** One readable Spanish line per error. */
