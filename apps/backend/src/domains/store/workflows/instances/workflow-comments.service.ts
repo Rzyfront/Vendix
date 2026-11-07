@@ -87,6 +87,7 @@ export class WorkflowCommentsService {
       where: { id: instanceId, store_id: c.store_id },
     })) as WorkflowInstanceRow | null;
     if (!instance) throw new VendixHttpException(ErrorCodes.WORKFLOW_NOT_FOUND);
+    await this.events.lockInstance(tx, c.store_id, instanceId);
     const comment = await tx.workflow_instance_comments.create({
       data: {
         organization_id: c.organization_id,

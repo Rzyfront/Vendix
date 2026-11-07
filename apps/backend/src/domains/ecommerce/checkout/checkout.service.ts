@@ -58,6 +58,10 @@ import { PaymentGatewayService } from '../../store/payments/services/payment-gat
 import * as crypto from 'crypto';
 import { ReservationsService } from '../../store/reservations/reservations.service';
 import { order_channel_enum } from '@prisma/client';
+import {
+  TriggerOutboxClient,
+  recordTriggerEvent,
+} from '../../store/workflows/engine/workflow-trigger.outbox';
 import { deriveDeliveryType } from '../../store/shipping/shipping-derivation.util';
 import { InvoiceDataRequestsService } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.service';
 import { InvoicingService } from '../../store/invoicing/invoicing.service';
@@ -123,6 +127,11 @@ interface CheckoutLineTaxSnapshot {
   tax_type: TaxFiscalType;
   is_inclusive: boolean;
 }
+
+/** Scoped transaction: the ecommerce client injects `store_id` into the order. */
+type CheckoutOrderTx = TriggerOutboxClient & {
+  orders: EcommercePrismaService['orders'];
+};
 
 @Injectable()
 export class CheckoutService {
@@ -2549,117 +2558,130 @@ export class CheckoutService {
     }
 
     // store_id y customer_id (user_id) se inyectan automáticamente
-    const order = await this.prisma.orders.create({
-      data: {
-        order_number,
-        customer_id: resolved_customer_id,
-        customer_alias: guest_customer_alias,
-        // Canal unificado CP-tienda-checkout-whatsapp: "Finalizar por
-        // WhatsApp" recorre este mismo núcleo con channel='whatsapp'; el
-        // endpoint legacy POST /whatsapp sigue creando channel='whatsapp'
-        // por su propio camino hasta su deprecación.
-        channel: dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
-        currency: cart_currency,
-        subtotal_amount: subtotal,
-        tax_amount: total_tax,
-        discount_amount: discountResult.total_discount,
-        shipping_cost: shipping_cost,
-        shipping_method_id: shipping_method_id,
-        shipping_rate_id: shipping_rate_id,
-        // Copia congelada del impuesto del envío (vacía sin tarifa gravada).
-        ...shipping_tax,
-        // Paso 14 — modo de la tarifa que produjo la copia (null = sin
-        // impuesto o histórico).
-        shipping_tax_is_inclusive,
-        delivery_type: delivery_type,
-        grand_total: grand_total,
-        // B8 (release-855): `remaining_balance`/`total_paid` default to 0 in
-        // the schema, which reads as "nothing owed". For a contra-entrega
-        // order that made the dispatch treat it as prepaid (no COD
-        // collection) and the order auto-finished unpaid. Scoped to
-        // ON_DELIVERY only: online/transfer methods keep their historical
-        // shape (their confirmation settles the order).
-        ...(payment_method?.system_payment_method?.processing_mode ===
-        payment_processing_mode_enum.ON_DELIVERY
-          ? { total_paid: 0, remaining_balance: grand_total }
-          : {}),
-        shipping_address_id,
-        shipping_address_snapshot,
-        state: 'pending_payment',
-        // QUI-887 (rev 867, re-review) — la observación del comprador va a
-        // `notes` (columna visible: el POS ya la escribe ahí y el KDS la lee
-        // de ahí). El aviso operativo de envío pendiente vive SOLO en
-        // `internal_notes`: con envío pendiente es SOLO el aviso — si llevara
-        // también la observación, el detalle mostraría el mismo texto en Nota
-        // y en Staff. Sin envío pendiente conserva la observación y el detalle
-        // oculta Staff cuando iguala a Nota.
-        notes: dto.notes?.trim() || undefined,
-        internal_notes: dto.pending_shipping_assignment
-          ? 'Pedido por WhatsApp con envío pendiente de asignar. Contactar al comprador para acordar el método y costo de envío.'
-          : dto.notes?.trim() || undefined,
-        placed_at: new Date(),
-        order_items: {
-          create: itemsWithTaxes.map((item) => ({
-            // Snapshot congelado de adiciones (solo si la línea las tiene).
-            ...(item.option_snapshots.length
-              ? {
-                  order_item_options: {
-                    create: item.option_snapshots.map((option) => ({
-                      store_id: store_id_ctx!,
-                      ...option,
-                    })),
-                  },
-                }
+    const createOrder = async (tx: CheckoutOrderTx) => {
+      const created = await tx.orders.create({
+          data: {
+            order_number,
+            customer_id: resolved_customer_id,
+            customer_alias: guest_customer_alias,
+            // Canal unificado CP-tienda-checkout-whatsapp: "Finalizar por
+            // WhatsApp" recorre este mismo núcleo con channel='whatsapp'; el
+            // endpoint legacy POST /whatsapp sigue creando channel='whatsapp'
+            // por su propio camino hasta su deprecación.
+            channel: dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
+            currency: cart_currency,
+            subtotal_amount: subtotal,
+            tax_amount: total_tax,
+            discount_amount: discountResult.total_discount,
+            shipping_cost: shipping_cost,
+            shipping_method_id: shipping_method_id,
+            shipping_rate_id: shipping_rate_id,
+            // Copia congelada del impuesto del envío (vacía sin tarifa gravada).
+            ...shipping_tax,
+            // Paso 14 — modo de la tarifa que produjo la copia (null = sin
+            // impuesto o histórico).
+            shipping_tax_is_inclusive,
+            delivery_type: delivery_type,
+            grand_total: grand_total,
+            // B8 (release-855): `remaining_balance`/`total_paid` default to 0 in
+            // the schema, which reads as "nothing owed". For a contra-entrega
+            // order that made the dispatch treat it as prepaid (no COD
+            // collection) and the order auto-finished unpaid. Scoped to
+            // ON_DELIVERY only: online/transfer methods keep their historical
+            // shape (their confirmation settles the order).
+            ...(payment_method?.system_payment_method?.processing_mode ===
+            payment_processing_mode_enum.ON_DELIVERY
+              ? { total_paid: 0, remaining_balance: grand_total }
               : {}),
-            // Online/whatsapp para enviar: el plato KDS se empaca.
-            is_takeaway:
-              markTakeawayForDelivery &&
-              (item as any).product?.product_type === 'prepared',
-            product_id: item.product_id,
-            product_variant_id: item.product_variant_id,
-            product_name: item.product.name,
-            variant_sku: item.product_variant?.sku,
-            variant_attributes: item.product_variant?.attributes
-              ? JSON.stringify(item.product_variant.attributes)
-              : null,
-            quantity: item.quantity,
-            unit_price: item.base_unit_price,
-            total_price: item.total_net,
-            tax_rate: item.tax_rate,
-            tax_amount_item: item.tax_amount_item,
-            cost_price: item.cost_price,
-            notes: (item as any).notes?.trim() || null,
-            // Snapshot de la presentación aplicada. `stock_units_consumed` queda
-            // en null cuando no hubo empaque, para distinguir "no aplica" de
-            // "empaque de 1" igual que en el resto de los flujos de venta.
-            applied_price_tier_id: item.applied_price_tier_id,
-            applied_price_tier_name_snapshot:
-              item.applied_price_tier_name_snapshot,
-            stock_units_consumed: item.stock_units_consumed,
-            order_item_taxes: {
-              create: item.item_taxes.map((t) => ({
-                tax_rate_id: t.tax_rate_id,
-                tax_name: t.name,
-                tax_rate: t.rate,
-                tax_amount: t.amount * item.quantity,
-                tax_type: t.tax_type,
-                // A.4 (F-002): el flag viaja por fila (N filas por tasa).
-                // QUI-INC — sin `?? false`. `CheckoutLineTaxSnapshot` ya lo
-                // declara obligatorio y el kernel lo devuelve por tasa: el
-                // default local sólo podía enmascarar un hueco del productor,
-                // y `is_inclusive` decide cómo parte el XML DIAN la línea
-                // (ADR-03), así que un `false` inventado descuadra el
-                // documento con los importes cuadrando igual.
-                is_inclusive: t.is_inclusive,
+            shipping_address_id,
+            shipping_address_snapshot,
+            state: 'pending_payment',
+            // QUI-887 (rev 867, re-review) — la observación del comprador va a
+            // `notes` (columna visible: el POS ya la escribe ahí y el KDS la lee
+            // de ahí). El aviso operativo de envío pendiente vive SOLO en
+            // `internal_notes`: con envío pendiente es SOLO el aviso — si llevara
+            // también la observación, el detalle mostraría el mismo texto en Nota
+            // y en Staff. Sin envío pendiente conserva la observación y el detalle
+            // oculta Staff cuando iguala a Nota.
+            notes: dto.notes?.trim() || undefined,
+            internal_notes: dto.pending_shipping_assignment
+              ? 'Pedido por WhatsApp con envío pendiente de asignar. Contactar al comprador para acordar el método y costo de envío.'
+              : dto.notes?.trim() || undefined,
+            placed_at: new Date(),
+            order_items: {
+              create: itemsWithTaxes.map((item) => ({
+                // Snapshot congelado de adiciones (solo si la línea las tiene).
+                ...(item.option_snapshots.length
+                  ? {
+                      order_item_options: {
+                        create: item.option_snapshots.map((option) => ({
+                          store_id: store_id_ctx!,
+                          ...option,
+                        })),
+                      },
+                    }
+                  : {}),
+                // Online/whatsapp para enviar: el plato KDS se empaca.
+                is_takeaway:
+                  markTakeawayForDelivery &&
+                  (item as any).product?.product_type === 'prepared',
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id,
+                product_name: item.product.name,
+                variant_sku: item.product_variant?.sku,
+                variant_attributes: item.product_variant?.attributes
+                  ? JSON.stringify(item.product_variant.attributes)
+                  : null,
+                quantity: item.quantity,
+                unit_price: item.base_unit_price,
+                total_price: item.total_net,
+                tax_rate: item.tax_rate,
+                tax_amount_item: item.tax_amount_item,
+                cost_price: item.cost_price,
+                notes: (item as any).notes?.trim() || null,
+                // Snapshot de la presentación aplicada. `stock_units_consumed` queda
+                // en null cuando no hubo empaque, para distinguir "no aplica" de
+                // "empaque de 1" igual que en el resto de los flujos de venta.
+                applied_price_tier_id: item.applied_price_tier_id,
+                applied_price_tier_name_snapshot:
+                  item.applied_price_tier_name_snapshot,
+                stock_units_consumed: item.stock_units_consumed,
+                order_item_taxes: {
+                  create: item.item_taxes.map((t) => ({
+                    tax_rate_id: t.tax_rate_id,
+                    tax_name: t.name,
+                    tax_rate: t.rate,
+                    tax_amount: t.amount * item.quantity,
+                    tax_type: t.tax_type,
+                    // A.4 (F-002): el flag viaja por fila (N filas por tasa).
+                    // QUI-INC — sin `?? false`. `CheckoutLineTaxSnapshot` ya lo
+                    // declara obligatorio y el kernel lo devuelve por tasa: el
+                    // default local sólo podía enmascarar un hueco del productor,
+                    // y `is_inclusive` decide cómo parte el XML DIAN la línea
+                    // (ADR-03), así que un `false` inventado descuadra el
+                    // documento con los importes cuadrando igual.
+                    is_inclusive: t.is_inclusive,
+                  })),
+                },
               })),
             },
-          })),
-        },
-      },
-      include: {
-        order_items: true,
-      },
-    }).catch(async (error) => {
+          },
+          include: {
+            order_items: true,
+          },
+      });
+      await recordTriggerEvent(tx, 'order.created', {
+        store_id: created.store_id,
+        order_id: created.id,
+        order_number: created.order_number,
+        grand_total: created.grand_total,
+        currency: created.currency,
+        channel: created.channel,
+      });
+      return created;
+    };
+    const order: Awaited<ReturnType<typeof createOrder>> =
+      await this.prisma.$transaction(createOrder).catch(async (error) => {
       await this.cancelCheckoutBookings(createdBookingIds);
       throw error;
     });
@@ -3529,91 +3551,104 @@ export class CheckoutService {
       guest_customer,
       resolved_customer_id,
     );
-    const order = await this.prisma.orders.create({
-      data: {
-        order_number,
-        customer_id: resolved_customer_id,
-        customer_alias: wa_guest_customer_alias,
-        channel: 'whatsapp',
-        currency: cart_currency,
-        subtotal_amount: subtotal,
-        tax_amount: total_tax,
-        discount_amount: discountResult.total_discount,
-        shipping_cost: wa_shipping_cost,
-        shipping_method_id: wa_shipping_method_id,
-        shipping_rate_id: wa_shipping_rate_id,
-        // Copia congelada del impuesto del envío (vacía sin tarifa gravada).
-        ...wa_shipping_tax,
-        // Paso 14 — modo de la tarifa que produjo la copia (null = sin
-        // impuesto o histórico).
-        shipping_tax_is_inclusive: wa_shipping_tax_is_inclusive,
-        delivery_type: wa_delivery_type,
-        grand_total: grand_total,
-        // B8 (release-855): same reasoning as the normal checkout path —
-        // no `payments` row is created for WhatsApp checkout at all, so the
-        // schema default (`remaining_balance=0`) is even more wrong here:
-        // nothing has ever been collected for this order.
-        total_paid: 0,
-        remaining_balance: grand_total,
-        shipping_address_id,
-        shipping_address_snapshot,
-        state: 'created',
-        internal_notes: dto.notes,
-        // QUI-887 — igual que el checkout normal: la observación del
-        // comprador va a la columna visible `notes` para que el KDS la lea.
-        notes: dto.notes?.trim() || undefined,
-        placed_at: new Date(),
-        order_items: {
-          create: itemsWithTaxes.map((item) => ({
-            // Online/whatsapp para enviar: el plato KDS se empaca.
-            is_takeaway:
-              markTakeawayForDelivery &&
-              (item as any).product?.product_type === 'prepared',
-            product_id: item.product_id,
-            product_variant_id: item.product_variant_id,
-            product_name: item.product.name,
-            variant_sku: item.product_variant?.sku,
-            variant_attributes: item.product_variant?.attributes
-              ? JSON.stringify(item.product_variant.attributes)
-              : null,
-            quantity: item.quantity,
-            unit_price: item.base_unit_price,
-            total_price: item.total_net,
-            tax_rate: item.tax_rate,
-            tax_amount_item: item.tax_amount_item,
-            cost_price: item.cost_price,
-            notes: (item as any).notes?.trim() || null,
-            // Snapshot de la presentación aplicada. `stock_units_consumed` queda
-            // en null cuando no hubo empaque, para distinguir "no aplica" de
-            // "empaque de 1" igual que en el resto de los flujos de venta.
-            applied_price_tier_id: item.applied_price_tier_id,
-            applied_price_tier_name_snapshot:
-              item.applied_price_tier_name_snapshot,
-            stock_units_consumed: item.stock_units_consumed,
-            order_item_taxes: {
-              create: item.item_taxes.map((t) => ({
-                tax_rate_id: t.tax_rate_id,
-                tax_name: t.name,
-                tax_rate: t.rate,
-                tax_amount: t.amount * item.quantity,
-                tax_type: t.tax_type,
-                // A.4 (F-002): el flag viaja por fila (N filas por tasa).
-                // QUI-INC — sin `?? false`. `CheckoutLineTaxSnapshot` ya lo
-                // declara obligatorio y el kernel lo devuelve por tasa: el
-                // default local sólo podía enmascarar un hueco del productor,
-                // y `is_inclusive` decide cómo parte el XML DIAN la línea
-                // (ADR-03), así que un `false` inventado descuadra el
-                // documento con los importes cuadrando igual.
-                is_inclusive: t.is_inclusive,
+    const createOrder = async (tx: CheckoutOrderTx) => {
+      const created = await tx.orders.create({
+          data: {
+            order_number,
+            customer_id: resolved_customer_id,
+            customer_alias: wa_guest_customer_alias,
+            channel: 'whatsapp',
+            currency: cart_currency,
+            subtotal_amount: subtotal,
+            tax_amount: total_tax,
+            discount_amount: discountResult.total_discount,
+            shipping_cost: wa_shipping_cost,
+            shipping_method_id: wa_shipping_method_id,
+            shipping_rate_id: wa_shipping_rate_id,
+            // Copia congelada del impuesto del envío (vacía sin tarifa gravada).
+            ...wa_shipping_tax,
+            // Paso 14 — modo de la tarifa que produjo la copia (null = sin
+            // impuesto o histórico).
+            shipping_tax_is_inclusive: wa_shipping_tax_is_inclusive,
+            delivery_type: wa_delivery_type,
+            grand_total: grand_total,
+            // B8 (release-855): same reasoning as the normal checkout path —
+            // no `payments` row is created for WhatsApp checkout at all, so the
+            // schema default (`remaining_balance=0`) is even more wrong here:
+            // nothing has ever been collected for this order.
+            total_paid: 0,
+            remaining_balance: grand_total,
+            shipping_address_id,
+            shipping_address_snapshot,
+            state: 'created',
+            internal_notes: dto.notes,
+            // QUI-887 — igual que el checkout normal: la observación del
+            // comprador va a la columna visible `notes` para que el KDS la lea.
+            notes: dto.notes?.trim() || undefined,
+            placed_at: new Date(),
+            order_items: {
+              create: itemsWithTaxes.map((item) => ({
+                // Online/whatsapp para enviar: el plato KDS se empaca.
+                is_takeaway:
+                  markTakeawayForDelivery &&
+                  (item as any).product?.product_type === 'prepared',
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id,
+                product_name: item.product.name,
+                variant_sku: item.product_variant?.sku,
+                variant_attributes: item.product_variant?.attributes
+                  ? JSON.stringify(item.product_variant.attributes)
+                  : null,
+                quantity: item.quantity,
+                unit_price: item.base_unit_price,
+                total_price: item.total_net,
+                tax_rate: item.tax_rate,
+                tax_amount_item: item.tax_amount_item,
+                cost_price: item.cost_price,
+                notes: (item as any).notes?.trim() || null,
+                // Snapshot de la presentación aplicada. `stock_units_consumed` queda
+                // en null cuando no hubo empaque, para distinguir "no aplica" de
+                // "empaque de 1" igual que en el resto de los flujos de venta.
+                applied_price_tier_id: item.applied_price_tier_id,
+                applied_price_tier_name_snapshot:
+                  item.applied_price_tier_name_snapshot,
+                stock_units_consumed: item.stock_units_consumed,
+                order_item_taxes: {
+                  create: item.item_taxes.map((t) => ({
+                    tax_rate_id: t.tax_rate_id,
+                    tax_name: t.name,
+                    tax_rate: t.rate,
+                    tax_amount: t.amount * item.quantity,
+                    tax_type: t.tax_type,
+                    // A.4 (F-002): el flag viaja por fila (N filas por tasa).
+                    // QUI-INC — sin `?? false`. `CheckoutLineTaxSnapshot` ya lo
+                    // declara obligatorio y el kernel lo devuelve por tasa: el
+                    // default local sólo podía enmascarar un hueco del productor,
+                    // y `is_inclusive` decide cómo parte el XML DIAN la línea
+                    // (ADR-03), así que un `false` inventado descuadra el
+                    // documento con los importes cuadrando igual.
+                    is_inclusive: t.is_inclusive,
+                  })),
+                },
               })),
             },
-          })),
-        },
-      },
-      include: {
-        order_items: true,
-      },
-    });
+          },
+          include: {
+            order_items: true,
+          },
+      });
+      await recordTriggerEvent(tx, 'order.created', {
+        store_id: created.store_id,
+        order_id: created.id,
+        order_number: created.order_number,
+        grand_total: created.grand_total,
+        currency: created.currency,
+        channel: created.channel,
+      });
+      return created;
+    };
+    const order: Awaited<ReturnType<typeof createOrder>> =
+      await this.prisma.$transaction(createOrder);
 
     // Persist promotions + coupon usage (WhatsApp checkout shares the same
     // discount source of truth as the normal checkout flow).

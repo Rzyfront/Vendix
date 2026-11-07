@@ -175,6 +175,7 @@ export class WorkflowBoardMoveModalComponent {
         },
         this.idempotencyKey,
       )
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.busy.set(false);

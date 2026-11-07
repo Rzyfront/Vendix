@@ -32,6 +32,11 @@ import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availabil
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from 'src/common/errors';
 
+// The durable outbox write has its own spec (workflow-trigger.fanout.spec.ts).
+jest.mock('../../store/workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
+
 /**
  * Tests for ecommerce CheckoutService promotion/coupon recalculation.
  *
@@ -172,6 +177,7 @@ describe('CheckoutService - promotions and coupons', () => {
 
     // ecommerce-scoped prisma: only the operations checkout uses.
     prisma = {
+      $transaction: jest.fn(async (cb: (tx: unknown) => unknown) => cb(prisma)),
       carts: { findFirst: jest.fn().mockResolvedValue(null) },
       products: {
         findUnique: jest.fn(({ where }: any) => {
@@ -847,7 +853,7 @@ describe('CheckoutService - promotions and coupons', () => {
     function mockBookingLinking() {
       const linkBookings = jest.fn().mockResolvedValue({ count: 1 });
       prisma.$transaction = jest.fn(async (cb: any) =>
-        cb({ bookings: { updateMany: linkBookings } }),
+        cb({ ...prisma, bookings: { updateMany: linkBookings } }),
       );
       prisma.orders.updateMany = jest.fn().mockResolvedValue({ count: 1 });
       const reservations = (service as any).reservationsService;

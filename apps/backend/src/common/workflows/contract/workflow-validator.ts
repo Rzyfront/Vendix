@@ -67,6 +67,7 @@ export const WORKFLOW_ISSUE_CODES = [
   "TOKEN_UNKNOWN",
   "EVENT_UNKNOWN",
   "MAP_INVALID",
+  "VISIBILITY_CYCLE",
 ] as const;
 
 export type WorkflowIssueCode = (typeof WORKFLOW_ISSUE_CODES)[number];
@@ -95,7 +96,10 @@ export interface WorkflowValidationContext {
 }
 
 type Json = Record<string, unknown>;
-type FieldMap = Map<string, { type: WorkflowFieldType }>;
+type FieldMap = Map<
+  string,
+  { type: WorkflowFieldType; options?: readonly string[] }
+>;
 
 const isObj = (v: unknown): v is Json =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -334,6 +338,9 @@ function checkRule(rule: unknown, path: string, cc: CondCtx) {
     bad(`es obligatorio con el operador "${op}"`);
     return;
   }
+  const options = cc.fields.get(fieldKey)!.options;
+  const outsideOptions = (x: unknown) =>
+    options !== undefined && !options.includes(String(x));
   if (op === "in" || op === "not_in") {
     if (
       !Array.isArray(value) ||
@@ -343,6 +350,8 @@ function checkRule(rule: unknown, path: string, cc: CondCtx) {
       )
     ) {
       bad("debe ser una lista de textos o números");
+    } else if (value.some(outsideOptions)) {
+      bad("usa una opción que el campo no tiene");
     }
     return;
   }
@@ -356,7 +365,53 @@ function checkRule(rule: unknown, path: string, cc: CondCtx) {
       bad("debe ser el id numérico de un usuario");
   } else if (!isStr(value)) {
     bad("debe ser un texto");
+  } else if (outsideOptions(value)) {
+    bad("usa una opción que el campo no tiene");
   }
+}
+
+/** Keys of the fields a condition reads, however nested. */
+function conditionFieldKeys(group: unknown, out = new Set<string>()): Set<string> {
+  if (!isObj(group)) return out;
+  if (isStr(group["field"])) out.add(group["field"]);
+  for (const kind of ["all", "any"]) {
+    const nodes = group[kind];
+    if (Array.isArray(nodes)) nodes.forEach((n) => conditionFieldKeys(n, out));
+  }
+  return out;
+}
+
+/** A field hidden by a field hidden by itself never shows: one error per cycle. */
+function checkVisibilityCycles(
+  c: Collector,
+  fields: ReadonlyArray<{ f: Json; i: number }>,
+) {
+  const reads = new Map(
+    fields.map(({ f }) => [
+      f["key"] as string,
+      conditionFieldKeys(f["visible_when"]),
+    ]),
+  );
+  const indexOf = new Map(fields.map(({ f, i }) => [f["key"] as string, i]));
+  const done = new Set<string>();
+  const visit = (key: string, trail: string[]) => {
+    const at = trail.indexOf(key);
+    if (at >= 0) {
+      const cycle = trail.slice(at);
+      c.err(
+        "VISIBILITY_CYCLE",
+        `fields[${indexOf.get(key)}].visible_when`,
+        `Los campos ${cycle.map((k) => `"${k}"`).join(", ")} dependen entre sí para mostrarse: ninguno aparecería nunca.`,
+      );
+      return;
+    }
+    if (done.has(key)) return;
+    for (const next of reads.get(key) ?? []) {
+      if (reads.has(next)) visit(next, [...trail, key]);
+    }
+    done.add(key);
+  };
+  for (const key of reads.keys()) visit(key, []);
 }
 
 /* ------------------------------------------------------------------ */
@@ -816,7 +871,17 @@ function checkFields(raw: unknown, c: Collector): FieldMap {
         );
     }
     if (keyOk && typeOk) {
-      map.set(f["key"] as string, { type: f["type"] as WorkflowFieldType });
+      const options = f["options"];
+      map.set(f["key"] as string, {
+        type: f["type"] as WorkflowFieldType,
+        ...(f["type"] === "select" && Array.isArray(options)
+          ? {
+              options: options
+                .filter(isObj)
+                .map((o) => String(o["value"])),
+            }
+          : {}),
+      });
       valid.push({ f, i });
     }
   });
@@ -831,6 +896,7 @@ function checkFields(raw: unknown, c: Collector): FieldMap {
       tooDeepReported: false,
     });
   }
+  checkVisibilityCycles(c, valid);
   return map;
 }
 

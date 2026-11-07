@@ -1,0 +1,7 @@
+Saludos para todos. El día de hoy les voy a enseñar cómo organizar tus productos con categorías. Empecemos desde un producto. En la lista de productos, haz clic en el lápiz para editarlo. Baja hasta Clasificación y Medidas. En Categorías puedes elegir varias, por ejemplo, Construcción y Herramientas. Luego haz clic en Guardar.
+
+Las categorías te sirven para encontrar productos rápido. En la lista, abre Filtros y elige una categoría, por ejemplo, Construcción. La lista muestra solo los productos de esa categoría.
+
+Ahora vamos a crear una categoría nueva. En el menú lateral, entra en Categorías. Aquí ves todas tus categorías, con cuántos productos tiene cada una. Abre el menú Acciones y elige Nueva Categoría. Escribe el nombre, por ejemplo, Vestimenta. Luego escribe el slug, que es la dirección de la categoría en tu tienda. Si quieres, agrega una imagen y una descripción. Haz clic en Crear Categoría.
+
+Para llenar la categoría, haz clic en el botón de productos de esa fila. Se abre la ventana Productos de Vestimenta. Marca los productos que quieres incluir y haz clic en Guardar. Vendix confirma los productos agregados, y la categoría ya muestra dos productos.

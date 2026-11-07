@@ -3,7 +3,6 @@ import { join } from 'path';
 import { MODULE_INDUSTRIES } from './module-industries';
 import {
   EMPRESARIAL_MODULE_KEYS,
-  IA_BUSINESS_MODULE_KEYS,
   PLAN_MATRIX,
   PLAN_MODULE_API_ROUTES,
   PLAN_MODULE_FAMILIES,
@@ -28,6 +27,12 @@ const COPIES = [
 const MIGRATION = join(
   REPO_ROOT,
   'apps/backend/prisma/migrations/20261110090000_plan_module_rules/migration.sql',
+);
+// Applied migrations are immutable: D2 takes flows/documents out in a later one.
+const RELEASED_FROM_IA_BUSINESS = ['flows', 'documents'];
+const RELEASE_MIGRATION = join(
+  REPO_ROOT,
+  'apps/backend/prisma/migrations/20261116090000_plan_rules_release_flows_documents/migration.sql',
 );
 
 /** Rows the migration would write for one plan code, built from PLAN_MATRIX. */
@@ -71,7 +76,7 @@ describe('plan-modules — parity with the copies and the migration', () => {
     });
   });
 
-  it('the migration seeds exactly PLAN_MATRIX (prefix, mode and keys per line)', () => {
+  it('the seed migration minus the D2 release is exactly PLAN_MATRIX (prefix, mode and keys per line)', () => {
     const sql = readFileSync(MIGRATION, 'utf8');
     const blocks = sql.split('-- ').filter((b) => /^[a-z-]+%: /.test(b));
     expect(blocks).toHaveLength(PLAN_MATRIX.length);
@@ -83,9 +88,28 @@ describe('plan-modules — parity with the copies and the migration', () => {
       expect({ line: line.id, found: !!block }).toEqual({ line: line.id, found: true });
       expect(block).toContain(`'${mode}'::"plan_module_rule_mode_enum"`);
       expect(block).toContain(`LIKE '${prefix}%'`);
-      const seeded = [...block!.matchAll(/\('([a-z_]+)'\)/g)].map((m) => m[1]);
+      const seeded = [...block!.matchAll(/\('([a-z_]+)'\)/g)]
+        .map((m) => m[1])
+        .filter(
+          (key) =>
+            prefix !== 'ia-business' || !RELEASED_FROM_IA_BUSINESS.includes(key),
+        );
       expect(seeded.sort()).toEqual([...keys].sort());
     }
+  });
+
+  it('the D2 release deletes only the exclusive flows/documents rows of ia-business%', () => {
+    const sql = readFileSync(RELEASE_MIGRATION, 'utf8');
+    expect(sql).toContain('-- DATA IMPACT:');
+    const statements = sql
+      .split('\n')
+      .filter((line) => !line.startsWith('--'))
+      .join('\n');
+    expect(statements.match(/DELETE FROM/g)).toHaveLength(1);
+    expect(statements).not.toMatch(/\b(TRUNCATE|DROP|CASCADE|UPDATE)\b/);
+    expect(statements).toContain(`"mode" = 'exclusive'`);
+    expect(statements).toContain(`"module_key" IN ('flows', 'documents')`);
+    expect(statements).toContain(`"code" LIKE 'ia-business%'`);
   });
 });
 
@@ -97,7 +121,7 @@ describe('plan-modules — matrix invariants', () => {
   });
 
   it('every API-mapped key and every paywall family key is a gated key', () => {
-    const gated = new Set([...EMPRESARIAL_MODULE_KEYS, ...IA_BUSINESS_MODULE_KEYS]);
+    const gated = new Set([...EMPRESARIAL_MODULE_KEYS]);
     for (const key of Object.keys(PLAN_MODULE_API_ROUTES)) {
       expect({ key, gated: gated.has(key) }).toEqual({ key, gated: true });
     }
@@ -113,7 +137,7 @@ describe('plan-modules — matrix invariants', () => {
   });
 
   it('no gated key is exempt (dashboard, subscription, account, help stay open)', () => {
-    for (const key of [...EMPRESARIAL_MODULE_KEYS, ...IA_BUSINESS_MODULE_KEYS]) {
+    for (const key of [...EMPRESARIAL_MODULE_KEYS]) {
       expect(isPlanExemptKey(key)).toBe(false);
     }
     for (const key of [
@@ -138,16 +162,30 @@ describe('plan-modules — evaluation over the seeded matrix', () => {
     for (const code of ['vendix-impulsa', 'emprendedor-pro-monthly', 'emprendedor-pro-annual']) {
       const blocked = planBlockedModules(code, rules);
       expect(blocked).toEqual(
-        [...EMPRESARIAL_MODULE_KEYS, ...IA_BUSINESS_MODULE_KEYS].sort(),
+        [...EMPRESARIAL_MODULE_KEYS].sort(),
       );
     }
   });
 
-  it('Empresarial Pro includes fiscal/accounting but not flows nor documents', () => {
-    expect(planBlockedModules('empresarial-pro-monthly', rules)).toEqual([
-      'documents',
-      'flows',
-    ]);
+  it('Empresarial Pro includes every gated module', () => {
+    expect(planBlockedModules('empresarial-pro-monthly', rules)).toEqual([]);
+  });
+
+  it('flows and documents are never gated by plan: the industry grants them (D2)', () => {
+    const everyLine = [
+      'vendix-impulsa',
+      'emprendedor-pro-monthly',
+      'empresarial-pro-monthly',
+      'ia-business',
+    ];
+    for (const plan of everyLine) {
+      const blocked = planBlockedModules(plan, rules);
+      expect(blocked).not.toContain('flows');
+      expect(blocked).not.toContain('documents');
+    }
+    expect(requiredPlanCodes('flows', rules)).toEqual([]);
+    expect(requiredPlanCodes('documents', rules)).toEqual([]);
+    expect(rules.some((r) => ['flows', 'documents'].includes(r.module_key))).toBe(false);
   });
 
   it('IA Business includes everything', () => {
@@ -171,12 +209,11 @@ describe('plan-modules — evaluation over the seeded matrix', () => {
     expect(blocked).not.toContain('subscription');
   });
 
-  it('required plans: invoicing → Empresarial + IA Business; flows → IA Business only', () => {
+  it('required plans: invoicing → Empresarial + IA Business', () => {
     expect(requiredPlanCodes('invoicing', rules)).toEqual([
       'empresarial-pro-monthly',
       'ia-business',
     ]);
-    expect(requiredPlanCodes('flows', rules)).toEqual(['ia-business']);
     expect(requiredPlanCodes('pos', rules)).toEqual([]);
   });
 

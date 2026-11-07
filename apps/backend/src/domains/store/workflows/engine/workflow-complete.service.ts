@@ -127,6 +127,17 @@ export class WorkflowCompleteService {
       if (CLOSED_TASK.includes(task.status)) {
         throw new VendixHttpException(ErrorCodes.WORKFLOW_TASK_CLOSED);
       }
+      // Under the lock: a double click from the same user read no vote above.
+      const votedMeanwhile = await tx.workflow_task_votes.findFirst({
+        where: {
+          store_id: ctx.store_id,
+          task_id: task.id,
+          user_id: ctx.user_id,
+        },
+      });
+      if (votedMeanwhile) {
+        throw new VendixHttpException(ErrorCodes.WORKFLOW_ALREADY_VOTED);
+      }
       expected = instance.row_version;
       await tx.workflow_task_votes.create({
         data: {

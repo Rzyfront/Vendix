@@ -1,3 +1,4 @@
+import { ApiKeyFailureLimiter } from '../store/integrations/api-keys/api-key-failure-limiter';
 import 'reflect-metadata';
 import { Reflector } from '@nestjs/core';
 import { firstValueFrom, from } from 'rxjs';
@@ -189,9 +190,12 @@ describe('/api/v1/workflows request chain', () => {
     const access: any = {
       canUseModule: jest.fn(async () => ({ mode: 'allow' })),
     };
-    const guard = new ApiKeyGuard(auth, access, {
-      isEnforce: () => true,
-    } as any);
+    const guard = new ApiKeyGuard(
+      auth,
+      access,
+      { isEnforce: () => true } as any,
+      new ApiKeyFailureLimiter(),
+    );
     const req: any = {
       method,
       headers: { 'x-api-key': 'vdx_live_abc123_zzzzzzzz' },

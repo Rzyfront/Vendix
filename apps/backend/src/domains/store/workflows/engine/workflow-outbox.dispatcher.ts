@@ -16,6 +16,11 @@ import { WorkflowActionsExecutor } from './workflow-actions.executor';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import { WorkflowEmailService } from './workflow-email.service';
 import { WorkflowEngineService } from './workflow-engine.service';
+import { WorkflowTriggerFanout } from './workflow-trigger.fanout';
+import {
+  BUSINESS_EVENT_OUTBOX_KIND,
+  BusinessEventOutboxPayload,
+} from './workflow-trigger.outbox';
 import {
   WorkflowInstanceRow,
   WorkflowNonRetryableError,
@@ -70,6 +75,7 @@ export class WorkflowOutboxDispatcher {
     private readonly mailer: WorkflowEmailService,
     private readonly webhooks: WorkflowWebhookDeliveryService,
     private readonly actions: WorkflowActionsExecutor,
+    private readonly fanout: WorkflowTriggerFanout,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -98,10 +104,15 @@ export class WorkflowOutboxDispatcher {
     for (const row of rows) {
       try {
         await this.process(row, orgByStore);
-        await this.prisma.withoutScope().workflow_outbox.updateMany({
+        const { count } = await this.prisma.withoutScope().workflow_outbox.updateMany({
           where: { id: row.id, status: 'processing' },
           data: { status: 'done', last_error: null },
         });
+        if (count === 0) {
+          this.logger.warn(
+            `Outbox ${row.id} (${row.kind}) finished after being buried or reclaimed by another worker`,
+          );
+        }
         summary.done++;
       } catch (e) {
         const outcome = await this.fail(row, e, now);
@@ -129,6 +140,7 @@ export class WorkflowOutboxDispatcher {
     const db = this.prisma.withoutScope();
     const stale = await db.workflow_outbox.findMany({
       where,
+      take: OUTBOX_BATCH,
       select: {
         id: true,
         store_id: true,
@@ -304,6 +316,11 @@ export class WorkflowOutboxDispatcher {
           await this.notify(row);
         } else if (row.kind === 'webhook') {
           await this.webhooks.deliver(row);
+        } else if (row.kind === BUSINESS_EVENT_OUTBOX_KIND) {
+          await this.fanout.fanOut(
+            row.store_id,
+            row.payload as BusinessEventOutboxPayload,
+          );
         } else if (row.kind === 'start_instance') {
           await this.startFromEvent(row);
         } else if (row.kind === 'action') {

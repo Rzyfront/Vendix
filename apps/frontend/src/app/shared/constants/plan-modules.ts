@@ -98,12 +98,10 @@ export const EMPRESARIAL_MODULE_KEYS: readonly string[] = [
 ];
 
 /**
- * IA Business only. Neither module exists yet (own plan:
- * odd/tasks/flujos-ai-business.md); the rules are seeded so they lock the day
- * the modules land.
+ * IA Business has no exclusive module of its own: access to `flows` and
+ * `documents` comes from the `administration` industry, and plans differ only
+ * by AI and its token quota (odd/tasks/flujos-administracion-plan.md, D2).
  */
-export const IA_BUSINESS_MODULE_KEYS: readonly string[] = ['flows', 'documents'];
-
 // ── Commercial lines and the matrix ───────────────────────────────────────
 
 export type PlanLineId = 'impulsa' | 'emprendedor' | 'empresarial' | 'ia_business';
@@ -147,7 +145,7 @@ export const PLAN_MATRIX: readonly PlanLine[] = [
     name: 'IA Business',
     code_prefixes: ['ia-business'],
     blocked: [],
-    exclusive: [...EMPRESARIAL_MODULE_KEYS, ...IA_BUSINESS_MODULE_KEYS],
+    exclusive: EMPRESARIAL_MODULE_KEYS,
   },
 ];
 
@@ -477,18 +475,6 @@ export const PLAN_MODULE_FAMILIES: readonly PlanModuleFamily[] = [
     name: 'Operación fiscal',
     value: 'Calendario de obligaciones, declaraciones y cierre fiscal en un solo lugar.',
     keys: FISCAL_KEYS,
-  },
-  {
-    id: 'flows',
-    name: 'Flujos Automatizados impulsados con IA',
-    value: 'Automatiza procesos de tu negocio con agentes que trabajan por ti.',
-    keys: ['flows'],
-  },
-  {
-    id: 'documents',
-    name: 'Documentación Avanzada con IA integrada',
-    value: 'Recibe, organiza y consulta tus documentos con IA.',
-    keys: ['documents'],
   },
 ];
 

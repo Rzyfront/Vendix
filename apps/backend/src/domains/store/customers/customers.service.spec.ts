@@ -5,6 +5,11 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import * as bcrypt from 'bcrypt';
 
+// The durable outbox write has its own spec (workflow-trigger.fanout.spec.ts).
+jest.mock('../workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
+
 /**
  * QUI-728 — DIAN Anexo Técnico 19 customer fiscal data.
  *
@@ -30,6 +35,9 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
   let eventEmitter: EventEmitter2;
 
   const mockPrismaService = {
+    withoutScope: () => ({
+      $transaction: (cb: (tx: unknown) => unknown) => cb(mockPrismaService),
+    }),
     stores: {
       findUnique: jest.fn(),
     },
