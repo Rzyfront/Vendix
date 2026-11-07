@@ -426,7 +426,7 @@ export class InventoryAdjustmentsService {
 
       data = {
         ...data,
-        type: this.resolveInitialLoadType(
+        type: await this.resolveGatedInitialLoadType(
           data.type,
           quantityBefore,
           quantityChange,
@@ -472,7 +472,7 @@ export class InventoryAdjustmentsService {
 
     data = {
       ...data,
-      type: this.resolveInitialLoadType(
+      type: await this.resolveGatedInitialLoadType(
         data.type,
         quantityBefore,
         quantityChange,
@@ -584,6 +584,43 @@ export class InventoryAdjustmentsService {
         : Number(stockUpdate.cost_snapshot?.total_cost || 0),
       adjustment_type: data.type,
     };
+  }
+
+  /**
+   * Flujos P1.3: an initial load is not held, so its gate was never asked.
+   * When the stock moved since the preview and the load falls back to a
+   * count difference, that difference is a real correction: if a flow
+   * governs it, it is refused (409) inside the caller's transaction and the
+   * user registers it from Ajustes de Stock, which asks the approval.
+   */
+  private async resolveGatedInitialLoadType(
+    type: AdjustmentType,
+    quantityBefore: number,
+    quantityChange: number,
+    allowFallback = false,
+  ): Promise<AdjustmentType> {
+    const resolved = this.resolveInitialLoadType(
+      type,
+      quantityBefore,
+      quantityChange,
+      allowFallback,
+    );
+    if (
+      type === 'initial_load' &&
+      resolved !== 'initial_load' &&
+      quantityChange !== 0 &&
+      (await operationIsGoverned(
+        this.prisma,
+        'inventory_adjustment.create',
+        Math.abs(quantityChange),
+      ))
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.WORKFLOW_APPROVAL_REQUIRED,
+        `El stock cambió mientras se aplicaba la carga inicial: la diferencia de ${quantityChange} unidades necesita aprobación (Inventario: ajuste). Regístrala desde Ajustes de Stock para pedir la aprobación.`,
+      );
+    }
+    return resolved;
   }
 
   private resolveInitialLoadType(

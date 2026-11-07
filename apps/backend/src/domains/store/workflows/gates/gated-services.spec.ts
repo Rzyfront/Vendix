@@ -486,6 +486,33 @@ describe('governed domain services (P1.3)', () => {
       expect(callerTx.inventory_adjustments.create).not.toHaveBeenCalled();
     });
 
+    it('an initial load that falls back to a count difference (stock moved since the preview) is refused when governed (review r2)', async () => {
+      const callerTx = {
+        $executeRawUnsafe: jest.fn(),
+        stock_levels: {
+          findFirst: jest.fn().mockResolvedValue({ quantity_on_hand: 20 }),
+        },
+        inventory_adjustments: { create: jest.fn() },
+      };
+      const svc = bare(InventoryAdjustmentsService, { prisma: {} });
+      const load = () =>
+        svc.createAdjustmentInTransaction(
+          callerTx,
+          { product_id: 3, location_id: 1, quantity_after: 600, type: 'initial_load' } as never,
+          { initialLoadFallback: true },
+        );
+      await expect(inStore(load)).rejects.toMatchObject({
+        errorCode: 'WORKFLOW_APPROVAL_REQUIRED',
+      });
+      expect(mockGoverned).toHaveBeenCalledWith(
+        {},
+        'inventory_adjustment.create',
+        580,
+      );
+      expect(mockEnforce).not.toHaveBeenCalled();
+      expect(callerTx.inventory_adjustments.create).not.toHaveBeenCalled();
+    });
+
     it('archive write-offs: every governed line gets its request before the 409', async () => {
       const prisma = {
         stock_levels: {
