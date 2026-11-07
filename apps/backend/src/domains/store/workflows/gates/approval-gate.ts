@@ -154,17 +154,17 @@ export async function findGoverningDefinition(
 
 /**
  * Cheap pre-check for hot paths (bulk adjustments): whether any active flow
- * of the current store governs `operation`, whatever the amount.
+ * of the current store governs `operation` — for `amount` when given,
+ * whatever the amount otherwise.
  */
 export async function operationIsGoverned(
   prisma: RootDb,
   operation: WorkflowGateOperation,
+  amount: number = Number.MAX_SAFE_INTEGER,
 ): Promise<boolean> {
   const storeId = RequestContextService.getStoreId();
   if (!storeId) return false;
-  return (
-    (await findGoverningDefinition(root(prisma), storeId, operation, Number.MAX_SAFE_INTEGER)) !== null
-  );
+  return (await findGoverningDefinition(root(prisma), storeId, operation, amount)) !== null;
 }
 
 /** P2002 by code: with the pg adapter `meta.target` may be missing. */

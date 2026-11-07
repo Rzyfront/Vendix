@@ -7,6 +7,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // Approval gate (flujos P1.3)
   WORKFLOW_APPROVAL_PENDING: 'Pendiente de aprobación: esta operación espera la decisión de su solicitud.',
   WORKFLOW_APPROVAL_REJECTED: 'La solicitud de aprobación de esta operación fue rechazada.',
+  WORKFLOW_APPROVAL_REQUIRED: 'Esta operación necesita aprobación y no puede hacerse por esta ruta.',
 
   // System
   SYS_INTERNAL_001: 'Ocurrio un error inesperado. Intente de nuevo.',

@@ -113,6 +113,11 @@ export class ApprovalGateProcessor {
         permission: 'store:orders:purchase_orders:pay',
         run: ([id, dto]) => this.purchaseOrders.registerPayment(num(id), dto as never),
       },
+      'supplier_payment.register:configurePurchaseOrderPaymentPlan': {
+        permission: 'store:orders:purchase_orders:update',
+        run: ([id, dto], userId) =>
+          this.purchaseOrders.configurePaymentPlan(num(id), dto as never, userId),
+      },
       'supplier_payment.register:registerPayablePayment': {
         permission: 'store:accounts_payable:payment',
         run: ([id, dto], userId) => payables.registerPayment(num(id), dto as never, userId),

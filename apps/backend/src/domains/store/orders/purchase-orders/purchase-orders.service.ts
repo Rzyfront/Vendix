@@ -2732,6 +2732,7 @@ export class PurchaseOrdersService {
         // por la matriz anti-doble-registro: partial con abono==total es
         // immediate SIN abono, así que aquí solo entran abonos reales < total.
         if (downPayment > 0) {
+          await this.assertCreateAdvanceNotGoverned(downPayment);
           const advance = await this.registerAdvancePaymentInTx(
             tx,
             purchaseOrder.id,
@@ -6470,6 +6471,27 @@ export class PurchaseOrdersService {
     }
   }
 
+  /**
+   * Flujos P1.3: an advance declared while creating an order is a real
+   * supplier payment. When a flow governs it, the order cannot carry it
+   * (there is no order yet to hold a request on): creating fails with 409 and
+   * the user registers the payment from the order, which asks approval.
+   */
+  private async assertCreateAdvanceNotGoverned(downPayment: number): Promise<void> {
+    if (
+      await operationIsGoverned(
+        this.prisma,
+        'supplier_payment.register',
+        downPayment,
+      )
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.WORKFLOW_APPROVAL_REQUIRED,
+        `El anticipo de $${downPayment} necesita aprobación (Pagos: pago a proveedor). Crea la orden sin anticipo y registra el pago desde la orden para pedir la aprobación.`,
+      );
+    }
+  }
+
   async registerPayment(purchaseOrderId: number, dto: RegisterPaymentDto) {
     const po = await this.prisma.purchase_orders.findUnique({
       where: { id: purchaseOrderId },
@@ -7570,8 +7592,35 @@ export class PurchaseOrdersService {
       }
     }
 
+    // Flujos P1.3: the advance configured here is a real supplier payment.
+    // A governed one waits for its request (409 while pending); once
+    // approved this same call runs once, as the requester
+    // (`configurePurchaseOrderPaymentPlan` of the gate processor).
+    const gate =
+      plan === 'partial' &&
+      down > 0 &&
+      (await operationIsGoverned(this.prisma, 'supplier_payment.register'))
+        ? await enforceApproval(this.prisma, {
+            operation: 'supplier_payment.register',
+            entity_type: 'purchase_order',
+            entity_id: id,
+            amount: down,
+            context: {
+              purchase_order_id: id,
+              supplier_id: order.suppliers?.id ?? null,
+              amount: down,
+              payment_method: PO_ADVANCE_PAYMENT_METHOD,
+            },
+            request: {
+              method: 'configurePurchaseOrderPaymentPlan',
+              args: [id, dto],
+            },
+          })
+        : ({ status: 'free' } as const);
+
     const orderId = order.id;
     const advanceRegistered = await this.prisma.$transaction(async (tx) => {
+      await consumeApproval(tx, gate);
       let advance: { paymentId: number; amount: number } | null = null;
 
       await tx.purchase_order_payment_schedules.deleteMany({

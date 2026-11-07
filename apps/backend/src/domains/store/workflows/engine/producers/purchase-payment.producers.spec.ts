@@ -26,6 +26,8 @@ describe('Flujos P1.1 producer: supplier_payment.registered (PurchaseOrdersServi
     };
     const prisma = {
       $transaction: transactionOf(tx),
+      // Flujos P1.3 gate lookup: a store without flows governs nothing.
+      withoutScope: () => ({ stores: { findFirst: async () => null } }),
       purchase_orders: {
         findUnique: jest.fn().mockResolvedValue({
           id: 12,

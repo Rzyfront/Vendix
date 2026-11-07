@@ -348,4 +348,175 @@ describe('governed domain services (P1.3)', () => {
       request: { method: 'void', args: [70] },
     });
   });
+
+  describe('routes that also write a governed effect (P1.3, review r1)', () => {
+    it('advance configured on an existing order (PATCH payment-plan) is held: 409, no write, same DTO replays', async () => {
+      const dto = { payment_plan: 'partial', down_payment_amount: 2900000 };
+      const prisma = {
+        purchase_orders: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 9,
+            status: 'draft',
+            total_amount: 3000000,
+            suppliers: { id: 7, name: 'Papelería Central', tax_id: '900' },
+          }),
+        },
+        purchase_order_payments: { findMany: jest.fn().mockResolvedValue([]) },
+        $transaction: tx,
+      };
+      const svc = bare(PurchaseOrdersService, { prisma });
+      await expect(
+        inStore(() => svc.configurePaymentPlan(9, dto as never, 4)),
+      ).rejects.toMatchObject({ errorCode: 'WORKFLOW_APPROVAL_PENDING' });
+      expect(tx).not.toHaveBeenCalled();
+      expect(mockEnforce).toHaveBeenCalledWith(
+        prisma,
+        expect.objectContaining({
+          operation: 'supplier_payment.register',
+          entity_type: 'purchase_order',
+          entity_id: 9,
+          amount: 2900000,
+          request: { method: 'configurePurchaseOrderPaymentPlan', args: [9, dto] },
+        }),
+      );
+    });
+
+    it('a payment plan without an advance is not a payment and is not held', async () => {
+      const prisma = {
+        purchase_orders: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 9,
+            status: 'draft',
+            total_amount: 3000000,
+            suppliers: { id: 7 },
+          }),
+        },
+        purchase_order_payments: { findMany: jest.fn().mockResolvedValue([]) },
+        $transaction: jest.fn().mockRejectedValue(new Error('reached the write')),
+      };
+      const svc = bare(PurchaseOrdersService, { prisma });
+      await expect(
+        inStore(() =>
+          svc.configurePaymentPlan(
+            9,
+            { payment_plan: 'deferred', payment_due_date: '2999-01-01' } as never,
+            4,
+          ),
+        ),
+      ).rejects.toThrow('reached the write');
+      expect(mockEnforce).not.toHaveBeenCalled();
+    });
+
+    it('advance declared while creating an order: governed for its amount → 409 and the order is not created', async () => {
+      const svc = bare(PurchaseOrdersService, { prisma: {} });
+      const guard = (amount: number) =>
+        (
+          svc as unknown as {
+            assertCreateAdvanceNotGoverned(a: number): Promise<void>;
+          }
+        ).assertCreateAdvanceNotGoverned(amount);
+      await expect(inStore(() => guard(2900000))).rejects.toMatchObject({
+        errorCode: 'WORKFLOW_APPROVAL_REQUIRED',
+      });
+      expect(mockGoverned).toHaveBeenCalledWith(
+        {},
+        'supplier_payment.register',
+        2900000,
+      );
+      mockGoverned.mockResolvedValue(false);
+      await expect(inStore(() => guard(1000))).resolves.toBeUndefined();
+    });
+
+    it('an adjustment written inside a caller transaction (bulk session, archive) is held: 409, nothing written', async () => {
+      const prisma = {
+        stock_levels: {
+          findFirst: jest.fn().mockResolvedValue({ quantity_on_hand: 500 }),
+        },
+        products: { findFirst: jest.fn().mockResolvedValue({ name: 'Resma' }) },
+      };
+      const callerTx = {
+        workflow_approval_gates: { updateMany: jest.fn() },
+        inventory_adjustments: { create: jest.fn() },
+      };
+      const svc = bare(InventoryAdjustmentsService, { prisma });
+      const dto = {
+        product_id: 3,
+        location_id: 1,
+        quantity_after: 0,
+        type: 'loss',
+      };
+      await expect(
+        inStore(() => svc.createAdjustmentInTransaction(callerTx, dto as never)),
+      ).rejects.toMatchObject({ errorCode: 'WORKFLOW_APPROVAL_PENDING' });
+      expect(callerTx.inventory_adjustments.create).not.toHaveBeenCalled();
+      expect(mockEnforce.mock.calls[0][1]).toMatchObject({
+        operation: 'inventory_adjustment.create',
+        entity_id: 3,
+        amount: 500,
+        request: { method: 'createAdjustment', args: [dto] },
+      });
+    });
+
+    it('an approval asked before the caller transaction is used once inside it', async () => {
+      const callerTx = {
+        workflow_approval_gates: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        },
+        inventory_adjustments: { create: jest.fn() },
+      };
+      const svc = bare(InventoryAdjustmentsService, { prisma: {} });
+      await expect(
+        inStore(() =>
+          svc.createAdjustmentInTransaction(
+            callerTx,
+            { product_id: 3, location_id: 1, quantity_after: 0, type: 'loss' } as never,
+            { approval: { status: 'approved', gate: { id: 5 } } as never },
+          ),
+        ),
+      ).rejects.toMatchObject({ errorCode: 'WORKFLOW_APPROVAL_PENDING' });
+      expect(mockEnforce).not.toHaveBeenCalled();
+      expect(callerTx.workflow_approval_gates.updateMany).toHaveBeenCalledWith({
+        where: { id: 5, status: 'approved', consumed_at: null },
+        data: { consumed_at: expect.any(Date) },
+      });
+      expect(callerTx.inventory_adjustments.create).not.toHaveBeenCalled();
+    });
+
+    it('archive write-offs: every governed line gets its request before the 409', async () => {
+      const prisma = {
+        stock_levels: {
+          findFirst: jest.fn().mockResolvedValue({ quantity_on_hand: 500 }),
+        },
+        products: { findFirst: jest.fn().mockResolvedValue({ name: 'Resma' }) },
+      };
+      const svc = bare(InventoryAdjustmentsService, { prisma });
+      const lines = [1, 2].map((location_id) => ({
+        product_id: 3,
+        location_id,
+        quantity_after: 0,
+        type: 'loss',
+      }));
+      await expect(
+        inStore(() => svc.requestAdjustmentApprovals(lines as never)),
+      ).rejects.toMatchObject({ errorCode: 'WORKFLOW_APPROVAL_PENDING' });
+      expect(mockRequest).toHaveBeenCalledTimes(2);
+      expect(mockRequest.mock.calls.map((c) => c[1].context.location_id)).toEqual([1, 2]);
+      expect(mockEnforce.mock.calls[0][1]).toMatchObject({
+        context: expect.objectContaining({ location_id: 1 }),
+      });
+    });
+
+    it('archive write-offs with no governing flow ask nothing and pass free', async () => {
+      mockGoverned.mockResolvedValue(false);
+      const svc = bare(InventoryAdjustmentsService, { prisma: {} });
+      await expect(
+        inStore(() =>
+          svc.requestAdjustmentApprovals([
+            { product_id: 3, location_id: 1, quantity_after: 0, type: 'loss' },
+          ] as never),
+        ),
+      ).resolves.toEqual([{ status: 'free' }]);
+      expect(mockRequest).not.toHaveBeenCalled();
+    });
+  });
 });
