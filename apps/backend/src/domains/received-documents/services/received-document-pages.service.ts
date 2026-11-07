@@ -15,6 +15,9 @@ export interface PreparedReceivedDocumentPage {
   data_uri: string;
   mime_type: 'image/jpeg';
   text: string;
+  /** PDF sources only: page size in PDF points (scale 1). */
+  width_pt?: number;
+  height_pt?: number;
 }
 
 export interface PreparedReceivedDocumentPages {
@@ -264,7 +267,11 @@ export class ReceivedDocumentPagesService {
           }
           await page.render({ canvasContext: canvasEntry.context, viewport }).promise;
           const jpeg = canvasEntry.canvas.toBuffer('image/jpeg', 85);
-          const prepared = this.toPage(pageNumber, jpeg, text);
+          const prepared = {
+            ...this.toPage(pageNumber, jpeg, text),
+            width_pt: baseViewport.width,
+            height_pt: baseViewport.height,
+          };
           totalOutputBytes += Buffer.byteLength(prepared.data_uri, 'utf8');
           if (totalOutputBytes > MAX_TOTAL_OUTPUT_BYTES) {
             throw this.badRequest('Las páginas preparadas exceden el límite de 20 MiB.');

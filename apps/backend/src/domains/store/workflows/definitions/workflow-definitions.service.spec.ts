@@ -134,6 +134,31 @@ describe('WorkflowDefinitionsService', () => {
       }
     });
 
+    it('P4.1: un requisito de documento emitido acepta solo plantillas publicadas de esta tienda', async () => {
+      const withTemplate = (key: string) => {
+        const d: any = purchaseDefinition();
+        d.stages[0].requirements = [
+          { kind: 'issued_document', key: 'contrato', label: 'Contrato', template_key: key },
+        ];
+        return d;
+      };
+      const tpl = (store_id: number, key: string, status: string, published_version_id: number | null) =>
+        kit.db.insert('document_templates', { store_id, organization_id: 1, key, status, published_version_id });
+      tpl(1, 'contrato-laboral', 'published', 10);
+      tpl(1, 'borrador', 'draft', null);
+      tpl(1, 'archivada', 'archived', 11);
+      tpl(2, 'ajena', 'published', 12);
+
+      const ok = await svc.create({ name: 'Con contrato', key: 'con_contrato', definition: withTemplate('contrato-laboral') });
+      expect((await svc.validate(ok.id)).errors.map((e: any) => e.code)).not.toContain('TEMPLATE_NOT_PUBLISHED');
+      for (const key of ['borrador', 'archivada', 'ajena', 'no-existe']) {
+        const d = await svc.create({ name: `T ${key}`, key: `t_${key.replace('-', '_')}`, definition: withTemplate(key) });
+        const r = await svc.validate(d.id);
+        expect(r.valid).toBe(false);
+        expect(r.errors.map((e: any) => e.code)).toContain('TEMPLATE_NOT_PUBLISHED');
+      }
+    });
+
     it('P3.2: {{secrets.NAME}} debe nombrar un secreto de esta tienda', async () => {
       const withSecret = (name: string) => {
         const d: any = purchaseDefinition();
