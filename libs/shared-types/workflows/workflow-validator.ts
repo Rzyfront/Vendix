@@ -19,8 +19,14 @@ import {
   WORKFLOW_INSTANCE_TOKENS,
   WORKFLOW_TRIGGER_EVENTS,
   WORKFLOW_VENDIX_ACTIONS,
+  WORKFLOW_ACTION_CATALOG,
+  WORKFLOW_GATE_OPERATIONS,
+  WORKFLOW_GATE_OPERATION_KEYS,
   WORKFLOW_VENDIX_ACTION_MAP_KEYS,
+  WorkflowActionInputSpec,
+  WorkflowGateOperation,
   WorkflowTriggerEvent,
+  gateOperationTokens,
   WorkflowVendixActionName,
   WORKFLOW_FIELD_TYPES,
   WORKFLOW_KEY_PATTERN,
@@ -67,6 +73,8 @@ export const WORKFLOW_ISSUE_CODES = [
   "TOKEN_UNKNOWN",
   "EVENT_UNKNOWN",
   "MAP_INVALID",
+  "GATE_OPERATION_UNKNOWN",
+  "GATE_END_MISSING",
   "VISIBILITY_CYCLE",
 ] as const;
 
@@ -476,6 +484,7 @@ function run(input: unknown, ctx: WorkflowValidationContext, c: Collector) {
       "fields",
       "stages",
       "triggers",
+      "governs",
       "start_roles",
     ],
     "",
@@ -586,6 +595,7 @@ function run(input: unknown, ctx: WorkflowValidationContext, c: Collector) {
   checkGraph(stages, c);
   checkPublicFormTrigger(input, c);
   checkEventTriggers(input, fields, c);
+  checkGoverns(input, fields, c);
 }
 
 /** Lists `{{path}}` tokens found in a string. */
@@ -637,50 +647,7 @@ function checkEventTriggers(input: Json, fields: FieldMap, c: Collector) {
     const allowed = WORKFLOW_EVENT_TOKENS[event as WorkflowTriggerEvent].map(
       (k) => `event.${k}`,
     );
-    const map = t["map"];
-    if (map !== undefined) {
-      if (!isObj(map)) {
-        c.err("MAP_INVALID", `${path}.map`, "El mapa del disparador debe ser un objeto.");
-      } else {
-        for (const [key, value] of Object.entries(map)) {
-          const p = `${path}.map.${key}`;
-          const f = fields.get(key);
-          if (!f) {
-            c.err(
-              "FIELD_UNKNOWN",
-              p,
-              `El disparador llena el campo "${key}", que no está declarado.`,
-            );
-          } else if (f.type === "file" || f.type === "multiselect") {
-            c.err(
-              "FIELD_TYPE_MISMATCH",
-              p,
-              `El disparador no puede llenar el campo "${key}" (los campos de tipo ${f.type} no admiten eventos).`,
-            );
-          }
-          if (!isStr(value) || value.length > 500) {
-            c.err(
-              "MAP_INVALID",
-              p,
-              `El valor de "${key}" debe ser texto de hasta 500 caracteres.`,
-            );
-            continue;
-          }
-          if (hasStrayBraces(value)) {
-            c.err("TOKEN_UNKNOWN", p, `El valor de "${key}" tiene llaves que no forman un token válido {{...}}.`);
-          }
-          for (const tok of tokensOf(value)) {
-            if (!allowed.includes(tok)) {
-              c.err(
-                "TOKEN_UNKNOWN",
-                p,
-                `El token "{{${tok}}}" no existe para el evento "${event}" (permitidos: ${allowed.map((a) => `{{${a}}}`).join(", ")}).`,
-              );
-            }
-          }
-        }
-      }
-    }
+    checkTokenMap(t["map"], `${path}.map`, fields, allowed, `el evento "${event}"`, c);
     const stages = Array.isArray(input["stages"])
       ? (input["stages"] as unknown[]).filter(isObj)
       : [];
@@ -695,6 +662,141 @@ function checkEventTriggers(input: Json, fields: FieldMap, c: Collector) {
       );
     }
   });
+}
+
+/**
+ * `map` of an event trigger or of `governs`: declared field → literal or
+ * `{{event.<key>}}` tokens of `allowed` only.
+ */
+function checkTokenMap(
+  map: unknown,
+  path: string,
+  fields: FieldMap,
+  allowed: readonly string[],
+  source: string,
+  c: Collector,
+) {
+  if (map === undefined) return;
+  if (!isObj(map)) {
+    c.err("MAP_INVALID", path, "El mapa debe ser un objeto.");
+    return;
+  }
+  for (const [key, value] of Object.entries(map)) {
+    const p = `${path}.${key}`;
+    const f = fields.get(key);
+    if (!f) {
+      c.err("FIELD_UNKNOWN", p, `El mapa llena el campo "${key}", que no está declarado.`);
+    } else if (f.type === "file" || f.type === "multiselect") {
+      c.err(
+        "FIELD_TYPE_MISMATCH",
+        p,
+        `El mapa no puede llenar el campo "${key}" (los campos de tipo ${f.type} no admiten datos de ${source}).`,
+      );
+    }
+    if (!isStr(value) || value.length > 500) {
+      c.err("MAP_INVALID", p, `El valor de "${key}" debe ser texto de hasta 500 caracteres.`);
+      continue;
+    }
+    if (hasStrayBraces(value)) {
+      c.err("TOKEN_UNKNOWN", p, `El valor de "${key}" tiene llaves que no forman un token válido {{...}}.`);
+    }
+    for (const tok of tokensOf(value)) {
+      if (!allowed.includes(tok)) {
+        c.err(
+          "TOKEN_UNKNOWN",
+          p,
+          `El token "{{${tok}}}" no existe para ${source} (permitidos: ${allowed.map((a) => `{{${a}}}`).join(", ")}).`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * `governs` (approval gate, P1.3): a known operation, a minimum amount >= 0, a
+ * map from the operation's tokens, a subject compatible with the operation,
+ * a start stage someone other than "the initiator" fills, and both an end
+ * `completed` (releases the operation) and an end `rejected` (voids it).
+ */
+function checkGoverns(input: Json, fields: FieldMap, c: Collector) {
+  const g = input["governs"];
+  if (g === undefined) return;
+  if (!isObj(g)) {
+    c.err("SHAPE_INVALID", "governs", "El candado de aprobación debe ser un objeto.");
+    return;
+  }
+  checkKeys(c, g, ["operation", "min_amount", "map"], "governs");
+  const op = g["operation"];
+  if (
+    !isStr(op) ||
+    !(WORKFLOW_GATE_OPERATION_KEYS as readonly string[]).includes(op)
+  ) {
+    c.err(
+      "GATE_OPERATION_UNKNOWN",
+      "governs.operation",
+      `La operación "${String(op)}" no se puede gobernar (permitidas: ${WORKFLOW_GATE_OPERATION_KEYS.join(", ")}).`,
+    );
+    return;
+  }
+  const spec = WORKFLOW_GATE_OPERATIONS[op as WorkflowGateOperation];
+  const min = g["min_amount"];
+  if (
+    min !== undefined &&
+    (typeof min !== "number" || !Number.isFinite(min) || min < 0)
+  ) {
+    c.err(
+      "SHAPE_INVALID",
+      "governs.min_amount",
+      `El umbral (${spec.amount_label.toLowerCase()}) debe ser un número mayor o igual a 0.`,
+    );
+  }
+  const allowed = gateOperationTokens(op as WorkflowGateOperation).map(
+    (k) => `event.${k}`,
+  );
+  checkTokenMap(g["map"], "governs.map", fields, allowed, `la operación "${spec.label}"`, c);
+  const subject = isObj(input["subject"]) ? input["subject"]["type"] : undefined;
+  if (
+    subject !== undefined &&
+    subject !== "none" &&
+    spec.subject !== "none" &&
+    subject !== spec.subject
+  ) {
+    c.err(
+      "SHAPE_INVALID",
+      "subject.type",
+      `Un flujo que gobierna "${spec.label}" trata sobre "${spec.subject}", no sobre "${String(subject)}".`,
+    );
+  }
+  const stages = Array.isArray(input["stages"])
+    ? (input["stages"] as unknown[]).filter(isObj)
+    : [];
+  const start = stages.find((s) => s["start"] === true);
+  const assignee = start?.["assignee"];
+  if (start && isObj(assignee) && assignee["kind"] === "initiator") {
+    c.err(
+      "ASSIGNEE_NOT_ALLOWED",
+      "governs",
+      "Un candado de aprobación inicia la solicitud el sistema: la etapa inicial no puede estar asignada a quien inicia (usa un rol, un grupo, un usuario o un campo).",
+      isStr(start["key"]) ? start["key"] : undefined,
+    );
+  }
+  for (const outcome of ["completed", "rejected"]) {
+    const has = stages.some(
+      (s) =>
+        s["type"] === "end" &&
+        (s["outcome"] === outcome ||
+          (outcome === "completed" && s["outcome"] === undefined)),
+    );
+    if (!has) {
+      c.err(
+        "GATE_END_MISSING",
+        "governs",
+        outcome === "completed"
+          ? "Un flujo que gobierna una operación necesita una etapa final «completado» que la libere."
+          : "Un flujo que gobierna una operación necesita una etapa final «rechazado» que la anule.",
+      );
+    }
+  }
 }
 
 /** `public_form`: the start stage must be a `form` stage filled by the initiator. */
@@ -1608,15 +1710,48 @@ function checkActions(
   });
 }
 
-/** Literal numeric keys of the Vendix actions and their minimum. */
-const NUMERIC_MAP_KEYS: Record<string, { min: number; integer: boolean }> = {
-  supplier_id: { min: 1, integer: true },
-  location_id: { min: 1, integer: true },
-  product_id: { min: 1, integer: true },
-  quantity: { min: 1, integer: true },
-  unit_price: { min: 0, integer: false },
-  due_in_days: { min: 0, integer: true },
-};
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Checks a literal (no tokens) against the input type of the registry. */
+function literalError(spec: WorkflowActionInputSpec, value: unknown): string | null {
+  const text = typeof value === "string" ? value.trim() : value;
+  switch (spec.type) {
+    case "id":
+    case "int":
+    case "number":
+    case "money": {
+      const n = typeof text === "number" ? text : Number(text);
+      const min = spec.min ?? (spec.type === "id" ? 1 : undefined);
+      const integer = spec.type === "id" || spec.type === "int";
+      if (
+        text === "" ||
+        typeof text === "boolean" ||
+        !Number.isFinite(n) ||
+        (min !== undefined && n < min) ||
+        (integer && !Number.isInteger(n))
+      ) {
+        return `debe ser un número${integer ? " entero" : ""}${min !== undefined ? ` mayor o igual a ${min}` : ""}`;
+      }
+      return null;
+    }
+    case "date":
+      return typeof text === "string" && ISO_DATE.test(text)
+        ? null
+        : "debe ser una fecha AAAA-MM-DD";
+    case "boolean":
+      return typeof value === "boolean" || text === "true" || text === "false"
+        ? null
+        : "debe ser verdadero o falso";
+    case "enum":
+      return typeof text === "string" && (spec.values ?? []).includes(text)
+        ? null
+        : `debe ser uno de: ${(spec.values ?? []).join(", ")}`;
+    case "assignee":
+      return "debe ser un responsable (rol, grupo, usuario o campo)";
+    default:
+      return null;
+  }
+}
 
 /**
  * `vendix.*` actions: `map` values are literals or tokens of the closed
@@ -1670,7 +1805,10 @@ function checkVendixAction(
       continue;
     }
     if (value === undefined || value === null) continue;
-    if (key === "assignee") {
+    const input = (
+      WORKFLOW_ACTION_CATALOG[name].inputs as Record<string, WorkflowActionInputSpec>
+    )[key];
+    if (input.type === "assignee") {
       checkAssignee(value, vp, L, sk, fields, ctx, c);
       continue;
     }
@@ -1710,21 +1848,9 @@ function checkVendixAction(
       }
       if (tokens.length > 0) continue;
     }
-    const num = NUMERIC_MAP_KEYS[key];
-    if (num) {
-      const n = typeof value === "number" ? value : Number(value);
-      if (
-        !Number.isFinite(n) ||
-        n < num.min ||
-        (num.integer && !Number.isInteger(n))
-      ) {
-        c.err(
-          "MAP_INVALID",
-          vp,
-          `${L}: "${key}" debe ser un número${num.integer ? " entero" : ""} mayor o igual a ${num.min}.`,
-          sk,
-        );
-      }
+    const problem = literalError(input, value);
+    if (problem) {
+      c.err("MAP_INVALID", vp, `${L}: "${key}" ${problem}.`, sk);
     }
   }
 }

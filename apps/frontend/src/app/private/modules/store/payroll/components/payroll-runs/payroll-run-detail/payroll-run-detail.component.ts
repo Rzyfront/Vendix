@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
+import { WorkflowEntityLinkComponent } from '../../../../workflows/components/workflow-entity-link/workflow-entity-link.component';
 import { Actions, ofType } from '@ngrx/effects';
 import { Subject, firstValueFrom } from 'rxjs';
 import { timeout, takeUntil } from 'rxjs/operators';
@@ -93,6 +94,7 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
     StepsLineComponent,
     ResponsiveDataViewComponent,
     PayrollItemDetailComponent,
+    WorkflowEntityLinkComponent,
   ],
   template: `
     <app-modal
@@ -122,6 +124,13 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
 
       @if (payrollRun()) {
         <div class="space-y-4">
+
+          <app-workflow-entity-link
+            entityType="payroll_run"
+            [entityId]="payrollRun()!.id"
+            [refreshKey]="payrollRun()"
+            [(pending)]="approvalPending"
+          />
 
           <!-- 1. STEPS LINE -->
           <app-steps-line
@@ -427,12 +436,18 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
               </div>
             } @else if (canProcess) {
               @if (quickProcessEnabled()) {
-                <app-button variant="primary" (clicked)="onFastTrack()" [loading]="loading()">
+                <app-button variant="primary" (clicked)="onFastTrack()" [loading]="loading()" [disabled]="approvalPending()">
                   <app-icon slot="icon" name="zap" [size]="16" class="mr-1"></app-icon>
                   Procesar Completo
                 </app-button>
               } @else {
-                <app-button [variant]="nextStepVariant" (clicked)="onNextStep()" [loading]="loading()">
+                <app-button
+                  [variant]="nextStepVariant"
+                  (clicked)="onNextStep()"
+                  [loading]="loading()"
+                  [disabled]="nextStepBlocked()"
+                  [ariaLabel]="nextStepBlocked() ? 'Pendiente de aprobación' : ''"
+                >
                   {{ nextStepLabel }}
                 </app-button>
               }
@@ -455,6 +470,9 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
 export class PayrollRunDetailComponent {
   readonly isOpen = input<boolean>(false);
   readonly payrollRun = input<PayrollRun | null>(null);
+  /** An approval gate holds this run: the approve step stays disabled. */
+  readonly approvalPending = signal(false);
+  readonly nextStepBlocked = computed(() => this.approvalPending() && this.payrollRun()?.status === 'calculated');
   readonly isOpenChange = output<boolean>();
 
   private currencyService = inject(CurrencyFormatService);

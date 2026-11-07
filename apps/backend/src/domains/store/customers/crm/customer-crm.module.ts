@@ -58,6 +58,7 @@ import { CrmUnsubscribeService } from './campaigns/crm-unsubscribe.service';
     StoreBootstrapHelper,
   ],
   // Flujos (bloque 13): la acción `vendix.crm_task.create` crea tareas por aquí.
-  exports: [CrmTasksService],
+  // CustomerCrmService: the Flujos action "asignar etiqueta" uses setTags.
+  exports: [CrmTasksService, CustomerCrmService],
 })
 export class CustomerCrmModule {}

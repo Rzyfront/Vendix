@@ -262,6 +262,10 @@ describe('ProductsService', () => {
   const mockInventoryAdjustments = {
     createAdjustmentInTransaction: jest.fn(),
     emitInventoryAdjusted: jest.fn(),
+    // Flujos P1.3: no flow governs the write-off unless a test says so.
+    requestAdjustmentApprovals: jest.fn(async (items: unknown[]) =>
+      items.map(() => ({ status: 'free' })),
+    ),
   };
 
   // D.4 — SOLO LECTURA: el detector de existencias fuera del alcance de la
@@ -1832,6 +1836,51 @@ describe('ProductsService', () => {
       expect(
         mockInventoryAdjustments.createAdjustmentInTransaction,
       ).not.toHaveBeenCalled();
+    });
+
+    it('Flujos P1.3: una baja gobernada pendiente de aprobación no archiva ni abre la transacción', async () => {
+      mockPrismaService.stock_levels.findMany.mockResolvedValue([stockRow()]);
+      mockInventoryAdjustments.requestAdjustmentApprovals.mockRejectedValueOnce(
+        new VendixHttpException(
+          ErrorCodes.WORKFLOW_APPROVAL_PENDING,
+          'Pendiente de aprobación',
+        ),
+      );
+
+      await expect(
+        service.remove(7, { confirm_stock_write_off: true }),
+      ).rejects.toMatchObject({ errorCode: 'WORKFLOW_APPROVAL_PENDING' });
+
+      expect(
+        mockInventoryAdjustments.requestAdjustmentApprovals,
+      ).toHaveBeenCalledWith([
+        expect.objectContaining({
+          product_id: 7,
+          location_id: 4,
+          type: 'loss',
+          quantity_after: 0,
+        }),
+      ]);
+      expect(mockPrismaService.$transaction).not.toHaveBeenCalled();
+      expect(mockPrismaService.products.update).not.toHaveBeenCalled();
+    });
+
+    it('Flujos P1.3: la baja aprobada se usa dentro de la transacción del archivado', async () => {
+      mockPrismaService.stock_levels.findMany.mockResolvedValue([stockRow()]);
+      const approved = { status: 'approved', gate: { id: 5 } };
+      mockInventoryAdjustments.requestAdjustmentApprovals.mockResolvedValueOnce(
+        [approved] as never,
+      );
+
+      await service.remove(7, { confirm_stock_write_off: true });
+
+      expect(
+        mockInventoryAdjustments.createAdjustmentInTransaction,
+      ).toHaveBeenCalledWith(
+        mockPrismaService,
+        expect.objectContaining({ product_id: 7, location_id: 4 }),
+        expect.objectContaining({ approval: approved }),
+      );
     });
 
     it('con confirmación castiga a cero, archiva DESPUÉS y audita, todo en una transacción', async () => {

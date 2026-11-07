@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 
 type EntryStatus = 'draft' | 'posted' | 'voided';
 
@@ -112,14 +113,25 @@ export class JournalEntryFlowService {
       );
     }
 
-    const updated = await this.prisma.accounting_entries.update({
-      where: { id },
-      data: {
-        status: 'posted',
-        posted_by_user_id: context.user_id,
-        posted_at: new Date(),
-      },
-      include: ENTRY_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const posted = await tx.accounting_entries.update({
+        where: { id },
+        data: {
+          status: 'posted',
+          posted_by_user_id: context.user_id,
+          posted_at: new Date(),
+        },
+        include: ENTRY_INCLUDE,
+      });
+      // Flujos P1.1: journal_entry.posted in the same transaction
+      await recordTriggerEvent(tx, 'journal_entry.posted', {
+        store_id: posted.store_id ?? context.store_id,
+        journal_entry_id: posted.id,
+        entry_number: posted.entry_number,
+        entry_type: posted.entry_type,
+        total_debit: posted.total_debit,
+      });
+      return posted;
     });
 
     this.logger.log(

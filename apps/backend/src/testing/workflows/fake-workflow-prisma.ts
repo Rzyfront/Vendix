@@ -27,6 +27,7 @@ const SCOPED = new Set([
   'workflow_public_links',
   'workflow_webhook_endpoints',
   'workflow_webhook_deliveries',
+  'workflow_approval_gates',
   'store_users',
 ]);
 
@@ -43,6 +44,7 @@ const UNIQUES: Record<string, string[][]> = {
   workflow_versions: [['definition_id', 'version']],
   work_groups: [['store_id', 'key']],
   work_group_members: [['work_group_id', 'user_id']],
+  workflow_approval_gates: [['store_id', 'operation', 'entity_id', 'revision']],
   stored_files: [['s3_key']],
   dossiers: [
     ['store_id', 'reference'],
@@ -51,6 +53,17 @@ const UNIQUES: Record<string, string[][]> = {
 };
 
 const DEFAULTS: Record<string, Row> = {
+  workflow_approval_gates: {
+    instance_id: null,
+    revision: 1,
+    status: 'pending',
+    reason: null,
+    context: {},
+    request: null,
+    requested_by_user_id: null,
+    resolved_at: null,
+    consumed_at: null,
+  },
   workflow_tasks: {
     status: 'open',
     assignee_user_id: null,
@@ -505,7 +518,30 @@ export class FakeWorkflowDb {
             }
           };
         }
-        if (prop === 'withoutScope') return () => db.client(null, false);
+        if (prop === 'withoutScope') {
+          // Like the real base client: unscoped, with its own `$transaction`.
+          return () =>
+            new Proxy(db.client(null, false), {
+              get(t, p: string) {
+                if (p === '$transaction') {
+                  return async (fn: (tx: any) => Promise<any>) => {
+                    const undo: UndoFn[] = [];
+                    try {
+                      return await fn(db.client(undo, false));
+                    } catch (e) {
+                      for (const u of undo.reverse()) u();
+                      throw e;
+                    } finally {
+                      for (const [row, owner] of db.locks) {
+                        if (owner === undo) db.locks.delete(row);
+                      }
+                    }
+                  };
+                }
+                return t[p];
+              },
+            });
+        }
         if (prop === '$queryRaw') {
           return (sql: any) => db.raw(sql?.sql ?? String(sql), sql?.values ?? []);
         }

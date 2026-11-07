@@ -12,6 +12,7 @@ import {
   InvoiceCalculatorService,
 } from './services/invoice-calculator.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+jest.mock('../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 describe('InvoicingService support adjustment notes', () => {
   const requestContext = {
@@ -62,7 +63,9 @@ describe('InvoicingService support adjustment notes', () => {
   };
 
   const createService = (overrides: any = {}) => {
-    const prisma = {
+    // Flujos P1.1: the invoice insert runs in a transaction with its event.
+    const prisma: any = {
+      $transaction: jest.fn(async (cb: (tx: unknown) => unknown) => cb(prisma)),
       suppliers: {
         findFirst: jest.fn().mockResolvedValue(supplier),
       },

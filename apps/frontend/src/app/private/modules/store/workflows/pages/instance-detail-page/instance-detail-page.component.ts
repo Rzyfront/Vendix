@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import {
   AlertBannerComponent,
   BadgeComponent,
@@ -32,11 +32,13 @@ import {
   WorkflowInstanceDetail,
 } from '../../interfaces/workflow.interfaces';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { isStaleCode, toWorkflowError } from '../../utils/workflow-errors.util';
 import {
   dueText,
   eventLabel,
   instanceStatusLabel,
+  instanceSubject,
   instanceStatusTone,
   isOverdue,
   outcomeBlockedByRequirements,
@@ -62,6 +64,8 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
   standalone: true,
   imports: [
     FormsModule,
+    RouterLink,
+    CurrencyPipe,
     StickyHeaderComponent,
     CardComponent,
     ButtonComponent,
@@ -100,8 +104,36 @@ const UPLOADABLE_KINDS = ['upload', 'signature'];
           }
         </div>
 
+        @if (subject(); as s) {
+          <p class="mb-3 px-1 text-sm" data-testid="instance-subject">
+            @if (s.link) {
+              <a class="font-medium text-primary hover:underline" [routerLink]="s.link">{{ s.text }}</a>
+            } @else {
+              <span class="text-text-secondary">{{ s.text }}</span>
+            }
+          </p>
+        }
+
         <div class="grid grid-cols-1 gap-4 lg:grid-cols-5">
           <div class="flex flex-col gap-4 lg:col-span-3">
+            @if (requestData().length > 0) {
+              <app-card title="Datos de la solicitud" [responsivePadding]="true">
+                <dl class="grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2" data-testid="instance-data">
+                  @for (row of requestData(); track row.key) {
+                    <div class="min-w-0">
+                      <dt class="text-xs text-text-secondary">{{ row.label }}</dt>
+                      <dd class="break-words font-medium text-text-primary">
+                        @if (row.money) {
+                          {{ row.number | currency }}
+                        } @else {
+                          {{ row.value }}
+                        }
+                      </dd>
+                    </div>
+                  }
+                </dl>
+              </app-card>
+            }
             <app-card title="Tarea actual" [responsivePadding]="true" overflow="visible">
               @if (d.status !== 'active' || !d.stage) {
                 <p class="text-sm text-text-secondary">
@@ -351,6 +383,10 @@ export class InstanceDetailPageComponent implements OnInit {
   );
   readonly overdue = computed(() => isOverdue(this.detail()?.stage_due_at ?? null));
   readonly dueLabel = computed(() => dueText(this.detail()?.stage_due_at ?? null));
+  readonly subject = computed(() => {
+    const d = this.detail();
+    return d ? instanceSubject(d.subject_type, d.subject_id) : null;
+  });
   readonly headerMeta = computed(() => {
     const d = this.detail();
     if (!d) return '';
@@ -372,6 +408,35 @@ export class InstanceDetailPageComponent implements OnInit {
       this.reload(true);
     });
   }
+
+  /**
+   * P1.5: the data the request carries (filled fields only), labelled with the
+   * definition, so whoever decides sees supplier, amount and products here
+   * even when the current stage has no form. Files live in the dossier.
+   */
+  readonly requestData = computed(() => {
+    const d = this.detail();
+    if (!d) return [];
+    const data = d.data ?? {};
+    return (d.data_fields ?? [])
+      .filter((f) => f.type !== 'file')
+      .map((f) => ({ key: f.key, label: f.label, type: f.type, raw: data[f.key] }))
+      .filter((f) => f.raw !== undefined && f.raw !== null && f.raw !== '')
+      .map((f) => ({
+        key: f.key,
+        label: f.label,
+        money: f.type === 'money' && typeof f.raw === 'number',
+        value:
+          typeof f.raw === 'boolean'
+            ? f.raw
+              ? 'Sí'
+              : 'No'
+            : Array.isArray(f.raw)
+              ? f.raw.join(', ')
+              : String(f.raw),
+        number: typeof f.raw === 'number' ? f.raw : null,
+      }));
+  });
 
   onHeaderAction(id: string): void {
     const definitionId = this.detail()?.definition.id;

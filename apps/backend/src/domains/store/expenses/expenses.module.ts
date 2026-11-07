@@ -26,7 +26,8 @@ import { createExpenseTools } from '../../../ai-engine/tools/domains/expenses.to
     ExpenseScannerService,
     ExpenseScanProcessor,
   ],
-  exports: [ExpensesService],
+  // ExpenseFlowService: Flujos runs expense actions and voids gated expenses.
+  exports: [ExpensesService, ExpenseFlowService],
 })
 export class ExpensesModule implements OnModuleInit {
   constructor(

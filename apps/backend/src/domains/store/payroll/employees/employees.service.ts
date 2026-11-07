@@ -8,6 +8,7 @@ import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import { QueryEmployeeDto } from './dto/query-employee.dto';
 import { normalizeEmail } from '@common/utils/email.util';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 
 const EMPLOYEE_INCLUDE = {
   employee_stores: {
@@ -242,6 +243,16 @@ export class EmployeesService {
             },
           });
         }
+
+        // Flujos P1.1: employee.created in the same transaction
+        await recordTriggerEvent(tx, 'employee.created', {
+          store_id: context.store_id,
+          employee_id: employee.id,
+          first_name: employee.first_name,
+          last_name: employee.last_name,
+          document_number: employee.document_number,
+          position: employee.position,
+        });
 
         return await tx.employees.findFirst({
           where: { id: employee.id },

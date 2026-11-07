@@ -90,6 +90,10 @@ export const ErrorCodes = {
   WORKFLOW_PUBLIC_LINK_UNAVAILABLE: { code: 'WORKFLOW_PUBLIC_LINK_UNAVAILABLE', httpStatus: 422, devMessage: 'Este flujo no puede publicarse como formulario por enlace.' },
   WORKFLOW_PUBLIC_CONSENT_REQUIRED: { code: 'WORKFLOW_PUBLIC_CONSENT_REQUIRED', httpStatus: 422, devMessage: 'Debes aceptar el aviso de privacidad para enviar el formulario.' },
   WORKFLOW_PUBLIC_PAYLOAD_TOO_LARGE: { code: 'WORKFLOW_PUBLIC_PAYLOAD_TOO_LARGE', httpStatus: 413, devMessage: 'El formulario enviado es demasiado grande.' },
+  // Candado de aprobación (flujos-adm P1.3)
+  WORKFLOW_APPROVAL_PENDING: { code: 'WORKFLOW_APPROVAL_PENDING', httpStatus: 409, devMessage: 'Esta operación quedó pendiente de aprobación; se ejecuta cuando la solicitud se apruebe.' },
+  WORKFLOW_APPROVAL_REJECTED: { code: 'WORKFLOW_APPROVAL_REJECTED', httpStatus: 409, devMessage: 'La solicitud de aprobación de esta operación fue rechazada.' },
+  WORKFLOW_APPROVAL_REQUIRED: { code: 'WORKFLOW_APPROVAL_REQUIRED', httpStatus: 409, devMessage: 'Esta operación necesita aprobación y no puede hacerse por esta ruta; usa la ruta que abre la solicitud.' },
   // Documental D1 (flujos-documental S5)
   DOCUMENT_TOO_LARGE: { code: 'DOCUMENT_TOO_LARGE', httpStatus: 413, devMessage: 'El archivo supera el tamaño máximo permitido.' },
   DOCUMENT_TYPE_NOT_ALLOWED: { code: 'DOCUMENT_TYPE_NOT_ALLOWED', httpStatus: 415, devMessage: 'Este tipo de archivo no está permitido.' },

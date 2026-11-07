@@ -79,6 +79,8 @@ import { DaviviendaBatchBuilder } from './bank-export/builders/davivienda-batch.
   ],
   exports: [
     EmployeesService,
+    // Flujos: a rejected payroll approval request cancels the run.
+    PayrollFlowService,
     PayrollRunsService,
     PayrollRulesService,
     AdvancesService,

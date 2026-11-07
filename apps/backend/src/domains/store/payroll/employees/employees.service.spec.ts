@@ -1,6 +1,11 @@
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException } from '../../../../common/errors';
 import { EmployeesService } from './employees.service';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
+
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
 
 describe('EmployeesService createOrAssociate fiscal scope gate', () => {
   const baseDto = {
@@ -154,6 +159,71 @@ describe('EmployeesService createOrAssociate fiscal scope gate', () => {
           }),
         }),
       );
+    });
+  });
+
+  it('Flujos P1.1: records employee.created only when a new employee is created, in its transaction', async () => {
+    (recordTriggerEvent as jest.Mock).mockClear();
+    const { prisma, tx } = buildPrismaMocks({
+      existing: null,
+      existingRelation: null,
+      fiscalScope: 'STORE',
+    });
+    tx.employees.create.mockResolvedValue({
+      id: 999,
+      first_name: 'Ada',
+      last_name: 'Lovelace',
+      document_number: '1010101',
+      position: 'Analista',
+    });
+    const service = new EmployeesService(prisma);
+
+    await withContext(async () => {
+      const result = await service.createOrAssociate({
+        ...baseDto,
+        employee_code: 'EMP-1',
+        position: 'Analista',
+      } as any);
+      expect(result.action).toBe('created');
+    });
+
+    expect(recordTriggerEvent).toHaveBeenCalledWith(tx, 'employee.created', {
+      store_id: 2,
+      employee_id: 999,
+      first_name: 'Ada',
+      last_name: 'Lovelace',
+      document_number: '1010101',
+      position: 'Analista',
+    });
+
+    (recordTriggerEvent as jest.Mock).mockClear();
+    const associated = buildPrismaMocks({
+      existing: { id: 500, first_name: 'Ada', last_name: 'Lovelace', document_number: '1010101' },
+      existingRelation: null,
+      fiscalScope: 'ORGANIZATION',
+    });
+    await withContext(async () => {
+      await new EmployeesService(associated.prisma).createOrAssociate({
+        ...baseDto,
+        associate_if_exists: true,
+      } as any);
+    });
+    expect(recordTriggerEvent).not.toHaveBeenCalled();
+  });
+
+  it('Flujos P1.1: does not persist the employee when the event write fails', async () => {
+    const { prisma } = buildPrismaMocks({
+      existing: null,
+      existingRelation: null,
+      fiscalScope: 'STORE',
+    });
+    (recordTriggerEvent as jest.Mock).mockRejectedValueOnce(new Error('outbox down'));
+    const service = new EmployeesService(prisma);
+
+    await withContext(async () => {
+      await expect(
+        service.createOrAssociate({ ...baseDto, employee_code: 'EMP-1' } as any),
+      ).rejects.toThrow('outbox down');
     });
   });
 

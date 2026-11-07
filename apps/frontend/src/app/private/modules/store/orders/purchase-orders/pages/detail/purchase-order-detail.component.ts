@@ -53,6 +53,7 @@ import {
 // QUI-431: reusable bulk serial-load modal in `collect` mode (no API call).
 import { SerialBulkLoadModalComponent } from '../../../../serial-numbers/components/serial-bulk-load-modal/serial-bulk-load-modal.component';
 import { BulkBackfillItem } from '../../../../serial-numbers/services/serial-numbers.service';
+import { WorkflowEntityLinkComponent } from '../../../../workflows/components/workflow-entity-link/workflow-entity-link.component';
 import { extractApiErrorMessage } from '../../../../../../../core/utils/api-error-handler';
 
 const STATUS_LABELS: Record<PurchaseOrderStatus, string> = {
@@ -136,6 +137,7 @@ interface ReceiveLine {
     PoTimelineComponent,
     SerialBulkLoadModalComponent,
     FiscalExplanationPanelComponent,
+    WorkflowEntityLinkComponent,
   ],
   template: `
     <div class="w-full min-h-screen">
@@ -166,6 +168,12 @@ interface ReceiveLine {
           <div class="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3 lg:gap-4">
             <!-- ============ MAIN COLUMN ============ -->
             <div class="flex flex-col gap-3">
+              <app-workflow-entity-link
+                entityType="purchase_order"
+                [entityId]="p.id"
+                [refreshKey]="po()"
+                [(pending)]="approvalPending"
+              />
               <!-- Supplier + location -->
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <!--
@@ -763,6 +771,8 @@ export class StorePurchaseOrderDetailComponent {
   readonly actionLoading = signal(false);
   readonly errorMessage = signal<string | null>(null);
   readonly po = signal<PurchaseOrder | null>(null);
+  /** An approval gate holds this order: Aprobar stays disabled. */
+  readonly approvalPending = signal(false);
 
   readonly receptions = signal<PurchaseOrderReception[]>([]);
   readonly payments = signal<PurchaseOrderPayment[]>([]);
@@ -1028,7 +1038,17 @@ export class StorePurchaseOrderDetailComponent {
     const acts: StickyHeaderActionButton[] = [];
     const loading = this.actionLoading();
     if (this.canApprove()) {
-      acts.push({ id: 'approve', label: 'Aprobar', variant: 'primary', icon: 'check-circle', loading, disabled: loading, visible: true });
+      const held = this.approvalPending();
+      acts.push({
+        id: 'approve',
+        label: 'Aprobar',
+        variant: 'primary',
+        icon: 'check-circle',
+        loading,
+        disabled: loading || held,
+        visible: true,
+        title: held ? 'Pendiente de aprobación' : undefined,
+      });
     }
     if (this.canReceive()) {
       acts.push({ id: 'receive', label: 'Recibir', variant: 'primary', icon: 'package-check', disabled: loading, visible: true });

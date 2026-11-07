@@ -50,6 +50,7 @@ describe('WorkflowOutboxDispatcher', () => {
       { deliver: jest.fn() } as any,
       actions as any,
       fanout as any,
+      {} as any,
     );
   });
 

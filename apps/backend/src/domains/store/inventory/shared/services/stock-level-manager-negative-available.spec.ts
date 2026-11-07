@@ -4,6 +4,7 @@ import {
 } from './stock-level-manager.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from 'src/common/errors';
+jest.mock('../../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 /**
  * QUI-557 — Piso duro: una reserva no puede escribir un disponible negativo.

@@ -22,6 +22,12 @@ import {
   payments_state_enum,
 } from '@prisma/client';
 import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
+import {
+  GateDecision,
+  consumeApproval,
+  enforceApproval,
+  operationIsGoverned,
+} from '../workflows/gates/approval-gate';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   DEFAULT_STORE_TIMEZONE,
@@ -884,6 +890,7 @@ export class OrdersService {
 
     const plannedTotals = this.sumPlannedOrderLines(plannedLines);
     const createDiscount = roundMoney(Number(createOrderDto.discount_amount || 0));
+    await this.assertApiDiscountNotGoverned(createDiscount, 0, 'create');
     const createShipping = roundMoney(Number(createOrderDto.shipping_cost || 0));
     const createGrandTotal = Math.max(
       0,
@@ -2555,6 +2562,13 @@ export class OrdersService {
     }
     const economicFields = ['items', 'subtotal', 'total_amount', 'tax_amount', 'discount_amount', 'shipping_cost', 'customer_id', 'customer_alias', 'currency'];
     if (economicFields.some((key) => Object.prototype.hasOwnProperty.call(updateOrderDto, key))) assertNoActiveFinancialSplit(order);
+    if (updateOrderDto.discount_amount !== undefined) {
+      await this.assertApiDiscountNotGoverned(
+        roundMoney(Number(updateOrderDto.discount_amount ?? 0)),
+        Number(order.discount_amount ?? 0),
+        'edit',
+      );
+    }
 
     // Contrato PATCH titular (regla vigente): el cambio de titular
     // (customer_id/customer_alias) se permite en CUALQUIER estado de la
@@ -3199,6 +3213,30 @@ export class OrdersService {
     }
   }
 
+  /**
+   * Flujos P1.3: a discount typed straight into the order (create, PATCH,
+   * PUT items: API and integrations) cannot wait for a request. When it
+   * raises the discount to an amount an active flow governs, it is refused
+   * with 409 and the user is sent to the paths that ask for approval (the
+   * order editor, the POS). Keeping or lowering a discount always passes.
+   */
+  private async assertApiDiscountNotGoverned(
+    discount: number,
+    previous: number,
+    route: 'create' | 'edit',
+  ): Promise<void> {
+    if (!(discount > previous)) return;
+    if (!(await operationIsGoverned(this.prisma, 'order.discount', discount))) {
+      return;
+    }
+    throw new VendixHttpException(
+      ErrorCodes.WORKFLOW_APPROVAL_REQUIRED,
+      route === 'create'
+        ? `El descuento de $${discount} necesita aprobación (Ventas: descuento). Registra la orden sin ese descuento y aplícalo desde el editor de la orden para pedir la aprobación.`
+        : `El descuento de $${discount} necesita aprobación (Ventas: descuento). Aplícalo desde el editor de la orden para pedir la aprobación.`,
+    );
+  }
+
   async updateOrderItems(id: number, dto: UpdateOrderItemsDto) {
     this.assertNoNewDraftOptions(dto.items);
     // PR #1004: Insumo y Uso interno nunca se venden; mismo guard que el
@@ -3323,6 +3361,11 @@ export class OrdersService {
       updateItemsRatesByProductId,
     );
     const discountAmount = roundMoney(Number(dto.discount_amount ?? 0));
+    await this.assertApiDiscountNotGoverned(
+      discountAmount,
+      Number(order.discount_amount ?? 0),
+      'edit',
+    );
     const persistedShipping = roundMoney(Number(order.shipping_cost ?? 0));
 
     // docs/plans/no-overselling-stock-guard-plan.md step 9 — additive to the
@@ -4583,7 +4626,29 @@ export class OrdersService {
 
     // 13) Transacción atómica: claim + replace items + order_promotions +
     //     cupón + reservas de stock + commit.
+    // Flujos P1.3: a discount raised to or past a governed threshold is not
+    // saved until its approval request is approved; then this same edit runs
+    // once, as the requester. Edits that do not raise the discount pass.
+    const discountGate: GateDecision =
+      grossDiscountTotal > Number(existingOrder.discount_amount ?? 0) &&
+      (await operationIsGoverned(this.prisma, 'order.discount'))
+        ? await enforceApproval(this.prisma, {
+            operation: 'order.discount',
+            entity_type: 'order',
+            entity_id: orderId,
+            amount: grossDiscountTotal,
+            context: {
+              order_id: orderId,
+              order_number: existingOrder.order_number,
+              discount_amount: grossDiscountTotal,
+              grand_total: grandTotal,
+            },
+            request: { method: 'updateOrderFromEditor', args: [orderId, dto] },
+          })
+        : { status: 'free' };
+
     const result = await this.prisma.$transaction(async (tx) => {
+      await consumeApproval(tx, discountGate);
       // 13-pre) ERR-07 / DB-14 — invariante "prepared + variantes exige
       //        variante". Mismo helper que `create` y `updateOrderItems`:
       //        una sola definición para que no vuelva a divergir.

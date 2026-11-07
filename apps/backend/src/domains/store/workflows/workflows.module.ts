@@ -53,6 +53,24 @@ import { WorkflowMetricsService } from './metrics/workflow-metrics.service';
 import { WorkflowAnalyticsService } from './metrics/workflow-analytics.service';
 import { WorkflowAnalyticsController } from './metrics/workflow-analytics.controller';
 import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
+import { WorkflowPeopleActions } from './engine/actions/people.actions';
+import { WorkflowPurchasingActions } from './engine/actions/purchasing.actions';
+import { WorkflowOperationsActions } from './engine/actions/operations.actions';
+import { ApprovalGateProcessor } from './gates/approval-gate.processor';
+import { WorkflowLinksController } from './links/workflow-links.controller';
+import { WorkflowLinksService } from './links/workflow-links.service';
+import { ExpensesModule } from '../expenses/expenses.module';
+import { AccountsPayableModule } from '../accounts-payable/accounts-payable.module';
+import { CustomersModule } from '../customers/customers.module';
+import { SuppliersModule } from '../inventory/suppliers/suppliers.module';
+import { PayrollModule } from '../payroll/payroll.module';
+import { ReservationsModule } from '../reservations/reservations.module';
+import { InventoryAdjustmentsModule } from '../inventory/adjustments/inventory-adjustments.module';
+import { StockTransfersModule } from '../orders/stock-transfers/stock-transfers.module';
+import { InvoicingModule } from '../invoicing/invoicing.module';
+import { InvoiceDeliveryModule } from '../invoicing/delivery/invoice-delivery.module';
+import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
+import { OrdersModule } from '../orders/orders.module';
 
 /**
  * Flujos: motor (start / completeTask / claim / transition / cancel / tick),
@@ -69,9 +87,22 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
     EmailModule,
     ResponseModule,
     DocumentsModule,
-    // Bloque 13: acciones Vendix (OC borrador, tarea CRM) por sus servicios.
+    // Bloque 13 / P1.2: acciones Vendix por los mismos servicios de la UI.
+    // P1.3: los mismos servicios aplican el efecto de un candado resuelto.
     PurchaseOrdersModule,
     CustomerCrmModule,
+    ExpensesModule,
+    AccountsPayableModule,
+    CustomersModule,
+    SuppliersModule,
+    PayrollModule,
+    ReservationsModule,
+    InventoryAdjustmentsModule,
+    StockTransfersModule,
+    InvoicingModule,
+    InvoiceDeliveryModule,
+    OrderFlowModule,
+    OrdersModule,
   ],
   controllers: [
     WorkflowDefinitionsController,
@@ -83,6 +114,7 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
     WorkGroupsController,
     DocumentFilesController,
     WorkflowWebhooksController,
+    WorkflowLinksController,
   ],
   providers: [
     WorkGroupsService,
@@ -116,6 +148,12 @@ import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
     WorkflowWebhooksService,
     WorkflowTriggerFanout,
     WorkflowActionsExecutor,
+    // P1.2: registro de acciones; P1.3: candado de aprobación; P1.4: vínculos.
+    WorkflowPeopleActions,
+    WorkflowPurchasingActions,
+    WorkflowOperationsActions,
+    ApprovalGateProcessor,
+    WorkflowLinksService,
     {
       provide: WorkflowRequirementsService,
       useClass: DossierWorkflowRequirementsService,

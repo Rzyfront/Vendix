@@ -34,6 +34,7 @@ import { RentalQuoteService } from '../service-stations/rental-quote/rental-quot
 import type { RentalQuote } from '../service-stations/rental-quote/rental-quote.service';
 import { RentalPrepayService } from './rental-prepay/rental-prepay.service';
 import { ServiceDepositsService } from '../service-deposits/service-deposits.service';
+import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
 
 @Injectable()
 export class ReservationsService {
@@ -520,6 +521,16 @@ export class ReservationsService {
               });
             }
           }
+
+          // Flujos P1.1: booking.created in the same transaction
+          await recordTriggerEvent(tx, 'booking.created', {
+            store_id: created.store_id,
+            booking_id: created.id,
+            booking_number: created.booking_number,
+            customer_id: created.customer_id,
+            date: created.date,
+            start_time: created.start_time,
+          });
 
           // The open-ended end is only known after allocation (and a desk deposit confirms the booking): re-read it.
           const finalBooking = isOpenEnded || startedDeposit

@@ -1,5 +1,9 @@
 import {
   WORKFLOW_ACTIONS,
+  WORKFLOW_ACTION_CATALOG,
+  WORKFLOW_EVENT_CATALOG,
+  WORKFLOW_GATE_OPERATIONS,
+  WORKFLOW_VENDIX_ACTIONS,
   WORKFLOW_EVENT_TOKENS,
   WORKFLOW_EXAMPLE_PURCHASE_APPROVAL,
   WORKFLOW_ISSUE_CODES,
@@ -602,18 +606,39 @@ describe('trigger event', () => {
     expect(withEvent({ kind: 'event', event: 'pqr.created' }).valid).toBe(true);
   });
 
-  it('exports the six events and a closed token catalog per event', () => {
-    expect([...WORKFLOW_TRIGGER_EVENTS]).toEqual([
-      'order.created',
-      'order.paid',
-      'purchase_order.received',
-      'expense.approved',
-      'customer.created',
-      'pqr.created',
-    ]);
-    for (const e of WORKFLOW_TRIGGER_EVENTS) {
-      expect(WORKFLOW_EVENT_TOKENS[e].length).toBeGreaterThan(0);
+  it('the registry lists events of every administrative module, each with labelled variables (P1.1)', () => {
+    const modules = new Set(
+      WORKFLOW_TRIGGER_EVENTS.map((e) => (WORKFLOW_EVENT_CATALOG as any)[e].module),
+    );
+    for (const m of [
+      'Ventas', 'Facturación', 'Pagos', 'Compras', 'Recepciones', 'Gastos', 'Nómina',
+      'Inventario', 'Contabilidad', 'Caja', 'Clientes', 'Proveedores', 'Empleados',
+      'Reservas', 'PQR',
+    ]) {
+      expect(modules.has(m)).toBe(true);
     }
+    expect(WORKFLOW_TRIGGER_EVENTS).toEqual(
+      expect.arrayContaining([
+        'order.created', 'order.paid', 'purchase_order.received', 'expense.approved',
+        'customer.created', 'pqr.created', 'inventory.adjusted', 'inventory.transferred',
+        'stock.low', 'journal_entry.posted', 'fiscal_period.closed', 'cash_session.closed',
+      ]),
+    );
+    for (const e of WORKFLOW_TRIGGER_EVENTS) {
+      const spec = (WORKFLOW_EVENT_CATALOG as any)[e];
+      expect(spec.label.length).toBeGreaterThan(0);
+      expect(WORKFLOW_EVENT_TOKENS[e]).toEqual(spec.tokens.map((t: any) => t.key));
+      for (const t of spec.tokens) expect(t.label.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('a newly declared event is accepted with its own tokens and nothing else', () => {
+    expect(
+      withEvent({ kind: 'event', event: 'supplier.created', map: { proveedor: '{{event.name}}' } }).valid,
+    ).toBe(true);
+    expect(
+      has(withEvent({ kind: 'event', event: 'supplier.created', map: { proveedor: '{{event.grand_total}}' } }), 'TOKEN_UNKNOWN'),
+    ).toBe(true);
   });
 
   it('rejects an unknown event (EVENT_UNKNOWN)', () => {
@@ -745,5 +770,132 @@ describe('vendix actions', () => {
     expect(has(withActions([t], { userIds: [9] }), 'USER_UNKNOWN')).toBe(true);
     t.map.assignee = { kind: 'field', field: 'ghost' };
     expect(has(withActions([t]), 'FIELD_UNKNOWN')).toBe(true);
+  });
+});
+
+describe('action registry (P1.2)', () => {
+  const withActions = (actions: any[], ctx?: any) =>
+    run((d) => {
+      stage(d, 'aprobada').on_enter = actions;
+    }, ctx);
+
+  it('declares ~25 actions, each with a label, a module, a permission and labelled inputs', () => {
+    expect(WORKFLOW_VENDIX_ACTIONS.length).toBeGreaterThanOrEqual(24);
+    expect(WORKFLOW_ACTIONS).toEqual(['notify', 'set_field', ...WORKFLOW_VENDIX_ACTIONS]);
+    for (const name of WORKFLOW_VENDIX_ACTIONS) {
+      const spec = (WORKFLOW_ACTION_CATALOG as any)[name];
+      expect(spec.label.length).toBeGreaterThan(0);
+      expect(spec.permission).toMatch(/^[a-z_:-]+$/);
+      expect(Object.keys(spec.inputs).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('checks literals by the input type: enum values, dates and ids', () => {
+    const adjust = (m: any) => ({
+      action: 'vendix.inventory.adjust',
+      map: { product_id: 1, location_id: 2, quantity_after: 5, adjustment_type: 'damage', ...m },
+    });
+    expect(withActions([adjust({})]).valid).toBe(true);
+    expect(has(withActions([adjust({ adjustment_type: 'gift' })]), 'MAP_INVALID')).toBe(true);
+    expect(has(withActions([adjust({ product_id: 0 })]), 'MAP_INVALID')).toBe(true);
+    expect(has(withActions([adjust({ quantity_after: -1 })]), 'MAP_INVALID')).toBe(true);
+    const expense = (date: string) => ({
+      action: 'vendix.expense.create',
+      map: { amount: 10, description: 'x', expense_date: date },
+    });
+    expect(withActions([expense('2026-11-07')]).valid).toBe(true);
+    expect(has(withActions([expense('7/11/2026')]), 'MAP_INVALID')).toBe(true);
+  });
+
+  it('accepts {{instance.subject_id}} to act on the record of the request', () => {
+    expect(
+      withActions([
+        { action: 'vendix.purchase_order.approve', map: { purchase_order_id: '{{instance.subject_id}}' } },
+      ]).valid,
+    ).toBe(true);
+  });
+
+  it('an assignee is only accepted where the registry declares one', () => {
+    expect(
+      has(
+        withActions([
+          { action: 'vendix.expense.approve', map: { expense_id: { kind: 'user', user_id: 5 } } },
+        ]),
+        'MAP_INVALID',
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('governs — approval gate (P1.3)', () => {
+  const CTX = { roleKeys: ['store_manager'], groupKeys: ['gerencia'] };
+  const asRole = (d: any) => {
+    stage(d, 'solicitud').assignee = { kind: 'role', role_key: 'store_manager' };
+  };
+  const withGoverns = (governs: any, m?: Mut) =>
+    run((d) => {
+      asRole(d);
+      d.governs = governs;
+      m?.(d);
+    }, CTX);
+
+  it('accepts "this flow governs purchase orders from 2.000.000" with a map of the operation tokens', () => {
+    const r = withGoverns({
+      operation: 'purchase_order.approve',
+      min_amount: 2000000,
+      map: {
+        proveedor: '{{event.supplier_name}}',
+        monto: '{{event.total_amount}}',
+      },
+    });
+    expect(r.errors).toEqual([]);
+  });
+
+  it('lists the seven governable operations of the plan', () => {
+    expect(Object.keys(WORKFLOW_GATE_OPERATIONS)).toEqual(
+      expect.arrayContaining([
+        'purchase_order.approve',
+        'expense.approve',
+        'inventory_adjustment.create',
+        'credit_note.create',
+        'invoice.void',
+        'order.discount',
+        'supplier_payment.register',
+        'payroll_run.approve',
+      ]),
+    );
+  });
+
+  it('rejects an unknown operation, a negative threshold and unknown tokens', () => {
+    expect(has(withGoverns({ operation: 'order.delete' }), 'GATE_OPERATION_UNKNOWN')).toBe(true);
+    const PO = 'purchase_order.approve';
+    expect(withGoverns({ operation: PO }).errors).toEqual([]);
+    expect(has(withGoverns({ operation: PO, min_amount: -1 }), 'SHAPE_INVALID')).toBe(true);
+    expect(
+      has(withGoverns({ operation: PO, map: { monto: '{{event.amount}}' } }), 'TOKEN_UNKNOWN'),
+    ).toBe(true);
+    expect(
+      has(withGoverns({ operation: PO, map: { ghost: '{{event.total_amount}}' } }), 'FIELD_UNKNOWN'),
+    ).toBe(true);
+    expect(has(withGoverns({ operation: PO, extra: 1 }), 'SHAPE_INVALID')).toBe(true);
+  });
+
+  it('needs an end that releases (completed) and one that voids (rejected)', () => {
+    const r = withGoverns({ operation: 'purchase_order.approve' }, (d) => {
+      stage(d, 'rechazada').outcome = 'completed';
+    });
+    expect(has(r, 'GATE_END_MISSING')).toBe(true);
+  });
+
+  it('the start stage cannot be the initiator, and the subject must match the operation', () => {
+    expect(
+      has(
+        run((d) => {
+          d.governs = { operation: 'purchase_order.approve' };
+        }, CTX),
+        'ASSIGNEE_NOT_ALLOWED',
+      ),
+    ).toBe(true);
+    expect(has(withGoverns({ operation: 'expense.approve' }), 'SHAPE_INVALID')).toBe(true); // example is about purchase_order
   });
 });

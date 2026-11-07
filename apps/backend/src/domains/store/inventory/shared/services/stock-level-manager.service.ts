@@ -24,6 +24,7 @@ import {
   CostingMethodResolverService,
   ResolvedCostingMethod,
 } from './costing-method-resolver.service';
+import { recordTriggerEvent } from '../../../workflows/engine/workflow-trigger.outbox';
 
 /**
  * Espacio de nombres de una reserva. `stock_reservations.reserved_for_id` es un
@@ -450,6 +451,17 @@ export class StockLevelManager {
         productForTracking.store_id &&
         settings?.notifications?.low_stock_alerts !== false
       ) {
+        // Flujos P1.1: stock.low in the same transaction; the business key
+        // (product, location, UTC day) fires the flow once per day.
+        await recordTriggerEvent(prisma, 'stock.low', {
+          store_id: productForTracking.store_id,
+          product_id: params.product_id,
+          product_name: productForTracking.name || 'Producto',
+          location_id: params.location_id,
+          quantity_available: updated_stock.quantity_available,
+          reorder_point: low_threshold,
+          occurred_on: new Date().toISOString().slice(0, 10),
+        });
         const publishLow = () => this.eventEmitter.emit('stock.low', {
           store_id: productForTracking.store_id,
           location_id: params.location_id,
