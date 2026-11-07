@@ -50,6 +50,13 @@ Riesgo (textual del plan): "Risk: item 1 (estado nuevo en entidades), 2 (permiso
 | T6 | S3 | inline (tras T4: mismos archivos) | ✅ | `11bca6333`, `591212912`, `45eac45d6`; 11/11 servicios gobernados; specs de los servicios en verde |
 | T7 | S1–S5 | delegada (escritor D, paralelo) | ✅ | `f3cd7a5b6`, `7b572dd80`; Karma 15/15; `ngc` limpio |
 | T8 | S1–S5 | inline | ✅ | En vivo :3099 + vhost; capturas en `evidencia-P1/` |
+| T9 | — (CI) | inline | ✅ | `5b4f70b1d`; typecheck de specs del job Backend Build en verde |
+| T10 | S3 | inline | ✅ | `04a9ba818`; ajustes por carga masiva (sesión) y archivado con candado; productos 157/157, ajustes 14/14 |
+| T11 | S3 | inline | ✅ | `1a080092e`; anticipo de OC (crear y plan de pago) con candado; servicios gobernados en verde |
+| T12 | S1–S3 (CI) | inline | ✅ | `a4acefc2b`, `a65c8dfa8`; 35 specs de la fase corren en el job de Flujos |
+| T13 | S3 | inline | ✅ | `db21fedaa`; descuento del POS retenido; candado 15/15, servicios 20/20, pagos 194/194 |
+| T14 | S2 | inline | ✅ | `0b2816d08`; idempotencia declarada y marca de inicio; acciones 17/17, paridad 8/8 |
+| T15 | S3–S4 | inline | ✅ | `041fd5ac5`, `734ffe7d5`, `2ab508dae`, `f6eb8c4f5`; bajos de la revisión r1 |
 
 Motivo de delegación (Writer trigger a): T2, T3, T4 y T7 son unidades independientes con superficies disjuntas, cada una de varios archivos y >100 líneas, lanzadas juntas tras cerrar el contrato.
 
@@ -64,3 +71,10 @@ Motivo de delegación (Writer trigger a): T2, T3, T4 y T7 son unidades independi
 - L7 (2026-11-07, QA en vivo): H-P1 pasa por API y en navegador (OC de $3.000.000 pendiente, 409 por API, Aprobar deshabilitado con enlace, solicitud con proveedor/monto/productos, aprobación libera, rechazo anula con motivo). Evento `supplier.created` arranca un flujo; acciones `expense.create` y `supplier.update` con `{{instance.subject_id}}` ejecutadas. Ajuste diferido ejecutado una vez como el solicitante.
 - L8 (2026-11-07, hallazgo): la prueba contra Postgres mostró que dos intentos simultáneos podían abrir dos candados; la revisión ahora sale de la primera lectura y la restricción única los serializa.
 - L9 (2026-11-07, pendiente): espejo Engram no disponible en este entorno.
+- L10 (2026-11-07, revisión r1, nota 58): CI rojo por el typecheck de specs; el candado se saltaba por el anticipo de OC (crear y plan de pago), la carga masiva por sesión y el archivado de producto; el descuento del POS no se retenía; los specs de la fase no corrían en CI; acciones al menos una vez.
+- L11 (2026-11-07, decisión, reemplaza la parte POS de L3): el descuento del POS sí se gobierna. La venta responde 409 y abre la solicitud; el worker no reejecuta nada (`retry_by_requester`), porque una venta necesita al cliente y el dinero en caja. Aprobada, el cajero repite la misma venta (mismo carrito, cliente, cupón y totales) y la aprobación se usa una vez en su transacción.
+- L12 (2026-11-07, decisión): un anticipo declarado al crear una OC no puede esperar una solicitud (aún no hay OC que retener): con un flujo que gobierna su monto, crear responde 409 `WORKFLOW_APPROVAL_REQUIRED` y el pago se registra desde la OC. El anticipo del plan de pago sí se retiene y se reejecuta.
+- L13 (2026-11-07, decisión): archivar un producto pide la aprobación de cada baja antes de abrir la transacción. Aprobada, la solicitud da de baja ese stock; el producto se archiva cuando se vuelve a archivar.
+- L14 (2026-11-07, decisión): idempotencia de acciones `replay_safe` (actualizar cliente, proveedor, empleado; etiqueta de cliente) o `at_most_once` (las demás). Una ejecución interrumpida tras la marca de inicio falla con motivo en vez de repetir el efecto; si el efecto falla, la marca se borra y el reintento corre.
+- L15 (2026-11-07, decisión): la restricción única del candado no lleva `entity_type` y cambiarla exige `DROP INDEX` (prohibido por el encargo); la regla vigente y el hash se leen con el tipo. `GET store/workflow-links` deja de devolver el título libre de la solicitud.
+- L16 (2026-11-07, pendiente declarado): anular una nota crédito o débito no emite `invoice.voided` (transición en el servicio fiscal de saldos de notas, fuera del alcance de la ronda).
