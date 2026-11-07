@@ -187,6 +187,11 @@ export interface StartPublicWorkflowInput {
   values: Record<string, unknown>;
   contact: { name: string; email?: string | null; phone?: string | null };
   idempotencyKey: string;
+  /**
+   * P3.4: file fields of the start form with a completed upload of this link
+   * (checked by the caller); the files join the dossier after the start.
+   */
+  fileFields?: string[];
 }
 
 /**
@@ -213,6 +218,8 @@ export interface StartExternalWorkflowInput {
   idempotencyKey: string;
   /** Extra data of the `started` event (`via` is set from `kind`). */
   started?: Record<string, unknown>;
+  /** Title of the request (default: the flow name). */
+  title?: string;
 }
 
 export interface StartSystemWorkflowInput {

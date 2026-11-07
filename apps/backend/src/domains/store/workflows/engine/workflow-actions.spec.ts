@@ -13,6 +13,8 @@ import { WorkflowActionInputError } from './actions/workflow-action.types';
 import { WorkflowPeopleActions } from './actions/people.actions';
 import { WorkflowPurchasingActions } from './actions/purchasing.actions';
 import { WorkflowOperationsActions } from './actions/operations.actions';
+import { WorkflowConnectorsActions } from './actions/connectors.actions';
+import { WorkflowHttpActions } from './actions/http.actions';
 
 // The executor acts with the publisher's REAL store permissions.
 const mockPublisherPermissions = jest.fn<Promise<string[]>, unknown[]>();
@@ -245,17 +247,21 @@ describe('WorkflowActionsExecutor (registry P1.2)', () => {
       { handlers: { 'vendix.purchase_order.create_draft': createDraft } } as any,
       { handlers: { 'vendix.expense.create': createExpense } } as any,
       { handlers: {} } as any,
+      { handlers: {} } as any,
+      { handlers: {} } as any,
     );
   });
   afterEach(() => jest.restoreAllMocks());
 
-  it('R1: every action of the registry has a handler in the three real groups', () => {
+  it('R1: every action of the registry has a handler in all the real groups', () => {
     const real = new WorkflowActionsExecutor(
       {} as any,
       {} as any,
       new WorkflowPeopleActions({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any),
       new WorkflowPurchasingActions({} as any, {} as any, {} as any, {} as any),
       new WorkflowOperationsActions({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any),
+      new WorkflowConnectorsActions({} as any, {} as any, {} as any, {} as any),
+      new WorkflowHttpActions({} as any),
     );
     expect([...real.registered()].sort()).toEqual([...WORKFLOW_VENDIX_ACTIONS].sort());
   });

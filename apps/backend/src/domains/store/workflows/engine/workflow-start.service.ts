@@ -233,14 +233,33 @@ export class WorkflowStartService {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_PUBLIC_NOT_FOUND);
     }
 
-    // Public uploads are out of scope: file fields are never accepted here.
+    // P3.4: file fields never travel in the values; the caller passes the
+    // ones with a completed upload of this link (they join the dossier after
+    // the start), and a required one without its upload fails like any field.
     const fileKeys = new Set(
       definition.fields.filter((f) => f.type === 'file').map((f) => f.key),
     );
     const submitted = Object.fromEntries(
       Object.entries(input.values ?? {}).filter(([k]) => !fileKeys.has(k)),
     );
-    const form = validateFormValues(definition, stage, submitted);
+    const uploaded = new Set(input.fileFields ?? []);
+    const form = validateFormValues(
+      definition,
+      {
+        ...stage,
+        form: stage.form
+          ? { ...stage.form, fields: stage.form.fields.filter((k) => !fileKeys.has(k)) }
+          : stage.form,
+      },
+      submitted,
+    );
+    for (const key of stage.form?.fields ?? []) {
+      const f = definition.fields.find((x) => x.key === key);
+      if (f?.type === 'file' && f.required && !uploaded.has(key)) {
+        form.ok = false;
+        form.errors.push({ field: key, message: `El campo "${f.label}" es obligatorio.` });
+      }
+    }
     if (!form.ok) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_FORM_INVALID, undefined, {
         errors: form.errors,
@@ -493,6 +512,7 @@ export class WorkflowStartService {
       subject,
       idempotencyKey: input.idempotencyKey,
       started: { ...(input.started ?? {}), via: input.kind },
+      title: input.title,
     });
   }
 
@@ -746,6 +766,8 @@ export class WorkflowStartService {
       subject: { type: string; id: number } | null;
       idempotencyKey: string;
       started: Record<string, unknown>;
+      /** P3: title given by the caller (default: the flow name). */
+      title?: string;
       /** P2.2: a child keeps the parent's starter, so `initiator` still means someone. */
       startedBy?: { type: WorkflowActor['type']; id: number | null };
       parent?: { id: number; stage_key: string; entry_seq: number };
@@ -754,7 +776,7 @@ export class WorkflowStartService {
     const actor: WorkflowActor = { type: 'system', id: null };
     const now = new Date();
     const reference = await this.references.next(tx, ctx.store_id);
-    const title = a.definition.name.slice(0, 200);
+    const title = (a.title?.trim() || a.definition.name).slice(0, 200);
     const enter = this.stages.applyActions(a.stage.on_enter, a.initial, {
       reference,
       title,

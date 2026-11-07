@@ -33,6 +33,62 @@ export const workflowsRoutes: Routes = [
       ),
   },
   {
+    path: 'connectors',
+    loadComponent: () =>
+      import('../connectors/pages/connectors-page/connectors-page.component').then(
+        (c) => c.ConnectorsPageComponent,
+      ),
+  },
+  {
+    path: 'records',
+    loadComponent: () =>
+      import('../records/pages/collections-page/collections-page.component').then(
+        (c) => c.CollectionsPageComponent,
+      ),
+  },
+  {
+    path: 'records/collections/new',
+    loadComponent: () =>
+      import('../records/pages/collection-designer-page/collection-designer-page.component').then(
+        (c) => c.CollectionDesignerPageComponent,
+      ),
+  },
+  {
+    path: 'records/collections/:collectionId/edit',
+    loadComponent: () =>
+      import('../records/pages/collection-designer-page/collection-designer-page.component').then(
+        (c) => c.CollectionDesignerPageComponent,
+      ),
+  },
+  {
+    path: 'records/collections/:collectionId',
+    loadComponent: () =>
+      import('../records/pages/records-list-page/records-list-page.component').then(
+        (c) => c.RecordsListPageComponent,
+      ),
+  },
+  {
+    path: 'records/collections/:collectionId/new',
+    loadComponent: () =>
+      import('../records/pages/record-form-page/record-form-page.component').then(
+        (c) => c.RecordFormPageComponent,
+      ),
+  },
+  {
+    path: 'records/:recordId/edit',
+    loadComponent: () =>
+      import('../records/pages/record-form-page/record-form-page.component').then(
+        (c) => c.RecordFormPageComponent,
+      ),
+  },
+  {
+    path: 'records/:recordId',
+    loadComponent: () =>
+      import('../records/pages/record-detail-page/record-detail-page.component').then(
+        (c) => c.RecordDetailPageComponent,
+      ),
+  },
+  {
     path: ':id/board',
     loadComponent: () =>
       import('../pages/board-page/board-page.component').then(

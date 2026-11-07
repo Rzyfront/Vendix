@@ -98,6 +98,36 @@ export const ErrorCodes = {
   WORKFLOW_APPROVAL_PENDING: { code: 'WORKFLOW_APPROVAL_PENDING', httpStatus: 409, devMessage: 'Esta operación quedó pendiente de aprobación; se ejecuta cuando la solicitud se apruebe.' },
   WORKFLOW_APPROVAL_REJECTED: { code: 'WORKFLOW_APPROVAL_REJECTED', httpStatus: 409, devMessage: 'La solicitud de aprobación de esta operación fue rechazada.' },
   WORKFLOW_APPROVAL_REQUIRED: { code: 'WORKFLOW_APPROVAL_REQUIRED', httpStatus: 409, devMessage: 'Esta operación necesita aprobación y no puede hacerse por esta ruta; usa la ruta que abre la solicitud.' },
+  // Flujos P3 · T1
+  WORKFLOW_INBOUND_UNAVAILABLE: { code: 'WORKFLOW_INBOUND_UNAVAILABLE', httpStatus: 422, devMessage: 'Este flujo no declara el disparador necesario o no está publicado.' },
+  WORKFLOW_INBOUND_ALREADY_ACTIVE: { code: 'WORKFLOW_INBOUND_ALREADY_ACTIVE', httpStatus: 409, devMessage: 'Ya está activo; rota el secreto si necesitas uno nuevo.' },
+  WORKFLOW_INBOUND_NOT_ACTIVATED: { code: 'WORKFLOW_INBOUND_NOT_ACTIVATED', httpStatus: 404, devMessage: 'Este flujo todavía no tiene esta conexión.' },
+  WORKFLOW_INBOUND_NOT_FOUND: { code: 'WORKFLOW_INBOUND_NOT_FOUND', httpStatus: 404, devMessage: 'Este webhook no existe o está desactivado.' },
+  WORKFLOW_INBOUND_SIGNATURE_INVALID: { code: 'WORKFLOW_INBOUND_SIGNATURE_INVALID', httpStatus: 401, devMessage: 'Firma ausente, inválida o vencida.' },
+  WORKFLOW_INBOUND_RATE_LIMITED: { code: 'WORKFLOW_INBOUND_RATE_LIMITED', httpStatus: 429, devMessage: 'Superaste el límite de llamadas por minuto de este webhook.' },
+  WORKFLOW_INBOUND_PAYLOAD_INVALID: { code: 'WORKFLOW_INBOUND_PAYLOAD_INVALID', httpStatus: 400, devMessage: 'El cuerpo debe ser un JSON con la forma {"values": {...}}.' },
+  WORKFLOW_INBOUND_PAYLOAD_TOO_LARGE: { code: 'WORKFLOW_INBOUND_PAYLOAD_TOO_LARGE', httpStatus: 413, devMessage: 'El cuerpo supera los 64 KB permitidos.' },
+  WORKFLOW_INBOUND_KEY_REQUIRED: { code: 'WORKFLOW_INBOUND_KEY_REQUIRED', httpStatus: 400, devMessage: 'Falta el encabezado Idempotency-Key (de 1 a 120 caracteres).' },
+  // Flujos P3 · T2
+  WORKFLOW_SECRET_NOT_FOUND: { code: 'WORKFLOW_SECRET_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró el secreto.' },
+  WORKFLOW_SECRET_DUPLICATE: { code: 'WORKFLOW_SECRET_DUPLICATE', httpStatus: 409, devMessage: 'Ya existe un secreto con ese nombre.' },
+  WORKFLOW_SECRET_IN_USE: { code: 'WORKFLOW_SECRET_IN_USE', httpStatus: 409, devMessage: 'El secreto lo usan flujos publicados; quítalo de ellos antes de borrarlo.' },
+  // Flujos P3 · T3
+  WORKFLOW_CONNECTOR_NOT_FOUND: { code: 'WORKFLOW_CONNECTOR_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró ese conector.' },
+  WORKFLOW_CONNECTOR_NOT_TESTABLE: { code: 'WORKFLOW_CONNECTOR_NOT_TESTABLE', httpStatus: 422, devMessage: 'Este conector se prueba desde su flujo.' },
+  // Flujos P3 · T5
+  WORKFLOW_COLLECTION_NOT_FOUND: { code: 'WORKFLOW_COLLECTION_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró la colección.' },
+  WORKFLOW_COLLECTION_INVALID: { code: 'WORKFLOW_COLLECTION_INVALID', httpStatus: 422, devMessage: 'La colección tiene datos no válidos.' },
+  WORKFLOW_COLLECTION_KEY_TAKEN: { code: 'WORKFLOW_COLLECTION_KEY_TAKEN', httpStatus: 409, devMessage: 'Ya existe una colección con esa clave.' },
+  WORKFLOW_COLLECTION_ARCHIVED: { code: 'WORKFLOW_COLLECTION_ARCHIVED', httpStatus: 409, devMessage: 'La colección está archivada.' },
+  WORKFLOW_COLLECTION_FIELD_IN_USE: { code: 'WORKFLOW_COLLECTION_FIELD_IN_USE', httpStatus: 409, devMessage: 'Un campo lo usan flujos publicados; quítalo de ellos antes de cambiarlo.' },
+  WORKFLOW_RECORD_NOT_FOUND: { code: 'WORKFLOW_RECORD_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró el registro.' },
+  WORKFLOW_RECORD_INVALID: { code: 'WORKFLOW_RECORD_INVALID', httpStatus: 422, devMessage: 'Los datos del registro no son válidos.' },
+  // Flujos P3 · T4
+  WORKFLOW_PUBLIC_CAPTCHA_INVALID: { code: 'WORKFLOW_PUBLIC_CAPTCHA_INVALID', httpStatus: 422, devMessage: 'No pudimos verificar que no eres un robot. Intenta de nuevo.' },
+  WORKFLOW_UPLOAD_INVALID: { code: 'WORKFLOW_UPLOAD_INVALID', httpStatus: 422, devMessage: 'La subida del archivo no es válida.' },
+  WORKFLOW_UPLOAD_NOT_FOUND: { code: 'WORKFLOW_UPLOAD_NOT_FOUND', httpStatus: 404, devMessage: 'La subida no existe o ya venció.' },
+  WORKFLOW_TRACKING_LINK_NOT_FOUND: { code: 'WORKFLOW_TRACKING_LINK_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró el enlace de seguimiento.' },
   // Documental D1 (flujos-documental S5)
   DOCUMENT_TOO_LARGE: { code: 'DOCUMENT_TOO_LARGE', httpStatus: 413, devMessage: 'El archivo supera el tamaño máximo permitido.' },
   DOCUMENT_TYPE_NOT_ALLOWED: { code: 'DOCUMENT_TYPE_NOT_ALLOWED', httpStatus: 415, devMessage: 'Este tipo de archivo no está permitido.' },

@@ -98,6 +98,71 @@ describe('WorkflowDefinitionsService', () => {
   });
 
   describe('validate', () => {
+    it('P3.6: la colección de un flujo sobre registros se valida contra las colecciones activas de la tienda', async () => {
+      const def = (collection: string) => ({
+        ...purchaseDefinition(),
+        subject: { type: 'custom_record', collection },
+      });
+      kit.db.insert('workflow_collections', {
+        store_id: 1,
+        organization_id: 1,
+        key: 'contratos',
+        is_archived: false,
+        fields: [{ key: 'vence', type: 'date' }],
+      });
+      kit.db.insert('workflow_collections', {
+        store_id: 1,
+        organization_id: 1,
+        key: 'viejos',
+        is_archived: true,
+        fields: [],
+      });
+      kit.db.insert('workflow_collections', {
+        store_id: 2,
+        organization_id: 1,
+        key: 'ajena',
+        is_archived: false,
+        fields: [],
+      });
+      const ok = await svc.create({ name: 'Renovación', key: 'renovacion', definition: def('contratos') as any });
+      expect(await svc.validate(ok.id)).toMatchObject({ valid: true, errors: [] });
+      for (const missing of ['nope', 'viejos', 'ajena']) {
+        const d = await svc.create({ name: `X ${missing}`, key: `x_${missing}`, definition: def(missing) as any });
+        const r = await svc.validate(d.id);
+        expect(r.valid).toBe(false);
+        expect(r.errors.map((e: any) => e.code)).toContain('COLLECTION_UNKNOWN');
+      }
+    });
+
+    it('P3.2: {{secrets.NAME}} debe nombrar un secreto de esta tienda', async () => {
+      const withSecret = (name: string) => {
+        const d: any = purchaseDefinition();
+        d.fields = [...d.fields, { key: 'crm_id', type: 'text', label: 'ID CRM' }];
+        d.stages[0].on_enter = [
+          {
+            action: 'vendix.http.request',
+            map: {
+              method: 'POST',
+              url: 'https://api.example.com/x',
+              headers: `Authorization: Bearer {{secrets.${name}}}`,
+            },
+            output: { crm_id: 'body.id' },
+          },
+        ];
+        return d;
+      };
+      kit.db.insert('workflow_secrets', { store_id: 1, organization_id: 1, name: 'CRM_TOKEN', value_enc: 'x' });
+      kit.db.insert('workflow_secrets', { store_id: 2, organization_id: 1, name: 'AJENO', value_enc: 'x' });
+      const ok = await svc.create({ name: 'Con secreto', key: 'con_secreto', definition: withSecret('CRM_TOKEN') });
+      expect((await svc.validate(ok.id)).errors.map((e: any) => e.code)).not.toContain('SECRET_UNKNOWN');
+      for (const missing of ['NOPE', 'AJENO']) {
+        const d = await svc.create({ name: `S ${missing}`, key: `s_${missing.toLowerCase()}`, definition: withSecret(missing) });
+        const r = await svc.validate(d.id);
+        expect(r.valid).toBe(false);
+        expect(r.errors.map((e: any) => e.code)).toContain('SECRET_UNKNOWN');
+      }
+    });
+
     it('usa roles, grupos con miembros disponibles y usuarios de la tienda', async () => {
       const d = await svc.create({ name: 'Compra', key: 'purchase', definition: purchaseDefinition() as any });
       expect(await svc.validate(d.id)).toMatchObject({ valid: true, errors: [] });

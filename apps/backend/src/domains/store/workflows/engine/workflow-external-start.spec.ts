@@ -46,8 +46,10 @@ describe('WorkflowEngineService.startExternal (P3.1, P3.3)', () => {
       values: { amount: '1500', reason: 'Desde la web' },
       idempotencyKey: 'hook-1:abc',
       started: { hook_id: 7 },
+      title: 'Pedido web #88',
     });
     expect(r.instance).toMatchObject({
+      title: 'Pedido web #88',
       status: 'active',
       current_stage_key: 'request',
       started_by_type: 'system',

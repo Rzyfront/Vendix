@@ -624,7 +624,27 @@ export class WorkflowDefinitionsService {
       }),
     ]);
     const withMembers = new Set<number>(members.map((m: any) => m.work_group_id));
+    // P3.2: `{{secrets.NAME}}` must name a secret of this store (names only).
+    const secrets = await db.workflow_secrets.findMany({
+      where: { store_id: storeId },
+      select: { name: true },
+    });
+    // P3.6: custom collections of the store (archived ones no longer validate).
+    const collections = await db.workflow_collections.findMany({
+      where: { store_id: storeId, is_archived: false },
+      select: { key: true, fields: true },
+    });
     return {
+      secretNames: secrets.map((s: { name: string }) => s.name),
+      collections: Object.fromEntries(
+        collections.map((c: { key: string; fields: unknown }) => [
+          c.key,
+          ((c.fields ?? []) as Array<{ key: string; type: string }>).map((f) => ({
+            key: f.key,
+            type: f.type,
+          })),
+        ]),
+      ),
       roleKeys: [...new Set<string>(roles.map((r: any) => r.name))],
       groupKeys: groups.filter((g: any) => withMembers.has(g.id)).map((g: any) => g.key),
       userIds: storeUsers.map((u: any) => u.user_id),

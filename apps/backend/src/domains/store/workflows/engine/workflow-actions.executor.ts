@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   WORKFLOW_ACTION_CATALOG,
+  WorkflowDefinitionV1,
   WorkflowVendixActionName,
+  applyComputedFields,
 } from '@common/workflows/contract';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
@@ -23,6 +25,10 @@ import {
 import { WorkflowPeopleActions } from './actions/people.actions';
 import { WorkflowOperationsActions } from './actions/operations.actions';
 import { WorkflowPurchasingActions } from './actions/purchasing.actions';
+import { WorkflowHttpActions } from './actions/http.actions';
+import { coerceOutputFields } from './workflow-http-output';
+import { DEFAULT_STORE_TIMEZONE } from './workflow-stage.service';
+import { WorkflowConnectorsActions } from './actions/connectors.actions';
 
 export interface ActionOutboxRow {
   id: number;
@@ -74,11 +80,15 @@ export class WorkflowActionsExecutor {
     people: WorkflowPeopleActions,
     purchasing: WorkflowPurchasingActions,
     operations: WorkflowOperationsActions,
+    http: WorkflowHttpActions,
+    connectors: WorkflowConnectorsActions,
   ) {
     this.handlers = {
       ...people.handlers,
       ...purchasing.handlers,
       ...operations.handlers,
+      ...http.handlers,
+      ...connectors.handlers,
     };
   }
 
@@ -104,6 +114,8 @@ export class WorkflowActionsExecutor {
     }
 
     let createdId: number | null | undefined = row.payload.created_id;
+    let outputValues: Record<string, unknown> | undefined;
+    const output = row.payload.output as Record<string, string> | undefined;
     if (createdId === undefined) {
       const spec = WORKFLOW_ACTION_CATALOG[action];
       const handler = this.handlers[action];
@@ -128,6 +140,7 @@ export class WorkflowActionsExecutor {
         const result = await handler({
           instance,
           map,
+          ...(output ? { output } : {}),
           actingUserId,
           permissions,
           asPublisher: (fn) =>
@@ -144,6 +157,7 @@ export class WorkflowActionsExecutor {
             ),
         });
         createdId = result.record_id;
+        outputValues = result.fields;
       } catch (e) {
         // The domain transaction rolled back: the effect did not happen, so a
         // retry may run it.
@@ -155,9 +169,33 @@ export class WorkflowActionsExecutor {
         }
         throw e;
       }
+      // P3.2: the produced values are saved with the result, so a retry never
+      // repeats the call and still writes them to the instance.
+      row.payload = {
+        ...row.payload,
+        created_id: createdId,
+        ...(outputValues && Object.keys(outputValues).length > 0
+          ? { output_values: outputValues }
+          : {}),
+      };
       await this.prisma.withoutScope().workflow_outbox.updateMany({
         where: { id: row.id },
-        data: { payload: { ...row.payload, created_id: createdId } },
+        data: { payload: row.payload },
+      });
+    }
+
+    const pending = row.payload.output_values as Record<string, unknown> | undefined;
+    if (pending) {
+      const done = await this.applyOutputFields(row, instance, pending);
+      const { output_values: _applied, ...rest } = row.payload;
+      row.payload = {
+        ...rest,
+        output_applied: done.applied,
+        output_dropped: done.dropped,
+      };
+      await this.prisma.withoutScope().workflow_outbox.updateMany({
+        where: { id: row.id },
+        data: { payload: row.payload },
       });
     }
 
@@ -165,7 +203,66 @@ export class WorkflowActionsExecutor {
       action,
       created_id: createdId,
       stage_key: row.payload.stage_key ?? null,
+      // Field keys only: the values (a response) never go to the timeline.
+      ...(Array.isArray(row.payload.output_applied)
+        ? {
+            fields: row.payload.output_applied,
+            fields_dropped: row.payload.output_dropped ?? [],
+          }
+        : {}),
     });
+  }
+
+  /**
+   * P3.2: writes the values an action produced into the instance `data`:
+   * coerced to each declared field type (invalid ones dropped), under the
+   * instance lock with a CAS on `row_version`, computed fields recomputed.
+   */
+  private async applyOutputFields(
+    row: ActionOutboxRow,
+    instance: WorkflowInstanceRow,
+    values: Record<string, unknown>,
+  ): Promise<{ applied: string[]; dropped: string[] }> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = await this.prisma.$transaction(async (tx: WorkflowTx) => {
+        await this.events.lockInstance(tx, row.store_id, instance.id);
+        const fresh = (await tx.workflow_instances.findFirst({
+          where: { id: instance.id, store_id: row.store_id },
+        })) as WorkflowInstanceRow | null;
+        if (!fresh || fresh.status !== 'active') {
+          return { applied: [] as string[], dropped: Object.keys(values) };
+        }
+        const version = await tx.workflow_versions.findFirst({
+          where: { id: fresh.version_id, store_id: row.store_id },
+          select: { definition: true },
+        });
+        if (!version) throw new Error('Workflow version not found');
+        const definition = version.definition as WorkflowDefinitionV1;
+        const { coerced, dropped } = coerceOutputFields(definition, values);
+        const applied = Object.keys(coerced);
+        if (applied.length === 0) return { applied, dropped };
+        const merged = { ...(fresh.data ?? {}), ...coerced };
+        const data = (definition.fields ?? []).some((f) => f.compute)
+          ? applyComputedFields(definition, merged, {
+              timeZone: await this.storeTimezone(row.store_id),
+            })
+          : merged;
+        const saved = await tx.workflow_instances.updateMany({
+          where: { id: fresh.id, store_id: row.store_id, row_version: fresh.row_version },
+          data: { data, row_version: { increment: 1 } },
+        });
+        return saved.count === 0 ? null : { applied, dropped };
+      });
+      if (result) return result;
+    }
+    throw new Error('La solicitud cambió mientras se guardaba la respuesta; se reintentará.');
+  }
+
+  private async storeTimezone(storeId: number): Promise<string> {
+    const store = await this.prisma
+      .withoutScope()
+      .stores.findFirst({ where: { id: storeId }, select: { timezone: true } });
+    return store?.timezone || DEFAULT_STORE_TIMEZONE;
   }
 
   /**
