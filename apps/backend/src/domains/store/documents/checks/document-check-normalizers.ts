@@ -15,7 +15,9 @@ export const READABLE_FIELD_TYPES: ReadonlySet<string> = new Set([
 
 export type NormalizedValue = string | number | boolean;
 
-const TAX_ID_HINT = /(^|[^a-z])(nit|rut|cedula|c[eé]dula|identificacion|identificaci[oó]n|documento|cc)([^a-z]|$)/i;
+const TAX_ID_HINT = /(^|[^a-z])(nit|rut|cedula|c[eé]dula|identificacion|identificaci[oó]n|cc)([^a-z]|$)/i;
+/** "Número de documento" is an id; "Tipo de documento" or "Documento adjunto" are not. */
+const DOC_NUMBER_HINT = /(^|[^a-z])(n[uú]mero|num|nro|no)[\s._-]*(de[\s._-]+)?documento([^a-z]|$)/i;
 
 function stripAccents(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -94,7 +96,7 @@ export function normalizeTaxId(raw: unknown): string | null {
 
 export function isTaxIdField(def: Pick<WorkflowFieldDef, 'key' | 'label' | 'type'>): boolean {
   if (def.type !== 'text') return false;
-  return TAX_ID_HINT.test(def.key) || TAX_ID_HINT.test(def.label);
+  return [def.key, def.label].some((text) => TAX_ID_HINT.test(text) || DOC_NUMBER_HINT.test(text));
 }
 
 function normalizeText(raw: unknown, max: number): string | null {

@@ -36,6 +36,9 @@ describe('normalizadores de lectura con IA', () => {
     expect(normalizeTaxId('12')).toBeNull();
     expect(isTaxIdField(def({ key: 'nit', label: 'NIT del proveedor' }))).toBe(true);
     expect(isTaxIdField(def({ key: 'proveedor', label: 'Proveedor' }))).toBe(false);
+    expect(isTaxIdField(def({ key: 'numero_documento', label: 'Número de documento' }))).toBe(true);
+    expect(isTaxIdField(def({ key: 'tipo_documento', label: 'Tipo de documento' }))).toBe(false);
+    expect(isTaxIdField(def({ key: 'doc', label: 'Documento adjunto' }))).toBe(false);
   });
 
   it('por tipo de campo', () => {
