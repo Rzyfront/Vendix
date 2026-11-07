@@ -1,3 +1,4 @@
+import type { signature_signers } from '@prisma/client';
 import { Injectable } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
@@ -38,7 +39,7 @@ export class SignatureSealService {
     });
     if (!request) throw new VendixHttpException(ErrorCodes.SIGNATURE_REQUEST_NOT_FOUND);
     if (request.status === 'completed') return false;
-    const signers: any[] = await this.prisma.signature_signers.findMany({
+    const signers: signature_signers[] = await this.prisma.signature_signers.findMany({
       where: { request_id: requestId, store_id: storeId },
       orderBy: [{ order: 'asc' }, { id: 'asc' }],
     });
@@ -55,6 +56,11 @@ export class SignatureSealService {
 
     const stamps: SignatureStamp[] = [];
     for (const s of signers) {
+      // A signed signer always has its stroke and time; without them the seal
+      // would be incomplete evidence, so it fails and the cron retries later.
+      if (s.signature_file_id === null || s.signed_at === null) {
+        throw new VendixHttpException(ErrorCodes.DOCUMENT_NOT_FOUND);
+      }
       const file = await this.files.findOne(s.signature_file_id);
       stamps.push({
         slot_key: s.slot_key,

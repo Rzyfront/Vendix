@@ -1,3 +1,4 @@
+import type { issued_documents, signature_requests, signature_signers } from '@prisma/client';
 import { randomInt, timingSafeEqual } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -32,9 +33,9 @@ export interface ClientMeta {
 export type SigningState = 'pending' | 'signed' | 'declined' | 'blocked';
 
 interface Resolved {
-  signer: any;
-  request: any;
-  document: any;
+  signer: signature_signers;
+  request: signature_requests;
+  document: issued_documents;
   store_id: number;
   organization_id: number;
 }

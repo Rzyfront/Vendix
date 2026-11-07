@@ -1,3 +1,4 @@
+import type { document_purge_items, document_purge_runs } from '@prisma/client';
 import { Injectable, Logger } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
@@ -151,8 +152,8 @@ export class DocumentRetentionService {
           created_by_user_id: c.user_id ?? 0,
         },
       });
-    } catch (e: any) {
-      if (e?.code === 'P2002') throw new VendixHttpException(ErrorCodes.DOCRET_POLICY_KEY_TAKEN);
+    } catch (e: unknown) {
+      if ((e as { code?: string } | null)?.code === 'P2002') throw new VendixHttpException(ErrorCodes.DOCRET_POLICY_KEY_TAKEN);
       throw e;
     }
   }
@@ -453,7 +454,7 @@ export class DocumentRetentionService {
     return this.getRun(run.id);
   }
 
-  private shapeRun(r: any) {
+  private shapeRun(r: document_purge_runs) {
     return {
       id: r.id,
       trigger: r.trigger,
@@ -482,7 +483,7 @@ export class DocumentRetentionService {
       }),
       this.prisma.document_purge_runs.count({ where }),
     ]);
-    return { data: rows.map((r: any) => this.shapeRun(r)), total, page, limit };
+    return { data: rows.map((r: document_purge_runs) => this.shapeRun(r)), total, page, limit };
   }
 
   async getRun(id: number) {
@@ -497,7 +498,7 @@ export class DocumentRetentionService {
     });
     return {
       ...this.shapeRun(run),
-      items: items.map((i: any) => ({
+      items: items.map((i: document_purge_items) => ({
         id: i.id,
         file_id: i.file_id,
         policy_id: i.policy_id,

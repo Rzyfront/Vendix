@@ -1,3 +1,9 @@
+import type {
+  issued_documents,
+  signature_evidence_events,
+  signature_requests,
+  signature_signers,
+} from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -99,7 +105,7 @@ export class SignatureRequestsService {
           created_by_id: actor.id,
         },
       });
-      const rows: any[] = [];
+      const rows: signature_signers[] = [];
       for (let i = 0; i < signers.length; i++) {
         rows.push(
           await tx.signature_signers.create({
@@ -331,11 +337,11 @@ export class SignatureRequestsService {
   /** Issued documents of a workflow request with their signature requests and evidence. */
   async listByInstance(instanceId: number) {
     const c = this.ctx();
-    const documents: any[] = await this.prisma.issued_documents.findMany({
+    const documents: issued_documents[] = await this.prisma.issued_documents.findMany({
       where: { workflow_instance_id: instanceId, store_id: c.store_id, status: { notIn: ['superseded', 'voided'] } },
       orderBy: { id: 'asc' },
     });
-    const requests: any[] = documents.length
+    const requests: signature_requests[] = documents.length
       ? await this.prisma.signature_requests.findMany({
           where: { store_id: c.store_id, issued_document_id: { in: documents.map((d) => d.id) } },
           orderBy: { id: 'desc' },
@@ -364,15 +370,15 @@ export class SignatureRequestsService {
     return this.files.signedDownloadUrl(request.sealed_file_id);
   }
 
-  private async present(requests: any[]) {
+  private async present(requests: signature_requests[]) {
     if (requests.length === 0) return [];
     const c = this.ctx();
     const ids = requests.map((r) => r.id);
-    const signers: any[] = await this.prisma.signature_signers.findMany({
+    const signers: signature_signers[] = await this.prisma.signature_signers.findMany({
       where: { store_id: c.store_id, request_id: { in: ids } },
       orderBy: [{ order: 'asc' }, { id: 'asc' }],
     });
-    const events: any[] = await this.prisma.signature_evidence_events.findMany({
+    const events: signature_evidence_events[] = await this.prisma.signature_evidence_events.findMany({
       where: { store_id: c.store_id, request_id: { in: ids } },
       orderBy: { seq: 'asc' },
     });
