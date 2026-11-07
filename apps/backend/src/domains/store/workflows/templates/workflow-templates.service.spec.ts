@@ -11,7 +11,12 @@ describe('WorkflowTemplatesService', () => {
       updateMany: jest.fn(),
     },
   };
-  const definitions = { create: jest.fn(), publish: jest.fn() };
+  const definitions = {
+    create: jest.fn(),
+    publish: jest.fn(),
+    validateDefinition: jest.fn(),
+    archive: jest.fn(),
+  };
   let service: WorkflowTemplatesService;
 
   const run = <T>(fn: () => Promise<T>) =>
@@ -29,6 +34,8 @@ describe('WorkflowTemplatesService', () => {
     prisma.workflow_definitions.updateMany.mockResolvedValue({ count: 1 });
     definitions.create.mockResolvedValue({ id: 41 });
     definitions.publish.mockResolvedValue({ unchanged: false, version: { version: 1 } });
+    definitions.validateDefinition.mockResolvedValue({ valid: true, errors: [], warnings: [] });
+    definitions.archive.mockResolvedValue({});
     service = new WorkflowTemplatesService(prisma as never, definitions as never);
   });
 
@@ -87,8 +94,23 @@ describe('WorkflowTemplatesService', () => {
     );
   });
 
-  it('does not report success when publishing fails', async () => {
+  it('does not report success when publishing fails, and archives the fresh draft', async () => {
     definitions.publish.mockRejectedValue(new Error('invalid'));
     await expect(run(() => service.activate('pqr'))).rejects.toThrow('invalid');
+    expect(definitions.archive).toHaveBeenCalledWith(41);
+  });
+
+  it('validates before writing: an invalid template creates no draft', async () => {
+    definitions.validateDefinition.mockResolvedValue({
+      valid: false,
+      errors: [{ code: 'X', message: 'bad' }],
+      warnings: [],
+    });
+    await expect(run(() => service.activate('pqr'))).rejects.toBeInstanceOf(VendixHttpException);
+    expect(definitions.validateDefinition).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'pqr' }),
+    );
+    expect(definitions.create).not.toHaveBeenCalled();
+    expect(definitions.publish).not.toHaveBeenCalled();
   });
 });

@@ -60,18 +60,38 @@ export class WorkflowTemplatesService {
     }
     const { flowKey, copy } = await this.freeKey(storeId, template.key);
     const name = copy > 1 ? `${template.name} (${copy})` : template.name;
+    const definition = { ...template.definition, key: flowKey, name };
+
+    // Same validation `publish` runs, before anything is written: an invalid
+    // template never leaves a draft behind.
+    const validation = await this.definitions.validateDefinition(definition);
+    if (!validation.valid) {
+      throw new VendixHttpException(ErrorCodes.WORKFLOW_INVALID, undefined, {
+        errors: validation.errors,
+        warnings: validation.warnings,
+      });
+    }
 
     const created = await this.definitions.create({
       name,
       key: flowKey,
       description: template.description,
       category: template.category,
-      definition: { ...template.definition, key: flowKey, name },
+      definition,
       source_template_key: template.key,
     });
-    const published = await this.definitions.publish(created.id, {
-      changelog: `Plantilla "${template.name}"`,
-    });
+    let published: Awaited<ReturnType<WorkflowDefinitionsService['publish']>>;
+    try {
+      published = await this.definitions.publish(created.id, {
+        changelog: `Plantilla "${template.name}"`,
+      });
+    } catch (error) {
+      // create and publish run in separate transactions: if publish still
+      // fails (e.g. a concurrent change), archive the fresh draft so the
+      // gallery never leaves an active half-made flow.
+      await this.definitions.archive(created.id).catch(() => undefined);
+      throw error;
+    }
     return {
       id: created.id,
       key: flowKey,
