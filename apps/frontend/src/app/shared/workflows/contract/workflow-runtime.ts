@@ -390,8 +390,12 @@ export const WORKFLOW_TOKEN_MAX_LENGTH = 4000;
 export interface WorkflowTokenContext {
   /** Instance data, addressed as `{{fields.<key>}}`. */
   fields?: Record<string, unknown>;
-  /** `{{instance.reference}}` and `{{instance.title}}`. */
-  instance?: { reference?: string | null; title?: string | null };
+  /** `{{instance.reference}}`, `{{instance.title}}` and `{{instance.subject_id}}`. */
+  instance?: {
+    reference?: string | null;
+    title?: string | null;
+    subject_id?: number | null;
+  };
   /** Flat event context, addressed as `{{event.<key>}}`. */
   event?: Record<string, unknown>;
   /**

@@ -38,7 +38,9 @@ export class WorkflowStageService {
   applyActions(
     actions: WorkflowActionDef[] | undefined,
     data: Record<string, unknown>,
-    instance: Pick<WorkflowInstanceRow, 'reference' | 'title'>,
+    instance: Pick<WorkflowInstanceRow, 'reference' | 'title'> & {
+      subject_id?: number | null;
+    },
   ): {
     data: Record<string, unknown>;
     notifies: WorkflowNotifyPayload[];

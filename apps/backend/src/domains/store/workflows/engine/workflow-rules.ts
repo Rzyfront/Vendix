@@ -1,4 +1,5 @@
 import {
+  WORKFLOW_VENDIX_ACTIONS,
   WorkflowActionDef,
   WorkflowActionMapValue,
   WorkflowAssigneeDef,
@@ -27,6 +28,8 @@ export interface AppliedVendixAction {
 export interface ActionInstanceRef {
   reference?: string | null;
   title?: string | null;
+  /** Id of the record the request is about (`{{instance.subject_id}}`). */
+  subject_id?: number | null;
 }
 
 function resolveMap(
@@ -67,13 +70,11 @@ export function applyActionList(
   for (const a of actions ?? []) {
     if (a.action === 'set_field') next[a.field] = a.value;
     else if (a.action === 'notify') notifies.push({ message: a.message, to: a.to });
-    else if (
-      a.action === 'vendix.purchase_order.create_draft' ||
-      a.action === 'vendix.crm_task.create'
-    ) {
+    else if ((WORKFLOW_VENDIX_ACTIONS as readonly string[]).includes(a.action)) {
+      const v = a as Extract<WorkflowActionDef, { map: unknown }>;
       vendix.push({
-        action: a.action,
-        map_resolved: resolveMap(a.map, next, instance),
+        action: v.action,
+        map_resolved: resolveMap(v.map, next, instance),
       });
     }
   }
