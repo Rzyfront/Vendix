@@ -26,6 +26,22 @@ export const workflowsRoutes: Routes = [
       ),
   },
   {
+    // P5.5: multi-flow board filtered by flow, role and branch.
+    path: 'board',
+    loadComponent: () =>
+      import('../pages/board-all-page/board-all-page.component').then(
+        (c) => c.BoardAllPageComponent,
+      ),
+  },
+  {
+    // P5.4: gallery of ready-made Administration templates.
+    path: 'templates',
+    loadComponent: () =>
+      import('../pages/templates-gallery-page/templates-gallery-page.component').then(
+        (c) => c.TemplatesGalleryPageComponent,
+      ),
+  },
+  {
     path: 'integrations',
     loadComponent: () =>
       import('../integrations/pages/integrations-page/integrations-page.component').then(
