@@ -269,6 +269,18 @@ export class StorePrismaService extends BasePrismaService {
     'workflow_tracking_links',
     'workflow_collections',
     'workflow_records',
+    // Documental completo (flujos-adm P4): todas llevan `store_id` NOT NULL.
+    'document_templates',
+    'document_template_versions',
+    'issued_documents',
+    'signature_requests',
+    'signature_signers',
+    'signature_evidence_events',
+    'document_checks',
+    'document_file_profiles',
+    'document_retention_policies',
+    'document_purge_runs',
+    'document_purge_items',
     // ===== CRM (PLAN-CRM §2.3) =====
     // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
     'crm_conversations',
@@ -2025,6 +2037,50 @@ export class StorePrismaService extends BasePrismaService {
 
   get workflow_approval_gates() {
     return this.scoped_client.workflow_approval_gates;
+  }
+
+  get document_templates() {
+    return this.scoped_client.document_templates;
+  }
+
+  get document_template_versions() {
+    return this.scoped_client.document_template_versions;
+  }
+
+  get issued_documents() {
+    return this.scoped_client.issued_documents;
+  }
+
+  get signature_requests() {
+    return this.scoped_client.signature_requests;
+  }
+
+  get signature_signers() {
+    return this.scoped_client.signature_signers;
+  }
+
+  get signature_evidence_events() {
+    return this.scoped_client.signature_evidence_events;
+  }
+
+  get document_checks() {
+    return this.scoped_client.document_checks;
+  }
+
+  get document_file_profiles() {
+    return this.scoped_client.document_file_profiles;
+  }
+
+  get document_retention_policies() {
+    return this.scoped_client.document_retention_policies;
+  }
+
+  get document_purge_runs() {
+    return this.scoped_client.document_purge_runs;
+  }
+
+  get document_purge_items() {
+    return this.scoped_client.document_purge_items;
   }
 
   get stored_files() {

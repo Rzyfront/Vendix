@@ -565,9 +565,9 @@ export class WorkflowDefinitionsService {
   }
 
   /**
-   * Context built from the DB. `publishedTemplateKeys` is [] on purpose:
-   * document templates do not exist yet (documents block), so any requirement
-   * that references a template fails closed until they do.
+   * Context built from the DB. `publishedTemplateKeys` are the keys of the
+   * store's templates with a published version (P4.1): a requirement that
+   * references any other template fails closed.
    */
   private async validateAgainstStore(
     db: WorkflowTx,
@@ -623,6 +623,10 @@ export class WorkflowDefinitionsService {
         select: { key: true },
       }),
     ]);
+    const templates = await db.document_templates.findMany({
+      where: { store_id: storeId, status: 'published', published_version_id: { not: null } },
+      select: { key: true },
+    });
     const withMembers = new Set<number>(members.map((m: any) => m.work_group_id));
     // P3.2: `{{secrets.NAME}}` must name a secret of this store (names only).
     const secrets = await db.workflow_secrets.findMany({
@@ -648,7 +652,7 @@ export class WorkflowDefinitionsService {
       roleKeys: [...new Set<string>(roles.map((r: any) => r.name))],
       groupKeys: groups.filter((g: any) => withMembers.has(g.id)).map((g: any) => g.key),
       userIds: storeUsers.map((u: any) => u.user_id),
-      publishedTemplateKeys: [],
+      publishedTemplateKeys: templates.map((t: { key: string }) => t.key),
       // P2.2: subflows may only launch published flows of this store.
       flowKeys: flows.map((f: any) => f.key),
     };

@@ -255,7 +255,10 @@ export class WorkflowStageService {
         payload: payload as unknown as Record<string, unknown>,
       });
     }
-    await this.enqueueVendixActions(tx, instance, stage.key, args.vendix);
+    await this.enqueueVendixActions(tx, instance, stage.key, [
+      ...(args.vendix ?? []),
+      ...this.autoIssueActions(stage),
+    ]);
     if (stage.type === 'end') {
       await this.notifyParent(tx, instance);
       return;
@@ -289,6 +292,24 @@ export class WorkflowStageService {
     }
     if (!isHumanStage(stage)) return;
     await this.createTask(tx, args, null);
+  }
+
+  /**
+   * P4.1: an `issued_document` requirement with `auto_issue_on_enter` issues its
+   * document when the stage is entered, through the same `vendix.document.issue`
+   * action (outbox row, publisher's permission, timeline entry on failure).
+   */
+  private autoIssueActions(stage: WorkflowStageDef): AppliedVendixAction[] {
+    return (stage.requirements ?? []).flatMap((r) =>
+      r.kind === 'issued_document' && r.auto_issue_on_enter
+        ? [
+            {
+              action: 'vendix.document.issue' as const,
+              map_resolved: { template_key: r.template_key, requirement_key: r.key },
+            },
+          ]
+        : [],
+    );
   }
 
   /** One task for a human stage, or one per branch of a parallel stage (P2.1). */

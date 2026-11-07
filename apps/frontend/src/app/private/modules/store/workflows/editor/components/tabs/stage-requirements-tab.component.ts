@@ -1,4 +1,5 @@
-import { Component, computed, inject, input } from '@angular/core';
+import { Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import {
   AlertBannerComponent,
@@ -14,11 +15,13 @@ import {
   WorkflowRequirementDef,
   WorkflowStageDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
+import { DocumentTemplatesApiService } from '../../../../documents/services/document-templates-api.service';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
 import { removeAt, replaceAt, uniqueKey } from '../../workflow-editor.utils';
 import { FileLimits, FileLimitsComponent } from '../file-limits.component';
 
-const LOCKED_HINT = 'Disponible cuando existan plantillas de documento publicadas';
+const SIGNATURE_HINT = 'agrega primero un requisito de documento emitido en esta etapa';
+const NO_TEMPLATES_HINT = 'Publica una plantilla en Documentos → Plantillas para usar este requisito';
 
 const KIND_TEXT: Record<string, string> = {
   upload: 'Subir un archivo',
@@ -27,7 +30,7 @@ const KIND_TEXT: Record<string, string> = {
   signature: 'Firma',
 };
 
-/** Requisitos tab: upload and file_field requirements; document/signature kinds locked. */
+/** Requisitos tab: upload, file_field, issued_document (P4.1) and signature (P4.2) requirements. */
 @Component({
   selector: 'app-stage-requirements-tab',
   standalone: true,
@@ -55,12 +58,7 @@ const KIND_TEXT: Record<string, string> = {
                 <app-icon name="trash-2" [size]="12" slot="icon" />
               </app-button>
             </div>
-            @if (locked(req)) {
-              <p class="text-xs text-text-secondary">
-                {{ req.label }} · {{ lockedHint }}. Se conserva tal como está en el flujo.
-              </p>
-            } @else {
-              <app-input label="Nombre del requisito" [ngModel]="req.label" (ngModelChange)="patch(i, { label: $event })" />
+            <app-input label="Nombre del requisito" [ngModel]="req.label" (ngModelChange)="patch(i, { label: $event })" />
               @if (req.kind === 'upload') {
                 <app-file-limits [accept]="req.accept" [maxSize]="req.max_size_mb" (changed)="limits(i, $event)" />
                 <app-toggle
@@ -73,6 +71,32 @@ const KIND_TEXT: Record<string, string> = {
                   [checked]="req.external === true"
                   (toggled)="patch(i, { external: $event ? true : undefined })"
                 />
+              } @else if (req.kind === 'issued_document') {
+                <app-selector
+                  label="Plantilla publicada"
+                  placeholder="Elige una plantilla"
+                  [options]="templateOptions()"
+                  [value]="req.template_key"
+                  (valueChange)="patch(i, { template_key: $event })"
+                />
+                <app-toggle
+                  label="Emitir el documento al entrar a la etapa"
+                  [checked]="req.auto_issue_on_enter === true"
+                  (toggled)="patch(i, { auto_issue_on_enter: $event ? true : undefined })"
+                />
+              } @else if (req.kind === 'signature') {
+                <app-selector
+                  label="Documento que se firma"
+                  placeholder="Elige un documento emitido de esta etapa"
+                  [options]="issuedOptions()"
+                  [value]="req.of"
+                  (valueChange)="patch(i, { of: $event })"
+                />
+                <app-toggle
+                  label="Debe estar firmado para avanzar"
+                  [checked]="req.blocks_exit !== false"
+                  (toggled)="patch(i, { blocks_exit: $event })"
+                />
               } @else if (req.kind === 'file_field') {
                 <app-selector
                   label="Campo de tipo archivo"
@@ -82,7 +106,6 @@ const KIND_TEXT: Record<string, string> = {
                   (valueChange)="patch(i, { field: $event })"
                 />
               }
-            }
           </div>
         } @empty {
           <p class="text-sm text-text-secondary">Esta etapa no exige requisitos.</p>
@@ -96,18 +119,37 @@ const KIND_TEXT: Record<string, string> = {
             <app-icon name="paperclip" [size]="14" slot="icon" />
             Exigir un campo de archivo
           </app-button>
-          <app-button variant="outline" size="sm" [disabled]="true" ariaLabel="Documento emitido: disponible cuando existan plantillas de documento publicadas">
-            <app-icon name="lock" [size]="14" slot="icon" />
+          <app-button
+            variant="outline"
+            size="sm"
+            [disabled]="atLimit() || templateOptions().length === 0"
+            [ariaLabel]="templateOptions().length === 0 ? 'Documento emitido: ' + noTemplatesHint : 'Documento emitido'"
+            (clicked)="add('issued_document')"
+          >
+            <app-icon name="file-text" [size]="14" slot="icon" />
             Documento emitido
           </app-button>
-          <app-button variant="outline" size="sm" [disabled]="true" ariaLabel="Firma: disponible cuando existan plantillas de documento publicadas">
-            <app-icon name="lock" [size]="14" slot="icon" />
+          <app-button
+            variant="outline"
+            size="sm"
+            [disabled]="atLimit() || issuedOptions().length === 0"
+            [ariaLabel]="issuedOptions().length === 0 ? 'Firma: ' + signatureHint : 'Firma'"
+            (clicked)="add('signature')"
+          >
+            <app-icon name="pen-line" [size]="14" slot="icon" />
             Firma
           </app-button>
         </div>
-        <app-alert-banner variant="info" icon="lock">
-          Documento emitido y Firma: {{ lockedHint }}.
-        </app-alert-banner>
+        @if (templateOptions().length === 0) {
+          <app-alert-banner variant="info" icon="lock">
+            Documento emitido: {{ noTemplatesHint }}.
+          </app-alert-banner>
+        }
+        @if (templateOptions().length > 0 && issuedOptions().length === 0) {
+          <app-alert-banner variant="info" icon="pen-line">
+            Firma: {{ signatureHint }}.
+          </app-alert-banner>
+        }
       </div>
     } @else {
       <p class="text-sm text-text-secondary">Esta etapa no tiene requisitos.</p>
@@ -116,14 +158,30 @@ const KIND_TEXT: Record<string, string> = {
 })
 export class StageRequirementsTabComponent {
   protected readonly store = inject(WorkflowEditorStore);
+  private readonly templatesApi = inject(DocumentTemplatesApiService);
   readonly stage = input.required<WorkflowStageDef>();
 
-  readonly lockedHint = LOCKED_HINT;
+  constructor() {
+    this.templatesApi
+      .list({ status: 'published' })
+      .pipe(takeUntilDestroyed(inject(DestroyRef)))
+      .subscribe({
+        next: (rows) => this.templates.set(rows.map((t) => ({ value: t.key, label: t.name }))),
+        // Without the list the picker stays empty and the validator explains why on publish.
+        error: () => this.templates.set([]),
+      });
+  }
+
+  readonly signatureHint = SIGNATURE_HINT;
+  readonly noTemplatesHint = NO_TEMPLATES_HINT;
   readonly isHuman = computed(() => HUMAN_STAGE_TYPES.includes(this.stage().type));
   readonly requirements = computed(() => this.stage().requirements ?? []);
   readonly atLimit = computed(
     () => this.requirements().length >= WORKFLOW_LIMITS.maxRequirementsPerStage,
   );
+  /** Published templates of the store (P4.1): the only ones a requirement can use. */
+  private readonly templates = signal<Array<{ value: string; label: string }>>([]);
+  readonly templateOptions = this.templates.asReadonly();
   readonly fileFieldOptions = computed(() =>
     (this.store.draft()?.fields ?? [])
       .filter((f) => f.type === 'file')
@@ -134,9 +192,12 @@ export class StageRequirementsTabComponent {
     return KIND_TEXT[kind] ?? kind;
   }
 
-  locked(req: WorkflowRequirementDef): boolean {
-    return req.kind === 'issued_document' || req.kind === 'signature';
-  }
+  /** P4.2: issued-document requirements of this stage (what a signature can point to). */
+  readonly issuedOptions = computed(() =>
+    this.requirements()
+      .filter((r) => r.kind === 'issued_document')
+      .map((r) => ({ value: r.key, label: r.label })),
+  );
 
   private set(next: WorkflowRequirementDef[]): void {
     this.store.updateStage(this.stage().key, (s) => {
@@ -145,14 +206,25 @@ export class StageRequirementsTabComponent {
     });
   }
 
-  add(kind: 'upload' | 'file_field'): void {
+  add(kind: 'upload' | 'file_field' | 'issued_document' | 'signature'): void {
     const taken = (this.store.draft()?.stages ?? []).flatMap((s) => (s.requirements ?? []).map((r) => r.key));
-    const label = kind === 'upload' ? 'Soporte' : 'Archivo del formulario';
+    const label =
+      kind === 'upload'
+        ? 'Soporte'
+        : kind === 'issued_document'
+          ? 'Documento'
+          : kind === 'signature'
+            ? 'Firma'
+            : 'Archivo del formulario';
     const key = uniqueKey(label, taken, 'requisito');
     const req: WorkflowRequirementDef =
       kind === 'upload'
         ? { kind: 'upload', key, label, blocks_exit: true }
-        : { kind: 'file_field', key, label, field: this.fileFieldOptions()[0]?.value ?? '' };
+        : kind === 'issued_document'
+          ? { kind: 'issued_document', key, label, template_key: this.templateOptions()[0]?.value ?? '' }
+          : kind === 'signature'
+            ? { kind: 'signature', key, label, of: this.issuedOptions()[0]?.value ?? '', blocks_exit: true }
+          : { kind: 'file_field', key, label, field: this.fileFieldOptions()[0]?.value ?? '' };
     this.set([...this.requirements(), req]);
   }
 

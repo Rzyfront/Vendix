@@ -27,6 +27,16 @@ export interface AddFileItemInput {
   actor: DocumentActor;
 }
 
+export interface AddDocumentItemInput {
+  dossier_id: number;
+  kind: 'issued_document' | 'signed_document';
+  issued_document_id: number;
+  file_id: number;
+  stage_key?: string | null;
+  requirement_key?: string | null;
+  actor: DocumentActor;
+}
+
 const ACTIVE = ['received', 'validated'];
 
 /** Dossier (expediente) per workflow instance and its items. */
@@ -94,6 +104,11 @@ export class DossiersService {
         })
       : [];
     const byId = new Map(files.map((f) => [f.id, f]));
+    const purgedBy = await this.purgePolicies(
+      db,
+      c.store_id,
+      files.filter((f) => f.purged_at).map((f) => f.id),
+    );
     const shape = (r: any) => {
       const f = r.file_id ? byId.get(r.file_id) : null;
       return {
@@ -115,6 +130,9 @@ export class DossiersService {
               mime_type: f.mime_type,
               size_bytes: f.size_bytes,
               sha256: f.sha256,
+              // P4.4: the object is gone; the row and its hash stay as evidence.
+              purged_at: f.purged_at ?? null,
+              purge_policy_name: f.purged_at ? (purgedBy.get(f.id) ?? null) : null,
             }
           : null,
       };
@@ -122,6 +140,30 @@ export class DossiersService {
     const active = rows.filter((r) => r.status !== 'superseded').map(shape);
     const superseded = rows.filter((r) => r.status === 'superseded').map(shape);
     return [...active, ...superseded];
+  }
+
+  /** Name of the retention policy that purged each file (P4.4), by file id. */
+  private async purgePolicies(db: any, storeId: number, fileIds: number[]) {
+    const out = new Map<number, string>();
+    if (fileIds.length === 0) return out;
+    const items: Array<{ file_id: number; policy_id: number | null }> =
+      await db.document_purge_items.findMany({
+        where: { store_id: storeId, file_id: { in: fileIds }, outcome: 'purged' },
+        orderBy: { id: 'asc' },
+      });
+    const policyIds = [...new Set(items.map((i) => i.policy_id).filter((v): v is number => v !== null))];
+    const policies: Array<{ id: number; name: string }> = policyIds.length
+      ? await db.document_retention_policies.findMany({
+          where: { store_id: storeId, id: { in: policyIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const names = new Map(policies.map((p) => [p.id, p.name]));
+    for (const i of items) {
+      const name = i.policy_id !== null ? names.get(i.policy_id) : undefined;
+      if (name) out.set(i.file_id, name);
+    }
+    return out;
   }
 
   async get(id: number) {
@@ -254,6 +296,55 @@ export class DossiersService {
     });
   }
 
+  /**
+   * P4.1/P4.2: files an issued (or sealed) document in the dossier. A previous
+   * active item of the same kind for the same issued-document chain key
+   * (`requirement_key`, or the document title when there is none) becomes
+   * `superseded`. Runs in the caller's transaction.
+   */
+  async addDocumentItem(tx: any, input: AddDocumentItemInput) {
+    const c = this.ctx();
+    const touched = await tx.dossiers.updateMany({
+      where: { id: input.dossier_id, store_id: c.store_id },
+      data: { updated_at: new Date() },
+    });
+    if (touched.count === 0) throw new VendixHttpException(ErrorCodes.DOCUMENT_NOT_FOUND);
+    const previous: Array<{ id: number }> = input.requirement_key
+      ? await tx.dossier_items.findMany({
+          where: {
+            dossier_id: input.dossier_id,
+            store_id: c.store_id,
+            kind: input.kind,
+            requirement_key: input.requirement_key,
+            status: { in: ACTIVE },
+          },
+          orderBy: { id: 'desc' },
+          select: { id: true },
+        })
+      : [];
+    if (previous.length > 0) {
+      await tx.dossier_items.updateMany({
+        where: { id: { in: previous.map((p) => p.id) }, store_id: c.store_id },
+        data: { status: 'superseded' },
+      });
+    }
+    return tx.dossier_items.create({
+      data: {
+        store_id: c.store_id,
+        dossier_id: input.dossier_id,
+        kind: input.kind,
+        requirement_key: input.requirement_key ?? null,
+        stage_key: input.stage_key ?? null,
+        file_id: input.file_id,
+        issued_document_id: input.issued_document_id,
+        status: 'received',
+        supersedes_id: previous[0]?.id ?? null,
+        added_by_type: input.actor.type,
+        added_by_id: input.actor.id,
+      },
+    });
+  }
+
   /** Active item of the dossier for a requirement (`upload` evaluation). */
   async hasActiveItem(dossierId: number, requirementKey: string, tx?: any) {
     const c = this.ctx();
@@ -268,6 +359,30 @@ export class DossiersService {
       select: { id: true },
     });
     return !!found;
+  }
+
+  /**
+   * P4.1/P4.2: status of the current issued document of an instance for an
+   * `issued_document` requirement (the newest one that is not superseded or
+   * voided), or null when none was issued.
+   */
+  async currentIssuedStatus(
+    instanceId: number,
+    requirementKey: string,
+    tx?: any,
+  ): Promise<string | null> {
+    const c = this.ctx();
+    const doc: { status: string } | null = await (tx ?? this.prisma).issued_documents.findFirst({
+      where: {
+        store_id: c.store_id,
+        workflow_instance_id: instanceId,
+        requirement_key: requirementKey,
+        status: { notIn: ['superseded', 'voided'] },
+      },
+      orderBy: { id: 'desc' },
+      select: { status: true },
+    });
+    return doc?.status ?? null;
   }
 
   /** File ids (of the given list) that are NOT part of the dossier or not usable. */

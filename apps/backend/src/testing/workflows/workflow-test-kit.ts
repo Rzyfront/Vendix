@@ -72,6 +72,7 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     advancer,
     stages,
     events,
+    requirements,
   );
   const engine = new WorkflowEngineService(
     prisma,

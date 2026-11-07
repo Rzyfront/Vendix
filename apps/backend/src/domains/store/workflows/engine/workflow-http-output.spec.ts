@@ -11,6 +11,7 @@ import { coerceOutputFields } from './workflow-http-output';
 
 // The connectors group pulls the SNS SDK, which this spec does not need.
 jest.mock('./actions/connectors.actions', () => ({ WorkflowConnectorsActions: class {} }));
+jest.mock('./actions/documents-issue.actions', () => ({ WorkflowDocumentsActions: class {} }));
 jest.mock('../../../../common/utils/user-store-permissions.util', () => ({
   resolveUserStorePermissions: async () => ['store:workflows:manage'],
 }));
@@ -133,6 +134,8 @@ describe('nodo HTTP en el motor: secretos fuera del outbox y respuesta a campos'
       { handlers: {} } as any,
       { handlers: {} } as any,
       httpActions,
+      { handlers: {} } as any,
+      { handlers: {} } as any,
       { handlers: {} } as any,
     );
   });

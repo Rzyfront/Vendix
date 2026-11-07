@@ -70,6 +70,8 @@ export const EVENT_BUSINESS_ID_KEYS: Record<WorkflowTriggerEvent, readonly strin
   'employee.created': ['employee_id'],
   'booking.created': ['booking_id'],
   'pqr.created': ['ticket_id'],
+  // P4.6: once per file and expiry date (a renewed date alerts again).
+  'document.expiring': ['file_id', 'valid_until'],
 };
 
 /** Ids are positive integers; any other identifying key is a short text. */

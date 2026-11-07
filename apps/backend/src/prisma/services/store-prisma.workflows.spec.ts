@@ -41,6 +41,18 @@ const WORKFLOW_MODELS = [
   'workflow_tracking_links',
   'workflow_collections',
   'workflow_records',
+  // Documental completo (flujos-adm P4)
+  'document_templates',
+  'document_template_versions',
+  'issued_documents',
+  'signature_requests',
+  'signature_signers',
+  'signature_evidence_events',
+  'document_checks',
+  'document_file_profiles',
+  'document_retention_policies',
+  'document_purge_runs',
+  'document_purge_items',
 ] as const;
 
 describe('StorePrismaService · aislamiento de Flujos', () => {
