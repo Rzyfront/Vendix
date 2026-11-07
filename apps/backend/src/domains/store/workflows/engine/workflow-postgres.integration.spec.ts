@@ -337,6 +337,44 @@ describeDestructiveE2E('Flujos contra Postgres real (M5)', () => {
   });
 
   describe('aislamiento de los titulares de un rol', () => {
+    it('un admin de la organización sin fila en la tienda es titular; el de otra empresa no', async () => {
+      const role =
+        (await db.roles.findFirst({
+          where: { name: 'admin', organization_id: null, store_id: null },
+        })) ?? (await db.roles.create({ data: { name: 'admin', organization_id: null } }));
+      const otherOrg = await db.organizations.create({
+        data: { name: `Otra admin ${run}`, slug: `otra-admin-${run}`, email: `otra-admin-${run}@example.com` },
+      });
+      const person = (username: string, organization_id: number) =>
+        db.users.create({
+          data: { username, password: 'x', first_name: 'Admin', last_name: 'Org', organization_id },
+        });
+      const orgAdmin = await person(`admin-org-${run}`, organizationId);
+      const strangerAdmin = await person(`admin-otra-${run}`, otherOrg.id);
+      for (const user_id of [orgAdmin.id, strangerAdmin.id]) {
+        await db.user_roles.create({ data: { user_id, role_id: role.id } });
+      }
+      const instance = { id: 0, store_id: storeId, organization_id: organizationId } as never;
+      const task = {
+        assignee_user_id: null,
+        assignee_group_id: null,
+        assignee_role_id: role.id,
+      } as never;
+      const recipients = await assignment.resolveUserIds(
+        db as never,
+        { def: { kind: 'role', role_key: 'admin' } } as never,
+        instance,
+      );
+      expect(recipients).toContain(orgAdmin.id);
+      expect(recipients).not.toContain(strangerAdmin.id);
+      expect(
+        await assignment.canAct(db as never, task, orgAdmin.id, storeId, organizationId),
+      ).toBe(true);
+      expect(
+        await assignment.canAct(db as never, task, strangerAdmin.id, storeId, organizationId),
+      ).toBe(false);
+    });
+
     it('un rol de sistema sin tienda solo alcanza a gente de esta tienda u organización, nunca a otra empresa', async () => {
       const role = await db.roles.create({
         data: { name: `owner-it-${run}`, organization_id: null },

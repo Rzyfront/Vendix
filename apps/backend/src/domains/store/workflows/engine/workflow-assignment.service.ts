@@ -20,9 +20,13 @@ const NONE: AssigneeFields = {
 };
 const OPEN_STATUSES = ['open', 'claimed'];
 
+/**
+ * These roles reach every store of their organization without a store row,
+ * the same rule login applies (`hasHighPrivilege`).
+ */
+const ORGANIZATION_WIDE_ROLES = ['owner', 'admin'];
+
 /** Resolves a `WorkflowAssigneeDef` to task assignee fields and to user ids. */
-/** Owners reach every store of their organization without a store row. */
-const OWNER_ROLE = 'owner';
 
 @Injectable()
 export class WorkflowAssignmentService {
@@ -238,7 +242,7 @@ export class WorkflowAssignmentService {
   ): Promise<number[]> {
     // `user_roles` is not tenant scoped and a system role has rows of every
     // organization: a row without a store only counts for someone who belongs
-    // to this store, or for an owner of this organization.
+    // to this store, or for an owner or admin of this organization.
     const rows: Array<{
       user_id: number | null;
       store_id: number | null;
@@ -271,12 +275,12 @@ export class WorkflowAssignmentService {
         select: { user_id: true },
       });
       members.forEach((m) => holders.add(m.user_id));
-      const owners = orgWide
-        .filter((r) => r.roles?.name === OWNER_ROLE)
+      const organizationWide = orgWide
+        .filter((r) => ORGANIZATION_WIDE_ROLES.includes(r.roles?.name ?? ''))
         .map((r) => r.user_id as number);
-      if (owners.length > 0) {
+      if (organizationWide.length > 0) {
         const sameOrg: Array<{ id: number }> = await tx.users.findMany({
-          where: { id: { in: owners }, organization_id: organizationId },
+          where: { id: { in: organizationWide }, organization_id: organizationId },
           select: { id: true },
         });
         sameOrg.forEach((u) => holders.add(u.id));
