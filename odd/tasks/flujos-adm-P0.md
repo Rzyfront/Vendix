@@ -32,15 +32,19 @@ Riesgo: migraciones y datos (D2, triggers), concurrencia (outbox, CAS), dinero (
 
 | ID | S# | Ruta | Estado | Evidencia |
 |---|---|---|---|---|
-| T1 | S1 | inline | pendiente | |
-| T2 | S2 | inline | pendiente | |
-| T3 | S4 M4 | inline | pendiente | |
-| T4 | S4 M5 | inline | pendiente | |
-| T5 | S4 B1–B10 | inline | pendiente | |
-| T6 | S4 M6 | inline | pendiente | |
-| T7 | S5 | inline | pendiente | |
-| T8 | S3 | inline | pendiente | |
+| T1 | S1 | inline | ✅ | `7d2f6c4e8`; paridad 36/36; dry-run en copia: 4 filas fuera, resto intacto, segunda corrida 0; vhost sin candado con plan Starter |
+| T2 | S2 | inline | ✅ | `d32aeaf0e`; en vivo: `kill -9` tras la recepción, el worker arrancó una solicitud por evento; spec en Postgres real |
+| T3 | S4 M4 | inline | ✅ | `db6f16347`; triggers probados en Postgres real |
+| T4 | S4 M5 | inline | ✅ | `851121d01`; 15/15 en Postgres real; job de CI nuevo; halló el bug de idempotencia con el adaptador pg |
+| T5 | S4 B1–B10 | inline | ✅ | `f42c322f5`, `011206df0`; además B11 |
+| T6 | S4 M6 | inline | ✅ | `1ffa0d84e`, `cb2d0147a`; 31 specs de Karma; B9 |
+| T7 | S5 | inline | ✅ | `cd4f7ea92`, `7bcce1ac9`; en vivo con worker: recordatorio, luego escalamiento; halló la fuga entre organizaciones |
+| T8 | S3 | inline | ◐ | 33 capturas en la carpeta del encargo; H1–H4, H6 y H7 pasan en navegador; H5 solo a nivel de herramienta (sin proveedor de IA en el entorno aislado) |
 
 ## Log
 
 - L1 (2026-11-07, encargo): "Implementa TODA la fase P0 de PLAN.md §2 (todas sus filas y sus historias), cerrando cada requisito con código, specs y verificación."
+- L2 (2026-11-07, QA): el QA halló lo que los specs con dobles no veían: estado `active` frente a `published`, respuesta de publicar e iniciar, y encabezado. Corregido en `cb2d0147a`.
+- L3 (2026-11-07, decisión): con recordatorio y escalamiento juntos, primero se avisa y al cumplirse un intervalo sube (criterio textual de P0.5). Sin recordatorio sube al vencer.
+- L4 (2026-11-07, decisión): `purchase_order.received.total_amount` se calcula dentro de la transacción (valor recibido del lote con su parte de flete prorrateado). El monto contable exacto sigue calculándose después del commit.
+- L5 (2026-11-07, pendiente): B12 sigue abierto porque pide una columna nueva y no está en P0. El patrón `meta.target` falla con el adaptador pg en otros módulos fuera de Flujos.
