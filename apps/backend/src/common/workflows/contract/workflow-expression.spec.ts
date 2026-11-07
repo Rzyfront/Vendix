@@ -6,6 +6,7 @@ import {
   cronMatches,
   describeCron,
   evaluateExpression,
+  localIsoDate,
   parseCron,
   parseExpression,
   validateFormValues,
@@ -30,6 +31,17 @@ describe('P2.9 expressions — closed grammar, no code', () => {
     expect(ev('"N° " + ref', { ref: 'FLU-1' })).toBe('N° FLU-1');
     expect(ev('if(monto > 1000000 && !urgente, "alto", "normal")', { monto: 2e6, urgente: false })).toBe('alto');
     expect(ev('coalesce(a, b, "x")', { a: null, b: '' })).toBe('x');
+  });
+
+  it('today() is the calendar date of the given time zone (20:00 in Bogotá is still that day)', () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-11-08T01:00:00Z')); // 20:00 on Nov 7 in Bogotá
+    try {
+      expect(evaluateExpression('add_days(today(), 3)', {}, { timeZone: 'America/Bogota' })).toBe('2026-11-10');
+      expect(evaluateExpression('today()', {}, {})).toBe('2026-11-08');
+      expect(localIsoDate(new Date(), 'America/Bogota')).toBe('2026-11-07');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('dates: today, add_days, add_months, days_between, parts', () => {

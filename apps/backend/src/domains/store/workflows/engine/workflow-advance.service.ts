@@ -3,7 +3,6 @@ import { ErrorCodes, VendixHttpException } from '@common/errors';
 import {
   WorkflowDefinitionV1,
   WorkflowStageDef,
-  applyComputedFields,
   findStage,
 } from '@common/workflows/contract';
 import { WorkflowEventsService } from './workflow-events.service';
@@ -79,7 +78,10 @@ export class WorkflowAdvanceService {
       a.instance,
     );
     // P2.9: calculated fields follow every write.
-    const enter = { ...hooks, data: applyComputedFields(a.definition, hooks.data) };
+    const enter = {
+      ...hooks,
+      data: await this.stages.computeFields(a.definition, hooks.data, a.instance.store_id),
+    };
     const patch = this.stages.stagePatch(toStage, now, a.instance.stage_entry_seq);
 
     // 7. CAS. Nothing else is written before it succeeds.

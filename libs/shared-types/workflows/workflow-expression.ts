@@ -265,8 +265,19 @@ function scalar(v: unknown): WorkflowExprValue {
 }
 
 export interface WorkflowExprOptions {
-  /** YYYY-MM-DD used by `today()`; default: the UTC date of now. */
+  /** YYYY-MM-DD used by `today()`; wins over `timeZone`. */
   today?: string;
+  /**
+   * IANA zone whose calendar date `today()` returns (the store's on the
+   * server, the browser's on screen); UTC when neither option is given.
+   */
+  timeZone?: string;
+}
+
+/** Calendar date (YYYY-MM-DD) of `now` in an IANA time zone. */
+export function localIsoDate(now: Date, timeZone: string): string {
+  const p = zonedParts(now, timeZone);
+  return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
 }
 
 function evalNode(
@@ -403,7 +414,10 @@ function evalCall(
     case "number":
       return toNumber(args[0]);
     case "today":
-      return opts.today ?? isoDate(new Date());
+      return (
+        opts.today ??
+        (opts.timeZone ? localIsoDate(new Date(), opts.timeZone) : isoDate(new Date()))
+      );
     case "add_days":
     case "add_months": {
       const d = parseIsoDate(args[0]);

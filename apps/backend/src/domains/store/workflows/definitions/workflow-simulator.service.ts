@@ -13,6 +13,7 @@ import {
   stageOutcomes,
   startStage,
   validateFormValues,
+  WorkflowExprOptions,
 } from '@common/workflows/contract';
 import {
   AppliedVendixAction,
@@ -22,6 +23,8 @@ import {
 } from '../engine/workflow-rules';
 import { firedGuard } from '../engine/workflow-guards';
 import { WorkflowDefinitionsService } from './workflow-definitions.service';
+import { WorkflowStageService } from '../engine/workflow-stage.service';
+import { RequestContextService } from '@common/context/request-context.service';
 
 const MAX_AUTOMATIC_HOPS = 20;
 const WATERMARK = 'SIMULACIÓN';
@@ -120,6 +123,7 @@ function ruleText(when: unknown): string | undefined {
 export function simulateWorkflow(
   rawDefinition: WorkflowDefinitionV1,
   input: SimulateInput = {},
+  exprOptions: WorkflowExprOptions = {},
 ): SimulationResult {
   const def = normalizeDefinition(rawDefinition);
   const res = emptyResult();
@@ -162,7 +166,7 @@ export function simulateWorkflow(
       }
       data = { ...data, ...form.values };
     }
-    data = applyComputedFields(def, data);
+    data = applyComputedFields(def, data, exprOptions);
     res.data = data;
 
     if (!stageOutcomes(current).includes(outcome)) {
@@ -257,7 +261,7 @@ export function simulateWorkflow(
     if (!current) break;
     data = res.data;
   }
-  res.data = applyComputedFields(def, data);
+  res.data = applyComputedFields(def, data, exprOptions);
   return res;
 }
 
@@ -337,7 +341,10 @@ function enterStage(
 /** `POST store/workflows/definitions/:id/simulate`: validates, then simulates. */
 @Injectable()
 export class WorkflowSimulatorService {
-  constructor(private readonly definitions: WorkflowDefinitionsService) {}
+  constructor(
+    private readonly definitions: WorkflowDefinitionsService,
+    private readonly stages: WorkflowStageService,
+  ) {}
 
   async simulate(
     id: number,
@@ -349,7 +356,14 @@ export class WorkflowSimulatorService {
     if (!check.valid) {
       return { ...emptyResult(), valid: false, issues: check.errors };
     }
-    const result = simulateWorkflow(definition as unknown as WorkflowDefinitionV1, input);
+    // P2.9: `today()` follows the store's calendar, as in the engine.
+    const storeId = RequestContextService.getContext()?.store_id;
+    const timeZone = storeId ? await this.stages.storeTimezone(storeId) : undefined;
+    const result = simulateWorkflow(
+      definition as unknown as WorkflowDefinitionV1,
+      input,
+      timeZone ? { timeZone } : {},
+    );
     return { ...result, issues: check.warnings };
   }
 }

@@ -3,7 +3,6 @@ import { ErrorCodes, VendixHttpException } from '@common/errors';
 import {
   WorkflowDefinitionV1,
   WorkflowStageDef,
-  applyComputedFields,
   resolveTransition,
   stageOutcomes,
   validateFormValues,
@@ -105,7 +104,7 @@ export class WorkflowCompleteService {
       }
       data = { ...data, ...form.values };
     }
-    data = applyComputedFields(definition, data);
+    data = await this.stages.computeFields(definition, data, ctx.store_id);
     // P2.5: a guard blocks with its message or sends the request elsewhere.
     const guard = firedGuard(stage, input.outcome, data, definition.fields);
     if (guard && !guard.redirect_to) {
@@ -368,7 +367,7 @@ export class WorkflowCompleteService {
 
     // The branch's values and `on_submit` hooks, written under the lock.
     const submitted = this.stagesApply(stage, { ...(fresh.data ?? {}), ...form.values }, fresh);
-    const data = applyComputedFields(definition, submitted.data);
+    const data = await this.stages.computeFields(definition, submitted.data, ctx.store_id);
     const saved = await tx.workflow_instances.updateMany({
       where: { id: fresh.id, store_id: ctx.store_id, row_version: fresh.row_version },
       data: { data, row_version: { increment: 1 } },

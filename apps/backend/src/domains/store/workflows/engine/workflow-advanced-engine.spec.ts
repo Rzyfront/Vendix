@@ -733,6 +733,22 @@ describe('Advanced engine (flujos-adm P2)', () => {
       const { id } = await startAndSubmit('iva', { monto: 1000, total_iva: 1 });
       expect(instance(id).data).toMatchObject({ monto: 1000, total_iva: 1190 });
     });
+
+    it('today() uses the store calendar: at 20:00 in Bogotá a +3 days due date is three days from that local day', async () => {
+      const def = flow('vence', []);
+      def.fields.push({ key: 'vence', type: 'date', label: 'Vence', compute: 'add_days(today(), 3)' });
+      seedDefinition(kit.db, def);
+      kit.db.table('stores').find((s) => s.id === 1)!.timezone = 'America/Bogota';
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] }).setSystemTime(
+        new Date('2026-11-08T01:00:00Z'),
+      );
+      try {
+        const { id } = await startAndSubmit('vence');
+        expect(instance(id).data.vence).toBe('2026-11-10');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
   });
 
   describe('P2.10 schedule trigger', () => {

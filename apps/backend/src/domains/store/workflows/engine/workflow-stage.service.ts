@@ -3,6 +3,7 @@ import {
   WorkflowActionDef,
   WorkflowBranchDef,
   WorkflowDefinitionV1,
+  applyComputedFields,
   WorkflowStageDef,
   computeWaitUntil,
   isHumanStage,
@@ -67,6 +68,21 @@ export class WorkflowStageService {
       };
     }
     return acc;
+  }
+
+  /**
+   * P2.9: calculated fields recomputed with `today()` on the store's calendar.
+   * The store is only read when the definition declares a formula.
+   */
+  async computeFields(
+    definition: Pick<WorkflowDefinitionV1, 'fields'>,
+    data: Record<string, unknown>,
+    storeId: number,
+  ): Promise<Record<string, unknown>> {
+    if (!(definition.fields ?? []).some((f) => f.compute)) return data;
+    return applyComputedFields(definition, data, {
+      timeZone: await this.storeTimezone(storeId),
+    });
   }
 
   /** Store time zone for wall-clock waits and schedules. */

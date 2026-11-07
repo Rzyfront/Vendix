@@ -15,7 +15,6 @@ import {
   resolveTransition,
   startStage,
   validateFormValues,
-  applyComputedFields,
   WORKFLOW_INSTANCE_TOKENS,
   WORKFLOW_LIMITS,
 } from '@common/workflows/contract';
@@ -140,7 +139,7 @@ export class WorkflowStartService {
         version_id: def.published_version_id,
         reference,
         title,
-        data: applyComputedFields(definition, enter.data),
+        data: await this.stages.computeFields(definition, enter.data, ctx.store_id),
         subject_type: subject?.type ?? null,
         subject_id: subject?.id ?? null,
         started_by_type: actor.type,
@@ -248,7 +247,7 @@ export class WorkflowStartService {
     const reference = await this.references.next(tx, ctx.store_id);
     const title = `${definition.name} · ${input.contact.name}`.slice(0, 200);
     const enter = this.stages.applyActions(stage.on_enter, form.values, { reference, title });
-    const data = applyComputedFields(definition, enter.data);
+    const data = await this.stages.computeFields(definition, enter.data, ctx.store_id);
     const guard = firedGuard(stage, 'submit', data, definition.fields);
     if (guard && !guard.redirect_to) {
       throw new VendixHttpException(ErrorCodes.WORKFLOW_GUARD_BLOCKED, guard.message);
@@ -677,7 +676,7 @@ export class WorkflowStartService {
         version_id: a.def.published_version_id,
         reference,
         title,
-        data: applyComputedFields(a.definition, enter.data),
+        data: await this.stages.computeFields(a.definition, enter.data, ctx.store_id),
         subject_type: a.subject?.type ?? null,
         subject_id: a.subject?.id ?? null,
         started_by_type: a.startedBy?.type ?? actor.type,

@@ -269,7 +269,9 @@ export class WorkflowStageFormComponent {
    * recomputed (the same function the server runs), so they update live.
    */
   readonly liveData = computed<FieldValues>(() =>
-    applyComputedFields({ fields: this.fields() }, { ...this.instanceData(), ...this.values() }),
+    applyComputedFields({ fields: this.fields() }, { ...this.instanceData(), ...this.values() }, {
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }),
   );
 
   readonly visibleFields = computed(() => {

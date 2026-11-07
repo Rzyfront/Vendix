@@ -216,7 +216,9 @@ export class WorkflowPublicFormComponent implements OnInit {
   );
   /** P2.9: what the person typed plus the calculated fields, recomputed live. */
   readonly liveData = computed<Values>(() =>
-    applyComputedFields({ fields: this.fields() }, this.values()),
+    applyComputedFields({ fields: this.fields() }, this.values(), {
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }),
   );
   readonly visibleFields = computed<WorkflowFieldDef[]>(() => {
     const all = this.form()?.fields ?? [];
