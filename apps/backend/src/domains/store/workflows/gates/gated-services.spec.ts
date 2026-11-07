@@ -8,6 +8,8 @@ import { CreditNotesService } from '../../invoicing/credit-notes/credit-notes.se
 import { InvoiceFlowService } from '../../invoicing/invoice-flow/invoice-flow.service';
 import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
 import { PaymentsService } from '../../payments/payments.service';
+import { ProductVariantService } from '../../products/services/product-variant.service';
+import { ProductsService } from '../../products/products.service';
 
 const mockGoverned = jest.fn<Promise<boolean>, unknown[]>();
 const mockEnforce = jest.fn();
@@ -565,6 +567,103 @@ describe('governed domain services (P1.3)', () => {
         inStore(() => gateOf(svc, { discount_amount: 50, grand_total: 950 })),
       ).resolves.toEqual({ status: 'free' });
       expect(mockEnforce).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('stock typed in the product edit (inventory_adjustment.create, review r2)', () => {
+    const variant = {
+      product_id: 3,
+      is_on_sale: false,
+      products: { product_type: 'physical', base_price: 1000, store_id: 1 },
+    };
+    const editVariant = (
+      svc: ProductVariantService,
+      tx: Record<string, unknown>,
+      stock: number,
+    ) =>
+      (
+        svc as unknown as {
+          executeUpdateVariant(
+            tx: unknown,
+            id: number,
+            dto: unknown,
+            existing: unknown,
+            userId: number,
+          ): Promise<unknown>;
+        }
+      ).executeUpdateVariant(tx, 7, { stock_quantity: stock }, variant, 4);
+    const variantTx = () => ({
+      $queryRaw: jest.fn().mockResolvedValue([{ location_id: 2, total: 500 }]),
+      product_variants: { update: jest.fn().mockResolvedValue({ id: 7 }) },
+    });
+
+    it('variant stock 500 → 0 (product page and PATCH variants/:id): 409, the variant is not saved, no stock moves', async () => {
+      const updateStock = jest.fn();
+      const svc = bare(ProductVariantService, {
+        prisma: {},
+        stockLevelManager: { updateStock },
+      });
+      const tx = variantTx();
+      await expect(inStore(() => editVariant(svc, tx, 0))).rejects.toMatchObject({
+        errorCode: 'WORKFLOW_APPROVAL_REQUIRED',
+      });
+      expect(mockGoverned).toHaveBeenCalledWith(
+        {},
+        'inventory_adjustment.create',
+        500,
+      );
+      expect(tx.product_variants.update).not.toHaveBeenCalled();
+      expect(updateStock).not.toHaveBeenCalled();
+    });
+
+    it('variant stock change with no governing flow is applied where the stock lives', async () => {
+      mockGoverned.mockResolvedValue(false);
+      const updateStock = jest.fn();
+      const svc = bare(ProductVariantService, {
+        prisma: {},
+        stockLevelManager: { updateStock },
+      });
+      const tx = variantTx();
+      await inStore(() => editVariant(svc, tx, 0));
+      expect(tx.product_variants.update).toHaveBeenCalled();
+      expect(updateStock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          variant_id: 7,
+          location_id: 2,
+          quantity_change: -500,
+          movement_type: 'adjustment',
+        }),
+        tx,
+      );
+    });
+
+    it('variant edit that keeps the stock does not ask the gate', async () => {
+      const svc = bare(ProductVariantService, {
+        prisma: {},
+        stockLevelManager: { updateStock: jest.fn() },
+      });
+      await inStore(() => editVariant(svc, variantTx(), 500));
+      expect(mockGoverned).not.toHaveBeenCalled();
+    });
+
+    it('base stock in PATCH products/:id (stock_quantity, stock_by_location): governed change → 409, otherwise passes', async () => {
+      const svc = bare(ProductsService, { prisma: {} });
+      const guard = (change: number) =>
+        (
+          svc as unknown as {
+            assertStockEditNotGoverned(c: number): Promise<void>;
+          }
+        ).assertStockEditNotGoverned(change);
+      await expect(inStore(() => guard(-500))).rejects.toMatchObject({
+        errorCode: 'WORKFLOW_APPROVAL_REQUIRED',
+      });
+      expect(mockGoverned).toHaveBeenCalledWith(
+        {},
+        'inventory_adjustment.create',
+        500,
+      );
+      mockGoverned.mockResolvedValue(false);
+      await expect(inStore(() => guard(-10))).resolves.toBeUndefined();
     });
   });
 });

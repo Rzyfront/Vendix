@@ -18,6 +18,7 @@ import { LocationsService } from '../../inventory/locations/locations.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { operationIsGoverned } from '../../workflows/gates/approval-gate';
 import { AutoEntryService } from '../../accounting/auto-entries/auto-entry.service';
 
 @Injectable()
@@ -516,23 +517,10 @@ export class ProductVariantService {
       }
     }
 
-    // Actualizar variante
-    const variant = await prisma.product_variants.update({
-      where: { id: variantId },
-      data: {
-        ...variantData,
-        price_override: priceOverride,
-        // PATCH semantics: solo normalizar barcode si el DTO lo trae. '' /
-        // whitespace-only → null para mantener consistencia con la ruta de
-        // creación y evitar colisiones con barcodes vacíos.
-        ...(updateVariantDto.barcode !== undefined
-          ? { barcode: updateVariantDto.barcode?.trim() || null }
-          : {}),
-        updated_at: new Date(),
-      } as any,
-    });
-
-    // Si cambió el stock, actualizar stock levels
+    // Si cambió el stock, se calcula la diferencia ANTES de escribir nada: si
+    // un flujo la gobierna, se rechaza sin dejar la variante a medias.
+    let stockDifference = 0;
+    let stockRows: Array<{ location_id: number; total: bigint | number | null }> = [];
     if (stock_quantity !== undefined) {
       // El saldo se lee con SQL crudo a propósito: `prisma` viene acotado al
       // tenant en una petición, y `stock_levels` incluye ubicaciones de la
@@ -540,10 +528,7 @@ export class ProductVariantService {
       // deja fuera. Comparar contra un saldo truncado producía la diferencia
       // equivocada: una variante con 10 en la bodega de la organización y 1 en
       // el showroom se leía como 1, y "dejarla en 0" bajaba stock real.
-      const stockRows: Array<{
-        location_id: number;
-        total: bigint | number | null;
-      }> = await prisma.$queryRaw`
+      stockRows = await prisma.$queryRaw`
         SELECT location_id, COALESCE(SUM(quantity_available), 0)::bigint AS total
         FROM stock_levels
         WHERE product_variant_id = ${variantId}
@@ -567,8 +552,44 @@ export class ProductVariantService {
         (sum, row) => sum + Number(row.total ?? 0),
         0,
       );
-      const stockDifference = stock_quantity - currentStockQuantity;
+      stockDifference = stock_quantity - currentStockQuantity;
 
+      // Flujos P1.3: editing the stock here is an inventory adjustment. This
+      // inline edit cannot wait for a request, so a change a flow governs is
+      // refused and the user is sent to Ajustes de Stock, which asks for it
+      // (and lets a real initial load through).
+      if (
+        stockDifference !== 0 &&
+        (await operationIsGoverned(
+          this.prisma,
+          'inventory_adjustment.create',
+          Math.abs(stockDifference),
+        ))
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.WORKFLOW_APPROVAL_REQUIRED,
+          `Cambiar el stock de esta variante en ${stockDifference} unidades necesita aprobación (Inventario: ajuste). Hazlo desde Ajustes de Stock para pedir la aprobación.`,
+        );
+      }
+    }
+
+    // Actualizar variante
+    const variant = await prisma.product_variants.update({
+      where: { id: variantId },
+      data: {
+        ...variantData,
+        price_override: priceOverride,
+        // PATCH semantics: solo normalizar barcode si el DTO lo trae. '' /
+        // whitespace-only → null para mantener consistencia con la ruta de
+        // creación y evitar colisiones con barcodes vacíos.
+        ...(updateVariantDto.barcode !== undefined
+          ? { barcode: updateVariantDto.barcode?.trim() || null }
+          : {}),
+        updated_at: new Date(),
+      } as any,
+    });
+
+    if (stock_quantity !== undefined) {
       if (stockDifference !== 0) {
         // El ajuste cae donde vive el stock. Mandarlo siempre a la ubicación
         // por defecto convertía una baja en un recorte contra una fila vacía:

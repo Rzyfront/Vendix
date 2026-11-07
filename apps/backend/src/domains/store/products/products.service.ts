@@ -94,6 +94,7 @@ import {
 } from '@common/helpers/s3-path.helper';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { operationIsGoverned } from '../workflows/gates/approval-gate';
 import { ImageContext } from '@common/config/image-presets';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import {
@@ -5231,6 +5232,7 @@ export class ProductsService {
                 const quantityChange = stockLocation.quantity - currentQuantity;
 
                 if (quantityChange !== 0) {
+                  await this.assertStockEditNotGoverned(quantityChange);
                   await this.stockLevelManager.updateStock(
                     {
                       product_id: id,
@@ -5252,6 +5254,7 @@ export class ProductsService {
                 stock_quantity - existingProduct.stock_quantity;
 
               if (stockDifference !== 0) {
+                await this.assertStockEditNotGoverned(stockDifference);
                 const defaultLocation =
                   await this.inventoryLocationsService.getDefaultLocation(
                     product.store_id,
@@ -5310,6 +5313,27 @@ export class ProductsService {
    * Emite `product.updated` para reindexar el embedding. Enriquecimiento, nunca
    * precondición: cualquier fallo (lectura o emit) se traga y se registra.
    */
+  /**
+   * Flujos P1.3: a stock change typed in the product edit is an inventory
+   * adjustment. The edit cannot wait for a request, so a change an active
+   * flow governs is refused (409) inside the edit's transaction, which then
+   * writes nothing, and the user is sent to Ajustes de Stock.
+   */
+  private async assertStockEditNotGoverned(quantityChange: number): Promise<void> {
+    if (
+      await operationIsGoverned(
+        this.prisma,
+        'inventory_adjustment.create',
+        Math.abs(quantityChange),
+      )
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.WORKFLOW_APPROVAL_REQUIRED,
+        `Cambiar el stock de este producto en ${quantityChange} unidades necesita aprobación (Inventario: ajuste). Hazlo desde Ajustes de Stock para pedir la aprobación.`,
+      );
+    }
+  }
+
   private async emitProductUpdatedEvent(product: {
     id: number;
     store_id: number;
