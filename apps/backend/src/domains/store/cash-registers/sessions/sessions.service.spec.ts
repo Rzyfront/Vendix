@@ -6,6 +6,8 @@ import { SettingsService } from '../../settings/settings.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 import { createHash } from 'node:crypto';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 /**
  * QUI-572 — regresión del cierre de caja contra un esperado rancio.
@@ -118,6 +120,72 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       {} as unknown as AIEngineService,
       settingsServiceMock as unknown as SettingsService,
     );
+  });
+
+  it('Flujos P1.1: openSession registra cash_session.opened con la transacción de la apertura', async () => {
+    (recordTriggerEvent as jest.Mock).mockClear();
+    prismaMock.cash_registers.findFirst.mockResolvedValue({ id: 3, is_active: true });
+    prismaMock.cash_register_sessions.findFirst.mockResolvedValue(null);
+    prismaMock.cash_register_sessions.create.mockResolvedValue({
+      id: SESSION_ID,
+      store_id: STORE_ID,
+      opened_by: USER_ID,
+      cash_register_id: 3,
+      opening_amount: 50000,
+    });
+
+    await service.openSession({ cash_register_id: 3, opening_amount: 50000 } as any);
+
+    expect(recordTriggerEvent).toHaveBeenCalledWith(
+      prismaMock,
+      'cash_session.opened',
+      {
+        store_id: STORE_ID,
+        session_id: SESSION_ID,
+        register_id: 3,
+        user_id: USER_ID,
+        opening_amount: 50000,
+      },
+    );
+  });
+
+  it('Flujos P1.1: closeSession registra cash_session.closed con la transacción del cierre y no emite si falla', async () => {
+    (recordTriggerEvent as jest.Mock).mockClear();
+    stubCloseFlow({
+      cash_register_id: 3,
+      closed_by: USER_ID,
+      actual_closing_amount: EXPECTED_FRESH,
+      difference: 0,
+    });
+
+    await service.closeSession(SESSION_ID, {
+      actual_closing_amount: EXPECTED_FRESH,
+      expected_closing_amount_seen: EXPECTED_FRESH,
+    } as any);
+
+    expect(recordTriggerEvent).toHaveBeenCalledWith(
+      prismaMock,
+      'cash_session.closed',
+      {
+        store_id: STORE_ID,
+        session_id: SESSION_ID,
+        register_id: 3,
+        user_id: USER_ID,
+        closing_amount: EXPECTED_FRESH,
+        difference: 0,
+      },
+    );
+
+    event_emitter.emit.mockClear();
+    stubCloseFlow({ cash_register_id: 3, closed_by: USER_ID });
+    (recordTriggerEvent as jest.Mock).mockRejectedValueOnce(new Error('outbox down'));
+    await expect(
+      service.closeSession(SESSION_ID, {
+        actual_closing_amount: EXPECTED_FRESH,
+        expected_closing_amount_seen: EXPECTED_FRESH,
+      } as any),
+    ).rejects.toThrow('outbox down');
+    expect(event_emitter.emit).not.toHaveBeenCalled();
   });
 
   it('habilita atribución de pendientes en sesiones recién abiertas', async () => {

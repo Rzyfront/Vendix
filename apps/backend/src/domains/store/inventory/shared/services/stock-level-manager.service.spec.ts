@@ -13,6 +13,8 @@ import { CostingMethodResolverService } from './costing-method-resolver.service'
 import { ConflictException, BadRequestException } from '@nestjs/common';
 import { VendixHttpException } from 'src/common/errors';
 import { InventoryTransaction } from '../../transactions/interfaces/inventory-transaction.interface';
+import { recordTriggerEvent } from '../../../workflows/engine/workflow-trigger.outbox';
+jest.mock('../../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 describe('StockLevelManager', () => {
   let service: StockLevelManager;
@@ -780,6 +782,69 @@ describe('StockLevelManager', () => {
             }),
           }),
         );
+      });
+
+      it('Flujos P1.1: stock.low goes to the outbox with the stock transaction and a per-day key', async () => {
+        (recordTriggerEvent as jest.Mock).mockClear();
+        prismaService.stock_levels.update.mockResolvedValue({
+          ...mockStockLevel,
+          quantity_on_hand: 3,
+          quantity_available: 3,
+        });
+        prismaService.products.findUnique.mockResolvedValue({
+          track_inventory: true,
+          store_id: 11,
+          name: 'Cable HDMI',
+          cost_price: 0,
+          reorder_point: 5,
+        } as any);
+
+        await service.updateStock({
+          ...updateStockParams,
+          quantity_change: -87,
+          movement_type: 'consumption',
+          validate_availability: false,
+        });
+
+        expect(recordTriggerEvent).toHaveBeenCalledTimes(1);
+        expect(recordTriggerEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ stock_levels: prismaService.stock_levels }),
+          'stock.low',
+          {
+            store_id: 11,
+            product_id: updateStockParams.product_id,
+            product_name: 'Cable HDMI',
+            location_id: updateStockParams.location_id,
+            quantity_available: 3,
+            reorder_point: 5,
+            occurred_on: new Date().toISOString().slice(0, 10),
+          },
+        );
+      });
+
+      it('Flujos P1.1: no stock.low while the available stock stays above the threshold', async () => {
+        (recordTriggerEvent as jest.Mock).mockClear();
+        prismaService.stock_levels.update.mockResolvedValue({
+          ...mockStockLevel,
+          quantity_on_hand: 80,
+          quantity_available: 80,
+        });
+        prismaService.products.findUnique.mockResolvedValue({
+          track_inventory: true,
+          store_id: 11,
+          name: 'Cable HDMI',
+          cost_price: 0,
+          reorder_point: 5,
+        } as any);
+
+        await service.updateStock({
+          ...updateStockParams,
+          quantity_change: -10,
+          movement_type: 'consumption',
+          validate_availability: false,
+        });
+
+        expect(recordTriggerEvent).not.toHaveBeenCalled();
       });
     });
   });

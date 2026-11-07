@@ -7,6 +7,7 @@
  */
 import { InventoryAdjustmentsService } from './inventory-adjustments.service';
 import { RequestContextService } from '@common/context/request-context.service';
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 describe('InventoryAdjustmentsService — searchAdjustableProducts (D.1)', () => {
   const mockPrisma = {

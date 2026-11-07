@@ -1,5 +1,6 @@
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { PayrollFlowService } from './payroll-flow.service';
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 describe('PayrollFlowService fiscal accounting gate', () => {
   const runFixture = (overrides: any = {}) => ({
@@ -45,7 +46,9 @@ describe('PayrollFlowService fiscal accounting gate', () => {
   });
 
   const createService = (run: any, providerResponse: any = null) => {
-    const prisma = {
+    const prisma: any = {
+      // Flujos P1.1: approve/pay write the state and the event in a transaction.
+      $transaction: jest.fn(async (cb: (tx: unknown) => unknown) => cb(prisma)),
       payroll_runs: {
         findFirst: jest.fn().mockResolvedValue(run),
         update: jest.fn().mockImplementation(({ data }) =>

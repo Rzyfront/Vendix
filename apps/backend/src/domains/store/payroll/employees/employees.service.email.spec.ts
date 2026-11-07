@@ -1,5 +1,6 @@
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { EmployeesService } from './employees.service';
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 describe('EmployeesService linked-user email persistence', () => {
   it('stores linked-user email in lowercase on employee creation', async () => {

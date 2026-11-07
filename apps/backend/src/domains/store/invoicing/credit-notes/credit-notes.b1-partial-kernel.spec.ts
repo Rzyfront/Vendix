@@ -11,6 +11,7 @@ import {
   mockRequestContext,
 } from '../../../../testing/prisma-mock';
 import { buildInvoice } from '../../../../testing/money-fixtures';
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 /**
  * B.1 (F-020) — la nota PARCIAL deriva por el kernel único

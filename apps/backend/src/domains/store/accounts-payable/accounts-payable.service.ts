@@ -7,6 +7,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ApQueryDto } from './dto/ap-query.dto';
 import { RegisterApPaymentDto } from './dto/register-ap-payment.dto';
+import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
 
 @Injectable()
 export class AccountsPayableService {
@@ -269,6 +270,16 @@ export class AccountsPayableService {
           void mirror;
         }
       }
+
+      // Flujos P1.1: payable.payment_registered in the same transaction
+      await recordTriggerEvent(tx, 'payable.payment_registered', {
+        store_id: ap.store_id,
+        payable_id: ap_id,
+        payment_id: payment.id,
+        supplier_id: ap.supplier_id,
+        amount: payment.amount,
+        status: updated_ap.status,
+      });
 
       return { payment, ap: updated_ap };
     });

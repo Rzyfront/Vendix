@@ -2756,6 +2756,15 @@ export class PurchaseOrdersService {
         // QUI-855 — el documento escaneado queda ligado a la orden en la MISMA tx.
         await this.linkScanAttachment(tx, purchaseOrder.id, scanAttachment);
 
+        // Flujos P1.1: purchase_order.created in the same transaction
+        await recordTriggerEvent(tx, 'purchase_order.created', {
+          store_id: ctxStoreId,
+          purchase_order_id: purchaseOrder.id,
+          order_number: purchaseOrder.order_number,
+          supplier_id: purchaseOrder.supplier_id,
+          total_amount: purchaseOrder.total_amount,
+        });
+
         return { order: purchaseOrder, advance: advanceToRegister, freight };
       },
       // A.11 — techo EXPLÍCITO de transacción. Prisma impone 5.000 ms por
@@ -3590,7 +3599,7 @@ export class PurchaseOrdersService {
     const result = await this.prisma.$transaction(async (tx) => {
       const order = await this.loadOrderOrFail(tx, id);
       this.assertTransition(order, purchase_order_status_enum.approved);
-      return tx.purchase_orders.update({
+      const approved = await tx.purchase_orders.update({
         where: { id },
         data: {
           status: purchase_order_status_enum.approved,
@@ -3607,6 +3616,15 @@ export class PurchaseOrdersService {
           },
         },
       });
+      // Flujos P1.1: purchase_order.approved in the same transaction
+      await recordTriggerEvent(tx, 'purchase_order.approved', {
+        store_id: approved.location?.store_id ?? RequestContextService.getStoreId(),
+        purchase_order_id: approved.id,
+        order_number: approved.order_number,
+        supplier_id: approved.supplier_id,
+        total_amount: approved.total_amount,
+      });
+      return approved;
     }, PO_TX_OPTIONS);
 
     // Audit log
@@ -6501,6 +6519,16 @@ export class PurchaseOrdersService {
         await tx.purchase_orders.update({
           where: { id: purchaseOrderId },
           data: { payment_status: status as any },
+        });
+
+        // Flujos P1.1: supplier_payment.registered in the same transaction
+        await recordTriggerEvent(tx, 'supplier_payment.registered', {
+          store_id: po.location?.store_id ?? RequestContextService.getStoreId(),
+          payment_id: created.id,
+          purchase_order_id: purchaseOrderId,
+          supplier_id: po.supplier_id,
+          amount: created.amount,
+          payment_method: created.payment_method,
         });
 
         return { payment: created, paymentStatus: status };

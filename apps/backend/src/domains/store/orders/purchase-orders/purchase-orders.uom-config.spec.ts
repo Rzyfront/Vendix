@@ -18,6 +18,7 @@ import { VatResponsibilityService } from '@common/helpers/vat-responsibility.hel
 
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 /**
  * S13d (product-sale-unit-consolidation) — las órdenes de compra del POP

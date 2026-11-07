@@ -25,6 +25,7 @@ import { UpdateTransferDto } from './dto/update-transfer.dto';
 import { TransferQueryDto } from './dto/transfer-query.dto';
 import { transfer_status_enum } from '@prisma/client';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 
 /**
  * Estados que representan "creada, todavía sin aprobar".
@@ -370,7 +371,7 @@ export class StockTransfersService {
         );
       }
 
-      return tx.stock_transfers.findUnique({
+      const completed = await tx.stock_transfers.findUnique({
         where: { id: stockTransfer.id },
         include: {
           from_location: true,
@@ -383,6 +384,20 @@ export class StockTransfersService {
           },
         },
       });
+      if (completed) {
+        // Flujos P1.1: inventory.transferred in the same transaction
+        await recordTriggerEvent(tx, 'inventory.transferred', {
+          store_id:
+            completed.from_location?.store_id ??
+            completed.to_location?.store_id ??
+            RequestContextService.getStoreId(),
+          transfer_id: completed.id,
+          transfer_number: completed.transfer_number,
+          from_location_id: completed.from_location_id,
+          to_location_id: completed.to_location_id,
+        });
+      }
+      return completed;
     });
 
     // Emit accounting event for completed stock transfer
@@ -769,7 +784,7 @@ export class StockTransfersService {
         ? transfer_status_enum.completed
         : transfer_status_enum.in_transit;
 
-      return tx.stock_transfers.update({
+      const updated = await tx.stock_transfers.update({
         where: { id },
         data: {
           status: newStatus,
@@ -786,6 +801,20 @@ export class StockTransfersService {
           },
         },
       });
+      if (allItemsReceived) {
+        // Flujos P1.1: inventory.transferred in the same transaction
+        await recordTriggerEvent(tx, 'inventory.transferred', {
+          store_id:
+            updated.from_location?.store_id ??
+            updated.to_location?.store_id ??
+            RequestContextService.getStoreId(),
+          transfer_id: updated.id,
+          transfer_number: updated.transfer_number,
+          from_location_id: updated.from_location_id,
+          to_location_id: updated.to_location_id,
+        });
+      }
+      return updated;
     });
 
     // Emit accounting event only if transfer is fully completed

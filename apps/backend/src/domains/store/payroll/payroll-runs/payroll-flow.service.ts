@@ -12,6 +12,7 @@ import {
   PayrollProviderAdapter,
 } from '../providers/payroll-provider.interface';
 import { DianPayrollProvider } from '../providers/dian-payroll/dian-payroll.provider';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 
 type PayrollStatus =
   | 'draft'
@@ -396,14 +397,26 @@ export class PayrollFlowService {
 
     this.validateTransition(run.status, 'approved');
 
-    const updated = await this.prisma.payroll_runs.update({
-      where: { id },
-      data: {
-        status: 'approved',
-        approved_by_user_id: context.user_id,
-        approved_at: new Date(),
-      },
-      include: PAYROLL_RUN_DETAIL_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const approved = await tx.payroll_runs.update({
+        where: { id },
+        data: {
+          status: 'approved',
+          approved_by_user_id: context.user_id,
+          approved_at: new Date(),
+        },
+        include: PAYROLL_RUN_DETAIL_INCLUDE,
+      });
+      // Flujos P1.1: payroll_run.approved in the same transaction
+      await recordTriggerEvent(tx, 'payroll_run.approved', {
+        store_id: approved.store_id ?? RequestContextService.getStoreId(),
+        payroll_run_id: approved.id,
+        payroll_number: approved.payroll_number,
+        total_net: approved.total_net_pay,
+        period_start: approved.period_start,
+        period_end: approved.period_end,
+      });
+      return approved;
     });
 
     this.logger.log(`Payroll run #${id} approved by user #${context.user_id}`);
@@ -498,13 +511,23 @@ export class PayrollFlowService {
 
     this.validateTransition(run.status, 'paid');
 
-    const updated = await this.prisma.payroll_runs.update({
-      where: { id },
-      data: {
-        status: 'paid',
-        payment_date: new Date(),
-      },
-      include: PAYROLL_RUN_DETAIL_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const paid = await tx.payroll_runs.update({
+        where: { id },
+        data: {
+          status: 'paid',
+          payment_date: new Date(),
+        },
+        include: PAYROLL_RUN_DETAIL_INCLUDE,
+      });
+      // Flujos P1.1: payroll_run.paid in the same transaction
+      await recordTriggerEvent(tx, 'payroll_run.paid', {
+        store_id: paid.store_id ?? RequestContextService.getStoreId(),
+        payroll_run_id: paid.id,
+        payroll_number: paid.payroll_number,
+        total_net: paid.total_net_pay,
+      });
+      return paid;
     });
 
     this.event_emitter.emit('payroll.paid', {

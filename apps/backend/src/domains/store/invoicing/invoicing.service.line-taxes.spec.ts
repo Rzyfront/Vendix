@@ -6,6 +6,8 @@ import {
 } from './invoicing.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceCalculatorService } from './services/invoice-calculator.service';
+import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
+jest.mock('../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 /**
  * QUÉ FORMA TOMA `invoice_taxes` AL PERSISTIR.
@@ -42,7 +44,9 @@ describe('InvoicingService · desglose de tributos por línea', () => {
   const createService = (item_ids: number[] = [11, 12]) => {
     const created: any[] = [];
     const created_taxes: any[][] = [];
-    const prisma = {
+    // Flujos P1.1: the invoice insert runs in a transaction with its event.
+    const prisma: any = {
+      $transaction: jest.fn(async (cb: (tx: unknown) => unknown) => cb(prisma)),
       invoices: {
         create: jest.fn().mockImplementation(({ data }) => {
           created.push(data);
@@ -180,6 +184,33 @@ describe('InvoicingService · desglose de tributos por línea', () => {
     // Ni una fila por línea: partirla no cambiaría un byte del XML y sí
     // multiplicaría las filas que leen el PDF, el panel y los reportes.
     expect(prisma.invoice_taxes.createMany).not.toHaveBeenCalled();
+  });
+
+  it('Flujos P1.1: invoice.created se registra con el cliente transaccional del insert', async () => {
+    const { service, prisma } = createService();
+    (recordTriggerEvent as jest.Mock).mockClear();
+
+    await withContext(() =>
+      service.create(baseDto([dish(100000, 'IVA', 19, 'iva')])),
+    );
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(recordTriggerEvent).toHaveBeenCalledWith(
+      prisma,
+      'invoice.created',
+      expect.objectContaining({ invoice_id: 300, invoice_number: 'FV1' }),
+    );
+  });
+
+  it('Flujos P1.1: si el evento falla, la factura no se entrega', async () => {
+    const { service } = createService();
+    (recordTriggerEvent as jest.Mock).mockRejectedValueOnce(new Error('outbox'));
+
+    await expect(
+      withContext(() =>
+        service.create(baseDto([dish(100000, 'IVA', 19, 'iva')])),
+      ),
+    ).rejects.toThrow('outbox');
   });
 
   it('escribe una fila POR LÍNEA en una cuenta mixta IVA + INC', async () => {

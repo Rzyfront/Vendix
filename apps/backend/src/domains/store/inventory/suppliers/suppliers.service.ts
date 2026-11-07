@@ -24,6 +24,7 @@ import {
 // criterio de "compra reconocida". Agregar una tercera definición garantizaría
 // un tercer desacuerdo — que es exactamente el bug de QUI-625.
 import { PURCHASE_COMMITTED_STATES } from '../../analytics/analytics-metrics.contract';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 
 @Injectable()
 export class SuppliersService {
@@ -61,7 +62,8 @@ export class SuppliersService {
     }
     const scopeWhere = await this.getSupplierScopeWhere();
 
-    const supplier = await this.prisma.suppliers.create({
+    const supplier = await this.prisma.$transaction(async (tx) => {
+    const created = await tx.suppliers.create({
       data: {
         ...createSupplierDto,
         organization_id: context.organization_id,
@@ -75,6 +77,17 @@ export class SuppliersService {
           },
         },
       },
+    });
+    // Flujos P1.1: supplier.created in the same transaction. An organization
+    // supplier belongs to the store where it was created for the flows.
+    await recordTriggerEvent(tx, 'supplier.created', {
+      store_id: created.store_id ?? RequestContextService.getStoreId(),
+      supplier_id: created.id,
+      name: created.name,
+      tax_id: created.tax_id,
+      email: created.email,
+    });
+    return created;
     });
 
     // Makes the supplier findable by description ("el proveedor de gaseosas del

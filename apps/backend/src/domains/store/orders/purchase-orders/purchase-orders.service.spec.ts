@@ -20,6 +20,8 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
 import { VatResponsibilityService } from '@common/helpers/vat-responsibility.helper';
 
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
+
 // The durable outbox write has its own spec (workflow-trigger.fanout.spec.ts).
 jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({
   recordTriggerEvent: jest.fn().mockResolvedValue(false),
@@ -619,6 +621,28 @@ describe('PurchaseOrdersService.receive()', () => {
           data: expect.objectContaining({ status: 'approved' }),
         }),
       );
+    });
+
+    it('Flujos P1.1: approve() registra purchase_order.approved con la transacción de la aprobación', async () => {
+      (recordTriggerEvent as jest.Mock).mockClear();
+      const tx = mockOrderInStatus('draft');
+
+      await service.approve(PO_ID);
+
+      expect(recordTriggerEvent).toHaveBeenCalledWith(
+        tx,
+        'purchase_order.approved',
+        expect.objectContaining({ purchase_order_id: PO_ID }),
+      );
+    });
+
+    it('Flujos P1.1: si el evento falla, la aprobación no se entrega', async () => {
+      mockOrderInStatus('draft');
+      (recordTriggerEvent as jest.Mock).mockRejectedValueOnce(
+        new Error('outbox down'),
+      );
+
+      await expect(service.approve(PO_ID)).rejects.toThrow('outbox down');
     });
 
     it('update() sobre una orden APROBADA responde PO_STATUS_002 y no reescribe líneas', async () => {
@@ -2592,6 +2616,21 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
    * envía en cada creación y quitarlo devolvería 400 a la pantalla principal de
    * compras— pero el servicio lo ignora.
    */
+  it('Flujos P1.1: la orden registra purchase_order.created con la transacción del insert', async () => {
+    (recordTriggerEvent as jest.Mock).mockClear();
+
+    const tx = await runCreate(baseDto());
+
+    expect(recordTriggerEvent).toHaveBeenCalledWith(
+      tx,
+      'purchase_order.created',
+      expect.objectContaining({
+        store_id: STORE_ID,
+        purchase_order_id: NEW_PO_ID,
+      }),
+    );
+  });
+
   it('A.10: ignora el `status` del cliente; la orden nace en draft', async () => {
     const tx = await runCreate({ ...baseDto(), status: 'approved' });
 

@@ -130,6 +130,7 @@ import {
 import { resolveOrderLineTaxTotal } from '../taxes/utils/final-price.util';
 import { resolveCategoryTaxType } from '../shipping/utils/shipping-tax.util';
 import { projectOrderInvoiceLines } from './utils/order-invoice-lines.util';
+import { recordTriggerEvent } from '../workflows/engine/workflow-trigger.outbox';
 // F-090 remediación (Agente E, 2026-09-27) — resuelve la tarifa real de una
 // línea huérfana (población 3 de `aggregateOrderTaxes`) contra el catálogo
 // del producto o contra un hermano real de la misma orden; nunca inventa.
@@ -2166,7 +2167,8 @@ export class InvoicingService {
       calculated.header_taxes,
       calculated.lines,
     );
-    const invoice = await prisma.invoices.create({
+    const insertInvoice = async (db: Prisma.TransactionClient) => {
+    const row = await db.invoices.create({
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id,
@@ -2372,6 +2374,24 @@ export class InvoicingService {
       },
       include: INVOICE_INCLUDE,
     });
+    // Flujos P1.1: invoice.created in the same transaction as the insert.
+    await recordTriggerEvent(db, 'invoice.created', {
+      store_id: row.store_id,
+      invoice_id: row.id,
+      invoice_number: row.invoice_number,
+      invoice_type: row.invoice_type,
+      customer_name: row.customer_name,
+      total_amount: row.total_amount,
+    });
+    return row;
+    };
+    // With the caller's transaction the event commits with the whole
+    // document; without one, the insert and its event commit together.
+    const invoice = options.transaction
+      ? await insertInvoice(options.transaction)
+      : await this.prisma.$transaction((tx: Prisma.TransactionClient) =>
+          insertInvoice(tx),
+        );
 
     // Segunda escritura: el desglose por línea. Sólo para el documento
     // multi-tributo, y sólo porque los ids de las líneas no existían antes.

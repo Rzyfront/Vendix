@@ -4,6 +4,7 @@ import { InvoiceCalculatorService } from '../services/invoice-calculator.service
 import { CreditNotesService } from './credit-notes.service';
 import { createPrismaMock, mockRequestContext } from '../../../../testing/prisma-mock';
 import { CreateCreditNoteDto } from './dto/create-credit-note.dto';
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 const decimal = (value: number | string) => new Prisma.Decimal(value);
 

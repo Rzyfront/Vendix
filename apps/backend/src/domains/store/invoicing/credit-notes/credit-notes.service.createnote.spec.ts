@@ -7,6 +7,10 @@ import {
 } from '../../../../testing/prisma-mock';
 import { buildInvoice } from '../../../../testing/money-fixtures';
 import { InvoiceCalculatorService } from '../services/invoice-calculator.service';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({
+  recordTriggerEvent: jest.fn().mockResolvedValue(false),
+}));
 
 /**
  * F-INC6 — pruebas de extremo a extremo de `createNote` (nota crédito), no
@@ -673,5 +677,65 @@ describe('CreditNotesService — createNote extremo a extremo (F-INC6)', () => {
     expect(note.customer_phone).toBe('+57 3001234567');
     expect(note.customer_tax_regime).toBe('48');
     expect(note.customer_fiscal_responsibilities).toEqual(['O-48', 'O-13']);
+  });
+
+  describe('Flujos P1.1 — credit_note.created', () => {
+    const wholeInvoice = () =>
+      baseParent({
+        id: 7700,
+        subtotal_amount: money(1000),
+        tax_amount: money(0),
+        total_amount: money(1000),
+        invoice_items: [
+          {
+            id: 902,
+            product_id: 3,
+            product_variant_id: null,
+            description: 'Consulta',
+            quantity: money(1),
+            unit_price: money(1000),
+            discount_amount: money(0),
+            tax_amount: money(0),
+            total_amount: money(1000),
+            is_inclusive: false,
+          },
+        ],
+        invoice_taxes: [],
+      });
+
+    beforeEach(() => (recordTriggerEvent as jest.Mock).mockClear());
+
+    it('records the event with the transaction client that wrote the note', async () => {
+      const { service, prisma } = setup(wholeInvoice());
+
+      await service.createCreditNote({
+        related_invoice_id: 7700,
+        reason: 'Anulación total',
+      } as unknown as CreateCreditNoteDto);
+
+      expect(recordTriggerEvent).toHaveBeenCalledTimes(1);
+      expect(recordTriggerEvent).toHaveBeenCalledWith(
+        prisma,
+        'credit_note.created',
+        expect.objectContaining({
+          credit_note_id: NOTE_ID,
+          related_invoice_id: 7700,
+        }),
+      );
+    });
+
+    it('does not deliver the note when the event write fails', async () => {
+      const { service } = setup(wholeInvoice());
+      (recordTriggerEvent as jest.Mock).mockRejectedValueOnce(
+        new Error('outbox down'),
+      );
+
+      await expect(
+        service.createCreditNote({
+          related_invoice_id: 7700,
+          reason: 'Anulación total',
+        } as unknown as CreateCreditNoteDto),
+      ).rejects.toThrow('outbox down');
+    });
   });
 });

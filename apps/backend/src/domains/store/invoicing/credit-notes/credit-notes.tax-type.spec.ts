@@ -4,6 +4,7 @@ import type { CreateCreditNoteDto } from './dto/create-credit-note.dto';
 import { InvoiceCalculatorService } from '../services/invoice-calculator.service';
 import { createPrismaMock, mockRequestContext } from '../../../../testing/prisma-mock';
 import { buildInvoice } from '../../../../testing/money-fixtures';
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 /** Tax classifications are frozen on source rows; no catalog fallback in note writing. */
 describe('CreditNotesService — source tax typing', () => {

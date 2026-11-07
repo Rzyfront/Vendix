@@ -156,6 +156,7 @@ import {
   type WithholdingResolution,
 } from '../../withholding-tax/withholding-flow.service';
 import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 
 type OrderState = order_state_enum;
 
@@ -1388,7 +1389,7 @@ export class OrderFlowService {
               },
             });
 
-            await this.orderHistoryService?.record(tx, {
+            const history = await this.orderHistoryService?.record(tx, {
               orderId,
               storeId: updated_order.store_id,
               organizationId:
@@ -1398,6 +1399,20 @@ export class OrderFlowService {
               toState: newState,
               source: historySource,
             });
+
+            // Flujos P1.1: order.status_changed in the same transaction
+            // A no-op write (same state) has no history row and is no transition.
+            if (history !== null) {
+              await recordTriggerEvent(tx, 'order.status_changed', {
+                store_id: updated_order.store_id,
+                order_id: orderId,
+                order_number: previous_order?.order_number ?? '',
+                from_state: opts?.historyFromState ?? previous_order?.state,
+                to_state: newState,
+                grand_total: updated_order.grand_total,
+                transition_id: history?.id,
+              });
+            }
 
             return { updated_order, commit };
           },
@@ -1452,25 +1467,44 @@ export class OrderFlowService {
       }
     }
 
-    // All other states: single non-transactional write (no inventory mutation).
-    const updated_order = await this.prisma.orders.update({
-      where: { id: orderId },
-      data: schemaFields,
-      include: {
-        stores: { select: { id: true, name: true, store_code: true } },
-        order_items: { include: { products: true, product_variants: true } },
-        payments: true,
-      },
-    });
+    // All other states: no inventory mutation. Flujos P1.1: the state write,
+    // its history row and the workflow event commit together.
+    const updated_order = await this.prisma.$transaction(async (tx) => {
+      const written = await tx.orders.update({
+        where: { id: orderId },
+        data: schemaFields,
+        include: {
+          stores: { select: { id: true, name: true, store_code: true } },
+          order_items: { include: { products: true, product_variants: true } },
+          payments: true,
+        },
+      });
 
-    await this.orderHistoryService?.record(this.prisma, {
-      orderId,
-      storeId: updated_order.store_id,
-      organizationId: previousOrganizationId,
-      type: 'state_changed',
-      fromState: opts?.historyFromState ?? previous_order?.state,
-      toState: newState,
-      source: historySource,
+      const history = await this.orderHistoryService?.record(tx, {
+        orderId,
+        storeId: written.store_id,
+        organizationId: previousOrganizationId,
+        type: 'state_changed',
+        fromState: opts?.historyFromState ?? previous_order?.state,
+        toState: newState,
+        source: historySource,
+      });
+
+      // Flujos P1.1: order.status_changed in the same transaction
+      // A no-op write (same state) has no history row and is no transition.
+      if (history !== null) {
+        await recordTriggerEvent(tx, 'order.status_changed', {
+          store_id: written.store_id,
+          order_id: orderId,
+          order_number: previous_order?.order_number ?? '',
+          from_state: opts?.historyFromState ?? previous_order?.state,
+          to_state: newState,
+          grand_total: written.grand_total,
+          transition_id: history?.id,
+        });
+      }
+
+      return written;
     });
 
     this.eventEmitter.emit('order.status_changed', {

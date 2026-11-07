@@ -31,6 +31,7 @@ import { PosSearchPathService } from '../../settings/pos-smart-search/pos-search
 import { Prisma } from '@prisma/client';
 import { CostingService } from '../shared/services/costing.service';
 import { CostingMethodResolverService } from '../shared/services/costing-method-resolver.service';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 
 /**
  * D.1 — Set de recall del picker de ajustes: PARIDAD con el OR legacy
@@ -449,6 +450,16 @@ export class InventoryAdjustmentsService {
       },
       prisma,
     );
+
+    // Flujos P1.1: inventory.adjusted in the same transaction (one per row)
+    await recordTriggerEvent(prisma, 'inventory.adjusted', {
+      store_id: RequestContextService.getStoreId(),
+      adjustment_id: adjustment.id,
+      product_id: productId,
+      location_id: locationId,
+      quantity_change: quantityChange,
+      adjustment_type: data.type,
+    });
 
     // 5. Transformar respuesta para mapear nombres de relaciones
     return {

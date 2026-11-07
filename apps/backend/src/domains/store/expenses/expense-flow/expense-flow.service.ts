@@ -163,13 +163,23 @@ export class ExpenseFlowService {
     // `expense_date` (fecha del documento) ni por `approved_at` (autorización).
     // Es columna de instante: se guarda en UTC y el bucketing por día lo hace
     // la capa de analítica con el timezone de la tienda.
-    const updated = await this.prisma.expenses.update({
-      where: { id },
-      data: {
-        state: 'paid',
-        paid_at: new Date(),
-      },
-      include: EXPENSE_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const paid = await tx.expenses.update({
+        where: { id },
+        data: {
+          state: 'paid',
+          paid_at: new Date(),
+        },
+        include: EXPENSE_INCLUDE,
+      });
+      // Flujos P1.1: expense.paid in the same transaction
+      await recordTriggerEvent(tx, 'expense.paid', {
+        store_id: context.store_id,
+        expense_id: paid.id,
+        amount: paid.amount,
+        category_id: paid.category_id,
+      });
+      return paid;
     });
 
     this.logger.log(

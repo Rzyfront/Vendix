@@ -18,6 +18,7 @@ import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
 import { VatResponsibilityService } from '@common/helpers/vat-responsibility.helper';
+jest.mock('../../workflows/engine/workflow-trigger.outbox', () => ({ recordTriggerEvent: jest.fn().mockResolvedValue(false) }));
 
 /**
  * QUI-855 (paso 7a) — el documento escaneado nunca se pierde: subida a S3 bajo

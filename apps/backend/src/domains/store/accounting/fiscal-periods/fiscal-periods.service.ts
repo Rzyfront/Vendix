@@ -5,6 +5,7 @@ import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { CreateFiscalPeriodDto } from './dto/create-fiscal-period.dto';
 import { UpdateFiscalPeriodDto } from './dto/update-fiscal-period.dto';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { recordTriggerEvent } from '../../workflows/engine/workflow-trigger.outbox';
 
 @Injectable()
 export class FiscalPeriodsService {
@@ -234,21 +235,31 @@ export class FiscalPeriodsService {
       );
     }
 
-    return this.prisma.fiscal_periods.update({
-      where: { id },
-      data: {
-        status: 'closed',
-        closed_by_user_id: context.user_id,
-        closed_at: new Date(),
-      },
-      include: {
-        closed_by_user: {
-          select: { id: true, first_name: true, last_name: true },
+    return this.prisma.$transaction(async (tx) => {
+      const closed = await tx.fiscal_periods.update({
+        where: { id },
+        data: {
+          status: 'closed',
+          closed_by_user_id: context.user_id,
+          closed_at: new Date(),
         },
-        _count: {
-          select: { accounting_entries: true },
+        include: {
+          closed_by_user: {
+            select: { id: true, first_name: true, last_name: true },
+          },
+          _count: {
+            select: { accounting_entries: true },
+          },
         },
-      },
+      });
+      // Flujos P1.1: fiscal_period.closed in the same transaction
+      await recordTriggerEvent(tx, 'fiscal_period.closed', {
+        store_id: context.store_id,
+        fiscal_period_id: closed.id,
+        name: closed.name,
+        end_date: closed.end_date,
+      });
+      return closed;
     });
   }
 
