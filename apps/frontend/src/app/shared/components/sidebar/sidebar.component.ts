@@ -118,8 +118,10 @@ export interface MenuItem {
   _locked?: boolean;
   /**
    * Internal flag set by `MenuFilterService` when the plan in force does not
-   * include the module and the plan flag is on. The item stays visible and
-   * navigable with a lock: the route guard opens the module paywall.
+   * include the module and the plan flag is on, or when an always-enforced
+   * module (`flows`, `documents`) is closed by the store industries. The item
+   * stays visible and navigable with a lock: the route guard opens the module
+   * paywall (plan) or the industry paywall.
    */
   _planLocked?: boolean;
 }

@@ -211,6 +211,10 @@ export class DefaultPanelUIService {
         hospitality_rooms: true,
         hospitality_reservations: true,
         hospitality_rates: true,
+        // Administración (flujos-documental S1): default visible; the gate is
+        // the `administration` industry (MODULE_INDUSTRIES, always enforced).
+        flows: true,
+        documents: true,
         reports: true,
         reports_dispatch: true,
         invoicing: true,

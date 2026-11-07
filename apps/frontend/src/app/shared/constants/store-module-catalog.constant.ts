@@ -146,6 +146,10 @@ export const MODULE_ROUTES: Record<string, string> = {
   hospitality_reservations: '/admin/hospitality/reservations',
   hospitality_rates: '/admin/hospitality/rates',
 
+  // Administración (flujos-documental S1)
+  flows: '/admin/workflows',
+  documents: '/admin/documents',
+
   // Facturación electrónica
   invoicing: '/admin/invoicing',
   invoicing_invoices: '/admin/invoicing/invoices',
@@ -275,6 +279,8 @@ export const MODULE_GATE_ROUTES: Record<string, string[]> = {
     '/admin/hospitality/rack',
   ],
   hospitality_rooms: ['/admin/hospitality/housekeeping'],
+  flows: ['/admin/workflows'],
+  documents: ['/admin/documents'],
 };
 
 /**

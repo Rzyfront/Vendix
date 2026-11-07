@@ -11,6 +11,7 @@ import { AccessAuditLogger } from '../access/access-audit.logger';
 import { AccessGateModeService } from '../access/access-gate-mode.service';
 import {
   industryAllowsKey,
+  isIndustryAlwaysEnforced,
   normalizeModuleIndustries,
 } from '../access/module-industries';
 
@@ -19,6 +20,7 @@ import {
  *
  * `audit` mode (default): logs `would_block` and lets the request through.
  * `enforce` mode (Redis flag): logs `blocked` and throws 403 `MODULE_INDUSTRY_001`.
+ * Keys in `ENFORCED_INDUSTRY_KEYS` (flows, documents) always enforce.
  * No store in context or unknown store: other layers own those errors.
  * Must run after the global JWT guard (needs `req.user`).
  */
@@ -50,7 +52,7 @@ export class IndustryModuleGuard implements CanActivate {
     if (!store || industryAllowsKey(key, store.industries)) return true;
 
     const mode = await this.modeService.modeForStore(storeId);
-    const enforce = mode === 'enforce';
+    const enforce = mode === 'enforce' || isIndustryAlwaysEnforced(key);
     this.auditLogger.record({
       source: 'backend',
       surface: 'api',

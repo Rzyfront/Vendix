@@ -31,6 +31,7 @@ export { createReportingTools } from './domains/reporting.tools';
 export { createKitchenTools } from './domains/kitchen.tools';
 export { createTablesTools, createComensalTools } from './domains/tables.tools';
 export { createLodgingTools } from './domains/lodging.tools';
+export { createWorkflowsTools } from './domains/workflows.tools';
 export {
   createRecipeTools,
   createMenuTools,

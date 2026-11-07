@@ -69,6 +69,10 @@ export class RequestContextInterceptor implements NestInterceptor {
         user.is_super_admin || effectiveRoles.includes('super_admin');
       contextObj.is_owner = user.is_owner || effectiveRoles.includes('owner');
       contextObj.email = user.email;
+      if (user.auth_source === 'api_key') {
+        contextObj.auth_source = 'api_key';
+        contextObj.api_key_id = user.api_key_id;
+      }
 
       // Only captured for authenticated requests. The AI api-bridge replays
       // requests as this user over internal HTTP; that is the whole reason the
@@ -85,7 +89,11 @@ export class RequestContextInterceptor implements NestInterceptor {
       // class of bug comes back.
       const authHeader = req.headers?.authorization;
       const queryToken = req.query?.token;
-      if (typeof authHeader === 'string' && /^Bearer /i.test(authHeader)) {
+      // An API key is a long-lived credential for a different surface: it is
+      // never exposed as the replayable session token.
+      if (user.auth_source === 'api_key') {
+        // no access_token
+      } else if (typeof authHeader === 'string' && /^Bearer /i.test(authHeader)) {
         contextObj.access_token = authHeader.slice(7);
       } else if (typeof queryToken === 'string' && queryToken) {
         contextObj.access_token = queryToken;

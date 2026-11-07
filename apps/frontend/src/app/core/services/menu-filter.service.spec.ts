@@ -941,6 +941,97 @@ describe('MenuFilterService.canSeeKey / applyAccessGate (apps-f4 S4)', () => {
 });
 
 /**
+ * flujos-documental S6: `flows` and `documents` enforce their industry rule
+ * whatever the gate mode. The sidebar keeps them visible with a lock; the URL
+ * is blocked. Every other key keeps following the audit/enforce mode.
+ */
+describe('MenuFilterService — industria siempre aplicada (flujos-documental S6)', () => {
+  let service: MenuFilterService;
+  let gate: ReturnType<typeof accessGateStub>;
+  let industries: WritableSignal<string[]>;
+
+  beforeEach(() => {
+    industries = signal<string[]>(['retail']);
+    gate = accessGateStub();
+    const authFacade = {
+      isOwner: () => true,
+      isModuleVisible: () => true,
+      currentAppPanelUi: signal<Record<string, boolean> | null>(null),
+      storeSettings: signal<any>(null),
+      userIndustries: industries,
+      fiscalScope: signal('STORE'),
+      operatingScope: signal('STORE'),
+      activeFiscalAreas: signal<string[]>([]),
+      userStoreType: signal<string | null>('physical'),
+    };
+    TestBed.configureTestingModule({
+      providers: [
+        MenuFilterService,
+        { provide: AuthFacade, useValue: authFacade },
+        { provide: AccessGateService, useValue: gate },
+        { provide: SubscriptionAccessService, useValue: { canUseAI: () => () => true } },
+      ],
+    });
+    service = TestBed.inject(MenuFilterService);
+  });
+
+  it('sin la industria administration, la URL se bloquea aunque el gate esté en auditoría', () => {
+    expect(gate.mode()).toBe('audit');
+    for (const key of ['flows', 'documents']) {
+      gate.report.calls.reset();
+      expect(service.applyAccessGate([key], true, 'url', `/admin/${key}`)).toBeFalse();
+      expect(gate.report).toHaveBeenCalledOnceWith(
+        jasmine.objectContaining({ key, decision: 'blocked', layer: 'industry', surface: 'url' }),
+      );
+    }
+  });
+
+  it('sin la industria administration, sidebar y Apps conservan el módulo y lo marcan con candado', () => {
+    gate.report.calls.reset();
+    expect(service.applyAccessGate(['flows'], true, 'sidebar')).toBeTrue();
+    // Visible with a lock: logged as would_hide, never as hidden.
+    expect(gate.report).toHaveBeenCalledOnceWith(
+      jasmine.objectContaining({ key: 'flows', decision: 'would_hide', surface: 'sidebar' }),
+    );
+    expect(service.applyAccessGate(['documents'], true, 'apps_card')).toBeTrue();
+    expect(service.isIndustryLocked(['flows'])).toBeTrue();
+    expect(service.isIndustryLocked(['documents'])).toBeTrue();
+  });
+
+  it('con la industria administration (sola o combinada) no hay bloqueo ni candado', () => {
+    for (const set of [['administration'], ['retail', 'administration']]) {
+      industries.set(set);
+      expect(service.applyAccessGate(['flows'], true, 'url')).toBeTrue();
+      expect(service.isIndustryLocked(['flows', 'documents'])).toBeFalse();
+    }
+  });
+
+  it('usa las industrias del backend cuando ya cargaron', () => {
+    gate.industries.set(['administration']);
+    expect(service.isIndustryLocked(['flows'])).toBeFalse();
+    gate.industries.set(['restaurant']);
+    expect(service.isIndustryLocked(['flows'])).toBeTrue();
+  });
+
+  it('las demás keys conservan su comportamiento: auditoría deja pasar y no hay candado', () => {
+    expect(service.applyAccessGate(['restaurant_ops_recipes'], true, 'url')).toBeTrue();
+    expect(service.isIndustryLocked(['restaurant_ops_recipes'])).toBeFalse();
+    expect(service.isIndustryLocked([])).toBeFalse();
+  });
+
+  it('las demás keys con el flag encendido siguen ocultándose en el sidebar', () => {
+    gate.mode.set('enforce');
+    expect(service.applyAccessGate(['restaurant_ops_recipes'], true, 'sidebar')).toBeFalse();
+  });
+
+  it('las rutas de Flujos y Documentos resuelven su key', () => {
+    expect(service.resolveGateKeysForRoute('/admin/workflows')).toContain('flows');
+    expect(service.resolveGateKeysForRoute('/admin/workflows/instances/12')).toContain('flows');
+    expect(service.resolveGateKeysForRoute('/admin/documents')).toContain('documents');
+  });
+});
+
+/**
  * planes-matriz-accesos: 4th layer `plan` in `canSeeKey` and its effect on the
  * four surfaces (sidebar, url, apps_card, vexi). The plan never hides: sidebar
  * and Apps keep the module with a lock; URL and Vexi refuse only with the plan

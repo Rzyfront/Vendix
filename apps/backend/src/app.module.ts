@@ -15,6 +15,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './domains/organization/users/users.module';
 import { TestModule } from './test/test.module';
 import { DomainsModule } from './domains/domains.module';
+import { ApiV1Module } from './domains/api-v1/api-v1.module';
 import { StorageModule } from './storage.module';
 import { PublicDomainsModule } from './domains/public/domains/public-domains.module';
 import { JobsModule } from './jobs/jobs.module';
@@ -156,6 +157,7 @@ function resolveThrottleSetting(
     UsersModule,
     TestModule,
     DomainsModule,
+    ApiV1Module,
     PublicDomainsModule,
     StorageModule,
     AuditModule,

@@ -1152,6 +1152,23 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // Administración (flujos-documental S6). Industry `administration`,
+      // always enforced: `panelUiGuard` blocks the URL and opens the industry
+      // paywall; the API answers 403 MODULE_INDUSTRY_001.
+      {
+        path: 'workflows',
+        loadChildren: () =>
+          import('../../private/modules/store/workflows/routes/workflows.routes').then(
+            (m) => m.workflowsRoutes,
+          ),
+      },
+      {
+        path: 'documents',
+        loadChildren: () =>
+          import('../../private/modules/store/documents/routes/documents.routes').then(
+            (m) => m.documentsRoutes,
+          ),
+      },
       // Hospitality Suite (H0.1). Industry gating is UX (panelUiGuard +
       // INDUSTRY_HIDDEN_MODULES); lodging APIs land with H0.2+.
       {

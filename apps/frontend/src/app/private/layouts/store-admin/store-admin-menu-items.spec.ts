@@ -297,3 +297,20 @@ describe('STORE_ADMIN menu — Finanzas por etapa del wizard fiscal', () => {
     });
   });
 });
+
+describe('Administración (flujos-documental S6): entradas del sidebar', () => {
+  it('Flujos y Documentos son entradas de primer nivel con su key y su ruta', () => {
+    const flows = STORE_ADMIN_MENU_ITEMS.find((item) => item.label === 'Flujos');
+    const documents = STORE_ADMIN_MENU_ITEMS.find((item) => item.label === 'Documentos');
+    expect(flows).toEqual(
+      jasmine.objectContaining({ route: '/admin/workflows', panelUiKey: 'flows', icon: 'git-branch' }),
+    );
+    expect(documents).toEqual(
+      jasmine.objectContaining({
+        route: '/admin/documents',
+        panelUiKey: 'documents',
+        icon: 'folder-open',
+      }),
+    );
+  });
+});

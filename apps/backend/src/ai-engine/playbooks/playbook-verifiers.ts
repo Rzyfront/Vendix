@@ -574,6 +574,18 @@ const RULES: Record<string, Rule> = {
       );
     },
   },
+  'disenar-flujo': {
+    tool: 'workflows_validate_definition',
+    id: 'definition_id',
+    identity: (d) => d.definition_id,
+    required: ['definition_id'],
+    effects: [['draft', 'workflows_draft_from_description']],
+    // The verdict is the deterministic validator's, never the model's.
+    predicate: (d, i) =>
+      same(d.definition_id, i.definition_id) &&
+      d.valid === true &&
+      array(d.errors).length === 0,
+  },
   'reporte-ventas-margen': {
     tool: 'analyze_report',
     required: ['date_from', 'date_to', 'report_id'],

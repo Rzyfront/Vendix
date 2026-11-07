@@ -11,6 +11,7 @@ export const STORE_INDUSTRIES = [
   'gym',
   'construction',
   'hospitality',
+  'administration',
 ] as const;
 
 export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
@@ -76,6 +77,12 @@ export const INDUSTRY_METADATA: Record<StoreIndustry, IndustryMeta> = {
     label: 'Hotelería',
     description: 'Habitaciones, reservas y recepción',
     icon: 'hotel',
+  },
+  administration: {
+    value: 'administration',
+    label: 'Administración',
+    description: 'Flujos de trabajo, aprobaciones y documentos',
+    icon: 'clipboard-list',
   },
 };
 

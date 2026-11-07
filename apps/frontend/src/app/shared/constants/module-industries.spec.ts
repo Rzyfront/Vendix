@@ -158,6 +158,29 @@ const PRE_F4_HIDDEN: Record<StoreIndustry, string[]> = {
     'analytics_dispatch',
     'reports_dispatch',
   ],
+  // Born after F4: every legacy-gated key is hidden for it (none lists it).
+  administration: [
+    'manufacturing',
+    'manufacturing_formulas',
+    'manufacturing_orders',
+    'manufacturing_settings',
+    'hospitality',
+    'hospitality_rooms',
+    'hospitality_reservations',
+    'hospitality_rates',
+    'restaurant_ops',
+    'memberships',
+    'orders_reservations',
+    'orders_service_stations',
+    'orders_contracts',
+    'dispatch',
+    'orders_dispatch_notes',
+    'orders_dispatch_routes',
+    'dispatch_fleet',
+    'settings_shipping',
+    'analytics_dispatch',
+    'reports_dispatch',
+  ],
 };
 
 

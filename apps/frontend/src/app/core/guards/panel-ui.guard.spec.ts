@@ -15,6 +15,7 @@ import {
 } from '../services/menu-filter.service';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { PlanPaywallService } from '../services/plan-paywall.service';
+import { IndustryPaywallService } from '../services/industry-paywall.service';
 import type { PlanLock } from '../services/menu-filter.service';
 
 const INVOICING_LOCK: PlanLock = {
@@ -55,6 +56,7 @@ describe('panelUiGuard', () => {
   let authFacade: jasmine.SpyObj<AuthFacade>;
   let accessGate: jasmine.SpyObj<AccessGateService>;
   let paywall: jasmine.SpyObj<PlanPaywallService>;
+  let industryPaywall: jasmine.SpyObj<IndustryPaywallService>;
   let router: Router;
 
   beforeEach(() => {
@@ -68,10 +70,15 @@ describe('panelUiGuard', () => {
       'industryBlockMessage',
       'fiscalStageBlockForUrl',
       'planLockForKeys',
+      'isIndustryLocked',
     ]);
+    // Por defecto las claves no son de un módulo siempre-compuerta
+    // (`flows`, `documents`); el test del paywall de industria lo sobreescribe.
+    menuFilter.isIndustryLocked.and.returnValue(false);
     menuFilter.fiscalStageBlockForUrl.and.returnValue(null);
     menuFilter.planLockForKeys.and.returnValue(null);
     paywall = jasmine.createSpyObj('PlanPaywallService', ['show', 'notice']);
+    industryPaywall = jasmine.createSpyObj('IndustryPaywallService', ['show']);
     paywall.notice.and.returnValue('Facturación electrónica no está incluido en tu plan. Disponible en Empresarial Pro.');
     accessGate = jasmine.createSpyObj('AccessGateService', ['ensureLoaded']);
     accessGate.ensureLoaded.and.resolveTo();
@@ -104,6 +111,7 @@ describe('panelUiGuard', () => {
         { provide: AuthFacade, useValue: authFacade },
         { provide: AccessGateService, useValue: accessGate },
         { provide: PlanPaywallService, useValue: paywall },
+        { provide: IndustryPaywallService, useValue: industryPaywall },
       ],
     });
 
@@ -294,6 +302,18 @@ describe('panelUiGuard', () => {
       'No disponible en tu industria. Este módulo aplica solo a tiendas de restaurante.',
     );
     expect(router.navigateByUrl).toHaveBeenCalledWith('/admin/dashboard');
+  });
+
+  it('S6: un módulo siempre-compuerta cerrado por industria abre el paywall, sin toast', async () => {
+    menuFilter.resolveGateKeysForRoute.and.returnValue(['flows']);
+    menuFilter.applyAccessGate.and.returnValue(false);
+    menuFilter.isIndustryLocked.and.returnValue(true);
+
+    const result = await runGuard('/admin/workflows');
+
+    expect(result).toBeFalse();
+    expect(industryPaywall.show).toHaveBeenCalledWith('flows');
+    expect(toast.info).not.toHaveBeenCalled();
   });
 
   it('plan: módulo fuera del plan con el flag encendido abre el paywall y no muestra el aviso de industria', async () => {

@@ -62,6 +62,29 @@ describe('panel-ui-merge.util', () => {
       expect(merged.STORE_ADMIN.settings_users).toBeUndefined();
     });
 
+    it('Flujos: gerente recibe flows y documents; supervisor, cajero y empleado reciben flows', () => {
+      const manager = mergePanelUiSoft({}, sampleDefaults, ['manager']);
+      expect(manager.STORE_ADMIN.flows).toBe(true);
+      expect(manager.STORE_ADMIN.documents).toBe(true);
+      for (const role of ['supervisor', 'cashier', 'employee']) {
+        const merged = mergePanelUiSoft({}, sampleDefaults, [role]);
+        expect({ role, flows: merged.STORE_ADMIN.flows }).toEqual({ role, flows: true });
+        expect({ role, documents: merged.STORE_ADMIN.documents }).toEqual({
+          role,
+          documents: undefined,
+        });
+      }
+    });
+
+    it('Flujos: un false explícito del usuario se respeta', () => {
+      const merged = mergePanelUiSoft(
+        { STORE_ADMIN: { flows: false } },
+        sampleDefaults,
+        ['employee'],
+      );
+      expect(merged.STORE_ADMIN.flows).toBe(false);
+    });
+
     it('waiter (mesero) recibe mesas, pos, pedidos y productos', () => {
       const merged = mergePanelUiSoft({}, sampleDefaults, ['waiter']);
       expect(merged.STORE_ADMIN).toBeDefined();

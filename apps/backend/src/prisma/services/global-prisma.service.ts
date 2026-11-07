@@ -25,6 +25,12 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.stores;
   }
 
+  // API keys: the `/api/v1` guard resolves a key BEFORE any tenant context
+  // exists, so it must read the unscoped table (lookup by key_hash only).
+  get store_api_keys() {
+    return this.baseClient.store_api_keys;
+  }
+
   get suppliers() {
     return this.baseClient.suppliers;
   }

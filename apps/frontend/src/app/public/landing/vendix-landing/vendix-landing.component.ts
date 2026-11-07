@@ -65,7 +65,9 @@ export interface IndustryFeatureItem {
  * `hospitality` queda fuera hasta que la suite de hotelería sea vendible: hoy
  * (H0.1) solo existe el menú vacío, y la landing no debe ofrecerla.
  */
-export type LandingSector = Exclude<StoreIndustry, 'hospitality'> | 'beauty';
+export type LandingSector =
+  | Exclude<StoreIndustry, 'hospitality' | 'administration'>
+  | 'beauty';
 
 /**
  * Ventana del simulador del hero, gobernada por el semáforo macOS de su barra.
