@@ -2167,7 +2167,8 @@ export class InvoicingService {
       calculated.header_taxes,
       calculated.lines,
     );
-    const insertInvoice = async (db: Prisma.TransactionClient) => {
+    // Same client type as `prisma` above (the caller's tx or the scoped one).
+    const insertInvoice = async (db: typeof prisma) => {
     const row = await db.invoices.create({
       data: {
         organization_id: context.organization_id,
@@ -2389,8 +2390,8 @@ export class InvoicingService {
     // document; without one, the insert and its event commit together.
     const invoice = options.transaction
       ? await insertInvoice(options.transaction)
-      : await this.prisma.$transaction((tx: Prisma.TransactionClient) =>
-          insertInvoice(tx),
+      : await this.prisma.$transaction((tx) =>
+          insertInvoice(tx as typeof prisma),
         );
 
     // Segunda escritura: el desglose por línea. Sólo para el documento

@@ -145,7 +145,7 @@ export class WorkflowPeopleActions implements WorkflowActionGroup {
         where: { customer_id: customerId },
         select: { tag_id: true },
       });
-      const tagIds = new Set(current.map((row) => row.tag_id));
+      const tagIds = new Set<number>(current.map((row) => Number(row.tag_id)));
       tagIds.add(tagId);
       return this.customerCrm.setTags(customerId, [...tagIds]);
     });
