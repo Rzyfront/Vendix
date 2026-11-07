@@ -536,18 +536,20 @@ export class WorkflowStartService {
     const parent = (await tx.workflow_instances.findFirst({
       where: { id: input.parentId, store_id: ctx.store_id },
     })) as WorkflowInstanceRow | null;
-    if (
-      !parent ||
-      parent.status !== 'active' ||
-      parent.current_stage_key !== input.stageKey ||
-      parent.stage_entry_seq !== input.entrySeq
-    ) {
+    if (!parent) return null;
+    const parentDef = await this.loader.loadDefinition(tx, parent.version_id);
+    const subflow = parentDef.stages.find((s) => s.key === input.stageKey)?.subflow;
+    // A stage that does not wait moved the parent on in the same batch: its
+    // children still start (the idempotency key above prevents duplicates).
+    // A waiting stage only starts children while the parent is still there.
+    const stillThere =
+      parent.status === 'active' &&
+      parent.current_stage_key === input.stageKey &&
+      parent.stage_entry_seq === input.entrySeq;
+    if (!stillThere && (subflow?.wait !== false || parent.stage_entry_seq < input.entrySeq)) {
       return null;
     }
-    const parentDef = await this.loader.loadDefinition(tx, parent.version_id);
-    const child = parentDef.stages.find((s) => s.key === input.stageKey)?.subflow?.flows[
-      input.index
-    ];
+    const child = subflow?.flows[input.index];
     if (!child) return null;
     const fail = (error: string) => ({ error, flowKey: child.flow_key });
 
