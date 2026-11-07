@@ -25,6 +25,14 @@ function setup(instance: unknown, events: unknown[]) {
   const prisma = {
     workflow_instances: { findFirst: jest.fn().mockResolvedValue(instance) },
     workflow_instance_events: { findMany: jest.fn().mockResolvedValue(events) },
+    workflow_versions: {
+      findFirst: jest.fn().mockResolvedValue({
+        definition: { stages: [{ key: 'a', name: 'Solicitud' }, { key: 'b', name: 'Jefe' }] },
+      }),
+    },
+    users: {
+      findMany: jest.fn().mockResolvedValue([{ id: 3, first_name: 'Ana', last_name: 'Ruiz' }]),
+    },
   };
   jest
     .spyOn(RequestContextService, 'getContext')
@@ -53,7 +61,7 @@ describe('WorkflowInstanceDebugService', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('returns events in seq order with changes against the previous snapshot', async () => {
-    const { service, prisma } = setup({ id: 5, data: { monto: 30 } }, [
+    const { service, prisma } = setup({ id: 5, data: { monto: 30 }, version_id: 11 }, [
       ev(1, { monto: 10 }, 'started'),
       ev(2, null, 'legacy'),
       ev(3, { monto: 30, nota: 'ok' }),
@@ -65,14 +73,24 @@ describe('WorkflowInstanceDebugService', () => {
     });
     expect(r.current_data).toEqual({ monto: 30 });
     expect(r.events.map((e) => e.seq)).toEqual([1, 2, 3]);
-    expect(r.events[0].changes).toEqual([]);
+    // The first event shows what the request started with.
+    expect(r.events[0].changes).toEqual([{ key: 'monto', before: null, after: 10 }]);
     expect(r.events[1]).toMatchObject({ data_snapshot: null, changes: [] });
     // Diffed against event 1: the legacy event in between is skipped.
     expect(r.events[2].changes).toEqual([
       { key: 'monto', before: 10, after: 30 },
       { key: 'nota', before: null, after: 'ok' },
     ]);
-    expect(r.events[2]).toMatchObject({ occurred_at: at(3), actor_type: 'user', actor_id: 3 });
+    expect(r.events[2]).toMatchObject({
+      occurred_at: at(3),
+      actor_type: 'user',
+      actor_id: 3,
+      actor_name: 'Ana Ruiz',
+    });
+    expect(r.stage_names).toEqual({ a: 'Solicitud', b: 'Jefe' });
+    expect(prisma.workflow_versions.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 11, store_id: 7 } }),
+    );
   });
 
   it('another store (or unknown) instance is a 404 and no event is read', async () => {

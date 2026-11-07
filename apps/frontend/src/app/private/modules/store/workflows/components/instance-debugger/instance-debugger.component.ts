@@ -150,7 +150,7 @@ export class InstanceDebuggerComponent {
   }
 
   stage(event: DebugEvent): string {
-    return stageText(event, this.stageNames());
+    return stageText(event, { ...(this.debug()?.stage_names ?? {}), ...this.stageNames() });
   }
 
   actor(event: DebugEvent): string {

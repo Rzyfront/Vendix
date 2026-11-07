@@ -47,6 +47,8 @@ export interface DebugEvent {
   to_stage_key: string | null;
   actor_type: string;
   actor_id: number | null;
+  /** Full name when a person acted. */
+  actor_name?: string | null;
   occurred_at: string;
   payload: unknown;
   /** `null` for events recorded before variables were captured. */
@@ -58,6 +60,8 @@ export interface InstanceDebug {
   instance_id: number;
   events: DebugEvent[];
   current_data: Record<string, unknown>;
+  /** Stage key → name in the request's version. */
+  stage_names?: Record<string, string>;
 }
 
 // ─── "Probar esta acción" ──────────────────────────────────────────────

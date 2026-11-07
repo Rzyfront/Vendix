@@ -45,11 +45,13 @@ export function hasCapture(event: DebugEvent): boolean {
   return event.data_snapshot !== null;
 }
 
-/** Who did it: the system or a user. */
+/** Who did it: the person by name, the external requester, the AI or the system. */
 export function actorLabel(event: DebugEvent): string {
+  if (event.actor_name) return event.actor_name;
   if (event.actor_type === 'system') return 'Sistema';
-  if (event.actor_type === 'user') return event.actor_id ? `Usuario #${event.actor_id}` : 'Usuario';
-  return event.actor_id ? `${event.actor_type} #${event.actor_id}` : event.actor_type;
+  if (event.actor_type === 'public') return 'Solicitante externo';
+  if (event.actor_type === 'ai') return 'Asistente IA';
+  return event.actor_id ? `Usuario #${event.actor_id}` : 'Usuario';
 }
 
 /** "from → to" using stage names when known; a single name when it stays. */

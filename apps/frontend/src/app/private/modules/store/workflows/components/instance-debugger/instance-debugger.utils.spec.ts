@@ -57,6 +57,8 @@ describe('instance debugger utils', () => {
   it('actorLabel y stageText', () => {
     expect(actorLabel(event({ actor_type: 'system', actor_id: null }))).toBe('Sistema');
     expect(actorLabel(event())).toBe('Usuario #4');
+    expect(actorLabel(event({ actor_name: 'Ana Ruiz' }))).toBe('Ana Ruiz');
+    expect(actorLabel(event({ actor_type: 'public', actor_id: null }))).toBe('Solicitante externo');
     expect(stageText(event(), { a: 'Solicitud', b: 'Jefe' })).toBe('Solicitud → Jefe');
     expect(stageText(event({ from_stage_key: 'b' }), {})).toBe('b');
     expect(stageText(event({ from_stage_key: null, to_stage_key: null }), {})).toBe('—');
