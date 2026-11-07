@@ -299,6 +299,40 @@ describe('DocumentRetentionService (P4.4)', () => {
       expect(fileRow(bad.file.id).purged_at).toBeNull();
       expect(fileRow(good.file.id).purged_at).not.toBeNull();
       expect(report.files_purged).toBe(1);
+      // The report lists only what was really deleted.
+      expect(report.items.map((i) => [i.file_id, i.outcome])).toEqual([[good.file.id, 'purged']]);
+    });
+
+    it('cada archivo reclamado queda en el informe aunque el proceso muera antes de terminar (r1 M6)', async () => {
+      policy({ retain_days: 30 });
+      const first = closedFile();
+      const second = closedFile();
+      // The process dies right after deleting the first object.
+      kit.s3.deleteFile.mockImplementationOnce(async () => undefined);
+      kit.s3.deleteFile.mockImplementationOnce(() => new Promise(() => undefined));
+      void svc.run('manual', NOW);
+      await new Promise((r) => setTimeout(r, 50));
+      const run = kit.db.table('document_purge_runs')[0];
+      expect(run.status).toBe('running');
+      const items = () => kit.db.table('document_purge_items').map((i) => [i.file_id, i.outcome]);
+      expect(items()).toEqual([
+        [first.file.id, 'purged'],
+        [second.file.id, 'claimed'],
+      ]);
+
+      // An hour later the next run finishes the dead one first: the claimed
+      // object is deleted again and the old run closes with a full report.
+      kit.s3.deleteFile.mockClear();
+      const later = new Date(NOW.getTime() + 2 * 3_600_000);
+      await svc.run('manual', later);
+      expect(kit.s3.deleteFile).toHaveBeenCalledWith(second.file.s3_key);
+      const old = await svc.getRun(run.id);
+      expect(old).toMatchObject({ status: 'completed', files_purged: 2, bytes_purged: 2000 });
+      expect(old.items.map((i) => [i.file_id, i.outcome])).toEqual([
+        [first.file.id, 'purged'],
+        [second.file.id, 'purged'],
+      ]);
+      expect(fileRow(second.file.id).purged_at).not.toBeNull();
     });
 
     it('rechaza una segunda corrida mientras otra sigue en curso', async () => {

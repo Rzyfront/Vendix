@@ -152,7 +152,8 @@ export interface PurgeRunItem {
   id: number;
   file_id: number;
   policy_id: number | null;
-  outcome: 'purged' | 'skipped_legal_hold';
+  /** `claimed`: the file is being purged by a run that has not finished. */
+  outcome: 'purged' | 'skipped_legal_hold' | 'claimed';
   original_name: string;
   size_bytes: number;
   sha256: string;

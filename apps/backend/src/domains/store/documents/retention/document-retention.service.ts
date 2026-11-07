@@ -336,31 +336,37 @@ export class DocumentRetentionService {
 
   /**
    * Purges what is due. Per file: claim the row (`purged_at`, guarded by
-   * `legal_hold = false` so a hold set meanwhile wins), delete the S3 object,
-   * write the item. The row, its hash and every other column stay as
-   * evidence. A file whose object could not be deleted is released again.
+   * `legal_hold = false` so a hold set meanwhile wins) together with a
+   * `claimed` report item, delete the S3 object, mark the item `purged`. The
+   * row, its hash and every other column stay as evidence. A file whose object
+   * could not be deleted is released again and leaves the report.
    */
   async run(trigger: PurgeTrigger, now = new Date()) {
     const c = this.ctx();
-    const open = await this.prisma.document_purge_runs.findFirst({
-      where: {
-        store_id: c.store_id,
-        status: 'running',
-        started_at: { gte: new Date(now.getTime() - STALE_RUN_MS) },
-      },
-      select: { id: true },
-    });
-    if (open) throw new VendixHttpException(ErrorCodes.DOCRET_RUN_IN_PROGRESS);
-
-    const run = await this.prisma.document_purge_runs.create({
-      data: {
-        organization_id: c.organization_id,
-        store_id: c.store_id,
-        trigger,
-        status: 'running',
-        started_by_user_id: trigger === 'manual' ? c.user_id : null,
-        started_at: now,
-      },
+    await this.recoverStaleRuns(now);
+    // The store row lock makes "no run open → open one" atomic: two runs started
+    // at once (manual and schedule) never overlap.
+    const run: document_purge_runs = await this.prisma.$transaction(async (tx: any) => {
+      await tx.$queryRaw`SELECT id FROM stores WHERE id = ${c.store_id} FOR NO KEY UPDATE`;
+      const open = await tx.document_purge_runs.findFirst({
+        where: {
+          store_id: c.store_id,
+          status: 'running',
+          started_at: { gte: new Date(now.getTime() - STALE_RUN_MS) },
+        },
+        select: { id: true },
+      });
+      if (open) throw new VendixHttpException(ErrorCodes.DOCRET_RUN_IN_PROGRESS);
+      return tx.document_purge_runs.create({
+        data: {
+          organization_id: c.organization_id,
+          store_id: c.store_id,
+          trigger,
+          status: 'running',
+          started_by_user_id: trigger === 'manual' ? c.user_id : null,
+          started_at: now,
+        },
+      });
     });
     let purged = 0;
     let bytes = 0;
@@ -386,17 +392,23 @@ export class DocumentRetentionService {
           skipped++;
           continue;
         }
-        const claimed = await this.prisma.stored_files.updateMany({
-          where: {
-            id: cand.file_id,
-            store_id: c.store_id,
-            purged_at: null,
-            legal_hold: false,
-            OR: [{ retention_until: null }, { retention_until: { lte: now } }],
-          },
-          data: { purged_at: now },
+        // Claim and report line in one transaction: whatever happens after this,
+        // the run lists the file (`claimed` until its object is gone).
+        const item: document_purge_items | null = await this.prisma.$transaction(async (tx: any) => {
+          const claimed = await tx.stored_files.updateMany({
+            where: {
+              id: cand.file_id,
+              store_id: c.store_id,
+              purged_at: null,
+              legal_hold: false,
+              OR: [{ retention_until: null }, { retention_until: { lte: now } }],
+            },
+            data: { purged_at: now },
+          });
+          if (claimed.count === 0) return null;
+          return tx.document_purge_items.create({ data: { ...base, outcome: 'claimed' } });
         });
-        if (claimed.count === 0) {
+        if (!item) {
           // A hold or a retention date arrived after the candidate was read.
           const kept = await this.prisma.stored_files.findFirst({
             where: { id: cand.file_id, store_id: c.store_id, legal_hold: true },
@@ -413,16 +425,25 @@ export class DocumentRetentionService {
         try {
           await this.s3.deleteFile(cand.s3_key);
         } catch (e) {
-          await this.prisma.stored_files.updateMany({
-            where: { id: cand.file_id, store_id: c.store_id },
-            data: { purged_at: null },
+          // The object is still there: release the file and drop its report line.
+          await this.prisma.$transaction(async (tx: any) => {
+            await tx.stored_files.updateMany({
+              where: { id: cand.file_id, store_id: c.store_id },
+              data: { purged_at: null },
+            });
+            await tx.document_purge_items.deleteMany({
+              where: { id: item.id, store_id: c.store_id, outcome: 'claimed' },
+            });
           });
           failures++;
           firstError ??= `No se pudo borrar ${cand.original_name}: ${(e as Error)?.message ?? 'error de almacenamiento'}`;
           this.logger.error(`Purge of file ${cand.file_id} failed: ${(e as Error)?.message}`);
           continue;
         }
-        await this.prisma.document_purge_items.create({ data: { ...base, outcome: 'purged' } });
+        await this.prisma.document_purge_items.updateMany({
+          where: { id: item.id, store_id: c.store_id },
+          data: { outcome: 'purged' },
+        });
         purged++;
         bytes += cand.size_bytes;
       }
@@ -452,6 +473,58 @@ export class DocumentRetentionService {
       metadata: { event: 'retention_purge', trigger, run_id: run.id, purged, bytes, skipped_legal_hold: skipped, status },
     });
     return this.getRun(run.id);
+  }
+
+  /**
+   * Finishes the runs of the store that died mid-way (process killed): each
+   * `claimed` file has its object deleted again (deleting a missing object is
+   * a no-op) and becomes `purged`; the run closes with totals counted from its
+   * items, so the report lists every file the run touched.
+   */
+  private async recoverStaleRuns(now: Date): Promise<void> {
+    const c = this.ctx();
+    const stale: document_purge_runs[] = await this.prisma.document_purge_runs.findMany({
+      where: { store_id: c.store_id, status: 'running', started_at: { lt: new Date(now.getTime() - STALE_RUN_MS) } },
+    });
+    for (const run of stale) {
+      const claimed: document_purge_items[] = await this.prisma.document_purge_items.findMany({
+        where: { run_id: run.id, store_id: c.store_id, outcome: 'claimed' },
+      });
+      let failed = 0;
+      for (const item of claimed) {
+        const file = await this.prisma.stored_files.findFirst({
+          where: { id: item.file_id, store_id: c.store_id },
+          select: { s3_key: true },
+        });
+        try {
+          if (file) await this.s3.deleteFile(file.s3_key);
+          await this.prisma.document_purge_items.updateMany({
+            where: { id: item.id, store_id: c.store_id },
+            data: { outcome: 'purged' },
+          });
+        } catch (e) {
+          failed++;
+          this.logger.error(`Recovery of purged file ${item.file_id} failed: ${(e as Error)?.message}`);
+        }
+      }
+      const items: Array<{ outcome: string; size_bytes: number }> = await this.prisma.document_purge_items.findMany({
+        where: { run_id: run.id, store_id: c.store_id },
+        select: { outcome: true, size_bytes: true },
+      });
+      const purged = items.filter((i) => i.outcome === 'purged');
+      const skipped = items.filter((i) => i.outcome === 'skipped_legal_hold').length;
+      await this.prisma.document_purge_runs.updateMany({
+        where: { id: run.id, store_id: c.store_id, status: 'running' },
+        data: {
+          status: failed > 0 ? 'partial' : 'completed',
+          files_purged: purged.length,
+          bytes_purged: purged.reduce((n, i) => n + i.size_bytes, 0),
+          skipped_legal_hold: skipped,
+          error: failed > 0 ? 'La corrida se interrumpió y no se pudo terminar de borrar algunos archivos.' : 'La corrida se interrumpió y se completó después.',
+          finished_at: now,
+        },
+      });
+    }
   }
 
   private shapeRun(r: document_purge_runs) {

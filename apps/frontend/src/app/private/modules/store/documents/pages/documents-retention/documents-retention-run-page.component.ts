@@ -103,9 +103,17 @@ import {
                 <li class="rounded-xl border border-border p-3">
                   <div class="flex flex-wrap items-center gap-2">
                     <span class="text-sm font-medium text-text-primary">{{ item.original_name }}</span>
-                    <app-badge [variant]="item.outcome === 'purged' ? 'error' : 'warning'" size="xs">
-                      {{ item.outcome === 'purged' ? 'Purgado' : 'Omitido por retención legal' }}
-                    </app-badge>
+                    @switch (item.outcome) {
+                      @case ('purged') {
+                        <app-badge variant="error" size="xs">Purgado</app-badge>
+                      }
+                      @case ('claimed') {
+                        <app-badge variant="info" size="xs">En proceso</app-badge>
+                      }
+                      @default {
+                        <app-badge variant="warning" size="xs">Omitido por retención legal</app-badge>
+                      }
+                    }
                   </div>
                   <p class="mt-1 text-xs text-text-secondary">
                     {{ item.reason }} · {{ sizeText(item.size_bytes) }} ·
