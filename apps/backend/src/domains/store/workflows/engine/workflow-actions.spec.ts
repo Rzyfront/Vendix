@@ -5,8 +5,14 @@ import {
   seedDefinition,
   seedPeople,
 } from '../../../../testing/workflows/workflow-test-kit';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
+import { WORKFLOW_VENDIX_ACTIONS } from '@common/workflows/contract';
 import { WorkflowActionsExecutor } from './workflow-actions.executor';
 import { WorkflowNonRetryableError } from './workflow-engine.types';
+import { WorkflowActionInputError } from './actions/workflow-action.types';
+import { WorkflowPeopleActions } from './actions/people.actions';
+import { WorkflowPurchasingActions } from './actions/purchasing.actions';
+import { WorkflowOperationsActions } from './actions/operations.actions';
 
 // The executor acts with the publisher's REAL store permissions.
 const mockPublisherPermissions = jest.fn<Promise<string[]>, unknown[]>();
@@ -16,10 +22,10 @@ jest.mock('../../../../common/utils/user-store-permissions.util', () => ({
 }));
 
 
-/** Exactly what the HTTP routes of both actions require. */
+/** Exactly what the HTTP routes of the two actions under test require. */
 const PUBLISHER_PERMISSIONS = [
   'store:orders:purchase_orders:create',
-  'store:crm_tasks:manage',
+  'store:expenses:create',
 ];
 
 const PO = {
@@ -191,43 +197,30 @@ describe('acciones Vendix en el motor (outbox kind=action)', () => {
   });
 });
 
-describe('WorkflowActionsExecutor', () => {
+describe('WorkflowActionsExecutor (registry P1.2)', () => {
   let kit: ReturnType<typeof buildWorkflowKit>;
   let executor: WorkflowActionsExecutor;
-  const purchaseOrders = { create: jest.fn() };
-  const crmTasks = { create: jest.fn() };
+  const createDraft = jest.fn();
+  const createExpense = jest.fn();
   const seen: Array<Record<string, any>> = [];
 
   const instance = () => kit.db.table('workflow_instances')[0];
   const actionEvents = (type?: string) =>
     kit.db
       .table('workflow_instance_events')
-      .filter(
-        (e) => e.type.startsWith('action_') && (!type || e.type === type),
-      );
-  const outboxRow = (
-    action: string,
-    map: Record<string, unknown>,
-    extra: Record<string, unknown> = {},
-  ) => {
-    const r = kit.db.insert('workflow_outbox', {
+      .filter((e) => e.type.startsWith('action_') && (!type || e.type === type));
+  const outboxRow = (action: string, map: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    kit.db.insert('workflow_outbox', {
       store_id: 1,
       instance_id: instance().id,
       kind: 'action',
       payload: { action, map_resolved: map, stage_key: 'crear' },
       available_at: new Date(),
       ...extra,
-    });
-    return r as any;
-  };
+    }) as any;
   const inStore = <T>(fn: () => Promise<T>) =>
     RequestContextService.runIsolated(
-      {
-        store_id: 1,
-        organization_id: 1,
-        is_super_admin: false,
-        is_owner: false,
-      },
+      { store_id: 1, organization_id: 1, is_super_admin: false, is_owner: false },
       fn,
     );
 
@@ -239,259 +232,126 @@ describe('WorkflowActionsExecutor', () => {
     seedDefinition(kit.db, flow([]));
     await kit.engine.start({ definitionKey: 'oc', idempotencyKey: 'k1' });
     seen.length = 0;
-    purchaseOrders.create.mockReset().mockImplementation(async (dto: any) => {
-      seen.push({ ctx: RequestContextService.getContext(), dto });
-      return { id: 501, order_number: 'PO-1' };
-    });
-    crmTasks.create.mockReset().mockImplementation(async (dto: any) => {
-      seen.push({ ctx: RequestContextService.getContext(), dto });
-      return { id: 77 };
-    });
+    createDraft.mockReset().mockImplementation(async (ctx: any) =>
+      ctx.asPublisher(async () => {
+        seen.push({ ctx: RequestContextService.getContext(), map: ctx.map, permissions: ctx.permissions });
+        return { record_id: 501 };
+      }),
+    );
+    createExpense.mockReset().mockResolvedValue({ record_id: 9 });
     executor = new WorkflowActionsExecutor(
       kit.prisma,
-      kit.assignment,
       (kit.engine as any).events,
-      purchaseOrders as any,
-      crmTasks as any,
+      { handlers: { 'vendix.purchase_order.create_draft': createDraft } } as any,
+      { handlers: { 'vendix.expense.create': createExpense } } as any,
+      { handlers: {} } as any,
     );
   });
   afterEach(() => jest.restoreAllMocks());
 
-  const PO_MAP = {
-    supplier_id: '7',
-    location_id: '3',
-    product_id: '11',
-    quantity: '4',
-    unit_price: '2500.5',
-    notes: 'Solicitud FLU-000001',
-  };
+  it('R1: every action of the registry has a handler in the three real groups', () => {
+    const real = new WorkflowActionsExecutor(
+      {} as any,
+      {} as any,
+      new WorkflowPeopleActions({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any),
+      new WorkflowPurchasingActions({} as any, {} as any, {} as any, {} as any),
+      new WorkflowOperationsActions({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any),
+    );
+    expect([...real.registered()].sort()).toEqual([...WORKFLOW_VENDIX_ACTIONS].sort());
+  });
 
-  it('OC: crea el BORRADOR por PurchaseOrdersService con los valores resueltos, en la tienda y como quien publicó', async () => {
-    const row = outboxRow('vendix.purchase_order.create_draft', PO_MAP);
+  it('runs the handler in the store, as the publisher with their REAL permissions, and records action_executed', async () => {
+    const row = outboxRow('vendix.purchase_order.create_draft', { supplier_id: '7' });
     await inStore(() => executor.execute(row));
-    expect(purchaseOrders.create).toHaveBeenCalledTimes(1);
-    expect(seen[0].dto).toMatchObject({
-      supplier_id: 7,
-      location_id: 3,
-      items: [{ product_id: 11, quantity: 4, unit_price: 2500.5 }],
-      notes: 'Solicitud FLU-000001',
-      internal_notes: 'Creada por el flujo FLU-000001',
-    });
-    expect(seen[0].dto.status).toBeUndefined(); // el estado lo decide el servicio: nace en draft
+    expect(createDraft).toHaveBeenCalledTimes(1);
+    expect(seen[0].map).toEqual({ supplier_id: '7' });
+    expect(seen[0].permissions).toEqual(PUBLISHER_PERMISSIONS);
     expect(seen[0].ctx).toMatchObject({
       store_id: 1,
       organization_id: 1,
       user_id: 1,
       is_owner: false,
       is_super_admin: false,
+      permissions: PUBLISHER_PERMISSIONS,
     });
     const ev = actionEvents('action_executed');
     expect(ev).toHaveLength(1);
     expect(ev[0]).toMatchObject({
       actor_type: 'system',
       actor_id: null,
-      payload: {
-        action: 'vendix.purchase_order.create_draft',
-        created_id: 501,
-      },
+      payload: { action: 'vendix.purchase_order.create_draft', created_id: 501 },
     });
   });
 
-  it('OC: valores inválidos fallan SIN llamar al servicio (para que reintente / action_failed)', async () => {
-    for (const bad of [
-      { supplier_id: '' },
-      { supplier_id: 'abc' },
-      { location_id: '0' },
-      { product_id: '1.5' },
-      { quantity: '-2' },
-      { unit_price: '' },
-      { unit_price: 'caro' },
-      { unit_price: '-1' },
-    ]) {
-      await expect(
-        inStore(() =>
-          executor.execute(
-            outboxRow('vendix.purchase_order.create_draft', {
-              ...PO_MAP,
-              ...bad,
-            }),
-          ),
-        ),
-      ).rejects.toThrow();
-    }
-    expect(purchaseOrders.create).not.toHaveBeenCalled();
+  it('without the permission of the UI route it fails at once, without calling the handler', async () => {
+    mockPublisherPermissions.mockResolvedValue(['store:expenses:create']);
+    const row = outboxRow('vendix.purchase_order.create_draft', {});
+    await expect(inStore(() => executor.execute(row))).rejects.toBeInstanceOf(WorkflowNonRetryableError);
+    expect(createDraft).not.toHaveBeenCalled();
     expect(actionEvents()).toHaveLength(0);
   });
 
-  it('OC: si el servicio rechaza (validación de negocio) el error sube y no hay evento de éxito', async () => {
-    purchaseOrders.create.mockRejectedValue(new Error('Supplier not found'));
+  it('wrong input or a business rejection (4xx) fails without retries; a 5xx or a plain error retries', async () => {
+    createExpense.mockRejectedValueOnce(new WorkflowActionInputError('"amount" resolved to an empty value'));
     await expect(
-      inStore(() =>
-        executor.execute(
-          outboxRow('vendix.purchase_order.create_draft', PO_MAP),
-        ),
-      ),
-    ).rejects.toThrow('Supplier not found');
-    expect(actionEvents('action_executed')).toHaveLength(0);
+      inStore(() => executor.execute(outboxRow('vendix.expense.create', {}))),
+    ).rejects.toBeInstanceOf(WorkflowNonRetryableError);
+    createExpense.mockRejectedValueOnce(new VendixHttpException(ErrorCodes.WORKFLOW_APPROVAL_PENDING));
+    await expect(
+      inStore(() => executor.execute(outboxRow('vendix.expense.create', {}))),
+    ).rejects.toBeInstanceOf(WorkflowNonRetryableError);
+    const boom = new Error('db down');
+    createExpense.mockRejectedValueOnce(boom);
+    await expect(inStore(() => executor.execute(outboxRow('vendix.expense.create', {})))).rejects.toBe(boom);
+    expect(actionEvents()).toHaveLength(0);
   });
 
-  it('Tarea CRM: crea por CrmTasksService con vencimiento relativo y sin permiso de ver todo si no asigna a otro', async () => {
-    const row = outboxRow('vendix.crm_task.create', {
-      title: 'Llamar',
-      description: 'Ref',
-      due_in_days: '3',
-    });
-    const before = Date.now();
+  it('a retry after a failure later than the effect does NOT repeat it (created_id in the payload)', async () => {
+    const row = outboxRow('vendix.expense.create', {});
     await inStore(() => executor.execute(row));
-    expect(crmTasks.create).toHaveBeenCalledTimes(1);
-    const dto = seen[0].dto;
-    expect(dto).toMatchObject({ title: 'Llamar', description: 'Ref' });
-    expect(dto.assigned_user_id).toBeUndefined();
-    const due = new Date(dto.due_at).getTime();
-    expect(due).toBeGreaterThanOrEqual(before + 3 * 86_400_000);
-    expect(due).toBeLessThanOrEqual(Date.now() + 3 * 86_400_000);
-    expect(seen[0].ctx).toMatchObject({
-      user_id: 1,
-      permissions: PUBLISHER_PERMISSIONS,
-    });
-    expect(actionEvents('action_executed')[0].payload.created_id).toBe(77);
-  });
-
-  it('Tarea CRM: asigna a otro con el ver-todo que el publicador SÍ tiene', async () => {
-    mockPublisherPermissions.mockResolvedValue([
-      ...PUBLISHER_PERMISSIONS,
-      'store:crm_inbox:assign',
-    ]);
-    await inStore(() =>
-      executor.execute(
-        outboxRow('vendix.crm_task.create', {
-          title: 'T',
-          assignee: { kind: 'user', user_id: 2 },
-        }),
-      ),
-    );
-    expect(seen[0].dto.assigned_user_id).toBe(2);
-    expect(seen[0].ctx.permissions).toContain('store:crm_inbox:assign');
-  });
-
-  it('Tarea CRM: nunca concede un permiso que el publicador no tiene', async () => {
-    mockPublisherPermissions.mockResolvedValue(PUBLISHER_PERMISSIONS);
-    await inStore(() =>
-      executor.execute(
-        outboxRow('vendix.crm_task.create', {
-          title: 'T',
-          assignee: { kind: 'user', user_id: 2 },
-        }),
-      ),
-    ).catch(() => undefined);
-    expect(seen[0]?.ctx.permissions ?? []).not.toContain('store:crm_inbox:assign');
-    expect(mockPublisherPermissions).toHaveBeenCalledWith(expect.anything(), 1, expect.any(Number));
-  });
-
-  it('Tarea CRM: título vacío tras resolver los tokens o vencimiento fuera de rango fallan sin llamar al servicio', async () => {
-    for (const map of [
-      { title: '' },
-      { title: '   ' },
-      { title: 'x', due_in_days: '999' },
-      { title: 'x', due_in_days: 'tres' },
-    ]) {
-      await expect(
-        inStore(() =>
-          executor.execute(outboxRow('vendix.crm_task.create', map)),
-        ),
-      ).rejects.toThrow();
-    }
-    expect(crmTasks.create).not.toHaveBeenCalled();
-  });
-
-  it('Tarea CRM sobre una solicitud de un cliente enlaza al cliente', async () => {
-    instance().subject_type = 'customer';
-    instance().subject_id = 55;
-    await inStore(() =>
-      executor.execute(outboxRow('vendix.crm_task.create', { title: 'T' })),
-    );
-    expect(seen[0].dto.customer_id).toBe(55);
-  });
-
-  it('reintento tras un fallo posterior al efecto NO crea un segundo registro (created_id en el payload)', async () => {
-    const row = outboxRow('vendix.purchase_order.create_draft', PO_MAP);
-    await inStore(() => executor.execute(row));
-    const saved = kit.db.table('workflow_outbox').find((o) => o.id === row.id)!;
-    expect(saved.payload.created_id).toBe(501);
-    // Simula el reintento: el evento ya existe y el outbox lleva created_id.
-    await inStore(() => executor.execute({ ...row, payload: saved.payload }));
-    expect(purchaseOrders.create).toHaveBeenCalledTimes(1);
+    const saved = kit.db.table('workflow_outbox').find((o) => o.id === row.id);
+    expect(saved.payload.created_id).toBe(9);
+    await inStore(() => executor.execute(saved));
+    expect(createExpense).toHaveBeenCalledTimes(1);
     expect(actionEvents('action_executed')).toHaveLength(1);
   });
 
-  it('recordFailure deja action_failed una sola vez con el error truncado y sin tocar secretos', async () => {
-    const row = outboxRow('vendix.crm_task.create', { title: 'T' });
-    await inStore(() => executor.recordFailure(row, 'x'.repeat(2000)));
-    await inStore(() => executor.recordFailure(row, 'otra vez'));
+  it('an update action that returns no record id is stored as null and not repeated', async () => {
+    createExpense.mockResolvedValueOnce({ record_id: null });
+    const row = outboxRow('vendix.expense.create', {});
+    await inStore(() => executor.execute(row));
+    const saved = kit.db.table('workflow_outbox').find((o) => o.id === row.id);
+    expect(saved.payload.created_id).toBeNull();
+    await inStore(() => executor.execute(saved));
+    expect(createExpense).toHaveBeenCalledTimes(1);
+  });
+
+  it('recordFailure leaves action_failed once with the error truncated', async () => {
+    const row = outboxRow('vendix.expense.create', {});
+    await inStore(() => executor.recordFailure(row, 'x'.repeat(900)));
+    await inStore(() => executor.recordFailure(row, 'x'.repeat(900)));
     const ev = actionEvents('action_failed');
     expect(ev).toHaveLength(1);
-    expect(ev[0]).toMatchObject({
-      actor_type: 'system',
-      payload: { action: 'vendix.crm_task.create' },
-    });
-    expect(ev[0].payload.error.length).toBeLessThanOrEqual(500);
+    expect(ev[0].payload.error).toHaveLength(500);
   });
 
-  it('una acción de otra tienda o una instancia inexistente no ejecuta nada', async () => {
-    const row = outboxRow(
-      'vendix.crm_task.create',
-      { title: 'T' },
-      { store_id: 2 },
-    );
-    await inStore(() => executor.execute(row));
-    expect(crmTasks.create).not.toHaveBeenCalled();
-    await inStore(() =>
-      executor.execute({ ...row, store_id: 1, instance_id: 999 }),
-    );
-    expect(crmTasks.create).not.toHaveBeenCalled();
+  it('an action of another store or a missing instance runs nothing', async () => {
+    const other = outboxRow('vendix.expense.create', {}, { store_id: 2 });
+    await inStore(() => executor.execute(other));
+    const missing = outboxRow('vendix.expense.create', {}, { instance_id: 999 });
+    await inStore(() => executor.execute(missing));
+    expect(createExpense).not.toHaveBeenCalled();
   });
 
-  it('OC: sin el permiso de la ruta (store:orders:purchase_orders:create) falla sin llamar al servicio y sin reintento', async () => {
-    mockPublisherPermissions.mockResolvedValue(['store:crm_tasks:manage']);
-    const err = await inStore(() =>
-      executor.execute(outboxRow('vendix.purchase_order.create_draft', PO_MAP)),
-    ).catch((e) => e);
-    expect(err).toBeInstanceOf(WorkflowNonRetryableError);
-    expect(String(err.message)).toContain('store:orders:purchase_orders:create');
-    expect(purchaseOrders.create).not.toHaveBeenCalled();
-    expect(actionEvents('action_executed')).toHaveLength(0);
+  it('if the store lost the administration industry the action is skipped (no effect, no error)', async () => {
+    kit.db.table('stores').forEach((s: any) => (s.industries = ['retail']));
+    await inStore(() => executor.execute(outboxRow('vendix.expense.create', {})));
+    expect(createExpense).not.toHaveBeenCalled();
   });
 
-  it('Tarea CRM: sin store:crm_tasks:manage falla sin llamar al servicio y sin reintento', async () => {
-    mockPublisherPermissions.mockResolvedValue([]);
-    const err = await inStore(() =>
-      executor.execute(outboxRow('vendix.crm_task.create', { title: 'T' })),
-    ).catch((e) => e);
-    expect(err).toBeInstanceOf(WorkflowNonRetryableError);
-    expect(String(err.message)).toContain('store:crm_tasks:manage');
-    expect(crmTasks.create).not.toHaveBeenCalled();
-  });
-
-  it('si la tienda perdió la industria administration la acción se omite (sin efecto, sin error)', async () => {
-    kit.db.table('stores').find((s) => s.id === 1)!.industries = ['retail'];
-    await inStore(() =>
-      executor.execute(outboxRow('vendix.crm_task.create', { title: 'T' })),
-    );
-    await inStore(() =>
-      executor.execute(outboxRow('vendix.purchase_order.create_draft', PO_MAP)),
-    );
-    expect(crmTasks.create).not.toHaveBeenCalled();
-    expect(purchaseOrders.create).not.toHaveBeenCalled();
-    expect(actionEvents()).toHaveLength(0);
-  });
-
-  it('una acción desconocida en el outbox falla (nunca ejecuta algo no catalogado)', async () => {
+  it('an action that is not in the registry fails without retries (never runs something uncatalogued)', async () => {
     await expect(
-      inStore(() =>
-        executor.execute(outboxRow('http.request', { url: 'http://x' })),
-      ),
-    ).rejects.toThrow('Unsupported action');
-    expect(purchaseOrders.create).not.toHaveBeenCalled();
-    expect(crmTasks.create).not.toHaveBeenCalled();
+      inStore(() => executor.execute(outboxRow('vendix.order.delete', {}))),
+    ).rejects.toBeInstanceOf(WorkflowNonRetryableError);
   });
 });

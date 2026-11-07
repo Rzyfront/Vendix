@@ -22,6 +22,7 @@ import {
 } from './actions/workflow-action.types';
 import { WorkflowPeopleActions } from './actions/people.actions';
 import { WorkflowOperationsActions } from './actions/operations.actions';
+import { WorkflowPurchasingActions } from './actions/purchasing.actions';
 
 export interface ActionOutboxRow {
   id: number;
@@ -71,9 +72,14 @@ export class WorkflowActionsExecutor {
     private readonly prisma: StorePrismaService,
     private readonly events: WorkflowEventsService,
     people: WorkflowPeopleActions,
+    purchasing: WorkflowPurchasingActions,
     operations: WorkflowOperationsActions,
   ) {
-    this.handlers = { ...people.handlers, ...operations.handlers };
+    this.handlers = {
+      ...people.handlers,
+      ...purchasing.handlers,
+      ...operations.handlers,
+    };
   }
 
   /** Actions of the registry with a handler (the registry spec checks all). */
