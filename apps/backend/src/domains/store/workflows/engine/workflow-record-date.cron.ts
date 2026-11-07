@@ -12,7 +12,7 @@ import { WorkflowEngineService } from './workflow-engine.service';
 import { storeAllowsFlows } from './workflow-industry';
 import { DEFAULT_STORE_TIMEZONE } from './workflow-stage.service';
 
-/** Records read per page for one flow and date. */
+/** Records read per page for one flow and trigger. */
 export const RECORD_DATE_PAGE = 200;
 
 interface RecordDateRow {
@@ -24,14 +24,25 @@ interface RecordDateRow {
   timezone: string | null;
 }
 
+interface RecordInWindowRow {
+  id: number;
+  title: string;
+  reference: string;
+  data: Record<string, unknown> | null;
+  /** Value of the trigger's date field (`YYYY-MM-DD`). */
+  date: string;
+}
+
 /**
  * P3.6: starts flows with a `record_date` trigger. Runs hourly in the worker
  * (once a day is enough; the idempotency key makes extra runs replay). For each
  * published, switched-on flow it takes the non-archived records of the flow's
- * collection whose date field equals today (in the store's time zone) plus
- * `days_before` and starts one request per record and date (actor `system`,
- * key `<definition>:<record>:<field>:<date>`). One failing record is logged
- * and never stops the rest.
+ * collection whose date field falls between today (in the store's time zone)
+ * and today plus `days_before`, and starts one request per record and date
+ * (actor `system`, key `<definition>:<record>:<field>:<date>`). A window and not
+ * the exact day: a record created or moved inside it, a flow published late or
+ * a worker down on that day still start; the key keeps it to one request per
+ * date. One failing record is logged and never stops the rest.
  */
 @Injectable()
 export class WorkflowRecordDateCron {
@@ -79,7 +90,8 @@ export class WorkflowRecordDateCron {
         const tz = row.timezone || DEFAULT_STORE_TIMEZONE;
         for (const trigger of row.triggers ?? []) {
           if (trigger.kind !== 'record_date') continue;
-          const date = zonedDatePlus(now, tz, trigger.days_before);
+          const from = zonedDatePlus(now, tz, 0);
+          const until = zonedDatePlus(now, tz, trigger.days_before);
           started += await RequestContextService.runIsolated(
             {
               store_id: row.store_id,
@@ -87,7 +99,7 @@ export class WorkflowRecordDateCron {
               is_super_admin: false,
               is_owner: false,
             },
-            () => this.fireForDate(row, row.collection as string, trigger.field, date),
+            () => this.fireForWindow(row, row.collection as string, trigger.field, from, until),
           );
         }
       } catch (e) {
@@ -99,11 +111,12 @@ export class WorkflowRecordDateCron {
     return started;
   }
 
-  private async fireForDate(
+  private async fireForWindow(
     row: RecordDateRow,
     collectionKey: string,
     field: string,
-    date: string,
+    from: string,
+    until: string,
   ): Promise<number> {
     const collection = await this.prisma.workflow_collections.findFirst({
       where: { store_id: row.store_id, key: collectionKey, is_archived: false },
@@ -113,17 +126,19 @@ export class WorkflowRecordDateCron {
     let started = 0;
     let lastId = 0;
     for (;;) {
-      const records = await this.prisma.workflow_records.findMany({
-        where: {
-          store_id: row.store_id,
-          collection_id: collection.id,
-          archived_at: null,
-          id: { gt: lastId },
-          data: { path: [field], equals: date },
-        },
-        orderBy: { id: 'asc' },
-        take: RECORD_DATE_PAGE,
-      });
+      // `YYYY-MM-DD` compares as text in byte order; anything else is skipped.
+      const records = await this.prisma.$queryRaw<RecordInWindowRow[]>(Prisma.sql`
+        SELECT r.id, r.title, r.reference, r.data, x.d AS date
+        FROM workflow_records r
+        CROSS JOIN LATERAL (SELECT r.data->>(${field}::text) AS d) x
+        WHERE r.store_id = ${row.store_id}
+          AND r.collection_id = ${collection.id}
+          AND r.archived_at IS NULL
+          AND r.id > ${lastId}
+          AND x.d ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          AND x.d COLLATE "C" BETWEEN ${from}::text AND ${until}::text
+        ORDER BY r.id
+        LIMIT ${RECORD_DATE_PAGE}`);
       for (const record of records) {
         lastId = record.id;
         try {
@@ -132,13 +147,13 @@ export class WorkflowRecordDateCron {
             kind: 'record_date',
             recordField: field,
             context: recordStartContext(
-              (record.data ?? {}) as Record<string, unknown>,
+              record.data ?? {},
               record.title,
               record.reference,
             ),
             subject: { type: 'custom_record', id: record.id },
-            idempotencyKey: `${row.id}:${record.id}:${field}:${date}`,
-            started: { record_id: record.id, field, date },
+            idempotencyKey: `${row.id}:${record.id}:${field}:${record.date}`,
+            started: { record_id: record.id, field, date: record.date },
           });
           if (result && !result.replayed) started++;
         } catch (e) {

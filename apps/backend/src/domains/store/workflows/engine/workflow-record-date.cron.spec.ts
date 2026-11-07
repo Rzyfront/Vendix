@@ -91,6 +91,22 @@ describe('WorkflowRecordDateCron (P3.6)', () => {
         })
         .filter((r) => (r.triggers as any[]).some((t) => t.kind === 'record_date'));
     });
+    // Emulates the window query over the records of one collection.
+    kit.db.rawHandlers.push((text, values) => {
+      if (!text.includes('FROM workflow_records')) return undefined;
+      const [field, storeId, collectionId, lastId, from, until, limit] = values as [
+        string, number, number, number, string, string, number,
+      ];
+      return kit.db
+        .table('workflow_records')
+        .filter((r) => r.store_id === storeId && r.collection_id === collectionId)
+        .filter((r) => r.archived_at === null && r.id > lastId)
+        .map((r) => ({ ...r, date: r.data?.[field] }))
+        .filter((r) => typeof r.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.date))
+        .filter((r) => r.date >= from && r.date <= until)
+        .sort((a, b) => a.id - b.id)
+        .slice(0, limit);
+    });
     addCollection(1, 'contratos');
     cron = new WorkflowRecordDateCron(kit.prisma, kit.engine);
   });
@@ -128,16 +144,38 @@ describe('WorkflowRecordDateCron (P3.6)', () => {
     expect(instances()).toHaveLength(1);
   });
 
-  it('honors days_before: a date 29 days away does not start a 30-day flow, and 0 days starts on the same day', async () => {
-    seedDefinition(kit.db, renewalDefinition({ days_before: 30 }));
+  it('honors days_before as a window: 31 days away and past dates do not start, 0 days starts on the same day', async () => {
     seedDefinition(kit.db, renewalDefinition({ days_before: 0, key: 'hoy' }));
-    addRecord(1, 1, 'contratos', { cliente: 'A', vence: '2026-12-06' });
+    addRecord(1, 1, 'contratos', { cliente: 'A', vence: '2026-11-08' });
     addRecord(2, 1, 'contratos', { cliente: 'B', vence: '2026-11-07' });
+    addRecord(3, 1, 'contratos', { cliente: 'C', vence: '2026-11-06' });
 
     expect(await cron.runOnce(NOW)).toBe(1);
+    expect(instances().map((i) => i.subject_id)).toEqual([2]);
+
+    seedDefinition(kit.db, renewalDefinition({ days_before: 30, key: 'mes' }));
+    addRecord(4, 1, 'contratos', { cliente: 'D', vence: '2026-12-08' });
+    addRecord(5, 1, 'contratos', { cliente: 'E', vence: 'pronto' });
+    // 30-day flow: today (2) .. 2026-12-07; 1 (tomorrow) also falls inside.
+    expect(await cron.runOnce(NOW)).toBe(2);
+    expect(instances().map((i) => i.subject_id).sort()).toEqual([1, 2, 2]);
+  });
+
+  it('a record created inside the window (20 days away on a 30-day flow) starts once, keyed by its date', async () => {
+    seedDefinition(kit.db, renewalDefinition({ days_before: 30 }));
+    addRecord(1, 1, 'contratos', { cliente: 'Tarde', vence: '2026-11-27' });
+
+    expect(await cron.runOnce(NOW)).toBe(1);
+    expect(await cron.runOnce(new Date(NOW.getTime() + 86_400_000))).toBe(0);
 
     expect(instances()).toHaveLength(1);
-    expect(instances()[0]).toMatchObject({ subject_id: 2 });
+    const started = kit.db.table('workflow_instance_events').find((e: any) => e.type === 'started')!;
+    expect(started.payload).toMatchObject({ record_id: 1, field: 'vence', date: '2026-11-27' });
+
+    // Moving the date starts a new request for the new date.
+    kit.db.table('workflow_records')[0].data.vence = '2026-11-30';
+    expect(await cron.runOnce(NOW)).toBe(1);
+    expect(instances()).toHaveLength(2);
   });
 
   it('skips archived records, switched-off flows, flows of another collection and records of other stores', async () => {
