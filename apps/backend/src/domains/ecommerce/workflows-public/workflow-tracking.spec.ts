@@ -145,7 +145,7 @@ describe('Tracking portal (P3.5)', () => {
       expect(after.pending).toEqual([]);
       expect(after.timeline.at(-1)).toMatchObject({ type: 'external_upload', label: 'Documento enviado', detail: 'Cédula' });
       // the engine's own evaluation agrees: the requirement is satisfied
-      expect(await kit.requirements.pendingRequirements(kit.db.table('workflow_instances')[0], {
+      expect(await kit.requirements.pendingRequirements(kit.db.table('workflow_instances')[0] as never, {
         key: 'revision', name: 'Revisión', type: 'approval',
         requirements: [{ kind: 'upload', key: 'cedula', label: 'Cédula', external: true }],
       } as never)).toEqual([]);

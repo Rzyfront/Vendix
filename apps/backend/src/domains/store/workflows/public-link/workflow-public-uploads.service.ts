@@ -41,11 +41,12 @@ export interface UploadInit {
   size_bytes: number;
 }
 
-interface StoredPart {
+/** A type alias (not an interface) so the list is a Prisma JSON value. */
+type StoredPart = {
   n: number;
   etag: string;
   size: number;
-}
+};
 
 export interface CompletedUpload {
   upload_id: string;

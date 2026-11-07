@@ -55,7 +55,7 @@ describe('WorkflowEngineService.startExternal (P3.1, P3.3)', () => {
       started_by_type: 'system',
       data: { amount: 1500, reason: 'Desde la web' },
     });
-    const started = kit.db.table('workflow_instance_events').find((e: any) => e.type === 'started');
+    const started = kit.db.table('workflow_instance_events').find((e: any) => e.type === 'started')!;
     expect(started.payload).toMatchObject({ via: 'webhook', hook_id: 7 });
   });
 
@@ -109,7 +109,7 @@ describe('WorkflowEngineService.startExternal (P3.1, P3.3)', () => {
     ).toBe('WORKFLOW_NOT_ACTIVE');
 
     const off = seedDefinition(kit.db, externalDefinition([{ kind: 'webhook' }], undefined, 'apagado'));
-    kit.db.table('workflow_definitions').find((d: any) => d.id === off.definitionId).is_enabled = false;
+    kit.db.table('workflow_definitions').find((d: any) => d.id === off.definitionId)!.is_enabled = false;
     expect(
       (await failure(kit.engine.startExternal({ definitionId: off.definitionId, kind: 'webhook', values: {}, idempotencyKey: 'c' })))?.code,
     ).toBe('WORKFLOW_DISABLED');

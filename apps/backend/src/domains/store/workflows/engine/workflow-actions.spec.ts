@@ -260,8 +260,8 @@ describe('WorkflowActionsExecutor (registry P1.2)', () => {
       new WorkflowPeopleActions({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any),
       new WorkflowPurchasingActions({} as any, {} as any, {} as any, {} as any),
       new WorkflowOperationsActions({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any),
-      new WorkflowConnectorsActions({} as any, {} as any, {} as any, {} as any),
       new WorkflowHttpActions({} as any),
+      new WorkflowConnectorsActions({} as any, {} as any, {} as any, {} as any),
     );
     expect([...real.registered()].sort()).toEqual([...WORKFLOW_VENDIX_ACTIONS].sort());
   });

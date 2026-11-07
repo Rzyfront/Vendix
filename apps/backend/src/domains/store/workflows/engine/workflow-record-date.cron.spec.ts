@@ -109,7 +109,7 @@ describe('WorkflowRecordDateCron (P3.6)', () => {
       subject_id: 1,
       data: { reason: 'Acme · REG-000001' },
     });
-    const started = kit.db.table('workflow_instance_events').find((e: any) => e.type === 'started');
+    const started = kit.db.table('workflow_instance_events').find((e: any) => e.type === 'started')!;
     expect(started.payload).toMatchObject({
       via: 'record_date',
       record_id: 1,

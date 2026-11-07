@@ -132,8 +132,8 @@ describe('nodo HTTP en el motor: secretos fuera del outbox y respuesta a campos'
       { handlers: {} } as any,
       { handlers: {} } as any,
       { handlers: {} } as any,
-      { handlers: {} } as any,
       httpActions,
+      { handlers: {} } as any,
     );
   });
   afterEach(() => jest.restoreAllMocks());

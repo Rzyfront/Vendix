@@ -120,7 +120,7 @@ describe('Inbound webhook admin (P3.1)', () => {
 
   it('a definition of another store answers 404 on every endpoint', async () => {
     const w = world();
-    for (const call of [
+    const calls: Array<() => Promise<unknown>> = [
       () => w.hookService.state(99),
       () => w.hookService.create(99),
       () => w.hookService.rotate(99),
@@ -128,7 +128,8 @@ describe('Inbound webhook admin (P3.1)', () => {
       () => w.mailService.state(99),
       () => w.mailService.activate(99),
       () => w.mailService.update(99, { is_active: false }),
-    ]) {
+    ];
+    for (const call of calls) {
       expect(await code(asStore(call))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
     }
   });
