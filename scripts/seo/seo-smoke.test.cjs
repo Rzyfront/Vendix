@@ -119,6 +119,21 @@ test('report + enforce de un control concreto: solo ese bloquea', async () => {
   assert.equal((await exec(t, { mode: 'report', enforceIds: ['www-apex'] })).exitCode, 1);
 });
 
+test('alerta: con SEO_SMOKE_ENFORCE de los controles estables, perder HSTS o el 301 http→https bloquea; las FALLA legacy no', async () => {
+  const stable = ['www-apex', 'precios-pricing', 'archivo-404', 'http-https', 'hsts', 'nosniff', 'referrer-policy', 'robots-200', 'sitemap-200', 'sitemap-hosts', 'sitemap-tokens'];
+  const sano = await exec(site({}), { mode: 'report', enforceIds: stable });
+  assert.equal(sano.exitCode, 0);
+  const sinHsts = await exec(site({ [BASE + '/']: { status: 200, headers: { 'content-type': 'text/html', 'strict-transport-security': '' }, body: page('/', true) } }), { mode: 'report', enforceIds: stable });
+  assert.equal(find(sinHsts, 'hsts').status, 'FALLA');
+  assert.equal(sinHsts.exitCode, 1);
+  const sinHttps = await exec(site({ 'http://vendix.online/': { status: 200, body: 'x' } }), { mode: 'report', enforceIds: stable });
+  assert.equal(find(sinHttps, 'http-https').status, 'FALLA');
+  assert.equal(sinHttps.exitCode, 1);
+  const soft404 = await exec(site({ [BASE + '/ruta-que-no-existe-seo-smoke']: { status: 200, headers: { 'content-type': 'text/html' }, body: page('/', true) } }), { mode: 'report', enforceIds: stable });
+  assert.ok(soft404.summary.falla > 0);
+  assert.equal(soft404.exitCode, 0);
+});
+
 test('sitio sano en enforce: código 0 y ninguna FALLA', async () => {
   const r = await exec(site(), { mode: 'enforce' });
   assert.equal(r.summary.falla, 0, JSON.stringify(r.results.filter(x => x.status === 'FALLA')));
