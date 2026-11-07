@@ -107,7 +107,7 @@ export class SignaturePublicService {
       return {
         state,
         store: { name: store?.name ?? '' },
-        document: { title: r.document.title, reference: r.document.reference },
+        document: { title: r.document.title, reference: r.document.reference, sha256: r.request.document_sha256 },
         signer: {
           name: r.signer.name,
           role_label: r.signer.role_label,

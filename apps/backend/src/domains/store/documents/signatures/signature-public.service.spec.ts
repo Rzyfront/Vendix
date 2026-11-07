@@ -105,7 +105,7 @@ describe('Public signing (P4.2)', () => {
       expect(v).toMatchObject({
         state: 'pending',
         store: { name: 'Taller Central' },
-        document: { title: 'Contrato laboral', reference: 'DOC-000001' },
+        document: { title: 'Contrato laboral', reference: 'DOC-000001', sha256: DOC_SHA },
         signer: { name: 'Laura Pérez', role_label: 'Empleado', method: 'otp_email', destination: 'l***@example.com', otp_verified: false, attempts_remaining: 5 },
       });
       expect(v.consent.text).toContain('Acepto firmar electrónicamente');

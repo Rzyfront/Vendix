@@ -47,6 +47,9 @@ const OTP_LENGTH = 6;
               {{ v.document.title }}
             </h1>
             <p class="text-sm text-text-secondary">{{ v.document.reference }}</p>
+            <p class="break-all text-xs text-text-secondary" data-testid="document-sha256">
+              Huella SHA-256: <span class="font-mono">{{ v.document.sha256 }}</span>
+            </p>
 
             @if (outcome() === 'signed' || v.state === 'signed') {
               <section class="mt-6 rounded-2xl border border-border bg-surface p-5" data-testid="signed" role="status">

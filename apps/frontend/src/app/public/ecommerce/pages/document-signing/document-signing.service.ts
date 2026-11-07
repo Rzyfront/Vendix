@@ -8,7 +8,8 @@ export type SigningState = 'pending' | 'signed' | 'declined' | 'blocked';
 export interface SigningView {
   state: SigningState;
   store: { name: string };
-  document: { title: string; reference: string };
+  /** `sha256`: fingerprint of the PDF being signed, the one the consent names. */
+  document: { title: string; reference: string; sha256: string };
   signer: {
     name: string;
     role_label: string | null;
