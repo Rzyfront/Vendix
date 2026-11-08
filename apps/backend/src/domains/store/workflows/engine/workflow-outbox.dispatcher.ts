@@ -110,21 +110,19 @@ export class WorkflowOutboxDispatcher {
     if (this.running) return;
     this.running = true;
     const startedAt = Date.now();
-    let processed = 0;
-    let batches = 0;
     try {
-      const drained = await this.drain();
-      processed = drained.processed;
-      batches = drained.batches;
-    } catch (e) {
-      this.logger.error(`Outbox dispatch failed: ${(e as Error)?.message}`);
-    } finally {
+      const { processed, batches } = await this.drain();
+      // Only a cycle that drained beats: a failing one leaves the heartbeat to
+      // age, so the superadmin screen and the `dispatcher_stalled` alert see it.
       await this.writeHeartbeat({
         at: new Date().toISOString(),
         processed,
         batches,
         duration_ms: Date.now() - startedAt,
       });
+    } catch (e) {
+      this.logger.error(`Outbox dispatch failed: ${(e as Error)?.message}`);
+    } finally {
       this.running = false;
     }
   }

@@ -113,6 +113,16 @@ describe('WorkflowOutboxDispatcher · P7.4 drain, processed_at and heartbeat', (
     expect(JSON.parse(redis.set.mock.calls[0][1])).toMatchObject({ processed: 0, batches: 1 });
   });
 
+  it('a cycle that fails leaves no heartbeat, so a dispatcher failing every cycle ages and alerts', async () => {
+    const dispatcher = build();
+    jest.spyOn(dispatcher, 'drain').mockRejectedValue(new Error('base caída'));
+    await expect(dispatcher.handle()).resolves.toBeUndefined();
+    expect(redis.set).not.toHaveBeenCalled();
+    enqueue('advance');
+    await build().handle();
+    expect(redis.set).toHaveBeenCalledTimes(1);
+  });
+
   it('never overlaps two cycles: the second call returns without running or beating', async () => {
     enqueue('advance');
     let release!: () => void;
