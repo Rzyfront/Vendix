@@ -253,11 +253,6 @@ export class WorkflowAccessPolicy {
   }
 
   /**
-   * Write access: 404 when the flow is not visible, 403 `WORKFLOW_DESIGN_FORBIDDEN`
-   * when `access.design` is set and the caller is not in it. The
-   * `store:workflows:design` permission itself is checked by the controller.
-   */
-  /**
    * Whether the caller may edit the flow's permissions: the
    * `store:workflows:design` permission (or a bypass) and a place in `design`
    * when the flow has one. Never throws for a flow the caller cannot design.
@@ -275,6 +270,11 @@ export class WorkflowAccessPolicy {
     }
   }
 
+  /**
+   * Write access: 404 when the flow is not visible, 403 `WORKFLOW_DESIGN_FORBIDDEN`
+   * when `access.design` is set and the caller is not in it. The
+   * `store:workflows:design` permission itself is checked by the controller.
+   */
   async assertCanDesign(definitionId: number): Promise<void> {
     await this.assertCanView(definitionId);
     const c = this.caller();

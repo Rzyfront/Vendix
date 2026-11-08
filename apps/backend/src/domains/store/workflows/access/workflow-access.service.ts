@@ -28,7 +28,6 @@ const CUSTOMER_ROLE = 'customer';
 /** Roles that never see nor decide a store's flows: shoppers and the platform. */
 const NON_STAFF_ROLES = [CUSTOMER_ROLE, 'super_admin'];
 
-/** Reads and changes the permissions of one flow (flujos-adm P7.3). */
 /** The options limited to the roles and people the access document already names. */
 function namedOptions(
   all: { roles: string[]; users: Array<{ id: number; name: string }> },
@@ -45,6 +44,7 @@ function namedOptions(
   };
 }
 
+/** Reads and changes the permissions of one flow (flujos-adm P7.3). */
 @Injectable()
 export class WorkflowAccessService {
   constructor(

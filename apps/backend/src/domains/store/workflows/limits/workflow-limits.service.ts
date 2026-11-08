@@ -158,7 +158,9 @@ export class WorkflowLimitsService {
   /**
    * Refuses (before any byte is written) a file that would take the store past
    * its storage cap: 402 with the plan details for staff, the neutral
-   * `WORKFLOW_INTAKE_UNAVAILABLE` for an outsider.
+   * `WORKFLOW_INTAKE_UNAVAILABLE` for an outsider. A soft cap: it reads the
+   * live sum without a lock, so uploads racing each other may pass the same
+   * check and end slightly over it; the next upload is then refused.
    */
   async assertStorage(
     storeId: number,
