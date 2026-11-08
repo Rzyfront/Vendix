@@ -15,6 +15,7 @@ import {
   failureOfRun,
   validateAiStepAnswer,
 } from './workflow-ai-step.logic';
+import { AiStepRow } from './workflow-ai-step.service';
 
 const user = (user_id: number) => ({ kind: 'user' as const, user_id });
 const manager = { kind: 'role' as const, role_key: 'manager' };
@@ -118,8 +119,12 @@ describe('Paso de IA — motor (P6.1)', () => {
     });
     return started.instance.id as number;
   }
-  const aiRow = () => outbox('ai_step')[0];
-  const runStep = (row = aiRow()) => kit.aiStep.execute({ ...row, payload: row.payload });
+  /** The pending `ai_step` outbox row, as the dispatcher hands it to the service. */
+  const aiRow = (): AiStepRow => {
+    const r = outbox('ai_step')[0];
+    return { id: r.id, store_id: r.store_id, instance_id: r.instance_id, payload: r.payload };
+  };
+  const runStep = (row = aiRow()) => kit.aiStep.execute(row);
   const advance = async (id: number) => {
     const row = outbox('advance').find((r) => r.status === 'pending' && r.payload.instance_id === id)!;
     row.status = 'done';
@@ -361,8 +366,8 @@ describe('Paso de IA — motor (P6.1)', () => {
     it('al agotar los intentos (onDead) degrada con provider_error, una sola vez', async () => {
       const id = await toAiStage(flow(aiStage({})));
       const row = aiRow();
-      await kit.aiStep.onDead({ ...row, payload: row.payload });
-      await kit.aiStep.onDead({ ...row, payload: row.payload });
+      await kit.aiStep.onDead(row);
+      await kit.aiStep.onDead(row);
       expect(events(id).filter((e) => e.type === 'ai_step_failed')).toHaveLength(1);
       expect(failedEvent(id)).toMatchObject({ reason_code: 'provider_error' });
       expect(outbox('advance').filter((r) => r.payload.stage_key === 'ia')).toHaveLength(1);
@@ -384,7 +389,7 @@ describe('Paso de IA — motor (P6.1)', () => {
       const id = await toAiStage(flow(aiStage({})));
       const row = aiRow();
       instance(id).stage_entry_seq += 1;
-      await kit.aiStep.execute({ ...row, payload: row.payload });
+      await kit.aiStep.execute(row);
       kit.aiGateway.run.mockClear();
       instance(id).status = 'cancelled';
       await kit.aiStep.execute({ ...row, payload: { ...row.payload, stage_entry_seq: instance(id).stage_entry_seq } });
@@ -394,7 +399,7 @@ describe('Paso de IA — motor (P6.1)', () => {
     it('una fila de otra tienda no toca la solicitud ajena', async () => {
       const id = await toAiStage(flow(aiStage({})));
       kit.as({ store_id: 2, organization_id: 1 });
-      await kit.aiStep.execute({ ...aiRow(), store_id: 2, payload: aiRow().payload });
+      await kit.aiStep.execute({ ...aiRow(), store_id: 2 });
       expect(kit.aiGateway.run).not.toHaveBeenCalled();
       expect(eventTypes(id)).not.toContain('ai_step_completed');
     });
