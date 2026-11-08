@@ -28,6 +28,9 @@ export const INSIGHTS_MANUAL_COOLDOWN_MS = 60 * 60 * 1000;
 export const INSIGHTS_URL = '/admin/workflows/insights';
 export const INSIGHTS_NOTIFICATION_TITLE = 'Resumen semanal de Flujos listo';
 const MANUAL_LOCK_SECONDS = 120;
+/** A failed weekly summary is retried by the next hourly runs, at most this many times. */
+export const INSIGHTS_WEEKLY_MAX_RETRIES = 3;
+const WEEKLY_RETRY_TTL_SECONDS = 8 * 24 * 60 * 60;
 
 export type WorkflowInsightsKind = 'weekly' | 'manual';
 export type WorkflowInsightsStatus = 'ready' | 'failed' | 'skipped_quota';
@@ -136,20 +139,24 @@ export class WorkflowInsightsService {
 
   /**
    * Weekly summary of the current store for the ISO week of `now` (store-local).
-   * Returns null when the week already has its summary.
+   * Returns null when the week already has its summary. A `failed` one (the
+   * provider was down, the answer was invalid) is regenerated in place by the
+   * next runs, at most INSIGHTS_WEEKLY_MAX_RETRIES times a week.
    */
   async generateWeekly(now = new Date()): Promise<WorkflowInsightsSummary | null> {
     const storeId = this.storeId();
     const timezone = await resolveStoreTimezone(this.prisma, storeId);
     const civil = localCivil(now, timezone);
     const weekKey = isoWeekKey(civil.year, civil.month, civil.day);
-    const existing = await this.prisma.workflow_ai_summaries.findFirst({
+    const existing = (await this.prisma.workflow_ai_summaries.findFirst({
       where: { store_id: storeId, week_key: weekKey },
-      select: { id: true },
-    });
-    if (existing) return null;
+      select: { id: true, status: true },
+    })) as { id: number; status: string } | null;
+    if (existing && (existing.status !== 'failed' || !(await this.claimWeeklyRetry(storeId, weekKey)))) {
+      return null;
+    }
 
-    const row = await this.generate('weekly', weekKey, now);
+    const row = await this.generate('weekly', weekKey, now, existing?.id ?? null);
     if (!row) return null;
     const summary = present(row);
     if (summary.status === 'ready' && summary.content) {
@@ -158,7 +165,21 @@ export class WorkflowInsightsService {
     return summary;
   }
 
-  private async generate(kind: WorkflowInsightsKind, weekKey: string | null, now: Date): Promise<SummaryRow | null> {
+  /** Counts the retries of one failed week (Redis INCR); false once they are used up. */
+  private async claimWeeklyRetry(storeId: number, weekKey: string): Promise<boolean> {
+    const key = `workflows:insights:weekly-retry:${storeId}:${weekKey}`;
+    const attempt = await this.redis.incr(key);
+    if (attempt === 1) await this.redis.expire(key, WEEKLY_RETRY_TTL_SECONDS);
+    return attempt <= INSIGHTS_WEEKLY_MAX_RETRIES;
+  }
+
+  private async generate(
+    kind: WorkflowInsightsKind,
+    weekKey: string | null,
+    now: Date,
+    /** Failed weekly row to regenerate in place (the week is unique per store). */
+    replaceId: number | null = null,
+  ): Promise<SummaryRow | null> {
     const storeId = this.storeId();
     const timezone = await resolveStoreTimezone(this.prisma, storeId);
     const to = localDateString(now, timezone);
@@ -194,20 +215,35 @@ export class WorkflowInsightsService {
       ? await this.narrate(period, totals, narrated, refs)
       : { status: 'ready' as const, content: emptyInsightsContent(definitions.length > 0), tokens: 0, model: null, error: null };
 
+    const data = {
+      period_from: new Date(`${period.from}T00:00:00Z`),
+      period_to: new Date(`${period.to}T00:00:00Z`),
+      status: outcome.status,
+      content: outcome.content ? (outcome.content as unknown as object) : undefined,
+      metrics: { period, totals, flows } as unknown as object,
+      model: outcome.model,
+      tokens_used: outcome.tokens,
+      error: outcome.error,
+    };
+    if (replaceId !== null) {
+      // Only a row that is still failed is replaced: never a summary that
+      // another run already completed.
+      const { count } = await this.prisma.workflow_ai_summaries.updateMany({
+        where: { id: replaceId, store_id: storeId, status: 'failed' },
+        data: { ...data, created_at: now },
+      });
+      if (count === 0) return null;
+      return (await this.prisma.workflow_ai_summaries.findFirst({
+        where: { id: replaceId, store_id: storeId },
+      })) as SummaryRow | null;
+    }
     try {
       return (await this.prisma.workflow_ai_summaries.create({
         data: {
+          ...data,
           store_id: storeId,
           kind,
-          period_from: new Date(`${period.from}T00:00:00Z`),
-          period_to: new Date(`${period.to}T00:00:00Z`),
           week_key: weekKey,
-          status: outcome.status,
-          content: outcome.content ? (outcome.content as unknown as object) : undefined,
-          metrics: { period, totals, flows } as unknown as object,
-          model: outcome.model,
-          tokens_used: outcome.tokens,
-          error: outcome.error,
           created_by_user_id: kind === 'manual' ? (RequestContextService.getUserId() ?? null) : null,
         },
       })) as SummaryRow;
@@ -259,9 +295,10 @@ export class WorkflowInsightsService {
     }
   }
 
+  /** The cooldown counts only summaries that came out: a failed try does not make the owner wait. */
   private lastManual(storeId: number): Promise<{ created_at: Date } | null> {
     return this.prisma.workflow_ai_summaries.findFirst({
-      where: { store_id: storeId, kind: 'manual' },
+      where: { store_id: storeId, kind: 'manual', status: 'ready' },
       orderBy: { created_at: 'desc' },
       select: { created_at: true },
     }) as Promise<{ created_at: Date } | null>;

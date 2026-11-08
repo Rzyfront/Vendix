@@ -17,7 +17,8 @@ const CRON_LOCK_SECONDS = 50 * 60;
  * P6.4: weekly AI summary. Runs every hour in the worker; for each store with
  * a published flow whose local time is Monday from 08:00 on it generates the
  * summary of that ISO week (the service skips a week that already has one, so a
- * missed 08:00 run is caught up later that Monday). A Redis lock
+ * missed 08:00 run is caught up later that Monday, and retries a failed one a
+ * few times in the following hours). A Redis lock
  * per hour keeps two instances from running the same hour; one failing store
  * never stops the rest.
  */

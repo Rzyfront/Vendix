@@ -43,8 +43,9 @@ const VALID = {
   recommendations: ['Reasigna la etapa del jefe.'],
 };
 
-function build(opts: { defs?: typeof DEFS; reports?: ReturnType<typeof report>; run?: unknown; lastManual?: Date | null; existingWeek?: boolean; lock?: boolean; createError?: unknown } = {}) {
+function build(opts: { defs?: typeof DEFS; reports?: ReturnType<typeof report>; run?: unknown; lastManual?: Date | null; existingWeek?: boolean; existingWeekStatus?: string; retries?: number; lock?: boolean; createError?: unknown } = {}) {
   const created: any[] = [];
+  const updated: any[] = [];
   const prisma = {
     store_settings: {
       findFirst: jest.fn().mockResolvedValue({ settings: {}, stores: { timezone: 'America/Bogota' } }),
@@ -54,8 +55,16 @@ function build(opts: { defs?: typeof DEFS; reports?: ReturnType<typeof report>; 
       findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn(async (args: any) => {
         if (args.where.kind === 'manual') return opts.lastManual ? { created_at: opts.lastManual } : null;
-        if (args.where.week_key) return opts.existingWeek ? { id: 99 } : null;
+        if (args.where.week_key) {
+          return opts.existingWeek ? { id: 99, status: opts.existingWeekStatus ?? 'ready' } : null;
+        }
+        if (args.where.id === 99) return { id: 99, kind: 'weekly', week_key: '2026-W46', ...updated[updated.length - 1] };
         return null;
+      }),
+      updateMany: jest.fn(async ({ where, data }: any) => {
+        if (where.id !== 99 || opts.existingWeekStatus !== 'failed') return { count: 0 };
+        updated.push(data);
+        return { count: 1 };
       }),
       create: jest.fn(async ({ data }: any) => {
         if (opts.createError) throw opts.createError;
@@ -72,12 +81,15 @@ function build(opts: { defs?: typeof DEFS; reports?: ReturnType<typeof report>; 
     ),
   };
   const notifications = { createAndBroadcast: jest.fn().mockResolvedValue(undefined) };
+  let retries = opts.retries ?? 0;
   const redis = {
     set: jest.fn().mockResolvedValue(opts.lock === false ? null : 'OK'),
     del: jest.fn().mockResolvedValue(1),
+    incr: jest.fn(async () => ++retries),
+    expire: jest.fn().mockResolvedValue(1),
   };
   const service = new WorkflowInsightsService(prisma as any, analytics as any, ai as any, notifications as any, redis as any);
-  return { service, prisma, analytics, ai, notifications, redis, created };
+  return { service, prisma, analytics, ai, notifications, redis, created, updated };
 }
 
 describe('WorkflowInsightsService', () => {
@@ -227,6 +239,14 @@ describe('WorkflowInsightsService', () => {
       expect(ai.run).not.toHaveBeenCalled();
     });
 
+    it('r1: only a ready manual summary starts the 60-minute cooldown', async () => {
+      const { service, prisma } = build();
+      await service.generateManual(MONDAY);
+      expect(prisma.workflow_ai_summaries.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { store_id: STORE_ID, kind: 'manual', status: 'ready' } }),
+      );
+    });
+
     it('allows a manual generation after 60 minutes', async () => {
       const { service } = build({ lastManual: new Date(MONDAY.getTime() - 61 * 60_000) });
       await expect(service.generateManual(MONDAY)).resolves.toMatchObject({ status: 'ready' });
@@ -283,6 +303,35 @@ describe('WorkflowInsightsService', () => {
       expect(ai.run).not.toHaveBeenCalled();
       expect(created).toHaveLength(0);
       expect(notifications.createAndBroadcast).not.toHaveBeenCalled();
+    });
+
+    it('r1: regenerates a failed week in place on a later run and notifies once it is ready', async () => {
+      const { service, ai, created, updated, notifications, redis, prisma } = build({ existingWeek: true, existingWeekStatus: 'failed' });
+      const summary = await service.generateWeekly(MONDAY);
+      expect(ai.run).toHaveBeenCalledTimes(1);
+      expect(created).toHaveLength(0);
+      expect(prisma.workflow_ai_summaries.updateMany).toHaveBeenCalledWith({
+        where: { id: 99, store_id: STORE_ID, status: 'failed' },
+        data: expect.objectContaining({ status: 'ready', created_at: MONDAY }),
+      });
+      expect(updated[0].error).toBeNull();
+      expect(summary).toMatchObject({ id: 99, status: 'ready', week_key: '2026-W46' });
+      expect(redis.incr).toHaveBeenCalledWith(`workflows:insights:weekly-retry:${STORE_ID}:2026-W46`);
+      expect(notifications.createAndBroadcast).toHaveBeenCalledTimes(1);
+    });
+
+    it('r1: stops retrying a failed week after 3 tries', async () => {
+      const { service, ai, prisma } = build({ existingWeek: true, existingWeekStatus: 'failed', retries: 3 });
+      await expect(service.generateWeekly(MONDAY)).resolves.toBeNull();
+      expect(ai.run).not.toHaveBeenCalled();
+      expect(prisma.workflow_ai_summaries.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('r1: a week skipped for quota is not retried', async () => {
+      const { service, ai, redis } = build({ existingWeek: true, existingWeekStatus: 'skipped_quota' });
+      await expect(service.generateWeekly(MONDAY)).resolves.toBeNull();
+      expect(ai.run).not.toHaveBeenCalled();
+      expect(redis.incr).not.toHaveBeenCalled();
     });
 
     it('treats a duplicate insert (P2002 race) as already generated, without notifying', async () => {
