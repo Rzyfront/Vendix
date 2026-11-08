@@ -29,6 +29,7 @@ import { WorkflowEngineService } from './engine/workflow-engine.service';
 import { WorkflowEventsService } from './engine/workflow-events.service';
 import { WorkflowLoaderService } from './engine/workflow-loader.service';
 import { WorkflowOutboxDispatcher } from './engine/workflow-outbox.dispatcher';
+import { WorkflowAiStepService } from './engine/workflow-ai-step.service';
 import { WorkflowReferenceService } from './engine/workflow-reference.service';
 import { DossierWorkflowRequirementsService } from './engine/workflow-requirements.service';
 import { WorkflowStageService } from './engine/workflow-stage.service';
@@ -47,6 +48,7 @@ import { WorkGroupsService } from './work-groups.service';
 import { WorkflowDefinitionsController } from './definitions/workflow-definitions.controller';
 import { WorkflowDefinitionsService } from './definitions/workflow-definitions.service';
 import { WorkflowSimulatorService } from './definitions/workflow-simulator.service';
+import { WorkflowAiStepTestService } from './definitions/workflow-ai-step-test.service';
 import { WorkflowInstancesController } from './instances/workflow-instances.controller';
 import { WorkflowInstancesService } from './instances/workflow-instances.service';
 import { DocumentFilesController } from './files/document-files.controller';
@@ -191,6 +193,7 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
     WorkflowLiveListener,
     WorkflowDefinitionsService,
     WorkflowSimulatorService,
+    WorkflowAiStepTestService,
     WorkflowMigrationService,
     WorkflowInstancesService,
     WorkflowMetricsService,
@@ -218,6 +221,7 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
     WorkflowTickService,
     WorkflowEngineService,
     WorkflowOutboxDispatcher,
+    WorkflowAiStepService,
     WorkflowTimersCron,
     WorkflowScheduleCron,
     // P3.6: registros personalizados y su disparador por fecha.

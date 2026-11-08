@@ -546,14 +546,42 @@ const PQR: WorkflowTemplate = {
       textarea('respuesta', 'Respuesta al cliente'),
     ],
     [
-      form('radicacion', 'Radicación', ['tipo', 'cliente', 'correo', 'asunto', 'detalle'], 'respuesta', {
+      form('radicacion', 'Radicación', ['cliente', 'correo', 'asunto', 'detalle'], 'clasificar', {
         start: true,
       }),
-      form('respuesta', 'Respuesta al cliente', ['respuesta'], 'revision', {
+      {
+        key: 'clasificar',
+        name: 'Clasificar con IA',
+        type: 'ai',
+        ai: {
+          task: 'classify',
+          instructions:
+            'Clasifica el caso del cliente como Petición, Queja o Reclamo según su asunto y detalle. Una petición solicita información o un servicio; una queja expresa inconformidad con la atención; un reclamo exige corregir un error o cumplir algo pendiente.',
+          inputs: ['asunto', 'detalle'],
+          outputs: ['tipo'],
+        },
+        transitions: [{ on: 'auto', to: 'redactar' }],
+      },
+      {
+        key: 'redactar',
+        name: 'Redactar respuesta con IA',
+        type: 'ai',
+        ai: {
+          task: 'draft',
+          instructions:
+            'Redacta una respuesta cordial, clara y breve para el cliente, en español, según el tipo y el detalle del caso. No prometas plazos ni compensaciones que no consten en el caso.',
+          inputs: ['tipo', 'cliente', 'asunto', 'detalle'],
+          outputs: ['respuesta'],
+          review: true,
+        },
         assignee: role('employee'),
-        dueHours: 72,
-      }),
-      review('revision', 'Revisión de la respuesta', role('manager'), 'cerrada', 'cerrada_sin_respuesta', 'respuesta', 24),
+        due: { hours: 72, on_overdue: { remind_every_hours: 12 } },
+        transitions: [
+          { on: 'approve', to: 'revision' },
+          { on: 'reject', to: 'cerrada_sin_respuesta', require_comment: true },
+        ],
+      },
+      review('revision', 'Revisión de la respuesta', role('manager'), 'cerrada', 'cerrada_sin_respuesta', 'redactar', 24),
       end('cerrada', 'Caso respondido', 'completed', 'Tu caso fue respondido y cerrado.'),
       end('cerrada_sin_respuesta', 'Caso descartado', 'rejected'),
     ],

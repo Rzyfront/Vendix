@@ -7,6 +7,7 @@ import { AIToolRegistry } from '../ai-tool-registry';
 import { buildToolDocument } from '../tool-catalog';
 import { TOOL_DISCOVERY_QUERIES_ES } from '../tool-discovery-queries.es';
 import { createWorkflowsTools, WorkflowsToolDeps } from './workflows.tools';
+import { WORKFLOW_TEMPLATES } from '../../../domains/store/workflows/templates/workflow-templates.catalog';
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 const CTX = { store_id: 1, organization_id: 1, user_id: 5 };
@@ -358,6 +359,32 @@ describe('workflows_draft_from_description', () => {
     expect(out.error).toMatch(/no es válida/);
     expect(out.issues.some((i: any) => i.code === 'GROUP_UNKNOWN')).toBe(true);
     expect(definitions.create).not.toHaveBeenCalled();
+  });
+
+  it('previews an AI step with its task, the fields it reads and writes, and its reviewer', async () => {
+    const { tool, definitions } = build();
+    const ctx = { roleKeys: ['employee', 'manager'], groupKeys: [], userIds: [] };
+    definitions.validateDefinition.mockImplementation(async (d: unknown) =>
+      validateWorkflowDefinition(d, ctx),
+    );
+    definitions.validationContext.mockResolvedValue(ctx);
+    const pqr = WORKFLOW_TEMPLATES.find((t) => t.key === 'pqr')!;
+    const preview = await tool('workflows_draft_from_description').preview!(
+      { name: 'PQR', definition: clone(pqr.definition) },
+      CTX,
+    );
+    expect(preview.status).toBe('ok');
+    const byField = Object.fromEntries(
+      preview.changes.map((c) => [c.field, c.to as string]),
+    );
+    expect(byField['stage:clasificar']).toContain('Tipo: Paso de IA');
+    expect(byField['stage:clasificar']).toContain('IA: clasificar');
+    expect(byField['stage:clasificar']).toContain('Lee: asunto, detalle');
+    expect(byField['stage:clasificar']).toContain('Escribe: tipo');
+    expect(byField['stage:clasificar']).not.toContain('Revisa:');
+    expect(byField['stage:clasificar']).not.toContain('Responsable:');
+    expect(byField['stage:redactar']).toContain('IA: redactar');
+    expect(byField['stage:redactar']).toContain('Revisa: Rol «employee»');
   });
 
   it('rejects a missing name or a non-object definition', async () => {

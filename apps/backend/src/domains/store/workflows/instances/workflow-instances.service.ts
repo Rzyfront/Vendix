@@ -283,7 +283,17 @@ export class WorkflowInstancesService {
     const definition = version?.definition as WorkflowDefinitionV1 | undefined;
     const stage = definition ? findStage(definition, instance.current_stage_key) : undefined;
     const active = instance.status === 'active';
-    const human = !!stage && isHumanStage(stage);
+    // P6.1: an `ai` stage under review has nothing to decide until its review
+    // task exists (the AI step has not answered yet).
+    const awaitingAi =
+      stage?.type === 'ai' &&
+      !taskRows.some(
+        (t: WorkflowTaskRow) =>
+          ['open', 'claimed'].includes(t.status) &&
+          t.stage_key === stage.key &&
+          t.stage_entry_seq === instance.stage_entry_seq,
+      );
+    const human = !!stage && isHumanStage(stage) && !awaitingAi;
 
     const userIds = new Set<number>();
     for (const t of taskRows) if (t.assignee_user_id) userIds.add(t.assignee_user_id);
@@ -414,7 +424,7 @@ export class WorkflowInstancesService {
                   ? true
                   : r.blocks_exit !== false,
             })),
-            form_fields: definition
+            form_fields: definition && !awaitingAi
               ? visibleFieldKeys(definition, stage, instance.data ?? {})
                   .map((k) => definition.fields.find((f) => f.key === k))
                   .filter(Boolean)

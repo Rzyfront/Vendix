@@ -39,6 +39,10 @@ export const WORKFLOW_LIMITS = {
   /** P3.2: HTTP node timeout (seconds) and response fields it may map. */
   maxHttpTimeoutSeconds: 30,
   maxHttpOutputs: 20,
+  /** P6.1: fields an AI step reads / writes and its instructions' length. */
+  maxAiInputs: 20,
+  maxAiOutputs: 20,
+  maxAiInstructions: 2000,
   /** P3.6: how many days before a record date a flow may start. */
   maxRecordDateDaysBefore: 365,
 } as const;
@@ -181,6 +185,7 @@ export type WorkflowStageType =
   | "approval"
   | "review"
   | "automatic"
+  | "ai"
   | "parallel"
   | "subflow"
   | "wait"
@@ -192,6 +197,7 @@ export const WORKFLOW_STAGE_TYPES: readonly WorkflowStageType[] = [
   "approval",
   "review",
   "automatic",
+  "ai",
   "parallel",
   "subflow",
   "wait",
@@ -211,6 +217,9 @@ export const STAGE_OUTCOMES: Record<WorkflowStageType, readonly string[]> = {
   approval: ["approve", "reject"],
   review: ["approve", "reject", "return"],
   automatic: ["auto"],
+  // P6.1: without `review` only `auto`; with `review` only approve / reject
+  // (see `stageOutcomes` in workflow-runtime.ts for the per-stage list).
+  ai: ["auto", "approve", "reject"],
   parallel: ["joined"],
   subflow: ["completed", "rejected"],
   wait: ["elapsed"],
@@ -218,7 +227,10 @@ export const STAGE_OUTCOMES: Record<WorkflowStageType, readonly string[]> = {
   end: [],
 };
 
-/** Stages the engine resolves by itself (no task of their own). */
+/**
+ * Stages the engine resolves by itself (no task of their own). An `ai` stage
+ * is system-resolved only without `review`; see `isSystemResolvedStage`.
+ */
 export const SYSTEM_STAGE_TYPES: readonly WorkflowStageType[] = [
   "automatic",
   "subflow",
@@ -343,6 +355,72 @@ export interface WorkflowGuardDef {
   when: WorkflowConditionGroup;
   message: string;
   redirect_to?: string;
+}
+
+/** P6.1: what an AI step does with the fields of the request. */
+export type WorkflowAiTask =
+  | "classify"
+  | "extract"
+  | "summarize"
+  | "draft"
+  | "decide";
+
+export const WORKFLOW_AI_TASKS: readonly WorkflowAiTask[] = [
+  "classify",
+  "extract",
+  "summarize",
+  "draft",
+  "decide",
+];
+
+/** Field types each AI task may write (its `outputs`). */
+export const WORKFLOW_AI_OUTPUT_TYPES: Record<
+  WorkflowAiTask,
+  readonly WorkflowFieldType[]
+> = {
+  classify: ["select"],
+  decide: ["select"],
+  extract: [
+    "text",
+    "textarea",
+    "number",
+    "money",
+    "date",
+    "boolean",
+    "select",
+    "email",
+    "phone",
+  ],
+  summarize: ["text", "textarea"],
+  draft: ["text", "textarea"],
+};
+
+/** Field types an AI step must not read (it only sees plain values). */
+export const WORKFLOW_AI_FORBIDDEN_INPUT_TYPES: readonly WorkflowFieldType[] = [
+  "file",
+  "user",
+];
+
+/**
+ * P6.1: `ai` stages only (required there). The engine asks the AI (through the
+ * plan-metered gateway) for the `outputs`, validates the answer against the
+ * declared fields and writes them. With `review` a person checks and may edit
+ * the outputs before the request moves on.
+ */
+export interface WorkflowAiDef {
+  task: WorkflowAiTask;
+  /** What the business wants this step to do (1..2000 characters). */
+  instructions: string;
+  /** 1..maxAiInputs declared fields the AI reads (never file or user). */
+  inputs: string[];
+  /** classify / decide / summarize / draft: exactly 1; extract: 1..maxAiOutputs. */
+  outputs: string[];
+  /** Declared `number` field that receives the confidence (0..1). */
+  confidence_field?: string;
+  /** A person reviews (and may edit) the outputs; needs `assignee`. */
+  review?: boolean;
+  /** Retries and what happens when the AI cannot answer (default continue). */
+  on_error?: WorkflowActionErrorPolicy;
 }
 
 /** P2.7: what happens when a `vendix.*` action fails. */
@@ -1649,6 +1727,8 @@ export interface WorkflowStageDef {
   wait?: WorkflowWaitDef;
   /** P2.4: `loop` stages only (required there). */
   loop?: WorkflowLoopDef;
+  /** P6.1: `ai` stages only (required there). */
+  ai?: WorkflowAiDef;
 }
 
 export type WorkflowTriggerDef =
@@ -2369,6 +2449,46 @@ export const WORKFLOW_V1_JSON_SCHEMA = {
               type: "integer",
               minimum: 1,
               maximum: WORKFLOW_LIMITS.maxLoopIterations,
+            },
+          },
+        },
+        ai: {
+          type: "object",
+          additionalProperties: false,
+          required: ["task", "instructions", "inputs", "outputs"],
+          properties: {
+            task: { enum: [...WORKFLOW_AI_TASKS] },
+            instructions: {
+              type: "string",
+              minLength: 1,
+              maxLength: WORKFLOW_LIMITS.maxAiInstructions,
+            },
+            inputs: {
+              type: "array",
+              minItems: 1,
+              maxItems: WORKFLOW_LIMITS.maxAiInputs,
+              items: { $ref: "#/$defs/key" },
+            },
+            outputs: {
+              type: "array",
+              minItems: 1,
+              maxItems: WORKFLOW_LIMITS.maxAiOutputs,
+              items: { $ref: "#/$defs/key" },
+            },
+            confidence_field: { $ref: "#/$defs/key" },
+            review: { type: "boolean" },
+            on_error: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                retries: {
+                  type: "integer",
+                  minimum: 0,
+                  maximum: WORKFLOW_LIMITS.maxActionRetries,
+                },
+                then: { enum: [...WORKFLOW_ERROR_THEN] },
+                route_to: { $ref: "#/$defs/key" },
+              },
             },
           },
         },

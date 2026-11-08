@@ -13,6 +13,7 @@ import {
 import { VendixHttpException } from '@common/errors';
 import { WorkflowWebhookDeliveryService } from '../webhooks/workflow-webhook-delivery.service';
 import { WorkflowActionsExecutor } from './workflow-actions.executor';
+import { WorkflowAiStepService } from './workflow-ai-step.service';
 import { WorkflowAssignmentService } from './workflow-assignment.service';
 import { WorkflowEmailService } from './workflow-email.service';
 import { WorkflowEngineService } from './workflow-engine.service';
@@ -33,6 +34,7 @@ import {
   GATE_START_OUTBOX_KIND,
 } from '../gates/approval-gate';
 import {
+  AI_STEP_OUTBOX_KIND,
   SUBFLOW_CLOSED_OUTBOX_KIND,
   SUBFLOW_START_OUTBOX_KIND,
 } from './workflow-stage.service';
@@ -86,6 +88,7 @@ export class WorkflowOutboxDispatcher {
     private readonly actions: WorkflowActionsExecutor,
     private readonly fanout: WorkflowTriggerFanout,
     private readonly gates: ApprovalGateProcessor,
+    private readonly aiStep: WorkflowAiStepService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -259,7 +262,7 @@ export class WorkflowOutboxDispatcher {
     }
     const subflow =
       row.kind === SUBFLOW_START_OUTBOX_KIND || row.kind === SUBFLOW_CLOSED_OUTBOX_KIND;
-    if (row.kind !== 'action' && !subflow) return;
+    if (row.kind !== 'action' && row.kind !== AI_STEP_OUTBOX_KIND && !subflow) return;
     try {
       const store = await this.prisma
         .withoutScope()
@@ -277,6 +280,11 @@ export class WorkflowOutboxDispatcher {
           if (subflow) {
             // P2.2: a dead subflow row must not leave the parent waiting forever.
             await this.engine.onSubflowDead(row, message);
+            return;
+          }
+          if (row.kind === AI_STEP_OUTBOX_KIND) {
+            // P6.1: the AI never answered; the step degrades and the owner is alerted.
+            await this.aiStep.onDead(row);
             return;
           }
           await this.actions.recordFailure(row, message);
@@ -366,6 +374,8 @@ export class WorkflowOutboxDispatcher {
           await this.startFromEvent(row);
         } else if (row.kind === 'action') {
           await this.actions.execute(row);
+        } else if (row.kind === AI_STEP_OUTBOX_KIND) {
+          await this.aiStep.execute(row);
         } else if (row.kind === GATE_START_OUTBOX_KIND) {
           await this.gates.start(row);
         } else if (row.kind === GATE_RESOLVED_OUTBOX_KIND) {

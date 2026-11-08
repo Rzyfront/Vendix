@@ -135,6 +135,14 @@ const OUTCOME_ES: Record<string, string> = {
   auto: 'Automático',
 };
 
+const AI_TASK_ES: Record<string, string> = {
+  classify: 'clasificar',
+  extract: 'extraer datos',
+  summarize: 'resumir',
+  draft: 'redactar',
+  decide: 'decidir rama',
+};
+
 const END_OUTCOME_ES: Record<string, string> = {
   completed: 'completado',
   rejected: 'rechazado',
@@ -166,6 +174,11 @@ function describeStage(stage: WorkflowStageDef, all: WorkflowStageDef[]) {
     parts.push(
       `Resultado: ${END_OUTCOME_ES[String(stage.outcome)] ?? stage.outcome ?? 'sin definir'}`,
     );
+  } else if (stage.type === 'ai' && stage.ai) {
+    parts.push(`IA: ${AI_TASK_ES[stage.ai.task] ?? stage.ai.task}`);
+    parts.push(`Lee: ${stage.ai.inputs.join(', ')}`);
+    parts.push(`Escribe: ${stage.ai.outputs.join(', ')}`);
+    if (stage.ai.review) parts.push(`Revisa: ${assigneeEs(stage.assignee)}`);
   } else if (stage.type !== 'automatic') {
     parts.push(`Responsable: ${assigneeEs(stage.assignee)}`);
   }

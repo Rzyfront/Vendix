@@ -7,9 +7,11 @@ import {
   applyComputedFields,
   evaluateCondition,
   findStage,
+  isAutoAiStage,
   isHumanStage,
   normalizeDefinition,
   resolveTransition,
+  stageFormKeys,
   stageOutcomes,
   startStage,
   validateFormValues,
@@ -95,6 +97,8 @@ export interface SimulationResult {
   loop_guard: boolean;
   /** P2.5: message of the guard that would hold the request. */
   guard_blocked?: string;
+  /** Caveats the simulator wants the person to read (deduplicated). */
+  notes: string[];
   watermark: typeof WATERMARK;
 }
 
@@ -117,6 +121,10 @@ export function describeAssignee(a: WorkflowAssigneeDef | undefined): {
   }
 }
 
+/** The simulator never calls the AI: the test data stands in for its answer. */
+export const AI_SIMULATOR_NOTE =
+  'El simulador no llama a la IA: usa los datos de prueba';
+
 function emptyResult(): SimulationResult {
   return {
     valid: true,
@@ -136,6 +144,7 @@ function emptyResult(): SimulationResult {
     actions: [],
     ended: null,
     loop_guard: false,
+    notes: [],
     watermark: WATERMARK,
   };
 }
@@ -218,7 +227,7 @@ function runSimulation(
     data = { ...(input.state.data ?? {}) };
 
     // Form (decisions that send the case back / reject need no values).
-    if (current.form?.fields.length && !['reject', 'return'].includes(outcome)) {
+    if (stageFormKeys(current).length && !['reject', 'return'].includes(outcome)) {
       const form = validateFormValues(def, current, input.values ?? {});
       if (!form.ok) {
         res.form_errors = form.errors;
@@ -296,13 +305,16 @@ function runSimulation(
   let hops = 0;
   while (
     current &&
-    (SYSTEM_OUTCOME[current.type] || current.type === 'loop' || current.type === 'parallel')
+    (SYSTEM_OUTCOME[current.type] ||
+      isAutoAiStage(current) ||
+      current.type === 'loop' ||
+      current.type === 'parallel')
   ) {
     if (hops++ >= MAX_AUTOMATIC_HOPS) {
       res.loop_guard = true;
       break;
     }
-    let outcome = SYSTEM_OUTCOME[current.type];
+    let outcome = SYSTEM_OUTCOME[current.type] ?? 'auto';
     if (current.type === 'parallel') {
       // Every needed branch submits (its `on_submit` runs once each) and the
       // join rule holds: the stage resolves `joined`.
@@ -420,10 +432,13 @@ function collectEntry(
   notifies: Array<{ message: string; to: WorkflowAssigneeDef }>,
 ) {
   res.notifications.push(...notifyList(notifies));
+  if (stage.type === 'ai' && !res.notes.includes(AI_SIMULATOR_NOTE)) {
+    res.notes.push(AI_SIMULATOR_NOTE);
+  }
   if (isHumanStage(stage)) {
     res.tasks.push({
       stage_key: stage.key,
-      kind: stage.type,
+      kind: stage.type === 'ai' ? 'review' : stage.type,
       assignee: describeAssignee(stage.assignee),
     });
   }

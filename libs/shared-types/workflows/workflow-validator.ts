@@ -38,6 +38,10 @@ import {
   WORKFLOW_SUBJECT_TYPES,
   WORKFLOW_WAIT_KINDS,
   WORKFLOW_ERROR_THEN,
+  WORKFLOW_AI_TASKS,
+  WORKFLOW_AI_OUTPUT_TYPES,
+  WORKFLOW_AI_FORBIDDEN_INPUT_TYPES,
+  WorkflowAiTask,
   SYSTEM_STAGE_TYPES,
   WorkflowFieldType,
   WORKFLOW_EMAIL_TOKENS,
@@ -100,6 +104,7 @@ export const WORKFLOW_ISSUE_CODES = [
   "SECRET_UNKNOWN",
   "FORM_STEPS_INVALID",
   "COLLECTION_UNKNOWN",
+  "AI_STEP_INVALID",
 ] as const;
 
 export type WorkflowIssueCode = (typeof WORKFLOW_ISSUE_CODES)[number];
@@ -147,7 +152,7 @@ export interface WorkflowValidationContext {
 type Json = Record<string, unknown>;
 type FieldMap = Map<
   string,
-  { type: WorkflowFieldType; options?: readonly string[] }
+  { type: WorkflowFieldType; options?: readonly string[]; computed?: boolean }
 >;
 
 const isObj = (v: unknown): v is Json =>
@@ -1258,6 +1263,7 @@ function checkFields(raw: unknown, c: Collector): FieldMap {
                 .map((o) => String(o["value"])),
             }
           : {}),
+        ...(f["compute"] !== undefined ? { computed: true } : {}),
       });
       valid.push({ f, i });
     }
@@ -1356,6 +1362,8 @@ interface StageInfo {
   start: boolean;
   index: number;
   targets: string[];
+  /** P6.1: an `ai` stage with a person reviewing its outputs. */
+  aiReview?: boolean;
 }
 
 function checkStages(
@@ -1420,6 +1428,7 @@ function checkStages(
         "subflow",
         "wait",
         "loop",
+        "ai",
       ],
       p,
     );
@@ -1488,7 +1497,10 @@ function checkStages(
       return;
     }
     const t = type as keyof typeof STAGE_OUTCOMES;
-    const human = (HUMAN_STAGE_TYPES as readonly string[]).includes(t);
+    const aiReview =
+      t === "ai" && isObj(s["ai"]) && s["ai"]["review"] === true;
+    const human =
+      (HUMAN_STAGE_TYPES as readonly string[]).includes(t) || aiReview;
 
     if (t === "end") {
       if (
@@ -1516,7 +1528,7 @@ function checkStages(
         c.err(
           "ASSIGNEE_NOT_ALLOWED",
           `${p}.assignee`,
-          `${L} es ${t === "end" ? "final" : t === "parallel" ? "paralela (cada rama tiene su responsable)" : "automática"} y no debe tener responsable.`,
+          `${L} es ${t === "end" ? "final" : t === "parallel" ? "paralela (cada rama tiene su responsable)" : t === "ai" ? "un paso de IA sin revisión humana" : "automática"} y no debe tener responsable.`,
           sk,
         );
       else checkAssignee(s["assignee"], `${p}.assignee`, L, sk, fields, ctx, c);
@@ -1566,7 +1578,14 @@ function checkStages(
 
     // form
     if (s["form"] !== undefined) {
-      if (!human)
+      if (t === "ai")
+        c.err(
+          "SHAPE_INVALID",
+          `${p}.form`,
+          `${L} es un paso de IA: quien revisa edita los campos que escribe la IA y no admite formulario propio.`,
+          sk,
+        );
+      else if (!human)
         c.err(
           "SHAPE_INVALID",
           `${p}.form`,
@@ -1608,15 +1627,23 @@ function checkStages(
       }
     }
 
-    checkRequirements(
-      s["requirements"],
-      `${p}.requirements`,
-      L,
-      sk,
-      fields,
-      ctx,
-      c,
-    );
+    if (t === "ai" && s["requirements"] !== undefined)
+      c.err(
+        "SHAPE_INVALID",
+        `${p}.requirements`,
+        `${L} es un paso de IA y no admite requisitos.`,
+        sk,
+      );
+    else
+      checkRequirements(
+        s["requirements"],
+        `${p}.requirements`,
+        L,
+        sk,
+        fields,
+        ctx,
+        c,
+      );
     checkActions(s["on_enter"], `${p}.on_enter`, L, sk, fields, ctx, c);
     checkActions(s["on_submit"], `${p}.on_submit`, L, sk, fields, ctx, c);
     checkActions(s["on_complete"], `${p}.on_complete`, L, sk, fields, ctx, c);
@@ -1637,7 +1664,11 @@ function checkStages(
     // P2.1 / P2.2 / P2.3 / P2.4: per-type configuration.
     const targets: string[] = [];
     checkTypeConfig(s, t, p, L, sk, fields, ctx, c);
-    checkGuards(s["guards"], t, p, L, sk, keys, fields, c, targets);
+    checkGuards(s["guards"], aiReview ? "review" : t, p, L, sk, keys, fields, c, targets);
+    if (t === "ai" && isObj(s["ai"]) && isObj(s["ai"]["on_error"])) {
+      const to = s["ai"]["on_error"]["route_to"];
+      if (isStr(to) && keys.has(to)) targets.push(to);
+    }
     for (const hook of ["on_enter", "on_submit", "on_complete", "on_exit"]) {
       const list = s[hook];
       if (!Array.isArray(list)) continue;
@@ -1665,10 +1696,13 @@ function checkStages(
       const required =
         t === "subflow" && isObj(s["subflow"]) && s["subflow"]["wait"] === false
           ? ["completed"]
-          : (SYSTEM_STAGE_TYPES as readonly string[]).includes(t) || t === "parallel"
-            ? [...STAGE_OUTCOMES[t]]
-            : [];
-      checkTransitions(s["transitions"], p, L, t, sk, keys, fields, c, targets, required);
+          : t === "ai"
+            ? [aiReview ? "approve" : "auto"]
+            : (SYSTEM_STAGE_TYPES as readonly string[]).includes(t) || t === "parallel"
+              ? [...STAGE_OUTCOMES[t]]
+              : [];
+      checkTransitions(s["transitions"], p, L, t, sk, keys, fields, c, targets, required, aiReview);
+      if (t === "ai") checkAiDecide(s, p, L, sk, aiReview, c);
     }
 
     if (keyOk) {
@@ -1679,6 +1713,7 @@ function checkStages(
         start: s["start"] === true,
         index: i,
         targets,
+        ...(aiReview ? { aiReview: true } : {}),
       });
     }
   });
@@ -2364,6 +2399,7 @@ function checkTransitions(
   c: Collector,
   targets: string[],
   requiredOutcomes: string[] = [],
+  aiReview = false,
 ) {
   const path = `${p}.transitions`;
   const list: unknown[] =
@@ -2385,7 +2421,12 @@ function checkTransitions(
       sk,
     );
   }
-  const outcomes = STAGE_OUTCOMES[t];
+  const outcomes =
+    t === "ai"
+      ? aiReview
+        ? ["approve", "reject"]
+        : ["auto"]
+      : STAGE_OUTCOMES[t];
   const byOn = new Map<string, { hasWhen: boolean }[]>();
   list.forEach((tr, i) => {
     const tp = `${path}[${i}]`;
@@ -2474,11 +2515,16 @@ function checkTransitions(
       path,
       t === "automatic"
         ? `${L} es automática y necesita una transición por defecto para "auto".`
-        : `${L} necesita una transición para el resultado "${o}".`,
+        : t === "ai" && !aiReview
+          ? `${L} es un paso de IA sin revisión y necesita una transición para "auto".`
+          : `${L} necesita una transición para el resultado "${o}".`,
       sk,
     );
   }
-  if (list.length > 0 && (HUMAN_STAGE_TYPES as readonly string[]).includes(t)) {
+  if (
+    list.length > 0 &&
+    ((HUMAN_STAGE_TYPES as readonly string[]).includes(t) || aiReview)
+  ) {
     for (const o of outcomes) {
       if (!byOn.has(o)) {
         c.warn(
@@ -2579,7 +2625,12 @@ function checkGraph(stages: StageInfo[], c: Collector) {
   // bounds its own cycle (`max_iterations`), so it breaks the chain.
   const auto = new Map(
     stages
-      .filter((s) => s.type !== "loop" && (SYSTEM_STAGE_TYPES as readonly string[]).includes(s.type))
+      .filter(
+        (s) =>
+          s.type !== "loop" &&
+          ((SYSTEM_STAGE_TYPES as readonly string[]).includes(s.type) ||
+            (s.type === "ai" && !s.aiReview)),
+      )
       .map((s) => [s.key, s]),
   );
   const state = new Map<string, 1 | 2>();
@@ -2618,6 +2669,7 @@ const TYPE_CONFIG: Record<string, string> = {
   subflow: "subflow",
   wait: "wait",
   loop: "loop",
+  ai: "ai",
 };
 
 function checkTypeConfig(
@@ -2644,6 +2696,158 @@ function checkTypeConfig(
   if (t === "subflow") checkSubflow(s["subflow"], `${p}.subflow`, L, sk, fields, ctx, c);
   if (t === "wait") checkWait(s["wait"], `${p}.wait`, L, sk, fields, c);
   if (t === "loop") checkLoop(s["loop"], `${p}.loop`, L, sk, fields, c);
+  if (t === "ai") checkAi(s["ai"], `${p}.ai`, L, sk, fields, c);
+}
+
+/** P6.1: shape and field rules of an `ai` stage. */
+function checkAi(
+  raw: unknown,
+  path: string,
+  L: string,
+  sk: string | undefined,
+  fields: FieldMap,
+  c: Collector,
+) {
+  const bad = (sub: string, message: string) =>
+    c.err("AI_STEP_INVALID", sub ? `${path}.${sub}` : path, `${L}: ${message}`, sk);
+  if (!isObj(raw)) {
+    bad("", "el paso de IA necesita su configuración (tarea, instrucciones, campos que lee y campos que escribe).");
+    return;
+  }
+  checkKeys(
+    c,
+    raw,
+    ["task", "instructions", "inputs", "outputs", "confidence_field", "review", "on_error"],
+    path,
+    sk,
+  );
+  const task = raw["task"];
+  const taskOk = (WORKFLOW_AI_TASKS as readonly unknown[]).includes(task);
+  if (!taskOk) {
+    bad("task", `la tarea de IA debe ser ${WORKFLOW_AI_TASKS.join(", ")}.`);
+  }
+  const ins = raw["instructions"];
+  if (
+    !isNonEmptyStr(ins) ||
+    ins.length > WORKFLOW_LIMITS.maxAiInstructions
+  ) {
+    bad(
+      "instructions",
+      `las instrucciones son obligatorias y admiten hasta ${WORKFLOW_LIMITS.maxAiInstructions} caracteres.`,
+    );
+  }
+  const keyList = (name: "inputs" | "outputs", max: number, min: number) => {
+    const v = raw[name];
+    const label = name === "inputs" ? "campos que lee" : "campos que escribe";
+    if (!Array.isArray(v) || !v.every(isStr) || v.length < min || v.length > max) {
+      bad(
+        name,
+        min === max
+          ? `los ${label} deben ser exactamente ${min}.`
+          : `los ${label} deben ser entre ${min} y ${max}.`,
+      );
+      return [] as string[];
+    }
+    const seen = new Set<string>();
+    for (const k of v as string[]) {
+      if (seen.has(k)) bad(name, `el campo "${k}" se repite en los ${label}.`);
+      seen.add(k);
+    }
+    return [...seen];
+  };
+  const inputs = keyList("inputs", WORKFLOW_LIMITS.maxAiInputs, 1);
+  const single =
+    taskOk && (task === "classify" || task === "decide" || task === "summarize" || task === "draft");
+  const outputs = keyList(
+    "outputs",
+    single ? 1 : WORKFLOW_LIMITS.maxAiOutputs,
+    1,
+  );
+  if (single && Array.isArray(raw["outputs"]) && raw["outputs"].length > 1) {
+    bad("outputs", "esta tarea escribe exactamente un campo.");
+  }
+  for (const k of inputs) {
+    const f = fields.get(k);
+    if (!f) {
+      c.err("FIELD_UNKNOWN", `${path}.inputs`, `${L} lee el campo "${k}", que no está declarado.`, sk);
+    } else if ((WORKFLOW_AI_FORBIDDEN_INPUT_TYPES as readonly string[]).includes(f.type)) {
+      bad("inputs", `el campo "${k}" es de tipo ${f.type} y la IA no lo puede leer.`);
+    }
+  }
+  for (const k of outputs) {
+    const f = fields.get(k);
+    if (!f) {
+      c.err("FIELD_UNKNOWN", `${path}.outputs`, `${L} escribe el campo "${k}", que no está declarado.`, sk);
+      continue;
+    }
+    if (f.computed) bad("outputs", `el campo "${k}" es calculado y la IA no puede escribirlo.`);
+    if (inputs.includes(k)) bad("outputs", `el campo "${k}" no puede ser a la vez de lectura y de escritura.`);
+    if (
+      taskOk &&
+      !WORKFLOW_AI_OUTPUT_TYPES[task as WorkflowAiTask].includes(f.type)
+    ) {
+      bad(
+        "outputs",
+        `el campo "${k}" es de tipo ${f.type} y la tarea "${String(task)}" solo escribe campos de tipo ${WORKFLOW_AI_OUTPUT_TYPES[task as WorkflowAiTask].join(", ")}.`,
+      );
+    }
+  }
+  const cf = raw["confidence_field"];
+  if (cf !== undefined) {
+    const f = isStr(cf) ? fields.get(cf) : undefined;
+    if (!f) {
+      c.err("FIELD_UNKNOWN", `${path}.confidence_field`, `${L} guarda la confianza en un campo que no está declarado.`, sk);
+    } else if (f.type !== "number" || f.computed) {
+      bad("confidence_field", "el campo de confianza debe ser numérico y no calculado.");
+    } else if (outputs.includes(cf as string) || inputs.includes(cf as string)) {
+      bad("confidence_field", "el campo de confianza debe ser distinto de los que lee y escribe.");
+    }
+  }
+  if (raw["review"] !== undefined && typeof raw["review"] !== "boolean") {
+    bad("review", '"review" debe ser verdadero o falso.');
+  }
+  if (raw["on_error"] !== undefined) {
+    checkErrorPolicy(raw["on_error"], `${path}.on_error`, L, sk, c);
+  }
+}
+
+function conditionUsesField(node: unknown, key: string): boolean {
+  if (!isObj(node)) return false;
+  if (isStr(node["field"])) return node["field"] === key;
+  const group = node["all"] ?? node["any"];
+  return Array.isArray(group) && group.some((n) => conditionUsesField(n, key));
+}
+
+/**
+ * P6.1: `decide` routes the request on the answer, so the outcome that leaves
+ * the stage needs a branch conditioned on the output field plus a default.
+ */
+function checkAiDecide(
+  s: Json,
+  p: string,
+  L: string,
+  sk: string | undefined,
+  aiReview: boolean,
+  c: Collector,
+) {
+  const ai = s["ai"];
+  if (!isObj(ai) || ai["task"] !== "decide") return;
+  const out = Array.isArray(ai["outputs"]) ? ai["outputs"][0] : undefined;
+  const outcome = aiReview ? "approve" : "auto";
+  const list = (Array.isArray(s["transitions"]) ? s["transitions"] : []).filter(
+    (tr): tr is Json => isObj(tr) && tr["on"] === outcome,
+  );
+  const conditioned = list.some(
+    (tr) => tr["when"] !== undefined && isStr(out) && conditionUsesField(tr["when"], out),
+  );
+  if (!conditioned) {
+    c.err(
+      "AI_STEP_INVALID",
+      `${p}.transitions`,
+      `${L} decide la rama: necesita al menos una transición de "${outcome}" con condición sobre el campo que escribe la IA${isStr(out) ? ` ("${out}")` : ""} y una rama por defecto.`,
+      sk,
+    );
+  }
 }
 
 /** P3.4: steps list exactly the form's fields, each once and in order. */

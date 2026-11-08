@@ -11,6 +11,7 @@ describe('WorkflowOutboxDispatcher · webhook / start_instance / action', () => 
   const engine = { tick: jest.fn(), startSystem: jest.fn() };
   const webhooks = { deliver: jest.fn() };
   const actions = { execute: jest.fn(), recordFailure: jest.fn() };
+  const aiStep = { execute: jest.fn(), onDead: jest.fn() };
   const fanout = { fanOut: jest.fn() };
   const MIN = 60_000;
   const row = () => db.table('workflow_outbox')[0];
@@ -35,6 +36,8 @@ describe('WorkflowOutboxDispatcher · webhook / start_instance / action', () => 
     engine.startSystem.mockReset().mockResolvedValue({});
     webhooks.deliver.mockReset().mockResolvedValue(undefined);
     actions.execute.mockReset().mockResolvedValue(undefined);
+    aiStep.execute.mockReset().mockResolvedValue(undefined);
+    aiStep.onDead.mockReset().mockResolvedValue(undefined);
     actions.recordFailure.mockReset().mockResolvedValue(undefined);
     dispatcher = new WorkflowOutboxDispatcher(
       db.asStorePrisma(),
@@ -46,6 +49,7 @@ describe('WorkflowOutboxDispatcher · webhook / start_instance / action', () => 
       actions as any,
       fanout as any,
       {} as any,
+      aiStep as any,
     );
   });
 
@@ -212,6 +216,27 @@ describe('WorkflowOutboxDispatcher · webhook / start_instance / action', () => 
     webhooks.deliver.mockRejectedValue(new Error('x'));
     enqueue('webhook', { delivery_id: 1 }, { attempts: 5, instance_id: null });
     expect(await dispatcher.dispatchBatch()).toMatchObject({ dead: 1 });
+    expect(actions.recordFailure).not.toHaveBeenCalled();
+  });
+  it('ai_step (P6.1): delega en el paso de IA bajo el contexto de la tienda de la fila', async () => {
+    let seen: any;
+    aiStep.execute.mockImplementation(async () => {
+      seen = RequestContextService.getContext();
+    });
+    enqueue('ai_step', { instance_id: 1, stage_key: 'clasificar', stage_entry_seq: 1, max_attempts: 2 });
+    expect(await dispatcher.dispatchBatch()).toMatchObject({ done: 1 });
+    expect(aiStep.execute).toHaveBeenCalledWith(expect.objectContaining({ kind: 'ai_step', store_id: 1 }));
+    expect(seen).toMatchObject({ store_id: 1, organization_id: 1 });
+  });
+
+  it('ai_step: respeta max_attempts de la fila y al agotarlos degrada el paso (onDead), sin tocar las acciones', async () => {
+    aiStep.execute.mockRejectedValue(new Error('proveedor caído'));
+    enqueue('ai_step', { instance_id: 1, stage_key: 'clasificar', stage_entry_seq: 1, max_attempts: 2 });
+    expect(await dispatcher.dispatchBatch()).toMatchObject({ retried: 1, dead: 0 });
+    row().available_at = new Date(Date.now() - MIN);
+    expect(await dispatcher.dispatchBatch()).toMatchObject({ retried: 0, dead: 1 });
+    expect(row()).toMatchObject({ status: 'dead', attempts: 2 });
+    expect(aiStep.onDead).toHaveBeenCalledTimes(1);
     expect(actions.recordFailure).not.toHaveBeenCalled();
   });
 });
