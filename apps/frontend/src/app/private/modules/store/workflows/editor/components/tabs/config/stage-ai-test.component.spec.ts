@@ -96,7 +96,8 @@ describe('StageAiTestComponent', () => {
     expect(api.testAiStep).toHaveBeenCalledWith(7, { stage_key: 'clasificar', data: { asunto: 'Me cobraron dos veces' } });
     const text = el().querySelector('[data-testid="ai-test-success"]')?.textContent ?? '';
     expect(text).toContain('Tipo');
-    expect(text).toContain('queja');
+    // A list field shows the option label, not its stored value.
+    expect(text).toContain('Queja');
     expect(el().querySelector('[data-testid="ai-test-confidence"]')?.textContent).toContain('91 %');
     expect(text).toContain('Menciona un cobro doble');
     expect(text).toContain('modelo-x');

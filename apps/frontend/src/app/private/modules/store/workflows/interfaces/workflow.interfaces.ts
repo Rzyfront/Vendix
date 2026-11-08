@@ -237,7 +237,13 @@ export interface WorkflowInstanceDetail {
   subject_type?: string | null;
   subject_id?: number | null;
   /** Declared fields (label and type) to show the request data. */
-  data_fields?: { key: string; label: string; type: string }[];
+  data_fields?: {
+    key: string;
+    label: string;
+    type: string;
+    /** Options of a list field, to show the label of the stored value. */
+    options?: { value: string; label: string }[];
+  }[];
   started_by: { name: string } | null;
   created_at: string;
   completed_at: string | null;

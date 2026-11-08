@@ -53,6 +53,7 @@ export function instanceStatusTone(status: string): BadgeTone {
 
 export const EVENT_LABEL: Record<string, string> = {
   started: 'Solicitud iniciada',
+  transitioned: 'Avanzó de etapa',
   task_completed: 'Etapa completada',
   vote: 'Voto registrado',
   claimed: 'Tarea tomada',
@@ -309,4 +310,17 @@ export function instanceSubject(
     text: `Sobre: ${SUBJECT_LABEL[type] ?? type} #${id}`,
     link: base ? [base, String(id)] : null,
   };
+}
+
+/**
+ * Text of a stored request value: a list field shows the label of each chosen
+ * option (an AI step writes the option value), a yes/no field "Sí"/"No".
+ */
+export function fieldDisplayValue(
+  raw: unknown,
+  options?: { value: string; label: string }[],
+): string {
+  if (typeof raw === 'boolean') return raw ? 'Sí' : 'No';
+  const one = (v: unknown) => options?.find((o) => o.value === v)?.label ?? String(v);
+  return Array.isArray(raw) ? raw.map(one).join(', ') : one(raw);
 }

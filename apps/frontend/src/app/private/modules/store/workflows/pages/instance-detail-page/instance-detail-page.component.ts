@@ -47,6 +47,7 @@ import {
   countdownText,
   dueText,
   eventDescription,
+  fieldDisplayValue,
   instanceStatusLabel,
   instanceSubject,
   instanceStatusTone,
@@ -703,20 +704,13 @@ export class InstanceDetailPageComponent implements OnInit {
     const data = d.data ?? {};
     return (d.data_fields ?? [])
       .filter((f) => f.type !== 'file')
-      .map((f) => ({ key: f.key, label: f.label, type: f.type, raw: data[f.key] }))
+      .map((f) => ({ key: f.key, label: f.label, type: f.type, options: f.options, raw: data[f.key] }))
       .filter((f) => f.raw !== undefined && f.raw !== null && f.raw !== '')
       .map((f) => ({
         key: f.key,
         label: f.label,
         money: f.type === 'money' && typeof f.raw === 'number',
-        value:
-          typeof f.raw === 'boolean'
-            ? f.raw
-              ? 'Sí'
-              : 'No'
-            : Array.isArray(f.raw)
-              ? f.raw.join(', ')
-              : String(f.raw),
+        value: fieldDisplayValue(f.raw, f.options),
         number: typeof f.raw === 'number' ? f.raw : null,
       }));
   });

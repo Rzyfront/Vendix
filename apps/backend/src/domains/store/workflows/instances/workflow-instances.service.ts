@@ -382,10 +382,13 @@ export class WorkflowInstancesService {
       data: instance.data ?? {},
       // P1.5: labels and types of the declared fields, so the screen shows the
       // data a request was born with even when the current stage has no form.
+      // P6: list fields carry their options so the screen shows the label of
+      // the stored value (an AI step writes the option value).
       data_fields: (definition?.fields ?? []).map((f) => ({
         key: f.key,
         label: f.label,
         type: f.type,
+        ...(f.options?.length ? { options: f.options } : {}),
       })),
       subject_type: instance.subject_type,
       subject_id: instance.subject_id,

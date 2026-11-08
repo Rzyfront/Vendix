@@ -1,4 +1,4 @@
-import { countdownText, eventDescription, eventLabel, outcomeLabel } from './workflow-labels.util';
+import { countdownText, eventDescription, eventLabel, fieldDisplayValue, outcomeLabel } from './workflow-labels.util';
 
 describe('workflow-labels.util — motor avanzado (P2)', () => {
   it('rotula los resultados nuevos en español', () => {
@@ -64,5 +64,29 @@ describe('workflow-labels.util — paso de IA (P6)', () => {
       eventDescription('ai_step_failed', { task: 'classify', reason_code: 'quota', reason: 'La IA no se ejecutó: el plan no tiene cupo de IA' }),
     ).toBe('Paso de IA fallido: La IA no se ejecutó: el plan no tiene cupo de IA');
     expect(eventDescription('ai_step_failed', {})).toBe('Paso de IA fallido');
+  });
+});
+
+describe('workflow-labels.util — datos de la solicitud (P6)', () => {
+  const options = [
+    { value: 'queja', label: 'Queja' },
+    { value: 'reclamo', label: 'Reclamo' },
+  ];
+
+  it('un campo de lista muestra la etiqueta de la opción, no el valor guardado', () => {
+    expect(fieldDisplayValue('queja', options)).toBe('Queja');
+    expect(fieldDisplayValue(['queja', 'reclamo'], options)).toBe('Queja, Reclamo');
+  });
+
+  it('un valor sin opción conocida se muestra tal cual, y un sí/no en español', () => {
+    expect(fieldDisplayValue('otro', options)).toBe('otro');
+    expect(fieldDisplayValue('Texto libre')).toBe('Texto libre');
+    expect(fieldDisplayValue(12)).toBe('12');
+    expect(fieldDisplayValue(true)).toBe('Sí');
+    expect(fieldDisplayValue(false)).toBe('No');
+  });
+
+  it('el avance automático de etapa tiene nombre en la línea de tiempo', () => {
+    expect(eventLabel('transitioned')).toBe('Avanzó de etapa');
   });
 });

@@ -156,11 +156,16 @@ export class StageAiTestComponent {
   }
 
   outputRows(values: Record<string, unknown>): { key: string; label: string; value: string }[] {
-    return Object.entries(values).map(([key, value]) => ({
-      key,
-      label: this.fields().find((f) => f.key === key)?.label ?? key,
-      value: formatOutputValue(value),
-    }));
+    return Object.entries(values).map(([key, value]) => {
+      const field = this.fields().find((f) => f.key === key);
+      // A list answer is stored as the option value; show its label.
+      const option = field?.options?.find((o) => o.value === value);
+      return {
+        key,
+        label: field?.label ?? key,
+        value: option ? option.label : formatOutputValue(value),
+      };
+    });
   }
 
   confidenceLabel(confidence: number | null): string | null {
