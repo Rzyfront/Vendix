@@ -263,7 +263,15 @@ describe('SubscriptionAccessService — WORKFLOW_PLAN_LIMIT_REACHED (P7.1)', () 
     const gb = 1024 ** 3;
     const state = open({ limit: 'storage_bytes', used: 10 * gb, cap: 10 * gb });
     expect(state.variant.description).toBe(
-      'Llegaste al límite de almacenamiento de tu plan (10 de 10 GB).',
+      'Llegaste al límite de almacenamiento de tu plan (10 GB de 10 GB).',
+    );
+  });
+
+  it('words a storage limit below 1 GB in MB, never "0 de 0 GB"', () => {
+    const mb = 1024 ** 2;
+    const state = open({ limit: 'storage_bytes', used: 48 * mb, cap: 50 * mb });
+    expect(state.variant.description).toBe(
+      'Llegaste al límite de almacenamiento de tu plan (48 MB de 50 MB).',
     );
   });
 

@@ -138,9 +138,17 @@ export interface PaywallDetails {
 }
 
 const GB_BYTES = 1024 ** 3;
+const MB_BYTES = 1024 ** 2;
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat('es-CO', { maximumFractionDigits: 1 }).format(value);
+}
+
+/** Bytes in GB, or in MB below 1 GB so a small cap never reads "0 GB". */
+function formatStorage(bytes: number): string {
+  return bytes >= GB_BYTES
+    ? `${formatCount(bytes / GB_BYTES)} GB`
+    : `${formatCount(bytes / MB_BYTES)} MB`;
 }
 
 /**
@@ -164,7 +172,7 @@ export function workflowLimitCopy(details?: PaywallDetails): string {
         : 'Llegaste al límite de llamadas HTTP de tu plan este mes.';
     case 'storage_bytes':
       return known
-        ? `Llegaste al límite de almacenamiento de tu plan (${formatCount(used / GB_BYTES)} de ${formatCount(cap / GB_BYTES)} GB).`
+        ? `Llegaste al límite de almacenamiento de tu plan (${formatStorage(used)} de ${formatStorage(cap)}).`
         : 'Llegaste al límite de almacenamiento de tu plan.';
     default:
       return 'Llegaste a un límite de Flujos de tu plan.';
