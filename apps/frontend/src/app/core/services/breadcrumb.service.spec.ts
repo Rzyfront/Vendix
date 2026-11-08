@@ -126,6 +126,16 @@ describe('BreadcrumbService', () => {
         expect(crumb.parent?.label).toBe('Flujos');
       });
     }
+
+    it('P7: names the tab of /super-admin/workflows-ops "Super Admin > Operación de Flujos"', () => {
+      titleSetSpy.calls.reset();
+      routerEvents$.next(
+        new NavigationEnd(5, '/super-admin/workflows-ops', '/super-admin/workflows-ops'),
+      );
+      TestBed.tick();
+      expect(service.breadcrumb().current.label).toBe('Operación de Flujos');
+      expect(titleSetSpy).toHaveBeenCalledWith('Super Admin > Operación de Flujos | Vendix');
+    });
   });
 
   describe('document.title sync (effect)', () => {

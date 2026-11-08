@@ -429,6 +429,12 @@ export class BreadcrumbService {
       icon: 'eye',
     },
     {
+      path: '/super-admin/workflows-ops',
+      title: 'Operación de Flujos',
+      parent: 'Super Admin',
+      icon: 'chart-line',
+    },
+    {
       path: '/super-admin/video-library',
       title: 'Biblioteca de Videos',
       parent: 'Super Admin',
