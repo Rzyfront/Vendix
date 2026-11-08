@@ -34,7 +34,7 @@ describe('ExportPageComponent', () => {
   let listCalls: number;
   let requestCalls: number;
   let downloadCalls: number[];
-  let opened: Array<{ url: string; target: string | undefined }>;
+  let opened: Array<{ url: string; target: string | undefined; download?: string }>;
 
   const root = (): HTMLElement => fixture.nativeElement as HTMLElement;
   const text = (): string => root().textContent ?? '';
@@ -45,12 +45,13 @@ describe('ExportPageComponent', () => {
 
   async function render(): Promise<void> {
     fixture = TestBed.createComponent(ExportPageComponent);
-    spyOn(window, 'open').and.callFake(
-      (url?: string | URL, target?: string) => {
-        opened.push({ url: String(url), target });
-        return null;
-      },
-    );
+    spyOn(window, 'open').and.callFake((url?: string | URL, target?: string) => {
+      opened.push({ url: String(url), target });
+      return null;
+    });
+    spyOn(HTMLAnchorElement.prototype, 'click').and.callFake(function (this: HTMLAnchorElement) {
+      opened.push({ url: this.href, target: this.target || undefined, download: this.download });
+    });
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
@@ -154,14 +155,14 @@ describe('ExportPageComponent', () => {
     );
   });
 
-  it('Descargar pide la URL firmada y la abre en otra pestaña', async () => {
+  it('Descargar pide la URL firmada y la descarga en la misma pestaña, sin abrir otra ventana', async () => {
     listResult = () => of([item({ id: 9 })]);
     await render();
     button('Descargar')?.click();
     fixture.detectChanges();
     await fixture.whenStable();
     expect(downloadCalls).toEqual([9]);
-    expect(opened).toEqual([{ url: 'https://s3.test/x.zip', target: '_blank' }]);
+    expect(opened).toEqual([{ url: 'https://s3.test/x.zip', target: undefined, download: 'x.zip' }]);
   });
 
   it('si la descarga falla (vencida) muestra el mensaje y no abre nada', async () => {

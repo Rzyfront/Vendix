@@ -236,7 +236,12 @@ export class ExportPageComponent implements OnInit {
       .subscribe({
         next: (result) => {
           this.downloadingId.set(null);
-          this.document.defaultView?.open(result.url, '_blank', 'noopener');
+          // Same tab, no new window: the signed URL answers as an attachment, so
+          // the page stays put. Safari blocks a window opened after an async answer.
+          const anchor = this.document.createElement('a');
+          anchor.href = result.url;
+          anchor.download = result.file_name;
+          anchor.click();
         },
         error: (err) => {
           this.downloadingId.set(null);
