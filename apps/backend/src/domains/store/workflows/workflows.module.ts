@@ -66,6 +66,11 @@ import { WorkflowTrackingPublicService } from './tracking/workflow-tracking-publ
 import { WorkflowMetricsService } from './metrics/workflow-metrics.service';
 import { WorkflowAnalyticsService } from './metrics/workflow-analytics.service';
 import { WorkflowAiService } from './ai/workflow-ai.service';
+import { WorkflowAiUsageController } from './ai/workflow-ai-usage.controller';
+import { WorkflowAiUsageService } from './ai/workflow-ai-usage.service';
+import { WorkflowInsightsController } from './ai/workflow-insights.controller';
+import { WorkflowInsightsCron } from './ai/workflow-insights.cron';
+import { WorkflowInsightsService } from './ai/workflow-insights.service';
 import { WorkflowAnalyticsController } from './metrics/workflow-analytics.controller';
 import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
 import { WorkflowPeopleActions } from './engine/actions/people.actions';
@@ -154,6 +159,9 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
     WorkflowInboxController,
     WorkflowBoardController,
     WorkflowAnalyticsController,
+    // P6.3/P6.4: AI consumption of the plan and weekly AI summaries.
+    WorkflowAiUsageController,
+    WorkflowInsightsController,
     WorkGroupsController,
     DocumentFilesController,
     WorkflowWebhooksController,
@@ -189,6 +197,10 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
     WorkflowAnalyticsService,
     // P6.3: single gateway for every AI call of Flows (quota, ledger, alerts).
     WorkflowAiService,
+    WorkflowAiUsageService,
+    // P6.4: weekly AI narrative of the analytics (hourly cron, Monday 08:00 store time).
+    WorkflowInsightsService,
+    WorkflowInsightsCron,
     WorkflowFilesService,
     WorkflowCommentsService,
     WorkflowInboxService,
