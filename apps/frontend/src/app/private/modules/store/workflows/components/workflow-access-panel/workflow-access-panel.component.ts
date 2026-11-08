@@ -45,16 +45,24 @@ const STAGE_PREFIX = 'stage:';
 
 const EMPTY: GroupDraft = { roles: [], users: [] };
 
-/** Drafts of the server document (what a section shows before any edit). */
-export function draftsFromAccess(access: WorkflowAccessDoc | null): Record<string, GroupDraft> {
+/**
+ * Drafts of the server document (what a section shows before any edit). Only
+ * the stages the flow still has get a draft: a rule left on a stage that was
+ * later removed has no section to show it, and saving it back would be refused.
+ */
+export function draftsFromAccess(
+  access: WorkflowAccessDoc | null,
+  stageKeys: readonly string[],
+): Record<string, GroupDraft> {
   const out: Record<string, GroupDraft> = {};
   const take = (id: string, group: WorkflowAccessGroup | undefined) => {
     if (group) out[id] = { roles: [...group.roles], users: [...group.user_ids] };
   };
   take(DESIGN, access?.design);
   take(VIEW, access?.view);
+  const current = new Set(stageKeys);
   for (const [key, stage] of Object.entries(access?.stages ?? {})) {
-    take(STAGE_PREFIX + key, stage.act);
+    if (current.has(key)) take(STAGE_PREFIX + key, stage.act);
   }
   return out;
 }
@@ -278,7 +286,7 @@ export class WorkflowAccessPanelComponent {
       .subscribe({
         next: (view) => {
           this.view.set(view);
-          this.drafts.set(draftsFromAccess(view.access));
+          this.drafts.set(draftsFromAccess(view.access, view.stages.map((stage) => stage.key)));
           this.loading.set(false);
         },
         error: (error) => {
