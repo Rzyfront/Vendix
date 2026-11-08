@@ -2,7 +2,11 @@ import {
   OPS_BY_FIELD_TYPE,
   STAGE_OUTCOMES,
   WORKFLOW_ACTIONS,
+  WORKFLOW_AI_FORBIDDEN_INPUT_TYPES,
+  WORKFLOW_AI_OUTPUT_TYPES,
+  WORKFLOW_AI_TASKS,
   WORKFLOW_END_OUTCOMES,
+  WORKFLOW_ERROR_THEN,
   WORKFLOW_EXAMPLE_PURCHASE_APPROVAL,
   WORKFLOW_FIELD_TYPES,
   WORKFLOW_KEY_PATTERN,
@@ -230,6 +234,10 @@ const SCHEMA_RULES_ES = [
   'Solo `role_key` y `group_key` de las listas de la tienda (`role_keys`, `group_keys`). Nunca inventes roles ni grupos: si no hay uno adecuado, usa `initiator` y avisa a la persona.',
   'Requisitos: `upload` y `file_field` siempre; `issued_document` solo con una `template_key` de las plantillas publicadas de la tienda (`published_template_keys`; con `auto_issue_on_enter: true` se emite al entrar a la etapa), y `signature` solo con `of` = clave de un `issued_document` de la misma etapa. Nunca inventes una plantilla: si no está publicada, avisa a la persona.',
   '`quorum.required` solo en aprobaciones. Un rechazo siempre rechaza.',
+  'Etapa `ai` (paso de IA): exige el objeto `ai` (ver `ai_step`) y no admite `form` ni `requirements`. Sin `ai.review` no lleva `assignee` y sale con una transición `auto`; con `ai.review: true` lleva `assignee` (la persona revisa y puede editar lo que escribió la IA) y sale con `approve` (y `reject` opcional).',
+  'Paso de IA: `inputs` son claves de campos declarados que la IA lee (nunca de tipo file ni user); `outputs` son los campos que escribe, del tipo que admite su tarea (`ai_step.output_types`) y nunca calculados. classify, decide, summarize y draft escriben exactamente un campo; extract, uno o varios.',
+  'Paso de IA con `task: decide`: la transición de salida (`auto`, o `approve` con revisión) necesita al menos una rama con `when` sobre el campo que escribe la IA y una rama por defecto.',
+  'Si la IA falla o no hay cupo: con `ai.review` nace la tarea de revisión para llenarlo a mano; sin revisión manda `ai.on_error.then` (continue por defecto, route a `route_to` o fail). Para un campo obligatorio usa `review: true` o `on_error` con `route` a una etapa de formulario.',
   'Tú propones el JSON; la validez la decide siempre el validador, nunca tú.',
 ];
 
@@ -265,7 +273,35 @@ function schemaReference(ctx: WorkflowValidationContext) {
     stage_outcomes: STAGE_OUTCOMES,
     end_outcomes: WORKFLOW_END_OUTCOMES,
     stage:
-      '{ key, name, type, start?, outcome? (end), assignee?, quorum?, form?: {fields:[keys]}, requirements?, transitions?: [{to,on,when?,require_comment?,label?}], due?: {hours,on_overdue?}, on_enter?, on_exit? }',
+      '{ key, name, type, start?, outcome? (end), assignee?, quorum?, form?: {fields:[keys]}, requirements?, ai? (solo type "ai"), transitions?: [{to,on,when?,require_comment?,label?}], due?: {hours,on_overdue?}, on_enter?, on_exit? }',
+    ai_step: {
+      shape:
+        '{ task, instructions, inputs: [claves], outputs: [claves], confidence_field?, review?, on_error?: { retries?, then?, route_to? } }',
+      tasks: WORKFLOW_AI_TASKS,
+      output_types: WORKFLOW_AI_OUTPUT_TYPES,
+      forbidden_input_types: WORKFLOW_AI_FORBIDDEN_INPUT_TYPES,
+      on_error_then: WORKFLOW_ERROR_THEN,
+      limits: {
+        max_instructions: WORKFLOW_LIMITS.maxAiInstructions,
+        max_inputs: WORKFLOW_LIMITS.maxAiInputs,
+        max_outputs: WORKFLOW_LIMITS.maxAiOutputs,
+        max_retries: WORKFLOW_LIMITS.maxActionRetries,
+      },
+      confidence_field: 'Opcional: campo number no calculado, distinto de inputs y outputs, que recibe la confianza (0 a 1).',
+      example: {
+        key: 'clasificar',
+        name: 'Clasificar con IA',
+        type: 'ai',
+        ai: {
+          task: 'classify',
+          instructions: 'Clasifica el caso como Petición, Queja o Reclamo según el asunto y el detalle.',
+          inputs: ['asunto', 'detalle'],
+          outputs: ['tipo'],
+          on_error: { then: 'route', route_to: 'clasificar_manual' },
+        },
+        transitions: [{ on: 'auto', to: 'responder' }],
+      },
+    },
     assignee_kinds: [
       '{ "kind": "initiator" }',
       '{ "kind": "role", "role_key": "<de role_keys>" }',

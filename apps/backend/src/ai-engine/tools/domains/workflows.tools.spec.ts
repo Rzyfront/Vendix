@@ -284,6 +284,51 @@ describe('workflows_schema_reference', () => {
     expect(out.stage_outcomes.approval).toEqual(['approve', 'reject']);
     expect(out.rules.join(' ')).toMatch(/Nunca inventes roles/);
   });
+
+  it('r1: describes the AI step so Vex can build one the validator accepts', async () => {
+    const { tool } = build();
+    const out = await call(tool('workflows_schema_reference'));
+    expect(out.stage_types).toContain('ai');
+    expect(out.stage).toMatch(/ai\?/);
+    expect(out.ai_step.tasks).toEqual(['classify', 'extract', 'summarize', 'draft', 'decide']);
+    expect(out.ai_step.output_types.classify).toEqual(['select']);
+    expect(out.ai_step.output_types.draft).toEqual(['text', 'textarea']);
+    expect(out.ai_step.forbidden_input_types).toEqual(['file', 'user']);
+    expect(out.ai_step.on_error_then).toEqual(['continue', 'route', 'fail']);
+    expect(out.ai_step.example.ai.task).toBe('classify');
+    expect(out.rules.join(' ')).toMatch(/Etapa `ai`/);
+  });
+
+  it('r1: the AI step example passes the validator inside a real flow', async () => {
+    const { tool } = build();
+    const { ai_step } = await call(tool('workflows_schema_reference'));
+    const def = {
+      schema: 'vendix.workflow/v1',
+      key: 'pqr-ia',
+      name: 'PQR con IA',
+      fields: [
+        { key: 'tipo', type: 'select', label: 'Tipo', required: true, options: [{ value: 'Queja', label: 'Queja' }] },
+        { key: 'asunto', type: 'text', label: 'Asunto' },
+        { key: 'detalle', type: 'textarea', label: 'Detalle' },
+      ],
+      stages: [
+        { key: 'radicar', name: 'Radicar', type: 'form', start: true, assignee: { kind: 'initiator' }, form: { fields: ['asunto', 'detalle'] }, transitions: [{ on: 'submit', to: 'clasificar' }] },
+        ai_step.example,
+        { key: 'clasificar_manual', name: 'Clasificar a mano', type: 'form', assignee: { kind: 'initiator' }, form: { fields: ['tipo'] }, transitions: [{ on: 'submit', to: 'responder' }] },
+        { key: 'responder', name: 'Responder', type: 'end', outcome: 'completed' },
+      ],
+    };
+    const result = validateWorkflowDefinition(def, {
+      roleKeys: [],
+      groupKeys: [],
+      userIds: [],
+      publishedTemplateKeys: [],
+      flowKeys: [],
+      secretNames: [],
+      collections: {},
+    });
+    expect(result.errors).toEqual([]);
+  });
 });
 
 describe('workflows_validate_definition', () => {
