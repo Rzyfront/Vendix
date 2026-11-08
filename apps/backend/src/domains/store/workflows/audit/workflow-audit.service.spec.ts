@@ -89,6 +89,23 @@ describe('WorkflowAuditService', () => {
     expect(JSON.stringify(row.details)).not.toContain('super-secreto');
   });
 
+  it('cuts long text without splitting an emoji, so what is stored is what was hashed', async () => {
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    await as(10, () =>
+      audit.recordNow({
+        action: 'secret.updated',
+        target_type: 'secret',
+        target_id: 'API_ERP',
+        summary: `${'a'.repeat(499)}😀 y más`,
+        details: { note: `${'b'.repeat(1999)}😀` },
+      }),
+    );
+    const [row] = rows();
+    expect(row.summary).toBe('a'.repeat(499));
+    expect(lone.test(row.summary)).toBe(false);
+    expect((row.details as { note: string }).note).toBe('b'.repeat(1999));
+  });
+
   it('marks the actor as system when no user is authenticated', async () => {
     await as(10, () => audit.recordNow({ action: 'export.requested', target_type: 'export', summary: 'Exportación programada' }), null);
     expect(rows()[0]).toMatchObject({ actor_type: 'system', actor_id: null, ip_address: null, user_agent: null });

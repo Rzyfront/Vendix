@@ -126,7 +126,7 @@ export function auditEntryHash(prevHash: string | null, row: WorkflowAuditHashab
 export function sanitizeAuditDetails(value: unknown, depth = 0): unknown {
   if (value === null || value === undefined) return null;
   if (typeof value === 'bigint') return value.toString();
-  if (typeof value === 'string') return value.length > MAX_DETAIL_STRING ? value.slice(0, MAX_DETAIL_STRING) : value;
+  if (typeof value === 'string') return cutText(value, MAX_DETAIL_STRING);
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value === 'boolean') return value;
   if (value instanceof Date) return value.toISOString();
@@ -167,9 +167,20 @@ export function verifyAuditChain(
   return { valid: true, count: Number(expected), broken_at_seq: null, last_hash: prev, next_seq: expected };
 }
 
+/**
+ * At most `max` UTF-16 units, never half of a surrogate pair: a lone half
+ * would be stored as U+FFFD (or refused by jsonb), so the stored row would
+ * no longer match its hash.
+ */
+export function cutText(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const code = value.charCodeAt(max - 1);
+  return value.slice(0, code >= 0xd800 && code <= 0xdbff ? max - 1 : max);
+}
+
 function clip(value: string | null | undefined, max: number): string | null {
   if (value === null || value === undefined || value === '') return null;
-  return value.length > max ? value.slice(0, max) : value;
+  return cutText(value, max);
 }
 
 /**
@@ -230,11 +241,11 @@ export class WorkflowAuditService {
       actor_type: actor.type,
       actor_id: actor.id,
       actor_label: clip(actor.label, 160),
-      target_type: input.target_type.slice(0, 40),
+      target_type: cutText(input.target_type, 40),
       target_id: input.target_id === null || input.target_id === undefined ? null : clip(String(input.target_id), 64),
       definition_id: input.definition_id ?? null,
       instance_id: input.instance_id ?? null,
-      summary: input.summary.slice(0, 500),
+      summary: cutText(input.summary, 500),
       details: sanitizeAuditDetails(input.details ?? {}) ?? {},
       ip_address: clip(origin?.ip_address, 64),
       user_agent: clip(origin?.user_agent, 300),
