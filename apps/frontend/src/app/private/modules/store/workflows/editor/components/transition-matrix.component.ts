@@ -1,9 +1,7 @@
 import { Component, computed, inject } from '@angular/core';
 import { ButtonComponent, SelectorComponent } from '../../../../../../shared/components/index';
-import {
-  STAGE_OUTCOMES,
-  WorkflowStageDef,
-} from '../../../../../../shared/workflows/contract/workflow-contract';
+import { WorkflowStageDef } from '../../../../../../shared/workflows/contract/workflow-contract';
+import { stageOutcomes } from '../../../../../../shared/workflows/contract/workflow-runtime';
 import { WorkflowEditorStore } from '../workflow-editor.store';
 import { describeCondition, outcomeText } from '../workflow-editor.utils';
 
@@ -71,7 +69,7 @@ export class TransitionMatrixComponent {
   }
 
   applies(stage: WorkflowStageDef, outcome: string): boolean {
-    return STAGE_OUTCOMES[stage.type].includes(outcome);
+    return stageOutcomes(stage).includes(outcome);
   }
 
   defaultOf(stage: WorkflowStageDef, outcome: string): string | null {

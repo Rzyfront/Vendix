@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
-import { WorkflowDefinitionV1, WorkflowStageDef, findStage } from '@common/workflows/contract';
+import {
+  WorkflowDefinitionV1,
+  WorkflowStageDef,
+  findStage,
+  stageFormKeys,
+} from '@common/workflows/contract';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { quickOutcomes } from '../engine/workflow-move-rules';
 
@@ -145,7 +150,7 @@ export class WorkflowInboxService {
           assignee: this.assignee(t, names),
           // P5.5: what the mobile list needs to act without opening the detail.
           stage_type: stage?.type ?? null,
-          has_form: (stage?.form?.fields.length ?? 0) > 0,
+          has_form: !!stage && stageFormKeys(stage).length > 0,
           quick_outcomes: quick,
           comment_outcomes:
             definition && stage ? this.commentOutcomes(definition, stage, instance.data ?? {}, quick) : [],

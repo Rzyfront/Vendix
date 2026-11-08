@@ -2,6 +2,7 @@ import {
   WorkflowDefinitionV1,
   WorkflowStageDef,
   isHumanStage,
+  stageFormKeys,
   stageOutcomes,
   visibleFieldKeys,
 } from '@common/workflows/contract';
@@ -57,7 +58,7 @@ export function quickOutcomes(
 /** Moves a card can make out of `stage`, with whether the UI must open the modal. */
 export function stageMoves(stage: WorkflowStageDef): StageMove[] {
   const outcomes = new Set(usableOutcomes(stage));
-  const hasForm = (stage.form?.fields.length ?? 0) > 0;
+  const hasForm = stageFormKeys(stage).length > 0;
   const blocking = hasBlockingRequirement(stage);
   const quorum = (stage.quorum?.required ?? 1) > 1;
   const seen = new Set<string>();

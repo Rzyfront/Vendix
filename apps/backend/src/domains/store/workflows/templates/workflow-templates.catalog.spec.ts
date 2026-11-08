@@ -75,4 +75,35 @@ describe('workflow templates catalog', () => {
     expect(types('retiro-empleado')).toContain('parallel');
     expect(types('renovacion-contratos')).toContain('wait');
   });
+
+  it('pqr classifies and drafts with AI, a person reviews the draft and the case never dead-ends', () => {
+    const def = WORKFLOW_TEMPLATES.find((t) => t.key === 'pqr')!.definition;
+    const stage = (key: string) => def.stages.find((s) => s.key === key)!;
+    expect(def.stages.map((s) => s.key)).toEqual([
+      'radicacion', 'clasificar', 'clasificar_manual', 'redactar', 'revision', 'cerrada', 'cerrada_sin_respuesta',
+    ]);
+    expect(stage('clasificar')).toMatchObject({
+      name: 'Clasificar con IA',
+      type: 'ai',
+      ai: { task: 'classify', outputs: ['tipo'] },
+    });
+    // r1: without quota or with a failed answer the required type is picked by hand.
+    expect(stage('clasificar').ai?.on_error).toEqual({ then: 'route', route_to: 'clasificar_manual' });
+    expect(stage('clasificar_manual')).toMatchObject({
+      type: 'form',
+      form: { fields: ['tipo'] },
+      assignee: { kind: 'role', role_key: 'employee' },
+      transitions: [{ on: 'submit', to: 'redactar' }],
+    });
+    expect(stage('redactar')).toMatchObject({
+      name: 'Redactar respuesta con IA',
+      type: 'ai',
+      ai: { task: 'draft', outputs: ['respuesta'], review: true },
+      assignee: { kind: 'role', role_key: 'employee' },
+      due: { hours: 72 },
+    });
+    expect(stage('revision').transitions?.find((t) => t.on === 'return')?.to).toBe('redactar');
+    const reachable = new Set(def.stages.flatMap((s) => (s.transitions ?? []).map((t) => t.to)));
+    expect(reachable.has('cerrada_sin_respuesta')).toBe(true);
+  });
 });

@@ -437,3 +437,70 @@ describe('simulateWorkflow: parallel stages and variables per step', () => {
     expect(r.steps[0]).toMatchObject({ stage_key: 'solicitud', type: 'form', data: {} });
   });
 });
+
+describe('simulateWorkflow — paso de IA (P6)', () => {
+  const NOTE = 'El simulador no llama a la IA: usa los datos de prueba';
+  const def = (review: boolean): WorkflowDefinitionV1 =>
+    ({
+      schema: 'vendix.workflow/v1',
+      key: 'pqr',
+      name: 'PQR',
+      fields: [
+        { key: 'detalle', type: 'textarea', label: 'Detalle' },
+        { key: 'respuesta', type: 'textarea', label: 'Respuesta' },
+      ],
+      stages: [
+        {
+          key: 'inicio', name: 'Inicio', type: 'form', start: true,
+          assignee: { kind: 'initiator' },
+          form: { fields: ['detalle'] },
+          transitions: [{ to: 'ia', on: 'submit' }],
+        },
+        {
+          key: 'ia', name: 'Redactar', type: 'ai',
+          ai: { task: 'draft', instructions: 'Redacta.', inputs: ['detalle'], outputs: ['respuesta'], ...(review ? { review: true } : {}) },
+          ...(review ? { assignee: { kind: 'role', role_key: 'manager' } } : {}),
+          transitions: review
+            ? [{ to: 'fin', on: 'approve' }, { to: 'inicio', on: 'reject' }]
+            : [{ to: 'fin', on: 'auto' }],
+        },
+        { key: 'fin', name: 'Fin', type: 'end', outcome: 'completed' },
+      ],
+    }) as unknown as WorkflowDefinitionV1;
+
+  it('sin revisión: pasa de largo con los datos de prueba y avisa que no llama a la IA', () => {
+    const r = simulateWorkflow(def(false), {
+      state: { stage_key: 'inicio', data: {} },
+      outcome: 'submit',
+      values: { detalle: 'Cobro doble' },
+    });
+    expect(r.path).toEqual(['inicio', 'ia', 'fin']);
+    expect(r.ended).toEqual({ outcome: 'completed' });
+    expect(r.tasks).toEqual([]);
+    expect(r.notes).toEqual([NOTE]);
+  });
+
+  it('con revisión: abre una tarea de revisión y el revisor aprueba con su texto', () => {
+    const enter = simulateWorkflow(def(true), {
+      state: { stage_key: 'inicio', data: {} },
+      outcome: 'submit',
+      values: { detalle: 'Cobro doble' },
+    });
+    expect(enter.to_stage).toMatchObject({ key: 'ia', type: 'ai' });
+    expect(enter.tasks).toEqual([
+      { stage_key: 'ia', kind: 'review', assignee: { kind: 'role', label: 'Rol: manager' } },
+    ]);
+    expect(enter.notes).toEqual([NOTE]);
+    const done = simulateWorkflow(def(true), {
+      state: { stage_key: 'ia', data: { detalle: 'x' } },
+      outcome: 'approve',
+      values: { respuesta: 'Texto del revisor' },
+    });
+    expect(done.data.respuesta).toBe('Texto del revisor');
+    expect(done.ended).toEqual({ outcome: 'completed' });
+  });
+
+  it('sin etapas de IA no hay notas', () => {
+    expect(simulateWorkflow(EX).notes).toEqual([]);
+  });
+});

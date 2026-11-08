@@ -38,6 +38,7 @@ const result: SimulationWithSteps = {
   ended: { outcome: 'completed' },
   loop_guard: false,
   watermark: 'SIMULACIÓN',
+  notes: ['El simulador no llama a la IA: usa los datos de prueba'],
   steps: [
     { stage_key: 'solicitud', stage_name: 'Solicitud', type: 'form', data: { monto: 3000000 }, changed: ['monto'] },
     {
@@ -102,6 +103,12 @@ describe('SimulatorPanelComponent', () => {
     expect(changed?.[0].textContent).toContain('revisado');
     expect(changed?.[0].textContent).toContain('cambió');
     expect(step?.querySelectorAll('tr[data-changed="false"]').length).toBe(1);
+  });
+
+  it('muestra las notas de la simulación, como que no llama a la IA', () => {
+    expect(el().querySelector('[data-testid="sim-notes"]')?.textContent).toContain(
+      'El simulador no llama a la IA',
+    );
   });
 
   it('variableRows incluye una variable quitada por el paso', () => {

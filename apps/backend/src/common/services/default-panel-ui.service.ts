@@ -219,6 +219,7 @@ export class DefaultPanelUIService {
         flows_list: true,
         flows_inbox: true,
         flows_board: true,
+        flows_insights: true,
         flows_templates: true,
         flows_records: true,
         flows_connectors: true,

@@ -9,7 +9,7 @@ import {
   TextareaComponent,
   ToggleComponent,
 } from '../../../../../../shared/components/index';
-import { STAGE_OUTCOMES } from '../../../../../../shared/workflows/contract/workflow-contract';
+import { isAutoAiStage, stageOutcomes } from '../../../../../../shared/workflows/contract/workflow-runtime';
 import { SimulatedParallel, SimulatedStep, SimulationWithSteps } from '../../interfaces/workflow-debug.interfaces';
 import { SimulatedAction } from '../../interfaces/workflow.interfaces';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
@@ -72,6 +72,8 @@ interface SimState {
               </p>
             } @else if (current.type === 'automatic') {
               <p class="text-sm text-text-secondary">Etapa automática: avanza sola.</p>
+            } @else if (isAutoAi(current)) {
+              <p class="text-sm text-text-secondary">Paso de IA sin revisión: avanza solo. El simulador no llama a la IA.</p>
             } @else {
               @if (fields().length > 0) {
                 <app-workflow-stage-form
@@ -122,6 +124,11 @@ interface SimState {
             }
             @if (res.loop_guard) {
               <p class="text-sm font-semibold text-warning">Se detuvo: las etapas automáticas parecen repetirse en bucle.</p>
+            }
+            @if ((res.notes ?? []).length > 0) {
+              <ul class="list-disc pl-5 text-xs text-text-secondary" data-testid="sim-notes">
+                @for (note of res.notes; track $index) { <li>{{ note }}</li> }
+              </ul>
             }
             @if (advanced()) {
               <p class="text-sm font-semibold text-text-primary">
@@ -237,8 +244,9 @@ export class SimulatorPanelComponent {
   readonly requirements = computed(() => this.stage()?.requirements ?? []);
   readonly outcomes = computed(() => {
     const stage = this.stage();
-    return stage ? STAGE_OUTCOMES[stage.type] : [];
+    return stage ? stageOutcomes(stage) : [];
   });
+  readonly isAutoAi = isAutoAiStage;
   readonly seedKey = computed(() => `${this.state()?.stage_key ?? ''}#${this.steps()}`);
   readonly advanced = computed(() => {
     const r = this.last();

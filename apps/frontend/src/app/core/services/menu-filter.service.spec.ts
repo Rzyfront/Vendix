@@ -1157,6 +1157,7 @@ describe('MenuFilterService — hijos de Flujos y Documentos (P5.7)', () => {
       { label: 'Todos los flujos', route: '/admin/workflows', key: 'flows_list' },
       { label: 'Mis tareas', route: '/admin/workflows/inbox', key: 'flows_inbox' },
       { label: 'Tablero general', route: '/admin/workflows/board', key: 'flows_board' },
+      { label: 'Analítica IA', route: '/admin/workflows/insights', key: 'flows_insights' },
       { label: 'Galería de plantillas', route: '/admin/workflows/templates', key: 'flows_templates' },
       { label: 'Registros', route: '/admin/workflows/records', key: 'flows_records' },
       { label: 'Conectores', route: '/admin/workflows/connectors', key: 'flows_connectors' },

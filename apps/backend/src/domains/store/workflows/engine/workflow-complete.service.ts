@@ -4,6 +4,7 @@ import {
   WorkflowDefinitionV1,
   WorkflowStageDef,
   resolveTransition,
+  stageFormKeys,
   stageOutcomes,
   validateFormValues,
 } from '@common/workflows/contract';
@@ -95,7 +96,7 @@ export class WorkflowCompleteService {
     }
     // 3. Form (decisions that send the case back / reject need no values).
     let data = instance.data ?? {};
-    if (stage.form?.fields.length && !['reject', 'return'].includes(input.outcome)) {
+    if (stageFormKeys(stage).length && !['reject', 'return'].includes(input.outcome)) {
       const form = validateFormValues(definition, stage, input.values ?? {});
       if (!form.ok) {
         throw new VendixHttpException(ErrorCodes.WORKFLOW_FORM_INVALID, undefined, {

@@ -217,12 +217,33 @@ export function startStage(
   return def.stages.find((s) => s.start === true);
 }
 
+/**
+ * Outcomes the stage resolves with. An `ai` stage resolves `auto` by itself
+ * and, with `review`, `approve` / `reject` once a person decides.
+ */
 export function stageOutcomes(stage: WorkflowStageDef): readonly string[] {
+  if (stage.type === "ai") return stage.ai?.review ? ["approve", "reject"] : ["auto"];
   return STAGE_OUTCOMES[stage.type] ?? [];
 }
 
+/** A stage a person completes (an `ai` stage only with `review: true`). */
 export function isHumanStage(stage: WorkflowStageDef): boolean {
+  if (stage.type === "ai") return stage.ai?.review === true;
   return HUMAN_STAGE_TYPES.includes(stage.type);
+}
+
+/** P6.1: an `ai` stage without review; the engine resolves it, nobody does. */
+export function isAutoAiStage(stage: WorkflowStageDef): boolean {
+  return stage.type === "ai" && stage.ai?.review !== true;
+}
+
+/**
+ * Keys of the fields a person fills when completing the stage: its form, or
+ * the outputs of an `ai` stage under review (the reviewer may edit them).
+ */
+export function stageFormKeys(stage: WorkflowStageDef): readonly string[] {
+  if (stage.type === "ai") return stage.ai?.review ? stage.ai.outputs : [];
+  return stage.form?.fields ?? [];
 }
 
 /** Keys of the stage form fields whose `visible_when` passes for `data`. */
@@ -232,7 +253,7 @@ export function visibleFieldKeys(
   data: Record<string, unknown>,
 ): string[] {
   const out: string[] = [];
-  for (const key of stage.form?.fields ?? []) {
+  for (const key of stageFormKeys(stage)) {
     const f = def.fields.find((x) => x.key === key);
     if (!f) continue;
     if (
@@ -343,7 +364,7 @@ export function validateFormValues(
       values: out,
     };
   }
-  const formKeys = new Set(stage.form?.fields ?? []);
+  const formKeys = new Set(stageFormKeys(stage));
   const visible = new Set(visibleFieldKeys(def, stage, values));
   // P2.9: calculated fields are read-only; the engine recomputes them.
   const computed = new Set(

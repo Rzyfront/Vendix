@@ -13,12 +13,12 @@ import {
   WorkflowGuardDef,
   WorkflowStageDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
+import { isHumanStage } from '../../../../../../../shared/workflows/contract/workflow-runtime';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
 import { removeAt, replaceAt } from '../../workflow-editor.utils';
 import { ConditionBuilderComponent } from '../condition-builder.component';
 
 const NO_REDIRECT = '__none__';
-const HUMAN_STAGE_TYPES: ReadonlySet<string> = new Set(['form', 'approval', 'review']);
 
 /** Guardas tab: rules checked before the stage advances; they block with a message or redirect. */
 @Component({
@@ -85,7 +85,7 @@ export class StageGuardsTabComponent {
   readonly guards = computed(() => this.stage().guards ?? []);
   readonly fields = computed(() => this.store.draft()?.fields ?? []);
   /** Only a stage a person submits may have a guard that just blocks. */
-  readonly humanStage = computed(() => HUMAN_STAGE_TYPES.has(this.stage().type));
+  readonly humanStage = computed(() => isHumanStage(this.stage()));
   readonly redirectOptions = computed(() => [
     ...(this.humanStage() ? [{ value: NO_REDIRECT, label: 'No redirigir (solo bloquear)' }] : []),
     ...(this.store.draft()?.stages ?? [])

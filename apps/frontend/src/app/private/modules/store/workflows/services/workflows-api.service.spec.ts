@@ -84,4 +84,15 @@ describe('WorkflowsApiService — contrato con el backend', () => {
     req.flush({ data: { retried: true } });
     expect(retried).toBeTrue();
   });
+
+  it('probar un paso de IA hace POST a ai-step-test y desenvuelve la respuesta', () => {
+    let result: unknown;
+    const body = { stage_key: 'clasificar', data: { asunto: 'Hola' } };
+    api.testAiStep(3, body).subscribe((r) => (result = r));
+    const req = http.expectOne((r) => r.url.endsWith('/definitions/3/ai-step-test'));
+    expect(req.request.method).toBe('POST');
+    expect(req.request.body).toEqual(body);
+    req.flush({ data: { status: 'skipped_quota', message: 'Sin cupo' } });
+    expect(result).toEqual({ status: 'skipped_quota', message: 'Sin cupo' });
+  });
 });

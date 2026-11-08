@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { RequestContextService } from '@common/context/request-context.service';
 import { WorkflowDefinitionV1 } from '@common/workflows/contract';
 import { WorkflowAdvanceService } from '../../domains/store/workflows/engine/workflow-advance.service';
+import { WorkflowAiStepService } from '../../domains/store/workflows/engine/workflow-ai-step.service';
 import { WorkflowAssignmentService } from '../../domains/store/workflows/engine/workflow-assignment.service';
 import { WorkflowCompleteService } from '../../domains/store/workflows/engine/workflow-complete.service';
 import { WorkflowEngineService } from '../../domains/store/workflows/engine/workflow-engine.service';
@@ -85,6 +86,18 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     events,
     ticker,
   );
+  // The metered AI gateway is a mock: specs script `aiGateway.run`.
+  const aiGateway = { run: jest.fn() };
+  const aiStep = new WorkflowAiStepService(
+    prisma,
+    loader,
+    events,
+    stages,
+    advancer,
+    ticker,
+    engine,
+    aiGateway as any,
+  );
   const instances = new WorkflowInstancesService(prisma, assignment, requirements, dossiers, events);
   const workflowFiles = new WorkflowFilesService(
     prisma,
@@ -112,6 +125,8 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
     db,
     prisma,
     engine,
+    aiStep,
+    aiGateway,
     groups,
     dossiers,
     requirements,

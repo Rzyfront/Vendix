@@ -78,6 +78,7 @@ describe('module-industries — parity and map invariants', () => {
       'flows_list',
       'flows_inbox',
       'flows_board',
+      'flows_insights',
       'flows_templates',
       'flows_records',
       'flows_connectors',

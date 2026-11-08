@@ -25,6 +25,7 @@ import {
 /** Outbox kinds of the P2 engine. */
 export const SUBFLOW_START_OUTBOX_KIND = 'subflow_start';
 export const SUBFLOW_CLOSED_OUTBOX_KIND = 'subflow_closed';
+export const AI_STEP_OUTBOX_KIND = 'ai_step';
 export const DEFAULT_STORE_TIMEZONE = 'America/Bogota';
 
 /** P3.2: a staged `vendix.*` action; the HTTP node also carries its `output` map. */
@@ -166,7 +167,8 @@ export class WorkflowStageService {
       current_stage_key: stage.key,
       stage_entered_at: now,
       stage_entry_seq: previousEntrySeq + 1,
-      stage_due_at: stage.due
+      // An `ai` stage starts its review clock when the review task opens.
+      stage_due_at: stage.due && stage.type !== 'ai'
         ? new Date(now.getTime() + stage.due.hours * 3_600_000)
         : null,
       stage_last_reminded_at: null,
@@ -277,6 +279,10 @@ export class WorkflowStageService {
       }
       return;
     }
+    if (stage.type === 'ai' && stage.ai) {
+      await this.enqueueAiStep(tx, instance, stage);
+      return;
+    }
     if (stage.type === 'automatic' || stage.type === 'loop') {
       await this.events.enqueue(tx, {
         store_id: instance.store_id,
@@ -292,6 +298,51 @@ export class WorkflowStageService {
     }
     if (!isHumanStage(stage)) return;
     await this.createTask(tx, args, null);
+  }
+
+  /**
+   * P6.1: the AI call never runs inside the entering transaction. One outbox
+   * row per entry; its attempts follow `ai.on_error.retries` like an action.
+   */
+  private async enqueueAiStep(
+    tx: WorkflowTx,
+    instance: WorkflowInstanceRow,
+    stage: WorkflowStageDef,
+  ): Promise<void> {
+    const retries = stage.ai?.on_error?.retries;
+    await this.events.enqueue(tx, {
+      store_id: instance.store_id,
+      instance_id: instance.id,
+      kind: AI_STEP_OUTBOX_KIND,
+      payload: {
+        instance_id: instance.id,
+        stage_key: stage.key,
+        stage_entry_seq: instance.stage_entry_seq,
+        max_attempts:
+          retries === undefined ? OUTBOX_MAX_ATTEMPTS : Math.min(retries + 1, OUTBOX_MAX_ATTEMPTS),
+      },
+    });
+  }
+
+  /**
+   * P6.1: the review task of an `ai` stage, opened once the AI wrote its
+   * outputs (or could not): its due date counts from now.
+   */
+  async openAiReviewTask(
+    tx: WorkflowTx,
+    args: { instance: WorkflowInstanceRow; stage: WorkflowStageDef },
+  ): Promise<WorkflowInstanceRow> {
+    const { instance, stage } = args;
+    const due = stage.due ? new Date(Date.now() + stage.due.hours * 3_600_000) : null;
+    if (due) {
+      await tx.workflow_instances.updateMany({
+        where: { id: instance.id, store_id: instance.store_id },
+        data: { stage_due_at: due },
+      });
+    }
+    const opened = { ...instance, stage_due_at: due };
+    await this.createTask(tx, { instance: opened, stage, actor: { type: 'system', id: null } }, null);
+    return opened;
   }
 
   /**
@@ -326,7 +377,7 @@ export class WorkflowStageService {
     const assignable: WorkflowStageDef = branch
       ? { key: stage.key, name: branch.name, type: 'form', assignee: branch.assignee }
       : stage;
-    const kind = branch ? 'form' : stage.type;
+    const kind = branch ? 'form' : stage.type === 'ai' ? 'review' : stage.type;
     const assigned = await this.assignment.resolveForStage(tx, assignable, instance);
     const task = await tx.workflow_tasks.create({
       data: {

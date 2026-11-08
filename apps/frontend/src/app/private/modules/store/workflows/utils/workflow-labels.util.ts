@@ -53,6 +53,7 @@ export function instanceStatusTone(status: string): BadgeTone {
 
 export const EVENT_LABEL: Record<string, string> = {
   started: 'Solicitud iniciada',
+  transitioned: 'Avanzó de etapa',
   task_completed: 'Etapa completada',
   vote: 'Voto registrado',
   claimed: 'Tarea tomada',
@@ -76,6 +77,8 @@ export const EVENT_LABEL: Record<string, string> = {
   action_retried: 'Acción reenviada',
   error_routed: 'Enviada a la ruta de error',
   migrated: 'Solicitud migrada',
+  ai_step_completed: 'Paso de IA completado',
+  ai_step_failed: 'Paso de IA fallido',
   external_upload: 'Documento enviado por el solicitante',
   external_message: 'Respuesta del solicitante',
   email_received: 'Correo recibido',
@@ -96,6 +99,21 @@ const CHILD_OUTCOME_LABEL: Record<string, string> = {
   cancelled: 'cancelada',
   failed: 'con error',
 };
+
+const AI_TASK_LABEL: Record<string, string> = {
+  classify: 'clasificó',
+  extract: 'extrajo datos',
+  summarize: 'resumió',
+  draft: 'redactó',
+  decide: 'decidió la rama',
+};
+
+/** "82 %" from a 0..1 confidence; empty when it is not a number. */
+function confidencePercent(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? `${Math.round(Math.min(1, Math.max(0, value)) * 100)} %`
+    : '';
+}
 
 /**
  * Timeline line of an event: the label plus the details of its payload
@@ -135,6 +153,13 @@ export function eventDescription(
     case 'signature_declined':
     case 'signature_cancelled':
       return p['label'] ? text(p['label']) : label;
+    case 'ai_step_completed': {
+      const task = AI_TASK_LABEL[text(p['task'])];
+      const confidence = confidencePercent(p['confidence']);
+      return `${label}${task ? ': ' + task : ''}${confidence ? ` (confianza ${confidence})` : ''}`;
+    }
+    case 'ai_step_failed':
+      return p['reason'] ? `${label}: ${text(p['reason'])}` : label;
     case 'migrated':
       return `Migrada de v${text(p['from_version'])} a v${text(p['to_version'])}`;
     case 'started':
@@ -285,4 +310,17 @@ export function instanceSubject(
     text: `Sobre: ${SUBJECT_LABEL[type] ?? type} #${id}`,
     link: base ? [base, String(id)] : null,
   };
+}
+
+/**
+ * Text of a stored request value: a list field shows the label of each chosen
+ * option (an AI step writes the option value), a yes/no field "Sí"/"No".
+ */
+export function fieldDisplayValue(
+  raw: unknown,
+  options?: { value: string; label: string }[],
+): string {
+  if (typeof raw === 'boolean') return raw ? 'Sí' : 'No';
+  const one = (v: unknown) => options?.find((o) => o.value === v)?.label ?? String(v);
+  return Array.isArray(raw) ? raw.map(one).join(', ') : one(raw);
 }

@@ -5,7 +5,8 @@ import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { S3Service } from '@common/services/s3.service';
 import { WorkflowDefinitionV1, WorkflowFieldDef, findStage } from '@common/workflows/contract';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
-import { AIMessage, AIMessageContentPart } from '../../../../ai-engine/interfaces/ai-provider.interface';
+import { WorkflowAiService } from '../../workflows/ai/workflow-ai.service';
+import { AIMessage, AIMessageContentPart, AIResponse } from '../../../../ai-engine/interfaces/ai-provider.interface';
 import { parseAiJson } from '../../../../ai-engine/utils/ai-json.util';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { ReceivedDocumentPagesService } from '../../../received-documents/services/received-document-pages.service';
@@ -189,6 +190,7 @@ export class DocumentChecksService {
     private readonly ai: AIEngineService,
     private readonly pages: ReceivedDocumentPagesService,
     private readonly s3: S3Service,
+    private readonly workflowAi: WorkflowAiService,
   ) {}
 
   private ctx() {
@@ -249,6 +251,7 @@ export class DocumentChecksService {
     requested.sort((a, b) => a.key.localeCompare(b.key));
     return {
       requested,
+      definitionId: instance.definition_id,
       context: {
         workflow: definition.name,
         stage: stage.name,
@@ -302,7 +305,7 @@ export class DocumentChecksService {
     if (!READABLE_MIMES.has(mime)) {
       throw new VendixHttpException(ErrorCodes.DOCUMENT_CHECK_FILE_UNSUPPORTED);
     }
-    const { requested, context } = await this.resolveFields(input.instance_id, input.field_keys);
+    const { requested, context, definitionId } = await this.resolveFields(input.instance_id, input.field_keys);
 
     // The request context decides `matches_request`, so it is part of the key:
     // the same file read for another request is a new reading.
@@ -350,6 +353,17 @@ export class DocumentChecksService {
     // No vision model linked → fail before consuming anything.
     await this.ai.assertVisionModelLinked(DOCUMENT_EXTRACT_APP_KEY);
 
+    // P6.3 soft block: with the plan quota used up the read does not call the
+    // AI, like the AI step; the screen shows "cupo agotado" and the person
+    // fills the fields by hand.
+    const blocked = await this.workflowAi.blockedQuota({
+      purpose: 'document_read',
+      appKey: DOCUMENT_EXTRACT_APP_KEY,
+      instanceId: input.instance_id,
+      definitionId,
+    });
+    if (blocked) throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_006);
+
     const created: CheckRow = await this.prisma.document_checks.create({
       data: {
         organization_id: c.organization_id,
@@ -385,6 +399,7 @@ export class DocumentChecksService {
       const response = await this.runWithTimeout(
         this.ai.run(DOCUMENT_EXTRACT_APP_KEY, {}, [this.buildMessage(prepared.pages, requested, context)]),
       );
+      await this.recordReadUsage(response, input.instance_id, definitionId);
       if (!response.success || !response.content) {
         this.logger.warn(`Document check ${created.id} failed: ${response.error ?? 'empty response'}`);
         throw new VendixHttpException(ErrorCodes.DOCUMENT_CHECK_AI_FAILED);
@@ -420,6 +435,22 @@ export class DocumentChecksService {
       });
       throw e;
     }
+  }
+
+  /** P6.3: a document read spends plan tokens; attribute them to the request and its flow. */
+  private async recordReadUsage(response: AIResponse, instanceId: number, definitionId: number): Promise<void> {
+    const prompt = response.usage?.promptTokens ?? 0;
+    const completion = response.usage?.completionTokens ?? 0;
+    await this.workflowAi.recordUsage({
+      purpose: 'document_read',
+      status: response.success ? 'success' : 'failed',
+      appKey: DOCUMENT_EXTRACT_APP_KEY,
+      model: response.model ?? null,
+      tokens: { prompt, completion, total: response.usage?.totalTokens ?? prompt + completion },
+      instanceId,
+      definitionId,
+    });
+    if (response.success) await this.workflowAi.warnIfThresholdReached();
   }
 
   private runWithTimeout<T>(call: Promise<T>): Promise<T> {

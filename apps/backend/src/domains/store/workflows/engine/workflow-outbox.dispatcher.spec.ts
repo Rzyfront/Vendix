@@ -23,6 +23,7 @@ describe('WorkflowOutboxDispatcher', () => {
   };
   const notifications = { sendToUser: jest.fn() };
   const actions = { execute: jest.fn(), recordFailure: jest.fn() };
+  const aiStep = { execute: jest.fn(), onDead: jest.fn() };
   const fanout = { fanOut: jest.fn() };
   const mailer = { send: jest.fn() };
   const MIN = 60_000;
@@ -49,6 +50,8 @@ describe('WorkflowOutboxDispatcher', () => {
     notifications.sendToUser.mockReset().mockResolvedValue({ id: 1 });
     mailer.send.mockReset().mockResolvedValue('sent');
     actions.execute.mockReset();
+    aiStep.execute.mockReset().mockResolvedValue(undefined);
+    aiStep.onDead.mockReset().mockResolvedValue(undefined);
     actions.recordFailure.mockReset();
     const prisma = db.asStorePrisma();
     dispatcher = new WorkflowOutboxDispatcher(
@@ -61,6 +64,7 @@ describe('WorkflowOutboxDispatcher', () => {
       actions as any,
       fanout as any,
       {} as any,
+      aiStep as any,
     );
   });
 

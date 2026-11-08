@@ -2,10 +2,10 @@ import { Component, computed, inject, input } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/index';
 import {
-  HUMAN_STAGE_TYPES,
   WorkflowAssigneeDef,
   WorkflowStageDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
+import { isHumanStage } from '../../../../../../../shared/workflows/contract/workflow-runtime';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
 import { AssigneeEditorComponent } from '../assignee-editor.component';
 
@@ -44,7 +44,7 @@ export class StageAssigneeTabComponent {
   protected readonly store = inject(WorkflowEditorStore);
   readonly stage = input.required<WorkflowStageDef>();
 
-  readonly isHuman = computed(() => HUMAN_STAGE_TYPES.includes(this.stage().type));
+  readonly isHuman = computed(() => isHumanStage(this.stage()));
   readonly quorumAllowed = computed(() => {
     const kind = this.stage().assignee?.kind;
     return this.stage().type === 'approval' && (kind === 'role' || kind === 'group');

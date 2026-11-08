@@ -281,6 +281,9 @@ export class StorePrismaService extends BasePrismaService {
     'document_retention_policies',
     'document_purge_runs',
     'document_purge_items',
+    // IA dentro de Flujos (flujos-adm P6): store_id propio NOT NULL.
+    'workflow_ai_usage',
+    'workflow_ai_summaries',
     // ===== CRM (PLAN-CRM §2.3) =====
     // Todas llevan `store_id` propio NOT NULL → scoping directo por tienda.
     'crm_conversations',
@@ -2081,6 +2084,14 @@ export class StorePrismaService extends BasePrismaService {
 
   get document_purge_items() {
     return this.scoped_client.document_purge_items;
+  }
+
+  get workflow_ai_usage() {
+    return this.scoped_client.workflow_ai_usage;
+  }
+
+  get workflow_ai_summaries() {
+    return this.scoped_client.workflow_ai_summaries;
   }
 
   get stored_files() {
