@@ -589,6 +589,11 @@ export const APP_MODULES: {
           description: 'Solicitudes de todos los flujos por etapa',
         },
         {
+          key: 'flows_insights',
+          label: 'Analítica IA',
+          description: 'Consumo de tokens de IA de los flujos y resumen semanal',
+        },
+        {
           key: 'flows_templates',
           label: 'Galería de plantillas',
           description: 'Flujos listos para activar',

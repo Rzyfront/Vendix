@@ -7,7 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import type { EChartsOption } from 'echarts';
 import {
   AlertBannerComponent,
@@ -22,9 +22,15 @@ import {
   DateRangePickerComponent,
 } from '../../../../../../shared/components/date-range-picker/date-range-picker.component';
 import { ReportExportService } from '../../../reports/services/report-export.service';
+import { WorkflowSummary } from '../../interfaces/workflow-insights.interfaces';
 import { WorkflowAnalytics } from '../../interfaces/workflow-ops.interfaces';
+import { WorkflowInsightsApiService } from '../../services/workflow-insights-api.service';
 import { WorkflowsApiService } from '../../services/workflows-api.service';
 import { toWorkflowError } from '../../utils/workflow-errors.util';
+import {
+  flowParagraph,
+  formatPeriod,
+} from '../../utils/workflow-insights.util';
 
 const COLOR_AVG = '#3b82f6';
 const COLOR_P90 = '#8b5cf6';
@@ -59,6 +65,7 @@ export function formatRate(value: number | null): string {
     ChartComponent,
     AlertBannerComponent,
     DateRangePickerComponent,
+    RouterLink,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -100,6 +107,37 @@ export function formatRate(value: number | null): string {
           loadError()
         }}</app-alert-banner>
       }
+
+      <app-card
+        [responsive]="true"
+        title="Lectura de la IA"
+        class="mt-3 block"
+      >
+        @if (aiReading(); as reading) {
+          <p class="text-sm text-text-primary" data-testid="ai-reading-text">
+            {{ reading.text }}
+          </p>
+          <p class="mt-2 text-xs text-text-secondary">
+            Resumen semanal {{ readingPeriod(reading.summary) }}
+          </p>
+        } @else if (aiState() === 'loading') {
+          <p class="text-sm text-text-secondary">Cargando la lectura de la IA...</p>
+        } @else if (aiState() === 'error') {
+          <p class="text-sm text-text-secondary" data-testid="ai-reading-error">
+            No se pudo cargar la lectura de la IA.
+          </p>
+        } @else {
+          <p class="text-sm text-text-secondary" data-testid="ai-reading-empty">
+            Todavía no hay una lectura de la IA para este flujo.
+          </p>
+        }
+        <a
+          routerLink="/admin/workflows/insights"
+          class="mt-2 inline-block text-sm font-medium text-primary underline"
+          data-testid="ai-reading-link"
+          >Ver todos los resúmenes en Analítica IA</a
+        >
+      </app-card>
 
       @if (data(); as d) {
         @if (d.insufficient_data) {
@@ -324,6 +362,7 @@ export function formatRate(value: number | null): string {
 })
 export class AnalyticsPageComponent implements OnInit {
   private readonly api = inject(WorkflowsApiService);
+  private readonly insightsApi = inject(WorkflowInsightsApiService);
   private readonly route = inject(ActivatedRoute);
   private readonly toast = inject(ToastService);
   private readonly exporter = inject(ReportExportService);
@@ -350,6 +389,16 @@ export class AnalyticsPageComponent implements OnInit {
       disabled: !this.data(),
     },
   ]);
+
+  /** Latest ready summary, loaded once: its paragraph of this flow, if any. */
+  private readonly definitionIdSignal = signal(0);
+  readonly aiSummaries = signal<WorkflowSummary[]>([]);
+  readonly aiState = signal<'loading' | 'ready' | 'error'>('loading');
+  readonly aiReading = computed(() =>
+    flowParagraph(this.aiSummaries(), this.definitionIdSignal()),
+  );
+  readonly readingPeriod = (s: WorkflowSummary): string =>
+    formatPeriod(s.period_from, s.period_to);
 
   readonly hours = formatHours;
   readonly rate = formatRate;
@@ -448,8 +497,10 @@ export class AnalyticsPageComponent implements OnInit {
             next: (row) => (this.flowKey = row.key),
             error: () => undefined,
           });
+        this.definitionIdSignal.set(this.definitionId);
         this.load();
       });
+    this.loadAiReading();
   }
 
   onRange(range: DateRange): void {
@@ -460,6 +511,19 @@ export class AnalyticsPageComponent implements OnInit {
 
   onHeaderAction(id: string): void {
     if (id === 'export') this.export();
+  }
+
+  private loadAiReading(): void {
+    this.insightsApi
+      .listSummaries()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (list) => {
+          this.aiSummaries.set(list.items);
+          this.aiState.set('ready');
+        },
+        error: () => this.aiState.set('error'),
+      });
   }
 
   private load(): void {

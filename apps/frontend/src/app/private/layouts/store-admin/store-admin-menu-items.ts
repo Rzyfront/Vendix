@@ -206,6 +206,12 @@ export const STORE_ADMIN_MENU_ITEMS: readonly MenuItem[] = [
         panelUiKey: 'flows_board',
       },
       {
+        label: 'Analítica IA',
+        icon: 'sparkles',
+        route: '/admin/workflows/insights',
+        panelUiKey: 'flows_insights',
+      },
+      {
         label: 'Galería de plantillas',
         icon: 'layout-template',
         route: '/admin/workflows/templates',
