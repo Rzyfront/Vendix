@@ -1,15 +1,84 @@
-import { WorkflowFieldDef, WorkflowStageDef } from '../../../../../shared/workflows/contract/workflow-contract';
+import { WorkflowAiDef, WorkflowDefinitionV1, WorkflowFieldDef, WorkflowStageDef } from '../../../../../shared/workflows/contract/workflow-contract';
 import { validateWorkflowDefinition } from '../../../../../shared/workflows/contract/workflow-validator';
 import {
   conditionFieldOptions,
   describeWait,
+  STAGE_TYPE_ICON,
+  STAGE_TYPE_LABEL,
   retypeStage,
+  stageFieldsOf,
   tabForIssue,
   tabsForStage,
   withStagePositions,
 } from './workflow-editor.utils';
 
 const fields: WorkflowFieldDef[] = [{ key: 'monto', type: 'money', label: 'Monto' }];
+
+describe('workflow-editor.utils — paso de IA (P6)', () => {
+  const stage: WorkflowStageDef = {
+    key: 'pedir',
+    name: 'Pedir',
+    type: 'form',
+    assignee: { kind: 'initiator' },
+    form: { fields: ['monto'] },
+    transitions: [{ on: 'submit', to: 'fin' }],
+  };
+
+  it('el paso de IA tiene etiqueta e icono', () => {
+    expect(STAGE_TYPE_LABEL.ai).toBe('Paso de IA');
+    expect(STAGE_TYPE_ICON.ai).toBe('sparkles');
+  });
+
+  it('cambiar a IA deja la configuración por defecto sin responsable ni formulario', () => {
+    const next = retypeStage(stage, 'ai', fields);
+    expect(next.ai).toEqual({ task: 'classify', instructions: '', inputs: [], outputs: [] });
+    expect(next.assignee).toBeUndefined();
+    expect(next.form).toBeUndefined();
+    expect(next.transitions).toEqual([]);
+  });
+
+  it('al salir de IA con revisión se conservan solo las transiciones del nuevo tipo', () => {
+    const reviewed: WorkflowStageDef = {
+      key: 'ia',
+      name: 'IA',
+      type: 'ai',
+      ai: { task: 'draft', instructions: 'x', inputs: ['a'], outputs: ['b'], review: true },
+      assignee: { kind: 'initiator' },
+      transitions: [{ on: 'approve', to: 'fin' }, { on: 'reject', to: 'fin' }],
+    };
+    const approval = retypeStage(reviewed, 'approval', fields);
+    expect(approval.ai).toBeUndefined();
+    expect(approval.transitions?.length).toBe(2);
+    expect(retypeStage(reviewed, 'form', fields).transitions).toEqual([]);
+  });
+
+  it('las pestañas del paso de IA: sin formulario ni requisitos, con responsable y plazo solo con revisión', () => {
+    const plain = tabsForStage('ai').map((t) => t.id);
+    expect(plain).toContain('config');
+    expect(plain).toContain('transitions');
+    expect(plain).not.toContain('form');
+    expect(plain).not.toContain('requirements');
+    expect(plain).not.toContain('assignee');
+    expect(plain).not.toContain('due');
+    const reviewed = tabsForStage('ai', true).map((t) => t.id);
+    expect(reviewed).toContain('assignee');
+    expect(reviewed).toContain('due');
+  });
+
+  it('los errores del paso de IA llevan a la pestaña Configuración', () => {
+    expect(tabForIssue({ code: 'AI_STEP_INVALID', path: 'stages[0].ai.outputs', message: '' })).toBe('config');
+  });
+
+  it('los campos de un paso de IA con revisión son sus salidas', () => {
+    const def = {
+      fields: [{ key: 'respuesta', type: 'textarea', label: 'Respuesta' }],
+    } as unknown as WorkflowDefinitionV1;
+    const aiDef: WorkflowAiDef = { task: 'draft', instructions: 'x', inputs: ['a'], outputs: ['respuesta'], review: true };
+    const ai: WorkflowStageDef = { key: 'ia', name: 'IA', type: 'ai', ai: aiDef };
+    expect(stageFieldsOf(def, ai).map((f) => f.key)).toEqual(['respuesta']);
+    expect(stageFieldsOf(def, { ...ai, ai: { ...aiDef, review: false } })).toEqual([]);
+  });
+});
 
 describe('workflow-editor.utils — etapas del motor avanzado (P2)', () => {
   const form: WorkflowStageDef = {

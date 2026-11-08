@@ -1,5 +1,4 @@
 import {
-  STAGE_OUTCOMES,
   WORKFLOW_LIMITS,
   WORKFLOW_STAGE_TYPES,
   WorkflowDefinitionV1,
@@ -8,6 +7,7 @@ import {
   WorkflowStageType,
   WorkflowTransitionDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
+import { stageOutcomes } from '../../../../../../../shared/workflows/contract/workflow-runtime';
 import {
   STAGE_TYPE_ICON,
   STAGE_TYPE_LABEL,
@@ -37,6 +37,7 @@ export const STAGE_TONE: Record<WorkflowStageType, { chip: string; bar: string }
   approval: { chip: 'bg-success/10 text-success', bar: 'border-l-success' },
   review: { chip: 'bg-info/10 text-info', bar: 'border-l-info' },
   automatic: { chip: 'bg-warning/10 text-warning', bar: 'border-l-warning' },
+  ai: { chip: 'bg-primary/10 text-primary', bar: 'border-l-primary' },
   parallel: { chip: 'bg-info/10 text-info', bar: 'border-l-info' },
   subflow: { chip: 'bg-primary/10 text-primary', bar: 'border-l-primary' },
   wait: { chip: 'bg-warning/10 text-warning', bar: 'border-l-warning' },
@@ -49,6 +50,7 @@ const PALETTE_HINT: Record<WorkflowStageType, string> = {
   approval: 'Aprobar o rechazar',
   review: 'Aprobar, rechazar o devolver',
   automatic: 'Se resuelve sola: decide y ejecuta acciones',
+  ai: 'Clasifica, extrae, resume, redacta o decide con IA',
   parallel: 'Varias ramas a la vez',
   subflow: 'Inicia otros flujos',
   wait: 'Espera un tiempo o una fecha',
@@ -266,9 +268,9 @@ export function nodeAt(nodes: readonly CanvasNode[], point: CanvasPoint): Canvas
   return null;
 }
 
-/** Outcomes a stage of `type` can be connected with (none for `end`). */
-export function outcomesOf(type: WorkflowStageType): readonly string[] {
-  return STAGE_OUTCOMES[type] ?? [];
+/** Outcomes a stage can be connected with (none for `end`; an AI step depends on its review). */
+export function outcomesOf(stage: WorkflowStageDef): readonly string[] {
+  return stageOutcomes(stage);
 }
 
 /**

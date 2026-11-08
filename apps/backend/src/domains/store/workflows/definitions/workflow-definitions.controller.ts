@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
   ParseIntPipe,
   Patch,
@@ -10,6 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ResponseService } from '@common/responses/response.service';
 import { WORKFLOW_V1_JSON_SCHEMA } from '@common/workflows/contract';
 
@@ -33,6 +35,8 @@ import { WorkflowPublicLinksService } from '../public-link/workflow-public-links
 import { WorkflowDefinitionsService } from './workflow-definitions.service';
 import { WorkflowMigrationService } from './workflow-migration.service';
 import { WorkflowSimulatorService } from './workflow-simulator.service';
+import { WorkflowAiStepTestService } from './workflow-ai-step-test.service';
+import { WorkflowAiStepTestDto } from '../dto/workflow-ai-step-test.dto';
 
 /** Definitions: drafts, validation, publishing, versions, export/import. */
 @Controller('store/workflows/definitions')
@@ -45,6 +49,7 @@ export class WorkflowDefinitionsController {
     private readonly publicLinks: WorkflowPublicLinksService,
     private readonly responseService: ResponseService,
     private readonly migrations: WorkflowMigrationService,
+    private readonly aiStepTest: WorkflowAiStepTestService,
   ) {}
 
   // Static routes first: they must not be captured by `:id`.
@@ -117,6 +122,18 @@ export class WorkflowDefinitionsController {
     @Body() dto: SimulateWorkflowDto,
   ) {
     return this.responseService.success(await this.simulator.simulate(id, dto));
+  }
+
+  /** "Probar paso de IA": a real call of one AI step with sample data. */
+  @Post(':id/ai-step-test')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Permissions('store:workflows:design')
+  async testAiStep(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: WorkflowAiStepTestDto,
+  ) {
+    return this.responseService.success(await this.aiStepTest.test(id, dto));
   }
 
   @Post(':id/publish')

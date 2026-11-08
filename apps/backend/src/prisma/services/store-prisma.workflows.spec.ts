@@ -53,6 +53,9 @@ const WORKFLOW_MODELS = [
   'document_retention_policies',
   'document_purge_runs',
   'document_purge_items',
+  // IA dentro de Flujos (flujos-adm P6)
+  'workflow_ai_usage',
+  'workflow_ai_summaries',
 ] as const;
 
 describe('StorePrismaService · aislamiento de Flujos', () => {

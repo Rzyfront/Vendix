@@ -3,6 +3,7 @@ import {
   WorkflowDefinitionV1,
   WorkflowStageDef,
   evaluateCondition,
+  isAutoAiStage,
   resolveTransition,
 } from '@common/workflows/contract';
 import { firedGuard } from './workflow-guards';
@@ -71,7 +72,7 @@ export class WorkflowTickService {
       const definition = await this.loader.loadDefinition(tx, instance.version_id);
       const stage = this.loader.currentStage(definition, instance);
 
-      if (stage.type === 'automatic') {
+      if (stage.type === 'automatic' || isAutoAiStage(stage)) {
         if (await this.waitingForDocuments(tx, instance, stage)) {
           return { action: 'blocked', reminded: false, escalated: false };
         }

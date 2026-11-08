@@ -436,7 +436,7 @@ export class WorkflowEngineService {
   }
 
   /** Who owns a flow: its creator and whoever published the running version. */
-  private async flowOwners(tx: WorkflowTx, instance: WorkflowInstanceRow): Promise<number[]> {
+  async flowOwners(tx: WorkflowTx, instance: WorkflowInstanceRow): Promise<number[]> {
     const [def, version] = await Promise.all([
       tx.workflow_definitions.findFirst({
         where: { id: instance.definition_id, store_id: instance.store_id },

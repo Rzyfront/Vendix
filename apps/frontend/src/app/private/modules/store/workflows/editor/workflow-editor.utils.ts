@@ -1,6 +1,5 @@
 import {
   OPS_BY_FIELD_TYPE,
-  STAGE_OUTCOMES,
   WORKFLOW_KEY_PATTERN,
   WorkflowEndOutcome,
   WorkflowConditionGroup,
@@ -14,6 +13,7 @@ import {
   WorkflowStageType,
   WorkflowWaitDef,
 } from '../../../../../shared/workflows/contract/workflow-contract';
+import { stageFormKeys, stageOutcomes } from '../../../../../shared/workflows/contract/workflow-runtime';
 import { WorkflowIssueView } from '../interfaces/workflow.interfaces';
 
 export type EditorTab =
@@ -40,13 +40,23 @@ export const EDITOR_TABS: { id: EditorTab; label: string; icon: string }[] = [
 ];
 
 /** Stage types that carry their own engine config (the "Configuración" tab). */
-export const CONFIG_STAGE_TYPES: readonly WorkflowStageType[] = ['parallel', 'subflow', 'wait', 'loop'];
+export const CONFIG_STAGE_TYPES: readonly WorkflowStageType[] = ['parallel', 'subflow', 'wait', 'loop', 'ai'];
 
 /** Tabs shown for a stage type: "Configuración" only where the type has config. */
-export function tabsForStage(type: WorkflowStageType): { id: EditorTab; label: string; icon: string }[] {
+export function tabsForStage(
+  type: WorkflowStageType,
+  aiReview = false,
+): { id: EditorTab; label: string; icon: string }[] {
   const engineStage = CONFIG_STAGE_TYPES.includes(type);
   return EDITOR_TABS.filter((t) => {
     if (t.id === 'config') return engineStage;
+    // An AI step has no form or requirements (the reviewer edits what the AI
+    // wrote); assignee and deadline exist only when a person reviews it.
+    if (type === 'ai') {
+      if (t.id === 'form' || t.id === 'requirements') return false;
+      if (t.id === 'assignee' || t.id === 'due') return aiReview;
+      return true;
+    }
     // The engine resolves these stages itself (a parallel stage assigns per
     // branch): no stage assignee, form or deadline to edit.
     if (engineStage && (t.id === 'assignee' || t.id === 'form' || t.id === 'due')) return false;
@@ -59,6 +69,7 @@ export const STAGE_TYPE_LABEL: Record<WorkflowStageType, string> = {
   approval: 'Aprobación',
   review: 'Revisión',
   automatic: 'Automática',
+  ai: 'Paso de IA',
   parallel: 'Paralelo',
   subflow: 'Subflujo',
   wait: 'Espera',
@@ -71,6 +82,7 @@ export const STAGE_TYPE_ICON: Record<WorkflowStageType, string> = {
   approval: 'check-circle',
   review: 'eye',
   automatic: 'zap',
+  ai: 'sparkles',
   parallel: 'git-merge',
   subflow: 'git-branch',
   wait: 'timer',
@@ -400,7 +412,7 @@ export function issueStageKey(
 export function tabForIssue(issue: WorkflowIssueView): EditorTab {
   const path = issue.path;
   // Engine config and guards first: their paths also contain .assignee / .form.
-  if (/\.(parallel|subflow|wait|loop)(\.|$|\[)/.test(path)) return 'config';
+  if (/\.(parallel|subflow|wait|loop|ai)(\.|$|\[)/.test(path)) return 'config';
   if (path.includes('.guards')) return 'guards';
   if (path.includes('.assignee') || path.includes('.quorum')) return 'assignee';
   if (path.includes('.transitions') || issue.code.startsWith('DEFAULT_BRANCH')) {
@@ -417,7 +429,7 @@ export function stageFieldsOf(
   def: WorkflowDefinitionV1,
   stage: WorkflowStageDef,
 ): WorkflowFieldDef[] {
-  return (stage.form?.fields ?? [])
+  return stageFormKeys(stage)
     .map((key) => def.fields.find((f) => f.key === key))
     .filter((f): f is WorkflowFieldDef => !!f);
 }
@@ -443,9 +455,9 @@ export function moveItem<T>(items: readonly T[], from: number, to: number): T[] 
 
 // ─── Stage type changes (P2) ──────────────────────────────────────────
 
-const TYPE_CONFIG_PROPS = ['parallel', 'subflow', 'wait', 'loop'] as const;
+const TYPE_CONFIG_PROPS = ['parallel', 'subflow', 'wait', 'loop', 'ai'] as const;
 
-/** Default config of a stage type that carries its own (parallel, subflow, wait, loop). */
+/** Default config of a stage type that carries its own (parallel, subflow, wait, loop, ai). */
 export function defaultTypeConfig(
   type: WorkflowStageType,
   fields: WorkflowFieldDef[],
@@ -465,6 +477,8 @@ export function defaultTypeConfig(
       return { subflow: { flows: [{ flow_key: '' }], wait: true } };
     case 'wait':
       return { wait: { kind: 'duration', days: 1 } };
+    case 'ai':
+      return { ai: { task: 'classify', instructions: '', inputs: [], outputs: [] } };
     case 'loop': {
       const first = fields[0];
       return {
@@ -489,7 +503,6 @@ export function retypeStage(
   type: WorkflowStageType,
   fields: WorkflowFieldDef[],
 ): WorkflowStageDef {
-  const outcomes = STAGE_OUTCOMES[type];
   const {
     outcome: _outcome,
     assignee,
@@ -501,14 +514,15 @@ export function retypeStage(
     subflow: _s,
     wait: _w,
     loop: _l,
+    ai: _a,
     ...rest
   } = stage;
   const human = type === 'form' || type === 'approval' || type === 'review';
   const engine = (TYPE_CONFIG_PROPS as readonly string[]).includes(type);
-  return {
+  const retyped: WorkflowStageDef = {
     ...rest,
     type,
-    transitions: (stage.transitions ?? []).filter((t) => outcomes.includes(t.on)),
+    transitions: stage.transitions ?? [],
     ...(type === 'end' ? { outcome: (stage.outcome ?? 'completed') as WorkflowEndOutcome } : {}),
     ...(human ? { assignee: assignee ?? { kind: 'initiator' as const }, ...(due ? { due } : {}) } : {}),
     ...(type === 'approval' && quorum ? { quorum } : {}),
@@ -516,6 +530,8 @@ export function retypeStage(
     ...(!engine && requirements ? { requirements } : {}),
     ...defaultTypeConfig(type, fields),
   };
+  const outcomes = stageOutcomes(retyped);
+  return { ...retyped, transitions: (retyped.transitions ?? []).filter((t) => outcomes.includes(t.on)) };
 }
 
 /** Whole number from an input value, `undefined` when empty or not a number. */

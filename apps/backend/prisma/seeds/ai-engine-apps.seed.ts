@@ -3,6 +3,8 @@ import { getPrismaClient } from './shared/client';
 import { RECEIVED_DOCUMENT_OCR_APPLICATION } from './received-document-ocr.application';
 import { INVOICE_DRAFT_OCR_APPLICATION } from './invoice-draft-ocr.application';
 import { WORKFLOW_DOCUMENT_EXTRACT_APPLICATION } from './workflow-document-extract.application';
+import { WORKFLOW_AI_STEP_APPLICATION } from './workflow-ai-step.application';
+import { WORKFLOW_INSIGHTS_SUMMARY_APPLICATION } from './workflow-insights-summary.application';
 
 export interface SeedAIEngineAppsResult {
   appsCreated: number;
@@ -144,6 +146,8 @@ Example D — a line with "IBUA $65/u" in an "Otros imp." column (value per unit
     },
     RECEIVED_DOCUMENT_OCR_APPLICATION,
     WORKFLOW_DOCUMENT_EXTRACT_APPLICATION,
+    WORKFLOW_AI_STEP_APPLICATION,
+    WORKFLOW_INSIGHTS_SUMMARY_APPLICATION,
     {
       key: 'invoice_ocr_ingredient',
       ai_feature_category: 'async_queue',

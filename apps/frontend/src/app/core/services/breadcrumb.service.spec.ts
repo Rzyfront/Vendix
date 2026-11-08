@@ -103,6 +103,17 @@ describe('BreadcrumbService', () => {
     });
   });
 
+  describe('Flujos children', () => {
+    it('resolves /admin/workflows/insights → "Flujos / Analítica IA"', () => {
+      routerEvents$.next(
+        new NavigationEnd(1, '/admin/workflows/insights', '/admin/workflows/insights'),
+      );
+      const crumb = service.breadcrumb();
+      expect(crumb.current.label).toBe('Analítica IA');
+      expect(crumb.parent?.label).toBe('Flujos');
+    });
+  });
+
   describe('document.title sync (effect)', () => {
     it('sets title with "Padre > Hijo | Vendix" format on admin route', () => {
       // Reset spy (constructor's effect ran once at boot for the default url)

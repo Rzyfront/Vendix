@@ -1,4 +1,5 @@
 import {
+  WorkflowAiDef,
   WorkflowDefinitionV1,
   WorkflowStageDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
@@ -7,6 +8,8 @@ import {
   CANVAS_NODE_H,
   CANVAS_NODE_W,
   SLOT_COLUMNS,
+  STAGE_PALETTE,
+  STAGE_TONE,
   clampPoint,
   computeCanvas,
   connectStages,
@@ -117,8 +120,22 @@ describe('canvas.utils', () => {
   });
 
   it('outcomesOf follows the contract (end has none)', () => {
-    expect(outcomesOf('approval')).toEqual(['approve', 'reject']);
-    expect(outcomesOf('end')).toEqual([]);
+    expect(outcomesOf({ key: 'a', name: 'A', type: 'approval' })).toEqual(['approve', 'reject']);
+    expect(outcomesOf({ key: 'f', name: 'F', type: 'end' })).toEqual([]);
+  });
+
+  it('outcomesOf de un paso de IA depende de su revisión humana', () => {
+    const ai: WorkflowAiDef = { task: 'classify', instructions: 'x', inputs: ['a'], outputs: ['b'] };
+    expect(outcomesOf({ key: 'i', name: 'I', type: 'ai', ai })).toEqual(['auto']);
+    expect(outcomesOf({ key: 'i', name: 'I', type: 'ai', ai: { ...ai, review: true } })).toEqual(['approve', 'reject']);
+  });
+
+  it('el paso de IA está en la paleta con su etiqueta, icono y tono', () => {
+    const entry = STAGE_PALETTE.find((e) => e.type === 'ai');
+    expect(entry?.label).toBe('Paso de IA');
+    expect(entry?.icon).toBe('sparkles');
+    expect(entry?.hint.length).toBeGreaterThan(0);
+    expect(STAGE_TONE.ai.chip.length).toBeGreaterThan(0);
   });
 
   describe('connectStages', () => {

@@ -309,7 +309,7 @@ describe('Administración (flujos-documental S6): entradas del sidebar', () => {
     // Parents are groups: navigation lives in each child.
     expect(flows?.route).toBeUndefined();
     expect(documents?.route).toBeUndefined();
-    expect(flows?.children?.length).toBe(7);
+    expect(flows?.children?.length).toBe(8);
     expect(documents?.children?.length).toBe(6);
     expect(flows?.children?.map((child) => child.route)).toContain('/admin/workflows');
     expect(documents?.children?.map((child) => child.route)).toContain('/admin/documents');

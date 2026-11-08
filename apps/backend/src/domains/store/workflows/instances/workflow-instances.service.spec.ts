@@ -3,6 +3,7 @@ import { WorkflowInstancesService } from './workflow-instances.service';
 import {
   buildWorkflowKit,
   purchaseDefinition,
+  SAMPLE_FIELDS,
   seedDefinition,
   seedPeople,
   seedWorkGroup,
@@ -67,6 +68,28 @@ describe('WorkflowInstancesService', () => {
     expect(d.data_fields).toEqual(
       expect.arrayContaining([expect.objectContaining({ key: 'amount', label: 'Monto', type: 'money' })]),
     );
+  });
+
+  it('P6: un campo de lista trae sus opciones para mostrar la etiqueta y no el valor guardado', async () => {
+    const options = [
+      { value: 'queja', label: 'Queja' },
+      { value: 'reclamo', label: 'Reclamo' },
+    ];
+    seedDefinition(
+      kit.db,
+      purchaseDefinition({
+        key: 'pqr',
+        fields: [...SAMPLE_FIELDS, { key: 'tipo', type: 'select', label: 'Tipo', options }] as any,
+      }),
+    );
+    kit.as({ user_id: 4, permissions: ['store:workflows:task'] });
+    const s = await kit.engine.start({ definitionKey: 'pqr', idempotencyKey: 's-pqr' });
+    kit.as({ user_id: 1, is_owner: true } as any);
+    const d: any = await svc.get(s.instance.id);
+    const tipo = d.data_fields.find((f: any) => f.key === 'tipo');
+    const amount = d.data_fields.find((f: any) => f.key === 'amount');
+    expect(tipo).toEqual({ key: 'tipo', label: 'Tipo', type: 'select', options });
+    expect(amount).toEqual({ key: 'amount', label: 'Monto', type: 'money' });
   });
 
   describe('visibilidad (§5.5)', () => {

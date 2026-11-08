@@ -9,12 +9,12 @@ import {
   ToggleComponent,
 } from '../../../../../../../shared/components/index';
 import {
-  STAGE_OUTCOMES,
   WORKFLOW_LIMITS,
   WorkflowConditionGroup,
   WorkflowStageDef,
   WorkflowTransitionDef,
 } from '../../../../../../../shared/workflows/contract/workflow-contract';
+import { stageOutcomes } from '../../../../../../../shared/workflows/contract/workflow-runtime';
 import { WorkflowEditorStore } from '../../workflow-editor.store';
 import { outcomeText, removeAt } from '../../workflow-editor.utils';
 import { ConditionBuilderComponent } from '../condition-builder.component';
@@ -113,7 +113,7 @@ export class StageTransitionsTabComponent {
   );
   readonly groups = computed<OutcomeGroup[]>(() => {
     const transitions = this.stage().transitions ?? [];
-    return (STAGE_OUTCOMES[this.stage().type] ?? []).map((outcome) => {
+    return stageOutcomes(this.stage()).map((outcome) => {
       const entries = transitions
         .map((t, index) => ({ t, index }))
         .filter((e) => e.t.on === outcome);

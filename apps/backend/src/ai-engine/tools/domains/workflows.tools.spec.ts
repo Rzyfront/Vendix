@@ -7,7 +7,9 @@ import { AIToolRegistry } from '../ai-tool-registry';
 import { buildToolDocument } from '../tool-catalog';
 import { TOOL_DISCOVERY_QUERIES_ES } from '../tool-discovery-queries.es';
 import { createWorkflowsTools, WorkflowsToolDeps } from './workflows.tools';
+import { WORKFLOW_TEMPLATES } from '../../../domains/store/workflows/templates/workflow-templates.catalog';
 
+const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 const CTX = { store_id: 1, organization_id: 1, user_id: 5 };
 const VALIDATION_CTX = {
   roleKeys: ['store_manager'],
@@ -58,6 +60,47 @@ function build(
         validateWorkflowDefinition(d, VALIDATION_CTX),
       ),
     validationContext: jest.fn().mockResolvedValue(VALIDATION_CTX),
+    get: jest.fn().mockResolvedValue({
+      id: 1,
+      key: 'compras',
+      name: 'Compras',
+      status: 'active',
+      is_enabled: true,
+      published_version: { version: 3 },
+      has_unpublished_changes: true,
+    }),
+    getDraft: jest.fn().mockResolvedValue({
+      id: 1,
+      key: 'compras',
+      definition: clone(WORKFLOW_EXAMPLE_PURCHASE_APPROVAL),
+      draft_updated_at: new Date('2026-11-01T10:00:00.000Z'),
+    }),
+    saveDraft: jest
+      .fn()
+      .mockResolvedValue({ id: 1, draft_updated_at: new Date('2026-11-02') }),
+    publish: jest.fn().mockResolvedValue({
+      unchanged: false,
+      version: { version: 4 },
+      warnings: [],
+    }),
+    version: jest.fn().mockResolvedValue({
+      definition: {
+        fields: [
+          { key: 'monto', label: 'Monto' },
+          { key: 'motivo', label: 'Motivo' },
+        ],
+      },
+    }),
+  };
+  const engine = {
+    start: jest.fn().mockResolvedValue({
+      instance: { id: 77, reference: 'FLU-000077', status: 'active' },
+    }),
+    completeTask: jest.fn().mockResolvedValue({
+      instance: { id: 9, reference: 'FLU-000009', status: 'active' },
+      advanced: true,
+      replayed: false,
+    }),
   };
   const instances = { get: jest.fn() };
   const metrics = { stageMetrics: jest.fn() };
@@ -65,22 +108,23 @@ function build(
     definitions: definitions as any,
     instances: instances as any,
     metrics: metrics as any,
+    engine: engine as any,
     findInstanceIdByReference: jest.fn().mockResolvedValue(9),
+    findInstanceIdByTaskId: jest.fn().mockResolvedValue(9),
     storeTimezone: jest.fn().mockResolvedValue('America/Bogota'),
     storeIndustries: jest.fn().mockResolvedValue(industries),
     ...overrides,
   };
   const tools = createWorkflowsTools(deps);
   const tool = (name: string) => tools.find((t) => t.name === name)!;
-  return { deps, definitions, instances, metrics, tools, tool };
+  return { deps, definitions, instances, metrics, engine, tools, tool };
 }
 
 const call = async (t: any, args: object = {}) =>
   JSON.parse(await t.handler(args, CTX));
-const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
 describe('registration', () => {
-  it('registers the six tools with the right permissions and confirmation only on the draft', () => {
+  it('registers the ten tools with the right permissions and confirmation on the five writes', () => {
     const { tools } = build();
     const table = Object.fromEntries(
       tools.map((t) => [
@@ -103,6 +147,10 @@ describe('registration', () => {
       ],
       workflows_explain_instance: [['store:workflows:read'], false, true],
       workflows_bottlenecks: [['store:workflows:read'], false, true],
+      workflows_update_draft: [['store:workflows:design'], true, false],
+      workflows_publish_definition: [['store:workflows:design'], true, false],
+      workflows_start_instance: [['store:workflows:start'], true, false],
+      workflows_complete_task: [['store:workflows:task'], true, false],
     });
     const draft = tools.find(
       (t) => t.name === 'workflows_draft_from_description',
@@ -111,14 +159,17 @@ describe('registration', () => {
     expect(typeof draft.preview).toBe('function');
   });
 
-  it('exposes no publish / force / cancel / delete / link / key tool and no plan gate', () => {
+  it('exposes no force / cancel / delete / link / key tool and no plan gate (publish exists, with confirmation)', () => {
     const { tools } = build();
     for (const t of tools) {
       expect(t.name).not.toMatch(
-        /publish|force|cancel|delete|archive|public|api_key|webhook/,
+        /force|cancel|delete|archive|public_|api_key|webhook/,
       );
-      expect(JSON.stringify(t.parameters)).not.toMatch(/publish/i);
     }
+    expect(
+      tools.find((t) => t.name === 'workflows_publish_definition')!
+        .requiresConfirmation,
+    ).toBe(true);
   });
 
   it('is indexable: discovery queries exist and the catalog document builds', () => {
@@ -137,6 +188,9 @@ describe('registration', () => {
         .getAvailableDefinitions(perms)
         .map((d) => d.function.name)
         .sort();
+    expect(names(['store:workflows:read', 'store:workflows:task'])).toContain(
+      'workflows_complete_task',
+    );
     expect(names(['store:workflows:read'])).toEqual([
       'workflows_bottlenecks',
       'workflows_explain_instance',
@@ -144,7 +198,7 @@ describe('registration', () => {
     ]);
     expect(
       names(['store:workflows:read', 'store:workflows:design']),
-    ).toHaveLength(6);
+    ).toHaveLength(8);
     expect(
       registry.get('workflows_draft_from_description')!.requiresConfirmation,
     ).toBe(true);
@@ -230,6 +284,51 @@ describe('workflows_schema_reference', () => {
     expect(out.stage_outcomes.approval).toEqual(['approve', 'reject']);
     expect(out.rules.join(' ')).toMatch(/Nunca inventes roles/);
   });
+
+  it('r1: describes the AI step so Vex can build one the validator accepts', async () => {
+    const { tool } = build();
+    const out = await call(tool('workflows_schema_reference'));
+    expect(out.stage_types).toContain('ai');
+    expect(out.stage).toMatch(/ai\?/);
+    expect(out.ai_step.tasks).toEqual(['classify', 'extract', 'summarize', 'draft', 'decide']);
+    expect(out.ai_step.output_types.classify).toEqual(['select']);
+    expect(out.ai_step.output_types.draft).toEqual(['text', 'textarea']);
+    expect(out.ai_step.forbidden_input_types).toEqual(['file', 'user']);
+    expect(out.ai_step.on_error_then).toEqual(['continue', 'route', 'fail']);
+    expect(out.ai_step.example.ai.task).toBe('classify');
+    expect(out.rules.join(' ')).toMatch(/Etapa `ai`/);
+  });
+
+  it('r1: the AI step example passes the validator inside a real flow', async () => {
+    const { tool } = build();
+    const { ai_step } = await call(tool('workflows_schema_reference'));
+    const def = {
+      schema: 'vendix.workflow/v1',
+      key: 'pqr-ia',
+      name: 'PQR con IA',
+      fields: [
+        { key: 'tipo', type: 'select', label: 'Tipo', required: true, options: [{ value: 'Queja', label: 'Queja' }] },
+        { key: 'asunto', type: 'text', label: 'Asunto' },
+        { key: 'detalle', type: 'textarea', label: 'Detalle' },
+      ],
+      stages: [
+        { key: 'radicar', name: 'Radicar', type: 'form', start: true, assignee: { kind: 'initiator' }, form: { fields: ['asunto', 'detalle'] }, transitions: [{ on: 'submit', to: 'clasificar' }] },
+        ai_step.example,
+        { key: 'clasificar_manual', name: 'Clasificar a mano', type: 'form', assignee: { kind: 'initiator' }, form: { fields: ['tipo'] }, transitions: [{ on: 'submit', to: 'responder' }] },
+        { key: 'responder', name: 'Responder', type: 'end', outcome: 'completed' },
+      ],
+    };
+    const result = validateWorkflowDefinition(def, {
+      roleKeys: [],
+      groupKeys: [],
+      userIds: [],
+      publishedTemplateKeys: [],
+      flowKeys: [],
+      secretNames: [],
+      collections: {},
+    });
+    expect(result.errors).toEqual([]);
+  });
 });
 
 describe('workflows_validate_definition', () => {
@@ -253,6 +352,25 @@ describe('workflows_validate_definition', () => {
     });
     expect(definitions.validate).toHaveBeenCalledWith(7);
     expect(out).toMatchObject({ definition_id: 7, valid: true });
+  });
+
+  it('P6: returns the saved draft so workflows_update_draft can replace it whole', async () => {
+    const { tool, definitions } = build();
+    const out = await call(tool('workflows_validate_definition'), {
+      definition_id: 7,
+    });
+    expect(definitions.getDraft).toHaveBeenCalledWith(7);
+    expect(out.definition).toEqual(WORKFLOW_EXAMPLE_PURCHASE_APPROVAL);
+    expect(out.draft_updated_at).toBe('2026-11-01T10:00:00.000Z');
+  });
+
+  it('P6: an inline definition returns no saved draft', async () => {
+    const { tool, definitions } = build();
+    const out = await call(tool('workflows_validate_definition'), {
+      definition: clone(WORKFLOW_EXAMPLE_PURCHASE_APPROVAL),
+    });
+    expect(definitions.getDraft).not.toHaveBeenCalled();
+    expect(out.definition).toBeUndefined();
   });
 
   it('requires exactly one of definition_id / definition', async () => {
@@ -305,6 +423,32 @@ describe('workflows_draft_from_description', () => {
     expect(out.error).toMatch(/no es válida/);
     expect(out.issues.some((i: any) => i.code === 'GROUP_UNKNOWN')).toBe(true);
     expect(definitions.create).not.toHaveBeenCalled();
+  });
+
+  it('previews an AI step with its task, the fields it reads and writes, and its reviewer', async () => {
+    const { tool, definitions } = build();
+    const ctx = { roleKeys: ['employee', 'manager'], groupKeys: [], userIds: [] };
+    definitions.validateDefinition.mockImplementation(async (d: unknown) =>
+      validateWorkflowDefinition(d, ctx),
+    );
+    definitions.validationContext.mockResolvedValue(ctx);
+    const pqr = WORKFLOW_TEMPLATES.find((t) => t.key === 'pqr')!;
+    const preview = await tool('workflows_draft_from_description').preview!(
+      { name: 'PQR', definition: clone(pqr.definition) },
+      CTX,
+    );
+    expect(preview.status).toBe('ok');
+    const byField = Object.fromEntries(
+      preview.changes.map((c) => [c.field, c.to as string]),
+    );
+    expect(byField['stage:clasificar']).toContain('Tipo: Paso de IA');
+    expect(byField['stage:clasificar']).toContain('IA: clasificar');
+    expect(byField['stage:clasificar']).toContain('Lee: asunto, detalle');
+    expect(byField['stage:clasificar']).toContain('Escribe: tipo');
+    expect(byField['stage:clasificar']).not.toContain('Revisa:');
+    expect(byField['stage:clasificar']).not.toContain('Responsable:');
+    expect(byField['stage:redactar']).toContain('IA: redactar');
+    expect(byField['stage:redactar']).toContain('Revisa: Rol «employee»');
   });
 
   it('rejects a missing name or a non-object definition', async () => {
@@ -397,7 +541,7 @@ describe('workflows_draft_from_description', () => {
       description: 'Compras con dos firmas',
       definition: def,
     });
-    expect(Object.keys(definitions)).not.toContain('publish');
+    expect(definitions.publish).not.toHaveBeenCalled();
     expect(out).toMatchObject({
       id: 42,
       key: 'aprobacion_de_compras',
@@ -668,5 +812,585 @@ describe('workflows_bottlenecks', () => {
     expect(
       (await call(tool('workflows_bottlenecks'), { definition_id: 99 })).error,
     ).toBeTruthy();
+  });
+});
+
+// ─── P6.2 write tools ────────────────────────────────────────────────────
+
+const STAMP = '2026-11-01T10:00:00.000Z';
+
+function validDefinition() {
+  return clone(WORKFLOW_EXAMPLE_PURCHASE_APPROVAL);
+}
+
+/** The example definition plus a new automatic-free approval stage is too coupled: rename + retype instead. */
+function editedDefinition() {
+  const d: any = validDefinition();
+  d.fields = [
+    ...d.fields,
+    { key: 'observaciones', type: 'text', label: 'Observaciones' },
+  ];
+  d.stages[0].name = 'Radicación nueva';
+  return d;
+}
+
+const taskDetail = (over: Record<string, unknown> = {}) => ({
+  id: 9,
+  reference: 'FLU-000009',
+  title: 'Vacaciones de Ana',
+  status: 'active',
+  row_version: 4,
+  stage: { key: 'revision', name: 'Revisión del jefe' },
+  allowed_outcomes: ['approve', 'reject'],
+  tasks: [
+    { id: 31, status: 'open', stage_key: 'revision', can_act: true },
+    { id: 30, status: 'done', stage_key: 'inicio', can_act: false },
+  ],
+  ...over,
+});
+
+describe('workflows_update_draft', () => {
+  it('proposal: shows the Spanish diff and executes nothing', async () => {
+    const { tool, definitions } = build();
+    const preview = await tool('workflows_update_draft').preview!(
+      { definition_id: 1, definition: editedDefinition() },
+      CTX,
+    );
+    expect(preview.status).toBe('ok');
+    expect(preview.target).toBe('Borrador del flujo «Compras»');
+    const byField = Object.fromEntries(
+      preview.changes.map((c) => [c.field, c.to as string]),
+    );
+    expect(byField.stages_renamed).toContain('→ «Radicación nueva»');
+    expect(byField.fields_added).toBe('Observaciones');
+    expect(preview.message).toMatch(/BORRADOR/);
+    expect(definitions.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('reports stages added, removed and retyped with the Spanish type labels', async () => {
+    const { tool, definitions } = build();
+    const next: any = validDefinition();
+    const removed = next.stages.pop();
+    next.stages[0].type = 'review';
+    definitions.validateDefinition.mockResolvedValue({
+      valid: true,
+      errors: [],
+      warnings: [],
+    });
+    const preview = await tool('workflows_update_draft').preview!(
+      { definition_id: 1, definition: next },
+      CTX,
+    );
+    const byField = Object.fromEntries(
+      preview.changes.map((c) => [c.field, c.to as string]),
+    );
+    expect(byField.stages_removed).toContain(removed.name);
+    expect(byField.stages_retyped).toMatch(/→ Revisión/);
+  });
+
+  it('execution: saves through saveDraft with the draft stamp captured by the proposal', async () => {
+    const { tool, definitions } = build();
+    const args = { definition_id: 1, definition: editedDefinition() };
+    await tool('workflows_update_draft').preview!(args, CTX);
+    definitions.getDraft.mockResolvedValue({
+      id: 1,
+      key: 'compras',
+      definition: validDefinition(),
+      draft_updated_at: new Date('2026-11-01T12:00:00.000Z'),
+    });
+    definitions.saveDraft.mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.WORKFLOW_DRAFT_CONFLICT),
+    );
+    const out = await call(tool('workflows_update_draft'), args);
+    expect(definitions.saveDraft).toHaveBeenCalledWith(1, {
+      definition: args.definition,
+      expected_draft_updated_at: STAMP,
+    });
+    expect(out.error).toMatch(/modificó el borrador|recarga/i);
+  });
+
+  it('execution after confirmation returns the edit link and never publishes', async () => {
+    const { tool, definitions } = build();
+    const args = { definition_key: 'compras', definition: editedDefinition() };
+    const out = await call(tool('workflows_update_draft'), args);
+    expect(definitions.saveDraft).toHaveBeenCalledTimes(1);
+    expect(definitions.publish).not.toHaveBeenCalled();
+    expect(out.edit_url).toBe('/admin/workflows/1/edit');
+    expect(out.message).toMatch(/Borrador de «Compras» actualizado/);
+  });
+
+  it('refuses an invalid definition with the validator errors and does not save', async () => {
+    const { tool, definitions } = build();
+    const bad: any = validDefinition();
+    bad.stages[0].assignee = { kind: 'role', role_key: 'inexistente' };
+    const args = { definition_id: 1, definition: bad };
+    const preview = await tool('workflows_update_draft').preview!(args, CTX);
+    expect(preview.status).toBe('error');
+    expect(preview.message).toMatch(/no es válida/);
+    const out = await call(tool('workflows_update_draft'), args);
+    expect(out.error).toMatch(/no es válida/);
+    expect(definitions.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it('a foreign or unknown flow is not found and nothing is read or saved', async () => {
+    const { tool, definitions } = build();
+    definitions.get.mockRejectedValue(
+      new VendixHttpException(ErrorCodes.WORKFLOW_DEFINITION_NOT_FOUND),
+    );
+    const out = await call(tool('workflows_update_draft'), {
+      definition_id: 999,
+      definition: validDefinition(),
+    });
+    expect(out.error).toMatch(/No encontré ese flujo/);
+    expect(definitions.saveDraft).not.toHaveBeenCalled();
+    const byKey = await call(tool('workflows_update_draft'), {
+      definition_key: 'no_existe',
+      definition: validDefinition(),
+    });
+    expect(byKey.error).toMatch(/No encontré ese flujo/);
+  });
+
+  it('declares the design permission and is hidden without it', () => {
+    const registry = new AIToolRegistry({} as any);
+    registry.registerMany(build().tools);
+    const visible = (perms: string[]) =>
+      registry.getAvailableDefinitions(perms).map((d) => d.function.name);
+    expect(visible(['store:workflows:read'])).not.toContain(
+      'workflows_update_draft',
+    );
+    expect(visible(['store:workflows:design'])).toContain(
+      'workflows_update_draft',
+    );
+  });
+});
+
+describe('workflows_publish_definition', () => {
+  it('proposal: "Publicar «Nombre» como versión N" without publishing', async () => {
+    const { tool, definitions } = build();
+    const preview = await tool('workflows_publish_definition').preview!(
+      { definition_id: 1 },
+      CTX,
+    );
+    expect(preview.status).toBe('ok');
+    expect(preview.target).toBe('Publicar «Compras» como versión 4');
+    expect(definitions.publish).not.toHaveBeenCalled();
+  });
+
+  it('refuses when the draft is invalid, in the proposal and on execution', async () => {
+    const { tool, definitions } = build();
+    definitions.validate.mockResolvedValue({
+      valid: false,
+      errors: [
+        {
+          code: 'X',
+          path: 'stages[0]',
+          message: 'Etapa sin salida.',
+          severity: 'error',
+        },
+      ],
+      warnings: [],
+    });
+    const preview = await tool('workflows_publish_definition').preview!(
+      { definition_id: 1 },
+      CTX,
+    );
+    expect(preview.status).toBe('error');
+    expect(preview.message).toContain('Etapa sin salida.');
+    const out = await call(tool('workflows_publish_definition'), {
+      definition_id: 1,
+    });
+    expect(out.error).toMatch(/No se puede publicar/);
+    expect(definitions.publish).not.toHaveBeenCalled();
+  });
+
+  it('execution calls publish and reports the version', async () => {
+    const { tool, definitions } = build();
+    const out = await call(tool('workflows_publish_definition'), {
+      definition_id: 1,
+      changelog: 'Paso nuevo',
+    });
+    expect(definitions.publish).toHaveBeenCalledWith(1, {
+      changelog: 'Paso nuevo',
+    });
+    expect(out.version).toBe(4);
+    expect(out.message).toBe(
+      '«Compras» publicado como versión 4. Ya se pueden iniciar solicitudes.',
+    );
+  });
+
+  it('a flow without draft or unknown to the store is refused', async () => {
+    const { tool, definitions } = build();
+    definitions.getDraft.mockResolvedValue({
+      id: 1,
+      key: 'compras',
+      definition: null,
+      draft_updated_at: null,
+    });
+    expect(
+      (await call(tool('workflows_publish_definition'), { definition_id: 1 }))
+        .error,
+    ).toMatch(/no tiene borrador/);
+    definitions.get.mockRejectedValue(new Error('nope'));
+    expect(
+      (await call(tool('workflows_publish_definition'), { definition_id: 5 }))
+        .error,
+    ).toMatch(/No encontré ese flujo/);
+    expect(definitions.publish).not.toHaveBeenCalled();
+  });
+});
+
+describe('workflows_start_instance', () => {
+  it('proposal: flow, title and data with Spanish labels, nothing started', async () => {
+    const { tool, engine } = build();
+    const preview = await tool('workflows_start_instance').preview!(
+      {
+        definition_id: 1,
+        title: 'Vacaciones de Ana',
+        data: { monto: 100, motivo: 'Descanso' },
+      },
+      CTX,
+    );
+    expect(preview.status).toBe('ok');
+    expect(preview.target).toBe('Nueva solicitud de «Compras»');
+    expect(preview.changes.map((c) => [c.label, c.to])).toEqual([
+      ['Flujo', 'Compras'],
+      ['Título', 'Vacaciones de Ana'],
+      ['Monto', '100'],
+      ['Motivo', 'Descanso'],
+    ]);
+    expect(preview.message).toMatch(/Nace una solicitud/);
+    expect(engine.start).not.toHaveBeenCalled();
+  });
+
+  it('execution: starts through the engine with the resolved definition and returns reference and link', async () => {
+    const { tool, engine } = build();
+    const out = await call(tool('workflows_start_instance'), {
+      definition_key: 'compras',
+      title: 'Compra',
+      data: { monto: 5 },
+    });
+    expect(engine.start).toHaveBeenCalledTimes(1);
+    const input = engine.start.mock.calls[0][0];
+    expect(input).toMatchObject({
+      definitionId: 1,
+      title: 'Compra',
+      data: { monto: 5 },
+    });
+    expect(input.idempotencyKey).toMatch(/^vex-start-/);
+    expect(out.reference).toBe('FLU-000077');
+    expect(out.url).toBe('/admin/workflows/instances/77');
+    expect(out.message).toContain('FLU-000077');
+  });
+
+  it('refuses an unpublished flow and a foreign one', async () => {
+    const { tool, engine, definitions } = build();
+    definitions.get.mockResolvedValueOnce({
+      id: 1,
+      key: 'compras',
+      name: 'Compras',
+      status: 'draft',
+      published_version: null,
+    });
+    const out = await call(tool('workflows_start_instance'), {
+      definition_id: 1,
+    });
+    expect(out.error).toMatch(/no está publicado/);
+    definitions.get.mockRejectedValue(new Error('not found'));
+    expect(
+      (await call(tool('workflows_start_instance'), { definition_id: 99 }))
+        .error,
+    ).toMatch(/No encontré ese flujo/);
+    expect(engine.start).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the engine refusal (no permission to start) instead of a success', async () => {
+    const { tool, engine } = build();
+    engine.start.mockRejectedValue(
+      new VendixHttpException(ErrorCodes.WORKFLOW_START_FORBIDDEN),
+    );
+    const out = await call(tool('workflows_start_instance'), {
+      definition_id: 1,
+    });
+    expect(out.error).toBeDefined();
+    expect(out.reference).toBeUndefined();
+  });
+
+  it('requires the start permission', () => {
+    const registry = new AIToolRegistry({} as any);
+    registry.registerMany(build().tools);
+    const names = (perms: string[]) =>
+      registry.getAvailableDefinitions(perms).map((d) => d.function.name);
+    expect(names(['store:workflows:design'])).not.toContain(
+      'workflows_start_instance',
+    );
+    expect(names(['store:workflows:start'])).toContain(
+      'workflows_start_instance',
+    );
+  });
+});
+
+describe('workflows_complete_task', () => {
+  it('proposal by reference: request, stage, Spanish outcome and comment; nothing executed', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(taskDetail());
+    const preview = await tool('workflows_complete_task').preview!(
+      { reference: 'FLU-000009', outcome: 'approve', comment: 'Adelante' },
+      CTX,
+    );
+    expect(preview.status).toBe('ok');
+    expect(preview.target).toBe('Solicitud FLU-000009 · Revisión del jefe');
+    expect(preview.changes.map((c) => [c.label, c.to])).toEqual([
+      ['Solicitud', 'FLU-000009 · Vacaciones de Ana'],
+      ['Etapa', 'Revisión del jefe'],
+      ['Decisión', 'Aprobar'],
+      ['Comentario', 'Adelante'],
+    ]);
+    expect(engine.completeTask).not.toHaveBeenCalled();
+  });
+
+  it('execution passes the row_version captured by the proposal, not the current one', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(taskDetail());
+    const args = { task_id: 31, outcome: 'reject', comment: 'No procede' };
+    await tool('workflows_complete_task').preview!(args, CTX);
+    instances.get.mockResolvedValue(taskDetail({ row_version: 6 }));
+    engine.completeTask.mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.WORKFLOW_STALE),
+    );
+    const out = await call(tool('workflows_complete_task'), args);
+    expect(engine.completeTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 31,
+        outcome: 'reject',
+        comment: 'No procede',
+        expectedRowVersion: 4,
+      }),
+    );
+    expect(out.error).toMatch(/cambió/);
+  });
+
+  it('execution after confirmation returns reference, outcome and link', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(taskDetail());
+    const out = await call(tool('workflows_complete_task'), {
+      reference: 'FLU-000009',
+      stage: 'Revisión del jefe',
+      outcome: 'approve',
+    });
+    expect(engine.completeTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 31,
+        outcome: 'approve',
+        comment: null,
+        expectedRowVersion: 4,
+        idempotencyKey: 'vex-task-31-approve-4',
+      }),
+    );
+    expect(out.reference).toBe('FLU-000009');
+    expect(out.url).toBe('/admin/workflows/instances/9');
+    expect(out.message).toMatch(/Aprobar/);
+  });
+
+  it('P6: a form task starts from the request data, like the screen; given values win', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(
+      taskDetail({
+        stage: { key: 'solicitud', name: 'Solicitud' },
+        allowed_outcomes: ['submit'],
+        data: { fecha_inicio: '2026-12-01', motivo: 'Viaje', otro: 'x', vacio: null },
+        tasks: [
+          {
+            id: 31,
+            status: 'open',
+            stage_key: 'solicitud',
+            can_act: true,
+            form_fields: [{ key: 'fecha_inicio' }, { key: 'motivo' }, { key: 'vacio' }],
+          },
+        ],
+      }),
+    );
+    await call(tool('workflows_complete_task'), {
+      reference: 'FLU-000009',
+      outcome: 'submit',
+      values: { motivo: 'Viaje familiar' },
+    });
+    expect(engine.completeTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 31,
+        outcome: 'submit',
+        values: { fecha_inicio: '2026-12-01', motivo: 'Viaje familiar' },
+      }),
+    );
+  });
+
+  it('r1: the card shows every field the decision writes, with its current and new value', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(
+      taskDetail({
+        stage: { key: 'revision', name: 'Aprobación del jefe' },
+        data: { monto: 1200000, prioridad: 'baja', motivo: 'Compra de sillas' },
+        tasks: [
+          {
+            id: 31,
+            status: 'open',
+            stage_key: 'revision',
+            can_act: true,
+            form_fields: [
+              { key: 'monto', type: 'money', label: 'Monto' },
+              {
+                key: 'prioridad',
+                type: 'select',
+                label: 'Prioridad',
+                options: [
+                  { value: 'baja', label: 'Baja' },
+                  { value: 'alta', label: 'Alta' },
+                ],
+              },
+              { key: 'motivo', type: 'text', label: 'Motivo' },
+            ],
+          },
+        ],
+      }),
+    );
+    const preview = await tool('workflows_complete_task').preview!(
+      {
+        reference: 'FLU-000009',
+        outcome: 'approve',
+        values: { monto: 9000000, prioridad: 'alta', motivo: 'Compra de sillas' },
+      },
+      CTX,
+    );
+    expect(preview.status).toBe('ok');
+    expect(preview.changes.map((c) => [c.field, c.label, c.from, c.to])).toEqual([
+      ['request', 'Solicitud', null, 'FLU-000009 · Vacaciones de Ana'],
+      ['stage', 'Etapa', null, 'Aprobación del jefe'],
+      ['outcome', 'Decisión', null, 'Aprobar'],
+      ['data:monto', 'Monto', '1200000', '9000000'],
+      ['data:prioridad', 'Prioridad', 'Baja', 'Alta'],
+    ]);
+    expect(preview.message).toMatch(/cambia 2 campos/);
+    expect(engine.completeTask).not.toHaveBeenCalled();
+  });
+
+  it('r1: a key the stage does not ask for is refused on the card and on execution, never dropped', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(
+      taskDetail({
+        data: { respuesta: 'Revisaremos su caso.' },
+        tasks: [
+          {
+            id: 31,
+            status: 'open',
+            stage_key: 'revision',
+            can_act: true,
+            form_fields: [{ key: 'nota', type: 'text', label: 'Nota' }],
+          },
+        ],
+      }),
+    );
+    const args = {
+      task_id: 31,
+      outcome: 'approve',
+      values: { respuesta: 'Le devolvemos el 100 %' },
+    };
+    const preview = await tool('workflows_complete_task').preview!(args, CTX);
+    expect(preview.status).toBe('error');
+    expect(preview.message).toMatch(/no pide el campo respuesta/);
+    expect(preview.message).toMatch(/nota \(Nota\)/);
+    const out = await call(tool('workflows_complete_task'), args);
+    expect(out.error).toMatch(/no pide el campo respuesta/);
+    expect(engine.completeTask).not.toHaveBeenCalled();
+  });
+
+  it('r1: values on a task without fields are refused', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(taskDetail());
+    const out = await call(tool('workflows_complete_task'), {
+      task_id: 31,
+      outcome: 'approve',
+      values: { monto: 1 },
+    });
+    expect(out.error).toMatch(/no pide el campo monto/);
+    expect(out.next_step).toMatch(/no pide campos/);
+    expect(engine.completeTask).not.toHaveBeenCalled();
+  });
+
+  it('P6: a task without a form sends no values', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(taskDetail({ data: { motivo: 'Viaje' } }));
+    await call(tool('workflows_complete_task'), { task_id: 31, outcome: 'approve' });
+    expect(engine.completeTask.mock.calls[0][0]).not.toHaveProperty('values');
+  });
+
+  it('a user who is not the assignee gets the engine refusal, and the card warns up front', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(
+      taskDetail({
+        tasks: [{ id: 31, status: 'open', stage_key: 'revision', can_act: false }],
+      }),
+    );
+    const preview = await tool('workflows_complete_task').preview!(
+      { task_id: 31, outcome: 'approve' },
+      CTX,
+    );
+    expect(preview.status).toBe('warning');
+    engine.completeTask.mockRejectedValue(
+      new VendixHttpException(ErrorCodes.WORKFLOW_TASK_FORBIDDEN),
+    );
+    const out = await call(tool('workflows_complete_task'), {
+      task_id: 31,
+      outcome: 'approve',
+    });
+    expect(out.error).toBeDefined();
+    expect(out.reference).toBeUndefined();
+  });
+
+  it('unknown, foreign or already attended tasks are not found / refused', async () => {
+    const { tool, engine, instances, deps } = build();
+    (deps.findInstanceIdByTaskId as jest.Mock).mockResolvedValue(null);
+    expect(
+      (await call(tool('workflows_complete_task'), { task_id: 5, outcome: 'approve' }))
+        .error,
+    ).toMatch(/No encontré esa tarea/);
+    (deps.findInstanceIdByTaskId as jest.Mock).mockResolvedValue(9);
+    instances.get.mockRejectedValue(new Error('not a participant'));
+    expect(
+      (await call(tool('workflows_complete_task'), { task_id: 5, outcome: 'approve' }))
+        .error,
+    ).toMatch(/No encontré esa tarea/);
+    instances.get.mockResolvedValue(taskDetail());
+    expect(
+      (await call(tool('workflows_complete_task'), { task_id: 30, outcome: 'approve' }))
+        .error,
+    ).toMatch(/ya fue atendida/);
+    expect(engine.completeTask).not.toHaveBeenCalled();
+  });
+
+  it('rejects an outcome the stage does not allow, listing the allowed ones', async () => {
+    const { tool, engine, instances } = build();
+    instances.get.mockResolvedValue(taskDetail());
+    const preview = await tool('workflows_complete_task').preview!(
+      { task_id: 31, outcome: 'submit' },
+      CTX,
+    );
+    expect(preview.status).toBe('error');
+    expect(preview.message).toMatch(/Aprobar, Rechazar/);
+    const out = await call(tool('workflows_complete_task'), {
+      task_id: 31,
+      outcome: 'submit',
+    });
+    expect(out.error).toMatch(/no está disponible/);
+    expect(engine.completeTask).not.toHaveBeenCalled();
+  });
+
+  it('requires the task permission', () => {
+    const registry = new AIToolRegistry({} as any);
+    registry.registerMany(build().tools);
+    const names = (perms: string[]) =>
+      registry.getAvailableDefinitions(perms).map((d) => d.function.name);
+    expect(names(['store:workflows:start'])).not.toContain(
+      'workflows_complete_task',
+    );
+    expect(names(['store:workflows:task'])).toContain('workflows_complete_task');
   });
 });

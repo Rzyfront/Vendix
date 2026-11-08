@@ -1111,6 +1111,12 @@ export class BreadcrumbService {
       icon: 'layout-dashboard',
     },
     {
+      path: '/admin/workflows/insights',
+      title: 'Analítica IA',
+      parent: 'Flujos',
+      icon: 'sparkles',
+    },
+    {
       path: '/admin/workflows/templates',
       title: 'Galería de plantillas',
       parent: 'Flujos',

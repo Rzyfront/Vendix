@@ -131,6 +131,11 @@ export const ErrorCodes = {
   WORKFLOW_UPLOAD_INVALID: { code: 'WORKFLOW_UPLOAD_INVALID', httpStatus: 422, devMessage: 'La subida del archivo no es válida.' },
   WORKFLOW_UPLOAD_NOT_FOUND: { code: 'WORKFLOW_UPLOAD_NOT_FOUND', httpStatus: 404, devMessage: 'La subida no existe o ya venció.' },
   WORKFLOW_TRACKING_LINK_NOT_FOUND: { code: 'WORKFLOW_TRACKING_LINK_NOT_FOUND', httpStatus: 404, devMessage: 'No se encontró el enlace de seguimiento.' },
+  // IA dentro de Flujos (flujos-adm P6)
+  WORKFLOW_AI_STAGE_INVALID: { code: 'WORKFLOW_AI_STAGE_INVALID', httpStatus: 422, devMessage: 'Esa etapa no es un paso de IA de este flujo.' },
+  WORKFLOW_AI_TEST_INVALID: { code: 'WORKFLOW_AI_TEST_INVALID', httpStatus: 422, devMessage: 'Los datos de prueba del paso de IA no son válidos.' },
+  WORKFLOW_AI_USAGE_MONTH_INVALID: { code: 'WORKFLOW_AI_USAGE_MONTH_INVALID', httpStatus: 422, devMessage: 'El mes debe tener el formato AAAA-MM y estar dentro de los últimos 12 meses.' },
+  WORKFLOW_INSIGHTS_RATE_LIMITED: { code: 'WORKFLOW_INSIGHTS_RATE_LIMITED', httpStatus: 429, devMessage: 'Ya se generó un resumen hace menos de una hora.' },
   // Documental D1 (flujos-documental S5)
   DOCUMENT_TOO_LARGE: { code: 'DOCUMENT_TOO_LARGE', httpStatus: 413, devMessage: 'El archivo supera el tamaño máximo permitido.' },
   DOCUMENT_TYPE_NOT_ALLOWED: { code: 'DOCUMENT_TYPE_NOT_ALLOWED', httpStatus: 415, devMessage: 'Este tipo de archivo no está permitido.' },

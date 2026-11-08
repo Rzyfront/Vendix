@@ -34,6 +34,14 @@ export const workflowsRoutes: Routes = [
       ),
   },
   {
+    // P6: AI token consumption and weekly summaries (sidebar child `flows_insights`).
+    path: 'insights',
+    loadComponent: () =>
+      import('../pages/insights-page/insights-page.component').then(
+        (c) => c.InsightsPageComponent,
+      ),
+  },
+  {
     // P5.4: gallery of ready-made Administration templates.
     path: 'templates',
     loadComponent: () =>

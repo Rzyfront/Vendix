@@ -29,6 +29,7 @@ import { WorkflowEngineService } from './engine/workflow-engine.service';
 import { WorkflowEventsService } from './engine/workflow-events.service';
 import { WorkflowLoaderService } from './engine/workflow-loader.service';
 import { WorkflowOutboxDispatcher } from './engine/workflow-outbox.dispatcher';
+import { WorkflowAiStepService } from './engine/workflow-ai-step.service';
 import { WorkflowReferenceService } from './engine/workflow-reference.service';
 import { DossierWorkflowRequirementsService } from './engine/workflow-requirements.service';
 import { WorkflowStageService } from './engine/workflow-stage.service';
@@ -47,6 +48,7 @@ import { WorkGroupsService } from './work-groups.service';
 import { WorkflowDefinitionsController } from './definitions/workflow-definitions.controller';
 import { WorkflowDefinitionsService } from './definitions/workflow-definitions.service';
 import { WorkflowSimulatorService } from './definitions/workflow-simulator.service';
+import { WorkflowAiStepTestService } from './definitions/workflow-ai-step-test.service';
 import { WorkflowInstancesController } from './instances/workflow-instances.controller';
 import { WorkflowInstancesService } from './instances/workflow-instances.service';
 import { DocumentFilesController } from './files/document-files.controller';
@@ -65,6 +67,12 @@ import { WorkflowTrackingLinksService } from './tracking/workflow-tracking-links
 import { WorkflowTrackingPublicService } from './tracking/workflow-tracking-public.service';
 import { WorkflowMetricsService } from './metrics/workflow-metrics.service';
 import { WorkflowAnalyticsService } from './metrics/workflow-analytics.service';
+import { WorkflowAiService } from './ai/workflow-ai.service';
+import { WorkflowAiUsageController } from './ai/workflow-ai-usage.controller';
+import { WorkflowAiUsageService } from './ai/workflow-ai-usage.service';
+import { WorkflowInsightsController } from './ai/workflow-insights.controller';
+import { WorkflowInsightsCron } from './ai/workflow-insights.cron';
+import { WorkflowInsightsService } from './ai/workflow-insights.service';
 import { WorkflowAnalyticsController } from './metrics/workflow-analytics.controller';
 import { WorkflowTasksController } from './tasks/workflow-tasks.controller';
 import { WorkflowPeopleActions } from './engine/actions/people.actions';
@@ -153,6 +161,9 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
     WorkflowInboxController,
     WorkflowBoardController,
     WorkflowAnalyticsController,
+    // P6.3/P6.4: AI consumption of the plan and weekly AI summaries.
+    WorkflowAiUsageController,
+    WorkflowInsightsController,
     WorkGroupsController,
     DocumentFilesController,
     WorkflowWebhooksController,
@@ -182,10 +193,17 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
     WorkflowLiveListener,
     WorkflowDefinitionsService,
     WorkflowSimulatorService,
+    WorkflowAiStepTestService,
     WorkflowMigrationService,
     WorkflowInstancesService,
     WorkflowMetricsService,
     WorkflowAnalyticsService,
+    // P6.3: single gateway for every AI call of Flows (quota, ledger, alerts).
+    WorkflowAiService,
+    WorkflowAiUsageService,
+    // P6.4: weekly AI narrative of the analytics (hourly cron, Monday 08:00 store time).
+    WorkflowInsightsService,
+    WorkflowInsightsCron,
     WorkflowFilesService,
     WorkflowCommentsService,
     WorkflowInboxService,
@@ -203,6 +221,7 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
     WorkflowTickService,
     WorkflowEngineService,
     WorkflowOutboxDispatcher,
+    WorkflowAiStepService,
     WorkflowTimersCron,
     WorkflowScheduleCron,
     // P3.6: registros personalizados y su disparador por fecha.
@@ -267,6 +286,8 @@ import { WorkflowLiveListener } from './live/workflow-live.listener';
     WorkflowPublicUploadsService,
     WorkflowTrackingLinksService,
     WorkflowTrackingPublicService,
+    // P6.3: the document read (DocumentChecksModule) records its tokens here.
+    WorkflowAiService,
   ],
 })
 export class WorkflowsModule implements OnModuleInit {
@@ -275,12 +296,14 @@ export class WorkflowsModule implements OnModuleInit {
     private readonly definitions: WorkflowDefinitionsService,
     private readonly instances: WorkflowInstancesService,
     private readonly metrics: WorkflowMetricsService,
+    private readonly engine: WorkflowEngineService,
     private readonly prisma: StorePrismaService,
     private readonly globalPrisma: GlobalPrismaService,
   ) {}
 
   /**
-   * Block 11 — AI tools (propose → confirm → execute; they never publish).
+   * Block 11 — AI tools (propose → confirm → execute; every write, publishing
+   * included, runs only after the user confirms its card).
    * Decentralized registration in the owning module, like the other domains.
    */
   onModuleInit(): void {
@@ -289,6 +312,16 @@ export class WorkflowsModule implements OnModuleInit {
         definitions: this.definitions,
         instances: this.instances,
         metrics: this.metrics,
+        engine: this.engine,
+        findInstanceIdByTaskId: async (taskId) => {
+          const store_id = RequestContextService.getContext()?.store_id;
+          if (!store_id) return null;
+          const row = await this.prisma.workflow_tasks.findFirst({
+            where: { id: taskId, store_id },
+            select: { instance_id: true },
+          });
+          return row?.instance_id ?? null;
+        },
         findInstanceIdByReference: async (reference) => {
           const store_id = RequestContextService.getContext()?.store_id;
           if (!store_id) return null;
