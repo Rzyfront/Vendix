@@ -24,6 +24,10 @@ interface DefinitionShape {
   stages?: Array<{ key: string; name?: string; type?: string }>;
 }
 
+const CUSTOMER_ROLE = 'customer';
+/** Roles that never see nor decide a store's flows: shoppers and the platform. */
+const NON_STAFF_ROLES = [CUSTOMER_ROLE, 'super_admin'];
+
 /** Reads and changes the permissions of one flow (flujos-adm P7.3). */
 @Injectable()
 export class WorkflowAccessService {
@@ -72,10 +76,17 @@ export class WorkflowAccessService {
     return { start_roles: published?.definition.start_roles ?? [], stages };
   }
 
+  /**
+   * Who can be picked: the store's staff. Ecommerce customers are
+   * `store_users` too, so a member whose only role is `customer` is left out
+   * (as in the staff picker of store-users), and so are the `customer` and
+   * `super_admin` roles.
+   */
   private async options(storeId: number, organizationId: number) {
     const [roles, members] = await Promise.all([
       this.prisma.roles.findMany({
         where: {
+          name: { notIn: NON_STAFF_ROLES },
           OR: [
             { organization_id: null },
             { organization_id: organizationId, OR: [{ store_id: null }, { store_id: storeId }] },
@@ -86,16 +97,35 @@ export class WorkflowAccessService {
       }),
       this.prisma.store_users.findMany({ where: { store_id: storeId }, select: { user_id: true } }),
     ]);
-    const users: Array<{ id: number; first_name: string | null; last_name: string | null; email: string | null }> =
-      members.length
-        ? await this.prisma.users.findMany({
-            where: { id: { in: members.map((m: { user_id: number }) => m.user_id) } },
+    const memberIds = members.map((m: { user_id: number }) => m.user_id);
+    const [users, memberRoles]: [
+      Array<{ id: number; first_name: string | null; last_name: string | null; email: string | null }>,
+      Array<{ user_id: number; roles: { name: string } | null }>,
+    ] = memberIds.length
+      ? await Promise.all([
+          this.prisma.users.findMany({
+            where: { id: { in: memberIds } },
             select: { id: true, first_name: true, last_name: true, email: true },
-          })
-        : [];
+          }),
+          this.prisma.user_roles.findMany({
+            where: { user_id: { in: memberIds } },
+            select: { user_id: true, roles: { select: { name: true } } },
+          }),
+        ])
+      : [[], []];
+    const roleNames = new Map<number, string[]>();
+    for (const ur of memberRoles) {
+      const name = ur.roles?.name;
+      if (name) roleNames.set(ur.user_id, [...(roleNames.get(ur.user_id) ?? []), name]);
+    }
+    const shopperOnly = (id: number) => {
+      const names = roleNames.get(id) ?? [];
+      return names.length > 0 && names.every((n) => n === CUSTOMER_ROLE);
+    };
     return {
       roles: [...new Set<string>(roles.map((r: { name: string }) => r.name))],
       users: users
+        .filter((u) => !shopperOnly(u.id))
         .map((u) => ({
           id: u.id,
           name: `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() || u.email || `#${u.id}`,
@@ -160,7 +190,7 @@ export class WorkflowAccessService {
     if (unknownRoles.length) {
       throw new VendixHttpException(
         ErrorCodes.WORKFLOW_ACCESS_INVALID,
-        `Estos roles no existen en la tienda: ${unknownRoles.join(', ')}.`,
+        `Estos roles no se pueden elegir en la tienda: ${unknownRoles.join(', ')}.`,
       );
     }
     const known = new Set(options.users.map((u) => u.id));

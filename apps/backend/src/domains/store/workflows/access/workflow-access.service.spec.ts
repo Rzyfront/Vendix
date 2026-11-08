@@ -214,6 +214,29 @@ describe('flow permissions (P7.3)', () => {
       expect(r.options.users.find((u: any) => u.id === 2)!.name).toBe('Ana Pérez');
     });
 
+    it('offers staff only: no customer-only member and no customer or super_admin role', async () => {
+      kit.db.insert('roles', { id: 3, name: 'customer', organization_id: null, store_id: null });
+      kit.db.insert('roles', { id: 4, name: 'super_admin', organization_id: null, store_id: null });
+      kit.db.insert('users', { id: 8, first_name: 'Cliente', last_name: 'Web', email: 'cliente@t.co' });
+      kit.db.insert('store_users', { id: 8, store_id: 1, user_id: 8 });
+      kit.db.insert('user_roles', { user_id: 8, role_id: 3, store_id: 1 });
+      // A staff member who also bought online keeps their place.
+      kit.db.insert('user_roles', { user_id: 3, role_id: 3, store_id: 1 });
+      as(2);
+      const r = await access.get(defId);
+      expect(r.options.roles).not.toContain('customer');
+      expect(r.options.roles).not.toContain('super_admin');
+      expect(r.options.roles).toEqual(expect.arrayContaining(['manager', 'owner']));
+      const ids = r.options.users.map((u: { id: number }) => u.id);
+      expect(ids).not.toContain(8);
+      expect(ids).toContain(3);
+      expect(await codeOf(access.update(defId, { view: { roles: [], user_ids: [8] } }))).toBe('WORKFLOW_ACCESS_INVALID');
+      expect(await codeOf(access.update(defId, { view: { roles: ['customer'], user_ids: [] } }))).toBe(
+        'WORKFLOW_ACCESS_INVALID',
+      );
+      expect(kit.db.table('workflow_definitions').find((d) => d.id === defId)!.access ?? null).toBeNull();
+    });
+
     it('a flow of another store is 404', async () => {
       const foreign = seedDefinition(kit.db, purchaseDefinition({ key: 'x' }), 2).definitionId;
       as(1, { is_owner: true });
