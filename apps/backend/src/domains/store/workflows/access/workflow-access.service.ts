@@ -116,23 +116,26 @@ export class WorkflowAccessService {
     const memberIds = members.map((m: { user_id: number }) => m.user_id);
     const [users, memberRoles]: [
       Array<{ id: number; first_name: string | null; last_name: string | null; email: string | null }>,
-      Array<{ user_id: number; roles: { name: string } | null }>,
+      Array<{ user_id: number; roles: { name: string; organization_id: number | null } | null }>,
     ] = memberIds.length
       ? await Promise.all([
           this.prisma.users.findMany({
             where: { id: { in: memberIds } },
             select: { id: true, first_name: true, last_name: true, email: true },
           }),
+          // Only the roles held here (same scope as `heldRoleNames`): a staff
+          // role in another store does not make a customer of this one staff.
           this.prisma.user_roles.findMany({
-            where: { user_id: { in: memberIds } },
-            select: { user_id: true, roles: { select: { name: true } } },
+            where: { user_id: { in: memberIds }, OR: [{ store_id: storeId }, { store_id: null }] },
+            select: { user_id: true, roles: { select: { name: true, organization_id: true } } },
           }),
         ])
       : [[], []];
     const roleNames = new Map<number, string[]>();
     for (const ur of memberRoles) {
-      const name = ur.roles?.name;
-      if (name) roleNames.set(ur.user_id, [...(roleNames.get(ur.user_id) ?? []), name]);
+      const role = ur.roles;
+      if (!role || (role.organization_id !== null && role.organization_id !== organizationId)) continue;
+      roleNames.set(ur.user_id, [...(roleNames.get(ur.user_id) ?? []), role.name]);
     }
     const shopperOnly = (id: number) => {
       const names = roleNames.get(id) ?? [];

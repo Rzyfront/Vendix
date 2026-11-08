@@ -324,6 +324,18 @@ describe('flow permissions (P7.3)', () => {
       expect(kit.db.table('workflow_definitions').find((d) => d.id === defId)!.access ?? null).toBeNull();
     });
 
+    it('a customer of this store who is staff only in another store is not offered', async () => {
+      kit.db.insert('roles', { id: 3, name: 'customer', organization_id: null, store_id: null });
+      kit.db.insert('users', { id: 9, first_name: 'Otra', last_name: 'Tienda', email: 'otra@t.co' });
+      kit.db.insert('store_users', { id: 9, store_id: 1, user_id: 9 });
+      kit.db.insert('user_roles', { user_id: 9, role_id: 3, store_id: 1 });
+      kit.db.insert('user_roles', { user_id: 9, role_id: 2, store_id: 2 });
+      as(2);
+      const ids = (await access.get(defId)).options.users.map((u: { id: number }) => u.id);
+      expect(ids).not.toContain(9);
+      expect(ids).toContain(3);
+    });
+
     it('a flow of another store is 404', async () => {
       const foreign = seedDefinition(kit.db, purchaseDefinition({ key: 'x' }), 2).definitionId;
       as(1, { is_owner: true });
