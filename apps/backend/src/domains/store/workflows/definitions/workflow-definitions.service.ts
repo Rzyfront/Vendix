@@ -340,6 +340,7 @@ export class WorkflowDefinitionsService {
 
   async validate(id: number): Promise<WorkflowValidationResult> {
     const { store_id, organization_id } = this.ctx();
+    await this.access.assertCanView(id);
     const row = await this.load(this.prisma, store_id, id);
     return this.validateAgainstStore(
       this.prisma,

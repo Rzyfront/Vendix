@@ -22,6 +22,7 @@ import { WorkflowCommentsService } from '../../domains/store/workflows/instances
 import { WorkflowInboxService } from '../../domains/store/workflows/inbox/workflow-inbox.service';
 import { WorkflowBoardService } from '../../domains/store/workflows/board/workflow-board.service';
 import { WorkflowPublicLinksService } from '../../domains/store/workflows/public-link/workflow-public-links.service';
+import { WorkflowAccessPolicy } from '../../domains/store/workflows/access/workflow-access.policy';
 import { WorkflowFilesService } from '../../domains/store/workflows/files/workflow-files.service';
 import { WorkflowInstancesService } from '../../domains/store/workflows/instances/workflow-instances.service';
 import { WorkGroupsService } from '../../domains/store/workflows/work-groups.service';
@@ -116,7 +117,7 @@ export function buildWorkflowKit(opts: { unscopedTx?: boolean } = {}) {
   const comments = new WorkflowCommentsService(prisma, instances, events);
   const inbox = new WorkflowInboxService(prisma);
   const board = new WorkflowBoardService(prisma, instances, requirements);
-  const publicLinks = new WorkflowPublicLinksService(prisma);
+  const publicLinks = new WorkflowPublicLinksService(prisma, new WorkflowAccessPolicy(prisma));
   let ctx: TestCtx = {
     store_id: 1,
     organization_id: 1,

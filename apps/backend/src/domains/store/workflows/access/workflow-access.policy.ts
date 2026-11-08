@@ -118,8 +118,24 @@ export async function evaluateStageAct(
 }
 
 /** A flow with `access` that every staff member still sees: no `view` group and no `start_roles`. */
-function openToEveryone(access: WorkflowAccess, startRoles: string[]): boolean {
+function openToEveryone(access: WorkflowAccess, startRoles: readonly string[]): boolean {
   return !access.view && startRoles.length === 0;
+}
+
+/**
+ * Whether a person sees a flow that has an `access` document: a place in
+ * `design` or `view`, a role of the published `start_roles`, or a flow open to
+ * everyone. The policy and the engine's start check share it.
+ */
+export function seesFlow(
+  access: WorkflowAccess,
+  startRoles: readonly string[],
+  userId: number,
+  roles: readonly string[],
+): boolean {
+  if (isInGroup(access.design, userId, roles) || isInGroup(access.view, userId, roles)) return true;
+  if (startRoles.some((r) => roles.includes(r))) return true;
+  return openToEveryone(access, startRoles);
 }
 
 /**
@@ -159,17 +175,6 @@ export class WorkflowAccessPolicy {
     return out;
   }
 
-  private visible(
-    access: WorkflowAccess,
-    startRoles: string[],
-    userId: number,
-    roles: readonly string[],
-  ): boolean {
-    if (isInGroup(access.design, userId, roles) || isInGroup(access.view, userId, roles)) return true;
-    if (startRoles.some((r) => roles.includes(r))) return true;
-    return openToEveryone(access, startRoles);
-  }
-
   /** This store's flows with an `access` document, each with its published `start_roles`. */
   private async withAccess(storeId: number) {
     const rows: Array<{ id: number; access: unknown; published_version_id: number | null }> =
@@ -200,7 +205,7 @@ export class WorkflowAccessPolicy {
     if (!restricted.length) return [];
     const roles = await heldRoleNames(this.prisma, c.user_id, c.store_id, c.organization_id);
     return restricted
-      .filter((r) => !this.visible(r.access, r.startRoles, c.user_id as number, roles))
+      .filter((r) => !seesFlow(r.access, r.startRoles, c.user_id as number, roles))
       .map((r) => r.id);
   }
 
@@ -237,7 +242,7 @@ export class WorkflowAccessPolicy {
       heldRoleNames(this.prisma, c.user_id, c.store_id, c.organization_id),
       this.startRoles(c.store_id, row.published_version_id ? [row.published_version_id] : []),
     ]);
-    return this.visible(
+    return seesFlow(
       access,
       row.published_version_id ? (starts.get(row.published_version_id) ?? []) : [],
       c.user_id,

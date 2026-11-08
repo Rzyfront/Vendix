@@ -1,5 +1,6 @@
 import { VendixHttpException } from '@common/errors';
 import { WorkflowDefinitionsService } from '../definitions/workflow-definitions.service';
+import { WorkflowSimulatorService } from '../definitions/workflow-simulator.service';
 import { WorkflowAuditService } from '../audit/workflow-audit.service';
 import { WorkflowAccessPolicy } from './workflow-access.policy';
 import { WorkflowAccessService } from './workflow-access.service';
@@ -82,6 +83,13 @@ describe('flow permissions (P7.3)', () => {
       expect(await codeOf(defs.version(defId, 1))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
       expect(await codeOf(defs.export(defId))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
       expect(await codeOf(access.get(defId))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+      // The editor helpers too, even when the body brings its own definition.
+      expect(await codeOf(defs.validate(defId))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+      const simulator = new WorkflowSimulatorService(defs, kit.stages);
+      expect(await codeOf(simulator.simulate(defId, {}))).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
+      expect(
+        await codeOf(simulator.simulate(defId, { definition: purchaseDefinition() as never })),
+      ).toBe('WORKFLOW_DEFINITION_NOT_FOUND');
     });
 
     it('a role in `view` sees it', async () => {
