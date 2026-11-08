@@ -507,6 +507,29 @@ describe('Workflow export (P7.6)', () => {
       expect([...s3.objects.keys()].filter((k) => k.includes('workflow-exports'))).toHaveLength(0);
       expect(s3.pendingUploads).toBe(0);
     });
+
+    it('a run marked failed meanwhile is not announced as ready and leaves no ZIP behind', async () => {
+      seedStoreData();
+      const prisma = db.asStorePrisma() as StorePrismaService;
+      const builder = new WorkflowExportBuilder(prisma, s3 as unknown as S3Service);
+      const build = builder.build.bind(builder);
+      jest.spyOn(builder, 'build').mockImplementation(async (input, zip) => {
+        const built = await build(input, zip);
+        // Another worker gave up on this run while it was still building.
+        exportsOf(10)[0].status = 'failed';
+        return built;
+      });
+      const racing = new WorkflowExportService(
+        prisma, s3 as unknown as S3Service, new S3PathHelper(), audit, notifications as unknown as NotificationsService, builder,
+      );
+      await as(10, () => racing.request());
+      await racing.processNext();
+      expect(exportsOf(10)[0]).toMatchObject({ status: 'failed' });
+      expect(exportsOf(10)[0].s3_key ?? null).toBeNull();
+      expect([...s3.objects.keys()].filter((k) => k.includes('workflow-exports'))).toHaveLength(0);
+      expect(notifications.sendToUser).not.toHaveBeenCalled();
+      expect(notifications.createAndBroadcast).not.toHaveBeenCalled();
+    });
   });
 
   describe('multipart sink', () => {

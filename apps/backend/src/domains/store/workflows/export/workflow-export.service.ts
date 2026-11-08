@@ -228,7 +228,7 @@ export class WorkflowExportService {
           );
           await zip.finalize();
           const completedAt = new Date();
-          await this.prisma.workflow_exports.updateMany({
+          const { count } = await this.prisma.workflow_exports.updateMany({
             where: { id: row.id, store_id: store.id, status: 'running' },
             data: {
               status: 'ready',
@@ -241,6 +241,9 @@ export class WorkflowExportService {
               expires_at: new Date(completedAt.getTime() + EXPORT_LIFETIME_DAYS * DAY_MS),
             },
           });
+          // Marked failed meanwhile (a stale run): no "lista" notice for a row
+          // that says failed, and the uploaded ZIP is deleted below.
+          if (count === 0) throw new Error(`export ${row.id} is no longer running`);
           return built;
         },
       );
