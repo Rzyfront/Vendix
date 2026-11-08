@@ -32,6 +32,7 @@ export class ZipWriter {
   private readonly waiting = new Map<string, () => void>();
   private failure: Error | null = null;
   private readonly onFailure: Array<(error: Error) => void> = [];
+  private outFinished = false;
 
   constructor(private readonly out: Writable) {
     this.archive = createArchiver('zip', { forceZip64: true, zlib: { level: 6 } });
@@ -48,6 +49,16 @@ export class ZipWriter {
     };
     this.archive.on('error', fail);
     this.archive.on('warning', fail);
+    // `pipe` only unpipes when the destination fails (a multipart part that
+    // does not upload), so the archive would wait forever for a reader: the
+    // destination's own failure or early close settles every pending call.
+    this.out.on('error', fail);
+    this.out.on('finish', () => {
+      this.outFinished = true;
+    });
+    this.out.on('close', () => {
+      if (!this.outFinished) fail(new Error('The export destination closed before the archive finished'));
+    });
     this.archive.pipe(this.out);
   }
 
@@ -64,9 +75,8 @@ export class ZipWriter {
   /** Closes the archive and resolves when the destination has finished. */
   async finalize(): Promise<void> {
     if (this.failure) throw this.failure;
-    const written = finished(this.out);
-    await this.archive.finalize();
-    await written;
+    const failed = new Promise<never>((_, reject) => this.onFailure.push(reject));
+    await Promise.race([Promise.all([this.archive.finalize(), finished(this.out)]), failed]);
     if (this.failure) throw this.failure;
   }
 

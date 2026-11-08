@@ -1,4 +1,5 @@
 import AdmZip = require('adm-zip');
+import { randomBytes } from 'crypto';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3PathHelper } from '../../../../common/helpers/s3-path.helper';
@@ -10,6 +11,7 @@ import { WorkflowAuditService } from '../audit/workflow-audit.service';
 import { S3MultipartWritable } from './s3-multipart-writable';
 import { WorkflowExportBuilder } from './workflow-export.builder';
 import { WorkflowExportCron } from './workflow-export.cron';
+import { ZipWriter } from './zip-archive';
 import {
   EXPORT_FAILED_MESSAGE,
   EXPORT_INTERRUPTED_MESSAGE,
@@ -25,6 +27,8 @@ class FakeS3 {
   signed: string[] = [];
   unreadable = new Set<string>();
   failOnPart = false;
+  /** Fails only this part number (a part in the middle of the archive). */
+  failAtPart: number | null = null;
   private uploads = new Map<string, { key: string; parts: Map<number, Buffer> }>();
   private n = 0;
 
@@ -34,7 +38,7 @@ class FakeS3 {
     return id;
   }
   async uploadMultipartPart(_key: string, uploadId: string, part: number, body: Buffer): Promise<string> {
-    if (this.failOnPart) throw new Error('S3 down');
+    if (this.failOnPart || part === this.failAtPart) throw new Error('S3 down');
     this.uploads.get(uploadId)?.parts.set(part, body);
     return `etag-${part}`;
   }
@@ -524,6 +528,44 @@ describe('Workflow export (P7.6)', () => {
     });
   });
 
+  describe('zip writer', () => {
+    /** Rejects with "hung" when `p` neither resolves nor rejects in time. */
+    const settlesWithin = <T>(p: Promise<T>, ms: number) =>
+      Promise.race([
+        p,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('hung')), ms).unref()),
+      ]);
+
+    it('a part that fails in the middle of the archive rejects the build instead of hanging', async () => {
+      s3.failAtPart = 2;
+      const sink = new S3MultipartWritable(s3 as unknown as S3Service, 'k/mid.zip', 'application/zip', 1024);
+      const zip = new ZipWriter(sink);
+      // Random bytes do not compress, so part 2 is reached while an entry is still being added.
+      const build = (async () => {
+        await zip.add('a.bin', randomBytes(64 * 1024));
+        await zip.add('b.bin', randomBytes(64 * 1024));
+        await zip.finalize();
+      })();
+
+      await expect(settlesWithin(build, 3000)).rejects.toThrow('S3 down');
+      expect(await settlesWithin(zip.add('c.bin', 'late'), 100).catch((e: Error) => e.message)).toBe('S3 down');
+      zip.abort();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(s3.aborted).toContain('k/mid.zip');
+      expect(s3.pendingUploads).toBe(0);
+      expect(s3.objects.has('k/mid.zip')).toBe(false);
+    });
+
+    it('a destination that closes before the end rejects the pending entry', async () => {
+      const sink = new S3MultipartWritable(s3 as unknown as S3Service, 'k/closed.zip', 'application/zip', 1024);
+      const zip = new ZipWriter(sink);
+      const pending = zip.add('a.bin', randomBytes(256 * 1024));
+      sink.destroy();
+      await expect(settlesWithin(pending, 3000)).rejects.toThrow(/closed before the archive finished/);
+      zip.abort();
+    });
+  });
+
   describe('expiry and stale runs', () => {
     it('deletes the object of a ready export past expires_at and marks it expired', async () => {
       s3.objects.set('old.zip', Buffer.from('x'));
@@ -590,6 +632,48 @@ describe('Workflow export (P7.6)', () => {
       const next = jest.spyOn(service, 'processNext').mockResolvedValue(true);
       await cron.process();
       expect(next).not.toHaveBeenCalled();
+    });
+
+    it('a build stuck past the stale limit stops holding the lock and the next run fails it', async () => {
+      jest.useFakeTimers({
+        now: new Date('2026-11-08T10:00:00Z'),
+        doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'],
+      });
+      try {
+        const redis = redisWith(true);
+        const cron = new WorkflowExportCron(service, redis as never);
+        const stuck = db.insert('workflow_exports', {
+          store_id: 10, status: 'running', started_at: new Date(), file_count: 0, counts: {},
+        });
+        const next = jest.spyOn(service, 'processNext').mockReturnValueOnce(new Promise<boolean>(() => undefined));
+        const stale = jest.spyOn(service, 'failStale');
+        const run = cron.process();
+        // The fake database answers on real `setImmediate` ticks: let the claim settle first.
+        await jest.advanceTimersByTimeAsync(0);
+        await stale.mock.results[0].value;
+        await jest.advanceTimersByTimeAsync(0);
+        expect(next).toHaveBeenCalledTimes(1);
+
+        await jest.advanceTimersByTimeAsync(60 * 60 * 1000);
+        const renewedInTheFirstHour = redis.expire.mock.calls.length;
+        expect(renewedInTheFirstHour).toBeGreaterThan(0);
+        expect(redis.eval).not.toHaveBeenCalled();
+
+        await jest.advanceTimersByTimeAsync(60 * 60 * 1000 + 1000);
+        await run;
+        // Given up at 2 h: the lock is released and no longer renewed.
+        expect(redis.eval).toHaveBeenCalledTimes(1);
+        const renewedAtTheEnd = redis.expire.mock.calls.length;
+        await jest.advanceTimersByTimeAsync(10 * 60 * 1000);
+        expect(redis.expire.mock.calls.length).toBe(renewedAtTheEnd);
+
+        // The next run marks the stuck export failed, so the store can ask again.
+        next.mockResolvedValue(false);
+        await cron.process();
+        expect(stuck).toMatchObject({ status: 'failed', error: EXPORT_INTERRUPTED_MESSAGE });
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 });
