@@ -309,6 +309,25 @@ describe('workflows_validate_definition', () => {
     expect(out).toMatchObject({ definition_id: 7, valid: true });
   });
 
+  it('P6: returns the saved draft so workflows_update_draft can replace it whole', async () => {
+    const { tool, definitions } = build();
+    const out = await call(tool('workflows_validate_definition'), {
+      definition_id: 7,
+    });
+    expect(definitions.getDraft).toHaveBeenCalledWith(7);
+    expect(out.definition).toEqual(WORKFLOW_EXAMPLE_PURCHASE_APPROVAL);
+    expect(out.draft_updated_at).toBe('2026-11-01T10:00:00.000Z');
+  });
+
+  it('P6: an inline definition returns no saved draft', async () => {
+    const { tool, definitions } = build();
+    const out = await call(tool('workflows_validate_definition'), {
+      definition: clone(WORKFLOW_EXAMPLE_PURCHASE_APPROVAL),
+    });
+    expect(definitions.getDraft).not.toHaveBeenCalled();
+    expect(out.definition).toBeUndefined();
+  });
+
   it('requires exactly one of definition_id / definition', async () => {
     const { tool } = build();
     expect(

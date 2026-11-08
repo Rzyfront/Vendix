@@ -1038,7 +1038,7 @@ export function createWorkflowsTools(
       domain: DOMAIN,
       readOnly: true,
       description:
-        'Valida un flujo con el validador determinista y el contexto real de la tienda (roles, grupos, usuarios). Recibe definition_id (el borrador guardado) o definition (JSON vendix.workflow/v1). Devuelve valid, errors, warnings y la lista `messages` en español: explícalos sin cambiar el veredicto. Tú NUNCA decides si un flujo es válido.',
+        'Valida un flujo con el validador determinista y el contexto real de la tienda (roles, grupos, usuarios). Recibe definition_id (el borrador guardado) o definition (JSON vendix.workflow/v1). Devuelve valid, errors, warnings y la lista `messages` en español: explícalos sin cambiar el veredicto. Con definition_id también devuelve `definition` (el borrador guardado completo) y `draft_updated_at`: es la base que se edita con workflows_update_draft. Tú NUNCA decides si un flujo es válido.',
       parameters: {
         type: 'object',
         properties: {
@@ -1086,8 +1086,18 @@ export function createWorkflowsTools(
         const result: WorkflowValidationResult = hasId
           ? await deps.definitions.validate(id as number)
           : await deps.definitions.validateDefinition(args.definition);
+        // The saved draft is what workflows_update_draft replaces whole: return it.
+        const draft = hasId ? await deps.definitions.getDraft(id as number) : null;
         return JSON.stringify({
           definition_id: hasId ? id : null,
+          ...(draft
+            ? {
+                definition: draft.definition,
+                draft_updated_at: draft.draft_updated_at
+                  ? new Date(draft.draft_updated_at).toISOString()
+                  : null,
+              }
+            : {}),
           valid: result.valid,
           errors: slimIssues(result.errors),
           warnings: slimIssues(result.warnings),
@@ -1403,7 +1413,7 @@ export function createWorkflowsTools(
       version: '1',
       domain: DOMAIN,
       description:
-        'Reemplaza el BORRADOR de un flujo existente por la definición vendix.workflow/v1 COMPLETA que TÚ propones (no publica). Recibe definition_id o definition_key + definition. Antes lee el borrador actual con workflows_validate_definition o workflows_schema_reference y respeta roles y grupos reales. Si la definición no es válida no propone nada: devuelve los errores para corregir. La persona ve en la tarjeta qué etapas se agregan, quitan, renombran o cambian de tipo y los campos nuevos o retirados, y confirma. Si el borrador cambió mientras tanto, falla sin sobrescribir.',
+        'Reemplaza el BORRADOR de un flujo existente por la definición vendix.workflow/v1 COMPLETA que TÚ propones (no publica). Recibe definition_id o definition_key + definition. Antes lee el borrador actual con workflows_validate_definition (definition_id): devuelve `definition` completa y `draft_updated_at`; modifica esa definición y envíala entera. Los roles y grupos reales salen de workflows_schema_reference. Si la definición no es válida no propone nada: devuelve los errores para corregir. La persona ve en la tarjeta qué etapas se agregan, quitan, renombran o cambian de tipo y los campos nuevos o retirados, y confirma. Si el borrador cambió mientras tanto, falla sin sobrescribir.',
       parameters: {
         type: 'object',
         properties: {
