@@ -29,6 +29,27 @@ export function formatDateTime(iso: string | null | undefined): string {
   return new Date(iso).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+/** Spanish name of each kind of background task of the outbox (`workflow_outbox.kind`). */
+export const OUTBOX_KIND_LABELS: Record<string, string> = {
+  advance: 'Avance de etapa',
+  notify: 'Aviso',
+  webhook: 'Webhook saliente',
+  business_event: 'Evento de negocio',
+  start_instance: 'Inicio de solicitud',
+  action: 'Acción',
+  ai_step: 'Paso de IA',
+  gate_start: 'Inicio de aprobación',
+  gate_resolved: 'Aprobación resuelta',
+  subflow_start: 'Inicio de subflujo',
+  subflow_closed: 'Cierre de subflujo',
+};
+
+/** The Spanish name of an outbox kind; an unknown kind shows as it came. */
+export function outboxKindLabel(kind: string | null | undefined): string {
+  if (!kind) return '—';
+  return OUTBOX_KIND_LABELS[kind] ?? kind;
+}
+
 export const RULE_LABELS: Record<string, string> = {
   dispatcher_stalled: 'Despachador detenido',
   backlog_lag: 'Atraso en la cola',

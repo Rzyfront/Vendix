@@ -32,6 +32,7 @@ import {
   formatDuration,
   formatLatency,
   formatPercent,
+  outboxKindLabel,
 } from '../../workflows-ops.format';
 
 const ALERTS_PAGE_SIZE = 10;
@@ -305,13 +306,13 @@ export class WorkflowsOpsPageComponent implements OnInit {
   readonly deadColumns: TableColumn[] = [
     { key: 'processed_at', label: 'Fecha', priority: 1, transform: (v: string | null) => formatDateTime(v) },
     { key: 'store_name', label: 'Tienda', priority: 1 },
-    { key: 'kind', label: 'Tipo', priority: 2 },
+    { key: 'kind', label: 'Tipo', priority: 2, transform: (v: string) => outboxKindLabel(v) },
     { key: 'attempts', label: 'Intentos', priority: 3, align: 'right' },
     { key: 'last_error', label: 'Último error', priority: 2, transform: (v: string | null) => v ?? '—' },
   ];
   readonly deadCardConfig: ItemListCardConfig = {
     titleKey: 'store_name',
-    subtitleKey: 'kind',
+    subtitleTransform: (item: { kind: string }) => outboxKindLabel(item.kind),
     detailKeys: [
       { key: 'processed_at', label: 'Fecha', transform: (v: string | null) => formatDateTime(v) },
       { key: 'attempts', label: 'Intentos' },
