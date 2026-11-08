@@ -22,6 +22,7 @@ import {
   WorkflowAuditVerification,
 } from '../../services/workflow-audit-api.service';
 import { toWorkflowError } from '../../utils/workflow-errors.util';
+import { Subscription } from 'rxjs';
 
 const PAGE_SIZE = 25;
 
@@ -283,6 +284,8 @@ export class AuditPageComponent implements OnInit {
     };
   }
 
+  private listing: Subscription | null = null;
+
   private reload(): void {
     this.page.set(1);
     this.load();
@@ -291,7 +294,9 @@ export class AuditPageComponent implements OnInit {
   private load(): void {
     this.loading.set(true);
     this.loadError.set('');
-    this.api
+    // Only the latest filters may fill the table: a slower, older answer is dropped.
+    this.listing?.unsubscribe();
+    this.listing = this.api
       .list(this.filters(), this.page(), PAGE_SIZE)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

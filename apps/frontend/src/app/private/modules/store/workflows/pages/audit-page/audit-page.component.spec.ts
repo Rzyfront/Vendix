@@ -2,7 +2,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { Observable, of, throwError } from 'rxjs';
+import { Observable, Subject, of, throwError } from 'rxjs';
 import { ReportExportService } from '../../../reports/services/report-export.service';
 import {
   WorkflowAuditApiService,
@@ -148,6 +148,24 @@ describe('AuditPageComponent', () => {
       category: undefined,
       search: 'firma',
     });
+  });
+
+  it('shows the result of the last search even when an older one answers later', async () => {
+    await render();
+    const answers: Array<Subject<WorkflowAuditPage>> = [];
+    listResult = () => {
+      const answer = new Subject<WorkflowAuditPage>();
+      answers.push(answer);
+      return answer;
+    };
+    const cmp = fixture.componentInstance;
+    cmp.onSearch('API');
+    cmp.onSearch('API_KEY');
+    answers[1].next(page([entry({ id: '2', summary: 'Resultado nuevo' })]));
+    answers[0].next(page([entry({ id: '1', summary: 'Resultado viejo' })]));
+    await settle();
+    expect(text()).toContain('Resultado nuevo');
+    expect(text()).not.toContain('Resultado viejo');
   });
 
   it('ignores an unknown category value', async () => {
